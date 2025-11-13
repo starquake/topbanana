@@ -1,0 +1,33 @@
+// Package logging provides logging functionality.
+package logging
+
+import (
+	"context"
+	"log/slog"
+	"os"
+)
+
+// Logger is a logging implementation.
+type Logger struct {
+	logger *slog.Logger
+}
+
+// NewLogger creates a new Logger.
+func NewLogger() *Logger {
+	return &Logger{slog.New(slog.NewTextHandler(os.Stdout, nil))}
+}
+
+// Info logs an info message.
+func (l *Logger) Info(ctx context.Context, msg string, args ...any) {
+	l.logger.InfoContext(ctx, msg, args...)
+}
+
+// Error logs an error message.
+func (l *Logger) Error(ctx context.Context, msg string, args ...any) {
+	l.logger.ErrorContext(ctx, msg, args...)
+}
+
+// Debug logs a debug message.
+func (l *Logger) Debug(ctx context.Context, msg string, args ...any) {
+	l.logger.DebugContext(ctx, msg, args...)
+}
