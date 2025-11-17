@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/starquake/topbanana/internal/api"
 	"github.com/starquake/topbanana/internal/logging"
 	"github.com/starquake/topbanana/internal/must"
+	"github.com/starquake/topbanana/internal/server"
 )
 
 const (
@@ -30,7 +30,7 @@ func run(
 
 	logger := logging.NewLogger()
 
-	srv := api.NewServer(logger)
+	srv := server.NewServer(logger)
 	httpServer := &http.Server{
 		ReadHeaderTimeout: readHeaderTimeout,
 		Addr:              net.JoinHostPort("0.0.0.0", "8080"),

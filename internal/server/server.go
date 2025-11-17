@@ -1,5 +1,5 @@
 // Package api everything related to the API
-package api
+package server
 
 import (
 	"net/http"

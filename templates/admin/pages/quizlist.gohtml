@@ -1,0 +1,37 @@
+{{define "content"}}
+<div class="quiz-list">
+    <h1>{{.Title}}</h1>
+
+    <a href="/admin/quizzes/new">Create New Quiz</a>
+
+    {{if .Quizzes}}
+    <table>
+        <thead>
+        <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Slug</th>
+            <th>Description</th>
+            <th>Actions</th>
+        </tr>
+        </thead>
+        <tbody>
+        {{range .Quizzes}}
+        <tr>
+            <td>{{.ID}}</td>
+            <td>{{.Name}}</td>
+            <td>{{.Slug}}</td>
+            <td>{{.Description}}</td>
+            <td>
+                <a href="/admin/quizzes/{{.ID}}/edit">Edit</a>
+                <a href="/admin/quizzes/{{.ID}}/delete">Delete</a>
+            </td>
+        </tr>
+        {{end}}
+        </tbody>
+    </table>
+    {{else}}
+    <p>No quizzes found. <a href="/admin/quizzes/new">Create one now!</a></p>
+    {{end}}
+</div>
+{{end}}
