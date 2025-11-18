@@ -18,7 +18,11 @@ func NewLogger() *Logger {
 }
 
 // Info logs an info message.
-func (l *Logger) Info(ctx context.Context, msg string, args ...any) {
+func (l *Logger) Info(ctx context.Context, msg string, attrs ...slog.Attr) {
+	args := make([]any, 0, len(attrs))
+	for _, attr := range attrs {
+		args = append(args, attr)
+	}
 	l.logger.InfoContext(ctx, msg, args...)
 }
 

@@ -1,27 +1,42 @@
+// Package admin contains handlers for the admin dashboard
 package admin
 
 import (
 	"html/template"
+	"log/slog"
 	"net/http"
 
 	"github.com/starquake/topbanana/internal/logging"
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
+// IndexData is the data for the index page.
 type IndexData struct {
 	Title string
 }
 
-type QuizListData struct {
-	Title   string
-	Quizzes []quiz.Quiz
+// QuizData is the data for the quiz list page.
+type QuizData struct {
+	ID          int64
+	Title       string
+	Slug        string
+	Description string
 }
 
+// QuizListData is the data for list on the quiz list page.
+type QuizListData struct {
+	Title   string
+	Quizzes []QuizData
+}
+
+// TODO: move this from the global scope.
 var layouts = template.Must(template.ParseGlob("templates/admin/layouts/*.gohtml"))
 
+// HandleAdminIndex returns the index page.
 func HandleAdminIndex(logger *logging.Logger) http.Handler {
-
-	tmpl := template.Must(template.Must(layouts.Clone()).ParseFiles("templates/admin/pages/index.gohtml"))
+	tmpl := template.Must(
+		template.Must(layouts.Clone()).ParseFiles("templates/admin/pages/index.gohtml"),
+	)
 
 	data := IndexData{
 		Title: "Admin Dashboard",
@@ -30,7 +45,7 @@ func HandleAdminIndex(logger *logging.Logger) http.Handler {
 	return http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
 			// TODO: Move to middleware
-			logger.Info(r.Context(), "Hello World", "handler", "handleAdminIndex")
+			logger.Info(r.Context(), "Hello World", slog.String("handler", "HandleAdminIndex"))
 			err := tmpl.ExecuteTemplate(w, "base.gohtml", data)
 			if err != nil {
 				return
@@ -38,27 +53,40 @@ func HandleAdminIndex(logger *logging.Logger) http.Handler {
 		})
 }
 
-func HandleAdminQuizList(logger *logging.Logger) http.Handler {
-	tmpl := template.Must(template.Must(layouts.Clone()).ParseFiles("templates/admin/pages/quizlist.gohtml"))
-
-	data := QuizListData{
-		Title: "Admin Dashboard - Quiz List",
-		Quizzes: []quiz.Quiz{
-			{
-				ID:          1,
-				Name:        "Quiz 1",
-				Slug:        "quiz-1",
-				Description: "Quiz 1 Description",
-			},
-		},
-	}
+// HandleAdminQuizList returns the quiz list page.
+func HandleAdminQuizList(logger *logging.Logger, quizStore quiz.Store) http.Handler {
+	tmpl := template.Must(
+		template.Must(layouts.Clone()).ParseFiles("templates/admin/pages/quizlist.gohtml"),
+	)
 
 	return http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
-			logger.Info(r.Context(), "Hello World", "handler", "handleAdminQuizList")
-			err := tmpl.ExecuteTemplate(w, "base.gohtml", data)
+			var qd []QuizData
+			var err error
+			quizzes, err := quizStore.List(r.Context())
 			if err != nil {
+				logger.Error(r.Context(), "error getting quizzes", "err", err)
+
 				return
+			}
+			qd = make([]QuizData, 0, len(quizzes))
+			for _, q := range quizzes {
+				qd = append(qd, QuizData{
+					ID:          q.ID,
+					Title:       q.Title,
+					Slug:        q.Slug,
+					Description: q.Description,
+				})
+			}
+
+			data := QuizListData{
+				Title:   "Admin Dashboard - Quiz List",
+				Quizzes: qd,
+			}
+
+			err = tmpl.ExecuteTemplate(w, "base.gohtml", data)
+			if err != nil {
+				logger.Error(r.Context(), "error executing template", err)
 			}
 		})
 }

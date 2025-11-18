@@ -1,15 +1,15 @@
 {{define "content"}}
 <div class="quiz-list">
-    <h1>{{.Title}}</h1>
+    <h1 class="title is-1">{{.Title}}</h1>
 
     <a href="/admin/quizzes/new">Create New Quiz</a>
 
     {{if .Quizzes}}
-    <table>
+    <table class="table">
         <thead>
         <tr>
             <th>ID</th>
-            <th>Name</th>
+            <th>Title</th>
             <th>Slug</th>
             <th>Description</th>
             <th>Actions</th>
@@ -19,7 +19,7 @@
         {{range .Quizzes}}
         <tr>
             <td>{{.ID}}</td>
-            <td>{{.Name}}</td>
+            <td>{{.Title}}</td>
             <td>{{.Slug}}</td>
             <td>{{.Description}}</td>
             <td>

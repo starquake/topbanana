@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"log/slog"
 	"net"
@@ -14,7 +15,10 @@ import (
 
 	"github.com/starquake/topbanana/internal/logging"
 	"github.com/starquake/topbanana/internal/must"
+	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/server"
+	"github.com/starquake/topbanana/internal/store"
+	_ "modernc.org/sqlite"
 )
 
 const (
@@ -29,8 +33,14 @@ func run(
 	defer cancel()
 
 	logger := logging.NewLogger()
+	db := must.Any(sql.Open("sqlite", "./topbanana.sqlite"))
+	quizStore := quiz.NewSQLiteStore(db, logger)
 
-	srv := server.NewServer(logger)
+	stores := &store.Stores{
+		Quizzes: quizStore,
+	}
+
+	srv := server.NewServer(logger, stores)
 	httpServer := &http.Server{
 		ReadHeaderTimeout: readHeaderTimeout,
 		Addr:              net.JoinHostPort("0.0.0.0", "8080"),
@@ -49,7 +59,7 @@ func run(
 		// make a new context for the Shutdown
 		shutdownCtx, cancel := context.WithTimeout(ctx, shutdownTimeout)
 		defer cancel()
-		must.Must(httpServer.Shutdown(shutdownCtx))
+		must.OK(httpServer.Shutdown(shutdownCtx))
 	})
 	wg.Wait()
 
@@ -58,5 +68,5 @@ func run(
 
 func main() {
 	ctx := context.Background()
-	must.Must(run(ctx))
+	must.OK(run(ctx))
 }

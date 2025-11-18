@@ -7,18 +7,10 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css">
 </head>
 <body>
-<header>
-    {{template "navbar" .}}
-</header>
+{{template "navbar" .}}
 
-<main>
+<div class="container">
     {{template "content" .}}
-</main>
-
-<footer class="footer">
-    <div class="content has-text-centered">
-    &copy; 2025 Quiz Admin
-    </div>
-</footer>
+</div>
 </body>
 </html>
