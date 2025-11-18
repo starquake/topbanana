@@ -12,4 +12,4 @@ For project structure we use [Go Modules - Server Project](https://go.dev/doc/mo
 
 ### Code style
 - [Go Style Guide](https://google.github.io/styleguide/go/)
-- [Go Code Review Comments](https://go.dev/wiki/CodeReviewComments))
+- [Go Code Review Comments](https://go.dev/wiki/CodeReviewComments)
