@@ -29,7 +29,7 @@ type QuizListData struct {
 	Quizzes []QuizData
 }
 
-// TODO: move this from the global scope.
+//nolint:gochecknoglobals // This is fine for now, will refactor to use a Renderer later. TODO!
 var layouts = template.Must(template.ParseGlob("templates/admin/layouts/*.gohtml"))
 
 // HandleAdminIndex returns the index page.

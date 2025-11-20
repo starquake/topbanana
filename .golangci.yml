@@ -104,6 +104,15 @@ linters:
     - wastedassign
     - whitespace
     - wrapcheck
+  settings:
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    godox:
+      keywords:
+#        - TODO     # will be enabled in the future
+        - BUG
+        - FIXME
 formatters:
   enable:
     - gci
