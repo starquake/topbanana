@@ -12,6 +12,7 @@ import (
 
 	"github.com/starquake/topbanana/internal/logging"
 	"github.com/starquake/topbanana/internal/quiz"
+	"github.com/starquake/topbanana/internal/web/tmpl"
 )
 
 // IndexData is the data for the index page.
@@ -78,7 +79,7 @@ type QuestionEditData struct {
 }
 
 //nolint:gochecknoglobals // This is fine for now, will refactor to use a Renderer later. TODO!
-var layouts = template.Must(template.ParseGlob("templates/admin/layouts/*.gohtml"))
+var layouts = template.Must(template.ParseFS(tmpl.FS, "admin/layouts/*.gohtml"))
 
 func quizDataFromQuiz(qz *quiz.Quiz) *QuizData {
 	return &QuizData{
@@ -150,8 +151,8 @@ func optionDataFromOptions(options []*quiz.Option) []*OptionData {
 
 // HandleIndex returns the index page.
 func HandleIndex(logger *logging.Logger) http.Handler {
-	tmpl := template.Must(
-		template.Must(layouts.Clone()).ParseFiles("templates/admin/pages/index.gohtml"),
+	t := template.Must(
+		template.Must(layouts.Clone()).ParseFS(tmpl.FS, "admin/pages/index.gohtml"),
 	)
 
 	data := IndexData{
@@ -162,7 +163,7 @@ func HandleIndex(logger *logging.Logger) http.Handler {
 		func(w http.ResponseWriter, r *http.Request) {
 			// TODO: Move to middleware
 			logger.Info(r.Context(), "Hello World", slog.String("handler", "HandleIndex"))
-			err := tmpl.ExecuteTemplate(w, "base.gohtml", data)
+			err := t.ExecuteTemplate(w, "base.gohtml", data)
 			if err != nil {
 				return
 			}
@@ -171,15 +172,15 @@ func HandleIndex(logger *logging.Logger) http.Handler {
 
 // HandleQuizList returns the quiz list page.
 func HandleQuizList(logger *logging.Logger, quizStore quiz.Store) http.Handler {
-	tmpl := template.Must(
-		template.Must(layouts.Clone()).ParseFiles("templates/admin/pages/quizlist.gohtml"),
+	t := template.Must(
+		template.Must(layouts.Clone()).ParseFS(tmpl.FS, "admin/pages/quizlist.gohtml"),
 	)
 
 	return http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
 			var qzd []*QuizData
 			var err error
-			quizzes, err := quizStore.List(r.Context())
+			quizzes, err := quizStore.ListQuizzes(r.Context())
 			if err != nil {
 				logger.Error(r.Context(), "error getting quizzes", "err", err)
 
@@ -189,72 +190,26 @@ func HandleQuizList(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 			qzd = quizDataFromQuizzes(quizzes)
 
 			data := QuizListData{
-				Title:   "Admin Dashboard - Quiz List",
+				Title:   "Admin Dashboard - Quiz ListQuizzes",
 				Quizzes: qzd,
 			}
 
-			err = tmpl.ExecuteTemplate(w, "base.gohtml", data)
+			err = t.ExecuteTemplate(w, "base.gohtml", data)
 			if err != nil {
 				logger.Error(r.Context(), "error executing template", err)
 			}
 		})
 }
 
-// HandleQuizSave saves the quiz.
-func HandleQuizSave(logger *logging.Logger, quizStore quiz.Store) http.Handler {
-	tmpl := template.Must(
-		template.Must(layouts.Clone()).ParseFiles("templates/admin/pages/quizsave.gohtml"),
-	)
-
-	return http.HandlerFunc(
-		func(w http.ResponseWriter, r *http.Request) {
-			var err error
-			err = r.ParseForm()
-			if err != nil {
-				logger.Error(r.Context(), "error parsing form", err)
-			}
-
-			quizID, err := strconv.ParseInt(r.PathValue("quizId"), 10, 64)
-			if err != nil {
-				logger.Error(r.Context(), "error parsing quizID", "err", err)
-
-				return
-			}
-
-			qz, err := quizStore.GetByID(r.Context(), quizID)
-			if err != nil {
-				logger.Error(r.Context(), "error getting quiz", "err", err)
-
-				return
-			}
-
-			qz.Title = r.FormValue("title")
-			qz.Slug = r.FormValue("slug")
-			qz.Description = r.FormValue("description")
-
-			qzd := quizDataFromQuiz(qz)
-
-			data := QuizSaveData{
-				Title: "Admin Dashboard - Quiz Save",
-				Quiz:  qzd,
-			}
-
-			err = tmpl.ExecuteTemplate(w, "base.gohtml", data)
-			if err != nil {
-				logger.Error(r.Context(), "error executing template", err)
-			}
-		})
-}
-
-// templateHandler returns a handler that renders a template with the given data.
-func templateHandler(
+// handleView returns a handler that renders a template with the given data.
+func handleView(
 	logger *logging.Logger,
 	templateFile string,
 	idPathName string,
 	fetchAndBuild func(ctx context.Context, id int64) (any, error),
 ) http.Handler {
-	tmpl := template.Must(
-		template.Must(layouts.Clone()).ParseFiles(templateFile),
+	t := template.Must(
+		template.Must(layouts.Clone()).ParseFS(tmpl.FS, templateFile),
 	)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -272,7 +227,7 @@ func templateHandler(
 			return
 		}
 
-		err = tmpl.ExecuteTemplate(w, "base.gohtml", data)
+		err = t.ExecuteTemplate(w, "base.gohtml", data)
 		if err != nil {
 			logger.Error(r.Context(), "error executing template", "err", err)
 		}
@@ -281,18 +236,18 @@ func templateHandler(
 
 // HandleQuizView returns the quiz view page.
 func HandleQuizView(logger *logging.Logger, quizStore quiz.Store) http.Handler {
-	return templateHandler(
+	return handleView(
 		logger,
-		"templates/admin/pages/quizview.gohtml",
+		"admin/pages/quizview.gohtml",
 		"quizId",
 		func(ctx context.Context, id int64) (any, error) {
-			q, err := quizStore.GetByID(ctx, id)
+			q, err := quizStore.GetQuizByID(ctx, id)
 			if err != nil {
 				return nil, fmt.Errorf("error getting quiz: %w", err)
 			}
 
 			return QuizViewData{
-				Title: "Admin Dashboard - Quiz List",
+				Title: "Admin Dashboard - Quiz ListQuizzes",
 				Quiz:  quizDataFromQuiz(q),
 			}, nil
 		},
@@ -301,12 +256,12 @@ func HandleQuizView(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 
 // HandleQuizEdit returns the quiz edit page.
 func HandleQuizEdit(logger *logging.Logger, quizStore quiz.Store) http.Handler {
-	return templateHandler(
+	return handleView(
 		logger,
-		"templates/admin/pages/quizedit.gohtml",
+		"admin/pages/quizedit.gohtml",
 		"quizId",
 		func(ctx context.Context, id int64) (any, error) {
-			qz, err := quizStore.GetByID(ctx, id)
+			qz, err := quizStore.GetQuizByID(ctx, id)
 			if err != nil {
 				return nil, fmt.Errorf("error getting quiz: %w", err)
 			}
@@ -321,9 +276,9 @@ func HandleQuizEdit(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 
 // HandleQuestionEdit returns the question edit page.
 func HandleQuestionEdit(logger *logging.Logger, quizStore quiz.Store) http.Handler {
-	return templateHandler(
+	return handleView(
 		logger,
-		"templates/admin/pages/questionedit.gohtml",
+		"admin/pages/questionedit.gohtml",
 		"questionId",
 		func(ctx context.Context, id int64) (any, error) {
 			qs, err := quizStore.GetQuestionByID(ctx, id)
@@ -337,4 +292,132 @@ func HandleQuestionEdit(logger *logging.Logger, quizStore quiz.Store) http.Handl
 			}, nil
 		},
 	)
+}
+
+// HandleQuizSave saves the quiz.
+func HandleQuizSave(logger *logging.Logger, quizStore quiz.Store) http.Handler {
+	t := template.Must(
+		template.Must(layouts.Clone()).ParseFS(tmpl.FS, "admin/pages/quizsave.gohtml"),
+	)
+
+	return http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			var err error
+			err = r.ParseForm()
+			if err != nil {
+				logger.Error(r.Context(), "error parsing form", err)
+			}
+
+			quizID, err := strconv.ParseInt(r.PathValue("quizId"), 10, 64)
+			if err != nil {
+				logger.Error(r.Context(), "error parsing quizID", "err", err)
+
+				return
+			}
+
+			qz, err := quizStore.GetQuizByID(r.Context(), quizID)
+			if err != nil {
+				logger.Error(r.Context(), "error getting quiz", "err", err)
+
+				return
+			}
+
+			qz.Title = r.FormValue("title")
+			qz.Slug = r.FormValue("slug")
+			qz.Description = r.FormValue("description")
+
+			err = quizStore.UpdateQuiz(r.Context(), qz)
+			if err != nil {
+				logger.Error(r.Context(), "error updating quiz", "err", err)
+
+				return
+			}
+
+			qzd := quizDataFromQuiz(qz)
+
+			data := QuizSaveData{
+				Title: "Admin Dashboard - Quiz Save",
+				Quiz:  qzd,
+			}
+
+			err = t.ExecuteTemplate(w, "base.gohtml", data)
+			if err != nil {
+				logger.Error(r.Context(), "error executing template", err)
+			}
+		})
+}
+
+// HandleQuestionSave saves a question.
+func HandleQuestionSave(logger *logging.Logger, quizStore quiz.Store) http.Handler {
+	t := template.Must(
+		template.Must(layouts.Clone()).ParseFS(tmpl.FS, "admin/pages/quizview.gohtml"),
+	)
+
+	return http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			var err error
+			err = r.ParseForm()
+			if err != nil {
+				logger.Error(r.Context(), "error parsing form", err)
+			}
+
+			quizID, err := strconv.ParseInt(r.PathValue("quizId"), 10, 64)
+			if err != nil {
+				logger.Error(r.Context(), "error parsing quizID", "err", err)
+
+				return
+			}
+
+			questionID, err := strconv.ParseInt(r.PathValue("questionId"), 10, 64)
+			if err != nil {
+				logger.Error(r.Context(), "error parsing questionID", "err", err)
+
+				return
+			}
+
+			qs, err := quizStore.GetQuestionByID(r.Context(), questionID)
+			if err != nil {
+				logger.Error(r.Context(), "error getting question", "err", err)
+
+				return
+			}
+
+			qs.Text = r.FormValue("text")
+			qs.ImageURL = r.FormValue("imageUrl")
+			position, err := strconv.Atoi(r.FormValue("position"))
+			if err != nil {
+				logger.Error(r.Context(), "error parsing position", "err", err)
+
+				return
+			}
+			qs.Position = position
+
+			// TODO: Handle changed options
+
+			err = quizStore.UpdateQuestion(r.Context(), qs)
+			if err != nil {
+				logger.Error(r.Context(), "error updating question", "err", err)
+
+				return
+			}
+
+			qz, err := quizStore.GetQuizByID(r.Context(), quizID)
+			if err != nil {
+				logger.Error(r.Context(), "error getting quiz", "err", err)
+
+				return
+			}
+
+			qzd := quizDataFromQuiz(qz)
+
+			data := QuizSaveData{
+				Title: "Admin Dashboard - Quiz Save",
+				Quiz:  qzd,
+			}
+
+			err = t.ExecuteTemplate(w, "base.gohtml", data)
+			if err != nil {
+				logger.Error(r.Context(), "error executing template", err)
+			}
+		})
 }

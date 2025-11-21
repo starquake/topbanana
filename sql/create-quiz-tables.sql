@@ -60,37 +60,37 @@ INSERT INTO quizzes (id, title, slug, description, created_by)
 VALUES (2, 'Quiz 2', 'quiz-2', 'This is another quiz', 'admin');
 
 INSERT INTO questions (id, quiz_id, text, position)
-VALUES (1, 1, 'What is the capital of France?', 1);
+VALUES (1, 1, 'What is the capital of France?', 10);
 INSERT INTO questions (id, quiz_id, text, position)
-VALUES (2, 1, 'What is the capital of Spain?', 2);
+VALUES (2, 1, 'What is the capital of Spain?', 20);
 INSERT INTO questions (id, quiz_id, text, position)
-VALUES (3, 1, 'What is the capital of Germany?', 3);
+VALUES (3, 1, 'What is the capital of Germany?', 30);
 -- INSERT INTO questions (id, quiz_id, text, position) VALUES (4,1, 'What is the capital of Italy?', 4);
 -- INSERT INTO questions (id, quiz_id, text, position) VALUES (5,1,'What is the capital of Poland?', 5);
 
 INSERT INTO options (question_id, text, is_correct, position)
-VALUES (1, 'Paris', true, 1);
+VALUES (1, 'Paris', true, 10);
 INSERT INTO options (question_id, text, is_correct, position)
-VALUES (1, 'Berlin', false, 2);
+VALUES (1, 'Berlin', false, 20);
 INSERT INTO options (question_id, text, is_correct, position)
-VALUES (1, 'Madrid', false, 3);
+VALUES (1, 'Madrid', false, 30);
 INSERT INTO options (question_id, text, is_correct, position)
-VALUES (1, 'Rome', false, 4);
+VALUES (1, 'Rome', false, 40);
 
 INSERT INTO options (question_id, text, is_correct, position)
-VALUES (2, 'Madrid', true, 4);
+VALUES (2, 'Madrid', true, 40);
 INSERT INTO options (question_id, text, is_correct, position)
-VALUES (2, 'Rome', false, 3);
+VALUES (2, 'Rome', false, 30);
 INSERT INTO options (question_id, text, is_correct, position)
-VALUES (2, 'Paris', false, 2);
+VALUES (2, 'Paris', false, 20);
 INSERT INTO options (question_id, text, is_correct, position)
-VALUES (2, 'Berlin', false, 1);
+VALUES (2, 'Berlin', false, 10);
 
 INSERT INTO options (question_id, text, is_correct, position)
-VALUES (3, 'Berlin', true, 2);
+VALUES (3, 'Berlin', true, 20);
 INSERT INTO options (question_id, text, is_correct, position)
-VALUES (3, 'Paris', false, 1);
+VALUES (3, 'Paris', false, 10);
 INSERT INTO options (question_id, text, is_correct, position)
-VALUES (3, 'Rome', false, 4);
+VALUES (3, 'Rome', false, 40);
 INSERT INTO options (question_id, text, is_correct, position)
-VALUES (3, 'Madrid', false, 3);
+VALUES (3, 'Madrid', false, 30);

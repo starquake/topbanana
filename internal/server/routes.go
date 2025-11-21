@@ -18,6 +18,10 @@ func addRoutes(mux *http.ServeMux, logger *logging.Logger, stores *store.Stores)
 		"GET /admin/quizzes/{quizId}/questions/{questionId}/edit",
 		admin.HandleQuestionEdit(logger, stores.Quizzes),
 	)
+	mux.Handle(
+		"POST /admin/quizzes/{quizId}/questions/{questionId}/save",
+		admin.HandleQuestionSave(logger, stores.Quizzes),
+	)
 
 	mux.Handle("/", http.NotFoundHandler())
 }

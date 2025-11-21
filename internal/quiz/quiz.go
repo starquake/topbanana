@@ -43,14 +43,16 @@ type Option struct {
 // Store represents a store for quizzes.
 // This can be implemented for different databases.
 type Store interface {
-	// Create(ctx context.Context, quiz *Quiz) error
-	// GetByID returns a quiz with questions and options, by its question ID.
-	GetByID(ctx context.Context, id int64) (*Quiz, error)
+	// GetQuizByID returns a quiz with questions and options, by its question ID.
+	GetQuizByID(ctx context.Context, id int64) (*Quiz, error)
 	// GetQuestionByID returns a question with options, by its question ID.
 	GetQuestionByID(ctx context.Context, id int64) (*Question, error)
-	// List returns all quizzes.
-	List(ctx context.Context) ([]*Quiz, error)
-	// Delete(ctx context.Context, id int64) error
+	// ListQuizzes returns all quizzes.
+	ListQuizzes(ctx context.Context) ([]*Quiz, error)
+	// UpdateQuiz updates a quiz.
+	UpdateQuiz(ctx context.Context, quiz *Quiz) error
+	// UpdateQuestion updates a question.
+	UpdateQuestion(ctx context.Context, question *Question) error
 }
 
 // SQLiteStore is a store for quizzes in SQLite.
@@ -73,8 +75,8 @@ func NewSQLiteStore(db *sql.DB, logger *logging.Logger) *SQLiteStore {
 //	return nil
 // }
 
-// GetByID returns a quiz including related questions and options by its ID.
-func (s *SQLiteStore) GetByID(ctx context.Context, id int64) (*Quiz, error) {
+// GetQuizByID returns a quiz including related questions and options by its ID.
+func (s *SQLiteStore) GetQuizByID(ctx context.Context, id int64) (*Quiz, error) {
 	var err error
 	quizQuery := `SELECT id, title, slug, description, created_at FROM quizzes WHERE id = ?`
 
@@ -99,8 +101,8 @@ func (s *SQLiteStore) GetByID(ctx context.Context, id int64) (*Quiz, error) {
 	return &quiz, nil
 }
 
-// List returns all quizzes including related questions and options.
-func (s *SQLiteStore) List(ctx context.Context) ([]*Quiz, error) {
+// ListQuizzes returns all quizzes including related questions and options.
+func (s *SQLiteStore) ListQuizzes(ctx context.Context) ([]*Quiz, error) {
 	quizQuery := `SELECT id, title, slug, description, created_at FROM quizzes`
 
 	quizRows, quizErr := s.db.QueryContext(
@@ -170,6 +172,28 @@ func (s *SQLiteStore) GetQuestionByID(ctx context.Context, id int64) (*Question,
 	question.Options = options
 
 	return question, nil
+}
+
+// UpdateQuiz updates a quiz.
+func (s *SQLiteStore) UpdateQuiz(ctx context.Context, quiz *Quiz) error {
+	query := `UPDATE quizzes SET title = ?, slug = ?, description = ? WHERE id = ?`
+	_, err := s.db.ExecContext(ctx, query, quiz.Title, quiz.Slug, quiz.Description, quiz.ID)
+	if err != nil {
+		return fmt.Errorf("error updating quiz: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateQuestion updates a question.
+func (s *SQLiteStore) UpdateQuestion(ctx context.Context, question *Question) error {
+	query := `UPDATE questions SET text = ?, image_url = ?, position = ? WHERE id = ?`
+	_, err := s.db.ExecContext(ctx, query, question.Text, question.ImageURL, question.Position, question.ID)
+	if err != nil {
+		return fmt.Errorf("error updating question: %w", err)
+	}
+
+	return nil
 }
 
 // getQuestionsByQuizID returns questions including related options for a quiz by its quizID.

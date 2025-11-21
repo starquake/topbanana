@@ -1,0 +1,159 @@
+{{define "content"}}
+
+    <div class="quiz-edit">
+        <h1 class="title is-1">{{.Title}}</h1>
+
+        {{if .Question}}
+            <form action="/admin/quizzes/{{.Question.QuizID}}/questions/{{.Question.ID}}/save" method="POST">
+                <div class="field">
+                    <label class="label" for="id">ID</label>
+                    <div class="control">
+                        <input id="id" name="id" class="input" type="text" value="{{.Question.ID}}" disabled>
+                    </div>
+                </div>
+
+                <div class="field">
+                    <label class="label" for="text">Text</label>
+                    <div class="control">
+                        <input id="text" name="text" class="input" type="text" value="{{.Question.Text}}">
+                    </div>
+                </div>
+
+                <div class="field">
+                    <label class="label" for="imageURL">Image URL</label>
+                    <div class="control">
+                        <input id="imageURL" name="imageURL" class="input" type="text" value="{{.Question.ImageURL}}"
+                               disabled>
+                    </div>
+                </div>
+
+                <div class="field">
+                    <label class="label" for="position">Position</label>
+                    <div class="control">
+                        <input id="position" name="position" class="input" type="text" value="{{.Question.Position}}">
+                    </div>
+                </div>
+
+                <div class="box">
+                    <h4 class="title is-4">Options</h4>
+                    <div class="fixed-grid has-4-cols">
+                        <div class="grid">
+                            {{if gt (len .Question.Options) 0}}
+                                <div class="cell">
+                                    <div class="field">
+                                        <label class="label" for="option[0]text">Text</label>
+                                        <div class="control">
+                                            <input id="option[0]text" name="option[0]text" class="input"
+                                                   type="text"
+                                                   value="{{(index .Question.Options 0).Text}}">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="cell">
+                                    <div class="field">
+                                        <label class="label" for="option[0]position">Position</label>
+                                        <div class="control">
+                                            <input id="option[0]position" name="option[0]position" class="input"
+                                                   type="text"
+                                                   value="{{(index .Question.Options 0).Position}}">
+                                        </div>
+                                    </div>
+                                </div>
+                            {{end}}
+                            {{if gt (len .Question.Options) 1}}
+                                <div class="cell">
+                                    <div class="field">
+                                        <label class="label" for="option[1]text">Text</label>
+                                        <div class="control">
+                                            <input id="option[1]text" name="option[1]text" class="input"
+                                                   type="text"
+                                                   value="{{(index .Question.Options 1).Text}}">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="cell">
+                                    <div class="field">
+                                        <label class="label" for="option[1]position">Position</label>
+                                        <div class="control">
+                                            <input id="option[1]position" name="option[1]position" class="input"
+                                                   type="text"
+                                                   value="{{(index .Question.Options 1).Position}}">
+                                        </div>
+                                    </div>
+                                </div>
+                            {{end}}
+                            {{if gt (len .Question.Options) 2}}
+                                <div class="cell">
+                                    <div class="field">
+                                        <label class="label" for="option[2]text">Text</label>
+                                        <div class="control">
+                                            <input id="option[2]text" name="option[2]text" class="input"
+                                                   type="text"
+                                                   value="{{(index .Question.Options 2).Text}}">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="cell">
+                                    <div class="field">
+                                        <label class="label" for="option[2]position">Position</label>
+                                        <div class="control">
+                                            <input id="option[2]position" name="option[2]position" class="input"
+                                                   type="text"
+                                                   value="{{(index .Question.Options 2).Position}}">
+                                        </div>
+                                    </div>
+                                </div>
+                            {{end}}
+                            {{if gt (len .Question.Options) 3}}
+                                <div class="cell">
+                                    <div class="field">
+                                        <label class="label" for="option[3]text">Text</label>
+                                        <div class="control">
+                                            <input id="option[3]text" name="option[3]text" class="input"
+                                                   type="text"
+                                                   value="{{(index .Question.Options 3).Text}}">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="cell">
+                                    <div class="field">
+                                        <label class="label" for="option[3]position">Position</label>
+                                        <div class="control">
+                                            <input id="option[3]position" name="option[3]position" class="input"
+                                                   type="text"
+                                                   value="{{(index .Question.Options 3).Position}}">
+                                        </div>
+                                    </div>
+                                </div>
+                            {{end}}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="level">
+                    <div class="level-left">
+                        <div class="level-item">
+                            <input type="submit" name="action" class="button is-primary is-right" value="Save">
+                        </div>
+                        <div class="level-item">
+                            <a href="/admin/quizzes">Cancel</a>
+                        </div>
+                    </div>
+                    <div class="level-right">
+                        <div class="level-item">
+                            <a href="/admin/quizzes/{{.Question.QuizID}}/question/{{.Question.ID}}}}delete">
+                            <span class="icon-text">
+                                <span class="icon">
+                                    <i class="fas fa-trash"></i></span>
+                                <span>Delete</span>
+                            </span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </form>
+        {{else}}
+            <p>Quiz not found!</p>
+        {{end}}
+    </div>
+{{end}}
