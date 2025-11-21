@@ -9,7 +9,15 @@ import (
 )
 
 func addRoutes(mux *http.ServeMux, logger *logging.Logger, stores *store.Stores) {
-	mux.Handle("/admin", admin.HandleAdminIndex(logger))
-	mux.Handle("/admin/quizzes", admin.HandleAdminQuizList(logger, stores.Quizzes))
+	mux.Handle("GET /admin", admin.HandleIndex(logger))
+	mux.Handle("GET /admin/quizzes", admin.HandleQuizList(logger, stores.Quizzes))
+	mux.Handle("GET /admin/quizzes/{quizId}/view", admin.HandleQuizView(logger, stores.Quizzes))
+	mux.Handle("GET /admin/quizzes/{quizId}/edit", admin.HandleQuizEdit(logger, stores.Quizzes))
+	mux.Handle("POST /admin/quizzes/{quizId}/save", admin.HandleQuizSave(logger, stores.Quizzes))
+	mux.Handle(
+		"GET /admin/quizzes/{quizId}/questions/{questionId}/edit",
+		admin.HandleQuestionEdit(logger, stores.Quizzes),
+	)
+
 	mux.Handle("/", http.NotFoundHandler())
 }

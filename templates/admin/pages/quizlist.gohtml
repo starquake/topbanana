@@ -12,6 +12,7 @@
             <th>Title</th>
             <th>Slug</th>
             <th>Description</th>
+            <th>Questions</th>
             <th>Actions</th>
         </tr>
         </thead>
@@ -19,12 +20,12 @@
         {{range .Quizzes}}
         <tr>
             <td>{{.ID}}</td>
-            <td>{{.Title}}</td>
+            <td><a href="/admin/quizzes/{{.ID}}/view">{{.Title}}</a></td>
             <td>{{.Slug}}</td>
             <td>{{.Description}}</td>
+            <td><a href="/admin/quizzes/{{.ID}}/view">{{len .Questions}}</a></td>
             <td>
-                <a href="/admin/quizzes/{{.ID}}/edit">Edit</a>
-                <a href="/admin/quizzes/{{.ID}}/delete">Delete</a>
+                <a href="/admin/quizzes/{{.ID}}/edit"><span class="icon"><i class="fas fa-pen"></i></span></a>
             </td>
         </tr>
         {{end}}

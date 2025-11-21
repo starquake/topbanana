@@ -1,0 +1,56 @@
+{{define "content"}}
+
+    <div class="quiz-view">
+        <h1 class="title is-1">{{.Title}}</h1>
+
+        {{if .Quiz}}
+            <h2 class="title is-2">#{{.Quiz.ID}} - {{.Quiz.Title}}</h2>
+            <a href="/admin/quizzes/{{.Quiz.ID}}/edit"><span class="icon"><i class="fas fa-pen"></i></span></a>
+            <h3 class="subtitle is-3">{{.Quiz.Description}}</h3>
+
+            <h4 class="subtitle is-4">Questions</h4>
+
+            {{if .Quiz.Questions}}
+                <table class="table is-striped is-fullwidth">
+                    <thead>
+                    <tr>
+                        <th>Question</th>
+                        <th>Options</th>
+                        <th>Actions</th>
+                    </tr>
+                    </thead>
+
+                    <tbody>
+                    {{range .Quiz.Questions}}
+                        <tr>
+                            <td>{{.Text}}</td>
+                            <td>
+                                <ul>
+                                    {{range .Options}}
+                                        <li>
+                                            {{.Text}}
+                                            {{if .Correct}}
+                                                <span class="icon is-small has-text-success">
+                                                    <i class="fas fa-check"></i>
+                                                </span>
+                                            {{end}}
+                                        </li>
+                                    {{end}}
+                                </ul>
+                            </td>
+                            <td>
+                                <a href="/admin/quizzes/{{.QuizID}}/questions/{{.ID}}/edit"><span class="icon"><i class="fas fa-pen"></i></span></a>
+                            </td>
+                        </tr>
+                    {{end}}
+                    </tbody>
+
+                </table>
+            {{else}}
+                <p>This quiz has no questions.</p>
+            {{end}}
+        {{else}}
+            <p>Quiz not found!</p>
+        {{end}}
+    </div>
+{{end}}

@@ -18,33 +18,38 @@ type Quiz struct {
 	Slug        string
 	Description string
 	CreatedAt   time.Time
-	Questions   []Question
+	Questions   []*Question
 }
 
 // Question represents a question in a quiz.
 type Question struct {
 	ID       int64
-	QuizID   int
+	QuizID   int64
 	Text     string
 	ImageURL string
-	Options  []Option
+	Position int
+	Options  []*Option
 }
 
 // Option represents an option for a question.
 type Option struct {
 	ID         int64
-	QuestionID int
+	QuestionID int64
 	Text       string
 	Correct    bool
+	Position   int
 }
 
 // Store represents a store for quizzes.
 // This can be implemented for different databases.
 type Store interface {
 	// Create(ctx context.Context, quiz *Quiz) error
-	// GetByID(ctx context.Context, id int64) (*Quiz, error)
+	// GetByID returns a quiz with questions and options, by its question ID.
+	GetByID(ctx context.Context, id int64) (*Quiz, error)
+	// GetQuestionByID returns a question with options, by its question ID.
+	GetQuestionByID(ctx context.Context, id int64) (*Question, error)
 	// List returns all quizzes.
-	List(ctx context.Context) ([]Quiz, error)
+	List(ctx context.Context) ([]*Quiz, error)
 	// Delete(ctx context.Context, id int64) error
 }
 
@@ -66,35 +71,191 @@ func NewSQLiteStore(db *sql.DB, logger *logging.Logger) *SQLiteStore {
 //		return err
 //	}
 //	return nil
-//}
+// }
 
-// List returns all quizzes.
-func (s *SQLiteStore) List(ctx context.Context) ([]Quiz, error) {
-	rows, err := s.db.QueryContext(
-		ctx,
-		`SELECT id, title, slug, description, created_at FROM quizzes`,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("error querying quizzes: %w", err)
+// GetByID returns a quiz including related questions and options by its ID.
+func (s *SQLiteStore) GetByID(ctx context.Context, id int64) (*Quiz, error) {
+	var err error
+	quizQuery := `SELECT id, title, slug, description, created_at FROM quizzes WHERE id = ?`
+
+	quizRow := s.db.QueryRowContext(ctx, quizQuery, id)
+	if quizRow.Err() != nil {
+		return nil, fmt.Errorf("error iterating quizRow: %w", quizRow.Err())
 	}
-	if rows.Err() != nil {
-		return nil, fmt.Errorf("error iterating rows: %w", rows.Err())
+
+	var quiz Quiz
+	err = quizRow.Scan(&quiz.ID, &quiz.Title, &quiz.Slug, &quiz.Description, &quiz.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("error scanning quizRow: %w", err)
+	}
+
+	questions, err := s.getQuestionsByQuizID(ctx, quiz.ID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting questions for quiz %d: %w", quiz.ID, err)
+	}
+
+	quiz.Questions = questions
+
+	return &quiz, nil
+}
+
+// List returns all quizzes including related questions and options.
+func (s *SQLiteStore) List(ctx context.Context) ([]*Quiz, error) {
+	quizQuery := `SELECT id, title, slug, description, created_at FROM quizzes`
+
+	quizRows, quizErr := s.db.QueryContext(
+		ctx,
+		quizQuery,
+	)
+	if quizErr != nil {
+		return nil, fmt.Errorf("error querying quizzes: %w", quizErr)
 	}
 	defer func() {
-		err := rows.Close()
+		err := quizRows.Close()
 		if err != nil {
-			s.logger.Error(ctx, "error closing rows", err)
+			s.logger.Error(ctx, "error closing quizRows", err)
 		}
 	}()
-	var quizzes []Quiz
-	for rows.Next() {
-		var quiz Quiz
-		err := rows.Scan(&quiz.ID, &quiz.Title, &quiz.Slug, &quiz.Description, &quiz.CreatedAt)
-		if err != nil {
-			return nil, fmt.Errorf("error scanning row: %w", err)
+	if quizRows.Err() != nil {
+		return nil, fmt.Errorf("error iterating quizRows: %w", quizRows.Err())
+	}
+	var quizzes []*Quiz
+	for quizRows.Next() {
+		quiz := &Quiz{}
+		quizErr = quizRows.Scan(
+			&quiz.ID,
+			&quiz.Title,
+			&quiz.Slug,
+			&quiz.Description,
+			&quiz.CreatedAt,
+		)
+		if quizErr != nil {
+			return nil, fmt.Errorf("error scanning quizRow: %w", quizErr)
 		}
+
 		quizzes = append(quizzes, quiz)
 	}
 
+	for _, quiz := range quizzes {
+		questions, err := s.getQuestionsByQuizID(ctx, quiz.ID)
+		if err != nil {
+			return nil, fmt.Errorf("error getting questions for quiz %d: %w", quiz.ID, err)
+		}
+
+		quiz.Questions = questions
+	}
+
 	return quizzes, nil
+}
+
+// GetQuestionByID returns a question including related options by its ID.
+func (s *SQLiteStore) GetQuestionByID(ctx context.Context, id int64) (*Question, error) {
+	questionQuery := `SELECT id, quiz_id, text, image_url, position FROM questions WHERE id = ?`
+
+	questionRow := s.db.QueryRowContext(ctx, questionQuery, id)
+	if questionRow.Err() != nil {
+		return nil, fmt.Errorf("error iterating questionRow: %w", questionRow.Err())
+	}
+
+	question := &Question{}
+	err := questionRow.Scan(&question.ID, &question.QuizID, &question.Text, &question.ImageURL, &question.Position)
+	if err != nil {
+		return nil, fmt.Errorf("error scanning questionRow: %w", err)
+	}
+
+	options, err := s.getOptionsByQuestionID(ctx, question.ID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting options for question %d: %w", question.ID, err)
+	}
+	question.Options = options
+
+	return question, nil
+}
+
+// getQuestionsByQuizID returns questions including related options for a quiz by its quizID.
+func (s *SQLiteStore) getQuestionsByQuizID(ctx context.Context, quizID int64) ([]*Question, error) {
+	questionQuery := `SELECT id, quiz_id, text, image_url, position FROM questions WHERE quiz_id = ?`
+
+	questionRows, questionErr := s.db.QueryContext(ctx, questionQuery, quizID)
+	if questionErr != nil {
+		return nil, fmt.Errorf("error querying questions: %w", questionErr)
+	}
+	defer func() {
+		err := questionRows.Close()
+		if err != nil {
+			s.logger.Error(ctx, "error closing questionRows", err)
+		}
+	}()
+
+	if questionRows.Err() != nil {
+		return nil, fmt.Errorf("error iterating questionRows: %w", questionRows.Err())
+	}
+	var questions []*Question
+	for questionRows.Next() {
+		question := &Question{}
+		questionErr = questionRows.Scan(
+			&question.ID,
+			&question.QuizID,
+			&question.Text,
+			&question.ImageURL,
+			&question.Position,
+		)
+		if questionErr != nil {
+			return nil, fmt.Errorf("error scanning questionRow: %w", questionErr)
+		}
+
+		options, err := s.getOptionsByQuestionID(ctx, question.ID)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"error getting options for question %d: %w",
+				question.ID,
+				err,
+			)
+		}
+		question.Options = options
+
+		questions = append(questions, question)
+	}
+
+	return questions, nil
+}
+
+// getOptionsByQuestionID returns options for a question by its questionID.
+func (s *SQLiteStore) getOptionsByQuestionID(
+	ctx context.Context,
+	questionID int64,
+) ([]*Option, error) {
+	optionQuery := `SELECT id, question_id, text, is_correct, position FROM options WHERE question_id = ?`
+
+	optionRows, optionErr := s.db.QueryContext(ctx, optionQuery, questionID)
+	if optionErr != nil {
+		return nil, fmt.Errorf("error querying options: %w", optionErr)
+	}
+	defer func() {
+		err := optionRows.Close()
+		if err != nil {
+			s.logger.Error(ctx, "error closing optionRows", err)
+		}
+	}()
+
+	if optionRows.Err() != nil {
+		return nil, fmt.Errorf("error iterating optionRows: %w", optionRows.Err())
+	}
+	var options []*Option
+	for optionRows.Next() {
+		option := &Option{}
+		optionErr = optionRows.Scan(
+			&option.ID,
+			&option.QuestionID,
+			&option.Text,
+			&option.Correct,
+			&option.Position,
+		)
+		if optionErr != nil {
+			return nil, fmt.Errorf("error scanning optionRow: %w", optionErr)
+		}
+		options = append(options, option)
+	}
+
+	return options, nil
 }
