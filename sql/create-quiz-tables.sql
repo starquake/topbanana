@@ -4,8 +4,7 @@ CREATE TABLE quizzes
     title       TEXT        NOT NULL,
     slug        TEXT UNIQUE NOT NULL,
     description TEXT        NOT NULL DEFAULT '',
-    created_at  DATETIME             DEFAULT CURRENT_TIMESTAMP,
-    created_by  INTEGER     NOT NULL
+    created_at  DATETIME             DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE questions
@@ -22,8 +21,7 @@ CREATE TABLE options
     id          INTEGER PRIMARY KEY,
     question_id INTEGER NOT NULL REFERENCES questions (id) ON DELETE CASCADE,
     text        TEXT    NOT NULL,
-    is_correct  BOOLEAN NOT NULL,
-    position    INTEGER NOT NULL -- A, B, C, D ordering
+    is_correct  BOOLEAN NOT NULL
 );
 
 CREATE TABLE players
@@ -68,29 +66,29 @@ VALUES (3, 1, 'What is the capital of Germany?', 30);
 -- INSERT INTO questions (id, quiz_id, text, position) VALUES (4,1, 'What is the capital of Italy?', 4);
 -- INSERT INTO questions (id, quiz_id, text, position) VALUES (5,1,'What is the capital of Poland?', 5);
 
-INSERT INTO options (question_id, text, is_correct, position)
-VALUES (1, 'Paris', true, 10);
-INSERT INTO options (question_id, text, is_correct, position)
-VALUES (1, 'Berlin', false, 20);
-INSERT INTO options (question_id, text, is_correct, position)
-VALUES (1, 'Madrid', false, 30);
-INSERT INTO options (question_id, text, is_correct, position)
-VALUES (1, 'Rome', false, 40);
+INSERT INTO options (question_id, text, is_correct)
+VALUES (1, 'Paris', true);
+INSERT INTO options (question_id, text, is_correct)
+VALUES (1, 'Berlin', false);
+INSERT INTO options (question_id, text, is_correct)
+VALUES (1, 'Madrid', false);
+INSERT INTO options (question_id, text, is_correct)
+VALUES (1, 'Rome', false);
 
-INSERT INTO options (question_id, text, is_correct, position)
-VALUES (2, 'Madrid', true, 40);
-INSERT INTO options (question_id, text, is_correct, position)
-VALUES (2, 'Rome', false, 30);
-INSERT INTO options (question_id, text, is_correct, position)
-VALUES (2, 'Paris', false, 20);
-INSERT INTO options (question_id, text, is_correct, position)
-VALUES (2, 'Berlin', false, 10);
+INSERT INTO options (question_id, text, is_correct)
+VALUES (2, 'Madrid', true);
+INSERT INTO options (question_id, text, is_correct)
+VALUES (2, 'Rome', false);
+INSERT INTO options (question_id, text, is_correct)
+VALUES (2, 'Paris', false);
+INSERT INTO options (question_id, text, is_correct)
+VALUES (2, 'Berlin', false);
 
-INSERT INTO options (question_id, text, is_correct, position)
-VALUES (3, 'Berlin', true, 20);
-INSERT INTO options (question_id, text, is_correct, position)
-VALUES (3, 'Paris', false, 10);
-INSERT INTO options (question_id, text, is_correct, position)
-VALUES (3, 'Rome', false, 40);
-INSERT INTO options (question_id, text, is_correct, position)
-VALUES (3, 'Madrid', false, 30);
+INSERT INTO options (question_id, text, is_correct)
+VALUES (3, 'Berlin', true);
+INSERT INTO options (question_id, text, is_correct)
+VALUES (3, 'Paris', false);
+INSERT INTO options (question_id, text, is_correct)
+VALUES (3, 'Rome', false);
+INSERT INTO options (question_id, text, is_correct)
+VALUES (3, 'Madrid', false);
