@@ -73,15 +73,6 @@ func NewSQLiteStore(db *sql.DB, logger *logging.Logger) *SQLiteStore {
 	return &SQLiteStore{db, logger}
 }
 
-// func (s *SQLiteStore) Create(ctx context.Context, quiz *Quiz) error {
-//	query := `INSERT INTO quizzes (name, slug, description, created_at) VALUES (?, ?, ?, ?)`
-//	_, err := s.db.ExecContext(ctx, query, quiz.Title, quiz.Slug, quiz.Description, quiz.CreatedAt)
-//	if err != nil {
-//		return err
-//	}
-//	return nil
-// }
-
 // GetQuizByID returns a quiz including related questions and options by its ID.
 func (s *SQLiteStore) GetQuizByID(ctx context.Context, id int64) (*Quiz, error) {
 	var err error

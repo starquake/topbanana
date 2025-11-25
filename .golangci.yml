@@ -27,7 +27,6 @@ linters:
     - fatcontext
     - forcetypeassert
     - funcorder
-    - funlen
     - gocheckcompilerdirectives
     - gochecknoglobals
     - gochecknoinits
@@ -134,7 +133,6 @@ linters:
       - path: _test\.go
         linters:
           - dupl
-          - funlen
           - err113
 formatters:
   enable:
