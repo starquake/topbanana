@@ -20,10 +20,10 @@
         {{range .Quizzes}}
         <tr>
             <td>{{.ID}}</td>
-            <td><a href="/admin/quizzes/{{.ID}}/view">{{.Title}}</a></td>
+            <td><a href="/admin/quizzes/{{.ID}}">{{.Title}}</a></td>
             <td>{{.Slug}}</td>
             <td>{{.Description}}</td>
-            <td><a href="/admin/quizzes/{{.ID}}/view">{{len .Questions}}</a></td>
+            <td><a href="/admin/quizzes/{{.ID}}">{{len .Questions}}</a></td>
             <td>
                 <a href="/admin/quizzes/{{.ID}}/edit"><span class="icon"><i class="fas fa-pen"></i></span></a>
             </td>

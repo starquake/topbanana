@@ -1,0 +1,61 @@
+{{define "content"}}
+
+    <div class="quiz-edit">
+        <h1 class="title is-1">{{.Title}}</h1>
+
+        <form
+                {{if .Quiz.ID}}
+                    action="/admin/quizzes/{{.Quiz.ID}}/save"
+                {{else}}
+                    action="/admin/quizzes/save"
+                {{end}}
+                method="POST">
+
+            <div class="field">
+                <label class="label" for="title">Title</label>
+                <div class="control">
+                    <input id="title" name="title" class="input" type="text" value="{{.Quiz.Title}}">
+                </div>
+            </div>
+
+            <div class="field">
+                <label class="label" for="slug">Slug</label>
+                <div class="control">
+                    <input id="slug" name="slug" class="input" type="text" value="{{.Quiz.Slug}}">
+                </div>
+            </div>
+
+            <div class="field">
+                <label class="label" for="description">Description</label>
+                <div class="control">
+                    <input id="description" name="description" class="input" type="text"
+                           value="{{.Quiz.Description}}">
+                </div>
+            </div>
+
+            <div class="level">
+                <div class="level-left">
+                    <div class="level-item">
+                        <input type="submit" name="action" class="button is-primary is-right" value="Save">
+                    </div>
+                    <div class="level-item">
+                        <a href="/admin/quizzes">Cancel</a>
+                    </div>
+                </div>
+                {{if .Quiz.ID}}
+                    <div class="level-right">
+                        <div class="level-item">
+                            <a href="/admin/quizzes/{{.Quiz.ID}}/delete">
+                            <span class="icon-text">
+                                <span class="icon">
+                                    <i class="fas fa-trash"></i></span>
+                                <span>Delete</span>
+                            </span>
+                            </a>
+                        </div>
+                    </div>
+                {{end}}
+            </div>
+        </form>
+    </div>
+{{end}}

@@ -52,10 +52,10 @@ CREATE TABLE quiz_attempts
     UNIQUE (player_id, quiz_id) -- one answer per question per player
 );
 
-INSERT INTO quizzes (id, title, slug, description, created_by)
-VALUES (1, 'Quiz 1', 'quiz-1', 'This is a quiz', 'admin');
-INSERT INTO quizzes (id, title, slug, description, created_by)
-VALUES (2, 'Quiz 2', 'quiz-2', 'This is another quiz', 'admin');
+INSERT INTO quizzes (id, title, slug, description)
+VALUES (1, 'Quiz 1', 'quiz-1', 'This is a quiz');
+INSERT INTO quizzes (id, title, slug, description)
+VALUES (2, 'Quiz 2', 'quiz-2', 'This is another quiz');
 
 INSERT INTO questions (id, quiz_id, text, position)
 VALUES (1, 1, 'What is the capital of France?', 10);

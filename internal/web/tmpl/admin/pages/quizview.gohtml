@@ -49,6 +49,7 @@
             {{else}}
                 <p>This quiz has no questions.</p>
             {{end}}
+            <a href="/admin/quizzes/{{.Quiz.ID}}/questions/new">Add question</a>
         {{else}}
             <p>Quiz not found!</p>
         {{end}}

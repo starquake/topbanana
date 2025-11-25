@@ -12,13 +12,16 @@ type Logger struct {
 	logger *slog.Logger
 }
 
+// Attr is a logging attribute.
+type Attr = slog.Attr
+
 // NewLogger creates a new Logger.
 func NewLogger() *Logger {
 	return &Logger{slog.New(slog.NewTextHandler(os.Stdout, nil))}
 }
 
 // Info logs an info message.
-func (l *Logger) Info(ctx context.Context, msg string, attrs ...slog.Attr) {
+func (l *Logger) Info(ctx context.Context, msg string, attrs ...Attr) {
 	args := make([]any, 0, len(attrs))
 	for _, attr := range attrs {
 		args = append(args, attr)
@@ -34,4 +37,9 @@ func (l *Logger) Error(ctx context.Context, msg string, args ...any) {
 // Debug logs a debug message.
 func (l *Logger) Debug(ctx context.Context, msg string, args ...any) {
 	l.logger.DebugContext(ctx, msg, args...)
+}
+
+// String creates a new attribute with the given key and value.
+func String(key, value string) Attr {
+	return slog.String(key, value)
 }

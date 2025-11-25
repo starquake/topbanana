@@ -49,10 +49,14 @@ type Store interface {
 	GetQuestionByID(ctx context.Context, id int64) (*Question, error)
 	// ListQuizzes returns all quizzes.
 	ListQuizzes(ctx context.Context) ([]*Quiz, error)
+	// CreateQuiz creates a quiz.
+	CreateQuiz(ctx context.Context, quiz *Quiz) error
 	// UpdateQuiz updates a quiz.
 	UpdateQuiz(ctx context.Context, quiz *Quiz) error
 	// UpdateQuestion updates a question.
 	UpdateQuestion(ctx context.Context, question *Question) error
+	// CreateQuestion creates a question.
+	CreateQuestion(ctx context.Context, qs *Question) error
 }
 
 // SQLiteStore is a store for quizzes in SQLite.
@@ -176,12 +180,56 @@ func (s *SQLiteStore) GetQuestionByID(ctx context.Context, id int64) (*Question,
 	return question, nil
 }
 
+// CreateQuiz creates a quiz.
+func (s *SQLiteStore) CreateQuiz(ctx context.Context, quiz *Quiz) error {
+	query := `INSERT INTO quizzes (title, slug, description, created_at) VALUES (?, ?, ?, ?)`
+	quiz.CreatedAt = time.Now().UTC()
+	result, err := s.db.ExecContext(ctx, query, quiz.Title, quiz.Slug, quiz.Description, quiz.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("error creating quiz: %w", err)
+	}
+	resultID, err := result.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("error getting last insert ID: %w", err)
+	}
+	quiz.ID = resultID
+
+	return nil
+}
+
 // UpdateQuiz updates a quiz.
 func (s *SQLiteStore) UpdateQuiz(ctx context.Context, quiz *Quiz) error {
 	query := `UPDATE quizzes SET title = ?, slug = ?, description = ? WHERE id = ?`
 	_, err := s.db.ExecContext(ctx, query, quiz.Title, quiz.Slug, quiz.Description, quiz.ID)
 	if err != nil {
 		return fmt.Errorf("error updating quiz: %w", err)
+	}
+
+	return nil
+}
+
+// CreateQuestion creates a question and its options and saves them to the database.
+func (s *SQLiteStore) CreateQuestion(ctx context.Context, qs *Question) error {
+	query := `INSERT INTO questions (quiz_id, text, image_url, position) VALUES (?, ?, ?, ?)`
+	optionQuery := `INSERT INTO options (question_id, text, is_correct) VALUES (?, ?, ?)`
+
+	var result sql.Result
+	var err error
+	result, err = s.db.ExecContext(ctx, query, qs.QuizID, qs.Text, qs.ImageURL, qs.Position)
+	if err != nil {
+		return fmt.Errorf("error creating question: %w", err)
+	}
+	resultID, err := result.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("error getting last insert ID: %w", err)
+	}
+	qs.ID = resultID
+
+	for _, option := range qs.Options {
+		_, err = s.db.ExecContext(ctx, optionQuery, qs.ID, option.Text, option.Correct)
+		if err != nil {
+			return fmt.Errorf("error creating option: %w", err)
+		}
 	}
 
 	return nil
