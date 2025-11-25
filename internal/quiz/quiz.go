@@ -5,6 +5,7 @@ package quiz
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -37,7 +38,6 @@ type Option struct {
 	QuestionID int64
 	Text       string
 	Correct    bool
-	Position   int
 }
 
 // Store represents a store for quizzes.
@@ -60,6 +60,13 @@ type SQLiteStore struct {
 	db     *sql.DB
 	logger *logging.Logger
 }
+
+var (
+	// ErrQuizNotFound is returned when a quiz is not found.
+	ErrQuizNotFound = errors.New("quiz not found")
+	// ErrQuestionNotFound is returned when a question is not found.
+	ErrQuestionNotFound = errors.New("quiz not found")
+)
 
 // NewSQLiteStore creates a new SQLiteStore.
 func NewSQLiteStore(db *sql.DB, logger *logging.Logger) *SQLiteStore {
@@ -88,6 +95,10 @@ func (s *SQLiteStore) GetQuizByID(ctx context.Context, id int64) (*Quiz, error) 
 	var quiz Quiz
 	err = quizRow.Scan(&quiz.ID, &quiz.Title, &quiz.Slug, &quiz.Description, &quiz.CreatedAt)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: quiz %d not found", ErrQuizNotFound, id)
+		}
+
 		return nil, fmt.Errorf("error scanning quizRow: %w", err)
 	}
 
@@ -249,7 +260,7 @@ func (s *SQLiteStore) getOptionsByQuestionID(
 	ctx context.Context,
 	questionID int64,
 ) ([]*Option, error) {
-	optionQuery := `SELECT id, question_id, text, is_correct, position FROM options WHERE question_id = ?`
+	optionQuery := `SELECT id, question_id, text, is_correct FROM options WHERE question_id = ?`
 
 	optionRows, optionErr := s.db.QueryContext(ctx, optionQuery, questionID)
 	if optionErr != nil {
@@ -273,7 +284,6 @@ func (s *SQLiteStore) getOptionsByQuestionID(
 			&option.QuestionID,
 			&option.Text,
 			&option.Correct,
-			&option.Position,
 		)
 		if optionErr != nil {
 			return nil, fmt.Errorf("error scanning optionRow: %w", optionErr)
