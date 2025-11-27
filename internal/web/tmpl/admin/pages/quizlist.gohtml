@@ -1,38 +1,39 @@
 {{define "content"}}
-<div class="quiz-list">
-    <h1 class="title is-1">{{.Title}}</h1>
+    <div class="quiz-list">
+        <h1 class="title is-1">{{.Title}}</h1>
 
-    <a href="/admin/quizzes/new">Create New Quiz</a>
+        <a href="/admin/quizzes/new">Create New Quiz</a>
 
-    {{if .Quizzes}}
-    <table class="table">
-        <thead>
-        <tr>
-            <th>ID</th>
-            <th>Title</th>
-            <th>Slug</th>
-            <th>Description</th>
-            <th>Questions</th>
-            <th>Actions</th>
-        </tr>
-        </thead>
-        <tbody>
-        {{range .Quizzes}}
-        <tr>
-            <td>{{.ID}}</td>
-            <td><a href="/admin/quizzes/{{.ID}}">{{.Title}}</a></td>
-            <td>{{.Slug}}</td>
-            <td>{{.Description}}</td>
-            <td><a href="/admin/quizzes/{{.ID}}">{{len .Questions}}</a></td>
-            <td>
-                <a href="/admin/quizzes/{{.ID}}/edit"><span class="icon"><i class="fas fa-pen"></i></span></a>
-            </td>
-        </tr>
+        {{if .Quizzes}}
+            <table class="table">
+                <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Title</th>
+                    <th>Slug</th>
+                    <th>Description</th>
+                    <th>Questions</th>
+                    <th>Actions</th>
+                </tr>
+                </thead>
+                <tbody>
+                {{range .Quizzes}}
+                    <tr>
+                        <td>{{.ID}}</td>
+                        <td><a href="/admin/quizzes/{{.ID}}">{{.Title}}</a></td>
+                        <td>{{.Slug}}</td>
+                        <td>{{.Description}}</td>
+                        <td><a href="/admin/quizzes/{{.ID}}">{{len .Questions}}</a></td>
+                        <td>
+                            <a href="/admin/quizzes/{{.ID}}/edit"><span class="icon"><i
+                                            class="fas fa-pen"></i></span></a>
+                        </td>
+                    </tr>
+                {{end}}
+                </tbody>
+            </table>
+        {{else}}
+            <p>No quizzes found. <a href="/admin/quizzes/new">Create one now!</a></p>
         {{end}}
-        </tbody>
-    </table>
-    {{else}}
-    <p>No quizzes found. <a href="/admin/quizzes/new">Create one now!</a></p>
-    {{end}}
-</div>
+    </div>
 {{end}}
