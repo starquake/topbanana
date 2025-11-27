@@ -332,8 +332,6 @@ func HandleQuizSave(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 			logger.Error(r.Context(), "error parsing form", err)
 		}
 
-		var qz *quiz.Quiz
-
 		var quizID int64
 		quizID, err = parseIDFromPath(r, logger, "quizId")
 		if err != nil {
@@ -343,6 +341,7 @@ func HandleQuizSave(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 		}
 		newQuiz := quizID == 0
 
+		var qz *quiz.Quiz
 		if newQuiz {
 			qz = &quiz.Quiz{}
 		} else {
@@ -354,9 +353,9 @@ func HandleQuizSave(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 			}
 		}
 
-		qz.Title = r.FormValue("title")
-		qz.Slug = r.FormValue("slug")
-		qz.Description = r.FormValue("description")
+		qz.Title = r.PostFormValue("title")
+		qz.Slug = r.PostFormValue("slug")
+		qz.Description = r.PostFormValue("description")
 
 		if newQuiz {
 			err = quizStore.CreateQuiz(r.Context(), qz)
@@ -523,9 +522,9 @@ func HandleQuestionSave(logger *logging.Logger, quizStore quiz.Store) http.Handl
 			}
 		}
 
-		qs.Text = r.FormValue("text")
-		qs.ImageURL = r.FormValue("imageUrl")
-		position, err := strconv.Atoi(r.FormValue("position"))
+		qs.Text = r.PostFormValue("text")
+		qs.ImageURL = r.PostFormValue("imageUrl")
+		position, err := strconv.Atoi(r.PostFormValue("position"))
 		if err != nil {
 			logger.Error(r.Context(), "error parsing position", "err", err)
 
@@ -544,7 +543,7 @@ func HandleQuestionSave(logger *logging.Logger, quizStore quiz.Store) http.Handl
 					QuestionID: qs.ID,
 				}
 			}
-			opID := r.FormValue(fmt.Sprintf("option[%d]id", i))
+			opID := r.PostFormValue(fmt.Sprintf("option[%d]id", i))
 			if opID == "" {
 				op.ID = 0
 			} else {
@@ -555,8 +554,8 @@ func HandleQuestionSave(logger *logging.Logger, quizStore quiz.Store) http.Handl
 					return
 				}
 			}
-			op.Text = r.FormValue(fmt.Sprintf("option[%d]text", i))
-			op.Correct = r.FormValue(fmt.Sprintf("option[%d]correct", i)) == "on"
+			op.Text = r.PostFormValue(fmt.Sprintf("option[%d]text", i))
+			op.Correct = r.PostFormValue(fmt.Sprintf("option[%d]correct", i)) == "on"
 
 			newOptions = append(newOptions, op)
 		}
