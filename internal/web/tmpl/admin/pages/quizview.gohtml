@@ -4,8 +4,24 @@
         <h1 class="title is-1">{{.Title}}</h1>
 
         {{if .Quiz}}
-            <h2 class="title is-2">#{{.Quiz.ID}} - {{.Quiz.Title}}</h2>
-            <a href="/admin/quizzes/{{.Quiz.ID}}/edit"><span class="icon"><i class="fas fa-pen"></i></span></a>
+            <div class="level">
+                <div class="level-left">
+                    <div class="level-item">
+                        <h2 class="title is-2">#{{.Quiz.ID}} - {{.Quiz.Title}}</h2>
+                    </div>
+                </div>
+                <div class="level-right">
+                    <div class="level-item">
+                        <a href="/admin/quizzes/{{.Quiz.ID}}/edit">
+                        <span class="icon-text">
+                            <span class="icon"><i class="fas fa-pen"></i></span>
+                            <span>Edit quiz</span>
+                        </span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+
             <h3 class="subtitle is-3">{{.Quiz.Description}}</h3>
 
             <h4 class="subtitle is-4">Questions</h4>
@@ -39,8 +55,12 @@
                                 </ul>
                             </td>
                             <td>
-                                <a href="/admin/quizzes/{{.QuizID}}/questions/{{.ID}}/edit"><span class="icon"><i
-                                                class="fas fa-pen"></i></span></a>
+                                <a href="/admin/quizzes/{{.QuizID}}/questions/{{.ID}}/edit">
+                                    <span class="icon-text">
+                                        <span class="icon"><i class="fas fa-pen"></i></span>
+                                        <span>Edit question</span>
+                                    </span>
+                                </a>
                             </td>
                         </tr>
                     {{end}}
@@ -50,7 +70,12 @@
             {{else}}
                 <p>This quiz has no questions.</p>
             {{end}}
-            <a href="/admin/quizzes/{{.Quiz.ID}}/questions/new">Add question</a>
+            <a href="/admin/quizzes/{{.Quiz.ID}}/questions/new">
+                <span class="icon-text">
+                    <span class="icon"><i class="fas fa-plus"></i></span>
+                    <span>Add question</span>
+                </span>
+            </a>
         {{else}}
             <p>Quiz not found!</p>
         {{end}}

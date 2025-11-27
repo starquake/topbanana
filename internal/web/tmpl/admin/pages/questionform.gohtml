@@ -35,58 +35,81 @@
             </div>
 
             <h4 class="title is-4">Options</h4>
-            <div class="field">
-                <label class="label" for="option[0]text">Option A</label>
-                <div class="control">
-                    <input type="hidden" name="option[0]id"
-                           value="{{if gt (len .Question.Options) 0}}{{(index .Question.Options 0).ID}}{{end}}">
-                    <input id="option[0]text" name="option[0]text" class="input" type="text"
-                           value="{{if gt (len .Question.Options) 0}}{{(index .Question.Options 0).Text}}{{end}}">
-                    <label class="label" for="option[0]correct">Correct</label>
-                    <input id="option[0]correct" name="option[0]correct" type="checkbox" value="on"
-                           {{if gt (len .Question.Options) 0}}{{(index .Question.Options 0).Correct}}checked{{end}}>
-                </div>
-            </div>
 
-            <div class="field">
-                <label class="label" for="option[1]text">Option B</label>
-                <div class="control">
-                    <input type="hidden" name="option[1]id"
-                           value="{{if gt (len .Question.Options) 1}}{{(index .Question.Options 1).ID}}{{end}}">
-                    <input id="option[1]text" name="option[1]text" class="input" type="text"
-                           value="{{if gt (len .Question.Options) 1}}{{(index .Question.Options 1).Text}}{{end}}">
-                    <label class="label" for="option[1]correct">Correct</label>
-                    <input id="option[1]correct" name="option[1]correct" type="checkbox" value="on"
-                           {{if gt (len .Question.Options) 1}}{{(index .Question.Options 1).Correct}}checked{{end}}>
-
-                </div>
-            </div>
-
-            <div class="field">
-                <label class="label" for="option[2]text">Option C</label>
-                <div class="control">
-                    <input type="hidden" name="option[2]id"
-                           value="{{if gt (len .Question.Options) 2}}{{(index .Question.Options 2).ID}}{{end}}">
-                    <input id="option[2]text" name="option[2]text" class="input" type="text"
-                           value="{{if gt (len .Question.Options) 2}}{{(index .Question.Options 2).Text}}{{end}}">
-                    <label class="label" for="option[2]correct">Correct</label>
-                    <input id="option[2]correct" name="option[2]correct" type="checkbox" value="on"
-                           {{if gt (len .Question.Options) 2}}{{(index .Question.Options 2).Correct}}checked{{end}}>
-
-                </div>
-            </div>
-
-            <div class="field">
-                <label class="label" for="option[3]text">Option D</label>
-                <div class="control">
-                    <input type="hidden" name="option[3]id"
-                           value="{{if gt (len .Question.Options) 3}}{{(index .Question.Options 3).ID}}{{end}}">
-                    <input id="option[3]text" name="option[3]text" class="input" type="text"
-                           value="{{if gt (len .Question.Options) 3}}{{(index .Question.Options 3).Text}}{{end}}">
-                    <label class="label" for="option[3]correct">Correct</label>
-                    <input id="option[3]correct" name="option[3]correct" type="checkbox" value="on"
-                           {{if gt (len .Question.Options) 3}}{{(index .Question.Options 3).Correct}}checked{{end}}>
-
+            <div class="fixed-grid has-2-cols">
+                <div class="grid ">
+                    <div class="cell">
+                        <div class="field">
+                            <label class="label">Option A</label>
+                            <div class="field is-grouped">
+                                <div class="control is-expanded">
+                                    <input type="hidden" name="option[0]id"
+                                           value="{{if gt (len .Question.Options) 0}}{{(index .Question.Options 0).ID}}{{end}}">
+                                    <input id="option[0]text" name="option[0]text" class="input" type="text"
+                                           value="{{if gt (len .Question.Options) 0}}{{(index .Question.Options 0).Text}}{{end}}">
+                                    <label class="checkbox">
+                                        <input id="option[0]correct" name="option[0]correct" type="checkbox" value="on"
+                                               {{if gt (len .Question.Options) 0}}{{if (index .Question.Options 0).Correct}}checked{{end}}{{end}}>
+                                        Correct
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="cell">
+                        <div class="field">
+                            <label class="label">Option B</label>
+                            <div class="field is-grouped">
+                                <div class="control is-expanded">
+                                    <input type="hidden" name="option[1]id"
+                                           value="{{if gt (len .Question.Options) 1}}{{(index .Question.Options 1).ID}}{{end}}">
+                                    <input id="option[1]text" name="option[1]text" class="input" type="text"
+                                           value="{{if gt (len .Question.Options) 1}}{{(index .Question.Options 1).Text}}{{end}}">
+                                    <label class="checkbox">
+                                        <input id="option[1]correct" name="option[1]correct" type="checkbox" value="on"
+                                               {{if gt (len .Question.Options) 1}}{{if (index .Question.Options 1).Correct}}checked{{end}}{{end}}>
+                                        Correct
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="cell">
+                        <div class="field">
+                            <label class="label">Option C</label>
+                            <div class="field is-grouped">
+                                <div class="control is-expanded">
+                                    <input type="hidden" name="option[2]id"
+                                           value="{{if gt (len .Question.Options) 2}}{{(index .Question.Options 2).ID}}{{end}}">
+                                    <input id="option[2]text" name="option[2]text" class="input" type="text"
+                                           value="{{if gt (len .Question.Options) 2}}{{(index .Question.Options 2).Text}}{{end}}">
+                                    <label class="checkbox">
+                                        <input id="option[2]correct" name="option[2]correct" type="checkbox" value="on"
+                                               {{if gt (len .Question.Options) 2}}{{if (index .Question.Options 2).Correct}}checked{{end}}{{end}}>
+                                        Correct
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="cell">
+                        <div class="field">
+                            <label class="label">Option D</label>
+                            <div class="field is-grouped">
+                                <div class="control is-expanded">
+                                    <input type="hidden" name="option[3]id"
+                                           value="{{if gt (len .Question.Options) 3}}{{(index .Question.Options 3).ID}}{{end}}">
+                                    <input id="option[3]text" name="option[3]text" class="input" type="text"
+                                           value="{{if gt (len .Question.Options) 3}}{{(index .Question.Options 3).Text}}{{end}}">
+                                    <label class="checkbox">
+                                        <input id="option[3]correct" name="option[3]correct" type="checkbox" value="on"
+                                               {{if gt (len .Question.Options) 3}}{{if (index .Question.Options 3).Correct}}checked{{end}}{{end}}>
+                                        Correct
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
