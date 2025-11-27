@@ -13,8 +13,15 @@ import (
 	"github.com/starquake/topbanana/internal/logging"
 )
 
+// ErrConvertingValueIntoTimestamp is returned when a value cannot be converted into a Timestamp.
+var ErrConvertingValueIntoTimestamp = errors.New("cannot convert value into Timestamp")
+
+// Timestamp is a timestamp with millisecond precision. Used for SQLite type conversion.
+//
+//nolint:recvcheck // Mixing pointer receivers and value receivers is needed here because we are implementing sql.Scanner and driver.Valuer.
 type Timestamp time.Time
 
+// Scan converts a value to a Timestamp.
 func (t *Timestamp) Scan(value any) error {
 	if value == nil {
 		*t = Timestamp(time.Time{})
@@ -24,7 +31,7 @@ func (t *Timestamp) Scan(value any) error {
 
 	ms, ok := value.(int64)
 	if !ok {
-		return fmt.Errorf("cannot scan %T into Timestamp", value)
+		return fmt.Errorf("%w: %T", ErrConvertingValueIntoTimestamp, value)
 	}
 
 	*t = Timestamp(time.UnixMilli(ms))
@@ -32,6 +39,7 @@ func (t *Timestamp) Scan(value any) error {
 	return nil
 }
 
+// Value converts a Timestamp to a value suitable for database storage.
 func (t Timestamp) Value() (driver.Value, error) {
 	return time.Time(t).UnixMilli(), nil
 }
