@@ -5,13 +5,36 @@ package quiz
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"time"
 
-	"github.com/starquake/topbanana/internal/db"
 	"github.com/starquake/topbanana/internal/logging"
 )
+
+type Timestamp time.Time
+
+func (t *Timestamp) Scan(value any) error {
+	if value == nil {
+		*t = Timestamp(time.Time{})
+
+		return nil
+	}
+
+	ms, ok := value.(int64)
+	if !ok {
+		return fmt.Errorf("cannot scan %T into Timestamp", value)
+	}
+
+	*t = Timestamp(time.UnixMilli(ms))
+
+	return nil
+}
+
+func (t Timestamp) Value() (driver.Value, error) {
+	return time.Time(t).UnixMilli(), nil
+}
 
 // Quiz represents a quiz.
 type Quiz struct {
@@ -79,23 +102,34 @@ func NewSQLiteStore(db *sql.DB, logger *logging.Logger) *SQLiteStore {
 }
 
 // GetQuizByID returns a quiz including related questions and options by its ID.
-func (s *SQLiteStore) GetQuizByID(ctx context.Context, id int64) (*Quiz, error) {
+func (s *SQLiteStore) GetQuizByID(ctx context.Context, quizID int64) (*Quiz, error) {
 	var err error
 	quizQuery := `SELECT id, title, slug, description, created_at FROM quizzes WHERE id = ?`
 
-	quizRow := s.db.QueryRowContext(ctx, quizQuery, id)
+	quizRow := s.db.QueryRowContext(ctx, quizQuery, quizID)
 	if quizRow.Err() != nil {
 		return nil, fmt.Errorf("error iterating quizRow: %w", quizRow.Err())
 	}
 
-	var quiz Quiz
-	err = quizRow.Scan(&quiz.ID, &quiz.Title, &quiz.Slug, &quiz.Description, &quiz.CreatedAt)
+	var id int64
+	var title, slug, description string
+	var createdAt Timestamp
+
+	err = quizRow.Scan(&id, &title, &slug, &description, &createdAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("%w: quiz %d not found", ErrQuizNotFound, id)
+			return nil, fmt.Errorf("%w: quiz %d not found", ErrQuizNotFound, quizID)
 		}
 
 		return nil, fmt.Errorf("error scanning quizRow: %w", err)
+	}
+
+	quiz := Quiz{
+		ID:          id,
+		Title:       title,
+		Slug:        slug,
+		Description: description,
+		CreatedAt:   time.Time(createdAt),
 	}
 
 	questions, err := s.getQuestionsByQuizID(ctx, quiz.ID)
@@ -132,7 +166,7 @@ func (s *SQLiteStore) ListQuizzes(ctx context.Context) ([]*Quiz, error) {
 
 	var id int64
 	var title, slug, description string
-	var createdAt db.Timestamp
+	var createdAt Timestamp
 
 	for quizRows.Next() {
 		quizErr = quizRows.Scan(
@@ -191,8 +225,8 @@ func (s *SQLiteStore) GetQuestionByID(ctx context.Context, id int64) (*Question,
 // CreateQuiz creates a quiz.
 func (s *SQLiteStore) CreateQuiz(ctx context.Context, quiz *Quiz) error {
 	query := `INSERT INTO quizzes (title, slug, description, created_at) VALUES (?, ?, ?, ?)`
-	quiz.CreatedAt = time.Now().UTC()
-	result, err := s.db.ExecContext(ctx, query, quiz.Title, quiz.Slug, quiz.Description, quiz.CreatedAt)
+	createdAt := Timestamp(time.Now().UTC())
+	result, err := s.db.ExecContext(ctx, query, quiz.Title, quiz.Slug, quiz.Description, createdAt)
 	if err != nil {
 		return fmt.Errorf("error creating quiz: %w", err)
 	}
