@@ -2,7 +2,12 @@
     <div class="quiz-list">
         <h1 class="title is-1">{{.Title}}</h1>
 
-        <a href="/admin/quizzes/new">Create New Quiz</a>
+        <a href="/admin/quizzes/new">
+            <span class="icon-text">
+                <span class="icon"><i class="fas fa-plus"></i></span>
+                <span>Create New Quiz</span>
+            </span>
+        </a>
 
         {{if .Quizzes}}
             <table class="table">
@@ -25,8 +30,12 @@
                         <td>{{.Description}}</td>
                         <td><a href="/admin/quizzes/{{.ID}}">{{len .Questions}}</a></td>
                         <td>
-                            <a href="/admin/quizzes/{{.ID}}/edit"><span class="icon"><i
-                                            class="fas fa-pen"></i></span></a>
+                            <a href="/admin/quizzes/{{.ID}}/edit">
+                                <span class="icon-text">
+                                    <span class="icon"><i class="fas fa-pen"></i></span>
+                                    <span>Edit question</span>
+                                </span>
+                            </a>
                         </td>
                     </tr>
                 {{end}}
