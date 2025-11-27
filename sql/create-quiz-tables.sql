@@ -4,7 +4,7 @@ CREATE TABLE quizzes
     title       TEXT        NOT NULL,
     slug        TEXT UNIQUE NOT NULL,
     description TEXT        NOT NULL DEFAULT '',
-    created_at  DATETIME             DEFAULT CURRENT_TIMESTAMP
+    created_at  INTEGER DEFAULT 0
 );
 
 CREATE TABLE questions
@@ -29,7 +29,7 @@ CREATE TABLE players
     id         INTEGER PRIMARY KEY,
     username   TEXT UNIQUE NOT NULL,
     email      TEXT UNIQUE NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at  INTEGER DEFAULT 0
 );
 
 CREATE TABLE answers
@@ -38,7 +38,7 @@ CREATE TABLE answers
     player_id   INTEGER NOT NULL REFERENCES players (id),
     question_id INTEGER NOT NULL REFERENCES questions (id),
     option_id   INTEGER NOT NULL REFERENCES options (id),
-    answered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    answered_at INTEGER DEFAULT 0,
     UNIQUE (player_id, question_id) -- one answer per question per player
 );
 
@@ -48,7 +48,7 @@ CREATE TABLE quiz_attempts
     player_id    INTEGER NOT NULL REFERENCES players (id),
     quiz_id      INTEGER NOT NULL REFERENCES quizzes (id),
     score        INTEGER NOT NULL,
-    completed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    completed_at INTEGER DEFAULT 0,
     UNIQUE (player_id, quiz_id) -- one answer per question per player
 );
 

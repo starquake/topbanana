@@ -83,7 +83,7 @@
                                value="{{if gt (len .Question.Options) 3}}{{(index .Question.Options 3).ID}}{{end}}">
                         <input id="option[3]text" name="option[3]text" class="input" type="text"
                                value="{{if gt (len .Question.Options) 3}}{{(index .Question.Options 3).Text}}0{{end}}">
-                        <label class="label" for="option[0]correct">Correct</label>
+                        <label class="label" for="option[3]correct">Correct</label>
                         <input id="option[3]correct" name="option[3]correct" type="checkbox" value="on"
                                {{if gt (len .Question.Options) 3}}{{(index .Question.Options 3).Correct}}checked{{end}}>
 
@@ -99,19 +99,6 @@
                             <a href="/admin/quizzes">Cancel</a>
                         </div>
                     </div>
-                    {{if .Question.ID}}
-                        <div class="level-right">
-                            <div class="level-item">
-                                <a href="/admin/quizzes/{{.Question.QuizID}}/question/{{.Question.ID}}}}delete">
-                            <span class="icon-text">
-                                <span class="icon">
-                                    <i class="fas fa-trash"></i></span>
-                                <span>Delete</span>
-                            </span>
-                                </a>
-                            </div>
-                        </div>
-                    {{end}}
                 </div>
             </form>
     </div>

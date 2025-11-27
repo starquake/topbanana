@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/starquake/topbanana/internal/db"
 	"github.com/starquake/topbanana/internal/logging"
 )
 
@@ -128,15 +129,22 @@ func (s *SQLiteStore) ListQuizzes(ctx context.Context) ([]*Quiz, error) {
 		return nil, fmt.Errorf("error iterating quizRows: %w", quizRows.Err())
 	}
 	var quizzes []*Quiz
+
+	var id int64
+	var title, slug, description string
+	var createdAt db.Timestamp
+
 	for quizRows.Next() {
-		quiz := &Quiz{}
 		quizErr = quizRows.Scan(
-			&quiz.ID,
-			&quiz.Title,
-			&quiz.Slug,
-			&quiz.Description,
-			&quiz.CreatedAt,
+			&id, &title, &slug, &description, &createdAt,
 		)
+		quiz := &Quiz{
+			ID:          id,
+			Title:       title,
+			Slug:        slug,
+			Description: description,
+			CreatedAt:   time.Time(createdAt),
+		}
 		if quizErr != nil {
 			return nil, fmt.Errorf("error scanning quizRow: %w", quizErr)
 		}

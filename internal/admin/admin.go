@@ -42,12 +42,6 @@ type QuizEditData struct {
 	Quiz  *QuizData
 }
 
-// QuizSaveData is the data for the quiz save page.
-type QuizSaveData struct {
-	Title string
-	Quiz  *QuizData
-}
-
 // QuizData is the data for the quiz list page.
 type QuizData struct {
 	ID          int64
@@ -215,37 +209,35 @@ func HandleIndex(logger *logging.Logger) http.Handler {
 		Title: "Admin Dashboard",
 	}
 
-	return http.HandlerFunc(
-		func(w http.ResponseWriter, r *http.Request) {
-			executeTemplate(w, r, logger, t, data)
-		})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		executeTemplate(w, r, logger, t, data)
+	})
 }
 
 // HandleQuizList returns the quiz list page.
 func HandleQuizList(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 	t := parseTemplate("admin/pages/quizlist.gohtml")
 
-	return http.HandlerFunc(
-		func(w http.ResponseWriter, r *http.Request) {
-			var err error
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
 
-			quizzes, err := quizStore.ListQuizzes(r.Context())
-			if err != nil {
-				logger.Error(r.Context(), "error getting quizzes", "err", err)
-				render500(w, r, logger)
+		quizzes, err := quizStore.ListQuizzes(r.Context())
+		if err != nil {
+			logger.Error(r.Context(), "error getting quizzes", "err", err)
+			render500(w, r, logger)
 
-				return
-			}
+			return
+		}
 
-			qzd := quizDataFromQuizzes(quizzes)
+		qzd := quizDataFromQuizzes(quizzes)
 
-			data := QuizListData{
-				Title:   "Admin Dashboard - Quiz List",
-				Quizzes: qzd,
-			}
+		data := QuizListData{
+			Title:   "Admin Dashboard - Quiz List",
+			Quizzes: qzd,
+		}
 
-			executeTemplate(w, r, logger, t, data)
-		})
+		executeTemplate(w, r, logger, t, data)
+	})
 }
 
 // HandleQuizView returns the quiz view page.
@@ -332,68 +324,58 @@ func HandleQuizEdit(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 
 // HandleQuizSave saves the quiz to the database.
 func HandleQuizSave(logger *logging.Logger, quizStore quiz.Store) http.Handler {
-	t := parseTemplate("admin/pages/quizsave.gohtml")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
 
-	return http.HandlerFunc(
-		func(w http.ResponseWriter, r *http.Request) {
-			var err error
+		err = r.ParseForm()
+		if err != nil {
+			logger.Error(r.Context(), "error parsing form", err)
+		}
 
-			err = r.ParseForm()
+		var qz *quiz.Quiz
+
+		var quizID int64
+		quizID, err = parseIDFromPath(r, logger, "quizId")
+		if err != nil {
+			logger.Error(r.Context(), "error parsing quiz ID", "err", err)
+
+			return
+		}
+		newQuiz := quizID == 0
+
+		if newQuiz {
+			qz = &quiz.Quiz{}
+		} else {
+			qz, err = quizStore.GetQuizByID(r.Context(), quizID)
 			if err != nil {
-				logger.Error(r.Context(), "error parsing form", err)
-			}
-
-			var qz *quiz.Quiz
-
-			var quizID int64
-			quizID, err = parseIDFromPath(r, logger, "quizId")
-			if err != nil {
-				logger.Error(r.Context(), "error parsing quiz ID", "err", err)
+				logger.Error(r.Context(), "error getting quiz", "err", err)
 
 				return
 			}
-			newQuiz := quizID == 0
+		}
 
-			if newQuiz {
-				qz = &quiz.Quiz{}
-			} else {
-				qz, err = quizStore.GetQuizByID(r.Context(), quizID)
-				if err != nil {
-					logger.Error(r.Context(), "error getting quiz", "err", err)
+		qz.Title = r.FormValue("title")
+		qz.Slug = r.FormValue("slug")
+		qz.Description = r.FormValue("description")
 
-					return
-				}
+		if newQuiz {
+			err = quizStore.CreateQuiz(r.Context(), qz)
+			if err != nil {
+				logger.Error(r.Context(), "error creating quiz", "err", err)
+
+				return
 			}
+		} else {
+			err = quizStore.UpdateQuiz(r.Context(), qz)
+			if err != nil {
+				logger.Error(r.Context(), "error updating quiz", "err", err)
 
-			qz.Title = r.FormValue("title")
-			qz.Slug = r.FormValue("slug")
-			qz.Description = r.FormValue("description")
-
-			if newQuiz {
-				err = quizStore.CreateQuiz(r.Context(), qz)
-				if err != nil {
-					logger.Error(r.Context(), "error creating quiz", "err", err)
-
-					return
-				}
-			} else {
-				err = quizStore.UpdateQuiz(r.Context(), qz)
-				if err != nil {
-					logger.Error(r.Context(), "error updating quiz", "err", err)
-
-					return
-				}
+				return
 			}
+		}
 
-			qzd := quizDataFromQuiz(qz)
-
-			data := QuizSaveData{
-				Title: "Admin Dashboard - Quiz Save",
-				Quiz:  qzd,
-			}
-
-			executeTemplate(w, r, logger, t, data)
-		})
+		http.Redirect(w, r, fmt.Sprintf("/admin/quizzes/%d", qz.ID), http.StatusFound)
+	})
 }
 
 // HandleQuestionCreate creates a question.
@@ -494,116 +476,108 @@ func HandleQuestionEdit(logger *logging.Logger, quizStore quiz.Store) http.Handl
 
 // HandleQuestionSave saves a question.
 func HandleQuestionSave(logger *logging.Logger, quizStore quiz.Store) http.Handler {
-	t := parseTemplate("admin/pages/quizview.gohtml")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
 
-	return http.HandlerFunc(
-		func(w http.ResponseWriter, r *http.Request) {
-			var err error
+		var quizID int64
+		quizID, err = parseIDFromPath(r, logger, "quizId")
+		if err != nil {
+			logger.Error(r.Context(), "error parsing quiz ID", "err", err)
 
-			var quizID int64
-			quizID, err = parseIDFromPath(r, logger, "quizId")
+			return
+		}
+
+		var questionID int64
+		questionID, err = parseIDFromPath(r, logger, "questionId")
+		if err != nil {
+			logger.Error(r.Context(), "error parsing question ID", "err", err)
+
+			return
+		}
+		newQuestion := questionID == 0
+
+		err = r.ParseForm()
+		if err != nil {
+			logger.Error(r.Context(), "error parsing form", err)
+		}
+
+		qz, err := quizStore.GetQuizByID(r.Context(), quizID)
+		if err != nil {
+			logger.Error(r.Context(), "error getting quiz", "err", err)
+
+			return
+		}
+
+		var qs *quiz.Question
+
+		if newQuestion {
+			qs = &quiz.Question{
+				QuizID: qz.ID,
+			}
+		} else {
+			qs, err = quizStore.GetQuestionByID(r.Context(), questionID)
 			if err != nil {
-				logger.Error(r.Context(), "error parsing quiz ID", "err", err)
+				logger.Error(r.Context(), "error getting question", "err", err)
 
 				return
 			}
+		}
 
-			var questionID int64
-			questionID, err = parseIDFromPath(r, logger, "questionId")
-			if err != nil {
-				logger.Error(r.Context(), "error parsing question ID", "err", err)
+		qs.Text = r.FormValue("text")
+		qs.ImageURL = r.FormValue("imageUrl")
+		position, err := strconv.Atoi(r.FormValue("position"))
+		if err != nil {
+			logger.Error(r.Context(), "error parsing position", "err", err)
 
-				return
-			}
-			newQuestion := questionID == 0
+			return
+		}
+		qs.Position = position
 
-			err = r.ParseForm()
-			if err != nil {
-				logger.Error(r.Context(), "error parsing form", err)
-			}
+		newOptions := make([]*quiz.Option, 0, maxOptions)
 
-			qz, err := quizStore.GetQuizByID(r.Context(), quizID)
-			if err != nil {
-				logger.Error(r.Context(), "error getting quiz", "err", err)
-
-				return
-			}
-
-			var qs *quiz.Question
-
-			if newQuestion {
-				qs = &quiz.Question{
-					QuizID: quizID,
-				}
+		for _, i := range []int{0, 1, 2, 3} {
+			var op *quiz.Option
+			if i < len(qs.Options) {
+				op = qs.Options[i]
 			} else {
-				qs, err = quizStore.GetQuestionByID(r.Context(), questionID)
+				op = &quiz.Option{
+					QuestionID: qs.ID,
+				}
+			}
+			opID := r.FormValue(fmt.Sprintf("option[%d]id", i))
+			if opID == "" {
+				op.ID = 0
+			} else {
+				op.ID, err = strconv.ParseInt(opID, base10, int64Size)
 				if err != nil {
-					logger.Error(r.Context(), "error getting question", "err", err)
+					logger.Error(r.Context(), "error parsing option ID", "err", err)
 
 					return
 				}
 			}
+			op.Text = r.FormValue(fmt.Sprintf("option[%d]text", i))
+			op.Correct = r.FormValue(fmt.Sprintf("option[%d]correct", i)) == "on"
 
-			qs.Text = r.FormValue("text")
-			qs.ImageURL = r.FormValue("imageUrl")
-			position, err := strconv.Atoi(r.FormValue("position"))
+			newOptions = append(newOptions, op)
+		}
+		qs.Options = newOptions
+
+		if newQuestion {
+			err = quizStore.CreateQuestion(r.Context(), qs)
 			if err != nil {
-				logger.Error(r.Context(), "error parsing position", "err", err)
+				logger.Error(r.Context(), "error creating question", "err", err)
 
 				return
 			}
-			qs.Position = position
+		} else {
+			err = quizStore.UpdateQuestion(r.Context(), qs)
+			if err != nil {
+				logger.Error(r.Context(), "error updating question", "err", err)
 
-			newOptions := make([]*quiz.Option, 0, maxOptions)
-
-			for _, i := range []int{0, 1, 2, 3} {
-				var op *quiz.Option
-				if i < len(qs.Options) {
-					op = qs.Options[i]
-				} else {
-					op = &quiz.Option{
-						QuestionID: qs.ID,
-					}
-				}
-				opID := r.FormValue(fmt.Sprintf("option[%d]id", i))
-				if opID == "" {
-					op.ID = 0
-				} else {
-					op.ID, err = strconv.ParseInt(opID, base10, int64Size)
-					if err != nil {
-						logger.Error(r.Context(), "error parsing option ID", "err", err)
-
-						return
-					}
-				}
-				op.Text = r.FormValue(fmt.Sprintf("option[%d]text", i))
-				op.Correct = r.FormValue(fmt.Sprintf("option[%d]correct", i)) == "on"
-
-				newOptions = append(newOptions, op)
+				return
 			}
-			qs.Options = newOptions
+		}
 
-			if newQuestion {
-				err = quizStore.CreateQuestion(r.Context(), qs)
-				if err != nil {
-					logger.Error(r.Context(), "error creating question", "err", err)
-
-					return
-				}
-			} else {
-				err = quizStore.UpdateQuestion(r.Context(), qs)
-				if err != nil {
-					logger.Error(r.Context(), "error updating question", "err", err)
-
-					return
-				}
-			}
-
-			data := QuizSaveData{
-				Title: "Admin Dashboard - Quiz Save",
-				Quiz:  quizDataFromQuiz(qz),
-			}
-
-			executeTemplate(w, r, logger, t, data)
-		})
+		http.Redirect(w, r, fmt.Sprintf("/admin/quizzes/%d", qz.ID), http.StatusFound)
+	})
 }
