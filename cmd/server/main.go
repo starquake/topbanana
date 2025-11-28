@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -28,11 +29,12 @@ const (
 
 func run(
 	ctx context.Context,
+	stdout io.Writer,
 ) error {
 	mainCtx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 	defer cancel()
 
-	logger := logging.NewLogger()
+	logger := logging.NewLogger(stdout)
 	db := must.Any(sql.Open("sqlite", "./topbanana.sqlite"))
 	quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -68,5 +70,5 @@ func run(
 
 func main() {
 	ctx := context.Background()
-	must.OK(run(ctx))
+	must.OK(run(ctx, os.Stdout))
 }

@@ -108,13 +108,13 @@ linters:
       enable-all-rules: true
       rules:
         - name: cognitive-complexity
+          exclude: ["**/*_test.go"]
           arguments:
             - 15
-          exclude:
-            - _test\.go
         - name: line-length-limit
           disabled: true
         - name: add-constant
+          exclude: ["**/*_test.go"]
           arguments:
             - maxLitCount: "3"
               allow-ints: "0,1,2"
