@@ -174,17 +174,17 @@ func idFromString(pathValue string) (int64, error) {
 }
 
 // parseIDFromPath parses an int64 ID from the given path value.
-func parseIDFromPath(w http.ResponseWriter, r *http.Request, logger *logging.Logger, s string) int64 {
+func parseIDFromPath(w http.ResponseWriter, r *http.Request, logger *logging.Logger, s string) (int64, bool) {
 	id, err := idFromString(r.PathValue(s))
 	if err != nil {
 		msg := "error parsing quiz ID"
 		logger.Error(r.Context(), msg, logging.ErrAttr(err))
 		render400(w, r, logger, msg)
 
-		return 0
+		return 0, false
 	}
 
-	return id
+	return id, true
 }
 
 // executeTemplate executes a template and logs any errors.
@@ -197,6 +197,8 @@ func executeTemplate(w http.ResponseWriter, t *template.Template, data any) erro
 	return nil
 }
 
+// render400 renders the 400 error page with the given message.
+// Should be used as the final handler in the chain and probably be followed by a return.
 func render400(w http.ResponseWriter, r *http.Request, logger *logging.Logger, msg string) {
 	t := parseTemplate("admin/errors/400.gohtml")
 	data := struct {
@@ -354,18 +356,18 @@ func storeQuiz(
 			logger.Error(r.Context(), "error creating quiz", logging.ErrAttr(err))
 			render500(w, r, logger)
 
-			return true
+			return false
 		}
 	} else {
 		if err = quizStore.UpdateQuiz(r.Context(), qz); err != nil {
 			logger.Error(r.Context(), "error updating quiz", logging.ErrAttr(err))
 			render500(w, r, logger)
 
-			return true
+			return false
 		}
 	}
 
-	return false
+	return true
 }
 
 // storeQuestion creates or updates a question in the store.
@@ -448,7 +450,10 @@ func HandleQuizView(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var err error
 
-		id := parseIDFromPath(w, r, logger, "quizId")
+		id, ok := parseIDFromPath(w, r, logger, "quizId")
+		if !ok {
+			return
+		}
 
 		qz, ok := quizByID(w, r, logger, quizStore, id)
 		if !ok {
@@ -486,15 +491,15 @@ func HandleQuizEdit(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var err error
 
-		quizID := parseIDFromPath(w, r, logger, "quizId")
+		quizID, _ := parseIDFromPath(w, r, logger, "quizId")
 
-		q, ok := quizByID(w, r, logger, quizStore, quizID)
+		qz, ok := quizByID(w, r, logger, quizStore, quizID)
 		if !ok {
 			return
 		}
 		data := QuizEditData{
 			Title: "Admin Dashboard - Quiz Edit",
-			Quiz:  quizDataFromQuiz(q),
+			Quiz:  quizDataFromQuiz(qz),
 		}
 		if err = executeTemplate(w, t, data); err != nil {
 			logger.Error(r.Context(), "error executing template", logging.ErrAttr(err))
@@ -507,7 +512,7 @@ func HandleQuizSave(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var err error
 
-		quizID := parseIDFromPath(w, r, logger, "quizId")
+		quizID, _ := parseIDFromPath(w, r, logger, "quizId")
 		newQuiz := quizID == 0
 
 		if err = r.ParseForm(); err != nil {
@@ -527,7 +532,7 @@ func HandleQuizSave(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 
 		fillQuizFromForm(r, qz)
 
-		if storeQuiz(w, r, logger, quizStore, qz) {
+		if ok := storeQuiz(w, r, logger, quizStore, qz); !ok {
 			return
 		}
 
@@ -542,7 +547,7 @@ func HandleQuestionCreate(logger *logging.Logger, quizStore quiz.Store) http.Han
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var err error
 
-		quizID := parseIDFromPath(w, r, logger, "quizId")
+		quizID, _ := parseIDFromPath(w, r, logger, "quizId")
 		qz, ok := quizByID(w, r, logger, quizStore, quizID)
 		if !ok {
 			return
@@ -565,8 +570,8 @@ func HandleQuestionEdit(logger *logging.Logger, quizStore quiz.Store) http.Handl
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var err error
-		quizID := parseIDFromPath(w, r, logger, "quizId")
-		questionID := parseIDFromPath(w, r, logger, "questionId")
+		quizID, _ := parseIDFromPath(w, r, logger, "quizId")
+		questionID, _ := parseIDFromPath(w, r, logger, "questionId")
 		newQuestion := questionID == 0
 
 		qz, ok := quizByID(w, r, logger, quizStore, quizID)
@@ -602,8 +607,8 @@ func HandleQuestionEdit(logger *logging.Logger, quizStore quiz.Store) http.Handl
 func HandleQuestionSave(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Parse quiz and question IDs from the URL
-		quizID := parseIDFromPath(w, r, logger, "quizId")
-		questionID := parseIDFromPath(w, r, logger, "questionId")
+		quizID, _ := parseIDFromPath(w, r, logger, "quizId")
+		questionID, _ := parseIDFromPath(w, r, logger, "questionId")
 		newQuestion := questionID == 0
 
 		// Retrieve quiz and question from the store
