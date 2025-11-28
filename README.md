@@ -11,5 +11,6 @@ For project structure we use [Go Modules - Server Project](https://go.dev/doc/mo
 - Packages are focused on a single responsibility.
 
 ### Code style
+This project uses conventions used by the standard library and the following style guides:
 - [Go Style Guide](https://google.github.io/styleguide/go/)
 - [Go Code Review Comments](https://go.dev/wiki/CodeReviewComments)
