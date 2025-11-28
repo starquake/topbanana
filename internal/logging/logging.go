@@ -52,5 +52,5 @@ func String(key, value string) Attr {
 	return slog.String(key, value)
 }
 
-// Error creates a new attribute with the given key and value.
-func Error(key string, value error) Attr { return slog.Any(key, value) }
+// ErrAttr creates a new attribute with the key "err" and the given error value.
+func ErrAttr(value error) Attr { return slog.Any("err", value) }

@@ -164,7 +164,7 @@ func (s *SQLiteStore) ListQuizzes(ctx context.Context) ([]*Quiz, error) {
 	defer func() {
 		err := quizRows.Close()
 		if err != nil {
-			s.logger.Error(ctx, "error closing quizRows", logging.Error("err", err))
+			s.logger.Error(ctx, "error closing quizRows", logging.ErrAttr(err))
 		}
 	}()
 	if quizRows.Err() != nil {
@@ -307,7 +307,7 @@ func (s *SQLiteStore) getQuestionsByQuizID(ctx context.Context, quizID int64) ([
 	defer func() {
 		err := questionRows.Close()
 		if err != nil {
-			s.logger.Error(ctx, "error closing questionRows", logging.Error("err", err))
+			s.logger.Error(ctx, "error closing questionRows", logging.ErrAttr(err))
 		}
 	}()
 
@@ -358,7 +358,7 @@ func (s *SQLiteStore) getOptionsByQuestionID(
 	defer func() {
 		err := optionRows.Close()
 		if err != nil {
-			s.logger.Error(ctx, "error closing optionRows", logging.Error("err", err))
+			s.logger.Error(ctx, "error closing optionRows", logging.ErrAttr(err))
 		}
 	}()
 

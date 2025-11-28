@@ -50,7 +50,7 @@ func run(
 		logger.Info(mainCtx, "listening on "+httpServer.Addr, slog.String("addr", httpServer.Addr))
 		err := httpServer.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error(mainCtx, "error listening and serving", logging.Error("err", err))
+			logger.Error(mainCtx, "error listening and serving", logging.ErrAttr(err))
 		}
 	}()
 	var wg sync.WaitGroup
