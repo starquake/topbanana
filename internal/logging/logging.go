@@ -30,12 +30,20 @@ func (l *Logger) Info(ctx context.Context, msg string, attrs ...Attr) {
 }
 
 // Error logs an error message.
-func (l *Logger) Error(ctx context.Context, msg string, args ...any) {
+func (l *Logger) Error(ctx context.Context, msg string, attrs ...Attr) {
+	args := make([]any, 0, len(attrs))
+	for _, attr := range attrs {
+		args = append(args, attr)
+	}
 	l.logger.ErrorContext(ctx, msg, args...)
 }
 
 // Debug logs a debug message.
-func (l *Logger) Debug(ctx context.Context, msg string, args ...any) {
+func (l *Logger) Debug(ctx context.Context, msg string, attrs ...Attr) {
+	args := make([]any, 0, len(attrs))
+	for _, attr := range attrs {
+		args = append(args, attr)
+	}
 	l.logger.DebugContext(ctx, msg, args...)
 }
 
@@ -43,3 +51,6 @@ func (l *Logger) Debug(ctx context.Context, msg string, args ...any) {
 func String(key, value string) Attr {
 	return slog.String(key, value)
 }
+
+// Error creates a new attribute with the given key and value.
+func Error(key string, value error) Attr { return slog.Any(key, value) }
