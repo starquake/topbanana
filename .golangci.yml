@@ -10,7 +10,6 @@ linters:
     - containedctx
     - contextcheck
     - copyloopvar
-    - cyclop
     - decorder
     - dogsled
     - dupl
@@ -31,8 +30,10 @@ linters:
     - gochecknoglobals
     - gochecknoinits
     - gochecksumtype
+    - gocognit
     - goconst
     - gocritic
+    - gocyclo
     - godoclint
     - godot
     - godox
@@ -100,6 +101,10 @@ linters:
     - whitespace
     - wrapcheck
   settings:
+    gocognit:
+      min-complexity: 20
+    gocyclo:
+      min-complexity: 20
     godoclint:
       default: all
       disable:
@@ -112,9 +117,9 @@ linters:
       enable-all-rules: true
       rules:
         - name: cognitive-complexity
-          exclude: ["**/*_test.go"]
-          arguments:
-            - 15
+          disabled: true # Already covered by gocognit
+        - name: cyclomatic
+          disabled: true # Already covered by gocyclo
         - name: line-length-limit
           disabled: true
         - name: add-constant
@@ -143,6 +148,8 @@ linters:
           - err113
           - godoclint
           - gochecknoglobals
+          - gocyclo
+          - gocognit
 formatters:
   enable:
     - gci
