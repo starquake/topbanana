@@ -100,6 +100,10 @@ linters:
     - whitespace
     - wrapcheck
   settings:
+    godoclint:
+      default: all
+      disable:
+        - max-len
     govet:
       enable-all: true
       disable:
@@ -120,6 +124,8 @@ linters:
               allow-ints: "0,1,2"
         - name: max-public-structs
           disabled: true
+        - name: function-length
+          exclude: ["**/*_test.go"]
     nolintlint:
       require-explanation: true
       require-specific: true
@@ -134,6 +140,8 @@ linters:
         linters:
           - dupl
           - err113
+          - godoclint
+          - gochecknoglobals
 formatters:
   enable:
     - gci
