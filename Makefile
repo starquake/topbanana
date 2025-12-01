@@ -1,6 +1,6 @@
 SHELL=/bin/bash -o pipefail
 
-# include .env
+include .env
 
 .PHONY: check
 check: lint build test

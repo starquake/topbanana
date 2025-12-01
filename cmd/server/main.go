@@ -14,7 +14,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pressly/goose/v3"
 	"github.com/starquake/topbanana/internal/logging"
+	"github.com/starquake/topbanana/internal/migrations"
 	"github.com/starquake/topbanana/internal/must"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/server"
@@ -35,7 +37,12 @@ func run(
 	defer cancel()
 
 	logger := logging.NewLogger(stdout)
+
 	db := must.Any(sql.Open("sqlite", "./topbanana.sqlite"))
+	goose.SetBaseFS(migrations.FS)
+	must.OK(goose.SetDialect("sqlite3"))
+	must.OK(goose.Up(db, "."))
+
 	quizStore := quiz.NewSQLiteStore(db, logger)
 
 	stores := &store.Stores{
