@@ -22,6 +22,7 @@ var ErrConvertingValueIntoTimestamp = errors.New("cannot convert value into Time
 type Timestamp time.Time
 
 // Scan converts a value to a Timestamp.
+// Currently, only int64 values are supported.
 func (t *Timestamp) Scan(value any) error {
 	if value == nil {
 		*t = Timestamp(time.Time{})
@@ -54,6 +55,22 @@ type Quiz struct {
 	Questions   []*Question
 }
 
+// Valid checks if the quiz is valid.
+func (q *Quiz) Valid(_ context.Context) map[string]string {
+	problems := make(map[string]string)
+	if q.Title == "" {
+		problems["title"] = "Title is required"
+	}
+	if q.Slug == "" {
+		problems["slug"] = "Slug is required"
+	}
+	if q.Description == "" {
+		problems["description"] = "Description is required"
+	}
+
+	return problems
+}
+
 // Question represents a question in a quiz.
 type Question struct {
 	ID       int64
@@ -62,6 +79,19 @@ type Question struct {
 	ImageURL string
 	Position int
 	Options  []*Option
+}
+
+// Valid checks if the question is valid.
+func (q *Question) Valid(_ context.Context) map[string]string {
+	problems := make(map[string]string)
+	if q.Text == "" {
+		problems["text"] = "Text is required"
+	}
+	if len(q.Options) == 0 {
+		problems["options"] = "Options are required"
+	}
+
+	return problems
 }
 
 // Option represents an option for a question.
@@ -101,7 +131,7 @@ var (
 	// ErrQuizNotFound is returned when a quiz is not found.
 	ErrQuizNotFound = errors.New("quiz not found")
 	// ErrQuestionNotFound is returned when a question is not found.
-	ErrQuestionNotFound = errors.New("quiz not found")
+	ErrQuestionNotFound = errors.New("question not found")
 )
 
 // NewSQLiteStore creates a new SQLiteStore.
@@ -207,10 +237,10 @@ func (s *SQLiteStore) ListQuizzes(ctx context.Context) ([]*Quiz, error) {
 }
 
 // GetQuestionByID returns a question including related options by its ID.
-func (s *SQLiteStore) GetQuestionByID(ctx context.Context, id int64) (*Question, error) {
+func (s *SQLiteStore) GetQuestionByID(ctx context.Context, questionID int64) (*Question, error) {
 	questionQuery := `SELECT id, quiz_id, text, image_url, position FROM questions WHERE id = ?`
 
-	questionRow := s.db.QueryRowContext(ctx, questionQuery, id)
+	questionRow := s.db.QueryRowContext(ctx, questionQuery, questionID)
 	if questionRow.Err() != nil {
 		return nil, fmt.Errorf("error iterating questionRow: %w", questionRow.Err())
 	}
@@ -218,6 +248,10 @@ func (s *SQLiteStore) GetQuestionByID(ctx context.Context, id int64) (*Question,
 	question := &Question{}
 	err := questionRow.Scan(&question.ID, &question.QuizID, &question.Text, &question.ImageURL, &question.Position)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: quiz %d not found", ErrQuestionNotFound, questionID)
+		}
+
 		return nil, fmt.Errorf("error scanning questionRow: %w", err)
 	}
 

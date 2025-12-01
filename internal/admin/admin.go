@@ -2,6 +2,7 @@
 package admin
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"html/template"
@@ -13,6 +14,11 @@ import (
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
+
+// Validator is an interface for validating data.
+type Validator interface {
+	Valid(ctx context.Context) map[string]string
+}
 
 // IndexData is the data for the index page.
 type IndexData struct {
@@ -272,12 +278,15 @@ func questionByID(
 	qs, err := quizStore.GetQuestionByID(r.Context(), questionID)
 	if err != nil {
 		if errors.Is(err, quiz.ErrQuestionNotFound) {
-			logger.Error(r.Context(), "question not found", logging.ErrAttr(err))
-			render404(w, r, logger)
+			logger.Error(r.Context(), fmt.Sprintf("question with ID %d not found", questionID), logging.ErrAttr(err))
 
 			return nil, false
 		}
-		logger.Error(r.Context(), "error fetching data", logging.ErrAttr(err))
+		logger.Error(
+			r.Context(),
+			fmt.Sprintf("error fetching data for question with ID %d", questionID),
+			logging.ErrAttr(err),
+		)
 		render500(w, r, logger)
 
 		return nil, false
@@ -287,13 +296,23 @@ func questionByID(
 }
 
 // fillQuizFromForm fills the quiz fields from the form values.
-func fillQuizFromForm(r *http.Request, qz *quiz.Quiz) {
+// It renders an error page if the form is invalid.
+// It returns true if the form was valid and the quiz was filled successfully.
+func fillQuizFromForm(w http.ResponseWriter, r *http.Request, logger *logging.Logger, qz *quiz.Quiz) bool {
 	qz.Title = r.PostFormValue("title")
 	qz.Slug = r.PostFormValue("slug")
 	qz.Description = r.PostFormValue("description")
+	if problems := qz.Valid(r.Context()); len(problems) > 0 {
+		render400(w, r, logger, fmt.Sprintf("validation errors: %v", problems))
+
+		return false
+	}
+
+	return true
 }
 
 // fillQuestionFromForm fills the question fields from the form values.
+// It renders an error page if the form is invalid.
 // It returns true if the form was valid and the question was filled successfully.
 func fillQuestionFromForm(w http.ResponseWriter, r *http.Request, logger *logging.Logger, qs *quiz.Question) bool {
 	var err error
@@ -530,7 +549,9 @@ func HandleQuizSave(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 			}
 		}
 
-		fillQuizFromForm(r, qz)
+		if ok := fillQuizFromForm(w, r, logger, qz); !ok {
+			return
+		}
 
 		if ok := storeQuiz(w, r, logger, quizStore, qz); !ok {
 			return
@@ -629,8 +650,13 @@ func HandleQuestionSave(logger *logging.Logger, quizStore quiz.Store) http.Handl
 			}
 		}
 
-		// Fill in the question fields from the form
 		if ok = fillQuestionFromForm(w, r, logger, qs); !ok {
+			return
+		}
+
+		if problems := qs.Valid(r.Context()); len(problems) > 0 {
+			render400(w, r, logger, fmt.Sprintf("validation errors: %v", problems))
+
 			return
 		}
 

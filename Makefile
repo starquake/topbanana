@@ -1,6 +1,9 @@
 SHELL=/bin/bash -o pipefail
 
-include .env
+ifneq (,$(wildcard ./.env))
+    include .env
+    export
+endif
 
 .PHONY: check
 check: lint build test
