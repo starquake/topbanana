@@ -55,8 +55,8 @@ type Quiz struct {
 	Questions   []*Question
 }
 
-// Valid checks if the quiz is valid.
-func (q *Quiz) Valid(_ context.Context) map[string]string {
+// Valid checks if the quiz, its questions, and its options are valid.
+func (q *Quiz) Valid(ctx context.Context) map[string]string {
 	problems := make(map[string]string)
 	if q.Title == "" {
 		problems["title"] = "Title is required"
@@ -66,6 +66,20 @@ func (q *Quiz) Valid(_ context.Context) map[string]string {
 	}
 	if q.Description == "" {
 		problems["description"] = "Description is required"
+	}
+	for qsIndex, question := range q.Questions {
+		if qsProblems := question.Valid(ctx); len(qsProblems) > 0 {
+			for qsProblemKey, v := range qsProblems {
+				problems[fmt.Sprintf("questions[%d][%s]", qsIndex, qsProblemKey)] = v
+			}
+		}
+		for oIndex, option := range question.Options {
+			if oProblems := option.Valid(ctx); len(oProblems) > 0 {
+				for oProblemKey, v := range oProblems {
+					problems[fmt.Sprintf("questions[%d].options[%d][%s]", qsIndex, oIndex, oProblemKey)] = v
+				}
+			}
+		}
 	}
 
 	return problems
@@ -81,7 +95,7 @@ type Question struct {
 	Options  []*Option
 }
 
-// Valid checks if the question is valid.
+// Valid checks if the question and its options are valid.
 func (q *Question) Valid(_ context.Context) map[string]string {
 	problems := make(map[string]string)
 	if q.Text == "" {
@@ -100,6 +114,16 @@ type Option struct {
 	QuestionID int64
 	Text       string
 	Correct    bool
+}
+
+// Valid checks if the option is valid.
+func (o *Option) Valid(_ context.Context) map[string]string {
+	problems := make(map[string]string)
+	if o.Text == "" {
+		problems["text"] = "Text is required"
+	}
+
+	return problems
 }
 
 // Store represents a store for quizzes.
