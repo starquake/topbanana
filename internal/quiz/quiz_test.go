@@ -284,8 +284,25 @@ func TestSQLiteStore_GetQuizByID(t *testing.T) {
 			t.Errorf("quiz is not nil: %v", qz)
 		}
 	})
+}
+
+func TestSQLiteStore_GetQuizByID_ErrorHandling(t *testing.T) {
+	t.Parallel()
+
+	buf := bytes.Buffer{}
+	logger := logging.NewLogger(&buf)
+
+	db := must.Any(sql.Open("sqlite", ":memory:"))
+	db.SetMaxOpenConns(1)
+	goose.SetBaseFS(migrations.FS)
+	must.OK(goose.SetDialect("sqlite3"))
+	must.OK(goose.Up(db, "."))
+
+	quizStore := quiz.NewSQLiteStore(db, logger)
+
 	t.Run("context cancelled", func(t *testing.T) {
 		t.Parallel()
+		// Create and cancel context to trigger an error
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
@@ -297,6 +314,7 @@ func TestSQLiteStore_GetQuizByID(t *testing.T) {
 			t.Errorf("expected error to contain 'error iterating quizRow', got %v", err)
 		}
 	})
+
 	t.Run("scan error", func(t *testing.T) {
 		t.Parallel()
 		// Insert a quiz with an invalid created_at value (string instead of int64) to trigger scan error.
@@ -322,6 +340,44 @@ func TestSQLiteStore_GetQuizByID(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "error scanning quizRow") {
 			t.Errorf("expected error to contain 'error scanning quizRow', got %v", err)
+		}
+	})
+
+	t.Run("question scan error", func(t *testing.T) {
+		t.Parallel()
+		// Insert a quiz with a question with an invalid position value (string instead of int64) to trigger scan error.
+		res, err := db.ExecContext(
+			t.Context(),
+			`INSERT INTO quizzes (title, slug, description, created_at) VALUES (?, ?, ?, ?)`,
+			"Bad Quiz 2",
+			"bad-quiz-2",
+			"Bad Description 2",
+			1234,
+		)
+		if err != nil {
+			t.Fatalf("error inserting bad quiz: %v", err)
+		}
+		id, err := res.LastInsertId()
+		if err != nil {
+			t.Fatalf("error getting last insert ID: %v", err)
+		}
+		_, err = db.ExecContext(
+			t.Context(),
+			`INSERT INTO questions (quiz_id, text, position) VALUES (?, ?, ?)`,
+			id,
+			"Bad Question",
+			"bad-position",
+		)
+		if err != nil {
+			t.Fatalf("error inserting bad question: %v", err)
+		}
+
+		_, err = quizStore.GetQuizByID(t.Context(), id)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "error scanning questionRow") {
+			t.Errorf("expected error to contain 'error scanning questionRow', got %v", err)
 		}
 	})
 }
