@@ -17,6 +17,28 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func setupTestDBWithMigrations(t *testing.T) *sql.DB {
+	t.Helper()
+
+	db := setupTestDBWithoutMigrations(t)
+
+	goose.SetBaseFS(migrations.FS)
+	must.OK(goose.SetDialect("sqlite3"))
+	must.OK(goose.Up(db, "."))
+
+	return db
+}
+
+func setupTestDBWithoutMigrations(t *testing.T) *sql.DB {
+	t.Helper()
+
+	db := must.Any(sql.Open("sqlite", ":memory:"))
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
+	return db
+}
+
 func TestTimestamp_Scan(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -227,15 +249,11 @@ func TestSQLiteStore_GetQuizByID(t *testing.T) {
 	buf := bytes.Buffer{}
 	logger := logging.NewLogger(&buf)
 
-	db := must.Any(sql.Open("sqlite", ":memory:"))
-	db.SetMaxOpenConns(1)
-	goose.SetBaseFS(migrations.FS)
-	must.OK(goose.SetDialect("sqlite3"))
-	must.OK(goose.Up(db, "."))
+	db := setupTestDBWithMigrations(t)
 
 	quizStore := quiz.NewSQLiteStore(db, logger)
 
-	err := quizStore.CreateQuiz(t.Context(), &quiz.Quiz{
+	testQuiz := &quiz.Quiz{
 		Title:       "Quiz 1",
 		Slug:        "quiz-1",
 		Description: "Quiz 1 Description",
@@ -259,19 +277,20 @@ func TestSQLiteStore_GetQuizByID(t *testing.T) {
 				},
 			},
 		},
-	})
+	}
+	err := quizStore.CreateQuiz(t.Context(), testQuiz)
 	if err != nil {
 		t.Fatalf("error creating quiz: %v", err)
 	}
 
 	t.Run("valid quiz ID", func(t *testing.T) {
 		t.Parallel()
-		qz, err := quizStore.GetQuizByID(t.Context(), 1)
+		qz, err := quizStore.GetQuizByID(t.Context(), testQuiz.ID)
 		if err != nil {
-			t.Errorf("error getting qz by ID: %v", err)
+			t.Errorf("error getting testQuiz by ID: %v", err)
 		}
-		if qz.ID != 1 {
-			t.Errorf("quizID is not 1: %d", qz.ID)
+		if got, want := qz.ID, testQuiz.ID; got != want {
+			t.Errorf("qz.ID = %d, want %d", qz.ID, testQuiz.ID)
 		}
 	})
 	t.Run("invalid quiz ID", func(t *testing.T) {
@@ -292,11 +311,7 @@ func TestSQLiteStore_GetQuizByID_ErrorHandling(t *testing.T) {
 	buf := bytes.Buffer{}
 	logger := logging.NewLogger(&buf)
 
-	db := must.Any(sql.Open("sqlite", ":memory:"))
-	db.SetMaxOpenConns(1)
-	goose.SetBaseFS(migrations.FS)
-	must.OK(goose.SetDialect("sqlite3"))
-	must.OK(goose.Up(db, "."))
+	db := setupTestDBWithMigrations(t)
 
 	quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -308,10 +323,13 @@ func TestSQLiteStore_GetQuizByID_ErrorHandling(t *testing.T) {
 
 		_, err := quizStore.GetQuizByID(ctx, 1)
 		if err == nil {
-			t.Fatal("expected error, got nil")
+			t.Fatal("got nil, want error")
 		}
-		if !strings.Contains(err.Error(), "error iterating quizRow") {
-			t.Errorf("expected error to contain 'error iterating quizRow', got %v", err)
+		if got, want := err.Error(), "error iterating quizRow"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = '%v', should contain '%v'", got, want)
+		}
+		if got, want := err, quiz.ErrScanQuizRow; errors.Is(err, quiz.ErrScanQuizRow) {
+			t.Errorf("err.Error() = '%v', should contain '%v'", got, want)
 		}
 	})
 
@@ -336,10 +354,10 @@ func TestSQLiteStore_GetQuizByID_ErrorHandling(t *testing.T) {
 
 		_, err = quizStore.GetQuizByID(t.Context(), id)
 		if err == nil {
-			t.Fatal("expected error, got nil")
+			t.Fatal("got nil, want error")
 		}
-		if !strings.Contains(err.Error(), "error scanning quizRow") {
-			t.Errorf("expected error to contain 'error scanning quizRow', got %v", err)
+		if got, want := err, quiz.ErrScanQuizRow; errors.Is(err, quiz.ErrScanQuizRow) {
+			t.Errorf("err.Error() = '%v', should contain '%v'", got, want)
 		}
 	})
 
@@ -374,10 +392,193 @@ func TestSQLiteStore_GetQuizByID_ErrorHandling(t *testing.T) {
 
 		_, err = quizStore.GetQuizByID(t.Context(), id)
 		if err == nil {
-			t.Fatal("expected error, got nil")
+			t.Fatal("got nil, want error")
 		}
-		if !strings.Contains(err.Error(), "error scanning questionRow") {
-			t.Errorf("expected error to contain 'error scanning questionRow', got %v", err)
+		if got, want := err, quiz.ErrScanQuestionRow; errors.Is(err, quiz.ErrScanQuizRow) {
+			t.Errorf("err.Error() = '%v', should contain '%v'", got, want)
 		}
 	})
+}
+
+func TestSQLiteStore_ListQuizzes(t *testing.T) {
+	t.Parallel()
+
+	buf := bytes.Buffer{}
+	logger := logging.NewLogger(&buf)
+
+	db := setupTestDBWithMigrations(t)
+
+	quizStore := quiz.NewSQLiteStore(db, logger)
+	err := quizStore.CreateQuiz(t.Context(), &quiz.Quiz{
+		Title:       "Quiz 1",
+		Slug:        "quiz-1",
+		Description: "Quiz 1 Description",
+	})
+	if err != nil {
+		t.Fatalf("error creating quiz: %v", err)
+	}
+	err = quizStore.CreateQuiz(t.Context(), &quiz.Quiz{
+		Title:       "Quiz 2",
+		Slug:        "quiz-2",
+		Description: "Quiz 2 Description",
+	})
+	if err != nil {
+		t.Fatalf("error creating quiz: %v", err)
+	}
+
+	quizzes, err := quizStore.ListQuizzes(t.Context())
+	if err != nil {
+		t.Fatalf("error listing quizzes: %v", err)
+	}
+	if got, want := len(quizzes), 2; got != want {
+		t.Fatalf("len(quizzes) = %d, want %d", len(quizzes), want)
+	}
+}
+
+func TestSQLiteStore_ListQuizzes_ErrorHandling(t *testing.T) {
+	t.Parallel()
+
+	buf := bytes.Buffer{}
+	logger := logging.NewLogger(&buf)
+
+	t.Run("context cancelled", func(t *testing.T) {
+		t.Parallel()
+
+		db := setupTestDBWithMigrations(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		_, err := quizStore.ListQuizzes(ctx)
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+	})
+	t.Run("scan error", func(t *testing.T) {
+		t.Parallel()
+
+		db := setupTestDBWithMigrations(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
+		// Insert a quiz with an invalid created_at value (string instead of int64) to trigger scan error.
+		_, err := db.ExecContext(
+			t.Context(),
+			`INSERT INTO quizzes (title, slug, description, created_at) VALUES (?, ?, ?, ?)`,
+			"Bad Quiz",
+			"bad-quiz",
+			"Bad Description",
+			"not-a-timestamp",
+		)
+		if err != nil {
+			t.Fatalf("error inserting bad quiz: %v", err)
+		}
+		_, err = quizStore.ListQuizzes(t.Context())
+		if got, want := err, quiz.ErrScanQuizRow; !errors.Is(got, want) {
+			t.Fatalf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("question scan error", func(t *testing.T) {
+		t.Parallel()
+
+		db := setupTestDBWithMigrations(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
+		// Insert a quiz with a question with an invalid position value (string instead of int64) to trigger scan error.
+		_, err := db.ExecContext(
+			t.Context(),
+			`INSERT INTO quizzes (title, slug, description, created_at) VALUES (?, ?, ?, ?)`,
+			"Bad Quiz 2",
+			"bad-quiz-2",
+			"Bad Description 2",
+			1234,
+		)
+		if err != nil {
+			t.Fatalf("error inserting bad quiz: %v", err)
+		}
+		_, err = db.ExecContext(
+			t.Context(),
+			`INSERT INTO questions (quiz_id, text, position) VALUES (?, ?, ?)`,
+			1,
+			"Bad Question",
+			"bad-position",
+		)
+		if err != nil {
+			t.Fatalf("error inserting bad question: %v", err)
+		}
+		quizzes, err := quizStore.ListQuizzes(t.Context())
+		if got, want := err, quiz.ErrScanQuestionRow; !errors.Is(got, want) {
+			t.Fatalf("err = %v, want %v", got, want)
+		}
+		if quizzes != nil {
+			t.Errorf("quizzes = %v, want nil", quizzes)
+		}
+	})
+}
+
+func TestSQLiteStore_GetQuestionByID(t *testing.T) {
+	t.Parallel()
+
+	buf := bytes.Buffer{}
+	logger := logging.NewLogger(&buf)
+
+	db := setupTestDBWithMigrations(t)
+
+	quizStore := quiz.NewSQLiteStore(db, logger)
+
+	testQuiz := &quiz.Quiz{
+		Title:       "Quiz 1",
+		Slug:        "quiz-1",
+		Description: "Quiz 1 Description",
+		Questions: []*quiz.Question{
+			{
+				ID:       1,
+				Text:     "Question 1",
+				Position: 10,
+				Options: []*quiz.Option{
+					{Text: "Option 1"},
+					{Text: "Option 2"},
+				},
+			},
+		},
+	}
+
+	err := quizStore.CreateQuiz(t.Context(), testQuiz)
+	if err != nil {
+		t.Fatalf("error creating quiz: %v", err)
+	}
+
+	// t.Run("valid question ID", func(t *testing.T) {
+	//	t.Parallel()
+	//
+	//	qs, err := quizStore.GetQuestionByID(t.Context(), testQuiz.Questions[0].ID)
+	//	if err != nil {
+	//		t.Errorf("error getting testQuiz by ID: %v", err)
+	//	}
+	//	if got, want := qs.ID, int64(1); got != want {
+	//		t.Errorf("qs.ID = %d, want %d", got, want)
+	//	}
+	//	if got, want := qs.QuizID, int64(1); got != want {
+	//		t.Errorf("qs.QuizID = %d, want %d", got, want)
+	//	}
+	//	if got, want := qs.Text, "Question 1"; got != want {
+	//		t.Errorf("qs.Text = %q, want %q", got, want)
+	//	}
+	//	if got, want := qs.Position, 10; got != want {
+	//		t.Errorf("qs.Position = %d, want %d", got, want)
+	//	}
+	//	if got, want := len(qs.Options), 2; got != want {
+	//		t.Errorf("len(qs.Options) = %d, want %d", got, want)
+	//	}
+	//	if got, want := qs.Options[0].Text, "Option 1"; got != want {
+	//		t.Errorf("qs.Options[0].Text = %q, want %q", got, want)
+	//	}
+	//	if got, want := qs.Options[1].Text, "Option 2"; got != want {
+	//		t.Errorf("qs.Options[1].Text = %q, want %q", got, want)
+	//	}
+	// })
 }
