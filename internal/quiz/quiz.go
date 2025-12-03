@@ -11,10 +11,34 @@ import (
 	"time"
 
 	"github.com/starquake/topbanana/internal/logging"
+	"github.com/starquake/topbanana/internal/must"
 )
 
-// ErrConvertingValueIntoTimestamp is returned when a value cannot be converted into a Timestamp.
-var ErrConvertingValueIntoTimestamp = errors.New("cannot convert value into Timestamp")
+const (
+	listQuizzesSQL            = `SELECT id, title, slug, description, created_at FROM quizzes`
+	getQuizByIDSQL            = listQuizzesSQL + ` WHERE id = ?`
+	getQuestionByIDSQL        = `SELECT id, quiz_id, text, image_url, position FROM questions WHERE id = ?`
+	createQuizSQL             = `INSERT INTO quizzes (title, slug, description, created_at) VALUES (?, ?, ?, ?)`
+	updateQuizSQL             = `UPDATE quizzes SET title = ?, slug = ?, description = ? WHERE id = ?`
+	createQuestionSQL         = `INSERT INTO questions (quiz_id, text, image_url, position) VALUES (?, ?, ?, ?)`
+	createOptionSQL           = `INSERT INTO options (question_id, text, is_correct) VALUES (?, ?, ?)`
+	updateQuestionSQL         = `UPDATE questions SET text = ?, image_url = ?, position = ? WHERE id = ?`
+	getQuestionsByQuizIDSQL   = `SELECT id, quiz_id, text, image_url, position FROM questions WHERE quiz_id = ?`
+	getOptionsByQuestionIDSQL = `SELECT id, question_id, text, is_correct FROM options WHERE question_id = ?`
+)
+
+var (
+	// ErrConvertingValueIntoTimestamp is returned when a value cannot be converted into a Timestamp.
+	ErrConvertingValueIntoTimestamp = errors.New("cannot convert value into Timestamp")
+	// ErrScanQuizRow is returned when an error occurs while scanning a quizRow.
+	ErrScanQuizRow = errors.New("error scanning quizrow")
+	// ErrScanQuestionRow is returned when an error occurs while scanning a questionRow.
+	ErrScanQuestionRow = errors.New("error scanning questionrow")
+	// ErrIteratingQuizRows is returned when an error occurs while iterating quizRows.
+	ErrIteratingQuizRows = errors.New("error iterating quizRows")
+	// ErrIteratingQuestionRows is returned when an error occurs while iterating questionRows.
+	ErrIteratingQuestionRows = errors.New("error iterating questionRows")
+)
 
 // Timestamp is a timestamp with millisecond precision. Used for SQLite type conversion.
 //
@@ -166,9 +190,8 @@ func NewSQLiteStore(db *sql.DB, logger *logging.Logger) *SQLiteStore {
 // GetQuizByID returns a quiz including related questions and options by its ID.
 func (s *SQLiteStore) GetQuizByID(ctx context.Context, quizID int64) (*Quiz, error) {
 	var err error
-	quizQuery := `SELECT id, title, slug, description, created_at FROM quizzes WHERE id = ?`
 
-	quizRow := s.db.QueryRowContext(ctx, quizQuery, quizID)
+	quizRow := s.db.QueryRowContext(ctx, getQuizByIDSQL, quizID)
 	if quizRow.Err() != nil {
 		return nil, fmt.Errorf("error iterating quizRow: %w", quizRow.Err())
 	}
@@ -206,24 +229,18 @@ func (s *SQLiteStore) GetQuizByID(ctx context.Context, quizID int64) (*Quiz, err
 
 // ListQuizzes returns all quizzes including related questions and options.
 func (s *SQLiteStore) ListQuizzes(ctx context.Context) ([]*Quiz, error) {
-	quizQuery := `SELECT id, title, slug, description, created_at FROM quizzes`
-
 	quizRows, quizErr := s.db.QueryContext(
 		ctx,
-		quizQuery,
+		listQuizzesSQL,
 	)
 	if quizErr != nil {
 		return nil, fmt.Errorf("error querying quizzes: %w", quizErr)
 	}
 	defer func() {
-		err := quizRows.Close()
-		if err != nil {
-			s.logger.Error(ctx, "error closing quizRows", logging.ErrAttr(err))
-		}
+		// Close the rows to free up resources. It must not return an error.
+		// It will not return an error because we checked for errors before (quizRows.Err()).
+		must.OK(quizRows.Close())
 	}()
-	if quizRows.Err() != nil {
-		return nil, fmt.Errorf("error iterating quizRows: %w", quizRows.Err())
-	}
 	var quizzes []*Quiz
 
 	var id int64
@@ -242,10 +259,14 @@ func (s *SQLiteStore) ListQuizzes(ctx context.Context) ([]*Quiz, error) {
 			CreatedAt:   time.Time(createdAt),
 		}
 		if quizErr != nil {
-			return nil, fmt.Errorf("error scanning quizRow: %w", quizErr)
+			return nil, fmt.Errorf("%w: %w", ErrScanQuizRow, quizErr)
 		}
 
 		quizzes = append(quizzes, quiz)
+	}
+
+	if err := quizRows.Err(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrIteratingQuizRows, err)
 	}
 
 	for _, quiz := range quizzes {
@@ -262,9 +283,7 @@ func (s *SQLiteStore) ListQuizzes(ctx context.Context) ([]*Quiz, error) {
 
 // GetQuestionByID returns a question including related options by its ID.
 func (s *SQLiteStore) GetQuestionByID(ctx context.Context, questionID int64) (*Question, error) {
-	questionQuery := `SELECT id, quiz_id, text, image_url, position FROM questions WHERE id = ?`
-
-	questionRow := s.db.QueryRowContext(ctx, questionQuery, questionID)
+	questionRow := s.db.QueryRowContext(ctx, getQuestionByIDSQL, questionID)
 	if questionRow.Err() != nil {
 		return nil, fmt.Errorf("error iterating questionRow: %w", questionRow.Err())
 	}
@@ -290,9 +309,8 @@ func (s *SQLiteStore) GetQuestionByID(ctx context.Context, questionID int64) (*Q
 
 // CreateQuiz creates a quiz.
 func (s *SQLiteStore) CreateQuiz(ctx context.Context, quiz *Quiz) error {
-	query := `INSERT INTO quizzes (title, slug, description, created_at) VALUES (?, ?, ?, ?)`
 	createdAt := Timestamp(time.Now().UTC())
-	result, err := s.db.ExecContext(ctx, query, quiz.Title, quiz.Slug, quiz.Description, createdAt)
+	result, err := s.db.ExecContext(ctx, createQuizSQL, quiz.Title, quiz.Slug, quiz.Description, createdAt)
 	if err != nil {
 		return fmt.Errorf("error creating quiz: %w", err)
 	}
@@ -307,8 +325,7 @@ func (s *SQLiteStore) CreateQuiz(ctx context.Context, quiz *Quiz) error {
 
 // UpdateQuiz updates a quiz.
 func (s *SQLiteStore) UpdateQuiz(ctx context.Context, quiz *Quiz) error {
-	query := `UPDATE quizzes SET title = ?, slug = ?, description = ? WHERE id = ?`
-	_, err := s.db.ExecContext(ctx, query, quiz.Title, quiz.Slug, quiz.Description, quiz.ID)
+	_, err := s.db.ExecContext(ctx, updateQuizSQL, quiz.Title, quiz.Slug, quiz.Description, quiz.ID)
 	if err != nil {
 		return fmt.Errorf("error updating quiz: %w", err)
 	}
@@ -318,12 +335,9 @@ func (s *SQLiteStore) UpdateQuiz(ctx context.Context, quiz *Quiz) error {
 
 // CreateQuestion creates a question and its options and saves them to the database.
 func (s *SQLiteStore) CreateQuestion(ctx context.Context, qs *Question) error {
-	query := `INSERT INTO questions (quiz_id, text, image_url, position) VALUES (?, ?, ?, ?)`
-	optionQuery := `INSERT INTO options (question_id, text, is_correct) VALUES (?, ?, ?)`
-
 	var result sql.Result
 	var err error
-	result, err = s.db.ExecContext(ctx, query, qs.QuizID, qs.Text, qs.ImageURL, qs.Position)
+	result, err = s.db.ExecContext(ctx, createQuestionSQL, qs.QuizID, qs.Text, qs.ImageURL, qs.Position)
 	if err != nil {
 		return fmt.Errorf("error creating question: %w", err)
 	}
@@ -334,7 +348,7 @@ func (s *SQLiteStore) CreateQuestion(ctx context.Context, qs *Question) error {
 	qs.ID = resultID
 
 	for _, option := range qs.Options {
-		_, err = s.db.ExecContext(ctx, optionQuery, qs.ID, option.Text, option.Correct)
+		_, err = s.db.ExecContext(ctx, createOptionSQL, qs.ID, option.Text, option.Correct)
 		if err != nil {
 			return fmt.Errorf("error creating option: %w", err)
 		}
@@ -345,8 +359,7 @@ func (s *SQLiteStore) CreateQuestion(ctx context.Context, qs *Question) error {
 
 // UpdateQuestion updates a question.
 func (s *SQLiteStore) UpdateQuestion(ctx context.Context, question *Question) error {
-	query := `UPDATE questions SET text = ?, image_url = ?, position = ? WHERE id = ?`
-	_, err := s.db.ExecContext(ctx, query, question.Text, question.ImageURL, question.Position, question.ID)
+	_, err := s.db.ExecContext(ctx, updateQuestionSQL, question.Text, question.ImageURL, question.Position, question.ID)
 	if err != nil {
 		return fmt.Errorf("error updating question: %w", err)
 	}
@@ -354,11 +367,9 @@ func (s *SQLiteStore) UpdateQuestion(ctx context.Context, question *Question) er
 	return nil
 }
 
-// getQuestionsByQuizID returns questions including related options for a quiz by its quizID.
+// getQuestionsByQuizIDSQL returns questions including related options for a quiz by its quizID.
 func (s *SQLiteStore) getQuestionsByQuizID(ctx context.Context, quizID int64) ([]*Question, error) {
-	questionQuery := `SELECT id, quiz_id, text, image_url, position FROM questions WHERE quiz_id = ?`
-
-	questionRows, questionErr := s.db.QueryContext(ctx, questionQuery, quizID)
+	questionRows, questionErr := s.db.QueryContext(ctx, getQuestionsByQuizIDSQL, quizID)
 	if questionErr != nil {
 		return nil, fmt.Errorf("error querying questions: %w", questionErr)
 	}
@@ -370,7 +381,7 @@ func (s *SQLiteStore) getQuestionsByQuizID(ctx context.Context, quizID int64) ([
 	}()
 
 	if questionRows.Err() != nil {
-		return nil, fmt.Errorf("error iterating questionRows: %w", questionRows.Err())
+		return nil, fmt.Errorf("%w: %w", ErrIteratingQuestionRows, questionRows.Err())
 	}
 	var questions []*Question
 	for questionRows.Next() {
@@ -383,7 +394,7 @@ func (s *SQLiteStore) getQuestionsByQuizID(ctx context.Context, quizID int64) ([
 			&question.Position,
 		)
 		if questionErr != nil {
-			return nil, fmt.Errorf("error scanning questionRow: %w", questionErr)
+			return nil, fmt.Errorf("%w: %w", ErrScanQuestionRow, questionErr)
 		}
 
 		options, err := s.getOptionsByQuestionID(ctx, question.ID)
@@ -407,9 +418,7 @@ func (s *SQLiteStore) getOptionsByQuestionID(
 	ctx context.Context,
 	questionID int64,
 ) ([]*Option, error) {
-	optionQuery := `SELECT id, question_id, text, is_correct FROM options WHERE question_id = ?`
-
-	optionRows, optionErr := s.db.QueryContext(ctx, optionQuery, questionID)
+	optionRows, optionErr := s.db.QueryContext(ctx, getOptionsByQuestionIDSQL, questionID)
 	if optionErr != nil {
 		return nil, fmt.Errorf("error querying options: %w", optionErr)
 	}
