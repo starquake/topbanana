@@ -293,6 +293,7 @@ func TestSQLiteStore_GetQuizByID(t *testing.T) {
 			t.Errorf("qz.ID = %d, want %d", qz.ID, testQuiz.ID)
 		}
 	})
+
 	t.Run("invalid quiz ID", func(t *testing.T) {
 		t.Parallel()
 		qz, err := quizStore.GetQuizByID(t.Context(), 999)
@@ -453,6 +454,7 @@ func TestSQLiteStore_ListQuizzes_ErrorHandling(t *testing.T) {
 			t.Fatal("got nil, want error")
 		}
 	})
+
 	t.Run("scan error", func(t *testing.T) {
 		t.Parallel()
 
@@ -533,20 +535,21 @@ func TestSQLiteStore_GetQuestionByID(t *testing.T) {
 
 	quizStore := quiz.NewSQLiteStore(db, logger)
 
-	t.Run("valid question", func(t *testing.T) {
+	t.Run("valid question ID", func(t *testing.T) {
 		t.Parallel()
 
 		testQuiz := &quiz.Quiz{
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
 			Description: "Quiz 1 Description",
+			CreatedAt:   time.Now().UTC(),
 			Questions: []*quiz.Question{
 				{
 					Text:     "Question 1",
 					Position: 10,
 					Options: []*quiz.Option{
 						{Text: "Option 1"},
-						{Text: "Option 2"},
+						{Text: "Option 2", Correct: true},
 					},
 				},
 			},
@@ -583,17 +586,204 @@ func TestSQLiteStore_GetQuestionByID(t *testing.T) {
 		}
 	})
 
-	t.Run("ignore question.QuizID", func(t *testing.T) {
+	t.Run("invalid question ID", func(t *testing.T) {
+		t.Parallel()
+		qs, err := quizStore.GetQuestionByID(t.Context(), 999)
+		if !errors.Is(err, quiz.ErrQuestionNotFound) {
+			t.Errorf("error is not sql.ErrNoRows: %v", err)
+		}
+		if qs != nil {
+			t.Errorf("question is not nil: %v", qs)
+		}
+	})
+}
+
+func TestSQLiteStore_GetQuestionByID_ErrorHandling(t *testing.T) {
+	t.Parallel()
+
+	buf := bytes.Buffer{}
+	logger := logging.NewLogger(&buf)
+
+	db := setupTestDBWithMigrations(t)
+
+	quizStore := quiz.NewSQLiteStore(db, logger)
+
+	t.Run("context cancelled", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		_, err := quizStore.GetQuestionByID(ctx, 1)
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+		if got, want := err.Error(), "error iterating questionRow"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = '%v', should contain '%v'", got, want)
+		}
+	})
+
+	t.Run("scan error", func(t *testing.T) {
+		t.Parallel()
+		// Insert a question with an invalid position value (string instead of int64) to trigger scan error.
+		res, err := db.ExecContext(
+			t.Context(),
+			`INSERT INTO questions (quiz_id, text, position) VALUES (?, ?, ?)`,
+			1,
+			"Bad Question",
+			"bad-position",
+		)
+		if err != nil {
+			t.Fatalf("error inserting bad question: %v", err)
+		}
+		id, err := res.LastInsertId()
+		if err != nil {
+			t.Fatalf("error getting last insert ID: %v", err)
+		}
+
+		_, err = quizStore.GetQuestionByID(t.Context(), id)
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+		if got, want := err.Error(), "error scanning questionRow"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = '%v', should contain '%v'", got, want)
+		}
+	})
+
+	t.Run("option scan error", func(t *testing.T) {
+		t.Parallel()
+		// Insert a quiz with an option with invalid is_correct value (string instead of bool) to trigger scan error.
+		res, err := db.ExecContext(
+			t.Context(),
+			`INSERT INTO questions (quiz_id, text, position) VALUES (?, ?, ?)`,
+			1,
+			"Question 1",
+			10,
+		)
+		if err != nil {
+			t.Fatalf("error inserting bad option: %v", err)
+		}
+		id, err := res.LastInsertId()
+		if err != nil {
+			t.Fatalf("error getting last insert ID: %v", err)
+		}
+		_, err = db.ExecContext(
+			t.Context(),
+			`INSERT INTO options (id, question_id, text,is_correct) VALUES (?, ?, ?, ?)`,
+			1,
+			id,
+			"Option 1",
+			"Bad Boolean",
+		)
+		if err != nil {
+			t.Fatalf("error inserting bad option: %v", err)
+		}
+
+		_, err = quizStore.GetQuestionByID(t.Context(), id)
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+		if got, want := err.Error(), "error scanning optionRow"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = '%v', should contain '%v'", got, want)
+		}
+	})
+}
+
+func TestSQLiteStore_CreateQuiz(t *testing.T) {
+	t.Parallel()
+
+	buf := bytes.Buffer{}
+	logger := logging.NewLogger(&buf)
+
+	db := setupTestDBWithMigrations(t)
+
+	quizStore := quiz.NewSQLiteStore(db, logger)
+
+	t.Run("quiz with questions", func(t *testing.T) {
 		t.Parallel()
 		testQuiz := &quiz.Quiz{
-			ID:          2,
+			Title:       "Quiz 1",
+			Slug:        "quiz-1",
+			Description: "Quiz 1 Description",
+			CreatedAt:   time.Now().UTC(),
+			Questions: []*quiz.Question{
+				{
+					Text:     "Question 1",
+					Position: 10,
+					Options: []*quiz.Option{
+						{Text: "Option 1"},
+						{Text: "Option 2", Correct: true},
+					},
+				},
+			},
+		}
+
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("error creating quiz: %v", err)
+		}
+
+		qz, err := quizStore.GetQuizByID(t.Context(), testQuiz.Questions[0].ID)
+		if err != nil {
+			t.Errorf("error getting question by ID: %v", err)
+		}
+		if got, want := qz.ID, testQuiz.ID; got != want {
+			t.Errorf("qz.QuizID = %d, want %d", got, want)
+		}
+		if got, want := qz.Title, testQuiz.Title; got != want {
+			t.Errorf("qz.Title = %q, want %q", got, want)
+		}
+		if got, want := qz.Slug, testQuiz.Slug; got != want {
+			t.Errorf("qz.Slug = %q, want %q", got, want)
+		}
+		if got, want := qz.Description, testQuiz.Description; got != want {
+			t.Errorf("qz.Description = %q, want %q", got, want)
+		}
+		if got, want := testQuiz.CreatedAt.Sub(qz.CreatedAt), 3*time.Second; got > want {
+			t.Errorf("testQuiz.CreatedAt.Sub(qz.CreatedAt) = %v, want %v", got, want)
+		}
+		if got, want := len(qz.Questions), 1; got != want {
+			t.Errorf("len(qz.Questions) = %d, want %d", got, want)
+		}
+		for i, q := range qz.Questions {
+			if got, want := q.ID, testQuiz.Questions[i].ID; got != want {
+				t.Errorf("qz.Questions[%d].ID = %d, want %d", i, got, want)
+			}
+			if got, want := q.QuizID, testQuiz.ID; got != want {
+				t.Errorf("qz.Questions[%d].QuizID = %d, want %d", i, got, want)
+			}
+			if got, want := q.Text, testQuiz.Questions[i].Text; got != want {
+				t.Errorf("qz.Questions[%d].Text = %q, want %q", i, got, want)
+			}
+			if got, want := q.Position, testQuiz.Questions[i].Position; got != want {
+				t.Errorf("qz.Questions[%d].Position = %d, want %d", i, got, want)
+			}
+			if got, want := len(q.Options), 2; got != want {
+				t.Errorf("len(qz.Questions[%d].Options) = %d, want %d", i, got, want)
+			}
+			for j, o := range q.Options {
+				if got, want := o.ID, testQuiz.Questions[i].Options[j].ID; got != want {
+					t.Errorf("qz.Questions[%d].Options[%d].ID = %d, want %d", i, j, got, want)
+				}
+				if got, want := o.QuestionID, testQuiz.Questions[i].ID; got != want {
+					t.Errorf("qz.Questions[%d].Options[%d].QuestionID = %d, want %d", i, j, got, want)
+				}
+				if got, want := o.Correct, testQuiz.Questions[i].Options[j].Correct; got != want {
+					t.Errorf("qz.Questions[%d].Options[%d].Correct = %t, want %t", i, j, got, want)
+				}
+			}
+		}
+	})
+
+	t.Run("ignore supplied ID's", func(t *testing.T) {
+		t.Parallel()
+		testQuiz := &quiz.Quiz{
+			ID:          1234,
 			Title:       "Quiz 2",
 			Slug:        "quiz-2",
 			Description: "Quiz 2 Description",
 			Questions: []*quiz.Question{
 				{
-					ID:       1,
-					QuizID:   1,
+					ID:       5678,
+					QuizID:   4321,
 					Text:     "Question 1",
 					Position: 10,
 					Options: []*quiz.Option{
