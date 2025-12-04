@@ -41,7 +41,7 @@ var (
 //nolint:recvcheck // Mixing pointer receivers and value receivers is needed here because we are implementing sql.Scanner and driver.Valuer.
 type Timestamp time.Time
 
-// Scan converts a value to a Timestamp.
+// Scan converts a value to a Timestamp in UTC.
 // Currently, only int64 values are supported.
 func (t *Timestamp) Scan(value any) error {
 	if value == nil {
@@ -55,7 +55,7 @@ func (t *Timestamp) Scan(value any) error {
 		return fmt.Errorf("%w: %T", ErrConvertingValueIntoTimestamp, value)
 	}
 
-	*t = Timestamp(time.UnixMilli(ms))
+	*t = Timestamp(time.UnixMilli(ms).UTC())
 
 	return nil
 }
