@@ -219,44 +219,50 @@ func (s *SQLiteStore) GetQuizByID(ctx context.Context, quizID int64) (*Quiz, err
 
 // ListQuizzes returns all quizzes including related questions and options.
 func (s *SQLiteStore) ListQuizzes(ctx context.Context) ([]*Quiz, error) {
-	quizRows, quizErr := s.db.QueryContext(
-		ctx,
-		listQuizzesSQL,
-	)
-	if quizErr != nil {
-		return nil, fmt.Errorf("error querying quizzes: %w", quizErr)
-	}
-	defer func() {
+	quizzes, funcErr := func() ([]*Quiz, error) {
+		rows, queryErr := s.db.QueryContext(ctx, listQuizzesSQL)
+		if queryErr != nil {
+			return nil, fmt.Errorf("error querying out: %w", queryErr)
+		}
 		// Close the rows to free up resources. It must not return an error.
-		// It will not return an error because we checked for errors before (quizRows.Err()).
-		must.OK(quizRows.Close())
+		// It will not return an error because we checked for errors before (rows.Err()).
+		defer func() {
+			// Close the rows to free up resources. It must not return an error.
+			// It will not return an error because we checked for errors before (quizRows.Err()).
+			must.OK(rows.Close())
+		}()
+
+		var out []*Quiz
+
+		var id int64
+		var title, slug, description string
+		var createdAt Timestamp
+
+		for rows.Next() {
+			scanErr := rows.Scan(
+				&id, &title, &slug, &description, &createdAt,
+			)
+			quiz := &Quiz{
+				ID:          id,
+				Title:       title,
+				Slug:        slug,
+				Description: description,
+				CreatedAt:   time.Time(createdAt),
+			}
+			if scanErr != nil {
+				return nil, fmt.Errorf("error scanning quizRow: %w", scanErr)
+			}
+
+			out = append(out, quiz)
+		}
+		if rowErr := rows.Err(); rowErr != nil {
+			return nil, fmt.Errorf("error iterating quizRows: %w", rowErr)
+		}
+
+		return out, nil
 	}()
-	var quizzes []*Quiz
-
-	var id int64
-	var title, slug, description string
-	var createdAt Timestamp
-
-	for quizRows.Next() {
-		quizErr = quizRows.Scan(
-			&id, &title, &slug, &description, &createdAt,
-		)
-		quiz := &Quiz{
-			ID:          id,
-			Title:       title,
-			Slug:        slug,
-			Description: description,
-			CreatedAt:   time.Time(createdAt),
-		}
-		if quizErr != nil {
-			return nil, fmt.Errorf("error scanning quizRow: %w", quizErr)
-		}
-
-		quizzes = append(quizzes, quiz)
-	}
-
-	if err := quizRows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating quizRows: %w", err)
+	if funcErr != nil {
+		return nil, fmt.Errorf("error listing quizzes: %w", funcErr)
 	}
 
 	for _, quiz := range quizzes {
@@ -300,15 +306,49 @@ func (s *SQLiteStore) GetQuestionByID(ctx context.Context, questionID int64) (*Q
 // CreateQuiz creates a quiz.
 func (s *SQLiteStore) CreateQuiz(ctx context.Context, quiz *Quiz) error {
 	createdAt := Timestamp(time.Now().UTC())
-	result, err := s.db.ExecContext(ctx, createQuizSQL, quiz.Title, quiz.Slug, quiz.Description, createdAt)
+	quizResult, err := s.db.ExecContext(ctx, createQuizSQL, quiz.Title, quiz.Slug, quiz.Description, createdAt)
 	if err != nil {
 		return fmt.Errorf("error creating quiz: %w", err)
 	}
-	resultID, err := result.LastInsertId()
+	resultID, err := quizResult.LastInsertId()
 	if err != nil {
-		return fmt.Errorf("error getting last insert ID: %w", err)
+		return fmt.Errorf("error getting last insert ID for quiz: %w", err)
 	}
 	quiz.ID = resultID
+
+	for _, question := range quiz.Questions {
+		questionResult, err := s.db.ExecContext(
+			ctx,
+			createQuestionSQL,
+			quiz.ID,
+			question.Text,
+			question.ImageURL,
+			question.Position,
+		)
+		if err != nil {
+			return fmt.Errorf("error creating question: %w", err)
+		}
+		questionID, err := questionResult.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("error getting last insert ID for question: %w", err)
+		}
+		question.ID = questionID
+		question.QuizID = quiz.ID
+	}
+	for _, question := range quiz.Questions {
+		for _, option := range question.Options {
+			optionResult, err := s.db.ExecContext(ctx, createOptionSQL, question.ID, option.Text, option.Correct)
+			if err != nil {
+				return fmt.Errorf("error creating option: %w", err)
+			}
+			optionID, err := optionResult.LastInsertId()
+			if err != nil {
+				return fmt.Errorf("error getting last insert ID for option: %w", err)
+			}
+			option.ID = optionID
+			option.QuestionID = question.ID
+		}
+	}
 
 	return nil
 }
@@ -386,7 +426,10 @@ func (s *SQLiteStore) getQuestionsByQuizID(ctx context.Context, quizID int64) ([
 		if questionErr != nil {
 			return nil, fmt.Errorf("error scanning questionRow: %w", questionErr)
 		}
+		questions = append(questions, question)
+	}
 
+	for _, question := range questions {
 		options, err := s.getOptionsByQuestionID(ctx, question.ID)
 		if err != nil {
 			return nil, fmt.Errorf(
@@ -396,8 +439,6 @@ func (s *SQLiteStore) getQuestionsByQuizID(ctx context.Context, quizID int64) ([
 			)
 		}
 		question.Options = options
-
-		questions = append(questions, question)
 	}
 
 	return questions, nil

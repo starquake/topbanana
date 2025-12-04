@@ -17,17 +17,35 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func setupTestDBWithMigrations(t *testing.T) *sql.DB {
+	t.Helper()
+
+	db := setupTestDBWithoutMigrations(t)
+
+	goose.SetBaseFS(migrations.FS)
+	must.OK(goose.SetDialect("sqlite3"))
+	must.OK(goose.Up(db, "."))
+
+	return db
+}
+
+func setupTestDBWithoutMigrations(t *testing.T) *sql.DB {
+	t.Helper()
+
+	db := must.Any(sql.Open("sqlite", ":memory:"))
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
+	return db
+}
+
 func TestAddRoutes(t *testing.T) {
 	t.Parallel()
 
 	buf := bytes.Buffer{}
 	logger := logging.NewLogger(&buf)
 
-	db := must.Any(sql.Open("sqlite", ":memory:"))
-	db.SetMaxOpenConns(1)
-	goose.SetBaseFS(migrations.FS)
-	must.OK(goose.SetDialect("sqlite3"))
-	must.OK(goose.Up(db, "."))
+	db := setupTestDBWithMigrations(t)
 
 	quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -37,7 +55,8 @@ func TestAddRoutes(t *testing.T) {
 		Description: "Quiz 1 Description",
 		Questions: []*quiz.Question{
 			{
-				Text: "Question 1",
+				Text:     "Question 1",
+				Position: 10,
 				Options: []*quiz.Option{
 					{Text: "Option 1"},
 					{Text: "Option 2"},
@@ -119,7 +138,7 @@ func TestAddRoutes(t *testing.T) {
 			name:       "Question Save With Question ID",
 			method:     http.MethodPost,
 			path:       "/admin/quizzes/1/questions/1/save",
-			wantStatus: http.StatusOK,
+			wantStatus: http.StatusBadRequest,
 		},
 		{
 			name:       "Not Found Route",
