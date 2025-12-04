@@ -473,6 +473,9 @@ func TestSQLiteStore_ListQuizzes_ErrorHandling(t *testing.T) {
 			t.Fatalf("error inserting bad quiz: %v", err)
 		}
 		_, err = quizStore.ListQuizzes(t.Context())
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
 		if got, want := err.Error(), "error scanning quizRow"; !strings.Contains(got, want) {
 			t.Fatalf("err.Error() = '%v', should contain '%v'", got, want)
 		}
@@ -508,6 +511,9 @@ func TestSQLiteStore_ListQuizzes_ErrorHandling(t *testing.T) {
 			t.Fatalf("error inserting bad question: %v", err)
 		}
 		quizzes, err := quizStore.ListQuizzes(t.Context())
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
 		if got, want := err.Error(), "error scanning questionRow"; !strings.Contains(got, want) {
 			t.Fatalf("err.Error() = '%v', should contain '%v'", got, want)
 		}
@@ -527,55 +533,87 @@ func TestSQLiteStore_GetQuestionByID(t *testing.T) {
 
 	quizStore := quiz.NewSQLiteStore(db, logger)
 
-	testQuiz := &quiz.Quiz{
-		Title:       "Quiz 1",
-		Slug:        "quiz-1",
-		Description: "Quiz 1 Description",
-		Questions: []*quiz.Question{
-			{
-				ID:       1,
-				Text:     "Question 1",
-				Position: 10,
-				Options: []*quiz.Option{
-					{Text: "Option 1"},
-					{Text: "Option 2"},
+	t.Run("valid question", func(t *testing.T) {
+		t.Parallel()
+
+		testQuiz := &quiz.Quiz{
+			Title:       "Quiz 1",
+			Slug:        "quiz-1",
+			Description: "Quiz 1 Description",
+			Questions: []*quiz.Question{
+				{
+					Text:     "Question 1",
+					Position: 10,
+					Options: []*quiz.Option{
+						{Text: "Option 1"},
+						{Text: "Option 2"},
+					},
 				},
 			},
-		},
-	}
+		}
 
-	err := quizStore.CreateQuiz(t.Context(), testQuiz)
-	if err != nil {
-		t.Fatalf("error creating quiz: %v", err)
-	}
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("error creating quiz: %v", err)
+		}
 
-	// t.Run("valid question ID", func(t *testing.T) {
-	//	t.Parallel()
-	//
-	//	qs, err := quizStore.GetQuestionByID(t.Context(), testQuiz.Questions[0].ID)
-	//	if err != nil {
-	//		t.Errorf("error getting testQuiz by ID: %v", err)
-	//	}
-	//	if got, want := qs.ID, int64(1); got != want {
-	//		t.Errorf("qs.ID = %d, want %d", got, want)
-	//	}
-	//	if got, want := qs.QuizID, int64(1); got != want {
-	//		t.Errorf("qs.QuizID = %d, want %d", got, want)
-	//	}
-	//	if got, want := qs.Text, "Question 1"; got != want {
-	//		t.Errorf("qs.Text = %q, want %q", got, want)
-	//	}
-	//	if got, want := qs.Position, 10; got != want {
-	//		t.Errorf("qs.Position = %d, want %d", got, want)
-	//	}
-	//	if got, want := len(qs.Options), 2; got != want {
-	//		t.Errorf("len(qs.Options) = %d, want %d", got, want)
-	//	}
-	//	if got, want := qs.Options[0].Text, "Option 1"; got != want {
-	//		t.Errorf("qs.Options[0].Text = %q, want %q", got, want)
-	//	}
-	//	if got, want := qs.Options[1].Text, "Option 2"; got != want {
-	//		t.Errorf("qs.Options[1].Text = %q, want %q", got, want)
-	//	}
-	// })
+		qs, err := quizStore.GetQuestionByID(t.Context(), testQuiz.Questions[0].ID)
+		if err != nil {
+			t.Errorf("error getting question by ID: %v", err)
+		}
+		if qs.ID == int64(0) {
+			t.Errorf("qs.ID = %d, should not be 0", qs.ID)
+		}
+		if got, want := qs.QuizID, testQuiz.ID; got != want {
+			t.Errorf("qs.QuizID = %d, want %d", got, want)
+		}
+		if got, want := qs.Text, "Question 1"; got != want {
+			t.Errorf("qs.Text = %q, want %q", got, want)
+		}
+		if got, want := qs.Position, 10; got != want {
+			t.Errorf("qs.Position = %d, want %d", got, want)
+		}
+		if got, want := len(qs.Options), 2; got != want {
+			t.Errorf("len(qs.Options) = %d, want %d", got, want)
+		}
+		if got, want := qs.Options[0].Text, "Option 1"; got != want {
+			t.Errorf("qs.Options[0].Text = %q, want %q", got, want)
+		}
+		if got, want := qs.Options[1].Text, "Option 2"; got != want {
+			t.Errorf("qs.Options[1].Text = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("ignore question.QuizID", func(t *testing.T) {
+		t.Parallel()
+		testQuiz := &quiz.Quiz{
+			ID:          2,
+			Title:       "Quiz 2",
+			Slug:        "quiz-2",
+			Description: "Quiz 2 Description",
+			Questions: []*quiz.Question{
+				{
+					ID:       1,
+					QuizID:   1,
+					Text:     "Question 1",
+					Position: 10,
+					Options: []*quiz.Option{
+						{Text: "Option 1"},
+						{Text: "Option 2"},
+					},
+				},
+			},
+		}
+
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("error creating quiz: %v", err)
+		}
+
+		qz, err := quizStore.GetQuestionByID(t.Context(), testQuiz.Questions[0].ID)
+		if err != nil {
+			t.Errorf("error getting question by ID: %v", err)
+		}
+		if got, want := qz.QuizID, testQuiz.ID; got != want {
+			t.Errorf("qz.QuizID = %d, want %d", got, want)
+		}
+	})
 }

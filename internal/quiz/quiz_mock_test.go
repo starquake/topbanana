@@ -23,6 +23,14 @@ func TestSQLiteStore_ListQuizzes_MockTesting(t *testing.T) {
 		if err != nil {
 			t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
 		}
+		defer func() {
+			if err = db.Close(); err != nil {
+				t.Fatalf("error closing db: %v", err)
+			}
+			if err = mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("there were unfulfilled expectations: %s", err)
+			}
+		}()
 
 		testError := errors.New("quizRows error")
 
@@ -32,6 +40,7 @@ func TestSQLiteStore_ListQuizzes_MockTesting(t *testing.T) {
 			AddRow(2, "Test Quiz 2", "test-quiz-2", "Test Description 2", 1234)
 		quizRows.RowError(1, testError)
 		mock.ExpectQuery(quiz.ListQuizzesSQL).WillReturnRows(quizRows)
+		mock.ExpectClose()
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 		_, err = quizStore.ListQuizzes(t.Context())
@@ -40,9 +49,6 @@ func TestSQLiteStore_ListQuizzes_MockTesting(t *testing.T) {
 		}
 		if !errors.Is(err, testError) {
 			t.Fatalf("expected error to be %v, got %v", testError, err)
-		}
-		if err = mock.ExpectationsWereMet(); err != nil {
-			t.Errorf("there were unfulfilled expectations: %s", err)
 		}
 	})
 }
