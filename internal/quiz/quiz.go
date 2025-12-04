@@ -30,14 +30,10 @@ const (
 var (
 	// ErrConvertingValueIntoTimestamp is returned when a value cannot be converted into a Timestamp.
 	ErrConvertingValueIntoTimestamp = errors.New("cannot convert value into Timestamp")
-	// ErrScanQuizRow is returned when an error occurs while scanning a quizRow.
-	ErrScanQuizRow = errors.New("error scanning quizrow")
-	// ErrScanQuestionRow is returned when an error occurs while scanning a questionRow.
-	ErrScanQuestionRow = errors.New("error scanning questionrow")
-	// ErrIteratingQuizRows is returned when an error occurs while iterating quizRows.
-	ErrIteratingQuizRows = errors.New("error iterating quizRows")
-	// ErrIteratingQuestionRows is returned when an error occurs while iterating questionRows.
-	ErrIteratingQuestionRows = errors.New("error iterating questionRows")
+	// ErrQuizNotFound is returned when a quiz is not found.
+	ErrQuizNotFound = errors.New("quiz not found")
+	// ErrQuestionNotFound is returned when a question is not found.
+	ErrQuestionNotFound = errors.New("question not found")
 )
 
 // Timestamp is a timestamp with millisecond precision. Used for SQLite type conversion.
@@ -175,19 +171,13 @@ type SQLiteStore struct {
 	logger *logging.Logger
 }
 
-var (
-	// ErrQuizNotFound is returned when a quiz is not found.
-	ErrQuizNotFound = errors.New("quiz not found")
-	// ErrQuestionNotFound is returned when a question is not found.
-	ErrQuestionNotFound = errors.New("question not found")
-)
-
 // NewSQLiteStore creates a new SQLiteStore.
 func NewSQLiteStore(db *sql.DB, logger *logging.Logger) *SQLiteStore {
 	return &SQLiteStore{db, logger}
 }
 
 // GetQuizByID returns a quiz including related questions and options by its ID.
+// Returns ErrQuizNotFound if the quiz is not found.
 func (s *SQLiteStore) GetQuizByID(ctx context.Context, quizID int64) (*Quiz, error) {
 	var err error
 
@@ -259,14 +249,14 @@ func (s *SQLiteStore) ListQuizzes(ctx context.Context) ([]*Quiz, error) {
 			CreatedAt:   time.Time(createdAt),
 		}
 		if quizErr != nil {
-			return nil, fmt.Errorf("%w: %w", ErrScanQuizRow, quizErr)
+			return nil, fmt.Errorf("error scanning quizRow: %w", quizErr)
 		}
 
 		quizzes = append(quizzes, quiz)
 	}
 
 	if err := quizRows.Err(); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrIteratingQuizRows, err)
+		return nil, fmt.Errorf("error iterating quizRows: %w", err)
 	}
 
 	for _, quiz := range quizzes {
@@ -381,7 +371,7 @@ func (s *SQLiteStore) getQuestionsByQuizID(ctx context.Context, quizID int64) ([
 	}()
 
 	if questionRows.Err() != nil {
-		return nil, fmt.Errorf("%w: %w", ErrIteratingQuestionRows, questionRows.Err())
+		return nil, fmt.Errorf("error iterating questionRows: %w", questionRows.Err())
 	}
 	var questions []*Question
 	for questionRows.Next() {
@@ -394,7 +384,7 @@ func (s *SQLiteStore) getQuestionsByQuizID(ctx context.Context, quizID int64) ([
 			&question.Position,
 		)
 		if questionErr != nil {
-			return nil, fmt.Errorf("%w: %w", ErrScanQuestionRow, questionErr)
+			return nil, fmt.Errorf("error scanning questionRow: %w", questionErr)
 		}
 
 		options, err := s.getOptionsByQuestionID(ctx, question.ID)

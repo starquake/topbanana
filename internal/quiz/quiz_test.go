@@ -328,9 +328,6 @@ func TestSQLiteStore_GetQuizByID_ErrorHandling(t *testing.T) {
 		if got, want := err.Error(), "error iterating quizRow"; !strings.Contains(got, want) {
 			t.Errorf("err.Error() = '%v', should contain '%v'", got, want)
 		}
-		if got, want := err, quiz.ErrScanQuizRow; errors.Is(err, quiz.ErrScanQuizRow) {
-			t.Errorf("err.Error() = '%v', should contain '%v'", got, want)
-		}
 	})
 
 	t.Run("scan error", func(t *testing.T) {
@@ -356,7 +353,7 @@ func TestSQLiteStore_GetQuizByID_ErrorHandling(t *testing.T) {
 		if err == nil {
 			t.Fatal("got nil, want error")
 		}
-		if got, want := err, quiz.ErrScanQuizRow; errors.Is(err, quiz.ErrScanQuizRow) {
+		if got, want := err.Error(), "error scanning quizRow"; !strings.Contains(got, want) {
 			t.Errorf("err.Error() = '%v', should contain '%v'", got, want)
 		}
 	})
@@ -394,7 +391,7 @@ func TestSQLiteStore_GetQuizByID_ErrorHandling(t *testing.T) {
 		if err == nil {
 			t.Fatal("got nil, want error")
 		}
-		if got, want := err, quiz.ErrScanQuestionRow; errors.Is(err, quiz.ErrScanQuizRow) {
+		if got, want := err.Error(), "error scanning questionRow"; !strings.Contains(got, want) {
 			t.Errorf("err.Error() = '%v', should contain '%v'", got, want)
 		}
 	})
@@ -476,8 +473,8 @@ func TestSQLiteStore_ListQuizzes_ErrorHandling(t *testing.T) {
 			t.Fatalf("error inserting bad quiz: %v", err)
 		}
 		_, err = quizStore.ListQuizzes(t.Context())
-		if got, want := err, quiz.ErrScanQuizRow; !errors.Is(got, want) {
-			t.Fatalf("err = %v, want %v", got, want)
+		if got, want := err.Error(), "error scanning quizRow"; !strings.Contains(got, want) {
+			t.Fatalf("err.Error() = '%v', should contain '%v'", got, want)
 		}
 	})
 
@@ -511,8 +508,8 @@ func TestSQLiteStore_ListQuizzes_ErrorHandling(t *testing.T) {
 			t.Fatalf("error inserting bad question: %v", err)
 		}
 		quizzes, err := quizStore.ListQuizzes(t.Context())
-		if got, want := err, quiz.ErrScanQuestionRow; !errors.Is(got, want) {
-			t.Fatalf("err = %v, want %v", got, want)
+		if got, want := err.Error(), "error scanning questionRow"; !strings.Contains(got, want) {
+			t.Fatalf("err.Error() = '%v', should contain '%v'", got, want)
 		}
 		if quizzes != nil {
 			t.Errorf("quizzes = %v, want nil", quizzes)
