@@ -31,7 +31,6 @@ linters:
     - gochecknoinits
     - gochecksumtype
     - gocognit
-    - goconst
     - gocritic
     - gocyclo
     - godoclint
@@ -126,7 +125,7 @@ linters:
           exclude: ["**/*_test.go"]
           arguments:
             - maxLitCount: "3"
-              allow-strs: '"","%w: %w"'
+              allow-strs: '"","%v: %w"'
               allow-ints: "0,1,2"
         - name: max-public-structs
           disabled: true
