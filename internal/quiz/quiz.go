@@ -11,17 +11,42 @@ import (
 	"time"
 
 	"github.com/starquake/topbanana/internal/logging"
+	"github.com/starquake/topbanana/internal/must"
 )
 
-// ErrConvertingValueIntoTimestamp is returned when a value cannot be converted into a Timestamp.
-var ErrConvertingValueIntoTimestamp = errors.New("cannot convert value into Timestamp")
+const (
+	createOptionSQL             = `INSERT INTO options (question_id, text, is_correct) VALUES (?, ?, ?)`
+	createQuestionSQL           = `INSERT INTO questions (quiz_id, text, image_url, position) VALUES (?, ?, ?, ?)`
+	createQuizSQL               = `INSERT INTO quizzes (title, slug, description, created_at) VALUES (?, ?, ?, ?)`
+	deleteOptionSQL             = `DELETE FROM options WHERE id = ?`
+	deleteQuestionSQL           = `DELETE FROM questions WHERE id = ?`
+	getOptionIDsByQuestionIDSQL = `SELECT id FROM options WHERE question_id = ?`
+	getOptionsByQuestionIDSQL   = `SELECT id, question_id, text, is_correct FROM options WHERE question_id = ?`
+	getQuestionByIDSQL          = `SELECT id, quiz_id, text, image_url, position FROM questions WHERE id = ?`
+	getQuestionIDsByQuizIDSQL   = `SELECT id FROM questions WHERE quiz_id = ?`
+	getQuestionsByQuizIDSQL     = `SELECT id, quiz_id, text, image_url, position FROM questions WHERE quiz_id = ?`
+	getQuizByIDSQL              = listQuizzesSQL + ` WHERE id = ?`
+	listQuizzesSQL              = `SELECT id, title, slug, description, created_at FROM quizzes`
+	updateOptionSQL             = `UPDATE options SET text = ?, is_correct = ? WHERE id = ?`
+	updateQuestionSQL           = `UPDATE questions SET text = ?, image_url = ?, position = ? WHERE id = ?`
+	updateQuizSQL               = `UPDATE quizzes SET title = ?, slug = ?, description = ? WHERE id = ?`
+)
+
+var (
+	// ErrConvertingValueIntoTimestamp is returned when a value cannot be converted into a Timestamp.
+	ErrConvertingValueIntoTimestamp = errors.New("cannot convert value into Timestamp")
+	// ErrQuizNotFound is returned when a quiz is not found.
+	ErrQuizNotFound = errors.New("quiz not found")
+	// ErrQuestionNotFound is returned when a question is not found.
+	ErrQuestionNotFound = errors.New("question not found")
+)
 
 // Timestamp is a timestamp with millisecond precision. Used for SQLite type conversion.
 //
 //nolint:recvcheck // Mixing pointer receivers and value receivers is needed here because we are implementing sql.Scanner and driver.Valuer.
 type Timestamp time.Time
 
-// Scan converts a value to a Timestamp.
+// Scan converts a value to a Timestamp in UTC.
 // Currently, only int64 values are supported.
 func (t *Timestamp) Scan(value any) error {
 	if value == nil {
@@ -35,7 +60,7 @@ func (t *Timestamp) Scan(value any) error {
 		return fmt.Errorf("%w: %T", ErrConvertingValueIntoTimestamp, value)
 	}
 
-	*t = Timestamp(time.UnixMilli(ms))
+	*t = Timestamp(time.UnixMilli(ms).UTC())
 
 	return nil
 }
@@ -55,8 +80,8 @@ type Quiz struct {
 	Questions   []*Question
 }
 
-// Valid checks if the quiz is valid.
-func (q *Quiz) Valid(_ context.Context) map[string]string {
+// Valid checks if the quiz, its questions, and its options are valid.
+func (q *Quiz) Valid(ctx context.Context) map[string]string {
 	problems := make(map[string]string)
 	if q.Title == "" {
 		problems["title"] = "Title is required"
@@ -66,6 +91,20 @@ func (q *Quiz) Valid(_ context.Context) map[string]string {
 	}
 	if q.Description == "" {
 		problems["description"] = "Description is required"
+	}
+	for qsIndex, question := range q.Questions {
+		if qsProblems := question.Valid(ctx); len(qsProblems) > 0 {
+			for qsProblemKey, v := range qsProblems {
+				problems[fmt.Sprintf("questions[%d][%s]", qsIndex, qsProblemKey)] = v
+			}
+		}
+		for oIndex, option := range question.Options {
+			if oProblems := option.Valid(ctx); len(oProblems) > 0 {
+				for oProblemKey, v := range oProblems {
+					problems[fmt.Sprintf("questions[%d].options[%d][%s]", qsIndex, oIndex, oProblemKey)] = v
+				}
+			}
+		}
 	}
 
 	return problems
@@ -81,7 +120,7 @@ type Question struct {
 	Options  []*Option
 }
 
-// Valid checks if the question is valid.
+// Valid checks if the question and its options are valid.
 func (q *Question) Valid(_ context.Context) map[string]string {
 	problems := make(map[string]string)
 	if q.Text == "" {
@@ -100,6 +139,16 @@ type Option struct {
 	QuestionID int64
 	Text       string
 	Correct    bool
+}
+
+// Valid checks if the option is valid.
+func (o *Option) Valid(_ context.Context) map[string]string {
+	problems := make(map[string]string)
+	if o.Text == "" {
+		problems["text"] = "Text is required"
+	}
+
+	return problems
 }
 
 // Store represents a store for quizzes.
@@ -127,24 +176,17 @@ type SQLiteStore struct {
 	logger *logging.Logger
 }
 
-var (
-	// ErrQuizNotFound is returned when a quiz is not found.
-	ErrQuizNotFound = errors.New("quiz not found")
-	// ErrQuestionNotFound is returned when a question is not found.
-	ErrQuestionNotFound = errors.New("question not found")
-)
-
 // NewSQLiteStore creates a new SQLiteStore.
 func NewSQLiteStore(db *sql.DB, logger *logging.Logger) *SQLiteStore {
 	return &SQLiteStore{db, logger}
 }
 
 // GetQuizByID returns a quiz including related questions and options by its ID.
+// Returns ErrQuizNotFound if the quiz is not found.
 func (s *SQLiteStore) GetQuizByID(ctx context.Context, quizID int64) (*Quiz, error) {
 	var err error
-	quizQuery := `SELECT id, title, slug, description, created_at FROM quizzes WHERE id = ?`
 
-	quizRow := s.db.QueryRowContext(ctx, quizQuery, quizID)
+	quizRow := s.db.QueryRowContext(ctx, getQuizByIDSQL, quizID)
 	if quizRow.Err() != nil {
 		return nil, fmt.Errorf("error iterating quizRow: %w", quizRow.Err())
 	}
@@ -182,46 +224,33 @@ func (s *SQLiteStore) GetQuizByID(ctx context.Context, quizID int64) (*Quiz, err
 
 // ListQuizzes returns all quizzes including related questions and options.
 func (s *SQLiteStore) ListQuizzes(ctx context.Context) ([]*Quiz, error) {
-	quizQuery := `SELECT id, title, slug, description, created_at FROM quizzes`
-
-	quizRows, quizErr := s.db.QueryContext(
-		ctx,
-		quizQuery,
-	)
-	if quizErr != nil {
-		return nil, fmt.Errorf("error querying quizzes: %w", quizErr)
-	}
-	defer func() {
-		err := quizRows.Close()
+	quizzes, funcErr := func() ([]*Quiz, error) {
+		rows, err := s.db.QueryContext(ctx, listQuizzesSQL)
 		if err != nil {
-			s.logger.Error(ctx, "error closing quizRows", logging.ErrAttr(err))
+			return nil, fmt.Errorf("error querying out: %w", err)
 		}
+		defer func() {
+			// Close the rows to free up resources. It must not return an error.
+			// It will not return an error because we checked for errors before (quizRows.Err()).
+			must.OK(rows.Close())
+		}()
+
+		var out []*Quiz
+		for rows.Next() {
+			qz := &Quiz{}
+			if err = rows.Scan(&qz.ID, &qz.Title, &qz.Slug, &qz.Description, (*Timestamp)(&qz.CreatedAt)); err != nil {
+				return nil, fmt.Errorf("error scanning quizRow: %w", err)
+			}
+			out = append(out, qz)
+		}
+		if err = rows.Err(); err != nil {
+			return nil, fmt.Errorf("error iterating quizRows: %w", err)
+		}
+
+		return out, nil
 	}()
-	if quizRows.Err() != nil {
-		return nil, fmt.Errorf("error iterating quizRows: %w", quizRows.Err())
-	}
-	var quizzes []*Quiz
-
-	var id int64
-	var title, slug, description string
-	var createdAt Timestamp
-
-	for quizRows.Next() {
-		quizErr = quizRows.Scan(
-			&id, &title, &slug, &description, &createdAt,
-		)
-		quiz := &Quiz{
-			ID:          id,
-			Title:       title,
-			Slug:        slug,
-			Description: description,
-			CreatedAt:   time.Time(createdAt),
-		}
-		if quizErr != nil {
-			return nil, fmt.Errorf("error scanning quizRow: %w", quizErr)
-		}
-
-		quizzes = append(quizzes, quiz)
+	if funcErr != nil {
+		return nil, fmt.Errorf("error listing quizzes: %w", funcErr)
 	}
 
 	for _, quiz := range quizzes {
@@ -238,9 +267,7 @@ func (s *SQLiteStore) ListQuizzes(ctx context.Context) ([]*Quiz, error) {
 
 // GetQuestionByID returns a question including related options by its ID.
 func (s *SQLiteStore) GetQuestionByID(ctx context.Context, questionID int64) (*Question, error) {
-	questionQuery := `SELECT id, quiz_id, text, image_url, position FROM questions WHERE id = ?`
-
-	questionRow := s.db.QueryRowContext(ctx, questionQuery, questionID)
+	questionRow := s.db.QueryRowContext(ctx, getQuestionByIDSQL, questionID)
 	if questionRow.Err() != nil {
 		return nil, fmt.Errorf("error iterating questionRow: %w", questionRow.Err())
 	}
@@ -266,27 +293,74 @@ func (s *SQLiteStore) GetQuestionByID(ctx context.Context, questionID int64) (*Q
 
 // CreateQuiz creates a quiz.
 func (s *SQLiteStore) CreateQuiz(ctx context.Context, quiz *Quiz) error {
-	query := `INSERT INTO quizzes (title, slug, description, created_at) VALUES (?, ?, ?, ?)`
-	createdAt := Timestamp(time.Now().UTC())
-	result, err := s.db.ExecContext(ctx, query, quiz.Title, quiz.Slug, quiz.Description, createdAt)
+	// TODO: Use a transaction here. Also updates the tests.
+	quizResult, err := s.db.ExecContext(ctx, createQuizSQL,
+		quiz.Title, quiz.Slug, quiz.Description, Timestamp(time.Now().UTC()))
 	if err != nil {
 		return fmt.Errorf("error creating quiz: %w", err)
 	}
-	resultID, err := result.LastInsertId()
+	resultID, err := quizResult.LastInsertId()
 	if err != nil {
-		return fmt.Errorf("error getting last insert ID: %w", err)
+		return fmt.Errorf("error getting last insert ID for quiz: %w", err)
 	}
 	quiz.ID = resultID
+
+	for _, question := range quiz.Questions {
+		questionResult, err := s.db.ExecContext(
+			ctx, createQuestionSQL,
+			quiz.ID, question.Text, question.ImageURL, question.Position,
+		)
+		if err != nil {
+			return fmt.Errorf("error creating question: %w", err)
+		}
+		questionID, err := questionResult.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("error getting last insert ID for question: %w", err)
+		}
+		question.ID = questionID
+		question.QuizID = quiz.ID
+	}
+	for _, question := range quiz.Questions {
+		for _, option := range question.Options {
+			optionResult, err := s.db.ExecContext(ctx, createOptionSQL, question.ID, option.Text, option.Correct)
+			if err != nil {
+				return fmt.Errorf("error creating option: %w", err)
+			}
+			optionID, err := optionResult.LastInsertId()
+			if err != nil {
+				return fmt.Errorf("error getting last insert ID for option: %w", err)
+			}
+			option.ID = optionID
+			option.QuestionID = question.ID
+		}
+	}
 
 	return nil
 }
 
 // UpdateQuiz updates a quiz.
 func (s *SQLiteStore) UpdateQuiz(ctx context.Context, quiz *Quiz) error {
-	query := `UPDATE quizzes SET title = ?, slug = ?, description = ? WHERE id = ?`
-	_, err := s.db.ExecContext(ctx, query, quiz.Title, quiz.Slug, quiz.Description, quiz.ID)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("error updating quiz: %w", err)
+		return fmt.Errorf("error starting transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	// Update Quiz root
+	if _, err = tx.ExecContext(ctx, updateQuizSQL, quiz.Title, quiz.Slug, quiz.Description, quiz.ID); err != nil {
+		return fmt.Errorf("error updating quiz root: %w", err)
+	}
+
+	// Handle Questions (Create, Update, Delete)
+	err = s.handleQuestionsInTx(ctx, quiz, tx)
+	if err != nil {
+		return fmt.Errorf("error handling questions in transaction: %w", err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("error committing transaction: %w", err)
 	}
 
 	return nil
@@ -294,12 +368,9 @@ func (s *SQLiteStore) UpdateQuiz(ctx context.Context, quiz *Quiz) error {
 
 // CreateQuestion creates a question and its options and saves them to the database.
 func (s *SQLiteStore) CreateQuestion(ctx context.Context, qs *Question) error {
-	query := `INSERT INTO questions (quiz_id, text, image_url, position) VALUES (?, ?, ?, ?)`
-	optionQuery := `INSERT INTO options (question_id, text, is_correct) VALUES (?, ?, ?)`
-
 	var result sql.Result
 	var err error
-	result, err = s.db.ExecContext(ctx, query, qs.QuizID, qs.Text, qs.ImageURL, qs.Position)
+	result, err = s.db.ExecContext(ctx, createQuestionSQL, qs.QuizID, qs.Text, qs.ImageURL, qs.Position)
 	if err != nil {
 		return fmt.Errorf("error creating question: %w", err)
 	}
@@ -310,7 +381,7 @@ func (s *SQLiteStore) CreateQuestion(ctx context.Context, qs *Question) error {
 	qs.ID = resultID
 
 	for _, option := range qs.Options {
-		_, err = s.db.ExecContext(ctx, optionQuery, qs.ID, option.Text, option.Correct)
+		_, err = s.db.ExecContext(ctx, createOptionSQL, qs.ID, option.Text, option.Correct)
 		if err != nil {
 			return fmt.Errorf("error creating option: %w", err)
 		}
@@ -321,8 +392,7 @@ func (s *SQLiteStore) CreateQuestion(ctx context.Context, qs *Question) error {
 
 // UpdateQuestion updates a question.
 func (s *SQLiteStore) UpdateQuestion(ctx context.Context, question *Question) error {
-	query := `UPDATE questions SET text = ?, image_url = ?, position = ? WHERE id = ?`
-	_, err := s.db.ExecContext(ctx, query, question.Text, question.ImageURL, question.Position, question.ID)
+	_, err := s.db.ExecContext(ctx, updateQuestionSQL, question.Text, question.ImageURL, question.Position, question.ID)
 	if err != nil {
 		return fmt.Errorf("error updating question: %w", err)
 	}
@@ -330,38 +400,180 @@ func (s *SQLiteStore) UpdateQuestion(ctx context.Context, question *Question) er
 	return nil
 }
 
-// getQuestionsByQuizID returns questions including related options for a quiz by its quizID.
-func (s *SQLiteStore) getQuestionsByQuizID(ctx context.Context, quizID int64) ([]*Question, error) {
-	questionQuery := `SELECT id, quiz_id, text, image_url, position FROM questions WHERE quiz_id = ?`
+func (s *SQLiteStore) handleQuestionsInTx(ctx context.Context, quiz *Quiz, tx *sql.Tx) error {
+	existingQIDs, err := s.getQuestionIDsInTx(ctx, tx, quiz.ID)
+	if err != nil {
+		return fmt.Errorf("error getting questionIDs: %w", err)
+	}
 
-	questionRows, questionErr := s.db.QueryContext(ctx, questionQuery, quizID)
-	if questionErr != nil {
-		return nil, fmt.Errorf("error querying questions: %w", questionErr)
+	incomingQIDs := make(map[int64]bool)
+	for _, q := range quiz.Questions {
+		q.QuizID = quiz.ID // Ensure linkage
+
+		if q.ID == 0 {
+			// CREATE
+			if err = s.createQuestionInTx(ctx, tx, q); err != nil {
+				return fmt.Errorf("error creating new question (text: %q): %w", q.Text, err)
+			}
+		} else {
+			// UPDATE
+			if err = s.updateQuestionInTx(ctx, tx, q); err != nil {
+				return fmt.Errorf("error updating question %d: %w", q.ID, err)
+			}
+			incomingQIDs[q.ID] = true
+		}
+		// Handle Options for this question (regardless of create or update)
+		if err = s.handleOptionsInTx(ctx, tx, q); err != nil {
+			return fmt.Errorf("error handling options for question %d: %w", q.ID, err)
+		}
+	}
+
+	// DELETE missing questions
+	for _, id := range existingQIDs {
+		if !incomingQIDs[id] {
+			if _, err = tx.ExecContext(ctx, deleteQuestionSQL, id); err != nil {
+				return fmt.Errorf("error deleting question %d: %w", id, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (s *SQLiteStore) handleOptionsInTx(ctx context.Context, tx *sql.Tx, q *Question) error {
+	existingOIDs, err := s.getOptionIDsInTx(ctx, tx, q.ID)
+	if err != nil {
+		return err
+	}
+
+	incomingOIDs := make(map[int64]bool)
+	for _, o := range q.Options {
+		o.QuestionID = q.ID // Ensure linkage
+
+		if o.ID == 0 {
+			// CREATE Option
+			res, err := tx.ExecContext(ctx, createOptionSQL, q.ID, o.Text, o.Correct)
+			if err != nil {
+				return fmt.Errorf("error creating option: %w", err)
+			}
+			o.ID, err = res.LastInsertId()
+			if err != nil {
+				return fmt.Errorf("error getting option ID: %w", err)
+			}
+		} else {
+			if _, err := tx.ExecContext(ctx, updateOptionSQL, o.Text, o.Correct, o.ID); err != nil {
+				return fmt.Errorf("error updating option %d: %w", o.ID, err)
+			}
+			incomingOIDs[o.ID] = true
+		}
+	}
+
+	// DELETE missing options
+	for _, id := range existingOIDs {
+		if !incomingOIDs[id] {
+			if _, err := tx.ExecContext(ctx, deleteOptionSQL, id); err != nil {
+				return fmt.Errorf("error deleting option %d: %w", id, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (*SQLiteStore) getQuestionIDsInTx(ctx context.Context, tx *sql.Tx, quizID int64) ([]int64, error) {
+	rows, err := tx.QueryContext(ctx, getQuestionIDsByQuizIDSQL, quizID)
+	if err != nil {
+		return nil, fmt.Errorf("error querying questionIDs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("error scanning questionIDs: %w", err)
+		}
+		ids = append(ids, id)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating questionIDs: %w", err)
+	}
+
+	return ids, nil
+}
+
+func (*SQLiteStore) getOptionIDsInTx(ctx context.Context, tx *sql.Tx, questionID int64) ([]int64, error) {
+	rows, err := tx.QueryContext(ctx, getOptionIDsByQuestionIDSQL, questionID)
+	if err != nil {
+		return nil, fmt.Errorf("error querying optionIDs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err = rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("error scanning optionIDs: %w", err)
+		}
+		ids = append(ids, id)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating optionIDs: %w", err)
+	}
+
+	return ids, nil
+}
+
+func (*SQLiteStore) createQuestionInTx(ctx context.Context, tx *sql.Tx, q *Question) error {
+	res, err := tx.ExecContext(ctx, createQuestionSQL, q.QuizID, q.Text, q.ImageURL, q.Position)
+	if err != nil {
+		return fmt.Errorf("error creating question: %w", err)
+	}
+	q.ID, err = res.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("error getting question ID: %w", err)
+	}
+
+	return nil
+}
+
+func (*SQLiteStore) updateQuestionInTx(ctx context.Context, tx *sql.Tx, q *Question) error {
+	_, err := tx.ExecContext(ctx, updateQuestionSQL, q.Text, q.ImageURL, q.Position, q.ID)
+	if err != nil {
+		return fmt.Errorf("error updating question: %w", err)
+	}
+
+	return nil
+}
+
+// getQuestionsByQuizIDSQL returns questions including related options for a quiz by its quizID.
+func (s *SQLiteStore) getQuestionsByQuizID(ctx context.Context, quizID int64) ([]*Question, error) {
+	questionRows, err := s.db.QueryContext(ctx, getQuestionsByQuizIDSQL, quizID)
+	if err != nil {
+		return nil, fmt.Errorf("error querying questions: %w", err)
 	}
 	defer func() {
-		err := questionRows.Close()
+		err = questionRows.Close()
 		if err != nil {
 			s.logger.Error(ctx, "error closing questionRows", logging.ErrAttr(err))
 		}
 	}()
 
+	var questions []*Question
+	for questionRows.Next() {
+		qs := &Question{}
+		if err = questionRows.Scan(&qs.ID, &qs.QuizID, &qs.Text, &qs.ImageURL, &qs.Position); err != nil {
+			return nil, fmt.Errorf("error scanning questionRow: %w", err)
+		}
+		questions = append(questions, qs)
+	}
 	if questionRows.Err() != nil {
 		return nil, fmt.Errorf("error iterating questionRows: %w", questionRows.Err())
 	}
-	var questions []*Question
-	for questionRows.Next() {
-		question := &Question{}
-		questionErr = questionRows.Scan(
-			&question.ID,
-			&question.QuizID,
-			&question.Text,
-			&question.ImageURL,
-			&question.Position,
-		)
-		if questionErr != nil {
-			return nil, fmt.Errorf("error scanning questionRow: %w", questionErr)
-		}
 
+	for _, question := range questions {
 		options, err := s.getOptionsByQuestionID(ctx, question.ID)
 		if err != nil {
 			return nil, fmt.Errorf(
@@ -371,8 +583,6 @@ func (s *SQLiteStore) getQuestionsByQuizID(ctx context.Context, quizID int64) ([
 			)
 		}
 		question.Options = options
-
-		questions = append(questions, question)
 	}
 
 	return questions, nil
@@ -383,9 +593,7 @@ func (s *SQLiteStore) getOptionsByQuestionID(
 	ctx context.Context,
 	questionID int64,
 ) ([]*Option, error) {
-	optionQuery := `SELECT id, question_id, text, is_correct FROM options WHERE question_id = ?`
-
-	optionRows, optionErr := s.db.QueryContext(ctx, optionQuery, questionID)
+	optionRows, optionErr := s.db.QueryContext(ctx, getOptionsByQuestionIDSQL, questionID)
 	if optionErr != nil {
 		return nil, fmt.Errorf("error querying options: %w", optionErr)
 	}
@@ -396,9 +604,6 @@ func (s *SQLiteStore) getOptionsByQuestionID(
 		}
 	}()
 
-	if optionRows.Err() != nil {
-		return nil, fmt.Errorf("error iterating optionRows: %w", optionRows.Err())
-	}
 	var options []*Option
 	for optionRows.Next() {
 		option := &Option{}
@@ -412,6 +617,9 @@ func (s *SQLiteStore) getOptionsByQuestionID(
 			return nil, fmt.Errorf("error scanning optionRow: %w", optionErr)
 		}
 		options = append(options, option)
+	}
+	if optionRows.Err() != nil {
+		return nil, fmt.Errorf("error iterating optionRows: %w", optionRows.Err())
 	}
 
 	return options, nil
