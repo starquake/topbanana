@@ -7,6 +7,5 @@ func (s *SQLiteStore) DB() *sql.DB {
 }
 
 const (
-	ListQuizzesSQL          = listQuizzesSQL
-	GetQuestionsByQuizIDSQL = getQuestionsByQuizIDSQL
+	ListQuizzesSQL = listQuizzesSQL
 )
