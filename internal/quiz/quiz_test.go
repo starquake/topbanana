@@ -750,7 +750,6 @@ func TestSQLiteStore_CreateQuiz(t *testing.T) {
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
 			Description: "Quiz 1 Description",
-			CreatedAt:   time.Now().UTC(),
 			Questions: []*quiz.Question{
 				{
 					Text:     "Question 1",
@@ -783,20 +782,34 @@ func TestSQLiteStore_CreateQuiz(t *testing.T) {
 
 	t.Run("ignore supplied ID's", func(t *testing.T) {
 		t.Parallel()
+		suppliedQuizID := int64(1000)
+		suppliedQuestionID := int64(1001)
+		suppliedOption1ID := int64(1002)
+		suppliedOption2ID := int64(1003)
+
 		testQuiz := &quiz.Quiz{
-			ID:          1234,
+			ID:          suppliedQuizID,
 			Title:       "Quiz 2",
 			Slug:        "quiz-2",
 			Description: "Quiz 2 Description",
+			CreatedAt:   time.Now().UTC(),
 			Questions: []*quiz.Question{
 				{
-					ID:       5678,
-					QuizID:   4321,
+					ID:       suppliedQuestionID,
+					QuizID:   suppliedQuizID,
 					Text:     "Question 1",
 					Position: 10,
 					Options: []*quiz.Option{
-						{Text: "Option 1"},
-						{Text: "Option 2"},
+						{
+							ID:         suppliedOption1ID,
+							QuestionID: suppliedQuestionID,
+							Text:       "Option 1",
+						},
+						{
+							ID:         suppliedOption2ID,
+							QuestionID: suppliedQuestionID,
+							Text:       "Option 2",
+						},
 					},
 				},
 			},
@@ -806,16 +819,36 @@ func TestSQLiteStore_CreateQuiz(t *testing.T) {
 			t.Fatalf("error creating quiz: %v", err)
 		}
 
-		qs, err := quizStore.GetQuestionByID(t.Context(), testQuiz.Questions[0].ID)
-		if err != nil {
-			t.Errorf("error getting question by ID: %v", err)
+		qz, err := quizStore.GetQuizByID(t.Context(), suppliedQuizID)
+		if err == nil {
+			t.Fatalf("got nil, want error")
 		}
-		if diff := cmp.Diff(qs, testQuiz.Questions[0],
-			cmpopts.SortSlices(lessQuestions),
-			cmpopts.SortSlices(lessOptions),
-			cmpopts.EquateApproxTime(3*time.Second),
-		); diff != "" {
-			t.Errorf("quizzes diff (-got +want):\n%s", diff)
+		if !errors.Is(err, quiz.ErrQuizNotFound) {
+			t.Errorf("err = %v, want %v", err, quiz.ErrQuizNotFound)
+		}
+		if qz != nil {
+			t.Errorf("qz = %v, want nil", qz)
+		}
+
+		if testQuiz.ID == suppliedQuizID {
+			t.Fatalf("testQuiz.ID = %d, should not be %d", testQuiz.ID, suppliedQuizID)
+		}
+		if testQuiz.Questions[0].ID == suppliedQuestionID {
+			t.Fatalf("testQuiz.Questions[0].ID = %d, should not be %d", testQuiz.Questions[0].ID, suppliedQuestionID)
+		}
+		if testQuiz.Questions[0].Options[0].ID == suppliedOption1ID {
+			t.Fatalf(
+				"testQuiz.Questions[0].Options[0].ID = %d, should not be %d",
+				testQuiz.Questions[0].Options[0].ID,
+				suppliedOption1ID,
+			)
+		}
+		if testQuiz.Questions[0].Options[1].ID == suppliedOption2ID {
+			t.Fatalf(
+				"testQuiz.Questions[0].Options[1].ID = %d, should not be %d",
+				testQuiz.Questions[0].Options[1].ID,
+				suppliedOption2ID,
+			)
 		}
 	})
 }
@@ -1123,15 +1156,15 @@ func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 	buf := bytes.Buffer{}
 	logger := logging.NewLogger(&buf)
 
-	db := setupTestDBWithMigrations(t)
-
-	quizStore := quiz.NewSQLiteStore(db, logger)
-
 	t.Run("context cancelled", func(t *testing.T) {
 		t.Parallel()
 		// Create and cancel context to trigger an error
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
+
+		db := setupTestDBWithMigrations(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
 
 		qz := quiz.Quiz{}
 
@@ -1143,17 +1176,188 @@ func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
-
-	t.Run("quiz not found", func(t *testing.T) {
+	t.Run("update error", func(t *testing.T) {
 		t.Parallel()
-		qz := quiz.Quiz{ID: 123456789}
+		db := setupTestDBWithMigrations(t)
 
-		err := quizStore.UpdateQuiz(t.Context(), &qz)
+		// Rename questions table to force an insert error
+		_, err := db.ExecContext(t.Context(), "ALTER TABLE quizzes RENAME TO quizzes_backup")
+		if err != nil {
+			t.Fatalf("failed to rename table: %v", err)
+		}
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
+		testQuiz := &quiz.Quiz{
+			Title:       "Quiz 1",
+			Slug:        "quiz-1",
+			Description: "Description",
+			Questions: []*quiz.Question{
+				{
+					Text: "Question 1",
+				},
+			},
+		}
+
+		err = quizStore.UpdateQuiz(t.Context(), testQuiz)
 		if err == nil {
 			t.Fatal("got nil, want error")
 		}
 		if got, want := err.Error(), "error updating quiz"; !strings.Contains(got, want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+
+	t.Run("quiz not found", func(t *testing.T) {
+		t.Parallel()
+		qz := quiz.Quiz{ID: 123456789}
+
+		db := setupTestDBWithMigrations(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
+		err := quizStore.UpdateQuiz(t.Context(), &qz)
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+		if got, want := err.Error(), "no rows affected when updating quiz"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+
+	t.Run("error handling questions", func(t *testing.T) {
+		t.Parallel()
+		db := setupTestDBWithMigrations(t)
+
+		// Rename questions table to force an insert error
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
+		originalQuiz := &quiz.Quiz{
+			Title:       "Quiz 1",
+			Slug:        "quiz-1",
+			Description: "Description",
+			Questions: []*quiz.Question{
+				{
+					Text: "Question 1",
+				},
+			},
+		}
+
+		err := quizStore.CreateQuiz(t.Context(), originalQuiz)
+		if err != nil {
+			t.Fatalf("error creating quiz: %v", err)
+		}
+
+		_, err = db.ExecContext(t.Context(), "ALTER TABLE questions RENAME TO questions_backup")
+		if err != nil {
+			t.Fatalf("failed to rename table: %v", err)
+		}
+
+		updatedQuiz := &quiz.Quiz{
+			ID:          originalQuiz.ID,
+			Title:       "Quiz 1",
+			Slug:        "quiz-1",
+			Description: "Description",
+			Questions: []*quiz.Question{
+				{
+					Text: "Question 1 Updated",
+				},
+			},
+		}
+
+		err = quizStore.UpdateQuiz(t.Context(), updatedQuiz)
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+		if got, want := err.Error(), "error handling questions in transaction"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+}
+
+func TestSQLiteStore_CreateQuestion(t *testing.T) {
+	t.Parallel()
+
+	buf := bytes.Buffer{}
+	logger := logging.NewLogger(&buf)
+
+	db := setupTestDBWithMigrations(t)
+
+	quizStore := quiz.NewSQLiteStore(db, logger)
+
+	t.Run("create question", func(t *testing.T) {
+		testQuestion := quiz.Question{
+			Text: "Question 1",
+			Options: []*quiz.Option{
+				{Text: "Option 1-1"},
+				{Text: "Option 1-2"},
+				{Text: "Option 1-3"},
+			},
+		}
+
+		err := quizStore.CreateQuestion(t.Context(), &testQuestion)
+		if err != nil {
+			t.Fatalf("error creating question: %v", err)
+		}
+		qs, err := quizStore.GetQuestionByID(t.Context(), testQuestion.ID)
+		if err != nil {
+			t.Fatalf("error getting question by ID: %v", err)
+		}
+		if diff := cmp.Diff(qs, &testQuestion,
+			cmpopts.SortSlices(lessOptions),
+		); diff != "" {
+			t.Errorf("questions diff (-got +want):\n%s", diff)
+		}
+	})
+
+	t.Run("ignore supplied ID's", func(t *testing.T) {
+		t.Parallel()
+
+		suppliedQuestionID := int64(1000)
+		suppliedOption1ID := int64(1001)
+		suppliedOption2ID := int64(1002)
+
+		testQuestion := &quiz.Question{
+			ID:   suppliedQuestionID,
+			Text: "Question 1",
+			Options: []*quiz.Option{
+				{
+					ID:         suppliedOption1ID,
+					QuestionID: suppliedQuestionID,
+					Text:       "Option 1-1",
+				},
+				{
+					ID:         suppliedOption2ID,
+					QuestionID: suppliedQuestionID,
+					Text:       "Option 1-2",
+				},
+			},
+		}
+
+		err := quizStore.CreateQuestion(t.Context(), testQuestion)
+		if err != nil {
+			t.Fatalf("error creating question: %v", err)
+		}
+
+		qs, err := quizStore.GetQuestionByID(t.Context(), suppliedQuestionID)
+		if err == nil {
+			t.Fatalf("got nil, want error")
+		}
+		if !errors.Is(err, quiz.ErrQuestionNotFound) {
+			t.Errorf("err = %v, want %v", err, quiz.ErrQuestionNotFound)
+		}
+		if qs != nil {
+			t.Errorf("qs = %v, want nil", qs)
+		}
+
+		if testQuestion.ID == suppliedQuestionID {
+			t.Fatalf("testQuestion.ID = %d, should not be %d", testQuestion.ID, suppliedQuestionID)
+		}
+		if testQuestion.Options[0].ID == suppliedOption1ID {
+			t.Fatalf("testQuestion.Options[0].ID = %d, should not be %d", testQuestion.Options[0].ID, suppliedOption1ID)
+		}
+		if testQuestion.Options[1].ID == suppliedOption2ID {
+			t.Fatalf("testQuestion.Options[1].ID = %d, should not be %d", testQuestion.Options[1].ID, suppliedOption2ID)
 		}
 	})
 }
