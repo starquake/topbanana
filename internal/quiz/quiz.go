@@ -39,6 +39,10 @@ var (
 	ErrQuizNotFound = errors.New("quiz not found")
 	// ErrQuestionNotFound is returned when a question is not found.
 	ErrQuestionNotFound = errors.New("question not found")
+	// ErrUpdatingQuizNoRowsAffected is returned when no rows are affected when updating a quiz.
+	ErrUpdatingQuizNoRowsAffected = errors.New("no rows affected when updating quiz")
+	// ErrUpdatingQuestionNoRowsAffected is returned when no rows are affected when updating a question.
+	ErrUpdatingQuestionNoRowsAffected = errors.New("no rows affected when updating question")
 )
 
 // Timestamp is a timestamp with millisecond precision. Used for SQLite type conversion.
@@ -294,8 +298,9 @@ func (s *SQLiteStore) GetQuestionByID(ctx context.Context, questionID int64) (*Q
 // CreateQuiz creates a quiz.
 func (s *SQLiteStore) CreateQuiz(ctx context.Context, quiz *Quiz) error {
 	// TODO: Use a transaction here. Also updates the tests.
+	quiz.CreatedAt = time.Now().UTC()
 	quizResult, err := s.db.ExecContext(ctx, createQuizSQL,
-		quiz.Title, quiz.Slug, quiz.Description, Timestamp(time.Now().UTC()))
+		quiz.Title, quiz.Slug, quiz.Description, Timestamp(quiz.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("error creating quiz: %w", err)
 	}
@@ -362,7 +367,7 @@ func (s *SQLiteStore) UpdateQuiz(ctx context.Context, quiz *Quiz) error {
 		return fmt.Errorf("error getting rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("no rows affected when updating quiz: %d", quiz.ID)
+		return fmt.Errorf("%w: quizID %d", ErrUpdatingQuizNoRowsAffected, quiz.ID)
 	}
 
 	// Handle Questions (Create, Update, Delete)
@@ -393,10 +398,16 @@ func (s *SQLiteStore) CreateQuestion(ctx context.Context, qs *Question) error {
 	qs.ID = resultID
 
 	for _, option := range qs.Options {
-		_, err = s.db.ExecContext(ctx, createOptionSQL, qs.ID, option.Text, option.Correct)
-		if err != nil {
+		result, err = s.db.ExecContext(ctx, createOptionSQL, qs.ID, option.Text, option.Correct)
+		if result == nil {
 			return fmt.Errorf("error creating option: %w", err)
 		}
+		optionID, err := result.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("error getting last insert ID: %w", err)
+		}
+		option.ID = optionID
+		option.QuestionID = qs.ID
 	}
 
 	return nil
