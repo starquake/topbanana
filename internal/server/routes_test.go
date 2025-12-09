@@ -10,7 +10,6 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/starquake/topbanana/internal/logging"
 	"github.com/starquake/topbanana/internal/migrations"
-	"github.com/starquake/topbanana/internal/must"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/server"
 	"github.com/starquake/topbanana/internal/store"
@@ -23,8 +22,14 @@ func setupTestDBWithMigrations(t *testing.T) *sql.DB {
 	db := setupTestDBWithoutMigrations(t)
 
 	goose.SetBaseFS(migrations.FS)
-	must.OK(goose.SetDialect("sqlite3"))
-	must.OK(goose.Up(db, "."))
+	err := goose.SetDialect("sqlite3")
+	if err != nil {
+		t.Fatalf("error setting dialect: %v", err)
+	}
+	err = goose.Up(db, ".")
+	if err != nil {
+		t.Fatalf("error running migrations: %v", err)
+	}
 
 	return db
 }
@@ -32,7 +37,10 @@ func setupTestDBWithMigrations(t *testing.T) *sql.DB {
 func setupTestDBWithoutMigrations(t *testing.T) *sql.DB {
 	t.Helper()
 
-	db := must.Any(sql.Open("sqlite", ":memory:"))
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("error opening SQLite database: %v", err)
+	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
