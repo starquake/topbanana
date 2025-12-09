@@ -821,7 +821,7 @@ func TestSQLiteStore_CreateQuiz(t *testing.T) {
 
 		qz, err := quizStore.GetQuizByID(t.Context(), suppliedQuizID)
 		if err == nil {
-			t.Fatalf("got nil, want error")
+			t.Fatal("got nil, want error")
 		}
 		if !errors.Is(err, quiz.ErrQuizNotFound) {
 			t.Errorf("err = %v, want %v", err, quiz.ErrQuizNotFound)
@@ -1286,6 +1286,7 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 	quizStore := quiz.NewSQLiteStore(db, logger)
 
 	t.Run("create question", func(t *testing.T) {
+		t.Parallel()
 		testQuestion := quiz.Question{
 			Text: "Question 1",
 			Options: []*quiz.Option{
@@ -1341,7 +1342,7 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 
 		qs, err := quizStore.GetQuestionByID(t.Context(), suppliedQuestionID)
 		if err == nil {
-			t.Fatalf("got nil, want error")
+			t.Fatal("got nil, want error")
 		}
 		if !errors.Is(err, quiz.ErrQuestionNotFound) {
 			t.Errorf("err = %v, want %v", err, quiz.ErrQuestionNotFound)
