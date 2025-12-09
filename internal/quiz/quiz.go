@@ -338,23 +338,35 @@ func (s *SQLiteStore) CreateQuiz(ctx context.Context, quiz *Quiz) error {
 	return nil
 }
 
-// UpdateQuiz updates a quiz.
+// UpdateQuiz updates a quiz, questions, and their options.
 func (s *SQLiteStore) UpdateQuiz(ctx context.Context, quiz *Quiz) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("error starting transaction: %w", err)
 	}
 	defer func() {
-		_ = tx.Rollback()
+		err = tx.Rollback()
+		if err != nil && !errors.Is(err, sql.ErrTxDone) {
+			s.logger.Error(ctx, "error rolling back transaction", logging.ErrAttr(err))
+		}
 	}()
 
-	// Update Quiz root
-	if _, err = tx.ExecContext(ctx, updateQuizSQL, quiz.Title, quiz.Slug, quiz.Description, quiz.ID); err != nil {
-		return fmt.Errorf("error updating quiz root: %w", err)
+	// Update Quiz
+	res, err := tx.ExecContext(ctx, updateQuizSQL, quiz.Title, quiz.Slug, quiz.Description, quiz.ID)
+	if err != nil {
+		return fmt.Errorf("error updating quiz: %w", err)
+	}
+
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("error getting rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("no rows affected when updating quiz: %d", quiz.ID)
 	}
 
 	// Handle Questions (Create, Update, Delete)
-	err = s.handleQuestionsInTx(ctx, quiz, tx)
+	err = s.handleQuestionsInTx(ctx, tx, quiz)
 	if err != nil {
 		return fmt.Errorf("error handling questions in transaction: %w", err)
 	}
@@ -400,7 +412,7 @@ func (s *SQLiteStore) UpdateQuestion(ctx context.Context, question *Question) er
 	return nil
 }
 
-func (s *SQLiteStore) handleQuestionsInTx(ctx context.Context, quiz *Quiz, tx *sql.Tx) error {
+func (s *SQLiteStore) handleQuestionsInTx(ctx context.Context, tx *sql.Tx, quiz *Quiz) error {
 	existingQIDs, err := s.getQuestionIDsInTx(ctx, tx, quiz.ID)
 	if err != nil {
 		return fmt.Errorf("error getting questionIDs: %w", err)
