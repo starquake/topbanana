@@ -16,7 +16,6 @@ import (
 	"github.com/starquake/topbanana/internal/migrations"
 	"github.com/starquake/topbanana/internal/quiz"
 	"modernc.org/sqlite"
-	_ "modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
@@ -1346,6 +1345,7 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 	})
 
 	t.Run("fail on nonexisting quizID", func(t *testing.T) {
+		t.Parallel()
 		db := setupTestDBWithMigrations(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
@@ -1363,7 +1363,8 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 		if err == nil {
 			t.Fatal("got nil, want error")
 		}
-		if sqliteErr, ok := err.(*sqlite.Error); ok {
+		sqliteErr := &sqlite.Error{}
+		if errors.As(err, &sqliteErr) {
 			code := sqliteErr.Code()
 			if got, want := code, sqlite3.SQLITE_CONSTRAINT; got != want {
 				t.Fatalf("got error code %d, want %d", code, sqlite3.SQLITE_CONSTRAINT)
@@ -1440,7 +1441,7 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 			t.Fatalf("error creating question: %v", err)
 		}
 		if testQuestion.Options[0].ID == suppliedOptionID {
-			t.Errorf("option ID was not ignored")
+			t.Error("option ID was not ignored")
 		}
 	})
 }
