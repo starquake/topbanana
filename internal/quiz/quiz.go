@@ -197,12 +197,8 @@ func (s *SQLiteStore) GetQuizByID(ctx context.Context, quizID int64) (*Quiz, err
 		return nil, fmt.Errorf("error iterating quizRow: %w", quizRow.Err())
 	}
 
-	var id int64
-	var title, slug, description string
-	var createdAt Timestamp
-
-	err = quizRow.Scan(&id, &title, &slug, &description, &createdAt)
-	if err != nil {
+	qz := &Quiz{}
+	if err = quizRow.Scan(&qz.ID, &qz.Title, &qz.Slug, &qz.Description, (*Timestamp)(&qz.CreatedAt)); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("%w: quiz %d not found", ErrQuizNotFound, quizID)
 		}
@@ -210,22 +206,14 @@ func (s *SQLiteStore) GetQuizByID(ctx context.Context, quizID int64) (*Quiz, err
 		return nil, fmt.Errorf("error scanning quizRow: %w", err)
 	}
 
-	quiz := Quiz{
-		ID:          id,
-		Title:       title,
-		Slug:        slug,
-		Description: description,
-		CreatedAt:   time.Time(createdAt),
-	}
-
-	questions, err := s.getQuestionsByQuizID(ctx, quiz.ID)
+	questions, err := s.getQuestionsByQuizID(ctx, qz.ID)
 	if err != nil {
-		return nil, fmt.Errorf("error getting questions for quiz %d: %w", quiz.ID, err)
+		return nil, fmt.Errorf("error getting questions for quiz %d: %w", qz.ID, err)
 	}
 
-	quiz.Questions = questions
+	qz.Questions = questions
 
-	return &quiz, nil
+	return qz, nil
 }
 
 // ListQuizzes returns all quizzes including related questions and options.
@@ -513,11 +501,13 @@ func (*SQLiteStore) getOptionIDsInTx(ctx context.Context, tx *sql.Tx, questionID
 }
 
 func (s *SQLiteStore) handleOptionsInTx(ctx context.Context, tx *sql.Tx, options []*Option, questionID int64) error {
-	existingOIDs, err := s.getOptionIDsInTx(ctx, tx, questionID)
-	if err != nil {
-		return err
+	var existingOIDs []int64
+	var err error
+	if existingOIDs, err = s.getOptionIDsInTx(ctx, tx, questionID); err != nil {
+		return fmt.Errorf("error getting options: %w", err)
 	}
 
+	// UPSERT
 	incomingOIDs := make(map[int64]bool)
 	for _, o := range options {
 		o.QuestionID = questionID // Ensure linkage
@@ -525,11 +515,12 @@ func (s *SQLiteStore) handleOptionsInTx(ctx context.Context, tx *sql.Tx, options
 		if o.ID != 0 {
 			incomingOIDs[o.ID] = true
 		}
-		if err := s.upsertOption(ctx, tx, o); err != nil {
-			return err
+		if err = s.upsertOption(ctx, tx, o); err != nil {
+			return fmt.Errorf("error upserting option %d: %w", o.ID, err)
 		}
 	}
 
+	// DELETE
 	deleteOIDs := make([]int64, 0, len(existingOIDs))
 	for _, oid := range existingOIDs {
 		if !incomingOIDs[oid] {
@@ -537,7 +528,12 @@ func (s *SQLiteStore) handleOptionsInTx(ctx context.Context, tx *sql.Tx, options
 		}
 	}
 
-	return s.deleteOptions(ctx, tx, deleteOIDs)
+	err = s.deleteOptions(ctx, tx, deleteOIDs)
+	if err != nil {
+		return fmt.Errorf("error deleting options: %w", err)
+	}
+
+	return nil
 }
 
 func (s *SQLiteStore) upsertOption(ctx context.Context, tx *sql.Tx, o *Option) error {
