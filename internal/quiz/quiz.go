@@ -304,7 +304,7 @@ func (s *SQLiteStore) CreateQuiz(ctx context.Context, qz *Quiz) error {
 		quizResult, err := tx.ExecContext(ctx, createQuizSQL,
 			qz.Title, qz.Slug, qz.Description, Timestamp(qz.CreatedAt))
 		if err != nil {
-			return fmt.Errorf("error creating qz: %w", err)
+			return fmt.Errorf("error creating quiz: %w", err)
 		}
 		resultID, err := quizResult.LastInsertId()
 		if err != nil {

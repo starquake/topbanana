@@ -1301,12 +1301,12 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 	buf := bytes.Buffer{}
 	logger := logging.NewLogger(&buf)
 
-	db := setupTestDBWithMigrations(t)
-
-	quizStore := quiz.NewSQLiteStore(db, logger)
-
 	t.Run("create question", func(t *testing.T) {
 		t.Parallel()
+		db := setupTestDBWithMigrations(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
 		testQuiz := &quiz.Quiz{
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
@@ -1346,6 +1346,10 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 	})
 
 	t.Run("fail on nonexisting quizID", func(t *testing.T) {
+		db := setupTestDBWithMigrations(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
 		testQuestion := &quiz.Question{
 			Text: "Question 1",
 			Options: []*quiz.Option{
@@ -1369,6 +1373,10 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 
 	t.Run("fail on nonexisting questionID", func(t *testing.T) {
 		t.Parallel()
+
+		db := setupTestDBWithMigrations(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
 
 		suppliedQuestionID := int64(1000)
 
@@ -1396,23 +1404,43 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 		}
 	})
 
-	// t.Run("fail on nonexisting optionId", func(t *testing.T) {
-	//	t.Parallel()
-	//
-	//	suppliedOptionID := int64(1000)
-	//
-	//	testQuestion := &quiz.Question{
-	//		Text:   "Question 1",
-	//		Options: []*quiz.Option{
-	//			{
-	//				ID:         suppliedOptionID,
-	//				QuestionID: 1,
-	//				Text:       "Option 1-1",
-	//			},
-	//			{
-	//				ID:         suppliedOptionID,
-	//			}
-	//		}
-	//	}
-	//})
+	t.Run("ignore supplied option ID", func(t *testing.T) {
+		t.Parallel()
+
+		db := setupTestDBWithMigrations(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
+		suppliedOptionID := int64(1000)
+
+		testQuiz := &quiz.Quiz{
+			Title:       "Quiz 1",
+			Slug:        "quiz-1",
+			Description: "Description",
+		}
+
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("error creating quiz: %v", err)
+		}
+
+		testQuestion := &quiz.Question{
+			QuizID: testQuiz.ID,
+			Text:   "Question 1",
+			Options: []*quiz.Option{
+				{
+					ID:         suppliedOptionID,
+					QuestionID: 1,
+					Text:       "Option 1-1",
+				},
+			},
+		}
+
+		err := quizStore.CreateQuestion(t.Context(), testQuestion)
+		if err != nil {
+			t.Fatalf("error creating question: %v", err)
+		}
+		if testQuestion.Options[0].ID == suppliedOptionID {
+			t.Errorf("option ID was not ignored")
+		}
+	})
 }
