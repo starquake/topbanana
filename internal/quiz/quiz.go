@@ -317,7 +317,7 @@ func (s *SQLiteStore) CreateQuiz(ctx context.Context, qz *Quiz) error {
 		}
 		err = s.handleQuestionsInTx(ctx, tx, qz.Questions, qz.ID)
 		if err != nil {
-			return fmt.Errorf("error handling questions in transaction: %w", err)
+			return fmt.Errorf("error handling questions: %w", err)
 		}
 
 		return nil
@@ -344,7 +344,7 @@ func (s *SQLiteStore) UpdateQuiz(ctx context.Context, qz *Quiz) error {
 		// Handle Questions (Create, Update, Delete)
 		err = s.handleQuestionsInTx(ctx, tx, qz.Questions, qz.ID)
 		if err != nil {
-			return fmt.Errorf("error handling questions in transaction: %w", err)
+			return fmt.Errorf("error handling questions: %w", err)
 		}
 
 		return nil
@@ -355,10 +355,10 @@ func (s *SQLiteStore) UpdateQuiz(ctx context.Context, qz *Quiz) error {
 func (s *SQLiteStore) CreateQuestion(ctx context.Context, qs *Question) error {
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		if err := s.handleQuestionsInTx(ctx, tx, []*Question{qs}, qs.QuizID); err != nil {
-			return fmt.Errorf("error creating question: %w", err)
+			return fmt.Errorf("error handling question: %w", err)
 		}
 		if err := s.handleOptionsInTx(ctx, tx, qs.Options, qs.ID); err != nil {
-			return fmt.Errorf("error handling options in transaction: %w", err)
+			return fmt.Errorf("error handling options: %w", err)
 		}
 
 		return nil
@@ -369,10 +369,10 @@ func (s *SQLiteStore) CreateQuestion(ctx context.Context, qs *Question) error {
 func (s *SQLiteStore) UpdateQuestion(ctx context.Context, qs *Question) error {
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		if err := s.handleQuestionsInTx(ctx, tx, []*Question{qs}, qs.QuizID); err != nil {
-			return fmt.Errorf("error creating question: %w", err)
+			return fmt.Errorf("error handling question: %w", err)
 		}
 		if err := s.handleOptionsInTx(ctx, tx, qs.Options, qs.ID); err != nil {
-			return fmt.Errorf("error handling options in transaction: %w", err)
+			return fmt.Errorf("error handling options: %w", err)
 		}
 
 		return nil
@@ -454,7 +454,7 @@ func (s *SQLiteStore) handleQuestionsInTx(ctx context.Context, tx *sql.Tx, quest
 		}
 		// Handle Options for this question (regardless of create or update)
 		if err = s.handleOptionsInTx(ctx, tx, qs.Options, qs.ID); err != nil {
-			return fmt.Errorf("error handling options in transaction for question %d: %w", qs.ID, err)
+			return fmt.Errorf("error handling options for question %d: %w", qs.ID, err)
 		}
 	}
 
