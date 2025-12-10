@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -14,8 +13,10 @@ import (
 
 type failLastInsertIDResult struct{}
 
+var ErrFailLastInsertID = errors.New("forced last insert ID error")
+
 func (failLastInsertIDResult) LastInsertId() (int64, error) {
-	return 0, errors.New("forced last insert ID error")
+	return 0, ErrFailLastInsertID
 }
 
 func (failLastInsertIDResult) RowsAffected() (int64, error) {
@@ -96,9 +97,13 @@ func TestSQLiteStore_CreateQuiz_MockTesting(t *testing.T) {
 			Description: "A description",
 		}
 
+		mock.ExpectBegin()
+
 		mock.ExpectExec("INSERT INTO quizzes").
 			WithArgs(qz.Title, qz.Slug, qz.Description, sqlmock.AnyArg()).
 			WillReturnResult(failLastInsertIDResult{})
+
+		mock.ExpectRollback()
 
 		mock.ExpectClose()
 
@@ -108,8 +113,8 @@ func TestSQLiteStore_CreateQuiz_MockTesting(t *testing.T) {
 			t.Fatal("expected an error, but got nil")
 		}
 
-		if got, want := err.Error(), "error getting last insert ID for quiz"; !strings.Contains(got, want) {
-			t.Errorf("got %q, should contain %q", got, want)
+		if got, want := err, ErrFailLastInsertID; !errors.Is(got, want) {
+			t.Errorf("got %q, want %q", got, want)
 		}
 	})
 
@@ -146,13 +151,21 @@ func TestSQLiteStore_CreateQuiz_MockTesting(t *testing.T) {
 			},
 		}
 
+		mock.ExpectBegin()
+
 		mock.ExpectExec("INSERT INTO quizzes").
 			WithArgs(qz.Title, qz.Slug, qz.Description, sqlmock.AnyArg()).
 			WillReturnResult(sqlmock.NewResult(1, 1))
 
+		mock.ExpectQuery("SELECT id FROM questions WHERE quiz_id").
+			WithArgs(sqlmock.AnyArg()).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
 		mock.ExpectExec("INSERT INTO questions").
 			WithArgs(1, qz.Questions[0].Text, qz.Questions[0].ImageURL, qz.Questions[0].Position).
 			WillReturnResult(failLastInsertIDResult{})
+
+		mock.ExpectRollback()
 
 		mock.ExpectClose()
 
@@ -162,8 +175,8 @@ func TestSQLiteStore_CreateQuiz_MockTesting(t *testing.T) {
 			t.Fatal("expected an error, but got nil")
 		}
 
-		if got, want := err.Error(), "error getting last insert ID for question"; !strings.Contains(got, want) {
-			t.Errorf("got %q, should contain %q", got, want)
+		if got, want := err, ErrFailLastInsertID; !errors.Is(got, want) {
+			t.Errorf("got %q, want %q", got, want)
 		}
 	})
 
@@ -203,17 +216,29 @@ func TestSQLiteStore_CreateQuiz_MockTesting(t *testing.T) {
 			},
 		}
 
+		mock.ExpectBegin()
+
 		mock.ExpectExec("INSERT INTO quizzes").
 			WithArgs(qz.Title, qz.Slug, qz.Description, sqlmock.AnyArg()).
 			WillReturnResult(sqlmock.NewResult(1, 1))
+
+		mock.ExpectQuery("SELECT id FROM questions WHERE quiz_id").
+			WithArgs(sqlmock.AnyArg()).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
 		mock.ExpectExec("INSERT INTO questions").
 			WithArgs(1, qz.Questions[0].Text, qz.Questions[0].ImageURL, qz.Questions[0].Position).
 			WillReturnResult(sqlmock.NewResult(1, 1))
 
+		mock.ExpectQuery("SELECT id FROM options WHERE question_id").
+			WithArgs(sqlmock.AnyArg()).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
 		mock.ExpectExec("INSERT INTO options").
 			WithArgs(1, qz.Questions[0].Options[0].Text, qz.Questions[0].Options[0].Correct).
 			WillReturnResult(failLastInsertIDResult{})
+
+		mock.ExpectRollback()
 
 		mock.ExpectClose()
 
@@ -223,8 +248,8 @@ func TestSQLiteStore_CreateQuiz_MockTesting(t *testing.T) {
 			t.Fatal("expected an error, but got nil")
 		}
 
-		if got, want := err.Error(), "error getting last insert ID for option"; !strings.Contains(got, want) {
-			t.Errorf("got %q, should contain %q", got, want)
+		if got, want := err, ErrFailLastInsertID; !errors.Is(got, want) {
+			t.Errorf("got %q, want %q", got, want)
 		}
 	})
 }

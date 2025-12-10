@@ -296,208 +296,110 @@ func (s *SQLiteStore) GetQuestionByID(ctx context.Context, questionID int64) (*Q
 }
 
 // CreateQuiz creates a quiz.
-func (s *SQLiteStore) CreateQuiz(ctx context.Context, quiz *Quiz) error {
-	// TODO: Use a transaction here. Also updates the tests.
-	quiz.CreatedAt = time.Now().UTC()
-	quizResult, err := s.db.ExecContext(ctx, createQuizSQL,
-		quiz.Title, quiz.Slug, quiz.Description, Timestamp(quiz.CreatedAt))
-	if err != nil {
-		return fmt.Errorf("error creating quiz: %w", err)
-	}
-	resultID, err := quizResult.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("error getting last insert ID for quiz: %w", err)
-	}
-	quiz.ID = resultID
-
-	for _, question := range quiz.Questions {
-		questionResult, err := s.db.ExecContext(
-			ctx, createQuestionSQL,
-			quiz.ID, question.Text, question.ImageURL, question.Position,
-		)
+func (s *SQLiteStore) CreateQuiz(ctx context.Context, qz *Quiz) error {
+	return s.withTx(ctx, func(tx *sql.Tx) error {
+		qz.CreatedAt = time.Now().UTC()
+		quizResult, err := tx.ExecContext(ctx, createQuizSQL,
+			qz.Title, qz.Slug, qz.Description, Timestamp(qz.CreatedAt))
 		if err != nil {
-			return fmt.Errorf("error creating question: %w", err)
+			return fmt.Errorf("error creating qz: %w", err)
 		}
-		questionID, err := questionResult.LastInsertId()
+		resultID, err := quizResult.LastInsertId()
 		if err != nil {
-			return fmt.Errorf("error getting last insert ID for question: %w", err)
+			return fmt.Errorf("error getting last insert ID for quiz: %w", err)
 		}
-		question.ID = questionID
-		question.QuizID = quiz.ID
-	}
-	for _, question := range quiz.Questions {
-		for _, option := range question.Options {
-			optionResult, err := s.db.ExecContext(ctx, createOptionSQL, question.ID, option.Text, option.Correct)
-			if err != nil {
-				return fmt.Errorf("error creating option: %w", err)
-			}
-			optionID, err := optionResult.LastInsertId()
-			if err != nil {
-				return fmt.Errorf("error getting last insert ID for option: %w", err)
-			}
-			option.ID = optionID
-			option.QuestionID = question.ID
-		}
-	}
+		qz.ID = resultID
 
-	return nil
+		for _, question := range qz.Questions {
+			question.ID = 0
+		}
+		err = s.handleQuestionsInTx(ctx, tx, qz.Questions, qz.ID)
+		if err != nil {
+			return fmt.Errorf("error handling questions in transaction: %w", err)
+		}
+
+		return nil
+	})
 }
 
 // UpdateQuiz updates a quiz, questions, and their options.
-func (s *SQLiteStore) UpdateQuiz(ctx context.Context, quiz *Quiz) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("error starting transaction: %w", err)
-	}
-	defer func() {
-		err = tx.Rollback()
-		if err != nil && !errors.Is(err, sql.ErrTxDone) {
-			s.logger.Error(ctx, "error rolling back transaction", logging.ErrAttr(err))
+func (s *SQLiteStore) UpdateQuiz(ctx context.Context, qz *Quiz) error {
+	return s.withTx(ctx, func(tx *sql.Tx) error {
+		// Update Quiz
+		res, err := tx.ExecContext(ctx, updateQuizSQL, qz.Title, qz.Slug, qz.Description, qz.ID)
+		if err != nil {
+			return fmt.Errorf("error updating quiz: %w", err)
 		}
-	}()
 
-	// Update Quiz
-	res, err := tx.ExecContext(ctx, updateQuizSQL, quiz.Title, quiz.Slug, quiz.Description, quiz.ID)
-	if err != nil {
-		return fmt.Errorf("error updating quiz: %w", err)
-	}
+		rows, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("error getting rows affected: %w", err)
+		}
+		if rows == 0 {
+			return fmt.Errorf("%w: quizID %d", ErrUpdatingQuizNoRowsAffected, qz.ID)
+		}
 
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("error getting rows affected: %w", err)
-	}
-	if rows == 0 {
-		return fmt.Errorf("%w: quizID %d", ErrUpdatingQuizNoRowsAffected, quiz.ID)
-	}
+		// Handle Questions (Create, Update, Delete)
+		err = s.handleQuestionsInTx(ctx, tx, qz.Questions, qz.ID)
+		if err != nil {
+			return fmt.Errorf("error handling questions in transaction: %w", err)
+		}
 
-	// Handle Questions (Create, Update, Delete)
-	err = s.handleQuestionsInTx(ctx, tx, quiz)
-	if err != nil {
-		return fmt.Errorf("error handling questions in transaction: %w", err)
-	}
-
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("error committing transaction: %w", err)
-	}
-
-	return nil
+		return nil
+	})
 }
 
 // CreateQuestion creates a question and its options and saves them to the database.
 func (s *SQLiteStore) CreateQuestion(ctx context.Context, qs *Question) error {
-	var result sql.Result
-	var err error
-	result, err = s.db.ExecContext(ctx, createQuestionSQL, qs.QuizID, qs.Text, qs.ImageURL, qs.Position)
-	if err != nil {
-		return fmt.Errorf("error creating question: %w", err)
-	}
-	resultID, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("error getting last insert ID: %w", err)
-	}
-	qs.ID = resultID
-
-	for _, option := range qs.Options {
-		result, err = s.db.ExecContext(ctx, createOptionSQL, qs.ID, option.Text, option.Correct)
-		if result == nil {
-			return fmt.Errorf("error creating option: %w", err)
+	return s.withTx(ctx, func(tx *sql.Tx) error {
+		for _, option := range qs.Options {
+			option.ID = 0
 		}
-		optionID, err := result.LastInsertId()
-		if err != nil {
-			return fmt.Errorf("error getting last insert ID: %w", err)
+		if err := s.createQuestionInTx(ctx, tx, qs); err != nil {
+			return fmt.Errorf("error creating question: %w", err)
 		}
-		option.ID = optionID
-		option.QuestionID = qs.ID
-	}
+		if err := s.handleOptionsInTx(ctx, tx, qs.Options, qs.ID); err != nil {
+			return fmt.Errorf("error handling options in transaction: %w", err)
+		}
 
-	return nil
+		return nil
+	})
 }
 
 // UpdateQuestion updates a question.
-func (s *SQLiteStore) UpdateQuestion(ctx context.Context, question *Question) error {
-	_, err := s.db.ExecContext(ctx, updateQuestionSQL, question.Text, question.ImageURL, question.Position, question.ID)
-	if err != nil {
-		return fmt.Errorf("error updating question: %w", err)
-	}
+func (s *SQLiteStore) UpdateQuestion(ctx context.Context, qs *Question) error {
+	return s.withTx(ctx, func(tx *sql.Tx) error {
+		if err := s.updateQuestionInTx(ctx, tx, qs); err != nil {
+			return fmt.Errorf("error creating question: %w", err)
+		}
+		if err := s.handleOptionsInTx(ctx, tx, qs.Options, qs.ID); err != nil {
+			return fmt.Errorf("error handling options in transaction: %w", err)
+		}
 
-	return nil
+		return nil
+	})
 }
 
-func (s *SQLiteStore) handleQuestionsInTx(ctx context.Context, tx *sql.Tx, quiz *Quiz) error {
-	existingQIDs, err := s.getQuestionIDsInTx(ctx, tx, quiz.ID)
+func (s *SQLiteStore) withTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
+	var txn *sql.Tx
+	var err error
+	if txn, err = s.db.BeginTx(ctx, nil); err != nil {
+		return fmt.Errorf("error starting transaction: %w", err)
+	}
+	defer func() {
+		err = txn.Rollback()
+		if err != nil && !errors.Is(err, sql.ErrTxDone) {
+			s.logger.Error(ctx, "error rolling back transaction", logging.ErrAttr(err))
+		}
+	}()
+	err = fn(txn)
 	if err != nil {
-		return fmt.Errorf("error getting questionIDs: %w", err)
+		return fmt.Errorf("error executing transaction: %w", err)
 	}
 
-	incomingQIDs := make(map[int64]bool)
-	for _, q := range quiz.Questions {
-		q.QuizID = quiz.ID // Ensure linkage
-
-		if q.ID == 0 {
-			// CREATE
-			if err = s.createQuestionInTx(ctx, tx, q); err != nil {
-				return fmt.Errorf("error creating new question (text: %q): %w", q.Text, err)
-			}
-		} else {
-			// UPDATE
-			if err = s.updateQuestionInTx(ctx, tx, q); err != nil {
-				return fmt.Errorf("error updating question %d: %w", q.ID, err)
-			}
-			incomingQIDs[q.ID] = true
-		}
-		// Handle Options for this question (regardless of create or update)
-		if err = s.handleOptionsInTx(ctx, tx, q); err != nil {
-			return fmt.Errorf("error handling options for question %d: %w", q.ID, err)
-		}
-	}
-
-	// DELETE missing questions
-	for _, id := range existingQIDs {
-		if !incomingQIDs[id] {
-			if _, err = tx.ExecContext(ctx, deleteQuestionSQL, id); err != nil {
-				return fmt.Errorf("error deleting question %d: %w", id, err)
-			}
-		}
-	}
-
-	return nil
-}
-
-func (s *SQLiteStore) handleOptionsInTx(ctx context.Context, tx *sql.Tx, q *Question) error {
-	existingOIDs, err := s.getOptionIDsInTx(ctx, tx, q.ID)
+	err = txn.Commit()
 	if err != nil {
-		return err
-	}
-
-	incomingOIDs := make(map[int64]bool)
-	for _, o := range q.Options {
-		o.QuestionID = q.ID // Ensure linkage
-
-		if o.ID == 0 {
-			// CREATE Option
-			res, err := tx.ExecContext(ctx, createOptionSQL, q.ID, o.Text, o.Correct)
-			if err != nil {
-				return fmt.Errorf("error creating option: %w", err)
-			}
-			o.ID, err = res.LastInsertId()
-			if err != nil {
-				return fmt.Errorf("error getting option ID: %w", err)
-			}
-		} else {
-			if _, err := tx.ExecContext(ctx, updateOptionSQL, o.Text, o.Correct, o.ID); err != nil {
-				return fmt.Errorf("error updating option %d: %w", o.ID, err)
-			}
-			incomingOIDs[o.ID] = true
-		}
-	}
-
-	// DELETE missing options
-	for _, id := range existingOIDs {
-		if !incomingOIDs[id] {
-			if _, err := tx.ExecContext(ctx, deleteOptionSQL, id); err != nil {
-				return fmt.Errorf("error deleting option %d: %w", id, err)
-			}
-		}
+		return fmt.Errorf("error committing transaction: %w", err)
 	}
 
 	return nil
@@ -526,6 +428,49 @@ func (*SQLiteStore) getQuestionIDsInTx(ctx context.Context, tx *sql.Tx, quizID i
 	return ids, nil
 }
 
+func (s *SQLiteStore) handleQuestionsInTx(ctx context.Context, tx *sql.Tx, questions []*Question, quizID int64) error {
+	existingQsIDs, err := s.getQuestionIDsInTx(ctx, tx, quizID)
+	if err != nil {
+		return fmt.Errorf("error getting questionIDs: %w", err)
+	}
+
+	incomingQsIDs := make(map[int64]bool)
+	for _, qs := range questions {
+		qs.QuizID = quizID // Ensure linkage
+
+		if qs.ID == 0 {
+			// CREATE
+			for _, option := range qs.Options {
+				option.ID = 0
+			}
+			if err = s.createQuestionInTx(ctx, tx, qs); err != nil {
+				return fmt.Errorf("error creating new question (text: %qs): %w", qs.Text, err)
+			}
+		} else {
+			// UPDATE
+			if err = s.updateQuestionInTx(ctx, tx, qs); err != nil {
+				return fmt.Errorf("error updating question %d: %w", qs.ID, err)
+			}
+			incomingQsIDs[qs.ID] = true
+		}
+		// Handle Options for this question (regardless of create or update)
+		if err = s.handleOptionsInTx(ctx, tx, qs.Options, qs.ID); err != nil {
+			return fmt.Errorf("error handling options in transaction for question %d: %w", qs.ID, err)
+		}
+	}
+
+	// DELETE missing questions
+	for _, id := range existingQsIDs {
+		if !incomingQsIDs[id] {
+			if _, err = tx.ExecContext(ctx, deleteQuestionSQL, id); err != nil {
+				return fmt.Errorf("error deleting question %d: %w", id, err)
+			}
+		}
+	}
+
+	return nil
+}
+
 func (*SQLiteStore) getOptionIDsInTx(ctx context.Context, tx *sql.Tx, questionID int64) ([]int64, error) {
 	rows, err := tx.QueryContext(ctx, getOptionIDsByQuestionIDSQL, questionID)
 	if err != nil {
@@ -549,12 +494,52 @@ func (*SQLiteStore) getOptionIDsInTx(ctx context.Context, tx *sql.Tx, questionID
 	return ids, nil
 }
 
-func (*SQLiteStore) createQuestionInTx(ctx context.Context, tx *sql.Tx, q *Question) error {
-	res, err := tx.ExecContext(ctx, createQuestionSQL, q.QuizID, q.Text, q.ImageURL, q.Position)
+func (s *SQLiteStore) handleOptionsInTx(ctx context.Context, tx *sql.Tx, options []*Option, questionID int64) error {
+	existingOIDs, err := s.getOptionIDsInTx(ctx, tx, questionID)
+	if err != nil {
+		return err
+	}
+
+	incomingOIDs := make(map[int64]bool)
+	for _, o := range options {
+		o.QuestionID = questionID // Ensure linkage
+
+		if o.ID == 0 {
+			// CREATE Option
+			res, err := tx.ExecContext(ctx, createOptionSQL, questionID, o.Text, o.Correct)
+			if err != nil {
+				return fmt.Errorf("error creating option: %w", err)
+			}
+			o.ID, err = res.LastInsertId()
+			if err != nil {
+				return fmt.Errorf("error getting option ID: %w", err)
+			}
+		} else {
+			if _, err := tx.ExecContext(ctx, updateOptionSQL, o.Text, o.Correct, o.ID); err != nil {
+				return fmt.Errorf("error updating option %d: %w", o.ID, err)
+			}
+			incomingOIDs[o.ID] = true
+		}
+	}
+
+	// DELETE missing options
+	for _, id := range existingOIDs {
+		if !incomingOIDs[id] {
+			if _, err := tx.ExecContext(ctx, deleteOptionSQL, id); err != nil {
+				return fmt.Errorf("error deleting option %d: %w", id, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (*SQLiteStore) createQuestionInTx(ctx context.Context, tx *sql.Tx, qs *Question) error {
+	res, err := tx.ExecContext(ctx, createQuestionSQL, qs.QuizID, qs.Text, qs.ImageURL, qs.Position)
 	if err != nil {
 		return fmt.Errorf("error creating question: %w", err)
 	}
-	q.ID, err = res.LastInsertId()
+	qs.ID, err = res.LastInsertId()
 	if err != nil {
 		return fmt.Errorf("error getting question ID: %w", err)
 	}

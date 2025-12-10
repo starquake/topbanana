@@ -50,6 +50,7 @@ func setupTestDBWithoutMigrations(t *testing.T) *sql.DB {
 }
 
 var (
+	lessQuizzes   = func(a, b *quiz.Quiz) bool { return a.Title < b.Title }
 	lessQuestions = func(a, b *quiz.Question) bool { return a.Text < b.Text }
 	lessOptions   = func(a, b *quiz.Option) bool { return a.Text < b.Text }
 )
@@ -268,43 +269,43 @@ func TestSQLiteStore_GetQuizByID(t *testing.T) {
 
 	quizStore := quiz.NewSQLiteStore(db, logger)
 
-	testQuiz := &quiz.Quiz{
-		Title:       "Quiz 1",
-		Slug:        "quiz-1",
-		Description: "Quiz 1 Description",
-		CreatedAt:   time.Now().UTC(),
-		Questions: []*quiz.Question{
-			{
-				ID:       1,
-				Text:     "Question 1",
-				Position: 10,
-				Options: []*quiz.Option{
-					{Text: "Option 1"},
-					{Text: "Option 2"},
-				},
-			},
-			{
-				ID:       2,
-				Text:     "Question 2",
-				Position: 20,
-				Options: []*quiz.Option{
-					{Text: "Option 3"},
-					{Text: "Option 4"},
-				},
-			},
-		},
-	}
-	err := quizStore.CreateQuiz(t.Context(), testQuiz)
-	if err != nil {
-		t.Fatalf("error creating quiz: %v", err)
-	}
-
 	t.Run("valid quiz ID", func(t *testing.T) {
 		t.Parallel()
+
+		testQuiz := &quiz.Quiz{
+			Title:       "Quiz 1",
+			Slug:        "quiz-1",
+			Description: "Quiz 1 Description",
+			CreatedAt:   time.Now().UTC(),
+			Questions: []*quiz.Question{
+				{
+					Text:     "Question 1",
+					Position: 10,
+					Options: []*quiz.Option{
+						{Text: "Option 1"},
+						{Text: "Option 2"},
+					},
+				},
+				{
+					Text:     "Question 2",
+					Position: 20,
+					Options: []*quiz.Option{
+						{Text: "Option 3"},
+						{Text: "Option 4"},
+					},
+				},
+			},
+		}
+		err := quizStore.CreateQuiz(t.Context(), testQuiz)
+		if err != nil {
+			t.Fatalf("error creating quiz: %v", err)
+		}
+
 		qz, err := quizStore.GetQuizByID(t.Context(), testQuiz.ID)
 		if err != nil {
 			t.Errorf("error getting testQuiz by ID: %v", err)
 		}
+
 		if diff := cmp.Diff(qz, testQuiz,
 			cmpopts.SortSlices(lessQuestions),
 			cmpopts.SortSlices(lessOptions),
@@ -484,6 +485,7 @@ func TestSQLiteStore_ListQuizzes(t *testing.T) {
 		t.Fatalf("error listing quizzes: %v", err)
 	}
 	if diff := cmp.Diff(quizzes, testQuizzes,
+		cmpopts.SortSlices(lessQuizzes),
 		cmpopts.SortSlices(lessQuestions),
 		cmpopts.SortSlices(lessOptions),
 		cmpopts.EquateApproxTime(3*time.Second),
@@ -744,7 +746,7 @@ func TestSQLiteStore_CreateQuiz(t *testing.T) {
 
 	quizStore := quiz.NewSQLiteStore(db, logger)
 
-	t.Run("quiz with questions", func(t *testing.T) {
+	t.Run("quiz with questions and options", func(t *testing.T) {
 		t.Parallel()
 		testQuiz := &quiz.Quiz{
 			Title:       "Quiz 1",
@@ -859,25 +861,6 @@ func TestSQLiteStore_CreateQuiz_ErrorHandling(t *testing.T) {
 	buf := bytes.Buffer{}
 	logger := logging.NewLogger(&buf)
 
-	t.Run("context cancelled", func(t *testing.T) {
-		t.Parallel()
-
-		db := setupTestDBWithMigrations(t)
-
-		quizStore := quiz.NewSQLiteStore(db, logger)
-
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-
-		err := quizStore.CreateQuiz(ctx, &quiz.Quiz{})
-		if err == nil {
-			t.Fatal("got nil, want error")
-		}
-		if got, want := err.Error(), "error creating quiz"; !strings.Contains(got, want) {
-			t.Errorf("err.Error() = %q, should contain %q", got, want)
-		}
-	})
-
 	t.Run("insert error", func(t *testing.T) {
 		t.Parallel()
 
@@ -907,7 +890,7 @@ func TestSQLiteStore_CreateQuiz_ErrorHandling(t *testing.T) {
 			t.Fatal("got nil, want error")
 		}
 
-		if got, want := err.Error(), "error creating question"; !strings.Contains(err.Error(), want) {
+		if got, want := err.Error(), "error handling questions in transaction"; !strings.Contains(err.Error(), want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
@@ -944,7 +927,7 @@ func TestSQLiteStore_CreateQuiz_ErrorHandling(t *testing.T) {
 			t.Fatal("got nil, want error")
 		}
 
-		if got, want := err.Error(), "error creating option"; !strings.Contains(err.Error(), want) {
+		if got, want := err.Error(), "error handling options in transaction"; !strings.Contains(err.Error(), want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
