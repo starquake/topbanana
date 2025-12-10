@@ -431,31 +431,52 @@ func (s *SQLiteStore) handleQuestionsInTx(ctx context.Context, tx *sql.Tx, quest
 	for _, qs := range questions {
 		qs.QuizID = quizID // Ensure linkage
 
-		if qs.ID == 0 {
-			// CREATE
-			for _, option := range qs.Options {
-				option.ID = 0
-			}
-			if err = s.createQuestionInTx(ctx, tx, qs); err != nil {
-				return fmt.Errorf("error creating new question (text: %qs): %w", qs.Text, err)
-			}
-		} else {
-			// UPDATE
-			if err = s.updateQuestionInTx(ctx, tx, qs); err != nil {
-				return fmt.Errorf("error updating question %d: %w", qs.ID, err)
-			}
+		// Track incoming IDs for updates
+		if qs.ID != 0 {
 			incomingQsIDs[qs.ID] = true
 		}
-		// Handle Options for this question (regardless of create or update)
-		if err = s.handleOptionsInTx(ctx, tx, qs.Options, qs.ID); err != nil {
-			return fmt.Errorf("error handling options for question %d: %w", qs.ID, err)
+
+		if err := s.upsertQuestion(ctx, tx, qs); err != nil {
+			return err
 		}
 	}
 
-	// DELETE missing questions
-	for _, id := range existingQsIDs {
-		if !incomingQsIDs[id] {
-			if _, err = tx.ExecContext(ctx, deleteQuestionSQL, id); err != nil {
+	return s.deleteMissingQuestions(ctx, tx, existingQsIDs, incomingQsIDs)
+}
+
+func (s *SQLiteStore) upsertQuestion(ctx context.Context, tx *sql.Tx, qs *Question) error {
+	if qs.ID == 0 {
+		// CREATE
+		for _, option := range qs.Options {
+			option.ID = 0
+		}
+		if err := s.createQuestionInTx(ctx, tx, qs); err != nil {
+			return fmt.Errorf("error creating new question (text: %q): %w", qs.Text, err)
+		}
+	} else {
+		// UPDATE
+		if err := s.updateQuestionInTx(ctx, tx, qs); err != nil {
+			return fmt.Errorf("error updating question %d: %w", qs.ID, err)
+		}
+	}
+
+	// Handle Options for this question (regardless of create or update)
+	if err := s.handleOptionsInTx(ctx, tx, qs.Options, qs.ID); err != nil {
+		return fmt.Errorf("error handling options for question %d: %w", qs.ID, err)
+	}
+
+	return nil
+}
+
+func (*SQLiteStore) deleteMissingQuestions(
+	ctx context.Context,
+	tx *sql.Tx,
+	existingIDs []int64,
+	incomingIDs map[int64]bool,
+) error {
+	for _, id := range existingIDs {
+		if !incomingIDs[id] {
+			if _, err := tx.ExecContext(ctx, deleteQuestionSQL, id); err != nil {
 				return fmt.Errorf("error deleting question %d: %w", id, err)
 			}
 		}
@@ -497,35 +518,72 @@ func (s *SQLiteStore) handleOptionsInTx(ctx context.Context, tx *sql.Tx, options
 	for _, o := range options {
 		o.QuestionID = questionID // Ensure linkage
 
-		if o.ID == 0 {
-			// CREATE Option
-			res, err := tx.ExecContext(ctx, createOptionSQL, questionID, o.Text, o.Correct)
-			if err != nil {
-				return fmt.Errorf("error creating option: %w", err)
-			}
-			o.ID, err = res.LastInsertId()
-			if err != nil {
-				return fmt.Errorf("error getting option ID: %w", err)
-			}
-		} else {
-			res, err := tx.ExecContext(ctx, updateOptionSQL, o.Text, o.Correct, o.ID)
-			if err != nil {
-				return fmt.Errorf("error updating option %d: %w", o.ID, err)
-			}
-			rows, err := res.RowsAffected()
-			if err != nil {
-				return fmt.Errorf("error getting rows affected: %w", err)
-			}
-			if rows == 0 {
-				return fmt.Errorf("%w: optionID %d", ErrUpdatingOptionNoRowsAffected, o.ID)
-			}
+		if o.ID != 0 {
 			incomingOIDs[o.ID] = true
+		}
+		if err := s.upsertOption(ctx, tx, o); err != nil {
+			return err
 		}
 	}
 
-	// DELETE missing options
-	for _, id := range existingOIDs {
-		if !incomingOIDs[id] {
+	return s.deleteMissingOptions(ctx, tx, existingOIDs, incomingOIDs)
+}
+
+func (s *SQLiteStore) upsertOption(ctx context.Context, tx *sql.Tx, o *Option) error {
+	if o.ID == 0 {
+		// CREATE Option
+		err := s.createOptionInTx(ctx, tx, o)
+		if err != nil {
+			return fmt.Errorf("error creating new option (text: %q): %w", o.Text, err)
+		}
+	} else {
+		// UPDATE Option
+		err := s.updateOption(ctx, tx, o)
+		if err != nil {
+			return fmt.Errorf("error updating option %d: %w", o.ID, err)
+		}
+	}
+
+	return nil
+}
+
+func (*SQLiteStore) updateOption(ctx context.Context, tx *sql.Tx, o *Option) error {
+	res, err := tx.ExecContext(ctx, updateOptionSQL, o.Text, o.Correct, o.ID)
+	if err != nil {
+		return fmt.Errorf("error updating option %d: %w", o.ID, err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("error getting rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w: optionID %d", ErrUpdatingOptionNoRowsAffected, o.ID)
+	}
+
+	return nil
+}
+
+func (*SQLiteStore) createOptionInTx(ctx context.Context, tx *sql.Tx, o *Option) error {
+	res, err := tx.ExecContext(ctx, createOptionSQL, o.QuestionID, o.Text, o.Correct)
+	if err != nil {
+		return fmt.Errorf("error creating option: %w", err)
+	}
+	o.ID, err = res.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("error getting option ID: %w", err)
+	}
+
+	return nil
+}
+
+func (*SQLiteStore) deleteMissingOptions(
+	ctx context.Context,
+	tx *sql.Tx,
+	existingIDs []int64,
+	incomingIDs map[int64]bool,
+) error {
+	for _, id := range existingIDs {
+		if !incomingIDs[id] {
 			if _, err := tx.ExecContext(ctx, deleteOptionSQL, id); err != nil {
 				return fmt.Errorf("error deleting option %d: %w", id, err)
 			}
