@@ -41,6 +41,9 @@ func setupTestDBWithoutMigrations(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("error opening SQLite database: %v", err)
 	}
+	if _, err := db.ExecContext(t.Context(), "PRAGMA foreign_keys = ON;"); err != nil {
+		t.Fatalf("error enabling foreign keys: %v", err)
+	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 

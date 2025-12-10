@@ -43,6 +43,8 @@ var (
 	ErrUpdatingQuizNoRowsAffected = errors.New("no rows affected when updating quiz")
 	// ErrUpdatingQuestionNoRowsAffected is returned when no rows are affected when updating a question.
 	ErrUpdatingQuestionNoRowsAffected = errors.New("no rows affected when updating question")
+	// ErrUpdatingOptionNoRowsAffected is returned when no rows are affected when updating a option.
+	ErrUpdatingOptionNoRowsAffected = errors.New("no rows affected when updating option")
 )
 
 // Timestamp is a timestamp with millisecond precision. Used for SQLite type conversion.
@@ -352,10 +354,7 @@ func (s *SQLiteStore) UpdateQuiz(ctx context.Context, qz *Quiz) error {
 // CreateQuestion creates a question and its options and saves them to the database.
 func (s *SQLiteStore) CreateQuestion(ctx context.Context, qs *Question) error {
 	return s.withTx(ctx, func(tx *sql.Tx) error {
-		for _, option := range qs.Options {
-			option.ID = 0
-		}
-		if err := s.createQuestionInTx(ctx, tx, qs); err != nil {
+		if err := s.handleQuestionsInTx(ctx, tx, []*Question{qs}, qs.QuizID); err != nil {
 			return fmt.Errorf("error creating question: %w", err)
 		}
 		if err := s.handleOptionsInTx(ctx, tx, qs.Options, qs.ID); err != nil {
@@ -369,7 +368,7 @@ func (s *SQLiteStore) CreateQuestion(ctx context.Context, qs *Question) error {
 // UpdateQuestion updates a question.
 func (s *SQLiteStore) UpdateQuestion(ctx context.Context, qs *Question) error {
 	return s.withTx(ctx, func(tx *sql.Tx) error {
-		if err := s.updateQuestionInTx(ctx, tx, qs); err != nil {
+		if err := s.handleQuestionsInTx(ctx, tx, []*Question{qs}, qs.QuizID); err != nil {
 			return fmt.Errorf("error creating question: %w", err)
 		}
 		if err := s.handleOptionsInTx(ctx, tx, qs.Options, qs.ID); err != nil {
@@ -515,8 +514,16 @@ func (s *SQLiteStore) handleOptionsInTx(ctx context.Context, tx *sql.Tx, options
 				return fmt.Errorf("error getting option ID: %w", err)
 			}
 		} else {
-			if _, err := tx.ExecContext(ctx, updateOptionSQL, o.Text, o.Correct, o.ID); err != nil {
+			res, err := tx.ExecContext(ctx, updateOptionSQL, o.Text, o.Correct, o.ID)
+			if err != nil {
 				return fmt.Errorf("error updating option %d: %w", o.ID, err)
+			}
+			rows, err := res.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("error getting rows affected: %w", err)
+			}
+			if rows == 0 {
+				return fmt.Errorf("%w: optionID %d", ErrUpdatingOptionNoRowsAffected, o.ID)
 			}
 			incomingOIDs[o.ID] = true
 		}
@@ -547,10 +554,17 @@ func (*SQLiteStore) createQuestionInTx(ctx context.Context, tx *sql.Tx, qs *Ques
 	return nil
 }
 
-func (*SQLiteStore) updateQuestionInTx(ctx context.Context, tx *sql.Tx, q *Question) error {
-	_, err := tx.ExecContext(ctx, updateQuestionSQL, q.Text, q.ImageURL, q.Position, q.ID)
+func (*SQLiteStore) updateQuestionInTx(ctx context.Context, tx *sql.Tx, qs *Question) error {
+	res, err := tx.ExecContext(ctx, updateQuestionSQL, qs.Text, qs.ImageURL, qs.Position, qs.ID)
 	if err != nil {
 		return fmt.Errorf("error updating question: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("error getting rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w: questionID %d", ErrUpdatingQuestionNoRowsAffected, qs.ID)
 	}
 
 	return nil
