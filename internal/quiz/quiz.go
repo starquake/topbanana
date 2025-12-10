@@ -357,9 +357,6 @@ func (s *SQLiteStore) CreateQuestion(ctx context.Context, qs *Question) error {
 		if err := s.handleQuestionsInTx(ctx, tx, []*Question{qs}, qs.QuizID); err != nil {
 			return fmt.Errorf("error handling question: %w", err)
 		}
-		if err := s.handleOptionsInTx(ctx, tx, qs.Options, qs.ID); err != nil {
-			return fmt.Errorf("error handling options: %w", err)
-		}
 
 		return nil
 	})
@@ -370,9 +367,6 @@ func (s *SQLiteStore) UpdateQuestion(ctx context.Context, qs *Question) error {
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		if err := s.handleQuestionsInTx(ctx, tx, []*Question{qs}, qs.QuizID); err != nil {
 			return fmt.Errorf("error handling question: %w", err)
-		}
-		if err := s.handleOptionsInTx(ctx, tx, qs.Options, qs.ID); err != nil {
-			return fmt.Errorf("error handling options: %w", err)
 		}
 
 		return nil

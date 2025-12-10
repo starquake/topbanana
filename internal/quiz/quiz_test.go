@@ -1421,3 +1421,106 @@ func TestSQLiteStore_UpdateQuestion(t *testing.T) {
 		}
 	})
 }
+
+func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
+	t.Parallel()
+
+	buf := bytes.Buffer{}
+	logger := logging.NewLogger(&buf)
+
+	t.Run("update question error", func(t *testing.T) {
+		t.Parallel()
+
+		db := setupTestDBWithMigrations(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
+		testQuiz := &quiz.Quiz{
+			Title:       "Quiz 1",
+			Slug:        "quiz-1",
+			Description: "Description",
+			Questions: []*quiz.Question{
+				{
+					Text: "Question 1",
+				},
+			},
+		}
+		err := quizStore.CreateQuiz(t.Context(), testQuiz)
+		if err != nil {
+			t.Fatalf("error creating question: %v", err)
+		}
+
+		// Rename questions table to force an insert error
+		_, err = db.ExecContext(t.Context(), "ALTER TABLE questions RENAME TO questions_backup")
+		if err != nil {
+			t.Fatalf("failed to rename table: %v", err)
+		}
+
+		updatedQuestion := &quiz.Question{
+			ID:   testQuiz.Questions[0].ID,
+			Text: testQuiz.Questions[0].Text + " Updated",
+		}
+
+		err = quizStore.UpdateQuestion(t.Context(), updatedQuestion)
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+		if got, want := err.Error(), "error handling question"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+
+	t.Run("update option error", func(t *testing.T) {
+		t.Parallel()
+
+		db := setupTestDBWithMigrations(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
+		testQuiz := &quiz.Quiz{
+			Title:       "Quiz 1",
+			Slug:        "quiz-1",
+			Description: "Description",
+			Questions: []*quiz.Question{
+				{
+					Text: "Question 1",
+					Options: []*quiz.Option{
+						{Text: "Option 1-1"},
+						{Text: "Option 1-2"},
+						{Text: "Option 1-3"},
+					},
+				},
+			},
+		}
+		err := quizStore.CreateQuiz(t.Context(), testQuiz)
+		if err != nil {
+			t.Fatalf("error creating question: %v", err)
+		}
+
+		// Rename questions table to force an insert error
+		_, err = db.ExecContext(t.Context(), "ALTER TABLE options RENAME TO options_backup")
+		if err != nil {
+			t.Fatalf("failed to rename table: %v", err)
+		}
+
+		updatedQuestion := &quiz.Question{
+			ID:   testQuiz.ID,
+			Text: testQuiz.Questions[0].Text + " Updated",
+			Options: []*quiz.Option{
+				{
+					ID:      testQuiz.Questions[0].Options[0].ID,
+					Text:    testQuiz.Questions[0].Options[0].Text + " Updated",
+					Correct: true,
+				},
+			},
+		}
+
+		err = quizStore.UpdateQuestion(t.Context(), updatedQuestion)
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+		if got, want := err.Error(), "error handling options"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+}
