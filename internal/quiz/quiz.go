@@ -170,10 +170,10 @@ type Store interface {
 	CreateQuiz(ctx context.Context, quiz *Quiz) error
 	// UpdateQuiz updates a quiz.
 	UpdateQuiz(ctx context.Context, quiz *Quiz) error
-	// UpdateQuestion updates a question.
-	UpdateQuestion(ctx context.Context, question *Question) error
 	// CreateQuestion creates a question.
 	CreateQuestion(ctx context.Context, qs *Question) error
+	// UpdateQuestion updates a question.
+	UpdateQuestion(ctx context.Context, question *Question) error
 }
 
 // SQLiteStore is a store for quizzes in SQLite.
@@ -441,7 +441,14 @@ func (s *SQLiteStore) handleQuestionsInTx(ctx context.Context, tx *sql.Tx, quest
 		}
 	}
 
-	return s.deleteMissingQuestions(ctx, tx, existingQsIDs, incomingQsIDs)
+	deleteIDs := make([]int64, 0, len(existingQsIDs))
+	for _, id := range existingQsIDs {
+		if !incomingQsIDs[id] {
+			deleteIDs = append(deleteIDs, id)
+		}
+	}
+
+	return s.deleteQuestions(ctx, tx, deleteIDs)
 }
 
 func (s *SQLiteStore) upsertQuestion(ctx context.Context, tx *sql.Tx, qs *Question) error {
@@ -468,17 +475,14 @@ func (s *SQLiteStore) upsertQuestion(ctx context.Context, tx *sql.Tx, qs *Questi
 	return nil
 }
 
-func (*SQLiteStore) deleteMissingQuestions(
+func (*SQLiteStore) deleteQuestions(
 	ctx context.Context,
 	tx *sql.Tx,
-	existingIDs []int64,
-	incomingIDs map[int64]bool,
+	deleteIDs []int64,
 ) error {
-	for _, id := range existingIDs {
-		if !incomingIDs[id] {
-			if _, err := tx.ExecContext(ctx, deleteQuestionSQL, id); err != nil {
-				return fmt.Errorf("error deleting question %d: %w", id, err)
-			}
+	for _, id := range deleteIDs {
+		if _, err := tx.ExecContext(ctx, deleteQuestionSQL, id); err != nil {
+			return fmt.Errorf("error deleting question %d: %w", id, err)
 		}
 	}
 
@@ -526,7 +530,14 @@ func (s *SQLiteStore) handleOptionsInTx(ctx context.Context, tx *sql.Tx, options
 		}
 	}
 
-	return s.deleteMissingOptions(ctx, tx, existingOIDs, incomingOIDs)
+	deleteOIDs := make([]int64, 0, len(existingOIDs))
+	for _, oid := range existingOIDs {
+		if !incomingOIDs[oid] {
+			deleteOIDs = append(deleteOIDs, oid)
+		}
+	}
+
+	return s.deleteOptions(ctx, tx, deleteOIDs)
 }
 
 func (s *SQLiteStore) upsertOption(ctx context.Context, tx *sql.Tx, o *Option) error {
@@ -576,17 +587,14 @@ func (*SQLiteStore) createOptionInTx(ctx context.Context, tx *sql.Tx, o *Option)
 	return nil
 }
 
-func (*SQLiteStore) deleteMissingOptions(
+func (*SQLiteStore) deleteOptions(
 	ctx context.Context,
 	tx *sql.Tx,
-	existingIDs []int64,
-	incomingIDs map[int64]bool,
+	deleteIDs []int64,
 ) error {
-	for _, id := range existingIDs {
-		if !incomingIDs[id] {
-			if _, err := tx.ExecContext(ctx, deleteOptionSQL, id); err != nil {
-				return fmt.Errorf("error deleting option %d: %w", id, err)
-			}
+	for _, id := range deleteIDs {
+		if _, err := tx.ExecContext(ctx, deleteOptionSQL, id); err != nil {
+			return fmt.Errorf("error deleting option %d: %w", id, err)
 		}
 	}
 
