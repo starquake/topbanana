@@ -1366,8 +1366,8 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 		sqliteErr := &sqlite.Error{}
 		if errors.As(err, &sqliteErr) {
 			code := sqliteErr.Code()
-			if got, want := code, sqlite3.SQLITE_CONSTRAINT; got != want {
-				t.Fatalf("got error code %d, want %d", code, sqlite3.SQLITE_CONSTRAINT)
+			if got, want := code, sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY; got != want {
+				t.Fatalf("got error code %d, want %d", code, sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY)
 			}
 		}
 	})
