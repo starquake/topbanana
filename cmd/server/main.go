@@ -39,6 +39,12 @@ func run(
 	logger := logging.NewLogger(stdout)
 
 	db := must.Any(sql.Open("sqlite", "./topbanana.sqlite"))
+	if _, err := db.ExecContext(ctx, "PRAGMA foreign_keys = ON;"); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, "PRAGMA journal_mode = WAL;"); err != nil {
+		return err
+	}
 	goose.SetBaseFS(migrations.FS)
 	must.OK(goose.SetDialect("sqlite3"))
 	must.OK(goose.Up(db, "."))

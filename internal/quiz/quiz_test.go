@@ -15,7 +15,9 @@ import (
 	"github.com/starquake/topbanana/internal/logging"
 	"github.com/starquake/topbanana/internal/migrations"
 	"github.com/starquake/topbanana/internal/quiz"
+	"modernc.org/sqlite"
 	_ "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 func setupTestDBWithMigrations(t *testing.T) *sql.DB {
@@ -42,6 +44,9 @@ func setupTestDBWithoutMigrations(t *testing.T) *sql.DB {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("error opening SQLite database: %v", err)
+	}
+	if _, err := db.ExecContext(t.Context(), "PRAGMA foreign_keys = ON;"); err != nil {
+		t.Fatalf("error enabling foreign keys: %v", err)
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
@@ -652,12 +657,13 @@ func TestSQLiteStore_GetQuestionByID_ErrorHandling(t *testing.T) {
 	buf := bytes.Buffer{}
 	logger := logging.NewLogger(&buf)
 
-	db := setupTestDBWithMigrations(t)
-
-	quizStore := quiz.NewSQLiteStore(db, logger)
-
 	t.Run("context cancelled", func(t *testing.T) {
 		t.Parallel()
+
+		db := setupTestDBWithMigrations(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
@@ -672,11 +678,24 @@ func TestSQLiteStore_GetQuestionByID_ErrorHandling(t *testing.T) {
 
 	t.Run("scan error", func(t *testing.T) {
 		t.Parallel()
+
+		db := setupTestDBWithMigrations(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
+		testQuiz := &quiz.Quiz{
+			Title:       "Quiz 1",
+			Slug:        "quiz-1",
+			Description: "Quiz 1 Description",
+		}
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("error creating quiz: %v", err)
+		}
 		// Insert a question with an invalid position value (string instead of int64) to trigger scan error.
 		res, err := db.ExecContext(
 			t.Context(),
 			`INSERT INTO questions (quiz_id, text, position) VALUES (?, ?, ?)`,
-			1,
+			testQuiz.ID,
 			"Bad Question",
 			"bad-position",
 		)
@@ -699,11 +718,29 @@ func TestSQLiteStore_GetQuestionByID_ErrorHandling(t *testing.T) {
 
 	t.Run("option scan error", func(t *testing.T) {
 		t.Parallel()
-		// Insert a quiz with an option with invalid is_correct value (string instead of bool) to trigger scan error.
+
+		db := setupTestDBWithMigrations(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
+		testQuiz := &quiz.Quiz{
+			Title:       "Quiz 1",
+			Slug:        "quiz-1",
+			Description: "Quiz 1 Description",
+			Questions: []*quiz.Question{
+				{
+					Text: "Question 1",
+				},
+			},
+		}
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("error creating quiz: %v", err)
+		}
+		// Insert a quiz with an option with an invalid is_correct value (string instead of bool) to trigger a scan error.
 		res, err := db.ExecContext(
 			t.Context(),
 			`INSERT INTO questions (quiz_id, text, position) VALUES (?, ?, ?)`,
-			1,
+			testQuiz.ID,
 			"Question 1",
 			10,
 		)
@@ -717,7 +754,7 @@ func TestSQLiteStore_GetQuestionByID_ErrorHandling(t *testing.T) {
 		_, err = db.ExecContext(
 			t.Context(),
 			`INSERT INTO options (id, question_id, text,is_correct) VALUES (?, ?, ?, ?)`,
-			1,
+			testQuiz.Questions[0].ID,
 			id,
 			"Option 1",
 			"Bad Boolean",
@@ -1270,7 +1307,46 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 
 	t.Run("create question", func(t *testing.T) {
 		t.Parallel()
-		testQuestion := quiz.Question{
+		testQuiz := &quiz.Quiz{
+			Title:       "Quiz 1",
+			Slug:        "quiz-1",
+			Description: "Description",
+		}
+
+		err := quizStore.CreateQuiz(t.Context(), testQuiz)
+		if err != nil {
+			t.Fatalf("error creating quiz: %v", err)
+		}
+
+		testQuestion := &quiz.Question{
+			QuizID: testQuiz.ID,
+			Text:   "Question 1",
+			Options: []*quiz.Option{
+				{Text: "Option 1-1"},
+				{Text: "Option 1-2"},
+				{Text: "Option 1-3"},
+			},
+		}
+
+		err = quizStore.CreateQuestion(t.Context(), testQuestion)
+		if err != nil {
+			t.Fatalf("error creating question: %v", err)
+		}
+
+		qs, err := quizStore.GetQuestionByID(t.Context(), testQuestion.ID)
+		if err != nil {
+			t.Fatalf("error getting question by ID: %v", err)
+		}
+
+		if diff := cmp.Diff(qs, testQuestion,
+			cmpopts.SortSlices(lessOptions),
+		); diff != "" {
+			t.Errorf("questions diff (-got +want):\n%s", diff)
+		}
+	})
+
+	t.Run("fail on nonexisting quizID", func(t *testing.T) {
+		testQuestion := &quiz.Question{
 			Text: "Question 1",
 			Options: []*quiz.Option{
 				{Text: "Option 1-1"},
@@ -1279,39 +1355,32 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 			},
 		}
 
-		err := quizStore.CreateQuestion(t.Context(), &testQuestion)
-		if err != nil {
-			t.Fatalf("error creating question: %v", err)
+		err := quizStore.CreateQuestion(t.Context(), testQuestion)
+		if err == nil {
+			t.Fatal("got nil, want error")
 		}
-		qs, err := quizStore.GetQuestionByID(t.Context(), testQuestion.ID)
-		if err != nil {
-			t.Fatalf("error getting question by ID: %v", err)
-		}
-		if diff := cmp.Diff(qs, &testQuestion,
-			cmpopts.SortSlices(lessOptions),
-		); diff != "" {
-			t.Errorf("questions diff (-got +want):\n%s", diff)
+		if sqliteErr, ok := err.(*sqlite.Error); ok {
+			code := sqliteErr.Code()
+			if got, want := code, sqlite3.SQLITE_CONSTRAINT; got != want {
+				t.Fatalf("got error code %d, want %d", code, sqlite3.SQLITE_CONSTRAINT)
+			}
 		}
 	})
 
-	t.Run("ignore supplied ID's", func(t *testing.T) {
+	t.Run("fail on nonexisting questionID", func(t *testing.T) {
 		t.Parallel()
 
 		suppliedQuestionID := int64(1000)
-		suppliedOption1ID := int64(1001)
-		suppliedOption2ID := int64(1002)
 
 		testQuestion := &quiz.Question{
 			ID:   suppliedQuestionID,
 			Text: "Question 1",
 			Options: []*quiz.Option{
 				{
-					ID:         suppliedOption1ID,
 					QuestionID: suppliedQuestionID,
 					Text:       "Option 1-1",
 				},
 				{
-					ID:         suppliedOption2ID,
 					QuestionID: suppliedQuestionID,
 					Text:       "Option 1-2",
 				},
@@ -1319,29 +1388,31 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 		}
 
 		err := quizStore.CreateQuestion(t.Context(), testQuestion)
-		if err != nil {
-			t.Fatalf("error creating question: %v", err)
-		}
-
-		qs, err := quizStore.GetQuestionByID(t.Context(), suppliedQuestionID)
 		if err == nil {
 			t.Fatal("got nil, want error")
 		}
-		if !errors.Is(err, quiz.ErrQuestionNotFound) {
-			t.Errorf("err = %v, want %v", err, quiz.ErrQuestionNotFound)
-		}
-		if qs != nil {
-			t.Errorf("qs = %v, want nil", qs)
-		}
-
-		if testQuestion.ID == suppliedQuestionID {
-			t.Fatalf("testQuestion.ID = %d, should not be %d", testQuestion.ID, suppliedQuestionID)
-		}
-		if testQuestion.Options[0].ID == suppliedOption1ID {
-			t.Fatalf("testQuestion.Options[0].ID = %d, should not be %d", testQuestion.Options[0].ID, suppliedOption1ID)
-		}
-		if testQuestion.Options[1].ID == suppliedOption2ID {
-			t.Fatalf("testQuestion.Options[1].ID = %d, should not be %d", testQuestion.Options[1].ID, suppliedOption2ID)
+		if got, want := err, quiz.ErrUpdatingQuestionNoRowsAffected; !errors.Is(got, want) {
+			t.Errorf("err = %q, want %q", got, want)
 		}
 	})
+
+	// t.Run("fail on nonexisting optionId", func(t *testing.T) {
+	//	t.Parallel()
+	//
+	//	suppliedOptionID := int64(1000)
+	//
+	//	testQuestion := &quiz.Question{
+	//		Text:   "Question 1",
+	//		Options: []*quiz.Option{
+	//			{
+	//				ID:         suppliedOptionID,
+	//				QuestionID: 1,
+	//				Text:       "Option 1-1",
+	//			},
+	//			{
+	//				ID:         suppliedOptionID,
+	//			}
+	//		}
+	//	}
+	//})
 }
