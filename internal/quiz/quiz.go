@@ -345,6 +345,9 @@ func (s *SQLiteStore) withTx(ctx context.Context, fn func(tx *sql.Tx) error) err
 	}
 	defer func() {
 		err = txn.Rollback()
+		if err == nil {
+			s.logger.Info(ctx, "rollback transaction successful")
+		}
 		if err != nil && !errors.Is(err, sql.ErrTxDone) {
 			s.logger.Error(ctx, "error rolling back transaction", logging.ErrAttr(err))
 		}
@@ -360,29 +363,6 @@ func (s *SQLiteStore) withTx(ctx context.Context, fn func(tx *sql.Tx) error) err
 	}
 
 	return nil
-}
-
-func (*SQLiteStore) getQuestionIDsInTx(ctx context.Context, tx *sql.Tx, quizID int64) ([]int64, error) {
-	rows, err := tx.QueryContext(ctx, getQuestionIDsByQuizIDSQL, quizID)
-	if err != nil {
-		return nil, fmt.Errorf("error querying questionIDs: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("error scanning questionIDs: %w", err)
-		}
-		ids = append(ids, id)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating questionIDs: %w", err)
-	}
-
-	return ids, nil
 }
 
 func (s *SQLiteStore) fetchQuizzes(ctx context.Context) ([]*Quiz, error) {
@@ -409,6 +389,29 @@ func (s *SQLiteStore) fetchQuizzes(ctx context.Context) ([]*Quiz, error) {
 	}
 
 	return quizzes, nil
+}
+
+func (*SQLiteStore) getQuestionIDsInTx(ctx context.Context, tx *sql.Tx, quizID int64) ([]int64, error) {
+	rows, err := tx.QueryContext(ctx, getQuestionIDsByQuizIDSQL, quizID)
+	if err != nil {
+		return nil, fmt.Errorf("error querying questionIDs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("error scanning questionIDs: %w", err)
+		}
+		ids = append(ids, id)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating questionIDs: %w", err)
+	}
+
+	return ids, nil
 }
 
 func (s *SQLiteStore) handleQuestionsInTx(ctx context.Context, tx *sql.Tx, questions []*Question, quizID int64) error {

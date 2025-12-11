@@ -1,11 +1,18 @@
 package quiz
 
-import "database/sql"
+import (
+	"context"
+	"database/sql"
+)
+
+const (
+	ListQuizzesSQL = listQuizzesSQL
+)
 
 func (s *SQLiteStore) DB() *sql.DB {
 	return s.db
 }
 
-const (
-	ListQuizzesSQL = listQuizzesSQL
-)
+func (s *SQLiteStore) WithTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
+	return s.withTx(ctx, fn)
+}
