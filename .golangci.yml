@@ -52,7 +52,6 @@ linters:
     - iotamixing
     - ireturn
     - loggercheck
-    - maintidx
     - makezero
     - mirror
     - misspell
@@ -134,7 +133,7 @@ linters:
         - name: confusing-naming
           disabled: false
           exclude:
-            - ".export_test.go"
+            - "**/export_test.go"
     nolintlint:
       require-explanation: true
       require-specific: true
