@@ -429,7 +429,7 @@ func (s *SQLiteStore) handleQuestionsInTx(ctx context.Context, tx *sql.Tx, quest
 			incomingQsIDs[qs.ID] = true
 		}
 
-		if err := s.upsertQuestion(ctx, tx, qs); err != nil {
+		if err := s.upsertQuestionInTx(ctx, tx, qs); err != nil {
 			return err
 		}
 	}
@@ -441,10 +441,10 @@ func (s *SQLiteStore) handleQuestionsInTx(ctx context.Context, tx *sql.Tx, quest
 		}
 	}
 
-	return s.deleteQuestions(ctx, tx, deleteIDs)
+	return s.deleteQuestionsInTx(ctx, tx, deleteIDs)
 }
 
-func (s *SQLiteStore) upsertQuestion(ctx context.Context, tx *sql.Tx, qs *Question) error {
+func (s *SQLiteStore) upsertQuestionInTx(ctx context.Context, tx *sql.Tx, qs *Question) error {
 	if qs.ID == 0 {
 		// CREATE
 		for _, option := range qs.Options {
@@ -468,11 +468,7 @@ func (s *SQLiteStore) upsertQuestion(ctx context.Context, tx *sql.Tx, qs *Questi
 	return nil
 }
 
-func (*SQLiteStore) deleteQuestions(
-	ctx context.Context,
-	tx *sql.Tx,
-	deleteIDs []int64,
-) error {
+func (*SQLiteStore) deleteQuestionsInTx(ctx context.Context, tx *sql.Tx, deleteIDs []int64) error {
 	for _, id := range deleteIDs {
 		if _, err := tx.ExecContext(ctx, deleteQuestionSQL, id); err != nil {
 			return fmt.Errorf("error deleting question %d: %w", id, err)
@@ -520,7 +516,7 @@ func (s *SQLiteStore) handleOptionsInTx(ctx context.Context, tx *sql.Tx, options
 		if o.ID != 0 {
 			incomingOIDs[o.ID] = true
 		}
-		if err = s.upsertOption(ctx, tx, o); err != nil {
+		if err = s.upsertOptionInTx(ctx, tx, o); err != nil {
 			return fmt.Errorf("error upserting option %d: %w", o.ID, err)
 		}
 	}
@@ -541,7 +537,7 @@ func (s *SQLiteStore) handleOptionsInTx(ctx context.Context, tx *sql.Tx, options
 	return nil
 }
 
-func (s *SQLiteStore) upsertOption(ctx context.Context, tx *sql.Tx, o *Option) error {
+func (s *SQLiteStore) upsertOptionInTx(ctx context.Context, tx *sql.Tx, o *Option) error {
 	if o.ID == 0 {
 		// CREATE Option
 		err := s.createOptionInTx(ctx, tx, o)
@@ -550,7 +546,7 @@ func (s *SQLiteStore) upsertOption(ctx context.Context, tx *sql.Tx, o *Option) e
 		}
 	} else {
 		// UPDATE Option
-		err := s.updateOption(ctx, tx, o)
+		err := s.updateOptionInTx(ctx, tx, o)
 		if err != nil {
 			return fmt.Errorf("error updating option %d: %w", o.ID, err)
 		}
@@ -559,7 +555,7 @@ func (s *SQLiteStore) upsertOption(ctx context.Context, tx *sql.Tx, o *Option) e
 	return nil
 }
 
-func (*SQLiteStore) updateOption(ctx context.Context, tx *sql.Tx, o *Option) error {
+func (*SQLiteStore) updateOptionInTx(ctx context.Context, tx *sql.Tx, o *Option) error {
 	res, err := tx.ExecContext(ctx, updateOptionSQL, o.Text, o.Correct, o.ID)
 	if err != nil {
 		return fmt.Errorf("error updating option %d: %w", o.ID, err)
@@ -672,10 +668,7 @@ func (s *SQLiteStore) getQuestionsByQuizID(ctx context.Context, quizID int64) ([
 }
 
 // getOptionsByQuestionID returns options for a question by its questionID.
-func (s *SQLiteStore) getOptionsByQuestionID(
-	ctx context.Context,
-	questionID int64,
-) ([]*Option, error) {
+func (s *SQLiteStore) getOptionsByQuestionID(ctx context.Context, questionID int64) ([]*Option, error) {
 	optionRows, optionErr := s.db.QueryContext(ctx, getOptionsByQuestionIDSQL, questionID)
 	if optionErr != nil {
 		return nil, fmt.Errorf("error querying options: %w", optionErr)
