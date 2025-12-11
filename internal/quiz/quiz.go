@@ -401,7 +401,7 @@ func (*SQLiteStore) getQuestionIDsInTx(ctx context.Context, tx *sql.Tx, quizID i
 	var ids []int64
 	for rows.Next() {
 		var id int64
-		if err := rows.Scan(&id); err != nil {
+		if err = rows.Scan(&id); err != nil {
 			return nil, fmt.Errorf("error scanning questionIDs: %w", err)
 		}
 		ids = append(ids, id)

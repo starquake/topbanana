@@ -2,7 +2,6 @@ package quiz_test
 
 import (
 	"bytes"
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -16,7 +15,11 @@ import (
 
 type failLastInsertIDResult struct{}
 
+type failRowsAffectedResult struct{}
+
 var ErrFailLastInsertID = errors.New("forced last insert ID error")
+
+var ErrFailRowsAffected = errors.New("forced rows affected error")
 
 func (failLastInsertIDResult) LastInsertId() (int64, error) {
 	return 0, ErrFailLastInsertID
@@ -24,6 +27,14 @@ func (failLastInsertIDResult) LastInsertId() (int64, error) {
 
 func (failLastInsertIDResult) RowsAffected() (int64, error) {
 	return 1, nil
+}
+
+func (failRowsAffectedResult) LastInsertId() (int64, error) {
+	return 1, nil
+}
+
+func (failRowsAffectedResult) RowsAffected() (int64, error) {
+	return 0, ErrFailRowsAffected
 }
 
 func TestSQLiteStore_ListQuizzes_MockTesting(t *testing.T) {
@@ -53,7 +64,7 @@ func TestSQLiteStore_ListQuizzes_MockTesting(t *testing.T) {
 		testError := errors.New("quizRows error")
 
 		// Set up a mock that will return an error when the GetQuestionsByQuizIDSQL query is executed.
-		quizRows := mock.NewRows([]string{"id", "title", "slug", "description", "created_at"}).
+		quizRows := sqlmock.NewRows([]string{"id", "title", "slug", "description", "created_at"}).
 			AddRow(1, "Test Quiz 1", "test-quiz-1", "Test Description 1", 1234).
 			AddRow(2, "Test Quiz 2", "test-quiz-2", "Test Description 2", 1234)
 		quizRows.RowError(1, testError)
@@ -110,7 +121,7 @@ func TestSQLiteStore_CreateQuiz_MockTesting(t *testing.T) {
 
 		mock.ExpectClose()
 
-		err = quizStore.CreateQuiz(context.Background(), qz)
+		err = quizStore.CreateQuiz(t.Context(), qz)
 
 		if err == nil {
 			t.Fatal("expected an error, but got nil")
@@ -172,7 +183,7 @@ func TestSQLiteStore_CreateQuiz_MockTesting(t *testing.T) {
 
 		mock.ExpectClose()
 
-		err = quizStore.CreateQuiz(context.Background(), qz)
+		err = quizStore.CreateQuiz(t.Context(), qz)
 
 		if err == nil {
 			t.Fatal("expected an error, but got nil")
@@ -245,13 +256,178 @@ func TestSQLiteStore_CreateQuiz_MockTesting(t *testing.T) {
 
 		mock.ExpectClose()
 
-		err = quizStore.CreateQuiz(context.Background(), qz)
+		err = quizStore.CreateQuiz(t.Context(), qz)
 
 		if err == nil {
 			t.Fatal("expected an error, but got nil")
 		}
 
 		if got, want := err, ErrFailLastInsertID; !errors.Is(got, want) {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("get question id scan fails", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+		}
+		defer func() {
+			if err = db.Close(); err != nil {
+				t.Fatalf("error closing db: %v", err)
+			}
+			if err = mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("there were unfulfilled expectations: %s", err)
+			}
+		}()
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
+		qz := &quiz.Quiz{
+			Title:       "Test Quiz",
+			Slug:        "test-quiz",
+			Description: "A description",
+			Questions: []*quiz.Question{
+				{
+					Text:     "Question 1",
+					Position: 10,
+				},
+			},
+		}
+
+		questionRows := sqlmock.NewRows([]string{"id"}).AddRow("bad id")
+
+		mock.ExpectBegin()
+
+		mock.ExpectExec("INSERT INTO quizzes").
+			WithArgs(qz.Title, qz.Slug, qz.Description, sqlmock.AnyArg()).
+			WillReturnResult(sqlmock.NewResult(1, 1))
+
+		mock.ExpectQuery("SELECT id FROM questions WHERE quiz_id").
+			WithArgs(sqlmock.AnyArg()).
+			WillReturnRows(questionRows)
+
+		mock.ExpectClose()
+
+		err = quizStore.CreateQuiz(t.Context(), qz)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if got, want := err.Error(), "error scanning questionIDs"; !strings.Contains(got, want) {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("get question id row error", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+		}
+		defer func() {
+			if err = db.Close(); err != nil {
+				t.Fatalf("error closing db: %v", err)
+			}
+			if err = mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("there were unfulfilled expectations: %s", err)
+			}
+		}()
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
+		qz := &quiz.Quiz{
+			Title:       "Test Quiz",
+			Slug:        "test-quiz",
+			Description: "A description",
+			Questions: []*quiz.Question{
+				{
+					Text:     "Question 1",
+					Position: 10,
+				},
+			},
+		}
+		rowError := errors.New("row error")
+		questionRows := sqlmock.NewRows([]string{"id"}).AddRow(1).RowError(0, rowError)
+
+		mock.ExpectBegin()
+
+		mock.ExpectExec("INSERT INTO quizzes").
+			WithArgs(qz.Title, qz.Slug, qz.Description, sqlmock.AnyArg()).
+			WillReturnResult(sqlmock.NewResult(1, 1))
+
+		mock.ExpectQuery("SELECT id FROM questions WHERE quiz_id").
+			WithArgs(sqlmock.AnyArg()).
+			WillReturnRows(questionRows)
+
+		mock.ExpectClose()
+
+		err = quizStore.CreateQuiz(t.Context(), qz)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if got, want := err, rowError; !errors.Is(got, want) {
+			t.Errorf("got %v, want %v", got, want)
+		}
+		if got, want := err.Error(), "error iterating questionIDs"; !strings.Contains(got, want) {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+}
+
+func TestSQLiteStore_UpdateQuiz_MockTesting(t *testing.T) {
+	t.Parallel()
+
+	buf := bytes.Buffer{}
+	logger := logging.NewLogger(&buf)
+
+	t.Run("error getting rows affected", func(t *testing.T) {
+		t.Parallel()
+
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+		}
+		defer func() {
+			if err = db.Close(); err != nil {
+				t.Fatalf("error closing db: %v", err)
+			}
+			if err = mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("there were unfulfilled expectations: %s", err)
+			}
+		}()
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
+		testQuiz := &quiz.Quiz{
+			ID: 1,
+			Questions: []*quiz.Question{
+				{
+					ID:   1,
+					Text: "Test Question",
+				},
+			},
+		}
+
+		mock.ExpectBegin()
+		mock.ExpectExec("UPDATE quizzes").
+			WithArgs(testQuiz.Title, testQuiz.Slug, testQuiz.Description, testQuiz.ID).
+			WillReturnResult(failRowsAffectedResult{})
+		mock.ExpectClose()
+
+		err = quizStore.UpdateQuiz(t.Context(), testQuiz)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if got, want := err, ErrFailRowsAffected; !errors.Is(got, want) {
 			t.Errorf("got %q, want %q", got, want)
 		}
 	})
@@ -286,7 +462,7 @@ func TestSQLiteStore_WithTx_MockTesting(t *testing.T) {
 		mock.ExpectExec("SELECT foo FROM bar").WillReturnError(queryError)
 		mock.ExpectRollback().WillReturnError(rollbackError)
 
-		err = quizStore.WithTx(context.Background(), func(tx *sql.Tx) error {
+		err = quizStore.WithTx(t.Context(), func(tx *sql.Tx) error {
 			_, err = tx.ExecContext(t.Context(), "SELECT foo FROM bar")
 			if err != nil {
 				return fmt.Errorf("error handling options: %w", err)
