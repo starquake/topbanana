@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -39,6 +40,12 @@ func run(
 	logger := logging.NewLogger(stdout)
 
 	db := must.Any(sql.Open("sqlite", "./topbanana.sqlite"))
+	if _, err := db.ExecContext(ctx, "PRAGMA foreign_keys = ON;"); err != nil {
+		return fmt.Errorf("error enabling foreign keys: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, "PRAGMA journal_mode = WAL;"); err != nil {
+		return fmt.Errorf("error enabling WAL journal mode: %w", err)
+	}
 	goose.SetBaseFS(migrations.FS)
 	must.OK(goose.SetDialect("sqlite3"))
 	must.OK(goose.Up(db, "."))
