@@ -131,6 +131,10 @@ linters:
           disabled: true
         - name: function-length
           exclude: ["**/*_test.go"]
+        - name: confusing-naming
+          disabled: false
+          exclude:
+            - ".export_test.go"
     nolintlint:
       require-explanation: true
       require-specific: true

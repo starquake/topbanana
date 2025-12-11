@@ -3,7 +3,10 @@ package quiz_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -249,6 +252,55 @@ func TestSQLiteStore_CreateQuiz_MockTesting(t *testing.T) {
 		}
 
 		if got, want := err, ErrFailLastInsertID; !errors.Is(got, want) {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+}
+
+func TestSQLiteStore_WithTx_MockTesting(t *testing.T) {
+	t.Parallel()
+
+	buf := bytes.Buffer{}
+	logger := logging.NewLogger(&buf)
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+
+	quizStore := quiz.NewSQLiteStore(db, logger)
+
+	t.Run("rollback fails", func(t *testing.T) {
+		t.Parallel()
+
+		defer func() {
+			if err = mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("there were unfulfilled expectations: %s", err)
+			}
+		}()
+
+		queryError := errors.New("query error")
+		rollbackError := errors.New("rollback error")
+
+		mock.ExpectBegin()
+		mock.ExpectExec("SELECT foo FROM bar").WillReturnError(queryError)
+		mock.ExpectRollback().WillReturnError(rollbackError)
+
+		err = quizStore.WithTx(context.Background(), func(tx *sql.Tx) error {
+			_, err = tx.ExecContext(t.Context(), "SELECT foo FROM bar")
+			if err != nil {
+				return fmt.Errorf("error handling options: %w", err)
+			}
+
+			return nil
+		})
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+		if got, want := err, queryError; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", err, want)
+		}
+		if got, want := buf.String(), "error rolling back transaction"; !strings.Contains(got, want) {
 			t.Errorf("got %q, want %q", got, want)
 		}
 	})

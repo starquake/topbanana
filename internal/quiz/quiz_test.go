@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -1520,6 +1521,136 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 			t.Fatal("got nil, want error")
 		}
 		if got, want := err.Error(), "error handling options"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+}
+
+func TestSQLiteStore_WithTx(t *testing.T) {
+	t.Parallel()
+
+	buf := bytes.Buffer{}
+	logger := logging.NewLogger(&buf)
+
+	db := setupTestDBWithMigrations(t)
+
+	quizStore := quiz.NewSQLiteStore(db, logger)
+
+	t.Run("withTx", func(t *testing.T) {
+		t.Parallel()
+
+		err := quizStore.WithTx(t.Context(), func(tx *sql.Tx) error {
+			rows, qErr := tx.QueryContext(t.Context(), "SELECT 1")
+			if qErr != nil {
+				t.Fatalf("error querying database: %v", qErr)
+			}
+			defer func() {
+				_ = rows.Close()
+			}()
+			if rows.Err() != nil {
+				t.Fatalf("error reading rows: %v", rows.Err())
+			}
+
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("error executing query: %v", err)
+		}
+	})
+}
+
+func TestSQLiteStore_WithTx_ErrorHandling(t *testing.T) {
+	t.Parallel()
+
+	buf := bytes.Buffer{}
+	logger := logging.NewLogger(&buf)
+
+	db := setupTestDBWithMigrations(t)
+
+	quizStore := quiz.NewSQLiteStore(db, logger)
+
+	t.Run("context cancelled", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := quizStore.WithTx(ctx, func(tx *sql.Tx) error {
+			rows, qErr := tx.QueryContext(ctx, "SELECT 1")
+			if qErr != nil {
+				t.Fatalf("error querying database: %v", qErr)
+			}
+			defer func() {
+				_ = rows.Close()
+			}()
+			if rows.Err() != nil {
+				t.Fatalf("error reading rows: %v", rows.Err())
+			}
+
+			return nil
+		})
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+		if got, want := err.Error(), "context canceled"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+
+	t.Run("fail triggers rollback", func(t *testing.T) {
+		t.Parallel()
+
+		err := quizStore.WithTx(t.Context(), func(tx *sql.Tx) error {
+			var err error
+
+			_, err = tx.ExecContext(t.Context(), "CREATE TABLE test (id INTEGER PRIMARY KEY)")
+			if err != nil {
+				t.Fatalf("error creating table: %v", err)
+			}
+			_, err = tx.ExecContext(t.Context(), "INSERT INTO test (id) VALUES (1)")
+			if err != nil {
+				t.Fatalf("error inserting row: %v", err)
+			}
+
+			rows, err := tx.QueryContext(t.Context(), "SELECT foo FROM bar")
+			if err != nil {
+				return fmt.Errorf("error querying database: %w", err)
+			}
+			defer func() {
+				_ = rows.Close()
+			}()
+			if rows.Err() != nil {
+				t.Fatalf("error reading rows: %v", rows.Err())
+			}
+
+			return nil
+		})
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+		if got, want := err.Error(), "no such table: bar"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+		if got, want := buf.String(), "rollback transaction successful"; !strings.Contains(got, want) {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("already triggered rollback", func(t *testing.T) {
+		t.Parallel()
+
+		err := quizStore.WithTx(t.Context(), func(tx *sql.Tx) error {
+			err := tx.Rollback()
+			if err != nil {
+				t.Fatalf("error rolling back transaction: %v", err)
+			}
+
+			return nil
+		})
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+		if got, want := err.Error(), "error committing transaction"; !strings.Contains(got, want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
