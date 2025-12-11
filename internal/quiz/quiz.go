@@ -218,31 +218,7 @@ func (s *SQLiteStore) GetQuizByID(ctx context.Context, quizID int64) (*Quiz, err
 
 // ListQuizzes returns all quizzes including related questions and options.
 func (s *SQLiteStore) ListQuizzes(ctx context.Context) ([]*Quiz, error) {
-	quizzes, funcErr := func() ([]*Quiz, error) {
-		rows, err := s.db.QueryContext(ctx, listQuizzesSQL)
-		if err != nil {
-			return nil, fmt.Errorf("error querying out: %w", err)
-		}
-		defer func() {
-			// Close the rows to free up resources. It must not return an error.
-			// It will not return an error because we checked for errors before (quizRows.Err()).
-			must.OK(rows.Close())
-		}()
-
-		var out []*Quiz
-		for rows.Next() {
-			qz := &Quiz{}
-			if err = rows.Scan(&qz.ID, &qz.Title, &qz.Slug, &qz.Description, (*Timestamp)(&qz.CreatedAt)); err != nil {
-				return nil, fmt.Errorf("error scanning quizRow: %w", err)
-			}
-			out = append(out, qz)
-		}
-		if err = rows.Err(); err != nil {
-			return nil, fmt.Errorf("error iterating quizRows: %w", err)
-		}
-
-		return out, nil
-	}()
+	quizzes, funcErr := s.fetchQuizzes(ctx)
 	if funcErr != nil {
 		return nil, fmt.Errorf("error listing quizzes: %w", funcErr)
 	}
@@ -407,6 +383,32 @@ func (*SQLiteStore) getQuestionIDsInTx(ctx context.Context, tx *sql.Tx, quizID i
 	}
 
 	return ids, nil
+}
+
+func (s *SQLiteStore) fetchQuizzes(ctx context.Context) ([]*Quiz, error) {
+	rows, err := s.db.QueryContext(ctx, listQuizzesSQL)
+	if err != nil {
+		return nil, fmt.Errorf("error querying quizzes: %w", err)
+	}
+	defer func() {
+		// Close the rows to free up resources. It must not return an error.
+		// It will not return an error because we checked for errors before (quizRows.Err()).
+		must.OK(rows.Close())
+	}()
+
+	var quizzes []*Quiz
+	for rows.Next() {
+		qz := &Quiz{}
+		if err = rows.Scan(&qz.ID, &qz.Title, &qz.Slug, &qz.Description, (*Timestamp)(&qz.CreatedAt)); err != nil {
+			return nil, fmt.Errorf("error scanning quizRow: %w", err)
+		}
+		quizzes = append(quizzes, qz)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating quizRows: %w", err)
+	}
+
+	return quizzes, nil
 }
 
 func (s *SQLiteStore) handleQuestionsInTx(ctx context.Context, tx *sql.Tx, questions []*Question, quizID int64) error {
