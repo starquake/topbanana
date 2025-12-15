@@ -152,6 +152,7 @@ linters:
           - gochecknoglobals
           - gocyclo
           - gocognit
+          - wrapcheck
 formatters:
   enable:
     - gci

@@ -323,8 +323,8 @@ func TestSQLiteStore_GetQuizByID(t *testing.T) {
 	t.Run("invalid quiz ID", func(t *testing.T) {
 		t.Parallel()
 		qz, err := quizStore.GetQuizByID(t.Context(), 999)
-		if !errors.Is(err, quiz.ErrQuizNotFound) {
-			t.Errorf("error is not sql.ErrNoRows: %v", err)
+		if got, want := err, quiz.ErrQuizNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
 		}
 		if qz != nil {
 			t.Errorf("quiz is not nil: %v", qz)
@@ -925,7 +925,7 @@ func TestSQLiteStore_CreateQuiz_ErrorHandling(t *testing.T) {
 			t.Fatal("got nil, want error")
 		}
 
-		if got, want := err.Error(), "no such table: quizzes"; !strings.Contains(err.Error(), want) {
+		if got, want := err.Error(), "error creating quiz"; !strings.Contains(err.Error(), want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
@@ -959,7 +959,7 @@ func TestSQLiteStore_CreateQuiz_ErrorHandling(t *testing.T) {
 			t.Fatal("got nil, want error")
 		}
 
-		if got, want := err.Error(), "no such table: questions"; !strings.Contains(err.Error(), want) {
+		if got, want := err.Error(), "error handling questions"; !strings.Contains(err.Error(), want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
@@ -996,7 +996,7 @@ func TestSQLiteStore_CreateQuiz_ErrorHandling(t *testing.T) {
 			t.Fatal("got nil, want error")
 		}
 
-		if got, want := err.Error(), "no such table: options"; !strings.Contains(err.Error(), want) {
+		if got, want := err.Error(), "error handling questions"; !strings.Contains(err.Error(), want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
@@ -1106,6 +1106,22 @@ func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 	buf := bytes.Buffer{}
 	logger := logging.NewLogger(&buf)
 
+	t.Run("bad quiz ID", func(t *testing.T) {
+		t.Parallel()
+
+		db := setupTestDBWithMigrations(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
+		err := quizStore.UpdateQuiz(t.Context(), &quiz.Quiz{ID: 0})
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+		if got, want := err, quiz.ErrCannotUpdateQuizWithIDZero; !errors.Is(got, want) {
+			t.Errorf("err = %q, want %q", got, want)
+		}
+	})
+
 	t.Run("update error", func(t *testing.T) {
 		t.Parallel()
 		db := setupTestDBWithMigrations(t)
@@ -1119,6 +1135,7 @@ func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
 		testQuiz := &quiz.Quiz{
+			ID:          123456789,
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
 			Description: "Description",
@@ -1133,7 +1150,7 @@ func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 		if err == nil {
 			t.Fatal("got nil, want error")
 		}
-		if got, want := err.Error(), "no such table: quizzes"; !strings.Contains(got, want) {
+		if got, want := err.Error(), "error updating quiz"; !strings.Contains(got, want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
@@ -1199,7 +1216,7 @@ func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 		if err == nil {
 			t.Fatal("got nil, want error")
 		}
-		if got, want := err.Error(), "no such table: questions"; !strings.Contains(got, want) {
+		if got, want := err.Error(), "error handling questions"; !strings.Contains(got, want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
@@ -1328,6 +1345,8 @@ func TestSQLiteStore_CreateQuestion_ErrorHandling(t *testing.T) {
 			if got, want := code, sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY; got != want {
 				t.Fatalf("got error code %d, want %d", code, sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY)
 			}
+		} else {
+			t.Fatalf("got error %v, want sqlite.Error", err)
 		}
 	})
 
@@ -1341,7 +1360,6 @@ func TestSQLiteStore_CreateQuestion_ErrorHandling(t *testing.T) {
 		suppliedQuestionID := int64(1000)
 
 		testQuestion := &quiz.Question{
-			ID:   suppliedQuestionID,
 			Text: "Question 1",
 			Options: []*quiz.Option{
 				{
@@ -1359,8 +1377,14 @@ func TestSQLiteStore_CreateQuestion_ErrorHandling(t *testing.T) {
 		if err == nil {
 			t.Fatal("got nil, want error")
 		}
-		if got, want := err, quiz.ErrUpdatingQuestionNoRowsAffected; !errors.Is(got, want) {
-			t.Errorf("err = %q, want %q", got, want)
+		sqliteErr := &sqlite.Error{}
+		if errors.As(err, &sqliteErr) {
+			code := sqliteErr.Code()
+			if got, want := code, sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY; got != want {
+				t.Fatalf("got error code %d, want %d", code, sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY)
+			}
+		} else {
+			t.Fatalf("got error %v, want sqlite error", err)
 		}
 	})
 }
@@ -1395,13 +1419,26 @@ func TestSQLiteStore_UpdateQuestion(t *testing.T) {
 		t.Fatalf("error creating quiz: %v", err)
 	}
 
-	updatedQuestion := originalQuiz.Questions[0]
-	updatedQuestion.Text = "Question 1 Updated"
-	updatedQuestion.Options[1].Text = "Option 1-2 Updated"
-	updatedQuestion.Options[2].Text = "Option 1-3 Updated"
-	updatedQuestion.Options = append(updatedQuestion.Options, &quiz.Option{Text: "Option 1-4 Added"})
-
-	updatedQuestion.Options = updatedQuestion.Options[1:]
+	updatedQuestion := &quiz.Question{
+		ID:     originalQuiz.Questions[0].ID,
+		QuizID: originalQuiz.ID,
+		Text:   originalQuiz.Questions[0].Text + " Updated",
+		Options: []*quiz.Option{
+			{
+				ID:      originalQuiz.Questions[0].Options[1].ID,
+				Text:    originalQuiz.Questions[0].Options[1].Text + " Updated",
+				Correct: true,
+			},
+			{
+				ID:      originalQuiz.Questions[0].Options[2].ID,
+				Text:    originalQuiz.Questions[0].Options[2].Text + " Updated",
+				Correct: false,
+			},
+			{
+				Text: "Option 1-4 Added",
+			},
+		},
+	}
 
 	err := quizStore.UpdateQuestion(t.Context(), updatedQuestion)
 	if err != nil {
@@ -1423,6 +1460,22 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 
 	buf := bytes.Buffer{}
 	logger := logging.NewLogger(&buf)
+
+	t.Run("bad question ID", func(t *testing.T) {
+		t.Parallel()
+
+		db := setupTestDBWithMigrations(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
+		err := quizStore.UpdateQuestion(t.Context(), &quiz.Question{ID: 0})
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+		if got, want := err, quiz.ErrCannotUpdateQuestionWithIDZero; !errors.Is(got, want) {
+			t.Errorf("err = %q, want %q", got, want)
+		}
+	})
 
 	t.Run("update question error", func(t *testing.T) {
 		t.Parallel()
@@ -1461,7 +1514,7 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 		if err == nil {
 			t.Fatal("got nil, want error")
 		}
-		if got, want := err.Error(), "no such table: questions"; !strings.Contains(got, want) {
+		if got, want := err.Error(), "error handling question"; !strings.Contains(got, want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
@@ -1515,7 +1568,70 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 		if err == nil {
 			t.Fatal("got nil, want error")
 		}
-		if got, want := err.Error(), "no such table: options"; !strings.Contains(got, want) {
+		if got, want := err.Error(), "error handling question"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+
+	t.Run("delete option error", func(t *testing.T) {
+		t.Parallel()
+
+		db := setupTestDBWithMigrations(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
+		testQuiz := &quiz.Quiz{
+			Title:       "Quiz 1",
+			Slug:        "quiz-1",
+			Description: "Description",
+			Questions: []*quiz.Question{
+				{
+					Text: "Question 1",
+					Options: []*quiz.Option{
+						{Text: "Option 1-1"},
+						{Text: "Option 1-2"},
+					},
+				},
+			},
+		}
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("error creating quiz: %v", err)
+		}
+
+		// Make deletes from options fail, while allowing updates/inserts to succeed.
+		_, err := db.ExecContext(t.Context(), `
+			CREATE TRIGGER options_no_delete
+			BEFORE DELETE ON options
+			BEGIN
+				SELECT RAISE(ABORT, 'no deletes');
+			END;
+		`)
+		if err != nil {
+			t.Fatalf("error creating trigger: %v", err)
+		}
+
+		// Keep the first option, drop the second, forces a DELETE during UpdateQuestion.
+		updatedQuestion := &quiz.Question{
+			ID:     testQuiz.Questions[0].ID,
+			QuizID: testQuiz.ID,
+			Text:   testQuiz.Questions[0].Text + " Updated",
+			Options: []*quiz.Option{
+				{
+					ID:      testQuiz.Questions[0].Options[0].ID,
+					Text:    testQuiz.Questions[0].Options[0].Text + " Updated",
+					Correct: false,
+				},
+			},
+		}
+
+		err = quizStore.UpdateQuestion(t.Context(), updatedQuestion)
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+		if got, want := err.Error(), "error deleting options"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+		if got, want := err.Error(), "no deletes"; !strings.Contains(got, want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
@@ -1619,7 +1735,7 @@ func TestSQLiteStore_WithTx_ErrorHandling(t *testing.T) {
 		if err == nil {
 			t.Fatal("got nil, want error")
 		}
-		if got, want := err.Error(), "no such table: bar"; !strings.Contains(got, want) {
+		if got, want := err.Error(), "error executing transaction"; !strings.Contains(got, want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 		if got, want := buf.String(), "rollback transaction successful"; !strings.Contains(got, want) {
@@ -1646,4 +1762,34 @@ func TestSQLiteStore_WithTx_ErrorHandling(t *testing.T) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
+}
+
+func TestSQLiteStore_upsertOptionInTx(t *testing.T) {
+	t.Parallel()
+
+	buf := bytes.Buffer{}
+	logger := logging.NewLogger(&buf)
+
+	db := setupTestDBWithMigrations(t)
+
+	quizStore := quiz.NewSQLiteStore(db, logger)
+
+	testOption := &quiz.Option{
+		Text: "Option 1-1",
+	}
+
+	_, err := db.ExecContext(t.Context(), "ALTER TABLE options RENAME TO options_backup")
+	if err != nil {
+		t.Fatalf("failed to rename table: %v", err)
+	}
+
+	err = quizStore.WithTx(t.Context(), func(tx *sql.Tx) error {
+		return quizStore.UpsertOptionInTx(t.Context(), tx, testOption)
+	})
+	if err == nil {
+		t.Fatal("got nil, want error")
+	}
+	if got, want := err.Error(), "error creating new option"; !strings.Contains(got, want) {
+		t.Errorf("err.Error() = %q, should contain %q", got, want)
+	}
 }

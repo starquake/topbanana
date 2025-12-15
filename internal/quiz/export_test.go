@@ -20,3 +20,7 @@ func (s *SQLiteStore) DeleteQuestionsInTx(ctx context.Context, tx *sql.Tx, delet
 func (s *SQLiteStore) GetOptionIDsInTx(ctx context.Context, tx *sql.Tx, questionID int64) ([]int64, error) {
 	return s.getOptionIDsInTx(ctx, tx, questionID)
 }
+
+func (s *SQLiteStore) UpsertOptionInTx(ctx context.Context, tx *sql.Tx, o *Option) error {
+	return s.upsertOptionInTx(ctx, tx, o)
+}

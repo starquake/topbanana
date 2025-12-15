@@ -45,6 +45,10 @@ var (
 	ErrUpdatingQuestionNoRowsAffected = errors.New("no rows affected when updating question")
 	// ErrUpdatingOptionNoRowsAffected is returned when no rows are affected when updating a option.
 	ErrUpdatingOptionNoRowsAffected = errors.New("no rows affected when updating option")
+	// ErrCannotUpdateQuizWithIDZero is returned when trying to update a quiz with ID 0.
+	ErrCannotUpdateQuizWithIDZero = errors.New("cannot update quiz with ID 0")
+	// ErrCannotUpdateQuestionWithIDZero is returned when trying to update a question with ID 0.
+	ErrCannotUpdateQuestionWithIDZero = errors.New("cannot update question with ID 0")
 )
 
 // Timestamp is a timestamp with millisecond precision. Used for SQLite type conversion.
@@ -263,6 +267,8 @@ func (s *SQLiteStore) GetQuestionByID(ctx context.Context, questionID int64) (*Q
 
 // CreateQuiz creates a quiz.
 func (s *SQLiteStore) CreateQuiz(ctx context.Context, qz *Quiz) error {
+	qz.ID = 0
+
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		qz.CreatedAt = time.Now().UTC()
 		quizResult, err := tx.ExecContext(ctx, createQuizSQL,
@@ -290,6 +296,10 @@ func (s *SQLiteStore) CreateQuiz(ctx context.Context, qz *Quiz) error {
 
 // UpdateQuiz updates a quiz, questions, and their options.
 func (s *SQLiteStore) UpdateQuiz(ctx context.Context, qz *Quiz) error {
+	if qz.ID == 0 {
+		return ErrCannotUpdateQuizWithIDZero
+	}
+
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		// Update Quiz
 		res, err := tx.ExecContext(ctx, updateQuizSQL, qz.Title, qz.Slug, qz.Description, qz.ID)
@@ -317,6 +327,8 @@ func (s *SQLiteStore) UpdateQuiz(ctx context.Context, qz *Quiz) error {
 
 // CreateQuestion creates a question and its options and saves them to the database.
 func (s *SQLiteStore) CreateQuestion(ctx context.Context, qs *Question) error {
+	qs.ID = 0
+
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		if err := s.handleQuestionsInTx(ctx, tx, []*Question{qs}, qs.QuizID); err != nil {
 			return fmt.Errorf("error handling question: %w", err)
@@ -328,6 +340,10 @@ func (s *SQLiteStore) CreateQuestion(ctx context.Context, qs *Question) error {
 
 // UpdateQuestion updates a question.
 func (s *SQLiteStore) UpdateQuestion(ctx context.Context, qs *Question) error {
+	if qs.ID == 0 {
+		return ErrCannotUpdateQuestionWithIDZero
+	}
+
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		if err := s.handleQuestionsInTx(ctx, tx, []*Question{qs}, qs.QuizID); err != nil {
 			return fmt.Errorf("error handling question: %w", err)
@@ -529,7 +545,7 @@ func (s *SQLiteStore) handleOptionsInTx(ctx context.Context, tx *sql.Tx, options
 		}
 	}
 
-	err = s.deleteOptions(ctx, tx, deleteOIDs)
+	err = s.deleteOptionsInTx(ctx, tx, deleteOIDs)
 	if err != nil {
 		return fmt.Errorf("error deleting options: %w", err)
 	}
@@ -555,6 +571,19 @@ func (s *SQLiteStore) upsertOptionInTx(ctx context.Context, tx *sql.Tx, o *Optio
 	return nil
 }
 
+func (*SQLiteStore) createOptionInTx(ctx context.Context, tx *sql.Tx, o *Option) error {
+	res, err := tx.ExecContext(ctx, createOptionSQL, o.QuestionID, o.Text, o.Correct)
+	if err != nil {
+		return fmt.Errorf("error creating option: %w", err)
+	}
+	o.ID, err = res.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("error getting option ID: %w", err)
+	}
+
+	return nil
+}
+
 func (*SQLiteStore) updateOptionInTx(ctx context.Context, tx *sql.Tx, o *Option) error {
 	res, err := tx.ExecContext(ctx, updateOptionSQL, o.Text, o.Correct, o.ID)
 	if err != nil {
@@ -571,20 +600,7 @@ func (*SQLiteStore) updateOptionInTx(ctx context.Context, tx *sql.Tx, o *Option)
 	return nil
 }
 
-func (*SQLiteStore) createOptionInTx(ctx context.Context, tx *sql.Tx, o *Option) error {
-	res, err := tx.ExecContext(ctx, createOptionSQL, o.QuestionID, o.Text, o.Correct)
-	if err != nil {
-		return fmt.Errorf("error creating option: %w", err)
-	}
-	o.ID, err = res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("error getting option ID: %w", err)
-	}
-
-	return nil
-}
-
-func (*SQLiteStore) deleteOptions(
+func (*SQLiteStore) deleteOptionsInTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	deleteIDs []int64,
