@@ -196,21 +196,21 @@ func NewSQLiteStore(db *sql.DB, logger *logging.Logger) *SQLiteStore {
 func (s *SQLiteStore) GetQuizByID(ctx context.Context, quizID int64) (*Quiz, error) {
 	var err error
 
-	quizRow := s.db.QueryRowContext(ctx, getQuizByIDSQL, quizID)
-	if quizRow.Err() != nil {
-		return nil, fmt.Errorf("error iterating quizRow: %w", quizRow.Err())
+	row := s.db.QueryRowContext(ctx, getQuizByIDSQL, quizID)
+	if row.Err() != nil {
+		return nil, fmt.Errorf("error iterating row: %w", row.Err())
 	}
 
 	qz := &Quiz{}
-	if err = quizRow.Scan(&qz.ID, &qz.Title, &qz.Slug, &qz.Description, (*Timestamp)(&qz.CreatedAt)); err != nil {
+	if err = row.Scan(&qz.ID, &qz.Title, &qz.Slug, &qz.Description, (*Timestamp)(&qz.CreatedAt)); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("%w: quiz %d not found", ErrQuizNotFound, quizID)
 		}
 
-		return nil, fmt.Errorf("error scanning quizRow: %w", err)
+		return nil, fmt.Errorf("error scanning row: %w", err)
 	}
 
-	questions, err := s.getQuestionsByQuizID(ctx, qz.ID)
+	questions, err := s.GetQuestionsByQuizID(ctx, qz.ID)
 	if err != nil {
 		return nil, fmt.Errorf("error getting questions for quiz %d: %w", qz.ID, err)
 	}
@@ -227,13 +227,13 @@ func (s *SQLiteStore) ListQuizzes(ctx context.Context) ([]*Quiz, error) {
 		return nil, fmt.Errorf("error listing quizzes: %w", funcErr)
 	}
 
-	for _, quiz := range quizzes {
-		questions, err := s.getQuestionsByQuizID(ctx, quiz.ID)
+	for _, qz := range quizzes {
+		questions, err := s.GetQuestionsByQuizID(ctx, qz.ID)
 		if err != nil {
-			return nil, fmt.Errorf("error getting questions for quiz %d: %w", quiz.ID, err)
+			return nil, fmt.Errorf("error getting questions for qz %d: %w", qz.ID, err)
 		}
 
-		quiz.Questions = questions
+		qz.Questions = questions
 	}
 
 	return quizzes, nil
@@ -241,22 +241,22 @@ func (s *SQLiteStore) ListQuizzes(ctx context.Context) ([]*Quiz, error) {
 
 // GetQuestionByID returns a question including related options by its ID.
 func (s *SQLiteStore) GetQuestionByID(ctx context.Context, questionID int64) (*Question, error) {
-	questionRow := s.db.QueryRowContext(ctx, getQuestionByIDSQL, questionID)
-	if questionRow.Err() != nil {
-		return nil, fmt.Errorf("error iterating questionRow: %w", questionRow.Err())
+	row := s.db.QueryRowContext(ctx, getQuestionByIDSQL, questionID)
+	if row.Err() != nil {
+		return nil, fmt.Errorf("error iterating row: %w", row.Err())
 	}
 
 	question := &Question{}
-	err := questionRow.Scan(&question.ID, &question.QuizID, &question.Text, &question.ImageURL, &question.Position)
+	err := row.Scan(&question.ID, &question.QuizID, &question.Text, &question.ImageURL, &question.Position)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("%w: quiz %d not found", ErrQuestionNotFound, questionID)
 		}
 
-		return nil, fmt.Errorf("error scanning questionRow: %w", err)
+		return nil, fmt.Errorf("error scanning row: %w", err)
 	}
 
-	options, err := s.getOptionsByQuestionID(ctx, question.ID)
+	options, err := s.GetOptionsByQuestionID(ctx, question.ID)
 	if err != nil {
 		return nil, fmt.Errorf("error getting options for question %d: %w", question.ID, err)
 	}
@@ -353,6 +353,80 @@ func (s *SQLiteStore) UpdateQuestion(ctx context.Context, qs *Question) error {
 	})
 }
 
+// GetQuestionsByQuizID returns questions including related options for a quiz by its quizID.
+func (s *SQLiteStore) GetQuestionsByQuizID(ctx context.Context, quizID int64) ([]*Question, error) {
+	var err error
+	var rows *sql.Rows
+	rows, err = s.db.QueryContext(ctx, getQuestionsByQuizIDSQL, quizID)
+	if err != nil {
+		return nil, fmt.Errorf("error querying questions: %w", err)
+	}
+	defer func() {
+		// Close the rows to free up resources. It must not return an error.
+		// It will not return an error because we checked for errors before (rows.Err()).
+		must.OK(rows.Close())
+	}()
+
+	var questions []*Question
+	for rows.Next() {
+		qs := &Question{}
+		if err = rows.Scan(&qs.ID, &qs.QuizID, &qs.Text, &qs.ImageURL, &qs.Position); err != nil {
+			return nil, fmt.Errorf("error scanning questionRow: %w", err)
+		}
+		questions = append(questions, qs)
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", rows.Err())
+	}
+
+	for _, question := range questions {
+		options, err := s.GetOptionsByQuestionID(ctx, question.ID)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"error getting options for question %d: %w",
+				question.ID,
+				err,
+			)
+		}
+		question.Options = options
+	}
+
+	return questions, nil
+}
+
+// GetOptionsByQuestionID returns options for a question by its questionID.
+func (s *SQLiteStore) GetOptionsByQuestionID(ctx context.Context, questionID int64) ([]*Option, error) {
+	rows, optionErr := s.db.QueryContext(ctx, getOptionsByQuestionIDSQL, questionID)
+	if optionErr != nil {
+		return nil, fmt.Errorf("error querying options: %w", optionErr)
+	}
+	defer func() {
+		// Close the rows to free up resources. It must not return an error.
+		// It will not return an error because we checked for errors before (rows.Err()).
+		must.OK(rows.Close())
+	}()
+
+	var options []*Option
+	for rows.Next() {
+		option := &Option{}
+		optionErr = rows.Scan(
+			&option.ID,
+			&option.QuestionID,
+			&option.Text,
+			&option.Correct,
+		)
+		if optionErr != nil {
+			return nil, fmt.Errorf("error scanning optionRow: %w", optionErr)
+		}
+		options = append(options, option)
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", rows.Err())
+	}
+
+	return options, nil
+}
+
 func (s *SQLiteStore) withTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
 	var txn *sql.Tx
 	var err error
@@ -388,7 +462,7 @@ func (s *SQLiteStore) fetchQuizzes(ctx context.Context) ([]*Quiz, error) {
 	}
 	defer func() {
 		// Close the rows to free up resources. It must not return an error.
-		// It will not return an error because we checked for errors before (quizRows.Err()).
+		// It will not return an error because we checked for errors before (rows.Err()).
 		must.OK(rows.Close())
 	}()
 
@@ -396,12 +470,12 @@ func (s *SQLiteStore) fetchQuizzes(ctx context.Context) ([]*Quiz, error) {
 	for rows.Next() {
 		qz := &Quiz{}
 		if err = rows.Scan(&qz.ID, &qz.Title, &qz.Slug, &qz.Description, (*Timestamp)(&qz.CreatedAt)); err != nil {
-			return nil, fmt.Errorf("error scanning quizRow: %w", err)
+			return nil, fmt.Errorf("error scanning row: %w", err)
 		}
 		quizzes = append(quizzes, qz)
 	}
 	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating quizRows: %w", err)
+		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
 	return quizzes, nil
@@ -412,7 +486,11 @@ func (*SQLiteStore) getQuestionIDsInTx(ctx context.Context, tx *sql.Tx, quizID i
 	if err != nil {
 		return nil, fmt.Errorf("error querying questionIDs: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		// Close the rows to free up resources. It must not return an error.
+		// It will not return an error because we checked for errors before (rows.Err()).
+		must.OK(rows.Close())
+	}()
 
 	var ids []int64
 	for rows.Next() {
@@ -445,8 +523,8 @@ func (s *SQLiteStore) handleQuestionsInTx(ctx context.Context, tx *sql.Tx, quest
 			incomingQsIDs[qs.ID] = true
 		}
 
-		if err := s.upsertQuestionInTx(ctx, tx, qs); err != nil {
-			return err
+		if err = s.upsertQuestionInTx(ctx, tx, qs); err != nil {
+			return fmt.Errorf("error upserting question %d: %w", qs.ID, err)
 		}
 	}
 
@@ -479,6 +557,35 @@ func (s *SQLiteStore) upsertQuestionInTx(ctx context.Context, tx *sql.Tx, qs *Qu
 	// Handle Options for this question (regardless of create or update)
 	if err := s.handleOptionsInTx(ctx, tx, qs.Options, qs.ID); err != nil {
 		return fmt.Errorf("error handling options for question %d: %w", qs.ID, err)
+	}
+
+	return nil
+}
+
+func (*SQLiteStore) createQuestionInTx(ctx context.Context, tx *sql.Tx, qs *Question) error {
+	res, err := tx.ExecContext(ctx, createQuestionSQL, qs.QuizID, qs.Text, qs.ImageURL, qs.Position)
+	if err != nil {
+		return fmt.Errorf("error creating question: %w", err)
+	}
+	qs.ID, err = res.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("error getting question ID: %w", err)
+	}
+
+	return nil
+}
+
+func (*SQLiteStore) updateQuestionInTx(ctx context.Context, tx *sql.Tx, qs *Question) error {
+	res, err := tx.ExecContext(ctx, updateQuestionSQL, qs.Text, qs.ImageURL, qs.Position, qs.ID)
+	if err != nil {
+		return fmt.Errorf("error updating question: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("error getting rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w: questionID %d", ErrUpdatingQuestionNoRowsAffected, qs.ID)
 	}
 
 	return nil
@@ -612,107 +719,4 @@ func (*SQLiteStore) deleteOptionsInTx(
 	}
 
 	return nil
-}
-
-func (*SQLiteStore) createQuestionInTx(ctx context.Context, tx *sql.Tx, qs *Question) error {
-	res, err := tx.ExecContext(ctx, createQuestionSQL, qs.QuizID, qs.Text, qs.ImageURL, qs.Position)
-	if err != nil {
-		return fmt.Errorf("error creating question: %w", err)
-	}
-	qs.ID, err = res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("error getting question ID: %w", err)
-	}
-
-	return nil
-}
-
-func (*SQLiteStore) updateQuestionInTx(ctx context.Context, tx *sql.Tx, qs *Question) error {
-	res, err := tx.ExecContext(ctx, updateQuestionSQL, qs.Text, qs.ImageURL, qs.Position, qs.ID)
-	if err != nil {
-		return fmt.Errorf("error updating question: %w", err)
-	}
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("error getting rows affected: %w", err)
-	}
-	if rows == 0 {
-		return fmt.Errorf("%w: questionID %d", ErrUpdatingQuestionNoRowsAffected, qs.ID)
-	}
-
-	return nil
-}
-
-// getQuestionsByQuizIDSQL returns questions including related options for a quiz by its quizID.
-func (s *SQLiteStore) getQuestionsByQuizID(ctx context.Context, quizID int64) ([]*Question, error) {
-	questionRows, err := s.db.QueryContext(ctx, getQuestionsByQuizIDSQL, quizID)
-	if err != nil {
-		return nil, fmt.Errorf("error querying questions: %w", err)
-	}
-	defer func() {
-		err = questionRows.Close()
-		if err != nil {
-			s.logger.Error(ctx, "error closing questionRows", logging.ErrAttr(err))
-		}
-	}()
-
-	var questions []*Question
-	for questionRows.Next() {
-		qs := &Question{}
-		if err = questionRows.Scan(&qs.ID, &qs.QuizID, &qs.Text, &qs.ImageURL, &qs.Position); err != nil {
-			return nil, fmt.Errorf("error scanning questionRow: %w", err)
-		}
-		questions = append(questions, qs)
-	}
-	if questionRows.Err() != nil {
-		return nil, fmt.Errorf("error iterating questionRows: %w", questionRows.Err())
-	}
-
-	for _, question := range questions {
-		options, err := s.getOptionsByQuestionID(ctx, question.ID)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"error getting options for question %d: %w",
-				question.ID,
-				err,
-			)
-		}
-		question.Options = options
-	}
-
-	return questions, nil
-}
-
-// getOptionsByQuestionID returns options for a question by its questionID.
-func (s *SQLiteStore) getOptionsByQuestionID(ctx context.Context, questionID int64) ([]*Option, error) {
-	optionRows, optionErr := s.db.QueryContext(ctx, getOptionsByQuestionIDSQL, questionID)
-	if optionErr != nil {
-		return nil, fmt.Errorf("error querying options: %w", optionErr)
-	}
-	defer func() {
-		err := optionRows.Close()
-		if err != nil {
-			s.logger.Error(ctx, "error closing optionRows", logging.ErrAttr(err))
-		}
-	}()
-
-	var options []*Option
-	for optionRows.Next() {
-		option := &Option{}
-		optionErr = optionRows.Scan(
-			&option.ID,
-			&option.QuestionID,
-			&option.Text,
-			&option.Correct,
-		)
-		if optionErr != nil {
-			return nil, fmt.Errorf("error scanning optionRow: %w", optionErr)
-		}
-		options = append(options, option)
-	}
-	if optionRows.Err() != nil {
-		return nil, fmt.Errorf("error iterating optionRows: %w", optionRows.Err())
-	}
-
-	return options, nil
 }
