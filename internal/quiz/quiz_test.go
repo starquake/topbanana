@@ -20,10 +20,17 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
-func setupTestDBWithMigrations(t *testing.T) *sql.DB {
+var (
+	lessQuizzes   = func(a, b *quiz.Quiz) bool { return a.Title < b.Title }
+	lessQuestions = func(a, b *quiz.Question) bool { return a.Text < b.Text }
+	lessOptions   = func(a, b *quiz.Option) bool { return a.Text < b.Text }
+)
+
+// open opens a database connection with migrations applied.
+func open(t *testing.T) *sql.DB {
 	t.Helper()
 
-	db := setupTestDBWithoutMigrations(t)
+	db := openUnmigrated(t)
 
 	goose.SetBaseFS(migrations.FS)
 	err := goose.SetDialect("sqlite3")
@@ -38,7 +45,8 @@ func setupTestDBWithMigrations(t *testing.T) *sql.DB {
 	return db
 }
 
-func setupTestDBWithoutMigrations(t *testing.T) *sql.DB {
+// openUnmigrated opens a database connection without migrations applied.
+func openUnmigrated(t *testing.T) *sql.DB {
 	t.Helper()
 
 	db, err := sql.Open("sqlite", ":memory:")
@@ -53,12 +61,6 @@ func setupTestDBWithoutMigrations(t *testing.T) *sql.DB {
 
 	return db
 }
-
-var (
-	lessQuizzes   = func(a, b *quiz.Quiz) bool { return a.Title < b.Title }
-	lessQuestions = func(a, b *quiz.Question) bool { return a.Text < b.Text }
-	lessOptions   = func(a, b *quiz.Option) bool { return a.Text < b.Text }
-)
 
 func TestTimestamp_Scan(t *testing.T) {
 	t.Parallel()
@@ -270,7 +272,7 @@ func TestSQLiteStore_GetQuizByID(t *testing.T) {
 	buf := bytes.Buffer{}
 	logger := logging.NewLogger(&buf)
 
-	db := setupTestDBWithMigrations(t)
+	db := open(t)
 
 	quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -341,7 +343,7 @@ func TestSQLiteStore_GetQuizByID_ErrorHandling(t *testing.T) {
 	t.Run("context canceled", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -361,7 +363,7 @@ func TestSQLiteStore_GetQuizByID_ErrorHandling(t *testing.T) {
 	t.Run("scan error", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -398,7 +400,7 @@ func TestSQLiteStore_GetQuizByID_ErrorHandling(t *testing.T) {
 	t.Run("question scan error", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -445,7 +447,7 @@ func TestSQLiteStore_ListQuizzes(t *testing.T) {
 	buf := bytes.Buffer{}
 	logger := logging.NewLogger(&buf)
 
-	db := setupTestDBWithMigrations(t)
+	db := open(t)
 
 	quizStore := quiz.NewSQLiteStore(db, logger)
 	testQuizzes := []*quiz.Quiz{
@@ -523,7 +525,7 @@ func TestSQLiteStore_ListQuizzes_ErrorHandling(t *testing.T) {
 	t.Run("context canceled", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -542,7 +544,7 @@ func TestSQLiteStore_ListQuizzes_ErrorHandling(t *testing.T) {
 	t.Run("scan error", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -570,7 +572,7 @@ func TestSQLiteStore_ListQuizzes_ErrorHandling(t *testing.T) {
 	t.Run("question scan error", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -615,7 +617,7 @@ func TestSQLiteStore_GetQuestionByID(t *testing.T) {
 	buf := bytes.Buffer{}
 	logger := logging.NewLogger(&buf)
 
-	db := setupTestDBWithMigrations(t)
+	db := open(t)
 
 	quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -678,7 +680,7 @@ func TestSQLiteStore_GetQuestionByID_ErrorHandling(t *testing.T) {
 	t.Run("context canceled", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -697,7 +699,7 @@ func TestSQLiteStore_GetQuestionByID_ErrorHandling(t *testing.T) {
 	t.Run("scan error", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -737,7 +739,7 @@ func TestSQLiteStore_GetQuestionByID_ErrorHandling(t *testing.T) {
 	t.Run("option scan error", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -797,7 +799,7 @@ func TestSQLiteStore_CreateQuiz(t *testing.T) {
 	buf := bytes.Buffer{}
 	logger := logging.NewLogger(&buf)
 
-	db := setupTestDBWithMigrations(t)
+	db := open(t)
 
 	quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -919,7 +921,7 @@ func TestSQLiteStore_CreateQuiz_ErrorHandling(t *testing.T) {
 	t.Run("quiz insert error", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -948,7 +950,7 @@ func TestSQLiteStore_CreateQuiz_ErrorHandling(t *testing.T) {
 	t.Run("question insert error", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -982,7 +984,7 @@ func TestSQLiteStore_CreateQuiz_ErrorHandling(t *testing.T) {
 	t.Run("option insert error", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1023,7 +1025,7 @@ func TestSQLiteStore_UpdateQuiz(t *testing.T) {
 	buf := bytes.Buffer{}
 	logger := logging.NewLogger(&buf)
 
-	db := setupTestDBWithMigrations(t)
+	db := open(t)
 
 	quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1124,7 +1126,7 @@ func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 	t.Run("bad quiz ID", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1139,7 +1141,7 @@ func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 
 	t.Run("update error", func(t *testing.T) {
 		t.Parallel()
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		// Rename questions table to force an insert error
 		_, err := db.ExecContext(t.Context(), "ALTER TABLE quizzes RENAME TO quizzes_backup")
@@ -1174,7 +1176,7 @@ func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 		t.Parallel()
 		qz := quiz.Quiz{ID: 123456789}
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1189,7 +1191,7 @@ func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 
 	t.Run("error handling questions", func(t *testing.T) {
 		t.Parallel()
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		// Rename questions table to force an insert error
 		quizStore := quiz.NewSQLiteStore(db, logger)
@@ -1245,7 +1247,7 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 
 	t.Run("create question", func(t *testing.T) {
 		t.Parallel()
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1290,7 +1292,7 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 	t.Run("ignore supplied option ID", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1337,7 +1339,7 @@ func TestSQLiteStore_CreateQuestion_ErrorHandling(t *testing.T) {
 	t.Run("fail on nonexisting quizID", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1368,7 +1370,7 @@ func TestSQLiteStore_CreateQuestion_ErrorHandling(t *testing.T) {
 	t.Run("fail creating option with nonexisting questionID", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1410,7 +1412,7 @@ func TestSQLiteStore_UpdateQuestion(t *testing.T) {
 	buf := bytes.Buffer{}
 	logger := logging.NewLogger(&buf)
 
-	db := setupTestDBWithMigrations(t)
+	db := open(t)
 
 	quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1479,7 +1481,7 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 	t.Run("bad question ID", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1495,7 +1497,7 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 	t.Run("question not found", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1515,7 +1517,7 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 	t.Run("update question error", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1557,7 +1559,7 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 	t.Run("update option error", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1611,7 +1613,7 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 	t.Run("delete option error", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1678,7 +1680,7 @@ func TestSQLiteStore_WithTx(t *testing.T) {
 	buf := bytes.Buffer{}
 	logger := logging.NewLogger(&buf)
 
-	db := setupTestDBWithMigrations(t)
+	db := open(t)
 
 	quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1707,7 +1709,7 @@ func TestSQLiteStore_WithTx_ErrorHandling(t *testing.T) {
 	buf := bytes.Buffer{}
 	logger := logging.NewLogger(&buf)
 
-	db := setupTestDBWithMigrations(t)
+	db := open(t)
 
 	quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1807,7 +1809,7 @@ func TestSQLiteStore_upsertQuestionInTx_ErrorHandling(t *testing.T) {
 
 	t.Run("create error", func(t *testing.T) {
 		t.Parallel()
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1833,7 +1835,7 @@ func TestSQLiteStore_upsertQuestionInTx_ErrorHandling(t *testing.T) {
 
 	t.Run("update error", func(t *testing.T) {
 		t.Parallel()
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1865,7 +1867,7 @@ func TestSQLiteStore_deleteQuestionsInTx(t *testing.T) {
 	buf := bytes.Buffer{}
 	logger := logging.NewLogger(&buf)
 
-	db := setupTestDBWithMigrations(t)
+	db := open(t)
 
 	quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1892,7 +1894,7 @@ func TestSQLiteStore_upsertOptionInTx_ErrorHandling(t *testing.T) {
 
 	t.Run("create error", func(t *testing.T) {
 		t.Parallel()
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1918,7 +1920,7 @@ func TestSQLiteStore_upsertOptionInTx_ErrorHandling(t *testing.T) {
 
 	t.Run("update error", func(t *testing.T) {
 		t.Parallel()
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1952,7 +1954,7 @@ func TestSQLiteStore_updateOptionInTx(t *testing.T) {
 
 	option := quiz.Option{ID: 123456789}
 
-	db := setupTestDBWithMigrations(t)
+	db := open(t)
 
 	quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1977,7 +1979,7 @@ func TestSQLiteStore_GetQuestionsByQuizID_ErrorHandling(t *testing.T) {
 	t.Run("context canceled", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
@@ -1996,7 +1998,7 @@ func TestSQLiteStore_GetQuestionsByQuizID_ErrorHandling(t *testing.T) {
 	t.Run("error getting options", func(t *testing.T) {
 		t.Parallel()
 
-		db := setupTestDBWithMigrations(t)
+		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
