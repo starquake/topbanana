@@ -15,7 +15,6 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pressly/goose/v3"
 	"github.com/starquake/topbanana/internal/logging"
-	"github.com/starquake/topbanana/internal/migrations"
 	"github.com/starquake/topbanana/internal/quiz"
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
@@ -33,12 +32,7 @@ func open(t *testing.T) *sql.DB {
 
 	db := openUnmigrated(t)
 
-	goose.SetBaseFS(migrations.FS)
-	err := goose.SetDialect("sqlite3")
-	if err != nil {
-		t.Fatalf("error setting dialect: %v", err)
-	}
-	err = goose.Up(db, ".")
+	err := goose.Up(db, ".")
 	if err != nil {
 		t.Fatalf("error running migrations: %v", err)
 	}
