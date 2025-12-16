@@ -266,12 +266,12 @@ func TestSQLiteStore_GetQuizByID(t *testing.T) {
 
 	logger := logging.NewLogger(io.Discard)
 
-	db := open(t)
-
-	quizStore := quiz.NewSQLiteStore(db, logger)
-
 	t.Run("valid quiz ID", func(t *testing.T) {
 		t.Parallel()
+
+		db := open(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
 
 		testQuiz := &quiz.Quiz{
 			Title:       "Quiz 1",
@@ -318,6 +318,11 @@ func TestSQLiteStore_GetQuizByID(t *testing.T) {
 
 	t.Run("invalid quiz ID", func(t *testing.T) {
 		t.Parallel()
+
+		db := open(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
 		qz, err := quizStore.GetQuizByID(t.Context(), 999)
 		if got, want := err, quiz.ErrQuizNotFound; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
@@ -607,12 +612,12 @@ func TestSQLiteStore_GetQuestionByID(t *testing.T) {
 
 	logger := logging.NewLogger(io.Discard)
 
-	db := open(t)
-
-	quizStore := quiz.NewSQLiteStore(db, logger)
-
 	t.Run("valid question ID", func(t *testing.T) {
 		t.Parallel()
+
+		db := open(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
 
 		testQuiz := &quiz.Quiz{
 			Title:       "Quiz 1",
@@ -651,6 +656,11 @@ func TestSQLiteStore_GetQuestionByID(t *testing.T) {
 
 	t.Run("invalid question ID", func(t *testing.T) {
 		t.Parallel()
+
+		db := open(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
 		qs, err := quizStore.GetQuestionByID(t.Context(), 999)
 		if got, want := err, quiz.ErrQuestionNotFound; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
@@ -785,15 +795,16 @@ func TestSQLiteStore_GetQuestionByID_ErrorHandling(t *testing.T) {
 func TestSQLiteStore_CreateQuiz(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
-
-	db := open(t)
-
-	quizStore := quiz.NewSQLiteStore(db, logger)
-
 	t.Run("quiz with questions and options", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		db := open(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
 		testQuiz := &quiz.Quiz{
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
@@ -830,6 +841,14 @@ func TestSQLiteStore_CreateQuiz(t *testing.T) {
 
 	t.Run("ignore supplied ID's", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		db := open(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
+
 		suppliedQuizID := int64(1000)
 		suppliedQuestionID := int64(1001)
 		suppliedOption1ID := int64(1002)
@@ -904,11 +923,11 @@ func TestSQLiteStore_CreateQuiz(t *testing.T) {
 func TestSQLiteStore_CreateQuiz_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
-
 	t.Run("quiz insert error", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		db := open(t)
 
@@ -938,6 +957,9 @@ func TestSQLiteStore_CreateQuiz_ErrorHandling(t *testing.T) {
 
 	t.Run("question insert error", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		db := open(t)
 
@@ -972,6 +994,9 @@ func TestSQLiteStore_CreateQuiz_ErrorHandling(t *testing.T) {
 
 	t.Run("option insert error", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		db := open(t)
 
@@ -1109,11 +1134,11 @@ func TestSQLiteStore_UpdateQuiz(t *testing.T) {
 func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
-
 	t.Run("bad quiz ID", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		db := open(t)
 
@@ -1130,6 +1155,10 @@ func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 
 	t.Run("update error", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
 		db := open(t)
 
 		// Rename questions table to force an insert error
@@ -1163,12 +1192,15 @@ func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 
 	t.Run("quiz not found", func(t *testing.T) {
 		t.Parallel()
-		qz := quiz.Quiz{ID: 123456789}
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
+		qz := quiz.Quiz{ID: 123456789}
 		err := quizStore.UpdateQuiz(t.Context(), &qz)
 		if err == nil {
 			t.Fatal("got nil, want error")
@@ -1180,6 +1212,10 @@ func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 
 	t.Run("error handling questions", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
 		db := open(t)
 
 		// Rename questions table to force an insert error
@@ -1231,11 +1267,12 @@ func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 func TestSQLiteStore_CreateQuestion(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
-
 	t.Run("create question", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
 		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
@@ -1280,6 +1317,9 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 
 	t.Run("ignore supplied option ID", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		db := open(t)
 
@@ -1464,11 +1504,11 @@ func TestSQLiteStore_UpdateQuestion(t *testing.T) {
 func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
-
 	t.Run("bad question ID", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		db := open(t)
 
@@ -1485,6 +1525,9 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 
 	t.Run("question not found", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		db := open(t)
 
@@ -1505,6 +1548,9 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 
 	t.Run("update question error", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		db := open(t)
 
@@ -1547,6 +1593,9 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 
 	t.Run("update option error", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		db := open(t)
 
@@ -1601,6 +1650,9 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 
 	t.Run("delete option error", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		db := open(t)
 
@@ -1892,11 +1944,12 @@ func TestSQLiteStore_deleteQuestionsInTx(t *testing.T) {
 func TestSQLiteStore_upsertOptionInTx_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
-
 	t.Run("create error", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
 		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
@@ -1923,6 +1976,10 @@ func TestSQLiteStore_upsertOptionInTx_ErrorHandling(t *testing.T) {
 
 	t.Run("update error", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
 		db := open(t)
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
@@ -1976,11 +2033,11 @@ func TestSQLiteStore_updateOptionInTx(t *testing.T) {
 func TestSQLiteStore_GetQuestionsByQuizID_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
-
 	t.Run("context canceled", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		db := open(t)
 
@@ -2000,6 +2057,9 @@ func TestSQLiteStore_GetQuestionsByQuizID_ErrorHandling(t *testing.T) {
 
 	t.Run("error getting options", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		db := open(t)
 
