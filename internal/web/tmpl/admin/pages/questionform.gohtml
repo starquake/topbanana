@@ -5,9 +5,9 @@
 
         <form
                 {{if .Question.ID}}
-                    action="/admin/quizzes/{{.Question.QuizID}}/questions/{{.Question.ID}}/save"
+                    action="/admin/quizzes/{{.Question.QuizID}}/questions/{{.Question.ID}}"
                 {{else}}
-                    action="/admin/quizzes/{{.Quiz.ID}}/questions/save"
+                    action="/admin/quizzes/{{.Quiz.ID}}/questions"
                 {{end}}
                 method="POST">
 

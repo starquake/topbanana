@@ -165,6 +165,7 @@ func (o *Option) Valid(_ context.Context) map[string]string {
 // This can be implemented for different databases.
 type Store interface {
 	// GetQuizByID returns a quiz with questions and options, by its question ID.
+	// Returns ErrQuizNotFound if the quiz is not found.
 	GetQuizByID(ctx context.Context, id int64) (*Quiz, error)
 	// GetQuestionByID returns a question with options, by its question ID.
 	GetQuestionByID(ctx context.Context, id int64) (*Question, error)

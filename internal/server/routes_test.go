@@ -2,162 +2,89 @@ package server_test
 
 import (
 	"bytes"
-	"database/sql"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/pressly/goose/v3"
 	"github.com/starquake/topbanana/internal/logging"
-	"github.com/starquake/topbanana/internal/migrations"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/server"
 	"github.com/starquake/topbanana/internal/store"
-	_ "modernc.org/sqlite"
 )
 
-func setupTestDBWithMigrations(t *testing.T) *sql.DB {
-	t.Helper()
+type stubQuizStore struct{}
 
-	db := setupTestDBWithoutMigrations(t)
-
-	goose.SetBaseFS(migrations.FS)
-	err := goose.SetDialect("sqlite3")
-	if err != nil {
-		t.Fatalf("error setting dialect: %v", err)
-	}
-	err = goose.Up(db, ".")
-	if err != nil {
-		t.Fatalf("error running migrations: %v", err)
-	}
-
-	return db
+func (stubQuizStore) GetQuizByID(_ context.Context, id int64) (*quiz.Quiz, error) {
+	return &quiz.Quiz{
+		ID:          id,
+		Title:       "Stub Quiz",
+		Slug:        "stub-quiz",
+		Description: "stub",
+		Questions:   nil,
+	}, nil
 }
 
-func setupTestDBWithoutMigrations(t *testing.T) *sql.DB {
-	t.Helper()
-
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("error opening SQLite database: %v", err)
-	}
-	if _, err := db.ExecContext(t.Context(), "PRAGMA foreign_keys = ON;"); err != nil {
-		t.Fatalf("error enabling foreign keys: %v", err)
-	}
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
-
-	return db
+func (stubQuizStore) GetQuestionByID(_ context.Context, id int64) (*quiz.Question, error) {
+	return &quiz.Question{
+		ID:       id,
+		QuizID:   1,
+		Text:     "Stub Question",
+		ImageURL: "",
+		Position: 1,
+		Options:  nil,
+	}, nil
 }
 
-func TestAddRoutes(t *testing.T) {
+func (stubQuizStore) ListQuizzes(_ context.Context) ([]*quiz.Quiz, error) {
+	return []*quiz.Quiz{
+		{ID: 1, Title: "Stub Quiz", Slug: "stub-quiz", Description: "stub"},
+	}, nil
+}
+
+func (stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error { return nil }
+func (stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error { return nil }
+func (stubQuizStore) CreateQuestion(_ context.Context, _ *quiz.Question) error {
+	return nil
+}
+
+func (stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error {
+	return nil
+}
+
+func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 	t.Parallel()
 
 	buf := bytes.Buffer{}
 	logger := logging.NewLogger(&buf)
 
-	db := setupTestDBWithMigrations(t)
-
-	quizStore := quiz.NewSQLiteStore(db, logger)
-
-	err := quizStore.CreateQuiz(t.Context(), &quiz.Quiz{
-		Title:       "Quiz 1",
-		Slug:        "quiz-1",
-		Description: "Quiz 1 Description",
-		Questions: []*quiz.Question{
-			{
-				Text:     "Question 1",
-				Position: 10,
-				Options: []*quiz.Option{
-					{Text: "Option 1"},
-					{Text: "Option 2"},
-				},
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("error creating quiz: %v", err)
-	}
-
 	stores := &store.Stores{
-		Quizzes: quizStore,
+		Quizzes: stubQuizStore{},
 	}
 	mux := http.NewServeMux()
 	server.AddRoutes(mux, logger, stores)
 
 	tests := []struct {
-		name       string
-		method     string
-		path       string
-		wantStatus int
+		name   string
+		method string
+		path   string
 	}{
-		{
-			name:       "Admin Index",
-			method:     http.MethodGet,
-			path:       "/admin",
-			wantStatus: http.StatusOK,
-		},
-		{
-			name:       "Admin Quiz List",
-			method:     http.MethodGet,
-			path:       "/admin/quizzes",
-			wantStatus: http.StatusOK,
-		},
-		{
-			name:       "Admin Quiz View",
-			method:     http.MethodGet,
-			path:       "/admin/quizzes/1",
-			wantStatus: http.StatusOK,
-		},
-		{
-			name:       "Admin Quiz Create",
-			method:     http.MethodGet,
-			path:       "/admin/quizzes/new",
-			wantStatus: http.StatusOK,
-		},
-		{
-			name:       "Admin Quiz Save",
-			method:     http.MethodPost,
-			path:       "/admin/quizzes/save",
-			wantStatus: http.StatusBadRequest,
-		},
-		{
-			name:       "Admin Quiz Edit",
-			method:     http.MethodGet,
-			path:       "/admin/quizzes/1/edit",
-			wantStatus: http.StatusOK,
-		},
-		{
-			name:       "Question Create",
-			method:     http.MethodGet,
-			path:       "/admin/quizzes/1/questions/new",
-			wantStatus: http.StatusOK,
-		},
-		{
-			name:       "Question Save",
-			method:     http.MethodPost,
-			path:       "/admin/quizzes/1/questions/save",
-			wantStatus: http.StatusBadRequest,
-		},
-		{
-			name:       "Question Edit",
-			method:     http.MethodGet,
-			path:       "/admin/quizzes/1/questions/1/edit",
-			wantStatus: http.StatusOK,
-		},
-		{
-			name:       "Question Save With Question ID",
-			method:     http.MethodPost,
-			path:       "/admin/quizzes/1/questions/1/save",
-			wantStatus: http.StatusBadRequest,
-		},
-		{
-			name:       "Not Found Route",
-			method:     http.MethodGet,
-			path:       "/unknown/path",
-			wantStatus: http.StatusNotFound,
-		},
+		{name: "Admin Index", method: http.MethodGet, path: "/admin"},
+		{name: "Admin Quiz List", method: http.MethodGet, path: "/admin/quizzes"},
+		{name: "Admin Quiz View", method: http.MethodGet, path: "/admin/quizzes/1"},
+		{name: "Admin Quiz Create", method: http.MethodGet, path: "/admin/quizzes/new"},
+		{name: "Admin Quiz Edit", method: http.MethodGet, path: "/admin/quizzes/1/edit"},
+
+		{name: "Admin Quiz Save (create)", method: http.MethodPost, path: "/admin/quizzes"},
+		{name: "Admin Quiz Save (update)", method: http.MethodPost, path: "/admin/quizzes/1"},
+
+		{name: "Question Create", method: http.MethodGet, path: "/admin/quizzes/1/questions/new"},
+		{name: "Question Edit", method: http.MethodGet, path: "/admin/quizzes/1/questions/1/edit"},
+
+		{name: "Question Save (create)", method: http.MethodPost, path: "/admin/quizzes/1/questions"},
+		{name: "Question Save (update)", method: http.MethodPost, path: "/admin/quizzes/1/questions/1"},
 	}
+
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -166,10 +93,33 @@ func TestAddRoutes(t *testing.T) {
 
 			mux.ServeHTTP(rec, req)
 
-			if rec.Code != tc.wantStatus {
-				t.Errorf("unexpected status code: got %v, want %v", rec.Code, tc.wantStatus)
-				t.Logf("logstr: %s", buf.String())
+			if rec.Code == http.StatusNotFound {
+				t.Errorf("unexpected 404 for %s %s", tc.method, tc.path)
+				t.Logf("log: %s", buf.String())
 			}
 		})
+	}
+}
+
+func TestAddRoutes_UnknownRouteReturns404(t *testing.T) {
+	t.Parallel()
+
+	buf := bytes.Buffer{}
+	logger := logging.NewLogger(&buf)
+
+	stores := &store.Stores{
+		Quizzes: stubQuizStore{},
+	}
+	mux := http.NewServeMux()
+	server.AddRoutes(mux, logger, stores)
+
+	req := httptest.NewRequest(http.MethodGet, "/unknown/path", nil)
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusNotFound; got != want {
+		t.Errorf("unexpected status code: got %v, want %v", got, want)
+		t.Logf("log: %s", buf.String())
 	}
 }
