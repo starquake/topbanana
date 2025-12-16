@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -72,8 +73,7 @@ func (stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error {
 func TestHandleQuizList(t *testing.T) {
 	t.Parallel()
 
-	var buf bytes.Buffer
-	logger := logging.NewLogger(&buf)
+	logger := logging.NewLogger(io.Discard)
 
 	t.Run("list quizzes", func(t *testing.T) {
 		t.Parallel()
@@ -149,11 +149,11 @@ func TestHandleQuizList(t *testing.T) {
 func TestHandleQuizList_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
-	var buf bytes.Buffer
-	logger := logging.NewLogger(&buf)
-
 	t.Run("list error", func(t *testing.T) {
 		t.Parallel()
+
+		var buf bytes.Buffer
+		logger := logging.NewLogger(&buf)
 
 		testError := errors.New("test error")
 
@@ -185,8 +185,7 @@ func TestHandleQuizList_ErrorHandling(t *testing.T) {
 func TestHandleIndex(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
+	logger := logging.NewLogger(io.Discard)
 	handler := admin.HandleIndex(logger)
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	if err != nil {
@@ -207,11 +206,11 @@ func TestHandleIndex(t *testing.T) {
 func TestHandleQuizView(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
-
 	t.Run("get quiz", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		quizStore := stubQuizStore{
 			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
@@ -239,6 +238,9 @@ func TestHandleQuizView(t *testing.T) {
 
 	t.Run("quiz not found", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		quizStore := stubQuizStore{
 			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
@@ -268,11 +270,11 @@ func TestHandleQuizView(t *testing.T) {
 func TestHandleQuizView_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
-
 	t.Run("parsing id fails", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		quizStore := stubQuizStore{}
 
@@ -296,6 +298,9 @@ func TestHandleQuizView_ErrorHandling(t *testing.T) {
 
 	t.Run("get quiz by id fails", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		testError := errors.New("test error")
 
@@ -327,8 +332,7 @@ func TestHandleQuizView_ErrorHandling(t *testing.T) {
 func TestHandleQuizCreate(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
+	logger := logging.NewLogger(io.Discard)
 
 	handler := admin.HandleQuizCreate(logger)
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/create", nil)
@@ -350,8 +354,7 @@ func TestHandleQuizCreate(t *testing.T) {
 func TestHandleQuizEdit(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
+	logger := logging.NewLogger(io.Discard)
 
 	t.Run("quiz found", func(t *testing.T) {
 		t.Parallel()
@@ -408,11 +411,11 @@ func TestHandleQuizEdit(t *testing.T) {
 func TestHandleQuizEdit_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
-
 	t.Run("parsing id fails", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		quizStore := stubQuizStore{}
 
@@ -436,6 +439,9 @@ func TestHandleQuizEdit_ErrorHandling(t *testing.T) {
 
 	t.Run("get quiz by id fails", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		testError := errors.New("test error")
 
@@ -464,11 +470,11 @@ func TestHandleQuizEdit_ErrorHandling(t *testing.T) {
 func TestHandleQuizSave(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
-
 	t.Run("new quiz saved successfully", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		testQuiz := quiz.Quiz{Title: "Quiz One", Slug: "quiz-one", Description: "First"}
 
@@ -509,6 +515,9 @@ func TestHandleQuizSave(t *testing.T) {
 
 	t.Run("existing quiz saved successfully", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
 		originalQuiz := quiz.Quiz{ID: 123456789, Title: "Quiz One", Slug: "quiz-one", Description: "First"}
 		updatedQuiz := quiz.Quiz{

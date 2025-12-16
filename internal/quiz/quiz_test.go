@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -269,8 +270,7 @@ func TestNewSQLiteStore(t *testing.T) {
 func TestSQLiteStore_GetQuizByID(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
+	logger := logging.NewLogger(io.Discard)
 
 	db := open(t)
 
@@ -337,8 +337,7 @@ func TestSQLiteStore_GetQuizByID(t *testing.T) {
 func TestSQLiteStore_GetQuizByID_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
+	logger := logging.NewLogger(io.Discard)
 
 	t.Run("context canceled", func(t *testing.T) {
 		t.Parallel()
@@ -444,8 +443,7 @@ func TestSQLiteStore_GetQuizByID_ErrorHandling(t *testing.T) {
 func TestSQLiteStore_ListQuizzes(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
+	logger := logging.NewLogger(io.Discard)
 
 	db := open(t)
 
@@ -519,8 +517,7 @@ func TestSQLiteStore_ListQuizzes(t *testing.T) {
 func TestSQLiteStore_ListQuizzes_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
+	logger := logging.NewLogger(io.Discard)
 
 	t.Run("context canceled", func(t *testing.T) {
 		t.Parallel()
@@ -614,8 +611,7 @@ func TestSQLiteStore_ListQuizzes_ErrorHandling(t *testing.T) {
 func TestSQLiteStore_GetQuestionByID(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
+	logger := logging.NewLogger(io.Discard)
 
 	db := open(t)
 
@@ -674,8 +670,7 @@ func TestSQLiteStore_GetQuestionByID(t *testing.T) {
 func TestSQLiteStore_GetQuestionByID_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
+	logger := logging.NewLogger(io.Discard)
 
 	t.Run("context canceled", func(t *testing.T) {
 		t.Parallel()
@@ -1706,15 +1701,15 @@ func TestSQLiteStore_WithTx(t *testing.T) {
 func TestSQLiteStore_WithTx_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
-
-	db := open(t)
-
-	quizStore := quiz.NewSQLiteStore(db, logger)
-
 	t.Run("context canceled", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		db := open(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -1743,6 +1738,13 @@ func TestSQLiteStore_WithTx_ErrorHandling(t *testing.T) {
 
 	t.Run("fail triggers rollback", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		db := open(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
 
 		err := quizStore.WithTx(t.Context(), func(tx *sql.Tx) error {
 			var err error
@@ -1782,6 +1784,13 @@ func TestSQLiteStore_WithTx_ErrorHandling(t *testing.T) {
 
 	t.Run("already triggered rollback", func(t *testing.T) {
 		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		db := open(t)
+
+		quizStore := quiz.NewSQLiteStore(db, logger)
 
 		err := quizStore.WithTx(t.Context(), func(tx *sql.Tx) error {
 			err := tx.Rollback()

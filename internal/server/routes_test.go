@@ -1,8 +1,8 @@
 package server_test
 
 import (
-	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -55,14 +55,11 @@ func (stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error {
 func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
-
 	stores := &store.Stores{
 		Quizzes: stubQuizStore{},
 	}
 	mux := http.NewServeMux()
-	server.AddRoutes(mux, logger, stores)
+	server.AddRoutes(mux, logging.NewLogger(io.Discard), stores)
 
 	tests := []struct {
 		name   string
@@ -95,7 +92,6 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 
 			if rec.Code == http.StatusNotFound {
 				t.Errorf("unexpected 404 for %s %s", tc.method, tc.path)
-				t.Logf("log: %s", buf.String())
 			}
 		})
 	}
@@ -104,8 +100,7 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 func TestAddRoutes_UnknownRouteReturns404(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
+	logger := logging.NewLogger(io.Discard)
 
 	stores := &store.Stores{
 		Quizzes: stubQuizStore{},
@@ -120,6 +115,5 @@ func TestAddRoutes_UnknownRouteReturns404(t *testing.T) {
 
 	if got, want := rec.Code, http.StatusNotFound; got != want {
 		t.Errorf("unexpected status code: got %v, want %v", got, want)
-		t.Logf("log: %s", buf.String())
 	}
 }
