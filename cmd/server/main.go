@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -15,9 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pressly/goose/v3"
+	"github.com/starquake/topbanana/internal/db"
 	"github.com/starquake/topbanana/internal/logging"
-	"github.com/starquake/topbanana/internal/migrations"
 	"github.com/starquake/topbanana/internal/must"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/server"
@@ -39,18 +37,18 @@ func run(
 
 	logger := logging.NewLogger(stdout)
 
-	db := must.Any(sql.Open("sqlite", "./topbanana.sqlite"))
-	if _, err := db.ExecContext(ctx, "PRAGMA foreign_keys = ON;"); err != nil {
-		return fmt.Errorf("error enabling foreign keys: %w", err)
+	conn, err := db.Open(ctx)
+	if err != nil {
+		return fmt.Errorf("error opening database connection: %w", err)
 	}
-	if _, err := db.ExecContext(ctx, "PRAGMA journal_mode = WAL;"); err != nil {
-		return fmt.Errorf("error enabling WAL journal mode: %w", err)
-	}
-	goose.SetBaseFS(migrations.FS)
-	must.OK(goose.SetDialect("sqlite3"))
-	must.OK(goose.Up(db, "."))
+	defer func() {
+		err := conn.Close()
+		if err != nil {
+			logger.Error(mainCtx, "error closing database connection", logging.ErrAttr(err))
+		}
+	}()
 
-	quizStore := quiz.NewSQLiteStore(db, logger)
+	quizStore := quiz.NewSQLiteStore(conn, logger)
 
 	stores := &store.Stores{
 		Quizzes: quizStore,
