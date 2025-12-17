@@ -218,7 +218,7 @@ func render500(w http.ResponseWriter, r *http.Request, logger *logging.Logger) {
 	render.Render(w, r, http.StatusInternalServerError, nil)
 }
 
-// quizByID returns the quiz with the given ID from the store.
+// quizByID returns the quiz with the given ID from the store. It includes the questions.
 // It logs any errors that occur, renders the errorpage and returns false.
 func quizByID(
 	w http.ResponseWriter,
@@ -229,7 +229,7 @@ func quizByID(
 ) (*quiz.Quiz, bool) {
 	q, err := quizStore.GetQuizByID(r.Context(), id)
 	if err != nil {
-		if errors.Is(err, quiz.ErrQuizNotFound) {
+		if errors.Is(err, quiz.ErrQuizNotFound) || errors.Is(err, quiz.ErrQuestionNotFound) {
 			logger.Error(r.Context(), "quiz not found", logging.ErrAttr(err))
 			render404(w, r, logger)
 
@@ -257,6 +257,7 @@ func questionByID(
 	if err != nil {
 		if errors.Is(err, quiz.ErrQuestionNotFound) {
 			logger.Error(r.Context(), fmt.Sprintf("question with ID %d not found", questionID), logging.ErrAttr(err))
+			render404(w, r, logger)
 
 			return nil, false
 		}
@@ -313,41 +314,49 @@ func fillQuestionFromForm(w http.ResponseWriter, r *http.Request, logger *loggin
 	}
 
 	qs.Text = r.PostFormValue("text")
-	qs.ImageURL = r.PostFormValue("imageUrl")
-	position, err := strconv.Atoi(r.PostFormValue("position"))
-	if err != nil {
+	qs.ImageURL = r.PostFormValue("image_url")
+	if qs.Position, err = strconv.Atoi(r.PostFormValue("position")); err != nil {
 		msg := "error parsing position"
 		logger.Error(r.Context(), msg, logging.ErrAttr(err))
 		render400(w, r, logger, msg)
 
 		return false
 	}
-	qs.Position = position
 
 	newOptions := make([]*quiz.Option, 0, maxOptions)
 
 	for i := range maxOptions {
 		var op *quiz.Option
-		if i < len(qs.Options) {
+		if i < len(newOptions) {
 			op = qs.Options[i]
 		} else {
 			op = &quiz.Option{
 				QuestionID: qs.ID,
 			}
 		}
-		op.ID, err = idFromString(r.PostFormValue(fmt.Sprintf("option[%d]id", i)))
-		if err != nil {
-			logger.Error(r.Context(), "error parsing option ID", logging.ErrAttr(err))
-			render500(w, r, logger)
+		if r.PostForm.Has(fmt.Sprintf("option[%d].text", i)) {
+			op.ID, err = idFromString(r.PostFormValue(fmt.Sprintf("option[%d].id", i)))
+			if err != nil {
+				logger.Error(r.Context(), "error parsing option ID", logging.ErrAttr(err))
+				render500(w, r, logger)
 
-			return false
+				return false
+			}
+			op.Text = r.PostFormValue(fmt.Sprintf("option[%d].text", i))
+			op.Correct = r.PostFormValue(fmt.Sprintf("option[%d].correct", i)) == "on"
+
+			newOptions = append(newOptions, op)
 		}
-		op.Text = r.PostFormValue(fmt.Sprintf("option[%d]text", i))
-		op.Correct = r.PostFormValue(fmt.Sprintf("option[%d]correct", i)) == "on"
-
-		newOptions = append(newOptions, op)
 	}
 	qs.Options = newOptions
+
+	if problems := qs.Valid(r.Context()); len(problems) > 0 {
+		msg := fmt.Sprintf("validation errors: %v", problems)
+		logger.Error(r.Context(), msg)
+		render400(w, r, logger, msg)
+
+		return false
+	}
 
 	return true
 }
@@ -556,7 +565,7 @@ func HandleQuizSave(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 			return
 		}
 
-		http.Redirect(w, r, fmt.Sprintf("/admin/quizzes/%d", qz.ID), http.StatusFound)
+		http.Redirect(w, r, fmt.Sprintf("/admin/quizzes/%d", qz.ID), http.StatusSeeOther)
 	})
 }
 
@@ -658,16 +667,10 @@ func HandleQuestionSave(logger *logging.Logger, quizStore quiz.Store) http.Handl
 			return
 		}
 
-		if problems := qs.Valid(r.Context()); len(problems) > 0 {
-			render400(w, r, logger, fmt.Sprintf("validation errors: %v", problems))
-
-			return
-		}
-
 		if ok = storeQuestion(w, r, logger, quizStore, qs); !ok {
 			return
 		}
 
-		http.Redirect(w, r, fmt.Sprintf("/admin/quizzes/%d", quizID), http.StatusFound)
+		http.Redirect(w, r, fmt.Sprintf("/admin/quizzes/%d/questions/%d", qz.ID, qs.ID), http.StatusSeeOther)
 	})
 }
