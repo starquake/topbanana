@@ -20,6 +20,8 @@ profile.cov
 
 # SQLite db
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
