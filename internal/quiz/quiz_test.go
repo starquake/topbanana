@@ -1276,28 +1276,73 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 
 		quizStore := quiz.NewSQLiteStore(db, logger)
 
-		testQuiz := &quiz.Quiz{
-			Title:       "Quiz 1",
-			Slug:        "quiz-1",
-			Description: "Description",
-		}
-
-		err := quizStore.CreateQuiz(t.Context(), testQuiz)
-		if err != nil {
-			t.Fatalf("error creating quiz: %v", err)
-		}
-
-		testQuestion := &quiz.Question{
-			QuizID: testQuiz.ID,
-			Text:   "Question 1",
-			Options: []*quiz.Option{
-				{Text: "Option 1-1"},
-				{Text: "Option 1-2"},
-				{Text: "Option 1-3"},
+		existingQuizzes := []*quiz.Quiz{
+			{
+				Title:       "Quiz 1",
+				Slug:        "quiz-1",
+				Description: "Description",
+				Questions: []*quiz.Question{
+					{
+						Text: "Question 1",
+						Options: []*quiz.Option{
+							{Text: "Option 1-1", Correct: true},
+							{Text: "Option 1-2"},
+							{Text: "Option 1-3"},
+						},
+					},
+					{
+						Text: "Question 2",
+						Options: []*quiz.Option{
+							{Text: "Option 2-1", Correct: true},
+							{Text: "Option 2-2"},
+							{Text: "Option 2-3"},
+						},
+					},
+				},
+			},
+			{
+				Title:       "Quiz 2",
+				Slug:        "quiz-2",
+				Description: "Description",
+				Questions: []*quiz.Question{
+					{
+						Text: "Question 3",
+						Options: []*quiz.Option{
+							{Text: "Option 3-1", Correct: true},
+							{Text: "Option 3-2"},
+							{Text: "Option 3-3"},
+						},
+					},
+					{
+						Text: "Question 4",
+						Options: []*quiz.Option{
+							{Text: "Option 4-1", Correct: true},
+							{Text: "Option 4-2"},
+							{Text: "Option 4-3"},
+						},
+					},
+				},
 			},
 		}
 
-		err = quizStore.CreateQuestion(t.Context(), testQuestion)
+		for _, qz := range existingQuizzes {
+			err := quizStore.CreateQuiz(t.Context(), qz)
+			if err != nil {
+				t.Fatalf("error creating quiz: %v", err)
+			}
+		}
+
+		testQuestion := &quiz.Question{
+			QuizID: existingQuizzes[0].ID,
+			Text:   "Added Question",
+			Options: []*quiz.Option{
+				{Text: "Added Question Option 1"},
+				{Text: "Added Question Option 2"},
+				{Text: "Added Question Option 3"},
+			},
+		}
+
+		err := quizStore.CreateQuestion(t.Context(), testQuestion)
 		if err != nil {
 			t.Fatalf("error creating question: %v", err)
 		}
@@ -1311,6 +1356,14 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 			cmpopts.SortSlices(lessOptions),
 		); diff != "" {
 			t.Errorf("questions diff (-got +want):\n%s", diff)
+		}
+		var count int
+		err = db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM questions").Scan(&count)
+		if err != nil {
+			t.Fatalf("error counting rows: %v", err)
+		}
+		if got, want := count, 5; got != want {
+			t.Fatalf("count = %d, want %d", got, want)
 		}
 	})
 
@@ -1585,7 +1638,7 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 		if err == nil {
 			t.Fatal("got nil, want error")
 		}
-		if got, want := err.Error(), "error handling question"; !strings.Contains(got, want) {
+		if got, want := err.Error(), "error updating question"; !strings.Contains(got, want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
@@ -1642,7 +1695,7 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 		if err == nil {
 			t.Fatal("got nil, want error")
 		}
-		if got, want := err.Error(), "error handling question"; !strings.Contains(got, want) {
+		if got, want := err.Error(), "error handling options"; !strings.Contains(got, want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})

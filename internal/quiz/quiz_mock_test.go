@@ -453,9 +453,6 @@ func TestSQLiteStore_UpdateQuestion_MockTesting_FailRowsAffected(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT id FROM questions WHERE quiz_id").
-		WithArgs(testQuestion.QuizID).
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(testQuestion.ID))
 	mock.ExpectExec("UPDATE questions").
 		WithArgs(testQuestion.Text, testQuestion.ImageURL, testQuestion.Position, testQuestion.ID).
 		WillReturnResult(failRowsAffectedResult{})

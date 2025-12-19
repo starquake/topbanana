@@ -331,8 +331,12 @@ func (s *SQLiteStore) CreateQuestion(ctx context.Context, qs *Question) error {
 	qs.ID = 0
 
 	return s.withTx(ctx, func(tx *sql.Tx) error {
-		if err := s.handleQuestionsInTx(ctx, tx, []*Question{qs}, qs.QuizID); err != nil {
-			return fmt.Errorf("error handling question: %w", err)
+		if err := s.upsertQuestionInTx(ctx, tx, qs); err != nil {
+			return fmt.Errorf("error upserting question: %w", err)
+		}
+
+		if err := s.handleOptionsInTx(ctx, tx, qs.Options, qs.ID); err != nil {
+			return fmt.Errorf("error handling options: %w", err)
 		}
 
 		return nil
@@ -346,8 +350,12 @@ func (s *SQLiteStore) UpdateQuestion(ctx context.Context, qs *Question) error {
 	}
 
 	return s.withTx(ctx, func(tx *sql.Tx) error {
-		if err := s.handleQuestionsInTx(ctx, tx, []*Question{qs}, qs.QuizID); err != nil {
-			return fmt.Errorf("error handling question: %w", err)
+		if err := s.updateQuestionInTx(ctx, tx, qs); err != nil {
+			return fmt.Errorf("error updating question: %w", err)
+		}
+
+		if err := s.handleOptionsInTx(ctx, tx, qs.Options, qs.ID); err != nil {
+			return fmt.Errorf("error handling options: %w", err)
 		}
 
 		return nil
@@ -510,18 +518,18 @@ func (*SQLiteStore) getQuestionIDsInTx(ctx context.Context, tx *sql.Tx, quizID i
 }
 
 func (s *SQLiteStore) handleQuestionsInTx(ctx context.Context, tx *sql.Tx, questions []*Question, quizID int64) error {
-	existingQsIDs, err := s.getQuestionIDsInTx(ctx, tx, quizID)
+	existingIDs, err := s.getQuestionIDsInTx(ctx, tx, quizID)
 	if err != nil {
 		return fmt.Errorf("error getting questionIDs: %w", err)
 	}
 
-	incomingQsIDs := make(map[int64]bool)
+	incomingIDs := make(map[int64]bool)
 	for _, qs := range questions {
 		qs.QuizID = quizID // Ensure linkage
 
 		// Track incoming IDs for updates
 		if qs.ID != 0 {
-			incomingQsIDs[qs.ID] = true
+			incomingIDs[qs.ID] = true
 		}
 
 		if err = s.upsertQuestionInTx(ctx, tx, qs); err != nil {
@@ -529,9 +537,9 @@ func (s *SQLiteStore) handleQuestionsInTx(ctx context.Context, tx *sql.Tx, quest
 		}
 	}
 
-	deleteIDs := make([]int64, 0, len(existingQsIDs))
-	for _, id := range existingQsIDs {
-		if !incomingQsIDs[id] {
+	deleteIDs := make([]int64, 0, len(existingIDs))
+	for _, id := range existingIDs {
+		if !incomingIDs[id] {
 			deleteIDs = append(deleteIDs, id)
 		}
 	}
