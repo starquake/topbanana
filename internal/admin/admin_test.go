@@ -26,6 +26,7 @@ type stubQuizStore struct {
 	updateQuiz      func(ctx context.Context, qz *quiz.Quiz) error
 	getQuestionByID func(ctx context.Context, id int64) (*quiz.Question, error)
 	createQuestion  func(ctx context.Context, qs *quiz.Question) error
+	updateQuestion  func(ctx context.Context, qs *quiz.Question) error
 }
 
 func (s stubQuizStore) GetQuizByID(ctx context.Context, id int64) (*quiz.Quiz, error) {
@@ -76,8 +77,38 @@ func (s stubQuizStore) CreateQuestion(ctx context.Context, qs *quiz.Question) er
 	return s.createQuestion(ctx, qs)
 }
 
-func (stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error {
-	panic("not implemented")
+func (s stubQuizStore) UpdateQuestion(ctx context.Context, qs *quiz.Question) error {
+	if s.updateQuestion == nil {
+		return errors.New("updateQuestion not supplied in stub")
+	}
+
+	return s.updateQuestion(ctx, qs)
+}
+
+func TestTemplateRenderer_Render_LogsError(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	logger := logging.NewLogger(&buf)
+
+	renderer := admin.NewTemplateRenderer(logger, "admin/pages/quizview.gohtml")
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+	if err != nil {
+		t.Fatalf("http.NewRequest error: %v", err)
+	}
+	rr := httptest.NewRecorder()
+
+	data := struct{ UnknownField string }{"trigger"}
+
+	renderer.Render(rr, req, http.StatusOK, data)
+	if got, want := rr.Code, http.StatusOK; got != want {
+		t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+	}
+	log := buf.String()
+	if got, want := log, "error executing template"; !strings.Contains(got, want) {
+		t.Fatalf("got: %q, should contain: %q, log: %q", got, want, log)
+	}
 }
 
 func TestHandleQuizList(t *testing.T) {
@@ -224,7 +255,25 @@ func TestHandleQuizView(t *testing.T) {
 
 		quizStore := stubQuizStore{
 			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{ID: 1, Title: "Quiz One", Slug: "quiz-one", Description: "First"}, nil
+				return &quiz.Quiz{
+					ID: 1234, Title: "Quiz One", Slug: "quiz-one", Description: "First",
+					Questions: []*quiz.Question{
+						{
+							ID: 4567, QuizID: 1234, Text: "Question One",
+							Options: []*quiz.Option{
+								{Text: "Option 1-1"},
+								{Text: "Option 1-2"},
+							},
+						},
+						{
+							ID: 4567, QuizID: 1234, Text: "Question Two",
+							Options: []*quiz.Option{
+								{Text: "Option 2-1"},
+								{Text: "Option 2-2"},
+							},
+						},
+					},
+				}, nil
 			},
 		}
 
@@ -569,17 +618,24 @@ func TestHandleQuizSave(t *testing.T) {
 			},
 		}
 
-		handler := admin.HandleQuizSave(logger, quizStore)
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/1", nil)
-		if err != nil {
-			t.Fatalf("http.NewRequest error: %v", err)
-		}
-		req.SetPathValue("quizID", strconv.FormatInt(originalQuiz.ID, 10))
-		req.PostForm = url.Values{
+		form := url.Values{
 			"title":       {updatedQuiz.Title},
 			"slug":        {updatedQuiz.Slug},
 			"description": {updatedQuiz.Description},
 		}
+
+		handler := admin.HandleQuizSave(logger, quizStore)
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			"/admin/quizzes/1",
+			strings.NewReader(form.Encode()),
+		)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.SetPathValue("quizID", strconv.FormatInt(originalQuiz.ID, 10))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 		rr := httptest.NewRecorder()
 
@@ -612,11 +668,12 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 		quizStore := stubQuizStore{}
 
 		handler := admin.HandleQuizSave(logger, quizStore)
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, "/admin/quizzes/abc/edit", nil)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, "/admin/quizzes/not-an-int/edit", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
 		}
-		req.SetPathValue("quizID", "abc")
+		req.SetPathValue("quizID", "not-an-int")
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rr := httptest.NewRecorder()
 
 		handler.ServeHTTP(rr, req)
@@ -670,7 +727,7 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 		quizStore := stubQuizStore{}
 
 		handler := admin.HandleQuizSave(logger, quizStore)
-		// Request with empty body so parsing the form triggers an error.
+		// Request with empty body and no header so parsing the form triggers an error.
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -683,6 +740,40 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
 		}
 		if got, want := rr.Body.String(), "error parsing form"; !strings.Contains(got, want) {
+			t.Fatalf("got: %q, should contain: %q", got, want)
+		}
+	})
+
+	t.Run("form is invalid", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		quizStore := stubQuizStore{}
+
+		handler := admin.HandleQuizSave(logger, quizStore)
+
+		form := url.Values{}
+
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			"/admin/quizzes",
+			strings.NewReader(form.Encode()),
+		)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+		if got, want := rr.Body.String(), "validation errors"; !strings.Contains(got, want) {
 			t.Fatalf("got: %q, should contain: %q", got, want)
 		}
 	})
@@ -703,16 +794,23 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 			},
 		}
 
-		handler := admin.HandleQuizSave(logger, quizStore)
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes", nil)
-		if err != nil {
-			t.Fatalf("http.NewRequest error: %v", err)
-		}
-		req.PostForm = url.Values{
+		form := url.Values{
 			"title":       {testQuiz.Title},
 			"slug":        {testQuiz.Slug},
 			"description": {testQuiz.Description},
 		}
+
+		handler := admin.HandleQuizSave(logger, quizStore)
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			"/admin/quizzes",
+			strings.NewReader(form.Encode()),
+		)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rr := httptest.NewRecorder()
 
 		handler.ServeHTTP(rr, req)
@@ -759,22 +857,25 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 			},
 		}
 
+		form := url.Values{
+			"title":       {updatedQuiz.Title},
+			"slug":        {updatedQuiz.Slug},
+			"description": {updatedQuiz.Description},
+		}
+
 		handler := admin.HandleQuizSave(logger, quizStore)
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodPost,
 			fmt.Sprintf("/admin/quizzes/%d", updatedQuiz.ID),
-			nil,
+			strings.NewReader(form.Encode()),
 		)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
 		}
 		req.SetPathValue("quizID", strconv.FormatInt(updatedQuiz.ID, 10))
-		req.PostForm = url.Values{
-			"title":       {updatedQuiz.Title},
-			"slug":        {updatedQuiz.Slug},
-			"description": {updatedQuiz.Description},
-		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
 		rr := httptest.NewRecorder()
 
 		handler.ServeHTTP(rr, req)
@@ -833,42 +934,73 @@ func TestHandleQuestionCreate(t *testing.T) {
 func TestHandleQuestionCreate_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
+	t.Run("parsing id fails", func(t *testing.T) {
+		t.Parallel()
 
-	testQuizID := 123456789
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
 
-	testError := errors.New("test error")
+		quizStore := stubQuizStore{}
 
-	quizStore := stubQuizStore{
-		getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
-			return nil, testError
-		},
-	}
+		handler := admin.HandleQuestionCreate(logger, quizStore)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, "/admin/quizzes/not-an-int/edit", nil)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.SetPathValue("quizID", "not-an-int")
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rr := httptest.NewRecorder()
 
-	handler := admin.HandleQuestionCreate(logger, quizStore)
+		handler.ServeHTTP(rr, req)
 
-	req, err := http.NewRequestWithContext(
-		t.Context(),
-		http.MethodGet,
-		fmt.Sprintf("/admin/quizzes/%d/questions/new", testQuizID),
-		nil,
-	)
-	if err != nil {
-		t.Fatalf("http.NewRequest error: %v", err)
-	}
-	req.SetPathValue("quizID", strconv.FormatInt(int64(testQuizID), 10))
-	rr := httptest.NewRecorder()
+		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+		if got, want := rr.Body.String(), "error parsing quizID"; !strings.Contains(got, want) {
+			t.Fatalf("got: %q, should contain: %q", got, want)
+		}
+	})
 
-	handler.ServeHTTP(rr, req)
+	t.Run("getting quiz fails", func(t *testing.T) {
+		t.Parallel()
 
-	log := buf.String()
-	if got, want := rr.Code, http.StatusInternalServerError; got != want {
-		t.Fatalf("got status code %v, want %v, log:\n%v", got, want, log)
-	}
-	if got, want := buf.String(), fmt.Sprintf("err=%q", testError); !strings.Contains(got, want) {
-		t.Fatalf("got: %v, should contain: %q", got, want)
-	}
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		testQuizID := 123456789
+
+		testError := errors.New("test error")
+
+		quizStore := stubQuizStore{
+			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
+				return nil, testError
+			},
+		}
+
+		handler := admin.HandleQuestionCreate(logger, quizStore)
+
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			fmt.Sprintf("/admin/quizzes/%d/questions/new", testQuizID),
+			nil,
+		)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.SetPathValue("quizID", strconv.FormatInt(int64(testQuizID), 10))
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		log := buf.String()
+		if got, want := rr.Code, http.StatusInternalServerError; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, log)
+		}
+		if got, want := buf.String(), fmt.Sprintf("err=%q", testError); !strings.Contains(got, want) {
+			t.Fatalf("got: %v, should contain: %q", got, want)
+		}
+	})
 }
 
 func TestHandleQuestionEdit(t *testing.T) {
@@ -897,7 +1029,7 @@ func TestHandleQuestionEdit(t *testing.T) {
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodGet,
-			fmt.Sprintf("/admin/quizzes/%d/question/new", testQuiz.ID),
+			fmt.Sprintf("/admin/quizzes/%d/questions/new", testQuiz.ID),
 			nil,
 		)
 		if err != nil {
@@ -953,7 +1085,7 @@ func TestHandleQuestionEdit(t *testing.T) {
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodGet,
-			fmt.Sprintf("/admin/quizzes/%d/question/%d/edit", testQuestion.QuizID, testQuestion.ID),
+			fmt.Sprintf("/admin/quizzes/%d/questions/%d/edit", testQuestion.QuizID, testQuestion.ID),
 			nil,
 		)
 		if err != nil {
@@ -987,7 +1119,7 @@ func TestHandleQuestionEdit(t *testing.T) {
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodGet,
-			fmt.Sprintf("/admin/quizzes/%d/question/%d/edit", 1234, 5678),
+			fmt.Sprintf("/admin/quizzes/%d/questions/%d/edit", 1234, 5678),
 			nil,
 		)
 		if err != nil {
@@ -1034,7 +1166,7 @@ func TestHandleQuestionEdit(t *testing.T) {
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodGet,
-			fmt.Sprintf("/admin/quizzes/%d/question/%d/edit", 1234, 5678),
+			fmt.Sprintf("/admin/quizzes/%d/questions/%d/edit", 1234, 5678),
 			nil,
 		)
 		if err != nil {
@@ -1074,7 +1206,7 @@ func TestHandleQuestionEdit_HandleError(t *testing.T) {
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodGet,
-			fmt.Sprintf("/admin/quizzes/%s/question/%s/edit", quizID, questionID),
+			fmt.Sprintf("/admin/quizzes/%s/questions/%s/edit", quizID, questionID),
 			nil,
 		)
 		if err != nil {
@@ -1108,7 +1240,7 @@ func TestHandleQuestionEdit_HandleError(t *testing.T) {
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodGet,
-			fmt.Sprintf("/admin/quizzes/%s/question/%s/edit", quizID, questionID),
+			fmt.Sprintf("/admin/quizzes/%s/questions/%s/edit", quizID, questionID),
 			nil,
 		)
 		if err != nil {
@@ -1124,6 +1256,50 @@ func TestHandleQuestionEdit_HandleError(t *testing.T) {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
 		}
 		if got, want := buf.String(), "error parsing questionID"; !strings.Contains(got, want) {
+			t.Fatalf("got: %v, should contain: %q", got, want)
+		}
+	})
+
+	t.Run("getting question fails", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		testError := errors.New("test error")
+
+		quizStore := stubQuizStore{
+			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{}, nil
+			},
+			getQuestionByID: func(_ context.Context, _ int64) (*quiz.Question, error) {
+				return nil, testError
+			},
+		}
+
+		quizID := "1234"
+		questionID := "5678"
+
+		handler := admin.HandleQuestionEdit(logger, quizStore)
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			fmt.Sprintf("/admin/quizzes/%s/questions/%s/edit", quizID, questionID),
+			nil,
+		)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.SetPathValue("quizID", quizID)
+		req.SetPathValue("questionID", questionID)
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusInternalServerError; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+		if got, want := buf.String(), fmt.Sprintf("err=%q", testError); !strings.Contains(got, want) {
 			t.Fatalf("got: %v, should contain: %q", got, want)
 		}
 	})
@@ -1187,9 +1363,7 @@ func TestHandleQuestionSave(t *testing.T) {
 			"position":  {strconv.Itoa(testQuestion.Position)},
 		}
 		for i, option := range testQuestion.Options {
-			if option.Text != "" {
-				form.Add(fmt.Sprintf("option[%d].text", i), option.Text)
-			}
+			form.Add(fmt.Sprintf("option[%d].text", i), option.Text)
 			if option.Correct {
 				form.Add(fmt.Sprintf("option[%d].correct", i), "on")
 			}
@@ -1206,7 +1380,6 @@ func TestHandleQuestionSave(t *testing.T) {
 		}
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.SetPathValue("quizID", strconv.FormatInt(testQuiz.ID, 10))
-
 		rr := httptest.NewRecorder()
 
 		handler.ServeHTTP(rr, req)
@@ -1225,74 +1398,599 @@ func TestHandleQuestionSave(t *testing.T) {
 			t.Fatalf("questions differ (-got +want):\n%s", diff)
 		}
 	})
+
+	t.Run("existing question", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		originalQuiz := quiz.Quiz{ID: 1234, Title: "Quiz One", Slug: "quiz-one", Description: "First"}
+		originalQuestion := quiz.Question{
+			ID:       1,
+			QuizID:   originalQuiz.ID,
+			Text:     "Question One",
+			ImageURL: "https://example.com/image.png",
+			Position: 10,
+			Options: []*quiz.Option{
+				{
+					ID: 1, QuestionID: 1, Text: "Option 1",
+				},
+				{
+					ID: 2, QuestionID: 1, Text: "Option 2", Correct: true,
+				},
+				{
+					ID: 3, QuestionID: 1, Text: "Option 3",
+				},
+			},
+		}
+		updatedQuestion := quiz.Question{
+			ID:       originalQuestion.ID,
+			QuizID:   originalQuestion.QuizID,
+			Text:     "Updated Question",
+			ImageURL: originalQuestion.ImageURL,
+			Position: originalQuestion.Position,
+			Options: []*quiz.Option{
+				{
+					ID:         originalQuestion.Options[1].ID,
+					QuestionID: originalQuestion.ID,
+					Text:       originalQuestion.Options[1].Text,
+				},
+				{
+					ID:         originalQuestion.Options[2].ID,
+					QuestionID: originalQuestion.ID,
+					Text:       originalQuestion.Options[2].Text,
+					Correct:    true,
+				},
+				{
+					QuestionID: originalQuestion.ID,
+					Text:       "Option 4",
+					Correct:    false,
+				},
+			},
+		}
+
+		var questions []*quiz.Question
+		quizStore := stubQuizStore{
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				if id != originalQuiz.ID {
+					return nil, quiz.ErrQuizNotFound
+				}
+
+				return &originalQuiz, nil
+			},
+			getQuestionByID: func(_ context.Context, id int64) (*quiz.Question, error) {
+				if id != originalQuestion.ID {
+					return nil, quiz.ErrQuestionNotFound
+				}
+
+				return &originalQuestion, nil
+			},
+			updateQuestion: func(_ context.Context, q *quiz.Question) error {
+				for _, option := range q.Options {
+					option.QuestionID = q.ID
+				}
+				questions = append(questions, q)
+
+				return nil
+			},
+		}
+
+		handler := admin.HandleQuestionSave(logger, quizStore)
+
+		form := url.Values{
+			"text":      {updatedQuestion.Text},
+			"image_url": {updatedQuestion.ImageURL},
+			"position":  {strconv.Itoa(updatedQuestion.Position)},
+		}
+		for i, option := range updatedQuestion.Options {
+			if option.ID != 0 {
+				form.Add(fmt.Sprintf("option[%d].id", i), strconv.FormatInt(option.ID, 10))
+			}
+			form.Add(fmt.Sprintf("option[%d].text", i), option.Text)
+			if option.Correct {
+				form.Add(fmt.Sprintf("option[%d].correct", i), "on")
+			}
+		}
+
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			fmt.Sprintf("/admin/quizzes/%d/questions/%d", originalQuiz.ID, originalQuestion.ID),
+			strings.NewReader(form.Encode()),
+		)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetPathValue("quizID", strconv.FormatInt(originalQuiz.ID, 10))
+		req.SetPathValue("questionID", strconv.FormatInt(originalQuestion.ID, 10))
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		log := buf.String()
+		if got, want := rr.Code, http.StatusSeeOther; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, log)
+		}
+		if got, want := rr.Header().Get("Location"), fmt.Sprintf("/admin/quizzes/%d/questions/%d", originalQuiz.ID, originalQuestion.ID); got != want {
+			t.Fatalf("got Location header %q, want %q", got, want)
+		}
+		if got, want := len(questions), 1; got != want {
+			t.Fatalf("got len(questions) %v, want %v", got, want)
+		}
+		if diff := cmp.Diff(questions[0], &updatedQuestion); diff != "" {
+			t.Fatalf("questions differ (-got +want):\n%s", diff)
+		}
+	})
 }
 
-// func TestQuizDataFromQuiz(t *testing.T) {
-//	tests := []struct {
-//		name string
-//		qz   *quiz.Quiz
-//		want *admin.QuizData
-//	}{
-//		{
-//			name: "valid quiz with no questions",
-//			qz: &quiz.Quiz{
-//				ID:          1,
-//				Title:       "Test Quiz",
-//				Slug:        "test-quiz",
-//				Description: "A test quiz.",
-//				Questions:   []*quiz.Question{},
-//			},
-//			want: &admin.QuizData{
-//				ID:          1,
-//				Title:       "Test Quiz",
-//				Slug:        "test-quiz",
-//				Description: "A test quiz.",
-//				Questions:   []*admin.QuestionData{},
-//			},
-//		},
-//		{
-//			name: "quiz with questions",
-//			qz: &quiz.Quiz{
-//				ID:          2,
-//				Title:       "Another Quiz",
-//				Slug:        "another-quiz",
-//				Description: "Another test quiz.",
-//				Questions: []*quiz.Question{
-//					{
-//						ID:       10,
-//						QuizID:   2,
-//						Text:     "Sample question?",
-//						ImageURL: "",
-//						Position: 1,
-//						Options:  []*quiz.Option{},
-//					},
-//				},
-//			},
-//			want: &admin.QuizData{
-//				ID:          2,
-//				Title:       "Another Quiz",
-//				Slug:        "another-quiz",
-//				Description: "Another test quiz.",
-//				Questions: []*admin.QuestionData{
-//					{
-//						ID:       10,
-//						QuizID:   2,
-//						Text:     "Sample question?",
-//						ImageURL: "",
-//						Position: 1,
-//						Options:  []*admin.OptionData{},
-//					},
-//				},
-//			},
-//		},
-//	}
-//
-//	for _, tt := range tests {
-//		t.Run(tt.name, func(t *testing.T) {
-//			got := admin.quizDataFromQuiz(tt.qz)
-//			if diff := cmp.Diff(tt.want, got); diff != "" {
-//				t.Errorf("quizDataFromQuiz mismatch (-want +got):\n%s", diff)
-//			}
-//		})
-//	}
-// }
+func TestHandleQuestionSave_HandleError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("parsing quizID fails", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		quizStore := stubQuizStore{}
+
+		testQuizID := "not-an-int"
+
+		handler := admin.HandleQuestionSave(logger, quizStore)
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			fmt.Sprintf("/admin/quizzes/%s/questions", testQuizID),
+			strings.NewReader("text=Question One"),
+		)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.SetPathValue("quizID", testQuizID)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+		if got, want := rr.Body.String(), "error parsing quizID"; !strings.Contains(got, want) {
+			t.Fatalf("got: %q, should contain: %q", got, want)
+		}
+	})
+
+	t.Run("parsing questionID fails", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		quizStore := stubQuizStore{}
+
+		testQuizID := "1234"
+		testQuestionID := "not-an-int"
+
+		handler := admin.HandleQuestionSave(logger, quizStore)
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			fmt.Sprintf("/admin/quizzes/%s/questions/%s", testQuizID, testQuestionID),
+			strings.NewReader("text=Question One"),
+		)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.SetPathValue("quizID", testQuizID)
+		req.SetPathValue("questionID", testQuestionID)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+		if got, want := rr.Body.String(), "error parsing questionID"; !strings.Contains(got, want) {
+			t.Fatalf("got: %q, should contain: %q", got, want)
+		}
+	})
+
+	t.Run("parsing form fails", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		quizStore := stubQuizStore{
+			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{}, nil
+			},
+		}
+
+		handler := admin.HandleQuestionSave(logger, quizStore)
+		// Request with empty body and no header so parsing the form triggers an error.
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/1234/questions", nil)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+		if got, want := rr.Body.String(), "error parsing form"; !strings.Contains(got, want) {
+			t.Fatalf("got: %q, should contain: %q", got, want)
+		}
+	})
+
+	t.Run("parsing form optionID fails", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		quizStore := stubQuizStore{
+			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{}, nil
+			},
+		}
+
+		handler := admin.HandleQuestionSave(logger, quizStore)
+
+		form := url.Values{
+			"text":           {""},
+			"image_url":      {"http://example.com/image.png"},
+			"position":       {"10"},
+			"option[0].id":   {"not-an-int"},
+			"option[0].text": {"Option 1"},
+		}
+
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			"/admin/quizzes/1234/questions",
+			strings.NewReader(form.Encode()),
+		)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+		if got, want := rr.Body.String(), "error parsing optionID"; !strings.Contains(got, want) {
+			t.Fatalf("got: %v, should contain: %q", got, want)
+		}
+	})
+
+	t.Run("parsing form position fails", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		quizStore := stubQuizStore{
+			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{}, nil
+			},
+		}
+
+		handler := admin.HandleQuestionSave(logger, quizStore)
+
+		form := url.Values{
+			"text":      {""},
+			"image_url": {"http://example.com/image.png"},
+		}
+
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			"/admin/quizzes/1234/questions",
+			strings.NewReader(form.Encode()),
+		)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+		if got, want := rr.Body.String(), "error parsing position"; !strings.Contains(got, want) {
+			t.Fatalf("got: %v, should contain: %q", got, want)
+		}
+	})
+
+	t.Run("form is invalid", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		quizStore := stubQuizStore{
+			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{}, nil
+			},
+		}
+
+		handler := admin.HandleQuestionSave(logger, quizStore)
+
+		form := url.Values{
+			"text":      {""},
+			"image_url": {"http://example.com/image.png"},
+			"position":  {"10"},
+		}
+
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			"/admin/quizzes/1234/questions",
+			strings.NewReader(form.Encode()),
+		)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+		if got, want := rr.Body.String(), "validation errors"; !strings.Contains(got, want) {
+			t.Fatalf("got: %v, should contain: %q", got, want)
+		}
+	})
+
+	t.Run("storing new question fails", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		testQuiz := quiz.Quiz{ID: 1234, Title: "Quiz One", Slug: "quiz-one", Description: "First"}
+		testQuestion := quiz.Question{
+			Text:     "Question One",
+			ImageURL: "https://example.com/image.png",
+			Position: 10,
+			Options: []*quiz.Option{
+				{
+					ID: 1, QuestionID: 1, Text: "Option 1",
+				},
+				{
+					ID: 2, QuestionID: 1, Text: "Option 2", Correct: true,
+				},
+				{
+					ID: 3, QuestionID: 1, Text: "Option 3",
+				},
+			},
+		}
+
+		testError := errors.New("test error")
+
+		quizStore := stubQuizStore{
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				if id != testQuiz.ID {
+					return nil, quiz.ErrQuizNotFound
+				}
+
+				return &testQuiz, nil
+			},
+			createQuestion: func(_ context.Context, _ *quiz.Question) error {
+				return testError
+			},
+		}
+
+		form := url.Values{
+			"text":      {testQuestion.Text},
+			"image_url": {testQuestion.ImageURL},
+			"position":  {strconv.Itoa(testQuestion.Position)},
+		}
+		for i, option := range testQuestion.Options {
+			form.Add(fmt.Sprintf("option[%d].text", i), option.Text)
+			if option.Correct {
+				form.Add(fmt.Sprintf("option[%d].correct", i), "on")
+			}
+		}
+
+		handler := admin.HandleQuestionSave(logger, quizStore)
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			fmt.Sprintf("/admin/quizzes/%d/questions", testQuiz.ID),
+			strings.NewReader(form.Encode()),
+		)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetPathValue("quizID", strconv.FormatInt(testQuiz.ID, 10))
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusInternalServerError; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+
+		log := buf.String()
+		if got, want := log, "error creating question"; !strings.Contains(got, want) {
+			t.Fatalf("got: %q, should contain: %q", got, want)
+		}
+		if got, want := log, fmt.Sprintf("err=%q", testError); !strings.Contains(got, want) {
+			t.Fatalf("got: %q, should contain: %q", got, want)
+		}
+	})
+
+	t.Run("storing existing question fails", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		testQuiz := quiz.Quiz{ID: 1234, Title: "Quiz One", Slug: "quiz-one", Description: "First"}
+		testQuestion := quiz.Question{
+			ID:       1,
+			QuizID:   testQuiz.ID,
+			Text:     "Question One",
+			ImageURL: "https://example.com/image.png",
+			Position: 10,
+			Options: []*quiz.Option{
+				{
+					ID: 1, QuestionID: 1, Text: "Option 1",
+				},
+				{
+					ID: 2, QuestionID: 1, Text: "Option 2", Correct: true,
+				},
+				{
+					ID: 3, QuestionID: 1, Text: "Option 3",
+				},
+			},
+		}
+
+		testError := errors.New("test error")
+
+		quizStore := stubQuizStore{
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				if id != testQuiz.ID {
+					return nil, quiz.ErrQuizNotFound
+				}
+
+				return &testQuiz, nil
+			},
+			getQuestionByID: func(_ context.Context, id int64) (*quiz.Question, error) {
+				if id != testQuestion.ID {
+					return nil, quiz.ErrQuestionNotFound
+				}
+
+				return &testQuestion, nil
+			},
+			updateQuestion: func(_ context.Context, _ *quiz.Question) error {
+				return testError
+			},
+		}
+
+		form := url.Values{
+			"id":        {strconv.FormatInt(testQuestion.ID, 10)},
+			"text":      {testQuestion.Text},
+			"image_url": {testQuestion.ImageURL},
+			"position":  {strconv.Itoa(testQuestion.Position)},
+		}
+		for i, option := range testQuestion.Options {
+			form.Add(fmt.Sprintf("option[%d].text", i), option.Text)
+			if option.Correct {
+				form.Add(fmt.Sprintf("option[%d].correct", i), "on")
+			}
+		}
+
+		handler := admin.HandleQuestionSave(logger, quizStore)
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			fmt.Sprintf("/admin/quizzes/%d/questions/%d", testQuiz.ID, testQuestion.ID),
+			strings.NewReader(form.Encode()),
+		)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetPathValue("quizID", strconv.FormatInt(testQuiz.ID, 10))
+		req.SetPathValue("questionID", strconv.FormatInt(testQuestion.ID, 10))
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusInternalServerError; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+
+		log := buf.String()
+		if got, want := log, "error updating question"; !strings.Contains(got, want) {
+			t.Fatalf("got: %q, should contain: %q", got, want)
+		}
+		if got, want := log, fmt.Sprintf("err=%q", testError); !strings.Contains(got, want) {
+			t.Fatalf("got: %q, should contain: %q", got, want)
+		}
+	})
+
+	t.Run("quiz not found", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		quizStore := stubQuizStore{
+			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
+				return nil, quiz.ErrQuizNotFound
+			},
+		}
+
+		handler := admin.HandleQuestionSave(logger, quizStore)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/1234/questions", nil)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusNotFound; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+		if got, want := buf.String(), "quiz not found"; !strings.Contains(got, want) {
+			t.Fatalf("got: %q, should contain: %q", got, want)
+		}
+	})
+
+	t.Run("question not found", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := logging.NewLogger(&buf)
+
+		testQuiz := quiz.Quiz{ID: 1234, Title: "Quiz One", Slug: "quiz-one", Description: "First"}
+		testQuestionID := int64(1)
+
+		quizStore := stubQuizStore{
+			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
+				return &testQuiz, nil
+			},
+			getQuestionByID: func(_ context.Context, _ int64) (*quiz.Question, error) {
+				return nil, quiz.ErrQuestionNotFound
+			},
+		}
+
+		handler := admin.HandleQuestionSave(logger, quizStore)
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			fmt.Sprintf("/admin/quizzes/%d/questions/%d", testQuiz.ID, testQuestionID),
+			nil,
+		)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.SetPathValue("quizID", strconv.FormatInt(testQuiz.ID, 10))
+		req.SetPathValue("questionID", strconv.FormatInt(testQuestionID, 10))
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusNotFound; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+	})
+}

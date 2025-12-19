@@ -327,7 +327,7 @@ func fillQuestionFromForm(w http.ResponseWriter, r *http.Request, logger *loggin
 
 	for i := range maxOptions {
 		var op *quiz.Option
-		if i < len(newOptions) {
+		if i < len(qs.Options) {
 			op = qs.Options[i]
 		} else {
 			op = &quiz.Option{
@@ -337,8 +337,9 @@ func fillQuestionFromForm(w http.ResponseWriter, r *http.Request, logger *loggin
 		if r.PostForm.Has(fmt.Sprintf("option[%d].text", i)) {
 			op.ID, err = idFromString(r.PostFormValue(fmt.Sprintf("option[%d].id", i)))
 			if err != nil {
-				logger.Error(r.Context(), "error parsing option ID", logging.ErrAttr(err))
-				render500(w, r, logger)
+				msg := "error parsing optionID"
+				logger.Error(r.Context(), msg, logging.ErrAttr(err))
+				render400(w, r, logger, msg)
 
 				return false
 			}
@@ -476,15 +477,18 @@ func HandleQuizView(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id, ok := parseIDFromPath(w, r, logger, "quizID")
-		if !ok {
+		var ok bool
+
+		var id int64
+		if id, ok = parseIDFromPath(w, r, logger, "quizID"); !ok {
 			return
 		}
 
-		qz, ok := quizByID(w, r, logger, quizStore, id)
-		if !ok {
+		var qz *quiz.Quiz
+		if qz, ok = quizByID(w, r, logger, quizStore, id); !ok {
 			return
 		}
+
 		data := quizViewData{
 			Title: "Admin Dashboard - View Quiz",
 			Quiz:  quizDataFromQuiz(qz),
@@ -521,13 +525,15 @@ func HandleQuizEdit(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		quizID, ok := parseIDFromPath(w, r, logger, "quizID")
-		if !ok {
+		var ok bool
+
+		var quizID int64
+		if quizID, ok = parseIDFromPath(w, r, logger, "quizID"); !ok {
 			return
 		}
 
-		qz, ok := quizByID(w, r, logger, quizStore, quizID)
-		if !ok {
+		var qz *quiz.Quiz
+		if qz, ok = quizByID(w, r, logger, quizStore, quizID); !ok {
 			return
 		}
 		data := quizEditData{
@@ -541,8 +547,9 @@ func HandleQuizEdit(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 // HandleQuizSave saves the quiz to the database.
 func HandleQuizSave(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var quizID int64
 		var ok bool
+
+		var quizID int64
 		if quizID, ok = parseIDFromPath(w, r, logger, "quizID"); !ok {
 			return
 		}
@@ -557,11 +564,11 @@ func HandleQuizSave(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 			}
 		}
 
-		if ok = fillQuizFromForm(w, r, logger, qz); !ok {
+		if !fillQuizFromForm(w, r, logger, qz) {
 			return
 		}
 
-		if ok = storeQuiz(w, r, logger, quizStore, qz); !ok {
+		if !storeQuiz(w, r, logger, quizStore, qz) {
 			return
 		}
 
@@ -580,9 +587,15 @@ func HandleQuestionCreate(logger *logging.Logger, quizStore quiz.Store) http.Han
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		quizID, _ := parseIDFromPath(w, r, logger, "quizID")
-		qz, ok := quizByID(w, r, logger, quizStore, quizID)
-		if !ok {
+		var ok bool
+
+		var quizID int64
+		if quizID, ok = parseIDFromPath(w, r, logger, "quizID"); !ok {
+			return
+		}
+
+		var qz *quiz.Quiz
+		if qz, ok = quizByID(w, r, logger, quizStore, quizID); !ok {
 			return
 		}
 
@@ -606,8 +619,17 @@ func HandleQuestionEdit(logger *logging.Logger, quizStore quiz.Store) http.Handl
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		quizID, _ := parseIDFromPath(w, r, logger, "quizID")
-		questionID, _ := parseIDFromPath(w, r, logger, "questionID")
+		var ok bool
+
+		var quizID int64
+		if quizID, ok = parseIDFromPath(w, r, logger, "quizID"); !ok {
+			return
+		}
+
+		var questionID int64
+		if questionID, ok = parseIDFromPath(w, r, logger, "questionID"); !ok {
+			return
+		}
 		newQuestion := questionID == 0
 
 		qz, ok := quizByID(w, r, logger, quizStore, quizID)
@@ -641,13 +663,22 @@ func HandleQuestionEdit(logger *logging.Logger, quizStore quiz.Store) http.Handl
 func HandleQuestionSave(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Parse quiz and question IDs from the URL
-		quizID, _ := parseIDFromPath(w, r, logger, "quizID")
-		questionID, _ := parseIDFromPath(w, r, logger, "questionID")
+		var ok bool
+
+		var quizID int64
+		if quizID, ok = parseIDFromPath(w, r, logger, "quizID"); !ok {
+			return
+		}
+
+		var questionID int64
+		if questionID, ok = parseIDFromPath(w, r, logger, "questionID"); !ok {
+			return
+		}
+
 		newQuestion := questionID == 0
 
 		// Retrieve quiz and question from the store
 		var qz *quiz.Quiz
-		var ok bool
 		if qz, ok = quizByID(w, r, logger, quizStore, quizID); !ok {
 			return
 		}
@@ -663,11 +694,11 @@ func HandleQuestionSave(logger *logging.Logger, quizStore quiz.Store) http.Handl
 			}
 		}
 
-		if ok = fillQuestionFromForm(w, r, logger, qs); !ok {
+		if !fillQuestionFromForm(w, r, logger, qs) {
 			return
 		}
 
-		if ok = storeQuestion(w, r, logger, quizStore, qs); !ok {
+		if !storeQuestion(w, r, logger, quizStore, qs) {
 			return
 		}
 
