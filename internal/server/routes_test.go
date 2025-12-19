@@ -2,12 +2,11 @@ package server_test
 
 import (
 	"context"
-	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/starquake/topbanana/internal/logging"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/server"
 	"github.com/starquake/topbanana/internal/store"
@@ -59,7 +58,7 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 		Quizzes: stubQuizStore{},
 	}
 	mux := http.NewServeMux()
-	server.AddRoutes(mux, logging.NewLogger(io.Discard), stores)
+	server.AddRoutes(mux, slog.New(slog.DiscardHandler), stores)
 
 	tests := []struct {
 		name   string
@@ -100,7 +99,7 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 func TestAddRoutes_UnknownRouteReturns404(t *testing.T) {
 	t.Parallel()
 
-	logger := logging.NewLogger(io.Discard)
+	logger := slog.New(slog.DiscardHandler)
 
 	stores := &store.Stores{
 		Quizzes: stubQuizStore{},

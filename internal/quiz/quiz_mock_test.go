@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/starquake/topbanana/internal/logging"
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
@@ -40,7 +40,7 @@ func TestSQLiteStore_ListQuizzes_MockTesting_RowError(t *testing.T) {
 	t.Parallel()
 
 	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
 
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -83,7 +83,7 @@ func TestSQLiteStore_CreateQuiz_MockTesting(t *testing.T) {
 		t.Parallel()
 
 		buf := bytes.Buffer{}
-		logger := logging.NewLogger(&buf)
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
 		db, mock, err := sqlmock.New()
 		if err != nil {
@@ -131,7 +131,7 @@ func TestSQLiteStore_CreateQuiz_MockTesting(t *testing.T) {
 		t.Parallel()
 
 		buf := bytes.Buffer{}
-		logger := logging.NewLogger(&buf)
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
 		db, mock, err := sqlmock.New()
 		if err != nil {
@@ -193,7 +193,7 @@ func TestSQLiteStore_CreateQuiz_MockTesting(t *testing.T) {
 		t.Parallel()
 
 		buf := bytes.Buffer{}
-		logger := logging.NewLogger(&buf)
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
 		db, mock, err := sqlmock.New()
 		if err != nil {
@@ -266,7 +266,7 @@ func TestSQLiteStore_CreateQuiz_MockTesting(t *testing.T) {
 		t.Parallel()
 
 		buf := bytes.Buffer{}
-		logger := logging.NewLogger(&buf)
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
 		db, mock, err := sqlmock.New()
 		if err != nil {
@@ -322,7 +322,7 @@ func TestSQLiteStore_CreateQuiz_MockTesting(t *testing.T) {
 		t.Parallel()
 
 		buf := bytes.Buffer{}
-		logger := logging.NewLogger(&buf)
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
 		db, mock, err := sqlmock.New()
 		if err != nil {
@@ -382,7 +382,7 @@ func TestSQLiteStore_UpdateQuiz_MockTesting_FailRowsAffected(t *testing.T) {
 	t.Parallel()
 
 	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
 
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -428,7 +428,7 @@ func TestSQLiteStore_UpdateQuestion_MockTesting_FailRowsAffected(t *testing.T) {
 	t.Parallel()
 
 	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
 
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -474,7 +474,7 @@ func TestSQLiteStore_updateOptionInTx_MockTesting_FailRowsAffected(t *testing.T)
 	t.Parallel()
 
 	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
 
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -519,7 +519,7 @@ func TestSQLiteStore_withTx_MockTesting_FailRollback(t *testing.T) {
 	t.Parallel()
 
 	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
 
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -561,7 +561,7 @@ func TestSQliteStore_getOptionIDsInTx_MockTesting(t *testing.T) {
 	t.Parallel()
 
 	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
 
 	t.Run("scan error", func(t *testing.T) {
 		t.Parallel()
@@ -652,7 +652,7 @@ func TestSQLiteStore_GetQuestionIDsInTx_MockTesting(t *testing.T) {
 	t.Parallel()
 
 	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
 
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -695,7 +695,7 @@ func TestSQLiteStore_GetOptionsByQuestionID_MockTesting(t *testing.T) {
 	t.Parallel()
 
 	buf := bytes.Buffer{}
-	logger := logging.NewLogger(&buf)
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
 
 	db, mock, err := sqlmock.New()
 	if err != nil {

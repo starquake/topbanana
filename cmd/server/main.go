@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/starquake/topbanana/internal/db"
-	"github.com/starquake/topbanana/internal/logging"
 	"github.com/starquake/topbanana/internal/must"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/server"
@@ -35,7 +34,7 @@ func run(
 	mainCtx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 	defer cancel()
 
-	logger := logging.NewLogger(stdout)
+	logger := slog.New(slog.NewTextHandler(stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	conn, err := db.Open(ctx)
 	if err != nil {
@@ -44,7 +43,7 @@ func run(
 	defer func() {
 		err := conn.Close()
 		if err != nil {
-			logger.Error(mainCtx, "error closing database connection", logging.ErrAttr(err))
+			logger.ErrorContext(mainCtx, "error closing database connection", slog.Any("err", err))
 		}
 	}()
 
@@ -61,10 +60,10 @@ func run(
 		Handler:           srv,
 	}
 	go func() {
-		logger.Info(mainCtx, "listening on "+httpServer.Addr, slog.String("addr", httpServer.Addr))
+		logger.InfoContext(mainCtx, "listening on "+httpServer.Addr, slog.String("addr", httpServer.Addr))
 		err := httpServer.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error(mainCtx, "error listening and serving", logging.ErrAttr(err))
+			logger.ErrorContext(mainCtx, "error listening and serving", slog.Any("err", err))
 		}
 	}()
 	var wg sync.WaitGroup

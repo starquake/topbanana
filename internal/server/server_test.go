@@ -1,10 +1,9 @@
 package server_test
 
 import (
-	"io"
+	"log/slog"
 	"testing"
 
-	"github.com/starquake/topbanana/internal/logging"
 	"github.com/starquake/topbanana/internal/server"
 	"github.com/starquake/topbanana/internal/store"
 )
@@ -12,7 +11,7 @@ import (
 func TestNewServer(t *testing.T) {
 	t.Parallel()
 
-	logger := logging.NewLogger(io.Discard)
+	logger := slog.New(slog.DiscardHandler)
 	stores := &store.Stores{}
 
 	srv := server.NewServer(logger, stores)

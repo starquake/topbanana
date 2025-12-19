@@ -8,9 +8,9 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
-	"github.com/starquake/topbanana/internal/logging"
 	"github.com/starquake/topbanana/internal/must"
 )
 
@@ -184,11 +184,11 @@ type Store interface {
 // SQLiteStore is a store for quizzes in SQLite.
 type SQLiteStore struct {
 	db     *sql.DB
-	logger *logging.Logger
+	logger *slog.Logger
 }
 
 // NewSQLiteStore creates a new SQLiteStore.
-func NewSQLiteStore(db *sql.DB, logger *logging.Logger) *SQLiteStore {
+func NewSQLiteStore(db *sql.DB, logger *slog.Logger) *SQLiteStore {
 	return &SQLiteStore{db, logger}
 }
 
@@ -437,10 +437,10 @@ func (s *SQLiteStore) withTx(ctx context.Context, fn func(tx *sql.Tx) error) err
 	defer func() {
 		err = txn.Rollback()
 		if err == nil {
-			s.logger.Info(ctx, "rollback transaction successful")
+			s.logger.InfoContext(ctx, "rollback transaction successful")
 		}
 		if err != nil && !errors.Is(err, sql.ErrTxDone) {
-			s.logger.Error(ctx, "error rolling back transaction", logging.ErrAttr(err))
+			s.logger.ErrorContext(ctx, "error rolling back transaction", slog.Any("err", err))
 		}
 	}()
 	err = fn(txn)
