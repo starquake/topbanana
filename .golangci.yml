@@ -124,7 +124,7 @@ linters:
           exclude: ["**/*_test.go"]
           arguments:
             - maxLitCount: "3"
-              allow-strs: '"","%v: %w"'
+              allow-strs: '"","%v: %w","err"'
               allow-ints: "0,1,2"
         - name: max-public-structs
           disabled: true
