@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/starquake/topbanana/internal/admin"
 	"github.com/starquake/topbanana/internal/quiz"
 )
@@ -539,12 +540,14 @@ func TestHandleQuizSave(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-		testQuiz := quiz.Quiz{ID: 1, Title: "Quiz One", Slug: "quiz-one", Description: "First"}
+		testQuiz := quiz.Quiz{Title: "Quiz One", Slug: "quiz-one", Description: "First"}
 
+		var createdQuizID int64
 		var quizzes []*quiz.Quiz
 		quizStore := stubQuizStore{
 			createQuiz: func(_ context.Context, qz *quiz.Quiz) error {
-				qz.ID = int64(len(quizzes) + 1)
+				createdQuizID = int64(len(quizzes) + 1)
+				qz.ID = createdQuizID
 				quizzes = append(quizzes, qz)
 
 				return nil
@@ -576,14 +579,19 @@ func TestHandleQuizSave(t *testing.T) {
 		if got, want := rr.Code, http.StatusSeeOther; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, log)
 		}
-		if got, want := rr.Header().Get("Location"), fmt.Sprintf("/admin/quizzes/%d", testQuiz.ID); got != want {
+		if got, want := rr.Header().Get("Location"), fmt.Sprintf("/admin/quizzes/%d", createdQuizID); got != want {
 			t.Fatalf("got Location header %q, want %q, log:\n%v", got, want, log)
 		}
 		if got, want := len(quizzes), 1; got != want {
 			t.Fatalf("got %v quizzes, want %v", got, want)
 		}
-		if diff := cmp.Diff(quizzes[0], &testQuiz); diff != "" {
+		if diff := cmp.Diff(quizzes[0], &testQuiz,
+			cmpopts.IgnoreFields(quiz.Quiz{}, "ID"),
+		); diff != "" {
 			t.Fatalf("quizzes differ (-got +want):\n%s", diff)
+		}
+		if got, want := quizzes[0].ID, createdQuizID; got != want {
+			t.Fatalf("got quiz ID %d, want %d", got, want)
 		}
 	})
 
@@ -643,7 +651,7 @@ func TestHandleQuizSave(t *testing.T) {
 		if got, want := rr.Code, http.StatusSeeOther; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
 		}
-		if got, want := rr.Header().Get("Location"), fmt.Sprintf("/admin/quizzes/%d", updatedQuiz.ID); got != want {
+		if got, want := rr.Header().Get("Location"), fmt.Sprintf("/admin/quizzes/%d", originalQuiz.ID); got != want {
 			t.Fatalf("got Location header %q, want %q", got, want)
 		}
 		if got, want := len(quizzes), 1; got != want {
@@ -1313,23 +1321,44 @@ func TestHandleQuestionSave(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-		testQuiz := quiz.Quiz{ID: 1234, Title: "Quiz One", Slug: "quiz-one", Description: "First"}
+		testQuiz := quiz.Quiz{
+			ID: 1234, Title: "Quiz One", Slug: "quiz-one", Description: "First",
+			Questions: []*quiz.Question{
+				{
+					ID: 5678, QuizID: 1234, Text: "Question One", ImageURL: "https://example.com/image.png", Position: 10,
+					Options: []*quiz.Option{
+						{Text: "Option 1-1", Correct: true},
+						{Text: "Option 1-2"},
+						{Text: "Option 1-3"},
+					},
+				},
+				{
+					ID: 9012, QuizID: 1234, Text: "Question Two", ImageURL: "https://example.com/image2.png", Position: 20,
+					Options: []*quiz.Option{
+						{Text: "Option 2-1"},
+						{Text: "Option 2-2", Correct: true},
+						{Text: "Option 2-3"},
+					},
+				},
+				{
+					ID: 3456, QuizID: 1234, Text: "Question Three", ImageURL: "https://example.com/image3.png", Position: 30,
+					Options: []*quiz.Option{
+						{Text: "Option 3-1"},
+						{Text: "Option 3-2"},
+						{Text: "Option 3-3", Correct: true},
+					},
+				},
+			},
+		}
 		testQuestion := quiz.Question{
-			ID:       1,
 			QuizID:   testQuiz.ID,
-			Text:     "Question One",
+			Text:     "Question Four",
 			ImageURL: "https://example.com/image.png",
 			Position: 10,
 			Options: []*quiz.Option{
-				{
-					ID: 1, QuestionID: 1, Text: "Option 1",
-				},
-				{
-					ID: 2, QuestionID: 1, Text: "Option 2", Correct: true,
-				},
-				{
-					ID: 3, QuestionID: 1, Text: "Option 3",
-				},
+				{Text: "Option 1"},
+				{Text: "Option 2", Correct: true},
+				{Text: "Option 3"},
 			},
 		}
 
@@ -1387,14 +1416,25 @@ func TestHandleQuestionSave(t *testing.T) {
 		if got, want := rr.Code, http.StatusSeeOther; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, log)
 		}
-		if got, want := rr.Header().Get("Location"), fmt.Sprintf("/admin/quizzes/%d/questions/%d", testQuiz.ID, testQuestion.ID); got != want {
+		if got, want := rr.Header().Get("Location"), fmt.Sprintf("/admin/quizzes/%d", testQuiz.ID); got != want {
 			t.Fatalf("got Location header %q, want %q", got, want)
 		}
 		if got, want := len(questions), 1; got != want {
 			t.Fatalf("got len(questions) %v, want %v", got, want)
 		}
-		if diff := cmp.Diff(questions[0], &testQuestion); diff != "" {
+		if diff := cmp.Diff(questions[0], &testQuestion,
+			cmpopts.IgnoreFields(quiz.Question{}, "ID"),
+			cmpopts.IgnoreFields(quiz.Option{}, "ID", "QuestionID"),
+		); diff != "" {
 			t.Fatalf("questions differ (-got +want):\n%s", diff)
+		}
+		if questions[0].ID == 0 {
+			t.Fatal("question ID should not be zero")
+		}
+		for i, option := range questions[0].Options {
+			if option.ID == 0 {
+				t.Fatalf("option ID for option %d should not be zero", i)
+			}
 		}
 	})
 
@@ -1426,24 +1466,25 @@ func TestHandleQuestionSave(t *testing.T) {
 		updatedQuestion := quiz.Question{
 			ID:       originalQuestion.ID,
 			QuizID:   originalQuestion.QuizID,
-			Text:     "Updated Question",
-			ImageURL: originalQuestion.ImageURL,
-			Position: originalQuestion.Position,
+			Text:     originalQuestion.Text + " Updated",
+			ImageURL: originalQuestion.ImageURL + "?updated",
+			Position: originalQuestion.Position + 10,
 			Options: []*quiz.Option{
 				{
 					ID:         originalQuestion.Options[1].ID,
 					QuestionID: originalQuestion.ID,
-					Text:       originalQuestion.Options[1].Text,
+					Text:       originalQuestion.Options[1].Text + " Updated",
+					Correct:    !originalQuestion.Options[1].Correct,
 				},
 				{
 					ID:         originalQuestion.Options[2].ID,
 					QuestionID: originalQuestion.ID,
-					Text:       originalQuestion.Options[2].Text,
-					Correct:    true,
+					Text:       originalQuestion.Options[2].Text + " Updated",
+					Correct:    !originalQuestion.Options[2].Correct,
 				},
 				{
 					QuestionID: originalQuestion.ID,
-					Text:       "Option 4",
+					Text:       "Option 4 Added",
 					Correct:    false,
 				},
 			},
@@ -1466,7 +1507,9 @@ func TestHandleQuestionSave(t *testing.T) {
 				return &originalQuestion, nil
 			},
 			updateQuestion: func(_ context.Context, q *quiz.Question) error {
-				for _, option := range q.Options {
+				q.ID = int64(len(questions) + 1)
+				for i, option := range q.Options {
+					option.ID = int64(i) + 1
 					option.QuestionID = q.ID
 				}
 				questions = append(questions, q)
@@ -1512,13 +1555,15 @@ func TestHandleQuestionSave(t *testing.T) {
 		if got, want := rr.Code, http.StatusSeeOther; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, log)
 		}
-		if got, want := rr.Header().Get("Location"), fmt.Sprintf("/admin/quizzes/%d/questions/%d", originalQuiz.ID, originalQuestion.ID); got != want {
+		if got, want := rr.Header().Get("Location"), fmt.Sprintf("/admin/quizzes/%d", originalQuiz.ID); got != want {
 			t.Fatalf("got Location header %q, want %q", got, want)
 		}
 		if got, want := len(questions), 1; got != want {
 			t.Fatalf("got len(questions) %v, want %v", got, want)
 		}
-		if diff := cmp.Diff(questions[0], &updatedQuestion); diff != "" {
+		if diff := cmp.Diff(questions[0], &updatedQuestion,
+			cmpopts.IgnoreFields(quiz.Option{}, "ID"),
+		); diff != "" {
 			t.Fatalf("questions differ (-got +want):\n%s", diff)
 		}
 	})
@@ -1767,13 +1812,13 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 			Position: 10,
 			Options: []*quiz.Option{
 				{
-					ID: 1, QuestionID: 1, Text: "Option 1",
+					Text: "Option 1",
 				},
 				{
-					ID: 2, QuestionID: 1, Text: "Option 2", Correct: true,
+					Text: "Option 2", Correct: true,
 				},
 				{
-					ID: 3, QuestionID: 1, Text: "Option 3",
+					Text: "Option 3",
 				},
 			},
 		}

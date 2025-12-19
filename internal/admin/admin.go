@@ -294,7 +294,9 @@ func fillQuizFromForm(w http.ResponseWriter, r *http.Request, logger *slog.Logge
 	qz.Slug = r.PostFormValue("slug")
 	qz.Description = r.PostFormValue("description")
 	if problems := qz.Valid(r.Context()); len(problems) > 0 {
-		render400(w, r, logger, fmt.Sprintf("validation errors: %v", problems))
+		msg := fmt.Sprintf("validation errors: %v", problems)
+		logger.ErrorContext(r.Context(), msg)
+		render400(w, r, logger, msg)
 
 		return false
 	}
@@ -706,6 +708,6 @@ func HandleQuestionSave(logger *slog.Logger, quizStore quiz.Store) http.Handler 
 			return
 		}
 
-		http.Redirect(w, r, fmt.Sprintf("/admin/quizzes/%d/questions/%d", qz.ID, qs.ID), http.StatusSeeOther)
+		http.Redirect(w, r, fmt.Sprintf("/admin/quizzes/%d", qz.ID), http.StatusSeeOther)
 	})
 }

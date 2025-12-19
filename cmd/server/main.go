@@ -61,6 +61,7 @@ func run(
 	}
 	go func() {
 		logger.InfoContext(mainCtx, "listening on "+httpServer.Addr, slog.String("addr", httpServer.Addr))
+		logger.InfoContext(mainCtx, "visit http://localhost:8080/admin/quizzes to manage quizzes")
 		err := httpServer.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.ErrorContext(mainCtx, "error listening and serving", slog.Any("err", err))
