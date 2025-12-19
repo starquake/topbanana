@@ -1,4 +1,4 @@
-# topbanana
+# Congratulations! You are the Top Banana!
 Top Banana! Your selfhosted quiz service!
 
 ## Guidelines
