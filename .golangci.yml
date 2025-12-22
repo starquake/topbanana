@@ -50,7 +50,7 @@ linters:
     - interfacebloat
     - intrange
     - iotamixing
-    - ireturn
+    # - ireturn      # Caching causes issues with this linter
     - loggercheck
     - makezero
     - mirror
