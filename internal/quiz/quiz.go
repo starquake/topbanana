@@ -10,8 +10,6 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
-
-	"github.com/starquake/topbanana/internal/must"
 )
 
 const (
@@ -373,7 +371,7 @@ func (s *SQLiteStore) GetQuestionsByQuizID(ctx context.Context, quizID int64) ([
 	defer func() {
 		// Close the rows to free up resources. It must not return an error.
 		// It will not return an error because we checked for errors before (rows.Err()).
-		must.OK(rows.Close())
+		_ = rows.Close()
 	}()
 
 	var questions []*Question
@@ -412,7 +410,7 @@ func (s *SQLiteStore) GetOptionsByQuestionID(ctx context.Context, questionID int
 	defer func() {
 		// Close the rows to free up resources. It must not return an error.
 		// It will not return an error because we checked for errors before (rows.Err()).
-		must.OK(rows.Close())
+		_ = rows.Close()
 	}()
 
 	var options []*Option
@@ -472,7 +470,7 @@ func (s *SQLiteStore) fetchQuizzes(ctx context.Context) ([]*Quiz, error) {
 	defer func() {
 		// Close the rows to free up resources. It must not return an error.
 		// It will not return an error because we checked for errors before (rows.Err()).
-		must.OK(rows.Close())
+		_ = rows.Close()
 	}()
 
 	var quizzes []*Quiz
@@ -498,7 +496,7 @@ func (*SQLiteStore) getQuestionIDsInTx(ctx context.Context, tx *sql.Tx, quizID i
 	defer func() {
 		// Close the rows to free up resources. It must not return an error.
 		// It will not return an error because we checked for errors before (rows.Err()).
-		must.OK(rows.Close())
+		_ = rows.Close()
 	}()
 
 	var ids []int64
