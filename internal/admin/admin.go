@@ -6,11 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
 
-	"github.com/starquake/topbanana/internal/logging"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
@@ -20,35 +20,31 @@ type Validator interface {
 	Valid(ctx context.Context) map[string]string
 }
 
-// IndexData is the data for the index page.
-type IndexData struct {
-	Title string
+// TemplateRenderer renders templates using the given logger and template path.
+type TemplateRenderer struct {
+	logger *slog.Logger
+	t      *template.Template
 }
 
-// QuizListData is the data for the list on the quiz list page.
-type QuizListData struct {
-	Title   string
-	Quizzes []*QuizData
+// NewTemplateRenderer creates a new TemplateRenderer with the given logger and template path.
+// It parses the template on creation.
+func NewTemplateRenderer(logger *slog.Logger, templatePath string) *TemplateRenderer {
+	return &TemplateRenderer{
+		logger: logger,
+		t:      parseTemplate(templatePath),
+	}
 }
 
-// QuizViewData is the data for the quiz view page.
-type QuizViewData struct {
-	Title string
-	Quiz  *QuizData
+// Render renders a template to the writer (w) giving a templatePath and data.
+// It does not return an error because the headers have already been written. So we can't render an error page anyway.
+func (tr *TemplateRenderer) Render(w http.ResponseWriter, r *http.Request, status int, data any) {
+	w.WriteHeader(status)
+	if err := tr.t.ExecuteTemplate(w, "base.gohtml", data); err != nil {
+		tr.logger.ErrorContext(r.Context(), "error executing template", slog.Any("err", err))
+	}
 }
 
-// QuizCreateData is the data for the quiz create page.
-type QuizCreateData struct {
-	Title string
-}
-
-// QuizEditData is the data for the quiz edit page.
-type QuizEditData struct {
-	Title string
-	Quiz  *QuizData
-}
-
-// QuizData is the data for the quiz list page.
+// QuizData is the data for the quiz list page, it shows multiple quizzes when available.
 type QuizData struct {
 	ID          int64
 	Title       string
@@ -76,14 +72,7 @@ type OptionData struct {
 	Position   int
 }
 
-// QuestionEditData is the data for the question edit page.
-type QuestionEditData struct {
-	Title    string
-	Quiz     *QuizData
-	Question *QuestionData
-}
-
-//nolint:gochecknoglobals // This is fine for now, will refactor to use a Renderer later. TODO!
+//nolint:gochecknoglobals // This is fine for now, will refactor to use a renderer later. TODO!
 var layouts = template.Must(template.ParseFS(tmpl.FS, "admin/layouts/*.gohtml"))
 
 const (
@@ -173,18 +162,26 @@ func idFromString(pathValue string) (int64, error) {
 	}
 	id, err := strconv.ParseInt(pathValue, base10, int64Size)
 	if err != nil {
-		return 0, fmt.Errorf("error parsing ID: %w", err)
+		return 0, fmt.Errorf("error parsing %q: %w", pathValue, err)
 	}
 
 	return id, nil
 }
 
 // parseIDFromPath parses an int64 ID from the given path value.
-func parseIDFromPath(w http.ResponseWriter, r *http.Request, logger *logging.Logger, s string) (int64, bool) {
-	id, err := idFromString(r.PathValue(s))
+// It returns the parsed ID and true if the parsing was successful.
+// It returns 0 and true if the path value is empty.
+// It renders a 400 error page if the path value cannot be parsed.
+func parseIDFromPath(w http.ResponseWriter, r *http.Request, logger *slog.Logger, s string) (int64, bool) {
+	pathValue := r.PathValue(s)
+	if pathValue == "" {
+		return 0, true
+	}
+
+	id, err := idFromString(pathValue)
 	if err != nil {
-		msg := "error parsing quiz ID"
-		logger.Error(r.Context(), msg, logging.ErrAttr(err))
+		msg := "error parsing " + s
+		logger.ErrorContext(r.Context(), msg, slog.Any("err", err))
 		render400(w, r, logger, msg)
 
 		return 0, false
@@ -193,20 +190,10 @@ func parseIDFromPath(w http.ResponseWriter, r *http.Request, logger *logging.Log
 	return id, true
 }
 
-// executeTemplate executes a template and logs any errors.
-// It does not return an error because the headers have already been written. So we can't render an error page anyway.
-func executeTemplate(w http.ResponseWriter, t *template.Template, data any) error {
-	if err := t.ExecuteTemplate(w, "base.gohtml", data); err != nil {
-		return fmt.Errorf("error executing template: %w", err)
-	}
-
-	return nil
-}
-
 // render400 renders the 400 error page with the given message.
 // Should be used as the final handler in the chain and probably be followed by a return.
-func render400(w http.ResponseWriter, r *http.Request, logger *logging.Logger, msg string) {
-	t := parseTemplate("admin/errors/400.gohtml")
+func render400(w http.ResponseWriter, r *http.Request, logger *slog.Logger, msg string) {
+	render := NewTemplateRenderer(logger, "admin/errors/400.gohtml")
 	data := struct {
 		Title   string
 		Message string
@@ -214,50 +201,41 @@ func render400(w http.ResponseWriter, r *http.Request, logger *logging.Logger, m
 		Title:   "Error",
 		Message: msg,
 	}
-	w.WriteHeader(http.StatusBadRequest)
-	if err := executeTemplate(w, t, data); err != nil {
-		logger.Error(r.Context(), "error executing template", logging.ErrAttr(err))
-	}
+	render.Render(w, r, http.StatusBadRequest, data)
 }
 
 // render404 renders the 404 error page.
 // Should be used as the final handler in the chain and probably be followed by a return.
-func render404(w http.ResponseWriter, r *http.Request, logger *logging.Logger) {
-	t := parseTemplate("admin/errors/404.gohtml")
-	w.WriteHeader(http.StatusNotFound)
-	if err := executeTemplate(w, t, nil); err != nil {
-		logger.Error(r.Context(), "error executing template", logging.ErrAttr(err))
-	}
+func render404(w http.ResponseWriter, r *http.Request, logger *slog.Logger) {
+	render := NewTemplateRenderer(logger, "admin/errors/404.gohtml")
+	render.Render(w, r, http.StatusNotFound, nil)
 }
 
 // render500 renders the 500 error page.
 // Should be used as the final handler in the chain and probably be followed by a return.
-func render500(w http.ResponseWriter, r *http.Request, logger *logging.Logger) {
-	t := parseTemplate("admin/errors/500.gohtml")
-	w.WriteHeader(http.StatusInternalServerError)
-	if err := executeTemplate(w, t, nil); err != nil {
-		logger.Error(r.Context(), "error executing template", logging.ErrAttr(err))
-	}
+func render500(w http.ResponseWriter, r *http.Request, logger *slog.Logger) {
+	render := NewTemplateRenderer(logger, "admin/errors/500.gohtml")
+	render.Render(w, r, http.StatusInternalServerError, nil)
 }
 
-// quizByID returns the quiz with the given ID from the store.
+// quizByID returns the quiz with the given ID from the store. It includes the questions.
 // It logs any errors that occur, renders the errorpage and returns false.
 func quizByID(
 	w http.ResponseWriter,
 	r *http.Request,
-	logger *logging.Logger,
+	logger *slog.Logger,
 	quizStore quiz.Store,
 	id int64,
 ) (*quiz.Quiz, bool) {
 	q, err := quizStore.GetQuizByID(r.Context(), id)
 	if err != nil {
-		if errors.Is(err, quiz.ErrQuizNotFound) {
-			logger.Error(r.Context(), "quiz not found", logging.ErrAttr(err))
+		if errors.Is(err, quiz.ErrQuizNotFound) || errors.Is(err, quiz.ErrQuestionNotFound) {
+			logger.ErrorContext(r.Context(), "quiz not found", slog.Any("err", err))
 			render404(w, r, logger)
 
 			return nil, false
 		}
-		logger.Error(r.Context(), "error fetching data", logging.ErrAttr(err))
+		logger.ErrorContext(r.Context(), "error fetching data", slog.Any("err", err))
 		render500(w, r, logger)
 
 		return nil, false
@@ -271,21 +249,26 @@ func quizByID(
 func questionByID(
 	w http.ResponseWriter,
 	r *http.Request,
-	logger *logging.Logger,
+	logger *slog.Logger,
 	quizStore quiz.Store,
 	questionID int64,
 ) (*quiz.Question, bool) {
 	qs, err := quizStore.GetQuestionByID(r.Context(), questionID)
 	if err != nil {
 		if errors.Is(err, quiz.ErrQuestionNotFound) {
-			logger.Error(r.Context(), fmt.Sprintf("question with ID %d not found", questionID), logging.ErrAttr(err))
+			logger.ErrorContext(
+				r.Context(),
+				fmt.Sprintf("question with ID %d not found", questionID),
+				slog.Any("err", err),
+			)
+			render404(w, r, logger)
 
 			return nil, false
 		}
-		logger.Error(
+		logger.ErrorContext(
 			r.Context(),
 			fmt.Sprintf("error fetching data for question with ID %d", questionID),
-			logging.ErrAttr(err),
+			slog.Any("err", err),
 		)
 		render500(w, r, logger)
 
@@ -298,12 +281,22 @@ func questionByID(
 // fillQuizFromForm fills the quiz fields from the form values.
 // It renders an error page if the form is invalid.
 // It returns true if the form was valid and the quiz was filled successfully.
-func fillQuizFromForm(w http.ResponseWriter, r *http.Request, logger *logging.Logger, qz *quiz.Quiz) bool {
+func fillQuizFromForm(w http.ResponseWriter, r *http.Request, logger *slog.Logger, qz *quiz.Quiz) bool {
+	err := r.ParseForm()
+	if err != nil {
+		msg := "error parsing form"
+		logger.ErrorContext(r.Context(), msg, slog.Any("err", err))
+		render400(w, r, logger, msg)
+
+		return false
+	}
 	qz.Title = r.PostFormValue("title")
 	qz.Slug = r.PostFormValue("slug")
 	qz.Description = r.PostFormValue("description")
 	if problems := qz.Valid(r.Context()); len(problems) > 0 {
-		render400(w, r, logger, fmt.Sprintf("validation errors: %v", problems))
+		msg := fmt.Sprintf("validation errors: %v", problems)
+		logger.ErrorContext(r.Context(), msg)
+		render400(w, r, logger, msg)
 
 		return false
 	}
@@ -314,25 +307,27 @@ func fillQuizFromForm(w http.ResponseWriter, r *http.Request, logger *logging.Lo
 // fillQuestionFromForm fills the question fields from the form values.
 // It renders an error page if the form is invalid.
 // It returns true if the form was valid and the question was filled successfully.
-func fillQuestionFromForm(w http.ResponseWriter, r *http.Request, logger *logging.Logger, qs *quiz.Question) bool {
+func fillQuestionFromForm(w http.ResponseWriter, r *http.Request, logger *slog.Logger, qs *quiz.Question) bool {
 	var err error
 	// Parse form values
 	err = r.ParseForm()
 	if err != nil {
-		logger.Error(r.Context(), "error parsing form", logging.ErrAttr(err))
-	}
-
-	qs.Text = r.PostFormValue("text")
-	qs.ImageURL = r.PostFormValue("imageUrl")
-	position, err := strconv.Atoi(r.PostFormValue("position"))
-	if err != nil {
-		msg := "error parsing position"
-		logger.Error(r.Context(), msg, logging.ErrAttr(err))
+		msg := "error parsing form"
+		logger.ErrorContext(r.Context(), msg, slog.Any("err", err))
 		render400(w, r, logger, msg)
 
 		return false
 	}
-	qs.Position = position
+
+	qs.Text = r.PostFormValue("text")
+	qs.ImageURL = r.PostFormValue("image_url")
+	if qs.Position, err = strconv.Atoi(r.PostFormValue("position")); err != nil {
+		msg := "error parsing position"
+		logger.ErrorContext(r.Context(), msg, slog.Any("err", err))
+		render400(w, r, logger, msg)
+
+		return false
+	}
 
 	newOptions := make([]*quiz.Option, 0, maxOptions)
 
@@ -345,19 +340,30 @@ func fillQuestionFromForm(w http.ResponseWriter, r *http.Request, logger *loggin
 				QuestionID: qs.ID,
 			}
 		}
-		op.ID, err = idFromString(r.PostFormValue(fmt.Sprintf("option[%d]id", i)))
-		if err != nil {
-			logger.Error(r.Context(), "error parsing option ID", logging.ErrAttr(err))
-			render500(w, r, logger)
+		if r.PostForm.Has(fmt.Sprintf("option[%d].text", i)) {
+			op.ID, err = idFromString(r.PostFormValue(fmt.Sprintf("option[%d].id", i)))
+			if err != nil {
+				msg := "error parsing optionID"
+				logger.ErrorContext(r.Context(), msg, slog.Any("err", err))
+				render400(w, r, logger, msg)
 
-			return false
+				return false
+			}
+			op.Text = r.PostFormValue(fmt.Sprintf("option[%d].text", i))
+			op.Correct = r.PostFormValue(fmt.Sprintf("option[%d].correct", i)) == "on"
+
+			newOptions = append(newOptions, op)
 		}
-		op.Text = r.PostFormValue(fmt.Sprintf("option[%d]text", i))
-		op.Correct = r.PostFormValue(fmt.Sprintf("option[%d]correct", i)) == "on"
-
-		newOptions = append(newOptions, op)
 	}
 	qs.Options = newOptions
+
+	if problems := qs.Valid(r.Context()); len(problems) > 0 {
+		msg := fmt.Sprintf("validation errors: %v", problems)
+		logger.ErrorContext(r.Context(), msg)
+		render400(w, r, logger, msg)
+
+		return false
+	}
 
 	return true
 }
@@ -365,21 +371,21 @@ func fillQuestionFromForm(w http.ResponseWriter, r *http.Request, logger *loggin
 func storeQuiz(
 	w http.ResponseWriter,
 	r *http.Request,
-	logger *logging.Logger,
+	logger *slog.Logger,
 	quizStore quiz.Store,
 	qz *quiz.Quiz,
 ) bool {
 	var err error
 	if qz.ID == 0 {
 		if err = quizStore.CreateQuiz(r.Context(), qz); err != nil {
-			logger.Error(r.Context(), "error creating quiz", logging.ErrAttr(err))
+			logger.ErrorContext(r.Context(), "error creating quiz", slog.Any("err", err))
 			render500(w, r, logger)
 
 			return false
 		}
 	} else {
 		if err = quizStore.UpdateQuiz(r.Context(), qz); err != nil {
-			logger.Error(r.Context(), "error updating quiz", logging.ErrAttr(err))
+			logger.ErrorContext(r.Context(), "error updating quiz", slog.Any("err", err))
 			render500(w, r, logger)
 
 			return false
@@ -393,7 +399,7 @@ func storeQuiz(
 func storeQuestion(
 	w http.ResponseWriter,
 	r *http.Request,
-	logger *logging.Logger,
+	logger *slog.Logger,
 	quizStore quiz.Store,
 	qs *quiz.Question,
 ) bool {
@@ -401,7 +407,7 @@ func storeQuestion(
 	if qs.ID == 0 {
 		err = quizStore.CreateQuestion(r.Context(), qs)
 		if err != nil {
-			logger.Error(r.Context(), "error creating question", logging.ErrAttr(err))
+			logger.ErrorContext(r.Context(), "error creating question", slog.Any("err", err))
 			render500(w, r, logger)
 
 			return false
@@ -409,7 +415,7 @@ func storeQuestion(
 	} else {
 		err = quizStore.UpdateQuestion(r.Context(), qs)
 		if err != nil {
-			logger.Error(r.Context(), "error updating question", logging.ErrAttr(err))
+			logger.ErrorContext(r.Context(), "error updating question", slog.Any("err", err))
 			render500(w, r, logger)
 
 			return false
@@ -420,30 +426,37 @@ func storeQuestion(
 }
 
 // HandleIndex returns the index page.
-func HandleIndex(logger *logging.Logger) http.Handler {
-	t := parseTemplate("admin/pages/index.gohtml")
+func HandleIndex(logger *slog.Logger) http.Handler {
+	render := NewTemplateRenderer(logger, "admin/pages/index.gohtml")
 
-	data := IndexData{
+	type indexData struct {
+		Title string
+	}
+
+	data := indexData{
 		Title: "Admin Dashboard",
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := executeTemplate(w, t, data); err != nil {
-			logger.Error(r.Context(), "error executing template", logging.ErrAttr(err))
-		}
+		render.Render(w, r, http.StatusOK, data)
 	})
 }
 
 // HandleQuizList returns the quiz list page.
-func HandleQuizList(logger *logging.Logger, quizStore quiz.Store) http.Handler {
-	t := parseTemplate("admin/pages/quizlist.gohtml")
+func HandleQuizList(logger *slog.Logger, quizStore quiz.Store) http.Handler {
+	render := NewTemplateRenderer(logger, "admin/pages/quizlist.gohtml")
+
+	type quizListDAta struct {
+		Title   string
+		Quizzes []*QuizData
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var err error
 
 		quizzes, err := quizStore.ListQuizzes(r.Context())
 		if err != nil {
-			logger.Error(r.Context(), "error retrieving quizzes from store", logging.ErrAttr(err))
+			logger.ErrorContext(r.Context(), "error retrieving quizzes from store", slog.Any("err", err))
 			render500(w, r, logger)
 
 			return
@@ -451,148 +464,178 @@ func HandleQuizList(logger *logging.Logger, quizStore quiz.Store) http.Handler {
 
 		qzd := quizDataFromQuizzes(quizzes)
 
-		data := QuizListData{
+		data := quizListDAta{
 			Title:   "Admin Dashboard - Quiz List",
 			Quizzes: qzd,
 		}
 
-		if err = executeTemplate(w, t, data); err != nil {
-			logger.Error(r.Context(), "error executing template", logging.ErrAttr(err))
-		}
+		render.Render(w, r, http.StatusOK, data)
 	})
 }
 
 // HandleQuizView returns the quiz view page.
-func HandleQuizView(logger *logging.Logger, quizStore quiz.Store) http.Handler {
-	t := parseTemplate("admin/pages/quizview.gohtml")
+func HandleQuizView(logger *slog.Logger, quizStore quiz.Store) http.Handler {
+	render := NewTemplateRenderer(logger, "admin/pages/quizview.gohtml")
+
+	type quizViewData struct {
+		Title string
+		Quiz  *QuizData
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var err error
+		var ok bool
 
-		id, ok := parseIDFromPath(w, r, logger, "quizId")
-		if !ok {
+		var id int64
+		if id, ok = parseIDFromPath(w, r, logger, "quizID"); !ok {
 			return
 		}
 
-		qz, ok := quizByID(w, r, logger, quizStore, id)
-		if !ok {
+		var qz *quiz.Quiz
+		if qz, ok = quizByID(w, r, logger, quizStore, id); !ok {
 			return
 		}
-		data := QuizViewData{
-			Title: "Admin Dashboard - Quiz View",
+
+		data := quizViewData{
+			Title: "Admin Dashboard - View Quiz",
 			Quiz:  quizDataFromQuiz(qz),
 		}
-		if err = executeTemplate(w, t, data); err != nil {
-			logger.Error(r.Context(), "error executing template", logging.ErrAttr(err))
-		}
+		render.Render(w, r, http.StatusOK, data)
 	})
 }
 
 // HandleQuizCreate creates a quiz.
-func HandleQuizCreate(logger *logging.Logger) http.Handler {
-	t := parseTemplate("admin/pages/quizform.gohtml")
+func HandleQuizCreate(logger *slog.Logger) http.Handler {
+	render := NewTemplateRenderer(logger, "admin/pages/quizform.gohtml")
+
+	type quizCreateData struct {
+		Title string
+		Quiz  *QuizData
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data := QuizEditData{
-			Title: "Admin Dashboard - Quiz Create",
+		data := quizCreateData{
+			Title: "Admin Dashboard - Create Quiz",
 			Quiz:  &QuizData{},
 		}
-		if err := executeTemplate(w, t, data); err != nil {
-			logger.Error(r.Context(), "error executing template", logging.ErrAttr(err))
-		}
+		render.Render(w, r, http.StatusOK, data)
 	})
 }
 
 // HandleQuizEdit handles the display of the quiz edit page in the admin dashboard.
-func HandleQuizEdit(logger *logging.Logger, quizStore quiz.Store) http.Handler {
-	t := parseTemplate("admin/pages/quizform.gohtml")
+func HandleQuizEdit(logger *slog.Logger, quizStore quiz.Store) http.Handler {
+	render := NewTemplateRenderer(logger, "admin/pages/quizform.gohtml")
+
+	type quizEditData struct {
+		Title string
+		Quiz  *QuizData
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var err error
+		var ok bool
 
-		quizID, _ := parseIDFromPath(w, r, logger, "quizId")
-
-		qz, ok := quizByID(w, r, logger, quizStore, quizID)
-		if !ok {
+		var quizID int64
+		if quizID, ok = parseIDFromPath(w, r, logger, "quizID"); !ok {
 			return
 		}
-		data := QuizEditData{
-			Title: "Admin Dashboard - Quiz Edit",
+
+		var qz *quiz.Quiz
+		if qz, ok = quizByID(w, r, logger, quizStore, quizID); !ok {
+			return
+		}
+		data := quizEditData{
+			Title: "Admin Dashboard - Edit Quiz",
 			Quiz:  quizDataFromQuiz(qz),
 		}
-		if err = executeTemplate(w, t, data); err != nil {
-			logger.Error(r.Context(), "error executing template", logging.ErrAttr(err))
-		}
+		render.Render(w, r, http.StatusOK, data)
 	})
 }
 
 // HandleQuizSave saves the quiz to the database.
-func HandleQuizSave(logger *logging.Logger, quizStore quiz.Store) http.Handler {
+func HandleQuizSave(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var err error
+		var ok bool
 
-		quizID, _ := parseIDFromPath(w, r, logger, "quizId")
-		newQuiz := quizID == 0
-
-		if err = r.ParseForm(); err != nil {
-			logger.Error(r.Context(), "error parsing form", logging.ErrAttr(err))
+		var quizID int64
+		if quizID, ok = parseIDFromPath(w, r, logger, "quizID"); !ok {
+			return
 		}
 
+		newQuiz := quizID == 0
 		var qz *quiz.Quiz
 		if newQuiz {
 			qz = &quiz.Quiz{}
 		} else {
-			var ok bool
-			qz, ok = quizByID(w, r, logger, quizStore, quizID)
-			if !ok {
+			if qz, ok = quizByID(w, r, logger, quizStore, quizID); !ok {
 				return
 			}
 		}
 
-		if ok := fillQuizFromForm(w, r, logger, qz); !ok {
+		if !fillQuizFromForm(w, r, logger, qz) {
 			return
 		}
 
-		if ok := storeQuiz(w, r, logger, quizStore, qz); !ok {
+		if !storeQuiz(w, r, logger, quizStore, qz) {
 			return
 		}
 
-		http.Redirect(w, r, fmt.Sprintf("/admin/quizzes/%d", qz.ID), http.StatusFound)
+		http.Redirect(w, r, fmt.Sprintf("/admin/quizzes/%d", qz.ID), http.StatusSeeOther)
 	})
 }
 
 // HandleQuestionCreate creates a question.
-func HandleQuestionCreate(logger *logging.Logger, quizStore quiz.Store) http.Handler {
-	t := parseTemplate("admin/pages/questionform.gohtml")
+func HandleQuestionCreate(logger *slog.Logger, quizStore quiz.Store) http.Handler {
+	render := NewTemplateRenderer(logger, "admin/pages/questionform.gohtml")
+
+	type questionCreateData struct {
+		Title    string
+		Quiz     *QuizData
+		Question *QuestionData
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var err error
+		var ok bool
 
-		quizID, _ := parseIDFromPath(w, r, logger, "quizId")
-		qz, ok := quizByID(w, r, logger, quizStore, quizID)
-		if !ok {
+		var quizID int64
+		if quizID, ok = parseIDFromPath(w, r, logger, "quizID"); !ok {
 			return
 		}
 
-		data := QuestionEditData{
+		var qz *quiz.Quiz
+		if qz, ok = quizByID(w, r, logger, quizStore, quizID); !ok {
+			return
+		}
+
+		data := questionCreateData{
 			Title:    "Admin Dashboard - Question Create",
 			Quiz:     quizDataFromQuiz(qz),
 			Question: &QuestionData{},
 		}
-		if err = executeTemplate(w, t, data); err != nil {
-			logger.Error(r.Context(), "error executing template", logging.ErrAttr(err))
-		}
+		render.Render(w, r, http.StatusOK, data)
 	})
 }
 
 // HandleQuestionEdit handles the display of the question edit page in the admin dashboard.
-func HandleQuestionEdit(logger *logging.Logger, quizStore quiz.Store) http.Handler {
-	t := parseTemplate("admin/pages/questionform.gohtml")
+func HandleQuestionEdit(logger *slog.Logger, quizStore quiz.Store) http.Handler {
+	render := NewTemplateRenderer(logger, "admin/pages/questionform.gohtml")
+
+	type questionEditData struct {
+		Title    string
+		Quiz     *QuizData
+		Question *QuestionData
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var err error
-		quizID, _ := parseIDFromPath(w, r, logger, "quizId")
-		questionID, _ := parseIDFromPath(w, r, logger, "questionId")
+		var ok bool
+
+		var quizID int64
+		if quizID, ok = parseIDFromPath(w, r, logger, "quizID"); !ok {
+			return
+		}
+
+		var questionID int64
+		if questionID, ok = parseIDFromPath(w, r, logger, "questionID"); !ok {
+			return
+		}
 		newQuestion := questionID == 0
 
 		qz, ok := quizByID(w, r, logger, quizStore, quizID)
@@ -613,28 +656,35 @@ func HandleQuestionEdit(logger *logging.Logger, quizStore quiz.Store) http.Handl
 			}
 		}
 
-		data := QuestionEditData{
+		data := questionEditData{
 			Title:    "Admin Dashboard - Question Edit",
 			Quiz:     quizDataFromQuiz(qz),
 			Question: questionDataFromQuestion(qs),
 		}
-		if err = executeTemplate(w, t, data); err != nil {
-			logger.Error(r.Context(), "error executing template", logging.ErrAttr(err))
-		}
+		render.Render(w, r, http.StatusOK, data)
 	})
 }
 
 // HandleQuestionSave saves a question.
-func HandleQuestionSave(logger *logging.Logger, quizStore quiz.Store) http.Handler {
+func HandleQuestionSave(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Parse quiz and question IDs from the URL
-		quizID, _ := parseIDFromPath(w, r, logger, "quizId")
-		questionID, _ := parseIDFromPath(w, r, logger, "questionId")
+		var ok bool
+
+		var quizID int64
+		if quizID, ok = parseIDFromPath(w, r, logger, "quizID"); !ok {
+			return
+		}
+
+		var questionID int64
+		if questionID, ok = parseIDFromPath(w, r, logger, "questionID"); !ok {
+			return
+		}
+
 		newQuestion := questionID == 0
 
 		// Retrieve quiz and question from the store
 		var qz *quiz.Quiz
-		var ok bool
 		if qz, ok = quizByID(w, r, logger, quizStore, quizID); !ok {
 			return
 		}
@@ -650,20 +700,14 @@ func HandleQuestionSave(logger *logging.Logger, quizStore quiz.Store) http.Handl
 			}
 		}
 
-		if ok = fillQuestionFromForm(w, r, logger, qs); !ok {
+		if !fillQuestionFromForm(w, r, logger, qs) {
 			return
 		}
 
-		if problems := qs.Valid(r.Context()); len(problems) > 0 {
-			render400(w, r, logger, fmt.Sprintf("validation errors: %v", problems))
-
+		if !storeQuestion(w, r, logger, quizStore, qs) {
 			return
 		}
 
-		if ok = storeQuestion(w, r, logger, quizStore, qs); !ok {
-			return
-		}
-
-		http.Redirect(w, r, fmt.Sprintf("/admin/quizzes/%d", quizID), http.StatusFound)
+		http.Redirect(w, r, fmt.Sprintf("/admin/quizzes/%d", qz.ID), http.StatusSeeOther)
 	})
 }

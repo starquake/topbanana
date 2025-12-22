@@ -3,8 +3,8 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -14,9 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pressly/goose/v3"
-	"github.com/starquake/topbanana/internal/logging"
-	"github.com/starquake/topbanana/internal/migrations"
+	"github.com/starquake/topbanana/internal/db"
 	"github.com/starquake/topbanana/internal/must"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/server"
@@ -36,14 +34,20 @@ func run(
 	mainCtx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 	defer cancel()
 
-	logger := logging.NewLogger(stdout)
+	logger := slog.New(slog.NewTextHandler(stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	db := must.Any(sql.Open("sqlite", "./topbanana.sqlite"))
-	goose.SetBaseFS(migrations.FS)
-	must.OK(goose.SetDialect("sqlite3"))
-	must.OK(goose.Up(db, "."))
+	conn, err := db.Open(ctx)
+	if err != nil {
+		return fmt.Errorf("error opening database connection: %w", err)
+	}
+	defer func() {
+		err := conn.Close()
+		if err != nil {
+			logger.ErrorContext(mainCtx, "error closing database connection", slog.Any("err", err))
+		}
+	}()
 
-	quizStore := quiz.NewSQLiteStore(db, logger)
+	quizStore := quiz.NewSQLiteStore(conn, logger)
 
 	stores := &store.Stores{
 		Quizzes: quizStore,
@@ -56,10 +60,11 @@ func run(
 		Handler:           srv,
 	}
 	go func() {
-		logger.Info(mainCtx, "listening on "+httpServer.Addr, slog.String("addr", httpServer.Addr))
+		logger.InfoContext(mainCtx, "listening on "+httpServer.Addr, slog.String("addr", httpServer.Addr))
+		logger.InfoContext(mainCtx, "visit http://localhost:8080/admin/quizzes to manage quizzes")
 		err := httpServer.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error(mainCtx, "error listening and serving", logging.ErrAttr(err))
+			logger.ErrorContext(mainCtx, "error listening and serving", slog.Any("err", err))
 		}
 	}()
 	var wg sync.WaitGroup
