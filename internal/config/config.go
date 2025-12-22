@@ -70,7 +70,7 @@ func Parse(getenv func(string) string) (*Config, error) {
 		c.Port = val
 	}
 	if val := getenv("DB_URI"); val != "" {
-		c.DBDriver = val
+		c.DBURI = val
 	}
 
 	// Strict validation for types

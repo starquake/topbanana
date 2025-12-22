@@ -33,22 +33,34 @@ func TestParse(t *testing.T) {
 	t.Run("parse config", func(t *testing.T) {
 		t.Parallel()
 
-		getenv := func(key string) string {
-			envs := map[string]string{
-				"APP_ENV":              "test",
-				"HOST":                 "localhost",
-				"PORT":                 "5432",
-				"DB_URI":               "postgres://localhost:5432/topbanana?sslmode=disable",
-				"DB_MAX_OPEN_CONNS":    "100",
-				"DB_MAX_IDLE_CONNS":    "200",
-				"DB_CONN_MAX_LIFETIME": "10m",
-			}
+		envs := map[string]string{
+			"APP_ENV":              "test",
+			"HOST":                 "localhost",
+			"PORT":                 "5432",
+			"DB_URI":               "postgres://localhost:5432/topbanana?sslmode=disable",
+			"DB_MAX_OPEN_CONNS":    "100",
+			"DB_MAX_IDLE_CONNS":    "200",
+			"DB_CONN_MAX_LIFETIME": "10m",
+		}
 
+		getenv := func(key string) string {
 			return envs[key]
 		}
-		_, err := config.Parse(getenv)
+		c, err := config.Parse(getenv)
 		if err != nil {
 			t.Fatalf("error parsing config: %v", err)
+		}
+		if c.AppEnvironment != envs["APP_ENV"] {
+			t.Errorf("got %v, want %v", c.AppEnvironment, envs["APP_ENV"])
+		}
+		if c.Host != envs["HOST"] {
+			t.Errorf("got %v, want %v", c.Host, envs["HOST"])
+		}
+		if c.Port != envs["PORT"] {
+			t.Errorf("got %v, want %v", c.Port, envs["PORT"])
+		}
+		if c.DBURI != envs["DB_URI"] {
+			t.Errorf("got %v, want %v", c.DBURI, envs["DB_URI"])
 		}
 	})
 
