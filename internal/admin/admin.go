@@ -446,7 +446,7 @@ func HandleIndex(logger *slog.Logger) http.Handler {
 func HandleQuizList(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 	render := NewTemplateRenderer(logger, "admin/pages/quizlist.gohtml")
 
-	type quizListDAta struct {
+	type quizListData struct {
 		Title   string
 		Quizzes []*QuizData
 	}
@@ -464,7 +464,7 @@ func HandleQuizList(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 
 		qzd := quizDataFromQuizzes(quizzes)
 
-		data := quizListDAta{
+		data := quizListData{
 			Title:   "Admin Dashboard - Quiz List",
 			Quizzes: qzd,
 		}
