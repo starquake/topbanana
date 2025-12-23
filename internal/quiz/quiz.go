@@ -50,6 +50,7 @@ var (
 )
 
 // Timestamp is a timestamp with millisecond precision. Used for SQLite type conversion.
+// TODO: Move to shared package
 //
 //nolint:recvcheck // Mixing pointer receivers and value receivers is needed here because we are implementing sql.Scanner and driver.Valuer.
 type Timestamp time.Time
@@ -162,7 +163,7 @@ func (o *Option) Valid(_ context.Context) map[string]string {
 // Store represents a store for quizzes.
 // This can be implemented for different databases.
 type Store interface {
-	// GetQuizByID returns a quiz with questions and options, by its question ID.
+	// GetQuizByID returns a quiz including related questions and options by its ID.
 	// Returns ErrQuizNotFound if the quiz is not found.
 	GetQuizByID(ctx context.Context, id int64) (*Quiz, error)
 	// GetQuestionByID returns a question with options, by its question ID.
@@ -269,24 +270,8 @@ func (s *SQLiteStore) CreateQuiz(ctx context.Context, qz *Quiz) error {
 	qz.ID = 0
 
 	return s.withTx(ctx, func(tx *sql.Tx) error {
-		qz.CreatedAt = time.Now().UTC()
-		quizResult, err := tx.ExecContext(ctx, createQuizSQL,
-			qz.Title, qz.Slug, qz.Description, Timestamp(qz.CreatedAt))
-		if err != nil {
-			return fmt.Errorf("error creating quiz: %w", err)
-		}
-		resultID, err := quizResult.LastInsertId()
-		if err != nil {
-			return fmt.Errorf("error getting last insert ID for quiz: %w", err)
-		}
-		qz.ID = resultID
-
-		for _, question := range qz.Questions {
-			question.ID = 0
-		}
-		err = s.handleQuestionsInTx(ctx, tx, qz.Questions, qz.ID)
-		if err != nil {
-			return fmt.Errorf("error handling questions: %w", err)
+		if err := s.upsertQuizInTx(ctx, tx, qz); err != nil {
+			return fmt.Errorf("error upserting quiz: %w", err)
 		}
 
 		return nil
@@ -300,24 +285,8 @@ func (s *SQLiteStore) UpdateQuiz(ctx context.Context, qz *Quiz) error {
 	}
 
 	return s.withTx(ctx, func(tx *sql.Tx) error {
-		// Update Quiz
-		res, err := tx.ExecContext(ctx, updateQuizSQL, qz.Title, qz.Slug, qz.Description, qz.ID)
-		if err != nil {
+		if err := s.upsertQuizInTx(ctx, tx, qz); err != nil {
 			return fmt.Errorf("error updating quiz: %w", err)
-		}
-
-		rows, err := res.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("error getting rows affected: %w", err)
-		}
-		if rows == 0 {
-			return fmt.Errorf("%w: quizID %d", ErrUpdatingQuizNoRowsAffected, qz.ID)
-		}
-
-		// Handle Questions (Create, Update, Delete)
-		err = s.handleQuestionsInTx(ctx, tx, qz.Questions, qz.ID)
-		if err != nil {
-			return fmt.Errorf("error handling questions: %w", err)
 		}
 
 		return nil
@@ -333,10 +302,6 @@ func (s *SQLiteStore) CreateQuestion(ctx context.Context, qs *Question) error {
 			return fmt.Errorf("error upserting question: %w", err)
 		}
 
-		if err := s.handleOptionsInTx(ctx, tx, qs.Options, qs.ID); err != nil {
-			return fmt.Errorf("error handling options: %w", err)
-		}
-
 		return nil
 	})
 }
@@ -348,12 +313,8 @@ func (s *SQLiteStore) UpdateQuestion(ctx context.Context, qs *Question) error {
 	}
 
 	return s.withTx(ctx, func(tx *sql.Tx) error {
-		if err := s.updateQuestionInTx(ctx, tx, qs); err != nil {
+		if err := s.upsertQuestionInTx(ctx, tx, qs); err != nil {
 			return fmt.Errorf("error updating question: %w", err)
-		}
-
-		if err := s.handleOptionsInTx(ctx, tx, qs.Options, qs.ID); err != nil {
-			return fmt.Errorf("error handling options: %w", err)
 		}
 
 		return nil
@@ -488,6 +449,60 @@ func (s *SQLiteStore) fetchQuizzes(ctx context.Context) ([]*Quiz, error) {
 	return quizzes, nil
 }
 
+func (s *SQLiteStore) upsertQuizInTx(ctx context.Context, tx *sql.Tx, qz *Quiz) error {
+	if qz.ID == 0 {
+		// CREATE
+		for _, question := range qz.Questions {
+			question.ID = 0
+		}
+		if err := s.createQuizInTx(ctx, tx, qz); err != nil {
+			return fmt.Errorf("error creating new quiz (title: %q): %w", qz.Title, err)
+		}
+	} else {
+		// UPDATE
+		if err := s.updateQuizInTx(ctx, tx, qz); err != nil {
+			return fmt.Errorf("error updating quiz %d: %w", qz.ID, err)
+		}
+	}
+
+	// Handle Questions for this quiz (regardless of create or update)
+	if err := s.handleQuestionsInTx(ctx, tx, qz.Questions, qz.ID); err != nil {
+		return fmt.Errorf("error handling questions for quiz %d: %w", qz.ID, err)
+	}
+
+	return nil
+}
+
+func (*SQLiteStore) createQuizInTx(ctx context.Context, tx *sql.Tx, qz *Quiz) error {
+	qz.CreatedAt = time.Now().UTC()
+	res, err := tx.ExecContext(ctx, createQuizSQL, qz.Title, qz.Slug, qz.Description, Timestamp(qz.CreatedAt))
+	if err != nil {
+		return fmt.Errorf("error creating quiz: %w", err)
+	}
+	qz.ID, err = res.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("error getting last insert ID for quiz: %w", err)
+	}
+
+	return nil
+}
+
+func (*SQLiteStore) updateQuizInTx(ctx context.Context, tx *sql.Tx, qz *Quiz) error {
+	res, err := tx.ExecContext(ctx, updateQuizSQL, qz.Title, qz.Slug, qz.Description, qz.ID)
+	if err != nil {
+		return fmt.Errorf("error updating quiz: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("error getting rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w: quizID %d", ErrUpdatingQuizNoRowsAffected, qz.ID)
+	}
+
+	return nil
+}
+
 func (*SQLiteStore) getQuestionIDsInTx(ctx context.Context, tx *sql.Tx, quizID int64) ([]int64, error) {
 	rows, err := tx.QueryContext(ctx, getQuestionIDsByQuizIDSQL, quizID)
 	if err != nil {
@@ -521,6 +536,7 @@ func (s *SQLiteStore) handleQuestionsInTx(ctx context.Context, tx *sql.Tx, quest
 		return fmt.Errorf("error getting questionIDs: %w", err)
 	}
 
+	// UPSERT
 	incomingIDs := make(map[int64]bool)
 	for _, qs := range questions {
 		qs.QuizID = quizID // Ensure linkage
@@ -535,6 +551,7 @@ func (s *SQLiteStore) handleQuestionsInTx(ctx context.Context, tx *sql.Tx, quest
 		}
 	}
 
+	// DELETE
 	deleteIDs := make([]int64, 0, len(existingIDs))
 	for _, id := range existingIDs {
 		if !incomingIDs[id] {
