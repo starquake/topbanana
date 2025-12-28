@@ -9,7 +9,8 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/starquake/topbanana/internal/quiz"
+
+	. "github.com/starquake/topbanana/internal/quiz"
 )
 
 type failLastInsertIDResult struct{}
@@ -55,7 +56,7 @@ func TestSQLiteStore_ListQuizzes_MockTesting_RowError(t *testing.T) {
 		}
 	}()
 
-	quizStore := quiz.NewSQLiteStore(db, logger)
+	quizStore := NewSQLiteStore(db, logger)
 
 	testError := errors.New("quizRows error")
 
@@ -98,9 +99,9 @@ func TestSQLiteStore_CreateQuiz_MockTesting(t *testing.T) {
 			}
 		}()
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		qz := &quiz.Quiz{
+		qz := &Quiz{
 			Title:       "Test Quiz",
 			Slug:        "test-qz",
 			Description: "A description",
@@ -146,13 +147,13 @@ func TestSQLiteStore_CreateQuiz_MockTesting(t *testing.T) {
 			}
 		}()
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		qz := &quiz.Quiz{
+		qz := &Quiz{
 			Title:       "Test Quiz",
 			Slug:        "test-quiz",
 			Description: "A description",
-			Questions: []*quiz.Question{
+			Questions: []*Question{
 				{
 					Text:     "Question 1",
 					Position: 10,
@@ -208,17 +209,17 @@ func TestSQLiteStore_CreateQuiz_MockTesting(t *testing.T) {
 			}
 		}()
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		qz := &quiz.Quiz{
+		qz := &Quiz{
 			Title:       "Test Quiz",
 			Slug:        "test-quiz",
 			Description: "A description",
-			Questions: []*quiz.Question{
+			Questions: []*Question{
 				{
 					Text:     "Question 1",
 					Position: 10,
-					Options: []*quiz.Option{
+					Options: []*Option{
 						{Text: "Option 1"},
 					},
 				},
@@ -281,13 +282,13 @@ func TestSQLiteStore_CreateQuiz_MockTesting(t *testing.T) {
 			}
 		}()
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		qz := &quiz.Quiz{
+		qz := &Quiz{
 			Title:       "Test Quiz",
 			Slug:        "test-quiz",
 			Description: "A description",
-			Questions: []*quiz.Question{
+			Questions: []*Question{
 				{
 					Text:     "Question 1",
 					Position: 10,
@@ -337,13 +338,13 @@ func TestSQLiteStore_CreateQuiz_MockTesting(t *testing.T) {
 			}
 		}()
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		qz := &quiz.Quiz{
+		qz := &Quiz{
 			Title:       "Test Quiz",
 			Slug:        "test-quiz",
 			Description: "A description",
-			Questions: []*quiz.Question{
+			Questions: []*Question{
 				{
 					Text:     "Question 1",
 					Position: 10,
@@ -397,11 +398,11 @@ func TestSQLiteStore_UpdateQuiz_MockTesting_FailRowsAffected(t *testing.T) {
 		}
 	}()
 
-	quizStore := quiz.NewSQLiteStore(db, logger)
+	quizStore := NewSQLiteStore(db, logger)
 
-	testQuiz := &quiz.Quiz{
+	testQuiz := &Quiz{
 		ID: 1,
-		Questions: []*quiz.Question{
+		Questions: []*Question{
 			{
 				ID:   1,
 				Text: "Test Question",
@@ -443,9 +444,9 @@ func TestSQLiteStore_UpdateQuestion_MockTesting_FailRowsAffected(t *testing.T) {
 		}
 	}()
 
-	quizStore := quiz.NewSQLiteStore(db, logger)
+	quizStore := NewSQLiteStore(db, logger)
 
-	testQuestion := &quiz.Question{
+	testQuestion := &Question{
 		ID:       1,
 		Text:     "Test Question",
 		ImageURL: "http://example.com/image.png",
@@ -486,9 +487,9 @@ func TestSQLiteStore_updateOptionInTx_MockTesting_FailRowsAffected(t *testing.T)
 		}
 	}()
 
-	quizStore := quiz.NewSQLiteStore(db, logger)
+	quizStore := NewSQLiteStore(db, logger)
 
-	testOption := &quiz.Option{
+	testOption := &Option{
 		ID:         1,
 		QuestionID: 1,
 		Text:       "Test Option",
@@ -501,8 +502,8 @@ func TestSQLiteStore_updateOptionInTx_MockTesting_FailRowsAffected(t *testing.T)
 		WillReturnResult(failRowsAffectedResult{})
 	mock.ExpectClose()
 
-	err = quizStore.WithTx(t.Context(), func(tx *sql.Tx) error {
-		return quizStore.UpdateOptionInTx(t.Context(), tx, testOption)
+	err = ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
+		return ExportSQLiteStoreUpdateOptionInTx(quizStore, t.Context(), tx, testOption)
 	})
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -523,7 +524,7 @@ func TestSQLiteStore_withTx_MockTesting_FailRollback(t *testing.T) {
 		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
 	}
 
-	quizStore := quiz.NewSQLiteStore(db, logger)
+	quizStore := NewSQLiteStore(db, logger)
 
 	defer func() {
 		if err = mock.ExpectationsWereMet(); err != nil {
@@ -538,7 +539,7 @@ func TestSQLiteStore_withTx_MockTesting_FailRollback(t *testing.T) {
 	mock.ExpectExec("SELECT foo FROM bar").WillReturnError(queryError)
 	mock.ExpectRollback().WillReturnError(rollbackError)
 
-	err = quizStore.WithTx(t.Context(), func(tx *sql.Tx) error {
+	err = ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
 		_, err2 := tx.ExecContext(t.Context(), "SELECT foo FROM bar")
 
 		return err2
@@ -576,7 +577,7 @@ func TestSQliteStore_getOptionIDsInTx_MockTesting(t *testing.T) {
 			}
 		}()
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		id := int64(42)
 		badQuestionRows := sqlmock.NewRows([]string{"id"}).AddRow("bad id")
@@ -589,8 +590,8 @@ func TestSQliteStore_getOptionIDsInTx_MockTesting(t *testing.T) {
 
 		mock.ExpectClose()
 
-		err = quizStore.WithTx(t.Context(), func(tx *sql.Tx) error { // use exported test helper
-			_, err2 := quizStore.GetOptionIDsInTx(t.Context(), tx, id)
+		err = ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error { // use exported test helper
+			_, err2 := ExportSQLiteStoreGetOptionIDsInTx(quizStore, t.Context(), tx, id)
 
 			return err2
 		})
@@ -618,7 +619,7 @@ func TestSQliteStore_getOptionIDsInTx_MockTesting(t *testing.T) {
 			}
 		}()
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		id := int64(42)
 		rowError := errors.New("row error")
@@ -631,8 +632,8 @@ func TestSQliteStore_getOptionIDsInTx_MockTesting(t *testing.T) {
 
 		mock.ExpectClose()
 
-		err = quizStore.WithTx(t.Context(), func(tx *sql.Tx) error { // use exported test helper
-			_, err2 := quizStore.GetOptionIDsInTx(t.Context(), tx, id)
+		err = ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error { // use exported test helper
+			_, err2 := ExportSQLiteStoreGetOptionIDsInTx(quizStore, t.Context(), tx, id)
 
 			return err2
 		})
@@ -677,7 +678,7 @@ func TestSQLiteStore_GetQuestionIDsInTx_MockTesting(t *testing.T) {
 		WithArgs(quizID).WillReturnRows(questionRows)
 	mock.ExpectClose()
 
-	quizStore := quiz.NewSQLiteStore(db, logger)
+	quizStore := NewSQLiteStore(db, logger)
 
 	_, err = quizStore.GetQuestionsByQuizID(t.Context(), quizID)
 	if err == nil {
@@ -720,7 +721,7 @@ func TestSQLiteStore_GetOptionsByQuestionID_MockTesting(t *testing.T) {
 		WithArgs(questionID).WillReturnRows(optionRows)
 	mock.ExpectClose()
 
-	quizStore := quiz.NewSQLiteStore(db, logger)
+	quizStore := NewSQLiteStore(db, logger)
 
 	_, err = quizStore.GetOptionsByQuestionID(t.Context(), questionID)
 	if err == nil {

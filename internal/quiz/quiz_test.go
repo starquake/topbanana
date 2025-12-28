@@ -14,15 +14,16 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pressly/goose/v3"
-	"github.com/starquake/topbanana/internal/quiz"
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
+
+	. "github.com/starquake/topbanana/internal/quiz"
 )
 
 var (
-	lessQuizzes   = func(a, b *quiz.Quiz) bool { return a.Title < b.Title }
-	lessQuestions = func(a, b *quiz.Question) bool { return a.Text < b.Text }
-	lessOptions   = func(a, b *quiz.Option) bool { return a.Text < b.Text }
+	lessQuizzes   = func(a, b *Quiz) bool { return a.Title < b.Title }
+	lessQuestions = func(a, b *Question) bool { return a.Text < b.Text }
+	lessOptions   = func(a, b *Option) bool { return a.Text < b.Text }
 )
 
 // open opens a database connection with migrations applied.
@@ -61,25 +62,25 @@ func TestTimestamp_Scan(t *testing.T) {
 	tests := []struct {
 		name    string
 		value   any
-		want    quiz.Timestamp
+		want    Timestamp
 		wantErr bool
 	}{
 		{
 			name:    "valid timestamp",
 			value:   int64(1764575476147),
-			want:    quiz.Timestamp(time.Unix(1764575476, 147*int64(time.Millisecond))),
+			want:    Timestamp(time.Unix(1764575476, 147*int64(time.Millisecond))),
 			wantErr: false,
 		},
 		{
 			name:    "invalid timestamp",
 			value:   "invalid",
-			want:    quiz.Timestamp{},
+			want:    Timestamp{},
 			wantErr: true,
 		},
 		{
 			name:    "nil timestamp",
 			value:   nil,
-			want:    quiz.Timestamp{},
+			want:    Timestamp{},
 			wantErr: false,
 		},
 	}
@@ -87,7 +88,7 @@ func TestTimestamp_Scan(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			var ts quiz.Timestamp
+			var ts Timestamp
 			err := ts.Scan(tt.value)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Scan() error = %v, wantErr %v", err, tt.wantErr)
@@ -98,7 +99,7 @@ func TestTimestamp_Scan(t *testing.T) {
 
 func TestTimestamp_Value(t *testing.T) {
 	t.Parallel()
-	ts := quiz.Timestamp(time.Unix(1764575476, 147*int64(time.Millisecond)))
+	ts := Timestamp(time.Unix(1764575476, 147*int64(time.Millisecond)))
 	got, err := ts.Value()
 	if err != nil {
 		t.Errorf("Value() error = %v", err)
@@ -117,11 +118,11 @@ func TestQuiz_Valid(t *testing.T) {
 
 		tests := []struct {
 			name string
-			quiz quiz.Quiz
+			quiz Quiz
 		}{
 			{
 				name: "valid quiz without questions",
-				quiz: quiz.Quiz{
+				quiz: Quiz{
 					Title:       "Quiz 1",
 					Slug:        "quiz-1",
 					Description: "Quiz 1 Description",
@@ -129,21 +130,21 @@ func TestQuiz_Valid(t *testing.T) {
 			},
 			{
 				name: "valid quiz with questions",
-				quiz: quiz.Quiz{
+				quiz: Quiz{
 					Title:       "Quiz 2",
 					Slug:        "quiz-2",
 					Description: "Quiz 2 Description",
-					Questions: []*quiz.Question{
+					Questions: []*Question{
 						{
 							Text: "Question 1",
-							Options: []*quiz.Option{
+							Options: []*Option{
 								{Text: "Option 1"},
 								{Text: "Option 2"},
 							},
 						},
 						{
 							Text: "Question 2",
-							Options: []*quiz.Option{
+							Options: []*Option{
 								{Text: "Option 3"},
 								{Text: "Option 4"},
 							},
@@ -170,36 +171,36 @@ func TestQuiz_Valid(t *testing.T) {
 		t.Parallel()
 		tests := []struct {
 			name string
-			quiz quiz.Quiz
+			quiz Quiz
 		}{
 			{
 				name: "quiz without title",
-				quiz: quiz.Quiz{
+				quiz: Quiz{
 					Slug:        "quiz-1",
 					Description: "Quiz 1 Description",
 				},
 			},
 			{
 				name: "quiz without slug",
-				quiz: quiz.Quiz{
+				quiz: Quiz{
 					Title:       "Quiz 2",
 					Description: "Quiz 2 Description",
 				},
 			},
 			{
 				name: "quiz without description",
-				quiz: quiz.Quiz{
+				quiz: Quiz{
 					Title: "Quiz 3",
 					Slug:  "quiz-3",
 				},
 			},
 			{
 				name: "valid quiz with invalid questions (no options)",
-				quiz: quiz.Quiz{
+				quiz: Quiz{
 					Title:       "Quiz 2",
 					Slug:        "quiz-2",
 					Description: "Quiz 2 Description",
-					Questions: []*quiz.Question{
+					Questions: []*Question{
 						{Text: "Question 1"},
 						{Text: "Question 2"},
 					},
@@ -207,34 +208,34 @@ func TestQuiz_Valid(t *testing.T) {
 			},
 			{
 				name: "quiz with invalid question (no text)",
-				quiz: quiz.Quiz{
+				quiz: Quiz{
 					Title:       "Quiz 4",
 					Slug:        "quiz-4",
 					Description: "Quiz 4 Description",
-					Questions: []*quiz.Question{
+					Questions: []*Question{
 						{Text: ""},
 					},
 				},
 			},
 			{
 				name: "quiz with question with invalid position",
-				quiz: quiz.Quiz{
+				quiz: Quiz{
 					Title:       "Quiz 5",
 					Slug:        "quiz-5",
 					Description: "Quiz 5 Description",
-					Questions: []*quiz.Question{
+					Questions: []*Question{
 						{Text: "Question 1", Position: -1},
 					},
 				},
 			},
 			{
 				name: "quiz with question with invalid options",
-				quiz: quiz.Quiz{
+				quiz: Quiz{
 					Title:       "Quiz 6",
 					Slug:        "quiz-6",
 					Description: "Quiz 6 Description",
-					Questions: []*quiz.Question{
-						{Text: "Question 1", Options: []*quiz.Option{{Text: ""}}},
+					Questions: []*Question{
+						{Text: "Question 1", Options: []*Option{{Text: ""}}},
 					},
 				},
 			},
@@ -254,7 +255,7 @@ func TestQuiz_Valid(t *testing.T) {
 func TestNewSQLiteStore(t *testing.T) {
 	t.Parallel()
 
-	store := quiz.NewSQLiteStore(&sql.DB{}, &slog.Logger{})
+	store := NewSQLiteStore(&sql.DB{}, &slog.Logger{})
 	if store == nil {
 		t.Error("store is nil")
 	}
@@ -270,18 +271,18 @@ func TestSQLiteStore_GetQuizByID(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		testQuiz := &quiz.Quiz{
+		testQuiz := &Quiz{
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
 			Description: "Quiz 1 Description",
 			CreatedAt:   time.Now().UTC(),
-			Questions: []*quiz.Question{
+			Questions: []*Question{
 				{
 					Text:     "Question 1",
 					Position: 10,
-					Options: []*quiz.Option{
+					Options: []*Option{
 						{Text: "Option 1"},
 						{Text: "Option 2"},
 					},
@@ -289,7 +290,7 @@ func TestSQLiteStore_GetQuizByID(t *testing.T) {
 				{
 					Text:     "Question 2",
 					Position: 20,
-					Options: []*quiz.Option{
+					Options: []*Option{
 						{Text: "Option 3"},
 						{Text: "Option 4"},
 					},
@@ -320,10 +321,10 @@ func TestSQLiteStore_GetQuizByID(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		qz, err := quizStore.GetQuizByID(t.Context(), 999)
-		if got, want := err, quiz.ErrQuizNotFound; !errors.Is(got, want) {
+		if got, want := err, ErrQuizNotFound; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
 		if qz != nil {
@@ -342,7 +343,7 @@ func TestSQLiteStore_GetQuizByID_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		// Create and cancel context to trigger an error
 		ctx, cancel := context.WithCancel(t.Context())
@@ -362,7 +363,7 @@ func TestSQLiteStore_GetQuizByID_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		// Insert a quiz with an invalid created_at value (string instead of int64) to trigger scan error.
 		res, err := db.ExecContext(
@@ -399,7 +400,7 @@ func TestSQLiteStore_GetQuizByID_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		// Insert a quiz with a question with an invalid position value (string instead of int64) to trigger scan error.
 		res, err := db.ExecContext(
@@ -445,18 +446,18 @@ func TestSQLiteStore_ListQuizzes(t *testing.T) {
 
 	db := open(t)
 
-	quizStore := quiz.NewSQLiteStore(db, logger)
-	testQuizzes := []*quiz.Quiz{
+	quizStore := NewSQLiteStore(db, logger)
+	testQuizzes := []*Quiz{
 		{
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
 			Description: "Quiz 1 Description",
 			CreatedAt:   time.Now().UTC(),
-			Questions: []*quiz.Question{
+			Questions: []*Question{
 				{
 					Text:     "Question 1",
 					Position: 10,
-					Options: []*quiz.Option{
+					Options: []*Option{
 						{Text: "Option 1"},
 						{Text: "Option 2"},
 						{Text: "Option 3", Correct: true},
@@ -465,7 +466,7 @@ func TestSQLiteStore_ListQuizzes(t *testing.T) {
 				{
 					Text:     "Question 2",
 					Position: 20,
-					Options: []*quiz.Option{
+					Options: []*Option{
 						{Text: "Option 4"},
 						{Text: "Option 5"},
 						{Text: "Option 6", Correct: true},
@@ -478,11 +479,11 @@ func TestSQLiteStore_ListQuizzes(t *testing.T) {
 			Slug:        "quiz-2",
 			Description: "Quiz 2 Description",
 			CreatedAt:   time.Now().UTC(),
-			Questions: []*quiz.Question{
+			Questions: []*Question{
 				{
 					Text:     "Question 3",
 					Position: 10,
-					Options: []*quiz.Option{
+					Options: []*Option{
 						{Text: "Option 7"},
 						{Text: "Option 8"},
 						{Text: "Option 9", Correct: true},
@@ -522,7 +523,7 @@ func TestSQLiteStore_ListQuizzes_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -541,7 +542,7 @@ func TestSQLiteStore_ListQuizzes_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		// Insert a quiz with an invalid created_at value (string instead of int64) to trigger scan error.
 		_, err := db.ExecContext(
@@ -569,7 +570,7 @@ func TestSQLiteStore_ListQuizzes_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		// Insert a quiz with a question with an invalid position value (string instead of int64) to trigger a scan error.
 		_, err := db.ExecContext(
@@ -616,18 +617,18 @@ func TestSQLiteStore_GetQuestionByID(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		testQuiz := &quiz.Quiz{
+		testQuiz := &Quiz{
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
 			Description: "Quiz 1 Description",
 			CreatedAt:   time.Now().UTC(),
-			Questions: []*quiz.Question{
+			Questions: []*Question{
 				{
 					Text:     "Question 1",
 					Position: 10,
-					Options: []*quiz.Option{
+					Options: []*Option{
 						{Text: "Option 1"},
 						{Text: "Option 2", Correct: true},
 					},
@@ -658,10 +659,10 @@ func TestSQLiteStore_GetQuestionByID(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		qs, err := quizStore.GetQuestionByID(t.Context(), 999)
-		if got, want := err, quiz.ErrQuestionNotFound; !errors.Is(got, want) {
+		if got, want := err, ErrQuestionNotFound; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
 		if qs != nil {
@@ -680,7 +681,7 @@ func TestSQLiteStore_GetQuestionByID_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -699,9 +700,9 @@ func TestSQLiteStore_GetQuestionByID_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		testQuiz := &quiz.Quiz{
+		testQuiz := &Quiz{
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
 			Description: "Quiz 1 Description",
@@ -739,13 +740,13 @@ func TestSQLiteStore_GetQuestionByID_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		testQuiz := &quiz.Quiz{
+		testQuiz := &Quiz{
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
 			Description: "Quiz 1 Description",
-			Questions: []*quiz.Question{
+			Questions: []*Question{
 				{
 					Text: "Question 1",
 				},
@@ -802,17 +803,17 @@ func TestSQLiteStore_CreateQuiz(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		testQuiz := &quiz.Quiz{
+		testQuiz := &Quiz{
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
 			Description: "Quiz 1 Description",
-			Questions: []*quiz.Question{
+			Questions: []*Question{
 				{
 					Text:     "Question 1",
 					Position: 10,
-					Options: []*quiz.Option{
+					Options: []*Option{
 						{Text: "Option 1"},
 						{Text: "Option 2", Correct: true},
 					},
@@ -846,26 +847,26 @@ func TestSQLiteStore_CreateQuiz(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		suppliedQuizID := int64(1000)
 		suppliedQuestionID := int64(1001)
 		suppliedOption1ID := int64(1002)
 		suppliedOption2ID := int64(1003)
 
-		testQuiz := &quiz.Quiz{
+		testQuiz := &Quiz{
 			ID:          suppliedQuizID,
 			Title:       "Quiz 2",
 			Slug:        "quiz-2",
 			Description: "Quiz 2 Description",
 			CreatedAt:   time.Now().UTC(),
-			Questions: []*quiz.Question{
+			Questions: []*Question{
 				{
 					ID:       suppliedQuestionID,
 					QuizID:   suppliedQuizID,
 					Text:     "Question 1",
 					Position: 10,
-					Options: []*quiz.Option{
+					Options: []*Option{
 						{
 							ID:         suppliedOption1ID,
 							QuestionID: suppliedQuestionID,
@@ -889,8 +890,8 @@ func TestSQLiteStore_CreateQuiz(t *testing.T) {
 		if err == nil {
 			t.Fatal("got nil, want error")
 		}
-		if !errors.Is(err, quiz.ErrQuizNotFound) {
-			t.Errorf("err = %v, want %v", err, quiz.ErrQuizNotFound)
+		if !errors.Is(err, ErrQuizNotFound) {
+			t.Errorf("err = %v, want %v", err, ErrQuizNotFound)
 		}
 		if qz != nil {
 			t.Errorf("qz = %v, want nil", qz)
@@ -930,7 +931,7 @@ func TestSQLiteStore_CreateQuiz_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		// Rename questions table to force an insert error
 		_, err := db.ExecContext(t.Context(), "ALTER TABLE quizzes RENAME TO quizzes_backup")
@@ -938,7 +939,7 @@ func TestSQLiteStore_CreateQuiz_ErrorHandling(t *testing.T) {
 			t.Fatalf("failed to rename table: %v", err)
 		}
 
-		testQuiz := &quiz.Quiz{
+		testQuiz := &Quiz{
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
 			Description: "Description",
@@ -962,7 +963,7 @@ func TestSQLiteStore_CreateQuiz_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		// Rename questions table to force an insert error
 		_, err := db.ExecContext(t.Context(), "ALTER TABLE questions RENAME TO questions_backup")
@@ -970,11 +971,11 @@ func TestSQLiteStore_CreateQuiz_ErrorHandling(t *testing.T) {
 			t.Fatalf("failed to rename table: %v", err)
 		}
 
-		testQuiz := &quiz.Quiz{
+		testQuiz := &Quiz{
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
 			Description: "Description",
-			Questions: []*quiz.Question{
+			Questions: []*Question{
 				{
 					Text: "Question 1",
 				},
@@ -999,7 +1000,7 @@ func TestSQLiteStore_CreateQuiz_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		// Rename options table to force an insert error
 		_, err := db.ExecContext(t.Context(), "ALTER TABLE options RENAME TO options_backup")
@@ -1007,14 +1008,14 @@ func TestSQLiteStore_CreateQuiz_ErrorHandling(t *testing.T) {
 			t.Fatalf("failed to rename table: %v", err)
 		}
 
-		testQuiz := &quiz.Quiz{
+		testQuiz := &Quiz{
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
 			Description: "Description",
-			Questions: []*quiz.Question{
+			Questions: []*Question{
 				{
 					Text: "Question 1",
-					Options: []*quiz.Option{
+					Options: []*Option{
 						{Text: "Option 1"},
 					},
 				},
@@ -1040,18 +1041,18 @@ func TestSQLiteStore_UpdateQuiz(t *testing.T) {
 
 	db := open(t)
 
-	quizStore := quiz.NewSQLiteStore(db, logger)
+	quizStore := NewSQLiteStore(db, logger)
 
-	originalQuiz := &quiz.Quiz{
+	originalQuiz := &Quiz{
 		Title:       "Quiz 1",
 		Slug:        "quiz-1",
 		Description: "Description",
 		CreatedAt:   time.Now().UTC(),
-		Questions: []*quiz.Question{
+		Questions: []*Question{
 			{
 				Text:     "Question 1",
 				Position: 10,
-				Options: []*quiz.Option{
+				Options: []*Option{
 					{Text: "Option 1-1"},
 					{Text: "Option 1-2", Correct: true},
 					{Text: "Option 1-3"},
@@ -1061,7 +1062,7 @@ func TestSQLiteStore_UpdateQuiz(t *testing.T) {
 			{
 				Text:     "Question 2",
 				Position: 20,
-				Options: []*quiz.Option{
+				Options: []*Option{
 					{Text: "Option 2-1"},
 					{Text: "Option 2-2", Correct: true},
 					{Text: "Option 2-3"},
@@ -1077,18 +1078,18 @@ func TestSQLiteStore_UpdateQuiz(t *testing.T) {
 		t.Fatalf("error creating quiz: %v", err)
 	}
 
-	updatedQuiz := &quiz.Quiz{
+	updatedQuiz := &Quiz{
 		ID:          originalQuiz.ID,
 		Title:       originalQuiz.Title + " Updated",
 		Slug:        originalQuiz.Slug + "-updated",
 		Description: originalQuiz.Description + " Updated",
 		CreatedAt:   originalQuiz.CreatedAt,
-		Questions: []*quiz.Question{
+		Questions: []*Question{
 			{
 				ID:     originalQuiz.Questions[0].ID,
 				QuizID: originalQuiz.ID,
 				Text:   originalQuiz.Questions[0].Text + " Updated",
-				Options: []*quiz.Option{
+				Options: []*Option{
 					{
 						ID:      originalQuiz.Questions[0].Options[1].ID,
 						Text:    originalQuiz.Questions[0].Options[1].Text + " Updated",
@@ -1141,13 +1142,13 @@ func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		err := quizStore.UpdateQuiz(t.Context(), &quiz.Quiz{ID: 0})
+		err := quizStore.UpdateQuiz(t.Context(), &Quiz{ID: 0})
 		if err == nil {
 			t.Fatal("got nil, want error")
 		}
-		if got, want := err, quiz.ErrCannotUpdateQuizWithIDZero; !errors.Is(got, want) {
+		if got, want := err, ErrCannotUpdateQuizWithIDZero; !errors.Is(got, want) {
 			t.Errorf("err = %q, want %q", got, want)
 		}
 	})
@@ -1166,14 +1167,14 @@ func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 			t.Fatalf("failed to rename table: %v", err)
 		}
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		testQuiz := &quiz.Quiz{
+		testQuiz := &Quiz{
 			ID:          123456789,
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
 			Description: "Description",
-			Questions: []*quiz.Question{
+			Questions: []*Question{
 				{
 					Text: "Question 1",
 				},
@@ -1197,14 +1198,14 @@ func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		qz := quiz.Quiz{ID: 123456789}
+		qz := Quiz{ID: 123456789}
 		err := quizStore.UpdateQuiz(t.Context(), &qz)
 		if err == nil {
 			t.Fatal("got nil, want error")
 		}
-		if got, want := err, quiz.ErrUpdatingQuizNoRowsAffected; !errors.Is(got, want) {
+		if got, want := err, ErrUpdatingQuizNoRowsAffected; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
 	})
@@ -1218,13 +1219,13 @@ func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 		db := open(t)
 
 		// Rename questions table to force an insert error
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		originalQuiz := &quiz.Quiz{
+		originalQuiz := &Quiz{
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
 			Description: "Description",
-			Questions: []*quiz.Question{
+			Questions: []*Question{
 				{
 					Text: "Question 1",
 				},
@@ -1241,12 +1242,12 @@ func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 			t.Fatalf("failed to rename table: %v", err)
 		}
 
-		updatedQuiz := &quiz.Quiz{
+		updatedQuiz := &Quiz{
 			ID:          originalQuiz.ID,
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
 			Description: "Description",
-			Questions: []*quiz.Question{
+			Questions: []*Question{
 				{
 					Text: "Question 1 Updated",
 				},
@@ -1274,17 +1275,17 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		existingQuizzes := []*quiz.Quiz{
+		existingQuizzes := []*Quiz{
 			{
 				Title:       "Quiz 1",
 				Slug:        "quiz-1",
 				Description: "Description",
-				Questions: []*quiz.Question{
+				Questions: []*Question{
 					{
 						Text: "Question 1",
-						Options: []*quiz.Option{
+						Options: []*Option{
 							{Text: "Option 1-1", Correct: true},
 							{Text: "Option 1-2"},
 							{Text: "Option 1-3"},
@@ -1292,7 +1293,7 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 					},
 					{
 						Text: "Question 2",
-						Options: []*quiz.Option{
+						Options: []*Option{
 							{Text: "Option 2-1", Correct: true},
 							{Text: "Option 2-2"},
 							{Text: "Option 2-3"},
@@ -1304,10 +1305,10 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 				Title:       "Quiz 2",
 				Slug:        "quiz-2",
 				Description: "Description",
-				Questions: []*quiz.Question{
+				Questions: []*Question{
 					{
 						Text: "Question 3",
-						Options: []*quiz.Option{
+						Options: []*Option{
 							{Text: "Option 3-1", Correct: true},
 							{Text: "Option 3-2"},
 							{Text: "Option 3-3"},
@@ -1315,7 +1316,7 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 					},
 					{
 						Text: "Question 4",
-						Options: []*quiz.Option{
+						Options: []*Option{
 							{Text: "Option 4-1", Correct: true},
 							{Text: "Option 4-2"},
 							{Text: "Option 4-3"},
@@ -1332,10 +1333,10 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 			}
 		}
 
-		testQuestion := &quiz.Question{
+		testQuestion := &Question{
 			QuizID: existingQuizzes[0].ID,
 			Text:   "Added Question",
-			Options: []*quiz.Option{
+			Options: []*Option{
 				{Text: "Added Question Option 1"},
 				{Text: "Added Question Option 2"},
 				{Text: "Added Question Option 3"},
@@ -1375,11 +1376,11 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		suppliedOptionID := int64(1000)
 
-		testQuiz := &quiz.Quiz{
+		testQuiz := &Quiz{
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
 			Description: "Description",
@@ -1389,10 +1390,10 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 			t.Fatalf("error creating quiz: %v", err)
 		}
 
-		testQuestion := &quiz.Question{
+		testQuestion := &Question{
 			QuizID: testQuiz.ID,
 			Text:   "Question 1",
-			Options: []*quiz.Option{
+			Options: []*Option{
 				{
 					ID:         suppliedOptionID,
 					QuestionID: 1,
@@ -1422,11 +1423,11 @@ func TestSQLiteStore_CreateQuestion_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		testQuestion := &quiz.Question{
+		testQuestion := &Question{
 			Text: "Question 1",
-			Options: []*quiz.Option{
+			Options: []*Option{
 				{Text: "Option 1-1"},
 				{Text: "Option 1-2"},
 				{Text: "Option 1-3"},
@@ -1453,13 +1454,13 @@ func TestSQLiteStore_CreateQuestion_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		suppliedQuestionID := int64(1000)
 
-		testQuestion := &quiz.Question{
+		testQuestion := &Question{
 			Text: "Question 1",
-			Options: []*quiz.Option{
+			Options: []*Option{
 				{
 					QuestionID: suppliedQuestionID,
 					Text:       "Option 1-1",
@@ -1495,16 +1496,16 @@ func TestSQLiteStore_UpdateQuestion(t *testing.T) {
 
 	db := open(t)
 
-	quizStore := quiz.NewSQLiteStore(db, logger)
+	quizStore := NewSQLiteStore(db, logger)
 
-	originalQuiz := &quiz.Quiz{
+	originalQuiz := &Quiz{
 		Title:       "Quiz 1",
 		Slug:        "quiz-1",
 		Description: "Description",
-		Questions: []*quiz.Question{
+		Questions: []*Question{
 			{
 				Text: "Question 1",
-				Options: []*quiz.Option{
+				Options: []*Option{
 					{Text: "Option 1-1"},
 					{Text: "Option 1-2"},
 					{Text: "Option 1-3"},
@@ -1517,11 +1518,11 @@ func TestSQLiteStore_UpdateQuestion(t *testing.T) {
 		t.Fatalf("error creating quiz: %v", err)
 	}
 
-	updatedQuestion := &quiz.Question{
+	updatedQuestion := &Question{
 		ID:     originalQuiz.Questions[0].ID,
 		QuizID: originalQuiz.ID,
 		Text:   originalQuiz.Questions[0].Text + " Updated",
-		Options: []*quiz.Option{
+		Options: []*Option{
 			{
 				ID:      originalQuiz.Questions[0].Options[1].ID,
 				Text:    originalQuiz.Questions[0].Options[1].Text + " Updated",
@@ -1564,13 +1565,13 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		err := quizStore.UpdateQuestion(t.Context(), &quiz.Question{ID: 0})
+		err := quizStore.UpdateQuestion(t.Context(), &Question{ID: 0})
 		if err == nil {
 			t.Fatal("got nil, want error")
 		}
-		if got, want := err, quiz.ErrCannotUpdateQuestionWithIDZero; !errors.Is(got, want) {
+		if got, want := err, ErrCannotUpdateQuestionWithIDZero; !errors.Is(got, want) {
 			t.Errorf("err = %q, want %q", got, want)
 		}
 	})
@@ -1583,9 +1584,9 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		testQuestion := &quiz.Question{
+		testQuestion := &Question{
 			ID:   123456789,
 			Text: "Question 1",
 		}
@@ -1593,7 +1594,7 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 		if err == nil {
 			t.Fatal("got nil, want error")
 		}
-		if got, want := err, quiz.ErrUpdatingQuestionNoRowsAffected; !errors.Is(got, want) {
+		if got, want := err, ErrUpdatingQuestionNoRowsAffected; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
 	})
@@ -1606,13 +1607,13 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		testQuiz := &quiz.Quiz{
+		testQuiz := &Quiz{
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
 			Description: "Description",
-			Questions: []*quiz.Question{
+			Questions: []*Question{
 				{
 					Text: "Question 1",
 				},
@@ -1629,7 +1630,7 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 			t.Fatalf("failed to rename table: %v", err)
 		}
 
-		updatedQuestion := &quiz.Question{
+		updatedQuestion := &Question{
 			ID:   testQuiz.Questions[0].ID,
 			Text: testQuiz.Questions[0].Text + " Updated",
 		}
@@ -1651,16 +1652,16 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		testQuiz := &quiz.Quiz{
+		testQuiz := &Quiz{
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
 			Description: "Description",
-			Questions: []*quiz.Question{
+			Questions: []*Question{
 				{
 					Text: "Question 1",
-					Options: []*quiz.Option{
+					Options: []*Option{
 						{Text: "Option 1-1"},
 						{Text: "Option 1-2"},
 						{Text: "Option 1-3"},
@@ -1679,10 +1680,10 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 			t.Fatalf("failed to rename table: %v", err)
 		}
 
-		updatedQuestion := &quiz.Question{
+		updatedQuestion := &Question{
 			ID:   testQuiz.ID,
 			Text: testQuiz.Questions[0].Text + " Updated",
-			Options: []*quiz.Option{
+			Options: []*Option{
 				{
 					ID:      testQuiz.Questions[0].Options[0].ID,
 					Text:    testQuiz.Questions[0].Options[0].Text + " Updated",
@@ -1708,16 +1709,16 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		testQuiz := &quiz.Quiz{
+		testQuiz := &Quiz{
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
 			Description: "Description",
-			Questions: []*quiz.Question{
+			Questions: []*Question{
 				{
 					Text: "Question 1",
-					Options: []*quiz.Option{
+					Options: []*Option{
 						{Text: "Option 1-1"},
 						{Text: "Option 1-2"},
 					},
@@ -1741,11 +1742,11 @@ func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 		}
 
 		// Keep the first option, drop the second, forces a DELETE during UpdateQuestion.
-		updatedQuestion := &quiz.Question{
+		updatedQuestion := &Question{
 			ID:     testQuiz.Questions[0].ID,
 			QuizID: testQuiz.ID,
 			Text:   testQuiz.Questions[0].Text + " Updated",
-			Options: []*quiz.Option{
+			Options: []*Option{
 				{
 					ID:      testQuiz.Questions[0].Options[0].ID,
 					Text:    testQuiz.Questions[0].Options[0].Text + " Updated",
@@ -1775,9 +1776,9 @@ func TestSQLiteStore_WithTx(t *testing.T) {
 
 	db := open(t)
 
-	quizStore := quiz.NewSQLiteStore(db, logger)
+	quizStore := NewSQLiteStore(db, logger)
 
-	err := quizStore.WithTx(t.Context(), func(tx *sql.Tx) error {
+	err := ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
 		rows, qErr := tx.QueryContext(t.Context(), "SELECT 1")
 		if qErr != nil {
 			t.Fatalf("error querying database: %v", qErr)
@@ -1807,12 +1808,12 @@ func TestSQLiteStore_WithTx_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		err := quizStore.WithTx(ctx, func(tx *sql.Tx) error {
+		err := ExportSQLiteStoreWithTx(quizStore, ctx, func(tx *sql.Tx) error {
 			rows, qErr := tx.QueryContext(ctx, "SELECT 1")
 			if qErr != nil {
 				t.Fatalf("error querying database: %v", qErr)
@@ -1842,9 +1843,9 @@ func TestSQLiteStore_WithTx_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		err := quizStore.WithTx(t.Context(), func(tx *sql.Tx) error {
+		err := ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
 			var err error
 
 			_, err = tx.ExecContext(t.Context(), "CREATE TABLE test (id INTEGER PRIMARY KEY)")
@@ -1888,9 +1889,9 @@ func TestSQLiteStore_WithTx_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		err := quizStore.WithTx(t.Context(), func(tx *sql.Tx) error {
+		err := ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
 			err := tx.Rollback()
 			if err != nil {
 				t.Fatalf("error rolling back transaction: %v", err)
@@ -1918,19 +1919,19 @@ func TestSQLiteStore_upsertQuestionInTx_ErrorHandling(t *testing.T) {
 		t.Parallel()
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		_, err := db.ExecContext(t.Context(), "ALTER TABLE questions RENAME TO questions_backup")
 		if err != nil {
 			t.Fatalf("failed to rename table: %v", err)
 		}
 
-		testQuestion := &quiz.Question{
+		testQuestion := &Question{
 			Text: "Question 1",
 		}
 
-		err = quizStore.WithTx(t.Context(), func(tx *sql.Tx) error {
-			return quizStore.UpsertQuestionInTx(t.Context(), tx, testQuestion)
+		err = ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
+			return ExportSQLiteStoreUpsertQuestionInTx(quizStore, t.Context(), tx, testQuestion)
 		})
 		if err == nil {
 			t.Fatal("got nil, want error")
@@ -1944,20 +1945,20 @@ func TestSQLiteStore_upsertQuestionInTx_ErrorHandling(t *testing.T) {
 		t.Parallel()
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		_, err := db.ExecContext(t.Context(), "ALTER TABLE questions RENAME TO questions_backup")
 		if err != nil {
 			t.Fatalf("failed to rename table: %v", err)
 		}
 
-		testQuestion := &quiz.Question{
+		testQuestion := &Question{
 			ID:   1,
 			Text: "Question 1",
 		}
 
-		err = quizStore.WithTx(t.Context(), func(tx *sql.Tx) error {
-			return quizStore.UpsertQuestionInTx(t.Context(), tx, testQuestion)
+		err = ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
+			return ExportSQLiteStoreUpsertQuestionInTx(quizStore, t.Context(), tx, testQuestion)
 		})
 		if err == nil {
 			t.Fatal("got nil, want error")
@@ -1976,14 +1977,14 @@ func TestSQLiteStore_deleteQuestionsInTx(t *testing.T) {
 
 	db := open(t)
 
-	quizStore := quiz.NewSQLiteStore(db, logger)
+	quizStore := NewSQLiteStore(db, logger)
 
 	_, err := db.ExecContext(t.Context(), "ALTER TABLE questions RENAME TO questions_backup")
 	if err != nil {
 		t.Fatalf("failed to rename table: %v", err)
 	}
-	err = quizStore.WithTx(t.Context(), func(tx *sql.Tx) error {
-		return quizStore.DeleteQuestionsInTx(t.Context(), tx, []int64{1})
+	err = ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
+		return ExportSQLiteStoreDeleteQuestionsInTx(quizStore, t.Context(), tx, []int64{1})
 	})
 	if err == nil {
 		t.Fatal("got nil, want error")
@@ -2004,19 +2005,19 @@ func TestSQLiteStore_upsertOptionInTx_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		_, err := db.ExecContext(t.Context(), "ALTER TABLE options RENAME TO options_backup")
 		if err != nil {
 			t.Fatalf("failed to rename table: %v", err)
 		}
 
-		testOption := &quiz.Option{
+		testOption := &Option{
 			Text: "Option 1",
 		}
 
-		err = quizStore.WithTx(t.Context(), func(tx *sql.Tx) error {
-			return quizStore.UpsertOptionInTx(t.Context(), tx, testOption)
+		err = ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
+			return ExportSQLiteStoreUpsertOptionInTx(quizStore, t.Context(), tx, testOption)
 		})
 		if err == nil {
 			t.Fatal("got nil, want error")
@@ -2034,20 +2035,20 @@ func TestSQLiteStore_upsertOptionInTx_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		_, err := db.ExecContext(t.Context(), "ALTER TABLE options RENAME TO options_backup")
 		if err != nil {
 			t.Fatalf("failed to rename table: %v", err)
 		}
 
-		testOption := &quiz.Option{
+		testOption := &Option{
 			ID:   1,
 			Text: "Option 1",
 		}
 
-		err = quizStore.WithTx(t.Context(), func(tx *sql.Tx) error {
-			return quizStore.UpsertOptionInTx(t.Context(), tx, testOption)
+		err = ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
+			return ExportSQLiteStoreUpsertOptionInTx(quizStore, t.Context(), tx, testOption)
 		})
 		if err == nil {
 			t.Fatal("got nil, want error")
@@ -2064,20 +2065,20 @@ func TestSQLiteStore_updateOptionInTx(t *testing.T) {
 	buf := bytes.Buffer{}
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-	option := quiz.Option{ID: 123456789}
+	option := Option{ID: 123456789}
 
 	db := open(t)
 
-	quizStore := quiz.NewSQLiteStore(db, logger)
+	quizStore := NewSQLiteStore(db, logger)
 
-	err := quizStore.WithTx(t.Context(), func(tx *sql.Tx) error {
-		return quizStore.UpdateOptionInTx(t.Context(), tx, &option)
+	err := ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
+		return ExportSQLiteStoreUpdateOptionInTx(quizStore, t.Context(), tx, &option)
 	})
 
 	if err == nil {
 		t.Fatal("got nil, want error")
 	}
-	if got, want := err, quiz.ErrUpdatingOptionNoRowsAffected; !errors.Is(got, want) {
+	if got, want := err, ErrUpdatingOptionNoRowsAffected; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
 }
@@ -2093,7 +2094,7 @@ func TestSQLiteStore_GetQuestionsByQuizID_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -2115,13 +2116,13 @@ func TestSQLiteStore_GetQuestionsByQuizID_ErrorHandling(t *testing.T) {
 
 		db := open(t)
 
-		quizStore := quiz.NewSQLiteStore(db, logger)
+		quizStore := NewSQLiteStore(db, logger)
 
-		testQuiz := &quiz.Quiz{
+		testQuiz := &Quiz{
 			Title:       "Quiz 1",
 			Slug:        "quiz-1",
 			Description: "Description",
-			Questions: []*quiz.Question{
+			Questions: []*Question{
 				{
 					Text: "Question 1",
 				},

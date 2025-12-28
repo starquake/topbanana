@@ -14,12 +14,13 @@ import (
 	"sync"
 	"time"
 
+	_ "modernc.org/sqlite"
+
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/db"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/server"
 	"github.com/starquake/topbanana/internal/store"
-	_ "modernc.org/sqlite"
 )
 
 const (

@@ -120,7 +120,7 @@ func questionDataFromQuestions(questions []*quiz.Question) []*QuestionData {
 
 	slices.SortFunc(
 		data,
-		func(a *QuestionData, b *QuestionData) int { return a.Position - b.Position },
+		func(a, b *QuestionData) int { return a.Position - b.Position },
 	)
 
 	return data
@@ -143,7 +143,7 @@ func optionDataFromOptions(options []*quiz.Option) []*OptionData {
 
 	slices.SortFunc(
 		data,
-		func(a *OptionData, b *OptionData) int { return a.Position - b.Position },
+		func(a, b *OptionData) int { return a.Position - b.Position },
 	)
 
 	return data

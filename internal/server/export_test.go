@@ -1,3 +1,3 @@
 package server
 
-var AddRoutes = addRoutes
+var ExportAddRoutes = addRoutes
