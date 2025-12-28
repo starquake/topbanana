@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/pressly/goose/v3"
+
 	"github.com/starquake/topbanana/internal/migrations"
 )
 

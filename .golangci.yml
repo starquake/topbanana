@@ -134,6 +134,8 @@ linters:
           disabled: false
           exclude:
             - "**/export_test.go"
+        - name: dot-imports
+          exclude: ["**/*_test.go"]
     nolintlint:
       require-explanation: true
       require-specific: true
@@ -161,8 +163,19 @@ formatters:
     - goimports
     - golines
   settings:
+    gci:
+      sections:
+        - standard # Standard section: captures all standard packages.
+        - default # Default section: contains all imports that could not be matched to another section type.
+        - localmodule # Local module section: contains all local packages. This section is not present unless explicitly enabled.
+    gofmt:
+      simplify: true
+    gofumpt:
+      extra-rules: true
     golines:
       max-len: 120
+
+
 run:
   timeout: 5m
 severity:

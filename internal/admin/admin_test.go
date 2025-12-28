@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+
 	"github.com/starquake/topbanana/internal/admin"
 	"github.com/starquake/topbanana/internal/quiz"
 )
