@@ -5,12 +5,12 @@ import (
 )
 
 var (
-	ExportSQLiteStoreWithTx              = (*SQLiteStore).withTx
-	ExportSQLiteStoreUpsertQuestionInTx  = (*SQLiteStore).upsertQuestionInTx
-	ExportSQLiteStoreDeleteQuestionsInTx = (*SQLiteStore).deleteQuestionsInTx
-	ExportSQLiteStoreGetOptionIDsInTx    = (*SQLiteStore).getOptionIDsInTx
-	ExportSQLiteStoreUpsertOptionInTx    = (*SQLiteStore).upsertOptionInTx
-	ExportSQLiteStoreUpdateOptionInTx    = (*SQLiteStore).updateOptionInTx
+	ExportWithTx              = withTx
+	ExportUpsertQuestionInTx  = upsertQuestionInTx
+	ExportDeleteQuestionsInTx = deleteQuestionsInTx
+	ExportGetOptionIDsInTx    = getOptionIDsInTx
+	ExportUpsertOptionInTx    = upsertOptionInTx
+	ExportUpdateOptionInTx    = updateOptionInTx
 )
 
 func (s *SQLiteStore) DB() *sql.DB {

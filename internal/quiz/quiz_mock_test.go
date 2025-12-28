@@ -502,8 +502,8 @@ func TestSQLiteStore_updateOptionInTx_MockTesting_FailRowsAffected(t *testing.T)
 		WillReturnResult(failRowsAffectedResult{})
 	mock.ExpectClose()
 
-	err = ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
-		return ExportSQLiteStoreUpdateOptionInTx(quizStore, t.Context(), tx, testOption)
+	err = ExportWithTx(t.Context(), quizStore, func(tx *sql.Tx) error {
+		return ExportUpdateOptionInTx(t.Context(), tx, testOption)
 	})
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -539,7 +539,7 @@ func TestSQLiteStore_withTx_MockTesting_FailRollback(t *testing.T) {
 	mock.ExpectExec("SELECT foo FROM bar").WillReturnError(queryError)
 	mock.ExpectRollback().WillReturnError(rollbackError)
 
-	err = ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
+	err = ExportWithTx(t.Context(), quizStore, func(tx *sql.Tx) error {
 		_, err2 := tx.ExecContext(t.Context(), "SELECT foo FROM bar")
 
 		return err2
@@ -590,8 +590,8 @@ func TestSQliteStore_getOptionIDsInTx_MockTesting(t *testing.T) {
 
 		mock.ExpectClose()
 
-		err = ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error { // use exported test helper
-			_, err2 := ExportSQLiteStoreGetOptionIDsInTx(quizStore, t.Context(), tx, id)
+		err = ExportWithTx(t.Context(), quizStore, func(tx *sql.Tx) error { // use exported test helper
+			_, err2 := ExportGetOptionIDsInTx(t.Context(), tx, id)
 
 			return err2
 		})
@@ -632,8 +632,8 @@ func TestSQliteStore_getOptionIDsInTx_MockTesting(t *testing.T) {
 
 		mock.ExpectClose()
 
-		err = ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error { // use exported test helper
-			_, err2 := ExportSQLiteStoreGetOptionIDsInTx(quizStore, t.Context(), tx, id)
+		err = ExportWithTx(t.Context(), quizStore, func(tx *sql.Tx) error { // use exported test helper
+			_, err2 := ExportGetOptionIDsInTx(t.Context(), tx, id)
 
 			return err2
 		})

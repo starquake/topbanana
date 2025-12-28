@@ -1778,7 +1778,7 @@ func TestSQLiteStore_WithTx(t *testing.T) {
 
 	quizStore := NewSQLiteStore(db, logger)
 
-	err := ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
+	err := ExportWithTx(t.Context(), quizStore, func(tx *sql.Tx) error {
 		rows, qErr := tx.QueryContext(t.Context(), "SELECT 1")
 		if qErr != nil {
 			t.Fatalf("error querying database: %v", qErr)
@@ -1813,7 +1813,7 @@ func TestSQLiteStore_WithTx_ErrorHandling(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		err := ExportSQLiteStoreWithTx(quizStore, ctx, func(tx *sql.Tx) error {
+		err := ExportWithTx(ctx, quizStore, func(tx *sql.Tx) error {
 			rows, qErr := tx.QueryContext(ctx, "SELECT 1")
 			if qErr != nil {
 				t.Fatalf("error querying database: %v", qErr)
@@ -1845,7 +1845,7 @@ func TestSQLiteStore_WithTx_ErrorHandling(t *testing.T) {
 
 		quizStore := NewSQLiteStore(db, logger)
 
-		err := ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
+		err := ExportWithTx(t.Context(), quizStore, func(tx *sql.Tx) error {
 			var err error
 
 			_, err = tx.ExecContext(t.Context(), "CREATE TABLE test (id INTEGER PRIMARY KEY)")
@@ -1891,7 +1891,7 @@ func TestSQLiteStore_WithTx_ErrorHandling(t *testing.T) {
 
 		quizStore := NewSQLiteStore(db, logger)
 
-		err := ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
+		err := ExportWithTx(t.Context(), quizStore, func(tx *sql.Tx) error {
 			err := tx.Rollback()
 			if err != nil {
 				t.Fatalf("error rolling back transaction: %v", err)
@@ -1930,8 +1930,8 @@ func TestSQLiteStore_upsertQuestionInTx_ErrorHandling(t *testing.T) {
 			Text: "Question 1",
 		}
 
-		err = ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
-			return ExportSQLiteStoreUpsertQuestionInTx(quizStore, t.Context(), tx, testQuestion)
+		err = ExportWithTx(t.Context(), quizStore, func(tx *sql.Tx) error {
+			return ExportUpsertQuestionInTx(t.Context(), tx, testQuestion)
 		})
 		if err == nil {
 			t.Fatal("got nil, want error")
@@ -1957,8 +1957,8 @@ func TestSQLiteStore_upsertQuestionInTx_ErrorHandling(t *testing.T) {
 			Text: "Question 1",
 		}
 
-		err = ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
-			return ExportSQLiteStoreUpsertQuestionInTx(quizStore, t.Context(), tx, testQuestion)
+		err = ExportWithTx(t.Context(), quizStore, func(tx *sql.Tx) error {
+			return ExportUpsertQuestionInTx(t.Context(), tx, testQuestion)
 		})
 		if err == nil {
 			t.Fatal("got nil, want error")
@@ -1983,8 +1983,8 @@ func TestSQLiteStore_deleteQuestionsInTx(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to rename table: %v", err)
 	}
-	err = ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
-		return ExportSQLiteStoreDeleteQuestionsInTx(quizStore, t.Context(), tx, []int64{1})
+	err = ExportWithTx(t.Context(), quizStore, func(tx *sql.Tx) error {
+		return ExportDeleteQuestionsInTx(t.Context(), tx, []int64{1})
 	})
 	if err == nil {
 		t.Fatal("got nil, want error")
@@ -2016,8 +2016,8 @@ func TestSQLiteStore_upsertOptionInTx_ErrorHandling(t *testing.T) {
 			Text: "Option 1",
 		}
 
-		err = ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
-			return ExportSQLiteStoreUpsertOptionInTx(quizStore, t.Context(), tx, testOption)
+		err = ExportWithTx(t.Context(), quizStore, func(tx *sql.Tx) error {
+			return ExportUpsertOptionInTx(t.Context(), tx, testOption)
 		})
 		if err == nil {
 			t.Fatal("got nil, want error")
@@ -2047,8 +2047,8 @@ func TestSQLiteStore_upsertOptionInTx_ErrorHandling(t *testing.T) {
 			Text: "Option 1",
 		}
 
-		err = ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
-			return ExportSQLiteStoreUpsertOptionInTx(quizStore, t.Context(), tx, testOption)
+		err = ExportWithTx(t.Context(), quizStore, func(tx *sql.Tx) error {
+			return ExportUpsertOptionInTx(t.Context(), tx, testOption)
 		})
 		if err == nil {
 			t.Fatal("got nil, want error")
@@ -2071,8 +2071,8 @@ func TestSQLiteStore_updateOptionInTx(t *testing.T) {
 
 	quizStore := NewSQLiteStore(db, logger)
 
-	err := ExportSQLiteStoreWithTx(quizStore, t.Context(), func(tx *sql.Tx) error {
-		return ExportSQLiteStoreUpdateOptionInTx(quizStore, t.Context(), tx, &option)
+	err := ExportWithTx(t.Context(), quizStore, func(tx *sql.Tx) error {
+		return ExportUpdateOptionInTx(t.Context(), tx, &option)
 	})
 
 	if err == nil {
