@@ -4,7 +4,7 @@ go 1.25.4
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
-	github.com/google/go-cmp v0.6.0
+	github.com/google/go-cmp v0.7.0
 	github.com/pressly/goose/v3 v3.26.0
 	modernc.org/sqlite v1.42.2
 )
