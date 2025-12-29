@@ -30,6 +30,10 @@ type stubQuizStore struct {
 	updateQuestion  func(ctx context.Context, qs *quiz.Question) error
 }
 
+func (stubQuizStore) Ping(_ context.Context) error {
+	return nil
+}
+
 func (s stubQuizStore) GetQuizByID(ctx context.Context, id int64) (*quiz.Quiz, error) {
 	if s.getQuizByID == nil {
 		return nil, errors.New("getQuizByID not supplied in stub")

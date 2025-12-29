@@ -18,7 +18,7 @@ var ErrUnsupportedDriver = errors.New("unsupported database driver")
 
 // Open opens a database connection.
 func Open(
-	ctx context.Context,
+	_ context.Context,
 	driver, uri string,
 	dbMaxOpenConns, dbMaxIdleConns int,
 	dbConnMaxLifetime time.Duration,
@@ -28,10 +28,6 @@ func Open(
 	db, err = sql.Open(driver, uri)
 	if err != nil {
 		return nil, fmt.Errorf("error opening database: %w", err)
-	}
-
-	if err = db.PingContext(ctx); err != nil {
-		return nil, fmt.Errorf("error pinging database: %w", err)
 	}
 
 	db.SetMaxOpenConns(dbMaxOpenConns)

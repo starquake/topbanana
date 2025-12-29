@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/starquake/topbanana/cmd/server/health"
 	"github.com/starquake/topbanana/internal/admin"
 	"github.com/starquake/topbanana/internal/store"
 )
@@ -27,6 +28,8 @@ func addRoutes(mux *http.ServeMux, logger *slog.Logger, stores *store.Stores) {
 		"POST /admin/quizzes/{quizID}/questions/{questionID}",
 		admin.HandleQuestionSave(logger, stores.Quizzes),
 	)
+
+	mux.Handle("/healthz", health.HandleHealthz(logger, stores))
 
 	mux.Handle("/", http.NotFoundHandler())
 }
