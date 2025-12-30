@@ -4,8 +4,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/starquake/topbanana/cmd/server/health"
 	"github.com/starquake/topbanana/internal/admin"
+	"github.com/starquake/topbanana/internal/health"
 	"github.com/starquake/topbanana/internal/store"
 )
 

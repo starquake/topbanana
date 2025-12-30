@@ -139,7 +139,7 @@ func setupDB(signalCtx context.Context, cfg *config.Config, logger *slog.Logger)
 		return nil, fmt.Errorf("error opening database connection: %w", err)
 	}
 
-	if err = db.Migrate(conn, cfg.DBDriver); err != nil {
+	if err = db.Migrate(conn); err != nil {
 		msg := "error migrating database"
 		logger.ErrorContext(signalCtx, msg, slog.Any("err", err))
 

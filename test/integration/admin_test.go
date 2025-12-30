@@ -1,6 +1,6 @@
 //go:build integration
 
-package main_test
+package integration_test
 
 import (
 	"context"
@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 
 	. "github.com/starquake/topbanana/cmd/server/app"
 	"github.com/starquake/topbanana/internal/dbtest"

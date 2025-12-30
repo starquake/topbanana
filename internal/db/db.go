@@ -4,7 +4,6 @@ package db
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"time"
 
@@ -13,8 +12,15 @@ import (
 	"github.com/starquake/topbanana/internal/migrations"
 )
 
-// ErrUnsupportedDriver is returned when the database driver is not supported. We only support sqlite for now.
-var ErrUnsupportedDriver = errors.New("unsupported database driver")
+// SetupGoose configures global settings for goose.
+// Used to prevent race conditions.
+func SetupGoose() {
+	goose.SetBaseFS(migrations.FS)
+
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		panic(err)
+	}
+}
 
 // Open opens a database connection.
 func Open(
@@ -38,21 +44,9 @@ func Open(
 }
 
 // Migrate runs database migrations.
-func Migrate(db *sql.DB, dbDriver string) error {
+func Migrate(db *sql.DB) error {
 	var err error
 
-	goose.SetBaseFS(migrations.FS)
-
-	var dialect string
-	switch dbDriver {
-	case "sqlite", "sqlite3":
-		dialect = "sqlite3"
-	default:
-		return fmt.Errorf("%w: %s", ErrUnsupportedDriver, dbDriver)
-	}
-	if err = goose.SetDialect(dialect); err != nil {
-		return fmt.Errorf("error setting dialect: %w", err)
-	}
 	if err = goose.Up(db, "."); err != nil {
 		return fmt.Errorf("error running migrations: %w", err)
 	}

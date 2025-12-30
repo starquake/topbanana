@@ -230,6 +230,44 @@ func TestNewSQLiteStore(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_Ping(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+
+	t.Run("ping success", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewSQLiteStore(db, logger)
+
+		if err := quizStore.Ping(t.Context()); err != nil {
+			t.Errorf("unexpected error pinging database: %v", err)
+		}
+	})
+
+	t.Run("ping failure", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewSQLiteStore(db, logger)
+
+		// Close the database to trigger a ping error
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close database: %v", err)
+		}
+
+		err := quizStore.Ping(t.Context())
+		if err == nil {
+			t.Fatal("expected error pinging closed database, got nil")
+		}
+
+		if got, want := err.Error(), "error pinging database"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, want it to contain %q", got, want)
+		}
+	})
+}
+
 func TestSQLiteStore_GetQuizByID(t *testing.T) {
 	t.Parallel()
 

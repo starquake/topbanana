@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/starquake/topbanana/internal/config"
+	. "github.com/starquake/topbanana/internal/config"
 )
 
 func getenvFailure(failureKey, value string) func(string) string {
@@ -46,7 +46,7 @@ func TestParse(t *testing.T) {
 		getenv := func(key string) string {
 			return envs[key]
 		}
-		c, err := config.Parse(getenv)
+		c, err := Parse(getenv)
 		if err != nil {
 			t.Fatalf("error parsing config: %v", err)
 		}
@@ -70,49 +70,49 @@ func TestParse(t *testing.T) {
 		tests := []struct {
 			name   string
 			key    string
-			wantFn func(c config.Config) bool
+			wantFn func(c Config) bool
 		}{
 			{
 				name:   "fallback App Environment",
 				key:    "APP_ENV",
-				wantFn: func(c config.Config) bool { return c.AppEnvironment == config.AppEnvironmentDefault },
+				wantFn: func(c Config) bool { return c.AppEnvironment == AppEnvironmentDefault },
 			},
 			{
 				name:   "fallback Host",
 				key:    "HOST",
-				wantFn: func(c config.Config) bool { return c.Host == config.HostDefault },
+				wantFn: func(c Config) bool { return c.Host == HostDefault },
 			},
 			{
 				name:   "fallback Port",
 				key:    "PORT",
-				wantFn: func(c config.Config) bool { return c.Port == config.PortDefault },
+				wantFn: func(c Config) bool { return c.Port == PortDefault },
 			},
 			{
 				name:   "fallback DB URI",
 				key:    "DB_URI",
-				wantFn: func(c config.Config) bool { return c.DBURI == config.DBURIDefault },
+				wantFn: func(c Config) bool { return c.DBURI == DBURIDefault },
 			},
 			{
 				name:   "fallback Max Open Connections",
 				key:    "DB_MAX_OPEN_CONNS",
-				wantFn: func(c config.Config) bool { return c.DBMaxOpenConns == config.DBMaxOpenConnsDefault },
+				wantFn: func(c Config) bool { return c.DBMaxOpenConns == DBMaxOpenConnsDefault },
 			},
 			{
 				name:   "fallback Max Idle Connections",
 				key:    "DB_MAX_IDLE_CONNS",
-				wantFn: func(c config.Config) bool { return c.DBMaxIdleConns == config.DBMaxIdleConnsDefault },
+				wantFn: func(c Config) bool { return c.DBMaxIdleConns == DBMaxIdleConnsDefault },
 			},
 			{
 				name:   "fallback Connection Max Connection Lifetime",
 				key:    "DB_CONN_MAX_LIFETIME",
-				wantFn: func(c config.Config) bool { return c.DBConnMaxLifetime == config.DBConnMaxLifetimeDefault },
+				wantFn: func(c Config) bool { return c.DBConnMaxLifetime == DBConnMaxLifetimeDefault },
 			},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				t.Parallel()
 				getenv := getenvFailure(tt.key, "")
-				c, err := config.Parse(getenv)
+				c, err := Parse(getenv)
 				if err != nil {
 					t.Fatalf("error parsing config: %v", err)
 				}
@@ -135,7 +135,7 @@ func TestParse(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				t.Parallel()
-				_, err := config.Parse(tt.getenv)
+				_, err := Parse(tt.getenv)
 				if err == nil {
 					t.Fatal("expected error parsing config")
 				}
@@ -160,11 +160,11 @@ func TestParse(t *testing.T) {
 			return envs[key]
 		}
 
-		_, err := config.Parse(getenv)
+		_, err := Parse(getenv)
 		if err == nil {
 			t.Fatal("expected error parsing config")
 		}
-		if got, want := err, config.ErrDBUriNotSetInProduction; !errors.Is(got, want) {
+		if got, want := err, ErrDBUriNotSetInProduction; !errors.Is(got, want) {
 			t.Fatalf("got error %v, want %v", got, want)
 		}
 	})

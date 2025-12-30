@@ -21,9 +21,20 @@ build:
 	mkdir -p bin
 	go build -o bin/ ./...
 
+# Run only unit tests (excludes files with //go:build integration)
 .PHONY: test
 test:
-	go test -race -v ./...
+	go test -v -race ./...
+
+# Run only integration tests
+.PHONY: test-integration
+test-integration:
+	go test -v -race -tags=integration ./test/integration/...
+
+# Run all tests
+.PHONY: test-all
+test-all:
+	go test -v -race -tags=integration ./...
 
 .PHONY: clean
 clean:

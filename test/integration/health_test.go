@@ -1,6 +1,6 @@
 //go:build integration
 
-package admin_test
+package integration_test
 
 import (
 	"context"

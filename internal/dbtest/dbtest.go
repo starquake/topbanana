@@ -6,8 +6,15 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/pressly/goose/v3"
+)
+
+const (
+	maxOpenConns    = 1
+	maxIdleConns    = 1
+	connMaxLifetime = 5 * time.Minute
 )
 
 // SetupTestDB creates a temporary SQLite database for testing and returns its DSN and a cleanup function.
@@ -57,15 +64,16 @@ func Open(t *testing.T) *sql.DB {
 func OpenUnmigrated(t *testing.T) *sql.DB {
 	t.Helper()
 
-	db, err := sql.Open("sqlite", ":memory:")
+	db, err := sql.Open(
+		"sqlite",
+		":memory:?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)",
+	)
 	if err != nil {
 		t.Fatalf("error opening SQLite database: %v", err)
 	}
-	if _, err := db.ExecContext(t.Context(), "PRAGMA foreign_keys = ON;"); err != nil {
-		t.Fatalf("error enabling foreign keys: %v", err)
-	}
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
+	db.SetMaxOpenConns(maxOpenConns)
+	db.SetMaxIdleConns(maxIdleConns)
+	db.SetConnMaxLifetime(connMaxLifetime)
 
 	return db
 }
