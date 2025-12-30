@@ -1,72 +1,59 @@
-package main
+//go:build integration
+
+package main_test
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/starquake/topbanana/cmd/server/app"
+	. "github.com/starquake/topbanana/cmd/server/app"
+	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/testutil"
 )
 
-func TestRun_CreateQuiz(t *testing.T) {
+func TestServer_Integration(t *testing.T) {
 	t.Parallel()
+
+	var err error
 
 	ctx, stop := testutil.SignalCtx(t)
 
-	var err error
-	var tmpDB *os.File
-	// Setup temporary database for the test
-	tmpDB, err = os.CreateTemp(t.TempDir(), "topbanana-test-*.sqlite")
-	if err != nil {
-		t.Fatalf("failed to create temp db: %v", err)
-	}
-	tmpDBPath := tmpDB.Name()
-	err = tmpDB.Close()
-	if err != nil {
-		t.Fatalf("failed to close temp db: %v", err)
-	}
-	defer func() {
-		removeErr := os.Remove(tmpDBPath)
-		if removeErr != nil {
-			t.Errorf("failed to remove temp db: %s", removeErr)
-		}
-	}()
+	stdout := testutil.NewTestWriter(t)
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	defer cleanup()
 
 	getenv := func(key string) string {
 		env := map[string]string{
+			"HOST":   "localhost",
 			"PORT":   "0", // Let the OS choose an available port
-			"DB_URI": "file:" + tmpDBPath + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)",
+			"DB_URI": dbURI,
 		}
 
 		return env[key]
 	}
 
-	pr, pw := io.Pipe()
-	defer func() {
-		closeErr := pr.Close()
-		if closeErr != nil {
-			t.Errorf("failed to close pipe reader: %v", closeErr)
-		}
-	}()
-	defer func() {
-		closeErr := pw.Close()
-		if closeErr != nil {
-			t.Errorf("failed to close pipe writer: %v", closeErr)
-		}
-	}()
+	listenConfig := &net.ListenConfig{}
+	var ln net.Listener
+	ln, err = listenConfig.Listen(ctx, "tcp", net.JoinHostPort(getenv("HOST"), getenv("PORT")))
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- app.Run(ctx, getenv, pw)
+		errCh <- Run(ctx, getenv, stdout, ln)
 	}()
 
-	serverAddr := testutil.ServerAddress(t, pr)
+	serverAddr := ln.Addr().String()
 	err = testutil.WaitForReady(ctx, t, 10*time.Second, fmt.Sprintf("http://%s/healthz", serverAddr))
 	if err != nil {
 		t.Fatalf("error waiting for server to be ready: %v", err)
@@ -188,7 +175,8 @@ func TestRun_CreateQuiz(t *testing.T) {
 	stop()
 	select {
 	case err = <-errCh:
-		if err != nil {
+		// Ignore context.Canceled because we triggered it ourselves via stop()
+		if err != nil && !errors.Is(err, context.Background().Err()) && !errors.Is(err, context.Canceled) {
 			t.Errorf("run() returned error: %v", err)
 		}
 	case <-time.After(10 * time.Second):

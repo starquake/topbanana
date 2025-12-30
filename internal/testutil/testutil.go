@@ -2,20 +2,17 @@
 package testutil
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 const (
-	serverAddrTimeout         = 10 * time.Second
 	clientTimeout             = 5 * time.Second
 	waitForReadyRetryInterval = 250 * time.Millisecond
 )
@@ -30,39 +27,29 @@ func SignalCtx(t *testing.T) (context.Context, context.CancelFunc) {
 	return ctx, stop
 }
 
-// ServerAddress returns the address of the server that is listening on, by checking the log of the
-// specified pipe reader.
-func ServerAddress(t *testing.T, pr *io.PipeReader) string {
-	t.Helper()
+// TestWriter is an io.Writer that forwards writes to tb.Log.
+// It is thread-safe and ensures logs are captured by the test runner.
+type TestWriter struct {
+	tb testing.TB
+	mu sync.Mutex
+}
 
-	serverAddrCh := make(chan string, 1)
-	go func() {
-		scanner := bufio.NewScanner(pr)
-		for scanner.Scan() {
-			line := scanner.Text()
-			t.Logf("Server log: %s", line)
-			if strings.Contains(line, "listening on") {
-				parts := strings.Split(line, "addr=")
-				if len(parts) > 1 {
-					addr := strings.Split(parts[1], " ")[0]
-					addr = strings.Trim(addr, "\"")
-					select {
-					case serverAddrCh <- addr:
-					default:
-					}
-				}
-			}
-		}
-	}()
+// NewTestWriter creates a new TestWriter that forwards writes to tb.Log.
+func NewTestWriter(tb testing.TB) *TestWriter {
+	tb.Helper()
 
-	var serverAddr string
-	select {
-	case serverAddr = <-serverAddrCh:
-	case <-time.After(serverAddrTimeout):
-		t.Fatal("timed out waiting for server address in logs")
-	}
+	return &TestWriter{tb: tb}
+}
 
-	return serverAddr
+// Write forwards writes to tb.Log.
+func (w *TestWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// We trim the trailing newline because tb.Log adds one automatically.
+	w.tb.Logf("%s", string(p))
+
+	return len(p), nil
 }
 
 // WaitForReady calls the specified endpoint until it gets a 200

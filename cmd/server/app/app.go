@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -11,8 +12,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/db"
@@ -23,6 +25,8 @@ import (
 
 const (
 	readHeaderTimeout = 5 * time.Second
+	readTimeout       = 10 * time.Second
+	writeTimeout      = 10 * time.Second
 	shutdownTimeout   = 5 * time.Second
 )
 
@@ -31,75 +35,129 @@ func Run(
 	ctx context.Context,
 	getenv func(string) string,
 	stdout io.Writer,
+	ln net.Listener,
 ) error {
 	var err error
-	mainCtx, stop := signal.NotifyContext(ctx, os.Interrupt)
+	signalCtx, stop := signal.NotifyContext(ctx, os.Interrupt)
 	defer stop()
 
 	logger := slog.New(slog.NewTextHandler(stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	var cfg *config.Config
-	if cfg, err = config.Parse(getenv); err != nil {
+	cfg, err := config.Parse(getenv)
+	if err != nil {
 		msg := "error parsing config"
-		logger.ErrorContext(ctx, msg, slog.Any("err", err))
+		logger.ErrorContext(signalCtx, msg, slog.Any("err", err))
 
 		return fmt.Errorf("%s: %w", msg, err)
 	}
 
-	conn, err := db.Open(ctx, cfg.DBDriver, cfg.DBURI, cfg.DBMaxOpenConns, cfg.DBMaxIdleConns, cfg.DBConnMaxLifetime)
+	conn, err := setupDB(signalCtx, cfg, logger)
 	if err != nil {
-		return fmt.Errorf("error opening database connection: %w", err)
+		return err
 	}
 	defer func() {
 		conErr := conn.Close()
 		if conErr != nil {
-			logger.ErrorContext(ctx, "error closing database connection", slog.Any("err", conErr))
+			logger.ErrorContext(signalCtx, "error closing database connection", slog.Any("err", conErr))
 		}
 	}()
+
+	srv := server.NewServer(logger, &store.Stores{
+		Quizzes: quiz.NewSQLiteStore(conn, logger),
+	})
+	if ln == nil {
+		ln, err = listener(signalCtx, cfg, logger)
+		if err != nil {
+			return fmt.Errorf("error creating listener: %w", err)
+		}
+	} else {
+		logger.InfoContext(signalCtx, "listener overridden")
+	}
+
+	return runHTTPServer(ctx, signalCtx, ln, srv, logger)
+}
+
+func runHTTPServer(ctx, signalCtx context.Context, ln net.Listener, srv http.Handler, logger *slog.Logger) error {
+	httpServer := &http.Server{
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		Handler:           srv,
+	}
+
+	g, gCtx := errgroup.WithContext(signalCtx)
+
+	g.Go(func() error {
+		logger.InfoContext(gCtx, "listening on "+ln.Addr().String(), slog.String("addr", ln.Addr().String()))
+		logger.InfoContext(gCtx, fmt.Sprintf("visit http://%s/admin/quizzes to manage quizzes", ln.Addr().String()))
+		httpErr := httpServer.Serve(ln)
+		if httpErr != nil && !errors.Is(httpErr, http.ErrServerClosed) {
+			msg := "error listening and serving"
+			logger.ErrorContext(signalCtx, msg, slog.Any("err", httpErr))
+
+			return fmt.Errorf("%v: %w", msg, httpErr)
+		}
+
+		return nil
+	})
+
+	g.Go(func() error {
+		<-gCtx.Done()
+		// make a new context for the Shutdown
+		// use the root ctx to ensure shutdown has its own timeout even though signalCtx is already canceled
+		shutdownCtx, shutdownCancel := context.WithTimeout(ctx, shutdownTimeout)
+		defer shutdownCancel()
+		if shutdownErr := httpServer.Shutdown(shutdownCtx); shutdownErr != nil {
+			logger.ErrorContext(shutdownCtx, "error shutting down server", slog.Any("err", shutdownErr))
+
+			return fmt.Errorf("error shutting down server: %w", shutdownErr)
+		}
+
+		return nil
+	})
+
+	err := g.Wait()
+	if err != nil {
+		return fmt.Errorf("error running server: %w", err)
+	}
+
+	return nil
+}
+
+func setupDB(signalCtx context.Context, cfg *config.Config, logger *slog.Logger) (*sql.DB, error) {
+	conn, err := db.Open(
+		signalCtx,
+		cfg.DBDriver,
+		cfg.DBURI,
+		cfg.DBMaxOpenConns,
+		cfg.DBMaxIdleConns,
+		cfg.DBConnMaxLifetime,
+	)
+	if err != nil {
+		logger.ErrorContext(signalCtx, "error opening database connection", slog.Any("err", err))
+
+		return nil, fmt.Errorf("error opening database connection: %w", err)
+	}
 
 	if err = db.Migrate(conn, cfg.DBDriver); err != nil {
 		msg := "error migrating database"
-		logger.ErrorContext(ctx, msg, slog.Any("err", err))
+		logger.ErrorContext(signalCtx, msg, slog.Any("err", err))
 
-		return fmt.Errorf("%s: %w", msg, err)
+		return nil, fmt.Errorf("%s: %w", msg, err)
 	}
 
-	quizStore := quiz.NewSQLiteStore(conn, logger)
+	return conn, nil
+}
 
-	stores := &store.Stores{
-		Quizzes: quizStore,
-	}
-
-	srv := server.NewServer(logger, stores)
+func listener(ctx context.Context, cfg *config.Config, logger *slog.Logger) (net.Listener, error) {
+	logger.InfoContext(ctx, "creating listener based on config")
 	listenConfig := &net.ListenConfig{}
-	ln, err := listenConfig.Listen(mainCtx, "tcp", net.JoinHostPort(cfg.Host, cfg.Port))
+	ln, err := listenConfig.Listen(ctx, "tcp", net.JoinHostPort(cfg.Host, cfg.Port))
 	if err != nil {
-		return fmt.Errorf("error listening on %s:%s: %w", cfg.Host, cfg.Port, err)
+		logger.ErrorContext(ctx, "error listening on "+cfg.Host+":"+cfg.Port, slog.Any("err", err))
+
+		return nil, fmt.Errorf("error listening on %s:%s: %w", cfg.Host, cfg.Port, err)
 	}
 
-	httpServer := &http.Server{
-		ReadHeaderTimeout: readHeaderTimeout,
-		Handler:           srv,
-	}
-	go func() {
-		logger.InfoContext(ctx, "listening on "+ln.Addr().String(), slog.String("addr", ln.Addr().String()))
-		logger.InfoContext(ctx, fmt.Sprintf("visit http://%s/admin/quizzes to manage quizzes", ln.Addr().String()))
-		httpErr := httpServer.Serve(ln)
-		if httpErr != nil && !errors.Is(httpErr, http.ErrServerClosed) {
-			logger.ErrorContext(ctx, "error listening and serving", slog.Any("err", httpErr))
-		}
-	}()
-	var wg sync.WaitGroup
-	wg.Go(func() {
-		<-mainCtx.Done()
-		// make a new context for the Shutdown
-		shutdownCtx, shutdownCancel := context.WithTimeout(ctx, shutdownTimeout)
-		defer shutdownCancel()
-		if shutdownErr := httpServer.Shutdown(shutdownCtx); err != nil {
-			logger.ErrorContext(shutdownCtx, "error shutting down server", slog.Any("err", shutdownErr))
-		}
-	})
-	wg.Wait()
-
-	return nil
+	return ln, nil
 }

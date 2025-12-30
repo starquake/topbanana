@@ -35,7 +35,7 @@ func HandleHealthz(logger *slog.Logger, stores *store.Stores) http.HandlerFunc {
 			health.Checks["database"] = "healthy"
 		}
 
-		logger.InfoContext(ctx, "Health check performed")
+		logger.InfoContext(ctx, "health check performed")
 		w.Header().Set("Content-Type", "application/json")
 		err := encoding.Encode(w, httpStatus, health)
 		if err != nil {

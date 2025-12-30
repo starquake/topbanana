@@ -13,7 +13,7 @@ import (
 
 func main() {
 	ctx := context.Background()
-	if err := app.Run(ctx, os.Getenv, os.Stdout); err != nil {
+	if err := app.Run(ctx, os.Getenv, os.Stdout, nil); err != nil {
 		if _, err2 := fmt.Fprintf(os.Stderr, "error: %v\n", err); err2 != nil {
 			panic(err2)
 		}

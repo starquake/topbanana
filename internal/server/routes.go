@@ -29,7 +29,7 @@ func addRoutes(mux *http.ServeMux, logger *slog.Logger, stores *store.Stores) {
 		admin.HandleQuestionSave(logger, stores.Quizzes),
 	)
 
-	mux.Handle("/healthz", health.HandleHealthz(logger, stores))
+	mux.Handle("GET /healthz", health.HandleHealthz(logger, stores))
 
 	mux.Handle("/", http.NotFoundHandler())
 }
