@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/starquake/topbanana/internal/server"
+	. "github.com/starquake/topbanana/internal/server"
 	"github.com/starquake/topbanana/internal/store"
 )
 
@@ -14,7 +14,7 @@ func TestNewServer(t *testing.T) {
 	logger := slog.New(slog.DiscardHandler)
 	stores := &store.Stores{}
 
-	srv := server.NewServer(logger, stores)
+	srv := NewServer(logger, stores)
 
 	if srv == nil {
 		t.Error("srv is nil")

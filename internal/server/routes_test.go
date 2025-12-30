@@ -14,6 +14,10 @@ import (
 
 type stubQuizStore struct{}
 
+func (stubQuizStore) Ping(_ context.Context) error {
+	return nil
+}
+
 func (stubQuizStore) GetQuizByID(_ context.Context, id int64) (*quiz.Quiz, error) {
 	return &quiz.Quiz{
 		ID:          id,

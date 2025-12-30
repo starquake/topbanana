@@ -163,6 +163,8 @@ func (o *Option) Valid(_ context.Context) map[string]string {
 // Store represents a store for quizzes.
 // This can be implemented for different databases.
 type Store interface {
+	// Ping returns the status of the database connection.
+	Ping(ctx context.Context) error
 	// GetQuizByID returns a quiz including related questions and options by its ID.
 	// Returns ErrQuizNotFound if the quiz is not found.
 	GetQuizByID(ctx context.Context, id int64) (*Quiz, error)
@@ -218,6 +220,16 @@ func (s *SQLiteStore) GetQuizByID(ctx context.Context, quizID int64) (*Quiz, err
 	qz.Questions = questions
 
 	return qz, nil
+}
+
+// Ping returns the status of the database connection.
+func (s *SQLiteStore) Ping(ctx context.Context) error {
+	err := s.db.PingContext(ctx)
+	if err != nil {
+		return fmt.Errorf("error pinging database: %w", err)
+	}
+
+	return nil
 }
 
 // ListQuizzes returns all quizzes including related questions and options.

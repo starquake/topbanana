@@ -1,4 +1,4 @@
-package quiz_test
+package integration_test
 
 import (
 	"testing"
