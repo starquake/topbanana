@@ -5,6 +5,7 @@ ifneq (,$(wildcard ./.env))
     export
 endif
 
+# Developer check before committing
 .PHONY: check
 check: lint build test
 

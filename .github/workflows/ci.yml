@@ -19,8 +19,8 @@ jobs:
       with:
         go-version: "stable"
 
-    - name: Build
-      run: make build
-
-    - name: Test
+    - name: Run Unit Tests
       run: make test
+
+    - name: Run Integration Tests
+      run: make test-integration
