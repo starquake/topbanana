@@ -7,7 +7,7 @@ endif
 
 # Developer check before committing
 .PHONY: check
-check: lint build test
+check: lint sql-lint build test
 
 .PHONY: lint
 lint:
@@ -16,6 +16,10 @@ lint:
 .PHONY: lint-fix
 lint-fix:
 	golangci-lint run --fix
+
+.PHONY: sql-lint
+sql-lint:
+	sqlc vet
 
 .PHONY: build
 build:

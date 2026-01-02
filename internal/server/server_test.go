@@ -14,7 +14,7 @@ func TestNewServer(t *testing.T) {
 	logger := slog.New(slog.DiscardHandler)
 	stores := &store.Stores{}
 
-	srv := NewServer(logger, stores)
+	srv := New(logger, stores)
 
 	if srv == nil {
 		t.Error("srv is nil")

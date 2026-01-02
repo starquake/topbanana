@@ -227,7 +227,7 @@ func quizByID(
 	quizStore quiz.Store,
 	id int64,
 ) (*quiz.Quiz, bool) {
-	q, err := quizStore.GetQuizByID(r.Context(), id)
+	q, err := quizStore.GetQuiz(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, quiz.ErrQuizNotFound) || errors.Is(err, quiz.ErrQuestionNotFound) {
 			logger.ErrorContext(r.Context(), "quiz not found", slog.Any("err", err))
@@ -253,7 +253,7 @@ func questionByID(
 	quizStore quiz.Store,
 	questionID int64,
 ) (*quiz.Question, bool) {
-	qs, err := quizStore.GetQuestionByID(r.Context(), questionID)
+	qs, err := quizStore.GetQuestion(r.Context(), questionID)
 	if err != nil {
 		if errors.Is(err, quiz.ErrQuestionNotFound) {
 			logger.ErrorContext(
