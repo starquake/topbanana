@@ -8,8 +8,8 @@ import (
 	"github.com/starquake/topbanana/internal/store"
 )
 
-// NewServer creates a new server.
-func NewServer(logger *slog.Logger, stores *store.Stores) http.Handler {
+// New creates a new server.
+func New(logger *slog.Logger, stores *store.Stores) http.Handler {
 	mux := http.NewServeMux()
 	addRoutes(mux, logger, stores)
 	var handler http.Handler = mux
