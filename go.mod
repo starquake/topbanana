@@ -3,9 +3,9 @@ module github.com/starquake/topbanana
 go 1.25.4
 
 require (
-	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/google/go-cmp v0.7.0
 	github.com/pressly/goose/v3 v3.26.0
+	golang.org/x/sync v0.16.0
 	modernc.org/sqlite v1.42.2
 )
 
@@ -19,7 +19,6 @@ require (
 	github.com/sethvargo/go-retry v0.3.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
-	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.36.0 // indirect
 	modernc.org/libc v1.66.10 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
