@@ -34,7 +34,7 @@ func (stubQuizStore) Ping(_ context.Context) error {
 	return nil
 }
 
-func (s stubQuizStore) GetQuizByID(ctx context.Context, id int64) (*quiz.Quiz, error) {
+func (s stubQuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 	if s.getQuizByID == nil {
 		return nil, errors.New("getQuizByID not supplied in stub")
 	}
@@ -42,7 +42,7 @@ func (s stubQuizStore) GetQuizByID(ctx context.Context, id int64) (*quiz.Quiz, e
 	return s.getQuizByID(ctx, id)
 }
 
-func (s stubQuizStore) GetQuestionByID(ctx context.Context, id int64) (*quiz.Question, error) {
+func (s stubQuizStore) GetQuestion(ctx context.Context, id int64) (*quiz.Question, error) {
 	if s.getQuestionByID == nil {
 		return nil, errors.New("getQuestionByID not supplied in stub")
 	}

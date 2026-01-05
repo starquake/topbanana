@@ -18,7 +18,7 @@ func (stubQuizStore) Ping(_ context.Context) error {
 	return nil
 }
 
-func (stubQuizStore) GetQuizByID(_ context.Context, id int64) (*quiz.Quiz, error) {
+func (stubQuizStore) GetQuiz(_ context.Context, id int64) (*quiz.Quiz, error) {
 	return &quiz.Quiz{
 		ID:          id,
 		Title:       "Stub Quiz",
@@ -28,7 +28,7 @@ func (stubQuizStore) GetQuizByID(_ context.Context, id int64) (*quiz.Quiz, error
 	}, nil
 }
 
-func (stubQuizStore) GetQuestionByID(_ context.Context, id int64) (*quiz.Question, error) {
+func (stubQuizStore) GetQuestion(_ context.Context, id int64) (*quiz.Question, error) {
 	return &quiz.Question{
 		ID:       id,
 		QuizID:   1,

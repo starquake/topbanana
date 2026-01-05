@@ -17,7 +17,7 @@ import (
 	"github.com/starquake/topbanana/internal/testutil"
 )
 
-func TestAdmin_Integration(t *testing.T) {
+func TestHeath_Integration(t *testing.T) {
 	t.Parallel()
 
 	var err error

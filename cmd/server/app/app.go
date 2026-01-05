@@ -17,8 +17,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/starquake/topbanana/internal/config"
-	"github.com/starquake/topbanana/internal/db"
-	"github.com/starquake/topbanana/internal/quiz"
+	"github.com/starquake/topbanana/internal/database"
 	"github.com/starquake/topbanana/internal/server"
 	"github.com/starquake/topbanana/internal/store"
 )
@@ -62,9 +61,7 @@ func Run(
 		}
 	}()
 
-	srv := server.NewServer(logger, &store.Stores{
-		Quizzes: quiz.NewSQLiteStore(conn, logger),
-	})
+	srv := server.New(logger, store.New(conn, logger))
 	if ln == nil {
 		ln, err = listener(signalCtx, cfg, logger)
 		if err != nil {
@@ -125,7 +122,7 @@ func runHTTPServer(ctx, signalCtx context.Context, ln net.Listener, srv http.Han
 }
 
 func setupDB(signalCtx context.Context, cfg *config.Config, logger *slog.Logger) (*sql.DB, error) {
-	conn, err := db.Open(
+	conn, err := database.Open(
 		signalCtx,
 		cfg.DBDriver,
 		cfg.DBURI,
@@ -139,7 +136,7 @@ func setupDB(signalCtx context.Context, cfg *config.Config, logger *slog.Logger)
 		return nil, fmt.Errorf("error opening database connection: %w", err)
 	}
 
-	if err = db.Migrate(conn); err != nil {
+	if err = database.Migrate(conn); err != nil {
 		msg := "error migrating database"
 		logger.ErrorContext(signalCtx, msg, slog.Any("err", err))
 
