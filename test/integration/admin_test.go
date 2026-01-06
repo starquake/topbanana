@@ -16,7 +16,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	. "github.com/starquake/topbanana/cmd/server/app"
+	"github.com/starquake/topbanana/cmd/server/app"
 	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/testutil"
 )
@@ -52,7 +52,7 @@ func TestAdmin_Integration(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- Run(ctx, getenv, stdout, ln)
+		errCh <- app.Run(ctx, getenv, stdout, ln)
 	}()
 
 	serverAddr := ln.Addr().String()
@@ -60,6 +60,8 @@ func TestAdmin_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error waiting for server to be ready: %v", err)
 	}
+
+	// Start of the integration test
 
 	// Create a quiz
 	quizTitle := "Integration Test Quiz"

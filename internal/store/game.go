@@ -128,8 +128,8 @@ func (s *GameStore) CreateGameQuestion(ctx context.Context, gq *game.Question) e
 	return nil
 }
 
-// createAnswer saves a new answer in the database and updates the provided Answer object with generated values.
-func (s *GameStore) createAnswer(ctx context.Context, a *game.Answer) error {
+// CreateAnswer saves a new answer in the database and updates the provided Answer object with generated values.
+func (s *GameStore) CreateAnswer(ctx context.Context, a *game.Answer) error {
 	var err error
 	row, err := s.q.CreateAnswer(ctx, db.CreateAnswerParams{
 		GameID: a.GameID, PlayerID: a.PlayerID, GameQuestionID: a.GameQuestionID, OptionID: a.OptionID,
@@ -142,29 +142,6 @@ func (s *GameStore) createAnswer(ctx context.Context, a *game.Answer) error {
 	a.AnsweredAt = row.AnsweredAt
 
 	return nil
-}
-
-// getPlayer retrieves a player by their ID from the database, returning the player details or an error if not found or failed.
-// Returns game.ErrPlayerNotFound if the player is not found.
-func (s *GameStore) getPlayer(ctx context.Context, id int64) (*game.Player, error) {
-	var err error
-	row, err := s.q.GetPlayer(ctx, id)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, game.ErrPlayerNotFound
-		}
-
-		return nil, fmt.Errorf("failed to get game: %w", err)
-	}
-
-	pl := &game.Player{
-		ID:        row.ID,
-		Username:  row.Username,
-		Email:     row.Email,
-		CreatedAt: row.CreatedAt,
-	}
-
-	return pl, nil
 }
 
 func (s *GameStore) listGameQuestions(ctx context.Context, gameID string) ([]*game.Question, error) {

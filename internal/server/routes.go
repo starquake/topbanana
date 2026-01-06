@@ -35,14 +35,11 @@ func addRoutes(mux *http.ServeMux, logger *slog.Logger, stores *store.Stores, ga
 	// API
 	mux.Handle("GET /api/quizzes", clientapi.HandleQuizList(logger, stores.Quizzes))
 	mux.Handle("POST /api/games", clientapi.HandleCreateGame(logger, gameService))
+	mux.Handle("GET /api/games/{gameID}/questions/next", clientapi.HandleQuestionNext(logger, gameService))
 	mux.Handle(
-		"GET /api/games/{gameID}/questions/next",
-		clientapi.HandleQuestionNext(logger, gameService),
+		"POST /api/games/{gameID}/questions/{questionID}/answers",
+		clientapi.HandleAnswerPost(logger, gameService),
 	)
-	// mux.Handle(
-	//	"POST /api/quizzes/{quizID}/questions/{questionID}/answers",
-	//	clientapi.HandleAnswerPost(logger, stores.Games, stores.Quizzes),
-	// )
 
 	// Health
 	mux.Handle("GET /healthz", health.HandleHealthz(logger, stores))

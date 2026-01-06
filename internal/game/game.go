@@ -17,6 +17,7 @@ var (
 	ErrGameNotFound               = errors.New("game not found")
 	ErrPlayerNotFound             = errors.New("player not found")
 	ErrNoMoreQuestions            = errors.New("no more questions")
+	ErrQuestionNotInGame          = errors.New("question not in game")
 	ErrStartingGameNoRowsAffected = errors.New("no rows affected when starting game")
 )
 
@@ -76,6 +77,7 @@ type Store interface {
 	StartGame(ctx context.Context, id string) error
 	CreateParticipant(ctx context.Context, p *Participant) error
 	CreateGameQuestion(ctx context.Context, gq *Question) error
+	CreateAnswer(ctx context.Context, a *Answer) error
 }
 
 // Service represents a game service.
@@ -174,4 +176,42 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string) (*quiz.Que
 	}
 
 	return nextQuestion, nil
+}
+
+// SubmitAnswer records an answer from a player for a specific question in a game.
+// It validates that the game exists and the question belongs to the game before saving the answer.
+// Returns an error if the operation fails.
+func (s *Service) SubmitAnswer(ctx context.Context, gameID string, playerID, questionID, optionID int64) error {
+	var err error
+
+	g, err := s.store.GetGame(ctx, gameID)
+	if err != nil {
+		return fmt.Errorf("failed to get game: %w", err)
+	}
+
+	var gameQuestionID int64
+	for _, gq := range g.GameQuestions {
+		if gq.QuestionID == questionID {
+			gameQuestionID = gq.ID
+
+			break
+		}
+	}
+
+	if gameQuestionID == 0 {
+		return fmt.Errorf("question %d not found in game %s: %w", questionID, gameID, ErrQuestionNotInGame)
+	}
+
+	a := &Answer{
+		GameID:         gameID,
+		PlayerID:       playerID,
+		GameQuestionID: gameQuestionID,
+		OptionID:       optionID,
+	}
+
+	if err = s.store.CreateAnswer(ctx, a); err != nil {
+		return fmt.Errorf("failed to create answer: %w", err)
+	}
+
+	return nil
 }

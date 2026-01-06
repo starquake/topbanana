@@ -123,9 +123,9 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 	}
 
 	type questionResponse struct {
-		ID      int64  `json:"id"`
-		Text    string `json:"text"`
-		Options []optionResponse
+		ID      int64            `json:"id"`
+		Text    string           `json:"text"`
+		Options []optionResponse `json:"options"`
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -171,8 +171,9 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 		}
 
 		res := questionResponse{
-			ID:   qs.ID,
-			Text: qs.Text,
+			ID:      qs.ID,
+			Text:    qs.Text,
+			Options: resOptions,
 		}
 
 		err = httputil.EncodeJSON(w, http.StatusOK, res)
@@ -182,5 +183,47 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 
 			return
 		}
+	})
+}
+
+// HandleAnswerPost handles the submission of an answer for a game question.
+// It decodes the request body, extracts game and question IDs from the path,
+// and uses the game service to submit the answer.
+func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
+	type answerRequest struct {
+		OptionID int64 `json:"optionId"`
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		var gameID string
+		if gameID = r.PathValue("gameID"); gameID == "" {
+			http.Error(w, "missing gameID", http.StatusBadRequest)
+
+			return
+		}
+
+		questionID, ok := httputil.ParseIDFromPath(w, r, logger, "questionID")
+		if !ok {
+			return
+		}
+
+		req, err := httputil.DecodeJSON[answerRequest](r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+
+			return
+		}
+
+		// TODO: Replace with real PlayerID
+		err = service.SubmitAnswer(r.Context(), gameID, 1, questionID, req.OptionID)
+		if err != nil {
+			logger.ErrorContext(r.Context(), "error submitting answer", slog.Any("err", err))
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
 	})
 }
