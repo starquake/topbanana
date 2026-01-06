@@ -51,7 +51,6 @@ func HandleQuizList(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 		err = httputil.EncodeJSON(w, http.StatusOK, res)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error encoding quizzesResponse", slog.Any("err", err))
-			http.Error(w, err.Error(), http.StatusInternalServerError)
 
 			return
 		}
@@ -99,15 +98,12 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 
 			return
 		}
+		res := createGameResponse{ID: g.ID}
 
-		w.WriteHeader(http.StatusCreated)
 		w.Header().Set("Location", fmt.Sprintf("/play/game/%v", g.ID))
-		err = httputil.EncodeJSON(w, http.StatusCreated, createGameResponse{
-			ID: g.ID,
-		})
+		err = httputil.EncodeJSON(w, http.StatusCreated, res)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error encoding quizzesResponse", slog.Any("err", err))
-			http.Error(w, err.Error(), http.StatusInternalServerError)
 
 			return
 		}
@@ -179,7 +175,6 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 		err = httputil.EncodeJSON(w, http.StatusOK, res)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error encoding questionResponse", slog.Any("err", err))
-			http.Error(w, err.Error(), http.StatusInternalServerError)
 
 			return
 		}
