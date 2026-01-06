@@ -94,7 +94,7 @@ func (s *QuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 
 // CreateQuiz creates a new quiz using a transaction.
 func (s *QuizStore) CreateQuiz(ctx context.Context, qz *quiz.Quiz) error {
-	err := database.ExecTx(s.db, ctx, func(q *db.Queries) error {
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
 		return s.execCreateQuiz(ctx, q, qz)
 	})
 	if err != nil {
@@ -106,7 +106,7 @@ func (s *QuizStore) CreateQuiz(ctx context.Context, qz *quiz.Quiz) error {
 
 // UpdateQuiz updates a quiz using a transaction.
 func (s *QuizStore) UpdateQuiz(ctx context.Context, qz *quiz.Quiz) error {
-	err := database.ExecTx(s.db, ctx, func(q *db.Queries) error {
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
 		return s.execUpdateQuiz(ctx, q, qz)
 	})
 	if err != nil {
@@ -175,7 +175,7 @@ func (s *QuizStore) GetQuestion(ctx context.Context, id int64) (*quiz.Question, 
 
 // CreateQuestion creates a new question using a transaction.
 func (s *QuizStore) CreateQuestion(ctx context.Context, qs *quiz.Question) error {
-	err := database.ExecTx(s.db, ctx, func(q *db.Queries) error {
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
 		return s.execCreateQuestion(ctx, q, qs)
 	})
 	if err != nil {
@@ -187,7 +187,7 @@ func (s *QuizStore) CreateQuestion(ctx context.Context, qs *quiz.Question) error
 
 // UpdateQuestion updates a question using a transaction.
 func (s *QuizStore) UpdateQuestion(ctx context.Context, qs *quiz.Question) error {
-	err := database.ExecTx(s.db, ctx, func(q *db.Queries) error {
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
 		return s.execUpdateQuestion(ctx, q, qs)
 	})
 	if err != nil {

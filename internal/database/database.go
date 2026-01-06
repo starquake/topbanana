@@ -56,7 +56,7 @@ func Migrate(conn *sql.DB) error {
 }
 
 // ExecTx is a helper to run queries within a transaction.
-func ExecTx(conn *sql.DB, ctx context.Context, fn func(*db.Queries) error) error {
+func ExecTx(ctx context.Context, conn *sql.DB, fn func(*db.Queries) error) error {
 	var err error
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
