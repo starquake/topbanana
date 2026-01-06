@@ -9,6 +9,7 @@ import (
 
 	"github.com/pressly/goose/v3"
 
+	"github.com/starquake/topbanana/internal/db"
 	"github.com/starquake/topbanana/internal/migrations"
 )
 
@@ -30,25 +31,50 @@ func Open(
 	dbConnMaxLifetime time.Duration,
 ) (*sql.DB, error) {
 	var err error
-	var db *sql.DB
-	db, err = sql.Open(driver, uri)
+	var conn *sql.DB
+	conn, err = sql.Open(driver, uri)
 	if err != nil {
 		return nil, fmt.Errorf("error opening database: %w", err)
 	}
 
-	db.SetMaxOpenConns(dbMaxOpenConns)
-	db.SetMaxIdleConns(dbMaxIdleConns)
-	db.SetConnMaxLifetime(dbConnMaxLifetime)
+	conn.SetMaxOpenConns(dbMaxOpenConns)
+	conn.SetMaxIdleConns(dbMaxIdleConns)
+	conn.SetConnMaxLifetime(dbConnMaxLifetime)
 
-	return db, nil
+	return conn, nil
 }
 
 // Migrate runs database migrations.
-func Migrate(db *sql.DB) error {
+func Migrate(conn *sql.DB) error {
 	var err error
 
-	if err = goose.Up(db, "."); err != nil {
+	if err = goose.Up(conn, "."); err != nil {
 		return fmt.Errorf("error running migrations: %w", err)
+	}
+
+	return nil
+}
+
+// ExecTx is a helper to run queries within a transaction.
+func ExecTx(ctx context.Context, conn *sql.DB, fn func(*db.Queries) error) error {
+	var err error
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	q := db.New(tx)
+	err = fn(q)
+	if err != nil {
+		if rbErr := tx.Rollback(); rbErr != nil {
+			return fmt.Errorf("transaction failed: %w (rollback error: %w)", err, rbErr)
+		}
+
+		return err
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return fmt.Errorf("transaction failed: %w", err)
 	}
 
 	return nil

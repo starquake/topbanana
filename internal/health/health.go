@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/starquake/topbanana/internal/encoding"
+	"github.com/starquake/topbanana/internal/httputil"
 	"github.com/starquake/topbanana/internal/store"
 )
 
@@ -37,7 +37,7 @@ func HandleHealthz(logger *slog.Logger, stores *store.Stores) http.HandlerFunc {
 
 		logger.InfoContext(ctx, "health check performed")
 		w.Header().Set("Content-Type", "application/json")
-		err := encoding.Encode(w, httpStatus, health)
+		err := httputil.EncodeJSON(w, httpStatus, health)
 		if err != nil {
 			panic(err)
 		}

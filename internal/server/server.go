@@ -5,13 +5,14 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/store"
 )
 
 // New creates a new server.
-func New(logger *slog.Logger, stores *store.Stores) http.Handler {
+func New(logger *slog.Logger, stores *store.Stores, gameService *game.Service) http.Handler {
 	mux := http.NewServeMux()
-	addRoutes(mux, logger, stores)
+	addRoutes(mux, logger, stores, gameService)
 	var handler http.Handler = mux
 
 	return handler

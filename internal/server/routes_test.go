@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/quiz"
 	. "github.com/starquake/topbanana/internal/server"
 	"github.com/starquake/topbanana/internal/store"
@@ -46,13 +47,19 @@ func (stubQuizStore) ListQuizzes(_ context.Context) ([]*quiz.Quiz, error) {
 }
 
 func (stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error { return nil }
+
 func (stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error { return nil }
+
 func (stubQuizStore) CreateQuestion(_ context.Context, _ *quiz.Question) error {
 	return nil
 }
 
 func (stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error {
 	return nil
+}
+
+func (stubQuizStore) ListQuestions(_ context.Context, _ int64) ([]*quiz.Question, error) {
+	return nil, nil
 }
 
 func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
@@ -62,7 +69,7 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 		Quizzes: stubQuizStore{},
 	}
 	mux := http.NewServeMux()
-	ExportAddRoutes(mux, slog.New(slog.DiscardHandler), stores)
+	ExportAddRoutes(mux, slog.New(slog.DiscardHandler), stores, &game.Service{})
 
 	tests := []struct {
 		name   string
@@ -109,7 +116,7 @@ func TestAddRoutes_UnknownRouteReturns404(t *testing.T) {
 		Quizzes: stubQuizStore{},
 	}
 	mux := http.NewServeMux()
-	ExportAddRoutes(mux, logger, stores)
+	ExportAddRoutes(mux, logger, stores, &game.Service{})
 
 	req := httptest.NewRequest(http.MethodGet, "/unknown/path", nil)
 	rec := httptest.NewRecorder()

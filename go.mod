@@ -5,6 +5,7 @@ go 1.25.4
 require (
 	github.com/google/go-cmp v0.7.0
 	github.com/pressly/goose/v3 v3.26.0
+	github.com/rs/xid v1.6.0
 	golang.org/x/sync v0.16.0
 	modernc.org/sqlite v1.42.2
 )

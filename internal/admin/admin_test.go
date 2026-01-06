@@ -28,6 +28,7 @@ type stubQuizStore struct {
 	getQuestionByID func(ctx context.Context, id int64) (*quiz.Question, error)
 	createQuestion  func(ctx context.Context, qs *quiz.Question) error
 	updateQuestion  func(ctx context.Context, qs *quiz.Question) error
+	listQuestions   func(ctx context.Context, quizID int64) ([]*quiz.Question, error)
 }
 
 func (stubQuizStore) Ping(_ context.Context) error {
@@ -88,6 +89,14 @@ func (s stubQuizStore) UpdateQuestion(ctx context.Context, qs *quiz.Question) er
 	}
 
 	return s.updateQuestion(ctx, qs)
+}
+
+func (s stubQuizStore) ListQuestions(ctx context.Context, quizID int64) ([]*quiz.Question, error) {
+	if s.listQuestions == nil {
+		return nil, errors.New("listQuestions not supplied in stub")
+	}
+
+	return s.listQuestions(ctx, quizID)
 }
 
 func TestTemplateRenderer_Render_LogsError(t *testing.T) {
