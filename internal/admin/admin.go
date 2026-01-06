@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/starquake/topbanana/internal/httputil"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
@@ -76,9 +77,6 @@ type OptionData struct {
 var layouts = template.Must(template.ParseFS(tmpl.FS, "admin/layouts/*.gohtml"))
 
 const (
-	base10    = 10
-	int64Size = 64
-
 	maxOptions = 4
 )
 
@@ -152,42 +150,6 @@ func optionDataFromOptions(options []*quiz.Option) []*OptionData {
 // parseTemplate parses a template from the given path with layouts.
 func parseTemplate(path string) *template.Template {
 	return template.Must(template.Must(layouts.Clone()).ParseFS(tmpl.FS, path))
-}
-
-// idFromString parses an int64 ID from the given string.
-// returns 0 if the path value is empty.
-func idFromString(pathValue string) (int64, error) {
-	if pathValue == "" {
-		return 0, nil
-	}
-	id, err := strconv.ParseInt(pathValue, base10, int64Size)
-	if err != nil {
-		return 0, fmt.Errorf("error parsing %q: %w", pathValue, err)
-	}
-
-	return id, nil
-}
-
-// parseIDFromPath parses an int64 ID from the given path value.
-// It returns the parsed ID and true if the parsing was successful.
-// It returns 0 and true if the path value is empty.
-// It renders a 400 error page if the path value cannot be parsed.
-func parseIDFromPath(w http.ResponseWriter, r *http.Request, logger *slog.Logger, s string) (int64, bool) {
-	pathValue := r.PathValue(s)
-	if pathValue == "" {
-		return 0, true
-	}
-
-	id, err := idFromString(pathValue)
-	if err != nil {
-		msg := "error parsing " + s
-		logger.ErrorContext(r.Context(), msg, slog.Any("err", err))
-		render400(w, r, logger, msg)
-
-		return 0, false
-	}
-
-	return id, true
 }
 
 // render400 renders the 400 error page with the given message.
@@ -341,7 +303,7 @@ func fillQuestionFromForm(w http.ResponseWriter, r *http.Request, logger *slog.L
 			}
 		}
 		if r.PostForm.Has(fmt.Sprintf("option[%d].text", i)) {
-			op.ID, err = idFromString(r.PostFormValue(fmt.Sprintf("option[%d].id", i)))
+			op.ID, err = httputil.IDFromString(r.PostFormValue(fmt.Sprintf("option[%d].id", i)))
 			if err != nil {
 				msg := "error parsing optionID"
 				logger.ErrorContext(r.Context(), msg, slog.Any("err", err))
@@ -486,7 +448,7 @@ func HandleQuizView(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 		var ok bool
 
 		var id int64
-		if id, ok = parseIDFromPath(w, r, logger, "quizID"); !ok {
+		if id, ok = httputil.ParseIDFromPath(w, r, logger, "quizID"); !ok {
 			return
 		}
 
@@ -534,7 +496,7 @@ func HandleQuizEdit(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 		var ok bool
 
 		var quizID int64
-		if quizID, ok = parseIDFromPath(w, r, logger, "quizID"); !ok {
+		if quizID, ok = httputil.ParseIDFromPath(w, r, logger, "quizID"); !ok {
 			return
 		}
 
@@ -556,7 +518,7 @@ func HandleQuizSave(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 		var ok bool
 
 		var quizID int64
-		if quizID, ok = parseIDFromPath(w, r, logger, "quizID"); !ok {
+		if quizID, ok = httputil.ParseIDFromPath(w, r, logger, "quizID"); !ok {
 			return
 		}
 
@@ -596,7 +558,7 @@ func HandleQuestionCreate(logger *slog.Logger, quizStore quiz.Store) http.Handle
 		var ok bool
 
 		var quizID int64
-		if quizID, ok = parseIDFromPath(w, r, logger, "quizID"); !ok {
+		if quizID, ok = httputil.ParseIDFromPath(w, r, logger, "quizID"); !ok {
 			return
 		}
 
@@ -628,12 +590,12 @@ func HandleQuestionEdit(logger *slog.Logger, quizStore quiz.Store) http.Handler 
 		var ok bool
 
 		var quizID int64
-		if quizID, ok = parseIDFromPath(w, r, logger, "quizID"); !ok {
+		if quizID, ok = httputil.ParseIDFromPath(w, r, logger, "quizID"); !ok {
 			return
 		}
 
 		var questionID int64
-		if questionID, ok = parseIDFromPath(w, r, logger, "questionID"); !ok {
+		if questionID, ok = httputil.ParseIDFromPath(w, r, logger, "questionID"); !ok {
 			return
 		}
 		newQuestion := questionID == 0
@@ -672,12 +634,12 @@ func HandleQuestionSave(logger *slog.Logger, quizStore quiz.Store) http.Handler 
 		var ok bool
 
 		var quizID int64
-		if quizID, ok = parseIDFromPath(w, r, logger, "quizID"); !ok {
+		if quizID, ok = httputil.ParseIDFromPath(w, r, logger, "quizID"); !ok {
 			return
 		}
 
 		var questionID int64
-		if questionID, ok = parseIDFromPath(w, r, logger, "questionID"); !ok {
+		if questionID, ok = httputil.ParseIDFromPath(w, r, logger, "questionID"); !ok {
 			return
 		}
 

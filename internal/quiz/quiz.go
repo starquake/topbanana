@@ -9,6 +9,30 @@ import (
 	"time"
 )
 
+// Store represents a store for quizzes.
+// This can be implemented for different databases.
+type Store interface {
+	// Ping returns the status of the database connection.
+	Ping(ctx context.Context) error
+	// ListQuizzes returns all quizzes.
+	ListQuizzes(ctx context.Context) ([]*Quiz, error)
+	// GetQuiz returns a quiz including related questions and options by its ID.
+	// Returns ErrQuizNotFound if the quiz is not found.
+	GetQuiz(ctx context.Context, id int64) (*Quiz, error)
+	// CreateQuiz creates a quiz.
+	CreateQuiz(ctx context.Context, qz *Quiz) error
+	// UpdateQuiz updates a quiz.
+	UpdateQuiz(ctx context.Context, qz *Quiz) error
+	// ListQuestions returns all questions for a quiz by its ID.
+	ListQuestions(ctx context.Context, quizID int64) ([]*Question, error)
+	// GetQuestion returns a question with options, by its question ID.
+	GetQuestion(ctx context.Context, id int64) (*Question, error)
+	// CreateQuestion creates a question.
+	CreateQuestion(ctx context.Context, qs *Question) error
+	// UpdateQuestion updates a question.
+	UpdateQuestion(ctx context.Context, qs *Question) error
+}
+
 var (
 	// ErrQuizNotFound is returned when a quiz is not found.
 	ErrQuizNotFound = errors.New("quiz not found")
@@ -44,24 +68,24 @@ type Quiz struct {
 func (q *Quiz) Valid(ctx context.Context) map[string]string {
 	problems := make(map[string]string)
 	if q.Title == "" {
-		problems["title"] = "Title is required"
+		problems["Title"] = "Title is required"
 	}
 	if q.Slug == "" {
-		problems["slug"] = "Slug is required"
+		problems["Slug"] = "Slug is required"
 	}
 	if q.Description == "" {
-		problems["description"] = "Description is required"
+		problems["Description"] = "Description is required"
 	}
 	for qsIndex, question := range q.Questions {
 		if qsProblems := question.Valid(ctx); len(qsProblems) > 0 {
 			for qsProblemKey, v := range qsProblems {
-				problems[fmt.Sprintf("questions[%d][%s]", qsIndex, qsProblemKey)] = v
+				problems[fmt.Sprintf("Questions[%d][%s]", qsIndex, qsProblemKey)] = v
 			}
 		}
 		for oIndex, option := range question.Options {
 			if oProblems := option.Valid(ctx); len(oProblems) > 0 {
 				for oProblemKey, v := range oProblems {
-					problems[fmt.Sprintf("questions[%d].options[%d][%s]", qsIndex, oIndex, oProblemKey)] = v
+					problems[fmt.Sprintf("Questions[%d].Options[%d][%s]", qsIndex, oIndex, oProblemKey)] = v
 				}
 			}
 		}
@@ -84,10 +108,10 @@ type Question struct {
 func (q *Question) Valid(_ context.Context) map[string]string {
 	problems := make(map[string]string)
 	if q.Text == "" {
-		problems["text"] = "Text is required"
+		problems["Text"] = "Text is required"
 	}
 	if len(q.Options) == 0 {
-		problems["options"] = "Options are required"
+		problems["Options"] = "Options are required"
 	}
 
 	return problems
@@ -105,30 +129,8 @@ type Option struct {
 func (o *Option) Valid(_ context.Context) map[string]string {
 	problems := make(map[string]string)
 	if o.Text == "" {
-		problems["text"] = "Text is required"
+		problems["Text"] = "Text is required"
 	}
 
 	return problems
-}
-
-// Store represents a store for quizzes.
-// This can be implemented for different databases.
-type Store interface {
-	// Ping returns the status of the database connection.
-	Ping(ctx context.Context) error
-	// ListQuizzes returns all quizzes.
-	ListQuizzes(ctx context.Context) ([]*Quiz, error)
-	// GetQuiz returns a quiz including related questions and options by its ID.
-	// Returns ErrQuizNotFound if the quiz is not found.
-	GetQuiz(ctx context.Context, id int64) (*Quiz, error)
-	// CreateQuiz creates a quiz.
-	CreateQuiz(ctx context.Context, qz *Quiz) error
-	// UpdateQuiz updates a quiz.
-	UpdateQuiz(ctx context.Context, qz *Quiz) error
-	// GetQuestion returns a question with options, by its question ID.
-	GetQuestion(ctx context.Context, id int64) (*Question, error)
-	// CreateQuestion creates a question.
-	CreateQuestion(ctx context.Context, qs *Question) error
-	// UpdateQuestion updates a question.
-	UpdateQuestion(ctx context.Context, qs *Question) error
 }

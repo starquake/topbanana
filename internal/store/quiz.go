@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/starquake/topbanana/internal/database"
 	"github.com/starquake/topbanana/internal/db"
 	"github.com/starquake/topbanana/internal/quiz"
 )
@@ -93,16 +94,26 @@ func (s *QuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 
 // CreateQuiz creates a new quiz using a transaction.
 func (s *QuizStore) CreateQuiz(ctx context.Context, qz *quiz.Quiz) error {
-	return s.execTx(ctx, func(q *db.Queries) error {
+	err := database.ExecTx(s.db, ctx, func(q *db.Queries) error {
 		return s.execCreateQuiz(ctx, q, qz)
 	})
+	if err != nil {
+		return fmt.Errorf("failed to create quiz: %w", err)
+	}
+
+	return nil
 }
 
 // UpdateQuiz updates a quiz using a transaction.
 func (s *QuizStore) UpdateQuiz(ctx context.Context, qz *quiz.Quiz) error {
-	return s.execTx(ctx, func(q *db.Queries) error {
+	err := database.ExecTx(s.db, ctx, func(q *db.Queries) error {
 		return s.execUpdateQuiz(ctx, q, qz)
 	})
+	if err != nil {
+		return fmt.Errorf("failed to update quiz: %w", err)
+	}
+
+	return nil
 }
 
 // ListQuestions retrieves a list of questions for the specified quiz ID, including their options, from the data store.
@@ -164,39 +175,23 @@ func (s *QuizStore) GetQuestion(ctx context.Context, id int64) (*quiz.Question, 
 
 // CreateQuestion creates a new question using a transaction.
 func (s *QuizStore) CreateQuestion(ctx context.Context, qs *quiz.Question) error {
-	return s.execTx(ctx, func(q *db.Queries) error {
+	err := database.ExecTx(s.db, ctx, func(q *db.Queries) error {
 		return s.execCreateQuestion(ctx, q, qs)
 	})
+	if err != nil {
+		return fmt.Errorf("failed to create question: %w", err)
+	}
+
+	return nil
 }
 
 // UpdateQuestion updates a question using a transaction.
 func (s *QuizStore) UpdateQuestion(ctx context.Context, qs *quiz.Question) error {
-	return s.execTx(ctx, func(q *db.Queries) error {
+	err := database.ExecTx(s.db, ctx, func(q *db.Queries) error {
 		return s.execUpdateQuestion(ctx, q, qs)
 	})
-}
-
-// execTx is a helper to run queries within a transaction.
-// TODO: Move to database package.
-func (s *QuizStore) execTx(ctx context.Context, fn func(*db.Queries) error) error {
-	var err error
-	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	q := db.New(tx)
-	err = fn(q)
-	if err != nil {
-		if rbErr := tx.Rollback(); rbErr != nil {
-			return fmt.Errorf("transaction failed: %w (rollback error: %w)", err, rbErr)
-		}
-
-		return err
-	}
-
-	err = tx.Commit()
-	if err != nil {
-		return fmt.Errorf("transaction failed: %w", err)
+		return fmt.Errorf("failed to update question: %w", err)
 	}
 
 	return nil

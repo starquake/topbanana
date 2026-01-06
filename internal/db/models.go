@@ -5,8 +5,40 @@
 package db
 
 import (
+	"database/sql"
 	"time"
 )
+
+type Game struct {
+	ID        string
+	QuizID    int64
+	CreatedAt time.Time
+	StartedAt sql.NullTime
+}
+
+type GameAnswer struct {
+	ID             int64
+	GameID         string
+	PlayerID       int64
+	GameQuestionID int64
+	OptionID       int64
+	AnsweredAt     time.Time
+}
+
+type GameParticipant struct {
+	ID       int64
+	GameID   string
+	PlayerID int64
+	JoinedAt time.Time
+}
+
+type GameQuestion struct {
+	ID         int64
+	GameID     string
+	QuestionID int64
+	StartedAt  time.Time
+	ExpiredAt  sql.NullTime
+}
 
 type Option struct {
 	ID         int64

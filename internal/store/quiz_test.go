@@ -163,7 +163,7 @@ func newTestQuestions() []*quiz.Question {
 	}
 }
 
-func TestSQLiteStore_Ping(t *testing.T) {
+func TestQuizStore_Ping(t *testing.T) {
 	t.Parallel()
 
 	t.Run("ping success", func(t *testing.T) {
@@ -200,7 +200,7 @@ func TestSQLiteStore_Ping(t *testing.T) {
 	})
 }
 
-func TestSQLiteStore_ListQuizzes(t *testing.T) {
+func TestQuizStore_ListQuizzes(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.Open(t)
@@ -230,7 +230,7 @@ func TestSQLiteStore_ListQuizzes(t *testing.T) {
 	}
 }
 
-func TestSQLiteStore_ListQuizzes_ErrorHandling(t *testing.T) {
+func TestQuizStore_ListQuizzes_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
 	t.Run("context canceled", func(t *testing.T) {
@@ -309,7 +309,7 @@ func TestSQLiteStore_ListQuizzes_ErrorHandling(t *testing.T) {
 	})
 }
 
-func TestSQLiteStore_GetQuiz(t *testing.T) {
+func TestQuizStore_GetQuiz(t *testing.T) {
 	t.Parallel()
 
 	t.Run("valid quiz ID", func(t *testing.T) {
@@ -357,7 +357,7 @@ func TestSQLiteStore_GetQuiz(t *testing.T) {
 	})
 }
 
-func TestSQLiteStore_GetQuiz_ErrorHandling(t *testing.T) {
+func TestQuizStore_GetQuiz_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
 	t.Run("context canceled", func(t *testing.T) {
@@ -409,7 +409,7 @@ func TestSQLiteStore_GetQuiz_ErrorHandling(t *testing.T) {
 	})
 }
 
-func TestSQLiteStore_GetQuestion(t *testing.T) {
+func TestQuizStore_GetQuestion(t *testing.T) {
 	t.Parallel()
 
 	t.Run("valid question ID", func(t *testing.T) {
@@ -456,7 +456,7 @@ func TestSQLiteStore_GetQuestion(t *testing.T) {
 	})
 }
 
-func TestSQLiteStore_GetQuestion_ErrorHandling(t *testing.T) {
+func TestQuizStore_GetQuestion_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
 	t.Run("context canceled", func(t *testing.T) {
@@ -507,7 +507,7 @@ func TestSQLiteStore_GetQuestion_ErrorHandling(t *testing.T) {
 	})
 }
 
-func TestSQLiteStore_CreateQuiz(t *testing.T) {
+func TestQuizStore_CreateQuiz(t *testing.T) {
 	t.Parallel()
 
 	t.Run("quiz with questions and options", func(t *testing.T) {
@@ -593,7 +593,7 @@ func TestSQLiteStore_CreateQuiz(t *testing.T) {
 	})
 }
 
-func TestSQLiteStore_CreateQuiz_ErrorHandling(t *testing.T) {
+func TestQuizStore_CreateQuiz_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
 	t.Run("quiz insert error", func(t *testing.T) {
@@ -671,7 +671,7 @@ func TestSQLiteStore_CreateQuiz_ErrorHandling(t *testing.T) {
 	})
 }
 
-func TestSQLiteStore_UpdateQuiz(t *testing.T) {
+func TestQuizStore_UpdateQuiz(t *testing.T) {
 	t.Parallel()
 
 	buf := bytes.Buffer{}
@@ -742,7 +742,7 @@ func TestSQLiteStore_UpdateQuiz(t *testing.T) {
 	}
 }
 
-func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
+func TestQuizStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
 	t.Run("bad quiz ID", func(t *testing.T) {
@@ -856,7 +856,7 @@ func TestSQLiteStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 	})
 }
 
-func TestSQLiteStore_CreateQuestion(t *testing.T) {
+func TestQuizStore_CreateQuestion(t *testing.T) {
 	t.Parallel()
 
 	t.Run("create question", func(t *testing.T) {
@@ -938,7 +938,7 @@ func TestSQLiteStore_CreateQuestion(t *testing.T) {
 	})
 }
 
-func TestSQLiteStore_CreateQuestion_ErrorHandling(t *testing.T) {
+func TestQuizStore_CreateQuestion_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
 	buf := bytes.Buffer{}
@@ -996,7 +996,7 @@ func TestSQLiteStore_CreateQuestion_ErrorHandling(t *testing.T) {
 	})
 }
 
-func TestSQLiteStore_UpdateQuestion(t *testing.T) {
+func TestQuizStore_UpdateQuestion(t *testing.T) {
 	t.Parallel()
 
 	buf := bytes.Buffer{}
@@ -1048,7 +1048,7 @@ func TestSQLiteStore_UpdateQuestion(t *testing.T) {
 	}
 }
 
-func TestSQLiteStore_UpdateQuestion_ErrorHandling(t *testing.T) {
+func TestQuizStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
 	t.Run("bad question ID", func(t *testing.T) {

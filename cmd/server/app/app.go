@@ -18,6 +18,7 @@ import (
 
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/database"
+	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/server"
 	"github.com/starquake/topbanana/internal/store"
 )
@@ -61,7 +62,10 @@ func Run(
 		}
 	}()
 
-	srv := server.New(logger, store.New(conn, logger))
+	stores := store.New(conn, logger)
+	gameService := game.NewService(stores.Games, stores.Quizzes)
+
+	srv := server.New(logger, stores, gameService)
 	if ln == nil {
 		ln, err = listener(signalCtx, cfg, logger)
 		if err != nil {

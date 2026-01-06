@@ -1,0 +1,30 @@
+### List all quizzes
+GET {{serverUrl}}/api/quizzes
+Accept: application/json
+
+### Start a game for quiz 1
+POST {{serverUrl}}/api/games
+
+{
+  "quizID": 1
+}
+
+### Get first question
+GET {{serverUrl}}/api/games/d5ees0on2fa1mda34mtg/questions/next
+Accept: application/json
+
+### Send answer to first question
+POST {{serverUrl}}/api/games/d5ees0on2fa1mda34mtg/questions/1/answers
+Content-Type: application/json
+
+{
+  "optionId": 1
+}
+
+### Get next question
+GET {{serverUrl}}/api/games/d5ees0on2fa1mda34mtg/questions/next
+Accept: application/json
+
+### Send answer to next question
+POST {{serverUrl}}/api/games/d5ees0on2fa1mda34mtg/questions/2/answers
+Content-Type: application/json
