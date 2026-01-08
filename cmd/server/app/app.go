@@ -65,7 +65,7 @@ func Run(
 	stores := store.New(conn, logger)
 	gameService := game.NewService(stores.Games, stores.Quizzes)
 
-	srv := server.New(logger, stores, gameService)
+	srv := server.New(logger, stores, gameService, cfg)
 	if ln == nil {
 		ln, err = listener(signalCtx, cfg, logger)
 		if err != nil {

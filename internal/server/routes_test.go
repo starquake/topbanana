@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/quiz"
 	. "github.com/starquake/topbanana/internal/server"
@@ -69,7 +70,7 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 		Quizzes: stubQuizStore{},
 	}
 	mux := http.NewServeMux()
-	ExportAddRoutes(mux, slog.New(slog.DiscardHandler), stores, &game.Service{})
+	ExportAddRoutes(mux, slog.New(slog.DiscardHandler), stores, &game.Service{}, &config.Config{})
 
 	tests := []struct {
 		name   string
@@ -116,7 +117,7 @@ func TestAddRoutes_UnknownRouteReturns404(t *testing.T) {
 		Quizzes: stubQuizStore{},
 	}
 	mux := http.NewServeMux()
-	ExportAddRoutes(mux, logger, stores, &game.Service{})
+	ExportAddRoutes(mux, logger, stores, &game.Service{}, &config.Config{})
 
 	req := httptest.NewRequest(http.MethodGet, "/unknown/path", nil)
 	rec := httptest.NewRecorder()
