@@ -83,7 +83,7 @@ func TestService_GetNextQuestion(t *testing.T) {
 			t.Fatalf("failed to create game: %v", err)
 		}
 
-		service := NewService(gameStore, quizStore)
+		service := NewService(gameStore, quizStore, slog.Default())
 		qs, err := service.GetNextQuestion(ctx, testGame.ID)
 		if err != nil {
 			t.Fatalf("failed to get next question: %v", err)
@@ -118,12 +118,12 @@ func TestService_GetNextQuestion(t *testing.T) {
 			t.Fatalf("failed to create game: %v", err)
 		}
 
-		err = gameStore.CreateGameQuestion(ctx, &Question{GameID: testGame.ID, QuestionID: testQuiz.Questions[0].ID})
+		err = gameStore.CreateQuestion(ctx, &Question{GameID: testGame.ID, QuestionID: testQuiz.Questions[0].ID})
 		if err != nil {
 			t.Fatalf("failed to create game question: %v", err)
 		}
 
-		service := NewService(gameStore, quizStore)
+		service := NewService(gameStore, quizStore, slog.Default())
 		qs, err := service.GetNextQuestion(ctx, testGame.ID)
 		if err != nil {
 			t.Fatalf("failed to get next question: %v", err)

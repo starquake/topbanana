@@ -58,9 +58,14 @@ func (s *GameStore) GetGame(ctx context.Context, id string) (*game.Game, error) 
 		g.StartedAt = &row.StartedAt.Time
 	}
 
-	g.GameQuestions, err = s.listGameQuestions(ctx, id)
+	g.Questions, err = s.listGameQuestions(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list game questions for game %q: %w", id, err)
+	}
+
+	g.Participants, err = s.listParticipants(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list participants for game %q: %w", id, err)
 	}
 
 	return g, nil
@@ -110,20 +115,25 @@ func (s *GameStore) CreateParticipant(ctx context.Context, p *game.Participant) 
 	return nil
 }
 
-// CreateGameQuestion saves a new game question in the database and updates the provided Question object with generated values.
-func (s *GameStore) CreateGameQuestion(ctx context.Context, gq *game.Question) error {
+// CreateQuestion saves a new game question in the database and updates the provided Question object with generated values.
+func (s *GameStore) CreateQuestion(ctx context.Context, gq *game.Question) error {
 	var err error
-	row, err := s.q.CreateGameQuestion(ctx, db.CreateGameQuestionParams{GameID: gq.GameID, QuestionID: gq.QuestionID})
+	row, err := s.q.CreateGameQuestion(
+		ctx,
+		db.CreateGameQuestionParams{
+			GameID:     gq.GameID,
+			QuestionID: gq.QuestionID,
+			StartedAt:  gq.StartedAt,
+			ExpiredAt:  gq.ExpiredAt,
+		},
+	)
 	if err != nil {
 		return fmt.Errorf("failed to create game question: %w", err)
 	}
 
 	gq.ID = row.ID
 	gq.StartedAt = row.StartedAt
-
-	if row.ExpiredAt.Valid {
-		gq.ExpiredAt = row.ExpiredAt.Time
-	}
+	gq.ExpiredAt = row.ExpiredAt
 
 	return nil
 }
@@ -157,6 +167,8 @@ func (s *GameStore) listGameQuestions(ctx context.Context, gameID string) ([]*ga
 			ID:         r.ID,
 			GameID:     r.GameID,
 			QuestionID: r.QuestionID,
+			StartedAt:  r.StartedAt,
+			ExpiredAt:  r.ExpiredAt,
 		}
 
 		gqs.Answers, err = s.listAnswers(ctx, gqs.ID)
@@ -168,6 +180,26 @@ func (s *GameStore) listGameQuestions(ctx context.Context, gameID string) ([]*ga
 	}
 
 	return gameQuestions, nil
+}
+
+func (s *GameStore) listParticipants(ctx context.Context, gameID string) ([]*game.Participant, error) {
+	var err error
+	rows, err := s.q.ListParticipantsByGameID(ctx, gameID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list participants for game %q: %w", gameID, err)
+	}
+
+	participants := make([]*game.Participant, 0, len(rows))
+	for _, r := range rows {
+		participants = append(participants, &game.Participant{
+			ID:       r.ID,
+			GameID:   r.GameID,
+			PlayerID: r.PlayerID,
+			JoinedAt: r.JoinedAt,
+		})
+	}
+
+	return participants, nil
 }
 
 func (s *GameStore) listAnswers(ctx context.Context, gameQuestionID int64) ([]*game.Answer, error) {

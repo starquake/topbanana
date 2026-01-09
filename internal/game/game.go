@@ -5,12 +5,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
-const defaultExpiration = 10 * time.Second
+const (
+	defaultExpiration = 10 * time.Second
+	maxPoints         = 1000
+)
 
 // ErrGameNotFound is returned when a game is not found.
 var (
@@ -21,14 +25,15 @@ var (
 	ErrStartingGameNoRowsAffected = errors.New("no rows affected when starting game")
 )
 
-// Game represents a game.
+// Game represents a game. It is an instance of a quiz being played by a player.
 type Game struct {
-	ID            string
-	QuizID        int64
-	Quiz          *quiz.Quiz
-	CreatedAt     time.Time
-	StartedAt     *time.Time
-	GameQuestions []*Question
+	ID           string
+	QuizID       int64
+	Quiz         *quiz.Quiz
+	CreatedAt    time.Time
+	StartedAt    *time.Time
+	Questions    []*Question
+	Participants []*Participant
 }
 
 // Player represents a player.
@@ -47,17 +52,18 @@ type Participant struct {
 	JoinedAt time.Time
 }
 
-// Question represents a question in a game.
+// Question represents a question in a game. It references a quiz question.
 type Question struct {
 	ID         int64
 	GameID     string
 	QuestionID int64
 	StartedAt  time.Time
-	ExpiredAt  time.Time
-	Answers    []*Answer
+	// TODO: change this to time duration like 10s instead of timestamp?
+	ExpiredAt time.Time
+	Answers   []*Answer
 }
 
-// Answer represents an answer for a question.
+// Answer represents an answer for a question. Answers are recorded for a specific game and player.
 type Answer struct {
 	ID             int64
 	GameID         string
@@ -65,6 +71,14 @@ type Answer struct {
 	GameQuestionID int64
 	OptionID       int64
 	AnsweredAt     time.Time
+}
+
+// Results represents the accumulated score for each player in a game.
+type Results struct {
+	GameID string
+
+	// PlayerScores maps a player's ID to their accumulated calculateScore in the game.
+	PlayerScores map[int64]int
 }
 
 // Store represents a game store.
@@ -76,7 +90,7 @@ type Store interface {
 	CreateGame(ctx context.Context, g *Game) error
 	StartGame(ctx context.Context, id string) error
 	CreateParticipant(ctx context.Context, p *Participant) error
-	CreateGameQuestion(ctx context.Context, gq *Question) error
+	CreateQuestion(ctx context.Context, gq *Question) error
 	CreateAnswer(ctx context.Context, a *Answer) error
 }
 
@@ -84,13 +98,15 @@ type Store interface {
 type Service struct {
 	store     Store
 	quizStore quiz.Store
+	logger    *slog.Logger
 }
 
 // NewService initializes and returns a new instance of Service with the provided game and quiz stores.
-func NewService(gameStore Store, quizStore quiz.Store) *Service {
+func NewService(gameStore Store, quizStore quiz.Store, logger *slog.Logger) *Service {
 	return &Service{
 		store:     gameStore,
 		quizStore: quizStore,
+		logger:    logger,
 	}
 }
 
@@ -131,6 +147,10 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string) (*quiz.Que
 	// Get the game
 	g, err := s.store.GetGame(ctx, gameID)
 	if err != nil {
+		if errors.Is(err, ErrGameNotFound) {
+			return nil, ErrGameNotFound
+		}
+
 		return nil, fmt.Errorf("failed to get game: %w", err)
 	}
 
@@ -144,7 +164,7 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string) (*quiz.Que
 
 	// Create a lookup map for questions already asked in this game
 	askedQuestions := make(map[int64]bool)
-	for _, gqs := range g.GameQuestions {
+	for _, gqs := range g.Questions {
 		askedQuestions[gqs.QuestionID] = true
 	}
 
@@ -158,7 +178,7 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string) (*quiz.Que
 		}
 	}
 
-	// If we found a question, register it as a GameQuestion (starting the timer)
+	// If we found a quiz question, register it as a GameQuestion (starting the timer)
 	if nextQuestion != nil {
 		gq := &Question{
 			GameID:     gameID,
@@ -166,7 +186,7 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string) (*quiz.Que
 			StartedAt:  time.Now(),
 			ExpiredAt:  time.Now().Add(defaultExpiration), // 10s limit
 		}
-		if err = s.store.CreateGameQuestion(ctx, gq); err != nil {
+		if err = s.store.CreateQuestion(ctx, gq); err != nil {
 			return nil, fmt.Errorf("failed to record game question: %w", err)
 		}
 	}
@@ -190,7 +210,7 @@ func (s *Service) SubmitAnswer(ctx context.Context, gameID string, playerID, que
 	}
 
 	var gameQuestionID int64
-	for _, gq := range g.GameQuestions {
+	for _, gq := range g.Questions {
 		if gq.QuestionID == questionID {
 			gameQuestionID = gq.ID
 
@@ -214,4 +234,42 @@ func (s *Service) SubmitAnswer(ctx context.Context, gameID string, playerID, que
 	}
 
 	return nil
+}
+
+// GetResults calculates the accumulated score for each player in a game and returns the results.
+func (s *Service) GetResults(ctx context.Context, gameID string) (*Results, error) {
+	var err error
+	g, err := s.store.GetGame(ctx, gameID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get game: %w", err)
+	}
+
+	plsMap := make(map[int64]int, len(g.Participants))
+
+	for _, gqs := range g.Questions {
+		for _, ga := range gqs.Answers {
+			plsMap[ga.PlayerID] += s.calculateScore(ctx, gqs, ga)
+		}
+	}
+
+	r := &Results{GameID: g.ID, PlayerScores: plsMap}
+
+	return r, nil
+}
+
+func (s *Service) calculateScore(ctx context.Context, question *Question, answer *Answer) int {
+	// TODO: Should this be the points for answering immediately? Or within one second?
+
+	if answer.AnsweredAt.After(question.ExpiredAt) {
+		s.logger.InfoContext(ctx, "score=0, answer.AnsweredAt > question.ExpiredAt, answered too late!")
+
+		return 0
+	}
+
+	answerWindow := question.ExpiredAt.Sub(question.StartedAt)
+	duration := answer.AnsweredAt.Sub(question.StartedAt)
+
+	score := int(duration.Seconds() / answerWindow.Seconds() * float64(maxPoints))
+
+	return score
 }

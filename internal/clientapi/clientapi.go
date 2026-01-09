@@ -222,3 +222,58 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 }
+
+// HandleGameResults returns the results of a game based on its ID.
+func HandleGameResults(logger *slog.Logger, service *game.Service) http.Handler {
+	type playerScoreResponse struct {
+		PlayerID int64 `json:"playerId"`
+		Score    int   `json:"score"`
+	}
+
+	type resultsResponse struct {
+		GameID string `json:"gameId"`
+		Winner string `json:"winner"`
+
+		PlayerScores []playerScoreResponse `json:"playerScores"`
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		var gameID string
+		if gameID = r.PathValue("gameID"); gameID == "" {
+			http.Error(w, "missing gameID", http.StatusBadRequest)
+		}
+		results, err := service.GetResults(r.Context(), gameID)
+		if err != nil {
+			if errors.Is(err, game.ErrGameNotFound) {
+				logger.ErrorContext(r.Context(), "game not found", slog.Any("err", err))
+				http.Error(w, err.Error(), http.StatusNotFound)
+
+				return
+			}
+			logger.ErrorContext(r.Context(), "error retrieving game results", slog.Any("err", err))
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+
+			return
+		}
+
+		psr := make([]playerScoreResponse, 0, len(results.PlayerScores))
+		for psKey, psVal := range results.PlayerScores {
+			psr = append(psr, playerScoreResponse{
+				PlayerID: psKey,
+				Score:    psVal,
+			})
+		}
+		res := resultsResponse{
+			GameID:       gameID,
+			PlayerScores: psr,
+		}
+
+		err = httputil.EncodeJSON(w, http.StatusOK, res)
+		if err != nil {
+			logger.ErrorContext(r.Context(), "error encoding questionResponse", slog.Any("err", err))
+
+			return
+		}
+	})
+}

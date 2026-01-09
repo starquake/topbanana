@@ -63,7 +63,7 @@ func Run(
 	}()
 
 	stores := store.New(conn, logger)
-	gameService := game.NewService(stores.Games, stores.Quizzes)
+	gameService := game.NewService(stores.Games, stores.Quizzes, logger)
 
 	srv := server.New(logger, stores, gameService, cfg)
 	if ln == nil {

@@ -48,6 +48,7 @@ func addRoutes(
 		"POST /api/games/{gameID}/questions/{questionID}/answers",
 		clientapi.HandleAnswerPost(logger, gameService),
 	)
+	mux.Handle("GET /api/games/{gameID}/results", clientapi.HandleGameResults(logger, gameService))
 
 	// Client
 	mux.Handle("/client/", client.Handler(cfg))

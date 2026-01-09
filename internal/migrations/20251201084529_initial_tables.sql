@@ -56,7 +56,7 @@ CREATE TABLE game_questions
     game_id     VARCHAR(20) NOT NULL REFERENCES games (id),
     question_id INTEGER     NOT NULL REFERENCES questions (id),
     started_at  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    expired_at  DATETIME
+    expired_at  DATETIME    NOT NULL
 );
 
 CREATE TABLE game_answers
