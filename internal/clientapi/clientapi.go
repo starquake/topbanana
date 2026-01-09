@@ -242,6 +242,8 @@ func HandleGameResults(logger *slog.Logger, service *game.Service) http.Handler 
 		var gameID string
 		if gameID = r.PathValue("gameID"); gameID == "" {
 			http.Error(w, "missing gameID", http.StatusBadRequest)
+
+			return
 		}
 		results, err := service.GetResults(r.Context(), gameID)
 		if err != nil {

@@ -269,7 +269,7 @@ func (s *Service) calculateScore(ctx context.Context, question *Question, answer
 	answerWindow := question.ExpiredAt.Sub(question.StartedAt)
 	duration := answer.AnsweredAt.Sub(question.StartedAt)
 
-	score := int(duration.Seconds() / answerWindow.Seconds() * float64(maxPoints))
+	score := int(float64(maxPoints) - (duration.Seconds() / answerWindow.Seconds() * float64(maxPoints)))
 
 	return score
 }

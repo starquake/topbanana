@@ -47,6 +47,27 @@
 
             <div x-show="finished">
                 <h2 class="subtitle">Game Finished!</h2>
+                <template x-if="results">
+                    <div class="content">
+                        <h3>Results</h3>
+                        <table class="table is-striped is-fullwidth">
+                            <thead>
+                                <tr>
+                                    <th>Player ID</th>
+                                    <th>Score</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="playerScore in results.playerScores" :key="playerScore.playerId">
+                                    <tr>
+                                        <td x-text="playerScore.playerId"></td>
+                                        <td x-text="playerScore.score"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </template>
                 <button class="button is-link" @click="reset()">Play Again</button>
             </div>
         </div>

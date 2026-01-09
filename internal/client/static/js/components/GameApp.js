@@ -8,6 +8,7 @@ export class GameApp {
         this.gameId = null;
         this.question = null;
         this.finished = false;
+        this.results = null;
     }
 
     async init() {
@@ -27,6 +28,7 @@ export class GameApp {
         const question = await gameService.getNextQuestion(this.gameId);
         if (!question) {
             this.finished = true;
+            this.results = await gameService.getResults(this.gameId);
             return;
         }
         this.question = question;
@@ -41,5 +43,6 @@ export class GameApp {
         this.gameId = null;
         this.question = null;
         this.finished = false;
+        this.results = null;
     }
 }

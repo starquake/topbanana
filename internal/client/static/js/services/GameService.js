@@ -23,6 +23,11 @@ export class GameService {
             body: JSON.stringify({ optionId: optionId })
         });
     }
+
+    async getResults(gameId) {
+        const response = await fetch(`/api/games/${gameId}/results`);
+        return await response.json();
+    }
 }
 
 export const gameService = new GameService();
