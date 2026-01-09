@@ -17,11 +17,12 @@ export class GameService {
     }
 
     async submitAnswer(gameId, questionId, optionId) {
-        await fetch(`/api/games/${gameId}/questions/${questionId}/answers`, {
+        const response = await fetch(`/api/games/${gameId}/questions/${questionId}/answers`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ optionId: optionId })
         });
+        return await response.json();
     }
 
     async getResults(gameId) {

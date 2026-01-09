@@ -9,6 +9,7 @@ export class GameApp {
         this.question = null;
         this.finished = false;
         this.results = null;
+        this.feedback = null;
         this.progress = 100;
         this.timer = null;
     }
@@ -61,7 +62,19 @@ export class GameApp {
     }
 
     async submitAnswer(optionId) {
-        await gameService.submitAnswer(this.gameId, this.question.id, optionId);
+        if (this.feedback) return;
+        this.feedback = await gameService.submitAnswer(this.gameId, this.question.id, optionId);
+        
+        // Stop timer
+        if (this.timer) {
+            clearInterval(this.timer);
+            this.timer = null;
+        }
+
+        // Wait for 2 seconds before moving to next question
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        this.feedback = null;
         await this.nextQuestion();
     }
 
@@ -74,6 +87,7 @@ export class GameApp {
         this.question = null;
         this.finished = false;
         this.results = null;
+        this.feedback = null;
         this.progress = 100;
     }
 }
