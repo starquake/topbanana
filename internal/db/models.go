@@ -37,7 +37,7 @@ type GameQuestion struct {
 	GameID     string
 	QuestionID int64
 	StartedAt  time.Time
-	ExpiredAt  sql.NullTime
+	ExpiredAt  time.Time
 }
 
 type Option struct {

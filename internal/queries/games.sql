@@ -13,6 +13,10 @@ UPDATE games
 SET started_at = CURRENT_TIMESTAMP
 WHERE id = ?;
 
+-- name: ListParticipantsByGameID :many
+SELECT *
+FROM game_participants
+WHERE game_id = ?;
 
 -- name: CreateParticipant :one
 INSERT INTO game_participants (game_id, player_id)

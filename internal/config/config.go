@@ -15,6 +15,9 @@ var ErrDBUriNotSetInProduction = errors.New("DB_URI must be set in production")
 const (
 	// AppEnvironmentDefault is the default application environment.
 	AppEnvironmentDefault = "development"
+	// ClientDirDefault specifies the default directory for client-side static files.
+	ClientDirDefault = "internal/client/static"
+
 	// HostDefault is the default host to listen on. Can be an IP address or hostname.
 	HostDefault = "localhost"
 	// PortDefault is the default port to listen on.
@@ -45,12 +48,15 @@ type Config struct {
 	DBMaxOpenConns    int
 	DBMaxIdleConns    int
 	DBConnMaxLifetime time.Duration
+
+	ClientDir string
 }
 
 // Parse parses environment variables into the config.
 func Parse(getenv func(string) string) (*Config, error) {
 	c := Config{
 		AppEnvironment:    AppEnvironmentDefault,
+		ClientDir:         ClientDirDefault,
 		Host:              HostDefault,
 		Port:              PortDefault,
 		DBDriver:          DBDriverDefault,
@@ -71,6 +77,9 @@ func Parse(getenv func(string) string) (*Config, error) {
 	}
 	if val := getenv("DB_URI"); val != "" {
 		c.DBURI = val
+	}
+	if val := getenv("CLIENT_DIR"); val != "" {
+		c.ClientDir = val
 	}
 
 	// Strict validation for types
@@ -104,4 +113,9 @@ func Parse(getenv func(string) string) (*Config, error) {
 	}
 
 	return &c, nil
+}
+
+// IsProduction returns true if the application is running in production.
+func (c *Config) IsProduction() bool {
+	return c.AppEnvironment == "production"
 }

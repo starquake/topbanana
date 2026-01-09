@@ -26,11 +26,13 @@ type Store interface {
 	// ListQuestions returns all questions for a quiz by its ID.
 	ListQuestions(ctx context.Context, quizID int64) ([]*Question, error)
 	// GetQuestion returns a question with options, by its question ID.
-	GetQuestion(ctx context.Context, id int64) (*Question, error)
+	GetQuestion(ctx context.Context, questionID int64) (*Question, error)
 	// CreateQuestion creates a question.
 	CreateQuestion(ctx context.Context, qs *Question) error
 	// UpdateQuestion updates a question.
 	UpdateQuestion(ctx context.Context, qs *Question) error
+	// GetOption returns an option by its ID.
+	GetOption(ctx context.Context, optionID int64) (*Option, error)
 }
 
 var (
@@ -38,6 +40,8 @@ var (
 	ErrQuizNotFound = errors.New("quiz not found")
 	// ErrQuestionNotFound is returned when a question is not found.
 	ErrQuestionNotFound = errors.New("question not found")
+	// ErrOptionNotFound is returned when an option is not found.
+	ErrOptionNotFound = errors.New("option not found")
 	// ErrUpdatingQuizNoRowsAffected is returned when no rows are affected when updating a quiz.
 	ErrUpdatingQuizNoRowsAffected = errors.New("no rows affected when updating quiz")
 	// ErrUpdatingQuestionNoRowsAffected is returned when no rows are affected when updating a question.

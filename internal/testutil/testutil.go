@@ -27,7 +27,7 @@ func SignalCtx(t *testing.T) (context.Context, context.CancelFunc) {
 	return ctx, stop
 }
 
-// TestWriter is an io.Writer that forwards writes to tb.Log.
+// TestWriter is an [io.Writer] that forwards writes to tb.Log.
 // It is thread-safe and ensures logs are captured by the test runner.
 type TestWriter struct {
 	tb testing.TB

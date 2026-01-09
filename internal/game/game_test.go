@@ -83,14 +83,18 @@ func TestService_GetNextQuestion(t *testing.T) {
 			t.Fatalf("failed to create game: %v", err)
 		}
 
-		service := NewService(gameStore, quizStore)
-		qs, err := service.GetNextQuestion(ctx, testGame.ID)
+		service := NewService(gameStore, quizStore, slog.Default())
+		gq, err := service.GetNextQuestion(ctx, testGame.ID)
 		if err != nil {
 			t.Fatalf("failed to get next question: %v", err)
 		}
 
-		if cmp.Diff(qs, testQuiz.Questions[0]) != "" {
-			t.Errorf("got qs: %+v, want %+v", qs, testQuiz.Questions[0])
+		if gq == nil {
+			t.Fatal("expected gq to be non-nil")
+		}
+
+		if cmp.Diff(gq.QuizQuestion, testQuiz.Questions[0]) != "" {
+			t.Errorf("got qs: %+v, want %+v", gq.QuizQuestion, testQuiz.Questions[0])
 		}
 	})
 
@@ -118,19 +122,23 @@ func TestService_GetNextQuestion(t *testing.T) {
 			t.Fatalf("failed to create game: %v", err)
 		}
 
-		err = gameStore.CreateGameQuestion(ctx, &Question{GameID: testGame.ID, QuestionID: testQuiz.Questions[0].ID})
+		err = gameStore.CreateQuestion(ctx, &Question{GameID: testGame.ID, QuestionID: testQuiz.Questions[0].ID})
 		if err != nil {
 			t.Fatalf("failed to create game question: %v", err)
 		}
 
-		service := NewService(gameStore, quizStore)
-		qs, err := service.GetNextQuestion(ctx, testGame.ID)
+		service := NewService(gameStore, quizStore, slog.Default())
+		gq, err := service.GetNextQuestion(ctx, testGame.ID)
 		if err != nil {
 			t.Fatalf("failed to get next question: %v", err)
 		}
 
-		if cmp.Diff(qs, testQuiz.Questions[1]) != "" {
-			t.Errorf("got qs: %+v, want %+v", qs, testQuiz.Questions[1])
+		if gq == nil {
+			t.Fatal("expected gq to be non-nil")
+		}
+
+		if cmp.Diff(gq.QuizQuestion, testQuiz.Questions[1]) != "" {
+			t.Errorf("got qs: %+v, want %+v", gq.QuizQuestion, testQuiz.Questions[1])
 		}
 	})
 }

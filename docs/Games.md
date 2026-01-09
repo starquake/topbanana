@@ -33,7 +33,7 @@ sequenceDiagram
         GameService->>Store: GetQuiz(quizID)
         Note right of GameService: Logic: Identify next unanswered question
         GameService->>Store: CreateGameQuestion(gameID, questionID)
-        GameService-->>API: *quiz.Question
+        GameService-->>API: *game.Question
         API-->>Player: {question, expiresAt}
 
         Note over Player, Store: Answering

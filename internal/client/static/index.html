@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TopBanana Client</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css">
+    <script type="module" src="js/app.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body>
+    <section class="section">
+        <div class="container" x-data="gameApp">
+            <h1 class="title">Top Banana!</h1>
+
+            <div x-show="!gameId">
+                <h2 class="subtitle">Select a Quiz</h2>
+                <div class="field">
+                    <div class="control">
+                        <div class="select">
+                            <select x-model="selectedQuizId">
+                                <template x-for="quiz in quizzes" :key="quiz.id">
+                                    <option :value="quiz.id" x-text="quiz.title"></option>
+                                </template>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <button class="button is-primary" @click="startGame()" :disabled="!selectedQuizId">Start Game</button>
+            </div>
+
+            <div x-show="gameId && !finished">
+                <template x-if="question">
+                    <div>
+                        <progress class="progress is-primary" :value="progress" max="100"></progress>
+                        <h2 class="subtitle" x-text="question.text"></h2>
+
+                        <template x-if="feedback">
+                            <div class="notification" :class="feedback.correct ? 'is-success' : 'is-danger'">
+                                <p class="is-size-4" x-text="feedback.correct ? 'Correct! ✅' : 'Wrong! ❌'"></p>
+                                <p>Score: <span x-text="feedback.score"></span></p>
+                            </div>
+                        </template>
+
+                        <div class="buttons" x-show="!feedback">
+                            <template x-for="option in question.options" :key="option.id">
+                                <button class="button is-fullwidth" @click="submitAnswer(option.id)" x-text="option.text"></button>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+                <template x-if="!question">
+                    <p>Loading question...</p>
+                </template>
+            </div>
+
+            <div x-show="finished">
+                <h2 class="subtitle">Game Finished!</h2>
+                <template x-if="results">
+                    <div class="content">
+                        <h3>Results</h3>
+                        <table class="table is-striped is-fullwidth">
+                            <thead>
+                                <tr>
+                                    <th>Player ID</th>
+                                    <th>Score</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="playerScore in results.playerScores" :key="playerScore.playerId">
+                                    <tr>
+                                        <td x-text="playerScore.playerId"></td>
+                                        <td x-text="playerScore.score"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </template>
+                <button class="button is-link" @click="reset()">Play Again</button>
+            </div>
+        </div>
+    </section>
+</body>
+</html>

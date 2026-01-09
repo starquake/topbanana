@@ -76,7 +76,7 @@ type CreateGameQuestionParams struct {
 	GameID     string
 	QuestionID int64
 	StartedAt  time.Time
-	ExpiredAt  sql.NullTime
+	ExpiredAt  time.Time
 }
 
 func (q *Queries) CreateGameQuestion(ctx context.Context, arg CreateGameQuestionParams) (GameQuestion, error) {
@@ -213,6 +213,40 @@ func (q *Queries) ListGameQuestionsByGameID(ctx context.Context, gameID string) 
 			&i.QuestionID,
 			&i.StartedAt,
 			&i.ExpiredAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listParticipantsByGameID = `-- name: ListParticipantsByGameID :many
+SELECT id, game_id, player_id, joined_at
+FROM game_participants
+WHERE game_id = ?
+`
+
+func (q *Queries) ListParticipantsByGameID(ctx context.Context, gameID string) ([]GameParticipant, error) {
+	rows, err := q.db.QueryContext(ctx, listParticipantsByGameID, gameID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GameParticipant
+	for rows.Next() {
+		var i GameParticipant
+		if err := rows.Scan(
+			&i.ID,
+			&i.GameID,
+			&i.PlayerID,
+			&i.JoinedAt,
 		); err != nil {
 			return nil, err
 		}

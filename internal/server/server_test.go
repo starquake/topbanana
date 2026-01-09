@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/game"
 	. "github.com/starquake/topbanana/internal/server"
 	"github.com/starquake/topbanana/internal/store"
@@ -12,7 +13,7 @@ import (
 func TestNewServer(t *testing.T) {
 	t.Parallel()
 
-	srv := New(slog.New(slog.DiscardHandler), &store.Stores{}, &game.Service{})
+	srv := New(slog.New(slog.DiscardHandler), &store.Stores{}, &game.Service{}, &config.Config{})
 
 	if srv == nil {
 		t.Error("srv is nil")

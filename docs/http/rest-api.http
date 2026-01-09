@@ -12,11 +12,11 @@ POST {{serverUrl}}/api/games
 }
 
 ### Get first question
-GET {{serverUrl}}/api/games/d5ees0on2fa1mda34mtg/questions/next
+GET {{serverUrl}}/api/games/d5gi9kgn2facjitokja0/questions/next
 Accept: application/json
 
 ### Send answer to first question
-POST {{serverUrl}}/api/games/d5ees0on2fa1mda34mtg/questions/1/answers
+POST {{serverUrl}}/api/games/d5gi9kgn2facjitokja0/questions/1/answers
 Content-Type: application/json
 
 {
@@ -24,9 +24,18 @@ Content-Type: application/json
 }
 
 ### Get next question
-GET {{serverUrl}}/api/games/d5ees0on2fa1mda34mtg/questions/next
+GET {{serverUrl}}/api/games/d5gi9kgn2facjitokja0/questions/next
 Accept: application/json
 
 ### Send answer to next question
-POST {{serverUrl}}/api/games/d5ees0on2fa1mda34mtg/questions/2/answers
+POST {{serverUrl}}/api/games/d5gi9kgn2facjitokja0/questions/2/answers
 Content-Type: application/json
+
+{
+  "optionId": 1
+}
+
+
+### Get the scores
+GET {{serverUrl}}/api/games/d5gi9kgn2facjitokja0/results
+Accept: application/json

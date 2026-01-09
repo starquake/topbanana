@@ -203,8 +203,8 @@ func TestGameplay_Integration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to submit answer: %v", err)
 		}
-		if resp.StatusCode != http.StatusNoContent {
-			t.Fatalf("expected status 204, got %d", resp.StatusCode)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", resp.StatusCode)
 		}
 		resp.Body.Close()
 	}

@@ -5,13 +5,21 @@ import (
 	"net/http"
 
 	"github.com/starquake/topbanana/internal/admin"
+	"github.com/starquake/topbanana/internal/client"
 	"github.com/starquake/topbanana/internal/clientapi"
+	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/health"
 	"github.com/starquake/topbanana/internal/store"
 )
 
-func addRoutes(mux *http.ServeMux, logger *slog.Logger, stores *store.Stores, gameService *game.Service) {
+func addRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	stores *store.Stores,
+	gameService *game.Service,
+	cfg *config.Config,
+) {
 	// Admin interface routes
 	mux.Handle("GET /admin", admin.HandleIndex(logger))
 	mux.Handle("GET /admin/quizzes", admin.HandleQuizList(logger, stores.Quizzes))
@@ -40,6 +48,10 @@ func addRoutes(mux *http.ServeMux, logger *slog.Logger, stores *store.Stores, ga
 		"POST /api/games/{gameID}/questions/{questionID}/answers",
 		clientapi.HandleAnswerPost(logger, gameService),
 	)
+	mux.Handle("GET /api/games/{gameID}/results", clientapi.HandleGameResults(logger, gameService))
+
+	// Client
+	mux.Handle("/client/", client.Handler(cfg))
 
 	// Health
 	mux.Handle("GET /healthz", health.HandleHealthz(logger, stores))
