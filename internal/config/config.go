@@ -16,7 +16,7 @@ const (
 	// AppEnvironmentDefault is the default application environment.
 	AppEnvironmentDefault = "development"
 	// ClientDirDefault specifies the default directory for client-side static files.
-	ClientDirDefault = "internal/client/static"
+	ClientDirDefault = ""
 
 	// HostDefault is the default host to listen on. Can be an IP address or hostname.
 	HostDefault = "localhost"
@@ -78,8 +78,10 @@ func Parse(getenv func(string) string) (*Config, error) {
 	if val := getenv("DB_URI"); val != "" {
 		c.DBURI = val
 	}
-	if val := getenv("CLIENT_DIR"); val != "" {
-		c.ClientDir = val
+	if c.AppEnvironment == "development" {
+		if val := getenv("CLIENT_DIR"); val != "" {
+			c.ClientDir = val
+		}
 	}
 
 	// Strict validation for types

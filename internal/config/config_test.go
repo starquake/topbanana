@@ -168,6 +168,28 @@ func TestParse(t *testing.T) {
 			t.Fatalf("got error %v, want %v", got, want)
 		}
 	})
+
+	t.Run("client dir in production", func(t *testing.T) {
+		t.Parallel()
+
+		getenv := func(key string) string {
+			envs := map[string]string{
+				"APP_ENV":    "production",
+				"CLIENT_DIR": "should/be/overridden",
+				"DB_URI":     "file:test.sqlite",
+			}
+
+			return envs[key]
+		}
+
+		c, err := Parse(getenv)
+		if err != nil {
+			t.Fatalf("error parsing config: %v", err)
+		}
+		if c.ClientDir != "" {
+			t.Errorf("got %q, want empty string for production default", c.ClientDir)
+		}
+	})
 }
 
 func TestParse_ErrorHandling(t *testing.T) {
