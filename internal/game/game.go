@@ -19,7 +19,6 @@ const (
 // ErrGameNotFound is returned when a game is not found.
 var (
 	ErrGameNotFound               = errors.New("game not found")
-	ErrPlayerNotFound             = errors.New("player not found")
 	ErrNoMoreQuestions            = errors.New("no more questions")
 	ErrQuestionNotInGame          = errors.New("question not in game")
 	ErrStartingGameNoRowsAffected = errors.New("no rows affected when starting game")
@@ -54,10 +53,11 @@ type Participant struct {
 
 // Question represents a question in a game. It references a quiz question.
 type Question struct {
-	ID         int64
-	GameID     string
-	QuestionID int64
-	StartedAt  time.Time
+	ID           int64
+	GameID       string
+	QuestionID   int64
+	QuizQuestion *quiz.Question
+	StartedAt    time.Time
 	// TODO: change this to time duration like 10s instead of timestamp?
 	ExpiredAt time.Time
 	Answers   []*Answer
@@ -65,19 +65,21 @@ type Question struct {
 
 // Answer represents an answer for a question. Answers are recorded for a specific game and player.
 type Answer struct {
-	ID             int64
-	GameID         string
-	PlayerID       int64
-	GameQuestionID int64
-	OptionID       int64
-	AnsweredAt     time.Time
+	ID         int64
+	GameID     string
+	PlayerID   int64
+	QuestionID int64
+	Question   *Question
+	OptionID   int64
+	Option     *quiz.Option
+	AnsweredAt time.Time
 }
 
 // Results represents the accumulated score for each player in a game.
 type Results struct {
 	GameID string
 
-	// PlayerScores maps a player's ID to their accumulated calculateScore in the game.
+	// PlayerScores maps a player's ID to their accumulated CalculateScore in the game.
 	PlayerScores map[int64]int
 }
 
@@ -143,14 +145,10 @@ func (s *Service) CreateGame(ctx context.Context, quizID, playerID int64) (*Game
 }
 
 // GetNextQuestion retrieves the next unanswered question for the specified game or returns nil if all are answered.
-func (s *Service) GetNextQuestion(ctx context.Context, gameID string) (*quiz.Question, error) {
+func (s *Service) GetNextQuestion(ctx context.Context, gameID string) (*Question, error) {
 	// Get the game
 	g, err := s.store.GetGame(ctx, gameID)
 	if err != nil {
-		if errors.Is(err, ErrGameNotFound) {
-			return nil, ErrGameNotFound
-		}
-
 		return nil, fmt.Errorf("failed to get game: %w", err)
 	}
 
@@ -178,13 +176,15 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string) (*quiz.Que
 		}
 	}
 
+	var gq *Question
 	// If we found a quiz question, register it as a GameQuestion (starting the timer)
 	if nextQuestion != nil {
-		gq := &Question{
-			GameID:     gameID,
-			QuestionID: nextQuestion.ID,
-			StartedAt:  time.Now(),
-			ExpiredAt:  time.Now().Add(defaultExpiration), // 10s limit
+		gq = &Question{
+			GameID:       gameID,
+			QuestionID:   nextQuestion.ID,
+			QuizQuestion: nextQuestion,
+			StartedAt:    time.Now(),
+			ExpiredAt:    time.Now().Add(defaultExpiration), // 10s limit
 		}
 		if err = s.store.CreateQuestion(ctx, gq); err != nil {
 			return nil, fmt.Errorf("failed to record game question: %w", err)
@@ -195,45 +195,55 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string) (*quiz.Que
 		return nil, ErrNoMoreQuestions
 	}
 
-	return nextQuestion, nil
+	return gq, nil
 }
 
 // SubmitAnswer records an answer from a player for a specific question in a game.
 // It validates that the game exists and the question belongs to the game before saving the answer.
+// Returns the saved answer or nil if the question was not found in the game.
 // Returns an error if the operation fails.
-func (s *Service) SubmitAnswer(ctx context.Context, gameID string, playerID, questionID, optionID int64) error {
+func (s *Service) SubmitAnswer(
+	ctx context.Context,
+	gameID string,
+	playerID, questionID, optionID int64,
+) (*Answer, error) {
 	var err error
 
 	g, err := s.store.GetGame(ctx, gameID)
 	if err != nil {
-		return fmt.Errorf("failed to get game: %w", err)
+		return nil, fmt.Errorf("failed to get game: %w", err)
 	}
 
-	var gameQuestionID int64
-	for _, gq := range g.Questions {
-		if gq.QuestionID == questionID {
-			gameQuestionID = gq.ID
+	var question *Question
+	for _, qs := range g.Questions {
+		if qs.QuestionID == questionID {
+			question = qs
 
 			break
 		}
 	}
 
-	if gameQuestionID == 0 {
-		return fmt.Errorf("question %d not found in game %s: %w", questionID, gameID, ErrQuestionNotInGame)
+	if question == nil {
+		return nil, fmt.Errorf("question %d not found in game %s: %w", questionID, gameID, ErrQuestionNotInGame)
 	}
 
 	a := &Answer{
-		GameID:         gameID,
-		PlayerID:       playerID,
-		GameQuestionID: gameQuestionID,
-		OptionID:       optionID,
+		GameID:     gameID,
+		PlayerID:   playerID,
+		QuestionID: question.ID,
+		Question:   question,
+		OptionID:   optionID,
 	}
 
 	if err = s.store.CreateAnswer(ctx, a); err != nil {
-		return fmt.Errorf("failed to create answer: %w", err)
+		return nil, fmt.Errorf("failed to create answer: %w", err)
+	}
+	a.Option, err = s.quizStore.GetOption(ctx, optionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get option: %w", err)
 	}
 
-	return nil
+	return a, nil
 }
 
 // GetResults calculates the accumulated score for each player in a game and returns the results.
@@ -248,7 +258,13 @@ func (s *Service) GetResults(ctx context.Context, gameID string) (*Results, erro
 
 	for _, gqs := range g.Questions {
 		for _, ga := range gqs.Answers {
-			plsMap[ga.PlayerID] += s.calculateScore(ctx, gqs, ga)
+			ga.Question = gqs
+			ga.Option, err = s.quizStore.GetOption(ctx, ga.OptionID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get option: %w", err)
+			}
+
+			plsMap[ga.PlayerID] += s.CalculateScore(ctx, ga)
 		}
 	}
 
@@ -257,17 +273,22 @@ func (s *Service) GetResults(ctx context.Context, gameID string) (*Results, erro
 	return r, nil
 }
 
-func (s *Service) calculateScore(ctx context.Context, question *Question, answer *Answer) int {
+// CalculateScore calculates the score for a given answer.
+func (s *Service) CalculateScore(ctx context.Context, a *Answer) int {
 	// TODO: Should this be the points for answering immediately? Or within one second?
 
-	if answer.AnsweredAt.After(question.ExpiredAt) {
-		s.logger.InfoContext(ctx, "score=0, answer.AnsweredAt > question.ExpiredAt, answered too late!")
+	if !a.Option.Correct {
+		return 0
+	}
+
+	if a.AnsweredAt.After(a.Question.ExpiredAt) {
+		s.logger.InfoContext(ctx, "score=0, a.AnsweredAt > question.ExpiredAt, answered too late!")
 
 		return 0
 	}
 
-	answerWindow := question.ExpiredAt.Sub(question.StartedAt)
-	duration := answer.AnsweredAt.Sub(question.StartedAt)
+	answerWindow := a.Question.ExpiredAt.Sub(a.Question.StartedAt)
+	duration := a.AnsweredAt.Sub(a.Question.StartedAt)
 
 	score := int(float64(maxPoints) - (duration.Seconds() / answerWindow.Seconds() * float64(maxPoints)))
 

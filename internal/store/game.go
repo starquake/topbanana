@@ -142,7 +142,7 @@ func (s *GameStore) CreateQuestion(ctx context.Context, gq *game.Question) error
 func (s *GameStore) CreateAnswer(ctx context.Context, a *game.Answer) error {
 	var err error
 	row, err := s.q.CreateAnswer(ctx, db.CreateAnswerParams{
-		GameID: a.GameID, PlayerID: a.PlayerID, GameQuestionID: a.GameQuestionID, OptionID: a.OptionID,
+		GameID: a.GameID, PlayerID: a.PlayerID, GameQuestionID: a.QuestionID, OptionID: a.OptionID,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create answer: %w", err)
@@ -211,12 +211,12 @@ func (s *GameStore) listAnswers(ctx context.Context, gameQuestionID int64) ([]*g
 	answers := make([]*game.Answer, 0, len(rows))
 	for _, r := range rows {
 		a := &game.Answer{
-			ID:             r.ID,
-			GameID:         r.GameID,
-			PlayerID:       r.PlayerID,
-			GameQuestionID: r.GameQuestionID,
-			OptionID:       r.OptionID,
-			AnsweredAt:     r.AnsweredAt,
+			ID:         r.ID,
+			GameID:     r.GameID,
+			PlayerID:   r.PlayerID,
+			QuestionID: r.GameQuestionID,
+			OptionID:   r.OptionID,
+			AnsweredAt: r.AnsweredAt,
 		}
 
 		answers = append(answers, a)

@@ -69,6 +69,12 @@ SELECT id
 FROM options
 WHERE question_id = ?;
 
+-- name: GetOption :one
+SELECT *
+FROM options
+WHERE id = ?
+LIMIT 1;
+
 -- name: CreateOption :one
 INSERT INTO options (question_id, text, is_correct)
 VALUES (?, ?, ?)

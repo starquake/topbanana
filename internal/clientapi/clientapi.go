@@ -119,9 +119,11 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 	}
 
 	type questionResponse struct {
-		ID      int64            `json:"id"`
-		Text    string           `json:"text"`
-		Options []optionResponse `json:"options"`
+		ID        int64            `json:"id"`
+		Text      string           `json:"text"`
+		Options   []optionResponse `json:"options"`
+		StartedAt time.Time        `json:"startedAt"`
+		ExpiredAt time.Time        `json:"expiredAt"`
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -134,7 +136,7 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 			return
 		}
 
-		qs, err := service.GetNextQuestion(r.Context(), gameID)
+		gq, err := service.GetNextQuestion(r.Context(), gameID)
 		if err != nil {
 			if errors.Is(err, game.ErrGameNotFound) {
 				http.Error(w, err.Error(), http.StatusNotFound)
@@ -157,8 +159,8 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 			return
 		}
 
-		resOptions := make([]optionResponse, len(qs.Options))
-		for i, o := range qs.Options {
+		resOptions := make([]optionResponse, len(gq.QuizQuestion.Options))
+		for i, o := range gq.QuizQuestion.Options {
 			resOption := optionResponse{
 				ID:   o.ID,
 				Text: o.Text,
@@ -167,9 +169,11 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 		}
 
 		res := questionResponse{
-			ID:      qs.ID,
-			Text:    qs.Text,
-			Options: resOptions,
+			ID:        gq.QuizQuestion.ID,
+			Text:      gq.QuizQuestion.Text,
+			Options:   resOptions,
+			StartedAt: gq.StartedAt,
+			ExpiredAt: gq.ExpiredAt,
 		}
 
 		err = httputil.EncodeJSON(w, http.StatusOK, res)
@@ -187,6 +191,12 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 	type answerRequest struct {
 		OptionID int64 `json:"optionId"`
+	}
+
+	type answerResponse struct {
+		OptionID int64 `json:"optionId"`
+		Correct  bool  `json:"correct"`
+		Score    int   `json:"score"`
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -211,7 +221,7 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 		}
 
 		// TODO: Replace with real PlayerID
-		err = service.SubmitAnswer(r.Context(), gameID, 1, questionID, req.OptionID)
+		a, err := service.SubmitAnswer(r.Context(), gameID, 1, questionID, req.OptionID)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error submitting answer", slog.Any("err", err))
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -219,7 +229,20 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 			return
 		}
 
-		w.WriteHeader(http.StatusNoContent)
+		score := service.CalculateScore(r.Context(), a)
+
+		res := answerResponse{
+			OptionID: a.OptionID,
+			Correct:  a.Option.Correct,
+			Score:    score,
+		}
+
+		err = httputil.EncodeJSON(w, http.StatusOK, res)
+		if err != nil {
+			logger.ErrorContext(r.Context(), "error encoding answerResponse", slog.Any("err", err))
+
+			return
+		}
 	})
 }
 

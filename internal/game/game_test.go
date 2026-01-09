@@ -84,13 +84,17 @@ func TestService_GetNextQuestion(t *testing.T) {
 		}
 
 		service := NewService(gameStore, quizStore, slog.Default())
-		qs, err := service.GetNextQuestion(ctx, testGame.ID)
+		gq, err := service.GetNextQuestion(ctx, testGame.ID)
 		if err != nil {
 			t.Fatalf("failed to get next question: %v", err)
 		}
 
-		if cmp.Diff(qs, testQuiz.Questions[0]) != "" {
-			t.Errorf("got qs: %+v, want %+v", qs, testQuiz.Questions[0])
+		if gq == nil {
+			t.Fatal("expected gq to be non-nil")
+		}
+
+		if cmp.Diff(gq.QuizQuestion, testQuiz.Questions[0]) != "" {
+			t.Errorf("got qs: %+v, want %+v", gq.QuizQuestion, testQuiz.Questions[0])
 		}
 	})
 
@@ -124,13 +128,17 @@ func TestService_GetNextQuestion(t *testing.T) {
 		}
 
 		service := NewService(gameStore, quizStore, slog.Default())
-		qs, err := service.GetNextQuestion(ctx, testGame.ID)
+		gq, err := service.GetNextQuestion(ctx, testGame.ID)
 		if err != nil {
 			t.Fatalf("failed to get next question: %v", err)
 		}
 
-		if cmp.Diff(qs, testQuiz.Questions[1]) != "" {
-			t.Errorf("got qs: %+v, want %+v", qs, testQuiz.Questions[1])
+		if gq == nil {
+			t.Fatal("expected gq to be non-nil")
+		}
+
+		if cmp.Diff(gq.QuizQuestion, testQuiz.Questions[1]) != "" {
+			t.Errorf("got qs: %+v, want %+v", gq.QuizQuestion, testQuiz.Questions[1])
 		}
 	})
 }

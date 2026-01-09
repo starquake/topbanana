@@ -9,6 +9,8 @@ export class GameApp {
         this.question = null;
         this.finished = false;
         this.results = null;
+        this.progress = 100;
+        this.timer = null;
     }
 
     async init() {
@@ -25,6 +27,10 @@ export class GameApp {
     }
 
     async nextQuestion() {
+        if (this.timer) {
+            clearInterval(this.timer);
+            this.timer = null;
+        }
         const question = await gameService.getNextQuestion(this.gameId);
         if (!question) {
             this.finished = true;
@@ -32,6 +38,26 @@ export class GameApp {
             return;
         }
         this.question = question;
+        this.startCountdown();
+    }
+
+    startCountdown() {
+        const start = new Date(this.question.startedAt).getTime();
+        const end = new Date(this.question.expiredAt).getTime();
+        const total = end - start;
+
+        this.progress = 100;
+
+        this.timer = setInterval(() => {
+            const now = new Date().getTime();
+            const remaining = end - now;
+            this.progress = Math.max(0, (remaining / total) * 100);
+
+            if (this.progress <= 0) {
+                clearInterval(this.timer);
+                this.timer = null;
+            }
+        }, 100);
     }
 
     async submitAnswer(optionId) {
@@ -40,9 +66,14 @@ export class GameApp {
     }
 
     reset() {
+        if (this.timer) {
+            clearInterval(this.timer);
+            this.timer = null;
+        }
         this.gameId = null;
         this.question = null;
         this.finished = false;
         this.results = null;
+        this.progress = 100;
     }
 }

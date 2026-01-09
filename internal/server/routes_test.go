@@ -47,9 +47,13 @@ func (stubQuizStore) ListQuizzes(_ context.Context) ([]*quiz.Quiz, error) {
 	}, nil
 }
 
-func (stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error { return nil }
+func (stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error {
+	return nil
+}
 
-func (stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error { return nil }
+func (stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error {
+	return nil
+}
 
 func (stubQuizStore) CreateQuestion(_ context.Context, _ *quiz.Question) error {
 	return nil
@@ -61,6 +65,10 @@ func (stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error {
 
 func (stubQuizStore) ListQuestions(_ context.Context, _ int64) ([]*quiz.Question, error) {
 	return nil, nil
+}
+
+func (stubQuizStore) GetOption(_ context.Context, _ int64) (*quiz.Option, error) {
+	return &quiz.Option{}, nil
 }
 
 func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {

@@ -111,6 +111,25 @@ func (q *Queries) DeleteQuiz(ctx context.Context, id int64) (sql.Result, error) 
 	return q.db.ExecContext(ctx, deleteQuiz, id)
 }
 
+const getOption = `-- name: GetOption :one
+SELECT id, question_id, text, is_correct
+FROM options
+WHERE id = ?
+LIMIT 1
+`
+
+func (q *Queries) GetOption(ctx context.Context, id int64) (Option, error) {
+	row := q.db.QueryRowContext(ctx, getOption, id)
+	var i Option
+	err := row.Scan(
+		&i.ID,
+		&i.QuestionID,
+		&i.Text,
+		&i.IsCorrect,
+	)
+	return i, err
+}
+
 const getQuestion = `-- name: GetQuestion :one
 SELECT id, quiz_id, text, position
 FROM questions

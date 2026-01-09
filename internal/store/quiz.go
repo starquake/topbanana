@@ -197,6 +197,28 @@ func (s *QuizStore) UpdateQuestion(ctx context.Context, qs *quiz.Question) error
 	return nil
 }
 
+// GetOption retrieves an option by its ID from the data store and returns it. Returns ErrOptionNotFound if no option is found.
+func (s *QuizStore) GetOption(ctx context.Context, optionID int64) (*quiz.Option, error) {
+	var err error
+	row, err := s.q.GetOption(ctx, optionID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, quiz.ErrOptionNotFound
+		}
+
+		return nil, fmt.Errorf("failed to get option: %w", err)
+	}
+
+	option := &quiz.Option{
+		ID:         row.ID,
+		QuestionID: row.QuestionID,
+		Text:       row.Text,
+		Correct:    row.IsCorrect,
+	}
+
+	return option, nil
+}
+
 // mustRowsAffected is a helper to panic if the result of a query has no rows affected.
 // TODO: Move to database package.
 func mustRowsAffected(res sql.Result) int64 {

@@ -12,11 +12,11 @@ POST {{serverUrl}}/api/games
 }
 
 ### Get first question
-GET {{serverUrl}}/api/games/d5gg8t8n2fa9mu4jd2i0/questions/next
+GET {{serverUrl}}/api/games/d5gi9kgn2facjitokja0/questions/next
 Accept: application/json
 
 ### Send answer to first question
-POST {{serverUrl}}/api/games/d5gg8t8n2fa9mu4jd2i0/questions/1/answers
+POST {{serverUrl}}/api/games/d5gi9kgn2facjitokja0/questions/1/answers
 Content-Type: application/json
 
 {
@@ -24,11 +24,11 @@ Content-Type: application/json
 }
 
 ### Get next question
-GET {{serverUrl}}/api/games/d5gg8t8n2fa9mu4jd2i0/questions/next
+GET {{serverUrl}}/api/games/d5gi9kgn2facjitokja0/questions/next
 Accept: application/json
 
 ### Send answer to next question
-POST {{serverUrl}}/api/games/d5gg8t8n2fa9mu4jd2i0/questions/2/answers
+POST {{serverUrl}}/api/games/d5gi9kgn2facjitokja0/questions/2/answers
 Content-Type: application/json
 
 {
@@ -37,5 +37,5 @@ Content-Type: application/json
 
 
 ### Get the scores
-GET {{serverUrl}}/api/games/d5gg8t8n2fa9mu4jd2i0/results
+GET {{serverUrl}}/api/games/d5gi9kgn2facjitokja0/results
 Accept: application/json
