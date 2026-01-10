@@ -1,0 +1,11 @@
+.git
+bin
+*.sqlite
+.env
+*.log
+docs
+test
+README.md
+LICENSE
+Makefile
+sqlc.yaml

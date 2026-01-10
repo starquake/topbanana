@@ -30,8 +30,9 @@ profile.cov
 go.work
 go.work.sum
 
-# env file
+# env files
 .env
+.env.*
 
 # Editor/IDE
 # .idea/
