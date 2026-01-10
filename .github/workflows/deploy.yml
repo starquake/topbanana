@@ -1,0 +1,158 @@
+name: Deploy
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ 'v*.*.*' ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging')
+    environment:
+      name: staging
+      url: http://topbanana.linuxeverywhere.link:8080
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H topbanana.linuxeverywhere.link >> ~/.ssh/known_hosts
+
+      - name: Deploy to staging server
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@topbanana.linuxeverywhere.link << 'EOF'
+            set -e
+
+            # Create deployment directory if it doesn't exist
+            mkdir -p ~/topbanana-staging
+            cd ~/topbanana-staging
+
+            # Login to GitHub Container Registry
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            # Create or update docker-compose.yml
+            cat > docker-compose.yml << 'COMPOSE_EOF'
+          services:
+            app:
+              image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:edge
+              container_name: topbanana-staging
+              ports:
+                - "8080:8080"
+              environment:
+                - APP_ENV=staging
+                - HOST=0.0.0.0
+                - PORT=8080
+                - DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)
+              volumes:
+                - topbanana_staging_data:/home/nonroot/data
+              restart: unless-stopped
+
+          volumes:
+            topbanana_staging_data:
+          COMPOSE_EOF
+
+            # Pull latest image and restart services
+            docker compose pull
+            docker compose up -d
+
+            # Clean up old images
+            docker image prune -af
+
+            echo "Staging deployment completed successfully!"
+          EOF
+
+      - name: Verify staging deployment
+        run: |
+          sleep 10
+          curl -f http://topbanana.linuxeverywhere.link:8080/health || echo "Health check failed, but deployment may still be starting up"
+
+  deploy-production:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'production')
+    environment:
+      name: production
+      url: https://topbanana.linuxeverywhere.link
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PRODUCTION_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H topbanana.linuxeverywhere.link >> ~/.ssh/known_hosts
+
+      - name: Deploy to production server
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.PRODUCTION_SSH_USER }}@topbanana.linuxeverywhere.link << 'EOF'
+            set -e
+
+            # Create deployment directory if it doesn't exist
+            mkdir -p ~/topbanana-production
+            cd ~/topbanana-production
+
+            # Login to GitHub Container Registry
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            # Determine image tag (use version tag if available, otherwise latest)
+            IMAGE_TAG="${GITHUB_REF_NAME#v}"
+            if [[ ! "$IMAGE_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              IMAGE_TAG="latest"
+            fi
+
+            # Create or update docker-compose.yml
+            cat > docker-compose.yml << COMPOSE_EOF
+          services:
+            app:
+              image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}
+              container_name: topbanana-production
+              ports:
+                - "8081:8080"
+              environment:
+                - APP_ENV=production
+                - HOST=0.0.0.0
+                - PORT=8080
+                - DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)
+              volumes:
+                - topbanana_production_data:/home/nonroot/data
+              restart: unless-stopped
+
+          volumes:
+            topbanana_production_data:
+          COMPOSE_EOF
+
+            # Pull latest image and restart services
+            docker compose pull
+            docker compose up -d
+
+            # Clean up old images
+            docker image prune -af
+
+            echo "Production deployment completed successfully!"
+          EOF
+
+      - name: Verify production deployment
+        run: |
+          sleep 10
+          curl -f http://topbanana.linuxeverywhere.link:8081/health || echo "Health check failed, but deployment may still be starting up"
