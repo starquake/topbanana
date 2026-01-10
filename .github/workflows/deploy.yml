@@ -1,0 +1,74 @@
+name: Deploy to Demo Server
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  DEPLOY_HOST: topbanana.linuxeverywhere.link
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ env.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to server
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.DEPLOY_SSH_USER }}@${{ env.DEPLOY_HOST }} << 'EOF'
+            set -e
+
+            # Create deployment directory if it doesn't exist
+            mkdir -p ~/topbanana
+            cd ~/topbanana
+
+            # Login to GitHub Container Registry
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            # Create or update docker-compose.yml
+            cat > docker-compose.yml << 'COMPOSE_EOF'
+          services:
+            app:
+              image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:edge
+              container_name: topbanana
+              ports:
+                - "8080:8080"
+              environment:
+                - APP_ENV=production
+                - HOST=0.0.0.0
+                - PORT=8080
+                - DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)
+              volumes:
+                - topbanana_data:/home/nonroot/data
+              restart: unless-stopped
+
+          volumes:
+            topbanana_data:
+          COMPOSE_EOF
+
+            # Pull latest image and restart services
+            docker compose pull
+            docker compose up -d
+
+            # Clean up old images
+            docker image prune -af
+
+            echo "Deployment completed successfully!"
+          EOF
+
+      - name: Verify deployment
+        run: |
+          sleep 10
+          curl -f http://${{ env.DEPLOY_HOST }}:8080/health || echo "Health check failed, but deployment may still be starting up"
