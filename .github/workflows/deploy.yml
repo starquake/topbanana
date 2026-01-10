@@ -24,7 +24,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging')
     environment:
       name: staging
-      url: "${{ secrets.STAGING_SERVER_URL }}"
+      url: "${{ secrets.SERVER_URL }}"
 
     steps:
       - name: Checkout repository
@@ -33,13 +33,13 @@ jobs:
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/deploy_key
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ secrets.STAGING_SSH_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
 
       - name: Deploy to staging server
         run: |
-          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_SSH_HOST }} << 'EOF'
+          ssh -i ~/.ssh/deploy_key ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
             set -e
 
             # Create deployment directory if it doesn't exist
@@ -83,14 +83,14 @@ jobs:
       - name: Verify staging deployment
         run: |
           sleep 10
-          curl -f "${{ secrets.STAGING_HEALTH_URL }}" || echo "Health check failed, but deployment may still be starting up"
+          curl -f "${{ secrets.HEALTH_URL }}" || echo "Health check failed, but deployment may still be starting up"
 
   deploy-production:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'production')
     environment:
       name: production
-      url: "${{ secrets.PRODUCTION_SERVER_URL }}"
+      url: "${{ secrets.SERVER_URL }}"
 
     steps:
       - name: Checkout repository
@@ -99,13 +99,13 @@ jobs:
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.PRODUCTION_SSH_KEY }}" > ~/.ssh/deploy_key
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ secrets.PRODUCTION_SSH_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
 
       - name: Deploy to production server
         run: |
-          ssh -i ~/.ssh/deploy_key ${{ secrets.PRODUCTION_SSH_USER }}@${{ secrets.PRODUCTION_SSH_HOST }} << 'EOF'
+          ssh -i ~/.ssh/deploy_key ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
             set -e
 
             # Create deployment directory if it doesn't exist
@@ -155,4 +155,4 @@ jobs:
       - name: Verify production deployment
         run: |
           sleep 10
-          curl -f "${{ secrets.PRODUCTION_HEALTH_URL }}" || echo "Health check failed, but deployment may still be starting up"
+          curl -f "${{ secrets.HEALTH_URL }}" || echo "Health check failed, but deployment may still be starting up"
