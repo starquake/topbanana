@@ -78,7 +78,7 @@ func TestGameplay_Integration(t *testing.T) {
 	stores := store.New(db, slog.Default())
 
 	// Create a player (ID 1 as hardcoded in clientapi)
-	_, err = db.ExecContext(ctx, "INSERT INTO players (id, username, email) VALUES (1, 'tester', 'tester@example.com')")
+	_, err = db.ExecContext(ctx, "INSERT INTO players (username, email) VALUES ('tester', 'tester@example.com')")
 	if err != nil {
 		t.Fatalf("failed to create player: %v", err)
 	}
