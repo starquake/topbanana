@@ -1,9 +1,10 @@
 name: Deploy Demo
 
 on:
-  push:
-    branches: [ "main" ]
-    tags: [ 'v*.*.*' ]
+  workflow_run:
+    workflows: ["Docker"]
+    types:
+      - completed
   workflow_dispatch:
     inputs:
       environment:
@@ -21,7 +22,7 @@ env:
 jobs:
   deploy-staging:
     runs-on: ubuntu-latest
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging')
+    if: (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging')
     environment:
       name: staging
       url: "${{ env.SERVER_URL }}"
@@ -29,6 +30,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Copy docker-compose file
         uses: appleboy/scp-action@v0.1.7
@@ -70,7 +73,7 @@ jobs:
 
   deploy-production:
     runs-on: ubuntu-latest
-    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.environment == 'production')
+    if: (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.environment == 'production')
     environment:
       name: production
       url: "${{ env.SERVER_URL }}"
@@ -78,11 +81,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Determine image tag
         id: tag
         run: |
-          IMAGE_TAG="${GITHUB_REF_NAME#v}"
+          IMAGE_TAG="${{ github.event.workflow_run.head_branch || github.ref_name }}"
+          IMAGE_TAG="${IMAGE_TAG#v}"
           if [[ ! "$IMAGE_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             IMAGE_TAG="latest"
           fi
