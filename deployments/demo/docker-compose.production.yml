@@ -1,0 +1,20 @@
+services:
+  topbanana-production:
+    image: ${IMAGE_NAME}:${IMAGE_TAG:-latest}
+    container_name: topbanana-production
+    environment:
+      - APP_ENV=production
+      - HOST=0.0.0.0
+      - PORT=8080
+      - DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)
+    volumes:
+      - topbanana_production_data:/home/nonroot/data
+    networks:
+      - web
+    restart: unless-stopped
+
+volumes:
+  topbanana_production_data:
+networks:
+  web:
+    external: true

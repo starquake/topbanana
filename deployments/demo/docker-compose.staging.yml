@@ -1,17 +1,20 @@
 services:
-  app:
-    image: ghcr.io/starquake/topbanana:latest
-    container_name: topbanana
-    ports:
-      - "8080:8080"
+  topbanana-staging:
+    image: ${IMAGE_NAME}:${IMAGE_TAG:-edge}
+    container_name: topbanana-staging
     environment:
-      - APP_ENV=production
+      - APP_ENV=staging
       - HOST=0.0.0.0
       - PORT=8080
       - DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)
     volumes:
-      - topbanana_data:/home/nonroot/data
+      - topbanana_staging_data:/home/nonroot/data
+    networks:
+      - web
     restart: unless-stopped
 
 volumes:
-  topbanana_data:
+  topbanana_staging_data:
+networks:
+  web:
+    external: true

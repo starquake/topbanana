@@ -30,58 +30,38 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+      - name: Copy docker-compose file
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "deployments/demo/docker-compose.staging.yml"
+          target: "~/topbanana-staging"
+          strip_components: 2
 
       - name: Deploy to staging server
-        run: |
-          ssh -i ~/.ssh/deploy_key ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          IMAGE_TAG: edge
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          envs: IMAGE_NAME,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR
+          script: |
             set -e
-
-            # Create deployment directory if it doesn't exist
             mkdir -p ~/topbanana-staging
             cd ~/topbanana-staging
-
-            # Login to GitHub Container Registry
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-
-            # Create or update docker-compose.yml
-            cat > docker-compose.yml << 'COMPOSE_EOF'
-          services:
-            topbanana-staging:
-              image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:edge
-              container_name: topbanana-staging
-              environment:
-                - APP_ENV=staging
-                - HOST=0.0.0.0
-                - PORT=8080
-                - DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)
-              networks:
-                - web
-              volumes:
-                - topbanana_staging_data:/home/nonroot/data
-              restart: unless-stopped
-          
-          networks:
-            web:
-              external: true
-          volumes:
-            topbanana_staging_data:
-          COMPOSE_EOF
-
-            # Pull latest image and restart services
+            mv -f docker-compose.staging.yml docker-compose.yml
+            echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
             docker compose pull
             docker compose up -d
-
-            # Clean up old images
             docker image prune -af
-
-            echo "Staging deployment completed successfully!"
-          EOF
+            docker logout ghcr.io
 
       - name: Verify staging deployment
         run: |
@@ -99,63 +79,47 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up SSH
+      - name: Determine image tag
+        id: tag
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+          IMAGE_TAG="${GITHUB_REF_NAME#v}"
+          if [[ ! "$IMAGE_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            IMAGE_TAG="latest"
+          fi
+          echo "tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+
+      - name: Copy docker-compose file
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "deployments/demo/docker-compose.production.yml"
+          target: "~/topbanana-production"
+          strip_components: 2
 
       - name: Deploy to production server
-        run: |
-          ssh -i ~/.ssh/deploy_key ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          IMAGE_TAG: ${{ steps.tag.outputs.tag }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          envs: IMAGE_NAME,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR
+          script: |
             set -e
-
-            # Create deployment directory if it doesn't exist
             mkdir -p ~/topbanana-production
             cd ~/topbanana-production
-
-            # Login to GitHub Container Registry
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-
-            # Determine image tag (use version tag if available, otherwise latest)
-            IMAGE_TAG="${GITHUB_REF_NAME#v}"
-            if [[ ! "$IMAGE_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              IMAGE_TAG="latest"
-            fi
-
-            # Create or update docker-compose.yml
-            cat > docker-compose.yml << COMPOSE_EOF
-          services:
-            topbanana-production:
-              image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}
-              container_name: topbanana-production
-              environment:
-                - APP_ENV=production
-                - HOST=0.0.0.0
-                - PORT=8080
-                - DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)
-              networks:
-                - web
-              volumes:
-                - topbanana_production_data:/home/nonroot/data
-              restart: unless-stopped
-          networks:
-            web:
-              external: true
-          volumes:
-            topbanana_production_data:
-          COMPOSE_EOF
-
-            # Pull latest image and restart services
+            mv -f docker-compose.production.yml docker-compose.yml
+            echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
             docker compose pull
             docker compose up -d
-
-            # Clean up old images
             docker image prune -af
-
-            echo "Production deployment completed successfully!"
-          EOF
+            docker logout ghcr.io
 
       - name: Verify production deployment
         run: |
