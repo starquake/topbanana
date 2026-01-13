@@ -86,16 +86,27 @@ func (q *Quiz) Valid(ctx context.Context) map[string]string {
 				problems[fmt.Sprintf("Questions[%d][%s]", qsIndex, qsProblemKey)] = v
 			}
 		}
-		for oIndex, option := range question.Options {
-			if oProblems := option.Valid(ctx); len(oProblems) > 0 {
-				for oProblemKey, v := range oProblems {
-					problems[fmt.Sprintf("Questions[%d].Options[%d][%s]", qsIndex, oIndex, oProblemKey)] = v
-				}
-			}
-		}
+		validQuestionOptions(ctx, question, problems, qsIndex)
 	}
 
 	return problems
+}
+
+func validQuestionOptions(ctx context.Context, question *Question, problems map[string]string, qsIndex int) {
+	var correctCount int
+	for oIndex, option := range question.Options {
+		if oProblems := option.Valid(ctx); len(oProblems) > 0 {
+			for oProblemKey, v := range oProblems {
+				problems[fmt.Sprintf("Questions[%d].Options[%d][%s]", qsIndex, oIndex, oProblemKey)] = v
+			}
+		}
+		if option.Correct {
+			correctCount++
+			if correctCount > 1 {
+				problems[fmt.Sprintf("Questions[%d].Options[%d].Correct", qsIndex, oIndex)] = "Only one option can be correct"
+			}
+		}
+	}
 }
 
 // Question represents a question in a quiz.
