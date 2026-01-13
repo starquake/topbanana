@@ -135,14 +135,32 @@ func TestQuiz_Valid(t *testing.T) {
 					},
 				},
 			},
+			{
+				name: "quiz with question with multiple correct options",
+				quiz: Quiz{
+					Title:       "Quiz 6",
+					Slug:        "quiz-6",
+					Description: "Quiz 6 Description",
+					Questions: []*Question{
+						{
+							Text: "Question 1", Options: []*Option{
+								{Text: "CorrectOption 1-1", Correct: true},
+								{Text: "CorrectOption 1-2", Correct: true},
+							},
+						},
+					},
+				},
+			},
 		}
 
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				if len(tc.quiz.Valid(t.Context())) == 0 {
-					t.Errorf("quiz is valid: %v", tc.quiz)
+				problems := tc.quiz.Valid(t.Context())
+				if len(problems) == 0 {
+					t.Errorf("quiz should not be valid: %v", tc.quiz)
 				}
+				t.Logf("quiz is invalid: %v", problems)
 			})
 		}
 	})
