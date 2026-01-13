@@ -8,7 +8,7 @@ require (
 	github.com/rs/xid v1.6.0
 	github.com/tdewolff/minify/v2 v2.24.8
 	golang.org/x/sync v0.19.0
-	modernc.org/sqlite v1.42.2
+	modernc.org/sqlite v1.43.0
 )
 
 require (
