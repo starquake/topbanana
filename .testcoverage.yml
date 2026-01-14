@@ -1,0 +1,13 @@
+# Test coverage configuration
+
+# Threshold for total coverage (percentage)
+threshold-total: 80
+
+# List of packages to exclude from coverage report
+exclude:
+  packages:
+    - github.com/starquake/topbanana/internal/dbtest
+    - github.com/starquake/topbanana/internal/testutil
+
+# Path to the coverage profile file
+profile: build/coverage/coverage.out

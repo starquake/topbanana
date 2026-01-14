@@ -48,6 +48,7 @@ A demo will be provided soon.
   - **Integration Testing**: Full-cycle tests against a real database instance.
 - **Concurrency Safety**: Tests run with Go race detector (`-race`) and parrallel test execution for every test.
 - **Static Analysis & Linting**: Integration of `golangci-lint` and `sqlc vet` into the development workflow to maintain high code quality and SQL correctness.
+- **Test Coverage**: Automated coverage checks in CI using `go-test-coverage` to maintain high testing standards.
 - **Dependency Updates**: Periodic dependency checks with Dependabot to ensure up-to-date dependencies.
 
 ### CI/CD DevOps
