@@ -51,9 +51,9 @@ Following the official guidelines for a [standard Go server project layout](http
 ## Technical Stack & Techniques
 
 ### Backend & Architecture
-- **Modern Go Implementation**: Build utilizing the latest language features and standard library enhancements.
+- **Modern Go Implementation**: Build using the latest language features and standard library enhancements.
 - **Enhanced Routing**: Uses the Go 1.22+ `http.ServeMux` for pattern-based routing, reducing reliance on third-party web frameworks.
-- **Modular Monolith**: Using packages to seperate concerns into logical domains (API, game logic, storage), following the [standard Go server project layout](https://go.dev/doc/modules/layout#server-project).   
+- **Modular Monolith**: Using packages to separate concerns into logical domains (API, game logic, storage), following the [standard Go server project layout](https://go.dev/doc/modules/layout#server-project).   
 - **Service Layer Pattern**: Business logic is decoupled from both transport (HTTP) and persistence (SQL) layers which should make it easier to maintain and extend in the future.
 - **Dependency Injection**: Explicitly managed dependencies through constructor injection and interfaces providing loose coupling and better testability.
 - **Graceful Shutdown**: Handling of SIGTERM signals to gracefully shutdown the server, handling in-flight requests, and closing database connections.
@@ -67,7 +67,7 @@ Following the official guidelines for a [standard Go server project layout](http
 - **Database Transactions**: Ensuring atomicity of database operations by wrapping them in a transaction.
 
 ### Quality Assurance
-- **Thorough Testing Suite**"
+- **Thorough Testing Suite**
   - **Unit Testing**: Targeted tests for individual packages and functions.
   - **Integration Testing**: Full-cycle tests against a real database instance.
 - **Concurrency Safety**: Tests run with Go race detector (`-race`) and parrallel test execution for every test.
@@ -75,9 +75,9 @@ Following the official guidelines for a [standard Go server project layout](http
 - **Dependency Updates**: Periodic dependency checks with Dependabot to ensure up-to-date dependencies.
 
 ### CI/CD DevOps
-- **GitHub Actions**: Fully automated pipelines for:
-  - **Continuous Integration**: Automated linting and testing on every pull request.
-  - **Docker Automation**: Automated multi-stage Docker builds pushed to GitHub Container Registry (GHCR).
+- **GitHub Actions**: Automated pipelines for:
+  - **Continuous Integration**: Linting and testing on every pull request.
+  - **Docker Automation**: Multi-stage Docker builds pushed to GitHub Container Registry (GHCR).
   - **Automated Deployment**: Staging and production deployments triggered by successful builds.
 - **Secure Containerization**:
   - **Distroless Images**: Uses Google's `distroless` images to minimize attack surface and image size.
