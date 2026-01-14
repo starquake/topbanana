@@ -87,7 +87,7 @@ Following the official guidelines for a [standard Go server project layout](http
 
 ### Development Experience (DX)
 - **Makefile Automation**: A unified interface for common tasks: `make check`, `make test`, `make build`.
-- **Server-Side Rendering (SSR): Admin interface built with Go's `html/template`.
+- **Server-Side Rendering (SSR)**: Admin interface built with Go's `html/template`.
 - **Minimalist Frontend**: A clean client interface using modern JavaScript and CSS without the overhead of a framework.
 - **Hot Reloading**: Changes in HTML or JavaScript files are immediately reflected in the browser on a page reload.    
 
