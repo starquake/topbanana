@@ -7,7 +7,13 @@ This repository also serves as a showcase for my software engineering and Go ski
 
 ## Demo
 
-A demo will be provided soon.
+### Game
+![Image](https://github.com/user-attachments/assets/ebf9de5c-47b6-410f-b8b8-7d29200fa193)
+
+### Admin interface
+![Image](https://github.com/user-attachments/assets/77d8a814-df67-449b-a7af-15814fc21333)
+
+A link to a live demo will be provided soon.
 
 ## Features
 - **Quiz Creation**: Create and edit quizzes with questions and answers.
