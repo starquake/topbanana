@@ -194,9 +194,8 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 	}
 
 	type answerResponse struct {
-		OptionID int64 `json:"optionId"`
-		Correct  bool  `json:"correct"`
-		Score    int   `json:"score"`
+		Correct bool `json:"correct"`
+		Score   int  `json:"score"`
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -232,9 +231,8 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 		score := service.CalculateScore(r.Context(), a)
 
 		res := answerResponse{
-			OptionID: a.OptionID,
-			Correct:  a.Option.Correct,
-			Score:    score,
+			Correct: a.Option.Correct,
+			Score:   score,
 		}
 
 		err = httputil.EncodeJSON(w, http.StatusOK, res)
