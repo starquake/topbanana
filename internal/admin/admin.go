@@ -11,7 +11,7 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/starquake/topbanana/internal/httputil"
+	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
@@ -303,7 +303,7 @@ func fillQuestionFromForm(w http.ResponseWriter, r *http.Request, logger *slog.L
 			}
 		}
 		if r.PostForm.Has(fmt.Sprintf("option[%d].text", i)) {
-			op.ID, err = httputil.IDFromString(r.PostFormValue(fmt.Sprintf("option[%d].id", i)))
+			op.ID, err = handlers.IDFromString(r.PostFormValue(fmt.Sprintf("option[%d].id", i)))
 			if err != nil {
 				msg := "error parsing optionID"
 				logger.ErrorContext(r.Context(), msg, slog.Any("err", err))
@@ -448,7 +448,7 @@ func HandleQuizView(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 		var ok bool
 
 		var id int64
-		if id, ok = httputil.ParseIDFromPath(w, r, logger, "quizID"); !ok {
+		if id, ok = handlers.ParseIDFromPath(w, r, logger, "quizID"); !ok {
 			return
 		}
 
@@ -496,7 +496,7 @@ func HandleQuizEdit(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 		var ok bool
 
 		var quizID int64
-		if quizID, ok = httputil.ParseIDFromPath(w, r, logger, "quizID"); !ok {
+		if quizID, ok = handlers.ParseIDFromPath(w, r, logger, "quizID"); !ok {
 			return
 		}
 
@@ -518,7 +518,7 @@ func HandleQuizSave(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 		var ok bool
 
 		var quizID int64
-		if quizID, ok = httputil.ParseIDFromPath(w, r, logger, "quizID"); !ok {
+		if quizID, ok = handlers.ParseIDFromPath(w, r, logger, "quizID"); !ok {
 			return
 		}
 
@@ -558,7 +558,7 @@ func HandleQuestionCreate(logger *slog.Logger, quizStore quiz.Store) http.Handle
 		var ok bool
 
 		var quizID int64
-		if quizID, ok = httputil.ParseIDFromPath(w, r, logger, "quizID"); !ok {
+		if quizID, ok = handlers.ParseIDFromPath(w, r, logger, "quizID"); !ok {
 			return
 		}
 
@@ -590,12 +590,12 @@ func HandleQuestionEdit(logger *slog.Logger, quizStore quiz.Store) http.Handler 
 		var ok bool
 
 		var quizID int64
-		if quizID, ok = httputil.ParseIDFromPath(w, r, logger, "quizID"); !ok {
+		if quizID, ok = handlers.ParseIDFromPath(w, r, logger, "quizID"); !ok {
 			return
 		}
 
 		var questionID int64
-		if questionID, ok = httputil.ParseIDFromPath(w, r, logger, "questionID"); !ok {
+		if questionID, ok = handlers.ParseIDFromPath(w, r, logger, "questionID"); !ok {
 			return
 		}
 		newQuestion := questionID == 0
@@ -634,12 +634,12 @@ func HandleQuestionSave(logger *slog.Logger, quizStore quiz.Store) http.Handler 
 		var ok bool
 
 		var quizID int64
-		if quizID, ok = httputil.ParseIDFromPath(w, r, logger, "quizID"); !ok {
+		if quizID, ok = handlers.ParseIDFromPath(w, r, logger, "quizID"); !ok {
 			return
 		}
 
 		var questionID int64
-		if questionID, ok = httputil.ParseIDFromPath(w, r, logger, "questionID"); !ok {
+		if questionID, ok = handlers.ParseIDFromPath(w, r, logger, "questionID"); !ok {
 			return
 		}
 

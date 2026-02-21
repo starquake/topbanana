@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/starquake/topbanana/internal/game"
-	"github.com/starquake/topbanana/internal/httputil"
+	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
@@ -48,7 +48,7 @@ func HandleQuizList(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 			res = append(res, qzr)
 		}
 
-		err = httputil.EncodeJSON(w, http.StatusOK, res)
+		err = handlers.EncodeJSON(w, http.StatusOK, res)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error encoding quizzesResponse", slog.Any("err", err))
 
@@ -77,7 +77,7 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 		ctx := r.Context()
 		var err error
 		var req createGameRequest
-		req, err = httputil.DecodeJSON[createGameRequest](r)
+		req, err = handlers.DecodeJSON[createGameRequest](r)
 		if err != nil {
 			logger.ErrorContext(ctx, "error decoding createGameRequest", slog.Any("err", err))
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -101,7 +101,7 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 		res := createGameResponse{ID: g.ID}
 
 		w.Header().Set("Location", fmt.Sprintf("/play/game/%v", g.ID))
-		err = httputil.EncodeJSON(w, http.StatusCreated, res)
+		err = handlers.EncodeJSON(w, http.StatusCreated, res)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error encoding quizzesResponse", slog.Any("err", err))
 
@@ -176,7 +176,7 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 			ExpiredAt: gq.ExpiredAt,
 		}
 
-		err = httputil.EncodeJSON(w, http.StatusOK, res)
+		err = handlers.EncodeJSON(w, http.StatusOK, res)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error encoding questionResponse", slog.Any("err", err))
 
@@ -208,12 +208,12 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 			return
 		}
 
-		questionID, ok := httputil.ParseIDFromPath(w, r, logger, "questionID")
+		questionID, ok := handlers.ParseIDFromPath(w, r, logger, "questionID")
 		if !ok {
 			return
 		}
 
-		req, err := httputil.DecodeJSON[answerRequest](r)
+		req, err := handlers.DecodeJSON[answerRequest](r)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 
@@ -237,7 +237,7 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 			Score:    score,
 		}
 
-		err = httputil.EncodeJSON(w, http.StatusOK, res)
+		err = handlers.EncodeJSON(w, http.StatusOK, res)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error encoding answerResponse", slog.Any("err", err))
 
@@ -294,7 +294,7 @@ func HandleGameResults(logger *slog.Logger, service *game.Service) http.Handler 
 			PlayerScores: psr,
 		}
 
-		err = httputil.EncodeJSON(w, http.StatusOK, res)
+		err = handlers.EncodeJSON(w, http.StatusOK, res)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error encoding questionResponse", slog.Any("err", err))
 

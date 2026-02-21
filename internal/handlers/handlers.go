@@ -1,5 +1,5 @@
-// Package httputil provides utility functions for HTTP servers.
-package httputil
+// Package handlers provides utility functions for HTTP servers.
+package handlers
 
 import (
 	"encoding/json"
