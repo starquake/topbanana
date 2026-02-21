@@ -85,7 +85,7 @@ Following the official guidelines for a [standard Go server project layout](http
   - `dbtest`: Helpers for testing database operations.
   - `game`: Business logic for gameplay.
   - `health`: Health check endpoint.
-  - `httputil`: HTTP utilities for parsing query parameters, encoding and decoding JSON, and more.
+  - `handlers`: HTTP utilities for handlers, parsing query parameters, encoding and decoding JSON, and more.
   - `migrations`: Database migrations.
   - `queries`: SQL queries used by the `sqlc` for the application.
   - `quiz`: Business logic for quiz creation and management.

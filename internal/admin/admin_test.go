@@ -1347,7 +1347,11 @@ func TestHandleQuestionSave(t *testing.T) {
 			ID: 1234, Title: "Quiz One", Slug: "quiz-one", Description: "First",
 			Questions: []*quiz.Question{
 				{
-					ID: 5678, QuizID: 1234, Text: "Question One", ImageURL: "https://example.com/image.png", Position: 10,
+					ID:       5678,
+					QuizID:   1234,
+					Text:     "Question One",
+					ImageURL: "https://example.com/image.png",
+					Position: 10,
 					Options: []*quiz.Option{
 						{Text: "Option 1-1", Correct: true},
 						{Text: "Option 1-2"},
@@ -1355,7 +1359,11 @@ func TestHandleQuestionSave(t *testing.T) {
 					},
 				},
 				{
-					ID: 9012, QuizID: 1234, Text: "Question Two", ImageURL: "https://example.com/image2.png", Position: 20,
+					ID:       9012,
+					QuizID:   1234,
+					Text:     "Question Two",
+					ImageURL: "https://example.com/image2.png",
+					Position: 20,
 					Options: []*quiz.Option{
 						{Text: "Option 2-1"},
 						{Text: "Option 2-2", Correct: true},
@@ -1363,7 +1371,11 @@ func TestHandleQuestionSave(t *testing.T) {
 					},
 				},
 				{
-					ID: 3456, QuizID: 1234, Text: "Question Three", ImageURL: "https://example.com/image3.png", Position: 30,
+					ID:       3456,
+					QuizID:   1234,
+					Text:     "Question Three",
+					ImageURL: "https://example.com/image3.png",
+					Position: 30,
 					Options: []*quiz.Option{
 						{Text: "Option 3-1"},
 						{Text: "Option 3-2"},
