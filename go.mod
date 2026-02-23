@@ -6,7 +6,7 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/pressly/goose/v3 v3.26.0
 	github.com/rs/xid v1.6.0
-	github.com/tdewolff/minify/v2 v2.24.8
+	github.com/tdewolff/minify/v2 v2.24.9
 	golang.org/x/sync v0.19.0
 	modernc.org/sqlite v1.44.3
 )
@@ -19,7 +19,7 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
-	github.com/tdewolff/parse/v2 v2.8.5 // indirect
+	github.com/tdewolff/parse/v2 v2.8.8 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/sys v0.37.0 // indirect
