@@ -5,9 +5,13 @@ ifneq (,$(wildcard ./.env))
     export
 endif
 
+BUILD_DIR := build
+BIN_DIR := $(BUILD_DIR)/bin
+COV_DIR := $(BUILD_DIR)/coverage
+
 # Developer check before committing
 .PHONY: check
-check: lint sql-lint build test
+check: lint sql-lint build test-coverage
 
 .PHONY: lint
 lint:
@@ -23,8 +27,8 @@ sql-lint:
 
 .PHONY: build
 build:
-	mkdir -p bin
-	go build -o bin/ ./...
+	mkdir -p $(BIN_DIR)
+	go build -o $(BIN_DIR)/ ./...
 
 # Run only unit tests (excludes files with //go:build integration)
 .PHONY: test
@@ -41,6 +45,16 @@ test-integration:
 test-all:
 	go test -v -race -tags=integration ./...
 
+.PHONY: test-coverage
+test-coverage:
+	mkdir -p $(COV_DIR)
+	go test -v -race -tags=integration -coverpkg=$(shell go list ./... | grep -v -E "dbtest|testutil" | paste -sd "," -) -coverprofile=$(COV_DIR)/coverage.out ./...
+	go tool cover -func=$(COV_DIR)/coverage.out
+
+.PHONY: test-coverage-html
+test-coverage-html: test-coverage
+	go tool cover -html=$(COV_DIR)/coverage.out
+
 .PHONY: clean
 clean:
-	rm -rf bin/
+	rm -rf $(BUILD_DIR)
