@@ -7,7 +7,7 @@ require (
 	github.com/pressly/goose/v3 v3.27.0
 	github.com/rs/xid v1.6.0
 	github.com/tdewolff/minify/v2 v2.24.10
-	golang.org/x/sync v0.19.0
+	golang.org/x/sync v0.20.0
 	modernc.org/sqlite v1.46.1
 )
 
