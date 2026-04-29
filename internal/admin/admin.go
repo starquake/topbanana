@@ -77,7 +77,8 @@ type OptionData struct {
 var layouts = template.Must(template.ParseFS(tmpl.FS, "admin/layouts/*.gohtml"))
 
 const (
-	maxOptions = 4
+	maxOptions  = 4
+	maxFormSize = 1 << 20 // 1 MB
 )
 
 func quizDataFromQuiz(qz *quiz.Quiz) *QuizData {
@@ -244,6 +245,7 @@ func questionByID(
 // It renders an error page if the form is invalid.
 // It returns true if the form was valid and the quiz was filled successfully.
 func fillQuizFromForm(w http.ResponseWriter, r *http.Request, logger *slog.Logger, qz *quiz.Quiz) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormSize)
 	err := r.ParseForm()
 	if err != nil {
 		msg := "error parsing form"
@@ -270,9 +272,8 @@ func fillQuizFromForm(w http.ResponseWriter, r *http.Request, logger *slog.Logge
 // It renders an error page if the form is invalid.
 // It returns true if the form was valid and the question was filled successfully.
 func fillQuestionFromForm(w http.ResponseWriter, r *http.Request, logger *slog.Logger, qs *quiz.Question) bool {
-	var err error
-	// Parse form values
-	err = r.ParseForm()
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormSize)
+	err := r.ParseForm()
 	if err != nil {
 		msg := "error parsing form"
 		logger.ErrorContext(r.Context(), msg, slog.Any("err", err))

@@ -104,7 +104,7 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			req := httptest.NewRequest(tc.method, tc.path, nil)
+			req := httptest.NewRequestWithContext(context.Background(), tc.method, tc.path, nil)
 			rec := httptest.NewRecorder()
 
 			mux.ServeHTTP(rec, req)
@@ -127,7 +127,7 @@ func TestAddRoutes_UnknownRouteReturns404(t *testing.T) {
 	mux := http.NewServeMux()
 	ExportAddRoutes(mux, logger, stores, &game.Service{}, &config.Config{})
 
-	req := httptest.NewRequest(http.MethodGet, "/unknown/path", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/unknown/path", nil)
 	rec := httptest.NewRecorder()
 
 	mux.ServeHTTP(rec, req)
