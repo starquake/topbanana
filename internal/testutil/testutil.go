@@ -84,7 +84,6 @@ func WaitForReady(
 			return fmt.Errorf("failed to create request: %w", err)
 		}
 
-		//nolint:gosec // This is a test utility for internal endpoints.
 		resp, err := client.Do(req)
 		if err == nil {
 			closeErr := resp.Body.Close()

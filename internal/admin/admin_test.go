@@ -20,6 +20,11 @@ import (
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
+type errReader struct{ err error }
+
+func (e errReader) Read(_ []byte) (int, error) { return 0, e.err }
+func (errReader) Close() error                 { return nil }
+
 type stubQuizStore struct {
 	listQuizzes     func(ctx context.Context) ([]*quiz.Quiz, error)
 	getQuizByID     func(ctx context.Context, id int64) (*quiz.Quiz, error)
@@ -756,11 +761,12 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 		quizStore := stubQuizStore{}
 
 		handler := HandleQuizSave(logger, quizStore)
-		// Request with empty body and no header so parsing the form triggers an error.
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes", nil)
+		body := errReader{err: errors.New("simulated read error")}
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes", body)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
 		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rr := httptest.NewRecorder()
 
 		handler.ServeHTTP(rr, req)
@@ -1689,11 +1695,12 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 		}
 
 		handler := HandleQuestionSave(logger, quizStore)
-		// Request with empty body and no header so parsing the form triggers an error.
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/1234/questions", nil)
+		body := errReader{err: errors.New("simulated read error")}
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/1234/questions", body)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
 		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rr := httptest.NewRecorder()
 
 		handler.ServeHTTP(rr, req)
