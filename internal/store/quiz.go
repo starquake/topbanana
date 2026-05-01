@@ -484,11 +484,11 @@ func (*QuizStore) updateOption(ctx context.Context, q *db.Queries, o *quiz.Optio
 		IsCorrect: o.Correct,
 		ID:        o.ID,
 	})
-	if mustRowsAffected(res) == 0 {
-		return quiz.ErrUpdatingOptionNoRowsAffected
-	}
 	if err != nil {
 		return fmt.Errorf("failed to update option: %w", err)
+	}
+	if mustRowsAffected(res) == 0 {
+		return quiz.ErrUpdatingOptionNoRowsAffected
 	}
 
 	return nil
