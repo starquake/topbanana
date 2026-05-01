@@ -76,6 +76,11 @@ FROM options
 WHERE id = ?
 LIMIT 1;
 
+-- name: GetOptionsByIDs :many
+SELECT *
+FROM options
+WHERE id IN (sqlc.slice('ids'));
+
 -- name: CreateOption :one
 INSERT INTO options (question_id, text, is_correct)
 VALUES (?, ?, ?)

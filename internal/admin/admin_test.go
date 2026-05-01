@@ -112,6 +112,10 @@ func (s stubQuizStore) GetOption(ctx context.Context, optionID int64) (*quiz.Opt
 	return s.GetOption(ctx, optionID)
 }
 
+func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Option, error) {
+	return nil, errors.New("GetOptionsByIDs not implemented in stub")
+}
+
 func TestTemplateRenderer_Render_LogsError(t *testing.T) {
 	t.Parallel()
 

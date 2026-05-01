@@ -71,6 +71,10 @@ func (stubQuizStore) GetOption(_ context.Context, _ int64) (*quiz.Option, error)
 	return &quiz.Option{}, nil
 }
 
+func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Option, error) {
+	return nil, nil
+}
+
 func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 	t.Parallel()
 

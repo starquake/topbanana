@@ -1326,3 +1326,49 @@ func TestQuizStore_ImageURL(t *testing.T) {
 		}
 	})
 }
+
+func TestQuizStore_GetOptionsByIDs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns all matching options", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		ids := []int64{
+			testQuiz.Questions[0].Options[0].ID,
+			testQuiz.Questions[0].Options[1].ID,
+		}
+
+		options, err := quizStore.GetOptionsByIDs(t.Context(), ids)
+		if err != nil {
+			t.Fatalf("failed to get options by IDs: %v", err)
+		}
+
+		if got, want := len(options), len(ids); got != want {
+			t.Fatalf("len(options) = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("empty ids returns empty slice", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		options, err := quizStore.GetOptionsByIDs(t.Context(), []int64{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if got, want := len(options), 0; got != want {
+			t.Fatalf("len(options) = %d, want %d", got, want)
+		}
+	})
+}

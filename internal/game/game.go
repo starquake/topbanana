@@ -248,29 +248,39 @@ func (s *Service) SubmitAnswer(
 
 // GetResults calculates the accumulated score for each player in a game and returns the results.
 func (s *Service) GetResults(ctx context.Context, gameID string) (*Results, error) {
-	var err error
 	g, err := s.store.GetGame(ctx, gameID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get game: %w", err)
 	}
 
-	plsMap := make(map[int64]int, len(g.Participants))
+	// Collect all option IDs needed across all answers in one pass.
+	var optionIDs []int64
+	for _, gqs := range g.Questions {
+		for _, ga := range gqs.Answers {
+			optionIDs = append(optionIDs, ga.OptionID)
+		}
+	}
 
+	options, err := s.quizStore.GetOptionsByIDs(ctx, optionIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get options: %w", err)
+	}
+
+	optionsByID := make(map[int64]*quiz.Option, len(options))
+	for _, o := range options {
+		optionsByID[o.ID] = o
+	}
+
+	plsMap := make(map[int64]int, len(g.Participants))
 	for _, gqs := range g.Questions {
 		for _, ga := range gqs.Answers {
 			ga.Question = gqs
-			ga.Option, err = s.quizStore.GetOption(ctx, ga.OptionID)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get option: %w", err)
-			}
-
+			ga.Option = optionsByID[ga.OptionID]
 			plsMap[ga.PlayerID] += s.CalculateScore(ctx, ga)
 		}
 	}
 
-	r := &Results{GameID: g.ID, PlayerScores: plsMap}
-
-	return r, nil
+	return &Results{GameID: g.ID, PlayerScores: plsMap}, nil
 }
 
 // CalculateScore calculates the score for a given answer.

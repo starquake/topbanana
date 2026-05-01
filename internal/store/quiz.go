@@ -221,6 +221,26 @@ func (s *QuizStore) GetOption(ctx context.Context, optionID int64) (*quiz.Option
 	return option, nil
 }
 
+// GetOptionsByIDs retrieves options for the given IDs from the data store.
+func (s *QuizStore) GetOptionsByIDs(ctx context.Context, ids []int64) ([]*quiz.Option, error) {
+	rows, err := s.q.GetOptionsByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get options by IDs: %w", err)
+	}
+
+	options := make([]*quiz.Option, 0, len(rows))
+	for _, row := range rows {
+		options = append(options, &quiz.Option{
+			ID:         row.ID,
+			QuestionID: row.QuestionID,
+			Text:       row.Text,
+			Correct:    row.IsCorrect,
+		})
+	}
+
+	return options, nil
+}
+
 // mustRowsAffected is a helper to panic if the result of a query has no rows affected.
 // TODO: Move to database package.
 func mustRowsAffected(res sql.Result) int64 {
