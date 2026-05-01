@@ -305,8 +305,6 @@ func (s *QuizStore) handleQuestions(ctx context.Context, q *db.Queries, qz *quiz
 			}
 		} else {
 			// UPDATE
-
-			// Create a map of incoming question IDs and track which IDs should remain to exist
 			incomingIDs[qs.ID] = true
 
 			if updateErr := s.execUpdateQuestion(ctx, q, qs); updateErr != nil {
@@ -443,8 +441,6 @@ func (s *QuizStore) handleOptions(ctx context.Context, q *db.Queries, qs *quiz.Q
 			}
 		} else {
 			// UPDATE
-
-			// Create a map of incoming question IDs and track which IDs should remain to exist
 			incomingIDs[o.ID] = true
 
 			if updateErr := s.updateOption(ctx, q, o); updateErr != nil {
