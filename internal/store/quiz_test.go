@@ -1227,3 +1227,102 @@ func TestQuizStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 		}
 	})
 }
+
+func TestQuizStore_ImageURL(t *testing.T) {
+	t.Parallel()
+
+	t.Run("create question persists image_url", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		q := &quiz.Question{
+			QuizID:   testQuiz.ID,
+			Text:     "What is shown in the image?",
+			Position: 99,
+			ImageURL: "https://example.com/image.png",
+			Options:  []*quiz.Option{{Text: "A cat", Correct: true}},
+		}
+		if err := quizStore.CreateQuestion(t.Context(), q); err != nil {
+			t.Fatalf("failed to create question: %v", err)
+		}
+
+		qs, err := quizStore.GetQuestion(t.Context(), q.ID)
+		if err != nil {
+			t.Fatalf("failed to get question: %v", err)
+		}
+		if got, want := qs.ImageURL, q.ImageURL; got != want {
+			t.Errorf("GetQuestion ImageURL = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("update question persists image_url", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		original := testQuiz.Questions[0]
+		updated := &quiz.Question{
+			ID:       original.ID,
+			QuizID:   testQuiz.ID,
+			Text:     original.Text,
+			Position: original.Position,
+			ImageURL: "https://example.com/updated.png",
+			Options:  original.Options,
+		}
+		if err := quizStore.UpdateQuestion(t.Context(), updated); err != nil {
+			t.Fatalf("failed to update question: %v", err)
+		}
+
+		qs, err := quizStore.GetQuestion(t.Context(), original.ID)
+		if err != nil {
+			t.Fatalf("failed to get question: %v", err)
+		}
+		if got, want := qs.ImageURL, updated.ImageURL; got != want {
+			t.Errorf("GetQuestion ImageURL = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("list questions includes image_url", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		testQuiz.Questions[0].ImageURL = "https://example.com/list.png"
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		questions, err := quizStore.ListQuestions(t.Context(), testQuiz.ID)
+		if err != nil {
+			t.Fatalf("failed to list questions: %v", err)
+		}
+
+		var found bool
+		for _, q := range questions {
+			if q.ID == testQuiz.Questions[0].ID {
+				found = true
+				if got, want := q.ImageURL, testQuiz.Questions[0].ImageURL; got != want {
+					t.Errorf("ListQuestions ImageURL = %q, want %q", got, want)
+				}
+			}
+		}
+		if !found {
+			t.Error("question not found in ListQuestions result")
+		}
+	})
+}

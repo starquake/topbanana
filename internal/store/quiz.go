@@ -131,6 +131,7 @@ func (s *QuizStore) ListQuestions(ctx context.Context, quizID int64) ([]*quiz.Qu
 			QuizID:   r.QuizID,
 			Text:     r.Text,
 			Position: int(r.Position),
+			ImageURL: r.ImageUrl,
 		}
 
 		options, listErr := s.listOptions(ctx, qs.ID)
@@ -162,6 +163,7 @@ func (s *QuizStore) GetQuestion(ctx context.Context, id int64) (*quiz.Question, 
 		QuizID:   row.QuizID,
 		Text:     row.Text,
 		Position: int(row.Position),
+		ImageURL: row.ImageUrl,
 	}
 
 	options, err := s.listOptions(ctx, qs.ID)
@@ -334,6 +336,7 @@ func (s *QuizStore) execCreateQuestion(ctx context.Context, q *db.Queries, qs *q
 		QuizID:   qs.QuizID,
 		Text:     qs.Text,
 		Position: int64(qs.Position),
+		ImageUrl: qs.ImageURL,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create question: %w", err)
@@ -361,6 +364,7 @@ func (s *QuizStore) execUpdateQuestion(ctx context.Context, q *db.Queries, qs *q
 	res, err := q.UpdateQuestion(ctx, db.UpdateQuestionParams{
 		Text:     qs.Text,
 		Position: int64(qs.Position),
+		ImageUrl: qs.ImageURL,
 		ID:       qs.ID,
 	})
 	if err != nil {

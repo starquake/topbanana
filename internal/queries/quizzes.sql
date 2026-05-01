@@ -45,14 +45,15 @@ WHERE quiz_id = ?
 ORDER BY position;
 
 -- name: CreateQuestion :one
-INSERT INTO questions (quiz_id, text, position)
-VALUES (?, ?, ?)
+INSERT INTO questions (quiz_id, text, position, image_url)
+VALUES (?, ?, ?, ?)
 RETURNING *;
 
 -- name: UpdateQuestion :execresult
 UPDATE questions
 SET text = ?,
-    position = ?
+    position = ?,
+    image_url = ?
 WHERE id = ?;
 
 -- name: DeleteQuestion :execresult
