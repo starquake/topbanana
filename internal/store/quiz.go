@@ -131,6 +131,7 @@ func (s *QuizStore) ListQuestions(ctx context.Context, quizID int64) ([]*quiz.Qu
 			QuizID:   r.QuizID,
 			Text:     r.Text,
 			Position: int(r.Position),
+			ImageURL: r.ImageUrl,
 		}
 
 		options, listErr := s.listOptions(ctx, qs.ID)
@@ -162,6 +163,7 @@ func (s *QuizStore) GetQuestion(ctx context.Context, id int64) (*quiz.Question, 
 		QuizID:   row.QuizID,
 		Text:     row.Text,
 		Position: int(row.Position),
+		ImageURL: row.ImageUrl,
 	}
 
 	options, err := s.listOptions(ctx, qs.ID)
@@ -303,8 +305,6 @@ func (s *QuizStore) handleQuestions(ctx context.Context, q *db.Queries, qz *quiz
 			}
 		} else {
 			// UPDATE
-
-			// Create a map of incoming question IDs and track which IDs should remain to exist
 			incomingIDs[qs.ID] = true
 
 			if updateErr := s.execUpdateQuestion(ctx, q, qs); updateErr != nil {
@@ -325,7 +325,7 @@ func (s *QuizStore) handleQuestions(ctx context.Context, q *db.Queries, qz *quiz
 		return fmt.Errorf("failed to delete questions: %w", err)
 	}
 
-	return err
+	return nil
 }
 
 // execCreateQuestion creates a new question.
@@ -334,6 +334,7 @@ func (s *QuizStore) execCreateQuestion(ctx context.Context, q *db.Queries, qs *q
 		QuizID:   qs.QuizID,
 		Text:     qs.Text,
 		Position: int64(qs.Position),
+		ImageUrl: qs.ImageURL,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create question: %w", err)
@@ -361,6 +362,7 @@ func (s *QuizStore) execUpdateQuestion(ctx context.Context, q *db.Queries, qs *q
 	res, err := q.UpdateQuestion(ctx, db.UpdateQuestionParams{
 		Text:     qs.Text,
 		Position: int64(qs.Position),
+		ImageUrl: qs.ImageURL,
 		ID:       qs.ID,
 	})
 	if err != nil {
@@ -439,8 +441,6 @@ func (s *QuizStore) handleOptions(ctx context.Context, q *db.Queries, qs *quiz.Q
 			}
 		} else {
 			// UPDATE
-
-			// Create a map of incoming question IDs and track which IDs should remain to exist
 			incomingIDs[o.ID] = true
 
 			if updateErr := s.updateOption(ctx, q, o); updateErr != nil {
@@ -484,11 +484,11 @@ func (*QuizStore) updateOption(ctx context.Context, q *db.Queries, o *quiz.Optio
 		IsCorrect: o.Correct,
 		ID:        o.ID,
 	})
-	if mustRowsAffected(res) == 0 {
-		return quiz.ErrUpdatingOptionNoRowsAffected
-	}
 	if err != nil {
 		return fmt.Errorf("failed to update option: %w", err)
+	}
+	if mustRowsAffected(res) == 0 {
+		return quiz.ErrUpdatingOptionNoRowsAffected
 	}
 
 	return nil

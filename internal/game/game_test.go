@@ -91,6 +91,8 @@ func TestService_GetNextQuestion(t *testing.T) {
 
 		if gq == nil {
 			t.Fatal("expected gq to be non-nil")
+
+			return
 		}
 
 		if cmp.Diff(gq.QuizQuestion, testQuiz.Questions[0]) != "" {
@@ -135,6 +137,8 @@ func TestService_GetNextQuestion(t *testing.T) {
 
 		if gq == nil {
 			t.Fatal("expected gq to be non-nil")
+
+			return
 		}
 
 		if cmp.Diff(gq.QuizQuestion, testQuiz.Questions[1]) != "" {

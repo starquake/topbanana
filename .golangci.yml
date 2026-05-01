@@ -146,6 +146,9 @@ linters:
         - FIXME
   exclusions:
     rules:
+      - path: (_test\.go|internal/testutil/|test/)
+        linters:
+          - gosec
       - path: _test\.go
         linters:
           - dupl

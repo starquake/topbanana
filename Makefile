@@ -7,7 +7,7 @@ endif
 
 # Developer check before committing
 .PHONY: check
-check: lint sql-lint build test
+check: lint sql-lint build test-all
 
 .PHONY: lint
 lint:
