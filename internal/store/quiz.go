@@ -327,7 +327,7 @@ func (s *QuizStore) handleQuestions(ctx context.Context, q *db.Queries, qz *quiz
 		return fmt.Errorf("failed to delete questions: %w", err)
 	}
 
-	return err
+	return nil
 }
 
 // execCreateQuestion creates a new question.
