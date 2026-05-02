@@ -77,7 +77,7 @@ func (s *GameStore) CreateGame(ctx context.Context, g *game.Game) error {
 	id := xid.New()
 	row, err := s.q.CreateGame(ctx, db.CreateGameParams{ID: id.String(), QuizID: g.QuizID})
 	if err != nil {
-		return fmt.Errorf("failed to create g: %w", err)
+		return fmt.Errorf("failed to create game: %w", err)
 	}
 
 	g.ID = row.ID
