@@ -70,7 +70,7 @@ func TestParseIDFromPath(t *testing.T) {
 		mux.HandleFunc("GET /items/{id}", func(w http.ResponseWriter, r *http.Request) {
 			gotID, gotOK = ParseIDFromPath(w, r, slog.Default(), "id")
 		})
-		req := httptest.NewRequest(http.MethodGet, "/items/42", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/items/42", nil)
 		mux.ServeHTTP(httptest.NewRecorder(), req)
 		if got, want := gotOK, true; got != want {
 			t.Errorf("ok = %v, want %v", got, want)
@@ -88,7 +88,7 @@ func TestParseIDFromPath(t *testing.T) {
 		mux.HandleFunc("GET /items/{id}", func(w http.ResponseWriter, r *http.Request) {
 			gotID, gotOK = ParseIDFromPath(w, r, slog.Default(), "nonexistent")
 		})
-		req := httptest.NewRequest(http.MethodGet, "/items/42", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/items/42", nil)
 		mux.ServeHTTP(httptest.NewRecorder(), req)
 		if got, want := gotOK, true; got != want {
 			t.Errorf("ok = %v, want %v", got, want)
@@ -105,7 +105,7 @@ func TestParseIDFromPath(t *testing.T) {
 		mux.HandleFunc("GET /items/{id}", func(w http.ResponseWriter, r *http.Request) {
 			_, gotOK = ParseIDFromPath(w, r, slog.Default(), "id")
 		})
-		req := httptest.NewRequest(http.MethodGet, "/items/not-a-number", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/items/not-a-number", nil)
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
 		if got, want := gotOK, false; got != want {

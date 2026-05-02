@@ -251,7 +251,7 @@ func TestQuizStore_ListQuizzes_ErrorHandling(t *testing.T) {
 
 		quizStore := NewQuizStore(db, slog.Default())
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
 		_, err := quizStore.ListQuizzes(ctx)
@@ -421,7 +421,7 @@ func TestQuizStore_GetQuestion_ErrorHandling(t *testing.T) {
 
 		quizStore := NewQuizStore(db, slog.Default())
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
 		_, err := quizStore.GetQuestion(ctx, 1)

@@ -65,7 +65,7 @@ func TestHandleHealthz(t *testing.T) {
 			Quizzes: &stubQuizStore{},
 			Games:   &stubGameStore{},
 		}
-		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil)
 		w := httptest.NewRecorder()
 		health.HandleHealthz(slog.Default(), stores)(w, req)
 
@@ -93,7 +93,7 @@ func TestHandleHealthz(t *testing.T) {
 			Quizzes: &stubQuizStore{pingErr: errors.New("connection refused")},
 			Games:   &stubGameStore{},
 		}
-		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil)
 		w := httptest.NewRecorder()
 		health.HandleHealthz(slog.Default(), stores)(w, req)
 
