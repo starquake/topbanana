@@ -122,12 +122,8 @@ func (s stubQuizStore) ListQuestions(ctx context.Context, quizID int64) ([]*quiz
 	return s.listQuestions(ctx, quizID)
 }
 
-func (s stubQuizStore) GetOption(ctx context.Context, optionID int64) (*quiz.Option, error) {
-	if s.listQuestions == nil {
-		return nil, errors.New("getOption not supplied in stub")
-	}
-
-	return s.GetOption(ctx, optionID)
+func (stubQuizStore) GetOption(_ context.Context, _ int64) (*quiz.Option, error) {
+	return nil, errors.ErrUnsupported
 }
 
 func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Option, error) {

@@ -259,7 +259,7 @@ func (s *QuizStore) GetOptionsByIDs(ctx context.Context, ids []int64) ([]*quiz.O
 	return options, nil
 }
 
-// mustRowsAffected is a helper to panic if the result of a query has no rows affected.
+// mustRowsAffected returns the number of rows affected by res, panicking if the driver returns an error.
 // TODO: Move to database package.
 func mustRowsAffected(res sql.Result) int64 {
 	rows, err := res.RowsAffected()

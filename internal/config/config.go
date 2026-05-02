@@ -8,9 +8,9 @@ import (
 	"time"
 )
 
-// ErrDBUriNotSetInProduction is returned when DB_URI is not set in production. We need this to prevent accidental
+// ErrDBURINotSetInProduction is returned when DB_URI is not set in production. We need this to prevent accidental
 // production deployments without a database.
-var ErrDBUriNotSetInProduction = errors.New("DB_URI must be set in production")
+var ErrDBURINotSetInProduction = errors.New("DB_URI must be set in production")
 
 const (
 	// AppEnvironmentDefault is the default application environment.
@@ -111,7 +111,7 @@ func Parse(getenv func(string) string) (*Config, error) {
 
 	// Mandatory fields
 	if c.AppEnvironment == "production" && getenv("DB_URI") == "" {
-		return nil, ErrDBUriNotSetInProduction
+		return nil, ErrDBURINotSetInProduction
 	}
 
 	return &c, nil

@@ -164,7 +164,7 @@ func TestParse(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error parsing config")
 		}
-		if got, want := err, ErrDBUriNotSetInProduction; !errors.Is(got, want) {
+		if got, want := err, ErrDBURINotSetInProduction; !errors.Is(got, want) {
 			t.Fatalf("got error %v, want %v", got, want)
 		}
 	})
