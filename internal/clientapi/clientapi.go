@@ -299,6 +299,11 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 		// TODO: Replace with real PlayerID
 		a, err := service.SubmitAnswer(r.Context(), gameID, 1, questionID, req.OptionID)
 		if err != nil {
+			if errors.Is(err, game.ErrGameNotFound) || errors.Is(err, game.ErrQuestionNotInGame) {
+				http.Error(w, err.Error(), http.StatusNotFound)
+
+				return
+			}
 			logger.ErrorContext(r.Context(), "error submitting answer", slog.Any("err", err))
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 

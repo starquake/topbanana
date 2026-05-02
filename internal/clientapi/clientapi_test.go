@@ -581,6 +581,62 @@ func TestHandleAnswerPost(t *testing.T) {
 		}
 	})
 
+	t.Run("returns 404 when game not found", func(t *testing.T) {
+		t.Parallel()
+
+		svc := newService(stubGameStore{
+			getGame: func(_ context.Context, _ string) (*game.Game, error) {
+				return nil, game.ErrGameNotFound
+			},
+		}, stubQuizStore{})
+
+		mux := http.NewServeMux()
+		mux.Handle(
+			"POST /api/games/{gameID}/questions/{questionID}/answers",
+			HandleAnswerPost(logger, svc),
+		)
+
+		req := httptest.NewRequestWithContext(
+			context.Background(), http.MethodPost,
+			"/api/games/missing/questions/1/answers",
+			strings.NewReader(`{"optionId": 1}`),
+		)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusNotFound; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns 404 when question not in game", func(t *testing.T) {
+		t.Parallel()
+
+		svc := newService(stubGameStore{
+			getGame: func(_ context.Context, id string) (*game.Game, error) {
+				return &game.Game{ID: id, QuizID: 1}, nil
+			},
+		}, stubQuizStore{})
+
+		mux := http.NewServeMux()
+		mux.Handle(
+			"POST /api/games/{gameID}/questions/{questionID}/answers",
+			HandleAnswerPost(logger, svc),
+		)
+
+		req := httptest.NewRequestWithContext(
+			context.Background(), http.MethodPost,
+			"/api/games/game-1/questions/99/answers",
+			strings.NewReader(`{"optionId": 1}`),
+		)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusNotFound; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+
 	t.Run("returns 500 on game error", func(t *testing.T) {
 		t.Parallel()
 
