@@ -11,6 +11,8 @@ import (
 
 // Store represents a store for quizzes.
 // This can be implemented for different databases.
+//
+//nolint:interfacebloat // Store interface intentionally covers full CRUD for quizzes and questions.
 type Store interface {
 	// Ping returns the status of the database connection.
 	Ping(ctx context.Context) error
@@ -35,6 +37,10 @@ type Store interface {
 	GetOption(ctx context.Context, optionID int64) (*Option, error)
 	// GetOptionsByIDs returns options for the given IDs.
 	GetOptionsByIDs(ctx context.Context, ids []int64) ([]*Option, error)
+	// DeleteQuiz deletes a quiz and all its questions and options by ID.
+	DeleteQuiz(ctx context.Context, id int64) error
+	// DeleteQuestion deletes a question and all its options by ID.
+	DeleteQuestion(ctx context.Context, id int64) error
 }
 
 var (
@@ -48,7 +54,9 @@ var (
 	ErrUpdatingQuizNoRowsAffected = errors.New("no rows affected when updating quiz")
 	// ErrUpdatingQuestionNoRowsAffected is returned when no rows are affected when updating a question.
 	ErrUpdatingQuestionNoRowsAffected = errors.New("no rows affected when updating question")
-	// ErrDeletingQuestionNoRowsAffected is returned when no rows are affected when deleting a quiz.
+	// ErrDeletingQuizNoRowsAffected is returned when no rows are affected when deleting a quiz.
+	ErrDeletingQuizNoRowsAffected = errors.New("no rows affected when deleting quiz")
+	// ErrDeletingQuestionNoRowsAffected is returned when no rows are affected when deleting a question.
 	ErrDeletingQuestionNoRowsAffected = errors.New("no rows affected when deleting question")
 	// ErrUpdatingOptionNoRowsAffected is returned when no rows are affected when updating a option.
 	ErrUpdatingOptionNoRowsAffected = errors.New("no rows affected when updating option")

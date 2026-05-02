@@ -633,6 +633,64 @@ func HandleQuestionEdit(logger *slog.Logger, quizStore quiz.Store) http.Handler 
 	})
 }
 
+// HandleQuizDelete deletes a quiz and all its questions and options.
+func HandleQuizDelete(logger *slog.Logger, quizStore quiz.Store) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var ok bool
+
+		var quizID int64
+		if quizID, ok = handlers.ParseIDFromPath(w, r, logger, "quizID"); !ok {
+			return
+		}
+
+		if err := quizStore.DeleteQuiz(r.Context(), quizID); err != nil {
+			if errors.Is(err, quiz.ErrDeletingQuizNoRowsAffected) {
+				render404(w, r, logger)
+
+				return
+			}
+			logger.ErrorContext(r.Context(), "error deleting quiz", slog.Any("err", err))
+			render500(w, r, logger)
+
+			return
+		}
+
+		http.Redirect(w, r, "/admin/quizzes", http.StatusSeeOther)
+	})
+}
+
+// HandleQuestionDelete deletes a question and all its options.
+func HandleQuestionDelete(logger *slog.Logger, quizStore quiz.Store) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var ok bool
+
+		var quizID int64
+		if quizID, ok = handlers.ParseIDFromPath(w, r, logger, "quizID"); !ok {
+			return
+		}
+
+		var questionID int64
+		if questionID, ok = handlers.ParseIDFromPath(w, r, logger, "questionID"); !ok {
+			return
+		}
+
+		if err := quizStore.DeleteQuestion(r.Context(), questionID); err != nil {
+			if errors.Is(err, quiz.ErrDeletingQuestionNoRowsAffected) {
+				render404(w, r, logger)
+
+				return
+			}
+			logger.ErrorContext(r.Context(), "error deleting question", slog.Any("err", err))
+			render500(w, r, logger)
+
+			return
+		}
+
+		//nolint:gosec // quizID is parsed as int64, redirect is always /admin/quizzes/<integer>
+		http.Redirect(w, r, fmt.Sprintf("/admin/quizzes/%d", quizID), http.StatusSeeOther)
+	})
+}
+
 // HandleQuestionSave saves a question.
 func HandleQuestionSave(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

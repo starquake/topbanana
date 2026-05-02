@@ -28,4 +28,5 @@ After each piece of work, provide the PR URL: `https://github.com/starquake/topb
 - **No SQL in Go files** — add queries to `internal/queries/` and regenerate.
 - **No third-party HTTP framework or ORM.**
 - **Branch names use dashes, no slashes** — e.g. `fix-bugs`, not `fix/bugs`.
+- **Branch names are prefixed with the ticket number** — e.g. `1-fix-bugs`. Ask for the ticket number if not provided. Omit the prefix if there is no ticket.
 - **Always create a new branch before starting any work** — never commit directly to `main`.

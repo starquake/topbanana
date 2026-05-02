@@ -28,6 +28,7 @@ func addRoutes(
 	mux.Handle("POST /admin/quizzes", admin.HandleQuizSave(logger, stores.Quizzes))
 	mux.Handle("GET /admin/quizzes/{quizID}/edit", admin.HandleQuizEdit(logger, stores.Quizzes))
 	mux.Handle("POST /admin/quizzes/{quizID}", admin.HandleQuizSave(logger, stores.Quizzes))
+	mux.Handle("POST /admin/quizzes/{quizID}/delete", admin.HandleQuizDelete(logger, stores.Quizzes))
 
 	mux.Handle("GET /admin/quizzes/{quizID}/questions/new", admin.HandleQuestionCreate(logger, stores.Quizzes))
 	mux.Handle("POST /admin/quizzes/{quizID}/questions", admin.HandleQuestionSave(logger, stores.Quizzes))
@@ -38,6 +39,10 @@ func addRoutes(
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/questions/{questionID}",
 		admin.HandleQuestionSave(logger, stores.Quizzes),
+	)
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/questions/{questionID}/delete",
+		admin.HandleQuestionDelete(logger, stores.Quizzes),
 	)
 
 	// API

@@ -58,11 +58,19 @@ func (stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error {
 	return nil
 }
 
+func (stubQuizStore) DeleteQuiz(_ context.Context, _ int64) error {
+	return nil
+}
+
 func (stubQuizStore) CreateQuestion(_ context.Context, _ *quiz.Question) error {
 	return nil
 }
 
 func (stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error {
+	return nil
+}
+
+func (stubQuizStore) DeleteQuestion(_ context.Context, _ int64) error {
 	return nil
 }
 
