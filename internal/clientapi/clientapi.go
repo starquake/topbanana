@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/starquake/topbanana/internal/game"
@@ -270,9 +271,8 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 	}
 
 	type answerResponse struct {
-		OptionID int64 `json:"optionId"`
-		Correct  bool  `json:"correct"`
-		Score    int   `json:"score"`
+		Correct bool `json:"correct"`
+		Score   int  `json:"score"`
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -299,6 +299,11 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 		// TODO: Replace with real PlayerID
 		a, err := service.SubmitAnswer(r.Context(), gameID, 1, questionID, req.OptionID)
 		if err != nil {
+			if errors.Is(err, game.ErrGameNotFound) || errors.Is(err, game.ErrQuestionNotInGame) {
+				http.Error(w, err.Error(), http.StatusNotFound)
+
+				return
+			}
 			logger.ErrorContext(r.Context(), "error submitting answer", slog.Any("err", err))
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 
@@ -308,9 +313,8 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 		score := service.CalculateScore(r.Context(), a)
 
 		res := answerResponse{
-			OptionID: a.OptionID,
-			Correct:  a.Option.Correct,
-			Score:    score,
+			Correct: a.Option.Correct,
+			Score:   score,
 		}
 
 		err = handlers.EncodeJSON(w, http.StatusOK, res)
@@ -365,8 +369,13 @@ func HandleGameResults(logger *slog.Logger, service *game.Service) http.Handler 
 				Score:    psVal,
 			})
 		}
+		var winner string
+		if results.Winner != 0 {
+			winner = strconv.FormatInt(results.Winner, 10)
+		}
 		res := resultsResponse{
 			GameID:       gameID,
+			Winner:       winner,
 			PlayerScores: psr,
 		}
 

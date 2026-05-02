@@ -56,6 +56,111 @@ func newTestGame(t *testing.T, qz *quiz.Quiz) *Game {
 	}
 }
 
+func TestService_GetResults(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns player with highest score as winner", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		g, err := svc.CreateGame(ctx, testQuiz.ID, 1)
+		if err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+
+		gq, err := svc.GetNextQuestion(ctx, g.ID)
+		if err != nil {
+			t.Fatalf("failed to get next question: %v", err)
+		}
+
+		insertPlayer2 := `INSERT INTO players (id, username, email, created_at) VALUES (2, 'player2', 'player2@test.com', CURRENT_TIMESTAMP)`
+		if _, err = db.ExecContext(ctx, insertPlayer2); err != nil {
+			t.Fatalf("failed to insert player 2: %v", err)
+		}
+
+		correctOption := testQuiz.Questions[0].Options[0] // Paris, Correct: true
+		wrongOption := testQuiz.Questions[0].Options[1]   // London, Correct: false
+
+		if _, err = svc.SubmitAnswer(ctx, g.ID, 1, gq.QuizQuestion.ID, correctOption.ID); err != nil {
+			t.Fatalf("failed to submit answer for player 1: %v", err)
+		}
+		if _, err = svc.SubmitAnswer(ctx, g.ID, 2, gq.QuizQuestion.ID, wrongOption.ID); err != nil {
+			t.Fatalf("failed to submit answer for player 2: %v", err)
+		}
+
+		results, err := svc.GetResults(ctx, g.ID)
+		if err != nil {
+			t.Fatalf("failed to get results: %v", err)
+		}
+
+		if got, want := results.Winner, int64(1); got != want {
+			t.Errorf("Winner = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns no winner on tie", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		g, err := svc.CreateGame(ctx, testQuiz.ID, 1)
+		if err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+
+		gq, err := svc.GetNextQuestion(ctx, g.ID)
+		if err != nil {
+			t.Fatalf("failed to get next question: %v", err)
+		}
+
+		insertPlayer2 := `INSERT INTO players (id, username, email, created_at) VALUES (2, 'player2', 'player2@test.com', CURRENT_TIMESTAMP)`
+		if _, err = db.ExecContext(ctx, insertPlayer2); err != nil {
+			t.Fatalf("failed to insert player 2: %v", err)
+		}
+
+		wrongOption := testQuiz.Questions[0].Options[1] // London, Correct: false
+
+		if _, err = svc.SubmitAnswer(ctx, g.ID, 1, gq.QuizQuestion.ID, wrongOption.ID); err != nil {
+			t.Fatalf("failed to submit answer for player 1: %v", err)
+		}
+		if _, err = svc.SubmitAnswer(ctx, g.ID, 2, gq.QuizQuestion.ID, wrongOption.ID); err != nil {
+			t.Fatalf("failed to submit answer for player 2: %v", err)
+		}
+
+		results, err := svc.GetResults(ctx, g.ID)
+		if err != nil {
+			t.Fatalf("failed to get results: %v", err)
+		}
+
+		if got, want := results.Winner, int64(0); got != want {
+			t.Errorf("Winner = %v, want %v (expected no winner on tie)", got, want)
+		}
+	})
+}
+
 func TestService_GetNextQuestion(t *testing.T) {
 	t.Parallel()
 

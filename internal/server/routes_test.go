@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,8 @@ import (
 	. "github.com/starquake/topbanana/internal/server"
 	"github.com/starquake/topbanana/internal/store"
 )
+
+var errRouteStub = errors.New("stub")
 
 type stubQuizStore struct{}
 
@@ -75,14 +78,32 @@ func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Opti
 	return nil, nil
 }
 
+type stubGameStore struct{}
+
+func (stubGameStore) Ping(_ context.Context) error { return nil }
+
+func (stubGameStore) GetGame(_ context.Context, _ string) (*game.Game, error) {
+	return nil, errRouteStub
+}
+
+func (stubGameStore) CreateGame(_ context.Context, _ *game.Game) error { return errRouteStub }
+func (stubGameStore) StartGame(_ context.Context, _ string) error      { return errRouteStub }
+func (stubGameStore) CreateParticipant(_ context.Context, _ *game.Participant) error {
+	return errRouteStub
+}
+func (stubGameStore) CreateQuestion(_ context.Context, _ *game.Question) error { return errRouteStub }
+func (stubGameStore) CreateAnswer(_ context.Context, _ *game.Answer) error     { return errRouteStub }
+
 func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 	t.Parallel()
 
+	logger := slog.New(slog.DiscardHandler)
 	stores := &store.Stores{
 		Quizzes: stubQuizStore{},
 	}
+	gameSvc := game.NewService(stubGameStore{}, stubQuizStore{}, logger)
 	mux := http.NewServeMux()
-	ExportAddRoutes(mux, slog.New(slog.DiscardHandler), stores, &game.Service{}, &config.Config{})
+	ExportAddRoutes(mux, logger, stores, gameSvc, &config.Config{})
 
 	tests := []struct {
 		name   string
@@ -97,6 +118,11 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 
 		{name: "API Quiz List", method: http.MethodGet, path: "/api/quizzes"},
 		{name: "API Quiz Get", method: http.MethodGet, path: "/api/quizzes/1"},
+
+		{name: "API Game Create", method: http.MethodPost, path: "/api/games"},
+		{name: "API Question Next", method: http.MethodGet, path: "/api/games/game-1/questions/next"},
+		{name: "API Answer Post", method: http.MethodPost, path: "/api/games/game-1/questions/1/answers"},
+		{name: "API Game Results", method: http.MethodGet, path: "/api/games/game-1/results"},
 
 		{name: "Admin Quiz Save (create)", method: http.MethodPost, path: "/admin/quizzes"},
 		{name: "Admin Quiz Save (update)", method: http.MethodPost, path: "/admin/quizzes/1"},
@@ -132,7 +158,7 @@ func TestAddRoutes_UnknownRouteReturns404(t *testing.T) {
 		Quizzes: stubQuizStore{},
 	}
 	mux := http.NewServeMux()
-	ExportAddRoutes(mux, logger, stores, &game.Service{}, &config.Config{})
+	ExportAddRoutes(mux, logger, stores, game.NewService(stubGameStore{}, stubQuizStore{}, logger), &config.Config{})
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/unknown/path", nil)
 	rec := httptest.NewRecorder()
