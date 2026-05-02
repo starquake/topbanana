@@ -36,13 +36,48 @@
                                     <span>Edit quiz</span>
                                 </span>
                             </a>
+                            &nbsp;
+                            <a href="#" onclick="openModal('modal-delete-quiz-{{.ID}}'); return false;">
+                                <span class="icon-text has-text-danger">
+                                    <span class="icon"><i class="fas fa-trash"></i></span>
+                                    <span>Delete quiz</span>
+                                </span>
+                            </a>
                         </td>
                     </tr>
                 {{end}}
                 </tbody>
             </table>
+
+            {{range .Quizzes}}
+                <div class="modal" id="modal-delete-quiz-{{.ID}}">
+                    <div class="modal-background" onclick="closeModal('modal-delete-quiz-{{.ID}}')"></div>
+                    <div class="modal-card">
+                        <header class="modal-card-head">
+                            <p class="modal-card-title">Delete Quiz</p>
+                            <button class="delete" aria-label="close" onclick="closeModal('modal-delete-quiz-{{.ID}}')"></button>
+                        </header>
+                        <section class="modal-card-body">
+                            Are you sure you want to delete quiz <strong>&#34;{{.Title}}&#34;</strong>? This will also delete all its questions and options. This action cannot be undone.
+                        </section>
+                        <footer class="modal-card-foot">
+                            <div class="buttons">
+                                <form method="post" action="/admin/quizzes/{{.ID}}/delete">
+                                    <button class="button is-danger" type="submit">Delete</button>
+                                </form>
+                                <button class="button" onclick="closeModal('modal-delete-quiz-{{.ID}}')">Cancel</button>
+                            </div>
+                        </footer>
+                    </div>
+                </div>
+            {{end}}
         {{else}}
             <p>No quizzes found. <a href="/admin/quizzes/new">Create one now!</a></p>
         {{end}}
     </div>
+
+    <script>
+        function openModal(id) { document.getElementById(id).classList.add('is-active'); }
+        function closeModal(id) { document.getElementById(id).classList.remove('is-active'); }
+    </script>
 {{end}}

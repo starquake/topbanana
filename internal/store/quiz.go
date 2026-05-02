@@ -179,6 +179,32 @@ func (s *QuizStore) CreateQuestion(ctx context.Context, qs *quiz.Question) error
 	return nil
 }
 
+// DeleteQuiz deletes a quiz and all its questions and options by ID.
+// Cascades to questions and options via foreign key constraints.
+func (s *QuizStore) DeleteQuiz(ctx context.Context, id int64) error {
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		return s.execDeleteQuiz(ctx, q, id)
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete quiz: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteQuestion deletes a question and all its options by ID.
+// Cascades to options via foreign key constraints.
+func (s *QuizStore) DeleteQuestion(ctx context.Context, id int64) error {
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		return s.execDeleteQuestion(ctx, q, id)
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete question: %w", err)
+	}
+
+	return nil
+}
+
 // UpdateQuestion updates a question using a transaction.
 func (s *QuizStore) UpdateQuestion(ctx context.Context, qs *quiz.Question) error {
 	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
@@ -333,7 +359,7 @@ func (s *QuizStore) handleQuestions(ctx context.Context, q *db.Queries, qz *quiz
 		}
 	}
 
-	if err = s.deleteQuestions(ctx, q, deleteIDs); err != nil {
+	if err = s.execDeleteQuestions(ctx, q, deleteIDs); err != nil {
 		return fmt.Errorf("failed to delete questions: %w", err)
 	}
 
@@ -396,7 +422,20 @@ func (s *QuizStore) execUpdateQuestion(ctx context.Context, q *db.Queries, qs *q
 	return nil
 }
 
-func (*QuizStore) deleteQuestion(ctx context.Context, q *db.Queries, id int64) error {
+func (*QuizStore) execDeleteQuiz(ctx context.Context, q *db.Queries, id int64) error {
+	res, err := q.DeleteQuiz(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete quiz: %w", err)
+	}
+
+	if mustRowsAffected(res) == 0 {
+		return quiz.ErrDeletingQuizNoRowsAffected
+	}
+
+	return nil
+}
+
+func (*QuizStore) execDeleteQuestion(ctx context.Context, q *db.Queries, id int64) error {
 	res, err := q.DeleteQuestion(ctx, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete question: %w", err)
@@ -409,9 +448,9 @@ func (*QuizStore) deleteQuestion(ctx context.Context, q *db.Queries, id int64) e
 	return nil
 }
 
-func (s *QuizStore) deleteQuestions(ctx context.Context, q *db.Queries, ids []int64) error {
+func (s *QuizStore) execDeleteQuestions(ctx context.Context, q *db.Queries, ids []int64) error {
 	for _, id := range ids {
-		if err := s.deleteQuestion(ctx, q, id); err != nil {
+		if err := s.execDeleteQuestion(ctx, q, id); err != nil {
 			return fmt.Errorf("failed to delete question %d: %w", id, err)
 		}
 	}

@@ -27,6 +27,7 @@ func (*stubQuizStore) GetQuiz(_ context.Context, _ int64) (*quiz.Quiz, error) {
 }
 func (*stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error { return nil }
 func (*stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error { return nil }
+func (*stubQuizStore) DeleteQuiz(_ context.Context, _ int64) error      { return nil }
 func (*stubQuizStore) ListQuestions(_ context.Context, _ int64) ([]*quiz.Question, error) {
 	return nil, nil
 }
@@ -36,6 +37,7 @@ func (*stubQuizStore) GetQuestion(_ context.Context, _ int64) (*quiz.Question, e
 }
 func (*stubQuizStore) CreateQuestion(_ context.Context, _ *quiz.Question) error { return nil }
 func (*stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error { return nil }
+func (*stubQuizStore) DeleteQuestion(_ context.Context, _ int64) error          { return nil }
 func (*stubQuizStore) GetOption(_ context.Context, _ int64) (*quiz.Option, error) {
 	return nil, errors.ErrUnsupported
 }

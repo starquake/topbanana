@@ -30,9 +30,11 @@ type stubQuizStore struct {
 	getQuizByID     func(ctx context.Context, id int64) (*quiz.Quiz, error)
 	createQuiz      func(ctx context.Context, qz *quiz.Quiz) error
 	updateQuiz      func(ctx context.Context, qz *quiz.Quiz) error
+	deleteQuiz      func(ctx context.Context, id int64) error
 	getQuestionByID func(ctx context.Context, id int64) (*quiz.Question, error)
 	createQuestion  func(ctx context.Context, qs *quiz.Question) error
 	updateQuestion  func(ctx context.Context, qs *quiz.Question) error
+	deleteQuestion  func(ctx context.Context, id int64) error
 	listQuestions   func(ctx context.Context, quizID int64) ([]*quiz.Question, error)
 }
 
@@ -80,6 +82,14 @@ func (s stubQuizStore) UpdateQuiz(ctx context.Context, qz *quiz.Quiz) error {
 	return s.updateQuiz(ctx, qz)
 }
 
+func (s stubQuizStore) DeleteQuiz(ctx context.Context, id int64) error {
+	if s.deleteQuiz == nil {
+		return errors.New("deleteQuiz not supplied in stub")
+	}
+
+	return s.deleteQuiz(ctx, id)
+}
+
 func (s stubQuizStore) CreateQuestion(ctx context.Context, qs *quiz.Question) error {
 	if s.createQuestion == nil {
 		return errors.New("createQuestion not supplied in stub")
@@ -94,6 +104,14 @@ func (s stubQuizStore) UpdateQuestion(ctx context.Context, qs *quiz.Question) er
 	}
 
 	return s.updateQuestion(ctx, qs)
+}
+
+func (s stubQuizStore) DeleteQuestion(ctx context.Context, id int64) error {
+	if s.deleteQuestion == nil {
+		return errors.New("deleteQuestion not supplied in stub")
+	}
+
+	return s.deleteQuestion(ctx, id)
 }
 
 func (s stubQuizStore) ListQuestions(ctx context.Context, quizID int64) ([]*quiz.Question, error) {
@@ -2080,6 +2098,305 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 
 		if got, want := rr.Code, http.StatusNotFound; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+	})
+}
+
+func TestHandleQuizDelete(t *testing.T) {
+	t.Parallel()
+
+	t.Run("delete quiz", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+		var deletedID int64
+		quizStore := stubQuizStore{
+			deleteQuiz: func(_ context.Context, id int64) error {
+				deletedID = id
+
+				return nil
+			},
+		}
+
+		handler := HandleQuizDelete(logger, quizStore)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/1/delete", nil)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.SetPathValue("quizID", "1")
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusSeeOther; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+		if got, want := rr.Header().Get("Location"), "/admin/quizzes"; got != want {
+			t.Fatalf("got Location header %q, want %q", got, want)
+		}
+		if got, want := deletedID, int64(1); got != want {
+			t.Fatalf("deletedID = %d, want %d", got, want)
+		}
+	})
+}
+
+func TestHandleQuizDelete_ErrorHandling(t *testing.T) {
+	t.Parallel()
+
+	t.Run("parsing id fails", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+		handler := HandleQuizDelete(logger, stubQuizStore{})
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/not-an-int/delete", nil)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.SetPathValue("quizID", "not-an-int")
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+	})
+
+	t.Run("quiz not found", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+		quizStore := stubQuizStore{
+			deleteQuiz: func(_ context.Context, _ int64) error {
+				return quiz.ErrDeletingQuizNoRowsAffected
+			},
+		}
+
+		handler := HandleQuizDelete(logger, quizStore)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/999/delete", nil)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.SetPathValue("quizID", "999")
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusNotFound; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+	})
+
+	t.Run("delete fails", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+		testError := errors.New("test error")
+
+		quizStore := stubQuizStore{
+			deleteQuiz: func(_ context.Context, _ int64) error {
+				return testError
+			},
+		}
+
+		handler := HandleQuizDelete(logger, quizStore)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/1/delete", nil)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.SetPathValue("quizID", "1")
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusInternalServerError; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+		if got, want := buf.String(), fmt.Sprintf("err=%q", testError); !strings.Contains(got, want) {
+			t.Fatalf("got: %q, should contain: %q", got, want)
+		}
+	})
+}
+
+func TestHandleQuestionDelete(t *testing.T) {
+	t.Parallel()
+
+	t.Run("delete question", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+		var deletedID int64
+		quizStore := stubQuizStore{
+			deleteQuestion: func(_ context.Context, id int64) error {
+				deletedID = id
+
+				return nil
+			},
+		}
+
+		handler := HandleQuestionDelete(logger, quizStore)
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			"/admin/quizzes/1/questions/5/delete",
+			nil,
+		)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.SetPathValue("quizID", "1")
+		req.SetPathValue("questionID", "5")
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusSeeOther; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+		if got, want := rr.Header().Get("Location"), "/admin/quizzes/1"; got != want {
+			t.Fatalf("got Location header %q, want %q", got, want)
+		}
+		if got, want := deletedID, int64(5); got != want {
+			t.Fatalf("deletedID = %d, want %d", got, want)
+		}
+	})
+}
+
+func TestHandleQuestionDelete_ErrorHandling(t *testing.T) {
+	t.Parallel()
+
+	t.Run("parsing quizID fails", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+		handler := HandleQuestionDelete(logger, stubQuizStore{})
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			"/admin/quizzes/not-an-int/questions/5/delete",
+			nil,
+		)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.SetPathValue("quizID", "not-an-int")
+		req.SetPathValue("questionID", "5")
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+	})
+
+	t.Run("parsing questionID fails", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+		handler := HandleQuestionDelete(logger, stubQuizStore{})
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			"/admin/quizzes/1/questions/not-an-int/delete",
+			nil,
+		)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.SetPathValue("quizID", "1")
+		req.SetPathValue("questionID", "not-an-int")
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+	})
+
+	t.Run("question not found", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+		quizStore := stubQuizStore{
+			deleteQuestion: func(_ context.Context, _ int64) error {
+				return quiz.ErrDeletingQuestionNoRowsAffected
+			},
+		}
+
+		handler := HandleQuestionDelete(logger, quizStore)
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			"/admin/quizzes/1/questions/999/delete",
+			nil,
+		)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.SetPathValue("quizID", "1")
+		req.SetPathValue("questionID", "999")
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusNotFound; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+	})
+
+	t.Run("delete fails", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+		testError := errors.New("test error")
+
+		quizStore := stubQuizStore{
+			deleteQuestion: func(_ context.Context, _ int64) error {
+				return testError
+			},
+		}
+
+		handler := HandleQuestionDelete(logger, quizStore)
+		req, err := http.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			"/admin/quizzes/1/questions/5/delete",
+			nil,
+		)
+		if err != nil {
+			t.Fatalf("http.NewRequest error: %v", err)
+		}
+		req.SetPathValue("quizID", "1")
+		req.SetPathValue("questionID", "5")
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusInternalServerError; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+		if got, want := buf.String(), fmt.Sprintf("err=%q", testError); !strings.Contains(got, want) {
+			t.Fatalf("got: %q, should contain: %q", got, want)
 		}
 	})
 }

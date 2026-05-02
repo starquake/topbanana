@@ -1327,3 +1327,96 @@ func TestQuizStore_GetOptionsByIDs(t *testing.T) {
 		}
 	})
 }
+
+func TestQuizStore_DeleteQuiz(t *testing.T) {
+	t.Parallel()
+
+	t.Run("delete quiz cascades to questions and options", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		if err := quizStore.DeleteQuiz(t.Context(), testQuiz.ID); err != nil {
+			t.Fatalf("failed to delete quiz: %v", err)
+		}
+
+		_, err := quizStore.GetQuiz(t.Context(), testQuiz.ID)
+		if got, want := err, quiz.ErrQuizNotFound; !errors.Is(got, want) {
+			t.Fatalf("GetQuiz err = %v, want %v", got, want)
+		}
+
+		var questionCount int
+		if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM questions WHERE quiz_id = ?", testQuiz.ID).
+			Scan(&questionCount); err != nil {
+			t.Fatalf("failed to count questions: %v", err)
+		}
+		if got, want := questionCount, 0; got != want {
+			t.Fatalf("questions after quiz delete = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("quiz not found", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		err := quizStore.DeleteQuiz(t.Context(), 999999)
+		if got, want := err, quiz.ErrDeletingQuizNoRowsAffected; !errors.Is(got, want) {
+			t.Fatalf("DeleteQuiz err = %v, want %v", got, want)
+		}
+	})
+}
+
+func TestQuizStore_DeleteQuestion(t *testing.T) {
+	t.Parallel()
+
+	t.Run("delete question cascades to options", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		questionID := testQuiz.Questions[0].ID
+		if err := quizStore.DeleteQuestion(t.Context(), questionID); err != nil {
+			t.Fatalf("failed to delete question: %v", err)
+		}
+
+		_, err := quizStore.GetQuestion(t.Context(), questionID)
+		if got, want := err, quiz.ErrQuestionNotFound; !errors.Is(got, want) {
+			t.Fatalf("GetQuestion err = %v, want %v", got, want)
+		}
+
+		var optionCount int
+		if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM options WHERE question_id = ?", questionID).
+			Scan(&optionCount); err != nil {
+			t.Fatalf("failed to count options: %v", err)
+		}
+		if got, want := optionCount, 0; got != want {
+			t.Fatalf("options after question delete = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("question not found", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		err := quizStore.DeleteQuestion(t.Context(), 999999)
+		if got, want := err, quiz.ErrDeletingQuestionNoRowsAffected; !errors.Is(got, want) {
+			t.Fatalf("DeleteQuestion err = %v, want %v", got, want)
+		}
+	})
+}
