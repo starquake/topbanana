@@ -148,7 +148,7 @@ func TestHandleQuizList(t *testing.T) {
 			},
 		})
 
-		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/quizzes", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -175,7 +175,7 @@ func TestHandleQuizList(t *testing.T) {
 			},
 		})
 
-		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/quizzes", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -222,7 +222,7 @@ func TestHandleQuizGet(t *testing.T) {
 		mux := http.NewServeMux()
 		mux.Handle("GET /api/quizzes/{quizID}", HandleQuizGet(logger, store))
 
-		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/quizzes/1", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes/1", nil)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 
@@ -275,7 +275,7 @@ func TestHandleQuizGet(t *testing.T) {
 		mux := http.NewServeMux()
 		mux.Handle("GET /api/quizzes/{quizID}", HandleQuizGet(logger, store))
 
-		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/quizzes/99", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes/99", nil)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 
@@ -296,7 +296,7 @@ func TestHandleQuizGet(t *testing.T) {
 		mux := http.NewServeMux()
 		mux.Handle("GET /api/quizzes/{quizID}", HandleQuizGet(logger, store))
 
-		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/quizzes/1", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes/1", nil)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 
@@ -391,7 +391,7 @@ func TestHandleQuestionNext(t *testing.T) {
 
 		handler := HandleQuestionNext(logger, newService(stubGameStore{}, stubQuizStore{}))
 
-		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/games//questions/next", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/games//questions/next", nil)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -528,7 +528,7 @@ func TestHandleAnswerPost(t *testing.T) {
 
 		handler := HandleAnswerPost(logger, newService(stubGameStore{}, stubQuizStore{}))
 
-		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -676,7 +676,7 @@ func TestHandleGameResults(t *testing.T) {
 
 		handler := HandleGameResults(logger, newService(stubGameStore{}, stubQuizStore{}))
 
-		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
