@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/starquake/topbanana/internal/game"
@@ -363,8 +364,13 @@ func HandleGameResults(logger *slog.Logger, service *game.Service) http.Handler 
 				Score:    psVal,
 			})
 		}
+		var winner string
+		if results.Winner != 0 {
+			winner = strconv.FormatInt(results.Winner, 10)
+		}
 		res := resultsResponse{
 			GameID:       gameID,
+			Winner:       winner,
 			PlayerScores: psr,
 		}
 

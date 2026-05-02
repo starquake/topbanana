@@ -79,6 +79,9 @@ type Answer struct {
 type Results struct {
 	GameID string
 
+	// Winner is the PlayerID with the highest score, or 0 if there is a tie or no players.
+	Winner int64
+
 	// PlayerScores maps a player's ID to their accumulated CalculateScore in the game.
 	PlayerScores map[int64]int
 }
@@ -280,7 +283,18 @@ func (s *Service) GetResults(ctx context.Context, gameID string) (*Results, erro
 		}
 	}
 
-	return &Results{GameID: g.ID, PlayerScores: plsMap}, nil
+	var winner int64
+	topScore := -1
+	for playerID, score := range plsMap {
+		if score > topScore {
+			topScore = score
+			winner = playerID
+		} else if score == topScore {
+			winner = 0
+		}
+	}
+
+	return &Results{GameID: g.ID, Winner: winner, PlayerScores: plsMap}, nil
 }
 
 // CalculateScore calculates the score for a given answer.
