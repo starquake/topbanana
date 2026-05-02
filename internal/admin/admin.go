@@ -73,8 +73,13 @@ type OptionData struct {
 	Position   int
 }
 
-//nolint:gochecknoglobals // This is fine for now, will refactor to use a renderer later. TODO!
-var layouts = template.Must(template.ParseFS(tmpl.FS, "admin/layouts/*.gohtml"))
+//nolint:gochecknoglobals // Templates are pre-parsed once at startup. TODO: refactor to a proper renderer.
+var (
+	layouts = template.Must(template.ParseFS(tmpl.FS, "admin/layouts/*.gohtml"))
+	tmpl400 = parseTemplate("admin/errors/400.gohtml")
+	tmpl404 = parseTemplate("admin/errors/404.gohtml")
+	tmpl500 = parseTemplate("admin/errors/500.gohtml")
+)
 
 const (
 	maxOptions  = 4
@@ -156,7 +161,7 @@ func parseTemplate(path string) *template.Template {
 // render400 renders the 400 error page with the given message.
 // Should be used as the final handler in the chain and probably be followed by a return.
 func render400(w http.ResponseWriter, r *http.Request, logger *slog.Logger, msg string) {
-	render := NewTemplateRenderer(logger, "admin/errors/400.gohtml")
+	render := &TemplateRenderer{logger: logger, t: tmpl400}
 	data := struct {
 		Title   string
 		Message string
@@ -170,14 +175,14 @@ func render400(w http.ResponseWriter, r *http.Request, logger *slog.Logger, msg 
 // render404 renders the 404 error page.
 // Should be used as the final handler in the chain and probably be followed by a return.
 func render404(w http.ResponseWriter, r *http.Request, logger *slog.Logger) {
-	render := NewTemplateRenderer(logger, "admin/errors/404.gohtml")
+	render := &TemplateRenderer{logger: logger, t: tmpl404}
 	render.Render(w, r, http.StatusNotFound, nil)
 }
 
 // render500 renders the 500 error page.
 // Should be used as the final handler in the chain and probably be followed by a return.
 func render500(w http.ResponseWriter, r *http.Request, logger *slog.Logger) {
-	render := NewTemplateRenderer(logger, "admin/errors/500.gohtml")
+	render := &TemplateRenderer{logger: logger, t: tmpl500}
 	render.Render(w, r, http.StatusInternalServerError, nil)
 }
 

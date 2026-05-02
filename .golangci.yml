@@ -99,6 +99,8 @@ linters:
     - whitespace
     - wrapcheck
   settings:
+    interfacebloat:
+      max: 12
     gocognit:
       min-complexity: 20
     gocyclo:

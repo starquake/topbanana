@@ -33,6 +33,8 @@ type Store interface {
 	UpdateQuestion(ctx context.Context, qs *Question) error
 	// GetOption returns an option by its ID.
 	GetOption(ctx context.Context, optionID int64) (*Option, error)
+	// GetOptionsByIDs returns options for the given IDs.
+	GetOptionsByIDs(ctx context.Context, ids []int64) ([]*Option, error)
 }
 
 var (

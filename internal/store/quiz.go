@@ -34,9 +34,8 @@ func (s *QuizStore) Ping(ctx context.Context) error {
 	return nil
 }
 
-// ListQuizzes returns a list of quizzes.
+// ListQuizzes returns a summary list of quizzes without questions or options.
 func (s *QuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
-	var err error
 	rows, err := s.q.ListQuizzes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list quizzes: %w", err)
@@ -44,20 +43,13 @@ func (s *QuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 
 	quizzes := make([]*quiz.Quiz, 0, len(rows))
 	for _, r := range rows {
-		qz := &quiz.Quiz{
+		quizzes = append(quizzes, &quiz.Quiz{
 			ID:          r.ID,
 			Title:       r.Title,
 			Slug:        r.Slug,
 			Description: r.Description,
 			CreatedAt:   r.CreatedAt,
-		}
-
-		qz.Questions, err = s.ListQuestions(ctx, qz.ID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list questions for quiz %d: %w", qz.ID, err)
-		}
-
-		quizzes = append(quizzes, qz)
+		})
 	}
 
 	return quizzes, nil
@@ -219,6 +211,26 @@ func (s *QuizStore) GetOption(ctx context.Context, optionID int64) (*quiz.Option
 	}
 
 	return option, nil
+}
+
+// GetOptionsByIDs retrieves options for the given IDs from the data store.
+func (s *QuizStore) GetOptionsByIDs(ctx context.Context, ids []int64) ([]*quiz.Option, error) {
+	rows, err := s.q.GetOptionsByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get options by IDs: %w", err)
+	}
+
+	options := make([]*quiz.Option, 0, len(rows))
+	for _, row := range rows {
+		options = append(options, &quiz.Option{
+			ID:         row.ID,
+			QuestionID: row.QuestionID,
+			Text:       row.Text,
+			Correct:    row.IsCorrect,
+		})
+	}
+
+	return options, nil
 }
 
 // mustRowsAffected is a helper to panic if the result of a query has no rows affected.

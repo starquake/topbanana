@@ -8,6 +8,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"strings"
 )
 
 const createOption = `-- name: CreateOption :one
@@ -135,6 +136,50 @@ func (q *Queries) GetOption(ctx context.Context, id int64) (Option, error) {
 		&i.IsCorrect,
 	)
 	return i, err
+}
+
+const getOptionsByIDs = `-- name: GetOptionsByIDs :many
+SELECT id, question_id, text, is_correct
+FROM options
+WHERE id IN (/*SLICE:ids*/?)
+`
+
+func (q *Queries) GetOptionsByIDs(ctx context.Context, ids []int64) ([]Option, error) {
+	query := getOptionsByIDs
+	var queryParams []interface{}
+	if len(ids) > 0 {
+		for _, v := range ids {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:ids*/?", strings.Repeat(",?", len(ids))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Option
+	for rows.Next() {
+		var i Option
+		if err := rows.Scan(
+			&i.ID,
+			&i.QuestionID,
+			&i.Text,
+			&i.IsCorrect,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getQuestion = `-- name: GetQuestion :one

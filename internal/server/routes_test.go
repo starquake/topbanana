@@ -71,6 +71,10 @@ func (stubQuizStore) GetOption(_ context.Context, _ int64) (*quiz.Option, error)
 	return &quiz.Option{}, nil
 }
 
+func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Option, error) {
+	return nil, nil
+}
+
 func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 	t.Parallel()
 
@@ -90,6 +94,9 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 		{name: "Admin Quiz View", method: http.MethodGet, path: "/admin/quizzes/1"},
 		{name: "Admin Quiz Create", method: http.MethodGet, path: "/admin/quizzes/new"},
 		{name: "Admin Quiz Edit", method: http.MethodGet, path: "/admin/quizzes/1/edit"},
+
+		{name: "API Quiz List", method: http.MethodGet, path: "/api/quizzes"},
+		{name: "API Quiz Get", method: http.MethodGet, path: "/api/quizzes/1"},
 
 		{name: "Admin Quiz Save (create)", method: http.MethodPost, path: "/admin/quizzes"},
 		{name: "Admin Quiz Save (update)", method: http.MethodPost, path: "/admin/quizzes/1"},

@@ -220,10 +220,21 @@ func TestQuizStore_ListQuizzes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to list quizzes: %v", err)
 	}
-	if diff := cmp.Diff(quizzes, testQuizzes,
+
+	// ListQuizzes returns summaries — no questions or options loaded.
+	summaries := make([]*quiz.Quiz, 0, len(testQuizzes))
+	for _, qz := range testQuizzes {
+		summaries = append(summaries, &quiz.Quiz{
+			ID:          qz.ID,
+			Title:       qz.Title,
+			Slug:        qz.Slug,
+			Description: qz.Description,
+			CreatedAt:   qz.CreatedAt,
+		})
+	}
+
+	if diff := cmp.Diff(quizzes, summaries,
 		cmpopts.SortSlices(lessQuizzes),
-		cmpopts.SortSlices(lessQuestions),
-		cmpopts.SortSlices(lessOptions),
 		cmpopts.EquateApproxTime(3*time.Second),
 	); diff != "" {
 		t.Errorf("quizzes diff (-got +want):\n%s", diff)
@@ -249,62 +260,6 @@ func TestQuizStore_ListQuizzes_ErrorHandling(t *testing.T) {
 		}
 		if got, want := err.Error(), "context canceled"; !strings.Contains(got, want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
-		}
-	})
-
-	t.Run("list questions error", func(t *testing.T) {
-		t.Parallel()
-
-		db := dbtest.Open(t)
-
-		quizStore := NewQuizStore(db, slog.Default())
-
-		testQuiz := newTestQuizzes()[0]
-
-		var err error
-		err = quizStore.CreateQuiz(t.Context(), testQuiz)
-		if err != nil {
-			t.Fatalf("failed to create quiz: %v", err)
-		}
-
-		_, err = db.ExecContext(t.Context(), `ALTER TABLE questions RENAME TO questions_backup;`)
-		if err != nil {
-			t.Fatalf("failed to rename table questions: %v", err)
-		}
-		_, err = quizStore.ListQuizzes(t.Context())
-		if err == nil {
-			t.Fatal("got nil, want error")
-		}
-		if got, want := err.Error(), "failed to list questions"; !strings.Contains(got, want) {
-			t.Fatalf("err.Error() = %q, should contain %q", got, want)
-		}
-	})
-
-	t.Run("list options error", func(t *testing.T) {
-		t.Parallel()
-
-		db := dbtest.Open(t)
-
-		quizStore := NewQuizStore(db, slog.Default())
-
-		testQuiz := newTestQuizzes()[0]
-
-		var err error
-		err = quizStore.CreateQuiz(t.Context(), testQuiz)
-		if err != nil {
-			t.Fatalf("failed to create quiz: %v", err)
-		}
-
-		_, err = db.ExecContext(t.Context(), `ALTER TABLE options RENAME TO options_backup;`)
-		if err != nil {
-			t.Fatalf("failed to rename table options: %v", err)
-		}
-		_, err = quizStore.ListQuizzes(t.Context())
-		if err == nil {
-			t.Fatal("got nil, want error")
-		}
-		if got, want := err.Error(), "failed to list options"; !strings.Contains(got, want) {
-			t.Fatalf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
 }
@@ -1323,6 +1278,52 @@ func TestQuizStore_ImageURL(t *testing.T) {
 		}
 		if !found {
 			t.Error("question not found in ListQuestions result")
+		}
+	})
+}
+
+func TestQuizStore_GetOptionsByIDs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns all matching options", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		ids := []int64{
+			testQuiz.Questions[0].Options[0].ID,
+			testQuiz.Questions[0].Options[1].ID,
+		}
+
+		options, err := quizStore.GetOptionsByIDs(t.Context(), ids)
+		if err != nil {
+			t.Fatalf("failed to get options by IDs: %v", err)
+		}
+
+		if got, want := len(options), len(ids); got != want {
+			t.Fatalf("len(options) = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("empty ids returns empty slice", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		options, err := quizStore.GetOptionsByIDs(t.Context(), []int64{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if got, want := len(options), 0; got != want {
+			t.Fatalf("len(options) = %d, want %d", got, want)
 		}
 	})
 }
