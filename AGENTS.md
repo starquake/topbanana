@@ -1,4 +1,4 @@
-# topbanana
+AL# topbanana
 
 ## Commands
 
@@ -19,6 +19,7 @@ Every change or new feature must have tests. Run `make lint-fix` then `make chec
 ## Workflow
 
 Always let the user wrap up and merge — never suggest merging yourself.
+Always update a branch by rebasing onto main (`git rebase origin/main`), never by merging.
 After each piece of work, provide the PR URL: `https://github.com/starquake/topbanana/compare/<branch-name>`
 
 ## Hard rules
