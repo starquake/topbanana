@@ -5,5 +5,5 @@ pull=true
 additional_packages="git golang"
 # Needed for Goland (uncomment if needed)
 #additional_packages="libXrender libXtst libXi libXext libXcomposite libXcursor libXdamage libXfixes libXrandr mesa-libGL mesa-libEGL freetype fontconfig dejavu-fonts-all libwayland-client libwayland-cursor libwayland-egl adwaita-cursor-theme gsettings-desktop-schemas nss at-spi2-atk atk cairo pango cups-libs alsa-lib libxkbcommon"
-init_hooks="curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.11.4"
+init_hooks="curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.12.1"
 init_hooks="go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest"
