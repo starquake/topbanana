@@ -9,6 +9,7 @@ import (
 
 	"github.com/rs/xid"
 
+	"github.com/starquake/topbanana/internal/database"
 	"github.com/starquake/topbanana/internal/db"
 	"github.com/starquake/topbanana/internal/game"
 )
@@ -94,7 +95,7 @@ func (s *GameStore) StartGame(ctx context.Context, id string) error {
 		return fmt.Errorf("failed to start game: %w", err)
 	}
 
-	if mustRowsAffected(res) == 0 {
+	if database.MustRowsAffected(res) == 0 {
 		return fmt.Errorf("failed to start game with id %q: %w", id, game.ErrStartingGameNoRowsAffected)
 	}
 

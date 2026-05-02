@@ -55,6 +55,16 @@ func Migrate(conn *sql.DB) error {
 	return nil
 }
 
+// MustRowsAffected returns the number of rows affected by res, panicking if the driver returns an error.
+func MustRowsAffected(res sql.Result) int64 {
+	rows, err := res.RowsAffected()
+	if err != nil {
+		panic(err)
+	}
+
+	return rows
+}
+
 // ExecTx is a helper to run queries within a transaction.
 func ExecTx(ctx context.Context, conn *sql.DB, fn func(*db.Queries) error) error {
 	var err error
