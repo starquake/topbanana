@@ -171,6 +171,40 @@ games(id[xid], quiz_id, created_at, started_at)
 | `DB_DRIVER` | `sqlite` | only supported value |
 | `CLIENT_DIR` | `""` | path to compiled frontend assets (dev only) |
 
+## Common linter pitfalls
+
+### `nilnil` — pointer + nil error return
+
+Returning `(nil, nil)` from a function whose first return type is a pointer triggers the `nilnil` linter. This most often happens in test stubs that implement an interface.
+
+```go
+// BAD — nilnil fires
+func (*stubStore) GetQuiz(_ context.Context, _ int64) (*quiz.Quiz, error) {
+    return nil, nil
+}
+
+// GOOD — return a non-nil error for methods that should not be called
+func (*stubStore) GetQuiz(_ context.Context, _ int64) (*quiz.Quiz, error) {
+    return nil, errors.ErrUnsupported
+}
+```
+
+Slice return types (`[]*quiz.Quiz, error`) are fine with `nil, nil` — only pointer returns are flagged.
+
+### `revive: receiver-naming` — unused receivers in stubs
+
+When a method does not use its receiver, omit the name entirely. Using `_` as the receiver name triggers the linter.
+
+```go
+// BAD — revive fires
+func (_ *stubStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error { return nil }
+
+// GOOD — omit the name
+func (*stubStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error { return nil }
+```
+
+Only name the receiver when you need to reference it (e.g. `func (s *stubQuizStore) Ping(...) error { return s.pingErr }`).
+
 ## Known tech debt
 
 `playerID` is hardcoded to `1` in `internal/clientapi/` — authentication is not implemented yet. Do not add more hardcoded player IDs.

@@ -10,7 +10,7 @@ make test-integration # integration tests (-tags=integration)
 
 ## Commits
 
-Never create commits yourself. When work is ready to commit, suggest a one-line commit message and wait for the user to review and commit. Use plain language — avoid jargon. Prefer simple verbs like "change", "update", "fix", "add", "remove".
+Never create commits yourself. When work is ready to commit, suggest a one-line commit message and wait for the user to review and commit. Use plain language — avoid jargon. Prefer simple verbs like "change", "update", "fix", "add", "remove". Start the message with a capital letter.
 
 ## Testing
 
@@ -27,3 +27,4 @@ After each piece of work, provide the PR URL: `https://github.com/starquake/topb
 - **No SQL in Go files** — add queries to `internal/queries/` and regenerate.
 - **No third-party HTTP framework or ORM.**
 - **Branch names use dashes, no slashes** — e.g. `fix-bugs`, not `fix/bugs`.
+- **Always create a new branch before starting any work** — never commit directly to `main`.
