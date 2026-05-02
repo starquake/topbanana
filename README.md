@@ -2,6 +2,7 @@
 Top Banana! is a self-hosted quiz service built with Go, focussing on simplicity and easy deployment.
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/starquake/topbanana)](https://goreportcard.com/report/github.com/starquake/topbanana)
+![coverage](https://raw.githubusercontent.com/starquake/topbanana/badges/.badges/main/coverage.svg)
 
 This repository also serves as a showcase for my software engineering and Go skills. Learn more about the [Technical Stack & Techniques](#technical-stack--techniques).
 
