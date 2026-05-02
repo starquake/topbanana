@@ -19,6 +19,9 @@ jobs:
       with:
         go-version: "stable"
 
+    - name: Run Integration Tests
+      run: make test-integration
+
     - name: Run Tests with Coverage
       run: make test-coverage
 
