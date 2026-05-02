@@ -105,6 +105,7 @@ Store interfaces are defined in the domain package so domain code does not impor
 
 - Unit tests use `internal/dbtest` to get an in-memory SQLite DB (already migrated).
 - Integration tests use build tag `//go:build integration` and live in `test/integration/`.
+- Always use `t.Context()` instead of `context.Background()` in tests — it is cancelled automatically when the test ends. This applies to `httptest.NewRequestWithContext`, `context.WithCancel`, store calls, and any other place a context is needed inside a test.
 
 ### Assertion style
 
@@ -204,6 +205,20 @@ func (*stubStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error { return nil
 ```
 
 Only name the receiver when you need to reference it (e.g. `func (s *stubQuizStore) Ping(...) error { return s.pingErr }`).
+
+### `noctx` — httptest.NewRequest without context
+
+`httptest.NewRequest` is banned by the `noctx` linter. Always use `httptest.NewRequestWithContext` and pass `context.Background()`.
+
+```go
+// BAD — noctx fires
+req := httptest.NewRequest(http.MethodGet, "/items/42", nil)
+
+// GOOD
+req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/items/42", nil)
+```
+
+`t.Context()` is preferred over `context.Background()` in tests — it is cancelled automatically when the test ends. No extra import needed.
 
 ## Known tech debt
 
