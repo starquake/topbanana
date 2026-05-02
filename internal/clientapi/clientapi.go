@@ -57,6 +57,82 @@ func HandleQuizList(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 	})
 }
 
+// HandleQuizGet returns a single quiz with its questions and options.
+func HandleQuizGet(logger *slog.Logger, quizStore quiz.Store) http.Handler {
+	type optionResponse struct {
+		ID   int64  `json:"id"`
+		Text string `json:"text"`
+	}
+
+	type questionResponse struct {
+		ID       int64            `json:"id"`
+		Text     string           `json:"text"`
+		ImageURL string           `json:"imageUrl"`
+		Position int              `json:"position"`
+		Options  []optionResponse `json:"options"`
+	}
+
+	type quizResponse struct {
+		ID          int64              `json:"id"`
+		Title       string             `json:"title"`
+		Slug        string             `json:"slug"`
+		Description string             `json:"description"`
+		CreatedAt   time.Time          `json:"createdAt"`
+		Questions   []questionResponse `json:"questions"`
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		quizID, ok := handlers.ParseIDFromPath(w, r, logger, "quizID")
+		if !ok {
+			return
+		}
+
+		qz, err := quizStore.GetQuiz(r.Context(), quizID)
+		if err != nil {
+			if errors.Is(err, quiz.ErrQuizNotFound) {
+				http.NotFound(w, r)
+
+				return
+			}
+			logger.ErrorContext(r.Context(), "error retrieving quiz from store", slog.Any("err", err))
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+
+			return
+		}
+
+		questions := make([]questionResponse, 0, len(qz.Questions))
+		for _, qs := range qz.Questions {
+			opts := make([]optionResponse, 0, len(qs.Options))
+			for _, o := range qs.Options {
+				opts = append(opts, optionResponse{ID: o.ID, Text: o.Text})
+			}
+			questions = append(questions, questionResponse{
+				ID:       qs.ID,
+				Text:     qs.Text,
+				ImageURL: qs.ImageURL,
+				Position: qs.Position,
+				Options:  opts,
+			})
+		}
+
+		res := quizResponse{
+			ID:          qz.ID,
+			Title:       qz.Title,
+			Slug:        qz.Slug,
+			Description: qz.Description,
+			CreatedAt:   qz.CreatedAt,
+			Questions:   questions,
+		}
+
+		err = handlers.EncodeJSON(w, http.StatusOK, res)
+		if err != nil {
+			logger.ErrorContext(r.Context(), "error encoding quizResponse", slog.Any("err", err))
+
+			return
+		}
+	})
+}
+
 // HandleCreateGame creates a new game.
 // It first checks if the quiz exists, then creates the game and participant, and finally starts the game.
 // Returns the ID of the created game.
