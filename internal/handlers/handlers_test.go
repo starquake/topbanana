@@ -166,7 +166,7 @@ func TestDecodeJSON(t *testing.T) {
 		type request struct {
 			Name string `json:"name"`
 		}
-		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"test"}`))
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(`{"name":"test"}`))
 		req, err := DecodeJSON[request](r)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -181,7 +181,7 @@ func TestDecodeJSON(t *testing.T) {
 		type request struct {
 			Name string `json:"name"`
 		}
-		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`not json`))
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(`not json`))
 		_, err := DecodeJSON[request](r)
 		if err == nil {
 			t.Fatal("expected error, got nil")
