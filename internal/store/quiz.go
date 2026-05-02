@@ -259,17 +259,6 @@ func (s *QuizStore) GetOptionsByIDs(ctx context.Context, ids []int64) ([]*quiz.O
 	return options, nil
 }
 
-// mustRowsAffected returns the number of rows affected by res, panicking if the driver returns an error.
-// TODO: Move to database package.
-func mustRowsAffected(res sql.Result) int64 {
-	rows, err := res.RowsAffected()
-	if err != nil {
-		panic(err)
-	}
-
-	return rows
-}
-
 func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.Quiz) error {
 	var err error
 	row, err := q.CreateQuiz(ctx, db.CreateQuizParams{
@@ -312,7 +301,7 @@ func (s *QuizStore) execUpdateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 		return fmt.Errorf("failed to update quiz: %w", err)
 	}
 
-	if mustRowsAffected(res) == 0 {
+	if database.MustRowsAffected(res) == 0 {
 		return quiz.ErrUpdatingQuizNoRowsAffected
 	}
 
@@ -407,7 +396,7 @@ func (s *QuizStore) execUpdateQuestion(ctx context.Context, q *db.Queries, qs *q
 		return fmt.Errorf("failed to update question: %w", err)
 	}
 
-	if mustRowsAffected(res) == 0 {
+	if database.MustRowsAffected(res) == 0 {
 		return quiz.ErrUpdatingQuestionNoRowsAffected
 	}
 
@@ -428,7 +417,7 @@ func (*QuizStore) execDeleteQuiz(ctx context.Context, q *db.Queries, id int64) e
 		return fmt.Errorf("failed to delete quiz: %w", err)
 	}
 
-	if mustRowsAffected(res) == 0 {
+	if database.MustRowsAffected(res) == 0 {
 		return quiz.ErrDeletingQuizNoRowsAffected
 	}
 
@@ -441,7 +430,7 @@ func (*QuizStore) execDeleteQuestion(ctx context.Context, q *db.Queries, id int6
 		return fmt.Errorf("failed to delete question: %w", err)
 	}
 
-	if mustRowsAffected(res) == 0 {
+	if database.MustRowsAffected(res) == 0 {
 		return quiz.ErrDeletingQuestionNoRowsAffected
 	}
 
@@ -538,7 +527,7 @@ func (*QuizStore) updateOption(ctx context.Context, q *db.Queries, o *quiz.Optio
 	if err != nil {
 		return fmt.Errorf("failed to update option: %w", err)
 	}
-	if mustRowsAffected(res) == 0 {
+	if database.MustRowsAffected(res) == 0 {
 		return quiz.ErrUpdatingOptionNoRowsAffected
 	}
 
@@ -563,7 +552,7 @@ func (*QuizStore) deleteOption(ctx context.Context, q *db.Queries, id int64) err
 		return fmt.Errorf("failed to delete option %d: %w", id, err)
 	}
 
-	if mustRowsAffected(res) == 0 {
+	if database.MustRowsAffected(res) == 0 {
 		return quiz.ErrDeletingOptionNoRowsAffected
 	}
 

@@ -73,14 +73,6 @@ type OptionData struct {
 	Position   int
 }
 
-//nolint:gochecknoglobals // Templates are pre-parsed once at startup. TODO: refactor to a proper renderer.
-var (
-	layouts = template.Must(template.ParseFS(tmpl.FS, "admin/layouts/*.gohtml"))
-	tmpl400 = parseTemplate("admin/errors/400.gohtml")
-	tmpl404 = parseTemplate("admin/errors/404.gohtml")
-	tmpl500 = parseTemplate("admin/errors/500.gohtml")
-)
-
 const (
 	maxOptions  = 4
 	maxFormSize = 1 << 20 // 1 MB
@@ -155,13 +147,15 @@ func optionDataFromOptions(options []*quiz.Option) []*OptionData {
 
 // parseTemplate parses a template from the given path with layouts.
 func parseTemplate(path string) *template.Template {
+	layouts := template.Must(template.ParseFS(tmpl.FS, "admin/layouts/*.gohtml"))
+
 	return template.Must(template.Must(layouts.Clone()).ParseFS(tmpl.FS, path))
 }
 
 // render400 renders the 400 error page with the given message.
 // Should be used as the final handler in the chain and probably be followed by a return.
 func render400(w http.ResponseWriter, r *http.Request, logger *slog.Logger, msg string) {
-	render := &TemplateRenderer{logger: logger, t: tmpl400}
+	render := &TemplateRenderer{logger: logger, t: parseTemplate("admin/errors/400.gohtml")}
 	data := struct {
 		Title   string
 		Message string
@@ -175,14 +169,14 @@ func render400(w http.ResponseWriter, r *http.Request, logger *slog.Logger, msg 
 // render404 renders the 404 error page.
 // Should be used as the final handler in the chain and probably be followed by a return.
 func render404(w http.ResponseWriter, r *http.Request, logger *slog.Logger) {
-	render := &TemplateRenderer{logger: logger, t: tmpl404}
+	render := &TemplateRenderer{logger: logger, t: parseTemplate("admin/errors/404.gohtml")}
 	render.Render(w, r, http.StatusNotFound, nil)
 }
 
 // render500 renders the 500 error page.
 // Should be used as the final handler in the chain and probably be followed by a return.
 func render500(w http.ResponseWriter, r *http.Request, logger *slog.Logger) {
-	render := &TemplateRenderer{logger: logger, t: tmpl500}
+	render := &TemplateRenderer{logger: logger, t: parseTemplate("admin/errors/500.gohtml")}
 	render.Render(w, r, http.StatusInternalServerError, nil)
 }
 
