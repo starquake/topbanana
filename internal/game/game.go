@@ -21,6 +21,7 @@ var (
 	ErrGameNotFound               = errors.New("game not found")
 	ErrNoMoreQuestions            = errors.New("no more questions")
 	ErrQuestionNotInGame          = errors.New("question not in game")
+	ErrOptionNotInQuestion        = errors.New("option does not belong to question")
 	ErrStartingGameNoRowsAffected = errors.New("no rows affected when starting game")
 )
 
@@ -230,20 +231,26 @@ func (s *Service) SubmitAnswer(
 		return nil, fmt.Errorf("question %d not found in game %s: %w", questionID, gameID, ErrQuestionNotInGame)
 	}
 
+	option, err := s.quizStore.GetOption(ctx, optionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get option: %w", err)
+	}
+
+	if option.QuestionID != question.QuestionID {
+		return nil, ErrOptionNotInQuestion
+	}
+
 	a := &Answer{
 		GameID:     gameID,
 		PlayerID:   playerID,
 		QuestionID: question.ID,
 		Question:   question,
 		OptionID:   optionID,
+		Option:     option,
 	}
 
 	if err = s.store.CreateAnswer(ctx, a); err != nil {
 		return nil, fmt.Errorf("failed to create answer: %w", err)
-	}
-	a.Option, err = s.quizStore.GetOption(ctx, optionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get option: %w", err)
 	}
 
 	return a, nil
