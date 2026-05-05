@@ -256,9 +256,7 @@ func fillQuizFromForm(w http.ResponseWriter, r *http.Request, logger *slog.Logge
 		return false
 	}
 	qz.Title = r.PostFormValue("title")
-	if qz.Slug == "" {
-		qz.Slug = slug.Make(qz.Title)
-	}
+	qz.Slug = slug.Make(qz.Title)
 	qz.Description = r.PostFormValue("description")
 	if problems := qz.Valid(r.Context()); len(problems) > 0 {
 		msg := fmt.Sprintf("validation errors: %v", problems)

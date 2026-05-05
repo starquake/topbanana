@@ -649,7 +649,7 @@ func TestHandleQuizSave(t *testing.T) {
 		updatedQuiz := quiz.Quiz{
 			ID:          originalQuiz.ID,
 			Title:       originalQuiz.Title + " Updated",
-			Slug:        originalQuiz.Slug,
+			Slug:        "quiz-one-updated",
 			Description: originalQuiz.Description + " Updated",
 		}
 
