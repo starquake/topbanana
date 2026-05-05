@@ -1,3 +1,6 @@
 package server
 
-var ExportAddRoutes = addRoutes
+var (
+	ExportAddRoutes   = addRoutes
+	ExportLogRequests = logRequests
+)

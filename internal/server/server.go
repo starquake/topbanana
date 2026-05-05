@@ -15,6 +15,7 @@ func New(logger *slog.Logger, stores *store.Stores, gameService *game.Service, c
 	mux := http.NewServeMux()
 	addRoutes(mux, logger, stores, gameService, cfg)
 	var handler http.Handler = mux
+	handler = logRequests(logger, handler)
 
 	return handler
 }
