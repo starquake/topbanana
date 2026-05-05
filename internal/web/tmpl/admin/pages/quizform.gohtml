@@ -20,9 +20,9 @@
 
             {{if .Quiz.ID}}
             <div class="field">
-                <label class="label">Slug</label>
+                <label class="label" for="slug">Slug</label>
                 <div class="control">
-                    <p class="input is-static">{{.Quiz.Slug}}</p>
+                    <input id="slug" class="input is-static" type="text" readonly value="{{.Quiz.Slug}}">
                 </div>
             </div>
             {{end}}
