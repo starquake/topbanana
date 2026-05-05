@@ -18,12 +18,14 @@
                 </div>
             </div>
 
+            {{if .Quiz.ID}}
             <div class="field">
-                <label class="label" for="slug">Slug</label>
+                <label class="label">Slug</label>
                 <div class="control">
-                    <input id="slug" name="slug" class="input" type="text" value="{{.Quiz.Slug}}">
+                    <p class="input is-static">{{.Quiz.Slug}}</p>
                 </div>
             </div>
+            {{end}}
 
             <div class="field">
                 <label class="label" for="description">Description</label>

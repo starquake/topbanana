@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/gosimple/slug"
+
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/web/tmpl"
@@ -254,7 +256,9 @@ func fillQuizFromForm(w http.ResponseWriter, r *http.Request, logger *slog.Logge
 		return false
 	}
 	qz.Title = r.PostFormValue("title")
-	qz.Slug = r.PostFormValue("slug")
+	if qz.Slug == "" {
+		qz.Slug = slug.Make(qz.Title)
+	}
 	qz.Description = r.PostFormValue("description")
 	if problems := qz.Valid(r.Context()); len(problems) > 0 {
 		msg := fmt.Sprintf("validation errors: %v", problems)
