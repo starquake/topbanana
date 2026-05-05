@@ -304,6 +304,11 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 
 				return
 			}
+			if errors.Is(err, game.ErrOptionNotInQuestion) {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+
+				return
+			}
 			logger.ErrorContext(r.Context(), "error submitting answer", slog.Any("err", err))
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 

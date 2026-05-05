@@ -1,6 +1,7 @@
 package game_test
 
 import (
+	"errors"
 	"log/slog"
 	"testing"
 
@@ -54,6 +55,79 @@ func newTestGame(t *testing.T, qz *quiz.Quiz) *Game {
 	return &Game{
 		QuizID: qz.ID,
 	}
+}
+
+func TestService_SubmitAnswer(t *testing.T) {
+	t.Parallel()
+
+	t.Run("rejects option from a different question", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		g, err := svc.CreateGame(ctx, testQuiz.ID, 1)
+		if err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+
+		gq, err := svc.GetNextQuestion(ctx, g.ID)
+		if err != nil {
+			t.Fatalf("failed to get next question: %v", err)
+		}
+
+		// Use a correct option from the second question (different from the active question).
+		wrongQuestionOption := testQuiz.Questions[1].Options[0] // Berlin, Correct: true, but for question 2
+
+		_, err = svc.SubmitAnswer(ctx, g.ID, 1, gq.QuizQuestion.ID, wrongQuestionOption.ID)
+		if got, want := err, ErrOptionNotInQuestion; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("accepts option belonging to the active question", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		g, err := svc.CreateGame(ctx, testQuiz.ID, 1)
+		if err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+
+		gq, err := svc.GetNextQuestion(ctx, g.ID)
+		if err != nil {
+			t.Fatalf("failed to get next question: %v", err)
+		}
+
+		correctOption := testQuiz.Questions[0].Options[0] // Paris, Correct: true
+
+		_, err = svc.SubmitAnswer(ctx, g.ID, 1, gq.QuizQuestion.ID, correctOption.ID)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
 }
 
 func TestService_GetResults(t *testing.T) {

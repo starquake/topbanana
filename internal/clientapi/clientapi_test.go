@@ -639,6 +639,53 @@ func TestHandleAnswerPost(t *testing.T) {
 		}
 	})
 
+	t.Run("returns 400 when option does not belong to question", func(t *testing.T) {
+		t.Parallel()
+
+		svc := newService(
+			stubGameStore{
+				getGame: func(_ context.Context, id string) (*game.Game, error) {
+					return &game.Game{
+						ID:     id,
+						QuizID: 1,
+						Questions: []*game.Question{
+							{ID: 1, GameID: id, QuestionID: 10},
+						},
+					}, nil
+				},
+			},
+			stubQuizStore{
+				getOption: func(_ context.Context, _ int64) (*quiz.Option, error) {
+					// Return an option that belongs to a different question (QuestionID: 99).
+					return &quiz.Option{
+						ID:         200,
+						QuestionID: 99,
+						Text:       "Option from another question",
+						Correct:    true,
+					}, nil
+				},
+			},
+		)
+
+		mux := http.NewServeMux()
+		mux.Handle(
+			"POST /api/games/{gameID}/questions/{questionID}/answers",
+			HandleAnswerPost(logger, svc),
+		)
+
+		req := httptest.NewRequestWithContext(
+			context.Background(), http.MethodPost,
+			"/api/games/game-1/questions/10/answers",
+			strings.NewReader(`{"optionId": 200}`),
+		)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusBadRequest; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+
 	t.Run("returns 500 on game error", func(t *testing.T) {
 		t.Parallel()
 
