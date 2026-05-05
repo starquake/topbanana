@@ -65,12 +65,10 @@ func TestAdmin_Integration(t *testing.T) {
 
 	// Create a quiz
 	quizTitle := "Integration Test Quiz"
-	quizSlug := "integration-test-quiz"
 	quizDesc := "A quiz created by integration test"
 
 	quizForm := url.Values{}
 	quizForm.Add("title", quizTitle)
-	quizForm.Add("slug", quizSlug)
 	quizForm.Add("description", quizDesc)
 
 	client := &http.Client{

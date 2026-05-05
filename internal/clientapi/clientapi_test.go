@@ -221,12 +221,12 @@ func TestHandleQuizGet(t *testing.T) {
 			},
 		}
 
-		mux := http.NewServeMux()
-		mux.Handle("GET /api/quizzes/{quizID}", HandleQuizGet(logger, store))
+		handler := HandleQuizGet(logger, store)
 
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes/1", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes/quiz-one-1", nil)
+		req.SetPathValue("slugID", "quiz-one-1")
 		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
+		handler.ServeHTTP(rec, req)
 
 		if got, want := rec.Code, http.StatusOK; got != want {
 			t.Fatalf("status code = %v, want %v", got, want)
@@ -274,12 +274,12 @@ func TestHandleQuizGet(t *testing.T) {
 			},
 		}
 
-		mux := http.NewServeMux()
-		mux.Handle("GET /api/quizzes/{quizID}", HandleQuizGet(logger, store))
+		handler := HandleQuizGet(logger, store)
 
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes/99", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes/quiz-one-99", nil)
+		req.SetPathValue("slugID", "quiz-one-99")
 		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
+		handler.ServeHTTP(rec, req)
 
 		if got, want := rec.Code, http.StatusNotFound; got != want {
 			t.Errorf("status code = %v, want %v", got, want)
@@ -295,12 +295,12 @@ func TestHandleQuizGet(t *testing.T) {
 			},
 		}
 
-		mux := http.NewServeMux()
-		mux.Handle("GET /api/quizzes/{quizID}", HandleQuizGet(logger, store))
+		handler := HandleQuizGet(logger, store)
 
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes/1", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes/quiz-one-1", nil)
+		req.SetPathValue("slugID", "quiz-one-1")
 		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
+		handler.ServeHTTP(rec, req)
 
 		if got, want := rec.Code, http.StatusInternalServerError; got != want {
 			t.Errorf("status code = %v, want %v", got, want)

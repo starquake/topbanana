@@ -603,7 +603,6 @@ func TestHandleQuizSave(t *testing.T) {
 
 		form := url.Values{
 			"title":       {testQuiz.Title},
-			"slug":        {testQuiz.Slug},
 			"description": {testQuiz.Description},
 		}
 		req, err := http.NewRequestWithContext(
@@ -650,7 +649,7 @@ func TestHandleQuizSave(t *testing.T) {
 		updatedQuiz := quiz.Quiz{
 			ID:          originalQuiz.ID,
 			Title:       originalQuiz.Title + " Updated",
-			Slug:        originalQuiz.Slug + "-updated",
+			Slug:        "quiz-one-updated",
 			Description: originalQuiz.Description + " Updated",
 		}
 
@@ -672,7 +671,6 @@ func TestHandleQuizSave(t *testing.T) {
 
 		form := url.Values{
 			"title":       {updatedQuiz.Title},
-			"slug":        {updatedQuiz.Slug},
 			"description": {updatedQuiz.Description},
 		}
 

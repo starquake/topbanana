@@ -217,3 +217,16 @@ In production (`APP_ENV=production`) the embedded files are served minified
 (HTML + CSS + JS) — avoid patterns that break minification (e.g., regex literals
 that look like division, unclosed template strings across lines).
 
+## Forms and labels
+
+Every `<label>` must have a `for` attribute pointing to the `id` of a form element. To display a read-only value, use `<input type="text" readonly class="input is-static">` — not `<p>` — so the label has a valid target and Bulma styles it correctly.
+
+## What to avoid
+
+- Do **not** introduce a build step (npm, Vite, webpack, etc.) — keep it build-free.
+- Do **not** use TypeScript — plain `.js` only.
+- Do **not** add a third-party component library or JS framework beyond Alpine + Bulma.
+- Do **not** add reactive state outside the constructor (Alpine won't track it).
+- Do **not** use inline styles — use Bulma classes.
+- Do **not** hardcode base URLs — all fetch calls use relative paths.
+- Do **not** add CSS files — add a `<style>` block to `index.html` only if Bulma truly has no equivalent.

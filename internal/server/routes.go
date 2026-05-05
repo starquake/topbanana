@@ -47,7 +47,7 @@ func addRoutes(
 
 	// API
 	mux.Handle("GET /api/quizzes", clientapi.HandleQuizList(logger, stores.Quizzes))
-	mux.Handle("GET /api/quizzes/{quizID}", clientapi.HandleQuizGet(logger, stores.Quizzes))
+	mux.Handle("GET /api/quizzes/{slugID}", clientapi.HandleQuizGet(logger, stores.Quizzes))
 	mux.Handle("POST /api/games", clientapi.HandleCreateGame(logger, gameService))
 	mux.Handle("GET /api/games/{gameID}/questions/next", clientapi.HandleQuestionNext(logger, gameService))
 	mux.Handle(

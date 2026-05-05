@@ -83,7 +83,7 @@ func HandleQuizGet(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		quizID, ok := handlers.ParseIDFromPath(w, r, logger, "quizID")
+		quizID, ok := handlers.ParseIDFromSlugPath(w, r, logger, "slugID")
 		if !ok {
 			return
 		}
