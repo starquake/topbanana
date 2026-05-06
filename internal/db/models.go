@@ -48,10 +48,12 @@ type Option struct {
 }
 
 type Player struct {
-	ID        int64
-	Username  string
-	Email     string
-	CreatedAt time.Time
+	ID           int64
+	Username     string
+	Email        sql.NullString
+	PasswordHash sql.NullString
+	Role         string
+	CreatedAt    time.Time
 }
 
 type Question struct {
