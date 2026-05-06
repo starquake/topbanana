@@ -15,6 +15,7 @@ Never create commits yourself. When work is ready to commit, suggest a one-line 
 ## Testing
 
 Every change or new feature must have tests. Run `make lint-fix` then `make check` before marking work done.
+After changes, also boot the server against the existing dev DB (`go run ./cmd/server/`) and confirm it starts cleanly before reporting done — `make check` only exercises a fresh DB, so migration or startup issues that only surface against populated data otherwise slip through.
 
 ## Workflow
 
@@ -22,6 +23,7 @@ When starting work on a new ticket: switch to `main`, run `git pull`, then creat
 When asked to update a branch, do it by rebasing onto main (`git rebase origin/main`), never by merging.
 ThAlways let the user wrap up and merge — never suggest merging yourself.
 After each piece of work, provide the PR URL: `https://github.com/starquake/topbanana/compare/<branch-name>`
+When implementing review findings or other non-trivial code changes, delegate to the appropriate dev agent — `backend-dev` for Go code under `internal/`, `cmd/`, migrations and queries; `frontend-dev` for the player client and admin templates — so project conventions are consistently applied.
 
 ## Hard rules
 

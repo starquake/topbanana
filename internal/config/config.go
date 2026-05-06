@@ -2,6 +2,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
@@ -11,6 +13,10 @@ import (
 // ErrDBURINotSetInProduction is returned when DB_URI is not set in production. We need this to prevent accidental
 // production deployments without a database.
 var ErrDBURINotSetInProduction = errors.New("DB_URI must be set in production")
+
+// ErrSessionKeyNotSetInProduction is returned when SESSION_KEY is not set in production. A stable key is required so
+// session cookies survive process restarts.
+var ErrSessionKeyNotSetInProduction = errors.New("SESSION_KEY must be set in production")
 
 const (
 	// AppEnvironmentDefault is the default application environment.
@@ -33,6 +39,9 @@ const (
 	DBMaxIdleConnsDefault = 10
 	// DBConnMaxLifetimeDefault is the default maximum lifetime of a database connection.
 	DBConnMaxLifetimeDefault = 5 * time.Minute
+
+	// sessionKeyByteLength is the length in bytes of an ephemeral session key generated for development.
+	sessionKeyByteLength = 32
 )
 
 // Config represents the application configuration.
@@ -50,6 +59,8 @@ type Config struct {
 	DBConnMaxLifetime time.Duration
 
 	ClientDir string
+
+	SessionKey string
 }
 
 // Parse parses environment variables into the config.
@@ -114,7 +125,31 @@ func Parse(getenv func(string) string) (*Config, error) {
 		return nil, ErrDBURINotSetInProduction
 	}
 
+	key, err := resolveSessionKey(getenv("SESSION_KEY"), c.AppEnvironment)
+	if err != nil {
+		return nil, err
+	}
+	c.SessionKey = key
+
 	return &c, nil
+}
+
+// resolveSessionKey returns the session key for cookie signing. In production an explicit value is required; in
+// development a random ephemeral key is generated when none is provided.
+func resolveSessionKey(envValue, appEnvironment string) (string, error) {
+	if envValue != "" {
+		return envValue, nil
+	}
+	if appEnvironment == "production" {
+		return "", ErrSessionKeyNotSetInProduction
+	}
+
+	b := make([]byte, sessionKeyByteLength)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generating ephemeral session key: %w", err)
+	}
+
+	return hex.EncodeToString(b), nil
 }
 
 // IsProduction returns true if the application is running in production.

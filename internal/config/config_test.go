@@ -16,6 +16,7 @@ func getenvFailure(failureKey, value string) func(string) string {
 		"DB_MAX_OPEN_CONNS":    "100",
 		"DB_MAX_IDLE_CONNS":    "200",
 		"DB_CONN_MAX_LIFETIME": "10m",
+		"SESSION_KEY":          "test-session-key",
 	}
 
 	return func(key string) string {
@@ -41,6 +42,7 @@ func TestParse(t *testing.T) {
 			"DB_MAX_OPEN_CONNS":    "100",
 			"DB_MAX_IDLE_CONNS":    "200",
 			"DB_CONN_MAX_LIFETIME": "10m",
+			"SESSION_KEY":          "test-session-key",
 		}
 
 		getenv := func(key string) string {
@@ -61,6 +63,9 @@ func TestParse(t *testing.T) {
 		}
 		if c.DBURI != envs["DB_URI"] {
 			t.Errorf("got %v, want %v", c.DBURI, envs["DB_URI"])
+		}
+		if c.SessionKey != envs["SESSION_KEY"] {
+			t.Errorf("Parse() SessionKey = %q, want %q", c.SessionKey, envs["SESSION_KEY"])
 		}
 	})
 
@@ -174,9 +179,10 @@ func TestParse(t *testing.T) {
 
 		getenv := func(key string) string {
 			envs := map[string]string{
-				"APP_ENV":    "production",
-				"CLIENT_DIR": "should/be/overridden",
-				"DB_URI":     "file:test.sqlite",
+				"APP_ENV":     "production",
+				"CLIENT_DIR":  "should/be/overridden",
+				"DB_URI":      "file:test.sqlite",
+				"SESSION_KEY": "test-session-key",
 			}
 
 			return envs[key]
@@ -188,6 +194,56 @@ func TestParse(t *testing.T) {
 		}
 		if c.ClientDir != "" {
 			t.Errorf("got %q, want empty string for production default", c.ClientDir)
+		}
+	})
+
+	t.Run("empty SESSION_KEY in production", func(t *testing.T) {
+		t.Parallel()
+
+		getenv := func(key string) string {
+			envs := map[string]string{
+				"APP_ENV":     "production",
+				"DB_URI":      "file:test.sqlite",
+				"SESSION_KEY": "",
+			}
+
+			return envs[key]
+		}
+
+		_, err := Parse(getenv)
+		if err == nil {
+			t.Fatal("Parse() with empty SESSION_KEY in production: err = nil, want non-nil")
+		}
+		if got, want := err, ErrSessionKeyNotSetInProduction; !errors.Is(got, want) {
+			t.Fatalf("Parse() err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("empty SESSION_KEY in development generates ephemeral key", func(t *testing.T) {
+		t.Parallel()
+
+		getenv := func(key string) string {
+			envs := map[string]string{
+				"APP_ENV": "development",
+			}
+
+			return envs[key]
+		}
+
+		c, err := Parse(getenv)
+		if err != nil {
+			t.Fatalf("Parse() err = %v, want nil", err)
+		}
+		if c.SessionKey == "" {
+			t.Fatal("Parse() SessionKey = \"\", want a non-empty ephemeral key in development")
+		}
+
+		c2, err := Parse(getenv)
+		if err != nil {
+			t.Fatalf("Parse() (second call) err = %v, want nil", err)
+		}
+		if c.SessionKey == c2.SessionKey {
+			t.Errorf("Parse() SessionKey = %q on both calls, want different ephemeral keys", c.SessionKey)
 		}
 	})
 }
