@@ -11,8 +11,6 @@ import (
 
 // Store represents a store for quizzes.
 // This can be implemented for different databases.
-//
-//nolint:interfacebloat // Store interface intentionally covers full CRUD for quizzes and questions.
 type Store interface {
 	// Ping returns the status of the database connection.
 	Ping(ctx context.Context) error

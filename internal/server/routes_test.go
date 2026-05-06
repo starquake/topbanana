@@ -8,12 +8,27 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/quiz"
 	. "github.com/starquake/topbanana/internal/server"
 	"github.com/starquake/topbanana/internal/store"
 )
+
+type stubPlayerStore struct{}
+
+func (stubPlayerStore) GetPlayerByUsername(_ context.Context, _ string) (*auth.Player, error) {
+	return nil, auth.ErrPlayerNotFound
+}
+
+func (stubPlayerStore) GetPlayerByID(_ context.Context, _ int64) (*auth.Player, error) {
+	return nil, auth.ErrPlayerNotFound
+}
+
+func (stubPlayerStore) CreatePlayer(_ context.Context, _, _, _ string) (*auth.Player, error) {
+	return nil, errRouteStub
+}
 
 var errRouteStub = errors.New("stub")
 
@@ -108,10 +123,11 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 	logger := slog.New(slog.DiscardHandler)
 	stores := &store.Stores{
 		Quizzes: stubQuizStore{},
+		Players: stubPlayerStore{},
 	}
 	gameSvc := game.NewService(stubGameStore{}, stubQuizStore{}, logger)
 	mux := http.NewServeMux()
-	ExportAddRoutes(mux, logger, stores, gameSvc, &config.Config{})
+	ExportAddRoutes(mux, logger, stores, gameSvc, &config.Config{RegistrationEnabled: true})
 
 	tests := []struct {
 		name   string
@@ -140,6 +156,12 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 
 		{name: "Question Save (create)", method: http.MethodPost, path: "/admin/quizzes/1/questions"},
 		{name: "Question Save (update)", method: http.MethodPost, path: "/admin/quizzes/1/questions/1"},
+
+		{name: "Auth Register GET", method: http.MethodGet, path: "/register"},
+		{name: "Auth Register POST", method: http.MethodPost, path: "/register"},
+		{name: "Auth Login GET", method: http.MethodGet, path: "/login"},
+		{name: "Auth Login POST", method: http.MethodPost, path: "/login"},
+		{name: "Auth Logout POST", method: http.MethodPost, path: "/logout"},
 	}
 
 	for _, tc := range tests {
@@ -157,6 +179,43 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 	}
 }
 
+func TestAddRoutes_RegisterDisabled_Returns404(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+	stores := &store.Stores{
+		Quizzes: stubQuizStore{},
+		Players: stubPlayerStore{},
+	}
+	gameSvc := game.NewService(stubGameStore{}, stubQuizStore{}, logger)
+	mux := http.NewServeMux()
+	// Default-false RegistrationEnabled — /register routes should not be registered.
+	ExportAddRoutes(mux, logger, stores, gameSvc, &config.Config{})
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{name: "Auth Register GET disabled", method: http.MethodGet, path: "/register"},
+		{name: "Auth Register POST disabled", method: http.MethodPost, path: "/register"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, nil)
+			rec := httptest.NewRecorder()
+
+			mux.ServeHTTP(rec, req)
+
+			if got, want := rec.Code, http.StatusNotFound; got != want {
+				t.Errorf("status = %d, want %d for %s %s", got, want, tc.method, tc.path)
+			}
+		})
+	}
+}
+
 func TestAddRoutes_UnknownRouteReturns404(t *testing.T) {
 	t.Parallel()
 
@@ -164,6 +223,7 @@ func TestAddRoutes_UnknownRouteReturns404(t *testing.T) {
 
 	stores := &store.Stores{
 		Quizzes: stubQuizStore{},
+		Players: stubPlayerStore{},
 	}
 	mux := http.NewServeMux()
 	ExportAddRoutes(mux, logger, stores, game.NewService(stubGameStore{}, stubQuizStore{}, logger), &config.Config{})
@@ -175,5 +235,28 @@ func TestAddRoutes_UnknownRouteReturns404(t *testing.T) {
 
 	if got, want := rec.Code, http.StatusNotFound; got != want {
 		t.Errorf("unexpected status code: got %v, want %v", got, want)
+	}
+}
+
+func TestAddRoutes_AdminRouteWithoutSession_RedirectsToLogin(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+	stores := &store.Stores{
+		Quizzes: stubQuizStore{},
+		Players: stubPlayerStore{},
+	}
+	mux := http.NewServeMux()
+	ExportAddRoutes(mux, logger, stores, game.NewService(stubGameStore{}, stubQuizStore{}, logger), &config.Config{})
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := rec.Header().Get("Location"), "/login"; got != want {
+		t.Errorf("Location = %q, want %q", got, want)
 	}
 }

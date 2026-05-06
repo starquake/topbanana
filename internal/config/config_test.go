@@ -2,6 +2,8 @@ package config_test
 
 import (
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	. "github.com/starquake/topbanana/internal/config"
@@ -250,4 +252,95 @@ func TestParse(t *testing.T) {
 
 func TestParse_ErrorHandling(t *testing.T) {
 	t.Parallel()
+}
+
+func TestParse_RegistrationEnabled(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid values", func(t *testing.T) {
+		t.Parallel()
+
+		tests := []struct {
+			name  string
+			value string
+			want  bool
+		}{
+			{"unset defaults to false", "", false},
+			{"true string", "true", true},
+			{"false string", "false", false},
+			{"numeric 1 parses as true", "1", true},
+			{"numeric 0 parses as false", "0", false},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+
+				getenv := func(key string) string {
+					if key == "REGISTRATION_ENABLED" {
+						return tt.value
+					}
+
+					return ""
+				}
+
+				c, err := Parse(getenv)
+				if err != nil {
+					t.Fatalf("Parse() err = %v, want nil", err)
+				}
+				if got, want := c.RegistrationEnabled, tt.want; got != want {
+					t.Errorf("RegistrationEnabled = %v, want %v", got, want)
+				}
+			})
+		}
+	})
+
+	t.Run("invalid value returns error", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := Parse(getenvFailure("REGISTRATION_ENABLED", "maybe"))
+		if err == nil {
+			t.Fatal("Parse() with invalid REGISTRATION_ENABLED: err = nil, want non-nil")
+		}
+		if got, want := err.Error(), "invalid REGISTRATION_ENABLED"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+}
+
+func TestParse_AdminUsernames(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value string
+		want  []string
+	}{
+		{"unset defaults to nil", "", nil},
+		{"single username", "alice", []string{"alice"}},
+		{"comma separated", "alice,bob,carol", []string{"alice", "bob", "carol"}},
+		{"trims whitespace", "  alice ,bob  , carol", []string{"alice", "bob", "carol"}},
+		{"drops empty entries", "alice,,bob, ,carol", []string{"alice", "bob", "carol"}},
+		{"only commas yields nil", ", ,", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			getenv := func(key string) string {
+				if key == "ADMIN_USERNAMES" {
+					return tt.value
+				}
+
+				return ""
+			}
+
+			c, err := Parse(getenv)
+			if err != nil {
+				t.Fatalf("Parse() err = %v, want nil", err)
+			}
+			if got, want := c.AdminUsernames, tt.want; !slices.Equal(got, want) {
+				t.Errorf("AdminUsernames = %v, want %v", got, want)
+			}
+		})
+	}
 }

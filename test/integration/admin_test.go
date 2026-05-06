@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"testing"
@@ -35,9 +36,10 @@ func TestAdmin_Integration(t *testing.T) {
 
 	getenv := func(key string) string {
 		env := map[string]string{
-			"HOST":   "localhost",
-			"PORT":   "0", // Let the OS choose an available port
-			"DB_URI": dbURI,
+			"HOST":                 "localhost",
+			"PORT":                 "0", // Let the OS choose an available port
+			"DB_URI":               dbURI,
+			"REGISTRATION_ENABLED": "true",
 		}
 
 		return env[key]
@@ -71,10 +73,41 @@ func TestAdmin_Integration(t *testing.T) {
 	quizForm.Add("title", quizTitle)
 	quizForm.Add("description", quizDesc)
 
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("failed to create cookie jar: %v", err)
+	}
 	client := &http.Client{
+		Jar: jar,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
+	}
+
+	// Register the first user (becomes admin) so subsequent /admin/* requests succeed.
+	registerForm := url.Values{}
+	registerForm.Add("username", "integration-admin")
+	registerForm.Add("password", "integration-pass-123")
+
+	registerReq, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		fmt.Sprintf("http://%s/register", serverAddr),
+		strings.NewReader(registerForm.Encode()),
+	)
+	if err != nil {
+		t.Fatalf("failed to create register request: %v", err)
+	}
+	registerReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	registerResp, err := client.Do(registerReq)
+	if err != nil {
+		t.Fatalf("failed to register: %v", err)
+	}
+	if got, want := registerResp.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("register status = %d, want %d", got, want)
+	}
+	if err := registerResp.Body.Close(); err != nil {
+		t.Errorf("failed to close register body: %v", err)
 	}
 
 	var req *http.Request

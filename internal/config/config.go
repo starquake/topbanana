@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -61,6 +62,14 @@ type Config struct {
 	ClientDir string
 
 	SessionKey string
+
+	// AdminUsernames is the list of usernames that are promoted to admin on registration.
+	// Parsed from the comma-separated ADMIN_USERNAMES env var.
+	AdminUsernames []string
+
+	// RegistrationEnabled gates the /register routes. Defaults to false so registration is
+	// opt-in per deployment. Parsed from the REGISTRATION_ENABLED env var via strconv.ParseBool.
+	RegistrationEnabled bool
 }
 
 // Parse parses environment variables into the config.
@@ -95,29 +104,8 @@ func Parse(getenv func(string) string) (*Config, error) {
 		}
 	}
 
-	// Strict validation for types
-	if val := getenv("DB_MAX_OPEN_CONNS"); val != "" {
-		var err error
-		c.DBMaxOpenConns, err = strconv.Atoi(val)
-		if err != nil {
-			return nil, fmt.Errorf("invalid DB_MAX_OPEN_CONNS: %q, err: %w", val, err)
-		}
-	}
-
-	if val := getenv("DB_MAX_IDLE_CONNS"); val != "" {
-		var err error
-		c.DBMaxIdleConns, err = strconv.Atoi(val)
-		if err != nil {
-			return nil, fmt.Errorf("invalid DB_MAX_IDLE_CONNS: %q, err: %w", val, err)
-		}
-	}
-
-	if val := getenv("DB_CONN_MAX_LIFETIME"); val != "" {
-		var err error
-		c.DBConnMaxLifetime, err = time.ParseDuration(val)
-		if err != nil {
-			return nil, fmt.Errorf("invalid DB_CONN_MAX_LIFETIME: %q, err: %w", val, err)
-		}
+	if err := parseTypedEnvVars(getenv, &c); err != nil {
+		return nil, err
 	}
 
 	// Mandatory fields
@@ -131,7 +119,65 @@ func Parse(getenv func(string) string) (*Config, error) {
 	}
 	c.SessionKey = key
 
+	c.AdminUsernames = parseAdminUsernames(getenv("ADMIN_USERNAMES"))
+
 	return &c, nil
+}
+
+// parseTypedEnvVars reads strict-typed env vars (ints, durations, bools) into c. It returns a
+// wrapped error if any value fails to parse.
+func parseTypedEnvVars(getenv func(string) string, c *Config) error {
+	if val := getenv("DB_MAX_OPEN_CONNS"); val != "" {
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			return fmt.Errorf("invalid DB_MAX_OPEN_CONNS: %q, err: %w", val, err)
+		}
+		c.DBMaxOpenConns = n
+	}
+
+	if val := getenv("DB_MAX_IDLE_CONNS"); val != "" {
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			return fmt.Errorf("invalid DB_MAX_IDLE_CONNS: %q, err: %w", val, err)
+		}
+		c.DBMaxIdleConns = n
+	}
+
+	if val := getenv("DB_CONN_MAX_LIFETIME"); val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil {
+			return fmt.Errorf("invalid DB_CONN_MAX_LIFETIME: %q, err: %w", val, err)
+		}
+		c.DBConnMaxLifetime = d
+	}
+
+	if val := getenv("REGISTRATION_ENABLED"); val != "" {
+		b, err := strconv.ParseBool(val)
+		if err != nil {
+			return fmt.Errorf("invalid REGISTRATION_ENABLED: %q, err: %w", val, err)
+		}
+		c.RegistrationEnabled = b
+	}
+
+	return nil
+}
+
+// parseAdminUsernames splits a comma-separated list, trims whitespace, and drops empty entries.
+func parseAdminUsernames(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+
+	return out
 }
 
 // resolveSessionKey returns the session key for cookie signing. In production an explicit value is required; in

@@ -47,6 +47,8 @@ test/integration/           ← integration tests (build tag: integration)
 Every handler is a **constructor that returns `http.Handler`**, not a method on a struct.
 Dependencies are closed over, keeping the handler function stateless.
 
+Write **one constructor per (method, path) pair**. Do not branch on `r.Method` inside a single handler — Go 1.22+ `http.ServeMux` already routes by method, so a `GET /foo` handler never sees a POST. For form pairs (GET to render, POST to submit), follow the existing admin pattern with two named constructors: e.g. `HandleQuizCreate` (GET form) + `HandleQuizSave` (POST submission).
+
 ```go
 func HandleFoo(logger *slog.Logger, store SomeStore) http.Handler {
     type fooRequest  struct { ... }
@@ -106,6 +108,7 @@ Store interfaces are defined in the domain package so domain code does not impor
 - Unit tests use `internal/dbtest` to get an in-memory SQLite DB (already migrated).
 - Integration tests use build tag `//go:build integration` and live in `test/integration/`.
 - Always use `t.Context()` instead of `context.Background()` in tests — it is cancelled automatically when the test ends. This applies to `httptest.NewRequestWithContext`, `context.WithCancel`, store calls, and any other place a context is needed inside a test.
+- When tests need to reach unexported package internals (private constructors, helpers, methods exposed via wrappers), use the `export_test.go` convention: a `package <pkg>` (same-package) file that aliases the unexported identifier as `Export<Name>`, e.g. `var ExportNewWithClock = newWithClock`. External `*_test.go` files (`package <pkg>_test`) then call `pkg.ExportNewWithClock(...)`. Mirrors `internal/server/export_test.go` and `internal/session/export_test.go`. Prefer this over `*_internal_test.go` files so all tests stay in the external test package and the test-only surface is itemized in one file.
 
 ## Key sentinel errors
 
