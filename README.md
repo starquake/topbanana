@@ -109,6 +109,14 @@ Following the official guidelines for a [standard Go server project layout](http
 
 Instructions will be provided soon.
 
+## Configuration
+
+Top Banana is configured through environment variables. The variables introduced with the register / login flow are:
+
+- **`SESSION_KEY`** — secret used to HMAC-sign session cookies. Defaults to a random ephemeral key in development; **required** in production. Treat as a credential — rotating it invalidates every active session.
+- **`ADMIN_USERNAMES`** — comma-separated list of usernames. A registrant whose trimmed username matches an entry is promoted to `admin` on registration. The very first password-bearing registrant becomes admin regardless of this list. Defaults to empty.
+- **`REGISTRATION_ENABLED`** — when `false` (the default), `GET/POST /register` return `404` and the "No account? Register" link is hidden on `/login`. Set to `true` to allow new sign-ups — typically just long enough to bootstrap your first admin, then unset to lock the instance down.
+
 ## Development
 
 ### Code Organization

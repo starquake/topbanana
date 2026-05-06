@@ -24,14 +24,18 @@ func addRoutes(
 ) {
 	sessions := session.New([]byte(cfg.SessionKey))
 
-	// Auth routes (HTML, no admin check)
-	mux.Handle("GET /register", auth.HandleRegisterForm(logger))
-	mux.Handle(
-		"POST /register",
-		auth.HandleRegisterSubmit(logger, stores.Players, sessions, cfg.AdminUsernames),
-	)
-	mux.Handle("GET /login", auth.HandleLoginForm(logger))
-	mux.Handle("POST /login", auth.HandleLoginSubmit(logger, stores.Players, sessions))
+	// Auth routes (HTML, no admin check). Registration routes are only registered when
+	// REGISTRATION_ENABLED is true; when disabled, /register naturally 404s from the mux,
+	// which is the desired UX (don't reveal the route exists).
+	if cfg.RegistrationEnabled {
+		mux.Handle("GET /register", auth.HandleRegisterForm(logger))
+		mux.Handle(
+			"POST /register",
+			auth.HandleRegisterSubmit(logger, stores.Players, sessions, cfg.AdminUsernames),
+		)
+	}
+	mux.Handle("GET /login", auth.HandleLoginForm(logger, cfg.RegistrationEnabled))
+	mux.Handle("POST /login", auth.HandleLoginSubmit(logger, stores.Players, sessions, cfg.RegistrationEnabled))
 	mux.Handle("POST /logout", auth.HandleLogout(sessions))
 
 	// Admin interface routes (require admin role)

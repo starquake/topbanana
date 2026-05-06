@@ -36,9 +36,10 @@ func TestAdmin_Integration(t *testing.T) {
 
 	getenv := func(key string) string {
 		env := map[string]string{
-			"HOST":   "localhost",
-			"PORT":   "0", // Let the OS choose an available port
-			"DB_URI": dbURI,
+			"HOST":                 "localhost",
+			"PORT":                 "0", // Let the OS choose an available port
+			"DB_URI":               dbURI,
+			"REGISTRATION_ENABLED": "true",
 		}
 
 		return env[key]

@@ -283,7 +283,7 @@ func TestHandleRegisterSubmit_DuplicateUsername(t *testing.T) {
 func TestHandleLoginForm_GET_RendersForm(t *testing.T) {
 	t.Parallel()
 
-	handler := auth.HandleLoginForm(discardLogger())
+	handler := auth.HandleLoginForm(discardLogger(), false)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login", nil)
 	rec := httptest.NewRecorder()
@@ -294,6 +294,40 @@ func TestHandleLoginForm_GET_RendersForm(t *testing.T) {
 	}
 	if got, want := rec.Body.String(), "Log in"; !strings.Contains(got, want) {
 		t.Errorf("body did not contain %q", want)
+	}
+}
+
+func TestHandleLoginForm_RegistrationDisabled_HidesRegisterLink(t *testing.T) {
+	t.Parallel()
+
+	handler := auth.HandleLoginForm(discardLogger(), false)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusOK; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got := rec.Body.String(); strings.Contains(got, "/register") {
+		t.Errorf("body should not contain %q when registration is disabled, got %q", "/register", got)
+	}
+}
+
+func TestHandleLoginForm_RegistrationEnabled_ShowsRegisterLink(t *testing.T) {
+	t.Parallel()
+
+	handler := auth.HandleLoginForm(discardLogger(), true)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusOK; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := rec.Body.String(), `href="/register"`; !strings.Contains(got, want) {
+		t.Errorf("body should contain %q when registration is enabled, got %q", want, got)
 	}
 }
 
@@ -309,7 +343,7 @@ func TestHandleLoginSubmit_Success(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := auth.HandleLoginSubmit(discardLogger(), store, session.New([]byte("k")))
+	handler := auth.HandleLoginSubmit(discardLogger(), store, session.New([]byte("k")), false)
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"alice"},
 		"password": {"correctbattery"},
@@ -327,7 +361,7 @@ func TestHandleLoginSubmit_BadCredentials_UnknownUser(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := auth.HandleLoginSubmit(discardLogger(), store, session.New([]byte("k")))
+	handler := auth.HandleLoginSubmit(discardLogger(), store, session.New([]byte("k")), false)
 
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"ghost"},
@@ -354,7 +388,7 @@ func TestHandleLoginSubmit_BadCredentials_WrongPassword(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := auth.HandleLoginSubmit(discardLogger(), store, session.New([]byte("k")))
+	handler := auth.HandleLoginSubmit(discardLogger(), store, session.New([]byte("k")), false)
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"alice"},
 		"password": {"wrong-password-no"},
@@ -377,7 +411,7 @@ func TestHandleLoginSubmit_RejectsEmptyHash(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := auth.HandleLoginSubmit(discardLogger(), store, session.New([]byte("k")))
+	handler := auth.HandleLoginSubmit(discardLogger(), store, session.New([]byte("k")), false)
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"legacy"},
 		"password": {"anything-goes-here-13"},

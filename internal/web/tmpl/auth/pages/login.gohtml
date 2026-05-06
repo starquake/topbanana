@@ -27,9 +27,11 @@
                     <div class="control">
                         <button class="button is-primary" type="submit">Log in</button>
                     </div>
+                    {{if .ShowRegister}}
                     <div class="control">
                         <a href="/register">No account? Register</a>
                     </div>
+                    {{end}}
                 </div>
             </form>
         </div>

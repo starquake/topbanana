@@ -23,6 +23,9 @@ type formData struct {
 	Title    string
 	Username string
 	Message  string
+	// ShowRegister controls whether the login template renders the
+	// "No account? Register" link. False when REGISTRATION_ENABLED is unset/false.
+	ShowRegister bool
 }
 
 // HandleRegisterForm returns a handler for GET /register that renders the
@@ -109,20 +112,23 @@ func HandleRegisterSubmit(
 }
 
 // HandleLoginForm returns a handler for GET /login that renders the login form.
-func HandleLoginForm(logger *slog.Logger) http.Handler {
+// registrationEnabled controls whether the template shows the "No account? Register" link.
+func HandleLoginForm(logger *slog.Logger, registrationEnabled bool) http.Handler {
 	render := newTemplateRenderer(logger, "auth/pages/login.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		render.render(w, r, http.StatusOK, formData{Title: "Log in"})
+		render.render(w, r, http.StatusOK, formData{Title: "Log in", ShowRegister: registrationEnabled})
 	})
 }
 
 // HandleLoginSubmit returns a handler for POST /login. It verifies the
 // credentials, signs the player in, and redirects to the admin landing page.
+// registrationEnabled controls whether error renders show the "No account? Register" link.
 func HandleLoginSubmit(
 	logger *slog.Logger,
 	players PlayerStore,
 	sessions *session.Manager,
+	registrationEnabled bool,
 ) http.Handler {
 	render := newTemplateRenderer(logger, "auth/pages/login.gohtml")
 
@@ -159,7 +165,7 @@ func HandleLoginSubmit(
 				// Equalise timing with the valid-username path so an attacker
 				// cannot enumerate usernames by response time.
 				_ = CheckPassword(dummyHash(), password)
-				renderInvalidCredentials(render, w, r, username)
+				renderInvalidCredentials(render, w, r, username, registrationEnabled)
 
 				return
 			}
@@ -173,13 +179,13 @@ func HandleLoginSubmit(
 			// Player has no password set (e.g. legacy seed admin). Run the
 			// dummy compare to keep timing consistent.
 			_ = CheckPassword(dummyHash(), password)
-			renderInvalidCredentials(render, w, r, username)
+			renderInvalidCredentials(render, w, r, username, registrationEnabled)
 
 			return
 		}
 
 		if err := CheckPassword(player.PasswordHash, password); err != nil {
-			renderInvalidCredentials(render, w, r, username)
+			renderInvalidCredentials(render, w, r, username, registrationEnabled)
 
 			return
 		}
@@ -222,11 +228,18 @@ func validateRegisterInput(username, password string) registerInput {
 	return registerInput{Cleaned: cleaned, OK: true}
 }
 
-func renderInvalidCredentials(render *templateRenderer, w http.ResponseWriter, r *http.Request, username string) {
+func renderInvalidCredentials(
+	render *templateRenderer,
+	w http.ResponseWriter,
+	r *http.Request,
+	username string,
+	registrationEnabled bool,
+) {
 	render.render(w, r, http.StatusUnauthorized, formData{
-		Title:    "Log in",
-		Username: username,
-		Message:  "Invalid username or password.",
+		Title:        "Log in",
+		Username:     username,
+		Message:      "Invalid username or password.",
+		ShowRegister: registrationEnabled,
 	})
 }
 

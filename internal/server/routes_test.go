@@ -127,7 +127,7 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 	}
 	gameSvc := game.NewService(stubGameStore{}, stubQuizStore{}, logger)
 	mux := http.NewServeMux()
-	ExportAddRoutes(mux, logger, stores, gameSvc, &config.Config{})
+	ExportAddRoutes(mux, logger, stores, gameSvc, &config.Config{RegistrationEnabled: true})
 
 	tests := []struct {
 		name   string
@@ -174,6 +174,43 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 
 			if rec.Code == http.StatusNotFound {
 				t.Errorf("unexpected 404 for %s %s", tc.method, tc.path)
+			}
+		})
+	}
+}
+
+func TestAddRoutes_RegisterDisabled_Returns404(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+	stores := &store.Stores{
+		Quizzes: stubQuizStore{},
+		Players: stubPlayerStore{},
+	}
+	gameSvc := game.NewService(stubGameStore{}, stubQuizStore{}, logger)
+	mux := http.NewServeMux()
+	// Default-false RegistrationEnabled — /register routes should not be registered.
+	ExportAddRoutes(mux, logger, stores, gameSvc, &config.Config{})
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{name: "Auth Register GET disabled", method: http.MethodGet, path: "/register"},
+		{name: "Auth Register POST disabled", method: http.MethodPost, path: "/register"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, nil)
+			rec := httptest.NewRecorder()
+
+			mux.ServeHTTP(rec, req)
+
+			if got, want := rec.Code, http.StatusNotFound; got != want {
+				t.Errorf("status = %d, want %d for %s %s", got, want, tc.method, tc.path)
 			}
 		})
 	}
