@@ -5,11 +5,13 @@ import (
 	"net/http"
 
 	"github.com/starquake/topbanana/internal/admin"
+	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/client"
 	"github.com/starquake/topbanana/internal/clientapi"
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/health"
+	"github.com/starquake/topbanana/internal/session"
 	"github.com/starquake/topbanana/internal/store"
 )
 
@@ -20,29 +22,51 @@ func addRoutes(
 	gameService *game.Service,
 	cfg *config.Config,
 ) {
-	// Admin interface routes
-	mux.Handle("GET /admin", admin.HandleIndex(logger))
-	mux.Handle("GET /admin/quizzes", admin.HandleQuizList(logger, stores.Quizzes))
-	mux.Handle("GET /admin/quizzes/{quizID}", admin.HandleQuizView(logger, stores.Quizzes))
-	mux.Handle("GET /admin/quizzes/new", admin.HandleQuizCreate(logger))
-	mux.Handle("POST /admin/quizzes", admin.HandleQuizSave(logger, stores.Quizzes))
-	mux.Handle("GET /admin/quizzes/{quizID}/edit", admin.HandleQuizEdit(logger, stores.Quizzes))
-	mux.Handle("POST /admin/quizzes/{quizID}", admin.HandleQuizSave(logger, stores.Quizzes))
-	mux.Handle("POST /admin/quizzes/{quizID}/delete", admin.HandleQuizDelete(logger, stores.Quizzes))
+	sessions := session.New([]byte(cfg.SessionKey), cfg.IsProduction())
 
-	mux.Handle("GET /admin/quizzes/{quizID}/questions/new", admin.HandleQuestionCreate(logger, stores.Quizzes))
-	mux.Handle("POST /admin/quizzes/{quizID}/questions", admin.HandleQuestionSave(logger, stores.Quizzes))
+	// Auth routes (HTML, no admin check)
+	mux.Handle("GET /register", auth.HandleRegisterForm(logger))
+	mux.Handle(
+		"POST /register",
+		auth.HandleRegisterSubmit(logger, stores.Players, sessions, cfg.AdminUsernames),
+	)
+	mux.Handle("GET /login", auth.HandleLoginForm(logger))
+	mux.Handle("POST /login", auth.HandleLoginSubmit(logger, stores.Players, sessions))
+	mux.Handle("POST /logout", auth.HandleLogout(sessions))
+
+	// Admin interface routes (require admin role)
+	requireAdmin := func(h http.Handler) http.Handler {
+		return auth.RequireAdmin(h, stores.Players, sessions, logger)
+	}
+
+	mux.Handle("GET /admin", requireAdmin(admin.HandleIndex(logger)))
+	mux.Handle("GET /admin/quizzes", requireAdmin(admin.HandleQuizList(logger, stores.Quizzes)))
+	mux.Handle("GET /admin/quizzes/{quizID}", requireAdmin(admin.HandleQuizView(logger, stores.Quizzes)))
+	mux.Handle("GET /admin/quizzes/new", requireAdmin(admin.HandleQuizCreate(logger)))
+	mux.Handle("POST /admin/quizzes", requireAdmin(admin.HandleQuizSave(logger, stores.Quizzes)))
+	mux.Handle("GET /admin/quizzes/{quizID}/edit", requireAdmin(admin.HandleQuizEdit(logger, stores.Quizzes)))
+	mux.Handle("POST /admin/quizzes/{quizID}", requireAdmin(admin.HandleQuizSave(logger, stores.Quizzes)))
+	mux.Handle("POST /admin/quizzes/{quizID}/delete", requireAdmin(admin.HandleQuizDelete(logger, stores.Quizzes)))
+
+	mux.Handle(
+		"GET /admin/quizzes/{quizID}/questions/new",
+		requireAdmin(admin.HandleQuestionCreate(logger, stores.Quizzes)),
+	)
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/questions",
+		requireAdmin(admin.HandleQuestionSave(logger, stores.Quizzes)),
+	)
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}/questions/{questionID}/edit",
-		admin.HandleQuestionEdit(logger, stores.Quizzes),
+		requireAdmin(admin.HandleQuestionEdit(logger, stores.Quizzes)),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/questions/{questionID}",
-		admin.HandleQuestionSave(logger, stores.Quizzes),
+		requireAdmin(admin.HandleQuestionSave(logger, stores.Quizzes)),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/questions/{questionID}/delete",
-		admin.HandleQuestionDelete(logger, stores.Quizzes),
+		requireAdmin(admin.HandleQuestionDelete(logger, stores.Quizzes)),
 	)
 
 	// API

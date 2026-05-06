@@ -1,0 +1,37 @@
+{{define "content"}}
+    <div class="columns is-centered">
+        <div class="column is-half">
+            <h1 class="title">Log in</h1>
+
+            {{if .Message}}
+                <div class="notification is-danger">{{.Message}}</div>
+            {{end}}
+
+            <form action="/login" method="POST">
+                <div class="field">
+                    <label class="label" for="username">Username</label>
+                    <div class="control">
+                        <input id="username" name="username" class="input" type="text" required
+                               value="{{.Username}}">
+                    </div>
+                </div>
+
+                <div class="field">
+                    <label class="label" for="password">Password</label>
+                    <div class="control">
+                        <input id="password" name="password" class="input" type="password" required>
+                    </div>
+                </div>
+
+                <div class="field is-grouped">
+                    <div class="control">
+                        <button class="button is-primary" type="submit">Log in</button>
+                    </div>
+                    <div class="control">
+                        <a class="button is-link is-light" href="/register">No account? Register</a>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+{{end}}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -61,6 +62,10 @@ type Config struct {
 	ClientDir string
 
 	SessionKey string
+
+	// AdminUsernames is the list of usernames that are promoted to admin on registration.
+	// Parsed from the comma-separated ADMIN_USERNAMES env var.
+	AdminUsernames []string
 }
 
 // Parse parses environment variables into the config.
@@ -131,7 +136,27 @@ func Parse(getenv func(string) string) (*Config, error) {
 	}
 	c.SessionKey = key
 
+	c.AdminUsernames = parseAdminUsernames(getenv("ADMIN_USERNAMES"))
+
 	return &c, nil
+}
+
+// parseAdminUsernames splits a comma-separated list, trims whitespace, and drops empty entries.
+func parseAdminUsernames(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+
+	return out
 }
 
 // resolveSessionKey returns the session key for cookie signing. In production an explicit value is required; in
