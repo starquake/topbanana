@@ -45,34 +45,6 @@ func TestPlayerStore_Ping(t *testing.T) {
 	})
 }
 
-func TestPlayerStore_CountPlayers(t *testing.T) {
-	t.Parallel()
-
-	db := dbtest.Open(t)
-	ps := NewPlayerStore(db, slog.Default())
-
-	// The seed migration creates an admin player (id=1) without a password_hash, which is excluded.
-	count, err := ps.CountPlayers(t.Context())
-	if err != nil {
-		t.Fatalf("CountPlayers() err = %v, want nil", err)
-	}
-	if got, want := count, int64(0); got != want {
-		t.Errorf("CountPlayers() = %d, want %d", got, want)
-	}
-
-	if _, createErr := ps.CreatePlayer(t.Context(), "alice", "hash", auth.RolePlayer); createErr != nil {
-		t.Fatalf("CreatePlayer err = %v, want nil", createErr)
-	}
-
-	count, err = ps.CountPlayers(t.Context())
-	if err != nil {
-		t.Fatalf("CountPlayers() err = %v, want nil", err)
-	}
-	if got, want := count, int64(1); got != want {
-		t.Errorf("CountPlayers() = %d, want %d", got, want)
-	}
-}
-
 func TestPlayerStore_CreateAndGetPlayer(t *testing.T) {
 	t.Parallel()
 
@@ -102,6 +74,81 @@ func TestPlayerStore_CreateAndGetPlayer(t *testing.T) {
 	}
 	if got, want := fetched.Role, auth.RoleAdmin; got != want {
 		t.Errorf("GetPlayerByUsername Role = %q, want %q", got, want)
+	}
+}
+
+func TestPlayerStore_CreatePlayer_FirstPasswordBearer_PromotedToAdmin(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	// Even when the caller asks for "player", the first password-bearing
+	// registrant is promoted to admin atomically by the SQL CASE expression.
+	created, err := ps.CreatePlayer(t.Context(), "alice", "hash", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	if got, want := created.Role, auth.RoleAdmin; got != want {
+		t.Errorf("Role = %q, want %q", got, want)
+	}
+}
+
+func TestPlayerStore_CreatePlayer_SecondPasswordBearer_StaysPlayer(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	if _, err := ps.CreatePlayer(t.Context(), "alice", "hash", auth.RolePlayer); err != nil {
+		t.Fatalf("seed CreatePlayer err = %v, want nil", err)
+	}
+
+	created, err := ps.CreatePlayer(t.Context(), "bob", "hash", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	if got, want := created.Role, auth.RolePlayer; got != want {
+		t.Errorf("Role = %q, want %q", got, want)
+	}
+}
+
+func TestPlayerStore_CreatePlayer_ExplicitAdmin_HonouredEvenWhenNotFirst(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	if _, err := ps.CreatePlayer(t.Context(), "alice", "hash", auth.RolePlayer); err != nil {
+		t.Fatalf("seed CreatePlayer err = %v, want nil", err)
+	}
+
+	created, err := ps.CreatePlayer(t.Context(), "carol", "hash", auth.RoleAdmin)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	if got, want := created.Role, auth.RoleAdmin; got != want {
+		t.Errorf("Role = %q, want %q", got, want)
+	}
+}
+
+func TestPlayerStore_TrimsWhitespaceOnCreateAndLookup(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	if _, err := ps.CreatePlayer(t.Context(), "  alice  ", "hash", auth.RolePlayer); err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+
+	// Lookup with a trailing space matches because the store trims.
+	fetched, err := ps.GetPlayerByUsername(t.Context(), "alice ")
+	if err != nil {
+		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+	}
+	if got, want := fetched.Username, "alice"; got != want {
+		t.Errorf("Username = %q, want %q (whitespace should have been trimmed)", got, want)
 	}
 }
 

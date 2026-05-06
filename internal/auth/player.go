@@ -24,15 +24,17 @@ type Player struct {
 
 // PlayerStore is the persistence interface used by the auth package.
 type PlayerStore interface {
-	// CountPlayers returns the total number of players. Used to detect the first registration.
-	CountPlayers(ctx context.Context) (int64, error)
 	// GetPlayerByUsername returns the player with the given username.
 	// Returns ErrPlayerNotFound when there is no match.
 	GetPlayerByUsername(ctx context.Context, username string) (*Player, error)
 	// GetPlayerByID returns the player with the given ID.
 	// Returns ErrPlayerNotFound when there is no match.
 	GetPlayerByID(ctx context.Context, id int64) (*Player, error)
-	// CreatePlayer creates a new player with the given username, password hash, and role.
+	// CreatePlayer creates a new player with the given username, password hash,
+	// and requested role. The store may promote the stored role to admin when
+	// the requested role is not "admin" but there are no other password-bearing
+	// players yet — making the "first registrant becomes admin" rule atomic
+	// against concurrent registrations.
 	// Returns ErrUsernameTaken when the username is already in use.
-	CreatePlayer(ctx context.Context, username, passwordHash, role string) (*Player, error)
+	CreatePlayer(ctx context.Context, username, passwordHash, requestedRole string) (*Player, error)
 }

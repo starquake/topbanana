@@ -22,7 +22,7 @@ func addRoutes(
 	gameService *game.Service,
 	cfg *config.Config,
 ) {
-	sessions := session.New([]byte(cfg.SessionKey), cfg.IsProduction())
+	sessions := session.New([]byte(cfg.SessionKey))
 
 	// Auth routes (HTML, no admin check)
 	mux.Handle("GET /register", auth.HandleRegisterForm(logger))

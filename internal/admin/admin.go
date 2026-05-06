@@ -682,8 +682,7 @@ func HandleQuestionDelete(logger *slog.Logger, quizStore quiz.Store) http.Handle
 			return
 		}
 
-		//nolint:gosec // quizID is parsed as int64, redirect is always /admin/quizzes/<integer>
-		http.Redirect(w, r, fmt.Sprintf("/admin/quizzes/%d", quizID), http.StatusSeeOther)
+		http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(quizID, 10), http.StatusSeeOther)
 	})
 }
 

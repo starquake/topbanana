@@ -1,9 +1,7 @@
 package auth
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -19,21 +17,6 @@ import (
 const MinPasswordLength = 13
 
 const adminLandingPath = "/admin/quizzes"
-
-// dummyHashOnce computes a bcrypt hash once on first use. The login handler
-// runs CheckPassword against this hash when the username does not exist, so
-// the response time matches the case where the username does exist. This
-// prevents an attacker from enumerating valid usernames by response timing.
-//
-//nolint:gochecknoglobals // package-level cache for a single dummy hash, by design
-var dummyHashOnce = sync.OnceValue(func() string {
-	h, err := HashPassword("timing-oracle-dummy-do-not-use")
-	if err != nil {
-		panic("dummyHashOnce: HashPassword on constant input failed")
-	}
-
-	return h
-})
 
 // formData is the data passed to the register and login templates.
 type formData struct {
@@ -56,8 +39,10 @@ func HandleRegisterForm(logger *slog.Logger) http.Handler {
 // request, creates the player, signs them in, and redirects to the admin
 // landing page.
 //
-// The first registered player is promoted to admin. Subsequent registrants matching
-// `adminUsernames` (case-sensitive) are also promoted. Everyone else gets RolePlayer.
+// Registrants whose username appears in `adminUsernames` (case-sensitive) are
+// promoted to admin. Otherwise the role passed to the store is RolePlayer and
+// the store atomically promotes the very first password-bearing registrant to
+// admin — see CreatePlayer for the SQL that makes this concurrency-safe.
 func HandleRegisterSubmit(
 	logger *slog.Logger,
 	players PlayerStore,
@@ -77,23 +62,20 @@ func HandleRegisterSubmit(
 		rawUsername := r.PostFormValue("username")
 		password := r.PostFormValue("password")
 
-		username, msg, ok := validateRegisterInput(rawUsername, password)
-		if !ok {
+		input := validateRegisterInput(rawUsername, password)
+		if !input.OK {
 			render.render(w, r, http.StatusBadRequest, formData{
 				Title:    "Register",
-				Username: username,
-				Message:  msg,
+				Username: input.Cleaned,
+				Message:  input.ErrMsg,
 			})
 
 			return
 		}
 
-		role, err := decideRole(r.Context(), players, username, adminUsernames)
-		if err != nil {
-			logger.ErrorContext(r.Context(), "error deciding role", slog.Any("err", err))
-			http.Error(w, "internal error", http.StatusInternalServerError)
-
-			return
+		role := RolePlayer
+		if slices.Contains(adminUsernames, input.Cleaned) {
+			role = RoleAdmin
 		}
 
 		hashed, err := HashPassword(password)
@@ -104,12 +86,12 @@ func HandleRegisterSubmit(
 			return
 		}
 
-		player, err := players.CreatePlayer(r.Context(), username, hashed, role)
+		player, err := players.CreatePlayer(r.Context(), input.Cleaned, hashed, role)
 		if err != nil {
 			if errors.Is(err, ErrUsernameTaken) {
 				render.render(w, r, http.StatusConflict, formData{
 					Title:    "Register",
-					Username: username,
+					Username: input.Cleaned,
 					Message:  "Username is already taken.",
 				})
 
@@ -144,6 +126,19 @@ func HandleLoginSubmit(
 ) http.Handler {
 	render := newTemplateRenderer(logger, "auth/pages/login.gohtml")
 
+	// dummyHash computes a bcrypt hash once on first use. The handler runs
+	// CheckPassword against it when the username does not exist so the
+	// response time matches the valid-username path, preventing username
+	// enumeration by response timing.
+	dummyHash := sync.OnceValue(func() string {
+		h, err := HashPassword("timing-oracle-dummy-do-not-use")
+		if err != nil {
+			panic("HashPassword on constant input failed")
+		}
+
+		return h
+	})
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			logger.ErrorContext(r.Context(), "error parsing login form", slog.Any("err", err))
@@ -152,7 +147,10 @@ func HandleLoginSubmit(
 			return
 		}
 
-		username := r.PostFormValue("username")
+		// Trim the username so a registrant who entered "alice" can still log in
+		// after typing "alice " (trailing space). The store also trims as
+		// defense in depth.
+		username := strings.TrimSpace(r.PostFormValue("username"))
 		password := r.PostFormValue("password")
 
 		player, err := players.GetPlayerByUsername(r.Context(), username)
@@ -160,7 +158,7 @@ func HandleLoginSubmit(
 			if errors.Is(err, ErrPlayerNotFound) {
 				// Equalise timing with the valid-username path so an attacker
 				// cannot enumerate usernames by response time.
-				_ = CheckPassword(dummyHashOnce(), password)
+				_ = CheckPassword(dummyHash(), password)
 				renderInvalidCredentials(render, w, r, username)
 
 				return
@@ -174,7 +172,7 @@ func HandleLoginSubmit(
 		if player.PasswordHash == "" {
 			// Player has no password set (e.g. legacy seed admin). Run the
 			// dummy compare to keep timing consistent.
-			_ = CheckPassword(dummyHashOnce(), password)
+			_ = CheckPassword(dummyHash(), password)
 			renderInvalidCredentials(render, w, r, username)
 
 			return
@@ -200,42 +198,28 @@ func HandleLogout(sessions *session.Manager) http.Handler {
 	})
 }
 
-// validateRegisterInput trims the username and validates the inputs. It returns
-// the trimmed username, an error message for the user, and ok indicating whether
-// the inputs are valid. Callers use the trimmed username for both storage and
-// lookup so `" alice "` and `"alice"` cannot be treated as different users.
-//
-//nolint:nonamedreturns // named results disambiguate two same-type strings (revive: confusing-results)
-func validateRegisterInput(username, password string) (cleaned, errMsg string, ok bool) {
-	cleaned = strings.TrimSpace(username)
-	if cleaned == "" {
-		return cleaned, "Username is required.", false
-	}
-	if len(password) < MinPasswordLength {
-		return cleaned, "Password must be at least 13 characters.", false
-	}
-
-	return cleaned, "", true
+// registerInput is the result of validateRegisterInput.
+type registerInput struct {
+	// Cleaned is the username with surrounding whitespace removed. Callers use it for
+	// both storage and lookup so `" alice "` and `"alice"` cannot be treated as different users.
+	Cleaned string
+	// ErrMsg is a user-facing error message, populated only when OK is false.
+	ErrMsg string
+	// OK reports whether the inputs are valid.
+	OK bool
 }
 
-func decideRole(
-	ctx context.Context,
-	players PlayerStore,
-	username string,
-	adminUsernames []string,
-) (string, error) {
-	count, err := players.CountPlayers(ctx)
-	if err != nil {
-		return "", fmt.Errorf("count players: %w", err)
+// validateRegisterInput trims the username and validates the inputs.
+func validateRegisterInput(username, password string) registerInput {
+	cleaned := strings.TrimSpace(username)
+	if cleaned == "" {
+		return registerInput{Cleaned: cleaned, ErrMsg: "Username is required.", OK: false}
 	}
-	if count == 0 {
-		return RoleAdmin, nil
-	}
-	if slices.Contains(adminUsernames, username) {
-		return RoleAdmin, nil
+	if len(password) < MinPasswordLength {
+		return registerInput{Cleaned: cleaned, ErrMsg: "Password must be at least 13 characters.", OK: false}
 	}
 
-	return RolePlayer, nil
+	return registerInput{Cleaned: cleaned, OK: true}
 }
 
 func renderInvalidCredentials(render *templateRenderer, w http.ResponseWriter, r *http.Request, username string) {

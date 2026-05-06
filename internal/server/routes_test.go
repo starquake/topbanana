@@ -18,7 +18,6 @@ import (
 
 type stubPlayerStore struct{}
 
-func (stubPlayerStore) CountPlayers(_ context.Context) (int64, error) { return 0, nil }
 func (stubPlayerStore) GetPlayerByUsername(_ context.Context, _ string) (*auth.Player, error) {
 	return nil, auth.ErrPlayerNotFound
 }

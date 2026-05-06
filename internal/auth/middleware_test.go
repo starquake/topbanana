@@ -24,7 +24,7 @@ func TestRequireAdmin_AllowsAdmin(t *testing.T) {
 		w.WriteHeader(http.StatusTeapot)
 	})
 
-	sessions := session.New([]byte("k"), false)
+	sessions := session.New([]byte("k"))
 	mw := auth.RequireAdmin(next, store, sessions, discardLogger())
 
 	rec := httptest.NewRecorder()
@@ -48,6 +48,11 @@ func TestRequireAdmin_DeniesPlayer(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
+	// Pre-seed an admin so the next CreatePlayer call is not auto-promoted to admin
+	// by the "first password-bearing registrant becomes admin" rule.
+	if _, err := store.CreatePlayer(t.Context(), "admin", "h", auth.RoleAdmin); err != nil {
+		t.Fatalf("seed admin err = %v, want nil", err)
+	}
 	player, err := store.CreatePlayer(t.Context(), "bob", "h", auth.RolePlayer)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
@@ -57,7 +62,7 @@ func TestRequireAdmin_DeniesPlayer(t *testing.T) {
 		t.Error("next should not be called for player role")
 	})
 
-	sessions := session.New([]byte("k"), false)
+	sessions := session.New([]byte("k"))
 	mw := auth.RequireAdmin(next, store, sessions, discardLogger())
 
 	rec := httptest.NewRecorder()
@@ -85,7 +90,7 @@ func TestRequireAdmin_NoCookie_RedirectsToLogin(t *testing.T) {
 		t.Error("next should not be called without cookie")
 	})
 
-	mw := auth.RequireAdmin(next, store, session.New([]byte("k"), false), discardLogger())
+	mw := auth.RequireAdmin(next, store, session.New([]byte("k")), discardLogger())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
 	rec := httptest.NewRecorder()
@@ -107,7 +112,7 @@ func TestRequireAdmin_UnknownPlayerID_RedirectsToLogin(t *testing.T) {
 		t.Error("next should not be called for unknown player")
 	})
 
-	sessions := session.New([]byte("k"), false)
+	sessions := session.New([]byte("k"))
 	mw := auth.RequireAdmin(next, store, sessions, discardLogger())
 
 	rec := httptest.NewRecorder()
@@ -138,7 +143,7 @@ func TestRequireAdmin_StoreError_500(t *testing.T) {
 		t.Error("next should not be called when store errors")
 	})
 
-	sessions := session.New([]byte("k"), false)
+	sessions := session.New([]byte("k"))
 	mw := auth.RequireAdmin(next, store, sessions, discardLogger())
 
 	rec := httptest.NewRecorder()

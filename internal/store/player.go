@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
@@ -35,20 +36,14 @@ func (s *PlayerStore) Ping(ctx context.Context) error {
 	return nil
 }
 
-// CountPlayers returns the total number of players in the database.
-func (s *PlayerStore) CountPlayers(ctx context.Context) (int64, error) {
-	count, err := s.q.CountPlayers(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("failed to count players: %w", err)
-	}
-
-	return count, nil
-}
-
 // GetPlayerByUsername returns the player with the given username.
 // Returns auth.ErrPlayerNotFound if no player matches the username.
+//
+// Whitespace around the username is trimmed before lookup so callers cannot
+// accidentally treat "alice" and " alice " as different users. The matching
+// trim happens in CreatePlayer too — defense in depth at the storage layer.
 func (s *PlayerStore) GetPlayerByUsername(ctx context.Context, username string) (*auth.Player, error) {
-	row, err := s.q.GetPlayerByUsername(ctx, username)
+	row, err := s.q.GetPlayerByUsername(ctx, strings.TrimSpace(username))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, auth.ErrPlayerNotFound
@@ -75,16 +70,22 @@ func (s *PlayerStore) GetPlayerByID(ctx context.Context, id int64) (*auth.Player
 	return playerFromRow(row), nil
 }
 
-// CreatePlayer creates a new player with the given username, password hash, and role.
+// CreatePlayer creates a new player with the given username, password hash, and
+// requested role. The role stored may be promoted to admin by the underlying
+// query: if the requested role is "admin" it is honoured directly, and if the
+// requested role is anything else it is promoted to admin only when no other
+// password-bearing player exists yet (so the first registrant always becomes
+// admin atomically — see the SQL for why).
+//
 // Returns auth.ErrUsernameTaken if the username is already in use.
 func (s *PlayerStore) CreatePlayer(
 	ctx context.Context,
-	username, passwordHash, role string,
+	username, passwordHash, requestedRole string,
 ) (*auth.Player, error) {
 	row, err := s.q.CreatePlayerWithCredentials(ctx, db.CreatePlayerWithCredentialsParams{
-		Username:     username,
-		PasswordHash: sql.NullString{String: passwordHash, Valid: true},
-		Role:         role,
+		Username:      strings.TrimSpace(username),
+		PasswordHash:  sql.NullString{String: passwordHash, Valid: true},
+		RequestedRole: requestedRole,
 	})
 	if err != nil {
 		var sqliteErr *sqlite.Error

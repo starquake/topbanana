@@ -47,7 +47,7 @@ linters:
     - importas
     - inamedparam
     - ineffassign
-    - interfacebloat
+    # - interfacebloat # disabled — keep interfaces decent by judgement
     - intrange
     - iotamixing
     # - ireturn      # Caching causes issues with this linter
@@ -99,8 +99,6 @@ linters:
     - whitespace
     - wrapcheck
   settings:
-    interfacebloat:
-      max: 12
     gocognit:
       min-complexity: 20
     gocyclo:

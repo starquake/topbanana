@@ -10,35 +10,38 @@ import (
 	"database/sql"
 )
 
-const countPlayers = `-- name: CountPlayers :one
-SELECT COUNT(*) AS count
-FROM players
-WHERE password_hash IS NOT NULL
-`
-
-// CountPlayers counts only players that have registered through the form (password_hash IS NOT NULL).
-// This intentionally ignores legacy seed rows so the "first registered user becomes admin" rule still works.
-func (q *Queries) CountPlayers(ctx context.Context) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countPlayers)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createPlayerWithCredentials = `-- name: CreatePlayerWithCredentials :one
 INSERT INTO players (username, password_hash, role)
-VALUES (?, ?, ?)
+VALUES (
+    ?1,
+    ?2,
+    CASE
+        WHEN CAST(?3 AS TEXT) = 'admin' THEN 'admin'
+        WHEN (SELECT COUNT(*) FROM players WHERE password_hash IS NOT NULL) = 0 THEN 'admin'
+        ELSE 'player'
+    END
+)
 RETURNING id, username, email, password_hash, role, created_at
 `
 
 type CreatePlayerWithCredentialsParams struct {
-	Username     string
-	PasswordHash sql.NullString
-	Role         string
+	Username      string
+	PasswordHash  sql.NullString
+	RequestedRole string
 }
 
+// The role decision lives in SQL so the "first password-bearing registrant
+// becomes admin" rule is atomic. Two concurrent first-registrations would
+// both observe count == 0 if we computed the role in Go and called INSERT
+// separately, leaving us with two admins. Folding the check into the same
+// INSERT serialises the decision against the row that gets written.
+//
+// The third placeholder is the role requested by the caller (env-list match,
+// otherwise "player"). If "admin" is requested explicitly we honour that;
+// otherwise we promote when there are no other rows with a password_hash
+// (legacy seed admin without a password is intentionally ignored).
 func (q *Queries) CreatePlayerWithCredentials(ctx context.Context, arg CreatePlayerWithCredentialsParams) (Player, error) {
-	row := q.db.QueryRowContext(ctx, createPlayerWithCredentials, arg.Username, arg.PasswordHash, arg.Role)
+	row := q.db.QueryRowContext(ctx, createPlayerWithCredentials, arg.Username, arg.PasswordHash, arg.RequestedRole)
 	var i Player
 	err := row.Scan(
 		&i.ID,

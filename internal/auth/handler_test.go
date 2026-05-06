@@ -32,13 +32,6 @@ func newStubPlayerStore() *stubPlayerStore {
 	}
 }
 
-func (s *stubPlayerStore) CountPlayers(_ context.Context) (int64, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	return int64(len(s.byID)), nil
-}
-
 func (s *stubPlayerStore) GetPlayerByUsername(_ context.Context, username string) (*auth.Player, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -66,12 +59,36 @@ func (s *stubPlayerStore) GetPlayerByID(_ context.Context, id int64) (*auth.Play
 	return p, nil
 }
 
-func (s *stubPlayerStore) CreatePlayer(_ context.Context, username, passwordHash, role string) (*auth.Player, error) {
+// CreatePlayer mirrors the SQL semantics of internal/queries/players.sql:
+// honour an explicit "admin" request, otherwise promote the very first
+// password-bearing player to admin so the "first registrant becomes admin"
+// rule is observed atomically.
+func (s *stubPlayerStore) CreatePlayer(
+	_ context.Context,
+	username, passwordHash, requestedRole string,
+) (*auth.Player, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if _, exists := s.byName[username]; exists {
 		return nil, auth.ErrUsernameTaken
+	}
+
+	role := requestedRole
+	if role != auth.RoleAdmin {
+		hasPasswordBearer := false
+		for _, existing := range s.byID {
+			if existing.PasswordHash != "" {
+				hasPasswordBearer = true
+
+				break
+			}
+		}
+		if !hasPasswordBearer {
+			role = auth.RoleAdmin
+		} else {
+			role = auth.RolePlayer
+		}
 	}
 
 	p := &auth.Player{
@@ -123,7 +140,7 @@ func TestHandleRegisterSubmit_FirstUser_BecomesAdmin(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := auth.HandleRegisterSubmit(discardLogger(), store, session.New([]byte("k"), false), nil)
+	handler := auth.HandleRegisterSubmit(discardLogger(), store, session.New([]byte("k")), nil)
 
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"alice"},
@@ -167,7 +184,7 @@ func TestHandleRegisterSubmit_SecondUser_DefaultsToPlayer(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := auth.HandleRegisterSubmit(discardLogger(), store, session.New([]byte("k"), false), nil)
+	handler := auth.HandleRegisterSubmit(discardLogger(), store, session.New([]byte("k")), nil)
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"bob"},
 		"password": {"correctbattery"},
@@ -198,7 +215,7 @@ func TestHandleRegisterSubmit_AdminUsernamesEnv_PromotesToAdmin(t *testing.T) {
 	handler := auth.HandleRegisterSubmit(
 		discardLogger(),
 		store,
-		session.New([]byte("k"), false),
+		session.New([]byte("k")),
 		[]string{"alice", "carol"},
 	)
 	rec := postForm(t, handler, "/register", url.Values{
@@ -223,7 +240,7 @@ func TestHandleRegisterSubmit_PasswordTooShort(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := auth.HandleRegisterSubmit(discardLogger(), store, session.New([]byte("k"), false), nil)
+	handler := auth.HandleRegisterSubmit(discardLogger(), store, session.New([]byte("k")), nil)
 
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"alice"},
@@ -249,7 +266,7 @@ func TestHandleRegisterSubmit_DuplicateUsername(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := auth.HandleRegisterSubmit(discardLogger(), store, session.New([]byte("k"), false), nil)
+	handler := auth.HandleRegisterSubmit(discardLogger(), store, session.New([]byte("k")), nil)
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"alice"},
 		"password": {"correctbattery"},
@@ -292,7 +309,7 @@ func TestHandleLoginSubmit_Success(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := auth.HandleLoginSubmit(discardLogger(), store, session.New([]byte("k"), false))
+	handler := auth.HandleLoginSubmit(discardLogger(), store, session.New([]byte("k")))
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"alice"},
 		"password": {"correctbattery"},
@@ -310,7 +327,7 @@ func TestHandleLoginSubmit_BadCredentials_UnknownUser(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := auth.HandleLoginSubmit(discardLogger(), store, session.New([]byte("k"), false))
+	handler := auth.HandleLoginSubmit(discardLogger(), store, session.New([]byte("k")))
 
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"ghost"},
@@ -337,7 +354,7 @@ func TestHandleLoginSubmit_BadCredentials_WrongPassword(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := auth.HandleLoginSubmit(discardLogger(), store, session.New([]byte("k"), false))
+	handler := auth.HandleLoginSubmit(discardLogger(), store, session.New([]byte("k")))
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"alice"},
 		"password": {"wrong-password-no"},
@@ -360,7 +377,7 @@ func TestHandleLoginSubmit_RejectsEmptyHash(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := auth.HandleLoginSubmit(discardLogger(), store, session.New([]byte("k"), false))
+	handler := auth.HandleLoginSubmit(discardLogger(), store, session.New([]byte("k")))
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"legacy"},
 		"password": {"anything-goes-here-13"},
@@ -375,7 +392,7 @@ func TestHandleRegisterSubmit_WhitespaceOnlyUsername(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := auth.HandleRegisterSubmit(discardLogger(), store, session.New([]byte("k"), false), nil)
+	handler := auth.HandleRegisterSubmit(discardLogger(), store, session.New([]byte("k")), nil)
 
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"   "},
@@ -398,7 +415,7 @@ func TestHandleRegisterSubmit_PasswordExactlyMinLength(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := auth.HandleRegisterSubmit(discardLogger(), store, session.New([]byte("k"), false), nil)
+	handler := auth.HandleRegisterSubmit(discardLogger(), store, session.New([]byte("k")), nil)
 
 	password := strings.Repeat("a", auth.MinPasswordLength) // exactly 13 characters
 	rec := postForm(t, handler, "/register", url.Values{
@@ -417,7 +434,7 @@ func TestHandleRegisterSubmit_PasswordExactlyMinLength(t *testing.T) {
 func TestHandleLogout_NoCookie(t *testing.T) {
 	t.Parallel()
 
-	handler := auth.HandleLogout(session.New([]byte("k"), false))
+	handler := auth.HandleLogout(session.New([]byte("k")))
 
 	// No session cookie attached to the request.
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/logout", nil)
@@ -435,7 +452,7 @@ func TestHandleLogout_NoCookie(t *testing.T) {
 func TestHandleLogout_ClearsCookieAndRedirects(t *testing.T) {
 	t.Parallel()
 
-	handler := auth.HandleLogout(session.New([]byte("k"), false))
+	handler := auth.HandleLogout(session.New([]byte("k")))
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/logout", nil)
 	rec := httptest.NewRecorder()
