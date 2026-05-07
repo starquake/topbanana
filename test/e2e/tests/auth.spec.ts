@@ -17,12 +17,11 @@ test('register, log out, log back in, and reach the admin dashboard', async ({ p
   await expect(page).toHaveURL(/\/admin\/quizzes$/);
   await expect(page.locator('h1.title')).toContainText('Admin Dashboard');
 
-  // Log out via POST /logout. There is no logout button in the admin UI yet
-  // (tracked by #113); for now we drive the endpoint directly using the page's
-  // request context so cookies are shared.
-  const logoutResp = await page.request.post('/logout', { maxRedirects: 0 });
-  expect(logoutResp.status()).toBe(303);
-  expect(logoutResp.headers()['location']).toBe('/login');
+  // Log out via the navbar button. The form posts to /logout, the server
+  // clears the cookie and 303s to /login, and the browser follows the redirect.
+  await page.getByRole('button', { name: 'Log out' }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.locator('h1.title')).toContainText('Log in');
 
   // After logout, /admin/quizzes redirects to /login (303). Navigating with the
   // browser follows the redirect; assert on the final URL.

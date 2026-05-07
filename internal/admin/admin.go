@@ -13,6 +13,7 @@ import (
 
 	"github.com/gosimple/slug"
 
+	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/web/tmpl"
@@ -40,9 +41,31 @@ func NewTemplateRenderer(logger *slog.Logger, templatePath string) *TemplateRend
 
 // Render renders a template to the writer (w) giving a templatePath and data.
 // It does not return an error because the headers have already been written. So we can't render an error page anyway.
+//
+// The clone-and-override dance lets the navbar template call {{currentUser}}
+// without every handler having to thread the username into its data struct:
+// the placeholder registered in parseTemplate satisfies the parser, and here
+// we swap in a real implementation that reads the authenticated player from
+// the request context.
 func (tr *TemplateRenderer) Render(w http.ResponseWriter, r *http.Request, status int, data any) {
+	t, err := tr.t.Clone()
+	if err != nil {
+		tr.logger.ErrorContext(r.Context(), "error cloning template", slog.Any("err", err))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+
+		return
+	}
+
+	username := ""
+	if p, ok := auth.PlayerFromContext(r.Context()); ok {
+		username = p.Username
+	}
+	t = t.Funcs(template.FuncMap{
+		"currentUser": func() string { return username },
+	})
+
 	w.WriteHeader(status)
-	if err := tr.t.ExecuteTemplate(w, "base.gohtml", data); err != nil {
+	if err := t.ExecuteTemplate(w, "base.gohtml", data); err != nil {
 		tr.logger.ErrorContext(r.Context(), "error executing template", slog.Any("err", err))
 	}
 }
@@ -148,8 +171,18 @@ func optionDataFromOptions(options []*quiz.Option) []*OptionData {
 }
 
 // parseTemplate parses a template from the given path with layouts.
+//
+// A placeholder "currentUser" func is registered before parse so the navbar's
+// {{currentUser}} call resolves at parse time. TemplateRenderer.Render clones
+// the parsed tree and replaces this placeholder with one that reads the
+// authenticated player from the per-request context.
 func parseTemplate(path string) *template.Template {
-	layouts := template.Must(template.ParseFS(tmpl.FS, "admin/layouts/*.gohtml"))
+	funcs := template.FuncMap{
+		"currentUser": func() string { return "" },
+	}
+	layouts := template.Must(
+		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "admin/layouts/*.gohtml"),
+	)
 
 	return template.Must(template.Must(layouts.Clone()).ParseFS(tmpl.FS, path))
 }

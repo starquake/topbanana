@@ -47,6 +47,6 @@ func RequireAdmin(next http.Handler, players PlayerStore, sessions *session.Mana
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(WithPlayer(r.Context(), player)))
 	})
 }
