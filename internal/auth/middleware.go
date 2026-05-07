@@ -10,9 +10,13 @@ import (
 
 // RequireAdmin wraps the next handler so only admins can reach it.
 //
-// If the request has no valid session cookie, the player cannot be found, or the
-// player's role is not admin, the request is redirected to /login with HTTP 303.
+// Unauthenticated requests (no cookie, invalid cookie, or unknown player ID) are
+// redirected to /login with HTTP 303. Requests from a valid non-admin session
+// receive HTTP 403 with an "Access denied" page so the user understands the
+// rejection is about role, not authentication.
 func RequireAdmin(next http.Handler, players PlayerStore, sessions *session.Manager, logger *slog.Logger) http.Handler {
+	render := newTemplateRenderer(logger, "auth/pages/access_denied.gohtml")
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		playerID, ok := sessions.PlayerID(r)
 		if !ok {
@@ -35,7 +39,10 @@ func RequireAdmin(next http.Handler, players PlayerStore, sessions *session.Mana
 		}
 
 		if player.Role != RoleAdmin {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			render.render(w, r, http.StatusForbidden, formData{
+				Title:    "Access denied",
+				Username: player.Username,
+			})
 
 			return
 		}

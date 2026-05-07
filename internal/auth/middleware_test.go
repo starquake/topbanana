@@ -3,6 +3,7 @@ package auth_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/starquake/topbanana/internal/auth"
@@ -74,11 +75,14 @@ func TestRequireAdmin_DeniesPlayer(t *testing.T) {
 	rec = httptest.NewRecorder()
 	mw.ServeHTTP(rec, req)
 
-	if got, want := rec.Code, http.StatusSeeOther; got != want {
+	if got, want := rec.Code, http.StatusForbidden; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
-	if got, want := rec.Header().Get("Location"), "/login"; got != want {
-		t.Errorf("Location = %q, want %q", got, want)
+	if got, want := rec.Body.String(), "Access denied"; !strings.Contains(got, want) {
+		t.Errorf("body should contain %q, got %q", want, got)
+	}
+	if got, want := rec.Body.String(), "bob"; !strings.Contains(got, want) {
+		t.Errorf("body should contain signed-in username %q, got %q", want, got)
 	}
 }
 
