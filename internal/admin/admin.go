@@ -14,6 +14,7 @@ import (
 	"github.com/gosimple/slug"
 
 	"github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/web/tmpl"
@@ -27,14 +28,19 @@ type Validator interface {
 // TemplateRenderer renders templates using the given logger and template path.
 type TemplateRenderer struct {
 	logger *slog.Logger
+	csrf   *csrf.Manager
 	t      *template.Template
 }
 
-// NewTemplateRenderer creates a new TemplateRenderer with the given logger and template path.
-// It parses the template on creation.
-func NewTemplateRenderer(logger *slog.Logger, templatePath string) *TemplateRenderer {
+// NewTemplateRenderer creates a new TemplateRenderer with the given logger,
+// CSRF manager, and template path. It parses the template on creation.
+//
+// The CSRF manager may be nil for callers that render error pages without an
+// embedded form (the placeholder {{csrfToken}} func still resolves to "").
+func NewTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, templatePath string) *TemplateRenderer {
 	return &TemplateRenderer{
 		logger: logger,
+		csrf:   csrfMgr,
 		t:      parseTemplate(templatePath),
 	}
 }
@@ -47,6 +53,12 @@ func NewTemplateRenderer(logger *slog.Logger, templatePath string) *TemplateRend
 // the placeholder registered in parseTemplate satisfies the parser, and here
 // we swap in a real implementation that reads the authenticated player from
 // the request context.
+//
+// The same dance also wires up {{csrfToken}}: parseTemplate registers a
+// placeholder so templates parse cleanly; here we replace it with one that
+// asks the CSRF manager for the token, which sets a nonce cookie on the
+// response if needed. Calling Token before WriteHeader is required because
+// [http.SetCookie] is a header write.
 func (tr *TemplateRenderer) Render(w http.ResponseWriter, r *http.Request, status int, data any) {
 	t, err := tr.t.Clone()
 	if err != nil {
@@ -60,8 +72,15 @@ func (tr *TemplateRenderer) Render(w http.ResponseWriter, r *http.Request, statu
 	if p, ok := auth.PlayerFromContext(r.Context()); ok {
 		username = p.Username
 	}
+
+	csrfToken := ""
+	if tr.csrf != nil {
+		csrfToken = tr.csrf.Token(w, r)
+	}
+
 	t = t.Funcs(template.FuncMap{
 		"currentUser": func() string { return username },
+		"csrfToken":   func() string { return csrfToken },
 	})
 
 	w.WriteHeader(status)
@@ -172,13 +191,15 @@ func optionDataFromOptions(options []*quiz.Option) []*OptionData {
 
 // parseTemplate parses a template from the given path with layouts.
 //
-// A placeholder "currentUser" func is registered before parse so the navbar's
-// {{currentUser}} call resolves at parse time. TemplateRenderer.Render clones
-// the parsed tree and replaces this placeholder with one that reads the
-// authenticated player from the per-request context.
+// Placeholder "currentUser" and "csrfToken" funcs are registered before parse
+// so the navbar's {{currentUser}} call and any form's {{csrfToken}} call
+// resolve at parse time. TemplateRenderer.Render clones the parsed tree and
+// replaces these placeholders with implementations that read the request
+// context and CSRF manager, respectively.
 func parseTemplate(path string) *template.Template {
 	funcs := template.FuncMap{
 		"currentUser": func() string { return "" },
+		"csrfToken":   func() string { return "" },
 	}
 	layouts := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "admin/layouts/*.gohtml"),
@@ -189,8 +210,14 @@ func parseTemplate(path string) *template.Template {
 
 // render400 renders the 400 error page with the given message.
 // Should be used as the final handler in the chain and probably be followed by a return.
-func render400(w http.ResponseWriter, r *http.Request, logger *slog.Logger, msg string) {
-	render := &TemplateRenderer{logger: logger, t: parseTemplate("admin/errors/400.gohtml")}
+//
+// Error pages embed the navbar (which contains the logout form), so they need
+// a CSRF manager to render a working {{csrfToken}}. We accept it as a
+// parameter rather than re-derive it because error renderers are spawned ad
+// hoc deep in the call stack — passing it explicitly keeps the rendering path
+// honest about its dependencies.
+func render400(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrfMgr *csrf.Manager, msg string) {
+	render := &TemplateRenderer{logger: logger, csrf: csrfMgr, t: parseTemplate("admin/errors/400.gohtml")}
 	data := struct {
 		Title   string
 		Message string
@@ -203,15 +230,15 @@ func render400(w http.ResponseWriter, r *http.Request, logger *slog.Logger, msg 
 
 // render404 renders the 404 error page.
 // Should be used as the final handler in the chain and probably be followed by a return.
-func render404(w http.ResponseWriter, r *http.Request, logger *slog.Logger) {
-	render := &TemplateRenderer{logger: logger, t: parseTemplate("admin/errors/404.gohtml")}
+func render404(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrfMgr *csrf.Manager) {
+	render := &TemplateRenderer{logger: logger, csrf: csrfMgr, t: parseTemplate("admin/errors/404.gohtml")}
 	render.Render(w, r, http.StatusNotFound, nil)
 }
 
 // render500 renders the 500 error page.
 // Should be used as the final handler in the chain and probably be followed by a return.
-func render500(w http.ResponseWriter, r *http.Request, logger *slog.Logger) {
-	render := &TemplateRenderer{logger: logger, t: parseTemplate("admin/errors/500.gohtml")}
+func render500(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrfMgr *csrf.Manager) {
+	render := &TemplateRenderer{logger: logger, csrf: csrfMgr, t: parseTemplate("admin/errors/500.gohtml")}
 	render.Render(w, r, http.StatusInternalServerError, nil)
 }
 
@@ -221,6 +248,7 @@ func quizByID(
 	w http.ResponseWriter,
 	r *http.Request,
 	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
 	quizStore quiz.Store,
 	id int64,
 ) (*quiz.Quiz, bool) {
@@ -228,12 +256,12 @@ func quizByID(
 	if err != nil {
 		if errors.Is(err, quiz.ErrQuizNotFound) || errors.Is(err, quiz.ErrQuestionNotFound) {
 			logger.ErrorContext(r.Context(), "quiz not found", slog.Any("err", err))
-			render404(w, r, logger)
+			render404(w, r, logger, csrfMgr)
 
 			return nil, false
 		}
 		logger.ErrorContext(r.Context(), "error fetching data", slog.Any("err", err))
-		render500(w, r, logger)
+		render500(w, r, logger, csrfMgr)
 
 		return nil, false
 	}
@@ -247,6 +275,7 @@ func questionByID(
 	w http.ResponseWriter,
 	r *http.Request,
 	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
 	quizStore quiz.Store,
 	questionID int64,
 ) (*quiz.Question, bool) {
@@ -258,7 +287,7 @@ func questionByID(
 				fmt.Sprintf("question with ID %d not found", questionID),
 				slog.Any("err", err),
 			)
-			render404(w, r, logger)
+			render404(w, r, logger, csrfMgr)
 
 			return nil, false
 		}
@@ -267,7 +296,7 @@ func questionByID(
 			fmt.Sprintf("error fetching data for question with ID %d", questionID),
 			slog.Any("err", err),
 		)
-		render500(w, r, logger)
+		render500(w, r, logger, csrfMgr)
 
 		return nil, false
 	}
@@ -278,13 +307,19 @@ func questionByID(
 // fillQuizFromForm fills the quiz fields from the form values.
 // It renders an error page if the form is invalid.
 // It returns true if the form was valid and the quiz was filled successfully.
-func fillQuizFromForm(w http.ResponseWriter, r *http.Request, logger *slog.Logger, qz *quiz.Quiz) bool {
+func fillQuizFromForm(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	qz *quiz.Quiz,
+) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxFormSize)
 	err := r.ParseForm()
 	if err != nil {
 		msg := "error parsing form"
 		logger.ErrorContext(r.Context(), msg, slog.Any("err", err))
-		render400(w, r, logger, msg)
+		render400(w, r, logger, csrfMgr, msg)
 
 		return false
 	}
@@ -294,7 +329,7 @@ func fillQuizFromForm(w http.ResponseWriter, r *http.Request, logger *slog.Logge
 	if problems := qz.Valid(r.Context()); len(problems) > 0 {
 		msg := fmt.Sprintf("validation errors: %v", problems)
 		logger.ErrorContext(r.Context(), msg)
-		render400(w, r, logger, msg)
+		render400(w, r, logger, csrfMgr, msg)
 
 		return false
 	}
@@ -305,13 +340,19 @@ func fillQuizFromForm(w http.ResponseWriter, r *http.Request, logger *slog.Logge
 // fillQuestionFromForm fills the question fields from the form values.
 // It renders an error page if the form is invalid.
 // It returns true if the form was valid and the question was filled successfully.
-func fillQuestionFromForm(w http.ResponseWriter, r *http.Request, logger *slog.Logger, qs *quiz.Question) bool {
+func fillQuestionFromForm(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	qs *quiz.Question,
+) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxFormSize)
 	err := r.ParseForm()
 	if err != nil {
 		msg := "error parsing form"
 		logger.ErrorContext(r.Context(), msg, slog.Any("err", err))
-		render400(w, r, logger, msg)
+		render400(w, r, logger, csrfMgr, msg)
 
 		return false
 	}
@@ -321,7 +362,7 @@ func fillQuestionFromForm(w http.ResponseWriter, r *http.Request, logger *slog.L
 	if qs.Position, err = strconv.Atoi(r.PostFormValue("position")); err != nil {
 		msg := "error parsing position"
 		logger.ErrorContext(r.Context(), msg, slog.Any("err", err))
-		render400(w, r, logger, msg)
+		render400(w, r, logger, csrfMgr, msg)
 
 		return false
 	}
@@ -342,7 +383,7 @@ func fillQuestionFromForm(w http.ResponseWriter, r *http.Request, logger *slog.L
 			if err != nil {
 				msg := "error parsing optionID"
 				logger.ErrorContext(r.Context(), msg, slog.Any("err", err))
-				render400(w, r, logger, msg)
+				render400(w, r, logger, csrfMgr, msg)
 
 				return false
 			}
@@ -357,7 +398,7 @@ func fillQuestionFromForm(w http.ResponseWriter, r *http.Request, logger *slog.L
 	if problems := qs.Valid(r.Context()); len(problems) > 0 {
 		msg := fmt.Sprintf("validation errors: %v", problems)
 		logger.ErrorContext(r.Context(), msg)
-		render400(w, r, logger, msg)
+		render400(w, r, logger, csrfMgr, msg)
 
 		return false
 	}
@@ -369,6 +410,7 @@ func storeQuiz(
 	w http.ResponseWriter,
 	r *http.Request,
 	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
 	quizStore quiz.Store,
 	qz *quiz.Quiz,
 ) bool {
@@ -376,14 +418,14 @@ func storeQuiz(
 	if qz.ID == 0 {
 		if err = quizStore.CreateQuiz(r.Context(), qz); err != nil {
 			logger.ErrorContext(r.Context(), "error creating quiz", slog.Any("err", err))
-			render500(w, r, logger)
+			render500(w, r, logger, csrfMgr)
 
 			return false
 		}
 	} else {
 		if err = quizStore.UpdateQuiz(r.Context(), qz); err != nil {
 			logger.ErrorContext(r.Context(), "error updating quiz", slog.Any("err", err))
-			render500(w, r, logger)
+			render500(w, r, logger, csrfMgr)
 
 			return false
 		}
@@ -397,6 +439,7 @@ func storeQuestion(
 	w http.ResponseWriter,
 	r *http.Request,
 	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
 	quizStore quiz.Store,
 	qs *quiz.Question,
 ) bool {
@@ -405,7 +448,7 @@ func storeQuestion(
 		err = quizStore.CreateQuestion(r.Context(), qs)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error creating question", slog.Any("err", err))
-			render500(w, r, logger)
+			render500(w, r, logger, csrfMgr)
 
 			return false
 		}
@@ -413,7 +456,7 @@ func storeQuestion(
 		err = quizStore.UpdateQuestion(r.Context(), qs)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error updating question", slog.Any("err", err))
-			render500(w, r, logger)
+			render500(w, r, logger, csrfMgr)
 
 			return false
 		}
@@ -423,8 +466,8 @@ func storeQuestion(
 }
 
 // HandleIndex returns the index page.
-func HandleIndex(logger *slog.Logger) http.Handler {
-	render := NewTemplateRenderer(logger, "admin/pages/index.gohtml")
+func HandleIndex(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
+	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/index.gohtml")
 
 	type indexData struct {
 		Title string
@@ -440,8 +483,8 @@ func HandleIndex(logger *slog.Logger) http.Handler {
 }
 
 // HandleQuizList returns the quiz list page.
-func HandleQuizList(logger *slog.Logger, quizStore quiz.Store) http.Handler {
-	render := NewTemplateRenderer(logger, "admin/pages/quizlist.gohtml")
+func HandleQuizList(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizlist.gohtml")
 
 	type quizListData struct {
 		Title   string
@@ -454,7 +497,7 @@ func HandleQuizList(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 		quizzes, err := quizStore.ListQuizzes(r.Context())
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error retrieving quizzes from store", slog.Any("err", err))
-			render500(w, r, logger)
+			render500(w, r, logger, csrfMgr)
 
 			return
 		}
@@ -471,8 +514,8 @@ func HandleQuizList(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 }
 
 // HandleQuizView returns the quiz view page.
-func HandleQuizView(logger *slog.Logger, quizStore quiz.Store) http.Handler {
-	render := NewTemplateRenderer(logger, "admin/pages/quizview.gohtml")
+func HandleQuizView(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
 
 	type quizViewData struct {
 		Title string
@@ -488,7 +531,7 @@ func HandleQuizView(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 		}
 
 		var qz *quiz.Quiz
-		if qz, ok = quizByID(w, r, logger, quizStore, id); !ok {
+		if qz, ok = quizByID(w, r, logger, csrfMgr, quizStore, id); !ok {
 			return
 		}
 
@@ -501,8 +544,8 @@ func HandleQuizView(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 }
 
 // HandleQuizCreate creates a quiz.
-func HandleQuizCreate(logger *slog.Logger) http.Handler {
-	render := NewTemplateRenderer(logger, "admin/pages/quizform.gohtml")
+func HandleQuizCreate(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
+	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizform.gohtml")
 
 	type quizCreateData struct {
 		Title string
@@ -519,8 +562,8 @@ func HandleQuizCreate(logger *slog.Logger) http.Handler {
 }
 
 // HandleQuizEdit handles the display of the quiz edit page in the admin dashboard.
-func HandleQuizEdit(logger *slog.Logger, quizStore quiz.Store) http.Handler {
-	render := NewTemplateRenderer(logger, "admin/pages/quizform.gohtml")
+func HandleQuizEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizform.gohtml")
 
 	type quizEditData struct {
 		Title string
@@ -536,7 +579,7 @@ func HandleQuizEdit(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 		}
 
 		var qz *quiz.Quiz
-		if qz, ok = quizByID(w, r, logger, quizStore, quizID); !ok {
+		if qz, ok = quizByID(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
 		data := quizEditData{
@@ -548,7 +591,7 @@ func HandleQuizEdit(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 }
 
 // HandleQuizSave saves the quiz to the database.
-func HandleQuizSave(logger *slog.Logger, quizStore quiz.Store) http.Handler {
+func HandleQuizSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
 
@@ -562,16 +605,16 @@ func HandleQuizSave(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 		if newQuiz {
 			qz = &quiz.Quiz{}
 		} else {
-			if qz, ok = quizByID(w, r, logger, quizStore, quizID); !ok {
+			if qz, ok = quizByID(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 				return
 			}
 		}
 
-		if !fillQuizFromForm(w, r, logger, qz) {
+		if !fillQuizFromForm(w, r, logger, csrfMgr, qz) {
 			return
 		}
 
-		if !storeQuiz(w, r, logger, quizStore, qz) {
+		if !storeQuiz(w, r, logger, csrfMgr, quizStore, qz) {
 			return
 		}
 
@@ -580,8 +623,8 @@ func HandleQuizSave(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 }
 
 // HandleQuestionCreate creates a question.
-func HandleQuestionCreate(logger *slog.Logger, quizStore quiz.Store) http.Handler {
-	render := NewTemplateRenderer(logger, "admin/pages/questionform.gohtml")
+func HandleQuestionCreate(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/questionform.gohtml")
 
 	type questionCreateData struct {
 		Title    string
@@ -598,7 +641,7 @@ func HandleQuestionCreate(logger *slog.Logger, quizStore quiz.Store) http.Handle
 		}
 
 		var qz *quiz.Quiz
-		if qz, ok = quizByID(w, r, logger, quizStore, quizID); !ok {
+		if qz, ok = quizByID(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
 
@@ -612,8 +655,8 @@ func HandleQuestionCreate(logger *slog.Logger, quizStore quiz.Store) http.Handle
 }
 
 // HandleQuestionEdit handles the display of the question edit page in the admin dashboard.
-func HandleQuestionEdit(logger *slog.Logger, quizStore quiz.Store) http.Handler {
-	render := NewTemplateRenderer(logger, "admin/pages/questionform.gohtml")
+func HandleQuestionEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/questionform.gohtml")
 
 	type questionEditData struct {
 		Title    string
@@ -635,7 +678,7 @@ func HandleQuestionEdit(logger *slog.Logger, quizStore quiz.Store) http.Handler 
 		}
 		newQuestion := questionID == 0
 
-		qz, ok := quizByID(w, r, logger, quizStore, quizID)
+		qz, ok := quizByID(w, r, logger, csrfMgr, quizStore, quizID)
 		if !ok {
 			return
 		}
@@ -647,7 +690,7 @@ func HandleQuestionEdit(logger *slog.Logger, quizStore quiz.Store) http.Handler 
 				QuizID: quizID,
 			}
 		} else {
-			qs, ok = questionByID(w, r, logger, quizStore, questionID)
+			qs, ok = questionByID(w, r, logger, csrfMgr, quizStore, questionID)
 			if !ok {
 				return
 			}
@@ -663,7 +706,7 @@ func HandleQuestionEdit(logger *slog.Logger, quizStore quiz.Store) http.Handler 
 }
 
 // HandleQuizDelete deletes a quiz and all its questions and options.
-func HandleQuizDelete(logger *slog.Logger, quizStore quiz.Store) http.Handler {
+func HandleQuizDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
 
@@ -674,12 +717,12 @@ func HandleQuizDelete(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 
 		if err := quizStore.DeleteQuiz(r.Context(), quizID); err != nil {
 			if errors.Is(err, quiz.ErrDeletingQuizNoRowsAffected) {
-				render404(w, r, logger)
+				render404(w, r, logger, csrfMgr)
 
 				return
 			}
 			logger.ErrorContext(r.Context(), "error deleting quiz", slog.Any("err", err))
-			render500(w, r, logger)
+			render500(w, r, logger, csrfMgr)
 
 			return
 		}
@@ -689,7 +732,7 @@ func HandleQuizDelete(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 }
 
 // HandleQuestionDelete deletes a question and all its options.
-func HandleQuestionDelete(logger *slog.Logger, quizStore quiz.Store) http.Handler {
+func HandleQuestionDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
 
@@ -705,12 +748,12 @@ func HandleQuestionDelete(logger *slog.Logger, quizStore quiz.Store) http.Handle
 
 		if err := quizStore.DeleteQuestion(r.Context(), questionID); err != nil {
 			if errors.Is(err, quiz.ErrDeletingQuestionNoRowsAffected) {
-				render404(w, r, logger)
+				render404(w, r, logger, csrfMgr)
 
 				return
 			}
 			logger.ErrorContext(r.Context(), "error deleting question", slog.Any("err", err))
-			render500(w, r, logger)
+			render500(w, r, logger, csrfMgr)
 
 			return
 		}
@@ -720,7 +763,7 @@ func HandleQuestionDelete(logger *slog.Logger, quizStore quiz.Store) http.Handle
 }
 
 // HandleQuestionSave saves a question.
-func HandleQuestionSave(logger *slog.Logger, quizStore quiz.Store) http.Handler {
+func HandleQuestionSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Parse quiz and question IDs from the URL
 		var ok bool
@@ -739,7 +782,7 @@ func HandleQuestionSave(logger *slog.Logger, quizStore quiz.Store) http.Handler 
 
 		// Retrieve quiz and question from the store
 		var qz *quiz.Quiz
-		if qz, ok = quizByID(w, r, logger, quizStore, quizID); !ok {
+		if qz, ok = quizByID(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
 
@@ -749,16 +792,16 @@ func HandleQuestionSave(logger *slog.Logger, quizStore quiz.Store) http.Handler 
 				QuizID: qz.ID,
 			}
 		} else {
-			if qs, ok = questionByID(w, r, logger, quizStore, questionID); !ok {
+			if qs, ok = questionByID(w, r, logger, csrfMgr, quizStore, questionID); !ok {
 				return
 			}
 		}
 
-		if !fillQuestionFromForm(w, r, logger, qs) {
+		if !fillQuestionFromForm(w, r, logger, csrfMgr, qs) {
 			return
 		}
 
-		if !storeQuestion(w, r, logger, quizStore, qs) {
+		if !storeQuestion(w, r, logger, csrfMgr, quizStore, qs) {
 			return
 		}
 

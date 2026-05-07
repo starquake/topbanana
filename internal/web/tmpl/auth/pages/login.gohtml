@@ -8,6 +8,7 @@
             {{end}}
 
             <form action="/login" method="POST">
+                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                 <div class="field">
                     <label class="label" for="username">Username</label>
                     <div class="control">

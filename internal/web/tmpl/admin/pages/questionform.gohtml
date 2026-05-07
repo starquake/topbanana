@@ -10,6 +10,7 @@
                     action="/admin/quizzes/{{.Quiz.ID}}/questions"
                 {{end}}
                 method="POST">
+            <input type="hidden" name="csrf_token" value="{{csrfToken}}">
 
             <input type="hidden" name="id" value="{{.Question.ID}}">
             <div class="field">
@@ -40,7 +41,7 @@
                 <div class="grid ">
                     <div class="cell">
                         <div class="field">
-                            <label class="label">Option A</label>
+                            <label class="label" for="option[0].text">Option A</label>
                             <div class="field is-grouped">
                                 <div class="control is-expanded">
                                     <input type="hidden" name="option[0].id"
@@ -58,7 +59,7 @@
                     </div>
                     <div class="cell">
                         <div class="field">
-                            <label class="label">Option B</label>
+                            <label class="label" for="option[1].text">Option B</label>
                             <div class="field is-grouped">
                                 <div class="control is-expanded">
                                     <input type="hidden" name="option[1].id"
@@ -76,10 +77,10 @@
                     </div>
                     <div class="cell">
                         <div class="field">
-                            <label class="label">Option C</label>
+                            <label class="label" for="option[2].text">Option C</label>
                             <div class="field is-grouped">
                                 <div class="control is-expanded">
-                                    <input type="hidden" name="option[2]id"
+                                    <input type="hidden" name="option[2].id"
                                            value="{{if gt (len .Question.Options) 2}}{{(index .Question.Options 2).ID}}{{end}}">
                                     <input id="option[2].text" name="option[2].text" class="input" type="text"
                                            value="{{if gt (len .Question.Options) 2}}{{(index .Question.Options 2).Text}}{{end}}">
@@ -94,7 +95,7 @@
                     </div>
                     <div class="cell">
                         <div class="field">
-                            <label class="label">Option D</label>
+                            <label class="label" for="option[3].text">Option D</label>
                             <div class="field is-grouped">
                                 <div class="control is-expanded">
                                     <input type="hidden" name="option[3].id"

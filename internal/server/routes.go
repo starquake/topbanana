@@ -9,6 +9,7 @@ import (
 	"github.com/starquake/topbanana/internal/client"
 	"github.com/starquake/topbanana/internal/clientapi"
 	"github.com/starquake/topbanana/internal/config"
+	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/health"
 	"github.com/starquake/topbanana/internal/session"
@@ -23,66 +24,11 @@ func addRoutes(
 	cfg *config.Config,
 ) {
 	sessions := session.New([]byte(cfg.SessionKey))
+	csrfMgr := csrf.New([]byte(cfg.SessionKey))
 
-	// Auth routes (HTML, no admin check). Registration routes are only registered when
-	// REGISTRATION_ENABLED is true; when disabled, /register naturally 404s from the mux,
-	// which is the desired UX (don't reveal the route exists).
-	if cfg.RegistrationEnabled {
-		mux.Handle("GET /register", auth.HandleRegisterForm(logger))
-		mux.Handle(
-			"POST /register",
-			auth.HandleRegisterSubmit(logger, stores.Players, sessions, cfg.AdminUsernames),
-		)
-	}
-	mux.Handle("GET /login", auth.HandleLoginForm(logger, cfg.RegistrationEnabled))
-	mux.Handle("POST /login", auth.HandleLoginSubmit(logger, stores.Players, sessions, cfg.RegistrationEnabled))
-	mux.Handle("POST /logout", auth.HandleLogout(sessions))
-
-	// Admin interface routes (require admin role)
-	requireAdmin := func(h http.Handler) http.Handler {
-		return auth.RequireAdmin(h, stores.Players, sessions, logger)
-	}
-
-	mux.Handle("GET /admin", requireAdmin(admin.HandleIndex(logger)))
-	mux.Handle("GET /admin/quizzes", requireAdmin(admin.HandleQuizList(logger, stores.Quizzes)))
-	mux.Handle("GET /admin/quizzes/{quizID}", requireAdmin(admin.HandleQuizView(logger, stores.Quizzes)))
-	mux.Handle("GET /admin/quizzes/new", requireAdmin(admin.HandleQuizCreate(logger)))
-	mux.Handle("POST /admin/quizzes", requireAdmin(admin.HandleQuizSave(logger, stores.Quizzes)))
-	mux.Handle("GET /admin/quizzes/{quizID}/edit", requireAdmin(admin.HandleQuizEdit(logger, stores.Quizzes)))
-	mux.Handle("POST /admin/quizzes/{quizID}", requireAdmin(admin.HandleQuizSave(logger, stores.Quizzes)))
-	mux.Handle("POST /admin/quizzes/{quizID}/delete", requireAdmin(admin.HandleQuizDelete(logger, stores.Quizzes)))
-
-	mux.Handle(
-		"GET /admin/quizzes/{quizID}/questions/new",
-		requireAdmin(admin.HandleQuestionCreate(logger, stores.Quizzes)),
-	)
-	mux.Handle(
-		"POST /admin/quizzes/{quizID}/questions",
-		requireAdmin(admin.HandleQuestionSave(logger, stores.Quizzes)),
-	)
-	mux.Handle(
-		"GET /admin/quizzes/{quizID}/questions/{questionID}/edit",
-		requireAdmin(admin.HandleQuestionEdit(logger, stores.Quizzes)),
-	)
-	mux.Handle(
-		"POST /admin/quizzes/{quizID}/questions/{questionID}",
-		requireAdmin(admin.HandleQuestionSave(logger, stores.Quizzes)),
-	)
-	mux.Handle(
-		"POST /admin/quizzes/{quizID}/questions/{questionID}/delete",
-		requireAdmin(admin.HandleQuestionDelete(logger, stores.Quizzes)),
-	)
-
-	// API
-	mux.Handle("GET /api/quizzes", clientapi.HandleQuizList(logger, stores.Quizzes))
-	mux.Handle("GET /api/quizzes/{slugID}", clientapi.HandleQuizGet(logger, stores.Quizzes))
-	mux.Handle("POST /api/games", clientapi.HandleCreateGame(logger, gameService))
-	mux.Handle("GET /api/games/{gameID}/questions/next", clientapi.HandleQuestionNext(logger, gameService))
-	mux.Handle(
-		"POST /api/games/{gameID}/questions/{questionID}/answers",
-		clientapi.HandleAnswerPost(logger, gameService),
-	)
-	mux.Handle("GET /api/games/{gameID}/results", clientapi.HandleGameResults(logger, gameService))
+	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg)
+	addAdminRoutes(mux, logger, stores, sessions, csrfMgr)
+	addAPIRoutes(mux, logger, stores, gameService)
 
 	// Client
 	mux.Handle("/client/", client.Handler(cfg))
@@ -92,4 +38,111 @@ func addRoutes(
 
 	// Not found
 	mux.Handle("/", http.NotFoundHandler())
+}
+
+// addAuthRoutes registers the unauthenticated auth-flow routes. Registration
+// is only registered when REGISTRATION_ENABLED is true; when disabled,
+// /register naturally 404s from the mux, which is the desired UX.
+//
+// The CSRF middleware guards every unsafe method; safe methods pass through so
+// the GET form renderer can still set the nonce cookie.
+func addAuthRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	stores *store.Stores,
+	sessions *session.Manager,
+	csrfMgr *csrf.Manager,
+	cfg *config.Config,
+) {
+	csrfMW := csrfMgr.Middleware
+
+	if cfg.RegistrationEnabled {
+		mux.Handle("GET /register", auth.HandleRegisterForm(logger, csrfMgr))
+		mux.Handle(
+			"POST /register",
+			csrfMW(auth.HandleRegisterSubmit(logger, csrfMgr, stores.Players, sessions, cfg.AdminUsernames)),
+		)
+	}
+	mux.Handle("GET /login", auth.HandleLoginForm(logger, csrfMgr, cfg.RegistrationEnabled))
+	mux.Handle(
+		"POST /login",
+		csrfMW(auth.HandleLoginSubmit(logger, csrfMgr, stores.Players, sessions, cfg.RegistrationEnabled)),
+	)
+	mux.Handle("POST /logout", csrfMW(auth.HandleLogout(sessions)))
+}
+
+// addAdminRoutes registers every /admin/* route. Each unsafe (POST/PUT/...)
+// route is wrapped as csrfMW(requireAdmin(handler)): the CSRF middleware runs
+// first so an unauthenticated request without a valid token is rejected with
+// 403 before any auth-state-leaking 303 to /login.
+func addAdminRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	stores *store.Stores,
+	sessions *session.Manager,
+	csrfMgr *csrf.Manager,
+) {
+	csrfMW := csrfMgr.Middleware
+	requireAdmin := func(h http.Handler) http.Handler {
+		return auth.RequireAdmin(h, stores.Players, sessions, csrfMgr, logger)
+	}
+
+	mux.Handle("GET /admin", requireAdmin(admin.HandleIndex(logger, csrfMgr)))
+	mux.Handle("GET /admin/quizzes", requireAdmin(admin.HandleQuizList(logger, csrfMgr, stores.Quizzes)))
+	mux.Handle("GET /admin/quizzes/{quizID}", requireAdmin(admin.HandleQuizView(logger, csrfMgr, stores.Quizzes)))
+	mux.Handle("GET /admin/quizzes/new", requireAdmin(admin.HandleQuizCreate(logger, csrfMgr)))
+	mux.Handle("POST /admin/quizzes", csrfMW(requireAdmin(admin.HandleQuizSave(logger, csrfMgr, stores.Quizzes))))
+	mux.Handle(
+		"GET /admin/quizzes/{quizID}/edit",
+		requireAdmin(admin.HandleQuizEdit(logger, csrfMgr, stores.Quizzes)),
+	)
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}",
+		csrfMW(requireAdmin(admin.HandleQuizSave(logger, csrfMgr, stores.Quizzes))),
+	)
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/delete",
+		csrfMW(requireAdmin(admin.HandleQuizDelete(logger, csrfMgr, stores.Quizzes))),
+	)
+	mux.Handle(
+		"GET /admin/quizzes/{quizID}/questions/new",
+		requireAdmin(admin.HandleQuestionCreate(logger, csrfMgr, stores.Quizzes)),
+	)
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/questions",
+		csrfMW(requireAdmin(admin.HandleQuestionSave(logger, csrfMgr, stores.Quizzes))),
+	)
+	mux.Handle(
+		"GET /admin/quizzes/{quizID}/questions/{questionID}/edit",
+		requireAdmin(admin.HandleQuestionEdit(logger, csrfMgr, stores.Quizzes)),
+	)
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/questions/{questionID}",
+		csrfMW(requireAdmin(admin.HandleQuestionSave(logger, csrfMgr, stores.Quizzes))),
+	)
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/questions/{questionID}/delete",
+		csrfMW(requireAdmin(admin.HandleQuestionDelete(logger, csrfMgr, stores.Quizzes))),
+	)
+}
+
+// addAPIRoutes registers the JSON API routes consumed by the game client.
+// These do not need CSRF protection: they expect application/json bodies and
+// do not rely on cookie auth, so the classic browser-form CSRF threat does
+// not apply.
+func addAPIRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	stores *store.Stores,
+	gameService *game.Service,
+) {
+	mux.Handle("GET /api/quizzes", clientapi.HandleQuizList(logger, stores.Quizzes))
+	mux.Handle("GET /api/quizzes/{slugID}", clientapi.HandleQuizGet(logger, stores.Quizzes))
+	mux.Handle("POST /api/games", clientapi.HandleCreateGame(logger, gameService))
+	mux.Handle("GET /api/games/{gameID}/questions/next", clientapi.HandleQuestionNext(logger, gameService))
+	mux.Handle(
+		"POST /api/games/{gameID}/questions/{questionID}/answers",
+		clientapi.HandleAnswerPost(logger, gameService),
+	)
+	mux.Handle("GET /api/games/{gameID}/results", clientapi.HandleGameResults(logger, gameService))
 }

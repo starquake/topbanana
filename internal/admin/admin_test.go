@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -137,7 +138,7 @@ func TestTemplateRenderer_Render_LogsError(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-	renderer := NewTemplateRenderer(logger, "admin/pages/quizview.gohtml")
+	renderer := NewTemplateRenderer(logger, nil, "admin/pages/quizview.gohtml")
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	if err != nil {
@@ -174,7 +175,7 @@ func TestHandleQuizList(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuizList(logger, store)
+		handler := HandleQuizList(logger, nil, store)
 
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
 		if err != nil {
@@ -209,7 +210,7 @@ func TestHandleQuizList(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuizList(logger, store)
+		handler := HandleQuizList(logger, nil, store)
 
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
 		if err != nil {
@@ -242,7 +243,7 @@ func TestHandleQuizList_RendersNavbarLogout(t *testing.T) {
 			return []*quiz.Quiz{}, nil
 		},
 	}
-	handler := HandleQuizList(logger, store)
+	handler := HandleQuizList(logger, nil, store)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
 	// Unit tests don't go through RequireAdmin, so attach the player directly.
@@ -285,7 +286,7 @@ func TestHandleQuizList_ErrorHandling(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuizList(logger, store)
+		handler := HandleQuizList(logger, nil, store)
 
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
 		if err != nil {
@@ -308,7 +309,7 @@ func TestHandleIndex(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.DiscardHandler)
-	handler := HandleIndex(logger)
+	handler := HandleIndex(logger, nil)
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	if err != nil {
 		t.Fatalf("http.NewRequest error: %v", err)
@@ -358,7 +359,7 @@ func TestHandleQuizView(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuizView(logger, quizStore)
+		handler := HandleQuizView(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -388,7 +389,7 @@ func TestHandleQuizView(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuizView(logger, quizStore)
+		handler := HandleQuizView(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -418,7 +419,7 @@ func TestHandleQuizView_ErrorHandling(t *testing.T) {
 
 		quizStore := stubQuizStore{}
 
-		handler := HandleQuizView(logger, quizStore)
+		handler := HandleQuizView(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/abc", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -450,7 +451,7 @@ func TestHandleQuizView_ErrorHandling(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuizView(logger, quizStore)
+		handler := HandleQuizView(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -475,7 +476,7 @@ func TestHandleQuizCreate(t *testing.T) {
 	buf := bytes.Buffer{}
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-	handler := HandleQuizCreate(logger)
+	handler := HandleQuizCreate(logger, nil)
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/create", nil)
 	if err != nil {
 		t.Fatalf("http.NewRequest error: %v", err)
@@ -507,7 +508,7 @@ func TestHandleQuizEdit(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuizEdit(logger, quizStore)
+		handler := HandleQuizEdit(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1/edit", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -537,7 +538,7 @@ func TestHandleQuizEdit(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuizEdit(logger, quizStore)
+		handler := HandleQuizEdit(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1/edit", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -564,7 +565,7 @@ func TestHandleQuizEdit_ErrorHandling(t *testing.T) {
 
 		quizStore := stubQuizStore{}
 
-		handler := HandleQuizEdit(logger, quizStore)
+		handler := HandleQuizEdit(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/abc/edit", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -596,7 +597,7 @@ func TestHandleQuizEdit_ErrorHandling(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuizEdit(logger, quizStore)
+		handler := HandleQuizEdit(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1/edit", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -635,7 +636,7 @@ func TestHandleQuizSave(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuizSave(logger, quizStore)
+		handler := HandleQuizSave(logger, nil, quizStore)
 
 		form := url.Values{
 			"title":       {testQuiz.Title},
@@ -710,7 +711,7 @@ func TestHandleQuizSave(t *testing.T) {
 			"description": {updatedQuiz.Description},
 		}
 
-		handler := HandleQuizSave(logger, quizStore)
+		handler := HandleQuizSave(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodPost,
@@ -753,7 +754,7 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 
 		quizStore := stubQuizStore{}
 
-		handler := HandleQuizSave(logger, quizStore)
+		handler := HandleQuizSave(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, "/admin/quizzes/not-an-int/edit", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -786,7 +787,7 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuizSave(logger, quizStore)
+		handler := HandleQuizSave(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1/edit", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -812,7 +813,7 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 
 		quizStore := stubQuizStore{}
 
-		handler := HandleQuizSave(logger, quizStore)
+		handler := HandleQuizSave(logger, nil, quizStore)
 		body := errReader{err: errors.New("simulated read error")}
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes", body)
 		if err != nil {
@@ -839,7 +840,7 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 
 		quizStore := stubQuizStore{}
 
-		handler := HandleQuizSave(logger, quizStore)
+		handler := HandleQuizSave(logger, nil, quizStore)
 
 		form := url.Values{}
 
@@ -887,7 +888,7 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 			"description": {testQuiz.Description},
 		}
 
-		handler := HandleQuizSave(logger, quizStore)
+		handler := HandleQuizSave(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodPost,
@@ -950,7 +951,7 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 			"description": {updatedQuiz.Description},
 		}
 
-		handler := HandleQuizSave(logger, quizStore)
+		handler := HandleQuizSave(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodPost,
@@ -999,7 +1000,7 @@ func TestHandleQuestionCreate(t *testing.T) {
 		},
 	}
 
-	handler := HandleQuestionCreate(logger, quizStore)
+	handler := HandleQuestionCreate(logger, nil, quizStore)
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1/questions/new", nil)
 	if err != nil {
@@ -1029,7 +1030,7 @@ func TestHandleQuestionCreate_ErrorHandling(t *testing.T) {
 
 		quizStore := stubQuizStore{}
 
-		handler := HandleQuestionCreate(logger, quizStore)
+		handler := HandleQuestionCreate(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, "/admin/quizzes/not-an-int/edit", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -1064,7 +1065,7 @@ func TestHandleQuestionCreate_ErrorHandling(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuestionCreate(logger, quizStore)
+		handler := HandleQuestionCreate(logger, nil, quizStore)
 
 		req, err := http.NewRequestWithContext(
 			t.Context(),
@@ -1111,7 +1112,7 @@ func TestHandleQuestionEdit(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuestionEdit(logger, quizStore)
+		handler := HandleQuestionEdit(logger, nil, quizStore)
 
 		req, err := http.NewRequestWithContext(
 			t.Context(),
@@ -1167,7 +1168,7 @@ func TestHandleQuestionEdit(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuestionEdit(logger, quizStore)
+		handler := HandleQuestionEdit(logger, nil, quizStore)
 
 		req, err := http.NewRequestWithContext(
 			t.Context(),
@@ -1201,7 +1202,7 @@ func TestHandleQuestionEdit(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuestionEdit(logger, quizStore)
+		handler := HandleQuestionEdit(logger, nil, quizStore)
 
 		req, err := http.NewRequestWithContext(
 			t.Context(),
@@ -1248,7 +1249,7 @@ func TestHandleQuestionEdit(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuestionEdit(logger, quizStore)
+		handler := HandleQuestionEdit(logger, nil, quizStore)
 
 		req, err := http.NewRequestWithContext(
 			t.Context(),
@@ -1275,6 +1276,164 @@ func TestHandleQuestionEdit(t *testing.T) {
 	})
 }
 
+// TestQuestionEditSave_OptionIDsRoundTrip exercises the full edit-then-save
+// loop: render the edit form for a question with four options, scrape the
+// resulting <input> name/value pairs the way a browser would, POST them to
+// the save handler, and assert that every option's ID survives unchanged.
+//
+// This catches the class of bug where a form field name in the template
+// drifts away from what the handler reads — e.g. "option[2]id" without the
+// dot — because the round-trip silently drops those values and the save
+// handler then sees option C as an unsaved (ID=0) option.
+func TestQuestionEditSave_OptionIDsRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+
+	originalIDs := []int64{11, 22, 33, 44}
+	originalTexts := []string{"A", "B", "C", "D"}
+	originalCorrect := []bool{true, false, false, false}
+	original := quiz.Question{
+		ID: 5678, QuizID: 1234, Text: "Q?", Position: 1,
+		Options: []*quiz.Option{
+			{ID: originalIDs[0], Text: originalTexts[0], Correct: originalCorrect[0]},
+			{ID: originalIDs[1], Text: originalTexts[1], Correct: originalCorrect[1]},
+			{ID: originalIDs[2], Text: originalTexts[2], Correct: originalCorrect[2]},
+			{ID: originalIDs[3], Text: originalTexts[3], Correct: originalCorrect[3]},
+		},
+	}
+	q := quiz.Quiz{ID: 1234, Title: "Q1", Slug: "q-1", Questions: []*quiz.Question{&original}}
+
+	// Snapshot the option fields the handler sees at update-time. The handler
+	// mutates the loaded question's options in place, so we have to capture
+	// values rather than pointers.
+	type savedOption struct {
+		ID      int64
+		Text    string
+		Correct bool
+	}
+	var saved []savedOption
+	store := stubQuizStore{
+		getQuizByID:     func(_ context.Context, _ int64) (*quiz.Quiz, error) { return &q, nil },
+		getQuestionByID: func(_ context.Context, _ int64) (*quiz.Question, error) { return &original, nil },
+		updateQuestion: func(_ context.Context, qs *quiz.Question) error {
+			saved = make([]savedOption, len(qs.Options))
+			for i, o := range qs.Options {
+				saved[i] = savedOption{ID: o.ID, Text: o.Text, Correct: o.Correct}
+			}
+
+			return nil
+		},
+	}
+
+	// Step 1: render the edit form.
+	editReq := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/admin/quizzes/%d/questions/%d/edit", q.ID, original.ID),
+		nil,
+	)
+	editReq.SetPathValue("quizID", strconv.FormatInt(q.ID, 10))
+	editReq.SetPathValue("questionID", strconv.FormatInt(original.ID, 10))
+	editRec := httptest.NewRecorder()
+	HandleQuestionEdit(logger, nil, store).ServeHTTP(editRec, editReq)
+
+	if got, want := editRec.Code, http.StatusOK; got != want {
+		t.Fatalf("edit form status = %d, want %d", got, want)
+	}
+
+	// Step 2: scrape the rendered form's name=value pairs the way a browser
+	// would on submit, then POST them to the save handler.
+	formBody := scrapeFormFields(t, editRec.Body.String()).Encode()
+	saveReq := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		fmt.Sprintf("/admin/quizzes/%d/questions/%d", q.ID, original.ID),
+		strings.NewReader(formBody),
+	)
+	saveReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	saveReq.SetPathValue("quizID", strconv.FormatInt(q.ID, 10))
+	saveReq.SetPathValue("questionID", strconv.FormatInt(original.ID, 10))
+	saveRec := httptest.NewRecorder()
+	HandleQuestionSave(logger, nil, store).ServeHTTP(saveRec, saveReq)
+
+	if got, want := saveRec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("save status = %d, want %d (body=%q)", got, want, saveRec.Body.String())
+	}
+
+	// Step 3: assert every option field round-tripped. A typo on any
+	// option[N].<field> name would drop that field's value during the POST,
+	// so the saved value would not match the loaded one.
+	if saved == nil {
+		t.Fatal("UpdateQuestion was not called")
+	}
+	if got, want := len(saved), len(originalIDs); got != want {
+		t.Fatalf("saved %d options, want %d", got, want)
+	}
+	for i, opt := range saved {
+		if got, want := opt.ID, originalIDs[i]; got != want {
+			t.Errorf("option %d ID = %d, want %d (round-trip dropped the ID)", i, got, want)
+		}
+		if got, want := opt.Text, originalTexts[i]; got != want {
+			t.Errorf("option %d Text = %q, want %q (round-trip dropped the text)", i, got, want)
+		}
+		if got, want := opt.Correct, originalCorrect[i]; got != want {
+			t.Errorf("option %d Correct = %v, want %v (round-trip dropped the checkbox)", i, got, want)
+		}
+	}
+}
+
+// scrapeFormFields extracts (name, value) pairs from <input> elements in body
+// the way a browser would when submitting the surrounding form: disabled
+// inputs are skipped, and unchecked checkboxes are excluded.
+//
+// Limitation: every <input type="submit"> is included. A real browser only
+// sends the submit button that was actually clicked, so callers must ensure
+// the rendered form has at most one submit input — otherwise the resulting
+// POST will include both and the handler may not behave like production.
+var (
+	inputElementRe = regexp.MustCompile(`<input\b([^>]*)>`)
+	inputNameRe    = regexp.MustCompile(`\bname="([^"]+)"`)
+	inputValueRe   = regexp.MustCompile(`\bvalue="([^"]*)"`)
+	inputTypeRe    = regexp.MustCompile(`\btype="([^"]+)"`)
+	disabledAttrRe = regexp.MustCompile(`\bdisabled\b`)
+	checkedAttrRe  = regexp.MustCompile(`\bchecked\b`)
+)
+
+func scrapeFormFields(t *testing.T, body string) url.Values {
+	t.Helper()
+
+	values := url.Values{}
+	for _, match := range inputElementRe.FindAllStringSubmatch(body, -1) {
+		attrs := match[1]
+		// Browsers do not submit values from disabled fields.
+		if disabledAttrRe.MatchString(attrs) {
+			continue
+		}
+		nameMatch := inputNameRe.FindStringSubmatch(attrs)
+		if nameMatch == nil {
+			continue
+		}
+		name := nameMatch[1]
+
+		var value string
+		if v := inputValueRe.FindStringSubmatch(attrs); v != nil {
+			value = v[1]
+		}
+
+		// Checkboxes: only included when checked.
+		if typeMatch := inputTypeRe.FindStringSubmatch(attrs); typeMatch != nil && typeMatch[1] == "checkbox" {
+			if !checkedAttrRe.MatchString(attrs) {
+				continue
+			}
+		}
+
+		values.Add(name, value)
+	}
+
+	return values
+}
+
 func TestHandleQuestionEdit_HandleError(t *testing.T) {
 	t.Parallel()
 
@@ -1289,7 +1448,7 @@ func TestHandleQuestionEdit_HandleError(t *testing.T) {
 		quizID := "not-an-int"
 		questionID := "5678"
 
-		handler := HandleQuestionEdit(logger, quizStore)
+		handler := HandleQuestionEdit(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodGet,
@@ -1323,7 +1482,7 @@ func TestHandleQuestionEdit_HandleError(t *testing.T) {
 		quizID := "1234"
 		questionID := "not-an-int"
 
-		handler := HandleQuestionEdit(logger, quizStore)
+		handler := HandleQuestionEdit(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodGet,
@@ -1367,7 +1526,7 @@ func TestHandleQuestionEdit_HandleError(t *testing.T) {
 		quizID := "1234"
 		questionID := "5678"
 
-		handler := HandleQuestionEdit(logger, quizStore)
+		handler := HandleQuestionEdit(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodGet,
@@ -1475,7 +1634,7 @@ func TestHandleQuestionSave(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuestionSave(logger, quizStore)
+		handler := HandleQuestionSave(logger, nil, quizStore)
 
 		form := url.Values{
 			"text":      {testQuestion.Text},
@@ -1610,7 +1769,7 @@ func TestHandleQuestionSave(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuestionSave(logger, quizStore)
+		handler := HandleQuestionSave(logger, nil, quizStore)
 
 		form := url.Values{
 			"text":      {updatedQuestion.Text},
@@ -1674,7 +1833,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 
 		testQuizID := "not-an-int"
 
-		handler := HandleQuestionSave(logger, quizStore)
+		handler := HandleQuestionSave(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodPost,
@@ -1709,7 +1868,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 		testQuizID := "1234"
 		testQuestionID := "not-an-int"
 
-		handler := HandleQuestionSave(logger, quizStore)
+		handler := HandleQuestionSave(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodPost,
@@ -1746,7 +1905,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuestionSave(logger, quizStore)
+		handler := HandleQuestionSave(logger, nil, quizStore)
 		body := errReader{err: errors.New("simulated read error")}
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/1234/questions", body)
 		if err != nil {
@@ -1777,7 +1936,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuestionSave(logger, quizStore)
+		handler := HandleQuestionSave(logger, nil, quizStore)
 
 		form := url.Values{
 			"text":           {""},
@@ -1821,7 +1980,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuestionSave(logger, quizStore)
+		handler := HandleQuestionSave(logger, nil, quizStore)
 
 		form := url.Values{
 			"text":      {""},
@@ -1862,7 +2021,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuestionSave(logger, quizStore)
+		handler := HandleQuestionSave(logger, nil, quizStore)
 
 		form := url.Values{
 			"text":      {""},
@@ -1943,7 +2102,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 			}
 		}
 
-		handler := HandleQuestionSave(logger, quizStore)
+		handler := HandleQuestionSave(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodPost,
@@ -2033,7 +2192,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 			}
 		}
 
-		handler := HandleQuestionSave(logger, quizStore)
+		handler := HandleQuestionSave(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodPost,
@@ -2075,7 +2234,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuestionSave(logger, quizStore)
+		handler := HandleQuestionSave(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/1234/questions", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -2110,7 +2269,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuestionSave(logger, quizStore)
+		handler := HandleQuestionSave(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodPost,
@@ -2150,7 +2309,7 @@ func TestHandleQuizDelete(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuizDelete(logger, quizStore)
+		handler := HandleQuizDelete(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/1/delete", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -2181,7 +2340,7 @@ func TestHandleQuizDelete_ErrorHandling(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-		handler := HandleQuizDelete(logger, stubQuizStore{})
+		handler := HandleQuizDelete(logger, nil, stubQuizStore{})
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/not-an-int/delete", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -2208,7 +2367,7 @@ func TestHandleQuizDelete_ErrorHandling(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuizDelete(logger, quizStore)
+		handler := HandleQuizDelete(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/999/delete", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -2237,7 +2396,7 @@ func TestHandleQuizDelete_ErrorHandling(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuizDelete(logger, quizStore)
+		handler := HandleQuizDelete(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/1/delete", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -2274,7 +2433,7 @@ func TestHandleQuestionDelete(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuestionDelete(logger, quizStore)
+		handler := HandleQuestionDelete(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodPost,
@@ -2311,7 +2470,7 @@ func TestHandleQuestionDelete_ErrorHandling(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-		handler := HandleQuestionDelete(logger, stubQuizStore{})
+		handler := HandleQuestionDelete(logger, nil, stubQuizStore{})
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodPost,
@@ -2338,7 +2497,7 @@ func TestHandleQuestionDelete_ErrorHandling(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-		handler := HandleQuestionDelete(logger, stubQuizStore{})
+		handler := HandleQuestionDelete(logger, nil, stubQuizStore{})
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodPost,
@@ -2371,7 +2530,7 @@ func TestHandleQuestionDelete_ErrorHandling(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuestionDelete(logger, quizStore)
+		handler := HandleQuestionDelete(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodPost,
@@ -2406,7 +2565,7 @@ func TestHandleQuestionDelete_ErrorHandling(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuestionDelete(logger, quizStore)
+		handler := HandleQuestionDelete(logger, nil, quizStore)
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodPost,

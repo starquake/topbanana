@@ -54,6 +54,7 @@
                 </div>
                 <div class="navbar-item">
                     <form action="/logout" method="POST">
+                        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                         <button type="submit" class="button is-light">
                             Log out
                         </button>

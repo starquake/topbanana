@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/session"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
@@ -30,8 +31,8 @@ type formData struct {
 
 // HandleRegisterForm returns a handler for GET /register that renders the
 // registration form.
-func HandleRegisterForm(logger *slog.Logger) http.Handler {
-	render := newTemplateRenderer(logger, "auth/pages/register.gohtml")
+func HandleRegisterForm(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
+	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/register.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		render.render(w, r, http.StatusOK, formData{Title: "Register"})
@@ -48,11 +49,12 @@ func HandleRegisterForm(logger *slog.Logger) http.Handler {
 // admin — see CreatePlayer for the SQL that makes this concurrency-safe.
 func HandleRegisterSubmit(
 	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
 	players PlayerStore,
 	sessions *session.Manager,
 	adminUsernames []string,
 ) http.Handler {
-	render := newTemplateRenderer(logger, "auth/pages/register.gohtml")
+	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/register.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
@@ -113,8 +115,8 @@ func HandleRegisterSubmit(
 
 // HandleLoginForm returns a handler for GET /login that renders the login form.
 // registrationEnabled controls whether the template shows the "No account? Register" link.
-func HandleLoginForm(logger *slog.Logger, registrationEnabled bool) http.Handler {
-	render := newTemplateRenderer(logger, "auth/pages/login.gohtml")
+func HandleLoginForm(logger *slog.Logger, csrfMgr *csrf.Manager, registrationEnabled bool) http.Handler {
+	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		render.render(w, r, http.StatusOK, formData{Title: "Log in", ShowRegister: registrationEnabled})
@@ -126,11 +128,12 @@ func HandleLoginForm(logger *slog.Logger, registrationEnabled bool) http.Handler
 // registrationEnabled controls whether error renders show the "No account? Register" link.
 func HandleLoginSubmit(
 	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
 	players PlayerStore,
 	sessions *session.Manager,
 	registrationEnabled bool,
 ) http.Handler {
-	render := newTemplateRenderer(logger, "auth/pages/login.gohtml")
+	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
 
 	// dummyHash computes a bcrypt hash once on first use. The handler runs
 	// CheckPassword against it when the username does not exist so the
@@ -244,23 +247,53 @@ func renderInvalidCredentials(
 }
 
 // templateRenderer renders a template combined with the auth layouts.
+//
+// The CSRF manager wires the {{csrfToken}} template func: each render asks the
+// manager for the token, which sets a nonce cookie on the response when needed
+// and returns the HMAC-derived token for the form's hidden field. The
+// placeholder registered in newTemplateRenderer keeps templates parseable
+// without a manager (e.g. unit tests).
 type templateRenderer struct {
 	logger *slog.Logger
+	csrf   *csrf.Manager
 	t      *template.Template
 }
 
-func newTemplateRenderer(logger *slog.Logger, page string) *templateRenderer {
-	layouts := template.Must(template.ParseFS(tmpl.FS, "auth/layouts/*.gohtml"))
+func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string) *templateRenderer {
+	funcs := template.FuncMap{
+		"csrfToken": func() string { return "" },
+	}
+	layouts := template.Must(
+		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "auth/layouts/*.gohtml"),
+	)
 
 	return &templateRenderer{
 		logger: logger,
+		csrf:   csrfMgr,
 		t:      template.Must(template.Must(layouts.Clone()).ParseFS(tmpl.FS, page)),
 	}
 }
 
 func (tr *templateRenderer) render(w http.ResponseWriter, r *http.Request, status int, data any) {
+	t, err := tr.t.Clone()
+	if err != nil {
+		tr.logger.ErrorContext(r.Context(), "error cloning template", slog.Any("err", err))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+
+		return
+	}
+
+	csrfToken := ""
+	if tr.csrf != nil {
+		csrfToken = tr.csrf.Token(w, r)
+	}
+
+	t = t.Funcs(template.FuncMap{
+		"csrfToken": func() string { return csrfToken },
+	})
+
 	w.WriteHeader(status)
-	if err := tr.t.ExecuteTemplate(w, "base.gohtml", data); err != nil {
+	if err := t.ExecuteTemplate(w, "base.gohtml", data); err != nil {
 		tr.logger.ErrorContext(r.Context(), "error executing template", slog.Any("err", err))
 	}
 }

@@ -29,7 +29,7 @@ func TestRequireAdmin_AllowsAdmin(t *testing.T) {
 	})
 
 	sessions := session.New([]byte("k"))
-	mw := auth.RequireAdmin(next, store, sessions, discardLogger())
+	mw := auth.RequireAdmin(next, store, sessions, nil, discardLogger())
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, admin.ID)
@@ -76,7 +76,7 @@ func TestRequireAdmin_DeniesPlayer(t *testing.T) {
 	})
 
 	sessions := session.New([]byte("k"))
-	mw := auth.RequireAdmin(next, store, sessions, discardLogger())
+	mw := auth.RequireAdmin(next, store, sessions, nil, discardLogger())
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, player.ID)
@@ -106,7 +106,7 @@ func TestRequireAdmin_NoCookie_RedirectsToLogin(t *testing.T) {
 		t.Error("next should not be called without cookie")
 	})
 
-	mw := auth.RequireAdmin(next, store, session.New([]byte("k")), discardLogger())
+	mw := auth.RequireAdmin(next, store, session.New([]byte("k")), nil, discardLogger())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
 	rec := httptest.NewRecorder()
@@ -129,7 +129,7 @@ func TestRequireAdmin_UnknownPlayerID_RedirectsToLogin(t *testing.T) {
 	})
 
 	sessions := session.New([]byte("k"))
-	mw := auth.RequireAdmin(next, store, sessions, discardLogger())
+	mw := auth.RequireAdmin(next, store, sessions, nil, discardLogger())
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, 9999)
@@ -160,7 +160,7 @@ func TestRequireAdmin_StoreError_500(t *testing.T) {
 	})
 
 	sessions := session.New([]byte("k"))
-	mw := auth.RequireAdmin(next, store, sessions, discardLogger())
+	mw := auth.RequireAdmin(next, store, sessions, nil, discardLogger())
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, admin.ID)
