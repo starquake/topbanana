@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -18,9 +19,52 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/starquake/topbanana/cmd/server/app"
+	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/testutil"
 )
+
+// csrfTokenPattern extracts the value of the hidden CSRF form field a
+// renderer embeds on every form. The browser does this implicitly when
+// submitting a form; the test client has to scrape it out of the GET response.
+// Built from csrf.FormField so a rename of the constant fails the integration
+// test loudly instead of silently producing empty matches.
+var csrfTokenPattern = regexp.MustCompile(
+	fmt.Sprintf(`name="%s" value="([^"]+)"`, regexp.QuoteMeta(csrf.FormField)),
+)
+
+// fetchCSRFToken issues a GET to the given URL using the supplied client,
+// extracts the first csrf_token form value from the response body, and
+// returns it. The client's cookie jar picks up the nonce cookie as a side
+// effect, so subsequent POSTs from the same client carry the matching pair.
+func fetchCSRFToken(ctx context.Context, t *testing.T, client *http.Client, url string) string {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("failed to create CSRF GET request: %v", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("failed to GET %s: %v", url, err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("failed to close response body: %v", err)
+		}
+	}()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to read body of %s: %v", url, err)
+	}
+	m := csrfTokenPattern.FindStringSubmatch(string(body))
+	if m == nil {
+		t.Fatalf("no csrf_token found in response from %s; body=%q", url, body)
+	}
+
+	return m[1]
+}
 
 func TestAdmin_Integration(t *testing.T) {
 	t.Parallel()
@@ -69,10 +113,6 @@ func TestAdmin_Integration(t *testing.T) {
 	quizTitle := "Integration Test Quiz"
 	quizDesc := "A quiz created by integration test"
 
-	quizForm := url.Values{}
-	quizForm.Add("title", quizTitle)
-	quizForm.Add("description", quizDesc)
-
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		t.Fatalf("failed to create cookie jar: %v", err)
@@ -85,9 +125,14 @@ func TestAdmin_Integration(t *testing.T) {
 	}
 
 	// Register the first user (becomes admin) so subsequent /admin/* requests succeed.
+	// Fetching the GET form first sets the CSRF nonce cookie on the jar and
+	// returns the hidden token, both of which the POST then carries.
+	registerToken := fetchCSRFToken(ctx, t, client, fmt.Sprintf("http://%s/register", serverAddr))
+
 	registerForm := url.Values{}
 	registerForm.Add("username", "integration-admin")
 	registerForm.Add("password", "integration-pass-123")
+	registerForm.Add("csrf_token", registerToken)
 
 	registerReq, err := http.NewRequestWithContext(
 		ctx,
@@ -109,6 +154,15 @@ func TestAdmin_Integration(t *testing.T) {
 	if err := registerResp.Body.Close(); err != nil {
 		t.Errorf("failed to close register body: %v", err)
 	}
+
+	// Visit the quiz-create form GET so we can pull a fresh CSRF token tied
+	// to the now-authenticated session jar.
+	quizCreateToken := fetchCSRFToken(ctx, t, client, fmt.Sprintf("http://%s/admin/quizzes/new", serverAddr))
+
+	quizForm := url.Values{}
+	quizForm.Add("title", quizTitle)
+	quizForm.Add("description", quizDesc)
+	quizForm.Add("csrf_token", quizCreateToken)
 
 	var req *http.Request
 	req, err = http.NewRequestWithContext(
@@ -212,6 +266,13 @@ func TestAdmin_Integration(t *testing.T) {
 	questionOption3 := "Tolls"
 	questionOption4 := "Kirby"
 
+	questionToken := fetchCSRFToken(
+		ctx,
+		t,
+		client,
+		fmt.Sprintf("http://%s%s/questions/new", serverAddr, quizLocation),
+	)
+
 	questionForm := url.Values{}
 	questionForm.Add("text", questionText)
 	questionForm.Add("position", "10")
@@ -220,6 +281,7 @@ func TestAdmin_Integration(t *testing.T) {
 	questionForm.Add("option[1].correct", "on")
 	questionForm.Add("option[2].text", questionOption3)
 	questionForm.Add("option[3].text", questionOption4)
+	questionForm.Add("csrf_token", questionToken)
 
 	// Add question to quiz
 	req, err = http.NewRequestWithContext(

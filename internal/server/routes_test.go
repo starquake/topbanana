@@ -6,10 +6,14 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/config"
+	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/quiz"
 	. "github.com/starquake/topbanana/internal/server"
@@ -238,6 +242,97 @@ func TestAddRoutes_UnknownRouteReturns404(t *testing.T) {
 	}
 }
 
+// csrfFormPattern extracts the value of the hidden csrf_token form field from
+// a rendered HTML form.
+var csrfFormPattern = regexp.MustCompile(`name="csrf_token" value="([^"]+)"`)
+
+// TestAddRoutes_LoginPOST_RejectsMissingCSRF verifies the CSRF middleware
+// short-circuits an unsafe request that does not carry a token, and accepts
+// the same request once the token is provided. /login is convenient here
+// because it does not require an admin session — only the CSRF middleware
+// stands between the request and the handler.
+func TestAddRoutes_LoginPOST_RejectsMissingCSRF(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+	stores := &store.Stores{
+		Quizzes: stubQuizStore{},
+		Players: stubPlayerStore{},
+	}
+	mux := http.NewServeMux()
+	cfg := &config.Config{SessionKey: "test-session-key"}
+	ExportAddRoutes(mux, logger, stores, game.NewService(stubGameStore{}, stubQuizStore{}, logger), cfg)
+
+	t.Run("missing token returns 403", func(t *testing.T) {
+		t.Parallel()
+
+		body := url.Values{
+			"username": {"any"},
+			"password": {"any"},
+		}.Encode()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/login", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusForbidden; got != want {
+			t.Errorf("status = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("valid token reaches handler", func(t *testing.T) {
+		t.Parallel()
+
+		// Step 1: GET /login to receive the nonce cookie and the matching
+		// hidden token rendered in the form.
+		getReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login", nil)
+		getRec := httptest.NewRecorder()
+		mux.ServeHTTP(getRec, getReq)
+
+		if got, want := getRec.Code, http.StatusOK; got != want {
+			t.Fatalf("GET /login status = %d, want %d", got, want)
+		}
+
+		match := csrfFormPattern.FindStringSubmatch(getRec.Body.String())
+		if match == nil {
+			t.Fatalf("no csrf_token field found in /login HTML, body=%q", getRec.Body.String())
+		}
+		token := match[1]
+
+		var nonce *http.Cookie
+		for _, c := range getRec.Result().Cookies() {
+			if c.Name == csrf.CookieName {
+				nonce = c
+
+				break
+			}
+		}
+		if nonce == nil {
+			t.Fatalf("no %q cookie found on GET /login", csrf.CookieName)
+		}
+
+		// Step 2: POST /login with the token in the form and the cookie on
+		// the request. The POST should pass CSRF validation and reach the
+		// handler, which in turn returns 401 for the unknown user — that's
+		// fine, the assertion here is "not 403".
+		body := url.Values{
+			"username":   {"ghost"},
+			"password":   {"correctbatterystaple"},
+			"csrf_token": {token},
+		}.Encode()
+		postReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/login", strings.NewReader(body))
+		postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		postReq.AddCookie(nonce)
+		postRec := httptest.NewRecorder()
+		mux.ServeHTTP(postRec, postReq)
+
+		if got := postRec.Code; got == http.StatusForbidden {
+			t.Errorf("status = %d (forbidden); CSRF should have passed with a valid token", got)
+		}
+	})
+}
+
 func TestAddRoutes_AdminRouteWithoutSession_RedirectsToLogin(t *testing.T) {
 	t.Parallel()
 
@@ -258,5 +353,33 @@ func TestAddRoutes_AdminRouteWithoutSession_RedirectsToLogin(t *testing.T) {
 	}
 	if got, want := rec.Header().Get("Location"), "/login"; got != want {
 		t.Errorf("Location = %q, want %q", got, want)
+	}
+}
+
+// TestAddRoutes_AdminPOSTWithoutCSRF_Returns403_NotAuthRedirect locks in the
+// middleware order on admin POST routes: csrfMW(requireAdmin(...)). An
+// anonymous POST without a CSRF token should be rejected with 403 from the
+// CSRF layer rather than 303-redirected to /login by the auth layer, so we
+// don't leak whether a session would have been honoured.
+func TestAddRoutes_AdminPOSTWithoutCSRF_Returns403_NotAuthRedirect(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+	stores := &store.Stores{
+		Quizzes: stubQuizStore{},
+		Players: stubPlayerStore{},
+	}
+	mux := http.NewServeMux()
+	cfg := &config.Config{SessionKey: "test-session-key"}
+	ExportAddRoutes(mux, logger, stores, game.NewService(stubGameStore{}, stubQuizStore{}, logger), cfg)
+
+	body := strings.NewReader(url.Values{}.Encode())
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/1/delete", body)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusForbidden; got != want {
+		t.Errorf("status = %d, want %d (CSRF must reject before the auth layer redirects)", got, want)
 	}
 }

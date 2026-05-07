@@ -63,6 +63,7 @@
                         <footer class="modal-card-foot">
                             <div class="buttons">
                                 <form method="post" action="/admin/quizzes/{{.ID}}/delete">
+                                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                                     <button class="button is-danger" type="submit">Delete</button>
                                 </form>
                                 <button class="button" onclick="closeModal('modal-delete-quiz-{{.ID}}')">Cancel</button>
