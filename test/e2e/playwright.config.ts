@@ -6,7 +6,10 @@ import { join } from 'path';
 // Fixed port keeps the Playwright config synchronous. Override with TOPBANANA_E2E_PORT
 // when the default collides (e.g. running multiple suites in parallel).
 const port = Number(process.env.TOPBANANA_E2E_PORT ?? 8181);
-const dataDir = mkdtempSync(join(tmpdir(), 'topbanana-e2e-'));
+// Playwright re-loads this config in worker processes, so guard the temp dir
+// behind the env var to avoid creating one per worker.
+const dataDir = process.env.TOPBANANA_E2E_DATA_DIR ?? mkdtempSync(join(tmpdir(), 'topbanana-e2e-'));
+process.env.TOPBANANA_E2E_DATA_DIR = dataDir;
 const dbPath = join(dataDir, 'e2e.db');
 const baseURL = `http://127.0.0.1:${port}`;
 
@@ -22,9 +25,10 @@ export default defineConfig({
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL,
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
     video: 'retain-on-failure',
   },
+  globalTeardown: './global-teardown.ts',
   projects: [
     {
       name: 'chromium',
@@ -51,7 +55,7 @@ export default defineConfig({
       // bootstrap-admin rule (first password-bearing player becomes admin) only
       // applies to the very first registration, which would leave subsequent
       // browser projects stuck on the role of `player`.
-      ADMIN_USERNAMES: 'e2e-admin-chromium,e2e-admin-firefox,e2e-admin-webkit',
+      ADMIN_USERNAMES: 'e2e-admin-chromium,e2e-admin-firefox',
     },
     reuseExistingServer: false,
     timeout: 60_000,

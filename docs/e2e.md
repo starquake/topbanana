@@ -1,4 +1,4 @@
-D# End-to-end browser tests
+# End-to-end browser tests
 
 Top Banana's E2E suite drives a real headless Chromium against a real `cmd/server` binary booted on a free port with an isolated SQLite file. Tests live under [`test/e2e/`](../test/e2e/) and use [Playwright](https://playwright.dev) (Node.js).
 

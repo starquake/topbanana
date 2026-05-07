@@ -7,9 +7,7 @@ test('register, log out, log back in, and reach the admin dashboard', async ({ p
   // username per project and rely on ADMIN_USERNAMES (set in playwright.config.ts)
   // to promote every project's registrant to admin.
   const username = `e2e-admin-${browserName}`;
-  // Register: with a fresh DB, the first password-bearing user is promoted to admin
-  // by the SQL CASE in CreatePlayerWithCredentials, so this run also exercises the
-  // bootstrap-admin path.
+
   await page.goto('/register');
   await page.locator('input[name=username]').fill(username);
   await page.locator('input[name=password]').fill(password);
