@@ -1,0 +1,13 @@
+{
+  "name": "topbanana-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "End-to-end browser tests for topbanana, run with Playwright.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.59.1",
+    "@types/node": "20.17.10"
+  }
+}

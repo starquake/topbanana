@@ -55,6 +55,12 @@ test-coverage:
 test-coverage-html: test-coverage
 	go tool cover -html=$(COV_DIR)/coverage.out
 
+# Run end-to-end browser tests. Requires Node.js and Playwright. The
+# `npx playwright install` step downloads Chromium on first run.
+.PHONY: test-e2e
+test-e2e:
+	cd test/e2e && npm ci && npx playwright install chromium firefox && npm test
+
 .PHONY: clean
 clean:
 	rm -rf $(BUILD_DIR)
