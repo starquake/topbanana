@@ -20,8 +20,11 @@ func TestRequireAdmin_AllowsAdmin(t *testing.T) {
 	}
 
 	called := false
-	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	var seenPlayer *auth.Player
+	var seenOK bool
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
+		seenPlayer, seenOK = auth.PlayerFromContext(r.Context())
 		w.WriteHeader(http.StatusTeapot)
 	})
 
@@ -42,6 +45,15 @@ func TestRequireAdmin_AllowsAdmin(t *testing.T) {
 	}
 	if got, want := rec.Code, http.StatusTeapot; got != want {
 		t.Errorf("status = %d, want %d", got, want)
+	}
+	if !seenOK {
+		t.Fatal("PlayerFromContext ok = false, want true (admin should be on context)")
+	}
+	if got, want := seenPlayer.ID, admin.ID; got != want {
+		t.Errorf("player.ID on context = %d, want %d", got, want)
+	}
+	if got, want := seenPlayer.Username, "alice"; got != want {
+		t.Errorf("player.Username on context = %q, want %q", got, want)
 	}
 }
 

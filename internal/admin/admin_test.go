@@ -17,6 +17,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	. "github.com/starquake/topbanana/internal/admin"
+	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
@@ -230,6 +231,44 @@ func TestHandleQuizList(t *testing.T) {
 			t.Fatalf("got: %q, should contain: %q", got, want)
 		}
 	})
+}
+
+func TestHandleQuizList_RendersNavbarLogout(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+	store := stubQuizStore{
+		listQuizzes: func(_ context.Context) ([]*quiz.Quiz, error) {
+			return []*quiz.Quiz{}, nil
+		},
+	}
+	handler := HandleQuizList(logger, store)
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
+	if err != nil {
+		t.Fatalf("http.NewRequest error: %v", err)
+	}
+	// Unit tests don't go through RequireAdmin, so attach the player directly.
+	signedIn := &auth.Player{ID: 1, Username: "alice", Role: auth.RoleAdmin}
+	req = req.WithContext(auth.WithPlayer(req.Context(), signedIn))
+
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if got, want := rr.Code, http.StatusOK; got != want {
+		t.Fatalf("status code = %v, want %v", got, want)
+	}
+
+	body := rr.Body.String()
+	if got, want := body, "alice"; !strings.Contains(got, want) {
+		t.Errorf("body should contain signed-in username %q, got %q", want, got)
+	}
+	if got, want := body, `action="/logout"`; !strings.Contains(got, want) {
+		t.Errorf("body should contain logout form action %q, got %q", want, got)
+	}
+	if got, want := body, "Log out"; !strings.Contains(got, want) {
+		t.Errorf("body should contain logout button label %q, got %q", want, got)
+	}
 }
 
 func TestHandleQuizList_ErrorHandling(t *testing.T) {
