@@ -6,6 +6,7 @@ AL# topbanana
 make check            # lint + sql-lint + build + all tests — run before every commit
 make test             # unit tests only
 make test-integration # integration tests (-tags=integration)
+make test-e2e         # end-to-end browser tests (Playwright; requires Node.js)
 ```
 
 ## Commits
@@ -14,7 +15,7 @@ Never create commits yourself. When work is ready to commit, suggest a one-line 
 
 ## Testing
 
-Every change or new feature must have tests. Run `make lint-fix` then `make check` before marking work done.
+Every change or new feature must have tests. Run `make lint-fix`, `make check`, and `make test-e2e` before marking work done.
 After changes, also boot the server against the existing dev DB (`go run ./cmd/server/`) and confirm it starts cleanly before reporting done — `make check` only exercises a fresh DB, so migration or startup issues that only surface against populated data otherwise slip through.
 
 ## Workflow

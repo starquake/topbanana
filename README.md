@@ -135,6 +135,7 @@ This project uses conventions used by the standard library and the following sty
 - To run all tests: `make test-all`
 - To check test coverage for all packages: `make test-coverage`
 - To view test coverage in your browser: `make test-coverage-html`
+- To run end-to-end browser tests: `make test-e2e` (requires Node.js — see [`docs/e2e.md`](docs/e2e.md))
 
 ### Pre-commit check
 Run `make check` to run linters, build the project, and run all tests with coverage.
