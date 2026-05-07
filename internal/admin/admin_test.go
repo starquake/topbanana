@@ -244,10 +244,7 @@ func TestHandleQuizList_RendersNavbarLogout(t *testing.T) {
 	}
 	handler := HandleQuizList(logger, store)
 
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
-	if err != nil {
-		t.Fatalf("http.NewRequest error: %v", err)
-	}
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
 	// Unit tests don't go through RequireAdmin, so attach the player directly.
 	signedIn := &auth.Player{ID: 1, Username: "alice", Role: auth.RoleAdmin}
 	req = req.WithContext(auth.WithPlayer(req.Context(), signedIn))
