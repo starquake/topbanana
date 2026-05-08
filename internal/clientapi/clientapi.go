@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/quiz"
@@ -162,8 +163,17 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 			return
 		}
 
-		// TODO: Replace with real PlayerID
-		g, err := service.CreateGame(ctx, req.QuizID, 1)
+		player, ok := auth.PlayerFromContext(ctx)
+		if !ok {
+			// EnsurePlayer middleware should have populated this; reaching
+			// here means the route was wired without it.
+			logger.ErrorContext(ctx, "missing player on context for create game")
+			http.Error(w, "internal error", http.StatusInternalServerError)
+
+			return
+		}
+
+		g, err := service.CreateGame(ctx, req.QuizID, player.ID)
 		if err != nil {
 			if errors.Is(err, quiz.ErrQuizNotFound) {
 				http.NotFound(w, r)
@@ -298,8 +308,15 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 			return
 		}
 
-		// TODO: Replace with real PlayerID
-		a, err := service.SubmitAnswer(r.Context(), gameID, 1, questionID, req.OptionID)
+		player, ok := auth.PlayerFromContext(r.Context())
+		if !ok {
+			logger.ErrorContext(r.Context(), "missing player on context for submit answer")
+			http.Error(w, "internal error", http.StatusInternalServerError)
+
+			return
+		}
+
+		a, err := service.SubmitAnswer(r.Context(), gameID, player.ID, questionID, req.OptionID)
 		if err != nil {
 			if errors.Is(err, game.ErrGameNotFound) || errors.Is(err, game.ErrQuestionNotInGame) {
 				http.Error(w, err.Error(), http.StatusNotFound)

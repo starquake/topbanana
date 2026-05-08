@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"strings"
 	"testing"
 	"time"
@@ -25,7 +26,77 @@ import (
 	"github.com/starquake/topbanana/internal/testutil"
 )
 
-func setupIntegration(t *testing.T) (context.Context, context.CancelFunc, chan error, string, *store.Stores, error) {
+// httpGet issues a GET with a request-scoped context so the noctx linter is
+// happy and the request gets cancelled when the test ends.
+func httpGet(ctx context.Context, t *testing.T, client *http.Client, url string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("client.Do err = %v, want nil", err)
+	}
+
+	return resp
+}
+
+// httpPostJSON issues a POST with a JSON body and a request-scoped context.
+func httpPostJSON(ctx context.Context, t *testing.T, client *http.Client, url, body string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("client.Do err = %v, want nil", err)
+	}
+
+	return resp
+}
+
+// nextQuestionOption mirrors one option in the GET /api/games/.../next
+// response. Pulled out so the parent decode target isn't a nested struct
+// (revive's nested-structs rule).
+type nextQuestionOption struct {
+	ID   int64  `json:"id"`
+	Text string `json:"text"`
+}
+
+// nextQuestionRes is the decode target for GET /api/games/.../next.
+type nextQuestionRes struct {
+	ID      int64                `json:"id"`
+	Text    string               `json:"text"`
+	Options []nextQuestionOption `json:"options"`
+}
+
+// playerScoreRes mirrors one player_scores entry in the GET .../results
+// response. Pulled out for the same nested-structs reason.
+type playerScoreRes struct {
+	PlayerID int64 `json:"playerId"`
+	Score    int   `json:"score"`
+}
+
+// resultsRes is the decode target for GET /api/games/.../results.
+type resultsRes struct {
+	GameID       string           `json:"gameId"`
+	PlayerScores []playerScoreRes `json:"playerScores"`
+}
+
+// integrationSetup bundles the artefacts a gameplay-style integration test
+// needs. Context is intentionally returned separately from the struct (passed
+// out of setupIntegration as the first return value) to avoid containedctx.
+type integrationSetup struct {
+	Stop    context.CancelFunc
+	ErrCh   chan error
+	BaseURL string
+	Stores  *store.Stores
+}
+
+func setupIntegration(t *testing.T) (context.Context, integrationSetup) {
 	t.Helper()
 
 	var err error
@@ -62,8 +133,8 @@ func setupIntegration(t *testing.T) (context.Context, context.CancelFunc, chan e
 	}()
 
 	serverAddr := ln.Addr().String()
-	baseURL := fmt.Sprintf("http://%s", serverAddr)
-	err = testutil.WaitForReady(ctx, t, 10*time.Second, fmt.Sprintf("%s/healthz", baseURL))
+	baseURL := "http://" + serverAddr
+	err = testutil.WaitForReady(ctx, t, 10*time.Second, baseURL+"/healthz")
 	if err != nil {
 		t.Fatalf("error waiting for server to be ready: %v", err)
 	}
@@ -74,19 +145,29 @@ func setupIntegration(t *testing.T) (context.Context, context.CancelFunc, chan e
 		t.Fatalf("failed to open db: %v", err)
 	}
 	t.Cleanup(func() {
-		db.Close()
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v, want nil", cerr)
+		}
 	})
 
 	stores := store.New(db, slog.Default())
-	return ctx, stop, errCh, baseURL, stores, err
+
+	return ctx, integrationSetup{
+		Stop:    stop,
+		ErrCh:   errCh,
+		BaseURL: baseURL,
+		Stores:  stores,
+	}
 }
 
 func TestGameplay_Integration(t *testing.T) {
 	t.Parallel()
 
-	var err error
-
-	ctx, stop, errCh, baseURL, stores, err := setupIntegration(t)
+	ctx, setup := setupIntegration(t)
+	stop := setup.Stop
+	errCh := setup.ErrCh
+	baseURL := setup.BaseURL
+	stores := setup.Stores
 
 	qz := &quiz.Quiz{
 		Title:       "Integration Quiz",
@@ -120,21 +201,23 @@ func TestGameplay_Integration(t *testing.T) {
 		},
 	}
 
-	err = stores.Quizzes.CreateQuiz(ctx, qz)
-	if err != nil {
+	if err := stores.Quizzes.CreateQuiz(ctx, qz); err != nil {
 		t.Fatalf("failed to create quiz: %v", err)
 	}
 
-	// Start of the integration test
-	client := &http.Client{}
+	// Start of the integration test. The cookie jar carries the anonymous
+	// session cookie that EnsurePlayer issues on the first request, so
+	// every subsequent request is attributed to the same player row.
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("failed to create cookie jar: %v", err)
+	}
+	client := &http.Client{Jar: jar}
 
 	var resp *http.Response
 
 	// Get a list of quizzes
-	resp, err = client.Get(baseURL + "/api/quizzes")
-	if err != nil {
-		t.Fatalf("failed to get quizzes: %v", err)
-	}
+	resp = httpGet(ctx, t, client, baseURL+"/api/quizzes")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", resp.StatusCode)
 	}
@@ -144,7 +227,9 @@ func TestGameplay_Integration(t *testing.T) {
 		Description string `json:"description"`
 	}
 	err = json.NewDecoder(resp.Body).Decode(&quizzesRes)
-	resp.Body.Close()
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+	}
 	if err != nil {
 		t.Fatalf("failed to decode quizzes response: %v", err)
 	}
@@ -160,10 +245,7 @@ func TestGameplay_Integration(t *testing.T) {
 
 	// Create Game
 	createGameReq := fmt.Sprintf(`{"quizId": %d}`, qz.ID)
-	resp, err = client.Post(baseURL+"/api/games", "application/json", strings.NewReader(createGameReq))
-	if err != nil {
-		t.Fatalf("failed to create game: %v", err)
-	}
+	resp = httpPostJSON(ctx, t, client, baseURL+"/api/games", createGameReq)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("expected status 201, got %d", resp.StatusCode)
 	}
@@ -172,7 +254,9 @@ func TestGameplay_Integration(t *testing.T) {
 		ID string `json:"id"`
 	}
 	err = json.NewDecoder(resp.Body).Decode(&createGameRes)
-	resp.Body.Close()
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+	}
 	if err != nil {
 		t.Fatalf("failed to decode create game response: %v", err)
 	}
@@ -180,26 +264,18 @@ func TestGameplay_Integration(t *testing.T) {
 
 	runningScore := 0
 	// Walk through questions
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		// Get Next Question
-		resp, err = client.Get(fmt.Sprintf("%s/api/games/%s/questions/next", baseURL, gameID))
-		if err != nil {
-			t.Fatalf("failed to get next question: %v", err)
-		}
+		resp = httpGet(ctx, t, client, fmt.Sprintf("%s/api/games/%s/questions/next", baseURL, gameID))
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("expected status 200, got %d", resp.StatusCode)
 		}
 
-		var nextQsRes struct {
-			ID      int64  `json:"id"`
-			Text    string `json:"text"`
-			Options []struct {
-				ID   int64  `json:"id"`
-				Text string `json:"text"`
-			} `json:"options"`
-		}
+		var nextQsRes nextQuestionRes
 		err = json.NewDecoder(resp.Body).Decode(&nextQsRes)
-		resp.Body.Close()
+		if cerr := resp.Body.Close(); cerr != nil {
+			t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+		}
 		if err != nil {
 			t.Fatalf("failed to decode next question response: %v", err)
 		}
@@ -219,6 +295,7 @@ func TestGameplay_Integration(t *testing.T) {
 					if o.Correct == targetCorrect {
 						optionID = o.ID
 						found = true
+
 						break
 					}
 				}
@@ -235,10 +312,7 @@ func TestGameplay_Integration(t *testing.T) {
 		// Submit Answer
 		answerReq := fmt.Sprintf(`{"optionId": %d}`, optionID)
 		answerURL := fmt.Sprintf("%s/api/games/%s/questions/%d/answers", baseURL, gameID, nextQsRes.ID)
-		resp, err = client.Post(answerURL, "application/json", strings.NewReader(answerReq))
-		if err != nil {
-			t.Fatalf("failed to submit answer: %v", err)
-		}
+		resp = httpPostJSON(ctx, t, client, answerURL, answerReq)
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("expected status 200, got %d", resp.StatusCode)
 		}
@@ -247,7 +321,11 @@ func TestGameplay_Integration(t *testing.T) {
 			Correct bool `json:"correct"`
 			Score   int  `json:"score"`
 		}
-		if err = json.NewDecoder(resp.Body).Decode(&answerRes); err != nil {
+		err = json.NewDecoder(resp.Body).Decode(&answerRes)
+		if cerr := resp.Body.Close(); cerr != nil {
+			t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+		}
+		if err != nil {
 			t.Fatalf("failed to decode results response: %v", err)
 		}
 		if got, want := answerRes.Correct, targetCorrect; got != want {
@@ -257,51 +335,44 @@ func TestGameplay_Integration(t *testing.T) {
 	}
 
 	// Get Results
-	resp, err = client.Get(fmt.Sprintf("%s/api/games/%s/results", baseURL, gameID))
-	if err != nil {
-		t.Fatalf("failed to get results: %v", err)
-	}
+	resp = httpGet(ctx, t, client, fmt.Sprintf("%s/api/games/%s/results", baseURL, gameID))
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", resp.StatusCode)
 	}
 
-	var resultsRes struct {
-		GameID       string `json:"gameId"`
-		PlayerScores []struct {
-			PlayerID int64 `json:"playerId"`
-			Score    int   `json:"score"`
-		} `json:"playerScores"`
+	var results resultsRes
+	err = json.NewDecoder(resp.Body).Decode(&results)
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("resp.Body.Close err = %v, want nil", cerr)
 	}
-	err = json.NewDecoder(resp.Body).Decode(&resultsRes)
-	resp.Body.Close()
 	if err != nil {
 		t.Fatalf("failed to decode results response: %v", err)
 	}
 
-	if got, want := resultsRes.GameID, gameID; got != want {
+	if got, want := results.GameID, gameID; got != want {
 		t.Fatalf("got game ID %q, want %q", got, want)
 	}
-	if got, want := len(resultsRes.PlayerScores), 1; got != want {
+	if got, want := len(results.PlayerScores), 1; got != want {
 		t.Fatalf("got %d player scores, want %d", got, want)
 	}
 
-	// TODO: Update when player ID is generated by server
-	if got, want := resultsRes.PlayerScores[0].PlayerID, int64(1); got != want {
-		t.Fatalf("got player ID %q, want %q", got, want)
+	// The server picks the player ID for an anonymous session, so we
+	// don't assert a specific value — just that it is a real row.
+	if got := results.PlayerScores[0].PlayerID; got <= 0 {
+		t.Fatalf("got player ID %d, want > 0", got)
 	}
-	if got, want := resultsRes.PlayerScores[0].Score, runningScore; got != want {
+	if got, want := results.PlayerScores[0].Score, runningScore; got != want {
 		t.Fatalf("got score %d, want %d", got, want)
 	}
 
 	// Verify no more questions
-	resp, err = client.Get(fmt.Sprintf("%s/api/games/%s/questions/next", baseURL, gameID))
-	if err != nil {
-		t.Fatalf("failed to get next question (final): %v", err)
-	}
+	resp = httpGet(ctx, t, client, fmt.Sprintf("%s/api/games/%s/questions/next", baseURL, gameID))
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected status 404, got %d", resp.StatusCode)
 	}
-	resp.Body.Close()
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+	}
 
 	// Shutdown server
 	stop()

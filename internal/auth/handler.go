@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -47,6 +48,15 @@ func HandleRegisterForm(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler
 // promoted to admin. Otherwise the role passed to the store is RolePlayer and
 // the store atomically promotes the very first password-bearing registrant to
 // admin — see CreatePlayer for the SQL that makes this concurrency-safe.
+//
+// Score-claiming flow: when the request already carries a valid session for
+// an anonymous player (a row created by EnsurePlayer with no password_hash),
+// the handler upgrades that existing row in place via ClaimPlayer instead of
+// inserting a new one. This means a visitor who plays a few games without an
+// account and then registers keeps their player_id, so their game history
+// follows them. If the anonymous row was concurrently claimed by another
+// request the handler falls back to CreatePlayer; the visitor ends up with a
+// fresh row but the registration still succeeds.
 func HandleRegisterSubmit(
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
@@ -91,7 +101,7 @@ func HandleRegisterSubmit(
 			return
 		}
 
-		player, err := players.CreatePlayer(r.Context(), input.Cleaned, hashed, role)
+		player, err := claimOrCreatePlayer(r, players, sessions, input.Cleaned, hashed, role)
 		if err != nil {
 			if errors.Is(err, ErrUsernameTaken) {
 				render.render(w, r, http.StatusConflict, formData{
@@ -111,6 +121,73 @@ func HandleRegisterSubmit(
 		sessions.Set(w, player.ID)
 		http.Redirect(w, r, adminLandingPath, http.StatusSeeOther)
 	})
+}
+
+// claimOrCreatePlayer is the storage-side branch of HandleRegisterSubmit. If
+// the request already has a session pointing at an anonymous (no
+// password_hash) row, it upgrades that row via ClaimPlayer so the visitor
+// keeps their player_id. Otherwise — no session, deleted row, or
+// already-claimed row — it falls back to CreatePlayer.
+//
+// The "already claimed" fallback handles a concurrent registration race
+// gracefully: by the time we call ClaimPlayer the row may have been claimed
+// by a different request that shared the same cookie. Falling back to
+// CreatePlayer means the user still completes registration, just without
+// their pre-claim history attached.
+//
+// Wrapped errors keep the underlying ErrUsernameTaken / ErrPlayerAlreadyClaimed
+// sentinel intact for [errors.Is] checks while satisfying wrapcheck.
+func claimOrCreatePlayer(
+	r *http.Request,
+	players PlayerStore,
+	sessions *session.Manager,
+	username, passwordHash, requestedRole string,
+) (*Player, error) {
+	playerID, ok := sessions.PlayerID(r)
+	if !ok {
+		return createPlayerWrapped(r, players, username, passwordHash, requestedRole)
+	}
+
+	existing, err := players.GetPlayerByID(r.Context(), playerID)
+	if err != nil {
+		if errors.Is(err, ErrPlayerNotFound) {
+			return createPlayerWrapped(r, players, username, passwordHash, requestedRole)
+		}
+
+		return nil, fmt.Errorf("get player by id for claim: %w", err)
+	}
+	if !existing.IsAnonymous() {
+		// Session already belongs to a credentialled account. Treat this as a
+		// fresh registration so the new account is created independently;
+		// the existing session is replaced when the caller resets the cookie.
+		return createPlayerWrapped(r, players, username, passwordHash, requestedRole)
+	}
+
+	claimed, err := players.ClaimPlayer(r.Context(), playerID, username, passwordHash, requestedRole)
+	if err != nil {
+		if errors.Is(err, ErrPlayerAlreadyClaimed) || errors.Is(err, ErrPlayerNotFound) {
+			return createPlayerWrapped(r, players, username, passwordHash, requestedRole)
+		}
+
+		return nil, fmt.Errorf("claim player: %w", err)
+	}
+
+	return claimed, nil
+}
+
+// createPlayerWrapped wraps PlayerStore.CreatePlayer's error so wrapcheck
+// is happy while preserving sentinel errors for [errors.Is].
+func createPlayerWrapped(
+	r *http.Request,
+	players PlayerStore,
+	username, passwordHash, requestedRole string,
+) (*Player, error) {
+	p, err := players.CreatePlayer(r.Context(), username, passwordHash, requestedRole)
+	if err != nil {
+		return nil, fmt.Errorf("create player: %w", err)
+	}
+
+	return p, nil
 }
 
 // HandleLoginForm returns a handler for GET /login that renders the login form.

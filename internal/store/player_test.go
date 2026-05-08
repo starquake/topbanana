@@ -179,3 +179,140 @@ func TestPlayerStore_CreatePlayer_DuplicateUsername(t *testing.T) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
 }
+
+func TestPlayerStore_CreateAnonymousPlayer(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	created, err := ps.CreateAnonymousPlayer(t.Context(), "anon-foo")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	if got, want := created.Username, "anon-foo"; got != want {
+		t.Errorf("Username = %q, want %q", got, want)
+	}
+	if got, want := created.PasswordHash, ""; got != want {
+		t.Errorf("PasswordHash = %q, want %q (anonymous row should have NULL hash)", got, want)
+	}
+	if got, want := created.Role, auth.RolePlayer; got != want {
+		t.Errorf("Role = %q, want %q (anonymous row never auto-promotes to admin)", got, want)
+	}
+	if !created.IsAnonymous() {
+		t.Error("IsAnonymous() = false, want true")
+	}
+}
+
+func TestPlayerStore_CreateAnonymousPlayer_DoesNotBlockFirstAdmin(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	// Seed an anonymous row first; the next CreatePlayer call should still
+	// trigger the "first password-bearing registrant becomes admin" rule
+	// because the SQL CASE filters by password_hash IS NOT NULL.
+	if _, err := ps.CreateAnonymousPlayer(t.Context(), "anon-first"); err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	created, err := ps.CreatePlayer(t.Context(), "alice", "hash", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	if got, want := created.Role, auth.RoleAdmin; got != want {
+		t.Errorf("Role = %q, want %q (first credentialled player should still become admin)", got, want)
+	}
+}
+
+func TestPlayerStore_ClaimPlayer_UpgradesAnonymousRow(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	anon, err := ps.CreateAnonymousPlayer(t.Context(), "anon-claim")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	claimed, err := ps.ClaimPlayer(t.Context(), anon.ID, "alice", "hash", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("ClaimPlayer err = %v, want nil", err)
+	}
+	if got, want := claimed.ID, anon.ID; got != want {
+		t.Errorf("claimed.ID = %d, want %d (claim must preserve player ID)", got, want)
+	}
+	if got, want := claimed.Username, "alice"; got != want {
+		t.Errorf("claimed.Username = %q, want %q", got, want)
+	}
+	if got, want := claimed.PasswordHash, "hash"; got != want {
+		t.Errorf("claimed.PasswordHash = %q, want %q", got, want)
+	}
+	// First password-bearing registrant — even via the claim path — becomes admin.
+	if got, want := claimed.Role, auth.RoleAdmin; got != want {
+		t.Errorf("claimed.Role = %q, want %q", got, want)
+	}
+}
+
+func TestPlayerStore_ClaimPlayer_AlreadyClaimed_ReturnsSentinel(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	anon, err := ps.CreateAnonymousPlayer(t.Context(), "anon-twice")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	if _, claimErr := ps.ClaimPlayer(t.Context(), anon.ID, "alice", "hash", auth.RolePlayer); claimErr != nil {
+		t.Fatalf("first ClaimPlayer err = %v, want nil", claimErr)
+	}
+
+	_, err = ps.ClaimPlayer(t.Context(), anon.ID, "bob", "other", auth.RolePlayer)
+	if got, want := err, auth.ErrPlayerAlreadyClaimed; !errors.Is(got, want) {
+		t.Errorf("err = %v, want %v", got, want)
+	}
+
+	// Make sure the original claim was not clobbered by the second attempt.
+	stored, err := ps.GetPlayerByUsername(t.Context(), "alice")
+	if err != nil {
+		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+	}
+	if got, want := stored.ID, anon.ID; got != want {
+		t.Errorf("stored.ID = %d, want %d (first claim should win)", got, want)
+	}
+}
+
+func TestPlayerStore_ClaimPlayer_UnknownPlayerID_ReturnsNotFound(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	_, err := ps.ClaimPlayer(t.Context(), 9999, "ghost", "hash", auth.RolePlayer)
+	if got, want := err, auth.ErrPlayerNotFound; !errors.Is(got, want) {
+		t.Errorf("err = %v, want %v", got, want)
+	}
+}
+
+func TestPlayerStore_ClaimPlayer_UsernameTaken(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	if _, err := ps.CreatePlayer(t.Context(), "alice", "h", auth.RolePlayer); err != nil {
+		t.Fatalf("seed CreatePlayer err = %v, want nil", err)
+	}
+	anon, err := ps.CreateAnonymousPlayer(t.Context(), "anon-rival")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	_, err = ps.ClaimPlayer(t.Context(), anon.ID, "alice", "h", auth.RolePlayer)
+	if got, want := err, auth.ErrUsernameTaken; !errors.Is(got, want) {
+		t.Errorf("err = %v, want %v", got, want)
+	}
+}

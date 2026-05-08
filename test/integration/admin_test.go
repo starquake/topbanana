@@ -37,30 +37,30 @@ var csrfTokenPattern = regexp.MustCompile(
 // extracts the first csrf_token form value from the response body, and
 // returns it. The client's cookie jar picks up the nonce cookie as a side
 // effect, so subsequent POSTs from the same client carry the matching pair.
-func fetchCSRFToken(ctx context.Context, t *testing.T, client *http.Client, url string) string {
+func fetchCSRFToken(ctx context.Context, t *testing.T, client *http.Client, formURL string) string {
 	t.Helper()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, formURL, nil)
 	if err != nil {
 		t.Fatalf("failed to create CSRF GET request: %v", err)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		t.Fatalf("failed to GET %s: %v", url, err)
+		t.Fatalf("failed to GET %s: %v", formURL, err)
 	}
 	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			t.Errorf("failed to close response body: %v", err)
+		if cerr := resp.Body.Close(); cerr != nil {
+			t.Errorf("failed to close response body: %v", cerr)
 		}
 	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatalf("failed to read body of %s: %v", url, err)
+		t.Fatalf("failed to read body of %s: %v", formURL, err)
 	}
 	m := csrfTokenPattern.FindStringSubmatch(string(body))
 	if m == nil {
-		t.Fatalf("no csrf_token found in response from %s; body=%q", url, body)
+		t.Fatalf("no csrf_token found in response from %s; body=%q", formURL, body)
 	}
 
 	return m[1]
@@ -151,8 +151,8 @@ func TestAdmin_Integration(t *testing.T) {
 	if got, want := registerResp.StatusCode, http.StatusSeeOther; got != want {
 		t.Fatalf("register status = %d, want %d", got, want)
 	}
-	if err := registerResp.Body.Close(); err != nil {
-		t.Errorf("failed to close register body: %v", err)
+	if cerr := registerResp.Body.Close(); cerr != nil {
+		t.Errorf("failed to close register body: %v", cerr)
 	}
 
 	// Visit the quiz-create form GET so we can pull a fresh CSRF token tied
@@ -307,8 +307,8 @@ func TestAdmin_Integration(t *testing.T) {
 	}()
 	if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
 		t.Errorf("expected status %d, got %d", want, got)
-		body, _ := io.ReadAll(resp.Body)
-		t.Logf("Response body: %s", string(body))
+		errBody, _ := io.ReadAll(resp.Body)
+		t.Logf("Response body: %s", string(errBody))
 	}
 
 	questionLocation := resp.Header.Get("Location")
