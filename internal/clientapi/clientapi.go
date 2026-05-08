@@ -198,6 +198,7 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 	type questionResponse struct {
 		ID        int64            `json:"id"`
 		Text      string           `json:"text"`
+		ImageURL  string           `json:"imageUrl"`
 		Options   []optionResponse `json:"options"`
 		StartedAt time.Time        `json:"startedAt"`
 		ExpiredAt time.Time        `json:"expiredAt"`
@@ -248,6 +249,7 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 		res := questionResponse{
 			ID:        gq.QuizQuestion.ID,
 			Text:      gq.QuizQuestion.Text,
+			ImageURL:  gq.QuizQuestion.ImageURL,
 			Options:   resOptions,
 			StartedAt: gq.StartedAt,
 			ExpiredAt: gq.ExpiredAt,

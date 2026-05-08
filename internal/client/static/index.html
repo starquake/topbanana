@@ -14,11 +14,11 @@
             <h1 class="title">Top Banana!</h1>
 
             <div x-show="!gameId">
-                <h2 class="subtitle">Select a Quiz</h2>
                 <div class="field">
+                    <label class="label" for="quiz-select">Select a Quiz</label>
                     <div class="control">
                         <div class="select">
-                            <select x-model="selectedQuizId">
+                            <select id="quiz-select" x-model="selectedQuizId">
                                 <template x-for="quiz in quizzes" :key="quiz.id">
                                     <option :value="quiz.id" x-text="quiz.title"></option>
                                 </template>
@@ -34,6 +34,14 @@
                     <div>
                         <progress class="progress is-primary" :value="progress" max="100"></progress>
                         <h2 class="subtitle" x-text="question.text"></h2>
+
+                        <template x-if="question.imageUrl">
+                            <figure class="image">
+                                <img alt="" :src="question.imageUrl" :alt="question.text"
+                                     x-show="!imageError"
+                                     @error="imageError = true">
+                            </figure>
+                        </template>
 
                         <template x-if="feedback">
                             <div class="notification" :class="feedback.correct ? 'is-success' : 'is-danger'">

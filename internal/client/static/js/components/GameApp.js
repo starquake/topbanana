@@ -12,6 +12,11 @@ export class GameApp {
         this.feedback = null;
         this.progress = 100;
         this.timer = null;
+        // Reset per-question; the <img> element is reused across questions
+        // (Alpine doesn't recreate it when x-if stays truthy), so a stale
+        // display:none from a prior broken image would otherwise hide the
+        // next image too.
+        this.imageError = false;
     }
 
     async init() {
@@ -38,6 +43,7 @@ export class GameApp {
             this.results = await gameService.getResults(this.gameId);
             return;
         }
+        this.imageError = false;
         this.question = question;
         this.startCountdown();
     }
@@ -89,5 +95,6 @@ export class GameApp {
         this.results = null;
         this.feedback = null;
         this.progress = 100;
+        this.imageError = false;
     }
 }

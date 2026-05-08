@@ -518,6 +518,46 @@ func TestHandleQuestionNext(t *testing.T) {
 			t.Errorf("status code = %v, want %v", got, want)
 		}
 	})
+
+	t.Run("returns the question with imageUrl when set", func(t *testing.T) {
+		t.Parallel()
+
+		const imageURL = "https://example.com/picture.png"
+		svc := newService(
+			stubGameStore{
+				getGame: func(_ context.Context, id string) (*game.Game, error) {
+					return &game.Game{ID: id, QuizID: 1}, nil
+				},
+				createQuestion: func(_ context.Context, _ *game.Question) error { return nil },
+			},
+			stubQuizStore{
+				getQuiz: func(_ context.Context, qid int64) (*quiz.Quiz, error) {
+					return &quiz.Quiz{
+						ID: qid,
+						Questions: []*quiz.Question{
+							{ID: 42, Text: "Q1", ImageURL: imageURL, Options: []*quiz.Option{{ID: 1, Text: "A"}}},
+						},
+					}, nil
+				},
+			},
+		)
+
+		mux := http.NewServeMux()
+		mux.Handle("GET /api/games/{gameID}/questions/next", HandleQuestionNext(logger, svc))
+
+		req := httptest.NewRequestWithContext(
+			context.Background(), http.MethodGet, "/api/games/game-1/questions/next", nil,
+		)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusOK; got != want {
+			t.Fatalf("status code = %v, want %v", got, want)
+		}
+		if got, want := rec.Body.String(), `"imageUrl":"`+imageURL+`"`; !strings.Contains(got, want) {
+			t.Errorf("body should contain %q, got %q", want, got)
+		}
+	})
 }
 
 func TestHandleAnswerPost(t *testing.T) {
