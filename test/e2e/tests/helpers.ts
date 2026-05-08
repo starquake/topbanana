@@ -79,7 +79,13 @@ export async function createQuizWithQuestions(
     for (let i = 0; i < q.options.length; i++) {
       await page.locator(`input[name="option[${i}].text"]`).fill(q.options[i]);
       if (q.correctIndices.includes(i)) {
-        await page.locator(`input[name="option[${i}].correct"]`).check();
+        // scrollIntoViewIfNeeded gives Firefox a frame to settle before the
+        // click — without it CI occasionally surfaces "Clicking the checkbox
+        // did not change its state" when the form's still styling under
+        // CDN-loaded Bulma CSS.
+        const checkbox = page.locator(`input[name="option[${i}].correct"]`);
+        await checkbox.scrollIntoViewIfNeeded();
+        await checkbox.check();
       }
     }
     await page.getByRole('button', { name: 'Save' }).click();
