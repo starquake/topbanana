@@ -21,5 +21,7 @@
     <orderEntry type="library" name="bulma" level="application" />
     <orderEntry type="library" name="fontawesome-free" level="application" />
     <orderEntry type="library" name="alpinejs" level="application" />
+    <orderEntry type="library" name="bulma" level="application" />
+    <orderEntry type="library" name="alpinejs" level="application" />
   </component>
 </module>

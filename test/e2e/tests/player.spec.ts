@@ -37,10 +37,23 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   // Walk every question. We always click the first option; whether that picks
   // a correct answer is determined by the spec (correctIndices includes 0).
   let expectedSuccesses = 0;
+  const figureImg = page.locator('figure.image img');
   for (const q of QUIZ_QUESTIONS) {
     const choice = q.options[0];
     const wasCorrect = q.correctIndices.includes(0);
-    await page.getByRole('button', { name: choice }).click();
+
+    // Wait for the new question to be live before asserting on its image so
+    // we don't read state from the previous question's render.
+    const optionButton = page.getByRole('button', { name: choice });
+    await expect(optionButton).toBeVisible();
+
+    if (q.expectImageVisible === true) {
+      await expect(figureImg).toBeVisible();
+    } else if (q.expectImageVisible === false) {
+      await expect(figureImg).toBeHidden();
+    }
+
+    await optionButton.click();
 
     if (wasCorrect) {
       await expect(page.locator('.notification.is-success')).toBeVisible();
