@@ -4,3 +4,19 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+
+  # Action versions pinned in .github/workflows/*.yml. Without this entry the
+  # pins drift silently — actions/checkout, actions/setup-go, etc. age out
+  # without a bump until something breaks.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Playwright + @types/node under test/e2e/. Keeps the browser deps moving
+  # forward in step with upstream releases (relevant for security advisories
+  # like the Playwright TLS-verification one we hit during #115).
+  - package-ecosystem: "npm"
+    directory: "/test/e2e"
+    schedule:
+      interval: "weekly"
