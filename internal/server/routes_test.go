@@ -34,6 +34,14 @@ func (stubPlayerStore) CreatePlayer(_ context.Context, _, _, _ string) (*auth.Pl
 	return nil, errRouteStub
 }
 
+func (stubPlayerStore) CreateAnonymousPlayer(_ context.Context, _ string) (*auth.Player, error) {
+	return nil, errRouteStub
+}
+
+func (stubPlayerStore) ClaimPlayer(_ context.Context, _ int64, _, _, _ string) (*auth.Player, error) {
+	return nil, errRouteStub
+}
+
 var errRouteStub = errors.New("stub")
 
 type stubQuizStore struct{}

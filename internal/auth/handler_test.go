@@ -74,22 +74,7 @@ func (s *stubPlayerStore) CreatePlayer(
 		return nil, auth.ErrUsernameTaken
 	}
 
-	role := requestedRole
-	if role != auth.RoleAdmin {
-		hasPasswordBearer := false
-		for _, existing := range s.byID {
-			if existing.PasswordHash != "" {
-				hasPasswordBearer = true
-
-				break
-			}
-		}
-		if !hasPasswordBearer {
-			role = auth.RoleAdmin
-		} else {
-			role = auth.RolePlayer
-		}
-	}
+	role := s.resolveRoleLocked(requestedRole)
 
 	p := &auth.Player{
 		ID:           s.nextID,
@@ -102,6 +87,74 @@ func (s *stubPlayerStore) CreatePlayer(
 	s.byName[username] = p
 
 	return p, nil
+}
+
+// CreateAnonymousPlayer mirrors store.CreateAnonymousPlayer: insert a row
+// with the given username, no password_hash, role = "player".
+func (s *stubPlayerStore) CreateAnonymousPlayer(_ context.Context, username string) (*auth.Player, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.byName[username]; exists {
+		return nil, auth.ErrUsernameTaken
+	}
+
+	p := &auth.Player{
+		ID:       s.nextID,
+		Username: username,
+		Role:     auth.RolePlayer,
+	}
+	s.nextID++
+	s.byID[p.ID] = p
+	s.byName[username] = p
+
+	return p, nil
+}
+
+// ClaimPlayer mirrors store.ClaimPlayer: upgrades an anonymous row in place
+// or fails with auth.ErrPlayerAlreadyClaimed / ErrPlayerNotFound /
+// ErrUsernameTaken.
+func (s *stubPlayerStore) ClaimPlayer(
+	_ context.Context,
+	playerID int64,
+	username, passwordHash, requestedRole string,
+) (*auth.Player, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	existing, ok := s.byID[playerID]
+	if !ok {
+		return nil, auth.ErrPlayerNotFound
+	}
+	if existing.PasswordHash != "" {
+		return nil, auth.ErrPlayerAlreadyClaimed
+	}
+	if other, exists := s.byName[username]; exists && other.ID != playerID {
+		return nil, auth.ErrUsernameTaken
+	}
+
+	delete(s.byName, existing.Username)
+	existing.Username = username
+	existing.PasswordHash = passwordHash
+	existing.Role = s.resolveRoleLocked(requestedRole)
+	s.byName[username] = existing
+
+	return existing, nil
+}
+
+// resolveRoleLocked applies the same "first password-bearing registrant
+// becomes admin" rule as the production SQL. Caller must hold s.mu.
+func (s *stubPlayerStore) resolveRoleLocked(requestedRole string) string {
+	if requestedRole == auth.RoleAdmin {
+		return auth.RoleAdmin
+	}
+	for _, existing := range s.byID {
+		if existing.PasswordHash != "" {
+			return auth.RolePlayer
+		}
+	}
+
+	return auth.RoleAdmin
 }
 
 func discardLogger() *slog.Logger {
@@ -278,6 +331,168 @@ func TestHandleRegisterSubmit_DuplicateUsername(t *testing.T) {
 	}
 	if got, want := rec.Body.String(), "already taken"; !strings.Contains(got, want) {
 		t.Errorf("body did not mention duplicate, got %q", got)
+	}
+}
+
+// TestHandleRegisterSubmit_ClaimsAnonymousSession verifies that registering
+// while already holding an anonymous session upgrades the existing row in
+// place rather than inserting a new one. This is the score-claiming flow:
+// the visitor's player_id stays stable so any games they played before
+// signing up still belong to them.
+func TestHandleRegisterSubmit_ClaimsAnonymousSession(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	anon, err := store.CreateAnonymousPlayer(t.Context(), "anon-existing")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	sessions := session.New([]byte("k"))
+	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, sessions, nil)
+
+	// Build a request that already carries the anonymous session cookie.
+	rec := httptest.NewRecorder()
+	sessions.Set(rec, anon.ID)
+	cookie := rec.Result().Cookies()[0]
+
+	form := url.Values{
+		"username": {"alice"},
+		"password": {"correctbattery"},
+	}
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, "/register", strings.NewReader(form.Encode()),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
+	}
+
+	// The same row was upgraded — no new row should appear, and the
+	// anonymous username should be gone.
+	upgraded, err := store.GetPlayerByUsername(t.Context(), "alice")
+	if err != nil {
+		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+	}
+	if got, want := upgraded.ID, anon.ID; got != want {
+		t.Errorf("upgraded.ID = %d, want %d (player ID should be preserved)", got, want)
+	}
+	if upgraded.PasswordHash == "" {
+		t.Error("upgraded.PasswordHash is empty, want bcrypt hash from claim")
+	}
+	if _, err := store.GetPlayerByUsername(t.Context(), "anon-existing"); !errors.Is(err, auth.ErrPlayerNotFound) {
+		t.Errorf("anonymous row still resolvable by old username; err = %v, want ErrPlayerNotFound", err)
+	}
+}
+
+// TestHandleRegisterSubmit_ClaimWithTakenUsername returns 409 and leaves
+// the anonymous row untouched so the visitor can retry with a different
+// username. First-sign-in-wins semantics: the row that already owns the
+// requested username keeps it.
+func TestHandleRegisterSubmit_ClaimWithTakenUsername(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	if _, err := store.CreatePlayer(t.Context(), "alice", "previousHash", auth.RolePlayer); err != nil {
+		t.Fatalf("seed CreatePlayer err = %v, want nil", err)
+	}
+	anon, err := store.CreateAnonymousPlayer(t.Context(), "anon-claimer")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	sessions := session.New([]byte("k"))
+	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, sessions, nil)
+
+	rec := httptest.NewRecorder()
+	sessions.Set(rec, anon.ID)
+	cookie := rec.Result().Cookies()[0]
+
+	form := url.Values{
+		"username": {"alice"}, // already taken by the seeded credentialled row
+		"password": {"correctbattery"},
+	}
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, "/register", strings.NewReader(form.Encode()),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusConflict; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	// Anonymous row was not mutated.
+	stillAnon, err := store.GetPlayerByID(t.Context(), anon.ID)
+	if err != nil {
+		t.Fatalf("GetPlayerByID err = %v, want nil", err)
+	}
+	if got, want := stillAnon.Username, "anon-claimer"; got != want {
+		t.Errorf("anonymous row Username = %q, want %q (should be unchanged)", got, want)
+	}
+	if !stillAnon.IsAnonymous() {
+		t.Error("anonymous row IsAnonymous() = false, want true (should still be unclaimed)")
+	}
+}
+
+// TestHandleRegisterSubmit_ClaimAlreadyClaimed_FallsBackToCreate covers the
+// concurrent-registration race: by the time the handler reaches ClaimPlayer
+// the anonymous row has already been claimed (e.g. another tab raced ahead).
+// The handler should fall through to CreatePlayer so the registration still
+// succeeds, just with a fresh row.
+func TestHandleRegisterSubmit_ClaimAlreadyClaimed_FallsBackToCreate(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	anon, err := store.CreateAnonymousPlayer(t.Context(), "anon-racer")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	// Simulate another tab claiming the row first.
+	if _, claimErr := store.ClaimPlayer(
+		t.Context(),
+		anon.ID,
+		"winner",
+		"winnerHash",
+		auth.RolePlayer,
+	); claimErr != nil {
+		t.Fatalf("ClaimPlayer err = %v, want nil", claimErr)
+	}
+
+	sessions := session.New([]byte("k"))
+	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, sessions, nil)
+
+	rec := httptest.NewRecorder()
+	sessions.Set(rec, anon.ID) // cookie still points at the now-claimed row
+	cookie := rec.Result().Cookies()[0]
+
+	form := url.Values{
+		"username": {"latecomer"},
+		"password": {"correctbattery"},
+	}
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, "/register", strings.NewReader(form.Encode()),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
+	}
+	// A fresh row was created instead of clobbering the already-claimed one.
+	latecomer, err := store.GetPlayerByUsername(t.Context(), "latecomer")
+	if err != nil {
+		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+	}
+	if got, dontWant := latecomer.ID, anon.ID; got == dontWant {
+		t.Errorf("latecomer reused the racer's anonymous ID %d, want a fresh row", got)
 	}
 }
 

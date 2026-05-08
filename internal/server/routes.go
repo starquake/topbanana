@@ -28,7 +28,7 @@ func addRoutes(
 
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg)
 	addAdminRoutes(mux, logger, stores, sessions, csrfMgr)
-	addAPIRoutes(mux, logger, stores, gameService)
+	addAPIRoutes(mux, logger, stores, gameService, sessions)
 
 	// Client
 	mux.Handle("/client/", client.Handler(cfg))
@@ -130,19 +130,34 @@ func addAdminRoutes(
 // These do not need CSRF protection: they expect application/json bodies and
 // do not rely on cookie auth, so the classic browser-form CSRF threat does
 // not apply.
+//
+// Every route is wrapped in EnsurePlayer so a cookieless visitor is silently
+// upgraded to an anonymous players row before the handler runs. This means
+// HandleCreateGame and HandleAnswerPost can safely read the player off the
+// request context. The static /client/* assets are intentionally not wrapped
+// — loading the SPA shell should not create a row; the first /api/ call
+// does.
 func addAPIRoutes(
 	mux *http.ServeMux,
 	logger *slog.Logger,
 	stores *store.Stores,
 	gameService *game.Service,
+	sessions *session.Manager,
 ) {
-	mux.Handle("GET /api/quizzes", clientapi.HandleQuizList(logger, stores.Quizzes))
-	mux.Handle("GET /api/quizzes/{slugID}", clientapi.HandleQuizGet(logger, stores.Quizzes))
-	mux.Handle("POST /api/games", clientapi.HandleCreateGame(logger, gameService))
-	mux.Handle("GET /api/games/{gameID}/questions/next", clientapi.HandleQuestionNext(logger, gameService))
+	ensurePlayer := func(h http.Handler) http.Handler {
+		return auth.EnsurePlayer(h, stores.Players, sessions, logger)
+	}
+
+	mux.Handle("GET /api/quizzes", ensurePlayer(clientapi.HandleQuizList(logger, stores.Quizzes)))
+	mux.Handle("GET /api/quizzes/{slugID}", ensurePlayer(clientapi.HandleQuizGet(logger, stores.Quizzes)))
+	mux.Handle("POST /api/games", ensurePlayer(clientapi.HandleCreateGame(logger, gameService)))
+	mux.Handle(
+		"GET /api/games/{gameID}/questions/next",
+		ensurePlayer(clientapi.HandleQuestionNext(logger, gameService)),
+	)
 	mux.Handle(
 		"POST /api/games/{gameID}/questions/{questionID}/answers",
-		clientapi.HandleAnswerPost(logger, gameService),
+		ensurePlayer(clientapi.HandleAnswerPost(logger, gameService)),
 	)
-	mux.Handle("GET /api/games/{gameID}/results", clientapi.HandleGameResults(logger, gameService))
+	mux.Handle("GET /api/games/{gameID}/results", ensurePlayer(clientapi.HandleGameResults(logger, gameService)))
 }

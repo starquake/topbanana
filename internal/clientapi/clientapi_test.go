@@ -11,10 +11,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/starquake/topbanana/internal/auth"
 	. "github.com/starquake/topbanana/internal/clientapi"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/quiz"
 )
+
+// withPlayer returns ctx annotated with a stub authenticated player. Use it
+// when the test exercises a handler that pulls the player off the context
+// (typically because EnsurePlayer would do so in production).
+func withPlayer(ctx context.Context, id int64) context.Context {
+	return auth.WithPlayer(ctx, &auth.Player{ID: id, Username: "stub", Role: auth.RolePlayer})
+}
 
 var errStub = errors.New("stub error")
 
@@ -342,7 +350,7 @@ func TestHandleCreateGame(t *testing.T) {
 		handler := HandleCreateGame(logger, svc)
 
 		req := httptest.NewRequestWithContext(
-			context.Background(), http.MethodPost, "/api/games",
+			withPlayer(t.Context(), 7), http.MethodPost, "/api/games",
 			strings.NewReader(`{"quizId": 1}`),
 		)
 		rec := httptest.NewRecorder()
@@ -371,7 +379,69 @@ func TestHandleCreateGame(t *testing.T) {
 		handler := HandleCreateGame(logger, svc)
 
 		req := httptest.NewRequestWithContext(
-			context.Background(), http.MethodPost, "/api/games",
+			withPlayer(t.Context(), 7), http.MethodPost, "/api/games",
+			strings.NewReader(`{"quizId": 1}`),
+		)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusInternalServerError; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("uses player ID from context", func(t *testing.T) {
+		t.Parallel()
+
+		const wantPlayerID = int64(42)
+		var seenPlayerID int64
+		svc := newService(
+			stubGameStore{
+				createGame: func(_ context.Context, _ *game.Game) error { return nil },
+				createParticipant: func(_ context.Context, p *game.Participant) error {
+					seenPlayerID = p.PlayerID
+
+					return nil
+				},
+				startGame: func(_ context.Context, _ string) error { return nil },
+			},
+			stubQuizStore{
+				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+					return &quiz.Quiz{ID: id, Title: "Q"}, nil
+				},
+			},
+		)
+		handler := HandleCreateGame(logger, svc)
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), wantPlayerID), http.MethodPost, "/api/games",
+			strings.NewReader(`{"quizId": 1}`),
+		)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusCreated; got != want {
+			t.Fatalf("status code = %v, want %v (body=%q)", got, want, rec.Body.String())
+		}
+		if got, want := seenPlayerID, wantPlayerID; got != want {
+			t.Errorf("CreateParticipant PlayerID = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("returns 500 when player missing on context", func(t *testing.T) {
+		t.Parallel()
+
+		svc := newService(stubGameStore{}, stubQuizStore{
+			getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Title: "Q"}, nil
+			},
+		})
+		handler := HandleCreateGame(logger, svc)
+
+		// No player on the context — handler should refuse rather than
+		// silently fall back to a hardcoded ID.
+		req := httptest.NewRequestWithContext(
+			t.Context(), http.MethodPost, "/api/games",
 			strings.NewReader(`{"quizId": 1}`),
 		)
 		rec := httptest.NewRecorder()
@@ -639,7 +709,7 @@ func TestHandleAnswerPost(t *testing.T) {
 		)
 
 		req := httptest.NewRequestWithContext(
-			context.Background(), http.MethodPost,
+			withPlayer(t.Context(), 7), http.MethodPost,
 			"/api/games/missing/questions/1/answers",
 			strings.NewReader(`{"optionId": 1}`),
 		)
@@ -667,7 +737,7 @@ func TestHandleAnswerPost(t *testing.T) {
 		)
 
 		req := httptest.NewRequestWithContext(
-			context.Background(), http.MethodPost,
+			withPlayer(t.Context(), 7), http.MethodPost,
 			"/api/games/game-1/questions/99/answers",
 			strings.NewReader(`{"optionId": 1}`),
 		)
@@ -714,7 +784,7 @@ func TestHandleAnswerPost(t *testing.T) {
 		)
 
 		req := httptest.NewRequestWithContext(
-			context.Background(), http.MethodPost,
+			withPlayer(t.Context(), 7), http.MethodPost,
 			"/api/games/game-1/questions/10/answers",
 			strings.NewReader(`{"optionId": 200}`),
 		)
@@ -722,6 +792,43 @@ func TestHandleAnswerPost(t *testing.T) {
 		mux.ServeHTTP(rec, req)
 
 		if got, want := rec.Code, http.StatusBadRequest; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns 500 when player missing on context", func(t *testing.T) {
+		t.Parallel()
+
+		svc := newService(
+			stubGameStore{
+				getGame: func(_ context.Context, id string) (*game.Game, error) {
+					return &game.Game{
+						ID:     id,
+						QuizID: 1,
+						Questions: []*game.Question{
+							{ID: 1, GameID: id, QuestionID: 10},
+						},
+					}, nil
+				},
+			},
+			stubQuizStore{},
+		)
+
+		mux := http.NewServeMux()
+		mux.Handle(
+			"POST /api/games/{gameID}/questions/{questionID}/answers",
+			HandleAnswerPost(logger, svc),
+		)
+
+		req := httptest.NewRequestWithContext(
+			t.Context(), http.MethodPost,
+			"/api/games/game-1/questions/10/answers",
+			strings.NewReader(`{"optionId": 200}`),
+		)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusInternalServerError; got != want {
 			t.Errorf("status code = %v, want %v", got, want)
 		}
 	})
