@@ -30,17 +30,27 @@ import (
 //nolint:gochecknoglobals // mutex protects an unavoidable package-level resource (goose globals).
 var migrateMu sync.Mutex
 
-// SetupGoose installs goose's dialect and BaseFS in its package-level state.
-// Call exactly once at process start (typically from main or TestMain);
-// concurrent calls would race because goose stores both as plain package
-// vars. Once installed, [Migrate] serialises the actual goose.Up calls so
-// multiple connections can migrate sequentially against goose's registry.
-func SetupGoose() {
-	goose.SetBaseFS(migrations.FS)
+// setupGooseOnce guarantees goose's package-level state (BaseFS + Dialect)
+// is installed exactly once per process even if SetupGoose is called from
+// multiple test setup helpers. Without this, a process that has both a
+// TestMain and a per-test setup that both call SetupGoose can race goose's
+// own globals against an in-flight Migrate call.
+//
+//nolint:gochecknoglobals // pairs with SetupGoose to guard the same goose globals.
+var setupGooseOnce sync.Once
 
-	if err := goose.SetDialect("sqlite3"); err != nil {
-		panic(err)
-	}
+// SetupGoose installs goose's dialect and BaseFS in its package-level state.
+// Idempotent: subsequent calls are no-ops, so it is safe to call from both a
+// TestMain and per-test setup helpers without racing goose's globals against
+// concurrent [Migrate] calls.
+func SetupGoose() {
+	setupGooseOnce.Do(func() {
+		goose.SetBaseFS(migrations.FS)
+
+		if err := goose.SetDialect("sqlite3"); err != nil {
+			panic(err)
+		}
+	})
 }
 
 // Open opens a database connection.

@@ -19,7 +19,6 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/starquake/topbanana/cmd/server/app"
-	"github.com/starquake/topbanana/internal/database"
 	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
@@ -100,8 +99,6 @@ func setupIntegration(t *testing.T) (context.Context, integrationSetup) {
 	t.Helper()
 
 	var err error
-
-	database.SetupGoose()
 
 	ctx, stop := testutil.SignalCtx(t)
 
