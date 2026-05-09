@@ -1,7 +1,7 @@
 -- name: ListQuizzes :many
 SELECT *
 FROM quizzes
-ORDER BY id;
+ORDER BY updated_at DESC, id DESC;
 
 -- name: GetQuiz :one
 SELECT *
@@ -10,15 +10,16 @@ WHERE id = ?
 LIMIT 1;
 
 -- name: CreateQuiz :one
-INSERT INTO quizzes (title, slug, description)
-VALUES (?, ?, ?)
+INSERT INTO quizzes (title, slug, description, updated_at)
+VALUES (?, ?, ?, CURRENT_TIMESTAMP)
 RETURNING *;
 
 -- name: UpdateQuiz :execresult
 UPDATE quizzes
 SET title       = ?,
     slug        = ?,
-    description = ?
+    description = ?,
+    updated_at  = CURRENT_TIMESTAMP
 WHERE id = ?;
 
 -- name: DeleteQuiz :execresult

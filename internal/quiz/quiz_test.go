@@ -48,6 +48,63 @@ func TestQuiz_Valid(t *testing.T) {
 					},
 				},
 			},
+			{
+				// Multi-correct, no-correct, and all-correct are all
+				// allowed configurations — the admin UI offers a checkbox
+				// per option and the player flow handles each.
+				name: "valid quiz with multiple correct options on a question",
+				quiz: Quiz{
+					Title:       "Quiz multi-correct",
+					Slug:        "quiz-multi-correct",
+					Description: "Quiz description",
+					Questions: []*Question{
+						{
+							Text: "Pick all primes",
+							Options: []*Option{
+								{Text: "2", Correct: true},
+								{Text: "3", Correct: true},
+								{Text: "4"},
+								{Text: "5", Correct: true},
+							},
+						},
+					},
+				},
+			},
+			{
+				name: "valid quiz with all options correct",
+				quiz: Quiz{
+					Title:       "Quiz all-correct",
+					Slug:        "quiz-all-correct",
+					Description: "Quiz description",
+					Questions: []*Question{
+						{
+							Text: "Pick a colour",
+							Options: []*Option{
+								{Text: "red", Correct: true},
+								{Text: "blue", Correct: true},
+								{Text: "green", Correct: true},
+							},
+						},
+					},
+				},
+			},
+			{
+				name: "valid quiz with no correct options on a question",
+				quiz: Quiz{
+					Title:       "Quiz no-correct",
+					Slug:        "quiz-no-correct",
+					Description: "Quiz description",
+					Questions: []*Question{
+						{
+							Text: "Trick question",
+							Options: []*Option{
+								{Text: "wrong"},
+								{Text: "also wrong"},
+							},
+						},
+					},
+				},
+			},
 		}
 
 		for _, tc := range tests {
@@ -132,22 +189,6 @@ func TestQuiz_Valid(t *testing.T) {
 					Description: "Quiz 6 Description",
 					Questions: []*Question{
 						{Text: "Question 1", Options: []*Option{{Text: ""}}},
-					},
-				},
-			},
-			{
-				name: "quiz with question with multiple correct options",
-				quiz: Quiz{
-					Title:       "Quiz 6",
-					Slug:        "quiz-6",
-					Description: "Quiz 6 Description",
-					Questions: []*Question{
-						{
-							Text: "Question 1", Options: []*Option{
-								{Text: "CorrectOption 1-1", Correct: true},
-								{Text: "CorrectOption 1-2", Correct: true},
-							},
-						},
 					},
 				},
 			},

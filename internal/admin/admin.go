@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/gosimple/slug"
 
@@ -95,6 +96,7 @@ type QuizData struct {
 	Title       string
 	Slug        string
 	Description string
+	UpdatedAt   time.Time
 	Questions   []*QuestionData
 }
 
@@ -128,6 +130,7 @@ func quizDataFromQuiz(qz *quiz.Quiz) *QuizData {
 		Title:       qz.Title,
 		Slug:        qz.Slug,
 		Description: qz.Description,
+		UpdatedAt:   qz.UpdatedAt,
 		Questions:   questionDataFromQuestions(qz.Questions),
 	}
 }
@@ -196,16 +199,55 @@ func optionDataFromOptions(options []*quiz.Option) []*OptionData {
 // resolve at parse time. TemplateRenderer.Render clones the parsed tree and
 // replaces these placeholders with implementations that read the request
 // context and CSRF manager, respectively.
+//
+// "humanizeTime" is a pure function of its argument, so it's registered with
+// its real implementation here — no per-request override needed.
 func parseTemplate(path string) *template.Template {
 	funcs := template.FuncMap{
-		"currentUser": func() string { return "" },
-		"csrfToken":   func() string { return "" },
+		"currentUser":  func() string { return "" },
+		"csrfToken":    func() string { return "" },
+		"humanizeTime": humanizeTime,
 	}
 	layouts := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "admin/layouts/*.gohtml"),
 	)
 
 	return template.Must(template.Must(layouts.Clone()).ParseFS(tmpl.FS, path))
+}
+
+// hoursPerDay is the bucket size for switching humanizeTime from hours to days.
+const hoursPerDay = 24
+
+// humanizeTime returns a coarse relative-time string for t (e.g. "3 hr ago").
+// It rounds down to the largest matching bucket and uses absolute zero-handling
+// for "just now" so a freshly written record renders sensibly.
+func humanizeTime(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		m := int(d.Minutes())
+		if m == 1 {
+			return "1 min ago"
+		}
+
+		return fmt.Sprintf("%d min ago", m)
+	case d < hoursPerDay*time.Hour:
+		h := int(d.Hours())
+		if h == 1 {
+			return "1 hr ago"
+		}
+
+		return fmt.Sprintf("%d hr ago", h)
+	default:
+		days := int(d.Hours() / hoursPerDay)
+		if days == 1 {
+			return "1 day ago"
+		}
+
+		return fmt.Sprintf("%d days ago", days)
+	}
 }
 
 // render400 renders the 400 error page with the given message.

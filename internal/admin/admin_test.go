@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -166,11 +167,24 @@ func TestHandleQuizList(t *testing.T) {
 	t.Run("list quizzes", func(t *testing.T) {
 		t.Parallel()
 
+		now := time.Now()
 		store := stubQuizStore{
 			listQuizzes: func(_ context.Context) ([]*quiz.Quiz, error) {
 				return []*quiz.Quiz{
-					{ID: 1, Title: "Quiz One", Slug: "quiz-one", Description: "First"},
-					{ID: 2, Title: "Quiz Two", Slug: "quiz-two", Description: "Second"},
+					{
+						ID:          1,
+						Title:       "Quiz One",
+						Slug:        "quiz-one",
+						Description: "First",
+						UpdatedAt:   now.Add(-2 * time.Hour),
+					},
+					{
+						ID:          2,
+						Title:       "Quiz Two",
+						Slug:        "quiz-two",
+						Description: "Second",
+						UpdatedAt:   now.Add(-30 * time.Second),
+					},
 				}, nil
 			},
 		}
@@ -198,6 +212,16 @@ func TestHandleQuizList(t *testing.T) {
 		}
 		if got, want := body, "Quiz Two"; !strings.Contains(got, want) {
 			t.Fatalf("got: %q, should contain: %q", got, want)
+		}
+		if got, want := body, "Last edited"; !strings.Contains(got, want) {
+			t.Fatalf("body should contain column header %q, got: %q", want, got)
+		}
+		// Quiz One: 2 hr ago. Quiz Two: just now.
+		if got, want := body, "2 hr ago"; !strings.Contains(got, want) {
+			t.Errorf("body should contain relative time %q, got: %q", want, got)
+		}
+		if got, want := body, "just now"; !strings.Contains(got, want) {
+			t.Errorf("body should contain relative time %q, got: %q", want, got)
 		}
 	})
 
@@ -2588,4 +2612,35 @@ func TestHandleQuestionDelete_ErrorHandling(t *testing.T) {
 			t.Fatalf("got: %q, should contain: %q", got, want)
 		}
 	})
+}
+
+func TestHumanizeTime(t *testing.T) {
+	t.Parallel()
+
+	// Pad each delta a few seconds inside its bucket so test scheduling
+	// jitter can't push us across a boundary.
+	now := time.Now()
+	tests := []struct {
+		name string
+		t    time.Time
+		want string
+	}{
+		{"just now (5s ago)", now.Add(-5 * time.Second), "just now"},
+		{"1 minute ago", now.Add(-1*time.Minute - 5*time.Second), "1 min ago"},
+		{"5 minutes ago", now.Add(-5*time.Minute - 5*time.Second), "5 min ago"},
+		{"1 hour ago", now.Add(-1*time.Hour - 5*time.Second), "1 hr ago"},
+		{"3 hours ago", now.Add(-3*time.Hour - 5*time.Second), "3 hr ago"},
+		{"1 day ago", now.Add(-24*time.Hour - 5*time.Second), "1 day ago"},
+		{"5 days ago", now.Add(-5*24*time.Hour - 5*time.Second), "5 days ago"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got, want := HumanizeTime(tc.t), tc.want; got != want {
+				t.Errorf("HumanizeTime() = %q, want %q", got, want)
+			}
+		})
+	}
 }

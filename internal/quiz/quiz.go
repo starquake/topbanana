@@ -73,6 +73,7 @@ type Quiz struct {
 	Slug        string
 	Description string
 	CreatedAt   time.Time
+	UpdatedAt   time.Time
 	Questions   []*Question
 }
 
@@ -101,17 +102,13 @@ func (q *Quiz) Valid(ctx context.Context) map[string]string {
 }
 
 func validQuestionOptions(ctx context.Context, question *Question, problems map[string]string, qsIndex int) {
-	var correctCount int
+	// Multi-correct, no-correct, and all-correct configurations are all
+	// supported by the data model and the admin UI; this validator only
+	// checks per-option text and other field-level constraints.
 	for oIndex, option := range question.Options {
 		if oProblems := option.Valid(ctx); len(oProblems) > 0 {
 			for oProblemKey, v := range oProblems {
 				problems[fmt.Sprintf("Questions[%d].Options[%d][%s]", qsIndex, oIndex, oProblemKey)] = v
-			}
-		}
-		if option.Correct {
-			correctCount++
-			if correctCount > 1 {
-				problems[fmt.Sprintf("Questions[%d].Options[%d].Correct", qsIndex, oIndex)] = "Only one option can be correct"
 			}
 		}
 	}
