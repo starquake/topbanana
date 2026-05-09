@@ -3,6 +3,7 @@ package auth_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -142,6 +143,19 @@ func (s *stubPlayerStore) ClaimPlayer(
 	return existing, nil
 }
 
+func (s *stubPlayerStore) SetPlayerPasswordHash(_ context.Context, username, passwordHash string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	p, ok := s.byName[username]
+	if !ok {
+		return auth.ErrPlayerNotFound
+	}
+	p.PasswordHash = passwordHash
+
+	return nil
+}
+
 // resolveRoleLocked applies the same "first password-bearing registrant
 // becomes admin" rule as the production SQL. Caller must hold s.mu.
 func (s *stubPlayerStore) resolveRoleLocked(requestedRole string) string {
@@ -184,8 +198,17 @@ func TestHandleRegisterForm_GET_RendersForm(t *testing.T) {
 	if got, want := rec.Code, http.StatusOK; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
-	if got, want := rec.Body.String(), `name="username"`; !strings.Contains(got, want) {
-		t.Errorf("body did not contain %q", want)
+	body := rec.Body.String()
+	if want := `name="username"`; !strings.Contains(body, want) {
+		t.Errorf("body = %q, want substring %q", body, want)
+	}
+	// passwordHelp template func renders the form's help text from the
+	// MinPasswordLength/MaxPasswordLength constants. Asserting the
+	// rendered output keeps the func bound to the constants and the
+	// validator-side error messages.
+	helpWant := fmt.Sprintf("Must be %d–%d characters.", auth.MinPasswordLength, auth.MaxPasswordLength)
+	if !strings.Contains(body, helpWant) {
+		t.Errorf("body = %q, want password-help substring %q", body, helpWant)
 	}
 }
 
@@ -304,8 +327,36 @@ func TestHandleRegisterSubmit_PasswordTooShort(t *testing.T) {
 	if got, want := rec.Code, http.StatusBadRequest; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
-	if got, want := rec.Body.String(), "at least 13 characters"; !strings.Contains(got, want) {
-		t.Errorf("body did not mention min length, got %q", got)
+	want := fmt.Sprintf("at least %d characters", auth.MinPasswordLength)
+	if got := rec.Body.String(); !strings.Contains(got, want) {
+		t.Errorf("body = %q, want substring %q", got, want)
+	}
+	if _, err := store.GetPlayerByUsername(t.Context(), "alice"); !errors.Is(err, auth.ErrPlayerNotFound) {
+		t.Errorf("player should not have been created, GetPlayerByUsername err = %v", err)
+	}
+}
+
+// TestHandleRegisterSubmit_PasswordTooLong covers the bcrypt 72-byte cap on
+// the public registration form. Without the upfront check, bcrypt would
+// surface a wrapped 500; the friendly form error keeps the failure mode
+// consistent with the too-short case.
+func TestHandleRegisterSubmit_PasswordTooLong(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k")), nil)
+
+	rec := postForm(t, handler, "/register", url.Values{
+		"username": {"alice"},
+		"password": {strings.Repeat("a", auth.MaxPasswordLength+1)},
+	})
+
+	if got, want := rec.Code, http.StatusBadRequest; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	want := fmt.Sprintf("at most %d characters", auth.MaxPasswordLength)
+	if got := rec.Body.String(); !strings.Contains(got, want) {
+		t.Errorf("body = %q, want substring %q", got, want)
 	}
 	if _, err := store.GetPlayerByUsername(t.Context(), "alice"); !errors.Is(err, auth.ErrPlayerNotFound) {
 		t.Errorf("player should not have been created, GetPlayerByUsername err = %v", err)

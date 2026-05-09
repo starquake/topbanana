@@ -151,3 +151,26 @@ func (q *Queries) GetPlayerByUsername(ctx context.Context, username string) (Pla
 	)
 	return i, err
 }
+
+const setPlayerPasswordHash = `-- name: SetPlayerPasswordHash :execrows
+UPDATE players
+SET password_hash = ?1
+WHERE username = ?2
+`
+
+type SetPlayerPasswordHashParams struct {
+	PasswordHash sql.NullString
+	Username     string
+}
+
+// Used by the cmd/server -reset-password operator tool to rotate a single
+// player's password without disturbing username / role / email. Returns the
+// number of affected rows so the caller can map "no rows" to a "username not
+// found" error.
+func (q *Queries) SetPlayerPasswordHash(ctx context.Context, arg SetPlayerPasswordHashParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setPlayerPasswordHash, arg.PasswordHash, arg.Username)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}

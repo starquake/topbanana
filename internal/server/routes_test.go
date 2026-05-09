@@ -42,6 +42,10 @@ func (stubPlayerStore) ClaimPlayer(_ context.Context, _ int64, _, _, _ string) (
 	return nil, errRouteStub
 }
 
+func (stubPlayerStore) SetPlayerPasswordHash(_ context.Context, _, _ string) error {
+	return errRouteStub
+}
+
 var errRouteStub = errors.New("stub")
 
 type stubQuizStore struct{}

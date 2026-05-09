@@ -19,6 +19,13 @@ func main() {
 		false,
 		"validate startup (parse config, open DB, run migrations) and exit without serving HTTP",
 	)
+	resetPasswordFor := flag.String(
+		"reset-password",
+		"",
+		"reset the password for the given username; reads the new password from stdin and exits."+
+			" The server should not be running concurrently against the same database."+
+			" Takes precedence over -check when both are supplied",
+	)
 	flag.Parse()
 
 	ctx := context.Background()
@@ -26,9 +33,12 @@ func main() {
 	database.SetupGoose()
 
 	var err error
-	if *checkOnly {
+	switch {
+	case *resetPasswordFor != "":
+		err = app.ResetPassword(ctx, os.Getenv, os.Stdin, os.Stdout, os.Stderr, *resetPasswordFor)
+	case *checkOnly:
 		err = app.Check(ctx, os.Getenv, os.Stdout)
-	} else {
+	default:
 		err = app.Run(ctx, os.Getenv, os.Stdout, nil)
 	}
 
