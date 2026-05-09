@@ -145,6 +145,24 @@ func (s *PlayerStore) ClaimPlayer(
 	return playerFromRow(row), nil
 }
 
+// SetPlayerPasswordHash overwrites the password_hash on the row identified
+// by username. Returns auth.ErrPlayerNotFound when no row matches; intended
+// for the cmd/server -reset-password operator tool, not the public auth flow.
+func (s *PlayerStore) SetPlayerPasswordHash(ctx context.Context, username, passwordHash string) error {
+	rows, err := s.q.SetPlayerPasswordHash(ctx, db.SetPlayerPasswordHashParams{
+		PasswordHash: sql.NullString{String: passwordHash, Valid: true},
+		Username:     strings.TrimSpace(username),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to set password hash: %w", err)
+	}
+	if rows == 0 {
+		return auth.ErrPlayerNotFound
+	}
+
+	return nil
+}
+
 // classifyClaimErr maps a ClaimPlayer storage error onto the auth-package
 // sentinels. [sql.ErrNoRows] from the UPDATE is ambiguous (the id might
 // not exist OR the row has already been claimed), so it re-queries by id

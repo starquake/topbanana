@@ -69,4 +69,8 @@ type PlayerStore interface {
 	// password_hash, ErrUsernameTaken when the requested username collides
 	// with another row, and ErrPlayerNotFound when the id does not exist.
 	ClaimPlayer(ctx context.Context, playerID int64, username, passwordHash, requestedRole string) (*Player, error)
+	// SetPlayerPasswordHash overwrites the password_hash on the row identified
+	// by username. Used by the operator-only -reset-password tool to rotate a
+	// forgotten admin password. Returns ErrPlayerNotFound when no row matches.
+	SetPlayerPasswordHash(ctx context.Context, username, passwordHash string) error
 }

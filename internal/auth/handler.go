@@ -18,6 +18,18 @@ import (
 // MinPasswordLength is the minimum number of bytes required for a password.
 const MinPasswordLength = 13
 
+// MaxPasswordLength is bcrypt's hard limit, in bytes: current
+// [golang.org/x/crypto/bcrypt] returns [bcrypt.ErrPasswordTooLong] above this,
+// and older versions silently truncated. We surface the cap up front in both
+// the public registration handler and the operator -reset-password tool so
+// callers receive a typed/friendly error instead of a wrapped bcrypt failure.
+//
+// The user-facing register-form message phrases the limit in "characters"
+// because typical input is ASCII (1 byte == 1 char) and "bytes" is jargon
+// for end users; the operator-tool message says "bytes" because the audience
+// already knows what that means. Both check the same byte length.
+const MaxPasswordLength = 72
+
 const adminLandingPath = "/admin/quizzes"
 
 // formData is the data passed to the register and login templates.
@@ -302,7 +314,21 @@ func validateRegisterInput(username, password string) registerInput {
 		return registerInput{Cleaned: cleaned, ErrMsg: "Username is required.", OK: false}
 	}
 	if len(password) < MinPasswordLength {
-		return registerInput{Cleaned: cleaned, ErrMsg: "Password must be at least 13 characters.", OK: false}
+		return registerInput{
+			Cleaned: cleaned,
+			ErrMsg:  fmt.Sprintf("Password must be at least %d characters.", MinPasswordLength),
+			OK:      false,
+		}
+	}
+	if len(password) > MaxPasswordLength {
+		// bcrypt rejects passwords above MaxPasswordLength; catching it here
+		// turns a wrapped 500 into a normal form-validation error with a
+		// user-friendly message.
+		return registerInput{
+			Cleaned: cleaned,
+			ErrMsg:  fmt.Sprintf("Password must be at most %d characters.", MaxPasswordLength),
+			OK:      false,
+		}
 	}
 
 	return registerInput{Cleaned: cleaned, OK: true}
@@ -337,8 +363,15 @@ type templateRenderer struct {
 }
 
 func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string) *templateRenderer {
+	// passwordHelp keeps the form's static help text bound to the
+	// MinPasswordLength/MaxPasswordLength constants — drift between the
+	// form, the validator, and the bcrypt cap stays impossible without
+	// touching the constants directly.
 	funcs := template.FuncMap{
 		"csrfToken": func() string { return "" },
+		"passwordHelp": func() string {
+			return fmt.Sprintf("Must be %d–%d characters.", MinPasswordLength, MaxPasswordLength)
+		},
 	}
 	layouts := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "auth/layouts/*.gohtml"),

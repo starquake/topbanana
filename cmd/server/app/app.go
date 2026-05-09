@@ -2,6 +2,7 @@
 package app
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"errors"
@@ -12,10 +13,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/term"
 
+	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/database"
 	"github.com/starquake/topbanana/internal/game"
@@ -29,6 +33,193 @@ const (
 	writeTimeout      = 10 * time.Second
 	shutdownTimeout   = 5 * time.Second
 )
+
+// Sentinel errors for ResetPassword; defined at package level so err113 stays
+// quiet while keeping the failure modes typed for callers and tests. Tests
+// in the external app_test package match on these via [errors.Is]; see
+// export_test.go for the re-exports.
+var (
+	errResetUsernameRequired   = errors.New("username is required")
+	errResetPasswordTooShort   = errors.New("password too short")
+	errResetPasswordTooLong    = errors.New("password too long")
+	errResetUserNotFound       = errors.New("username not found")
+	errResetEmptyInput         = errors.New("empty password input")
+	errResetPasswordsDontMatch = errors.New("passwords do not match")
+)
+
+// resetWrap is the error-wrap prefix used by every ResetPassword failure
+// path so error messages stay consistent and revive's add-constant linter
+// stays quiet.
+const resetWrap = "reset password: %w"
+
+// ResetPassword reads a new password from stdin and overwrites the
+// password_hash for the row identified by username. Operator-only tool for
+// cases where an admin password is lost and the only alternative would be
+// dropping the database volume.
+//
+// stdout carries interactive prompts only ("New password: ", "Confirm
+// password: "); stderr carries structured slog output. Splitting them lets
+// scripts redirect logs without capturing prompt noise (e.g. piping the new
+// password in and discarding 2>/dev/null).
+//
+// stdin echo is disabled when stdin is a terminal; otherwise the password
+// is read up to the first newline (so scripts can pipe). The supplied
+// password must satisfy [auth.MinPasswordLength] and [auth.MaxPasswordLength].
+//
+// Order of operations is deliberately: parse config → open DB → look up
+// username → THEN prompt. The lookup-before-prompt avoids making the
+// operator type the password twice only to find out the username was a
+// typo. There is a small TOCTOU window between the lookup and the UPDATE,
+// which is acceptable for an operator-only tool that should not run while
+// the server is live.
+func ResetPassword(
+	ctx context.Context,
+	getenv func(string) string,
+	stdin io.Reader,
+	stdout, stderr io.Writer,
+	username string,
+) error {
+	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return fmt.Errorf(resetWrap, errResetUsernameRequired)
+	}
+
+	cfg, err := config.Parse(getenv)
+	if err != nil {
+		return fmt.Errorf("reset password: parse config: %w", err)
+	}
+
+	conn, err := setupDB(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := conn.Close(); cerr != nil {
+			logger.ErrorContext(ctx, "error closing database connection", slog.Any("err", cerr))
+		}
+	}()
+
+	players := store.NewPlayerStore(conn, logger)
+	if _, lookupErr := players.GetPlayerByUsername(ctx, username); lookupErr != nil {
+		if errors.Is(lookupErr, auth.ErrPlayerNotFound) {
+			return fmt.Errorf("reset password: %w (%q)", errResetUserNotFound, username)
+		}
+
+		return fmt.Errorf(resetWrap, lookupErr)
+	}
+
+	password, err := readNewPassword(stdin, stdout)
+	if err != nil {
+		return err
+	}
+
+	hashed, err := auth.HashPassword(password)
+	if err != nil {
+		return fmt.Errorf("reset password: hash password: %w", err)
+	}
+
+	if err := players.SetPlayerPasswordHash(ctx, username, hashed); err != nil {
+		if errors.Is(err, auth.ErrPlayerNotFound) {
+			return fmt.Errorf("reset password: %w (%q)", errResetUserNotFound, username)
+		}
+
+		return fmt.Errorf(resetWrap, err)
+	}
+
+	logger.InfoContext(ctx, "password reset", slog.String("username", username))
+
+	return nil
+}
+
+// readNewPassword prompts for a new password twice (input + confirmation)
+// and returns the password if the two reads match and the value falls within
+// the [auth.MinPasswordLength] / [auth.MaxPasswordLength] range. Length is
+// validated *before* the second prompt so a too-short or too-long password
+// fails fast with a single typed line — same UX as `passwd(1)`.
+func readNewPassword(stdin io.Reader, stdout io.Writer) (string, error) {
+	readPassword := newPasswordReader(stdin, stdout)
+
+	password, err := readPassword("New password: ")
+	if err != nil {
+		return "", fmt.Errorf(resetWrap, err)
+	}
+	if len(password) < auth.MinPasswordLength {
+		return "", fmt.Errorf(
+			"reset password: %w (need at least %d characters)",
+			errResetPasswordTooShort,
+			auth.MinPasswordLength,
+		)
+	}
+	if len(password) > auth.MaxPasswordLength {
+		return "", fmt.Errorf(
+			"reset password: %w (bcrypt accepts at most %d bytes)",
+			errResetPasswordTooLong,
+			auth.MaxPasswordLength,
+		)
+	}
+	confirm, err := readPassword("Confirm password: ")
+	if err != nil {
+		return "", fmt.Errorf(resetWrap, err)
+	}
+	if confirm != password {
+		return "", fmt.Errorf(resetWrap, errResetPasswordsDontMatch)
+	}
+
+	return password, nil
+}
+
+// newPasswordReader returns a closure that reads a password from stdin once
+// per call. State (the [bufio.Scanner] for non-TTY input) is captured in the
+// closure so successive reads advance through the same input stream — needed
+// for the "New password: ... Confirm password: ..." sequence in
+// ResetPassword. A fresh Scanner per call would buffer-ahead on the first
+// call and leave the second with an empty reader.
+//
+// TTY path uses [term.ReadPassword] directly with the *[os.File] so echo is
+// disabled; non-TTY path reads one scanner line per call. Both branches
+// write the prompt to stdout so scripts piping a password in can still see
+// (or 2>/dev/null discard) prompt text uniformly. TTY detection only works
+// when stdin is a *[os.File]; wrapped readers always take the scanner path
+// (today's only caller is cmd/server/main.go which passes [os.Stdin]).
+func newPasswordReader(stdin io.Reader, stdout io.Writer) func(prompt string) (string, error) {
+	if f, ok := stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
+		return func(prompt string) (string, error) {
+			if _, err := fmt.Fprint(stdout, prompt); err != nil {
+				return "", fmt.Errorf("write prompt: %w", err)
+			}
+			raw, err := term.ReadPassword(int(f.Fd()))
+			if err != nil {
+				return "", fmt.Errorf("read password: %w", err)
+			}
+			// Best-effort newline so the next prompt or log line starts on
+			// a fresh row; a write failure here only mis-positions the
+			// terminal cursor — the password has already been captured, so
+			// returning an error would discard valid input.
+			_, _ = fmt.Fprintln(stdout)
+
+			return string(raw), nil
+		}
+	}
+
+	scanner := bufio.NewScanner(stdin)
+
+	return func(prompt string) (string, error) {
+		if _, err := fmt.Fprint(stdout, prompt); err != nil {
+			return "", fmt.Errorf("write prompt: %w", err)
+		}
+		if !scanner.Scan() {
+			if err := scanner.Err(); err != nil {
+				return "", fmt.Errorf("read password: %w", err)
+			}
+
+			return "", fmt.Errorf("read password: %w", errResetEmptyInput)
+		}
+
+		return scanner.Text(), nil
+	}
+}
 
 // Check validates that the server can start: it parses config, opens the
 // database, and runs migrations, then closes the connection and returns. No

@@ -61,3 +61,12 @@ SET username = sqlc.arg('username'),
 WHERE players.id = sqlc.arg('id')
   AND players.password_hash IS NULL
 RETURNING *;
+
+-- name: SetPlayerPasswordHash :execrows
+-- Used by the cmd/server -reset-password operator tool to rotate a single
+-- player's password without disturbing username / role / email. Returns the
+-- number of affected rows so the caller can map "no rows" to a "username not
+-- found" error.
+UPDATE players
+SET password_hash = sqlc.arg('password_hash')
+WHERE username = sqlc.arg('username');
