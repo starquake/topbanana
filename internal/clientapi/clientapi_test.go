@@ -82,12 +82,13 @@ func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Opti
 }
 
 type stubGameStore struct {
-	getGame           func(ctx context.Context, id string) (*game.Game, error)
-	createGame        func(ctx context.Context, g *game.Game) error
-	startGame         func(ctx context.Context, id string) error
-	createParticipant func(ctx context.Context, p *game.Participant) error
-	createQuestion    func(ctx context.Context, gq *game.Question) error
-	createAnswer      func(ctx context.Context, a *game.Answer) error
+	getGame                       func(ctx context.Context, id string) (*game.Game, error)
+	createGame                    func(ctx context.Context, g *game.Game) error
+	startGame                     func(ctx context.Context, id string) error
+	createParticipant             func(ctx context.Context, p *game.Participant) error
+	createQuestion                func(ctx context.Context, gq *game.Question) error
+	createAnswer                  func(ctx context.Context, a *game.Answer) error
+	listAnswersForQuizLeaderboard func(ctx context.Context, quizID int64) ([]*game.LeaderboardAnswer, error)
 }
 
 func (stubGameStore) Ping(_ context.Context) error { return nil }
@@ -138,6 +139,16 @@ func (s stubGameStore) CreateAnswer(ctx context.Context, a *game.Answer) error {
 	}
 
 	return s.createAnswer(ctx, a)
+}
+
+func (s stubGameStore) ListAnswersForQuizLeaderboard(
+	ctx context.Context, quizID int64,
+) ([]*game.LeaderboardAnswer, error) {
+	if s.listAnswersForQuizLeaderboard == nil {
+		return nil, errStub
+	}
+
+	return s.listAnswersForQuizLeaderboard(ctx, quizID)
 }
 
 func newService(gs stubGameStore, qs stubQuizStore) *game.Service {
@@ -925,6 +936,173 @@ func TestHandleGameResults(t *testing.T) {
 		)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusInternalServerError; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+}
+
+// leaderboardTestEntry mirrors one entry in the JSON leaderboard response;
+// pulled out of the surrounding test fn so the parent decode target stays
+// flat (revive's nested-structs rule).
+type leaderboardTestEntry struct {
+	PlayerID        int64  `json:"playerId"`
+	Username        string `json:"username"`
+	Score           int    `json:"score"`
+	IsCurrentPlayer bool   `json:"isCurrentPlayer"`
+}
+
+// leaderboardTestResponse is the decode target for the leaderboard endpoint.
+type leaderboardTestResponse struct {
+	QuizID  int64                  `json:"quizId"`
+	Entries []leaderboardTestEntry `json:"entries"`
+}
+
+func TestHandleQuizLeaderboard(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+
+	// makeAnswer mirrors the helper in internal/game; replicated here so the
+	// black-box test does not need an exported builder. The 10s window with
+	// answeredOffset=0 yields a 1000-point CalculateScore for a correct
+	// answer and 0 for a wrong one.
+	makeAnswer := func(playerID int64, username string, correct bool) *game.LeaderboardAnswer {
+		const window = 10 * time.Second
+		start := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+
+		return &game.LeaderboardAnswer{
+			PlayerID:          playerID,
+			Username:          username,
+			QuestionStartedAt: start,
+			QuestionExpiredAt: start.Add(window),
+			AnsweredAt:        start,
+			Correct:           correct,
+		}
+	}
+
+	t.Run("returns leaderboard with isCurrentPlayer set", func(t *testing.T) {
+		t.Parallel()
+
+		gs := stubGameStore{
+			listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*game.LeaderboardAnswer, error) {
+				return []*game.LeaderboardAnswer{
+					makeAnswer(1, "alice", true),
+					makeAnswer(2, "bob", true),
+					makeAnswer(2, "bob", true),
+				}, nil
+			},
+		}
+		qs := stubQuizStore{
+			getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Title: "Quiz"}, nil
+			},
+		}
+		handler := HandleQuizLeaderboard(logger, newService(gs, qs))
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), 1), http.MethodGet,
+			"/api/quizzes/quiz-1/leaderboard", nil,
+		)
+		req.SetPathValue("slugID", "quiz-1")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusOK; got != want {
+			t.Fatalf("status code = %v, want %v", got, want)
+		}
+
+		var body leaderboardTestResponse
+		if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if got, want := body.QuizID, int64(1); got != want {
+			t.Errorf("quizId = %d, want %d", got, want)
+		}
+		if got, want := len(body.Entries), 2; got != want {
+			t.Fatalf("len(entries) = %d, want %d", got, want)
+		}
+		// bob (2000) should outrank alice (1000).
+		if got, want := body.Entries[0].Username, "bob"; got != want {
+			t.Errorf("entries[0].Username = %q, want %q", got, want)
+		}
+		if got, want := body.Entries[0].IsCurrentPlayer, false; got != want {
+			t.Errorf("entries[0].IsCurrentPlayer = %v, want %v", got, want)
+		}
+		if got, want := body.Entries[1].Username, "alice"; got != want {
+			t.Errorf("entries[1].Username = %q, want %q", got, want)
+		}
+		if got, want := body.Entries[1].IsCurrentPlayer, true; got != want {
+			t.Errorf("entries[1].IsCurrentPlayer = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns 404 when quiz not found", func(t *testing.T) {
+		t.Parallel()
+
+		qs := stubQuizStore{
+			getQuiz: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
+				return nil, quiz.ErrQuizNotFound
+			},
+		}
+		handler := HandleQuizLeaderboard(logger, newService(stubGameStore{}, qs))
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), 1), http.MethodGet,
+			"/api/quizzes/missing-99/leaderboard", nil,
+		)
+		req.SetPathValue("slugID", "missing-99")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusNotFound; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns 500 when player missing from context", func(t *testing.T) {
+		t.Parallel()
+
+		handler := HandleQuizLeaderboard(logger, newService(stubGameStore{}, stubQuizStore{}))
+
+		// No withPlayer wrapper — simulate a misconfigured route that
+		// forgot to wrap the handler in EnsurePlayer.
+		req := httptest.NewRequestWithContext(
+			t.Context(), http.MethodGet, "/api/quizzes/quiz-1/leaderboard", nil,
+		)
+		req.SetPathValue("slugID", "quiz-1")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusInternalServerError; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns 500 when service errors", func(t *testing.T) {
+		t.Parallel()
+
+		gs := stubGameStore{
+			listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*game.LeaderboardAnswer, error) {
+				return nil, errStub
+			},
+		}
+		qs := stubQuizStore{
+			getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id}, nil
+			},
+		}
+		handler := HandleQuizLeaderboard(logger, newService(gs, qs))
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), 1), http.MethodGet,
+			"/api/quizzes/quiz-1/leaderboard", nil,
+		)
+		req.SetPathValue("slugID", "quiz-1")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
 
 		if got, want := rec.Code, http.StatusInternalServerError; got != want {
 			t.Errorf("status code = %v, want %v", got, want)

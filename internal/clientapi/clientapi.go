@@ -135,6 +135,77 @@ func HandleQuizGet(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 	})
 }
 
+// HandleQuizLeaderboard returns the top scoring players for the given quiz.
+// Each player appears at most once, with their total score for the quiz; ties
+// are broken by ascending username for a stable order. IsCurrentPlayer is set
+// on the entry that matches the authenticated player on the request context
+// so the client can highlight that row.
+func HandleQuizLeaderboard(logger *slog.Logger, service *game.Service) http.Handler {
+	const leaderboardLimit = 10
+
+	type entryResponse struct {
+		PlayerID        int64  `json:"playerId"`
+		Username        string `json:"username"`
+		Score           int    `json:"score"`
+		IsCurrentPlayer bool   `json:"isCurrentPlayer"`
+	}
+
+	type leaderboardResponse struct {
+		QuizID  int64           `json:"quizId"`
+		Entries []entryResponse `json:"entries"`
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		quizID, ok := handlers.ParseIDFromSlugPath(w, r, logger, "slugID")
+		if !ok {
+			return
+		}
+
+		player, ok := auth.PlayerFromContext(ctx)
+		if !ok {
+			// EnsurePlayer middleware should have populated this; reaching
+			// here means the route was wired without it.
+			logger.ErrorContext(ctx, "missing player on context for quiz leaderboard")
+			http.Error(w, "internal error", http.StatusInternalServerError)
+
+			return
+		}
+
+		entries, err := service.GetQuizLeaderboard(ctx, quizID, player.ID, leaderboardLimit)
+		if err != nil {
+			if errors.Is(err, quiz.ErrQuizNotFound) {
+				http.NotFound(w, r)
+
+				return
+			}
+			logger.ErrorContext(ctx, "error retrieving quiz leaderboard", slog.Any("err", err))
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+
+			return
+		}
+
+		respEntries := make([]entryResponse, 0, len(entries))
+		for _, e := range entries {
+			respEntries = append(respEntries, entryResponse{
+				PlayerID:        e.PlayerID,
+				Username:        e.Username,
+				Score:           e.Score,
+				IsCurrentPlayer: e.IsCurrentPlayer,
+			})
+		}
+
+		res := leaderboardResponse{QuizID: quizID, Entries: respEntries}
+
+		if err = handlers.EncodeJSON(w, http.StatusOK, res); err != nil {
+			logger.ErrorContext(ctx, "error encoding leaderboardResponse", slog.Any("err", err))
+
+			return
+		}
+	})
+}
+
 // HandleCreateGame creates a new game.
 // It first checks if the quiz exists, then creates the game and participant, and finally starts the game.
 // Returns the ID of the created game.

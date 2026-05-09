@@ -1,9 +1,11 @@
 package game_test
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	_ "modernc.org/sqlite"
@@ -13,6 +15,77 @@ import (
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
 )
+
+var errStub = errors.New("stub error")
+
+// stubStore satisfies game.Store for service-level tests that do not need a
+// live database. Each behaviour is overridable per test via a func field; a
+// nil field returns errStub so accidental use surfaces loudly.
+type stubStore struct {
+	listAnswersForQuizLeaderboard func(ctx context.Context, quizID int64) ([]*LeaderboardAnswer, error)
+}
+
+func (stubStore) Ping(_ context.Context) error { return nil }
+
+func (stubStore) GetGame(_ context.Context, _ string) (*Game, error) {
+	return nil, errStub
+}
+func (stubStore) CreateGame(_ context.Context, _ *Game) error               { return errStub }
+func (stubStore) StartGame(_ context.Context, _ string) error               { return errStub }
+func (stubStore) CreateParticipant(_ context.Context, _ *Participant) error { return errStub }
+func (stubStore) CreateQuestion(_ context.Context, _ *Question) error       { return errStub }
+func (stubStore) CreateAnswer(_ context.Context, _ *Answer) error           { return errStub }
+
+func (s stubStore) ListAnswersForQuizLeaderboard(
+	ctx context.Context, quizID int64,
+) ([]*LeaderboardAnswer, error) {
+	if s.listAnswersForQuizLeaderboard == nil {
+		return nil, errStub
+	}
+
+	return s.listAnswersForQuizLeaderboard(ctx, quizID)
+}
+
+// stubQuizStore satisfies quiz.Store for service-level tests. Only GetQuiz is
+// overridable since GetQuizLeaderboard never reaches the other methods.
+type stubQuizStore struct {
+	getQuiz func(ctx context.Context, id int64) (*quiz.Quiz, error)
+}
+
+func (stubQuizStore) Ping(_ context.Context) error                        { return nil }
+func (stubQuizStore) ListQuizzes(_ context.Context) ([]*quiz.Quiz, error) { return nil, nil }
+func (stubQuizStore) QuestionCountsByQuiz(_ context.Context) (map[int64]int, error) {
+	return map[int64]int{}, nil
+}
+
+func (s stubQuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
+	if s.getQuiz == nil {
+		return nil, errStub
+	}
+
+	return s.getQuiz(ctx, id)
+}
+func (stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error         { return nil }
+func (stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error         { return nil }
+func (stubQuizStore) DeleteQuiz(_ context.Context, _ int64) error              { return nil }
+func (stubQuizStore) CreateQuestion(_ context.Context, _ *quiz.Question) error { return nil }
+func (stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error { return nil }
+func (stubQuizStore) DeleteQuestion(_ context.Context, _ int64) error          { return nil }
+func (stubQuizStore) ListQuestions(_ context.Context, _ int64) ([]*quiz.Question, error) {
+	return nil, nil
+}
+
+func (stubQuizStore) GetQuestion(_ context.Context, _ int64) (*quiz.Question, error) {
+	return nil, errStub
+}
+
+func (stubQuizStore) GetOption(_ context.Context, _ int64) (*quiz.Option, error) {
+	return nil, errStub
+}
+
+func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Option, error) {
+	return nil, nil
+}
 
 func newTestQuiz(t *testing.T) *quiz.Quiz {
 	t.Helper()
@@ -322,6 +395,296 @@ func TestService_GetNextQuestion(t *testing.T) {
 
 		if cmp.Diff(gq.QuizQuestion, testQuiz.Questions[1]) != "" {
 			t.Errorf("got qs: %+v, want %+v", gq.QuizQuestion, testQuiz.Questions[1])
+		}
+	})
+}
+
+// makeAnswer produces a flat LeaderboardAnswer answered at the start of the
+// 10s answer window (matching defaultExpiration) so CalculateScore yields a
+// predictable maxPoints (1000) for a correct answer or 0 for a wrong one.
+func makeAnswer(playerID int64, username string, correct bool) *LeaderboardAnswer {
+	const window = 10 * time.Second
+	start := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	return &LeaderboardAnswer{
+		PlayerID:          playerID,
+		Username:          username,
+		QuestionStartedAt: start,
+		QuestionExpiredAt: start.Add(window),
+		AnsweredAt:        start,
+		Correct:           correct,
+	}
+}
+
+func TestService_GetQuizLeaderboard(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns 404 when quiz not found", func(t *testing.T) {
+		t.Parallel()
+
+		svc := NewService(stubStore{}, stubQuizStore{
+			getQuiz: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
+				return nil, quiz.ErrQuizNotFound
+			},
+		}, slog.New(slog.DiscardHandler))
+
+		_, err := svc.GetQuizLeaderboard(t.Context(), 1, 0, 10)
+		if got, want := err, quiz.ErrQuizNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns empty slice when no games", func(t *testing.T) {
+		t.Parallel()
+
+		svc := NewService(
+			stubStore{
+				listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*LeaderboardAnswer, error) {
+					return nil, nil
+				},
+			},
+			stubQuizStore{
+				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+					return &quiz.Quiz{ID: id}, nil
+				},
+			},
+			slog.New(slog.DiscardHandler),
+		)
+
+		got, err := svc.GetQuizLeaderboard(t.Context(), 1, 0, 10)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("len(entries) = %d, want 0", len(got))
+		}
+	})
+
+	t.Run("sums a single player's answers", func(t *testing.T) {
+		t.Parallel()
+
+		svc := NewService(
+			stubStore{
+				listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*LeaderboardAnswer, error) {
+					// Two correct answers + one wrong -> 1000 + 1000 + 0 = 2000.
+					return []*LeaderboardAnswer{
+						makeAnswer(1, "alice", true),
+						makeAnswer(1, "alice", true),
+						makeAnswer(1, "alice", false),
+					}, nil
+				},
+			},
+			stubQuizStore{
+				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+					return &quiz.Quiz{ID: id}, nil
+				},
+			},
+			slog.New(slog.DiscardHandler),
+		)
+
+		entries, err := svc.GetQuizLeaderboard(t.Context(), 1, 0, 10)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got, want := len(entries), 1; got != want {
+			t.Fatalf("len(entries) = %d, want %d", got, want)
+		}
+		if got, want := entries[0].PlayerID, int64(1); got != want {
+			t.Errorf("entries[0].PlayerID = %d, want %d", got, want)
+		}
+		if got, want := entries[0].Username, "alice"; got != want {
+			t.Errorf("entries[0].Username = %q, want %q", got, want)
+		}
+		if got, want := entries[0].Score, 2000; got != want {
+			t.Errorf("entries[0].Score = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("sorts two players by score descending", func(t *testing.T) {
+		t.Parallel()
+
+		svc := NewService(
+			stubStore{
+				listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*LeaderboardAnswer, error) {
+					return []*LeaderboardAnswer{
+						// alice: 1000.
+						makeAnswer(1, "alice", true),
+						// bob: 2000.
+						makeAnswer(2, "bob", true),
+						makeAnswer(2, "bob", true),
+					}, nil
+				},
+			},
+			stubQuizStore{
+				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+					return &quiz.Quiz{ID: id}, nil
+				},
+			},
+			slog.New(slog.DiscardHandler),
+		)
+
+		entries, err := svc.GetQuizLeaderboard(t.Context(), 1, 0, 10)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got, want := len(entries), 2; got != want {
+			t.Fatalf("len(entries) = %d, want %d", got, want)
+		}
+		if got, want := entries[0].Username, "bob"; got != want {
+			t.Errorf("entries[0].Username = %q, want %q", got, want)
+		}
+		if got, want := entries[1].Username, "alice"; got != want {
+			t.Errorf("entries[1].Username = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("breaks ties by ascending username", func(t *testing.T) {
+		t.Parallel()
+
+		svc := NewService(
+			stubStore{
+				listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*LeaderboardAnswer, error) {
+					// Three players with identical 1000-point runs but
+					// usernames intentionally out of order.
+					return []*LeaderboardAnswer{
+						makeAnswer(1, "charlie", true),
+						makeAnswer(2, "alice", true),
+						makeAnswer(3, "bob", true),
+					}, nil
+				},
+			},
+			stubQuizStore{
+				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+					return &quiz.Quiz{ID: id}, nil
+				},
+			},
+			slog.New(slog.DiscardHandler),
+		)
+
+		entries, err := svc.GetQuizLeaderboard(t.Context(), 1, 0, 10)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		gotNames := []string{entries[0].Username, entries[1].Username, entries[2].Username}
+		wantNames := []string{"alice", "bob", "charlie"}
+		if diff := cmp.Diff(wantNames, gotNames); diff != "" {
+			t.Errorf("username order mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("flags the entry of the current player", func(t *testing.T) {
+		t.Parallel()
+
+		svc := NewService(
+			stubStore{
+				listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*LeaderboardAnswer, error) {
+					return []*LeaderboardAnswer{
+						makeAnswer(1, "alice", true),
+						makeAnswer(2, "bob", true),
+						makeAnswer(2, "bob", true),
+					}, nil
+				},
+			},
+			stubQuizStore{
+				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+					return &quiz.Quiz{ID: id}, nil
+				},
+			},
+			slog.New(slog.DiscardHandler),
+		)
+
+		entries, err := svc.GetQuizLeaderboard(t.Context(), 1, 1, 10)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		var aliceEntry, bobEntry LeaderboardEntry
+		for _, e := range entries {
+			switch e.PlayerID {
+			case 1:
+				aliceEntry = e
+			case 2:
+				bobEntry = e
+			default:
+				t.Fatalf("unexpected player ID %d", e.PlayerID)
+			}
+		}
+
+		if got, want := aliceEntry.IsCurrentPlayer, true; got != want {
+			t.Errorf("aliceEntry.IsCurrentPlayer = %v, want %v", got, want)
+		}
+		if got, want := bobEntry.IsCurrentPlayer, false; got != want {
+			t.Errorf("bobEntry.IsCurrentPlayer = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("truncates results to the supplied limit", func(t *testing.T) {
+		t.Parallel()
+
+		svc := NewService(
+			stubStore{
+				listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*LeaderboardAnswer, error) {
+					answers := make([]*LeaderboardAnswer, 0, 5)
+					for i := int64(1); i <= 5; i++ {
+						// Player i answers (5-i+1) correct questions so
+						// scores are strictly decreasing: 5000, 4000, 3000, 2000, 1000.
+						for range 6 - i {
+							answers = append(answers, makeAnswer(i, "p", true))
+						}
+					}
+
+					return answers, nil
+				},
+			},
+			stubQuizStore{
+				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+					return &quiz.Quiz{ID: id}, nil
+				},
+			},
+			slog.New(slog.DiscardHandler),
+		)
+
+		entries, err := svc.GetQuizLeaderboard(t.Context(), 1, 0, 3)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got, want := len(entries), 3; got != want {
+			t.Errorf("len(entries) = %d, want %d", got, want)
+		}
+		if got, want := entries[0].PlayerID, int64(1); got != want {
+			t.Errorf("entries[0].PlayerID = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("defaults limit to 10 when limit <= 0", func(t *testing.T) {
+		t.Parallel()
+
+		svc := NewService(
+			stubStore{
+				listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*LeaderboardAnswer, error) {
+					answers := make([]*LeaderboardAnswer, 0, 15)
+					for i := int64(1); i <= 15; i++ {
+						answers = append(answers, makeAnswer(i, "p", true))
+					}
+
+					return answers, nil
+				},
+			},
+			stubQuizStore{
+				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+					return &quiz.Quiz{ID: id}, nil
+				},
+			},
+			slog.New(slog.DiscardHandler),
+		)
+
+		entries, err := svc.GetQuizLeaderboard(t.Context(), 1, 0, 0)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got, want := len(entries), 10; got != want {
+			t.Errorf("len(entries) = %d, want %d (default limit)", got, want)
 		}
 	})
 }

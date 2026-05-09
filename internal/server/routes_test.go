@@ -136,6 +136,11 @@ func (stubGameStore) CreateParticipant(_ context.Context, _ *game.Participant) e
 }
 func (stubGameStore) CreateQuestion(_ context.Context, _ *game.Question) error { return errRouteStub }
 func (stubGameStore) CreateAnswer(_ context.Context, _ *game.Answer) error     { return errRouteStub }
+func (stubGameStore) ListAnswersForQuizLeaderboard(
+	_ context.Context, _ int64,
+) ([]*game.LeaderboardAnswer, error) {
+	return nil, nil
+}
 
 func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 	t.Parallel()
@@ -162,6 +167,7 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 
 		{name: "API Quiz List", method: http.MethodGet, path: "/api/quizzes"},
 		{name: "API Quiz Get", method: http.MethodGet, path: "/api/quizzes/1"},
+		{name: "API Quiz Leaderboard", method: http.MethodGet, path: "/api/quizzes/quiz-1/leaderboard"},
 
 		{name: "API Game Create", method: http.MethodPost, path: "/api/games"},
 		{name: "API Question Next", method: http.MethodGet, path: "/api/games/game-1/questions/next"},

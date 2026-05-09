@@ -69,13 +69,15 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   // logic adds up over four questions.
   await expect(page.getByRole('heading', { name: 'Game Finished!' })).toBeVisible({ timeout: 15_000 });
 
-  // The results table should have at least one player row, and the score
-  // column for that row must not be 0 — Q3 (all correct) and Q4 (idx 0 is
-  // prime) both yield a hit when picking the first option, so scoring being
-  // broken (always-0) needs to fail the test.
-  const firstRow = page.locator('table tbody tr').first();
-  await expect(firstRow).toBeVisible();
-  await expect(firstRow.locator('td').nth(1)).not.toHaveText('0');
+  // The leaderboard table renders rank/player/score; the player just played, so
+  // their row must be marked with .is-selected. The score column for that row
+  // must not be 0 — Q3 (all correct) and Q4 (idx 0 is prime) both yield a hit
+  // when picking the first option, so scoring being broken (always-0) needs
+  // to fail the test.
+  await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
+  const playerRow = page.locator('table tbody tr.is-selected');
+  await expect(playerRow).toBeVisible();
+  await expect(playerRow.locator('td').nth(2)).not.toHaveText('0');
 
   // Lock in the prediction: picking option[0] of every QUIZ_QUESTIONS entry
   // currently hits Q3 (all correct) and Q4 (idx 0 is prime) — exactly 2
