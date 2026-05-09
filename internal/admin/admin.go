@@ -552,6 +552,9 @@ func HandleQuizList(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 		// Counts come from a separate aggregate query so the Quiz domain
 		// type doesn't have to carry a list-only field. A quiz with no
 		// questions is absent from the map; the lookup yields 0.
+		// A question added or deleted between this call and ListQuizzes
+		// above can produce a count that's off by one for a single render
+		// — acceptable for a read view; eventual consistency is fine.
 		counts, err := quizStore.QuestionCountsByQuiz(r.Context())
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error retrieving question counts from store", slog.Any("err", err))

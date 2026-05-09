@@ -234,6 +234,67 @@ func TestHandleQuizList(t *testing.T) {
 		}
 	})
 
+	t.Run("renders question counts merged from QuestionCountsByQuiz", func(t *testing.T) {
+		t.Parallel()
+
+		// Two quizzes; only Quiz One is in the counts map. Quiz Two is
+		// absent (zero questions) and should render as "0", proving the
+		// missing-key contract holds at the rendering boundary.
+		store := stubQuizStore{
+			listQuizzes: func(_ context.Context) ([]*quiz.Quiz, error) {
+				return []*quiz.Quiz{
+					{ID: 1, Title: "Quiz With Five", Slug: "quiz-1", Description: "x"},
+					{ID: 2, Title: "Empty Quiz", Slug: "quiz-2", Description: "y"},
+				}, nil
+			},
+			questionCountsByQuiz: func(_ context.Context) (map[int64]int, error) {
+				return map[int64]int{1: 5}, nil
+			},
+		}
+
+		handler := HandleQuizList(logger, nil, store)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusOK; got != want {
+			t.Fatalf("status = %d, want %d", got, want)
+		}
+
+		body := rr.Body.String()
+		// The count for Quiz One (id=1) should appear inside its row's
+		// linked count cell. Anchor on the href so we don't accidentally
+		// match unrelated digits elsewhere on the page.
+		if got, want := body, `href="/admin/quizzes/1">5</a>`; !strings.Contains(got, want) {
+			t.Errorf("body should contain count cell %q, got %q", want, got)
+		}
+		if got, want := body, `href="/admin/quizzes/2">0</a>`; !strings.Contains(got, want) {
+			t.Errorf("body should contain zero-count cell %q (missing key → 0), got %q", want, got)
+		}
+	})
+
+	t.Run("returns 500 when QuestionCountsByQuiz fails", func(t *testing.T) {
+		t.Parallel()
+
+		store := stubQuizStore{
+			listQuizzes: func(_ context.Context) ([]*quiz.Quiz, error) {
+				return []*quiz.Quiz{{ID: 1, Title: "Q", Slug: "q", Description: ""}}, nil
+			},
+			questionCountsByQuiz: func(_ context.Context) (map[int64]int, error) {
+				return nil, errors.New("count boom")
+			},
+		}
+
+		handler := HandleQuizList(logger, nil, store)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusInternalServerError; got != want {
+			t.Errorf("status = %d, want %d", got, want)
+		}
+	})
+
 	t.Run("no quizzes", func(t *testing.T) {
 		t.Parallel()
 
