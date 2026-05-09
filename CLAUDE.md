@@ -7,6 +7,7 @@ make check            # lint + sql-lint + build + all tests — run before every
 make test             # unit tests only
 make test-integration # integration tests (-tags=integration)
 make test-e2e         # end-to-end browser tests (Playwright; requires Node.js)
+make smoke            # validate startup against the existing dev DB (no HTTP listener)
 ```
 
 ## Commits
@@ -15,8 +16,8 @@ Never create commits yourself. When work is ready to commit, suggest a one-line 
 
 ## Testing
 
-Every change or new feature must have tests. Run `make lint-fix`, `make check`, and `make test-e2e` before marking work done.
-After changes, also boot the server against the existing dev DB (`go run ./cmd/server/`) and confirm it starts cleanly before reporting done — `make check` only exercises a fresh DB, so migration or startup issues that only surface against populated data otherwise slip through.
+Every change or new feature must have tests. Run `make lint-fix`, `make check`, `make test-e2e`, and `make smoke` before marking work done.
+`make check` only exercises a fresh DB, so migration or startup issues that only surface against populated data otherwise slip through. `make smoke` runs `go run ./cmd/server/ -check` to parse config, open the dev DB, run migrations, and exit — no port juggling, no leftover process.
 
 ## Workflow
 

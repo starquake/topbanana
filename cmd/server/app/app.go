@@ -30,6 +30,37 @@ const (
 	shutdownTimeout   = 5 * time.Second
 )
 
+// Check validates that the server can start: it parses config, opens the
+// database, and runs migrations, then closes the connection and returns. No
+// TCP listener is bound. Used by the `make smoke` target so a contributor
+// can confirm the binary boots cleanly against the existing dev DB without
+// process juggling.
+func Check(ctx context.Context, getenv func(string) string, stdout io.Writer) error {
+	logger := slog.New(slog.NewTextHandler(stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	cfg, err := config.Parse(getenv)
+	if err != nil {
+		msg := "error parsing config"
+		logger.ErrorContext(ctx, msg, slog.Any("err", err))
+
+		return fmt.Errorf("%s: %w", msg, err)
+	}
+
+	conn, err := setupDB(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
+	if cerr := conn.Close(); cerr != nil {
+		logger.ErrorContext(ctx, "error closing database connection", slog.Any("err", cerr))
+
+		return fmt.Errorf("error closing database connection: %w", cerr)
+	}
+
+	logger.InfoContext(ctx, "startup ok")
+
+	return nil
+}
+
 // Run starts the application server, connects to the database, runs migrations, and listens for incoming requests.
 func Run(
 	ctx context.Context,
