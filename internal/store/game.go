@@ -155,6 +155,33 @@ func (s *GameStore) CreateAnswer(ctx context.Context, a *game.Answer) error {
 	return nil
 }
 
+// ListAnswersForQuizLeaderboard returns one flat row per game answer across
+// every game of the given quiz. The rows carry just enough fields for
+// [game.Service.GetQuizLeaderboard] to reuse [game.Service.CalculateScore]
+// without re-loading the option / question / player rows individually.
+func (s *GameStore) ListAnswersForQuizLeaderboard(
+	ctx context.Context, quizID int64,
+) ([]*game.LeaderboardAnswer, error) {
+	rows, err := s.q.ListAnswersForQuizLeaderboard(ctx, quizID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list leaderboard answers for quiz %d: %w", quizID, err)
+	}
+
+	answers := make([]*game.LeaderboardAnswer, 0, len(rows))
+	for _, r := range rows {
+		answers = append(answers, &game.LeaderboardAnswer{
+			PlayerID:          r.PlayerID,
+			Username:          r.Username,
+			QuestionStartedAt: r.QuestionStartedAt,
+			QuestionExpiredAt: r.QuestionExpiredAt,
+			AnsweredAt:        r.AnsweredAt,
+			Correct:           r.IsCorrect,
+		})
+	}
+
+	return answers, nil
+}
+
 func (s *GameStore) listGameQuestions(ctx context.Context, gameID string) ([]*game.Question, error) {
 	var err error
 	rows, err := s.q.ListGameQuestionsByGameID(ctx, gameID)

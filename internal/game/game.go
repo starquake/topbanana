@@ -2,18 +2,22 @@
 package game
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
 const (
-	defaultExpiration = 10 * time.Second
-	maxPoints         = 1000
+	defaultExpiration       = 10 * time.Second
+	maxPoints               = 1000
+	defaultLeaderboardLimit = 10
 )
 
 // ErrGameNotFound is returned when a game is not found.
@@ -87,6 +91,31 @@ type Results struct {
 	PlayerScores map[int64]int
 }
 
+// LeaderboardAnswer is a flat row used to compute a global per-quiz
+// leaderboard. It carries every field [Service.CalculateScore] needs (the
+// option's correctness, the question's start/expiry timestamps, and the
+// answer's submission time) plus the player's username and ID for the
+// leaderboard row. The leaderboard service assumes one attempt per
+// (player, quiz) — see #145 for the enforcement ticket.
+type LeaderboardAnswer struct {
+	PlayerID          int64
+	Username          string
+	QuestionStartedAt time.Time
+	QuestionExpiredAt time.Time
+	AnsweredAt        time.Time
+	Correct           bool
+}
+
+// LeaderboardEntry is a single row of a per-quiz leaderboard: the player's
+// total score for that quiz. IsCurrentPlayer is true when the entry belongs
+// to the player making the request, which lets the client highlight the row.
+type LeaderboardEntry struct {
+	PlayerID        int64
+	Username        string
+	Score           int
+	IsCurrentPlayer bool
+}
+
 // Store represents a game store.
 type Store interface {
 	// Ping returns the status of the database connection.
@@ -98,6 +127,10 @@ type Store interface {
 	CreateParticipant(ctx context.Context, p *Participant) error
 	CreateQuestion(ctx context.Context, gq *Question) error
 	CreateAnswer(ctx context.Context, a *Answer) error
+	// ListAnswersForQuizLeaderboard returns one row per game_answer for the
+	// given quiz, joined with the fields the Service needs to score each
+	// answer.
+	ListAnswersForQuizLeaderboard(ctx context.Context, quizID int64) ([]*LeaderboardAnswer, error)
 }
 
 // Service represents a game service.
@@ -302,6 +335,86 @@ func (s *Service) GetResults(ctx context.Context, gameID string) (*Results, erro
 	}
 
 	return &Results{GameID: g.ID, Winner: winner, PlayerScores: plsMap}, nil
+}
+
+// GetQuizLeaderboard returns the top scoring players for the given quiz.
+// Scoring reuses [Service.CalculateScore] so values stay consistent with
+// [Service.GetResults].
+//
+// Assumes one attempt per (player, quiz): the service simply sums every
+// answer the player has on the quiz. Enforcement of that constraint is
+// tracked in #145; until it lands, a player who somehow has multiple
+// attempts will see the sum of all of them.
+//
+// Ordering: descending by score; ties are broken by ascending username for
+// determinism so a tied scoreboard is stable across requests.
+//
+// currentPlayerID flags the entry that belongs to the requesting player so
+// the client can highlight it; pass 0 to flag nothing.
+//
+// If limit <= 0 it defaults to 10. The quiz must exist; missing quizzes
+// surface as [quiz.ErrQuizNotFound].
+func (s *Service) GetQuizLeaderboard(
+	ctx context.Context, quizID, currentPlayerID int64, limit int,
+) ([]LeaderboardEntry, error) {
+	if limit <= 0 {
+		limit = defaultLeaderboardLimit
+	}
+
+	// Verify the quiz exists so callers can map ErrQuizNotFound to a 404.
+	if _, err := s.quizStore.GetQuiz(ctx, quizID); err != nil {
+		return nil, fmt.Errorf("failed to get quiz: %w", err)
+	}
+
+	rows, err := s.store.ListAnswersForQuizLeaderboard(ctx, quizID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list leaderboard answers: %w", err)
+	}
+
+	playerTotals := make(map[int64]int)
+	usernames := make(map[int64]string)
+
+	for _, r := range rows {
+		usernames[r.PlayerID] = r.Username
+
+		// Synthesise just enough of an *Answer / *Question / *quiz.Option
+		// for CalculateScore. The formula touches only Option.Correct,
+		// Question.StartedAt, Question.ExpiredAt, and Answer.AnsweredAt.
+		a := &Answer{
+			AnsweredAt: r.AnsweredAt,
+			Question: &Question{
+				StartedAt: r.QuestionStartedAt,
+				ExpiredAt: r.QuestionExpiredAt,
+			},
+			Option: &quiz.Option{Correct: r.Correct},
+		}
+		playerTotals[r.PlayerID] += s.CalculateScore(ctx, a)
+	}
+
+	entries := make([]LeaderboardEntry, 0, len(playerTotals))
+	for playerID, score := range playerTotals {
+		entries = append(entries, LeaderboardEntry{
+			PlayerID:        playerID,
+			Username:        usernames[playerID],
+			Score:           score,
+			IsCurrentPlayer: playerID == currentPlayerID,
+		})
+	}
+
+	slices.SortFunc(entries, func(a, b LeaderboardEntry) int {
+		// Higher scores first; ties broken by ascending username.
+		if c := cmp.Compare(b.Score, a.Score); c != 0 {
+			return c
+		}
+
+		return strings.Compare(a.Username, b.Username)
+	})
+
+	if len(entries) > limit {
+		entries = entries[:limit]
+	}
+
+	return entries, nil
 }
 
 // CalculateScore calculates the score for a given answer.

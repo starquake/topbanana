@@ -64,26 +64,31 @@
 
             <div x-show="finished">
                 <h2 class="subtitle">Game Finished!</h2>
-                <template x-if="results">
+                <template x-if="leaderboard">
                     <div class="content">
-                        <h3>Results</h3>
+                        <h3>Leaderboard</h3>
                         <table class="table is-striped is-fullwidth">
                             <thead>
                                 <tr>
-                                    <th>Player ID</th>
+                                    <th>Rank</th>
+                                    <th>Player</th>
                                     <th>Score</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <template x-for="playerScore in results.playerScores" :key="playerScore.playerId">
-                                    <tr>
-                                        <td x-text="playerScore.playerId"></td>
-                                        <td x-text="playerScore.score"></td>
+                                <template x-for="(entry, index) in leaderboard.entries" :key="entry.playerId">
+                                    <tr :class="entry.isCurrentPlayer ? 'is-selected' : ''">
+                                        <td x-text="index + 1"></td>
+                                        <td x-text="entry.username"></td>
+                                        <td x-text="entry.score"></td>
                                     </tr>
                                 </template>
                             </tbody>
                         </table>
                     </div>
+                </template>
+                <template x-if="!leaderboard">
+                    <p>Loading leaderboard...</p>
                 </template>
                 <button class="button is-link" @click="reset()">Play Again</button>
             </div>

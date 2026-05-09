@@ -194,6 +194,64 @@ func (q *Queries) ListAnswersByGameQuestionID(ctx context.Context, gameQuestionI
 	return items, nil
 }
 
+const listAnswersForQuizLeaderboard = `-- name: ListAnswersForQuizLeaderboard :many
+SELECT ga.player_id        AS player_id,
+       p.username           AS username,
+       gq.started_at        AS question_started_at,
+       gq.expired_at        AS question_expired_at,
+       ga.answered_at       AS answered_at,
+       o.is_correct         AS is_correct
+FROM game_answers ga
+         JOIN games g ON g.id = ga.game_id
+         JOIN game_questions gq ON gq.id = ga.game_question_id
+         JOIN options o ON o.id = ga.option_id
+         JOIN players p ON p.id = ga.player_id
+WHERE g.quiz_id = ?
+`
+
+type ListAnswersForQuizLeaderboardRow struct {
+	PlayerID          int64
+	Username          string
+	QuestionStartedAt time.Time
+	QuestionExpiredAt time.Time
+	AnsweredAt        time.Time
+	IsCorrect         bool
+}
+
+// Selects the per-answer scoring inputs for every game of the given quiz.
+// The leaderboard service assumes one attempt per (player, quiz) (#145 covers
+// enforcement) and sums these rows per player; if multiple attempts ever leak
+// through, scores will be inflated until enforcement lands.
+func (q *Queries) ListAnswersForQuizLeaderboard(ctx context.Context, quizID int64) ([]ListAnswersForQuizLeaderboardRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAnswersForQuizLeaderboard, quizID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAnswersForQuizLeaderboardRow
+	for rows.Next() {
+		var i ListAnswersForQuizLeaderboardRow
+		if err := rows.Scan(
+			&i.PlayerID,
+			&i.Username,
+			&i.QuestionStartedAt,
+			&i.QuestionExpiredAt,
+			&i.AnsweredAt,
+			&i.IsCorrect,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listGameQuestionsByGameID = `-- name: ListGameQuestionsByGameID :many
 SELECT id, game_id, question_id, started_at, expired_at
 FROM game_questions

@@ -85,6 +85,21 @@ type resultsRes struct {
 	PlayerScores []playerScoreRes `json:"playerScores"`
 }
 
+// leaderboardEntryRes mirrors one entry in the leaderboard response. Pulled
+// out of the parent struct to keep nested-structs-friendly types.
+type leaderboardEntryRes struct {
+	PlayerID        int64  `json:"playerId"`
+	Username        string `json:"username"`
+	Score           int    `json:"score"`
+	IsCurrentPlayer bool   `json:"isCurrentPlayer"`
+}
+
+// leaderboardRes is the decode target for GET /api/quizzes/{slugID}/leaderboard.
+type leaderboardRes struct {
+	QuizID  int64                 `json:"quizId"`
+	Entries []leaderboardEntryRes `json:"entries"`
+}
+
 // integrationSetup bundles the artefacts a gameplay-style integration test
 // needs. Context is intentionally returned separately from the struct (passed
 // out of setupIntegration as the first return value) to avoid containedctx.
@@ -369,6 +384,39 @@ func TestGameplay_Integration(t *testing.T) {
 	}
 	if cerr := resp.Body.Close(); cerr != nil {
 		t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+	}
+
+	// Quiz leaderboard: the player who just finished should appear with
+	// IsCurrentPlayer=true and the same score they accumulated above.
+	leaderboardURL := fmt.Sprintf("%s/api/quizzes/%s-%d/leaderboard", baseURL, qz.Slug, qz.ID)
+	resp = httpGet(ctx, t, client, leaderboardURL)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var leaderboard leaderboardRes
+	err = json.NewDecoder(resp.Body).Decode(&leaderboard)
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+	}
+	if err != nil {
+		t.Fatalf("failed to decode leaderboard response: %v", err)
+	}
+
+	if got, want := leaderboard.QuizID, qz.ID; got != want {
+		t.Fatalf("leaderboard.QuizID = %d, want %d", got, want)
+	}
+	if got, want := len(leaderboard.Entries), 1; got != want {
+		t.Fatalf("len(leaderboard.Entries) = %d, want %d", got, want)
+	}
+	if got, want := leaderboard.Entries[0].IsCurrentPlayer, true; got != want {
+		t.Errorf("leaderboard.Entries[0].IsCurrentPlayer = %v, want %v", got, want)
+	}
+	if got, want := leaderboard.Entries[0].Score, runningScore; got != want {
+		t.Errorf("leaderboard.Entries[0].Score = %d, want %d", got, want)
+	}
+	if got := leaderboard.Entries[0].PlayerID; got <= 0 {
+		t.Errorf("leaderboard.Entries[0].PlayerID = %d, want > 0", got)
 	}
 
 	// Shutdown server

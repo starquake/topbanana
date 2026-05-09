@@ -61,6 +61,11 @@ func (*stubGameStore) StartGame(_ context.Context, _ string) error              
 func (*stubGameStore) CreateParticipant(_ context.Context, _ *game.Participant) error { return nil }
 func (*stubGameStore) CreateQuestion(_ context.Context, _ *game.Question) error       { return nil }
 func (*stubGameStore) CreateAnswer(_ context.Context, _ *game.Answer) error           { return nil }
+func (*stubGameStore) ListAnswersForQuizLeaderboard(
+	_ context.Context, _ int64,
+) ([]*game.LeaderboardAnswer, error) {
+	return nil, nil
+}
 
 func TestHandleHealthz(t *testing.T) {
 	t.Parallel()

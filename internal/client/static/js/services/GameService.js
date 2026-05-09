@@ -29,6 +29,11 @@ export class GameService {
         const response = await fetch(`/api/games/${gameId}/results`);
         return await response.json();
     }
+
+    async getQuizLeaderboard(slugId) {
+        const response = await fetch(`/api/quizzes/${slugId}/leaderboard`);
+        return await response.json();
+    }
 }
 
 export const gameService = new GameService();

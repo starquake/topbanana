@@ -260,3 +260,159 @@ func TestGameStore_CreateAnswer(t *testing.T) {
 		}
 	})
 }
+
+func TestGameStore_ListAnswersForQuizLeaderboard(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns empty slice for quiz with no games", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		got, err := gameStore.ListAnswersForQuizLeaderboard(t.Context(), testQuiz.ID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("len(answers) = %d, want 0", len(got))
+		}
+	})
+
+	t.Run("returns one row per stored answer with joined fields", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		playerStore := NewPlayerStore(db, slog.Default())
+		player, err := playerStore.CreateAnonymousPlayer(
+			t.Context(), "anon-leaderboard-1",
+		)
+		if err != nil {
+			t.Fatalf("failed to create player: %v", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		g := &game.Game{QuizID: testQuiz.ID}
+		if err = gameStore.CreateGame(t.Context(), g); err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+		if err = gameStore.CreateParticipant(
+			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID},
+		); err != nil {
+			t.Fatalf("failed to create participant: %v", err)
+		}
+
+		now := time.Now().UTC().Truncate(time.Second)
+		gq := &game.Question{
+			GameID:     g.ID,
+			QuestionID: testQuiz.Questions[0].ID,
+			StartedAt:  now,
+			ExpiredAt:  now.Add(10 * time.Second),
+		}
+		if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+			t.Fatalf("failed to create game question: %v", err)
+		}
+
+		correctOption := testQuiz.Questions[0].Options[0]
+		a := &game.Answer{
+			GameID:     g.ID,
+			PlayerID:   player.ID,
+			QuestionID: gq.ID,
+			OptionID:   correctOption.ID,
+		}
+		if err = gameStore.CreateAnswer(t.Context(), a); err != nil {
+			t.Fatalf("failed to create answer: %v", err)
+		}
+
+		rows, err := gameStore.ListAnswersForQuizLeaderboard(t.Context(), testQuiz.ID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got, want := len(rows), 1; got != want {
+			t.Fatalf("len(rows) = %d, want %d", got, want)
+		}
+		if got, want := rows[0].PlayerID, player.ID; got != want {
+			t.Errorf("rows[0].PlayerID = %d, want %d", got, want)
+		}
+		if got, want := rows[0].Username, player.Username; got != want {
+			t.Errorf("rows[0].Username = %q, want %q", got, want)
+		}
+		if got, want := rows[0].Correct, correctOption.Correct; got != want {
+			t.Errorf("rows[0].Correct = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("only returns answers for the requested quiz", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		// Two distinct quizzes; the leaderboard query for quiz A must not
+		// see answers recorded against quiz B.
+		quizzes := newTestQuizzes()
+		quizA := quizzes[0]
+		quizB := quizzes[1]
+		if err := quizStore.CreateQuiz(t.Context(), quizA); err != nil {
+			t.Fatalf("failed to create quiz A: %v", err)
+		}
+		if err := quizStore.CreateQuiz(t.Context(), quizB); err != nil {
+			t.Fatalf("failed to create quiz B: %v", err)
+		}
+
+		playerStore := NewPlayerStore(db, slog.Default())
+		player, err := playerStore.CreateAnonymousPlayer(
+			t.Context(), "anon-leaderboard-2",
+		)
+		if err != nil {
+			t.Fatalf("failed to create player: %v", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		now := time.Now().UTC().Truncate(time.Second)
+
+		// Record one answer on quizB (should not appear in quizA's leaderboard).
+		gB := &game.Game{QuizID: quizB.ID}
+		if err = gameStore.CreateGame(t.Context(), gB); err != nil {
+			t.Fatalf("failed to create game B: %v", err)
+		}
+		if err = gameStore.CreateParticipant(
+			t.Context(), &game.Participant{GameID: gB.ID, PlayerID: player.ID},
+		); err != nil {
+			t.Fatalf("failed to create participant for game B: %v", err)
+		}
+		gqB := &game.Question{
+			GameID:     gB.ID,
+			QuestionID: quizB.Questions[0].ID,
+			StartedAt:  now,
+			ExpiredAt:  now.Add(10 * time.Second),
+		}
+		if err = gameStore.CreateQuestion(t.Context(), gqB); err != nil {
+			t.Fatalf("failed to create question for game B: %v", err)
+		}
+		if err = gameStore.CreateAnswer(t.Context(), &game.Answer{
+			GameID:     gB.ID,
+			PlayerID:   player.ID,
+			QuestionID: gqB.ID,
+			OptionID:   quizB.Questions[0].Options[0].ID,
+		}); err != nil {
+			t.Fatalf("failed to create answer for game B: %v", err)
+		}
+
+		rows, err := gameStore.ListAnswersForQuizLeaderboard(t.Context(), quizA.ID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(rows) != 0 {
+			t.Errorf("len(rows) = %d, want 0 (only quiz B has answers)", len(rows))
+		}
+	})
+}
