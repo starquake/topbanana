@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 
@@ -13,11 +14,25 @@ import (
 )
 
 func main() {
+	checkOnly := flag.Bool(
+		"check",
+		false,
+		"validate startup (parse config, open DB, run migrations) and exit without serving HTTP",
+	)
+	flag.Parse()
+
 	ctx := context.Background()
 
 	database.SetupGoose()
 
-	if err := app.Run(ctx, os.Getenv, os.Stdout, nil); err != nil {
+	var err error
+	if *checkOnly {
+		err = app.Check(ctx, os.Getenv, os.Stdout)
+	} else {
+		err = app.Run(ctx, os.Getenv, os.Stdout, nil)
+	}
+
+	if err != nil {
 		if _, err2 := fmt.Fprintf(os.Stderr, "error: %v\n", err); err2 != nil {
 			panic(err2)
 		}

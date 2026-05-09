@@ -61,6 +61,17 @@ test-coverage-html: test-coverage
 test-e2e:
 	cd test/e2e && npm ci && npx playwright install chromium firefox && npm test
 
+# Smoke-test the binary against the existing dev DB: parses config, opens
+# the DB, runs migrations, and exits 0. Catches startup / migration / config
+# regressions that `make check` (fresh DB only) wouldn't surface.
+#
+# On a fresh checkout the dev DB doesn't exist; SQLite creates it and goose
+# applies every migration, so the first `make smoke` run also seeds an empty
+# topbanana.sqlite in the working directory. Subsequent runs reuse it.
+.PHONY: smoke
+smoke:
+	go run ./cmd/server/ -check
+
 .PHONY: clean
 clean:
 	rm -rf $(BUILD_DIR)
