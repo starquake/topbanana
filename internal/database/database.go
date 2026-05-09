@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/pressly/goose/v3"
@@ -13,8 +14,27 @@ import (
 	"github.com/starquake/topbanana/internal/migrations"
 )
 
-// SetupGoose configures global settings for goose.
-// Used to prevent race conditions.
+// migrateMu serialises Migrate calls. goose's package-level state (the
+// migration registry built lazily from BaseFS) is not safe under concurrent
+// goose.Up calls — even when each call holds its own [sql.DB]. The integration
+// test suite exposes this by spinning up several test servers in parallel,
+// each calling Migrate against its own per-test SQLite file. Serialising the
+// migration step is negligible in practice (one call per process boot in
+// production) and eliminates the race entirely.
+//
+// gochecknoglobals would prefer this lived on a struct, but Migrate is the
+// package's contract surface and the mutex protects state inside goose, not
+// state we own. A constructor-based refactor would push the same mutex onto
+// every caller of Migrate without changing the contention shape.
+//
+//nolint:gochecknoglobals // mutex protects an unavoidable package-level resource (goose globals).
+var migrateMu sync.Mutex
+
+// SetupGoose installs goose's dialect and BaseFS in its package-level state.
+// Call exactly once at process start (typically from main or TestMain);
+// concurrent calls would race because goose stores both as plain package
+// vars. Once installed, [Migrate] serialises the actual goose.Up calls so
+// multiple connections can migrate sequentially against goose's registry.
 func SetupGoose() {
 	goose.SetBaseFS(migrations.FS)
 
@@ -44,11 +64,15 @@ func Open(
 	return conn, nil
 }
 
-// Migrate runs database migrations.
+// Migrate runs database migrations against conn. Safe for concurrent callers:
+// goose.Up reads goose's package-level state (the migration registry, the
+// dialect, the BaseFS) which is not goroutine-safe, so we serialise. See the
+// migrateMu comment above for why this is necessary.
 func Migrate(conn *sql.DB) error {
-	var err error
+	migrateMu.Lock()
+	defer migrateMu.Unlock()
 
-	if err = goose.Up(conn, "."); err != nil {
+	if err := goose.Up(conn, "."); err != nil {
 		return fmt.Errorf("error running migrations: %w", err)
 	}
 
