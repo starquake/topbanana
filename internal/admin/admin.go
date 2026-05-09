@@ -92,12 +92,13 @@ func (tr *TemplateRenderer) Render(w http.ResponseWriter, r *http.Request, statu
 
 // QuizData is the data for the quiz list page, it shows multiple quizzes when available.
 type QuizData struct {
-	ID          int64
-	Title       string
-	Slug        string
-	Description string
-	UpdatedAt   time.Time
-	Questions   []*QuestionData
+	ID            int64
+	Title         string
+	Slug          string
+	Description   string
+	UpdatedAt     time.Time
+	QuestionCount int
+	Questions     []*QuestionData
 }
 
 // QuestionData is the data for a question.
@@ -125,13 +126,17 @@ const (
 )
 
 func quizDataFromQuiz(qz *quiz.Quiz) *QuizData {
+	// QuestionCount defaults to len(Questions); the list handler overrides
+	// it from a separate count query because ListQuizzes doesn't load the
+	// question tree.
 	return &QuizData{
-		ID:          qz.ID,
-		Title:       qz.Title,
-		Slug:        qz.Slug,
-		Description: qz.Description,
-		UpdatedAt:   qz.UpdatedAt,
-		Questions:   questionDataFromQuestions(qz.Questions),
+		ID:            qz.ID,
+		Title:         qz.Title,
+		Slug:          qz.Slug,
+		Description:   qz.Description,
+		UpdatedAt:     qz.UpdatedAt,
+		QuestionCount: len(qz.Questions),
+		Questions:     questionDataFromQuestions(qz.Questions),
 	}
 }
 
@@ -544,7 +549,24 @@ func HandleQuizList(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 			return
 		}
 
+		// Counts come from a separate aggregate query so the Quiz domain
+		// type doesn't have to carry a list-only field. A quiz with no
+		// questions is absent from the map; the lookup yields 0.
+		// A question added or deleted between this call and ListQuizzes
+		// above can produce a count that's off by one for a single render
+		// — acceptable for a read view; eventual consistency is fine.
+		counts, err := quizStore.QuestionCountsByQuiz(r.Context())
+		if err != nil {
+			logger.ErrorContext(r.Context(), "error retrieving question counts from store", slog.Any("err", err))
+			render500(w, r, logger, csrfMgr)
+
+			return
+		}
+
 		qzd := quizDataFromQuizzes(quizzes)
+		for _, qd := range qzd {
+			qd.QuestionCount = counts[qd.ID]
+		}
 
 		data := quizListData{
 			Title:   "Admin Dashboard - Quiz List",

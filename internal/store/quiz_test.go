@@ -242,6 +242,46 @@ func TestQuizStore_ListQuizzes(t *testing.T) {
 	}
 }
 
+func TestQuizStore_QuestionCountsByQuiz(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+
+	// Two quizzes with different question counts; one with no questions
+	// at all so we can assert it's absent from the map.
+	withQuestions := &quiz.Quiz{
+		Title: "With questions", Slug: "with-questions", Description: "x",
+		Questions: []*quiz.Question{
+			{Text: "Q1", Options: []*quiz.Option{{Text: "a", Correct: true}}},
+			{Text: "Q2", Options: []*quiz.Option{{Text: "b"}}},
+			{Text: "Q3", Options: []*quiz.Option{{Text: "c"}}},
+		},
+	}
+	if err := quizStore.CreateQuiz(t.Context(), withQuestions); err != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", err)
+	}
+
+	empty := &quiz.Quiz{Title: "Empty", Slug: "empty", Description: "y"}
+	if err := quizStore.CreateQuiz(t.Context(), empty); err != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", err)
+	}
+
+	counts, err := quizStore.QuestionCountsByQuiz(t.Context())
+	if err != nil {
+		t.Fatalf("QuestionCountsByQuiz err = %v, want nil", err)
+	}
+
+	if got, want := counts[withQuestions.ID], 3; got != want {
+		t.Errorf("counts[%d] = %d, want %d", withQuestions.ID, got, want)
+	}
+	if _, present := counts[empty.ID]; present {
+		// A quiz with zero questions should not appear in the map at all;
+		// callers treat the missing entry as 0.
+		t.Errorf("empty quiz id %d should be absent from counts, got %d", empty.ID, counts[empty.ID])
+	}
+}
+
 func TestQuizStore_ListQuizzes_ErrorHandling(t *testing.T) {
 	t.Parallel()
 

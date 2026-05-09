@@ -56,6 +56,25 @@ func (s *QuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 	return quizzes, nil
 }
 
+// QuestionCountsByQuiz returns the number of questions per quiz, keyed by
+// quiz ID. Quizzes with zero questions are absent from the map; callers
+// should treat a missing entry as 0. Pair with [QuizStore.ListQuizzes] when
+// the list view needs to render counts without loading every quiz's full
+// question + option tree.
+func (s *QuizStore) QuestionCountsByQuiz(ctx context.Context) (map[int64]int, error) {
+	rows, err := s.q.QuestionCountsByQuiz(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count questions by quiz: %w", err)
+	}
+
+	counts := make(map[int64]int, len(rows))
+	for _, r := range rows {
+		counts[r.QuizID] = int(r.QuestionCount)
+	}
+
+	return counts, nil
+}
+
 // GetQuiz returns a quiz by its ID.
 func (s *QuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 	var err error

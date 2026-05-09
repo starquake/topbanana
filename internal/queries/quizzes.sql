@@ -3,6 +3,15 @@ SELECT *
 FROM quizzes
 ORDER BY updated_at DESC, id DESC;
 
+-- name: QuestionCountsByQuiz :many
+-- Returns one row per quiz that has at least one question. Quizzes with
+-- zero questions are absent; callers should treat a missing entry as 0.
+-- Used by the admin list to render "{N} questions" alongside ListQuizzes
+-- without coupling the count into the Quiz domain type.
+SELECT quiz_id, COUNT(*) AS question_count
+FROM questions
+GROUP BY quiz_id;
+
 -- name: GetQuiz :one
 SELECT *
 FROM quizzes

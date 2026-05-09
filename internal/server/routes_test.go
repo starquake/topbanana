@@ -77,6 +77,10 @@ func (stubQuizStore) ListQuizzes(_ context.Context) ([]*quiz.Quiz, error) {
 	}, nil
 }
 
+func (stubQuizStore) QuestionCountsByQuiz(_ context.Context) (map[int64]int, error) {
+	return map[int64]int{}, nil
+}
+
 func (stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error {
 	return nil
 }

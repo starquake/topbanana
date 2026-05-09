@@ -42,6 +42,10 @@ func (s stubQuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 	return s.listQuizzes(ctx)
 }
 
+func (stubQuizStore) QuestionCountsByQuiz(_ context.Context) (map[int64]int, error) {
+	return map[int64]int{}, nil
+}
+
 func (s stubQuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 	if s.getQuiz == nil {
 		return nil, errStub
