@@ -230,6 +230,7 @@ func TestQuizStore_ListQuizzes(t *testing.T) {
 			Slug:        qz.Slug,
 			Description: qz.Description,
 			CreatedAt:   qz.CreatedAt,
+			UpdatedAt:   qz.UpdatedAt,
 		})
 	}
 
@@ -650,6 +651,7 @@ func TestQuizStore_UpdateQuiz(t *testing.T) {
 		Slug:        originalQuiz.Slug + "-updated",
 		Description: originalQuiz.Description + " Updated",
 		CreatedAt:   originalQuiz.CreatedAt,
+		UpdatedAt:   originalQuiz.UpdatedAt,
 		Questions: []*quiz.Question{
 			{
 				ID:     originalQuiz.Questions[0].ID,
@@ -1419,4 +1421,187 @@ func TestQuizStore_DeleteQuestion(t *testing.T) {
 			t.Fatalf("DeleteQuestion err = %v, want %v", got, want)
 		}
 	})
+}
+
+// SQLite's CURRENT_TIMESTAMP has 1-second granularity, so the bump tests
+// sleep just over a second between the baseline snapshot and the mutation
+// to make sure the timestamp can advance.
+const updatedAtBumpDelay = 1100 * time.Millisecond
+
+func TestQuizStore_UpdateQuiz_BumpsUpdatedAt(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+
+	original := newTestQuizzes()[0]
+	if err := quizStore.CreateQuiz(t.Context(), original); err != nil {
+		t.Fatalf("failed to create quiz: %v", err)
+	}
+
+	before := original.UpdatedAt
+	time.Sleep(updatedAtBumpDelay)
+
+	original.Title += " edited"
+	if err := quizStore.UpdateQuiz(t.Context(), original); err != nil {
+		t.Fatalf("failed to update quiz: %v", err)
+	}
+
+	got, err := quizStore.GetQuiz(t.Context(), original.ID)
+	if err != nil {
+		t.Fatalf("failed to get quiz: %v", err)
+	}
+
+	if !got.UpdatedAt.After(before) {
+		t.Errorf("UpdatedAt = %v, want after %v", got.UpdatedAt, before)
+	}
+}
+
+func TestQuizStore_CreateQuestion_BumpsParentQuizUpdatedAt(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+
+	parent := newTestQuizzes()[0]
+	if err := quizStore.CreateQuiz(t.Context(), parent); err != nil {
+		t.Fatalf("failed to create quiz: %v", err)
+	}
+
+	before := parent.UpdatedAt
+	time.Sleep(updatedAtBumpDelay)
+
+	newQuestion := &quiz.Question{
+		QuizID:   parent.ID,
+		Text:     "New question",
+		Position: 30,
+		Options: []*quiz.Option{
+			{Text: "A"},
+			{Text: "B", Correct: true},
+		},
+	}
+	if err := quizStore.CreateQuestion(t.Context(), newQuestion); err != nil {
+		t.Fatalf("failed to create question: %v", err)
+	}
+
+	got, err := quizStore.GetQuiz(t.Context(), parent.ID)
+	if err != nil {
+		t.Fatalf("failed to get quiz: %v", err)
+	}
+
+	if !got.UpdatedAt.After(before) {
+		t.Errorf("UpdatedAt = %v, want after %v", got.UpdatedAt, before)
+	}
+}
+
+func TestQuizStore_UpdateQuestion_BumpsParentQuizUpdatedAt(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+
+	parent := newTestQuizzes()[0]
+	if err := quizStore.CreateQuiz(t.Context(), parent); err != nil {
+		t.Fatalf("failed to create quiz: %v", err)
+	}
+
+	before := parent.UpdatedAt
+	time.Sleep(updatedAtBumpDelay)
+
+	question := parent.Questions[0]
+	question.Text += " edited"
+	if err := quizStore.UpdateQuestion(t.Context(), question); err != nil {
+		t.Fatalf("failed to update question: %v", err)
+	}
+
+	got, err := quizStore.GetQuiz(t.Context(), parent.ID)
+	if err != nil {
+		t.Fatalf("failed to get quiz: %v", err)
+	}
+
+	if !got.UpdatedAt.After(before) {
+		t.Errorf("UpdatedAt = %v, want after %v", got.UpdatedAt, before)
+	}
+}
+
+func TestQuizStore_DeleteOption_BumpsParentQuizUpdatedAt(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+
+	parent := newTestQuizzes()[0]
+	if err := quizStore.CreateQuiz(t.Context(), parent); err != nil {
+		t.Fatalf("failed to create quiz: %v", err)
+	}
+
+	before := parent.UpdatedAt
+	time.Sleep(updatedAtBumpDelay)
+
+	// Drop one option from the first question and update — this routes
+	// through UpdateQuestion, which deletes orphaned options and so should
+	// fire the option-delete trigger that bumps the parent quiz.
+	question := parent.Questions[0]
+	question.Options = question.Options[:len(question.Options)-1]
+	if err := quizStore.UpdateQuestion(t.Context(), question); err != nil {
+		t.Fatalf("failed to update question: %v", err)
+	}
+
+	got, err := quizStore.GetQuiz(t.Context(), parent.ID)
+	if err != nil {
+		t.Fatalf("failed to get quiz: %v", err)
+	}
+
+	if !got.UpdatedAt.After(before) {
+		t.Errorf("UpdatedAt = %v, want after %v", got.UpdatedAt, before)
+	}
+}
+
+func TestQuizStore_ListQuizzes_OrderedByUpdatedAtDesc(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+
+	first := &quiz.Quiz{Title: "First", Slug: "first", Description: "first"}
+	if err := quizStore.CreateQuiz(t.Context(), first); err != nil {
+		t.Fatalf("failed to create first quiz: %v", err)
+	}
+
+	time.Sleep(updatedAtBumpDelay)
+
+	second := &quiz.Quiz{Title: "Second", Slug: "second", Description: "second"}
+	if err := quizStore.CreateQuiz(t.Context(), second); err != nil {
+		t.Fatalf("failed to create second quiz: %v", err)
+	}
+
+	quizzes, err := quizStore.ListQuizzes(t.Context())
+	if err != nil {
+		t.Fatalf("failed to list quizzes: %v", err)
+	}
+	if got, want := len(quizzes), 2; got != want {
+		t.Fatalf("len(quizzes) = %d, want %d", got, want)
+	}
+	// Most-recent first.
+	if got, want := quizzes[0].Title, "Second"; got != want {
+		t.Errorf("quizzes[0].Title = %q, want %q", got, want)
+	}
+	if got, want := quizzes[1].Title, "First"; got != want {
+		t.Errorf("quizzes[1].Title = %q, want %q", got, want)
+	}
+
+	// Edit the older quiz and confirm it floats to the top.
+	time.Sleep(updatedAtBumpDelay)
+	first.Title = "First Edited"
+	if updateErr := quizStore.UpdateQuiz(t.Context(), first); updateErr != nil {
+		t.Fatalf("failed to update first quiz: %v", updateErr)
+	}
+
+	quizzes, err = quizStore.ListQuizzes(t.Context())
+	if err != nil {
+		t.Fatalf("failed to list quizzes: %v", err)
+	}
+	if got, want := quizzes[0].Title, "First Edited"; got != want {
+		t.Errorf("quizzes[0].Title = %q, want %q", got, want)
+	}
 }

@@ -70,4 +70,5 @@ type Quiz struct {
 	Slug        string
 	Description string
 	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }

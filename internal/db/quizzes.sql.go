@@ -67,9 +67,9 @@ func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) 
 }
 
 const createQuiz = `-- name: CreateQuiz :one
-INSERT INTO quizzes (title, slug, description)
-VALUES (?, ?, ?)
-RETURNING id, title, slug, description, created_at
+INSERT INTO quizzes (title, slug, description, updated_at)
+VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+RETURNING id, title, slug, description, created_at, updated_at
 `
 
 type CreateQuizParams struct {
@@ -87,6 +87,7 @@ func (q *Queries) CreateQuiz(ctx context.Context, arg CreateQuizParams) (Quiz, e
 		&i.Slug,
 		&i.Description,
 		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -203,7 +204,7 @@ func (q *Queries) GetQuestion(ctx context.Context, id int64) (Question, error) {
 }
 
 const getQuiz = `-- name: GetQuiz :one
-SELECT id, title, slug, description, created_at
+SELECT id, title, slug, description, created_at, updated_at
 FROM quizzes
 WHERE id = ?
 LIMIT 1
@@ -218,6 +219,7 @@ func (q *Queries) GetQuiz(ctx context.Context, id int64) (Quiz, error) {
 		&i.Slug,
 		&i.Description,
 		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -352,9 +354,9 @@ func (q *Queries) ListQuestionsByQuizID(ctx context.Context, quizID int64) ([]Qu
 }
 
 const listQuizzes = `-- name: ListQuizzes :many
-SELECT id, title, slug, description, created_at
+SELECT id, title, slug, description, created_at, updated_at
 FROM quizzes
-ORDER BY id
+ORDER BY updated_at DESC, id DESC
 `
 
 func (q *Queries) ListQuizzes(ctx context.Context) ([]Quiz, error) {
@@ -372,6 +374,7 @@ func (q *Queries) ListQuizzes(ctx context.Context) ([]Quiz, error) {
 			&i.Slug,
 			&i.Description,
 			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -431,7 +434,8 @@ const updateQuiz = `-- name: UpdateQuiz :execresult
 UPDATE quizzes
 SET title       = ?,
     slug        = ?,
-    description = ?
+    description = ?,
+    updated_at  = CURRENT_TIMESTAMP
 WHERE id = ?
 `
 

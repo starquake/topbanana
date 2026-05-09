@@ -49,6 +49,7 @@ func (s *QuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 			Slug:        r.Slug,
 			Description: r.Description,
 			CreatedAt:   r.CreatedAt,
+			UpdatedAt:   r.UpdatedAt,
 		})
 	}
 
@@ -73,6 +74,7 @@ func (s *QuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 		Slug:        row.Slug,
 		Description: row.Description,
 		CreatedAt:   row.CreatedAt,
+		UpdatedAt:   row.UpdatedAt,
 	}
 
 	questions, err := s.ListQuestions(ctx, id)
@@ -272,6 +274,7 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 
 	qz.ID = row.ID
 	qz.CreatedAt = row.CreatedAt
+	qz.UpdatedAt = row.UpdatedAt
 
 	for _, qs := range qz.Questions {
 		qs.ID = 0

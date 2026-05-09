@@ -17,6 +17,7 @@
                     <th>Title</th>
                     <th>Slug</th>
                     <th>Description</th>
+                    <th>Last edited</th>
                     <th>Questions</th>
                     <th>Actions</th>
                 </tr>
@@ -28,6 +29,7 @@
                         <td><a href="/admin/quizzes/{{.ID}}">{{.Title}}</a></td>
                         <td>{{.Slug}}</td>
                         <td>{{.Description}}</td>
+                        <td title="{{.UpdatedAt.Format "2006-01-02 15:04"}}">{{humanizeTime .UpdatedAt}}</td>
                         <td><a href="/admin/quizzes/{{.ID}}">{{len .Questions}}</a></td>
                         <td>
                             <a href="/admin/quizzes/{{.ID}}/edit">
