@@ -389,6 +389,44 @@ func (q *Queries) ListQuizzes(ctx context.Context) ([]Quiz, error) {
 	return items, nil
 }
 
+const questionCountsByQuiz = `-- name: QuestionCountsByQuiz :many
+SELECT quiz_id, COUNT(*) AS question_count
+FROM questions
+GROUP BY quiz_id
+`
+
+type QuestionCountsByQuizRow struct {
+	QuizID        int64
+	QuestionCount int64
+}
+
+// Returns one row per quiz that has at least one question. Quizzes with
+// zero questions are absent; callers should treat a missing entry as 0.
+// Used by the admin list to render "{N} questions" alongside ListQuizzes
+// without coupling the count into the Quiz domain type.
+func (q *Queries) QuestionCountsByQuiz(ctx context.Context) ([]QuestionCountsByQuizRow, error) {
+	rows, err := q.db.QueryContext(ctx, questionCountsByQuiz)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []QuestionCountsByQuizRow
+	for rows.Next() {
+		var i QuestionCountsByQuizRow
+		if err := rows.Scan(&i.QuizID, &i.QuestionCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateOption = `-- name: UpdateOption :execresult
 UPDATE options
 SET text = ?,

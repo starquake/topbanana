@@ -29,16 +29,17 @@ func (e errReader) Read(_ []byte) (int, error) { return 0, e.err }
 func (errReader) Close() error                 { return nil }
 
 type stubQuizStore struct {
-	listQuizzes     func(ctx context.Context) ([]*quiz.Quiz, error)
-	getQuizByID     func(ctx context.Context, id int64) (*quiz.Quiz, error)
-	createQuiz      func(ctx context.Context, qz *quiz.Quiz) error
-	updateQuiz      func(ctx context.Context, qz *quiz.Quiz) error
-	deleteQuiz      func(ctx context.Context, id int64) error
-	getQuestionByID func(ctx context.Context, id int64) (*quiz.Question, error)
-	createQuestion  func(ctx context.Context, qs *quiz.Question) error
-	updateQuestion  func(ctx context.Context, qs *quiz.Question) error
-	deleteQuestion  func(ctx context.Context, id int64) error
-	listQuestions   func(ctx context.Context, quizID int64) ([]*quiz.Question, error)
+	listQuizzes          func(ctx context.Context) ([]*quiz.Quiz, error)
+	questionCountsByQuiz func(ctx context.Context) (map[int64]int, error)
+	getQuizByID          func(ctx context.Context, id int64) (*quiz.Quiz, error)
+	createQuiz           func(ctx context.Context, qz *quiz.Quiz) error
+	updateQuiz           func(ctx context.Context, qz *quiz.Quiz) error
+	deleteQuiz           func(ctx context.Context, id int64) error
+	getQuestionByID      func(ctx context.Context, id int64) (*quiz.Question, error)
+	createQuestion       func(ctx context.Context, qs *quiz.Question) error
+	updateQuestion       func(ctx context.Context, qs *quiz.Question) error
+	deleteQuestion       func(ctx context.Context, id int64) error
+	listQuestions        func(ctx context.Context, quizID int64) ([]*quiz.Question, error)
 }
 
 func (stubQuizStore) Ping(_ context.Context) error {
@@ -67,6 +68,14 @@ func (s stubQuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 	}
 
 	return s.listQuizzes(ctx)
+}
+
+func (s stubQuizStore) QuestionCountsByQuiz(ctx context.Context) (map[int64]int, error) {
+	if s.questionCountsByQuiz == nil {
+		return map[int64]int{}, nil
+	}
+
+	return s.questionCountsByQuiz(ctx)
 }
 
 func (s stubQuizStore) CreateQuiz(ctx context.Context, qz *quiz.Quiz) error {

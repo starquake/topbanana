@@ -16,6 +16,11 @@ type Store interface {
 	Ping(ctx context.Context) error
 	// ListQuizzes returns all quizzes.
 	ListQuizzes(ctx context.Context) ([]*Quiz, error)
+	// QuestionCountsByQuiz returns the number of questions per quiz, keyed by
+	// quiz ID. Quizzes with no questions are absent from the map; callers
+	// should treat a missing entry as 0. Used alongside ListQuizzes by the
+	// admin list to render counts without loading every quiz's full tree.
+	QuestionCountsByQuiz(ctx context.Context) (map[int64]int, error)
 	// GetQuiz returns a quiz including related questions and options by its ID.
 	// Returns ErrQuizNotFound if the quiz is not found.
 	GetQuiz(ctx context.Context, id int64) (*Quiz, error)

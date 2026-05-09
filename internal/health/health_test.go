@@ -22,6 +22,10 @@ type stubQuizStore struct {
 
 func (s *stubQuizStore) Ping(_ context.Context) error                      { return s.pingErr }
 func (*stubQuizStore) ListQuizzes(_ context.Context) ([]*quiz.Quiz, error) { return nil, nil }
+func (*stubQuizStore) QuestionCountsByQuiz(_ context.Context) (map[int64]int, error) {
+	return map[int64]int{}, nil
+}
+
 func (*stubQuizStore) GetQuiz(_ context.Context, _ int64) (*quiz.Quiz, error) {
 	return nil, errors.ErrUnsupported
 }

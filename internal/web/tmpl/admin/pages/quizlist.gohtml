@@ -30,7 +30,7 @@
                         <td>{{.Slug}}</td>
                         <td>{{.Description}}</td>
                         <td title="{{.UpdatedAt.Format "2006-01-02 15:04"}}">{{humanizeTime .UpdatedAt}}</td>
-                        <td><a href="/admin/quizzes/{{.ID}}">{{len .Questions}}</a></td>
+                        <td><a href="/admin/quizzes/{{.ID}}">{{.QuestionCount}}</a></td>
                         <td>
                             <a href="/admin/quizzes/{{.ID}}/edit">
                                 <span class="icon-text">
