@@ -64,6 +64,10 @@ func (stubQuizStore) GetQuiz(_ context.Context, id int64) (*quiz.Quiz, error) {
 	}, nil
 }
 
+func (stubQuizStore) QuizExists(_ context.Context, _ int64) (bool, error) {
+	return true, nil
+}
+
 func (stubQuizStore) GetQuestion(_ context.Context, id int64) (*quiz.Question, error) {
 	return &quiz.Question{
 		ID:       id,

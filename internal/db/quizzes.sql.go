@@ -427,6 +427,21 @@ func (q *Queries) QuestionCountsByQuiz(ctx context.Context) ([]QuestionCountsByQ
 	return items, nil
 }
 
+const quizExists = `-- name: QuizExists :one
+SELECT EXISTS(SELECT 1 FROM quizzes WHERE id = ?) AS quiz_exists
+`
+
+// Cheap existence check for a quiz by ID. Returns 1 when the row exists,
+// 0 otherwise. Used by handlers and services that need to validate the
+// quiz is real before doing further work but do not need the full tree
+// of questions and options that GetQuiz materialises.
+func (q *Queries) QuizExists(ctx context.Context, id int64) (bool, error) {
+	row := q.db.QueryRowContext(ctx, quizExists, id)
+	var quiz_exists bool
+	err := row.Scan(&quiz_exists)
+	return quiz_exists, err
+}
+
 const updateOption = `-- name: UpdateOption :execresult
 UPDATE options
 SET text = ?,

@@ -94,6 +94,7 @@ type stubQuizStore struct {
 	listQuizzes          func(ctx context.Context) ([]*quiz.Quiz, error)
 	questionCountsByQuiz func(ctx context.Context) (map[int64]int, error)
 	getQuizByID          func(ctx context.Context, id int64) (*quiz.Quiz, error)
+	quizExists           func(ctx context.Context, id int64) (bool, error)
 	createQuiz           func(ctx context.Context, qz *quiz.Quiz) error
 	updateQuiz           func(ctx context.Context, qz *quiz.Quiz) error
 	deleteQuiz           func(ctx context.Context, id int64) error
@@ -114,6 +115,14 @@ func (s stubQuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error
 	}
 
 	return s.getQuizByID(ctx, id)
+}
+
+func (s stubQuizStore) QuizExists(ctx context.Context, id int64) (bool, error) {
+	if s.quizExists == nil {
+		return false, errors.ErrUnsupported
+	}
+
+	return s.quizExists(ctx, id)
 }
 
 func (s stubQuizStore) GetQuestion(ctx context.Context, id int64) (*quiz.Question, error) {
@@ -512,6 +521,9 @@ func TestHandleQuizView(t *testing.T) {
 						},
 					},
 				}, nil
+			},
+			quizExists: func(_ context.Context, _ int64) (bool, error) {
+				return true, nil
 			},
 		}
 
@@ -2758,6 +2770,9 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
 				return &quiz.Quiz{ID: id, Title: "Q1", Slug: "q-1"}, nil
 			},
+			quizExists: func(_ context.Context, _ int64) (bool, error) {
+				return true, nil
+			},
 		}
 		// Two leaderboard answers for two distinct players, both correct,
 		// so each player accumulates a non-zero score and shows up in the
@@ -2817,6 +2832,9 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
 				return &quiz.Quiz{ID: id, Title: "Q1", Slug: "q-1"}, nil
 			},
+			quizExists: func(_ context.Context, _ int64) (bool, error) {
+				return true, nil
+			},
 		}
 		gameStore := stubGameStore{} // no leaderboard rows
 
@@ -2850,6 +2868,9 @@ func TestHandleResetGameForPlayer(t *testing.T) {
 		quizStore := stubQuizStore{
 			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
 				return &quiz.Quiz{ID: id, Title: "Q1"}, nil
+			},
+			quizExists: func(_ context.Context, _ int64) (bool, error) {
+				return true, nil
 			},
 		}
 		gameStore := stubGameStore{
@@ -2889,8 +2910,8 @@ func TestHandleResetGameForPlayer(t *testing.T) {
 		t.Parallel()
 
 		quizStore := stubQuizStore{
-			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
-				return nil, quiz.ErrQuizNotFound
+			quizExists: func(_ context.Context, _ int64) (bool, error) {
+				return false, nil
 			},
 		}
 
@@ -2915,6 +2936,9 @@ func TestHandleResetGameForPlayer(t *testing.T) {
 		quizStore := stubQuizStore{
 			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
 				return &quiz.Quiz{ID: id}, nil
+			},
+			quizExists: func(_ context.Context, _ int64) (bool, error) {
+				return true, nil
 			},
 		}
 		gameStore := stubGameStore{

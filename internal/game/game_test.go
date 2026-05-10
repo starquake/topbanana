@@ -70,10 +70,12 @@ func (s stubStore) DeleteGamesForPlayerOnQuiz(
 	return s.deleteGamesForPlayerOnQuiz(ctx, playerID, quizID)
 }
 
-// stubQuizStore satisfies quiz.Store for service-level tests. Only GetQuiz is
-// overridable since GetQuizLeaderboard never reaches the other methods.
+// stubQuizStore satisfies quiz.Store for service-level tests. Only GetQuiz
+// and QuizExists are overridable since the leaderboard/reset paths never
+// reach the other methods.
 type stubQuizStore struct {
-	getQuiz func(ctx context.Context, id int64) (*quiz.Quiz, error)
+	getQuiz    func(ctx context.Context, id int64) (*quiz.Quiz, error)
+	quizExists func(ctx context.Context, id int64) (bool, error)
 }
 
 func (stubQuizStore) Ping(_ context.Context) error                        { return nil }
@@ -88,6 +90,14 @@ func (s stubQuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error
 	}
 
 	return s.getQuiz(ctx, id)
+}
+
+func (s stubQuizStore) QuizExists(ctx context.Context, id int64) (bool, error) {
+	if s.quizExists == nil {
+		return false, errStub
+	}
+
+	return s.quizExists(ctx, id)
 }
 func (stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error         { return nil }
 func (stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error         { return nil }
@@ -401,8 +411,8 @@ func TestService_ResetGamesForPlayerOnQuiz(t *testing.T) {
 		t.Parallel()
 
 		svc := NewService(stubStore{}, stubQuizStore{
-			getQuiz: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
-				return nil, quiz.ErrQuizNotFound
+			quizExists: func(_ context.Context, _ int64) (bool, error) {
+				return false, nil
 			},
 		}, slog.New(slog.DiscardHandler))
 
@@ -706,8 +716,8 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 		t.Parallel()
 
 		svc := NewService(stubStore{}, stubQuizStore{
-			getQuiz: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
-				return nil, quiz.ErrQuizNotFound
+			quizExists: func(_ context.Context, _ int64) (bool, error) {
+				return false, nil
 			},
 		}, slog.New(slog.DiscardHandler))
 
@@ -727,8 +737,8 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 				},
 			},
 			stubQuizStore{
-				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-					return &quiz.Quiz{ID: id}, nil
+				quizExists: func(_ context.Context, _ int64) (bool, error) {
+					return true, nil
 				},
 			},
 			slog.New(slog.DiscardHandler),
@@ -758,8 +768,8 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 				},
 			},
 			stubQuizStore{
-				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-					return &quiz.Quiz{ID: id}, nil
+				quizExists: func(_ context.Context, _ int64) (bool, error) {
+					return true, nil
 				},
 			},
 			slog.New(slog.DiscardHandler),
@@ -799,8 +809,8 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 				},
 			},
 			stubQuizStore{
-				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-					return &quiz.Quiz{ID: id}, nil
+				quizExists: func(_ context.Context, _ int64) (bool, error) {
+					return true, nil
 				},
 			},
 			slog.New(slog.DiscardHandler),
@@ -837,8 +847,8 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 				},
 			},
 			stubQuizStore{
-				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-					return &quiz.Quiz{ID: id}, nil
+				quizExists: func(_ context.Context, _ int64) (bool, error) {
+					return true, nil
 				},
 			},
 			slog.New(slog.DiscardHandler),
@@ -870,8 +880,8 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 				},
 			},
 			stubQuizStore{
-				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-					return &quiz.Quiz{ID: id}, nil
+				quizExists: func(_ context.Context, _ int64) (bool, error) {
+					return true, nil
 				},
 			},
 			slog.New(slog.DiscardHandler),
@@ -921,8 +931,8 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 				},
 			},
 			stubQuizStore{
-				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-					return &quiz.Quiz{ID: id}, nil
+				quizExists: func(_ context.Context, _ int64) (bool, error) {
+					return true, nil
 				},
 			},
 			slog.New(slog.DiscardHandler),
@@ -955,8 +965,8 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 				},
 			},
 			stubQuizStore{
-				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-					return &quiz.Quiz{ID: id}, nil
+				quizExists: func(_ context.Context, _ int64) (bool, error) {
+					return true, nil
 				},
 			},
 			slog.New(slog.DiscardHandler),

@@ -75,6 +75,19 @@ func (s *QuizStore) QuestionCountsByQuiz(ctx context.Context) (map[int64]int, er
 	return counts, nil
 }
 
+// QuizExists reports whether a quiz with the given ID exists. It runs a
+// single one-row SELECT EXISTS probe and does not load the quiz's
+// questions or options, so callers that only need to validate the quiz
+// is real should prefer this over [QuizStore.GetQuiz].
+func (s *QuizStore) QuizExists(ctx context.Context, id int64) (bool, error) {
+	exists, err := s.q.QuizExists(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("failed to check quiz exists: %w", err)
+	}
+
+	return exists, nil
+}
+
 // GetQuiz returns a quiz by its ID.
 func (s *QuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 	var err error
