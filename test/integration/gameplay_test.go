@@ -657,6 +657,45 @@ func TestGameplay_Integration(t *testing.T) {
 		t.Errorf("in-flight my-game Completed = %v, want %v", got, want)
 	}
 
+	// Regression for #157 sec.1: admin delete of a played question must not
+	// 500. The fresh game above answered question[0], so game_questions and
+	// game_answers both have rows referencing that question at the moment
+	// the delete fires. Without the in-Go cascade in execDeleteQuestion the
+	// FK on game_questions.question_id would raise FOREIGN KEY constraint
+	// failed (787) and the admin route would surface it as a 500.
+	questionDeleteToken := fetchCSRFToken(
+		ctx, t, adminClient, fmt.Sprintf("%s/admin/quizzes/%d", baseURL, qz.ID),
+	)
+	questionDeleteForm := url.Values{}
+	questionDeleteForm.Add("csrf_token", questionDeleteToken)
+	questionDeleteURL := fmt.Sprintf(
+		"%s/admin/quizzes/%d/questions/%d/delete", baseURL, qz.ID, qz.Questions[0].ID,
+	)
+	questionDeleteReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, questionDeleteURL, strings.NewReader(questionDeleteForm.Encode()),
+	)
+	if err != nil {
+		t.Fatalf("failed to build question delete request: %v", err)
+	}
+	questionDeleteReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	questionDeleteResp, err := adminClient.Do(questionDeleteReq)
+	if err != nil {
+		t.Fatalf("failed to POST question delete: %v", err)
+	}
+	if got, want := questionDeleteResp.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf(
+			"question delete status = %d, want %d (500 here means the FK cascade for question delete regressed)",
+			got, want,
+		)
+	}
+	wantQuestionDeleteLocation := fmt.Sprintf("/admin/quizzes/%d", qz.ID)
+	if got, want := questionDeleteResp.Header.Get("Location"), wantQuestionDeleteLocation; got != want {
+		t.Errorf("question delete Location = %q, want %q", got, want)
+	}
+	if cerr := questionDeleteResp.Body.Close(); cerr != nil {
+		t.Errorf("question delete body close err = %v", cerr)
+	}
+
 	// CSRF: a POST to a state-changing admin route without the
 	// csrf_token form field is rejected by the CSRF middleware before
 	// the handler runs. The middleware sits in front of requireAdmin,

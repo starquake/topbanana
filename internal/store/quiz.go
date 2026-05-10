@@ -473,6 +473,29 @@ func (*QuizStore) execDeleteQuiz(ctx context.Context, q *db.Queries, id int64) e
 }
 
 func (*QuizStore) execDeleteQuestion(ctx context.Context, q *db.Queries, id int64) error {
+	// game_questions.question_id and game_answers.option_id /
+	// game_answers.game_question_id reference this question (and its
+	// options) without ON DELETE CASCADE, so once the question has been
+	// played SQLite raises FOREIGN KEY constraint failed (787) on the
+	// raw question delete. Snapshot the affected game_question IDs and
+	// drop the dependent game_answers / game_questions rows first.
+	// Filtering the answer delete by game_question_id (not game_id) is
+	// deliberate: a single game can hold answers for many questions, and
+	// dropping by game_id would over-delete answers for OTHER questions
+	// in the same game. Options cascade from the question itself.
+	gqIDs, err := q.ListGameQuestionIDsForQuestion(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to list game question IDs for question %d: %w", id, err)
+	}
+	if len(gqIDs) > 0 {
+		if err = q.DeleteGameAnswersByGameQuestionIDs(ctx, gqIDs); err != nil {
+			return fmt.Errorf("failed to delete game answers: %w", err)
+		}
+		if err = q.DeleteGameQuestionsByQuestionID(ctx, id); err != nil {
+			return fmt.Errorf("failed to delete game questions: %w", err)
+		}
+	}
+
 	res, err := q.DeleteQuestion(ctx, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete question: %w", err)

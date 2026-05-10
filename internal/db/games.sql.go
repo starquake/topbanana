@@ -145,6 +145,32 @@ func (q *Queries) DeleteGameAnswersByGameIDs(ctx context.Context, gameIds []stri
 	return err
 }
 
+const deleteGameAnswersByGameQuestionIDs = `-- name: DeleteGameAnswersByGameQuestionIDs :exec
+DELETE
+FROM game_answers
+WHERE game_question_id IN (/*SLICE:game_question_ids*/?)
+`
+
+// Hard-deletes game_answers rows that reference the given game_question
+// IDs. Filtering by game_question_id (not game_id) is deliberate: a single
+// game can hold answers for many questions, and the question delete must
+// only wipe the answers tied to the question being deleted, leaving the
+// other questions in the same game untouched.
+func (q *Queries) DeleteGameAnswersByGameQuestionIDs(ctx context.Context, gameQuestionIds []int64) error {
+	query := deleteGameAnswersByGameQuestionIDs
+	var queryParams []interface{}
+	if len(gameQuestionIds) > 0 {
+		for _, v := range gameQuestionIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:game_question_ids*/?", strings.Repeat(",?", len(gameQuestionIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:game_question_ids*/?", "NULL", 1)
+	}
+	_, err := q.db.ExecContext(ctx, query, queryParams...)
+	return err
+}
+
 const deleteGameParticipantsByGameIDs = `-- name: DeleteGameParticipantsByGameIDs :exec
 DELETE
 FROM game_participants
@@ -186,6 +212,21 @@ func (q *Queries) DeleteGameQuestionsByGameIDs(ctx context.Context, gameIds []st
 		query = strings.Replace(query, "/*SLICE:game_ids*/?", "NULL", 1)
 	}
 	_, err := q.db.ExecContext(ctx, query, queryParams...)
+	return err
+}
+
+const deleteGameQuestionsByQuestionID = `-- name: DeleteGameQuestionsByQuestionID :exec
+DELETE
+FROM game_questions
+WHERE question_id = ?
+`
+
+// Hard-deletes every game_questions row issued for the given question.
+// Once the dependent game_answers rows are gone (see
+// DeleteGameAnswersByGameQuestionIDs) the FK on game_answers.game_question_id
+// no longer blocks, so a single-arg delete by question_id is enough.
+func (q *Queries) DeleteGameQuestionsByQuestionID(ctx context.Context, questionID int64) error {
+	_, err := q.db.ExecContext(ctx, deleteGameQuestionsByQuestionID, questionID)
 	return err
 }
 
@@ -442,6 +483,40 @@ func (q *Queries) ListGameIDsForQuiz(ctx context.Context, quizID int64) ([]strin
 	var items []string
 	for rows.Next() {
 		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listGameQuestionIDsForQuestion = `-- name: ListGameQuestionIDsForQuestion :many
+SELECT id
+FROM game_questions
+WHERE question_id = ?
+`
+
+// Lists every game_questions.id where the given question has been issued.
+// Used by the question delete flow so the in-Go transaction can drop
+// dependent game_answers rows scoped to THIS question's game_question rows
+// before deleting the game_questions and the question itself. Snapshotted
+// up front so subsequent deletes do not see a moving target as rows drain.
+func (q *Queries) ListGameQuestionIDsForQuestion(ctx context.Context, questionID int64) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listGameQuestionIDsForQuestion, questionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var id int64
 		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
