@@ -1,285 +1,261 @@
-/* Synthwave / retrowave skin for the player client. Applies only to
-   /client/ and /play/<slug>-<id>; admin and auth pages keep stock Bulma.
-
-   Colour palette (kept short on purpose so glow effects compose
-   predictably):
-     --sw-bg-deep    : page backdrop, near-black with a violet bias
-     --sw-bg-mid     : gradient stop near the horizon
-     --sw-magenta    : primary accent / question / wrong-feedback
-     --sw-purple     : button surfaces and borders
-     --sw-cyan       : leaderboard / correct feedback
-     --sw-red        : wrong-feedback flash (more saturated than magenta)
-*/
+/* Player-client skin. Dark, restrained, European-inspired: a single
+   magenta accent on near-black, generous whitespace, Inter throughout.
+   The synthwave heritage is in the accent colour and the kinetic
+   animations driven from GameApp.js — not in the static decoration.
+   File name kept for diff continuity; the contents have moved on. */
 
 :root {
-    --sw-bg-deep: #0b0014;
-    --sw-bg-mid: #1a0033;
-    --sw-magenta: #ff2d95;
-    --sw-purple: #b148ff;
-    --sw-cyan: #00f0ff;
-    --sw-red: #ff003c;
-    --sw-text: #f6e8ff;
-    --sw-text-dim: rgba(246, 232, 255, 0.65);
+    --bg: #0a0a0f;
+    --surface: #15151c;
+    --surface-2: #1d1d26;
+    --border: #2a2a35;
+    --text: #e8e8ee;
+    --text-dim: #7a7a85;
+    --accent: #ff2d95;
+    --accent-soft: rgba(255, 45, 149, 0.14);
+    --cyan: #66e8ff;
+    --cyan-soft: rgba(102, 232, 255, 0.12);
+    --danger: #ff5c5c;
 }
 
-/* Page backdrop — vertical gradient with a faint perspective grid drawn
-   from a pair of repeating linear-gradients. The horizontal lines cluster
-   denser toward the horizon at ~70% via background-size differences. */
+html, body {
+    background: var(--bg);
+    color: var(--text);
+}
+
 body {
     margin: 0;
     min-height: 100vh;
-    color: var(--sw-text);
-    font-family: 'Orbitron', system-ui, sans-serif;
-    background-color: var(--sw-bg-deep);
-    background-image:
-        /* Horizontal lines (perspective floor) */
-        repeating-linear-gradient(
-            to bottom,
-            transparent 0,
-            transparent 38px,
-            rgba(177, 72, 255, 0.18) 38px,
-            rgba(177, 72, 255, 0.18) 39px
-        ),
-        /* Vertical lines */
-        repeating-linear-gradient(
-            to right,
-            transparent 0,
-            transparent 64px,
-            rgba(177, 72, 255, 0.12) 64px,
-            rgba(177, 72, 255, 0.12) 65px
-        ),
-        /* The dark sky-to-deep-horizon wash */
-        linear-gradient(
-            to bottom,
-            var(--sw-bg-deep) 0%,
-            var(--sw-bg-mid) 70%,
-            var(--sw-bg-deep) 100%
-        );
-    overflow-x: hidden;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
 }
 
-/* CRT scanline overlay — thin horizontal alternating gradient at low
-   opacity, fixed so it doesn't shift while content scrolls. Set to
-   pointer-events:none so it never interrupts clicks. */
-body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 1;
-    background: repeating-linear-gradient(
-        to bottom,
-        rgba(0, 0, 0, 0) 0,
-        rgba(0, 0, 0, 0) 2px,
-        rgba(0, 0, 0, 0.18) 2px,
-        rgba(0, 0, 0, 0.18) 3px
-    );
-}
-
-/* Make sure interactive content sits above the scanline overlay. */
 .section {
-    position: relative;
-    z-index: 2;
+    padding: 4rem 1.5rem;
 }
 
-/* Brand title at the top of the page. */
+.container {
+    max-width: 720px;
+}
+
+/* Brand title — small, magenta, no glow. The page is supposed to be
+   quiet at rest; the title is a wordmark, not a stage curtain. */
 .title {
-    font-family: 'Audiowide', 'Orbitron', sans-serif;
-    color: var(--sw-magenta);
-    text-shadow:
-        0 0 6px var(--sw-magenta),
-        0 0 18px rgba(255, 45, 149, 0.6),
-        0 0 32px rgba(255, 45, 149, 0.4);
-    letter-spacing: 0.04em;
+    font-family: 'Inter', sans-serif;
+    font-weight: 700;
+    font-size: 1.5rem;
+    letter-spacing: -0.02em;
+    color: var(--accent);
+    margin-bottom: 3rem;
 }
 
-/* Dropdown / quiz selection */
+/* Form labels and helper text — uppercase microtype, plenty of tracking,
+   for the European editorial feel. */
 .label {
-    color: var(--sw-text-dim);
-    font-family: 'Orbitron', sans-serif;
+    color: var(--text-dim);
+    font-family: 'Inter', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    font-size: 0.7rem;
+    font-weight: 600;
+    margin-bottom: 0.6rem;
+}
+
+/* Quiz dropdown */
+.select select {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.55em 1.5em 0.55em 0.85em;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.95rem;
+    transition: border-color 160ms ease;
+}
+.select select:hover,
+.select select:focus {
+    border-color: var(--accent);
+    outline: none;
+}
+
+/* Question text — the typographic event of the page. Big, tight, just
+   weight and size doing the work, no decoration. */
+.subtitle {
+    font-family: 'Inter', sans-serif;
+    font-weight: 700;
+    font-size: 2.6rem;
+    line-height: 1.1;
+    letter-spacing: -0.025em;
+    color: var(--text);
+    margin: 1.5rem 0 2rem;
+}
+
+/* Smaller subtitles ("Game Finished!", deep-link title) get a quieter
+   treatment so they don't fight the question for attention. */
+.content > .subtitle,
+[x-show="finished"] .subtitle {
+    font-size: 1.6rem;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin: 1rem 0 1.5rem;
+}
+
+.content p {
+    color: var(--text-dim);
+    font-size: 1rem;
+    line-height: 1.6;
+}
+
+h3 {
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.18em;
-    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-bottom: 1rem;
 }
 
-.select select {
-    background: rgba(11, 0, 20, 0.7);
-    color: var(--sw-text);
-    border: 1px solid var(--sw-purple);
-    border-radius: 4px;
-    box-shadow: 0 0 12px rgba(177, 72, 255, 0.35);
-    font-family: 'Orbitron', sans-serif;
-}
-
-/* The question itself — biggest text on the page, glowing magenta. */
-.subtitle {
-    font-family: 'Audiowide', 'Orbitron', sans-serif;
-    color: var(--sw-text);
-    font-size: 2.2rem;
-    line-height: 1.15;
-    text-shadow:
-        0 0 8px var(--sw-magenta),
-        0 0 24px rgba(255, 45, 149, 0.55);
-    letter-spacing: 0.02em;
-}
-
-/* "Game Finished!" / "Leaderboard" subtitles re-use .subtitle, so they
-   inherit the glow above. The leaderboard h3 needs a touch less weight. */
-h3 {
-    font-family: 'Audiowide', sans-serif;
-    color: var(--sw-cyan);
-    text-shadow:
-        0 0 6px var(--sw-cyan),
-        0 0 18px rgba(0, 240, 255, 0.5);
-}
-
-/* Description card under the deep-link title. */
-.content p {
-    color: var(--sw-text-dim);
-    font-family: 'Orbitron', sans-serif;
-}
-
-/* Buttons — every interactive button gets the neon treatment. The
-   `.button.is-primary`, `.button.is-link`, `.button.is-fullwidth` etc.
-   classes already get applied by the existing markup; we re-skin them
-   here without changing structure. */
+/* Buttons — neutral surface at rest, magenta accent on hover/focus. No
+   idle pulse, no permanent glow. */
 .button {
-    background: rgba(11, 0, 20, 0.55);
-    color: var(--sw-text);
-    border: 1px solid var(--sw-purple);
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
     border-radius: 4px;
-    font-family: 'Orbitron', sans-serif;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    box-shadow:
-        0 0 10px rgba(177, 72, 255, 0.45),
-        inset 0 0 6px rgba(177, 72, 255, 0.18);
-    transition: transform 120ms ease-out, box-shadow 160ms ease-out, border-color 160ms ease-out;
-    animation: sw-button-idle 4s ease-in-out infinite;
+    padding: 0.75em 1.4em;
+    font-family: 'Inter', sans-serif;
+    font-weight: 500;
+    font-size: 0.95rem;
+    letter-spacing: 0.01em;
+    transition: border-color 160ms ease, background 160ms ease, transform 120ms ease, box-shadow 200ms ease;
+    box-shadow: none;
 }
-
 .button:hover,
 .button:focus {
-    border-color: var(--sw-magenta);
-    box-shadow:
-        0 0 14px var(--sw-magenta),
-        0 0 28px rgba(255, 45, 149, 0.55),
-        inset 0 0 8px rgba(255, 45, 149, 0.3);
-    transform: translateY(-1px);
-    animation: none;
+    border-color: var(--accent);
+    background: var(--surface-2);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+    outline: none;
 }
-
+.button:active {
+    transform: translateY(1px);
+}
 .button.is-primary {
-    border-color: var(--sw-magenta);
-    color: var(--sw-magenta);
+    background: var(--accent);
+    color: var(--bg);
+    border-color: var(--accent);
+    font-weight: 600;
 }
-
-.button.is-link {
-    border-color: var(--sw-cyan);
-    color: var(--sw-cyan);
-    box-shadow:
-        0 0 10px rgba(0, 240, 255, 0.45),
-        inset 0 0 6px rgba(0, 240, 255, 0.2);
+.button.is-primary:hover,
+.button.is-primary:focus {
+    background: var(--text);
+    color: var(--bg);
+    border-color: var(--text);
+    box-shadow: 0 0 0 3px var(--accent-soft);
 }
-
+.button.is-fullwidth {
+    text-align: left;
+    justify-content: flex-start;
+    padding: 1em 1.4em;
+}
 .button[disabled],
 .button:disabled {
-    opacity: 0.4;
-    box-shadow: none;
-    animation: none;
+    opacity: 0.35;
     cursor: not-allowed;
+    box-shadow: none;
+    background: var(--surface);
+    border-color: var(--border);
 }
 
-@keyframes sw-button-idle {
-    0%, 100% {
-        box-shadow:
-            0 0 10px rgba(177, 72, 255, 0.45),
-            inset 0 0 6px rgba(177, 72, 255, 0.18);
-    }
-    50% {
-        box-shadow:
-            0 0 18px rgba(177, 72, 255, 0.7),
-            inset 0 0 10px rgba(177, 72, 255, 0.32);
-    }
+.buttons {
+    gap: 0.6rem;
 }
 
-/* Progress bar — the countdown timer between questions. */
+/* Progress bar — a hair-thin line in the accent gradient. */
 .progress {
-    background: rgba(177, 72, 255, 0.12);
-    height: 6px;
+    background: var(--border);
+    height: 3px;
     border-radius: 999px;
     overflow: hidden;
+    margin-bottom: 0;
 }
 .progress::-webkit-progress-bar {
-    background: rgba(177, 72, 255, 0.12);
+    background: var(--border);
     border-radius: 999px;
 }
 .progress::-webkit-progress-value,
 .progress::-moz-progress-bar {
-    background: linear-gradient(90deg, var(--sw-magenta), var(--sw-cyan));
-    box-shadow: 0 0 12px var(--sw-magenta);
+    background: var(--accent);
     border-radius: 999px;
+    transition: width 100ms linear;
 }
 
-/* Notifications — correct / wrong feedback, plus the "already played"
-   lockout. Match the genre by replacing Bulma's pastel fills with neon
-   borders + dark fills. */
+/* Notifications — surface card with a single accent-colored top border
+   instead of Bulma's loud fills. */
 .notification {
-    background: rgba(11, 0, 20, 0.7);
-    color: var(--sw-text);
-    border-radius: 6px;
-    border: 1px solid var(--sw-purple);
-    box-shadow: 0 0 16px rgba(177, 72, 255, 0.35);
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--accent);
+    border-radius: 4px;
+    padding: 1rem 1.25rem;
+    box-shadow: none;
 }
 .notification.is-success {
-    border-color: var(--sw-cyan);
-    color: var(--sw-cyan);
-    box-shadow: 0 0 22px rgba(0, 240, 255, 0.55);
-    text-shadow: 0 0 6px rgba(0, 240, 255, 0.7);
+    border-top-color: var(--cyan);
+}
+.notification.is-success .is-size-4 {
+    color: var(--cyan);
 }
 .notification.is-danger {
-    border-color: var(--sw-red);
-    color: var(--sw-red);
-    box-shadow: 0 0 22px rgba(255, 0, 60, 0.55);
-    text-shadow: 0 0 6px rgba(255, 0, 60, 0.7);
+    border-top-color: var(--danger);
+}
+.notification.is-danger,
+.notification.is-danger .is-size-4 {
+    color: var(--danger);
 }
 
-/* Leaderboard table */
+/* Leaderboard table — flat surface, restrained header microtype, accent
+   used only for the current player's row. */
 .table {
-    background: rgba(11, 0, 20, 0.55);
-    color: var(--sw-text);
-    border: 1px solid var(--sw-purple);
-    box-shadow: 0 0 18px rgba(177, 72, 255, 0.3);
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    box-shadow: none;
 }
 .table th {
-    color: var(--sw-cyan);
-    text-shadow: 0 0 4px rgba(0, 240, 255, 0.6);
-    border-color: rgba(177, 72, 255, 0.4);
-    font-family: 'Orbitron', sans-serif;
+    color: var(--text-dim);
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.18em;
-    font-size: 0.8rem;
+    letter-spacing: 0.16em;
+    font-size: 0.7rem;
+    border-color: var(--border);
 }
 .table td {
-    border-color: rgba(177, 72, 255, 0.25);
+    border-color: var(--border);
+    color: var(--text);
 }
 .table.is-striped tbody tr:not(.is-selected):nth-child(even) {
-    background: rgba(177, 72, 255, 0.06);
+    background: var(--surface-2);
 }
 .table tbody tr.is-selected {
-    background: rgba(0, 240, 255, 0.12);
-    color: var(--sw-cyan);
-    box-shadow: inset 0 0 12px rgba(0, 240, 255, 0.4);
+    background: var(--accent-soft);
+    color: var(--accent);
 }
 .table tbody tr.is-selected td {
-    color: var(--sw-cyan);
-    text-shadow: 0 0 4px rgba(0, 240, 255, 0.7);
+    color: var(--accent);
+    border-color: rgba(255, 45, 149, 0.25);
 }
 
-/* Question image — keep its native size but give it a neon frame. */
+/* Question image — a clean 1px frame, no neon halo. */
 figure.image img {
-    border: 1px solid var(--sw-purple);
-    box-shadow: 0 0 18px rgba(177, 72, 255, 0.4);
+    border: 1px solid var(--border);
     border-radius: 4px;
 }
 
@@ -288,8 +264,10 @@ figure.image img {
 @media (prefers-reduced-motion: reduce) {
     .button,
     .button:hover,
-    .button:focus {
-        animation: none !important;
+    .button:focus,
+    .progress::-webkit-progress-value,
+    .progress::-moz-progress-bar {
         transition: none !important;
+        animation: none !important;
     }
 }

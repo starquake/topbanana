@@ -142,57 +142,62 @@ export class GameApp {
         this.animateQuestionEntrance();
     }
 
-    // animateQuestionEntrance fades and scales the question text in, and
-    // staggers the answer buttons so the screen feels alive when a new
-    // question lands. Run inside requestAnimationFrame so Alpine has
-    // committed the new markup before anime.js targets it.
+    // animateQuestionEntrance carries the question and answer buttons in
+    // with generous travel and a longer settle — the page is intentionally
+    // calm at rest, so the entrance is where the personality lives. Run
+    // inside requestAnimationFrame so Alpine has committed the new markup
+    // before anime.js targets it.
     animateQuestionEntrance() {
         requestAnimationFrame(() => {
             runAnim('.subtitle', {
                 opacity: [0, 1],
-                scale: [0.95, 1],
-                translateY: [8, 0],
-                duration: 280,
-                easing: 'easeOutCubic',
+                translateY: [36, 0],
+                duration: 520,
+                easing: 'easeOutQuart',
             });
             runAnim('.buttons .button', {
                 opacity: [0, 1],
-                translateY: [12, 0],
-                duration: 240,
-                delay: staggerDelay(60),
-                easing: 'easeOutCubic',
+                translateY: [48, 0],
+                scale: [0.96, 1],
+                duration: 460,
+                delay: staggerDelay(85),
+                easing: 'easeOutQuart',
             });
         });
     }
 
-    // animateLeaderboard staggers the leaderboard rows in once the table
-    // renders. Defensive against an empty leaderboard.
+    // animateLeaderboard slides the leaderboard rows in from the right
+    // with a generous stagger so the table assembles itself one row at a
+    // time. Defensive against an empty leaderboard.
     animateLeaderboard() {
         requestAnimationFrame(() => {
             runAnim('.table tbody tr', {
                 opacity: [0, 1],
-                translateY: [8, 0],
-                duration: 260,
-                delay: staggerDelay(50),
-                easing: 'easeOutCubic',
+                translateX: [40, 0],
+                duration: 480,
+                delay: staggerDelay(85),
+                easing: 'easeOutQuart',
             });
         });
     }
 
-    // animateFeedback flashes the notification on a correct answer and
-    // shakes it horizontally on a wrong one.
+    // animateFeedback gives the feedback notification a noticeable kick
+    // — pop-in for correct answers, a bigger shake for wrong ones. The
+    // amplitudes are larger than the static design because the rest of
+    // the page stays still, so the motion has to carry the moment.
     animateFeedback(correct) {
         requestAnimationFrame(() => {
             if (correct) {
                 runAnim('.notification', {
-                    scale: [1, 1.06, 1],
-                    duration: 320,
-                    easing: 'easeOutQuad',
+                    scale: [0.9, 1.06, 1],
+                    rotate: ['-1.2deg', '1deg', '0deg'],
+                    duration: 560,
+                    easing: 'easeOutBack',
                 });
             } else {
                 runAnim('.notification', {
-                    translateX: [-8, 8, -6, 6, -3, 3, 0],
-                    duration: 320,
+                    translateX: [-18, 18, -14, 14, -8, 8, 0],
+                    duration: 460,
                     easing: 'easeOutQuad',
                 });
             }
@@ -232,6 +237,12 @@ export class GameApp {
         // Wait for 2 seconds before moving to next question
         await new Promise(resolve => setTimeout(resolve, 2000));
 
+        // Clear the previous question alongside the feedback so the new
+        // render swaps to the "Loading question..." placeholder. Without
+        // this, the buttons region (gated only on `!feedback`) re-mounts
+        // for one frame with the *old* question's options before
+        // nextQuestion() resolves and re-binds them.
+        this.question = null;
         this.feedback = null;
         await this.nextQuestion();
     }
