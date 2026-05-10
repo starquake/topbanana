@@ -89,6 +89,10 @@ Each domain exposes:
 
 Store interfaces are defined in the domain package so domain code does not import `internal/store`.
 
+### Naming: `Get*` is fine for DB read methods
+
+Hand-written Store and Service methods that read from the database use the `Get*` prefix (`GetQuiz`, `GetGameByPlayerAndQuiz`, etc.), matching the sqlc-generated layer in `internal/db/`. Do NOT rename these to `Fetch*` for stylistic reasons — the Google Go Style Guide's "no `Get` prefix" rule is aimed at pure accessors, not DB I/O wrappers, and sqlc's generated names are the ground truth we cannot change. Diverging means readers translate at every wrapper boundary forever. Considered and rejected in #147 (closed wontfix).
+
 ## Adding a new feature (checklist)
 
 1. **Migration** — add a `.sql` file in `internal/migrations/` using `goose` up/down format.
