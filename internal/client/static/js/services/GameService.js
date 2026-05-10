@@ -16,6 +16,14 @@ export class GameService {
         return await response.json();
     }
 
+    async getMyGameForQuiz(slugId) {
+        const response = await fetch(`/api/quizzes/${slugId}/my-game`);
+        if (response.status === 404) {
+            return null;
+        }
+        return await response.json();
+    }
+
     async submitAnswer(gameId, questionId, optionId) {
         const response = await fetch(`/api/games/${gameId}/questions/${questionId}/answers`, {
             method: 'POST',

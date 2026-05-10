@@ -26,6 +26,9 @@
                         </div>
                     </div>
                 </div>
+                <template x-if="startError">
+                    <div class="notification is-danger" x-text="startError"></div>
+                </template>
                 <button class="button is-primary" @click="startGame()" :disabled="!selectedQuizId">Start Game</button>
             </div>
 

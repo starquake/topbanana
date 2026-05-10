@@ -8,6 +8,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 )
 
@@ -120,6 +121,97 @@ func (q *Queries) CreateParticipant(ctx context.Context, arg CreateParticipantPa
 	return i, err
 }
 
+const deleteGameAnswersByGameIDs = `-- name: DeleteGameAnswersByGameIDs :exec
+DELETE
+FROM game_answers
+WHERE game_id IN (/*SLICE:game_ids*/?)
+`
+
+// Hard-deletes every game_answers row attached to the given game IDs. Used
+// by the player-on-quiz reset flow with the IDs gathered up front by
+// ListGameIDsForPlayerOnQuiz.
+func (q *Queries) DeleteGameAnswersByGameIDs(ctx context.Context, gameIds []string) error {
+	query := deleteGameAnswersByGameIDs
+	var queryParams []interface{}
+	if len(gameIds) > 0 {
+		for _, v := range gameIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:game_ids*/?", strings.Repeat(",?", len(gameIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:game_ids*/?", "NULL", 1)
+	}
+	_, err := q.db.ExecContext(ctx, query, queryParams...)
+	return err
+}
+
+const deleteGameParticipantsByGameIDs = `-- name: DeleteGameParticipantsByGameIDs :exec
+DELETE
+FROM game_participants
+WHERE game_id IN (/*SLICE:game_ids*/?)
+`
+
+// Hard-deletes every game_participants row attached to the given game IDs.
+func (q *Queries) DeleteGameParticipantsByGameIDs(ctx context.Context, gameIds []string) error {
+	query := deleteGameParticipantsByGameIDs
+	var queryParams []interface{}
+	if len(gameIds) > 0 {
+		for _, v := range gameIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:game_ids*/?", strings.Repeat(",?", len(gameIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:game_ids*/?", "NULL", 1)
+	}
+	_, err := q.db.ExecContext(ctx, query, queryParams...)
+	return err
+}
+
+const deleteGameQuestionsByGameIDs = `-- name: DeleteGameQuestionsByGameIDs :exec
+DELETE
+FROM game_questions
+WHERE game_id IN (/*SLICE:game_ids*/?)
+`
+
+// Hard-deletes every game_questions row attached to the given game IDs.
+func (q *Queries) DeleteGameQuestionsByGameIDs(ctx context.Context, gameIds []string) error {
+	query := deleteGameQuestionsByGameIDs
+	var queryParams []interface{}
+	if len(gameIds) > 0 {
+		for _, v := range gameIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:game_ids*/?", strings.Repeat(",?", len(gameIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:game_ids*/?", "NULL", 1)
+	}
+	_, err := q.db.ExecContext(ctx, query, queryParams...)
+	return err
+}
+
+const deleteGamesByIDs = `-- name: DeleteGamesByIDs :exec
+DELETE
+FROM games
+WHERE id IN (/*SLICE:ids*/?)
+`
+
+// Hard-deletes the given games themselves. Run last; the participant /
+// question / answer rows referencing these games have already been removed.
+func (q *Queries) DeleteGamesByIDs(ctx context.Context, ids []string) error {
+	query := deleteGamesByIDs
+	var queryParams []interface{}
+	if len(ids) > 0 {
+		for _, v := range ids {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:ids*/?", strings.Repeat(",?", len(ids))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:ids*/?", "NULL", 1)
+	}
+	_, err := q.db.ExecContext(ctx, query, queryParams...)
+	return err
+}
+
 const getGame = `-- name: GetGame :one
 SELECT id, quiz_id, created_at, started_at
 FROM games
@@ -128,6 +220,37 @@ WHERE id = ?
 
 func (q *Queries) GetGame(ctx context.Context, id string) (Game, error) {
 	row := q.db.QueryRowContext(ctx, getGame, id)
+	var i Game
+	err := row.Scan(
+		&i.ID,
+		&i.QuizID,
+		&i.CreatedAt,
+		&i.StartedAt,
+	)
+	return i, err
+}
+
+const getGameByPlayerAndQuiz = `-- name: GetGameByPlayerAndQuiz :one
+SELECT g.id, g.quiz_id, g.created_at, g.started_at
+FROM games g
+         JOIN game_participants gp ON gp.game_id = g.id
+WHERE gp.player_id = ?
+  AND g.quiz_id = ?
+ORDER BY g.created_at DESC
+LIMIT 1
+`
+
+type GetGameByPlayerAndQuizParams struct {
+	PlayerID int64
+	QuizID   int64
+}
+
+// Returns the most-recent game for the given (player, quiz) pair. Used by the
+// player-side resume flow (GET /api/quizzes/{slugID}/my-game) and as a
+// defensive backstop in CreateGame so the same player cannot start a second
+// attempt at a quiz they have already played.
+func (q *Queries) GetGameByPlayerAndQuiz(ctx context.Context, arg GetGameByPlayerAndQuizParams) (Game, error) {
+	row := q.db.QueryRowContext(ctx, getGameByPlayerAndQuiz, arg.PlayerID, arg.QuizID)
 	var i Game
 	err := row.Scan(
 		&i.ID,
@@ -219,9 +342,9 @@ type ListAnswersForQuizLeaderboardRow struct {
 }
 
 // Selects the per-answer scoring inputs for every game of the given quiz.
-// The leaderboard service assumes one attempt per (player, quiz) (#145 covers
-// enforcement) and sums these rows per player; if multiple attempts ever leak
-// through, scores will be inflated until enforcement lands.
+// The leaderboard service sums these rows per player. The one-attempt-per-
+// (player, quiz) constraint enforced by #145 keeps the sum from
+// double-counting a re-played quiz.
 func (q *Queries) ListAnswersForQuizLeaderboard(ctx context.Context, quizID int64) ([]ListAnswersForQuizLeaderboardRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAnswersForQuizLeaderboard, quizID)
 	if err != nil {
@@ -242,6 +365,47 @@ func (q *Queries) ListAnswersForQuizLeaderboard(ctx context.Context, quizID int6
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listGameIDsForPlayerOnQuiz = `-- name: ListGameIDsForPlayerOnQuiz :many
+SELECT g.id
+FROM games g
+         JOIN game_participants gp ON gp.game_id = g.id
+WHERE gp.player_id = ?
+  AND g.quiz_id = ?
+`
+
+type ListGameIDsForPlayerOnQuizParams struct {
+	PlayerID int64
+	QuizID   int64
+}
+
+// Lists every game ID the player has on the given quiz. The reset flow
+// collects these once at the start of the in-Go transaction and feeds them
+// into the dependent deletes; doing it that way avoids a delete-order
+// problem where each subsequent statement's subquery would see fewer rows
+// as we drained the dependency tables.
+func (q *Queries) ListGameIDsForPlayerOnQuiz(ctx context.Context, arg ListGameIDsForPlayerOnQuizParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listGameIDsForPlayerOnQuiz, arg.PlayerID, arg.QuizID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

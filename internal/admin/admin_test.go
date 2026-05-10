@@ -20,8 +20,70 @@ import (
 
 	. "github.com/starquake/topbanana/internal/admin"
 	"github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/quiz"
 )
+
+// stubGameStore satisfies game.Store for admin handler tests; only the
+// methods the admin code actually exercises are wired up. The leaderboard
+// fetch on the quiz view defaults to "no rows" so test cases that don't
+// care about the players list keep working with no extra setup.
+type stubGameStore struct {
+	listAnswersForQuizLeaderboard func(ctx context.Context, quizID int64) ([]*game.LeaderboardAnswer, error)
+	deleteGamesForPlayerOnQuiz    func(ctx context.Context, playerID, quizID int64) error
+}
+
+func (stubGameStore) Ping(_ context.Context) error { return nil }
+
+func (stubGameStore) GetGame(_ context.Context, _ string) (*game.Game, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (stubGameStore) GetGameByPlayerAndQuiz(_ context.Context, _, _ int64) (*game.Game, error) {
+	return nil, game.ErrGameNotFound
+}
+
+func (stubGameStore) CreateGame(_ context.Context, _ *game.Game) error {
+	return errors.ErrUnsupported
+}
+func (stubGameStore) StartGame(_ context.Context, _ string) error { return errors.ErrUnsupported }
+func (stubGameStore) CreateParticipant(_ context.Context, _ *game.Participant) error {
+	return errors.ErrUnsupported
+}
+
+func (stubGameStore) CreateQuestion(_ context.Context, _ *game.Question) error {
+	return errors.ErrUnsupported
+}
+
+func (stubGameStore) CreateAnswer(_ context.Context, _ *game.Answer) error {
+	return errors.ErrUnsupported
+}
+
+func (s stubGameStore) ListAnswersForQuizLeaderboard(
+	ctx context.Context, quizID int64,
+) ([]*game.LeaderboardAnswer, error) {
+	if s.listAnswersForQuizLeaderboard == nil {
+		return nil, nil
+	}
+
+	return s.listAnswersForQuizLeaderboard(ctx, quizID)
+}
+
+func (s stubGameStore) DeleteGamesForPlayerOnQuiz(
+	ctx context.Context, playerID, quizID int64,
+) error {
+	if s.deleteGamesForPlayerOnQuiz == nil {
+		return nil
+	}
+
+	return s.deleteGamesForPlayerOnQuiz(ctx, playerID, quizID)
+}
+
+// newGameService wires the supplied stubs into a [game.Service] so
+// admin handler tests can call the constructor with the real type.
+func newGameService(gs stubGameStore, qs stubQuizStore) *game.Service {
+	return game.NewService(gs, qs, slog.New(slog.DiscardHandler))
+}
 
 type errReader struct{ err error }
 
@@ -453,7 +515,7 @@ func TestHandleQuizView(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuizView(logger, nil, quizStore)
+		handler := HandleQuizView(logger, nil, quizStore, newGameService(stubGameStore{}, quizStore))
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -483,7 +545,7 @@ func TestHandleQuizView(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuizView(logger, nil, quizStore)
+		handler := HandleQuizView(logger, nil, quizStore, newGameService(stubGameStore{}, quizStore))
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -513,7 +575,7 @@ func TestHandleQuizView_ErrorHandling(t *testing.T) {
 
 		quizStore := stubQuizStore{}
 
-		handler := HandleQuizView(logger, nil, quizStore)
+		handler := HandleQuizView(logger, nil, quizStore, newGameService(stubGameStore{}, quizStore))
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/abc", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -545,7 +607,7 @@ func TestHandleQuizView_ErrorHandling(t *testing.T) {
 			},
 		}
 
-		handler := HandleQuizView(logger, nil, quizStore)
+		handler := HandleQuizView(logger, nil, quizStore, newGameService(stubGameStore{}, quizStore))
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -2680,6 +2742,217 @@ func TestHandleQuestionDelete_ErrorHandling(t *testing.T) {
 		}
 		if got, want := buf.String(), fmt.Sprintf("err=%q", testError); !strings.Contains(got, want) {
 			t.Fatalf("got: %q, should contain: %q", got, want)
+		}
+	})
+}
+
+func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+
+	t.Run("renders a row per player with reset button", func(t *testing.T) {
+		t.Parallel()
+
+		quizStore := stubQuizStore{
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Title: "Q1", Slug: "q-1"}, nil
+			},
+		}
+		// Two leaderboard answers for two distinct players, both correct,
+		// so each player accumulates a non-zero score and shows up in the
+		// "Played by" table.
+		now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+		gameStore := stubGameStore{
+			listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*game.LeaderboardAnswer, error) {
+				return []*game.LeaderboardAnswer{
+					{
+						PlayerID: 1, Username: "alice",
+						QuestionStartedAt: now, QuestionExpiredAt: now.Add(10 * time.Second),
+						AnsweredAt: now, Correct: true,
+					},
+					{
+						PlayerID: 2, Username: "bob",
+						QuestionStartedAt: now, QuestionExpiredAt: now.Add(10 * time.Second),
+						AnsweredAt: now, Correct: true,
+					},
+				}, nil
+			},
+		}
+
+		handler := HandleQuizView(logger, nil, quizStore, newGameService(gameStore, quizStore))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
+		req.SetPathValue("quizID", "1")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusOK; got != want {
+			t.Fatalf("status = %d, want %d", got, want)
+		}
+
+		body := rr.Body.String()
+		if got, want := body, "Played by"; !strings.Contains(got, want) {
+			t.Errorf("body should contain section header %q, got %q", want, got)
+		}
+		if got, want := body, "alice"; !strings.Contains(got, want) {
+			t.Errorf("body should contain player name %q, got %q", want, got)
+		}
+		if got, want := body, "bob"; !strings.Contains(got, want) {
+			t.Errorf("body should contain player name %q, got %q", want, got)
+		}
+		// Anchor on the form action so we know the reset button targets
+		// the right URL with the player ID and quiz ID interpolated.
+		if got, want := body, `action="/admin/quizzes/1/players/1/reset"`; !strings.Contains(got, want) {
+			t.Errorf("body should contain reset form for alice, got %q", got)
+		}
+		if got, want := body, `action="/admin/quizzes/1/players/2/reset"`; !strings.Contains(got, want) {
+			t.Errorf("body should contain reset form for bob, got %q", got)
+		}
+	})
+
+	t.Run("renders 'No plays yet.' when nobody has played", func(t *testing.T) {
+		t.Parallel()
+
+		quizStore := stubQuizStore{
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Title: "Q1", Slug: "q-1"}, nil
+			},
+		}
+		gameStore := stubGameStore{} // no leaderboard rows
+
+		handler := HandleQuizView(logger, nil, quizStore, newGameService(gameStore, quizStore))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
+		req.SetPathValue("quizID", "1")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusOK; got != want {
+			t.Fatalf("status = %d, want %d", got, want)
+		}
+		if got, want := rr.Body.String(), "No plays yet."; !strings.Contains(got, want) {
+			t.Errorf("body should contain placeholder %q, got %q", want, got)
+		}
+	})
+}
+
+func TestHandleResetGameForPlayer(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+
+	t.Run("303 redirects back to the quiz page on success", func(t *testing.T) {
+		t.Parallel()
+
+		var (
+			seenPlayerID int64
+			seenQuizID   int64
+		)
+		quizStore := stubQuizStore{
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Title: "Q1"}, nil
+			},
+		}
+		gameStore := stubGameStore{
+			deleteGamesForPlayerOnQuiz: func(_ context.Context, playerID, quizID int64) error {
+				seenPlayerID = playerID
+				seenQuizID = quizID
+
+				return nil
+			},
+		}
+
+		handler := HandleResetGameForPlayer(logger, nil, newGameService(gameStore, quizStore))
+		req := httptest.NewRequestWithContext(
+			t.Context(), http.MethodPost,
+			"/admin/quizzes/42/players/7/reset", nil,
+		)
+		req.SetPathValue("quizID", "42")
+		req.SetPathValue("playerID", "7")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusSeeOther; got != want {
+			t.Fatalf("status = %d, want %d", got, want)
+		}
+		if got, want := rr.Header().Get("Location"), "/admin/quizzes/42"; got != want {
+			t.Errorf("Location = %q, want %q", got, want)
+		}
+		if got, want := seenPlayerID, int64(7); got != want {
+			t.Errorf("delete called with playerID = %d, want %d", got, want)
+		}
+		if got, want := seenQuizID, int64(42); got != want {
+			t.Errorf("delete called with quizID = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("404 when quiz does not exist", func(t *testing.T) {
+		t.Parallel()
+
+		quizStore := stubQuizStore{
+			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
+				return nil, quiz.ErrQuizNotFound
+			},
+		}
+
+		handler := HandleResetGameForPlayer(logger, nil, newGameService(stubGameStore{}, quizStore))
+		req := httptest.NewRequestWithContext(
+			t.Context(), http.MethodPost,
+			"/admin/quizzes/99/players/7/reset", nil,
+		)
+		req.SetPathValue("quizID", "99")
+		req.SetPathValue("playerID", "7")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusNotFound; got != want {
+			t.Errorf("status = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("500 when delete fails", func(t *testing.T) {
+		t.Parallel()
+
+		quizStore := stubQuizStore{
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id}, nil
+			},
+		}
+		gameStore := stubGameStore{
+			deleteGamesForPlayerOnQuiz: func(_ context.Context, _, _ int64) error {
+				return errors.New("delete boom")
+			},
+		}
+
+		handler := HandleResetGameForPlayer(logger, nil, newGameService(gameStore, quizStore))
+		req := httptest.NewRequestWithContext(
+			t.Context(), http.MethodPost,
+			"/admin/quizzes/1/players/2/reset", nil,
+		)
+		req.SetPathValue("quizID", "1")
+		req.SetPathValue("playerID", "2")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusInternalServerError; got != want {
+			t.Errorf("status = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("400 when playerID path value is non-numeric", func(t *testing.T) {
+		t.Parallel()
+
+		handler := HandleResetGameForPlayer(logger, nil, newGameService(stubGameStore{}, stubQuizStore{}))
+		req := httptest.NewRequestWithContext(
+			t.Context(), http.MethodPost,
+			"/admin/quizzes/1/players/abc/reset", nil,
+		)
+		req.SetPathValue("quizID", "1")
+		req.SetPathValue("playerID", "abc")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Errorf("status = %d, want %d", got, want)
 		}
 	})
 }

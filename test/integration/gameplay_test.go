@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -27,9 +28,9 @@ import (
 
 // httpGet issues a GET with a request-scoped context so the noctx linter is
 // happy and the request gets cancelled when the test ends.
-func httpGet(ctx context.Context, t *testing.T, client *http.Client, url string) *http.Response {
+func httpGet(ctx context.Context, t *testing.T, client *http.Client, target string) *http.Response {
 	t.Helper()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		t.Fatalf("NewRequest err = %v, want nil", err)
 	}
@@ -42,9 +43,9 @@ func httpGet(ctx context.Context, t *testing.T, client *http.Client, url string)
 }
 
 // httpPostJSON issues a POST with a JSON body and a request-scoped context.
-func httpPostJSON(ctx context.Context, t *testing.T, client *http.Client, url, body string) *http.Response {
+func httpPostJSON(ctx context.Context, t *testing.T, client *http.Client, target, body string) *http.Response {
 	t.Helper()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("NewRequest err = %v, want nil", err)
 	}
@@ -100,6 +101,78 @@ type leaderboardRes struct {
 	Entries []leaderboardEntryRes `json:"entries"`
 }
 
+// registerAdminAndResetPlayer registers a fresh admin via the public
+// /register form (the first password-bearing registrant becomes admin),
+// then POSTs to /admin/quizzes/{quizID}/players/{playerID}/reset with a
+// freshly-fetched CSRF token. Used by the gameplay test to exercise the
+// admin reset path end-to-end after a player has finished a quiz.
+func registerAdminAndResetPlayer(
+	ctx context.Context, t *testing.T, client *http.Client, baseURL string, quizID, playerID int64,
+) {
+	t.Helper()
+
+	// Step 1: GET /register to seed the CSRF nonce on the jar and pull
+	// the matching hidden token out of the form.
+	registerToken := fetchCSRFToken(ctx, t, client, baseURL+"/register")
+
+	registerForm := url.Values{}
+	registerForm.Add("username", "gameplay-admin")
+	registerForm.Add("password", "gameplay-admin-pass-123")
+	registerForm.Add("csrf_token", registerToken)
+
+	registerReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, baseURL+"/register",
+		strings.NewReader(registerForm.Encode()),
+	)
+	if err != nil {
+		t.Fatalf("failed to build register request: %v", err)
+	}
+	registerReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	registerResp, err := client.Do(registerReq)
+	if err != nil {
+		t.Fatalf("failed to register: %v", err)
+	}
+	if got, want := registerResp.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("register status = %d, want %d", got, want)
+	}
+	if cerr := registerResp.Body.Close(); cerr != nil {
+		t.Errorf("register body close err = %v", cerr)
+	}
+
+	// Step 2: GET the quiz view to receive a CSRF token tied to the
+	// admin session jar.
+	quizViewURL := fmt.Sprintf("%s/admin/quizzes/%d", baseURL, quizID)
+	resetToken := fetchCSRFToken(ctx, t, client, quizViewURL)
+
+	resetForm := url.Values{}
+	resetForm.Add("csrf_token", resetToken)
+
+	resetURL := fmt.Sprintf("%s/admin/quizzes/%d/players/%d/reset", baseURL, quizID, playerID)
+	resetReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, resetURL, strings.NewReader(resetForm.Encode()),
+	)
+	if err != nil {
+		t.Fatalf("failed to build reset request: %v", err)
+	}
+	resetReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resetResp, err := client.Do(resetReq)
+	if err != nil {
+		t.Fatalf("failed to POST admin reset: %v", err)
+	}
+	defer func() {
+		if cerr := resetResp.Body.Close(); cerr != nil {
+			t.Errorf("reset body close err = %v", cerr)
+		}
+	}()
+	if got, want := resetResp.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("admin reset status = %d, want %d", got, want)
+	}
+	wantLocation := fmt.Sprintf("/admin/quizzes/%d", quizID)
+	if got, want := resetResp.Header.Get("Location"), wantLocation; got != want {
+		t.Errorf("admin reset Location = %q, want %q", got, want)
+	}
+}
+
 // integrationSetup bundles the artefacts a gameplay-style integration test
 // needs. Context is intentionally returned separately from the struct (passed
 // out of setupIntegration as the first return value) to avoid containedctx.
@@ -124,9 +197,14 @@ func setupIntegration(t *testing.T) (context.Context, integrationSetup) {
 
 	getenv := func(key string) string {
 		env := map[string]string{
-			"HOST":   "localhost",
-			"PORT":   "0", // Let the OS choose an available port
-			"DB_URI": dbURI,
+			"HOST": "localhost",
+			"PORT": "0", // Let the OS choose an available port
+			// REGISTRATION_ENABLED=true so the admin-reset portion of the
+			// gameplay test can register the first user (which becomes the
+			// admin) and POST to /admin/quizzes/.../reset. The first
+			// registered user is the admin per the existing auth flow.
+			"REGISTRATION_ENABLED": "true",
+			"DB_URI":               dbURI,
 		}
 
 		return env[key]
@@ -417,6 +495,91 @@ func TestGameplay_Integration(t *testing.T) {
 	}
 	if got := leaderboard.Entries[0].PlayerID; got <= 0 {
 		t.Errorf("leaderboard.Entries[0].PlayerID = %d, want > 0", got)
+	}
+	completedPlayerID := leaderboard.Entries[0].PlayerID
+
+	// One-attempt-per-quiz: GET /my-game now reports the finished game
+	// with completed=true.
+	myGameURL := fmt.Sprintf("%s/api/quizzes/%s-%d/my-game", baseURL, qz.Slug, qz.ID)
+	resp = httpGet(ctx, t, client, myGameURL)
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("GET /my-game status = %d, want %d", got, want)
+	}
+
+	var myGameRes struct {
+		GameID    string `json:"gameId"`
+		Completed bool   `json:"completed"`
+	}
+	if derr := json.NewDecoder(resp.Body).Decode(&myGameRes); derr != nil {
+		t.Fatalf("failed to decode my-game response: %v", derr)
+	}
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+	}
+	if got, want := myGameRes.GameID, gameID; got != want {
+		t.Errorf("my-game GameID = %q, want %q", got, want)
+	}
+	if got, want := myGameRes.Completed, true; got != want {
+		t.Errorf("my-game Completed = %v, want %v", got, want)
+	}
+
+	// A second POST /api/games for the same player + quiz must be
+	// rejected with 409 — the frontend should have called my-game first.
+	resp = httpPostJSON(ctx, t, client, baseURL+"/api/games", createGameReq)
+	if got, want := resp.StatusCode, http.StatusConflict; got != want {
+		t.Fatalf("second create game status = %d, want %d", got, want)
+	}
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+	}
+
+	// Admin reset (drive via the HTTP route, with CSRF token from the
+	// admin form). Use a separate jar / client so the admin's own session
+	// does not interfere with the player flow above.
+	adminClient := &http.Client{
+		Jar: func() *cookiejar.Jar {
+			j, jerr := cookiejar.New(nil)
+			if jerr != nil {
+				t.Fatalf("failed to create admin cookie jar: %v", jerr)
+			}
+
+			return j
+		}(),
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	registerAdminAndResetPlayer(ctx, t, adminClient, baseURL, qz.ID, completedPlayerID)
+
+	// After reset, GET /my-game returns 404 — no game for this (player, quiz).
+	resp = httpGet(ctx, t, client, myGameURL)
+	if got, want := resp.StatusCode, http.StatusNotFound; got != want {
+		t.Fatalf("after reset, GET /my-game status = %d, want %d", got, want)
+	}
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+	}
+
+	// And the player can now POST /api/games again to start fresh.
+	resp = httpPostJSON(ctx, t, client, baseURL+"/api/games", createGameReq)
+	if got, want := resp.StatusCode, http.StatusCreated; got != want {
+		t.Fatalf("after reset, create game status = %d, want %d", got, want)
+	}
+
+	var freshGameRes struct {
+		ID string `json:"id"`
+	}
+	if derr := json.NewDecoder(resp.Body).Decode(&freshGameRes); derr != nil {
+		t.Fatalf("failed to decode fresh create-game response: %v", derr)
+	}
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+	}
+	if got := freshGameRes.ID; got == "" {
+		t.Error("fresh game ID is empty, want non-empty")
+	}
+	if freshGameRes.ID == gameID {
+		t.Errorf("fresh game ID %q equals old game ID %q, want a new ID", freshGameRes.ID, gameID)
 	}
 
 	// Shutdown server

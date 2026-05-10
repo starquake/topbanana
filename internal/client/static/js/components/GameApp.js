@@ -18,6 +18,7 @@ export class GameApp {
         // display:none from a prior broken image would otherwise hide the
         // next image too.
         this.imageError = false;
+        this.startError = null;
     }
 
     async init() {
@@ -28,11 +29,22 @@ export class GameApp {
     }
 
     async startGame() {
+        this.startError = null;
         const quiz = this.quizzes.find(q => q.id === parseInt(this.selectedQuizId));
         if (!quiz) return;
         this.quizSlugId = `${quiz.slug}-${quiz.id}`;
-        const data = await gameService.startGame(this.selectedQuizId);
-        this.gameId = data.id;
+        const existing = await gameService.getMyGameForQuiz(this.quizSlugId);
+        if (existing && existing.completed) {
+            this.startError = "You've already completed this quiz.";
+            this.quizSlugId = null;
+            return;
+        }
+        if (existing) {
+            this.gameId = existing.gameId;
+        } else {
+            const data = await gameService.startGame(this.selectedQuizId);
+            this.gameId = data.id;
+        }
         await this.nextQuestion();
     }
 
@@ -101,5 +113,6 @@ export class GameApp {
         this.feedback = null;
         this.progress = 100;
         this.imageError = false;
+        this.startError = null;
     }
 }

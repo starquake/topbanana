@@ -27,7 +27,7 @@ func addRoutes(
 	csrfMgr := csrf.New([]byte(cfg.SessionKey))
 
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg)
-	addAdminRoutes(mux, logger, stores, sessions, csrfMgr)
+	addAdminRoutes(mux, logger, stores, gameService, sessions, csrfMgr)
 	addAPIRoutes(mux, logger, stores, gameService, sessions)
 
 	// Client
@@ -79,6 +79,7 @@ func addAdminRoutes(
 	mux *http.ServeMux,
 	logger *slog.Logger,
 	stores *store.Stores,
+	gameService *game.Service,
 	sessions *session.Manager,
 	csrfMgr *csrf.Manager,
 ) {
@@ -89,7 +90,10 @@ func addAdminRoutes(
 
 	mux.Handle("GET /admin", requireAdmin(admin.HandleIndex(logger, csrfMgr)))
 	mux.Handle("GET /admin/quizzes", requireAdmin(admin.HandleQuizList(logger, csrfMgr, stores.Quizzes)))
-	mux.Handle("GET /admin/quizzes/{quizID}", requireAdmin(admin.HandleQuizView(logger, csrfMgr, stores.Quizzes)))
+	mux.Handle(
+		"GET /admin/quizzes/{quizID}",
+		requireAdmin(admin.HandleQuizView(logger, csrfMgr, stores.Quizzes, gameService)),
+	)
 	mux.Handle("GET /admin/quizzes/new", requireAdmin(admin.HandleQuizCreate(logger, csrfMgr)))
 	mux.Handle("POST /admin/quizzes", csrfMW(requireAdmin(admin.HandleQuizSave(logger, csrfMgr, stores.Quizzes))))
 	mux.Handle(
@@ -103,6 +107,10 @@ func addAdminRoutes(
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/delete",
 		csrfMW(requireAdmin(admin.HandleQuizDelete(logger, csrfMgr, stores.Quizzes))),
+	)
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/players/{playerID}/reset",
+		csrfMW(requireAdmin(admin.HandleResetGameForPlayer(logger, csrfMgr, gameService))),
 	)
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}/questions/new",
@@ -153,6 +161,10 @@ func addAPIRoutes(
 	mux.Handle(
 		"GET /api/quizzes/{slugID}/leaderboard",
 		ensurePlayer(clientapi.HandleQuizLeaderboard(logger, gameService)),
+	)
+	mux.Handle(
+		"GET /api/quizzes/{slugID}/my-game",
+		ensurePlayer(clientapi.HandleGameForQuiz(logger, gameService)),
 	)
 	mux.Handle("POST /api/games", ensurePlayer(clientapi.HandleCreateGame(logger, gameService)))
 	mux.Handle(

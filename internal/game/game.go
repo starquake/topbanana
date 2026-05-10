@@ -20,12 +20,30 @@ const (
 	defaultLeaderboardLimit = 10
 )
 
-// ErrGameNotFound is returned when a game is not found.
 var (
-	ErrGameNotFound               = errors.New("game not found")
-	ErrNoMoreQuestions            = errors.New("no more questions")
-	ErrQuestionNotInGame          = errors.New("question not in game")
-	ErrOptionNotInQuestion        = errors.New("option does not belong to question")
+	// ErrGameNotFound is returned when a game lookup finds no matching row.
+	ErrGameNotFound = errors.New("game not found")
+
+	// ErrGameAlreadyExists is returned by [Service.CreateGame] when the
+	// player already has a game (in-progress or completed) for the quiz.
+	// Callers that need to render a "resume" affordance should call
+	// [Service.GetGameForPlayerOnQuiz] first.
+	ErrGameAlreadyExists = errors.New("game already exists for this player and quiz")
+
+	// ErrNoMoreQuestions is returned by [Service.GetNextQuestion] when
+	// every quiz question has already been issued for the game.
+	ErrNoMoreQuestions = errors.New("no more questions")
+
+	// ErrQuestionNotInGame is returned by [Service.SubmitAnswer] when the
+	// question being answered does not belong to the supplied game.
+	ErrQuestionNotInGame = errors.New("question not in game")
+
+	// ErrOptionNotInQuestion is returned by [Service.SubmitAnswer] when
+	// the option being submitted does not belong to the supplied question.
+	ErrOptionNotInQuestion = errors.New("option does not belong to question")
+
+	// ErrStartingGameNoRowsAffected is returned by [GameStore.StartGame]
+	// when the UPDATE matched no rows — i.e. the game does not exist.
 	ErrStartingGameNoRowsAffected = errors.New("no rows affected when starting game")
 )
 
@@ -96,7 +114,8 @@ type Results struct {
 // option's correctness, the question's start/expiry timestamps, and the
 // answer's submission time) plus the player's username and ID for the
 // leaderboard row. The leaderboard service assumes one attempt per
-// (player, quiz) — see #145 for the enforcement ticket.
+// (player, quiz); that constraint is enforced by [Service.CreateGame] and
+// the admin reset flow.
 type LeaderboardAnswer struct {
 	PlayerID          int64
 	Username          string
@@ -121,6 +140,11 @@ type Store interface {
 	// Ping returns the status of the database connection.
 	Ping(ctx context.Context) error
 	GetGame(ctx context.Context, id string) (*Game, error)
+	// GetGameByPlayerAndQuiz returns the most-recent game played by the
+	// given player on the given quiz, with [Game.Questions] populated so
+	// callers can call [Game.IsCompleted]. Returns [ErrGameNotFound] if
+	// the player has no game for the quiz.
+	GetGameByPlayerAndQuiz(ctx context.Context, playerID, quizID int64) (*Game, error)
 	// CreateGame creates a new game.
 	CreateGame(ctx context.Context, g *Game) error
 	StartGame(ctx context.Context, id string) error
@@ -131,6 +155,11 @@ type Store interface {
 	// given quiz, joined with the fields the Service needs to score each
 	// answer.
 	ListAnswersForQuizLeaderboard(ctx context.Context, quizID int64) ([]*LeaderboardAnswer, error)
+	// DeleteGamesForPlayerOnQuiz hard-deletes every game (and dependent
+	// rows) that belongs to the given player on the given quiz. No error
+	// when the player has no games for the quiz: the admin reset flow is
+	// idempotent.
+	DeleteGamesForPlayerOnQuiz(ctx context.Context, playerID, quizID int64) error
 }
 
 // Service represents a game service.
@@ -149,14 +178,43 @@ func NewService(gameStore Store, quizStore quiz.Store, logger *slog.Logger) *Ser
 	}
 }
 
+// IsCompleted reports whether the game has had every quiz question issued.
+// A question that was issued but never answered still counts as "asked"
+// because it has a [Question] row, matching [Service.GetNextQuestion]'s
+// existing semantics. Requires [Game.Quiz] to be populated; an unpopulated
+// Quiz returns false.
+func (g *Game) IsCompleted() bool {
+	if g.Quiz == nil {
+		return false
+	}
+
+	return len(g.Questions) >= len(g.Quiz.Questions) && len(g.Quiz.Questions) > 0
+}
+
 // CreateGame creates a new game with the specified quiz and player, linking the player and starting the game immediately.
 // Returns the newly created game or an error if the operation fails.
+//
+// Returns [ErrGameAlreadyExists] when the player already has a game for the
+// quiz (in-progress or completed). Callers that need to render a "resume"
+// affordance should call [Service.GetGameForPlayerOnQuiz] first; the
+// AlreadyExists error here is a defensive backstop, not the primary signal.
 func (s *Service) CreateGame(ctx context.Context, quizID, playerID int64) (*Game, error) {
 	var err error
 	// verify that the quiz exists
 	qz, err := s.quizStore.GetQuiz(ctx, quizID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quiz: %w", err)
+	}
+
+	// One-attempt-per-(player, quiz) enforcement. Checked here rather than
+	// at the DB level because the schema doesn't carry the constraint —
+	// see #145 for the design discussion.
+	existing, err := s.store.GetGameByPlayerAndQuiz(ctx, playerID, qz.ID)
+	if err != nil && !errors.Is(err, ErrGameNotFound) {
+		return nil, fmt.Errorf("failed to check existing game: %w", err)
+	}
+	if existing != nil {
+		return nil, ErrGameAlreadyExists
 	}
 
 	// Create the game record
@@ -179,6 +237,48 @@ func (s *Service) CreateGame(ctx context.Context, quizID, playerID int64) (*Game
 	}
 
 	return g, nil
+}
+
+// GetGameForPlayerOnQuiz returns the player's most-recent game for the given
+// quiz with [Game.Quiz] populated so callers can call [Game.IsCompleted].
+//
+// Returns [ErrGameNotFound] when the player has no game for the quiz, and
+// [quiz.ErrQuizNotFound] when the quiz itself does not exist.
+func (s *Service) GetGameForPlayerOnQuiz(ctx context.Context, playerID, quizID int64) (*Game, error) {
+	// Verify the quiz exists first so callers can map ErrQuizNotFound to
+	// a 404 distinct from "no game yet".
+	qz, err := s.quizStore.GetQuiz(ctx, quizID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load quiz for player resume: %w", err)
+	}
+
+	g, err := s.store.GetGameByPlayerAndQuiz(ctx, playerID, quizID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load game for player resume: %w", err)
+	}
+
+	g.Quiz = qz
+
+	return g, nil
+}
+
+// ResetGamesForPlayerOnQuiz hard-deletes every game (and dependent rows) the
+// given player has for the given quiz. The reset is idempotent: running it
+// against a (player, quiz) with no games is a no-op success so the admin
+// reset button can be pressed safely from any state.
+//
+// Returns [quiz.ErrQuizNotFound] when the quiz does not exist so the admin
+// route can map it to a 404.
+func (s *Service) ResetGamesForPlayerOnQuiz(ctx context.Context, playerID, quizID int64) error {
+	if _, err := s.quizStore.GetQuiz(ctx, quizID); err != nil {
+		return fmt.Errorf("failed to load quiz for reset: %w", err)
+	}
+
+	if err := s.store.DeleteGamesForPlayerOnQuiz(ctx, playerID, quizID); err != nil {
+		return fmt.Errorf("failed to delete games for player %d on quiz %d: %w", playerID, quizID, err)
+	}
+
+	return nil
 }
 
 // GetNextQuestion retrieves the next unanswered question for the specified game or returns nil if all are answered.
@@ -342,9 +442,8 @@ func (s *Service) GetResults(ctx context.Context, gameID string) (*Results, erro
 // [Service.GetResults].
 //
 // Assumes one attempt per (player, quiz): the service simply sums every
-// answer the player has on the quiz. Enforcement of that constraint is
-// tracked in #145; until it lands, a player who somehow has multiple
-// attempts will see the sum of all of them.
+// answer the player has on the quiz. The constraint is enforced by
+// [Service.CreateGame] together with the admin reset flow.
 //
 // Ordering: descending by score; ties are broken by ascending username for
 // determinism so a tied scoreboard is stable across requests.
