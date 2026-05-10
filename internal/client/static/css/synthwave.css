@@ -1,0 +1,295 @@
+/* Synthwave / retrowave skin for the player client. Applies only to
+   /client/ and /play/<slug>-<id>; admin and auth pages keep stock Bulma.
+
+   Colour palette (kept short on purpose so glow effects compose
+   predictably):
+     --sw-bg-deep    : page backdrop, near-black with a violet bias
+     --sw-bg-mid     : gradient stop near the horizon
+     --sw-magenta    : primary accent / question / wrong-feedback
+     --sw-purple     : button surfaces and borders
+     --sw-cyan       : leaderboard / correct feedback
+     --sw-red        : wrong-feedback flash (more saturated than magenta)
+*/
+
+:root {
+    --sw-bg-deep: #0b0014;
+    --sw-bg-mid: #1a0033;
+    --sw-magenta: #ff2d95;
+    --sw-purple: #b148ff;
+    --sw-cyan: #00f0ff;
+    --sw-red: #ff003c;
+    --sw-text: #f6e8ff;
+    --sw-text-dim: rgba(246, 232, 255, 0.65);
+}
+
+/* Page backdrop — vertical gradient with a faint perspective grid drawn
+   from a pair of repeating linear-gradients. The horizontal lines cluster
+   denser toward the horizon at ~70% via background-size differences. */
+body {
+    margin: 0;
+    min-height: 100vh;
+    color: var(--sw-text);
+    font-family: 'Orbitron', system-ui, sans-serif;
+    background-color: var(--sw-bg-deep);
+    background-image:
+        /* Horizontal lines (perspective floor) */
+        repeating-linear-gradient(
+            to bottom,
+            transparent 0,
+            transparent 38px,
+            rgba(177, 72, 255, 0.18) 38px,
+            rgba(177, 72, 255, 0.18) 39px
+        ),
+        /* Vertical lines */
+        repeating-linear-gradient(
+            to right,
+            transparent 0,
+            transparent 64px,
+            rgba(177, 72, 255, 0.12) 64px,
+            rgba(177, 72, 255, 0.12) 65px
+        ),
+        /* The dark sky-to-deep-horizon wash */
+        linear-gradient(
+            to bottom,
+            var(--sw-bg-deep) 0%,
+            var(--sw-bg-mid) 70%,
+            var(--sw-bg-deep) 100%
+        );
+    overflow-x: hidden;
+}
+
+/* CRT scanline overlay — thin horizontal alternating gradient at low
+   opacity, fixed so it doesn't shift while content scrolls. Set to
+   pointer-events:none so it never interrupts clicks. */
+body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    background: repeating-linear-gradient(
+        to bottom,
+        rgba(0, 0, 0, 0) 0,
+        rgba(0, 0, 0, 0) 2px,
+        rgba(0, 0, 0, 0.18) 2px,
+        rgba(0, 0, 0, 0.18) 3px
+    );
+}
+
+/* Make sure interactive content sits above the scanline overlay. */
+.section {
+    position: relative;
+    z-index: 2;
+}
+
+/* Brand title at the top of the page. */
+.title {
+    font-family: 'Audiowide', 'Orbitron', sans-serif;
+    color: var(--sw-magenta);
+    text-shadow:
+        0 0 6px var(--sw-magenta),
+        0 0 18px rgba(255, 45, 149, 0.6),
+        0 0 32px rgba(255, 45, 149, 0.4);
+    letter-spacing: 0.04em;
+}
+
+/* Dropdown / quiz selection */
+.label {
+    color: var(--sw-text-dim);
+    font-family: 'Orbitron', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 0.85rem;
+}
+
+.select select {
+    background: rgba(11, 0, 20, 0.7);
+    color: var(--sw-text);
+    border: 1px solid var(--sw-purple);
+    border-radius: 4px;
+    box-shadow: 0 0 12px rgba(177, 72, 255, 0.35);
+    font-family: 'Orbitron', sans-serif;
+}
+
+/* The question itself — biggest text on the page, glowing magenta. */
+.subtitle {
+    font-family: 'Audiowide', 'Orbitron', sans-serif;
+    color: var(--sw-text);
+    font-size: 2.2rem;
+    line-height: 1.15;
+    text-shadow:
+        0 0 8px var(--sw-magenta),
+        0 0 24px rgba(255, 45, 149, 0.55);
+    letter-spacing: 0.02em;
+}
+
+/* "Game Finished!" / "Leaderboard" subtitles re-use .subtitle, so they
+   inherit the glow above. The leaderboard h3 needs a touch less weight. */
+h3 {
+    font-family: 'Audiowide', sans-serif;
+    color: var(--sw-cyan);
+    text-shadow:
+        0 0 6px var(--sw-cyan),
+        0 0 18px rgba(0, 240, 255, 0.5);
+}
+
+/* Description card under the deep-link title. */
+.content p {
+    color: var(--sw-text-dim);
+    font-family: 'Orbitron', sans-serif;
+}
+
+/* Buttons — every interactive button gets the neon treatment. The
+   `.button.is-primary`, `.button.is-link`, `.button.is-fullwidth` etc.
+   classes already get applied by the existing markup; we re-skin them
+   here without changing structure. */
+.button {
+    background: rgba(11, 0, 20, 0.55);
+    color: var(--sw-text);
+    border: 1px solid var(--sw-purple);
+    border-radius: 4px;
+    font-family: 'Orbitron', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    box-shadow:
+        0 0 10px rgba(177, 72, 255, 0.45),
+        inset 0 0 6px rgba(177, 72, 255, 0.18);
+    transition: transform 120ms ease-out, box-shadow 160ms ease-out, border-color 160ms ease-out;
+    animation: sw-button-idle 4s ease-in-out infinite;
+}
+
+.button:hover,
+.button:focus {
+    border-color: var(--sw-magenta);
+    box-shadow:
+        0 0 14px var(--sw-magenta),
+        0 0 28px rgba(255, 45, 149, 0.55),
+        inset 0 0 8px rgba(255, 45, 149, 0.3);
+    transform: translateY(-1px);
+    animation: none;
+}
+
+.button.is-primary {
+    border-color: var(--sw-magenta);
+    color: var(--sw-magenta);
+}
+
+.button.is-link {
+    border-color: var(--sw-cyan);
+    color: var(--sw-cyan);
+    box-shadow:
+        0 0 10px rgba(0, 240, 255, 0.45),
+        inset 0 0 6px rgba(0, 240, 255, 0.2);
+}
+
+.button[disabled],
+.button:disabled {
+    opacity: 0.4;
+    box-shadow: none;
+    animation: none;
+    cursor: not-allowed;
+}
+
+@keyframes sw-button-idle {
+    0%, 100% {
+        box-shadow:
+            0 0 10px rgba(177, 72, 255, 0.45),
+            inset 0 0 6px rgba(177, 72, 255, 0.18);
+    }
+    50% {
+        box-shadow:
+            0 0 18px rgba(177, 72, 255, 0.7),
+            inset 0 0 10px rgba(177, 72, 255, 0.32);
+    }
+}
+
+/* Progress bar — the countdown timer between questions. */
+.progress {
+    background: rgba(177, 72, 255, 0.12);
+    height: 6px;
+    border-radius: 999px;
+    overflow: hidden;
+}
+.progress::-webkit-progress-bar {
+    background: rgba(177, 72, 255, 0.12);
+    border-radius: 999px;
+}
+.progress::-webkit-progress-value,
+.progress::-moz-progress-bar {
+    background: linear-gradient(90deg, var(--sw-magenta), var(--sw-cyan));
+    box-shadow: 0 0 12px var(--sw-magenta);
+    border-radius: 999px;
+}
+
+/* Notifications — correct / wrong feedback, plus the "already played"
+   lockout. Match the genre by replacing Bulma's pastel fills with neon
+   borders + dark fills. */
+.notification {
+    background: rgba(11, 0, 20, 0.7);
+    color: var(--sw-text);
+    border-radius: 6px;
+    border: 1px solid var(--sw-purple);
+    box-shadow: 0 0 16px rgba(177, 72, 255, 0.35);
+}
+.notification.is-success {
+    border-color: var(--sw-cyan);
+    color: var(--sw-cyan);
+    box-shadow: 0 0 22px rgba(0, 240, 255, 0.55);
+    text-shadow: 0 0 6px rgba(0, 240, 255, 0.7);
+}
+.notification.is-danger {
+    border-color: var(--sw-red);
+    color: var(--sw-red);
+    box-shadow: 0 0 22px rgba(255, 0, 60, 0.55);
+    text-shadow: 0 0 6px rgba(255, 0, 60, 0.7);
+}
+
+/* Leaderboard table */
+.table {
+    background: rgba(11, 0, 20, 0.55);
+    color: var(--sw-text);
+    border: 1px solid var(--sw-purple);
+    box-shadow: 0 0 18px rgba(177, 72, 255, 0.3);
+}
+.table th {
+    color: var(--sw-cyan);
+    text-shadow: 0 0 4px rgba(0, 240, 255, 0.6);
+    border-color: rgba(177, 72, 255, 0.4);
+    font-family: 'Orbitron', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 0.8rem;
+}
+.table td {
+    border-color: rgba(177, 72, 255, 0.25);
+}
+.table.is-striped tbody tr:not(.is-selected):nth-child(even) {
+    background: rgba(177, 72, 255, 0.06);
+}
+.table tbody tr.is-selected {
+    background: rgba(0, 240, 255, 0.12);
+    color: var(--sw-cyan);
+    box-shadow: inset 0 0 12px rgba(0, 240, 255, 0.4);
+}
+.table tbody tr.is-selected td {
+    color: var(--sw-cyan);
+    text-shadow: 0 0 4px rgba(0, 240, 255, 0.7);
+}
+
+/* Question image — keep its native size but give it a neon frame. */
+figure.image img {
+    border: 1px solid var(--sw-purple);
+    box-shadow: 0 0 18px rgba(177, 72, 255, 0.4);
+    border-radius: 4px;
+}
+
+/* Reduced-motion users get all the colour but none of the movement. The
+   JS-driven animations also short-circuit via the same media query. */
+@media (prefers-reduced-motion: reduce) {
+    .button,
+    .button:hover,
+    .button:focus {
+        animation: none !important;
+        transition: none !important;
+    }
+}
