@@ -49,10 +49,14 @@ VALUES (?, ?, ?, ?)
 RETURNING *;
 
 -- name: ListAnswersForQuizLeaderboard :many
--- Selects the per-answer scoring inputs for every game of the given quiz.
--- The leaderboard service sums these rows per player. The one-attempt-per-
--- (player, quiz) constraint enforced by #145 keeps the sum from
--- double-counting a re-played quiz.
+-- Selects the per-answer scoring inputs for every completed game of the
+-- given quiz. A game counts as complete when every quiz question has
+-- been issued, i.e. the count of game_questions rows for the game has
+-- caught up with the count of questions on the quiz. Partial games
+-- (where the player walked away mid-quiz) are filtered out so the
+-- leaderboard only compares finishers. The one-attempt-per-(player,
+-- quiz) constraint enforced by #145 keeps a player from showing up more
+-- than once.
 SELECT ga.player_id        AS player_id,
        p.username           AS username,
        gq.started_at        AS question_started_at,
@@ -64,7 +68,9 @@ FROM game_answers ga
          JOIN game_questions gq ON gq.id = ga.game_question_id
          JOIN options o ON o.id = ga.option_id
          JOIN players p ON p.id = ga.player_id
-WHERE g.quiz_id = ?;
+WHERE g.quiz_id = ?
+  AND (SELECT COUNT(*) FROM game_questions gqc WHERE gqc.game_id = g.id) >=
+      (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id);
 
 -- name: GetGameByPlayerAndQuiz :one
 -- Returns the most-recent game for the given (player, quiz) pair. Used by the

@@ -113,9 +113,10 @@ type Results struct {
 // leaderboard. It carries every field [Service.CalculateScore] needs (the
 // option's correctness, the question's start/expiry timestamps, and the
 // answer's submission time) plus the player's username and ID for the
-// leaderboard row. The leaderboard service assumes one attempt per
-// (player, quiz); that constraint is enforced by [Service.CreateGame] and
-// the admin reset flow.
+// leaderboard row. The store filters these rows to completed games only
+// (every quiz question issued), and the one-attempt-per-(player, quiz)
+// constraint enforced by [Service.CreateGame] and the admin reset flow
+// keeps a player from showing up more than once.
 type LeaderboardAnswer struct {
 	PlayerID          int64
 	Username          string
@@ -151,9 +152,11 @@ type Store interface {
 	CreateParticipant(ctx context.Context, p *Participant) error
 	CreateQuestion(ctx context.Context, gq *Question) error
 	CreateAnswer(ctx context.Context, a *Answer) error
-	// ListAnswersForQuizLeaderboard returns one row per game_answer for the
-	// given quiz, joined with the fields the Service needs to score each
-	// answer.
+	// ListAnswersForQuizLeaderboard returns one row per game_answer for
+	// completed games of the given quiz, joined with the fields the
+	// Service needs to score each answer. A game counts as completed when
+	// every quiz question has been issued (answered or timed out); partial
+	// games are filtered out at the store layer.
 	ListAnswersForQuizLeaderboard(ctx context.Context, quizID int64) ([]*LeaderboardAnswer, error)
 	// DeleteGamesForPlayerOnQuiz hard-deletes every game (and dependent
 	// rows) that belongs to the given player on the given quiz. No error
@@ -441,9 +444,12 @@ func (s *Service) GetResults(ctx context.Context, gameID string) (*Results, erro
 // Scoring reuses [Service.CalculateScore] so values stay consistent with
 // [Service.GetResults].
 //
-// Assumes one attempt per (player, quiz): the service simply sums every
-// answer the player has on the quiz. The constraint is enforced by
-// [Service.CreateGame] together with the admin reset flow.
+// Only completed games (every quiz question issued, answered or timed
+// out) are counted; partial games are filtered out by the store so a
+// player who walked away mid-quiz does not take a slot. Combined with
+// the one-attempt-per-(player, quiz) constraint enforced by
+// [Service.CreateGame] and the admin reset flow, that means each player
+// either appears with their final score for the quiz or not at all.
 //
 // Ordering: descending by score; ties are broken by ascending username for
 // determinism so a tied scoreboard is stable across requests.
