@@ -59,6 +59,12 @@ guide explicitly calls optional. If the code is fine, say so.
   `Url`, `Id`, `Db`, `HttpRequest`.
 - No `Get` prefix on getters. Use `Counts()` not `GetCounts()`. Reserve
   `Fetch`/`Compute` for operations that are expensive or perform I/O.
+  **Project exception:** `Get*` is the accepted name for hand-written
+  `Store`/`Service` methods that read from the database, because sqlc's
+  generated layer in `internal/db/` uses `Get*` and the wrapper layer
+  intentionally mirrors it. Do NOT flag `GetQuiz`, `GetGame`,
+  `GetGameByPlayerAndQuiz`, etc. on Store/Service receivers. Considered
+  and rejected as a rename in #147.
 - Variable name length proportional to scope: short in tight loops, longer in
   package-level or exported contexts.
 - Eliminate redundancy between the package name and the exported symbol name
