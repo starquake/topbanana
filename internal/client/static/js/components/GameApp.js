@@ -5,6 +5,40 @@ import { gameService } from '../services/GameService.js';
 // is the quiz ID.
 const PLAY_PATH_PATTERN = /^\/play\/.+-(\d+)\/?$/;
 
+// reducedMotion returns true when the OS-level preference is set; all
+// JS-driven animation calls below short-circuit in that case so the page
+// behaves identically to a no-animation build for affected users.
+function reducedMotion() {
+    return typeof window !== 'undefined'
+        && typeof window.matchMedia === 'function'
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+// runAnim wraps anime.js with safe fallbacks so missing globals or
+// unsupported reduced-motion preferences don't break the page. The
+// targets argument can be a CSS selector string or a DOM element.
+function runAnim(targets, params) {
+    if (reducedMotion()) return;
+    const a = typeof window !== 'undefined' ? window.anime : null;
+    if (!a) return;
+    if (typeof a.animate === 'function') {
+        a.animate(targets, params);
+    } else if (typeof a === 'function') {
+        a({ targets, ...params });
+    }
+}
+
+// staggerDelay returns a value usable as anime.js's `delay`. Prefers the
+// real anime.stagger when available, falls back to an index-based
+// computation so the staggered effect still happens on older builds.
+function staggerDelay(step) {
+    const a = typeof window !== 'undefined' ? window.anime : null;
+    if (a && typeof a.stagger === 'function') {
+        return a.stagger(step);
+    }
+    return (_el, i) => i * step;
+}
+
 export class GameApp {
     constructor() {
         this.quizzes = [];
@@ -99,11 +133,75 @@ export class GameApp {
         if (!question) {
             this.finished = true;
             this.leaderboard = await gameService.getQuizLeaderboard(this.quizSlugId);
+            this.animateLeaderboard();
             return;
         }
         this.imageError = false;
         this.question = question;
         this.startCountdown();
+        this.animateQuestionEntrance();
+    }
+
+    // animateQuestionEntrance carries the question and answer buttons in
+    // with generous travel and a longer settle — the page is intentionally
+    // calm at rest, so the entrance is where the personality lives. Run
+    // inside requestAnimationFrame so Alpine has committed the new markup
+    // before anime.js targets it.
+    animateQuestionEntrance() {
+        requestAnimationFrame(() => {
+            runAnim('.subtitle', {
+                opacity: [0, 1],
+                translateY: [36, 0],
+                duration: 520,
+                easing: 'easeOutQuart',
+            });
+            runAnim('.buttons .button', {
+                opacity: [0, 1],
+                translateY: [48, 0],
+                scale: [0.96, 1],
+                duration: 460,
+                delay: staggerDelay(85),
+                easing: 'easeOutQuart',
+            });
+        });
+    }
+
+    // animateLeaderboard slides the leaderboard rows in from the right
+    // with a generous stagger so the table assembles itself one row at a
+    // time. Defensive against an empty leaderboard.
+    animateLeaderboard() {
+        requestAnimationFrame(() => {
+            runAnim('.table tbody tr', {
+                opacity: [0, 1],
+                translateX: [40, 0],
+                duration: 480,
+                delay: staggerDelay(85),
+                easing: 'easeOutQuart',
+            });
+        });
+    }
+
+    // animateFeedback gives the feedback notification a noticeable kick
+    // — pop-in for correct answers, a bigger shake for wrong ones. The
+    // amplitudes are larger than the static design because the rest of
+    // the page stays still, so the motion has to carry the moment.
+    animateFeedback(correct) {
+        requestAnimationFrame(() => {
+            if (correct) {
+                runAnim('.notification', {
+                    scale: [0.9, 1.06, 1],
+                    rotate: ['-1.2deg', '1deg', '0deg'],
+                    duration: 560,
+                    easing: 'easeOutBack',
+                });
+            } else {
+                runAnim('.notification', {
+                    translateX: [-18, 18, -14, 14, -8, 8, 0],
+                    duration: 460,
+                    easing: 'easeOutQuad',
+                });
+            }
+        });
     }
 
     startCountdown() {
@@ -128,7 +226,8 @@ export class GameApp {
     async submitAnswer(optionId) {
         if (this.feedback) return;
         this.feedback = await gameService.submitAnswer(this.gameId, this.question.id, optionId);
-        
+        this.animateFeedback(this.feedback.correct);
+
         // Stop timer
         if (this.timer) {
             clearInterval(this.timer);
@@ -137,7 +236,13 @@ export class GameApp {
 
         // Wait for 2 seconds before moving to next question
         await new Promise(resolve => setTimeout(resolve, 2000));
-        
+
+        // Clear the previous question alongside the feedback so the new
+        // render swaps to the "Loading question..." placeholder. Without
+        // this, the buttons region (gated only on `!feedback`) re-mounts
+        // for one frame with the *old* question's options before
+        // nextQuestion() resolves and re-binds them.
+        this.question = null;
         this.feedback = null;
         await this.nextQuestion();
     }
