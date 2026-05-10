@@ -95,6 +95,7 @@ Store interfaces are defined in the domain package so domain code does not impor
    Name it `YYYYMMDDHHMMSS_description.sql`.
 2. **SQL query** — add the query to the relevant file in `internal/queries/` using `sqlc` annotations.
    Run `sqlc generate` to regenerate `internal/db/`.
+   Keep `--` comments ASCII-only: non-ASCII characters (em-dashes, curly apostrophes, etc.) in the comment block above a query confuse `sqlc`'s SQLite preprocessor and produce cryptic errors pointing at *unrelated* queries below. Plain `-` and `'` only.
 3. **Domain types** — add or update structs in the relevant domain package.
 4. **Store interface** — extend the interface in the domain package if new persistence ops are needed.
 5. **Store implementation** — implement the interface method in `internal/store/`.

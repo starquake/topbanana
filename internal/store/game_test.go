@@ -509,22 +509,30 @@ func TestGameStore_ListAnswersForQuizLeaderboard(t *testing.T) {
 			t.Fatalf("failed to create participant: %v", err)
 		}
 
+		// Issue every quiz question for the game so it counts as
+		// complete; the leaderboard query now filters out partial
+		// games. Only the first question gets an answer — the
+		// second is "issued but timed out".
 		now := time.Now().UTC().Truncate(time.Second)
-		gq := &game.Question{
-			GameID:     g.ID,
-			QuestionID: testQuiz.Questions[0].ID,
-			StartedAt:  now,
-			ExpiredAt:  now.Add(10 * time.Second),
-		}
-		if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
-			t.Fatalf("failed to create game question: %v", err)
+		gameQuestions := make([]*game.Question, len(testQuiz.Questions))
+		for i, q := range testQuiz.Questions {
+			gq := &game.Question{
+				GameID:     g.ID,
+				QuestionID: q.ID,
+				StartedAt:  now,
+				ExpiredAt:  now.Add(10 * time.Second),
+			}
+			if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+				t.Fatalf("failed to create game question %d: %v", i, err)
+			}
+			gameQuestions[i] = gq
 		}
 
 		correctOption := testQuiz.Questions[0].Options[0]
 		a := &game.Answer{
 			GameID:     g.ID,
 			PlayerID:   player.ID,
-			QuestionID: gq.ID,
+			QuestionID: gameQuestions[0].ID,
 			OptionID:   correctOption.ID,
 		}
 		if err = gameStore.CreateAnswer(t.Context(), a); err != nil {
@@ -546,6 +554,63 @@ func TestGameStore_ListAnswersForQuizLeaderboard(t *testing.T) {
 		}
 		if got, want := rows[0].Correct, correctOption.Correct; got != want {
 			t.Errorf("rows[0].Correct = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("filters out partial games where not every question was issued", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		playerStore := NewPlayerStore(db, slog.Default())
+		player, err := playerStore.CreateAnonymousPlayer(
+			t.Context(), "anon-leaderboard-partial",
+		)
+		if err != nil {
+			t.Fatalf("failed to create player: %v", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		g := &game.Game{QuizID: testQuiz.ID}
+		if err = gameStore.CreateGame(t.Context(), g); err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+		if err = gameStore.CreateParticipant(
+			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID},
+		); err != nil {
+			t.Fatalf("failed to create participant: %v", err)
+		}
+
+		// Issue only the first of two questions — game is incomplete.
+		now := time.Now().UTC().Truncate(time.Second)
+		gq := &game.Question{
+			GameID:     g.ID,
+			QuestionID: testQuiz.Questions[0].ID,
+			StartedAt:  now,
+			ExpiredAt:  now.Add(10 * time.Second),
+		}
+		if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+			t.Fatalf("failed to create game question: %v", err)
+		}
+		if err = gameStore.CreateAnswer(t.Context(), &game.Answer{
+			GameID:     g.ID,
+			PlayerID:   player.ID,
+			QuestionID: gq.ID,
+			OptionID:   testQuiz.Questions[0].Options[0].ID,
+		}); err != nil {
+			t.Fatalf("failed to create answer: %v", err)
+		}
+
+		rows, err := gameStore.ListAnswersForQuizLeaderboard(t.Context(), testQuiz.ID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got, want := len(rows), 0; got != want {
+			t.Errorf("len(rows) = %d, want %d (partial games must be filtered out)", got, want)
 		}
 	})
 
@@ -577,7 +642,10 @@ func TestGameStore_ListAnswersForQuizLeaderboard(t *testing.T) {
 		gameStore := NewGameStore(db, slog.Default())
 		now := time.Now().UTC().Truncate(time.Second)
 
-		// Record one answer on quizB (should not appear in quizA's leaderboard).
+		// Record a complete game on quizB (every quiz question issued)
+		// so the new partial-game filter would normally let its rows
+		// through. The cross-quiz filter must still keep them out of
+		// quizA's leaderboard.
 		gB := &game.Game{QuizID: quizB.ID}
 		if err = gameStore.CreateGame(t.Context(), gB); err != nil {
 			t.Fatalf("failed to create game B: %v", err)
@@ -587,19 +655,23 @@ func TestGameStore_ListAnswersForQuizLeaderboard(t *testing.T) {
 		); err != nil {
 			t.Fatalf("failed to create participant for game B: %v", err)
 		}
-		gqB := &game.Question{
-			GameID:     gB.ID,
-			QuestionID: quizB.Questions[0].ID,
-			StartedAt:  now,
-			ExpiredAt:  now.Add(10 * time.Second),
-		}
-		if err = gameStore.CreateQuestion(t.Context(), gqB); err != nil {
-			t.Fatalf("failed to create question for game B: %v", err)
+		gameQuestionsB := make([]*game.Question, len(quizB.Questions))
+		for i, q := range quizB.Questions {
+			gq := &game.Question{
+				GameID:     gB.ID,
+				QuestionID: q.ID,
+				StartedAt:  now,
+				ExpiredAt:  now.Add(10 * time.Second),
+			}
+			if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+				t.Fatalf("failed to create question %d for game B: %v", i, err)
+			}
+			gameQuestionsB[i] = gq
 		}
 		if err = gameStore.CreateAnswer(t.Context(), &game.Answer{
 			GameID:     gB.ID,
 			PlayerID:   player.ID,
-			QuestionID: gqB.ID,
+			QuestionID: gameQuestionsB[0].ID,
 			OptionID:   quizB.Questions[0].Options[0].ID,
 		}); err != nil {
 			t.Fatalf("failed to create answer for game B: %v", err)
