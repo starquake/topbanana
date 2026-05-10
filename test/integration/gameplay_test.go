@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -295,6 +296,30 @@ func TestGameplay_Integration(t *testing.T) {
 		t.Fatalf("failed to create quiz: %v", err)
 	}
 
+	// Deep-link smoke (#157 sec.3): GET /play/{slug}-{id} should rewrite
+	// to the SPA shell and return 200 with the player client HTML. Use a
+	// throwaway client (no jar) so any accidental cookie write from the
+	// static handler does not pollute the player session below.
+	deepLinkURL := fmt.Sprintf("%s/play/%s-%d", baseURL, qz.Slug, qz.ID)
+	deepLinkResp := httpGet(ctx, t, &http.Client{}, deepLinkURL)
+	if got, want := deepLinkResp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("GET /play/{slugID} status = %d, want %d", got, want)
+	}
+	deepLinkBody, err := io.ReadAll(deepLinkResp.Body)
+	if cerr := deepLinkResp.Body.Close(); cerr != nil {
+		t.Errorf("deep-link body close err = %v", cerr)
+	}
+	if err != nil {
+		t.Fatalf("failed to read deep-link body: %v", err)
+	}
+	if got, want := string(deepLinkBody), "<title>TopBanana"; !strings.Contains(got, want) {
+		t.Errorf(
+			"deep-link body should contain %q (proves SPA shell was served), got body of length %d",
+			want,
+			len(got),
+		)
+	}
+
 	// Start of the integration test. The cookie jar carries the anonymous
 	// session cookie that EnsurePlayer issues on the first request, so
 	// every subsequent request is attributed to the same player row.
@@ -497,6 +522,176 @@ func TestGameplay_Integration(t *testing.T) {
 		t.Errorf("leaderboard.Entries[0].PlayerID = %d, want > 0", got)
 	}
 	completedPlayerID := leaderboard.Entries[0].PlayerID
+
+	// Multi-player leaderboard (#157 sec.2): a second player finishes the
+	// same quiz with a different (strictly higher) score so we can assert
+	// ranking by score descending and per-requester IsCurrentPlayer flags.
+	// The first player got Q1+Q3 correct (2/3); player 2 gets all three
+	// correct so the totals are unambiguously different.
+	jar2, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("failed to create second cookie jar: %v", err)
+	}
+	client2 := &http.Client{Jar: jar2}
+
+	resp = httpPostJSON(ctx, t, client2, baseURL+"/api/games", createGameReq)
+	if got, want := resp.StatusCode, http.StatusCreated; got != want {
+		t.Fatalf("player2 create game status = %d, want %d", got, want)
+	}
+
+	var createGame2Res struct {
+		ID string `json:"id"`
+	}
+	if derr := json.NewDecoder(resp.Body).Decode(&createGame2Res); derr != nil {
+		t.Fatalf("failed to decode player2 create-game response: %v", derr)
+	}
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+	}
+	gameID2 := createGame2Res.ID
+
+	runningScore2 := 0
+	for i := range 3 {
+		resp = httpGet(ctx, t, client2, fmt.Sprintf("%s/api/games/%s/questions/next", baseURL, gameID2))
+		if got, want := resp.StatusCode, http.StatusOK; got != want {
+			t.Fatalf("player2 next question status = %d, want %d", got, want)
+		}
+
+		var nextQs2Res nextQuestionRes
+		if derr := json.NewDecoder(resp.Body).Decode(&nextQs2Res); derr != nil {
+			t.Fatalf("failed to decode player2 next question: %v", derr)
+		}
+		if cerr := resp.Body.Close(); cerr != nil {
+			t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+		}
+
+		// Player 2 gets all three questions correct.
+		var optionID2 int64
+		found2 := false
+		for _, q := range qz.Questions {
+			if q.ID == nextQs2Res.ID {
+				for _, o := range q.Options {
+					if o.Correct {
+						optionID2 = o.ID
+						found2 = true
+
+						break
+					}
+				}
+			}
+			if found2 {
+				break
+			}
+		}
+		if !found2 {
+			t.Fatalf("could not find correct option for player2 question %d", i+1)
+		}
+
+		answer2Req := fmt.Sprintf(`{"optionId": %d}`, optionID2)
+		answer2URL := fmt.Sprintf("%s/api/games/%s/questions/%d/answers", baseURL, gameID2, nextQs2Res.ID)
+		resp = httpPostJSON(ctx, t, client2, answer2URL, answer2Req)
+		if got, want := resp.StatusCode, http.StatusOK; got != want {
+			t.Fatalf("player2 answer status = %d, want %d", got, want)
+		}
+
+		var answer2Res struct {
+			Correct bool `json:"correct"`
+			Score   int  `json:"score"`
+		}
+		if derr := json.NewDecoder(resp.Body).Decode(&answer2Res); derr != nil {
+			t.Fatalf("failed to decode player2 answer response: %v", derr)
+		}
+		if cerr := resp.Body.Close(); cerr != nil {
+			t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+		}
+		if got, want := answer2Res.Correct, true; got != want {
+			t.Fatalf("player2 Q%d correct = %v, want %v", i+1, got, want)
+		}
+		runningScore2 += answer2Res.Score
+	}
+
+	// Sanity: player2 must strictly out-score player1 for the ranking
+	// assertion below to be meaningful.
+	if got := runningScore2; got <= runningScore {
+		t.Fatalf("runningScore2 = %d, want > runningScore (%d)", got, runningScore)
+	}
+
+	// GET leaderboard from player2's session: 2 entries, descending by
+	// score (player2 first), player2 flagged IsCurrentPlayer=true.
+	resp = httpGet(ctx, t, client2, leaderboardURL)
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("player2 leaderboard status = %d, want %d", got, want)
+	}
+
+	var leaderboard2 leaderboardRes
+	if derr := json.NewDecoder(resp.Body).Decode(&leaderboard2); derr != nil {
+		t.Fatalf("failed to decode player2 leaderboard response: %v", derr)
+	}
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+	}
+
+	if got, want := len(leaderboard2.Entries), 2; got != want {
+		t.Fatalf("len(leaderboard2.Entries) = %d, want %d", got, want)
+	}
+	if got, want := leaderboard2.Entries[0].Score, runningScore2; got != want {
+		t.Errorf("leaderboard2.Entries[0].Score = %d, want %d (player2 should rank first)", got, want)
+	}
+	if got, want := leaderboard2.Entries[1].Score, runningScore; got != want {
+		t.Errorf("leaderboard2.Entries[1].Score = %d, want %d (player1 should rank second)", got, want)
+	}
+	if got, want := leaderboard2.Entries[0].IsCurrentPlayer, true; got != want {
+		t.Errorf("leaderboard2.Entries[0].IsCurrentPlayer = %v, want %v (requester is player2)", got, want)
+	}
+	if got, want := leaderboard2.Entries[1].IsCurrentPlayer, false; got != want {
+		t.Errorf("leaderboard2.Entries[1].IsCurrentPlayer = %v, want %v (player1 is not the requester)", got, want)
+	}
+	if got := leaderboard2.Entries[0].PlayerID; got <= 0 {
+		t.Errorf("leaderboard2.Entries[0].PlayerID = %d, want > 0", got)
+	}
+	if got := leaderboard2.Entries[1].PlayerID; got <= 0 {
+		t.Errorf("leaderboard2.Entries[1].PlayerID = %d, want > 0", got)
+	}
+	if leaderboard2.Entries[0].PlayerID == leaderboard2.Entries[1].PlayerID {
+		t.Errorf("leaderboard2 entries have same PlayerID %d, want distinct", leaderboard2.Entries[0].PlayerID)
+	}
+	if got, want := leaderboard2.Entries[1].PlayerID, completedPlayerID; got != want {
+		t.Errorf("leaderboard2.Entries[1].PlayerID = %d, want %d (player1)", got, want)
+	}
+
+	// Re-fetch leaderboard from player1's session: same order (score is
+	// the only sort key) but the IsCurrentPlayer flags flip.
+	resp = httpGet(ctx, t, client, leaderboardURL)
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("player1 re-fetch leaderboard status = %d, want %d", got, want)
+	}
+
+	var leaderboard1Again leaderboardRes
+	if derr := json.NewDecoder(resp.Body).Decode(&leaderboard1Again); derr != nil {
+		t.Fatalf("failed to decode player1 re-fetch leaderboard response: %v", derr)
+	}
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+	}
+
+	if got, want := len(leaderboard1Again.Entries), 2; got != want {
+		t.Fatalf("len(leaderboard1Again.Entries) = %d, want %d", got, want)
+	}
+	if got, want := leaderboard1Again.Entries[0].Score, runningScore2; got != want {
+		t.Errorf("leaderboard1Again.Entries[0].Score = %d, want %d", got, want)
+	}
+	if got, want := leaderboard1Again.Entries[1].Score, runningScore; got != want {
+		t.Errorf("leaderboard1Again.Entries[1].Score = %d, want %d", got, want)
+	}
+	if got, want := leaderboard1Again.Entries[0].IsCurrentPlayer, false; got != want {
+		t.Errorf("leaderboard1Again.Entries[0].IsCurrentPlayer = %v, want %v (player2 is not the requester)", got, want)
+	}
+	if got, want := leaderboard1Again.Entries[1].IsCurrentPlayer, true; got != want {
+		t.Errorf("leaderboard1Again.Entries[1].IsCurrentPlayer = %v, want %v (requester is player1)", got, want)
+	}
+	if got, want := leaderboard1Again.Entries[1].PlayerID, completedPlayerID; got != want {
+		t.Errorf("leaderboard1Again.Entries[1].PlayerID = %d, want %d (player1)", got, want)
+	}
 
 	// One-attempt-per-quiz: GET /my-game now reports the finished game
 	// with completed=true.
