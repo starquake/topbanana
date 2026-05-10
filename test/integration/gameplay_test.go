@@ -582,6 +582,179 @@ func TestGameplay_Integration(t *testing.T) {
 		t.Errorf("fresh game ID %q equals old game ID %q, want a new ID", freshGameRes.ID, gameID)
 	}
 
+	// Auth gate: an unauthenticated client requesting an /admin route is
+	// redirected to /login with 303, not allowed through to render the
+	// admin page. A throwaway client with no jar and no auto-redirect so
+	// we can assert on the redirect itself.
+	anonClient := &http.Client{
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	anonResp := httpGet(ctx, t, anonClient, baseURL+"/admin/quizzes")
+	if got, want := anonResp.StatusCode, http.StatusSeeOther; got != want {
+		t.Errorf("anon /admin/quizzes status = %d, want %d", got, want)
+	}
+	if got, want := anonResp.Header.Get("Location"), "/login"; got != want {
+		t.Errorf("anon /admin/quizzes Location = %q, want %q", got, want)
+	}
+	if cerr := anonResp.Body.Close(); cerr != nil {
+		t.Errorf("anonResp body close err = %v", cerr)
+	}
+
+	// Regression for #155: admin delete of a played quiz must not 500.
+	// Answer one question on the fresh game first so game_questions and
+	// game_answers both have rows referencing the quiz at the moment the
+	// delete fires. Without QuizStore's in-Go cascade those rows would
+	// trigger a FOREIGN KEY constraint failure and surface as a 500.
+	freshGameID := freshGameRes.ID
+	resp = httpGet(ctx, t, client, fmt.Sprintf("%s/api/games/%s/questions/next", baseURL, freshGameID))
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("fresh next question status = %d, want %d", got, want)
+	}
+
+	var freshQs nextQuestionRes
+	if derr := json.NewDecoder(resp.Body).Decode(&freshQs); derr != nil {
+		t.Fatalf("failed to decode fresh next question: %v", derr)
+	}
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+	}
+
+	freshAnswerURL := fmt.Sprintf("%s/api/games/%s/questions/%d/answers", baseURL, freshGameID, freshQs.ID)
+	freshAnswerBody := fmt.Sprintf(`{"optionId": %d}`, freshQs.Options[0].ID)
+	resp = httpPostJSON(ctx, t, client, freshAnswerURL, freshAnswerBody)
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("fresh answer status = %d, want %d", got, want)
+	}
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+	}
+
+	// /my-game during an in-flight game: the player has answered one
+	// question but not finished, so the response is 200 with the
+	// in-flight game ID and completed=false. The player client uses
+	// this to skip the start-game button and resume.
+	resp = httpGet(ctx, t, client, myGameURL)
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("in-flight /my-game status = %d, want %d", got, want)
+	}
+
+	var inFlightMyGame struct {
+		GameID    string `json:"gameId"`
+		Completed bool   `json:"completed"`
+	}
+	if derr := json.NewDecoder(resp.Body).Decode(&inFlightMyGame); derr != nil {
+		t.Fatalf("failed to decode in-flight my-game response: %v", derr)
+	}
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+	}
+	if got, want := inFlightMyGame.GameID, freshGameID; got != want {
+		t.Errorf("in-flight my-game GameID = %q, want %q", got, want)
+	}
+	if got, want := inFlightMyGame.Completed, false; got != want {
+		t.Errorf("in-flight my-game Completed = %v, want %v", got, want)
+	}
+
+	// CSRF: a POST to a state-changing admin route without the
+	// csrf_token form field is rejected by the CSRF middleware before
+	// the handler runs. The middleware sits in front of requireAdmin,
+	// so the response is 403 (not a 303 to /login). Use a body with no
+	// csrf_token field so the cookie is present but the form value is
+	// missing.
+	csrfRejectURL := fmt.Sprintf("%s/admin/quizzes/%d/delete", baseURL, qz.ID)
+	csrfRejectReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, csrfRejectURL, strings.NewReader(""),
+	)
+	if err != nil {
+		t.Fatalf("failed to build CSRF-reject request: %v", err)
+	}
+	csrfRejectReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	csrfRejectResp, err := adminClient.Do(csrfRejectReq)
+	if err != nil {
+		t.Fatalf("failed to POST CSRF-reject request: %v", err)
+	}
+	if got, want := csrfRejectResp.StatusCode, http.StatusForbidden; got != want {
+		t.Errorf("CSRF-less admin delete status = %d, want %d", got, want)
+	}
+	if cerr := csrfRejectResp.Body.Close(); cerr != nil {
+		t.Errorf("csrfReject body close err = %v", cerr)
+	}
+
+	// CSRF: a forged token (cookie present, form value present but
+	// mismatched) is also rejected. Different code path from the
+	// missing-field case above — the cookie HMAC verification fails
+	// rather than the form-value lookup.
+	badTokenForm := url.Values{}
+	badTokenForm.Add("csrf_token", "not-a-real-token")
+	badTokenReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, csrfRejectURL, strings.NewReader(badTokenForm.Encode()),
+	)
+	if err != nil {
+		t.Fatalf("failed to build bad-token request: %v", err)
+	}
+	badTokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	badTokenResp, err := adminClient.Do(badTokenReq)
+	if err != nil {
+		t.Fatalf("failed to POST bad-token request: %v", err)
+	}
+	if got, want := badTokenResp.StatusCode, http.StatusForbidden; got != want {
+		t.Errorf("bad-token admin delete status = %d, want %d", got, want)
+	}
+	if cerr := badTokenResp.Body.Close(); cerr != nil {
+		t.Errorf("badToken body close err = %v", cerr)
+	}
+
+	// Admin POSTs /admin/quizzes/{id}/delete with a CSRF token tied to
+	// the admin session jar created by registerAdminAndResetPlayer above.
+	quizDetailURL := fmt.Sprintf("%s/admin/quizzes/%d", baseURL, qz.ID)
+	deleteToken := fetchCSRFToken(ctx, t, adminClient, quizDetailURL)
+
+	deleteForm := url.Values{}
+	deleteForm.Add("csrf_token", deleteToken)
+
+	deleteURL := fmt.Sprintf("%s/admin/quizzes/%d/delete", baseURL, qz.ID)
+	deleteReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, deleteURL, strings.NewReader(deleteForm.Encode()),
+	)
+	if err != nil {
+		t.Fatalf("failed to build admin delete request: %v", err)
+	}
+	deleteReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	deleteResp, err := adminClient.Do(deleteReq)
+	if err != nil {
+		t.Fatalf("failed to POST admin delete: %v", err)
+	}
+	if got, want := deleteResp.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("admin delete status = %d, want %d (500 here means the FK cascade regressed)", got, want)
+	}
+	if got, want := deleteResp.Header.Get("Location"), "/admin/quizzes"; got != want {
+		t.Errorf("admin delete Location = %q, want %q", got, want)
+	}
+	if cerr := deleteResp.Body.Close(); cerr != nil {
+		t.Errorf("delete body close err = %v", cerr)
+	}
+
+	// /api/quizzes no longer lists the deleted quiz.
+	resp = httpGet(ctx, t, client, baseURL+"/api/quizzes")
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("post-delete /api/quizzes status = %d, want %d", got, want)
+	}
+
+	var afterDelete []struct {
+		Title string `json:"title"`
+	}
+	if derr := json.NewDecoder(resp.Body).Decode(&afterDelete); derr != nil {
+		t.Fatalf("failed to decode quizzes after delete: %v", derr)
+	}
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+	}
+	if got, want := len(afterDelete), 0; got != want {
+		t.Errorf("quizzes after delete len = %d, want %d", got, want)
+	}
+
 	// Shutdown server
 	stop()
 	select {

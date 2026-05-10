@@ -97,6 +97,16 @@ FROM games g
 WHERE gp.player_id = ?
   AND g.quiz_id = ?;
 
+-- name: ListGameIDsForQuiz :many
+-- Lists every game ID for the quiz, regardless of player. Used by the
+-- quiz delete flow so the in-Go transaction can drop dependent
+-- game_answers / game_questions / game_participants / games rows before
+-- the quiz row itself is deleted (questions and options cascade from
+-- the quiz, but the game_* tables do not).
+SELECT id
+FROM games
+WHERE quiz_id = ?;
+
 -- name: DeleteGameAnswersByGameIDs :exec
 -- Hard-deletes every game_answers row attached to the given game IDs. Used
 -- by the player-on-quiz reset flow with the IDs gathered up front by

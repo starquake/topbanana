@@ -434,6 +434,32 @@ func (s *QuizStore) execUpdateQuestion(ctx context.Context, q *db.Queries, qs *q
 }
 
 func (*QuizStore) execDeleteQuiz(ctx context.Context, q *db.Queries, id int64) error {
+	// The cascade only covers questions -> options. The game_* tables
+	// reference quizzes (via games.quiz_id), questions (via
+	// game_questions.question_id), and options (via game_answers.option_id)
+	// without ON DELETE CASCADE, so they would block the quiz row delete
+	// once the quiz has been played. Snapshot the affected game IDs and
+	// drop the dependent rows explicitly, in the same order the
+	// player-on-quiz reset uses, before deleting the quiz itself.
+	gameIDs, err := q.ListGameIDsForQuiz(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to list game IDs for quiz %d: %w", id, err)
+	}
+	if len(gameIDs) > 0 {
+		if err = q.DeleteGameAnswersByGameIDs(ctx, gameIDs); err != nil {
+			return fmt.Errorf("failed to delete game answers: %w", err)
+		}
+		if err = q.DeleteGameQuestionsByGameIDs(ctx, gameIDs); err != nil {
+			return fmt.Errorf("failed to delete game questions: %w", err)
+		}
+		if err = q.DeleteGameParticipantsByGameIDs(ctx, gameIDs); err != nil {
+			return fmt.Errorf("failed to delete game participants: %w", err)
+		}
+		if err = q.DeleteGamesByIDs(ctx, gameIDs); err != nil {
+			return fmt.Errorf("failed to delete games: %w", err)
+		}
+	}
+
 	res, err := q.DeleteQuiz(ctx, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete quiz: %w", err)
