@@ -179,6 +179,8 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 		{name: "API Quiz Leaderboard", method: http.MethodGet, path: "/api/quizzes/quiz-1/leaderboard"},
 		{name: "API Quiz My Game", method: http.MethodGet, path: "/api/quizzes/quiz-1/my-game"},
 
+		{name: "Play Quiz", method: http.MethodGet, path: "/play/quiz-1"},
+
 		{name: "API Game Create", method: http.MethodPost, path: "/api/games"},
 		{name: "API Question Next", method: http.MethodGet, path: "/api/games/game-1/questions/next"},
 		{name: "API Answer Post", method: http.MethodPost, path: "/api/games/game-1/questions/1/answers"},

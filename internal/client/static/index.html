@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TopBanana Client</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css">
-    <script type="module" src="js/app.js"></script>
+    <script type="module" src="/client/js/app.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body>
@@ -14,11 +14,11 @@
             <h1 class="title">Top Banana!</h1>
 
             <div x-show="!gameId">
-                <div class="field">
+                <div x-show="!deepLinkedQuiz" class="field">
                     <label class="label" for="quiz-select">Select a Quiz</label>
                     <div class="control">
                         <div class="select">
-                            <select id="quiz-select" x-model="selectedQuizId">
+                            <select id="quiz-select" x-model="selectedQuizId" @change="checkAlreadyPlayed()">
                                 <template x-for="quiz in quizzes" :key="quiz.id">
                                     <option :value="quiz.id" x-text="quiz.title"></option>
                                 </template>
@@ -26,10 +26,16 @@
                         </div>
                     </div>
                 </div>
+                <template x-if="deepLinkedQuiz">
+                    <div class="content">
+                        <h2 class="subtitle" x-text="deepLinkedQuiz.title"></h2>
+                        <p x-text="deepLinkedQuiz.description"></p>
+                    </div>
+                </template>
                 <template x-if="startError">
                     <div class="notification is-danger" x-text="startError"></div>
                 </template>
-                <button class="button is-primary" @click="startGame()" :disabled="!selectedQuizId">Start Game</button>
+                <button class="button is-primary" @click="startGame()" :disabled="!selectedQuizId || !!startError">Start Game</button>
             </div>
 
             <div x-show="gameId && !finished">
@@ -93,7 +99,6 @@
                 <template x-if="!leaderboard">
                     <p>Loading leaderboard...</p>
                 </template>
-                <button class="button is-link" @click="reset()">Play Again</button>
             </div>
         </div>
     </section>
