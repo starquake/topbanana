@@ -30,4 +30,14 @@ test('register, create a quiz with varied questions, and see them on the quiz vi
   // on /admin — guards against regressing back to href="#".
   await page.getByRole('link', { name: 'Top Banana!' }).click();
   await expect(page).toHaveURL(/\/admin$/);
+
+  // Open the share modal on the quiz view and confirm the rendered share
+  // URL points at /play/<slug>-<id>. Don't try to verify the clipboard
+  // (browser permission model varies); just check the user-visible link.
+  await page.goto('/admin/quizzes');
+  await page.getByRole('cell', { name: quizTitle }).click();
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+  await page.getByRole('link', { name: 'Share quiz' }).click();
+  const shareLinkText = await page.locator('.share-link').textContent();
+  expect(shareLinkText).toMatch(/\/play\/[a-z0-9-]+-\d+$/);
 });

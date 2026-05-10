@@ -1,6 +1,10 @@
 import { quizService } from '../services/QuizService.js';
 import { gameService } from '../services/GameService.js';
 
+// PLAY_PATH_PATTERN matches /play/<anything>-<integer>; the integer suffix
+// is the quiz ID.
+const PLAY_PATH_PATTERN = /^\/play\/.+-(\d+)\/?$/;
+
 export class GameApp {
     constructor() {
         this.quizzes = [];
@@ -19,13 +23,31 @@ export class GameApp {
         // next image too.
         this.imageError = false;
         this.startError = null;
+        // Set when the page is loaded via /play/<slug>-<id>; the dropdown
+        // is hidden in that case so the player just sees a description and
+        // a Start button. Stays null on /client/, where the dropdown shows.
+        this.deepLinkedQuiz = null;
     }
 
     async init() {
         this.quizzes = await quizService.getQuizzes();
-        if (this.quizzes.length > 0) {
+        const deepLinked = this.findDeepLinkedQuiz();
+        if (deepLinked) {
+            this.deepLinkedQuiz = deepLinked;
+            this.selectedQuizId = deepLinked.id;
+        } else if (this.quizzes.length > 0) {
             this.selectedQuizId = this.quizzes[0].id;
         }
+    }
+
+    // findDeepLinkedQuiz extracts the quiz ID from /play/<slug>-<id> and
+    // returns the matching quiz, or null if the path is not a deep link or
+    // the ID does not match a known quiz.
+    findDeepLinkedQuiz() {
+        const match = window.location.pathname.match(PLAY_PATH_PATTERN);
+        if (!match) return null;
+        const id = parseInt(match[1], 10);
+        return this.quizzes.find(q => q.id === id) || null;
     }
 
     async startGame() {

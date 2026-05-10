@@ -31,7 +31,18 @@ func addRoutes(
 	addAPIRoutes(mux, logger, stores, gameService, sessions)
 
 	// Client
-	mux.Handle("/client/", client.Handler(cfg))
+	clientHandler := client.Handler(cfg)
+	mux.Handle("/client/", clientHandler)
+
+	// Per-quiz share URL. Serves the same SPA shell as /client/ but the
+	// frontend reads the slug-id off the path and pre-selects the quiz.
+	// Path is rewritten to /client/ so the existing file server (and its
+	// production minification middleware) keeps doing the work.
+	mux.Handle("GET /play/{slugID}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = "/client/"
+		clientHandler.ServeHTTP(w, r2)
+	}))
 
 	// Health
 	mux.Handle("GET /healthz", health.HandleHealthz(logger, stores))

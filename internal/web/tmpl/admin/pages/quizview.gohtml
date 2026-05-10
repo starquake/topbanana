@@ -20,6 +20,15 @@
                         </a>
                     </div>
                     <div class="level-item">
+                        <a href="#"
+                           onclick="openModal('modal-share-quiz-{{.Quiz.ID}}'); return false;">
+                            <span class="icon-text has-text-link">
+                                <span class="icon"><i class="fas fa-share"></i></span>
+                                <span>Share quiz</span>
+                            </span>
+                        </a>
+                    </div>
+                    <div class="level-item">
                         <a href="#" onclick="openModal('modal-delete-quiz-{{.Quiz.ID}}'); return false;">
                             <span class="icon-text has-text-danger">
                                 <span class="icon"><i class="fas fa-trash"></i></span>
@@ -27,6 +36,44 @@
                             </span>
                         </a>
                     </div>
+                </div>
+            </div>
+
+            <div class="modal" id="modal-share-quiz-{{.Quiz.ID}}">
+                <div class="modal-background"
+                     onclick="closeModal('modal-share-quiz-{{.Quiz.ID}}')"></div>
+                <div class="modal-card">
+                    <header class="modal-card-head">
+                        <p class="modal-card-title">Share quiz</p>
+                        <button class="delete" aria-label="close"
+                                onclick="closeModal('modal-share-quiz-{{.Quiz.ID}}')"></button>
+                    </header>
+                    <section class="modal-card-body"
+                             data-share-path="/play/{{.Quiz.Slug}}-{{.Quiz.ID}}"
+                             data-share-title="{{.Quiz.Title}}">
+                        <p class="mb-3">Anyone with this link can land directly on the quiz:</p>
+                        <p class="has-text-weight-semibold mb-4 share-link"></p>
+                        <div class="buttons">
+                            <button class="button is-link share-copy" type="button">
+                                <span class="icon"><i class="fas fa-copy"></i></span>
+                                <span>Copy link</span>
+                            </button>
+                            <button class="button is-success share-whatsapp" type="button">
+                                <span class="icon"><i class="fab fa-whatsapp"></i></span>
+                                <span>Share via WhatsApp</span>
+                            </button>
+                            <button class="button share-signal" type="button">
+                                <span>Share via Signal</span>
+                            </button>
+                        </div>
+                        <p class="help share-feedback is-hidden"></p>
+                    </section>
+                    <footer class="modal-card-foot">
+                        <div class="buttons">
+                            <button class="button"
+                                    onclick="closeModal('modal-share-quiz-{{.Quiz.ID}}')">Close</button>
+                        </div>
+                    </footer>
                 </div>
             </div>
 
@@ -200,5 +247,69 @@
     <script>
         function openModal(id) { document.getElementById(id).classList.add('is-active'); }
         function closeModal(id) { document.getElementById(id).classList.remove('is-active'); }
+
+        // Wire share-modal buttons. The share modal body carries the
+        // path and title in data-* attributes; the absolute URL is
+        // derived at click time from window.location.origin so the
+        // server doesn't need to know its public hostname.
+        document.querySelectorAll('[data-share-path]').forEach(function (body) {
+            const path = body.dataset.sharePath;
+            const title = body.dataset.shareTitle;
+            const url = window.location.origin + path;
+            const linkEl = body.querySelector('.share-link');
+            const feedback = body.querySelector('.share-feedback');
+            if (linkEl) linkEl.textContent = url;
+
+            function flash(msg) {
+                if (!feedback) return;
+                feedback.textContent = msg;
+                feedback.classList.remove('is-hidden');
+                setTimeout(function () { feedback.classList.add('is-hidden'); }, 2500);
+            }
+
+            const copyBtn = body.querySelector('.share-copy');
+            if (copyBtn) {
+                copyBtn.addEventListener('click', async function () {
+                    try {
+                        await navigator.clipboard.writeText(url);
+                        flash('Link copied to clipboard.');
+                    } catch (err) {
+                        flash('Could not copy automatically — select the link above and copy it manually.');
+                    }
+                });
+            }
+
+            const whatsappBtn = body.querySelector('.share-whatsapp');
+            if (whatsappBtn) {
+                whatsappBtn.addEventListener('click', function () {
+                    const text = title + ': ' + url;
+                    window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank', 'noopener');
+                });
+            }
+
+            const signalBtn = body.querySelector('.share-signal');
+            if (signalBtn) {
+                signalBtn.addEventListener('click', async function () {
+                    // Signal has no public web share URL, so we use the
+                    // Web Share API on platforms that support it (mobile)
+                    // and fall back to clipboard everywhere else.
+                    if (navigator.share) {
+                        try {
+                            await navigator.share({ title: title, url: url });
+                            return;
+                        } catch (err) {
+                            // User cancelled the share sheet — no-op.
+                            if (err && err.name === 'AbortError') return;
+                        }
+                    }
+                    try {
+                        await navigator.clipboard.writeText(url);
+                        flash('Link copied — paste into Signal.');
+                    } catch (err) {
+                        flash('Could not share — copy the link above manually.');
+                    }
+                });
+            }
+        });
     </script>
 {{end}}
