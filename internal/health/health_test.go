@@ -56,6 +56,10 @@ func (*stubGameStore) Ping(_ context.Context) error { return nil }
 func (*stubGameStore) GetGame(_ context.Context, _ string) (*game.Game, error) {
 	return nil, errors.ErrUnsupported
 }
+
+func (*stubGameStore) GetGameByPlayerAndQuiz(_ context.Context, _, _ int64) (*game.Game, error) {
+	return nil, errors.ErrUnsupported
+}
 func (*stubGameStore) CreateGame(_ context.Context, _ *game.Game) error               { return nil }
 func (*stubGameStore) StartGame(_ context.Context, _ string) error                    { return nil }
 func (*stubGameStore) CreateParticipant(_ context.Context, _ *game.Participant) error { return nil }
@@ -65,6 +69,10 @@ func (*stubGameStore) ListAnswersForQuizLeaderboard(
 	_ context.Context, _ int64,
 ) ([]*game.LeaderboardAnswer, error) {
 	return nil, nil
+}
+
+func (*stubGameStore) DeleteGamesForPlayerOnQuiz(_ context.Context, _, _ int64) error {
+	return nil
 }
 
 func TestHandleHealthz(t *testing.T) {

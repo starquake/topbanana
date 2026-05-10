@@ -72,6 +72,41 @@ func (s *GameStore) GetGame(ctx context.Context, id string) (*game.Game, error) 
 	return g, nil
 }
 
+// GetGameByPlayerAndQuiz returns the most-recent game for the given (player,
+// quiz) pair, with Questions populated so callers can call IsCompleted once
+// they wire the Quiz onto the returned game.
+// Returns [game.ErrGameNotFound] if the player has no game for the quiz.
+func (s *GameStore) GetGameByPlayerAndQuiz(ctx context.Context, playerID, quizID int64) (*game.Game, error) {
+	row, err := s.q.GetGameByPlayerAndQuiz(ctx, db.GetGameByPlayerAndQuizParams{
+		PlayerID: playerID,
+		QuizID:   quizID,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, game.ErrGameNotFound
+		}
+
+		return nil, fmt.Errorf("failed to get game by player %d and quiz %d: %w", playerID, quizID, err)
+	}
+
+	g := &game.Game{
+		ID:        row.ID,
+		QuizID:    row.QuizID,
+		CreatedAt: row.CreatedAt,
+	}
+
+	if row.StartedAt.Valid {
+		g.StartedAt = &row.StartedAt.Time
+	}
+
+	g.Questions, err = s.listGameQuestions(ctx, g.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list game questions for game %q: %w", g.ID, err)
+	}
+
+	return g, nil
+}
+
 // CreateGame creates a new game record in the database using the provided game details and updates the game with generated data.
 func (s *GameStore) CreateGame(ctx context.Context, g *game.Game) error {
 	var err error
@@ -155,6 +190,39 @@ func (s *GameStore) CreateAnswer(ctx context.Context, a *game.Answer) error {
 	return nil
 }
 
+// DeleteGamesForPlayerOnQuiz hard-deletes every game (and its dependent
+// participants, questions, and answers) the given player has on the given
+// quiz. The four statements run inside a single transaction; rollback on
+// any error so a partial reset never leaves orphans behind.
+//
+// The IDs are gathered up front because the per-statement subqueries we
+// would otherwise need to scope each DELETE rely on rows that earlier
+// statements have already removed (e.g. the games delete needs participants
+// to scope, but participants are gone by then). Snapshotting the IDs once
+// sidesteps that ordering puzzle entirely.
+//
+// No-op if the player has no games for the quiz.
+func (s *GameStore) DeleteGamesForPlayerOnQuiz(ctx context.Context, playerID, quizID int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
+	if err = s.deleteGamesForPlayerOnQuizTx(ctx, tx, playerID, quizID); err != nil {
+		if rbErr := tx.Rollback(); rbErr != nil {
+			return fmt.Errorf("delete games failed: %w (rollback error: %w)", err, rbErr)
+		}
+
+		return err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit reset transaction: %w", err)
+	}
+
+	return nil
+}
+
 // ListAnswersForQuizLeaderboard returns one flat row per game answer across
 // every game of the given quiz. The rows carry just enough fields for
 // [game.Service.GetQuizLeaderboard] to reuse [game.Service.CalculateScore]
@@ -180,6 +248,39 @@ func (s *GameStore) ListAnswersForQuizLeaderboard(
 	}
 
 	return answers, nil
+}
+
+func (s *GameStore) deleteGamesForPlayerOnQuizTx(
+	ctx context.Context, tx *sql.Tx, playerID, quizID int64,
+) error {
+	q := s.q.WithTx(tx)
+
+	gameIDs, err := q.ListGameIDsForPlayerOnQuiz(ctx, db.ListGameIDsForPlayerOnQuizParams{
+		PlayerID: playerID,
+		QuizID:   quizID,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list game IDs for player %d on quiz %d: %w", playerID, quizID, err)
+	}
+
+	if len(gameIDs) == 0 {
+		return nil
+	}
+
+	if err = q.DeleteGameAnswersByGameIDs(ctx, gameIDs); err != nil {
+		return fmt.Errorf("failed to delete answers: %w", err)
+	}
+	if err = q.DeleteGameQuestionsByGameIDs(ctx, gameIDs); err != nil {
+		return fmt.Errorf("failed to delete questions: %w", err)
+	}
+	if err = q.DeleteGameParticipantsByGameIDs(ctx, gameIDs); err != nil {
+		return fmt.Errorf("failed to delete participants: %w", err)
+	}
+	if err = q.DeleteGamesByIDs(ctx, gameIDs); err != nil {
+		return fmt.Errorf("failed to delete games: %w", err)
+	}
+
+	return nil
 }
 
 func (s *GameStore) listGameQuestions(ctx context.Context, gameID string) ([]*game.Question, error) {

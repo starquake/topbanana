@@ -137,6 +137,61 @@
                     <span>Add question</span>
                 </span>
             </a>
+
+            <h4 class="subtitle is-4 mt-5">Played by</h4>
+            {{if .Players}}
+                <table class="table is-striped is-fullwidth">
+                    <thead>
+                    <tr>
+                        <th>Player</th>
+                        <th>Score</th>
+                        <th>Actions</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {{range .Players}}
+                        <tr>
+                            <td>{{.Username}}</td>
+                            <td>{{.Score}}</td>
+                            <td>
+                                <a href="#" onclick="openModal('modal-reset-player-{{.PlayerID}}'); return false;">
+                                    <span class="icon-text has-text-warning">
+                                        <span class="icon"><i class="fas fa-rotate-left"></i></span>
+                                        <span>Reset</span>
+                                    </span>
+                                </a>
+                            </td>
+                        </tr>
+                    {{end}}
+                    </tbody>
+                </table>
+
+                {{range .Players}}
+                    <div class="modal" id="modal-reset-player-{{.PlayerID}}">
+                        <div class="modal-background" onclick="closeModal('modal-reset-player-{{.PlayerID}}')"></div>
+                        <div class="modal-card">
+                            <header class="modal-card-head">
+                                <p class="modal-card-title">Reset Quiz Attempt</p>
+                                <button class="delete" aria-label="close" onclick="closeModal('modal-reset-player-{{.PlayerID}}')"></button>
+                            </header>
+                            <section class="modal-card-body">
+                                Are you sure you want to reset <strong>&#34;{{.Username}}&#34;</strong>'s attempt? Their game and all answers will be deleted, and they will be able to play this quiz again. This action cannot be undone.
+                            </section>
+                            <footer class="modal-card-foot">
+                                <div class="buttons">
+                                    <form method="post" action="/admin/quizzes/{{$.Quiz.ID}}/players/{{.PlayerID}}/reset">
+                                        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                                        <button class="button is-warning" type="submit">Reset</button>
+                                    </form>
+                                    <button class="button" onclick="closeModal('modal-reset-player-{{.PlayerID}}')">Cancel</button>
+                                </div>
+                            </footer>
+                        </div>
+                    </div>
+                {{end}}
+            {{else}}
+                <p>No plays yet.</p>
+            {{end}}
         {{else}}
             <p>Quiz not found!</p>
         {{end}}

@@ -211,7 +211,10 @@ func HandleQuizLeaderboard(logger *slog.Logger, service *game.Service) http.Hand
 // Returns the ID of the created game.
 // Returns 201 if the game was created successfully.
 // Returns 400 if the request body is invalid.
-// Returns 404 if the quiz or game does not exist.
+// Returns 404 if the quiz does not exist.
+// Returns 409 if the player already has a game for the quiz (in-progress or
+// completed); the client should call GET /api/quizzes/{slugID}/my-game to
+// resolve.
 // Returns 500 if an error occurs.
 func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 	type createGameRequest struct {
@@ -251,6 +254,11 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 
 				return
 			}
+			if errors.Is(err, game.ErrGameAlreadyExists) {
+				http.Error(w, err.Error(), http.StatusConflict)
+
+				return
+			}
 			logger.ErrorContext(ctx, "error creating game", slog.Any("err", err))
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 
@@ -262,6 +270,60 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 		err = handlers.EncodeJSON(w, http.StatusCreated, res)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error encoding quizzesResponse", slog.Any("err", err))
+
+			return
+		}
+	})
+}
+
+// HandleGameForQuiz returns the requesting player's game for the given quiz,
+// if any. The frontend uses this as the resume probe before deciding whether
+// to POST /api/games for a fresh attempt.
+//
+// Returns 200 with {"gameId":..., "completed":...} when a game exists.
+// Returns 404 when the player has no game for the quiz, or when the quiz
+// itself does not exist (consistent with other ErrQuizNotFound mappings).
+// Returns 500 when EnsurePlayer hasn't populated the player on the context
+// (a wiring bug rather than a user-facing condition).
+func HandleGameForQuiz(logger *slog.Logger, service *game.Service) http.Handler {
+	type gameForQuizResponse struct {
+		GameID    string `json:"gameId"`
+		Completed bool   `json:"completed"`
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		quizID, ok := handlers.ParseIDFromSlugPath(w, r, logger, "slugID")
+		if !ok {
+			return
+		}
+
+		player, ok := auth.PlayerFromContext(ctx)
+		if !ok {
+			logger.ErrorContext(ctx, "missing player on context for game-for-quiz")
+			http.Error(w, "internal error", http.StatusInternalServerError)
+
+			return
+		}
+
+		g, err := service.GetGameForPlayerOnQuiz(ctx, player.ID, quizID)
+		if err != nil {
+			if errors.Is(err, quiz.ErrQuizNotFound) || errors.Is(err, game.ErrGameNotFound) {
+				http.NotFound(w, r)
+
+				return
+			}
+			logger.ErrorContext(ctx, "error retrieving game for quiz", slog.Any("err", err))
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+
+			return
+		}
+
+		res := gameForQuizResponse{GameID: g.ID, Completed: g.IsCompleted()}
+
+		if err = handlers.EncodeJSON(w, http.StatusOK, res); err != nil {
+			logger.ErrorContext(ctx, "error encoding gameForQuizResponse", slog.Any("err", err))
 
 			return
 		}

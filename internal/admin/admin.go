@@ -16,6 +16,7 @@ import (
 
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/web/tmpl"
@@ -577,14 +578,36 @@ func HandleQuizList(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 	})
 }
 
-// HandleQuizView returns the quiz view page.
-func HandleQuizView(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+// PlayerScoreData represents one row of the "Played by" table on the quiz
+// view page: a player who has at least one answer recorded for the quiz,
+// alongside their accumulated score (computed by the game service in the
+// same way the public leaderboard computes its scores).
+type PlayerScoreData struct {
+	PlayerID int64
+	Username string
+	Score    int
+}
+
+// HandleQuizView returns the quiz view page. It also fetches the per-quiz
+// leaderboard so the admin can see who has played and reset their attempt
+// from the same screen. We reuse the leaderboard service with a high limit
+// rather than spinning up a dedicated "list participants" service method —
+// see #145 for the rationale (and #141 for the performance ceilings).
+func HandleQuizView(
+	logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store, gameService *game.Service,
+) http.Handler {
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
 
 	type quizViewData struct {
-		Title string
-		Quiz  *QuizData
+		Title   string
+		Quiz    *QuizData
+		Players []PlayerScoreData
 	}
+
+	// playersLimit is the upper bound on rows in the "Played by" section.
+	// Set high enough that real-world quiz playthroughs fit; #141 covers
+	// pagination for genuinely large rosters.
+	const playersLimit = 1000
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
@@ -599,11 +622,72 @@ func HandleQuizView(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 			return
 		}
 
+		// Admin "Played by" doesn't highlight a current player — the
+		// template ignores IsCurrentPlayer — so pass 0 to flag nothing,
+		// per Service.GetQuizLeaderboard's documented sentinel.
+		entries, err := gameService.GetQuizLeaderboard(r.Context(), id, 0, playersLimit)
+		if err != nil {
+			logger.ErrorContext(r.Context(), "error fetching players for quiz view", slog.Any("err", err))
+			render500(w, r, logger, csrfMgr)
+
+			return
+		}
+
+		players := make([]PlayerScoreData, 0, len(entries))
+		for _, e := range entries {
+			players = append(players, PlayerScoreData{
+				PlayerID: e.PlayerID,
+				Username: e.Username,
+				Score:    e.Score,
+			})
+		}
+
 		data := quizViewData{
-			Title: "Admin Dashboard - View Quiz",
-			Quiz:  quizDataFromQuiz(qz),
+			Title:   "Admin Dashboard - View Quiz",
+			Quiz:    quizDataFromQuiz(qz),
+			Players: players,
 		}
 		render.Render(w, r, http.StatusOK, data)
+	})
+}
+
+// HandleResetGameForPlayer hard-deletes the games (and dependent rows) that
+// the given player has on the given quiz. Idempotent: if the player has no
+// games, it is a 303-redirect no-op. The admin reset button on the quiz
+// view page POSTs here.
+func HandleResetGameForPlayer(
+	logger *slog.Logger, csrfMgr *csrf.Manager, gameService *game.Service,
+) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var ok bool
+
+		var quizID int64
+		if quizID, ok = handlers.ParseIDFromPath(w, r, logger, "quizID"); !ok {
+			return
+		}
+
+		var playerID int64
+		if playerID, ok = handlers.ParseIDFromPath(w, r, logger, "playerID"); !ok {
+			return
+		}
+
+		if err := gameService.ResetGamesForPlayerOnQuiz(r.Context(), playerID, quizID); err != nil {
+			if errors.Is(err, quiz.ErrQuizNotFound) {
+				render404(w, r, logger, csrfMgr)
+
+				return
+			}
+			logger.ErrorContext(r.Context(), "error resetting games for player on quiz", slog.Any("err", err))
+			render500(w, r, logger, csrfMgr)
+
+			return
+		}
+
+		// quizID came from ParseIDFromPath, which only returns an int64
+		// once the path value parses cleanly — formatting it back via
+		// strconv.FormatInt avoids gosec's open-redirect taint heuristic
+		// for fmt.Sprintf with a path argument.
+		http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(quizID, 10), http.StatusSeeOther)
 	})
 }
 

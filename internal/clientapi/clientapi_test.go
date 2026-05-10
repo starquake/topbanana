@@ -83,12 +83,14 @@ func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Opti
 
 type stubGameStore struct {
 	getGame                       func(ctx context.Context, id string) (*game.Game, error)
+	getGameByPlayerAndQuiz        func(ctx context.Context, playerID, quizID int64) (*game.Game, error)
 	createGame                    func(ctx context.Context, g *game.Game) error
 	startGame                     func(ctx context.Context, id string) error
 	createParticipant             func(ctx context.Context, p *game.Participant) error
 	createQuestion                func(ctx context.Context, gq *game.Question) error
 	createAnswer                  func(ctx context.Context, a *game.Answer) error
 	listAnswersForQuizLeaderboard func(ctx context.Context, quizID int64) ([]*game.LeaderboardAnswer, error)
+	deleteGamesForPlayerOnQuiz    func(ctx context.Context, playerID, quizID int64) error
 }
 
 func (stubGameStore) Ping(_ context.Context) error { return nil }
@@ -101,12 +103,34 @@ func (s stubGameStore) GetGame(ctx context.Context, id string) (*game.Game, erro
 	return s.getGame(ctx, id)
 }
 
+func (s stubGameStore) GetGameByPlayerAndQuiz(
+	ctx context.Context, playerID, quizID int64,
+) (*game.Game, error) {
+	if s.getGameByPlayerAndQuiz == nil {
+		// Default to "no existing game" so existing CreateGame tests
+		// continue to exercise the success path.
+		return nil, game.ErrGameNotFound
+	}
+
+	return s.getGameByPlayerAndQuiz(ctx, playerID, quizID)
+}
+
 func (s stubGameStore) CreateGame(ctx context.Context, g *game.Game) error {
 	if s.createGame == nil {
 		return errStub
 	}
 
 	return s.createGame(ctx, g)
+}
+
+func (s stubGameStore) DeleteGamesForPlayerOnQuiz(
+	ctx context.Context, playerID, quizID int64,
+) error {
+	if s.deleteGamesForPlayerOnQuiz == nil {
+		return errStub
+	}
+
+	return s.deleteGamesForPlayerOnQuiz(ctx, playerID, quizID)
 }
 
 func (s stubGameStore) StartGame(ctx context.Context, id string) error {
@@ -459,6 +483,220 @@ func TestHandleCreateGame(t *testing.T) {
 			t.Context(), http.MethodPost, "/api/games",
 			strings.NewReader(`{"quizId": 1}`),
 		)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusInternalServerError; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+}
+
+func TestHandleCreateGame_AlreadyExists(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+
+	svc := newService(
+		stubGameStore{
+			getGameByPlayerAndQuiz: func(_ context.Context, _, _ int64) (*game.Game, error) {
+				return &game.Game{ID: "existing"}, nil
+			},
+		},
+		stubQuizStore{
+			getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Title: "Q"}, nil
+			},
+		},
+	)
+	handler := HandleCreateGame(logger, svc)
+
+	req := httptest.NewRequestWithContext(
+		withPlayer(t.Context(), 7), http.MethodPost, "/api/games",
+		strings.NewReader(`{"quizId": 1}`),
+	)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusConflict; got != want {
+		t.Errorf("status code = %v, want %v", got, want)
+	}
+}
+
+// gameForQuizTestResponse mirrors the JSON shape returned by
+// HandleGameForQuiz; pulled out of the test fn so the parent decode target
+// is not a nested struct (revive's nested-structs rule).
+type gameForQuizTestResponse struct {
+	GameID    string `json:"gameId"`
+	Completed bool   `json:"completed"`
+}
+
+func TestHandleGameForQuiz(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+
+	t.Run("returns 200 with completed=false for an in-progress game", func(t *testing.T) {
+		t.Parallel()
+
+		svc := newService(
+			stubGameStore{
+				getGameByPlayerAndQuiz: func(_ context.Context, _, _ int64) (*game.Game, error) {
+					return &game.Game{
+						ID:     "abc",
+						QuizID: 1,
+						// Only the first of two questions has been issued.
+						Questions: []*game.Question{{QuestionID: 10}},
+					}, nil
+				},
+			},
+			stubQuizStore{
+				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+					return &quiz.Quiz{
+						ID: id,
+						Questions: []*quiz.Question{
+							{ID: 10}, {ID: 20},
+						},
+					}, nil
+				},
+			},
+		)
+		handler := HandleGameForQuiz(logger, svc)
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), 7), http.MethodGet,
+			"/api/quizzes/q-1/my-game", nil,
+		)
+		req.SetPathValue("slugID", "q-1")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusOK; got != want {
+			t.Fatalf("status code = %v, want %v", got, want)
+		}
+
+		var body gameForQuizTestResponse
+		if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if got, want := body.GameID, "abc"; got != want {
+			t.Errorf("body.GameID = %q, want %q", got, want)
+		}
+		if got, want := body.Completed, false; got != want {
+			t.Errorf("body.Completed = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns 200 with completed=true once every question has been issued", func(t *testing.T) {
+		t.Parallel()
+
+		svc := newService(
+			stubGameStore{
+				getGameByPlayerAndQuiz: func(_ context.Context, _, _ int64) (*game.Game, error) {
+					return &game.Game{
+						ID:        "done",
+						QuizID:    1,
+						Questions: []*game.Question{{QuestionID: 10}, {QuestionID: 20}},
+					}, nil
+				},
+			},
+			stubQuizStore{
+				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+					return &quiz.Quiz{
+						ID: id,
+						Questions: []*quiz.Question{
+							{ID: 10}, {ID: 20},
+						},
+					}, nil
+				},
+			},
+		)
+		handler := HandleGameForQuiz(logger, svc)
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), 7), http.MethodGet,
+			"/api/quizzes/q-1/my-game", nil,
+		)
+		req.SetPathValue("slugID", "q-1")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusOK; got != want {
+			t.Fatalf("status code = %v, want %v", got, want)
+		}
+
+		var body gameForQuizTestResponse
+		if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if got, want := body.Completed, true; got != want {
+			t.Errorf("body.Completed = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns 404 when player has no game for the quiz", func(t *testing.T) {
+		t.Parallel()
+
+		svc := newService(
+			stubGameStore{
+				getGameByPlayerAndQuiz: func(_ context.Context, _, _ int64) (*game.Game, error) {
+					return nil, game.ErrGameNotFound
+				},
+			},
+			stubQuizStore{
+				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+					return &quiz.Quiz{ID: id}, nil
+				},
+			},
+		)
+		handler := HandleGameForQuiz(logger, svc)
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), 7), http.MethodGet,
+			"/api/quizzes/q-1/my-game", nil,
+		)
+		req.SetPathValue("slugID", "q-1")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusNotFound; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns 404 when quiz itself does not exist", func(t *testing.T) {
+		t.Parallel()
+
+		svc := newService(stubGameStore{}, stubQuizStore{
+			getQuiz: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
+				return nil, quiz.ErrQuizNotFound
+			},
+		})
+		handler := HandleGameForQuiz(logger, svc)
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), 7), http.MethodGet,
+			"/api/quizzes/q-99/my-game", nil,
+		)
+		req.SetPathValue("slugID", "q-99")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusNotFound; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns 500 when player missing from context", func(t *testing.T) {
+		t.Parallel()
+
+		handler := HandleGameForQuiz(logger, newService(stubGameStore{}, stubQuizStore{}))
+
+		req := httptest.NewRequestWithContext(
+			t.Context(), http.MethodGet,
+			"/api/quizzes/q-1/my-game", nil,
+		)
+		req.SetPathValue("slugID", "q-1")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 

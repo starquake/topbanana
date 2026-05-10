@@ -85,15 +85,15 @@ func TestGameStore_GetGame(t *testing.T) {
 			t.Fatalf("failed to create game: %v", err)
 		}
 
-		got, err := gameStore.GetGame(t.Context(), g.ID)
+		fetched, err := gameStore.GetGame(t.Context(), g.ID)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got.ID != g.ID {
-			t.Errorf("got.ID = %q, want %q", got.ID, g.ID)
+		if got, want := fetched.ID, g.ID; got != want {
+			t.Errorf("fetched.ID = %q, want %q", got, want)
 		}
-		if got, want := got.QuizID, testQuiz.ID; got != want {
-			t.Errorf("got.QuizID = %d, want %d", got, want)
+		if got, want := fetched.QuizID, testQuiz.ID; got != want {
+			t.Errorf("fetched.QuizID = %d, want %d", got, want)
 		}
 	})
 
@@ -257,6 +257,204 @@ func TestGameStore_CreateAnswer(t *testing.T) {
 		}
 		if a.AnsweredAt.IsZero() {
 			t.Error("a.AnsweredAt is zero, want non-zero time")
+		}
+	})
+}
+
+func TestGameStore_GetGameByPlayerAndQuiz(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns ErrGameNotFound when player has no game", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		_, err := gameStore.GetGameByPlayerAndQuiz(t.Context(), 99, testQuiz.ID)
+		if got, want := err, game.ErrGameNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns the most-recent game for the player and quiz", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+
+		quizStore := NewQuizStore(db, slog.Default())
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		playerStore := NewPlayerStore(db, slog.Default())
+		player, err := playerStore.CreateAnonymousPlayer(t.Context(), "anon-resume-1")
+		if err != nil {
+			t.Fatalf("failed to create player: %v", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		g := &game.Game{QuizID: testQuiz.ID}
+		if err = gameStore.CreateGame(t.Context(), g); err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+		if err = gameStore.CreateParticipant(
+			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID},
+		); err != nil {
+			t.Fatalf("failed to create participant: %v", err)
+		}
+
+		existing, err := gameStore.GetGameByPlayerAndQuiz(t.Context(), player.ID, testQuiz.ID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got, want := existing.ID, g.ID; got != want {
+			t.Errorf("existing.ID = %q, want %q", got, want)
+		}
+		if got, want := existing.QuizID, testQuiz.ID; got != want {
+			t.Errorf("existing.QuizID = %d, want %d", got, want)
+		}
+	})
+}
+
+func TestGameStore_DeleteGamesForPlayerOnQuiz(t *testing.T) {
+	t.Parallel()
+
+	t.Run("removes games and dependent rows for the player", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+
+		quizStore := NewQuizStore(db, slog.Default())
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		playerStore := NewPlayerStore(db, slog.Default())
+		player, err := playerStore.CreateAnonymousPlayer(t.Context(), "anon-reset-1")
+		if err != nil {
+			t.Fatalf("failed to create player: %v", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		g := &game.Game{QuizID: testQuiz.ID}
+		if err = gameStore.CreateGame(t.Context(), g); err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+		if err = gameStore.CreateParticipant(
+			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID},
+		); err != nil {
+			t.Fatalf("failed to create participant: %v", err)
+		}
+
+		now := time.Now().UTC().Truncate(time.Second)
+		gq := &game.Question{
+			GameID:     g.ID,
+			QuestionID: testQuiz.Questions[0].ID,
+			StartedAt:  now,
+			ExpiredAt:  now.Add(10 * time.Second),
+		}
+		if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+			t.Fatalf("failed to create game question: %v", err)
+		}
+		if err = gameStore.CreateAnswer(t.Context(), &game.Answer{
+			GameID:     g.ID,
+			PlayerID:   player.ID,
+			QuestionID: gq.ID,
+			OptionID:   testQuiz.Questions[0].Options[0].ID,
+		}); err != nil {
+			t.Fatalf("failed to create answer: %v", err)
+		}
+
+		if err = gameStore.DeleteGamesForPlayerOnQuiz(t.Context(), player.ID, testQuiz.ID); err != nil {
+			t.Fatalf("DeleteGamesForPlayerOnQuiz err = %v, want nil", err)
+		}
+
+		// All four tables for this game should be empty.
+		assertCount := func(label, sqlStr string, want int) {
+			t.Helper()
+			row := db.QueryRowContext(t.Context(), sqlStr, g.ID)
+			var got int
+			if scanErr := row.Scan(&got); scanErr != nil {
+				t.Fatalf("scan %s err = %v", label, scanErr)
+			}
+			if got != want {
+				t.Errorf("%s count = %d, want %d", label, got, want)
+			}
+		}
+		assertCount("game_answers", `SELECT COUNT(*) FROM game_answers WHERE game_id = ?`, 0)
+		assertCount("game_questions", `SELECT COUNT(*) FROM game_questions WHERE game_id = ?`, 0)
+		assertCount("game_participants", `SELECT COUNT(*) FROM game_participants WHERE game_id = ?`, 0)
+		assertCount("games", `SELECT COUNT(*) FROM games WHERE id = ?`, 0)
+	})
+
+	t.Run("no-op when player has no games for the quiz", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+
+		quizStore := NewQuizStore(db, slog.Default())
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		if err := gameStore.DeleteGamesForPlayerOnQuiz(t.Context(), 999, testQuiz.ID); err != nil {
+			t.Errorf("DeleteGamesForPlayerOnQuiz err = %v, want nil (no rows means no error)", err)
+		}
+	})
+
+	t.Run("does not touch other players' games on the same quiz", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+
+		quizStore := NewQuizStore(db, slog.Default())
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		playerStore := NewPlayerStore(db, slog.Default())
+		victim, err := playerStore.CreateAnonymousPlayer(t.Context(), "anon-reset-victim")
+		if err != nil {
+			t.Fatalf("failed to create victim player: %v", err)
+		}
+		bystander, err := playerStore.CreateAnonymousPlayer(t.Context(), "anon-reset-bystander")
+		if err != nil {
+			t.Fatalf("failed to create bystander player: %v", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		victimGame := &game.Game{QuizID: testQuiz.ID}
+		if err = gameStore.CreateGame(t.Context(), victimGame); err != nil {
+			t.Fatalf("failed to create victim game: %v", err)
+		}
+		if err = gameStore.CreateParticipant(
+			t.Context(), &game.Participant{GameID: victimGame.ID, PlayerID: victim.ID},
+		); err != nil {
+			t.Fatalf("failed to create victim participant: %v", err)
+		}
+
+		bystanderGame := &game.Game{QuizID: testQuiz.ID}
+		if err = gameStore.CreateGame(t.Context(), bystanderGame); err != nil {
+			t.Fatalf("failed to create bystander game: %v", err)
+		}
+		if err = gameStore.CreateParticipant(
+			t.Context(), &game.Participant{GameID: bystanderGame.ID, PlayerID: bystander.ID},
+		); err != nil {
+			t.Fatalf("failed to create bystander participant: %v", err)
+		}
+
+		if err = gameStore.DeleteGamesForPlayerOnQuiz(t.Context(), victim.ID, testQuiz.ID); err != nil {
+			t.Fatalf("DeleteGamesForPlayerOnQuiz err = %v, want nil", err)
+		}
+
+		// Bystander's game must still exist.
+		if _, err = gameStore.GetGame(t.Context(), bystanderGame.ID); err != nil {
+			t.Errorf("bystander game lookup err = %v, want nil", err)
 		}
 	})
 }

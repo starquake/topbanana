@@ -129,6 +129,10 @@ func (stubGameStore) GetGame(_ context.Context, _ string) (*game.Game, error) {
 	return nil, errRouteStub
 }
 
+func (stubGameStore) GetGameByPlayerAndQuiz(_ context.Context, _, _ int64) (*game.Game, error) {
+	return nil, game.ErrGameNotFound
+}
+
 func (stubGameStore) CreateGame(_ context.Context, _ *game.Game) error { return errRouteStub }
 func (stubGameStore) StartGame(_ context.Context, _ string) error      { return errRouteStub }
 func (stubGameStore) CreateParticipant(_ context.Context, _ *game.Participant) error {
@@ -140,6 +144,10 @@ func (stubGameStore) ListAnswersForQuizLeaderboard(
 	_ context.Context, _ int64,
 ) ([]*game.LeaderboardAnswer, error) {
 	return nil, nil
+}
+
+func (stubGameStore) DeleteGamesForPlayerOnQuiz(_ context.Context, _, _ int64) error {
+	return nil
 }
 
 func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
@@ -164,10 +172,12 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 		{name: "Admin Quiz View", method: http.MethodGet, path: "/admin/quizzes/1"},
 		{name: "Admin Quiz Create", method: http.MethodGet, path: "/admin/quizzes/new"},
 		{name: "Admin Quiz Edit", method: http.MethodGet, path: "/admin/quizzes/1/edit"},
+		{name: "Admin Reset Player", method: http.MethodPost, path: "/admin/quizzes/1/players/2/reset"},
 
 		{name: "API Quiz List", method: http.MethodGet, path: "/api/quizzes"},
 		{name: "API Quiz Get", method: http.MethodGet, path: "/api/quizzes/1"},
 		{name: "API Quiz Leaderboard", method: http.MethodGet, path: "/api/quizzes/quiz-1/leaderboard"},
+		{name: "API Quiz My Game", method: http.MethodGet, path: "/api/quizzes/quiz-1/my-game"},
 
 		{name: "API Game Create", method: http.MethodPost, path: "/api/games"},
 		{name: "API Question Next", method: http.MethodGet, path: "/api/games/game-1/questions/next"},

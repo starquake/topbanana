@@ -50,9 +50,9 @@ RETURNING *;
 
 -- name: ListAnswersForQuizLeaderboard :many
 -- Selects the per-answer scoring inputs for every game of the given quiz.
--- The leaderboard service assumes one attempt per (player, quiz) (#145 covers
--- enforcement) and sums these rows per player; if multiple attempts ever leak
--- through, scores will be inflated until enforcement lands.
+-- The leaderboard service sums these rows per player. The one-attempt-per-
+-- (player, quiz) constraint enforced by #145 keeps the sum from
+-- double-counting a re-played quiz.
 SELECT ga.player_id        AS player_id,
        p.username           AS username,
        gq.started_at        AS question_started_at,
@@ -65,3 +65,55 @@ FROM game_answers ga
          JOIN options o ON o.id = ga.option_id
          JOIN players p ON p.id = ga.player_id
 WHERE g.quiz_id = ?;
+
+-- name: GetGameByPlayerAndQuiz :one
+-- Returns the most-recent game for the given (player, quiz) pair. Used by the
+-- player-side resume flow (GET /api/quizzes/{slugID}/my-game) and as a
+-- defensive backstop in CreateGame so the same player cannot start a second
+-- attempt at a quiz they have already played.
+SELECT g.id, g.quiz_id, g.created_at, g.started_at
+FROM games g
+         JOIN game_participants gp ON gp.game_id = g.id
+WHERE gp.player_id = ?
+  AND g.quiz_id = ?
+ORDER BY g.created_at DESC
+LIMIT 1;
+
+-- name: ListGameIDsForPlayerOnQuiz :many
+-- Lists every game ID the player has on the given quiz. The reset flow
+-- collects these once at the start of the in-Go transaction and feeds them
+-- into the dependent deletes; doing it that way avoids a delete-order
+-- problem where each subsequent statement's subquery would see fewer rows
+-- as we drained the dependency tables.
+SELECT g.id
+FROM games g
+         JOIN game_participants gp ON gp.game_id = g.id
+WHERE gp.player_id = ?
+  AND g.quiz_id = ?;
+
+-- name: DeleteGameAnswersByGameIDs :exec
+-- Hard-deletes every game_answers row attached to the given game IDs. Used
+-- by the player-on-quiz reset flow with the IDs gathered up front by
+-- ListGameIDsForPlayerOnQuiz.
+DELETE
+FROM game_answers
+WHERE game_id IN (sqlc.slice('game_ids'));
+
+-- name: DeleteGameQuestionsByGameIDs :exec
+-- Hard-deletes every game_questions row attached to the given game IDs.
+DELETE
+FROM game_questions
+WHERE game_id IN (sqlc.slice('game_ids'));
+
+-- name: DeleteGameParticipantsByGameIDs :exec
+-- Hard-deletes every game_participants row attached to the given game IDs.
+DELETE
+FROM game_participants
+WHERE game_id IN (sqlc.slice('game_ids'));
+
+-- name: DeleteGamesByIDs :exec
+-- Hard-deletes the given games themselves. Run last; the participant /
+-- question / answer rows referencing these games have already been removed.
+DELETE
+FROM games
+WHERE id IN (sqlc.slice('ids'));

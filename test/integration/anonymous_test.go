@@ -127,7 +127,13 @@ func TestAnonymous_Integration(t *testing.T) {
 		t.Errorf("[scenario 1] anonymous players added = %d, want %d", got, want)
 	}
 
-	// Scenario 2: second request from same client reuses the existing row.
+	// Scenario 2: a request that goes through EnsurePlayer reuses the
+	// existing row when the cookie jar is reused. Creating a game and
+	// then issuing a follow-up GET /api/quizzes (also wrapped in
+	// EnsurePlayer) exercises the reuse path. We can't repeat
+	// POST /api/games for the same player + quiz any more — #145
+	// enforces one attempt per (player, quiz) — so this scenario tests
+	// reuse via the safer GET route.
 	jar2, err := cookiejar.New(nil)
 	if err != nil {
 		t.Fatalf("cookiejar.New err = %v, want nil", err)
@@ -136,7 +142,8 @@ func TestAnonymous_Integration(t *testing.T) {
 
 	startCount = countAnonymousPlayers(ctx, t, dbConn)
 	_, _ = postCreateGame(ctx, t, client2, baseURL, qz.ID)
-	_, _ = postCreateGame(ctx, t, client2, baseURL, qz.ID)
+	fetchAPIQuizzes(ctx, t, client2, baseURL)
+	fetchAPIQuizzes(ctx, t, client2, baseURL)
 	if got, want := countAnonymousPlayers(ctx, t, dbConn)-startCount, 1; got != want {
 		t.Errorf("[scenario 2] anonymous players added = %d, want %d (jar should reuse row)", got, want)
 	}
@@ -214,6 +221,31 @@ func postCreateGame(
 	}
 
 	return out.ID, hadSessionCookie
+}
+
+// fetchAPIQuizzes issues GET /api/quizzes through the supplied client. The
+// route is wrapped in EnsurePlayer so calling it on a cookie-bearing client
+// exercises the player-row reuse path without creating a game (which the
+// new one-attempt-per-quiz rule would block on the second call).
+func fetchAPIQuizzes(ctx context.Context, t *testing.T, client *http.Client, baseURL string) {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/quizzes", nil)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("client.Do err = %v, want nil", err)
+	}
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+		}
+	}()
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("GET /api/quizzes status = %d, want %d", got, want)
+	}
 }
 
 // countAnonymousPlayers returns the number of rows with NULL password_hash.

@@ -20,15 +20,29 @@ var errStub = errors.New("stub error")
 
 // stubStore satisfies game.Store for service-level tests that do not need a
 // live database. Each behaviour is overridable per test via a func field; a
-// nil field returns errStub so accidental use surfaces loudly.
+// nil field returns errStub so accidental use surfaces loudly. The
+// getGameByPlayerAndQuiz field defaults to "not found" rather than errStub
+// so the existing CreateGame happy-path tests do not have to opt in.
 type stubStore struct {
 	listAnswersForQuizLeaderboard func(ctx context.Context, quizID int64) ([]*LeaderboardAnswer, error)
+	getGameByPlayerAndQuiz        func(ctx context.Context, playerID, quizID int64) (*Game, error)
+	deleteGamesForPlayerOnQuiz    func(ctx context.Context, playerID, quizID int64) error
 }
 
 func (stubStore) Ping(_ context.Context) error { return nil }
 
 func (stubStore) GetGame(_ context.Context, _ string) (*Game, error) {
 	return nil, errStub
+}
+
+func (s stubStore) GetGameByPlayerAndQuiz(
+	ctx context.Context, playerID, quizID int64,
+) (*Game, error) {
+	if s.getGameByPlayerAndQuiz == nil {
+		return nil, ErrGameNotFound
+	}
+
+	return s.getGameByPlayerAndQuiz(ctx, playerID, quizID)
 }
 func (stubStore) CreateGame(_ context.Context, _ *Game) error               { return errStub }
 func (stubStore) StartGame(_ context.Context, _ string) error               { return errStub }
@@ -44,6 +58,16 @@ func (s stubStore) ListAnswersForQuizLeaderboard(
 	}
 
 	return s.listAnswersForQuizLeaderboard(ctx, quizID)
+}
+
+func (s stubStore) DeleteGamesForPlayerOnQuiz(
+	ctx context.Context, playerID, quizID int64,
+) error {
+	if s.deleteGamesForPlayerOnQuiz == nil {
+		return errStub
+	}
+
+	return s.deleteGamesForPlayerOnQuiz(ctx, playerID, quizID)
 }
 
 // stubQuizStore satisfies quiz.Store for service-level tests. Only GetQuiz is
@@ -128,6 +152,265 @@ func newTestGame(t *testing.T, qz *quiz.Quiz) *Game {
 	return &Game{
 		QuizID: qz.ID,
 	}
+}
+
+func TestGame_IsCompleted(t *testing.T) {
+	t.Parallel()
+
+	t.Run("true when issued questions match quiz length", func(t *testing.T) {
+		t.Parallel()
+
+		g := &Game{
+			Quiz: &quiz.Quiz{
+				Questions: []*quiz.Question{{ID: 1}, {ID: 2}},
+			},
+			Questions: []*Question{
+				{QuestionID: 1},
+				{QuestionID: 2},
+			},
+		}
+		if got, want := g.IsCompleted(), true; got != want {
+			t.Errorf("IsCompleted() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("false when fewer questions issued than quiz length", func(t *testing.T) {
+		t.Parallel()
+
+		g := &Game{
+			Quiz: &quiz.Quiz{
+				Questions: []*quiz.Question{{ID: 1}, {ID: 2}, {ID: 3}},
+			},
+			Questions: []*Question{
+				{QuestionID: 1},
+			},
+		}
+		if got, want := g.IsCompleted(), false; got != want {
+			t.Errorf("IsCompleted() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("false when zero questions issued and quiz has some", func(t *testing.T) {
+		t.Parallel()
+
+		g := &Game{
+			Quiz: &quiz.Quiz{
+				Questions: []*quiz.Question{{ID: 1}},
+			},
+		}
+		if got, want := g.IsCompleted(), false; got != want {
+			t.Errorf("IsCompleted() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("false when quiz is not populated", func(t *testing.T) {
+		t.Parallel()
+
+		g := &Game{
+			Questions: []*Question{{QuestionID: 1}},
+		}
+		if got, want := g.IsCompleted(), false; got != want {
+			t.Errorf("IsCompleted() = %v, want %v (without Quiz the game cannot be known to be complete)", got, want)
+		}
+	})
+}
+
+func TestService_GetGameForPlayerOnQuiz(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns existing game with quiz populated", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		const playerID = int64(1)
+		created, err := svc.CreateGame(ctx, testQuiz.ID, playerID)
+		if err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+
+		resumed, err := svc.GetGameForPlayerOnQuiz(ctx, playerID, testQuiz.ID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got, want := resumed.ID, created.ID; got != want {
+			t.Errorf("resumed.ID = %q, want %q", got, want)
+		}
+		if resumed.Quiz == nil {
+			t.Fatal("resumed.Quiz is nil, want populated quiz")
+		}
+		if got, want := resumed.Quiz.ID, testQuiz.ID; got != want {
+			t.Errorf("resumed.Quiz.ID = %d, want %d", got, want)
+		}
+		// IsCompleted should work because Quiz is populated.
+		if got, want := resumed.IsCompleted(), false; got != want {
+			t.Errorf("IsCompleted() = %v, want %v (no questions issued yet)", got, want)
+		}
+	})
+
+	t.Run("returns ErrGameNotFound when player has no game", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		_, err := svc.GetGameForPlayerOnQuiz(ctx, 999, testQuiz.ID)
+		if got, want := err, ErrGameNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns ErrQuizNotFound when quiz missing", func(t *testing.T) {
+		t.Parallel()
+
+		svc := NewService(stubStore{}, stubQuizStore{
+			getQuiz: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
+				return nil, quiz.ErrQuizNotFound
+			},
+		}, slog.New(slog.DiscardHandler))
+
+		_, err := svc.GetGameForPlayerOnQuiz(t.Context(), 1, 999)
+		if got, want := err, quiz.ErrQuizNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+}
+
+func TestService_CreateGame_RejectsSecondAttempt(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := dbtest.Open(t)
+
+	quizStore := store.NewQuizStore(db, slog.Default())
+	gameStore := store.NewGameStore(db, slog.Default())
+
+	testQuiz := newTestQuiz(t)
+	if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+		t.Fatalf("failed to create quiz: %v", err)
+	}
+
+	svc := NewService(gameStore, quizStore, slog.Default())
+
+	const playerID = int64(1)
+	if _, err := svc.CreateGame(ctx, testQuiz.ID, playerID); err != nil {
+		t.Fatalf("failed to create initial game: %v", err)
+	}
+
+	// Second attempt for the same (player, quiz) must be rejected.
+	_, err := svc.CreateGame(ctx, testQuiz.ID, playerID)
+	if got, want := err, ErrGameAlreadyExists; !errors.Is(got, want) {
+		t.Errorf("err = %v, want %v", got, want)
+	}
+}
+
+func TestService_ResetGamesForPlayerOnQuiz(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reset clears existing game and lets a fresh CreateGame succeed", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		const playerID = int64(1)
+		if _, err := svc.CreateGame(ctx, testQuiz.ID, playerID); err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+
+		// Sanity check: GetGameForPlayerOnQuiz finds the game first.
+		if _, err := svc.GetGameForPlayerOnQuiz(ctx, playerID, testQuiz.ID); err != nil {
+			t.Fatalf("expected game to exist before reset: %v", err)
+		}
+
+		if err := svc.ResetGamesForPlayerOnQuiz(ctx, playerID, testQuiz.ID); err != nil {
+			t.Fatalf("ResetGamesForPlayerOnQuiz err = %v, want nil", err)
+		}
+
+		_, err := svc.GetGameForPlayerOnQuiz(ctx, playerID, testQuiz.ID)
+		if got, want := err, ErrGameNotFound; !errors.Is(got, want) {
+			t.Errorf("after reset, err = %v, want %v", got, want)
+		}
+
+		if _, err = svc.CreateGame(ctx, testQuiz.ID, playerID); err != nil {
+			t.Errorf("CreateGame after reset err = %v, want nil", err)
+		}
+	})
+
+	t.Run("idempotent — calling reset twice is fine", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		const playerID = int64(1)
+		if _, err := svc.CreateGame(ctx, testQuiz.ID, playerID); err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+
+		if err := svc.ResetGamesForPlayerOnQuiz(ctx, playerID, testQuiz.ID); err != nil {
+			t.Fatalf("first reset err = %v, want nil", err)
+		}
+		if err := svc.ResetGamesForPlayerOnQuiz(ctx, playerID, testQuiz.ID); err != nil {
+			t.Errorf("second reset err = %v, want nil (reset must be idempotent)", err)
+		}
+	})
+
+	t.Run("returns ErrQuizNotFound when quiz missing", func(t *testing.T) {
+		t.Parallel()
+
+		svc := NewService(stubStore{}, stubQuizStore{
+			getQuiz: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
+				return nil, quiz.ErrQuizNotFound
+			},
+		}, slog.New(slog.DiscardHandler))
+
+		err := svc.ResetGamesForPlayerOnQuiz(t.Context(), 1, 999)
+		if got, want := err, quiz.ErrQuizNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
 }
 
 func TestService_SubmitAnswer(t *testing.T) {
