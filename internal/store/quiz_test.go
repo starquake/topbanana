@@ -1535,6 +1535,125 @@ func TestQuizStore_DeleteQuestion(t *testing.T) {
 			t.Fatalf("DeleteQuestion err = %v, want %v", got, want)
 		}
 	})
+
+	t.Run("delete question also wipes played game_questions and game_answers for that question", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		playerStore := NewPlayerStore(db, slog.Default())
+		player, err := playerStore.CreateAnonymousPlayer(t.Context(), "anon-question-delete")
+		if err != nil {
+			t.Fatalf("failed to create player: %v", err)
+		}
+
+		// Stand up a played game in which BOTH questions have been issued
+		// and answered. Deleting question[0] must wipe its game_questions
+		// and game_answers rows, but the rows tied to question[1] in the
+		// same game must remain — that is the difference from the quiz
+		// delete cascade. Without the FK cascade fix, the question delete
+		// would fail with FOREIGN KEY constraint failed because
+		// game_questions.question_id and game_answers.option_id both
+		// reference rows the delete touches.
+		gameStore := NewGameStore(db, slog.Default())
+		g := &game.Game{QuizID: testQuiz.ID}
+		if err = gameStore.CreateGame(t.Context(), g); err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+		if err = gameStore.CreateParticipant(
+			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID},
+		); err != nil {
+			t.Fatalf("failed to create participant: %v", err)
+		}
+
+		now := time.Now().UTC().Truncate(time.Second)
+		gq0 := &game.Question{
+			GameID:     g.ID,
+			QuestionID: testQuiz.Questions[0].ID,
+			StartedAt:  now,
+			ExpiredAt:  now.Add(10 * time.Second),
+		}
+		if err = gameStore.CreateQuestion(t.Context(), gq0); err != nil {
+			t.Fatalf("failed to create game question 0: %v", err)
+		}
+		if err = gameStore.CreateAnswer(t.Context(), &game.Answer{
+			GameID:     g.ID,
+			PlayerID:   player.ID,
+			QuestionID: gq0.ID,
+			OptionID:   testQuiz.Questions[0].Options[0].ID,
+		}); err != nil {
+			t.Fatalf("failed to create answer for question 0: %v", err)
+		}
+
+		gq1 := &game.Question{
+			GameID:     g.ID,
+			QuestionID: testQuiz.Questions[1].ID,
+			StartedAt:  now,
+			ExpiredAt:  now.Add(10 * time.Second),
+		}
+		if err = gameStore.CreateQuestion(t.Context(), gq1); err != nil {
+			t.Fatalf("failed to create game question 1: %v", err)
+		}
+		if err = gameStore.CreateAnswer(t.Context(), &game.Answer{
+			GameID:     g.ID,
+			PlayerID:   player.ID,
+			QuestionID: gq1.ID,
+			OptionID:   testQuiz.Questions[1].Options[0].ID,
+		}); err != nil {
+			t.Fatalf("failed to create answer for question 1: %v", err)
+		}
+
+		question0ID := testQuiz.Questions[0].ID
+		question1ID := testQuiz.Questions[1].ID
+		if err = quizStore.DeleteQuestion(t.Context(), question0ID); err != nil {
+			t.Fatalf("DeleteQuestion err = %v, want nil", err)
+		}
+
+		assertCount := func(label, sqlStr string, arg any, want int) {
+			t.Helper()
+			row := db.QueryRowContext(t.Context(), sqlStr, arg)
+			var got int
+			if scanErr := row.Scan(&got); scanErr != nil {
+				t.Fatalf("scan %s err = %v", label, scanErr)
+			}
+			if got != want {
+				t.Errorf("%s count = %d, want %d", label, got, want)
+			}
+		}
+
+		// Rows for the deleted question are gone.
+		assertCount(
+			"game_questions for deleted question",
+			`SELECT COUNT(*) FROM game_questions WHERE question_id = ?`, question0ID, 0,
+		)
+		assertCount(
+			"game_answers for deleted question's game_question",
+			`SELECT COUNT(*) FROM game_answers WHERE game_question_id = ?`, gq0.ID, 0,
+		)
+
+		// Rows for the OTHER question in the same game are untouched.
+		// This is the bit that distinguishes the question delete from the
+		// quiz delete: only the deleted question's chain is wiped.
+		assertCount(
+			"game_questions for sibling question",
+			`SELECT COUNT(*) FROM game_questions WHERE question_id = ?`, question1ID, 1,
+		)
+		assertCount(
+			"game_answers for sibling question's game_question",
+			`SELECT COUNT(*) FROM game_answers WHERE game_question_id = ?`, gq1.ID, 1,
+		)
+
+		// The game itself and its participant survive — only the
+		// per-question rows for the deleted question were dropped.
+		assertCount("games", `SELECT COUNT(*) FROM games WHERE id = ?`, g.ID, 1)
+		assertCount("game_participants", `SELECT COUNT(*) FROM game_participants WHERE game_id = ?`, g.ID, 1)
+	})
 }
 
 // SQLite's CURRENT_TIMESTAMP has 1-second granularity, so the bump tests

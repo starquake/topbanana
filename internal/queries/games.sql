@@ -115,6 +115,35 @@ DELETE
 FROM game_answers
 WHERE game_id IN (sqlc.slice('game_ids'));
 
+-- name: ListGameQuestionIDsForQuestion :many
+-- Lists every game_questions.id where the given question has been issued.
+-- Used by the question delete flow so the in-Go transaction can drop
+-- dependent game_answers rows scoped to THIS question's game_question rows
+-- before deleting the game_questions and the question itself. Snapshotted
+-- up front so subsequent deletes do not see a moving target as rows drain.
+SELECT id
+FROM game_questions
+WHERE question_id = ?;
+
+-- name: DeleteGameAnswersByGameQuestionIDs :exec
+-- Hard-deletes game_answers rows that reference the given game_question
+-- IDs. Filtering by game_question_id (not game_id) is deliberate: a single
+-- game can hold answers for many questions, and the question delete must
+-- only wipe the answers tied to the question being deleted, leaving the
+-- other questions in the same game untouched.
+DELETE
+FROM game_answers
+WHERE game_question_id IN (sqlc.slice('game_question_ids'));
+
+-- name: DeleteGameQuestionsByQuestionID :exec
+-- Hard-deletes every game_questions row issued for the given question.
+-- Once the dependent game_answers rows are gone (see
+-- DeleteGameAnswersByGameQuestionIDs) the FK on game_answers.game_question_id
+-- no longer blocks, so a single-arg delete by question_id is enough.
+DELETE
+FROM game_questions
+WHERE question_id = ?;
+
 -- name: DeleteGameQuestionsByGameIDs :exec
 -- Hard-deletes every game_questions row attached to the given game IDs.
 DELETE
