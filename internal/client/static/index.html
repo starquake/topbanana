@@ -18,7 +18,7 @@
                     <label class="label" for="quiz-select">Select a Quiz</label>
                     <div class="control">
                         <div class="select">
-                            <select id="quiz-select" x-model="selectedQuizId">
+                            <select id="quiz-select" x-model="selectedQuizId" @change="checkAlreadyPlayed()">
                                 <template x-for="quiz in quizzes" :key="quiz.id">
                                     <option :value="quiz.id" x-text="quiz.title"></option>
                                 </template>
@@ -35,7 +35,7 @@
                 <template x-if="startError">
                     <div class="notification is-danger" x-text="startError"></div>
                 </template>
-                <button class="button is-primary" @click="startGame()" :disabled="!selectedQuizId">Start Game</button>
+                <button class="button is-primary" @click="startGame()" :disabled="!selectedQuizId || !!startError">Start Game</button>
             </div>
 
             <div x-show="gameId && !finished">
@@ -99,7 +99,6 @@
                 <template x-if="!leaderboard">
                     <p>Loading leaderboard...</p>
                 </template>
-                <button class="button is-link" @click="reset()">Play Again</button>
             </div>
         </div>
     </section>

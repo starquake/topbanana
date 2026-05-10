@@ -84,4 +84,15 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   // successes. If a future spec edit shifts that count, this assertion fails
   // loudly so the score-not-zero guard above can't silently degrade.
   expect(expectedSuccesses).toBe(2);
+
+  // Re-visit the start screen. Because the player already completed this
+  // quiz and #145 enforces one attempt per (player, quiz), the start
+  // screen must surface the "already completed" lockout notification
+  // proactively and disable the Start button — without the player having
+  // to click Start to discover they're locked out.
+  await page.goto('/client/');
+  await page.locator('select').selectOption({ label: quizTitle });
+  await expect(page.locator('.notification.is-danger'))
+    .toContainText('already completed');
+  await expect(page.getByRole('button', { name: 'Start Game' })).toBeDisabled();
 });

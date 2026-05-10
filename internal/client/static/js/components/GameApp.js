@@ -38,6 +38,7 @@ export class GameApp {
         } else if (this.quizzes.length > 0) {
             this.selectedQuizId = this.quizzes[0].id;
         }
+        await this.checkAlreadyPlayed();
     }
 
     // findDeepLinkedQuiz extracts the quiz ID from /play/<slug>-<id> and
@@ -50,17 +51,36 @@ export class GameApp {
         return this.quizzes.find(q => q.id === id) || null;
     }
 
-    async startGame() {
+    // slugIdFor returns the `${slug}-${id}` form for the selected quiz, or
+    // null when no matching quiz exists in this.quizzes.
+    slugIdFor(quizId) {
+        const quiz = this.quizzes.find(q => q.id === parseInt(quizId));
+        return quiz ? `${quiz.slug}-${quiz.id}` : null;
+    }
+
+    // checkAlreadyPlayed pre-flights the resume probe so the start screen
+    // can show the "already completed" notification before the player
+    // bothers clicking Start. Called from init, on dropdown changes, and
+    // after reset so a returning player sees the lockout immediately.
+    // Returns the existing game payload (or null) so callers can avoid a
+    // second round-trip in startGame.
+    async checkAlreadyPlayed() {
         this.startError = null;
-        const quiz = this.quizzes.find(q => q.id === parseInt(this.selectedQuizId));
-        if (!quiz) return;
-        this.quizSlugId = `${quiz.slug}-${quiz.id}`;
-        const existing = await gameService.getMyGameForQuiz(this.quizSlugId);
+        const slugId = this.slugIdFor(this.selectedQuizId);
+        if (!slugId) return null;
+        const existing = await gameService.getMyGameForQuiz(slugId);
         if (existing && existing.completed) {
             this.startError = "You've already completed this quiz.";
-            this.quizSlugId = null;
-            return;
         }
+        return existing;
+    }
+
+    async startGame() {
+        const existing = await this.checkAlreadyPlayed();
+        if (this.startError) return;
+        const slugId = this.slugIdFor(this.selectedQuizId);
+        if (!slugId) return;
+        this.quizSlugId = slugId;
         if (existing) {
             this.gameId = existing.gameId;
         } else {
@@ -122,19 +142,4 @@ export class GameApp {
         await this.nextQuestion();
     }
 
-    reset() {
-        if (this.timer) {
-            clearInterval(this.timer);
-            this.timer = null;
-        }
-        this.gameId = null;
-        this.question = null;
-        this.finished = false;
-        this.leaderboard = null;
-        this.quizSlugId = null;
-        this.feedback = null;
-        this.progress = 100;
-        this.imageError = false;
-        this.startError = null;
-    }
 }
