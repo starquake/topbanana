@@ -406,6 +406,45 @@ func TestQuizStore_GetQuiz_ErrorHandling(t *testing.T) {
 	})
 }
 
+func TestQuizStore_QuizExists(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns true for an existing quiz", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		exists, err := quizStore.QuizExists(t.Context(), testQuiz.ID)
+		if err != nil {
+			t.Fatalf("QuizExists err = %v, want nil", err)
+		}
+		if got, want := exists, true; got != want {
+			t.Errorf("QuizExists = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns false for a missing quiz", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		exists, err := quizStore.QuizExists(t.Context(), 999)
+		if err != nil {
+			t.Fatalf("QuizExists err = %v, want nil", err)
+		}
+		if got, want := exists, false; got != want {
+			t.Errorf("QuizExists = %v, want %v", got, want)
+		}
+	})
+}
+
 func TestQuizStore_GetQuestion(t *testing.T) {
 	t.Parallel()
 

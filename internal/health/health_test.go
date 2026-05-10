@@ -29,6 +29,10 @@ func (*stubQuizStore) QuestionCountsByQuiz(_ context.Context) (map[int64]int, er
 func (*stubQuizStore) GetQuiz(_ context.Context, _ int64) (*quiz.Quiz, error) {
 	return nil, errors.ErrUnsupported
 }
+
+func (*stubQuizStore) QuizExists(_ context.Context, _ int64) (bool, error) {
+	return false, errors.ErrUnsupported
+}
 func (*stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error { return nil }
 func (*stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error { return nil }
 func (*stubQuizStore) DeleteQuiz(_ context.Context, _ int64) error      { return nil }

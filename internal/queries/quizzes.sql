@@ -18,6 +18,13 @@ FROM quizzes
 WHERE id = ?
 LIMIT 1;
 
+-- name: QuizExists :one
+-- Cheap existence check for a quiz by ID. Returns 1 when the row exists,
+-- 0 otherwise. Used by handlers and services that need to validate the
+-- quiz is real before doing further work but do not need the full tree
+-- of questions and options that GetQuiz materialises.
+SELECT EXISTS(SELECT 1 FROM quizzes WHERE id = ?) AS quiz_exists;
+
 -- name: CreateQuiz :one
 INSERT INTO quizzes (title, slug, description, updated_at)
 VALUES (?, ?, ?, CURRENT_TIMESTAMP)

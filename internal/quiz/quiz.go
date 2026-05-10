@@ -24,6 +24,12 @@ type Store interface {
 	// GetQuiz returns a quiz including related questions and options by its ID.
 	// Returns ErrQuizNotFound if the quiz is not found.
 	GetQuiz(ctx context.Context, id int64) (*Quiz, error)
+	// QuizExists is a cheap existence check for a quiz by ID. It runs a
+	// single one-row SELECT EXISTS probe and does not load the quiz's
+	// questions or options. Prefer this over GetQuiz when the caller only
+	// needs to know whether the quiz is real (e.g. to map a missing quiz
+	// to a 404) and does not need the rest of the tree.
+	QuizExists(ctx context.Context, id int64) (bool, error)
 	// CreateQuiz creates a quiz.
 	CreateQuiz(ctx context.Context, qz *Quiz) error
 	// UpdateQuiz updates a quiz.

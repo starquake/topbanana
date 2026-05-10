@@ -29,6 +29,7 @@ var errStub = errors.New("stub error")
 type stubQuizStore struct {
 	listQuizzes func(ctx context.Context) ([]*quiz.Quiz, error)
 	getQuiz     func(ctx context.Context, id int64) (*quiz.Quiz, error)
+	quizExists  func(ctx context.Context, id int64) (bool, error)
 	getOption   func(ctx context.Context, id int64) (*quiz.Option, error)
 }
 
@@ -52,6 +53,14 @@ func (s stubQuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error
 	}
 
 	return s.getQuiz(ctx, id)
+}
+
+func (s stubQuizStore) QuizExists(ctx context.Context, id int64) (bool, error) {
+	if s.quizExists == nil {
+		return false, errors.ErrUnsupported
+	}
+
+	return s.quizExists(ctx, id)
 }
 
 func (s stubQuizStore) GetOption(ctx context.Context, id int64) (*quiz.Option, error) {
@@ -1233,8 +1242,8 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 			},
 		}
 		qs := stubQuizStore{
-			getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{ID: id, Title: "Quiz"}, nil
+			quizExists: func(_ context.Context, _ int64) (bool, error) {
+				return true, nil
 			},
 		}
 		handler := HandleQuizLeaderboard(logger, newService(gs, qs))
@@ -1281,8 +1290,8 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 		t.Parallel()
 
 		qs := stubQuizStore{
-			getQuiz: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
-				return nil, quiz.ErrQuizNotFound
+			quizExists: func(_ context.Context, _ int64) (bool, error) {
+				return false, nil
 			},
 		}
 		handler := HandleQuizLeaderboard(logger, newService(stubGameStore{}, qs))
@@ -1328,8 +1337,8 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 			},
 		}
 		qs := stubQuizStore{
-			getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{ID: id}, nil
+			quizExists: func(_ context.Context, _ int64) (bool, error) {
+				return true, nil
 			},
 		}
 		handler := HandleQuizLeaderboard(logger, newService(gs, qs))

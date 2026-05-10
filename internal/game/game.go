@@ -273,8 +273,15 @@ func (s *Service) GetGameForPlayerOnQuiz(ctx context.Context, playerID, quizID i
 // Returns [quiz.ErrQuizNotFound] when the quiz does not exist so the admin
 // route can map it to a 404.
 func (s *Service) ResetGamesForPlayerOnQuiz(ctx context.Context, playerID, quizID int64) error {
-	if _, err := s.quizStore.GetQuiz(ctx, quizID); err != nil {
-		return fmt.Errorf("failed to load quiz for reset: %w", err)
+	// Existence-only check: we don't need the quiz's questions or options,
+	// so use QuizExists to skip the per-question/per-option fan-out reads
+	// GetQuiz performs.
+	exists, err := s.quizStore.QuizExists(ctx, quizID)
+	if err != nil {
+		return fmt.Errorf("failed to check quiz exists for reset: %w", err)
+	}
+	if !exists {
+		return quiz.ErrQuizNotFound
 	}
 
 	if err := s.store.DeleteGamesForPlayerOnQuiz(ctx, playerID, quizID); err != nil {
@@ -467,8 +474,14 @@ func (s *Service) GetQuizLeaderboard(
 	}
 
 	// Verify the quiz exists so callers can map ErrQuizNotFound to a 404.
-	if _, err := s.quizStore.GetQuiz(ctx, quizID); err != nil {
-		return nil, fmt.Errorf("failed to get quiz: %w", err)
+	// Cheap existence check — leaderboard rendering does not need the
+	// quiz's questions or options.
+	exists, err := s.quizStore.QuizExists(ctx, quizID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check quiz exists for leaderboard: %w", err)
+	}
+	if !exists {
+		return nil, quiz.ErrQuizNotFound
 	}
 
 	rows, err := s.store.ListAnswersForQuizLeaderboard(ctx, quizID)
