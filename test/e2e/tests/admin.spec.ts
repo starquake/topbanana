@@ -25,4 +25,9 @@ test('register, create a quiz with varied questions, and see them on the quiz vi
   // share a long-lived SQLite file.
   await page.goto('/admin/quizzes');
   await expect(page.getByRole('cell', { name: quizTitle })).toBeVisible();
+
+  // The "Top Banana!" brand in the navbar should be a real link that lands
+  // on /admin — guards against regressing back to href="#".
+  await page.getByRole('link', { name: 'Top Banana!' }).click();
+  await expect(page).toHaveURL(/\/admin$/);
 });
