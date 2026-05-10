@@ -422,6 +422,40 @@ func (q *Queries) ListGameIDsForPlayerOnQuiz(ctx context.Context, arg ListGameID
 	return items, nil
 }
 
+const listGameIDsForQuiz = `-- name: ListGameIDsForQuiz :many
+SELECT id
+FROM games
+WHERE quiz_id = ?
+`
+
+// Lists every game ID for the quiz, regardless of player. Used by the
+// quiz delete flow so the in-Go transaction can drop dependent
+// game_answers / game_questions / game_participants / games rows before
+// the quiz row itself is deleted (questions and options cascade from
+// the quiz, but the game_* tables do not).
+func (q *Queries) ListGameIDsForQuiz(ctx context.Context, quizID int64) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listGameIDsForQuiz, quizID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listGameQuestionsByGameID = `-- name: ListGameQuestionsByGameID :many
 SELECT id, game_id, question_id, started_at, expired_at
 FROM game_questions

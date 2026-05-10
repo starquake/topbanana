@@ -15,6 +15,7 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/starquake/topbanana/internal/dbtest"
+	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/quiz"
 	. "github.com/starquake/topbanana/internal/store"
 )
@@ -1413,6 +1414,79 @@ func TestQuizStore_DeleteQuiz(t *testing.T) {
 		if got, want := err, quiz.ErrDeletingQuizNoRowsAffected; !errors.Is(got, want) {
 			t.Fatalf("DeleteQuiz err = %v, want %v", got, want)
 		}
+	})
+
+	t.Run("delete quiz also wipes played games and their dependent rows", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		playerStore := NewPlayerStore(db, slog.Default())
+		player, err := playerStore.CreateAnonymousPlayer(t.Context(), "anon-quiz-delete")
+		if err != nil {
+			t.Fatalf("failed to create player: %v", err)
+		}
+
+		// Stand up a played game: game + participant + question issued +
+		// answer recorded. Without the cascade fix, deleting the quiz
+		// would fail with FOREIGN KEY constraint failed because
+		// game_answers.option_id and games.quiz_id both reference rows
+		// the quiz delete touches.
+		gameStore := NewGameStore(db, slog.Default())
+		g := &game.Game{QuizID: testQuiz.ID}
+		if err = gameStore.CreateGame(t.Context(), g); err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+		if err = gameStore.CreateParticipant(
+			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID},
+		); err != nil {
+			t.Fatalf("failed to create participant: %v", err)
+		}
+		now := time.Now().UTC().Truncate(time.Second)
+		gq := &game.Question{
+			GameID:     g.ID,
+			QuestionID: testQuiz.Questions[0].ID,
+			StartedAt:  now,
+			ExpiredAt:  now.Add(10 * time.Second),
+		}
+		if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+			t.Fatalf("failed to create game question: %v", err)
+		}
+		if err = gameStore.CreateAnswer(t.Context(), &game.Answer{
+			GameID:     g.ID,
+			PlayerID:   player.ID,
+			QuestionID: gq.ID,
+			OptionID:   testQuiz.Questions[0].Options[0].ID,
+		}); err != nil {
+			t.Fatalf("failed to create answer: %v", err)
+		}
+
+		if err = quizStore.DeleteQuiz(t.Context(), testQuiz.ID); err != nil {
+			t.Fatalf("DeleteQuiz err = %v, want nil", err)
+		}
+
+		assertCount := func(label, sqlStr string, arg any, want int) {
+			t.Helper()
+			row := db.QueryRowContext(t.Context(), sqlStr, arg)
+			var got int
+			if scanErr := row.Scan(&got); scanErr != nil {
+				t.Fatalf("scan %s err = %v", label, scanErr)
+			}
+			if got != want {
+				t.Errorf("%s count = %d, want %d", label, got, want)
+			}
+		}
+		assertCount("game_answers", `SELECT COUNT(*) FROM game_answers WHERE game_id = ?`, g.ID, 0)
+		assertCount("game_questions", `SELECT COUNT(*) FROM game_questions WHERE game_id = ?`, g.ID, 0)
+		assertCount("game_participants", `SELECT COUNT(*) FROM game_participants WHERE game_id = ?`, g.ID, 0)
+		assertCount("games", `SELECT COUNT(*) FROM games WHERE id = ?`, g.ID, 0)
+		assertCount("questions", `SELECT COUNT(*) FROM questions WHERE quiz_id = ?`, testQuiz.ID, 0)
 	})
 }
 
