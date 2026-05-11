@@ -686,3 +686,46 @@ func TestGameStore_ListAnswersForQuizLeaderboard(t *testing.T) {
 		}
 	})
 }
+
+func TestGameStore_ListAnswersForQuizLeaderboard_UsesQuizIDIndex(t *testing.T) {
+	t.Parallel()
+
+	// The leaderboard query joins game_answers to games and filters games by
+	// quiz_id; without the index, the planner has to scan one of the tables.
+	// EXPLAIN this minimal mirror of that join shape and assert the planner
+	// picks games_quiz_id_idx — the assertion is about the join access path,
+	// not the full leaderboard SQL.
+	db := dbtest.Open(t)
+	rows, err := db.QueryContext(t.Context(),
+		"EXPLAIN QUERY PLAN SELECT 1 FROM game_answers ga JOIN games g ON g.id = ga.game_id WHERE g.quiz_id = ?",
+		int64(1),
+	)
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN err = %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			t.Errorf("rows.Close err = %v", closeErr)
+		}
+	})
+
+	// EXPLAIN QUERY PLAN rows: (id INTEGER, parent INTEGER, notused INTEGER, detail TEXT).
+	var plan []string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if scanErr := rows.Scan(&id, &parent, &notused, &detail); scanErr != nil {
+			t.Fatalf("scan plan row err = %v", scanErr)
+		}
+		plan = append(plan, detail)
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		t.Fatalf("plan rows iteration err = %v", rowsErr)
+	}
+
+	joined := strings.Join(plan, "\n")
+	t.Logf("EXPLAIN QUERY PLAN output:\n%s", joined)
+	if got, want := joined, "games_quiz_id_idx"; !strings.Contains(got, want) {
+		t.Errorf("EXPLAIN QUERY PLAN output should contain %q; got:\n%s", want, got)
+	}
+}
