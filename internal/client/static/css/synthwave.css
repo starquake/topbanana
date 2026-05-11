@@ -259,6 +259,27 @@ figure.image img {
     border-radius: 4px;
 }
 
+/* Mobile UX: drop the stuck focus ring left behind after a tap. We only
+   suppress the outline when focus did NOT arrive via the keyboard, so
+   keyboard navigation still gets the visible accent ring. Scoped to the
+   answer list so other buttons keep their existing focus treatment. */
+.buttons .button.is-fullwidth:focus:not(:focus-visible) {
+    border-color: var(--border);
+    background: var(--surface);
+    box-shadow: none;
+    outline: none;
+}
+
+/* Mobile UX: bump answer-button touch targets above the WCAG 44px
+   minimum on small viewports. Questions have at most six options so the
+   extra height is comfortable. Desktop layout is untouched. */
+@media (max-width: 768px) {
+    .buttons .button.is-fullwidth {
+        min-height: 3.5rem;
+        font-size: 1rem;
+    }
+}
+
 /* Reduced-motion users get all the colour but none of the movement. The
    JS-driven animations also short-circuit via the same media query. */
 @media (prefers-reduced-motion: reduce) {
