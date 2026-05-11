@@ -184,16 +184,12 @@ func readNewPassword(stdin io.Reader, stdout io.Writer) (string, error) {
 // when stdin is a *[os.File]; wrapped readers always take the scanner path
 // (today's only caller is cmd/server/main.go which passes [os.Stdin]).
 func newPasswordReader(stdin io.Reader, stdout io.Writer) func(prompt string) (string, error) {
-	// File descriptors are small non-negative ints, so the uintptr -> int
-	// narrowing here cannot overflow. Suppress gosec G115 at both call sites
-	// where x/term insists on int.
-	if f, ok := stdin.(*os.File); ok &&
-		term.IsTerminal(int(f.Fd())) { //nolint:gosec // G115: file descriptors fit in int
+	if f, ok := stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
 		return func(prompt string) (string, error) {
 			if _, err := fmt.Fprint(stdout, prompt); err != nil {
 				return "", fmt.Errorf("write prompt: %w", err)
 			}
-			raw, err := term.ReadPassword(int(f.Fd())) //nolint:gosec // G115: file descriptors fit in int
+			raw, err := term.ReadPassword(int(f.Fd()))
 			if err != nil {
 				return "", fmt.Errorf("read password: %w", err)
 			}
