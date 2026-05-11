@@ -32,6 +32,12 @@ const MaxPasswordLength = 72
 
 const adminLandingPath = "/admin/quizzes"
 
+// maxFormBodySize caps the request body for login/register form posts.
+// 64 KiB is comfortable for username + password + csrf_token while denying
+// an attacker the ability to exhaust memory by streaming a multi-megabyte
+// body into r.ParseForm. Wraps r.Body before any form-parsing call.
+const maxFormBodySize = 64 * 1024
+
 // formData is the data passed to the register and login templates.
 type formData struct {
 	Title    string
@@ -79,6 +85,7 @@ func HandleRegisterSubmit(
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/register.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxFormBodySize)
 		if err := r.ParseForm(); err != nil {
 			logger.ErrorContext(r.Context(), "error parsing register form", slog.Any("err", err))
 			http.Error(w, "bad form", http.StatusBadRequest)
@@ -238,6 +245,7 @@ func HandleLoginSubmit(
 	})
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxFormBodySize)
 		if err := r.ParseForm(); err != nil {
 			logger.ErrorContext(r.Context(), "error parsing login form", slog.Any("err", err))
 			http.Error(w, "bad form", http.StatusBadRequest)
