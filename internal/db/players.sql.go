@@ -18,10 +18,11 @@ SET username = ?1,
         WHEN CAST(?3 AS TEXT) = 'admin' THEN 'admin'
         WHEN (SELECT COUNT(*) FROM players AS pp WHERE pp.password_hash IS NOT NULL) = 0 THEN 'admin'
         ELSE 'player'
-    END
+    END,
+    username_claimed = 1
 WHERE players.id = ?4
   AND players.password_hash IS NULL
-RETURNING id, username, email, password_hash, role, created_at
+RETURNING id, username, email, password_hash, role, created_at, username_claimed
 `
 
 type ClaimPlayerParams struct {
@@ -43,6 +44,11 @@ type ClaimPlayerParams struct {
 // played anonymously first). The subquery aliases the players table as pp
 // so the column reference in the WHERE is unambiguous against the row
 // being updated.
+//
+// username_claimed is set to 1 because the visitor is explicitly choosing
+// their username via the register form. This is the register-after-playing
+// path; from this point on the frontend should no longer offer the
+// claim-name affordances.
 func (q *Queries) ClaimPlayer(ctx context.Context, arg ClaimPlayerParams) (Player, error) {
 	row := q.db.QueryRowContext(ctx, claimPlayer,
 		arg.Username,
@@ -58,6 +64,7 @@ func (q *Queries) ClaimPlayer(ctx context.Context, arg ClaimPlayerParams) (Playe
 		&i.PasswordHash,
 		&i.Role,
 		&i.CreatedAt,
+		&i.UsernameClaimed,
 	)
 	return i, err
 }
@@ -65,7 +72,7 @@ func (q *Queries) ClaimPlayer(ctx context.Context, arg ClaimPlayerParams) (Playe
 const createAnonymousPlayer = `-- name: CreateAnonymousPlayer :one
 INSERT INTO players (username, role)
 VALUES (?1, 'player')
-RETURNING id, username, email, password_hash, role, created_at
+RETURNING id, username, email, password_hash, role, created_at, username_claimed
 `
 
 // Used by the EnsurePlayer middleware to back a fresh visitor with a real
@@ -73,6 +80,10 @@ RETURNING id, username, email, password_hash, role, created_at
 // is fixed to 'player' because the "first password-bearing registrant
 // becomes admin" SQL above filters by password_hash IS NOT NULL, so an
 // anonymous row never qualifies for promotion.
+//
+// username_claimed defaults to 0: the auto-generated petname is not a name
+// the visitor picked, so the frontend should keep offering the claim-name
+// affordance until they pick one explicitly.
 func (q *Queries) CreateAnonymousPlayer(ctx context.Context, username string) (Player, error) {
 	row := q.db.QueryRowContext(ctx, createAnonymousPlayer, username)
 	var i Player
@@ -83,12 +94,13 @@ func (q *Queries) CreateAnonymousPlayer(ctx context.Context, username string) (P
 		&i.PasswordHash,
 		&i.Role,
 		&i.CreatedAt,
+		&i.UsernameClaimed,
 	)
 	return i, err
 }
 
 const createPlayerWithCredentials = `-- name: CreatePlayerWithCredentials :one
-INSERT INTO players (username, password_hash, role)
+INSERT INTO players (username, password_hash, role, username_claimed)
 VALUES (
     ?1,
     ?2,
@@ -96,9 +108,10 @@ VALUES (
         WHEN CAST(?3 AS TEXT) = 'admin' THEN 'admin'
         WHEN (SELECT COUNT(*) FROM players WHERE password_hash IS NOT NULL) = 0 THEN 'admin'
         ELSE 'player'
-    END
+    END,
+    1
 )
-RETURNING id, username, email, password_hash, role, created_at
+RETURNING id, username, email, password_hash, role, created_at, username_claimed
 `
 
 type CreatePlayerWithCredentialsParams struct {
@@ -117,6 +130,11 @@ type CreatePlayerWithCredentialsParams struct {
 // otherwise "player"). If "admin" is requested explicitly we honour that;
 // otherwise we promote when there are no other rows with a password_hash
 // (legacy seed admin without a password is intentionally ignored).
+//
+// username_claimed is set to 1 because a registering user explicitly chose
+// their username at the form. The frontend uses this flag (surfaced as
+// hasCustomName) to decide whether to show the claim-name affordances, so
+// a fresh registrant must not see them.
 func (q *Queries) CreatePlayerWithCredentials(ctx context.Context, arg CreatePlayerWithCredentialsParams) (Player, error) {
 	row := q.db.QueryRowContext(ctx, createPlayerWithCredentials, arg.Username, arg.PasswordHash, arg.RequestedRole)
 	var i Player
@@ -127,12 +145,13 @@ func (q *Queries) CreatePlayerWithCredentials(ctx context.Context, arg CreatePla
 		&i.PasswordHash,
 		&i.Role,
 		&i.CreatedAt,
+		&i.UsernameClaimed,
 	)
 	return i, err
 }
 
 const getPlayerByUsername = `-- name: GetPlayerByUsername :one
-SELECT id, username, email, password_hash, role, created_at
+SELECT id, username, email, password_hash, role, created_at, username_claimed
 FROM players
 WHERE username = ?
 LIMIT 1
@@ -148,6 +167,7 @@ func (q *Queries) GetPlayerByUsername(ctx context.Context, username string) (Pla
 		&i.PasswordHash,
 		&i.Role,
 		&i.CreatedAt,
+		&i.UsernameClaimed,
 	)
 	return i, err
 }
@@ -173,4 +193,44 @@ func (q *Queries) SetPlayerPasswordHash(ctx context.Context, arg SetPlayerPasswo
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const updatePlayerUsername = `-- name: UpdatePlayerUsername :one
+UPDATE players
+SET username = ?1,
+    username_claimed = 1
+WHERE id = ?2 AND password_hash IS NULL
+RETURNING id, username, email, password_hash, role, created_at, username_claimed
+`
+
+type UpdatePlayerUsernameParams struct {
+	Username string
+	ID       int64
+}
+
+// Updates the username on an anonymous player row in place. The WHERE
+// clause refuses the update when the player has already claimed a
+// non-anonymous identity (password_hash IS NOT NULL), so the SQL is the
+// atomic guard against a stale anonymous check in the service layer.
+// Returns the updated row when one was affected; the wrapper distinguishes
+// "not anonymous anymore" (sql.ErrNoRows) from "username collision"
+// (UNIQUE constraint failure on players.username).
+//
+// username_claimed is set to 1 because this is the dedicated claim-name
+// endpoint (PATCH /api/players/me); the visitor is explicitly picking
+// their display name. The frontend gates the claim-name modal on the
+// flipped flag so it does not re-open on subsequent visits.
+func (q *Queries) UpdatePlayerUsername(ctx context.Context, arg UpdatePlayerUsernameParams) (Player, error) {
+	row := q.db.QueryRowContext(ctx, updatePlayerUsername, arg.Username, arg.ID)
+	var i Player
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.Email,
+		&i.PasswordHash,
+		&i.Role,
+		&i.CreatedAt,
+		&i.UsernameClaimed,
+	)
+	return i, err
 }

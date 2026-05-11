@@ -19,6 +19,8 @@ Never create commits yourself. When work is ready to commit, suggest a one-line 
 Every change or new feature must have tests. Run `make lint-fix`, `make check`, `make test-e2e`, and `make smoke` before marking work done.
 `make check` only exercises a fresh DB, so migration or startup issues that only surface against populated data otherwise slip through. `make smoke` runs `go run ./cmd/server/ -check` to parse config, open the dev DB, run migrations, and exit — no port juggling, no leftover process.
 
+**Prefer integration tests over ad-hoc smoke scripts.** When verifying a new endpoint or flow, write a test under `test/integration/` rather than running one-off `curl` commands or scripted Playwright sessions. A scripted check verifies behaviour once at implementation time; an integration test catches regressions forever. The harness in `test/integration/` already provides a real server, real DB, and cookie jars — add scenarios to existing tests or create a new `*_test.go` there. Use one-off scripts only for genuinely interactive debugging that can't be expressed as a test (e.g. visual layout in a browser).
+
 ## Workflow
 
 When starting work on a new ticket: switch to `main`, run `git pull`, then create a new branch. Branch names use dashes (not slashes) and are prefixed with the ticket number — e.g. `1-fix-bugs`. Ask for the ticket number if not provided. Omit the prefix if there is no ticket.

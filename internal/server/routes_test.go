@@ -46,6 +46,10 @@ func (stubPlayerStore) SetPlayerPasswordHash(_ context.Context, _, _ string) err
 	return errRouteStub
 }
 
+func (stubPlayerStore) UpdatePlayerUsername(_ context.Context, _ int64, _ string) (*auth.Player, error) {
+	return nil, errRouteStub
+}
+
 var errRouteStub = errors.New("stub")
 
 type stubQuizStore struct{}

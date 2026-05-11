@@ -1,5 +1,6 @@
 import { quizService } from '../services/QuizService.js';
 import { gameService } from '../services/GameService.js';
+import { playerService } from '../services/PlayerService.js';
 
 // PLAY_PATH_PATTERN matches /play/<anything>-<integer>; the integer suffix
 // is the quiz ID.
@@ -61,10 +62,32 @@ export class GameApp {
         // is hidden in that case so the player just sees a description and
         // a Start button. Stays null on /client/, where the dropdown shows.
         this.deepLinkedQuiz = null;
+        // Current player as returned by GET /api/players/me. Stays null
+        // until init() resolves; templates guard with `player &&`. When
+        // the player renames, the PATCH response replaces this object
+        // so player.username and player.hasCustomName flow through every
+        // bound template at once.
+        this.player = null;
+        // Visibility of the shared claim-name modal. A single piece of
+        // state drives the modal across all three entry points
+        // (pre-leaderboard, inline leaderboard row, start screen).
+        // The modal sits on top of whatever view is currently rendered,
+        // so the leaderboard is never gated by this flag — the modal
+        // simply overlays it.
+        this.claimModalOpen = false;
     }
 
     async init() {
-        this.quizzes = await quizService.getQuizzes();
+        // Kick off both in parallel; neither depends on the other.
+        // playerService.getMe is best-effort: a null result just means
+        // the claim affordances stay hidden, the rest of the page is
+        // unaffected.
+        const [quizzes, player] = await Promise.all([
+            quizService.getQuizzes(),
+            playerService.getMe(),
+        ]);
+        this.quizzes = quizzes;
+        this.player = player;
         const deepLinked = this.findDeepLinkedQuiz();
         if (deepLinked) {
             this.deepLinkedQuiz = deepLinked;
@@ -73,6 +96,73 @@ export class GameApp {
             this.selectedQuizId = this.quizzes[0].id;
         }
         await this.checkAlreadyPlayed();
+    }
+
+    // hasCustomName reports whether the current player has explicitly
+    // picked their display name (either through PATCH /api/players/me
+    // or through the register form). The templates gate every claim
+    // affordance on the negation of this, so a player who has already
+    // chosen a name does not see the claim modal/links again — which
+    // was the bug fixed in #165: the previous gate (isAnonymous, i.e.
+    // "no password_hash") stayed truthy after a PATCH because the
+    // claim flow does not set a password, re-opening the modal on
+    // every subsequent finished quiz.
+    hasCustomName() {
+        return !!(this.player && this.player.hasCustomName);
+    }
+
+    // isAnonymous reports whether the current player has no password set
+    // (anonymous in the credential sense). Distinct from hasCustomName:
+    // a player who claims a display name without registering stays
+    // anonymous. The start-screen "Playing as" card uses this so the
+    // affordance keeps showing post-claim, letting the player retune
+    // their name before they start a quiz.
+    isAnonymous() {
+        return !!(this.player && this.player.isAnonymous);
+    }
+
+    // openClaimModal is the single entry point that any of the three
+    // affordances (pre-leaderboard auto-open, inline "Set my name"
+    // link, start-screen "Set your name" link) calls. The modal
+    // template is mounted via x-if so each open gets a fresh
+    // claimNameForm instance with empty input/error state.
+    openClaimModal() {
+        this.claimModalOpen = true;
+    }
+
+    // closeClaimModal hides the modal. Used by the Cancel button,
+    // the modal-background click, and the ESC key handler.
+    closeClaimModal() {
+        this.claimModalOpen = false;
+    }
+
+    // claimFromModal is the single onSubmit callback wired into the
+    // shared claimNameForm. Returns the discriminated result from
+    // PlayerService so the form can render an error banner without
+    // knowing anything about HTTP status codes. On success it updates
+    // `this.player` (so hasCustomName flips to true and every gated
+    // template hides at once), closes the modal, and — if the
+    // leaderboard is already rendered — re-fetches it so the player's
+    // row swaps from the auto-petname to the chosen name. The re-fetch
+    // is best-effort: a failure leaves the stale leaderboard in place
+    // (the new name will appear on the next page load) rather than
+    // surfacing an error on the success path, since the PATCH itself
+    // already succeeded.
+    async claimFromModal(username) {
+        const result = await playerService.claimName(username);
+        if (result.ok) {
+            this.player = result.player;
+            this.claimModalOpen = false;
+            if (this.finished && this.quizSlugId) {
+                try {
+                    this.leaderboard = await gameService.getQuizLeaderboard(this.quizSlugId);
+                    this.animateLeaderboard();
+                } catch (err) {
+                    console.warn('leaderboard re-fetch after claim failed; row will update on next load', err);
+                }
+            }
+        }
+        return result;
     }
 
     // findDeepLinkedQuiz extracts the quiz ID from /play/<slug>-<id> and
@@ -132,8 +222,23 @@ export class GameApp {
         const question = await gameService.getNextQuestion(this.gameId);
         if (!question) {
             this.finished = true;
+            // Re-fetch /me so the player's claim status is current.
+            // Could in principle have flipped since page load (rare,
+            // but cheap to verify and keeps the UI honest if they
+            // logged in mid-quiz from a second tab).
+            const fresh = await playerService.getMe();
+            if (fresh) this.player = fresh;
+            // Render the leaderboard first so the player sees their
+            // row populated immediately; then open the claim modal on
+            // top — but only if the player has not already chosen a
+            // display name. On a successful claim the modal handler
+            // re-fetches the leaderboard so the row updates from the
+            // auto-petname to the chosen name.
             this.leaderboard = await gameService.getQuizLeaderboard(this.quizSlugId);
             this.animateLeaderboard();
+            if (!this.hasCustomName()) {
+                this.openClaimModal();
+            }
             return;
         }
         this.imageError = false;

@@ -23,6 +23,20 @@ type stubPlayerStore struct {
 	byName  map[string]*auth.Player
 	nextID  int64
 	failGet bool
+	// forceAnonCollisions, when > 0, makes the next N CreateAnonymousPlayer
+	// calls return ErrUsernameTaken without inserting. Each call decrements
+	// the counter, so once it reaches zero the stub returns to its normal
+	// insert-or-conflict behaviour. Used by the petname retry-loop tests
+	// to drive the middleware down the collision path a deterministic
+	// number of times.
+	forceAnonCollisions int
+	// forceAnonErr, when set, is returned by the NEXT CreateAnonymousPlayer
+	// call and then automatically cleared. The single-shot semantics keep
+	// each test scenario self-contained: setting the error and then
+	// triggering a single request exercises one error branch without
+	// leaking the failure into any follow-up call inside the same test.
+	// Used to exercise the non-collision error branch of EnsurePlayer.
+	forceAnonErr error
 }
 
 func newStubPlayerStore() *stubPlayerStore {
@@ -96,6 +110,18 @@ func (s *stubPlayerStore) CreateAnonymousPlayer(_ context.Context, username stri
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.forceAnonErr != nil {
+		err := s.forceAnonErr
+		s.forceAnonErr = nil
+
+		return nil, err
+	}
+	if s.forceAnonCollisions > 0 {
+		s.forceAnonCollisions--
+
+		return nil, auth.ErrUsernameTaken
+	}
+
 	if _, exists := s.byName[username]; exists {
 		return nil, auth.ErrUsernameTaken
 	}
@@ -138,6 +164,30 @@ func (s *stubPlayerStore) ClaimPlayer(
 	existing.Username = username
 	existing.PasswordHash = passwordHash
 	existing.Role = s.resolveRoleLocked(requestedRole)
+	s.byName[username] = existing
+
+	return existing, nil
+}
+
+func (s *stubPlayerStore) UpdatePlayerUsername(
+	_ context.Context, playerID int64, username string,
+) (*auth.Player, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	existing, ok := s.byID[playerID]
+	if !ok {
+		return nil, auth.ErrPlayerNotFound
+	}
+	if existing.PasswordHash != "" {
+		return nil, auth.ErrPlayerNotAnonymous
+	}
+	if other, exists := s.byName[username]; exists && other.ID != playerID {
+		return nil, auth.ErrUsernameTaken
+	}
+
+	delete(s.byName, existing.Username)
+	existing.Username = username
 	s.byName[username] = existing
 
 	return existing, nil

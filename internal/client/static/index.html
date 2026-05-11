@@ -16,10 +16,44 @@
 </head>
 <body>
     <section class="section">
-        <div class="container" x-data="gameApp">
+        <div class="container" x-data="gameApp" @keydown.escape.window="claimModalOpen && closeClaimModal()">
             <h1 class="title">Top Banana!</h1>
 
             <div x-show="!gameId">
+                <!-- Entry 3: anytime affordance on the start screen.
+                     Renders for any anonymous player (no password yet),
+                     even after they have already claimed a display name,
+                     so they can keep tweaking it before they start a
+                     quiz. The body text and button label adapt to whether
+                     they have already picked something. The end-of-quiz
+                     modal is the one-shot "auto-prompt" path and gates on
+                     hasCustomName() instead — see #165.
+
+                     NB: this article is duplicated below inside the
+                     finished-leaderboard view because the two need
+                     different visual positions (above the quiz selector
+                     here, above the table there) and Alpine has no
+                     template-include primitive. The markup is kept
+                     byte-identical so future copy edits are a single
+                     search-and-replace. -->
+                <template x-if="isAnonymous()">
+                    <article class="claim-cta mb-5">
+                        <p class="claim-cta-label">Playing as</p>
+                        <p class="claim-cta-name" x-text="player ? player.username : ''"></p>
+                        <p class="claim-cta-body" x-show="!hasCustomName()">
+                            Pick a display name and your leaderboard row will show it
+                            instead of the random one above.
+                        </p>
+                        <p class="claim-cta-body" x-show="hasCustomName()">
+                            Not happy with it? Pick a different display name.
+                        </p>
+                        <button class="button is-primary" @click="openClaimModal()">
+                            <span x-show="!hasCustomName()">Set your name</span>
+                            <span x-show="hasCustomName()">Change your name</span>
+                        </button>
+                    </article>
+                </template>
+
                 <div x-show="!deepLinkedQuiz" class="field">
                     <label class="label" for="quiz-select">Select a Quiz</label>
                     <div class="control">
@@ -77,8 +111,37 @@
                 </template>
             </div>
 
+            <!-- Leaderboard view. Renders as soon as the quiz is
+                 finished; the claim modal (below) opens on top of it
+                 for anonymous players. -->
             <div x-show="finished">
                 <h2 class="subtitle">Game Finished!</h2>
+
+                <!-- Persistent claim affordance on the leaderboard screen.
+                     Renders for any anonymous player (no password) so a
+                     player who landed outside the top 10 can still pick or
+                     change their name — the inline row-level link in the
+                     table only shows up if the current player made the
+                     cut. Markup mirrors the start-screen instance above
+                     byte-for-byte (see comment there). -->
+                <template x-if="isAnonymous()">
+                    <article class="claim-cta mb-5">
+                        <p class="claim-cta-label">Playing as</p>
+                        <p class="claim-cta-name" x-text="player ? player.username : ''"></p>
+                        <p class="claim-cta-body" x-show="!hasCustomName()">
+                            Pick a display name and your leaderboard row will show it
+                            instead of the random one above.
+                        </p>
+                        <p class="claim-cta-body" x-show="hasCustomName()">
+                            Not happy with it? Pick a different display name.
+                        </p>
+                        <button class="button is-primary" @click="openClaimModal()">
+                            <span x-show="!hasCustomName()">Set your name</span>
+                            <span x-show="hasCustomName()">Change your name</span>
+                        </button>
+                    </article>
+                </template>
+
                 <template x-if="leaderboard">
                     <div class="content">
                         <h3>Leaderboard</h3>
@@ -94,7 +157,16 @@
                                 <template x-for="(entry, index) in leaderboard.entries" :key="entry.playerId">
                                     <tr :class="entry.isCurrentPlayer ? 'is-selected' : ''">
                                         <td x-text="index + 1"></td>
-                                        <td x-text="entry.username"></td>
+                                        <td>
+                                            <span x-text="entry.username"></span>
+                                            <!-- Entry 2: leaderboard-row link that
+                                                 opens the same shared modal. Only
+                                                 renders for the current player while
+                                                 they have not yet picked a name. -->
+                                            <template x-if="entry.isCurrentPlayer && !hasCustomName()">
+                                                <a href="#" class="ml-2" @click.prevent="openClaimModal()">Set my name</a>
+                                            </template>
+                                        </td>
                                         <td x-text="entry.score"></td>
                                     </tr>
                                 </template>
@@ -106,6 +178,63 @@
                     <p>Loading leaderboard...</p>
                 </template>
             </div>
+
+            <!-- Shared claim-name modal. Mounted via x-if so each open
+                 gets a fresh claimNameForm instance (empty input,
+                 cleared error). All three entry points
+                 (pre-leaderboard auto-open, leaderboard-row link,
+                 start-screen link) flip the same claimModalOpen flag
+                 and wire the same claimFromModal callback. -->
+            <template x-if="claimModalOpen">
+                <div class="modal is-active" role="dialog" aria-modal="true" aria-labelledby="claim-modal-title">
+                    <div class="modal-background" @click="closeClaimModal()"></div>
+                    <div class="modal-card"
+                         x-data="claimNameForm({
+                                submitLabel: 'Save',
+                                cancelLabel: 'Cancel',
+                                onSubmit: (name) => claimFromModal(name),
+                                onCancel: () => closeClaimModal(),
+                             })">
+                        <header class="modal-card-head">
+                            <p class="modal-card-title" id="claim-modal-title">Pick a display name</p>
+                            <button class="delete" aria-label="close" @click="cancel()" :disabled="submitting"></button>
+                        </header>
+                        <section class="modal-card-body">
+                            <p class="mb-3">This is the name that will appear on the leaderboard.</p>
+                            <div class="field">
+                                <label class="label" for="claim-name-modal">Display name</label>
+                                <div class="control">
+                                    <input id="claim-name-modal" type="text" class="input"
+                                           maxlength="64" autocomplete="off"
+                                           x-init="$nextTick(() => $el.focus())"
+                                           x-model="username"
+                                           @keydown.enter.prevent="submit()"
+                                           :disabled="submitting">
+                                </div>
+                            </div>
+                            <template x-if="error">
+                                <div class="notification is-danger" x-text="error"></div>
+                            </template>
+                        </section>
+                        <footer class="modal-card-foot">
+                            <div class="field is-grouped">
+                                <div class="control">
+                                    <button class="button is-primary"
+                                            @click="submit()"
+                                            :disabled="submitting"
+                                            x-text="submitting ? 'Saving...' : submitLabel"></button>
+                                </div>
+                                <div class="control">
+                                    <button class="button is-light"
+                                            @click="cancel()"
+                                            :disabled="submitting"
+                                            x-text="cancelLabel"></button>
+                                </div>
+                            </div>
+                        </footer>
+                    </div>
+                </div>
+            </template>
         </div>
     </section>
 </body>

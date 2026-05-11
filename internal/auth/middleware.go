@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -11,11 +13,19 @@ import (
 	"github.com/starquake/topbanana/internal/session"
 )
 
-// anonymousUsernamePrefix is prepended to the random xid used as the username
-// for an EnsurePlayer-created row. Keeping a recognisable prefix means an
-// admin scrolling through the players table can tell a never-claimed visitor
-// apart from a real registration without inspecting password_hash.
+// anonymousUsernamePrefix is the prefix used by the last-resort xid-backed
+// fallback when GeneratePetname collisions exhaust the retry budget. The
+// petname path is the common case; this prefix only appears in the
+// astronomically unlikely event that the petname pool becomes saturated or
+// the same petname is drawn N times in a row.
 const anonymousUsernamePrefix = "anon-"
+
+// petnameMaxAttempts caps how many times EnsurePlayer will retry a petname
+// against the UNIQUE-on-username index before falling back to an xid-backed
+// name. With ~15M combinations the chance of one collision is tiny and the
+// chance of five in a row is effectively zero, so five attempts is a safe
+// upper bound that still keeps the request latency bounded.
+const petnameMaxAttempts = 5
 
 // EnsurePlayer guarantees the request carries a session that points at an
 // existing players row. If the request has no session, an invalid one, or a
@@ -33,25 +43,22 @@ const anonymousUsernamePrefix = "anon-"
 // without a session would leave the handler unable to attribute writes.
 func EnsurePlayer(next http.Handler, players PlayerStore, sessions *session.Manager, logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if playerID, ok := sessions.PlayerID(r); ok {
-			player, err := players.GetPlayerByID(r.Context(), playerID)
-			if err == nil {
-				next.ServeHTTP(w, r.WithContext(WithPlayer(r.Context(), player)))
+		player, err := loadSessionPlayer(r, players, sessions)
+		if err != nil && !errors.Is(err, ErrPlayerNotFound) {
+			logger.ErrorContext(r.Context(), "error loading player for ensure", slog.Any("err", err))
+			http.Error(w, "internal error", http.StatusInternalServerError)
 
-				return
-			}
-			if !errors.Is(err, ErrPlayerNotFound) {
-				logger.ErrorContext(r.Context(), "error loading player for ensure", slog.Any("err", err))
-				http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if player != nil {
+			next.ServeHTTP(w, r.WithContext(WithPlayer(r.Context(), player)))
 
-				return
-			}
-			// Fall through: the cookie referenced a deleted row, mint a new
-			// anonymous player and replace the cookie.
+			return
 		}
 
-		username := anonymousUsernamePrefix + xid.New().String()
-		player, err := players.CreateAnonymousPlayer(r.Context(), username)
+		// Fall-through from loadSessionPlayer (no cookie or deleted row):
+		// the session cookie must be replaced before the next handler runs.
+		player, err = mintAnonymousPlayer(r.Context(), players)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error creating anonymous player", slog.Any("err", err))
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -62,6 +69,57 @@ func EnsurePlayer(next http.Handler, players PlayerStore, sessions *session.Mana
 		sessions.Set(w, player.ID)
 		next.ServeHTTP(w, r.WithContext(WithPlayer(r.Context(), player)))
 	})
+}
+
+// loadSessionPlayer resolves the player referenced by the request's session
+// cookie. It returns (player, nil) when a usable row was found,
+// (nil, ErrPlayerNotFound) when there is no session cookie OR the cookie
+// referenced a deleted row, and (nil, otherErr) when the store returned an
+// unexpected error.
+func loadSessionPlayer(r *http.Request, players PlayerStore, sessions *session.Manager) (*Player, error) {
+	playerID, hasSession := sessions.PlayerID(r)
+	if !hasSession {
+		return nil, ErrPlayerNotFound
+	}
+
+	player, err := players.GetPlayerByID(r.Context(), playerID)
+	if err != nil {
+		if errors.Is(err, ErrPlayerNotFound) {
+			return nil, ErrPlayerNotFound
+		}
+
+		return nil, fmt.Errorf("load player by id: %w", err)
+	}
+
+	return player, nil
+}
+
+// mintAnonymousPlayer creates a brand-new anonymous players row. The happy
+// path takes a fresh petname; on UNIQUE collisions it retries up to
+// petnameMaxAttempts times before falling back to an xid-backed name that is
+// unique by construction.
+func mintAnonymousPlayer(ctx context.Context, players PlayerStore) (*Player, error) {
+	var lastErr error
+	for range petnameMaxAttempts {
+		player, err := players.CreateAnonymousPlayer(ctx, GeneratePetname())
+		if err == nil {
+			return player, nil
+		}
+		if !errors.Is(err, ErrUsernameTaken) {
+			return nil, fmt.Errorf("create anonymous player: %w", err)
+		}
+		lastErr = err
+	}
+
+	// Petname pool collided every attempt. Fall back to an xid-backed name,
+	// which is unique by construction and effectively guarantees the insert
+	// succeeds even if the petname pool ever becomes saturated.
+	player, err := players.CreateAnonymousPlayer(ctx, anonymousUsernamePrefix+xid.New().String())
+	if err != nil {
+		return nil, fmt.Errorf("petname exhausted (last: %w); xid fallback: %w", lastErr, err)
+	}
+
+	return player, nil
 }
 
 // RequireAdmin wraps the next handler so only admins can reach it.

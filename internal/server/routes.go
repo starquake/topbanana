@@ -167,6 +167,11 @@ func addAPIRoutes(
 		return auth.EnsurePlayer(h, stores.Players, sessions, logger)
 	}
 
+	mux.Handle("GET /api/players/me", ensurePlayer(clientapi.HandlePlayerGetMe(logger)))
+	mux.Handle(
+		"PATCH /api/players/me",
+		ensurePlayer(clientapi.HandlePlayerClaimName(logger, stores.Players)),
+	)
 	mux.Handle("GET /api/quizzes", ensurePlayer(clientapi.HandleQuizList(logger, stores.Quizzes)))
 	mux.Handle("GET /api/quizzes/{slugID}", ensurePlayer(clientapi.HandleQuizGet(logger, stores.Quizzes)))
 	mux.Handle(
