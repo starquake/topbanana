@@ -1,6 +1,7 @@
 package auth_test
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -221,8 +222,14 @@ func TestEnsurePlayer_NoCookie_CreatesAnonymousAndSetsCookie(t *testing.T) {
 	if !seenPlayer.IsAnonymous() {
 		t.Errorf("seenPlayer.IsAnonymous() = false, want true (PasswordHash = %q)", seenPlayer.PasswordHash)
 	}
-	if got, want := seenPlayer.Username[:5], "anon-"; got != want {
-		t.Errorf("seenPlayer.Username prefix = %q, want %q", got, want)
+	// EnsurePlayer should mint a petname-style "Adjective-Adjective-Noun"
+	// username, not the legacy "anon-<xid>" form (the xid form is the
+	// last-resort fallback only).
+	if got := seenPlayer.Username; strings.HasPrefix(got, "anon-") {
+		t.Errorf("seenPlayer.Username = %q, want a petname-style name (no anon- prefix)", got)
+	}
+	if got, want := strings.Count(seenPlayer.Username, "-"), 2; got != want {
+		t.Errorf("seenPlayer.Username = %q, want %d hyphens (Adjective-Adjective-Noun)", seenPlayer.Username, want)
 	}
 	cookie, ok := findCookie(rec, session.CookieName)
 	if !ok {
@@ -332,6 +339,88 @@ func TestEnsurePlayer_TwoCookielessRequests_TwoDistinctPlayers(t *testing.T) {
 	}
 	if seenIDs[0] == seenIDs[1] {
 		t.Errorf("two cookieless requests produced the same player ID %d, want distinct", seenIDs[0])
+	}
+}
+
+func TestEnsurePlayer_PetnameCollision_Retries(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	// Force the first three CreateAnonymousPlayer calls to return
+	// ErrUsernameTaken; the fourth attempt should succeed and produce a
+	// regular petname row.
+	store.forceAnonCollisions = 3
+	sessions := session.New([]byte("k"))
+
+	var seenPlayer *auth.Player
+	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seenPlayer, _ = auth.PlayerFromContext(r.Context())
+	})
+
+	mw := auth.EnsurePlayer(next, store, sessions, discardLogger())
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+
+	if seenPlayer == nil {
+		t.Fatal("PlayerFromContext returned nil player; middleware should have retried past the collisions")
+	}
+	if got := seenPlayer.Username; strings.HasPrefix(got, "anon-") {
+		t.Errorf("seenPlayer.Username = %q, want a petname-style name (no anon- fallback)", got)
+	}
+	if got, want := strings.Count(seenPlayer.Username, "-"), 2; got != want {
+		t.Errorf("seenPlayer.Username = %q, want %d hyphens", seenPlayer.Username, want)
+	}
+}
+
+func TestEnsurePlayer_PetnameExhausted_FallsBackToXid(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	// Force every petname attempt (5) to collide so the fallback xid path
+	// has to run.
+	store.forceAnonCollisions = 5
+	sessions := session.New([]byte("k"))
+
+	var seenPlayer *auth.Player
+	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seenPlayer, _ = auth.PlayerFromContext(r.Context())
+	})
+
+	mw := auth.EnsurePlayer(next, store, sessions, discardLogger())
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+
+	if seenPlayer == nil {
+		t.Fatal("PlayerFromContext returned nil player; fallback should have produced one")
+	}
+	if got, want := seenPlayer.Username[:5], "anon-"; got != want {
+		t.Errorf("seenPlayer.Username prefix = %q, want %q (xid fallback after exhausted retries)", got, want)
+	}
+}
+
+func TestEnsurePlayer_CreateAnonymousNonCollisionError_500(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	store.forceAnonErr = errors.New("boom")
+	sessions := session.New([]byte("k"))
+
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Error("next should not be called when CreateAnonymousPlayer returns a non-collision error")
+	})
+
+	mw := auth.EnsurePlayer(next, store, sessions, discardLogger())
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusInternalServerError; got != want {
+		t.Errorf("status = %d, want %d", got, want)
 	}
 }
 

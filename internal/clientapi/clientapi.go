@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/starquake/topbanana/internal/auth"
@@ -477,6 +478,125 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 		err = handlers.EncodeJSON(w, http.StatusOK, res)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error encoding answerResponse", slog.Any("err", err))
+
+			return
+		}
+	})
+}
+
+// playerResponse is the JSON shape returned by both GET and PATCH
+// /api/players/me. Shared so the two handlers cannot drift out of sync
+// when a field is added — the frontend's PlayerService.getMe() and
+// .claimName() decode into the same model.
+type playerResponse struct {
+	ID            int64  `json:"id"`
+	Username      string `json:"username"`
+	IsAnonymous   bool   `json:"isAnonymous"`
+	HasCustomName bool   `json:"hasCustomName"`
+}
+
+// newPlayerResponse projects an auth.Player onto the wire format.
+func newPlayerResponse(p *auth.Player) playerResponse {
+	return playerResponse{
+		ID:            p.ID,
+		Username:      p.Username,
+		IsAnonymous:   p.IsAnonymous(),
+		HasCustomName: p.HasCustomName(),
+	}
+}
+
+// HandlePlayerGetMe returns a handler for GET /api/players/me that reports
+// the calling player's id, username, whether they are still anonymous
+// (no password_hash set), and whether they have explicitly picked a
+// display name. The frontend uses hasCustomName to gate the "claim your
+// name" affordances; isAnonymous remains as a distinct, credential-level
+// concept (a registered user with a password is never anonymous, but a
+// claimed-but-passwordless visitor still is). The username is shown
+// verbatim so a fresh petname can be displayed as-is until the player
+// renames.
+func HandlePlayerGetMe(logger *slog.Logger) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		current, ok := auth.PlayerFromContext(ctx)
+		if !ok {
+			http.Error(w, "unauthenticated", http.StatusUnauthorized)
+
+			return
+		}
+
+		if err := handlers.EncodeJSON(w, http.StatusOK, newPlayerResponse(current)); err != nil {
+			logger.ErrorContext(ctx, "error encoding playerResponse", slog.Any("err", err))
+
+			return
+		}
+	})
+}
+
+// HandlePlayerClaimName returns a handler for PATCH /api/players/me that
+// renames the calling player's row in place. It targets the score-claim flow
+// for anonymous visitors who want to pick a friendlier display name without
+// going through the full register form: the player keeps the same row (and
+// session cookie) and stays anonymous afterwards.
+//
+// Behaviour:
+//   - 200 with the updated player JSON on success.
+//   - 400 when the request body is malformed or the username is empty.
+//   - 401 when EnsurePlayer has not populated a player on the context.
+//     This is a wiring bug rather than a user-facing condition, but the
+//     401 keeps the contract honest if the route is reused elsewhere.
+//   - 409 when the username is already in use by another row, OR when the
+//     player has already claimed a non-anonymous identity (password_hash
+//     is set). Both are conflict states; the distinct error messages let
+//     the client distinguish them.
+//   - 500 on any other error.
+func HandlePlayerClaimName(logger *slog.Logger, players auth.PlayerStore) http.Handler {
+	type claimNameRequest struct {
+		Username string `json:"username"`
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		current, ok := auth.PlayerFromContext(ctx)
+		if !ok {
+			http.Error(w, "unauthenticated", http.StatusUnauthorized)
+
+			return
+		}
+
+		req, err := handlers.DecodeJSON[claimNameRequest](r)
+		if err != nil {
+			logger.ErrorContext(ctx, "error decoding claimNameRequest", slog.Any("err", err))
+			http.Error(w, err.Error(), http.StatusBadRequest)
+
+			return
+		}
+		if strings.TrimSpace(req.Username) == "" {
+			http.Error(w, "username is required", http.StatusBadRequest)
+
+			return
+		}
+
+		updated, err := players.UpdatePlayerUsername(ctx, current.ID, req.Username)
+		if err != nil {
+			switch {
+			case errors.Is(err, auth.ErrUsernameTaken):
+				http.Error(w, "username already taken", http.StatusConflict)
+			case errors.Is(err, auth.ErrPlayerNotAnonymous):
+				http.Error(w, "username already set for this account", http.StatusConflict)
+			case errors.Is(err, auth.ErrUsernameEmpty):
+				http.Error(w, "username is required", http.StatusBadRequest)
+			default:
+				logger.ErrorContext(ctx, "error updating player username", slog.Any("err", err))
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+			}
+
+			return
+		}
+
+		if err = handlers.EncodeJSON(w, http.StatusOK, newPlayerResponse(updated)); err != nil {
+			logger.ErrorContext(ctx, "error encoding playerResponse", slog.Any("err", err))
 
 			return
 		}

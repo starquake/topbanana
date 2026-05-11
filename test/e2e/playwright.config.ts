@@ -56,9 +56,11 @@ export default defineConfig({
       // applies to the very first registration, which would leave subsequent
       // browser projects stuck on the role of `player`.
       ADMIN_USERNAMES: [
-        'e2e-admin-chromium', 'e2e-admin-firefox',                // auth.spec.ts
-        'e2e-admin-create-chromium', 'e2e-admin-create-firefox',  // admin.spec.ts
-        'e2e-admin-player-chromium', 'e2e-admin-player-firefox',  // player.spec.ts
+        'e2e-admin-chromium', 'e2e-admin-firefox',                          // auth.spec.ts
+        'e2e-admin-create-chromium', 'e2e-admin-create-firefox',            // admin.spec.ts
+        'e2e-admin-player-chromium', 'e2e-admin-player-firefox',            // player.spec.ts
+        'e2e-admin-claim-chromium', 'e2e-admin-claim-firefox',              // claim.spec.ts test 3
+        'e2e-admin-claim-skip-chromium', 'e2e-admin-claim-skip-firefox',    // claim.spec.ts test 4
       ].join(','),
     },
     reuseExistingServer: false,

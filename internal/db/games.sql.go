@@ -303,7 +303,7 @@ func (q *Queries) GetGameByPlayerAndQuiz(ctx context.Context, arg GetGameByPlaye
 }
 
 const getPlayer = `-- name: GetPlayer :one
-SELECT id, username, email, password_hash, role, created_at
+SELECT id, username, email, password_hash, role, created_at, username_claimed
 FROM players
 WHERE id = ?
 `
@@ -318,6 +318,7 @@ func (q *Queries) GetPlayer(ctx context.Context, id int64) (Player, error) {
 		&i.PasswordHash,
 		&i.Role,
 		&i.CreatedAt,
+		&i.UsernameClaimed,
 	)
 	return i, err
 }

@@ -145,6 +145,43 @@ func (s *PlayerStore) ClaimPlayer(
 	return playerFromRow(row), nil
 }
 
+// UpdatePlayerUsername renames an anonymous (password_hash IS NULL) row in
+// place so an anonymous visitor can pick their own display name without
+// going through the full claim flow. The session cookie continues to point
+// at the same row, so the player stays "signed in" as the same player and
+// remains anonymous after the rename.
+//
+// The username is trimmed before storage to mirror CreatePlayer's
+// normalisation; lookups in GetPlayerByUsername perform the same trim so
+// "alice" and " alice " cannot become distinct identities.
+//
+// Returns auth.ErrUsernameTaken when the requested username collides with
+// another row, and auth.ErrPlayerNotAnonymous when the target row exists
+// but already has a password_hash (the WHERE guard filters it out and the
+// UPDATE returns no rows). An unknown player ID also yields no rows; the
+// wrapper re-queries by id to disambiguate, returning ErrPlayerNotFound
+// when the row genuinely does not exist.
+func (s *PlayerStore) UpdatePlayerUsername(
+	ctx context.Context,
+	playerID int64,
+	username string,
+) (*auth.Player, error) {
+	cleaned := strings.TrimSpace(username)
+	if cleaned == "" {
+		return nil, auth.ErrUsernameEmpty
+	}
+
+	row, err := s.q.UpdatePlayerUsername(ctx, db.UpdatePlayerUsernameParams{
+		Username: cleaned,
+		ID:       playerID,
+	})
+	if err != nil {
+		return nil, s.classifyUpdateUsernameErr(ctx, playerID, err)
+	}
+
+	return playerFromRow(row), nil
+}
+
 // SetPlayerPasswordHash overwrites the password_hash on the row identified
 // by username. Returns auth.ErrPlayerNotFound when no row matches; intended
 // for the cmd/server -reset-password operator tool, not the public auth flow.
@@ -161,6 +198,30 @@ func (s *PlayerStore) SetPlayerPasswordHash(ctx context.Context, username, passw
 	}
 
 	return nil
+}
+
+// classifyUpdateUsernameErr maps an UpdatePlayerUsername storage error onto
+// the auth-package sentinels. [sql.ErrNoRows] from the UPDATE is ambiguous
+// (the id might not exist OR the row already carries a password_hash), so it
+// re-queries by id to disambiguate.
+func (s *PlayerStore) classifyUpdateUsernameErr(ctx context.Context, playerID int64, err error) error {
+	var sqliteErr *sqlite.Error
+	if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+		return auth.ErrUsernameTaken
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("failed to update player username: %w", err)
+	}
+
+	if _, getErr := s.q.GetPlayer(ctx, playerID); getErr != nil {
+		if errors.Is(getErr, sql.ErrNoRows) {
+			return auth.ErrPlayerNotFound
+		}
+
+		return fmt.Errorf("failed to verify player after username update: %w", getErr)
+	}
+
+	return auth.ErrPlayerNotAnonymous
 }
 
 // classifyClaimErr maps a ClaimPlayer storage error onto the auth-package
@@ -189,10 +250,11 @@ func (s *PlayerStore) classifyClaimErr(ctx context.Context, playerID int64, err 
 
 func playerFromRow(row db.Player) *auth.Player {
 	p := &auth.Player{
-		ID:        row.ID,
-		Username:  row.Username,
-		Role:      row.Role,
-		CreatedAt: row.CreatedAt,
+		ID:              row.ID,
+		Username:        row.Username,
+		Role:            row.Role,
+		CreatedAt:       row.CreatedAt,
+		UsernameClaimed: row.UsernameClaimed != 0,
 	}
 	if row.Email.Valid {
 		p.Email = row.Email.String

@@ -253,6 +253,39 @@ h3 {
     border-color: rgba(255, 45, 149, 0.25);
 }
 
+/* Anonymous "Playing as ..." card on the start screen. A themed
+   replacement for Bulma's is-info notification (which sits awkwardly as a
+   bright blue panel on the near-black synthwave page). Uses the project's
+   own surface + accent tokens: dark card, magenta left-stripe, dimmed
+   meta label, accent username, dimmed body copy. */
+.claim-cta {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    padding: 1.25rem 1.5rem;
+    border-radius: 6px;
+}
+.claim-cta-label {
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.7rem;
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+}
+.claim-cta-name {
+    font-family: ui-monospace, "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+    color: var(--accent);
+    font-size: 1.15rem;
+    margin-bottom: 1rem;
+    word-break: break-all;
+}
+.claim-cta-body {
+    color: var(--text-dim);
+    margin-bottom: 1.25rem;
+    line-height: 1.5;
+}
+
 /* Question image — a clean 1px frame, no neon halo. */
 figure.image img {
     border: 1px solid var(--border);
