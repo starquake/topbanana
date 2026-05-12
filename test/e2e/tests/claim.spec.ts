@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { registerAdmin, createQuizWithQuestions, QUIZ_QUESTIONS } from './helpers';
+import { registerAdmin, createQuizWithQuestions, playThroughQuiz } from './helpers';
 
 // Petname format: Title-cased Adjective-Adjective-Noun, e.g. "Steamy-Farty-Bear".
 // EnsurePlayer middleware generates one of these for every fresh anonymous
@@ -70,41 +70,6 @@ test('submitting a name via the start-screen modal updates the Playing as card i
   // trailing slash so the test doesn't depend on a redirect quirk.
   await expect(page).toHaveURL(/\/client\/?$/);
 });
-
-// playThroughQuiz walks every question by clicking the first option each time
-// and waiting for the per-question feedback notification. Extracted so Tests
-// 3 and 4 share the same play loop. Mirrors the inline loop in player.spec.ts
-// (which intentionally stays unchanged for this PR).
-async function playThroughQuiz(page: import('@playwright/test').Page, quizTitle: string): Promise<void> {
-  await page.goto('/client/');
-
-  // Alpine fetches the quiz list asynchronously, so wait for our title.
-  const select = page.locator('select');
-  await expect(select.locator('option', { hasText: quizTitle })).toHaveCount(1);
-  await select.selectOption({ label: quizTitle });
-  await page.getByRole('button', { name: 'Start Game' }).click();
-
-  for (const q of QUIZ_QUESTIONS) {
-    const choice = q.options[0];
-    const wasCorrect = q.correctIndices.includes(0);
-
-    const optionButton = page.getByRole('button', { name: choice });
-    await expect(optionButton).toBeVisible();
-    await optionButton.click();
-
-    if (wasCorrect) {
-      await expect(page.locator('.notification.is-success')).toBeVisible();
-    } else {
-      await expect(page.locator('.notification.is-danger')).toBeVisible();
-    }
-  }
-
-  // The leaderboard renders after the last answer's auto-advance hits 404
-  // on getNextQuestion. Generous timeout because the per-question feedback
-  // delay adds up over four questions.
-  await expect(page.getByRole('heading', { name: 'Game Finished!' })).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
-}
 
 // Test 3 — fresh anonymous visitor sees the claim modal auto-open after the
 // leaderboard renders.

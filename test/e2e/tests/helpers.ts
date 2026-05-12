@@ -92,3 +92,56 @@ export async function createQuizWithQuestions(
     await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
   }
 }
+
+// playThroughQuiz walks the full quiz by clicking the first option on each
+// question and waiting for the per-question feedback notification. Used by
+// claim.spec.ts (and indirectly composes startQuizAsAnonymous +
+// answerRemainingQuestions for tests that need to interleave behaviour).
+export async function playThroughQuiz(page: Page, quizTitle: string): Promise<void> {
+  await startQuizAsAnonymous(page, quizTitle);
+  await answerRemainingQuestions(page);
+}
+
+// startQuizAsAnonymous navigates to /client/, picks the named quiz from the
+// dropdown, and clicks Start Game. Stops before the first question's options
+// are clicked so a caller can interleave timer/timeout behaviour between the
+// start and the answer loop.
+export async function startQuizAsAnonymous(page: Page, quizTitle: string): Promise<void> {
+  await page.goto('/client/');
+
+  // Alpine fetches the quiz list asynchronously, so wait for our title.
+  const select = page.locator('select');
+  await expect(select.locator('option', { hasText: quizTitle })).toHaveCount(1);
+  await select.selectOption({ label: quizTitle });
+  await page.getByRole('button', { name: 'Start Game' }).click();
+}
+
+// answerRemainingQuestions clicks the first option for each question starting
+// at fromIndex (default 0) and asserts the matching success/danger feedback.
+// Waits for the leaderboard at the end so the caller can pick up immediately
+// after the auto-advance from the final question. fromIndex lets timeout
+// specs skip the questions that have already been resolved (e.g. via the
+// timer-expired path).
+export async function answerRemainingQuestions(page: Page, fromIndex = 0): Promise<void> {
+  for (let i = fromIndex; i < QUIZ_QUESTIONS.length; i++) {
+    const q = QUIZ_QUESTIONS[i];
+    const choice = q.options[0];
+    const wasCorrect = q.correctIndices.includes(0);
+
+    const optionButton = page.getByRole('button', { name: choice });
+    await expect(optionButton).toBeVisible();
+    await optionButton.click();
+
+    if (wasCorrect) {
+      await expect(page.locator('.notification.is-success')).toBeVisible();
+    } else {
+      await expect(page.locator('.notification.is-danger')).toBeVisible();
+    }
+  }
+
+  // The leaderboard renders after the last answer's auto-advance hits 404
+  // on getNextQuestion. Generous timeout because the per-question feedback
+  // delay adds up.
+  await expect(page.getByRole('heading', { name: 'Game Finished!' })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
+}
