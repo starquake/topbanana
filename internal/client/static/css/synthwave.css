@@ -376,6 +376,36 @@ figure.image img {
     }
 }
 
+/* Mobile UX (#196): keep the claim-name modal above the on-screen
+   keyboard. Bulma centres .modal-card vertically; when the keyboard
+   slides up, the visible viewport shrinks but the layout viewport
+   stays the same, so the centred card disappears under the keyboard.
+
+   Mobile Firefox (and historically other engines) does NOT shrink
+   CSS units like vh / svh / dvh in response to the on-screen
+   keyboard — only window.visualViewport reports the reduced height.
+   app.js subscribes to visualViewport.resize and publishes that
+   height as --visual-viewport-height; the modal-card consumes it
+   below so its max-height tracks the visible window.
+
+   The fallback chain is: --visual-viewport-height (JS-driven) →
+   100svh (CSS, in case JS hasn't run yet) → 100vh (very old
+   browsers). */
+@media (max-width: 768px) {
+    /* Bulma's .modal uses flex-direction: column, so vertical alignment
+       is controlled by justify-content (main axis), not align-items.
+       Overriding align-items leaves the card centred top-to-bottom — */
+    .modal {
+        justify-content: flex-start;
+    }
+    .modal-card {
+        margin-top: 1rem;
+        max-height: calc(100vh - 2rem);
+        max-height: calc(100svh - 2rem);
+        max-height: calc(var(--visual-viewport-height, 100svh) - 2rem);
+    }
+}
+
 /* Reduced-motion users get all the colour but none of the movement. The
    JS-driven animations also short-circuit via the same media query. */
 @media (prefers-reduced-motion: reduce) {
