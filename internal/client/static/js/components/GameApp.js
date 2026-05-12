@@ -75,6 +75,11 @@ export class GameApp {
         // so the leaderboard is never gated by this flag — the modal
         // simply overlays it.
         this.claimModalOpen = false;
+        // True while a submitAnswer POST is in flight. Without this,
+        // the countdown could fire between the click and the response
+        // and overwrite the real feedback with a timeout banner — see
+        // the race notes on handleTimeout for #175.
+        this.submittingAnswer = false;
     }
 
     async init() {
@@ -309,6 +314,21 @@ export class GameApp {
         });
     }
 
+    // animateTimeout settles the timeout banner in with a soft scale + fade,
+    // intentionally quieter than the wrong-answer shake: the player did not
+    // make a wrong decision — the clock simply ran out — so the motion
+    // should feel like a gentle "moving on" rather than a buzzer.
+    animateTimeout() {
+        requestAnimationFrame(() => {
+            runAnim('.notification', {
+                opacity: [0, 1],
+                scale: [0.96, 1],
+                duration: 420,
+                easing: 'easeOutQuart',
+            });
+        });
+    }
+
     startCountdown() {
         const start = new Date(this.question.startedAt).getTime();
         const end = new Date(this.question.expiredAt).getTime();
@@ -324,29 +344,61 @@ export class GameApp {
             if (this.progress <= 0) {
                 clearInterval(this.timer);
                 this.timer = null;
+                // Fire-and-forget: setInterval callbacks can't await,
+                // and resolveAndAdvance handles its own teardown.
+                void this.handleTimeout();
             }
         }, 100);
     }
 
-    async submitAnswer(optionId) {
-        if (this.feedback) return;
-        this.feedback = await gameService.submitAnswer(this.gameId, this.question.id, optionId);
-        this.animateFeedback(this.feedback.correct);
+    // handleTimeout fires when the per-question countdown reaches zero
+    // without a submitted answer. Skips when feedback is already set
+    // (the user beat the clock) or while a submit is in flight (the
+    // POST is racing the timer — let it finish and use the real
+    // result). On a real timeout it shows a "Time out!" notification
+    // and auto-advances via resolveAndAdvance after the same 2s pause
+    // the answered path uses. No POST is issued: the server's
+    // GetNextQuestion advances on the "asked" set rather than the
+    // "answered" set, and a missing answer row already produces a
+    // zero-score on the leaderboard.
+    async handleTimeout() {
+        if (this.feedback || this.submittingAnswer) return;
+        this.feedback = { timedOut: true, correct: false, score: 0 };
+        this.animateTimeout();
+        await this.resolveAndAdvance();
+    }
 
-        // Stop timer
+    async submitAnswer(optionId) {
+        if (this.feedback || this.submittingAnswer) return;
+        this.submittingAnswer = true;
+        try {
+            this.feedback = await gameService.submitAnswer(this.gameId, this.question.id, optionId);
+            this.animateFeedback(this.feedback.correct);
+        } finally {
+            this.submittingAnswer = false;
+        }
+
+        // Stop the countdown so it cannot fire handleTimeout on top
+        // of a real submission while we wait for the 2s feedback pause.
         if (this.timer) {
             clearInterval(this.timer);
             this.timer = null;
         }
 
-        // Wait for 2 seconds before moving to next question
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await this.resolveAndAdvance();
+    }
 
-        // Clear the previous question alongside the feedback so the new
-        // render swaps to the "Loading question..." placeholder. Without
-        // this, the buttons region (gated only on `!feedback`) re-mounts
-        // for one frame with the *old* question's options before
-        // nextQuestion() resolves and re-binds them.
+    // resolveAndAdvance waits the per-question feedback pause and then
+    // tears down current-question state before fetching the next one.
+    // Shared by submitAnswer and handleTimeout so both paths look the
+    // same to the user — only the feedback banner differs. Clears the
+    // previous question alongside the feedback so the new render swaps
+    // to the "Loading question..." placeholder; without this, the
+    // buttons region (gated only on `!feedback`) re-mounts for one
+    // frame with the old question's options before nextQuestion()
+    // resolves and re-binds them.
+    async resolveAndAdvance() {
+        await new Promise(resolve => setTimeout(resolve, 2000));
         this.question = null;
         this.feedback = null;
         await this.nextQuestion();

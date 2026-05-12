@@ -16,6 +16,7 @@
     --cyan: #66e8ff;
     --cyan-soft: rgba(102, 232, 255, 0.12);
     --danger: #ff5c5c;
+    --warning: #ffb454;
 }
 
 html, body {
@@ -216,6 +217,13 @@ h3 {
 .notification.is-danger,
 .notification.is-danger .is-size-4 {
     color: var(--danger);
+}
+.notification.is-warning {
+    border-top-color: var(--warning);
+}
+.notification.is-warning,
+.notification.is-warning .is-size-4 {
+    color: var(--warning);
 }
 
 /* Leaderboard table — flat surface, restrained header microtype, accent

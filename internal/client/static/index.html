@@ -93,9 +93,13 @@
                         </template>
 
                         <template x-if="feedback">
-                            <div class="notification" :class="feedback.correct ? 'is-success' : 'is-danger'">
-                                <p class="is-size-4" x-text="feedback.correct ? 'Correct! ✅' : 'Wrong! ❌'"></p>
-                                <p>Score: <span x-text="feedback.score"></span></p>
+                            <div class="notification"
+                                 :class="feedback.timedOut ? 'is-warning' : feedback.correct ? 'is-success' : 'is-danger'">
+                                <p class="is-size-4"
+                                   x-text="feedback.timedOut ? 'Time out! ⏰' : feedback.correct ? 'Correct! ✅' : 'Wrong! ❌'"></p>
+                                <template x-if="!feedback.timedOut">
+                                    <p>Score: <span x-text="feedback.score"></span></p>
+                                </template>
                             </div>
                         </template>
 
