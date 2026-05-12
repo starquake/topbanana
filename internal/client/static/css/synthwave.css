@@ -120,7 +120,15 @@ h3 {
 }
 
 /* Buttons — neutral surface at rest, magenta accent on hover/focus. No
-   idle pulse, no permanent glow. */
+   idle pulse, no permanent glow.
+
+   :hover is split off from :focus and wrapped in @media (hover: hover)
+   so it only fires on devices with a real hovering input (mouse,
+   trackpad). On touch-only devices the :hover state would otherwise
+   stick to the last-touched button because there is no pointer-leave
+   event, leaving a permanent magenta glow until the user taps
+   somewhere else — see #194. :focus stays unconditional so keyboard
+   navigation still gets a visible accent ring on every button. */
 .button {
     background: var(--surface);
     color: var(--text);
@@ -134,12 +142,18 @@ h3 {
     transition: border-color 160ms ease, background 160ms ease, transform 120ms ease, box-shadow 200ms ease;
     box-shadow: none;
 }
-.button:hover,
 .button:focus {
     border-color: var(--accent);
     background: var(--surface-2);
     box-shadow: 0 0 0 3px var(--accent-soft);
     outline: none;
+}
+@media (hover: hover) {
+    .button:hover {
+        border-color: var(--accent);
+        background: var(--surface-2);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+    }
 }
 .button:active {
     transform: translateY(1px);
@@ -150,12 +164,19 @@ h3 {
     border-color: var(--accent);
     font-weight: 600;
 }
-.button.is-primary:hover,
 .button.is-primary:focus {
     background: var(--text);
     color: var(--bg);
     border-color: var(--text);
     box-shadow: 0 0 0 3px var(--accent-soft);
+}
+@media (hover: hover) {
+    .button.is-primary:hover {
+        background: var(--text);
+        color: var(--bg);
+        border-color: var(--text);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+    }
 }
 .button.is-fullwidth {
     text-align: left;
@@ -333,8 +354,11 @@ figure.image img {
 
 /* Mobile UX: drop the stuck focus ring left behind after a tap. We only
    suppress the outline when focus did NOT arrive via the keyboard, so
-   keyboard navigation still gets the visible accent ring. Scoped to the
-   answer list so other buttons keep their existing focus treatment. */
+   keyboard navigation still gets the visible accent ring on the answer
+   buttons. Scoped to the answer list so other buttons keep their
+   existing focus treatment. The :hover side of the sticky-tap problem
+   is handled at the source by the (hover: hover) gate on .button:hover
+   earlier in this file (#194). */
 .buttons .button.is-fullwidth:focus:not(:focus-visible) {
     border-color: var(--border);
     background: var(--surface);
