@@ -120,7 +120,15 @@ h3 {
 }
 
 /* Buttons — neutral surface at rest, magenta accent on hover/focus. No
-   idle pulse, no permanent glow. */
+   idle pulse, no permanent glow.
+
+   :hover is split off from :focus and wrapped in @media (hover: hover)
+   so it only fires on devices with a real hovering input (mouse,
+   trackpad). On touch-only devices the :hover state would otherwise
+   stick to the last-touched button because there is no pointer-leave
+   event, leaving a permanent magenta glow until the user taps
+   somewhere else — see #194. :focus stays unconditional so keyboard
+   navigation still gets a visible accent ring on every button. */
 .button {
     background: var(--surface);
     color: var(--text);
@@ -134,12 +142,18 @@ h3 {
     transition: border-color 160ms ease, background 160ms ease, transform 120ms ease, box-shadow 200ms ease;
     box-shadow: none;
 }
-.button:hover,
 .button:focus {
     border-color: var(--accent);
     background: var(--surface-2);
     box-shadow: 0 0 0 3px var(--accent-soft);
     outline: none;
+}
+@media (hover: hover) {
+    .button:hover {
+        border-color: var(--accent);
+        background: var(--surface-2);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+    }
 }
 .button:active {
     transform: translateY(1px);
@@ -150,12 +164,19 @@ h3 {
     border-color: var(--accent);
     font-weight: 600;
 }
-.button.is-primary:hover,
 .button.is-primary:focus {
     background: var(--text);
     color: var(--bg);
     border-color: var(--text);
     box-shadow: 0 0 0 3px var(--accent-soft);
+}
+@media (hover: hover) {
+    .button.is-primary:hover {
+        background: var(--text);
+        color: var(--bg);
+        border-color: var(--text);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+    }
 }
 .button.is-fullwidth {
     text-align: left;
@@ -335,48 +356,14 @@ figure.image img {
    suppress the outline when focus did NOT arrive via the keyboard, so
    keyboard navigation still gets the visible accent ring on the answer
    buttons. Scoped to the answer list so other buttons keep their
-   existing focus treatment. */
+   existing focus treatment. The :hover side of the sticky-tap problem
+   is handled at the source by the (hover: hover) gate on .button:hover
+   earlier in this file (#194). */
 .buttons .button.is-fullwidth:focus:not(:focus-visible) {
     border-color: var(--border);
     background: var(--surface);
     box-shadow: none;
     outline: none;
-}
-
-/* Mobile UX (#194): kill the magenta glow on :hover and :active for the
-   answer buttons specifically. On Mobile Firefox a touch-down sets
-   :active (and the :hover state lingers because touch devices have no
-   pointer-leave event), so the glow from the base .button:hover rule
-   earlier in this file sticks to the touched button until the user
-   taps somewhere else. The :focus-visible rule above does not catch
-   this because the state is :hover/:active, not :focus.
-
-   We suppress unconditionally first so any device without a real hover
-   (and any device whose hover media-query reports unexpectedly) lands
-   on the no-glow path. The (hover: hover) block below then layers the
-   accent glow back on for real desktop pointers. Inverting the gate
-   like this is safer than `(hover: none)`: a mis-evaluating media
-   query fails toward no-glow, which is the bug-free state rather than
-   the regression. */
-.buttons .button.is-fullwidth:hover,
-.buttons .button.is-fullwidth:active {
-    border-color: var(--border);
-    background: var(--surface);
-    box-shadow: none;
-    outline: none;
-}
-
-/* Desktop-only: re-introduce the accent glow on hover for the answer
-   buttons. (hover: hover) matches devices with a real hovering input
-   (mouse, trackpad, paired keyboard with a pointer); it does NOT match
-   on a phone's touchscreen, so the suppression above is the final word
-   there. */
-@media (hover: hover) {
-    .buttons .button.is-fullwidth:hover {
-        border-color: var(--accent);
-        background: var(--surface-2);
-        box-shadow: 0 0 0 3px var(--accent-soft);
-    }
 }
 
 /* Mobile UX: bump answer-button touch targets above the WCAG 44px
