@@ -44,7 +44,7 @@ jobs:
           strip_components: 2
 
       - name: Deploy to staging server
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.2.5
         env:
           IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           IMAGE_TAG: edge
@@ -105,7 +105,7 @@ jobs:
           strip_components: 2
 
       - name: Deploy to production server
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.2.5
         env:
           IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           IMAGE_TAG: ${{ steps.tag.outputs.tag }}
