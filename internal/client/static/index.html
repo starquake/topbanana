@@ -158,9 +158,9 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                <template x-for="(entry, index) in leaderboard.entries" :key="entry.playerId">
+                                <template x-for="entry in leaderboard.entries" :key="entry.playerId">
                                     <tr :class="entry.isCurrentPlayer ? 'is-selected' : ''">
-                                        <td x-text="index + 1"></td>
+                                        <td x-text="entry.rank"></td>
                                         <td>
                                             <span x-text="entry.username"></span>
                                             <!-- Entry 2: leaderboard-row link that
@@ -178,6 +178,26 @@
                         </table>
                     </div>
                 </template>
+
+                <!-- Off-leaderboard standing: when the player has a row
+                     for this quiz but didn't make the visible top N
+                     (currentPlayer is set, no entry carries
+                     isCurrentPlayer), show the player's own rank and
+                     score below the table so they don't leave the
+                     screen with nothing to show. See #181. -->
+                <template x-if="hasOffLeaderboardStanding()">
+                    <article class="standing-card mt-5">
+                        <p class="standing-label">Your score</p>
+                        <p class="standing-line">
+                            Rank
+                            <span class="standing-rank" x-text="leaderboard.currentPlayer.rank"></span>
+                            ·
+                            <span class="standing-score" x-text="leaderboard.currentPlayer.score"></span>
+                             points
+                        </p>
+                    </article>
+                </template>
+
                 <template x-if="!leaderboard">
                     <p>Loading leaderboard...</p>
                 </template>

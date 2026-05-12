@@ -624,8 +624,10 @@ func HandleQuizView(
 
 		// Admin "Played by" doesn't highlight a current player — the
 		// template ignores IsCurrentPlayer — so pass 0 to flag nothing,
-		// per Service.GetQuizLeaderboard's documented sentinel.
-		entries, err := gameService.GetQuizLeaderboard(r.Context(), id, 0, playersLimit)
+		// per Service.GetQuizLeaderboard's documented sentinel. The
+		// admin view also has no concept of "viewer score" so the
+		// CurrentPlayer field of the result is irrelevant here.
+		result, err := gameService.GetQuizLeaderboard(r.Context(), id, 0, playersLimit)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error fetching players for quiz view", slog.Any("err", err))
 			render500(w, r, logger, csrfMgr)
@@ -633,8 +635,8 @@ func HandleQuizView(
 			return
 		}
 
-		players := make([]PlayerScoreData, 0, len(entries))
-		for _, e := range entries {
+		players := make([]PlayerScoreData, 0, len(result.Entries))
+		for _, e := range result.Entries {
 			players = append(players, PlayerScoreData{
 				PlayerID: e.PlayerID,
 				Username: e.Username,

@@ -79,6 +79,14 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   await expect(playerRow).toBeVisible();
   await expect(playerRow.locator('td').nth(2)).not.toHaveText('0');
 
+  // The off-leaderboard "Your score" standing (#181) must NOT show when
+  // the player already has a visible row on the leaderboard — the
+  // hasOffLeaderboardStanding gate keys on the absence of an
+  // isCurrentPlayer entry. Asserting it is hidden here pins the gate
+  // against an always-on regression; the populated-card case is covered
+  // by the Go service + handler tests where seeding 11+ rows is cheap.
+  await expect(page.locator('.standing-card')).toBeHidden();
+
   // Lock in the prediction: picking option[0] of every QUIZ_QUESTIONS entry
   // currently hits Q3 (all correct) and Q4 (idx 0 is prime) — exactly 2
   // successes. If a future spec edit shifts that count, this assertion fails

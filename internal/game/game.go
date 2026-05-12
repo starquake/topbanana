@@ -127,13 +127,28 @@ type LeaderboardAnswer struct {
 }
 
 // LeaderboardEntry is a single row of a per-quiz leaderboard: the player's
-// total score for that quiz. IsCurrentPlayer is true when the entry belongs
-// to the player making the request, which lets the client highlight the row.
+// total score for that quiz. Rank is 1-indexed and computed before
+// truncation, so the value remains meaningful for a CurrentPlayer entry
+// returned outside the truncated top-N. IsCurrentPlayer is true when the
+// entry belongs to the player making the request, which lets the client
+// highlight the row.
 type LeaderboardEntry struct {
 	PlayerID        int64
 	Username        string
 	Score           int
+	Rank            int
 	IsCurrentPlayer bool
+}
+
+// LeaderboardResult bundles the truncated top-N entries with the requesting
+// player's full standing, so a player who finished outside the visible
+// leaderboard can still see their own score and rank. CurrentPlayer is nil
+// when the player has no completed-game row for the quiz; when populated
+// it carries Rank from the full (pre-truncation) ordering, even if the
+// same player also appears in Entries.
+type LeaderboardResult struct {
+	Entries       []LeaderboardEntry
+	CurrentPlayer *LeaderboardEntry
 }
 
 // Store represents a game store.
@@ -462,13 +477,15 @@ func (s *Service) GetResults(ctx context.Context, gameID string) (*Results, erro
 // determinism so a tied scoreboard is stable across requests.
 //
 // currentPlayerID flags the entry that belongs to the requesting player so
-// the client can highlight it; pass 0 to flag nothing.
+// the client can highlight it; pass 0 to flag nothing. The same id drives
+// the returned CurrentPlayer standing so a player who landed outside the
+// truncated top-N can still see their own score and rank — see #181.
 //
 // If limit <= 0 it defaults to 10. The quiz must exist; missing quizzes
 // surface as [quiz.ErrQuizNotFound].
 func (s *Service) GetQuizLeaderboard(
 	ctx context.Context, quizID, currentPlayerID int64, limit int,
-) ([]LeaderboardEntry, error) {
+) (*LeaderboardResult, error) {
 	if limit <= 0 {
 		limit = defaultLeaderboardLimit
 	}
@@ -528,11 +545,42 @@ func (s *Service) GetQuizLeaderboard(
 		return strings.Compare(a.Username, b.Username)
 	})
 
+	return finalizeLeaderboardInPlace(entries, currentPlayerID, limit), nil
+}
+
+// finalizeLeaderboardInPlace stamps 1-indexed rank on every entry, extracts the
+// current player's standing from the full ordering (so a player outside
+// the visible top-N still gets a Rank that matches their global position),
+// and then truncates entries to the requested limit. Split out of
+// GetQuizLeaderboard to keep that function under the project's per-function
+// length budget; the steps need to run in this order — ranks must be stamped
+// before the CurrentPlayer copy or it gets a zero rank, and the truncation
+// must come after both or the off-leaderboard player vanishes.
+//
+// The entries slice is mutated in place (rank field writes + sub-slicing);
+// callers must not retain the original slice after invocation.
+func finalizeLeaderboardInPlace(entries []LeaderboardEntry, currentPlayerID int64, limit int) *LeaderboardResult {
+	for i := range entries {
+		entries[i].Rank = i + 1
+	}
+
+	var currentPlayer *LeaderboardEntry
+	if currentPlayerID != 0 {
+		for i := range entries {
+			if entries[i].PlayerID == currentPlayerID {
+				cp := entries[i]
+				currentPlayer = &cp
+
+				break
+			}
+		}
+	}
+
 	if len(entries) > limit {
 		entries = entries[:limit]
 	}
 
-	return entries, nil
+	return &LeaderboardResult{Entries: entries, CurrentPlayer: currentPlayer}
 }
 
 // CalculateScore calculates the score for a given answer.

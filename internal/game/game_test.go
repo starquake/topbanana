@@ -3,6 +3,7 @@ package game_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -748,8 +749,11 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(got) != 0 {
-			t.Errorf("len(entries) = %d, want 0", len(got))
+		if len(got.Entries) != 0 {
+			t.Errorf("len(entries) = %d, want 0", len(got.Entries))
+		}
+		if got.CurrentPlayer != nil {
+			t.Errorf("CurrentPlayer = %+v, want nil", got.CurrentPlayer)
 		}
 	})
 
@@ -775,21 +779,24 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 			slog.New(slog.DiscardHandler),
 		)
 
-		entries, err := svc.GetQuizLeaderboard(t.Context(), 1, 0, 10)
+		result, err := svc.GetQuizLeaderboard(t.Context(), 1, 0, 10)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got, want := len(entries), 1; got != want {
+		if got, want := len(result.Entries), 1; got != want {
 			t.Fatalf("len(entries) = %d, want %d", got, want)
 		}
-		if got, want := entries[0].PlayerID, int64(1); got != want {
+		if got, want := result.Entries[0].PlayerID, int64(1); got != want {
 			t.Errorf("entries[0].PlayerID = %d, want %d", got, want)
 		}
-		if got, want := entries[0].Username, "alice"; got != want {
+		if got, want := result.Entries[0].Username, "alice"; got != want {
 			t.Errorf("entries[0].Username = %q, want %q", got, want)
 		}
-		if got, want := entries[0].Score, 2000; got != want {
+		if got, want := result.Entries[0].Score, 2000; got != want {
 			t.Errorf("entries[0].Score = %d, want %d", got, want)
+		}
+		if got, want := result.Entries[0].Rank, 1; got != want {
+			t.Errorf("entries[0].Rank = %d, want %d", got, want)
 		}
 	})
 
@@ -816,18 +823,24 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 			slog.New(slog.DiscardHandler),
 		)
 
-		entries, err := svc.GetQuizLeaderboard(t.Context(), 1, 0, 10)
+		result, err := svc.GetQuizLeaderboard(t.Context(), 1, 0, 10)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got, want := len(entries), 2; got != want {
+		if got, want := len(result.Entries), 2; got != want {
 			t.Fatalf("len(entries) = %d, want %d", got, want)
 		}
-		if got, want := entries[0].Username, "bob"; got != want {
+		if got, want := result.Entries[0].Username, "bob"; got != want {
 			t.Errorf("entries[0].Username = %q, want %q", got, want)
 		}
-		if got, want := entries[1].Username, "alice"; got != want {
+		if got, want := result.Entries[1].Username, "alice"; got != want {
 			t.Errorf("entries[1].Username = %q, want %q", got, want)
+		}
+		if got, want := result.Entries[0].Rank, 1; got != want {
+			t.Errorf("entries[0].Rank = %d, want %d", got, want)
+		}
+		if got, want := result.Entries[1].Rank, 2; got != want {
+			t.Errorf("entries[1].Rank = %d, want %d", got, want)
 		}
 	})
 
@@ -854,12 +867,12 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 			slog.New(slog.DiscardHandler),
 		)
 
-		entries, err := svc.GetQuizLeaderboard(t.Context(), 1, 0, 10)
+		result, err := svc.GetQuizLeaderboard(t.Context(), 1, 0, 10)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		gotNames := []string{entries[0].Username, entries[1].Username, entries[2].Username}
+		gotNames := []string{result.Entries[0].Username, result.Entries[1].Username, result.Entries[2].Username}
 		wantNames := []string{"alice", "bob", "charlie"}
 		if diff := cmp.Diff(wantNames, gotNames); diff != "" {
 			t.Errorf("username order mismatch (-want +got):\n%s", diff)
@@ -887,13 +900,13 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 			slog.New(slog.DiscardHandler),
 		)
 
-		entries, err := svc.GetQuizLeaderboard(t.Context(), 1, 1, 10)
+		result, err := svc.GetQuizLeaderboard(t.Context(), 1, 1, 10)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
 		var aliceEntry, bobEntry LeaderboardEntry
-		for _, e := range entries {
+		for _, e := range result.Entries {
 			switch e.PlayerID {
 			case 1:
 				aliceEntry = e
@@ -909,6 +922,19 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 		}
 		if got, want := bobEntry.IsCurrentPlayer, false; got != want {
 			t.Errorf("bobEntry.IsCurrentPlayer = %v, want %v", got, want)
+		}
+		// CurrentPlayer is also surfaced separately so off-leaderboard
+		// players can see their own row (#181). Alice is in the top-N
+		// here so it duplicates her entry, but the field is populated
+		// either way.
+		if result.CurrentPlayer == nil {
+			t.Fatal("CurrentPlayer = nil, want alice's standing")
+		}
+		if got, want := result.CurrentPlayer.PlayerID, int64(1); got != want {
+			t.Errorf("CurrentPlayer.PlayerID = %d, want %d", got, want)
+		}
+		if got, want := result.CurrentPlayer.Rank, 2; got != want {
+			t.Errorf("CurrentPlayer.Rank = %d, want %d (alice trails bob)", got, want)
 		}
 	})
 
@@ -938,14 +964,14 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 			slog.New(slog.DiscardHandler),
 		)
 
-		entries, err := svc.GetQuizLeaderboard(t.Context(), 1, 0, 3)
+		result, err := svc.GetQuizLeaderboard(t.Context(), 1, 0, 3)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got, want := len(entries), 3; got != want {
+		if got, want := len(result.Entries), 3; got != want {
 			t.Errorf("len(entries) = %d, want %d", got, want)
 		}
-		if got, want := entries[0].PlayerID, int64(1); got != want {
+		if got, want := result.Entries[0].PlayerID, int64(1); got != want {
 			t.Errorf("entries[0].PlayerID = %d, want %d", got, want)
 		}
 	})
@@ -972,12 +998,99 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 			slog.New(slog.DiscardHandler),
 		)
 
-		entries, err := svc.GetQuizLeaderboard(t.Context(), 1, 0, 0)
+		result, err := svc.GetQuizLeaderboard(t.Context(), 1, 0, 0)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got, want := len(entries), 10; got != want {
+		if got, want := len(result.Entries), 10; got != want {
 			t.Errorf("len(entries) = %d, want %d (default limit)", got, want)
+		}
+	})
+
+	t.Run("surfaces CurrentPlayer when current player is outside the top-N", func(t *testing.T) {
+		t.Parallel()
+
+		// Five players, strictly decreasing scores (5000, 4000, 3000,
+		// 2000, 1000). Limit to top-3. Player 5 (lowest score) is the
+		// requesting player — they should NOT appear in Entries but
+		// SHOULD appear in CurrentPlayer with Rank=5. This is the
+		// scenario from #181.
+		svc := NewService(
+			stubStore{
+				listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*LeaderboardAnswer, error) {
+					answers := make([]*LeaderboardAnswer, 0, 5)
+					for i := int64(1); i <= 5; i++ {
+						for range 6 - i {
+							answers = append(answers, makeAnswer(i, fmt.Sprintf("p%d", i), true))
+						}
+					}
+
+					return answers, nil
+				},
+			},
+			stubQuizStore{
+				quizExists: func(_ context.Context, _ int64) (bool, error) {
+					return true, nil
+				},
+			},
+			slog.New(slog.DiscardHandler),
+		)
+
+		result, err := svc.GetQuizLeaderboard(t.Context(), 1, 5, 3)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got, want := len(result.Entries), 3; got != want {
+			t.Fatalf("len(entries) = %d, want %d", got, want)
+		}
+		for _, e := range result.Entries {
+			if e.PlayerID == 5 {
+				t.Errorf("player 5 should be outside the top-3, found in entries: %+v", e)
+			}
+		}
+		if result.CurrentPlayer == nil {
+			t.Fatal("CurrentPlayer = nil, want player 5's standing")
+		}
+		if got, want := result.CurrentPlayer.PlayerID, int64(5); got != want {
+			t.Errorf("CurrentPlayer.PlayerID = %d, want %d", got, want)
+		}
+		if got, want := result.CurrentPlayer.Rank, 5; got != want {
+			t.Errorf("CurrentPlayer.Rank = %d, want %d", got, want)
+		}
+		if got, want := result.CurrentPlayer.Score, 1000; got != want {
+			t.Errorf("CurrentPlayer.Score = %d, want %d", got, want)
+		}
+		if got, want := result.CurrentPlayer.IsCurrentPlayer, true; got != want {
+			t.Errorf("CurrentPlayer.IsCurrentPlayer = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("CurrentPlayer is nil when current player has no row", func(t *testing.T) {
+		t.Parallel()
+
+		svc := NewService(
+			stubStore{
+				listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*LeaderboardAnswer, error) {
+					return []*LeaderboardAnswer{
+						makeAnswer(1, "alice", true),
+					}, nil
+				},
+			},
+			stubQuizStore{
+				quizExists: func(_ context.Context, _ int64) (bool, error) {
+					return true, nil
+				},
+			},
+			slog.New(slog.DiscardHandler),
+		)
+
+		// Request as player 99, who never played.
+		result, err := svc.GetQuizLeaderboard(t.Context(), 1, 99, 10)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.CurrentPlayer != nil {
+			t.Errorf("CurrentPlayer = %+v, want nil (player has no row)", result.CurrentPlayer)
 		}
 	})
 }

@@ -126,6 +126,17 @@ export class GameApp {
         return !!(this.player && this.player.isAnonymous);
     }
 
+    // hasOffLeaderboardStanding reports whether the requesting player
+    // finished the quiz but landed outside the visible top-N: the
+    // leaderboard payload's currentPlayer field is populated AND no
+    // visible entry carries isCurrentPlayer. The dedicated "Your
+    // score" card on the leaderboard view gates on this so a player
+    // who placed 11th+ still sees their own rank and score (#181).
+    hasOffLeaderboardStanding() {
+        if (!this.leaderboard || !this.leaderboard.currentPlayer) return false;
+        return !this.leaderboard.entries.some(e => e.isCurrentPlayer);
+    }
+
     // openClaimModal is the single entry point that any of the three
     // affordances (pre-leaderboard auto-open, inline "Set my name"
     // link, start-screen "Set your name" link) calls. The modal
