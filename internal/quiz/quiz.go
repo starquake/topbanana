@@ -42,6 +42,19 @@ type Store interface {
 	CreateQuestion(ctx context.Context, qs *Question) error
 	// UpdateQuestion updates a question.
 	UpdateQuestion(ctx context.Context, qs *Question) error
+	// NextQuestionPosition returns max(position)+1 for the given quiz,
+	// or 1 when the quiz has no questions yet. Used by the question-
+	// creation flow to auto-assign positions so authors do not have to
+	// type integers manually (#16).
+	NextQuestionPosition(ctx context.Context, quizID int64) (int, error)
+	// SwapQuestionPositions swaps the question with questionID against
+	// its neighbour on the given side ("up" = previous position,
+	// "down" = next position) within the same quiz, atomically.
+	// Returns ErrQuestionAtTop / ErrQuestionAtBottom when there is no
+	// neighbour in that direction, ErrQuestionNotFound when the id
+	// does not belong to the quiz, and ErrInvalidDirection on any
+	// direction other than "up"/"down".
+	SwapQuestionPositions(ctx context.Context, quizID, questionID int64, direction string) error
 	// GetOption returns an option by its ID.
 	GetOption(ctx context.Context, optionID int64) (*Option, error)
 	// GetOptionsByIDs returns options for the given IDs.
@@ -75,6 +88,23 @@ var (
 	ErrCannotUpdateQuizWithIDZero = errors.New("cannot update quiz with ID 0")
 	// ErrCannotUpdateQuestionWithIDZero is returned when trying to update a question with ID 0.
 	ErrCannotUpdateQuestionWithIDZero = errors.New("cannot update question with ID 0")
+	// ErrQuestionAtTop is returned by SwapQuestionPositions when the
+	// caller asked to move a question up but it already has the
+	// lowest position in its quiz.
+	ErrQuestionAtTop = errors.New("question is already at the top")
+	// ErrQuestionAtBottom is returned by SwapQuestionPositions when the
+	// caller asked to move a question down but it already has the
+	// highest position in its quiz.
+	ErrQuestionAtBottom = errors.New("question is already at the bottom")
+	// ErrInvalidDirection is returned by SwapQuestionPositions when the
+	// supplied direction is neither "up" nor "down".
+	ErrInvalidDirection = errors.New("invalid direction")
+)
+
+// Reorder directions accepted by [Store.SwapQuestionPositions].
+const (
+	DirectionUp   = "up"
+	DirectionDown = "down"
 )
 
 // Quiz represents a quiz.

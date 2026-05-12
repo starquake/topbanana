@@ -143,6 +143,10 @@ func addAdminRoutes(
 		"POST /admin/quizzes/{quizID}/questions/{questionID}/delete",
 		csrfMW(requireAdmin(admin.HandleQuestionDelete(logger, csrfMgr, stores.Quizzes))),
 	)
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/questions/{questionID}/move/{direction}",
+		csrfMW(requireAdmin(admin.HandleQuestionMove(logger, csrfMgr, stores.Quizzes))),
+	)
 }
 
 // addAPIRoutes registers the JSON API routes consumed by the game client.

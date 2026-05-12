@@ -113,6 +113,14 @@ func (stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error {
 	return nil
 }
 
+func (stubQuizStore) NextQuestionPosition(_ context.Context, _ int64) (int, error) {
+	return 0, errRouteStub
+}
+
+func (stubQuizStore) SwapQuestionPositions(_ context.Context, _, _ int64, _ string) error {
+	return errRouteStub
+}
+
 func (stubQuizStore) DeleteQuestion(_ context.Context, _ int64) error {
 	return nil
 }

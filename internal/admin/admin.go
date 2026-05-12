@@ -407,13 +407,6 @@ func fillQuestionFromForm(
 
 	qs.Text = r.PostFormValue("text")
 	qs.ImageURL = r.PostFormValue("image_url")
-	if qs.Position, err = strconv.Atoi(r.PostFormValue("position")); err != nil {
-		msg := "error parsing position"
-		logger.ErrorContext(r.Context(), msg, slog.Any("err", err))
-		render400(w, r, logger, csrfMgr, msg)
-
-		return false
-	}
 
 	newOptions := make([]*quiz.Option, 0, maxOptions)
 
@@ -599,9 +592,12 @@ func HandleQuizView(
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
 
 	type quizViewData struct {
-		Title   string
-		Quiz    *QuizData
-		Players []PlayerScoreData
+		Title             string
+		Quiz              *QuizData
+		Players           []PlayerScoreData
+		LastQuestionIndex int // len(.Quiz.Questions) - 1; used by the
+		// template to disable the Down button on the last row. Sized
+		// here because html/template lacks a `sub` builtin.
 	}
 
 	// playersLimit is the upper bound on rows in the "Played by" section.
@@ -644,10 +640,12 @@ func HandleQuizView(
 			})
 		}
 
+		quizData := quizDataFromQuiz(qz)
 		data := quizViewData{
-			Title:   "Admin Dashboard - View Quiz",
-			Quiz:    quizDataFromQuiz(qz),
-			Players: players,
+			Title:             "Admin Dashboard - View Quiz",
+			Quiz:              quizData,
+			Players:           players,
+			LastQuestionIndex: len(quizData.Questions) - 1,
 		}
 		render.Render(w, r, http.StatusOK, data)
 	})
@@ -881,6 +879,55 @@ func HandleQuizDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz
 	})
 }
 
+// HandleQuestionMove handles the per-row Up/Down reorder buttons on the
+// quiz view (#16). The {direction} path segment must be "up" or "down";
+// the underlying store handles the swap atomically and returns sentinel
+// errors for boundary conditions (already at top/bottom) which we map
+// to 400 here so the operator sees the cause rather than a generic
+// 500. After a successful swap we redirect back to the quiz view; the
+// re-rendered page reflects the new order from the database.
+func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var ok bool
+
+		var quizID int64
+		if quizID, ok = handlers.ParseIDFromPath(w, r, logger, "quizID"); !ok {
+			return
+		}
+
+		var questionID int64
+		if questionID, ok = handlers.ParseIDFromPath(w, r, logger, "questionID"); !ok {
+			return
+		}
+
+		direction := r.PathValue("direction")
+
+		if err := quizStore.SwapQuestionPositions(r.Context(), quizID, questionID, direction); err != nil {
+			switch {
+			case errors.Is(err, quiz.ErrInvalidDirection):
+				render400(w, r, logger, csrfMgr, "invalid direction")
+			case errors.Is(err, quiz.ErrQuestionAtTop),
+				errors.Is(err, quiz.ErrQuestionAtBottom):
+				// Boundary case: the button should have been disabled in
+				// the UI, so a request here is unusual but harmless.
+				// Redirect back to the view without surfacing an error.
+				// strconv.FormatInt avoids gosec's open-redirect taint
+				// heuristic (G710) — same pattern as HandleQuestionSave.
+				http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(quizID, 10), http.StatusSeeOther)
+			case errors.Is(err, quiz.ErrQuestionNotFound):
+				render404(w, r, logger, csrfMgr)
+			default:
+				logger.ErrorContext(r.Context(), "error swapping question positions", slog.Any("err", err))
+				render500(w, r, logger, csrfMgr)
+			}
+
+			return
+		}
+
+		http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(quizID, 10), http.StatusSeeOther)
+	})
+}
+
 // HandleQuestionDelete deletes a question and all its options.
 func HandleQuestionDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -949,6 +996,20 @@ func HandleQuestionSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 
 		if !fillQuestionFromForm(w, r, logger, csrfMgr, qs) {
 			return
+		}
+
+		// Auto-assign position for new questions so authors do not have
+		// to type integers (#16). Called after form validation so form
+		// errors surface as 400 before this hits the store.
+		if newQuestion {
+			nextPos, posErr := quizStore.NextQuestionPosition(r.Context(), qz.ID)
+			if posErr != nil {
+				logger.ErrorContext(r.Context(), "error fetching next question position", slog.Any("err", posErr))
+				render500(w, r, logger, csrfMgr)
+
+				return
+			}
+			qs.Position = nextPos
 		}
 
 		if !storeQuestion(w, r, logger, csrfMgr, quizStore, qs) {

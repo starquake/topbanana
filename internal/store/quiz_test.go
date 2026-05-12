@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -1876,4 +1877,157 @@ func TestQuizStore_ListQuizzes_OrderedByUpdatedAtDesc(t *testing.T) {
 	if got, want := quizzes[0].Title, "First Edited"; got != want {
 		t.Errorf("quizzes[0].Title = %q, want %q", got, want)
 	}
+}
+
+// seedQuizWithQuestions creates a quiz with `n` questions at positions
+// 10, 20, ..., 10*n and returns it. Helper for the position-reorder
+// tests so each subtest can start from a known order without rebuilding
+// the fixture inline.
+func seedQuizWithQuestions(t *testing.T, quizStore *QuizStore, n int) *quiz.Quiz {
+	t.Helper()
+
+	qz := &quiz.Quiz{Title: "Reorder Quiz", Slug: "reorder-quiz", Description: "for reorder tests"}
+	for i := 1; i <= n; i++ {
+		qz.Questions = append(qz.Questions, &quiz.Question{
+			Text:     fmt.Sprintf("Q%d", i),
+			Position: i * 10,
+			Options: []*quiz.Option{
+				{Text: "A", Correct: true},
+				{Text: "B"},
+			},
+		})
+	}
+
+	if err := quizStore.CreateQuiz(t.Context(), qz); err != nil {
+		t.Fatalf("failed to seed quiz: %v", err)
+	}
+
+	return qz
+}
+
+func TestQuizStore_NextQuestionPosition(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns 1 for an empty quiz", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		qz := &quiz.Quiz{Title: "Empty", Slug: "empty", Description: "no questions"}
+		if err := quizStore.CreateQuiz(t.Context(), qz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+
+		got, err := quizStore.NextQuestionPosition(t.Context(), qz.ID)
+		if err != nil {
+			t.Fatalf("NextQuestionPosition err = %v, want nil", err)
+		}
+		if want := 1; got != want {
+			t.Errorf("NextQuestionPosition = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("returns max+1 for an existing quiz", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		qz := seedQuizWithQuestions(t, quizStore, 3) // positions 10, 20, 30
+
+		got, err := quizStore.NextQuestionPosition(t.Context(), qz.ID)
+		if err != nil {
+			t.Fatalf("NextQuestionPosition err = %v, want nil", err)
+		}
+		if want := 31; got != want {
+			t.Errorf("NextQuestionPosition = %d, want %d (30+1)", got, want)
+		}
+	})
+}
+
+func TestQuizStore_SwapQuestionPositions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("swap down moves a question past its successor", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		qz := seedQuizWithQuestions(t, quizStore, 3) // Q1@10, Q2@20, Q3@30
+
+		err := quizStore.SwapQuestionPositions(t.Context(), qz.ID, qz.Questions[0].ID, quiz.DirectionDown)
+		if err != nil {
+			t.Fatalf("SwapQuestionPositions err = %v, want nil", err)
+		}
+
+		// After swap Q1 should hold position 20 and Q2 should hold 10,
+		// so listing by position yields Q2, Q1, Q3.
+		listed, err := quizStore.ListQuestions(t.Context(), qz.ID)
+		if err != nil {
+			t.Fatalf("ListQuestions err = %v, want nil", err)
+		}
+		got := []string{listed[0].Text, listed[1].Text, listed[2].Text}
+		want := []string{"Q2", "Q1", "Q3"}
+		if diff := cmp.Diff(want, got); diff != "" {
+			t.Errorf("order mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("swap up moves a question past its predecessor", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		qz := seedQuizWithQuestions(t, quizStore, 3)
+
+		err := quizStore.SwapQuestionPositions(t.Context(), qz.ID, qz.Questions[2].ID, quiz.DirectionUp)
+		if err != nil {
+			t.Fatalf("SwapQuestionPositions err = %v, want nil", err)
+		}
+
+		listed, err := quizStore.ListQuestions(t.Context(), qz.ID)
+		if err != nil {
+			t.Fatalf("ListQuestions err = %v, want nil", err)
+		}
+		got := []string{listed[0].Text, listed[1].Text, listed[2].Text}
+		want := []string{"Q1", "Q3", "Q2"}
+		if diff := cmp.Diff(want, got); diff != "" {
+			t.Errorf("order mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("swap up from the first question returns ErrQuestionAtTop", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		qz := seedQuizWithQuestions(t, quizStore, 3)
+
+		err := quizStore.SwapQuestionPositions(t.Context(), qz.ID, qz.Questions[0].ID, quiz.DirectionUp)
+		if got, want := err, quiz.ErrQuestionAtTop; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("swap down from the last question returns ErrQuestionAtBottom", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		qz := seedQuizWithQuestions(t, quizStore, 3)
+
+		err := quizStore.SwapQuestionPositions(t.Context(), qz.ID, qz.Questions[2].ID, quiz.DirectionDown)
+		if got, want := err, quiz.ErrQuestionAtBottom; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("invalid direction returns ErrInvalidDirection", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		qz := seedQuizWithQuestions(t, quizStore, 2)
+
+		err := quizStore.SwapQuestionPositions(t.Context(), qz.ID, qz.Questions[0].ID, "sideways")
+		if got, want := err, quiz.ErrInvalidDirection; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("unknown question ID returns ErrQuestionNotFound", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		qz := seedQuizWithQuestions(t, quizStore, 2)
+
+		err := quizStore.SwapQuestionPositions(t.Context(), qz.ID, 9999, quiz.DirectionUp)
+		if got, want := err, quiz.ErrQuestionNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
 }
