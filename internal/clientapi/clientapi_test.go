@@ -1197,13 +1197,15 @@ type leaderboardTestEntry struct {
 	PlayerID        int64  `json:"playerId"`
 	Username        string `json:"username"`
 	Score           int    `json:"score"`
+	Rank            int    `json:"rank"`
 	IsCurrentPlayer bool   `json:"isCurrentPlayer"`
 }
 
 // leaderboardTestResponse is the decode target for the leaderboard endpoint.
 type leaderboardTestResponse struct {
-	QuizID  int64                  `json:"quizId"`
-	Entries []leaderboardTestEntry `json:"entries"`
+	QuizID        int64                  `json:"quizId"`
+	Entries       []leaderboardTestEntry `json:"entries"`
+	CurrentPlayer *leaderboardTestEntry  `json:"currentPlayer"`
 }
 
 func TestHandleQuizLeaderboard(t *testing.T) {
@@ -1275,14 +1277,31 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 		if got, want := body.Entries[0].Username, "bob"; got != want {
 			t.Errorf("entries[0].Username = %q, want %q", got, want)
 		}
+		if got, want := body.Entries[0].Rank, 1; got != want {
+			t.Errorf("entries[0].Rank = %d, want %d", got, want)
+		}
 		if got, want := body.Entries[0].IsCurrentPlayer, false; got != want {
 			t.Errorf("entries[0].IsCurrentPlayer = %v, want %v", got, want)
 		}
 		if got, want := body.Entries[1].Username, "alice"; got != want {
 			t.Errorf("entries[1].Username = %q, want %q", got, want)
 		}
+		if got, want := body.Entries[1].Rank, 2; got != want {
+			t.Errorf("entries[1].Rank = %d, want %d", got, want)
+		}
 		if got, want := body.Entries[1].IsCurrentPlayer, true; got != want {
 			t.Errorf("entries[1].IsCurrentPlayer = %v, want %v", got, want)
+		}
+		// currentPlayer field is always populated when the player has a
+		// row; in this case alice (player 1) ranks 2.
+		if body.CurrentPlayer == nil {
+			t.Fatal("currentPlayer = nil, want alice's standing")
+		}
+		if got, want := body.CurrentPlayer.PlayerID, int64(1); got != want {
+			t.Errorf("currentPlayer.PlayerID = %d, want %d", got, want)
+		}
+		if got, want := body.CurrentPlayer.Rank, 2; got != want {
+			t.Errorf("currentPlayer.Rank = %d, want %d", got, want)
 		}
 	})
 

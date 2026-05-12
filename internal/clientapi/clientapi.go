@@ -141,6 +141,11 @@ func HandleQuizGet(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 // are broken by ascending username for a stable order. IsCurrentPlayer is set
 // on the entry that matches the authenticated player on the request context
 // so the client can highlight that row.
+//
+// The response also carries a currentPlayer field with the requesting
+// player's rank and score, populated even when the player landed outside
+// the truncated top-N. Frontend uses this to render an off-leaderboard
+// "Your score" card — see #181.
 func HandleQuizLeaderboard(logger *slog.Logger, service *game.Service) http.Handler {
 	const leaderboardLimit = 10
 
@@ -148,12 +153,24 @@ func HandleQuizLeaderboard(logger *slog.Logger, service *game.Service) http.Hand
 		PlayerID        int64  `json:"playerId"`
 		Username        string `json:"username"`
 		Score           int    `json:"score"`
+		Rank            int    `json:"rank"`
 		IsCurrentPlayer bool   `json:"isCurrentPlayer"`
 	}
 
 	type leaderboardResponse struct {
-		QuizID  int64           `json:"quizId"`
-		Entries []entryResponse `json:"entries"`
+		QuizID        int64           `json:"quizId"`
+		Entries       []entryResponse `json:"entries"`
+		CurrentPlayer *entryResponse  `json:"currentPlayer"`
+	}
+
+	toEntryResponse := func(e game.LeaderboardEntry) entryResponse {
+		return entryResponse{
+			PlayerID:        e.PlayerID,
+			Username:        e.Username,
+			Score:           e.Score,
+			Rank:            e.Rank,
+			IsCurrentPlayer: e.IsCurrentPlayer,
+		}
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -174,7 +191,7 @@ func HandleQuizLeaderboard(logger *slog.Logger, service *game.Service) http.Hand
 			return
 		}
 
-		entries, err := service.GetQuizLeaderboard(ctx, quizID, player.ID, leaderboardLimit)
+		result, err := service.GetQuizLeaderboard(ctx, quizID, player.ID, leaderboardLimit)
 		if err != nil {
 			if errors.Is(err, quiz.ErrQuizNotFound) {
 				http.NotFound(w, r)
@@ -187,17 +204,16 @@ func HandleQuizLeaderboard(logger *slog.Logger, service *game.Service) http.Hand
 			return
 		}
 
-		respEntries := make([]entryResponse, 0, len(entries))
-		for _, e := range entries {
-			respEntries = append(respEntries, entryResponse{
-				PlayerID:        e.PlayerID,
-				Username:        e.Username,
-				Score:           e.Score,
-				IsCurrentPlayer: e.IsCurrentPlayer,
-			})
+		respEntries := make([]entryResponse, 0, len(result.Entries))
+		for _, e := range result.Entries {
+			respEntries = append(respEntries, toEntryResponse(e))
 		}
 
 		res := leaderboardResponse{QuizID: quizID, Entries: respEntries}
+		if result.CurrentPlayer != nil {
+			cp := toEntryResponse(*result.CurrentPlayer)
+			res.CurrentPlayer = &cp
+		}
 
 		if err = handlers.EncodeJSON(w, http.StatusOK, res); err != nil {
 			logger.ErrorContext(ctx, "error encoding leaderboardResponse", slog.Any("err", err))

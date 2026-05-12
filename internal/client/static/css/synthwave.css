@@ -261,6 +261,37 @@ h3 {
     border-color: rgba(255, 45, 149, 0.25);
 }
 
+/* Off-leaderboard "Your score" card on the leaderboard view. Shown when
+   the player finished but landed outside the visible top-N — gives them
+   their own rank and score in lieu of the highlighted row they don't have
+   (see #181). Cyan stripe so it pairs visually with the table's correct-
+   answer cyan while staying distinct from the magenta claim-cta. */
+.standing-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--cyan);
+    padding: 1.25rem 1.5rem;
+    border-radius: 6px;
+}
+.standing-label {
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.7rem;
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+}
+.standing-line {
+    color: var(--text);
+    font-size: 1.05rem;
+    line-height: 1.4;
+}
+.standing-rank,
+.standing-score {
+    color: var(--cyan);
+    font-weight: 600;
+}
+
 /* Anonymous "Playing as ..." card on the start screen. A themed
    replacement for Bulma's is-info notification (which sits awkwardly as a
    bright blue panel on the near-black synthwave page). Uses the project's
