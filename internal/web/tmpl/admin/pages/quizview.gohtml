@@ -107,6 +107,7 @@
                 <table class="table is-striped is-fullwidth">
                     <thead>
                     <tr>
+                        <th>Order</th>
                         <th>Question</th>
                         <th>Options</th>
                         <th>Actions</th>
@@ -114,12 +115,38 @@
                     </thead>
 
                     <tbody>
-                    {{range .Quiz.Questions}}
+                    {{range $i, $q := .Quiz.Questions}}
                         <tr>
-                            <td>{{.Text}}</td>
+                            <td>
+                                <form method="post"
+                                      action="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/move/up"
+                                      class="is-inline">
+                                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                                    <button class="button is-small is-white"
+                                            type="submit"
+                                            title="Move up"
+                                            aria-label="Move up"
+                                            {{if eq $i 0}}disabled{{end}}>
+                                        <span class="icon"><i class="fas fa-arrow-up"></i></span>
+                                    </button>
+                                </form>
+                                <form method="post"
+                                      action="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/move/down"
+                                      class="is-inline">
+                                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                                    <button class="button is-small is-white"
+                                            type="submit"
+                                            title="Move down"
+                                            aria-label="Move down"
+                                            {{if eq $i $.LastQuestionIndex}}disabled{{end}}>
+                                        <span class="icon"><i class="fas fa-arrow-down"></i></span>
+                                    </button>
+                                </form>
+                            </td>
+                            <td>{{$q.Text}}</td>
                             <td>
                                 <ul>
-                                    {{range .Options}}
+                                    {{range $q.Options}}
                                         <li>
                                             {{.Text}}
                                             {{if .Correct}}
@@ -132,14 +159,14 @@
                                 </ul>
                             </td>
                             <td>
-                                <a href="/admin/quizzes/{{.QuizID}}/questions/{{.ID}}/edit">
+                                <a href="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/edit">
                                     <span class="icon-text">
                                         <span class="icon"><i class="fas fa-pen"></i></span>
                                         <span>Edit question</span>
                                     </span>
                                 </a>
                                 &nbsp;
-                                <a href="#" onclick="openModal('modal-delete-question-{{.ID}}'); return false;">
+                                <a href="#" onclick="openModal('modal-delete-question-{{$q.ID}}'); return false;">
                                     <span class="icon-text has-text-danger">
                                         <span class="icon"><i class="fas fa-trash"></i></span>
                                         <span>Delete question</span>

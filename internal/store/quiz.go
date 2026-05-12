@@ -251,6 +251,105 @@ func (s *QuizStore) UpdateQuestion(ctx context.Context, qs *quiz.Question) error
 	return nil
 }
 
+// NextQuestionPosition returns max(position)+1 for the given quiz, or 1
+// when the quiz has no questions yet. The SQL COALESCE keeps the typed
+// return as int64 even on an empty quiz; we add 1 here so callers get
+// the position they should assign on a new question.
+func (s *QuizStore) NextQuestionPosition(ctx context.Context, quizID int64) (int, error) {
+	maxPos, err := s.q.MaxQuestionPosition(ctx, quizID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read max question position: %w", err)
+	}
+
+	return int(maxPos) + 1, nil
+}
+
+// SwapQuestionPositions swaps the questionID's position with its
+// neighbour on the given side within the same quiz, atomically. The
+// implementation reads the full ordered list once and finds the
+// adjacent row in Go rather than via SQL — quizzes hold a handful of
+// questions in practice, so the simpler code beats a second LIMIT/
+// ORDER query. Both position updates run inside a single transaction
+// so a concurrent read never observes a half-swapped state.
+//
+// Returns [quiz.ErrInvalidDirection] when direction is neither "up"
+// nor "down", [quiz.ErrQuestionNotFound] when the question does not
+// belong to the quiz, and [quiz.ErrQuestionAtTop] /
+// [quiz.ErrQuestionAtBottom] when the question is already at the
+// requested boundary.
+func (s *QuizStore) SwapQuestionPositions(
+	ctx context.Context, quizID, questionID int64, direction string,
+) error {
+	if direction != quiz.DirectionUp && direction != quiz.DirectionDown {
+		return quiz.ErrInvalidDirection
+	}
+
+	rows, err := s.q.ListQuestionsByQuizID(ctx, quizID)
+	if err != nil {
+		return fmt.Errorf("failed to list questions for swap: %w", err)
+	}
+
+	idx := -1
+	for i := range rows {
+		if rows[i].ID == questionID {
+			idx = i
+
+			break
+		}
+	}
+	if idx == -1 {
+		return quiz.ErrQuestionNotFound
+	}
+
+	var neighbourIdx int
+	switch direction {
+	case quiz.DirectionUp:
+		if idx == 0 {
+			return quiz.ErrQuestionAtTop
+		}
+		neighbourIdx = idx - 1
+	case quiz.DirectionDown:
+		if idx == len(rows)-1 {
+			return quiz.ErrQuestionAtBottom
+		}
+		neighbourIdx = idx + 1
+	default:
+		// Guarded above by the early return for invalid directions,
+		// so this branch is unreachable. The explicit default keeps
+		// revive's enforce-switch-style happy.
+		return quiz.ErrInvalidDirection
+	}
+
+	current, neighbour := rows[idx], rows[neighbourIdx]
+
+	err = database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		// Two position-only updates inside the same transaction. The
+		// schema has no UNIQUE constraint on (quiz_id, position), so
+		// the order does not matter for correctness — but the txn
+		// boundary keeps any reader on the table from seeing two
+		// rows with the same position mid-swap.
+		if _, swapErr := q.UpdateQuestionPosition(ctx, db.UpdateQuestionPositionParams{
+			Position: neighbour.Position,
+			ID:       current.ID,
+		}); swapErr != nil {
+			return fmt.Errorf("failed to update current question position: %w", swapErr)
+		}
+		if _, swapErr := q.UpdateQuestionPosition(ctx, db.UpdateQuestionPositionParams{
+			Position: current.Position,
+			ID:       neighbour.ID,
+		}); swapErr != nil {
+			return fmt.Errorf("failed to update neighbour question position: %w", swapErr)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to swap question positions: %w", err)
+	}
+
+	return nil
+}
+
 // GetOption retrieves an option by its ID from the data store and returns it. Returns ErrOptionNotFound if no option is found.
 func (s *QuizStore) GetOption(ctx context.Context, optionID int64) (*quiz.Option, error) {
 	var err error

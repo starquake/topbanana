@@ -389,6 +389,23 @@ func (q *Queries) ListQuizzes(ctx context.Context) ([]Quiz, error) {
 	return items, nil
 }
 
+const maxQuestionPosition = `-- name: MaxQuestionPosition :one
+SELECT CAST(COALESCE(MAX(position), 0) AS INTEGER) AS max_position
+FROM questions
+WHERE quiz_id = ?
+`
+
+// Returns the highest position in use for the given quiz, or 0 when the
+// quiz has no questions yet. The CAST + COALESCE forces sqlc to type
+// the result as int64 instead of interface{} (raw MAX can return NULL).
+// Callers add 1 to get the next-position to assign on a new question.
+func (q *Queries) MaxQuestionPosition(ctx context.Context, quizID int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, maxQuestionPosition, quizID)
+	var max_position int64
+	err := row.Scan(&max_position)
+	return max_position, err
+}
+
 const questionCountsByQuiz = `-- name: QuestionCountsByQuiz :many
 SELECT quiz_id, COUNT(*) AS question_count
 FROM questions
@@ -481,6 +498,24 @@ func (q *Queries) UpdateQuestion(ctx context.Context, arg UpdateQuestionParams) 
 		arg.ImageUrl,
 		arg.ID,
 	)
+}
+
+const updateQuestionPosition = `-- name: UpdateQuestionPosition :execresult
+UPDATE questions
+SET position = ?
+WHERE id = ?
+`
+
+type UpdateQuestionPositionParams struct {
+	Position int64
+	ID       int64
+}
+
+// Position-only update. Used by the reorder flow (#16) to swap a pair
+// of questions atomically inside a transaction without rewriting the
+// text/image fields.
+func (q *Queries) UpdateQuestionPosition(ctx context.Context, arg UpdateQuestionPositionParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, updateQuestionPosition, arg.Position, arg.ID)
 }
 
 const updateQuiz = `-- name: UpdateQuiz :execresult

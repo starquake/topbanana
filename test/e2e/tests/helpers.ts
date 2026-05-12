@@ -72,7 +72,10 @@ export async function createQuizWithQuestions(
     await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/new$/);
 
     await page.locator('input[name=text]').fill(q.text);
-    await page.locator('input[name=position]').fill(String(index + 1));
+    // Position is auto-assigned by the server now (#16) — no input field
+    // on the question form. The index variable is kept on the for-of
+    // signature so future helpers can use it without re-binding.
+    void index;
     if (q.imageUrl !== undefined) {
       await page.locator('input[name=image_url]').fill(q.imageUrl);
     }

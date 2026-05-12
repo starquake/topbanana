@@ -29,12 +29,17 @@
                 </div>
             </div>
 
-            <div class="field">
-                <label class="label" for="position">Position</label>
-                <div class="control">
-                    <input id="position" name="position" class="input" type="text" value="{{.Question.Position}}">
+            {{if .Question.ID}}
+                <div class="field">
+                    <label class="label">Position</label>
+                    <div class="control">
+                        <p class="content is-small">
+                            {{.Question.Position}}
+                            <span class="has-text-grey">— use the Up/Down buttons on the quiz page to reorder.</span>
+                        </p>
+                    </div>
                 </div>
-            </div>
+            {{end}}
 
             <h4 class="title is-4">Options</h4>
 

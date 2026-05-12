@@ -91,18 +91,20 @@ func (e errReader) Read(_ []byte) (int, error) { return 0, e.err }
 func (errReader) Close() error                 { return nil }
 
 type stubQuizStore struct {
-	listQuizzes          func(ctx context.Context) ([]*quiz.Quiz, error)
-	questionCountsByQuiz func(ctx context.Context) (map[int64]int, error)
-	getQuizByID          func(ctx context.Context, id int64) (*quiz.Quiz, error)
-	quizExists           func(ctx context.Context, id int64) (bool, error)
-	createQuiz           func(ctx context.Context, qz *quiz.Quiz) error
-	updateQuiz           func(ctx context.Context, qz *quiz.Quiz) error
-	deleteQuiz           func(ctx context.Context, id int64) error
-	getQuestionByID      func(ctx context.Context, id int64) (*quiz.Question, error)
-	createQuestion       func(ctx context.Context, qs *quiz.Question) error
-	updateQuestion       func(ctx context.Context, qs *quiz.Question) error
-	deleteQuestion       func(ctx context.Context, id int64) error
-	listQuestions        func(ctx context.Context, quizID int64) ([]*quiz.Question, error)
+	listQuizzes           func(ctx context.Context) ([]*quiz.Quiz, error)
+	questionCountsByQuiz  func(ctx context.Context) (map[int64]int, error)
+	getQuizByID           func(ctx context.Context, id int64) (*quiz.Quiz, error)
+	quizExists            func(ctx context.Context, id int64) (bool, error)
+	createQuiz            func(ctx context.Context, qz *quiz.Quiz) error
+	updateQuiz            func(ctx context.Context, qz *quiz.Quiz) error
+	deleteQuiz            func(ctx context.Context, id int64) error
+	getQuestionByID       func(ctx context.Context, id int64) (*quiz.Question, error)
+	createQuestion        func(ctx context.Context, qs *quiz.Question) error
+	updateQuestion        func(ctx context.Context, qs *quiz.Question) error
+	deleteQuestion        func(ctx context.Context, id int64) error
+	listQuestions         func(ctx context.Context, quizID int64) ([]*quiz.Question, error)
+	nextQuestionPosition  func(ctx context.Context, quizID int64) (int, error)
+	swapQuestionPositions func(ctx context.Context, quizID, questionID int64, direction string) error
 }
 
 func (stubQuizStore) Ping(_ context.Context) error {
@@ -187,6 +189,24 @@ func (s stubQuizStore) UpdateQuestion(ctx context.Context, qs *quiz.Question) er
 	}
 
 	return s.updateQuestion(ctx, qs)
+}
+
+func (s stubQuizStore) NextQuestionPosition(ctx context.Context, quizID int64) (int, error) {
+	if s.nextQuestionPosition == nil {
+		return 0, errors.New("nextQuestionPosition not supplied in stub")
+	}
+
+	return s.nextQuestionPosition(ctx, quizID)
+}
+
+func (s stubQuizStore) SwapQuestionPositions(
+	ctx context.Context, quizID, questionID int64, direction string,
+) error {
+	if s.swapQuestionPositions == nil {
+		return errors.New("swapQuestionPositions not supplied in stub")
+	}
+
+	return s.swapQuestionPositions(ctx, quizID, questionID, direction)
 }
 
 func (s stubQuizStore) DeleteQuestion(ctx context.Context, id int64) error {
@@ -1769,11 +1789,15 @@ func TestHandleQuestionSave(t *testing.T) {
 				},
 			},
 		}
+		// Position is auto-assigned by the handler (#16); the
+		// existing quiz has questions at positions 10, 20, 30 so the
+		// next-position stub returns 40.
+		const autoAssignedPosition = 40
 		testQuestion := quiz.Question{
 			QuizID:   testQuiz.ID,
 			Text:     "Question Four",
 			ImageURL: "https://example.com/image.png",
-			Position: 10,
+			Position: autoAssignedPosition,
 			Options: []*quiz.Option{
 				{Text: "Option 1"},
 				{Text: "Option 2", Correct: true},
@@ -1789,6 +1813,9 @@ func TestHandleQuestionSave(t *testing.T) {
 				}
 
 				return &testQuiz, nil
+			},
+			nextQuestionPosition: func(_ context.Context, _ int64) (int, error) {
+				return autoAssignedPosition, nil
 			},
 			createQuestion: func(_ context.Context, q *quiz.Question) error {
 				q.ID = int64(len(questions) + 1)
@@ -1807,7 +1834,6 @@ func TestHandleQuestionSave(t *testing.T) {
 		form := url.Values{
 			"text":      {testQuestion.Text},
 			"image_url": {testQuestion.ImageURL},
-			"position":  {strconv.Itoa(testQuestion.Position)},
 		}
 		for i, option := range testQuestion.Options {
 			form.Add(fmt.Sprintf("option[%d].text", i), option.Text)
@@ -1887,7 +1913,9 @@ func TestHandleQuestionSave(t *testing.T) {
 			QuizID:   originalQuestion.QuizID,
 			Text:     originalQuestion.Text + " Updated",
 			ImageURL: originalQuestion.ImageURL + "?updated",
-			Position: originalQuestion.Position + 10,
+			// Position no longer comes from the form (#16); the
+			// stored position is whatever was loaded from the DB.
+			Position: originalQuestion.Position,
 			Options: []*quiz.Option{
 				{
 					ID:         originalQuestion.Options[1].ID,
@@ -1942,7 +1970,6 @@ func TestHandleQuestionSave(t *testing.T) {
 		form := url.Values{
 			"text":      {updatedQuestion.Text},
 			"image_url": {updatedQuestion.ImageURL},
-			"position":  {strconv.Itoa(updatedQuestion.Position)},
 		}
 		for i, option := range updatedQuestion.Options {
 			if option.ID != 0 {
@@ -2136,47 +2163,6 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 		}
 	})
 
-	t.Run("parsing form position fails", func(t *testing.T) {
-		t.Parallel()
-
-		buf := bytes.Buffer{}
-		logger := slog.New(slog.NewTextHandler(&buf, nil))
-
-		quizStore := stubQuizStore{
-			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{}, nil
-			},
-		}
-
-		handler := HandleQuestionSave(logger, nil, quizStore)
-
-		form := url.Values{
-			"text":      {""},
-			"image_url": {"http://example.com/image.png"},
-		}
-
-		req, err := http.NewRequestWithContext(
-			t.Context(),
-			http.MethodPost,
-			"/admin/quizzes/1234/questions",
-			strings.NewReader(form.Encode()),
-		)
-		if err != nil {
-			t.Fatalf("http.NewRequest error: %v", err)
-		}
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		rr := httptest.NewRecorder()
-
-		handler.ServeHTTP(rr, req)
-
-		if got, want := rr.Code, http.StatusBadRequest; got != want {
-			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
-		}
-		if got, want := rr.Body.String(), "error parsing position"; !strings.Contains(got, want) {
-			t.Fatalf("got: %v, should contain: %q", got, want)
-		}
-	})
-
 	t.Run("form is invalid", func(t *testing.T) {
 		t.Parallel()
 
@@ -2229,7 +2215,6 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 		testQuestion := quiz.Question{
 			Text:     "Question One",
 			ImageURL: "https://example.com/image.png",
-			Position: 10,
 			Options: []*quiz.Option{
 				{
 					Text: "Option 1",
@@ -2253,6 +2238,9 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 
 				return &testQuiz, nil
 			},
+			nextQuestionPosition: func(_ context.Context, _ int64) (int, error) {
+				return 10, nil
+			},
 			createQuestion: func(_ context.Context, _ *quiz.Question) error {
 				return testError
 			},
@@ -2261,7 +2249,6 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 		form := url.Values{
 			"text":      {testQuestion.Text},
 			"image_url": {testQuestion.ImageURL},
-			"position":  {strconv.Itoa(testQuestion.Position)},
 		}
 		for i, option := range testQuestion.Options {
 			form.Add(fmt.Sprintf("option[%d].text", i), option.Text)
@@ -2579,6 +2566,122 @@ func TestHandleQuizDelete_ErrorHandling(t *testing.T) {
 		}
 		if got, want := buf.String(), fmt.Sprintf("err=%q", testError); !strings.Contains(got, want) {
 			t.Fatalf("got: %q, should contain: %q", got, want)
+		}
+	})
+}
+
+func TestHandleQuestionMove(t *testing.T) {
+	t.Parallel()
+
+	t.Run("swap succeeds and redirects to quiz view", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+		var seen struct {
+			quizID, questionID int64
+			direction          string
+		}
+		store := stubQuizStore{
+			swapQuestionPositions: func(_ context.Context, quizID, questionID int64, direction string) error {
+				seen.quizID, seen.questionID, seen.direction = quizID, questionID, direction
+
+				return nil
+			},
+		}
+
+		handler := HandleQuestionMove(logger, nil, store)
+		req, err := http.NewRequestWithContext(
+			t.Context(), http.MethodPost,
+			"/admin/quizzes/7/questions/42/move/up", nil,
+		)
+		if err != nil {
+			t.Fatalf("NewRequest err = %v, want nil", err)
+		}
+		req.SetPathValue("quizID", "7")
+		req.SetPathValue("questionID", "42")
+		req.SetPathValue("direction", "up")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusSeeOther; got != want {
+			t.Fatalf("status = %d, want %d, log:\n%v", got, want, buf.String())
+		}
+		if got, want := rr.Header().Get("Location"), "/admin/quizzes/7"; got != want {
+			t.Errorf("Location = %q, want %q", got, want)
+		}
+		if got, want := seen.quizID, int64(7); got != want {
+			t.Errorf("seen.quizID = %d, want %d", got, want)
+		}
+		if got, want := seen.questionID, int64(42); got != want {
+			t.Errorf("seen.questionID = %d, want %d", got, want)
+		}
+		if got, want := seen.direction, "up"; got != want {
+			t.Errorf("seen.direction = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("boundary error redirects without surfacing the failure", func(t *testing.T) {
+		t.Parallel()
+		// ErrQuestionAtTop / ErrQuestionAtBottom happen when the button
+		// should already have been disabled in the UI. Treat as a
+		// silent no-op: redirect back so the page re-renders.
+
+		buf := bytes.Buffer{}
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+		store := stubQuizStore{
+			swapQuestionPositions: func(_ context.Context, _, _ int64, _ string) error {
+				return quiz.ErrQuestionAtTop
+			},
+		}
+
+		handler := HandleQuestionMove(logger, nil, store)
+		req, err := http.NewRequestWithContext(
+			t.Context(), http.MethodPost,
+			"/admin/quizzes/7/questions/42/move/up", nil,
+		)
+		if err != nil {
+			t.Fatalf("NewRequest err = %v, want nil", err)
+		}
+		req.SetPathValue("quizID", "7")
+		req.SetPathValue("questionID", "42")
+		req.SetPathValue("direction", "up")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusSeeOther; got != want {
+			t.Fatalf("status = %d, want %d, log:\n%v", got, want, buf.String())
+		}
+	})
+
+	t.Run("invalid direction renders 400", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+		store := stubQuizStore{
+			swapQuestionPositions: func(_ context.Context, _, _ int64, _ string) error {
+				return quiz.ErrInvalidDirection
+			},
+		}
+
+		handler := HandleQuestionMove(logger, nil, store)
+		req, err := http.NewRequestWithContext(
+			t.Context(), http.MethodPost,
+			"/admin/quizzes/7/questions/42/move/sideways", nil,
+		)
+		if err != nil {
+			t.Fatalf("NewRequest err = %v, want nil", err)
+		}
+		req.SetPathValue("quizID", "7")
+		req.SetPathValue("questionID", "42")
+		req.SetPathValue("direction", "sideways")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Errorf("status = %d, want %d, log:\n%v", got, want, buf.String())
 		}
 	})
 }

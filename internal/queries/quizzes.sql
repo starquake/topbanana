@@ -73,6 +73,23 @@ SET text = ?,
     image_url = ?
 WHERE id = ?;
 
+-- name: UpdateQuestionPosition :execresult
+-- Position-only update. Used by the reorder flow (#16) to swap a pair
+-- of questions atomically inside a transaction without rewriting the
+-- text/image fields.
+UPDATE questions
+SET position = ?
+WHERE id = ?;
+
+-- name: MaxQuestionPosition :one
+-- Returns the highest position in use for the given quiz, or 0 when the
+-- quiz has no questions yet. The CAST + COALESCE forces sqlc to type
+-- the result as int64 instead of interface{} (raw MAX can return NULL).
+-- Callers add 1 to get the next-position to assign on a new question.
+SELECT CAST(COALESCE(MAX(position), 0) AS INTEGER) AS max_position
+FROM questions
+WHERE quiz_id = ?;
+
 -- name: DeleteQuestion :execresult
 DELETE FROM questions
 WHERE id = ?;
