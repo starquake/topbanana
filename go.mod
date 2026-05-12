@@ -8,7 +8,7 @@ require (
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/rs/xid v1.6.0
 	github.com/tdewolff/minify/v2 v2.24.13
-	golang.org/x/crypto v0.50.0
+	golang.org/x/crypto v0.51.0
 	golang.org/x/sync v0.20.0
 	golang.org/x/term v0.43.0
 	modernc.org/sqlite v1.50.0
