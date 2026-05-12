@@ -6,9 +6,23 @@ on:
   pull_request:
     branches: [ main ]
 
+# Cancel the older run when a new push lands on the same branch / PR (#202).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   e2e:
-    runs-on: ubuntu-latest
+    # Matrixed by browser so chromium and firefox run on separate
+    # runners in parallel — roughly halves wall-clock time. Each
+    # matrix job gets its own filesystem, so the playwright.config
+    # mkdtemp data dir is naturally isolated across browsers (#202).
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
+
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v6
@@ -30,23 +44,33 @@ jobs:
         working-directory: test/e2e
 
       - name: Cache Playwright browsers
+        id: playwright-cache
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('test/e2e/package-lock.json') }}
+          # Per-browser cache key so the chromium job doesn't pull in
+          # firefox's binaries and vice versa.
+          key: playwright-${{ runner.os }}-${{ matrix.browser }}-${{ hashFiles('test/e2e/package-lock.json') }}
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium firefox
+      # Browser binaries skip on cache hit; system deps still run each
+      # time because apt-get state isn't cached. See #202 for the split.
+      - name: Install Playwright browser
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install ${{ matrix.browser }}
+        working-directory: test/e2e
+
+      - name: Install Playwright system deps
+        run: npx playwright install-deps ${{ matrix.browser }}
         working-directory: test/e2e
 
       - name: Run Playwright tests
-        run: npm test
+        run: npx playwright test --project=${{ matrix.browser }}
         working-directory: test/e2e
 
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.browser }}
           path: test/e2e/playwright-report
           retention-days: 7

@@ -6,10 +6,16 @@ on:
   pull_request:
     branches: [ main, develop ]
 
+# Cancel the older run when a new push lands on the same branch / PR.
+# Saves runner minutes on fixup pushes (#202).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
     - uses: actions/checkout@v6
@@ -19,9 +25,9 @@ jobs:
       with:
         go-version: "stable"
 
-    - name: Run Integration Tests
-      run: make test-integration
-
+    # `make test-coverage` runs the full suite with -tags=integration,
+    # so a separate integration step would just duplicate the work.
+    # Dropped here as part of #202.
     - name: Run Tests with Coverage
       run: make test-coverage
 
