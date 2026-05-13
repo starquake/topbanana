@@ -216,8 +216,33 @@ func TestParse(t *testing.T) {
 		if err == nil {
 			t.Fatal("Parse() with empty SESSION_KEY in production: err = nil, want non-nil")
 		}
-		if got, want := err, ErrSessionKeyNotSetInProduction; !errors.Is(got, want) {
+		if got, want := err, ErrSessionKeyRequired; !errors.Is(got, want) {
 			t.Fatalf("Parse() err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("empty SESSION_KEY in staging requires explicit key", func(t *testing.T) {
+		t.Parallel()
+
+		getenv := func(key string) string {
+			envs := map[string]string{
+				"APP_ENV":     "staging",
+				"DB_URI":      "file:test.sqlite",
+				"SESSION_KEY": "",
+			}
+
+			return envs[key]
+		}
+
+		_, err := Parse(getenv)
+		if err == nil {
+			t.Fatal("Parse() with empty SESSION_KEY in staging: err = nil, want non-nil")
+		}
+		if got, want := err, ErrSessionKeyRequired; !errors.Is(got, want) {
+			t.Fatalf("Parse() err = %v, want %v", got, want)
+		}
+		if got, want := err.Error(), `APP_ENV="staging"`; !strings.Contains(got, want) {
+			t.Errorf("Parse() err.Error() = %q, should contain %q", got, want)
 		}
 	})
 

@@ -15,9 +15,11 @@ import (
 // production deployments without a database.
 var ErrDBURINotSetInProduction = errors.New("DB_URI must be set in production")
 
-// ErrSessionKeyNotSetInProduction is returned when SESSION_KEY is not set in production. A stable key is required so
-// session cookies survive process restarts.
-var ErrSessionKeyNotSetInProduction = errors.New("SESSION_KEY must be set in production")
+// ErrSessionKeyRequired is returned when SESSION_KEY is not set in an
+// environment that requires an explicit key. Every APP_ENV except development
+// requires one so session cookies survive process restarts; development falls
+// back to an ephemeral random key so localhost runs need no configuration.
+var ErrSessionKeyRequired = errors.New("SESSION_KEY must be set")
 
 const (
 	// AppEnvironmentDefault is the default application environment.
@@ -195,14 +197,18 @@ func parseAdminUsernames(raw string) []string {
 	return out
 }
 
-// resolveSessionKey returns the session key for cookie signing. In production an explicit value is required; in
-// development a random ephemeral key is generated when none is provided.
+// resolveSessionKey returns the session key for cookie signing. An explicit
+// value is required in every environment except development; development
+// generates a random ephemeral key so localhost runs need no configuration.
+// The previous policy only enforced this in production, which let staging
+// silently rotate keys on every container restart and invalidate active
+// sessions. See #217.
 func resolveSessionKey(envValue, appEnvironment string) (string, error) {
 	if envValue != "" {
 		return envValue, nil
 	}
-	if appEnvironment == AppEnvironmentProduction {
-		return "", ErrSessionKeyNotSetInProduction
+	if appEnvironment != AppEnvironmentDefault {
+		return "", fmt.Errorf("%w: APP_ENV=%q", ErrSessionKeyRequired, appEnvironment)
 	}
 
 	b := make([]byte, sessionKeyByteLength)
