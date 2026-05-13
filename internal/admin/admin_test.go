@@ -313,15 +313,24 @@ func TestHandleQuizList(t *testing.T) {
 		if got, want := body, "Quiz Two"; !strings.Contains(got, want) {
 			t.Fatalf("got: %q, should contain: %q", got, want)
 		}
-		if got, want := body, "Last edited"; !strings.Contains(got, want) {
-			t.Fatalf("body should contain column header %q, got: %q", want, got)
-		}
-		// Quiz One: 2 hr ago. Quiz Two: just now.
+		// Quiz One: 2 hr ago. Quiz Two: just now. Rendered inside the
+		// card's <time> element by humanizeTime — see quizlist.gohtml.
 		if got, want := body, "2 hr ago"; !strings.Contains(got, want) {
 			t.Errorf("body should contain relative time %q, got: %q", want, got)
 		}
 		if got, want := body, "just now"; !strings.Contains(got, want) {
 			t.Errorf("body should contain relative time %q, got: %q", want, got)
+		}
+		// Pin a Tailwind utility that's structurally tied to the navbar
+		// shell. max-w-shell is a custom theme token from tailwind-src.css
+		// (only generated when a class uses it) so its presence proves the
+		// reskinned navbar rendered.
+		if got, want := body, `class="max-w-shell`; !strings.Contains(got, want) {
+			t.Errorf("body should contain Tailwind shell class %q, got: %q", want, got)
+		}
+		// And pin the dark-theme body class flipped on in base.gohtml.
+		if got, want := body, `class="bg-bg`; !strings.Contains(got, want) {
+			t.Errorf("body should contain Tailwind dark-bg class %q, got: %q", want, got)
 		}
 	})
 
@@ -353,14 +362,15 @@ func TestHandleQuizList(t *testing.T) {
 		}
 
 		body := rr.Body.String()
-		// The count for Quiz One (id=1) should appear inside its row's
-		// linked count cell. Anchor on the href so we don't accidentally
-		// match unrelated digits elsewhere on the page.
-		if got, want := body, `href="/admin/quizzes/1">5</a>`; !strings.Contains(got, want) {
-			t.Errorf("body should contain count cell %q, got %q", want, got)
+		// The reskinned card renders the question count inside a <strong>
+		// element nested under an /admin/quizzes/{id} link. The count
+		// substring is bracketed by ">{count}</strong>" so we don't
+		// accidentally match unrelated digits elsewhere on the page.
+		if got, want := body, `>5</strong>`; !strings.Contains(got, want) {
+			t.Errorf("body should contain question-count strong %q, got %q", want, got)
 		}
-		if got, want := body, `href="/admin/quizzes/2">0</a>`; !strings.Contains(got, want) {
-			t.Errorf("body should contain zero-count cell %q (missing key → 0), got %q", want, got)
+		if got, want := body, `>0</strong>`; !strings.Contains(got, want) {
+			t.Errorf("body should contain zero-count strong %q (missing key → 0), got %q", want, got)
 		}
 	})
 
@@ -415,6 +425,11 @@ func TestHandleQuizList(t *testing.T) {
 		}
 		if got, want := body, "No quizzes found."; !strings.Contains(got, want) {
 			t.Fatalf("got: %q, should contain: %q", got, want)
+		}
+		// Pin the dashed-border empty-state container — its border-dashed
+		// utility is unique to the Tailwind reskin.
+		if got, want := body, `border-dashed`; !strings.Contains(got, want) {
+			t.Errorf("body should contain Tailwind empty-state class %q, got: %q", want, got)
 		}
 	})
 }
@@ -1202,7 +1217,11 @@ func TestHandleQuestionCreate(t *testing.T) {
 	if got, want := rr.Code, http.StatusOK; got != want {
 		t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
 	}
-	if got, want := rr.Body.String(), "List of Quizzes"; !strings.Contains(got, want) {
+	// The Tailwind navbar doesn't render a "List of Quizzes" link (the
+	// brand mark already points at /admin). Pin the navbar by its
+	// aria-label, which is the stable accessibility contract for tests
+	// (also relied on by the Playwright e2e suite).
+	if got, want := rr.Body.String(), `aria-label="Top Banana!"`; !strings.Contains(got, want) {
 		t.Fatalf("got: %v, should contain: %q", got, want)
 	}
 }

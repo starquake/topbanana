@@ -1,22 +1,16 @@
 {{define "content"}}
-    <div class="columns is-centered">
-        <div class="column is-half">
-            <h1 class="title">Access denied</h1>
-            <p class="subtitle">This area requires an admin account.</p>
+    <div class="max-w-md mx-auto">
+        <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight mb-2">Access denied</h1>
+        <p class="text-text-dim text-[0.95rem] mb-5">This area requires an admin account.</p>
 
-            <p class="block">
-                You are signed in as <strong>{{.Username}}</strong>, but the page you tried to open is
-                only available to admins.
-            </p>
+        <p class="mb-6 text-[0.95rem]">
+            You are signed in as <strong class="text-text font-semibold">{{.Username}}</strong>, but the page you tried to open is
+            only available to admins.
+        </p>
 
-            <form action="/logout" method="POST">
-                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                <div class="field">
-                    <div class="control">
-                        <button class="button is-primary" type="submit">Sign out and switch accounts</button>
-                    </div>
-                </div>
-            </form>
-        </div>
+        <form action="/logout" method="POST">
+            <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+            <button type="submit" class="btn-primary">Sign out and switch accounts</button>
+        </form>
     </div>
 {{end}}

@@ -1,9 +1,9 @@
 {{define "content"}}
-    <div class="quiz-index">
-        <h1>{{.Title}}</h1>
-
-        <a href="/admin/quizzes/new">Create New Quiz</a>
-        <a href="/admin/quizzes">List Quizzes</a>
-
+    <div class="max-w-xl">
+        <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight mb-6">{{.Title}}</h1>
+        <div class="flex flex-col sm:flex-row gap-3">
+            <a href="/admin/quizzes/new" class="btn-primary">Create new quiz</a>
+            <a href="/admin/quizzes" class="btn-ghost">List quizzes</a>
+        </div>
     </div>
 {{end}}

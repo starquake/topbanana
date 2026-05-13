@@ -82,6 +82,80 @@ test-e2e:
 smoke:
 	go run ./cmd/server/ -check
 
+# --- Tailwind ---------------------------------------------------------------
+#
+# We use the Tailwind CLI v4 standalone binary so there is no Node.js, npm,
+# or node_modules in this repo. The binary is downloaded into $(BIN_DIR) on
+# first use (which is gitignored via build/) and reused on subsequent runs.
+#
+# v4 dropped tailwind.config.js — configuration now lives in CSS via the
+# @theme directive in internal/client/static/css/tailwind-src.css. The
+# preflight reset is opted out by importing only the theme and utilities
+# sub-layers (Bulma is still loaded on un-reskinned pages and provides its
+# own reset).
+#
+# The generated output (internal/client/static/css/admin.css) IS committed,
+# so the binary only has to exist on machines that intend to regenerate it.
+# CI can call `make tailwind-check` to catch drift.
+
+TAILWIND_VERSION    := v4.3.0
+TAILWIND_BIN        := $(BIN_DIR)/tailwindcss-v4
+TAILWIND_INPUT      := internal/client/static/css/tailwind-src.css
+TAILWIND_OUTPUT     := internal/client/static/css/admin.css
+
+# Pick the right asset for the current host. The release page ships
+# Linux x64/arm64, macOS x64/arm64, and Windows x64 — which covers every
+# machine we care about. Other hosts fall through to the Linux x64 binary
+# (works under WSL).
+UNAME_S := $(shell uname -s)
+UNAME_M := $(shell uname -m)
+ifeq ($(UNAME_S),Linux)
+    ifeq ($(UNAME_M),aarch64)
+        TAILWIND_ASSET := tailwindcss-linux-arm64
+    else
+        TAILWIND_ASSET := tailwindcss-linux-x64
+    endif
+else ifeq ($(UNAME_S),Darwin)
+    ifeq ($(UNAME_M),arm64)
+        TAILWIND_ASSET := tailwindcss-macos-arm64
+    else
+        TAILWIND_ASSET := tailwindcss-macos-x64
+    endif
+else
+    TAILWIND_ASSET := tailwindcss-linux-x64
+endif
+
+$(TAILWIND_BIN):
+	@mkdir -p $(BIN_DIR)
+	@echo "Downloading Tailwind CLI $(TAILWIND_VERSION) ($(TAILWIND_ASSET))..."
+	curl -sSfL -o $@ \
+	    https://github.com/tailwindlabs/tailwindcss/releases/download/$(TAILWIND_VERSION)/$(TAILWIND_ASSET)
+	chmod +x $@
+
+.PHONY: tailwind
+tailwind: $(TAILWIND_BIN)
+	$(TAILWIND_BIN) -i $(TAILWIND_INPUT) -o $(TAILWIND_OUTPUT) --minify
+
+.PHONY: tailwind-watch
+tailwind-watch: $(TAILWIND_BIN)
+	$(TAILWIND_BIN) -i $(TAILWIND_INPUT) -o $(TAILWIND_OUTPUT) --watch
+
+# Regenerate into a temp file and diff against the committed admin.css. CI can
+# call this to catch the case where someone changes a template class but
+# forgets to rerun `make tailwind`. Not wired into `make check` yet — see #213.
+.PHONY: tailwind-check
+tailwind-check: $(TAILWIND_BIN)
+	@tmp=$$(mktemp) && \
+	    $(TAILWIND_BIN) -i $(TAILWIND_INPUT) -o $$tmp --minify 2>/dev/null && \
+	    if ! diff -q $$tmp $(TAILWIND_OUTPUT) >/dev/null; then \
+	        echo "ERROR: $(TAILWIND_OUTPUT) is out of date — run \`make tailwind\` and commit the result."; \
+	        diff -u $(TAILWIND_OUTPUT) $$tmp || true; \
+	        rm -f $$tmp; \
+	        exit 1; \
+	    fi; \
+	    rm -f $$tmp; \
+	    echo "$(TAILWIND_OUTPUT) is up to date."
+
 .PHONY: clean
 clean:
 	rm -rf $(BUILD_DIR)

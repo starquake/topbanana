@@ -1,40 +1,30 @@
 {{define "content"}}
-    <div class="columns is-centered">
-        <div class="column is-half">
-            <h1 class="title">Log in</h1>
+    <div class="max-w-md mx-auto">
+        <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight mb-6">Log in</h1>
 
-            {{if .Message}}
-                <div class="notification is-danger">{{.Message}}</div>
-            {{end}}
+        {{if .Message}}
+            <div class="mb-5 px-4 py-3 rounded-sm bg-danger/10 border border-danger/40 text-danger text-sm" role="alert">{{.Message}}</div>
+        {{end}}
 
-            <form action="/login" method="POST">
-                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                <div class="field">
-                    <label class="label" for="username">Username</label>
-                    <div class="control">
-                        <input id="username" name="username" class="input" type="text" required
-                               value="{{.Username}}">
-                    </div>
-                </div>
+        <form action="/login" method="POST">
+            <input type="hidden" name="csrf_token" value="{{csrfToken}}">
 
-                <div class="field">
-                    <label class="label" for="password">Password</label>
-                    <div class="control">
-                        <input id="password" name="password" class="input" type="password" required>
-                    </div>
-                </div>
+            <div class="mb-5">
+                <label for="username" class="form-label">Username</label>
+                <input id="username" name="username" type="text" required value="{{.Username}}" class="form-input">
+            </div>
 
-                <div class="field is-grouped">
-                    <div class="control">
-                        <button class="button is-primary" type="submit">Log in</button>
-                    </div>
-                    {{if .ShowRegister}}
-                    <div class="control">
-                        <a href="/register">No account? Register</a>
-                    </div>
-                    {{end}}
-                </div>
-            </form>
-        </div>
+            <div class="mb-5">
+                <label for="password" class="form-label">Password</label>
+                <input id="password" name="password" type="password" required class="form-input">
+            </div>
+
+            <div class="flex items-center gap-4">
+                <button type="submit" class="btn-primary">Log in</button>
+                {{if .ShowRegister}}
+                    <a href="/register" class="text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">No account? Register</a>
+                {{end}}
+            </div>
+        </form>
     </div>
 {{end}}

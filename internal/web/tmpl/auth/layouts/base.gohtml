@@ -4,13 +4,19 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}} - Top Banana</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css">
+    {{/* Auth pages share the admin Tailwind stylesheet — one source of truth
+         for the dark theme + tokens. Bulma was dropped in #213; the auth
+         classes are scanned via the second @source directive in
+         tailwind-src.css so they survive tree-shaking. */}}
+    <link rel="stylesheet" href="/client/css/tokens.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@500;600;700;800;900&display=swap">
+    <link rel="stylesheet" href="/client/css/admin.css">
 </head>
-<body>
-<section class="section">
-    <div class="container">
-        {{template "content" .}}
-    </div>
+<body class="bg-bg text-text font-sans antialiased min-h-screen leading-relaxed">
+<section class="max-w-shell mx-auto px-5 py-10">
+    {{template "content" .}}
 </section>
 </body>
 </html>

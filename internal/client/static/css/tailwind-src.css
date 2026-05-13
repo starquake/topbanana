@@ -1,0 +1,125 @@
+/* Tailwind v4 entry point for the admin reskin.
+ *
+ * Generated output lives at admin.css (also committed) — see `make tailwind`.
+ *
+ * v4 uses CSS-first configuration: there is no tailwind.config.js. All
+ * theme tokens live in the @theme block below and are emitted as CSS
+ * custom properties, which Tailwind then surfaces as utilities
+ * (--color-bg → bg-bg, text-bg, border-bg, etc.).
+ *
+ * Bulma has been fully removed across admin + auth templates. Tailwind's
+ * preflight reset is the only baseline now. The player client at
+ * internal/client/static/index.html still uses Bulma directly via CDN —
+ * that's a separate surface and is intentionally out of scope here.
+ */
+
+@import "tailwindcss/preflight.css" layer(base);
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/* Limit Tailwind's class scanner to the admin + auth Go-HTML templates.
+ * The player client (internal/client/static/*) does not use Tailwind, so
+ * excluding it from the scan keeps the generated CSS lean. */
+@source "../../../web/tmpl/admin";
+@source "../../../web/tmpl/auth";
+
+@theme {
+    /* Palette — same tokens as mockups/admin-redesign-tailwind/quiz-list.html. */
+    --color-bg: #0a0a0f;
+    --color-surface: #15151c;
+    --color-surface-2: #1d1d26;
+    --color-border: #2a2a35;
+    --color-border-soft: #1f1f28;
+    --color-text: #e8e8ee;
+    --color-text-dim: #7a7a85;
+    --color-text-mute: #4a4a55;
+    --color-accent: #ffd23f;
+    --color-accent-soft: rgba(255, 210, 63, 0.14);
+    --color-accent-line: rgba(255, 210, 63, 0.4);
+    --color-accent-deep: #f5b800;
+    --color-cyan: #66e8ff;
+    --color-cyan-soft: rgba(102, 232, 255, 0.08);
+    --color-danger: #ff5c5c;
+    --color-success: #4ade80;
+    --color-warning: #fbbf24;
+
+    /* Type */
+    --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-display: 'Orbitron', system-ui, sans-serif;
+    --font-mono: ui-monospace, 'JetBrains Mono', Menlo, monospace;
+
+    /* Radii */
+    --radius-sm: 3px;
+    --radius: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --radius-xl: 12px;
+
+    /* Focus ring + shell width */
+    --shadow-focus: 0 0 0 3px rgba(255, 210, 63, 0.14);
+    --container-shell: 1080px;
+}
+
+/* Bespoke styles Tailwind has no utility for. The radial-gradient stack
+ * and font-feature settings come straight from the mockup — these need
+ * real CSS because Tailwind can't express stacked background gradients
+ * as utilities. Scoped to the base layer so utility classes can still
+ * override on a per-element basis. */
+@layer base {
+    body {
+        font-feature-settings: 'cv11', 'ss01', 'tnum';
+        background-image:
+            radial-gradient(ellipse 80% 600px at 50% -200px, rgba(255, 210, 63, 0.10), transparent 60%),
+            radial-gradient(ellipse 60% 400px at 50% -100px, rgba(102, 232, 255, 0.04), transparent 70%),
+            radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.025) 1px, transparent 0);
+        background-size: 100% 100%, 100% 100%, 24px 24px;
+        background-attachment: fixed, fixed, fixed;
+    }
+}
+
+/* A handful of @apply-based component shortcuts. The admin + auth surface
+ * is form-heavy and the same button/input combos appear in five+ templates;
+ * collapsing them into 5 utility classes keeps the diff readable without
+ * inventing a full design system. Anything page-specific stays as direct
+ * utilities on the element. */
+@layer components {
+    .btn-primary {
+        @apply inline-flex items-center justify-center min-h-[44px] px-4 rounded-sm
+               bg-accent text-[#1a1a1f] font-bold text-xs uppercase tracking-[0.12em] border-0
+               transition-colors hover:bg-accent-deep
+               focus-visible:outline-none focus-visible:shadow-focus cursor-pointer;
+    }
+    .btn-danger {
+        @apply inline-flex items-center justify-center min-h-[44px] px-4 rounded-sm
+               bg-danger text-[#1a1a1f] font-bold text-xs uppercase tracking-[0.12em] border-0
+               transition-[filter] hover:brightness-110
+               focus-visible:outline-none focus-visible:shadow-focus cursor-pointer;
+    }
+    .btn-warning {
+        @apply inline-flex items-center justify-center min-h-[44px] px-4 rounded-sm
+               bg-warning text-[#1a1a1f] font-bold text-xs uppercase tracking-[0.12em] border-0
+               transition-[filter] hover:brightness-110
+               focus-visible:outline-none focus-visible:shadow-focus cursor-pointer;
+    }
+    .btn-ghost {
+        @apply inline-flex items-center justify-center min-h-[44px] px-4 rounded-sm
+               bg-transparent text-text border border-border font-semibold text-xs uppercase tracking-[0.12em]
+               transition-colors hover:border-accent
+               focus-visible:outline-none focus-visible:shadow-focus cursor-pointer;
+    }
+    .icon-btn {
+        @apply w-9 h-9 inline-flex items-center justify-center rounded-sm bg-transparent border-0
+               text-text-dim hover:text-text hover:bg-surface-2
+               focus-visible:outline-none focus-visible:shadow-focus
+               transition-colors cursor-pointer
+               disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent;
+    }
+    .form-input {
+        @apply block w-full px-3 py-2 bg-surface border border-border rounded-sm text-text
+               placeholder:text-text-mute
+               focus-visible:outline-none focus-visible:shadow-focus focus-visible:border-accent;
+    }
+    .form-label {
+        @apply block mb-1.5 text-sm font-medium text-text;
+    }
+}

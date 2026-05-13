@@ -227,6 +227,18 @@ func TestAdmin_Integration(t *testing.T) {
 		t.Errorf("string(body) = %q, should contain %q", got, want)
 	}
 
+	// Pin Tailwind classes on the quiz list. max-w-shell is a custom
+	// theme token from tailwind-src.css used by the navbar shell;
+	// bg-cyan-soft is the play-URL chip pill rendered per quiz card.
+	// Together they prove both the navbar and the per-card reskin
+	// rendered. See #213.
+	if got, want := string(body), `class="max-w-shell`; !strings.Contains(got, want) {
+		t.Errorf("string(body) should contain Tailwind shell class %q, got %q", want, got)
+	}
+	if got, want := string(body), `bg-cyan-soft`; !strings.Contains(got, want) {
+		t.Errorf("string(body) should contain per-card Tailwind class %q, got %q", want, got)
+	}
+
 	// Verify quiz details
 	req, err = http.NewRequestWithContext(
 		ctx,

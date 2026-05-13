@@ -1,279 +1,304 @@
 {{define "content"}}
+    {{/* Breadcrumb */}}
+    <nav aria-label="breadcrumbs" class="mb-8">
+        <ol class="flex items-center text-xs uppercase tracking-[0.14em]">
+            <li><a href="/admin" class="pr-2 text-text-dim hover:text-text">Admin</a></li>
+            <li class="text-text-mute" aria-hidden="true">/</li>
+            <li><a href="/admin/quizzes" class="px-2 text-text-dim hover:text-text">Quizzes</a></li>
+            <li class="text-text-mute" aria-hidden="true">/</li>
+            <li><span class="pl-2 text-text" aria-current="page">{{if .Quiz}}{{.Quiz.Title}}{{else}}Not found{{end}}</span></li>
+        </ol>
+    </nav>
 
-    <div class="quiz-view">
-        <h1 class="title is-1">{{.Title}}</h1>
-
-        {{if .Quiz}}
-            <div class="level">
-                <div class="level-left">
-                    <div class="level-item">
-                        <h2 class="title is-2">#{{.Quiz.ID}} - {{.Quiz.Title}}</h2>
-                    </div>
-                </div>
-                <div class="level-right">
-                    <div class="level-item">
-                        <a href="/admin/quizzes/{{.Quiz.ID}}/edit">
-                        <span class="icon-text">
-                            <span class="icon"><i class="fas fa-pen"></i></span>
-                            <span>Edit quiz</span>
-                        </span>
-                        </a>
-                    </div>
-                    <div class="level-item">
-                        <a href="#"
-                           onclick="openModal('modal-share-quiz-{{.Quiz.ID}}'); return false;">
-                            <span class="icon-text has-text-link">
-                                <span class="icon"><i class="fas fa-share"></i></span>
-                                <span>Share quiz</span>
-                            </span>
-                        </a>
-                    </div>
-                    <div class="level-item">
-                        <a href="#" onclick="openModal('modal-delete-quiz-{{.Quiz.ID}}'); return false;">
-                            <span class="icon-text has-text-danger">
-                                <span class="icon"><i class="fas fa-trash"></i></span>
-                                <span>Delete quiz</span>
-                            </span>
-                        </a>
-                    </div>
-                </div>
+    {{if .Quiz}}
+        {{/* Header: quiz title + action buttons (edit/share/delete) */}}
+        <header class="flex flex-col md:flex-row md:items-start md:justify-between gap-5 mb-10">
+            <div>
+                <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight">#{{.Quiz.ID}} - {{.Quiz.Title}}</h1>
+                {{if .Quiz.Description}}
+                    <p class="mt-1.5 max-w-[640px] text-text-dim text-[0.95rem]">{{.Quiz.Description}}</p>
+                {{end}}
             </div>
-
-            <div class="modal" id="modal-share-quiz-{{.Quiz.ID}}">
-                <div class="modal-background"
-                     onclick="closeModal('modal-share-quiz-{{.Quiz.ID}}')"></div>
-                <div class="modal-card">
-                    <header class="modal-card-head">
-                        <p class="modal-card-title">Share quiz</p>
-                        <button class="delete" aria-label="close"
-                                onclick="closeModal('modal-share-quiz-{{.Quiz.ID}}')"></button>
-                    </header>
-                    <section class="modal-card-body"
-                             data-share-path="/play/{{.Quiz.Slug}}-{{.Quiz.ID}}"
-                             data-share-title="{{.Quiz.Title}}">
-                        <p class="mb-3">Anyone with this link can land directly on the quiz:</p>
-                        <p class="has-text-weight-semibold mb-4 share-link"></p>
-                        <div class="buttons">
-                            <button class="button is-link share-copy" type="button">
-                                <span class="icon"><i class="fas fa-copy"></i></span>
-                                <span>Copy link</span>
-                            </button>
-                            <button class="button is-success share-whatsapp" type="button">
-                                <span class="icon"><i class="fab fa-whatsapp"></i></span>
-                                <span>Share via WhatsApp</span>
-                            </button>
-                            <button class="button share-signal" type="button">
-                                <span>Share via Signal</span>
-                            </button>
-                        </div>
-                        <p class="help share-feedback is-hidden"></p>
-                    </section>
-                    <footer class="modal-card-foot">
-                        <div class="buttons">
-                            <button class="button"
-                                    onclick="closeModal('modal-share-quiz-{{.Quiz.ID}}')">Close</button>
-                        </div>
-                    </footer>
-                </div>
+            <div class="flex items-center gap-2">
+                <a href="/admin/quizzes/{{.Quiz.ID}}/edit"
+                   class="btn-ghost gap-2">
+                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>
+                    <span>Edit</span>
+                </a>
+                <button type="button"
+                        onclick="openModal('modal-share-quiz-{{.Quiz.ID}}')"
+                        class="btn-ghost gap-2">
+                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M13.5 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.5 2.5 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5zm-8.5 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm11 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>
+                    <span>Share</span>
+                </button>
+                <button type="button"
+                        onclick="openModal('modal-delete-quiz-{{.Quiz.ID}}')"
+                        class="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 rounded-sm bg-transparent text-danger border border-danger/40 font-semibold text-xs uppercase tracking-[0.12em] transition-colors hover:bg-danger/10 hover:border-danger focus-visible:outline-none focus-visible:shadow-focus cursor-pointer">
+                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5zM11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1H11z"/></svg>
+                    <span>Delete</span>
+                </button>
             </div>
+        </header>
 
-            <div class="modal" id="modal-delete-quiz-{{.Quiz.ID}}">
-                <div class="modal-background" onclick="closeModal('modal-delete-quiz-{{.Quiz.ID}}')"></div>
-                <div class="modal-card">
-                    <header class="modal-card-head">
-                        <p class="modal-card-title">Delete Quiz</p>
-                        <button class="delete" aria-label="close" onclick="closeModal('modal-delete-quiz-{{.Quiz.ID}}')"></button>
-                    </header>
-                    <section class="modal-card-body">
-                        Are you sure you want to delete quiz <strong>&#34;{{.Quiz.Title}}&#34;</strong>? This will also delete all its questions and options. This action cannot be undone.
-                    </section>
-                    <footer class="modal-card-foot">
-                        <div class="buttons">
-                            <form method="post" action="/admin/quizzes/{{.Quiz.ID}}/delete">
-                                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                                <button class="button is-danger" type="submit">Delete</button>
-                            </form>
-                            <button class="button" onclick="closeModal('modal-delete-quiz-{{.Quiz.ID}}')">Cancel</button>
-                        </div>
-                    </footer>
-                </div>
+        {{/* Share modal */}}
+        <div id="modal-share-quiz-{{.Quiz.ID}}" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
+            <div class="absolute inset-0" onclick="closeModal('modal-share-quiz-{{.Quiz.ID}}')"></div>
+            <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
+                <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
+                    <p class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Share quiz</p>
+                    <button type="button"
+                            aria-label="close"
+                            onclick="closeModal('modal-share-quiz-{{.Quiz.ID}}')"
+                            class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer">&times;</button>
+                </header>
+                <section class="px-6 py-5 text-[0.95rem]"
+                         data-share-path="/play/{{.Quiz.Slug}}-{{.Quiz.ID}}"
+                         data-share-title="{{.Quiz.Title}}">
+                    <p class="mb-3">Anyone with this link can land directly on the quiz:</p>
+                    <p class="font-semibold mb-4 break-all text-cyan share-link"></p>
+                    <div class="flex flex-wrap gap-2">
+                        <button class="btn-primary gap-2 share-copy" type="button">
+                            <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1z"/><path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0z"/></svg>
+                            <span>Copy link</span>
+                        </button>
+                        <button class="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 rounded-sm bg-success text-[#1a1a1f] font-bold text-xs uppercase tracking-[0.12em] border-0 transition-[filter] hover:brightness-110 cursor-pointer share-whatsapp" type="button">
+                            <span>Share via WhatsApp</span>
+                        </button>
+                        <button class="btn-ghost share-signal" type="button">
+                            <span>Share via Signal</span>
+                        </button>
+                    </div>
+                    <p class="hidden mt-3 text-xs text-text-dim share-feedback"></p>
+                </section>
+                <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
+                    <button type="button"
+                            onclick="closeModal('modal-share-quiz-{{.Quiz.ID}}')"
+                            class="btn-ghost">Close</button>
+                </footer>
             </div>
+        </div>
 
-            <h3 class="subtitle is-3">{{.Quiz.Description}}</h3>
+        {{/* Delete-quiz modal */}}
+        <div id="modal-delete-quiz-{{.Quiz.ID}}" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
+            <div class="absolute inset-0" onclick="closeModal('modal-delete-quiz-{{.Quiz.ID}}')"></div>
+            <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
+                <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
+                    <p class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Delete quiz</p>
+                    <button type="button" aria-label="close"
+                            onclick="closeModal('modal-delete-quiz-{{.Quiz.ID}}')"
+                            class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer">&times;</button>
+                </header>
+                <section class="px-6 py-5 text-[0.95rem]">
+                    Are you sure you want to delete quiz <strong class="text-text">&#34;{{.Quiz.Title}}&#34;</strong>? This will also delete all its questions and options. This action cannot be undone.
+                </section>
+                <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
+                    <button type="button"
+                            onclick="closeModal('modal-delete-quiz-{{.Quiz.ID}}')"
+                            class="btn-ghost">Cancel</button>
+                    <form method="post" action="/admin/quizzes/{{.Quiz.ID}}/delete" class="inline-flex">
+                        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                        <button type="submit" class="btn-danger">Delete</button>
+                    </form>
+                </footer>
+            </div>
+        </div>
 
-            <h4 class="subtitle is-4">Questions</h4>
+        {{/* Questions section */}}
+        <section class="mb-10" aria-label="Questions">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="font-display text-xl font-semibold">Questions</h2>
+                <a href="/admin/quizzes/{{.Quiz.ID}}/questions/new"
+                   class="btn-primary gap-2">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5a.5.5 0 0 1 .5.5v5.5H14a.5.5 0 0 1 0 1H8.5V14a.5.5 0 0 1-1 0V8.5H2a.5.5 0 0 1 0-1h5.5V2a.5.5 0 0 1 .5-.5z"/></svg>
+                    <span>Add question</span>
+                </a>
+            </div>
 
             {{if .Quiz.Questions}}
-                <table class="table is-striped is-fullwidth">
-                    <thead>
-                    <tr>
-                        <th>Order</th>
-                        <th>Question</th>
-                        <th>Options</th>
-                        <th>Actions</th>
-                    </tr>
-                    </thead>
-
-                    <tbody>
-                    {{range $i, $q := .Quiz.Questions}}
-                        <tr>
-                            <td>
-                                <form method="post"
-                                      action="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/move/up"
-                                      class="is-inline">
-                                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                                    <button class="button is-small is-white"
-                                            type="submit"
-                                            title="Move up"
-                                            aria-label="Move up"
-                                            {{if eq $i 0}}disabled{{end}}>
-                                        <span class="icon"><i class="fas fa-arrow-up"></i></span>
-                                    </button>
-                                </form>
-                                <form method="post"
-                                      action="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/move/down"
-                                      class="is-inline">
-                                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                                    <button class="button is-small is-white"
-                                            type="submit"
-                                            title="Move down"
-                                            aria-label="Move down"
-                                            {{if eq $i $.LastQuestionIndex}}disabled{{end}}>
-                                        <span class="icon"><i class="fas fa-arrow-down"></i></span>
-                                    </button>
-                                </form>
-                            </td>
-                            <td>{{$q.Text}}</td>
-                            <td>
-                                <ul>
-                                    {{range $q.Options}}
-                                        <li>
-                                            {{.Text}}
-                                            {{if .Correct}}
-                                                <span class="icon is-small has-text-success">
-                                                    <i class="fas fa-check"></i>
-                                                </span>
+                <div class="overflow-x-auto rounded-lg border border-border-soft">
+                    <table class="w-full text-sm">
+                        <thead class="bg-surface-2 text-text-dim uppercase text-xs tracking-[0.12em]">
+                            <tr>
+                                <th class="px-4 py-3 text-left font-semibold w-28">Order</th>
+                                <th class="px-4 py-3 text-left font-semibold">Question</th>
+                                <th class="px-4 py-3 text-left font-semibold">Options</th>
+                                <th class="px-4 py-3 text-left font-semibold w-40">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{range $i, $q := .Quiz.Questions}}
+                                <tr class="border-t border-border-soft bg-surface">
+                                    <td class="px-4 py-3 align-top">
+                                        <div class="flex items-center gap-1">
+                                            <form method="post"
+                                                  action="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/move/up"
+                                                  class="inline-flex">
+                                                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                                                <button type="submit"
+                                                        title="Move up"
+                                                        aria-label="Move up"
+                                                        class="icon-btn"
+                                                        {{if eq $i 0}}disabled{{end}}>
+                                                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M8 12a.5.5 0 0 0 .5-.5V5.707l2.146 2.147a.5.5 0 0 0 .708-.708l-3-3a.5.5 0 0 0-.708 0l-3 3a.5.5 0 1 0 .708.708L7.5 5.707V11.5a.5.5 0 0 0 .5.5z"/></svg>
+                                                </button>
+                                            </form>
+                                            <form method="post"
+                                                  action="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/move/down"
+                                                  class="inline-flex">
+                                                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                                                <button type="submit"
+                                                        title="Move down"
+                                                        aria-label="Move down"
+                                                        class="icon-btn"
+                                                        {{if eq $i $.LastQuestionIndex}}disabled{{end}}>
+                                                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M8 4a.5.5 0 0 1 .5.5v5.793l2.146-2.147a.5.5 0 0 1 .708.708l-3 3a.5.5 0 0 1-.708 0l-3-3a.5.5 0 1 1 .708-.708L7.5 10.293V4.5A.5.5 0 0 1 8 4z"/></svg>
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-3 align-top">{{$q.Text}}</td>
+                                    <td class="px-4 py-3 align-top">
+                                        <ul class="space-y-1">
+                                            {{range $q.Options}}
+                                                <li class="flex items-center gap-2">
+                                                    <span>{{.Text}}</span>
+                                                    {{if .Correct}}
+                                                        <span class="inline-flex items-center text-success" aria-label="Correct">
+                                                            <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/></svg>
+                                                        </span>
+                                                    {{end}}
+                                                </li>
                                             {{end}}
-                                        </li>
-                                    {{end}}
-                                </ul>
-                            </td>
-                            <td>
-                                <a href="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/edit">
-                                    <span class="icon-text">
-                                        <span class="icon"><i class="fas fa-pen"></i></span>
-                                        <span>Edit question</span>
-                                    </span>
-                                </a>
-                                &nbsp;
-                                <a href="#" onclick="openModal('modal-delete-question-{{$q.ID}}'); return false;">
-                                    <span class="icon-text has-text-danger">
-                                        <span class="icon"><i class="fas fa-trash"></i></span>
-                                        <span>Delete question</span>
-                                    </span>
-                                </a>
-                            </td>
-                        </tr>
-                    {{end}}
-                    </tbody>
+                                        </ul>
+                                    </td>
+                                    <td class="px-4 py-3 align-top">
+                                        <div class="flex items-center gap-1">
+                                            <a href="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/edit"
+                                               aria-label="Edit question" title="Edit question"
+                                               class="icon-btn">
+                                                <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>
+                                            </a>
+                                            <button type="button"
+                                                    onclick="openModal('modal-delete-question-{{$q.ID}}')"
+                                                    aria-label="Delete question" title="Delete question"
+                                                    class="w-9 h-9 inline-flex items-center justify-center rounded-sm bg-transparent border-0 text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:shadow-focus transition-colors cursor-pointer">
+                                                <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5zM11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1H11z"/></svg>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                </div>
 
-                </table>
-
+                {{/* Delete-question modals */}}
                 {{range .Quiz.Questions}}
-                    <div class="modal" id="modal-delete-question-{{.ID}}">
-                        <div class="modal-background" onclick="closeModal('modal-delete-question-{{.ID}}')"></div>
-                        <div class="modal-card">
-                            <header class="modal-card-head">
-                                <p class="modal-card-title">Delete Question</p>
-                                <button class="delete" aria-label="close" onclick="closeModal('modal-delete-question-{{.ID}}')"></button>
+                    <div id="modal-delete-question-{{.ID}}" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
+                        <div class="absolute inset-0" onclick="closeModal('modal-delete-question-{{.ID}}')"></div>
+                        <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
+                            <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
+                                <p class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Delete question</p>
+                                <button type="button" aria-label="close"
+                                        onclick="closeModal('modal-delete-question-{{.ID}}')"
+                                        class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer">&times;</button>
                             </header>
-                            <section class="modal-card-body">
-                                Are you sure you want to delete question <strong>&#34;{{.Text}}&#34;</strong>? This will also delete all its options. This action cannot be undone.
+                            <section class="px-6 py-5 text-[0.95rem]">
+                                Are you sure you want to delete question <strong class="text-text">&#34;{{.Text}}&#34;</strong>? This will also delete all its options. This action cannot be undone.
                             </section>
-                            <footer class="modal-card-foot">
-                                <div class="buttons">
-                                    <form method="post" action="/admin/quizzes/{{.QuizID}}/questions/{{.ID}}/delete">
-                                        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                                        <button class="button is-danger" type="submit">Delete</button>
-                                    </form>
-                                    <button class="button" onclick="closeModal('modal-delete-question-{{.ID}}')">Cancel</button>
-                                </div>
+                            <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
+                                <button type="button"
+                                        onclick="closeModal('modal-delete-question-{{.ID}}')"
+                                        class="btn-ghost">Cancel</button>
+                                <form method="post" action="/admin/quizzes/{{.QuizID}}/questions/{{.ID}}/delete" class="inline-flex">
+                                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                                    <button type="submit" class="btn-danger">Delete</button>
+                                </form>
                             </footer>
                         </div>
                     </div>
                 {{end}}
             {{else}}
-                <p>This quiz has no questions.</p>
+                <div class="border border-dashed border-border rounded-xl p-10 text-center text-text-dim">
+                    This quiz has no questions yet.
+                </div>
             {{end}}
-            <a href="/admin/quizzes/{{.Quiz.ID}}/questions/new">
-                <span class="icon-text">
-                    <span class="icon"><i class="fas fa-plus"></i></span>
-                    <span>Add question</span>
-                </span>
-            </a>
+        </section>
 
-            <h4 class="subtitle is-4 mt-5">Played by</h4>
+        {{/* Players section */}}
+        <section aria-label="Played by">
+            <h2 class="font-display text-xl font-semibold mb-4">Played by</h2>
             {{if .Players}}
-                <table class="table is-striped is-fullwidth">
-                    <thead>
-                    <tr>
-                        <th>Player</th>
-                        <th>Score</th>
-                        <th>Actions</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    {{range .Players}}
-                        <tr>
-                            <td>{{.Username}}</td>
-                            <td>{{.Score}}</td>
-                            <td>
-                                <a href="#" onclick="openModal('modal-reset-player-{{.PlayerID}}'); return false;">
-                                    <span class="icon-text has-text-warning">
-                                        <span class="icon"><i class="fas fa-rotate-left"></i></span>
-                                        <span>Reset</span>
-                                    </span>
-                                </a>
-                            </td>
-                        </tr>
-                    {{end}}
-                    </tbody>
-                </table>
+                <div class="overflow-x-auto rounded-lg border border-border-soft">
+                    <table class="w-full text-sm">
+                        <thead class="bg-surface-2 text-text-dim uppercase text-xs tracking-[0.12em]">
+                            <tr>
+                                <th class="px-4 py-3 text-left font-semibold">Player</th>
+                                <th class="px-4 py-3 text-left font-semibold">Score</th>
+                                <th class="px-4 py-3 text-left font-semibold w-40">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{range .Players}}
+                                <tr class="border-t border-border-soft bg-surface">
+                                    <td class="px-4 py-3 align-top">{{.Username}}</td>
+                                    <td class="px-4 py-3 align-top tabular-nums">{{.Score}}</td>
+                                    <td class="px-4 py-3 align-top">
+                                        <button type="button"
+                                                onclick="openModal('modal-reset-player-{{.PlayerID}}')"
+                                                class="inline-flex items-center gap-2 px-3 py-2 rounded-sm bg-transparent border border-warning/40 text-warning font-semibold text-xs uppercase tracking-[0.12em] hover:bg-warning/10 hover:border-warning focus-visible:outline-none focus-visible:shadow-focus cursor-pointer transition-colors">
+                                            <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/><path d="M8 4.466V.534a.25.25 0 0 0-.41-.192L5.23 2.308a.25.25 0 0 0 0 .384l2.36 1.966A.25.25 0 0 0 8 4.466z"/></svg>
+                                            <span>Reset</span>
+                                        </button>
+                                    </td>
+                                </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                </div>
 
                 {{range .Players}}
-                    <div class="modal" id="modal-reset-player-{{.PlayerID}}">
-                        <div class="modal-background" onclick="closeModal('modal-reset-player-{{.PlayerID}}')"></div>
-                        <div class="modal-card">
-                            <header class="modal-card-head">
-                                <p class="modal-card-title">Reset Quiz Attempt</p>
-                                <button class="delete" aria-label="close" onclick="closeModal('modal-reset-player-{{.PlayerID}}')"></button>
+                    <div id="modal-reset-player-{{.PlayerID}}" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
+                        <div class="absolute inset-0" onclick="closeModal('modal-reset-player-{{.PlayerID}}')"></div>
+                        <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
+                            <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
+                                <p class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Reset quiz attempt</p>
+                                <button type="button" aria-label="close"
+                                        onclick="closeModal('modal-reset-player-{{.PlayerID}}')"
+                                        class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer">&times;</button>
                             </header>
-                            <section class="modal-card-body">
-                                Are you sure you want to reset <strong>&#34;{{.Username}}&#34;</strong>'s attempt? Their game and all answers will be deleted, and they will be able to play this quiz again. This action cannot be undone.
+                            <section class="px-6 py-5 text-[0.95rem]">
+                                Are you sure you want to reset <strong class="text-text">&#34;{{.Username}}&#34;</strong>'s attempt? Their game and all answers will be deleted, and they will be able to play this quiz again. This action cannot be undone.
                             </section>
-                            <footer class="modal-card-foot">
-                                <div class="buttons">
-                                    <form method="post" action="/admin/quizzes/{{$.Quiz.ID}}/players/{{.PlayerID}}/reset">
-                                        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                                        <button class="button is-warning" type="submit">Reset</button>
-                                    </form>
-                                    <button class="button" onclick="closeModal('modal-reset-player-{{.PlayerID}}')">Cancel</button>
-                                </div>
+                            <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
+                                <button type="button"
+                                        onclick="closeModal('modal-reset-player-{{.PlayerID}}')"
+                                        class="btn-ghost">Cancel</button>
+                                <form method="post" action="/admin/quizzes/{{$.Quiz.ID}}/players/{{.PlayerID}}/reset" class="inline-flex">
+                                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                                    <button type="submit" class="btn-warning">Reset</button>
+                                </form>
                             </footer>
                         </div>
                     </div>
                 {{end}}
             {{else}}
-                <p>No plays yet.</p>
+                <div class="border border-dashed border-border rounded-xl p-10 text-center text-text-dim">
+                    No plays yet.
+                </div>
             {{end}}
-        {{else}}
-            <p>Quiz not found!</p>
-        {{end}}
-    </div>
+        </section>
+    {{else}}
+        <div class="border border-dashed border-border rounded-xl p-12 text-center">
+            <h2 class="mb-2 font-display text-2xl font-bold">Quiz not found!</h2>
+            <p class="mb-6 text-text-dim text-[0.95rem]">The quiz you tried to open doesn't exist or has been deleted.</p>
+            <a href="/admin/quizzes" class="btn-primary">Back to quiz list</a>
+        </div>
+    {{end}}
 
     <script>
-        function openModal(id) { document.getElementById(id).classList.add('is-active'); }
-        function closeModal(id) { document.getElementById(id).classList.remove('is-active'); }
+        function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
+        function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 
         // Wire share-modal buttons. The share modal body carries the
         // path and title in data-* attributes; the absolute URL is
@@ -290,8 +315,8 @@
             function flash(msg) {
                 if (!feedback) return;
                 feedback.textContent = msg;
-                feedback.classList.remove('is-hidden');
-                setTimeout(function () { feedback.classList.add('is-hidden'); }, 2500);
+                feedback.classList.remove('hidden');
+                setTimeout(function () { feedback.classList.add('hidden'); }, 2500);
             }
 
             const copyBtn = body.querySelector('.share-copy');
