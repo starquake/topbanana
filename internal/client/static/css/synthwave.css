@@ -196,6 +196,34 @@ h3 {
     gap: 0.6rem;
 }
 
+/* Icon-only button — inline affordance that should read as a clickable
+   glyph rather than a chrome'd button. Used for the leaderboard-row
+   "Set my name" pencil (#204) where a full Bulma button took too much
+   of the row. The :focus rule keeps the keyboard focus ring visible
+   for accessibility; the (hover: hover) gate matches the rest of the
+   palette's sticky-hover-on-touch fix from #194. */
+.icon-button {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    color: inherit;
+    line-height: 1;
+    vertical-align: middle;
+    opacity: 0.65;
+    transition: opacity 160ms ease;
+}
+.icon-button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    opacity: 1;
+}
+@media (hover: hover) {
+    .icon-button:hover {
+        opacity: 1;
+    }
+}
+
 /* Progress bar — a hair-thin line in the accent gradient. */
 .progress {
     background: var(--border);
