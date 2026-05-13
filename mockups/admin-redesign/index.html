@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin redesign mockup — top banana</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav class="nav" aria-label="Primary">
+        <div class="nav-inner">
+            <a class="nav-brand" href="index.html"><span class="nav-brand-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13c3.5-2 8-2 10 2a5.5 5.5 0 0 1 8 5"/><path d="M5.15 17.89c5.52-1.52 8.65-6.89 7-12C11.55 4 11.5 2 13 2c3.22 0 5 5.5 5 8 0 6.5-4.2 12-10.49 12C5.11 22 2 22 2 20c0-1.5 1.14-1.55 3.15-2.11Z"/></svg></span>TOP<span>BANANA</span></a>
+            <div class="nav-meta">
+                <span class="nav-user">Mockup index</span>
+            </div>
+        </div>
+    </nav>
+
+    <main class="shell">
+        <header class="page-header">
+            <div>
+                <h1 class="page-title">Admin redesign</h1>
+                <p class="page-sub">Three mockup pages exploring the dark, editorial, mobile-first direction for #207. Open each one and resize the viewport — they're shaped for 360 px upward.</p>
+            </div>
+        </header>
+
+        <section class="quiz-grid">
+            <a class="quiz-card" href="quiz-list.html" style="text-decoration: none;">
+                <div class="quiz-card-meta">
+                    <span>Page 1 of 3</span>
+                </div>
+                <h3 class="quiz-card-title">Quiz list</h3>
+                <span class="quiz-card-slug">quiz-list.html</span>
+                <p class="quiz-card-desc">Card grid of quizzes with title, slug, description, play count, and per-card actions. Includes the empty state at the bottom of the page.</p>
+            </a>
+            <a class="quiz-card" href="quiz-view.html" style="text-decoration: none;">
+                <div class="quiz-card-meta">
+                    <span>Page 2 of 3</span>
+                </div>
+                <h3 class="quiz-card-title">Quiz view</h3>
+                <span class="quiz-card-slug">quiz-view.html</span>
+                <p class="quiz-card-desc">Quiz header with visibility pill, share URL, and edit/share/delete actions. Question rows with Up/Down reorder. "Played by" players list.</p>
+            </a>
+            <a class="quiz-card" href="question-form.html" style="text-decoration: none;">
+                <div class="quiz-card-meta">
+                    <span>Page 3 of 3</span>
+                </div>
+                <h3 class="quiz-card-title">Question form</h3>
+                <span class="quiz-card-slug">question-form.html</span>
+                <p class="quiz-card-desc">Single-column form: question text, image drop zone, four option rows with cyan correct-pills, read-only position, time-limit override.</p>
+            </a>
+        </section>
+
+        <section style="margin-top: 4rem; color: var(--text-dim); font-size: 0.85rem; max-width: 60ch;">
+            <p class="eyebrow">Design notes</p>
+            <p style="margin: 0 0 1rem;">Sans throughout: Inter for body, Orbitron for every display moment — brand wordmark, page titles, quiz titles, position numbers, option letters. Geometric retro-futurist face that puts a synthwave/cyber stamp on the surface without sliding into arcade-game territory. Mostly used in caps where the type was designed to live, with measured tracking so it reads less ALARM and more INTERFACE.</p>
+            <p style="margin: 0 0 1rem;">Banana yellow as the primary accent (matches the name), cyan reserved for positive states (correct answers, "copy link" affordance). Magenta dropped — two-color discipline. Subtle yellow vignette behind the navbar plus a quiet dot-grid for surface texture. The primary CTA gets a controlled glow on hover (negative spread keeps it tight, no permanent halo). Hover affordances gated to <code>@media (hover: hover)</code> so they do not stick on touch.</p>
+            <p style="margin: 0 0 1rem;">All three pages tested at 360 px width; touch targets ≥ 44 px; tables collapse to stacked cards on mobile. <code>:focus-visible</code> outlines on every interactive element.</p>
+            <p style="margin: 0;">Future-feature placeholders included: visibility pill (#103), image drop zone (#168), time-limit override (#99). Empty slots make it easy to fill them in later without re-skinning.</p>
+        </section>
+    </main>
+</body>
+</html>

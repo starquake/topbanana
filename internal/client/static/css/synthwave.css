@@ -2,22 +2,10 @@
    magenta accent on near-black, generous whitespace, Inter throughout.
    The synthwave heritage is in the accent colour and the kinetic
    animations driven from GameApp.js — not in the static decoration.
-   File name kept for diff continuity; the contents have moved on. */
+   File name kept for diff continuity; the contents have moved on.
 
-:root {
-    --bg: #0a0a0f;
-    --surface: #15151c;
-    --surface-2: #1d1d26;
-    --border: #2a2a35;
-    --text: #e8e8ee;
-    --text-dim: #7a7a85;
-    --accent: #ff2d95;
-    --accent-soft: rgba(255, 45, 149, 0.14);
-    --cyan: #66e8ff;
-    --cyan-soft: rgba(102, 232, 255, 0.12);
-    --danger: #ff5c5c;
-    --warning: #ffb454;
-}
+   Design tokens (--bg, --accent, etc.) live in tokens.css, which must
+   be loaded before this file — see #207. */
 
 html, body {
     background: var(--bg);
@@ -307,7 +295,10 @@ h3 {
 }
 .table tbody tr.is-selected td {
     color: var(--accent);
-    border-color: rgba(255, 45, 149, 0.25);
+    /* rgba mirror of --accent (banana #ffd23f) at slightly higher
+       alpha than --accent-soft so the row border is visible against
+       the yellow-tinted background. */
+    border-color: rgba(255, 210, 63, 0.3);
 }
 
 /* Off-leaderboard "Your score" card on the leaderboard view. Shown when
