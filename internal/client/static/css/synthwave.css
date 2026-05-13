@@ -295,7 +295,10 @@ h3 {
 }
 .table tbody tr.is-selected td {
     color: var(--accent);
-    border-color: rgba(255, 45, 149, 0.25);
+    /* rgba mirror of --accent (banana #ffd23f) at slightly higher
+       alpha than --accent-soft so the row border is visible against
+       the yellow-tinted background. */
+    border-color: rgba(255, 210, 63, 0.3);
 }
 
 /* Off-leaderboard "Your score" card on the leaderboard view. Shown when
