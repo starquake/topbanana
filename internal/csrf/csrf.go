@@ -15,7 +15,10 @@
 // HMAC-SHA256(sessionKey, "csrf-v1") so deployments do not need to manage a
 // second secret, and the two keys cannot be confused with each other.
 //
-// Cookies use Path=/, Secure, SameSite=Lax, and HttpOnly=true. The cookie
+// Cookies use Path=/, SameSite=Lax, and HttpOnly=true. The Secure attribute
+// is controlled per Manager via [New]'s secureCookies argument: production
+// callers pass true; development callers pass false so the dev server is
+// reachable over plain HTTP from any LAN hostname (see #205). The cookie
 // rides along automatically on same-origin form submits regardless of
 // HttpOnly, so making it readable from JavaScript would only add risk
 // without enabling any current flow.
@@ -56,18 +59,22 @@ var ErrInvalidToken = errors.New("csrf: invalid or missing token")
 // Manager issues CSRF nonce cookies and validates tokens submitted with unsafe
 // requests. A single instance is safe for concurrent use.
 type Manager struct {
-	key []byte
+	key           []byte
+	secureCookies bool
 }
 
 // New returns a Manager whose signing key is derived from the given session
 // key using HMAC-SHA256. Passing the same SESSION_KEY produces the same CSRF
 // key so the manager survives process restarts without invalidating tokens.
-func New(sessionKey []byte) *Manager {
+// secureCookies controls the Secure attribute on issued nonce cookies — see
+// Config.SecureCookies in internal/config for the policy and #205 for why
+// it is gated.
+func New(sessionKey []byte, secureCookies bool) *Manager {
 	h := hmac.New(sha256.New, sessionKey)
 	// hash.Hash.Write never returns an error.
 	_, _ = h.Write([]byte(keyDerivationLabel))
 
-	return &Manager{key: h.Sum(nil)}
+	return &Manager{key: h.Sum(nil), secureCookies: secureCookies}
 }
 
 // Token returns a CSRF token for the current request, ensuring a nonce cookie
@@ -85,7 +92,7 @@ func (m *Manager) Token(w http.ResponseWriter, r *http.Request) string {
 	}
 
 	nonce := newNonce()
-	http.SetCookie(w, newCookie(nonce))
+	http.SetCookie(w, m.newCookie(nonce))
 
 	return tokenFromNonce(m.key, nonce)
 }
@@ -178,15 +185,20 @@ func newNonce() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// newCookie returns a fresh CSRF nonce cookie with the safe defaults applied.
-func newCookie(value string) *http.Cookie {
+// newCookie returns a fresh CSRF nonce cookie. HttpOnly and SameSite=Lax
+// are always set; the Secure attribute follows the Manager's
+// secureCookies field — see [New]'s doc comment for the rationale.
+func (m *Manager) newCookie(value string) *http.Cookie {
+	//nolint:gosec // G124: Secure is intentionally policy-driven (production
+	// passes true via cfg.SecureCookies(); dev passes false so plain-HTTP
+	// LAN access works). See #205.
 	return &http.Cookie{
 		Name:     CookieName,
 		Value:    value,
 		Path:     "/",
 		MaxAge:   MaxAge,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   m.secureCookies,
 		SameSite: http.SameSiteLaxMode,
 	}
 }

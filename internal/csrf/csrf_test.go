@@ -51,7 +51,7 @@ func nonceCookieFromResponse(rec *httptest.ResponseRecorder) string {
 func TestToken_SetsCookieWhenAbsent(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"))
+	m := csrf.New([]byte("test-key"), true)
 
 	rec := httptest.NewRecorder()
 	req := newGetRequest(t, "/login")
@@ -67,10 +67,56 @@ func TestToken_SetsCookieWhenAbsent(t *testing.T) {
 	}
 }
 
+func TestToken_CookieFlags_RespectSecureCookies(t *testing.T) {
+	t.Parallel()
+	// secureCookies=true (production) must set the Secure attribute;
+	// secureCookies=false (development) must drop it so browsers accept
+	// the cookie over plain HTTP from LAN hostnames — see #205. The
+	// HttpOnly + SameSite=Lax flags stay on regardless of mode.
+
+	t.Run("production sets Secure", func(t *testing.T) {
+		t.Parallel()
+		m := csrf.New([]byte("test-key"), true)
+		rec := httptest.NewRecorder()
+		_ = m.Token(rec, newGetRequest(t, "/"))
+
+		c := rec.Result().Cookies()[0]
+		if !c.Secure {
+			t.Error("cookie Secure = false, want true in production")
+		}
+		if !c.HttpOnly {
+			t.Error("cookie HttpOnly = false, want true")
+		}
+		if got, want := c.SameSite, http.SameSiteLaxMode; got != want {
+			t.Errorf("cookie SameSite = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("development drops Secure", func(t *testing.T) {
+		t.Parallel()
+		m := csrf.New([]byte("test-key"), false)
+		rec := httptest.NewRecorder()
+		_ = m.Token(rec, newGetRequest(t, "/"))
+
+		c := rec.Result().Cookies()[0]
+		if c.Secure {
+			t.Error("cookie Secure = true, want false in dev")
+		}
+		// HttpOnly and SameSite must still be set even in dev — only
+		// the Secure attribute is environment-gated.
+		if !c.HttpOnly {
+			t.Error("cookie HttpOnly = false, want true even in dev")
+		}
+		if got, want := c.SameSite, http.SameSiteLaxMode; got != want {
+			t.Errorf("cookie SameSite = %v, want %v even in dev", got, want)
+		}
+	})
+}
+
 func TestToken_ReusesExistingCookie(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"))
+	m := csrf.New([]byte("test-key"), true)
 
 	// Issue a nonce first so we have a stable cookie value.
 	rec1 := httptest.NewRecorder()
@@ -100,7 +146,7 @@ func TestToken_ReusesExistingCookie(t *testing.T) {
 func TestToken_DeterministicForSameNonce(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"))
+	m := csrf.New([]byte("test-key"), true)
 
 	rec := httptest.NewRecorder()
 	req := newGetRequest(t, "/login")
@@ -117,7 +163,7 @@ func TestToken_DeterministicForSameNonce(t *testing.T) {
 func TestValidate_NoCookie(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"))
+	m := csrf.New([]byte("test-key"), true)
 	req := newPostFormRequest(t, url.Values{csrf.FormField: {"anything"}})
 
 	if got, want := m.Validate(req), csrf.ErrInvalidToken; !errors.Is(got, want) {
@@ -128,7 +174,7 @@ func TestValidate_NoCookie(t *testing.T) {
 func TestValidate_NoFormField(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"))
+	m := csrf.New([]byte("test-key"), true)
 	req := newPostFormRequest(t, url.Values{})
 	req.AddCookie(&http.Cookie{Name: csrf.CookieName, Value: "some-nonce"})
 
@@ -140,7 +186,7 @@ func TestValidate_NoFormField(t *testing.T) {
 func TestValidate_TamperedToken(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"))
+	m := csrf.New([]byte("test-key"), true)
 
 	// Get a valid token.
 	rec := httptest.NewRecorder()
@@ -168,8 +214,8 @@ func TestValidate_TamperedToken(t *testing.T) {
 func TestValidate_DifferentKey(t *testing.T) {
 	t.Parallel()
 
-	managerA := csrf.New([]byte("key-a"))
-	managerB := csrf.New([]byte("key-b"))
+	managerA := csrf.New([]byte("key-a"), true)
+	managerB := csrf.New([]byte("key-b"), true)
 
 	rec := httptest.NewRecorder()
 	req := newGetRequest(t, "/login")
@@ -187,7 +233,7 @@ func TestValidate_DifferentKey(t *testing.T) {
 func TestValidate_ValidToken(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"))
+	m := csrf.New([]byte("test-key"), true)
 
 	rec := httptest.NewRecorder()
 	req := newGetRequest(t, "/login")
@@ -205,7 +251,7 @@ func TestValidate_ValidToken(t *testing.T) {
 func TestMiddleware_GET_PassesThrough(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"))
+	m := csrf.New([]byte("test-key"), true)
 
 	called := false
 	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
@@ -228,7 +274,7 @@ func TestMiddleware_GET_PassesThrough(t *testing.T) {
 func TestMiddleware_POST_NoToken_403(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"))
+	m := csrf.New([]byte("test-key"), true)
 
 	called := false
 	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
@@ -251,7 +297,7 @@ func TestMiddleware_POST_NoToken_403(t *testing.T) {
 func TestMiddleware_POST_ValidToken_CallsNext(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"))
+	m := csrf.New([]byte("test-key"), true)
 
 	// Issue a token first so we know the nonce/token pair is valid.
 	rec := httptest.NewRecorder()
@@ -282,7 +328,7 @@ func TestMiddleware_POST_ValidToken_CallsNext(t *testing.T) {
 func TestMiddleware_UnsafeMethods_AreValidated(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"))
+	m := csrf.New([]byte("test-key"), true)
 
 	tests := []struct {
 		name   string

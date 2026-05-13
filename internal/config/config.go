@@ -22,6 +22,10 @@ var ErrSessionKeyNotSetInProduction = errors.New("SESSION_KEY must be set in pro
 const (
 	// AppEnvironmentDefault is the default application environment.
 	AppEnvironmentDefault = "development"
+	// AppEnvironmentProduction is the production environment value. Several
+	// behaviours flip on this (see [Config.SecureCookies] and the DB_URI /
+	// SESSION_KEY validation in [Parse]).
+	AppEnvironmentProduction = "production"
 	// ClientDirDefault specifies the default directory for client-side static files.
 	ClientDirDefault = ""
 
@@ -72,6 +76,17 @@ type Config struct {
 	RegistrationEnabled bool
 }
 
+// SecureCookies reports whether session and CSRF cookies should be issued
+// with the Secure attribute. Returns true only in production. In
+// development the flag is dropped so the dev server is reachable from any
+// LAN hostname over plain HTTP (chip.local, 192.168.x.x, devtunnels, …) —
+// browsers reject Secure cookies on non-HTTPS contexts and the rejection
+// cascades into "forbidden: invalid CSRF token" failures otherwise. See
+// #205.
+func (c *Config) SecureCookies() bool {
+	return c.IsProduction()
+}
+
 // Parse parses environment variables into the config.
 func Parse(getenv func(string) string) (*Config, error) {
 	c := Config{
@@ -109,7 +124,7 @@ func Parse(getenv func(string) string) (*Config, error) {
 	}
 
 	// Mandatory fields
-	if c.AppEnvironment == "production" && getenv("DB_URI") == "" {
+	if c.AppEnvironment == AppEnvironmentProduction && getenv("DB_URI") == "" {
 		return nil, ErrDBURINotSetInProduction
 	}
 
@@ -186,7 +201,7 @@ func resolveSessionKey(envValue, appEnvironment string) (string, error) {
 	if envValue != "" {
 		return envValue, nil
 	}
-	if appEnvironment == "production" {
+	if appEnvironment == AppEnvironmentProduction {
 		return "", ErrSessionKeyNotSetInProduction
 	}
 
@@ -200,5 +215,5 @@ func resolveSessionKey(envValue, appEnvironment string) (string, error) {
 
 // IsProduction returns true if the application is running in production.
 func (c *Config) IsProduction() bool {
-	return c.AppEnvironment == "production"
+	return c.AppEnvironment == AppEnvironmentProduction
 }

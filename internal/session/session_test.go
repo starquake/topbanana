@@ -16,13 +16,13 @@ import (
 func newManagerAt(t *testing.T, when time.Time) *session.Manager {
 	t.Helper()
 
-	return session.ExportNewWithClock([]byte("k"), func() time.Time { return when })
+	return session.ExportNewWithClock([]byte("k"), true, func() time.Time { return when })
 }
 
 func TestSet_AndPlayerID_RoundTrip(t *testing.T) {
 	t.Parallel()
 
-	mgr := session.New([]byte("test-key"))
+	mgr := session.New([]byte("test-key"), true)
 	rec := httptest.NewRecorder()
 	mgr.Set(rec, 42)
 
@@ -62,10 +62,34 @@ func TestSet_AndPlayerID_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestSet_SecureFlag_DroppedInDevelopment(t *testing.T) {
+	t.Parallel()
+	// In dev (secureCookies=false) the Secure attribute is dropped so
+	// browsers accept the cookie over plain HTTP from any LAN hostname
+	// — see #205. The TestSet_AndPlayerID_RoundTrip test above covers
+	// the secureCookies=true path.
+
+	mgr := session.New([]byte("k"), false)
+	rec := httptest.NewRecorder()
+	mgr.Set(rec, 42)
+
+	c := rec.Result().Cookies()[0]
+	if c.Secure {
+		t.Error("cookie Secure = true, want false in dev")
+	}
+	// Other safe defaults must still apply regardless of dev/prod.
+	if !c.HttpOnly {
+		t.Error("cookie HttpOnly = false, want true even in dev")
+	}
+	if got, want := c.SameSite, http.SameSiteLaxMode; got != want {
+		t.Errorf("cookie SameSite = %v, want %v even in dev", got, want)
+	}
+}
+
 func TestPlayerID_MissingCookie(t *testing.T) {
 	t.Parallel()
 
-	mgr := session.New([]byte("k"))
+	mgr := session.New([]byte("k"), true)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 
 	_, ok := mgr.PlayerID(req)
@@ -77,7 +101,7 @@ func TestPlayerID_MissingCookie(t *testing.T) {
 func TestPlayerID_TamperedSignature(t *testing.T) {
 	t.Parallel()
 
-	mgr := session.New([]byte("k"))
+	mgr := session.New([]byte("k"), true)
 	rec := httptest.NewRecorder()
 	mgr.Set(rec, 7)
 
@@ -99,7 +123,7 @@ func TestPlayerID_TamperedSignature(t *testing.T) {
 func TestPlayerID_TamperedPayload(t *testing.T) {
 	t.Parallel()
 
-	mgr := session.New([]byte("k"))
+	mgr := session.New([]byte("k"), true)
 	rec := httptest.NewRecorder()
 	mgr.Set(rec, 7)
 
@@ -123,7 +147,7 @@ func TestPlayerID_TamperedPayload(t *testing.T) {
 func TestPlayerID_TamperedTimestamp(t *testing.T) {
 	t.Parallel()
 
-	mgr := session.New([]byte("k"))
+	mgr := session.New([]byte("k"), true)
 	rec := httptest.NewRecorder()
 	mgr.Set(rec, 7)
 
@@ -148,7 +172,7 @@ func TestPlayerID_TamperedTimestamp(t *testing.T) {
 func TestPlayerID_MalformedCookie(t *testing.T) {
 	t.Parallel()
 
-	mgr := session.New([]byte("k"))
+	mgr := session.New([]byte("k"), true)
 
 	// base64url("not-an-int|123") and base64url("123|not-an-int") for the parse-error paths.
 	badPlayerID := base64.RawURLEncoding.EncodeToString([]byte("not-an-int|123"))
@@ -177,11 +201,11 @@ func TestPlayerID_MalformedCookie(t *testing.T) {
 func TestPlayerID_DifferentKey(t *testing.T) {
 	t.Parallel()
 
-	signer := session.New([]byte("real-key"))
+	signer := session.New([]byte("real-key"), true)
 	rec := httptest.NewRecorder()
 	signer.Set(rec, 1)
 
-	verifier := session.New([]byte("other-key"))
+	verifier := session.New([]byte("other-key"), true)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	req.AddCookie(rec.Result().Cookies()[0])
 
@@ -239,7 +263,7 @@ func TestPlayerID_BoundaryAgeIsValid(t *testing.T) {
 func TestClear(t *testing.T) {
 	t.Parallel()
 
-	mgr := session.New([]byte("k"))
+	mgr := session.New([]byte("k"), true)
 	rec := httptest.NewRecorder()
 	mgr.Clear(rec)
 
