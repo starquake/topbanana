@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit question — top banana admin</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav class="nav" aria-label="Primary">
+        <div class="nav-inner">
+            <a class="nav-brand" href="index.html"><span class="nav-brand-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13c3.5-2 8-2 10 2a5.5 5.5 0 0 1 8 5"/><path d="M5.15 17.89c5.52-1.52 8.65-6.89 7-12C11.55 4 11.5 2 13 2c3.22 0 5 5.5 5 8 0 6.5-4.2 12-10.49 12C5.11 22 2 22 2 20c0-1.5 1.14-1.55 3.15-2.11Z"/></svg></span>TOP<span>BANANA</span></a>
+            <div class="nav-meta">
+                <span class="nav-user">Signed in as <strong>alice</strong></span>
+                <a class="nav-logout" href="#" aria-label="Log out">Log out</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="shell">
+        <div class="crumb">
+            <a href="index.html">Admin</a>
+            <span class="sep">/</span>
+            <a href="quiz-list.html">Quizzes</a>
+            <span class="sep">/</span>
+            <a href="quiz-view.html">Capital Cities of Europe</a>
+            <span class="sep">/</span>
+            <span>Question 01</span>
+        </div>
+
+        <header class="page-header">
+            <div>
+                <h1 class="page-title">Edit question</h1>
+                <p class="page-sub">Question 01 of "Capital Cities of Europe". Order is managed from the quiz view.</p>
+            </div>
+        </header>
+
+        <form class="form-shell">
+            <div class="form-field">
+                <label class="label" for="text">Question text</label>
+                <textarea class="textarea" id="text" rows="3">Which city sits on the river Vltava and is the capital of the Czech Republic?</textarea>
+            </div>
+
+            <div class="form-field">
+                <label class="label">Image</label>
+                <div class="dropzone">
+                    <div class="dropzone-icon">
+                        <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/><path d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2h-12zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1h12z"/></svg>
+                    </div>
+                    <strong class="dropzone-strong">Drop an image, or click to choose</strong>
+                    <span style="color: var(--text-mute); font-size: 0.78rem;">PNG, JPG, or WebP — up to 4 MB</span>
+                    <div class="dropzone-alt">
+                        <span>Or paste a URL</span>
+                        <input type="text" value="https://example.com/prague-vltava.jpg">
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-field">
+                <label class="label">Options <span class="label-hint">Tap "Correct" to mark the right answer(s)</span></label>
+                <div>
+                    <div class="option-row">
+                        <span class="option-letter">A</span>
+                        <input class="option-input" type="text" value="Bratislava">
+                        <label class="option-check">
+                            <input type="checkbox">
+                            <span class="option-check-pill">Correct</span>
+                        </label>
+                    </div>
+                    <div class="option-row">
+                        <span class="option-letter">B</span>
+                        <input class="option-input" type="text" value="Budapest">
+                        <label class="option-check">
+                            <input type="checkbox">
+                            <span class="option-check-pill">Correct</span>
+                        </label>
+                    </div>
+                    <div class="option-row">
+                        <span class="option-letter">C</span>
+                        <input class="option-input" type="text" value="Prague">
+                        <label class="option-check">
+                            <input type="checkbox" checked>
+                            <span class="option-check-pill">Correct</span>
+                        </label>
+                    </div>
+                    <div class="option-row">
+                        <span class="option-letter">D</span>
+                        <input class="option-input" type="text" value="Warsaw">
+                        <label class="option-check">
+                            <input type="checkbox">
+                            <span class="option-check-pill">Correct</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-field">
+                <label class="label" for="position">Position <span class="label-hint">Use Up/Down on the quiz view to reorder</span></label>
+                <input class="input input-readonly" id="position" type="text" value="01" readonly>
+            </div>
+
+            <div class="form-field">
+                <label class="label" for="time-limit">Time limit <span class="label-hint">Override the quiz default (10s)</span></label>
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <input class="input" id="time-limit" type="number" value="10" min="3" max="60" style="max-width: 100px;">
+                    <span style="color: var(--text-dim); font-size: 0.85rem;">seconds</span>
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button class="btn btn-primary" type="submit">Save question</button>
+                <a class="btn btn-ghost" href="quiz-view.html">Cancel</a>
+            </div>
+        </form>
+    </main>
+</body>
+</html>
