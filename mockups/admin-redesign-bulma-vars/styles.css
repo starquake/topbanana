@@ -1,0 +1,422 @@
+/* topbanana admin — redesign mockup, Bulma variable-first variant.
+   Visual goal identical to ../admin-redesign/ and ../admin-redesign-bulma/.
+   The technique here is the v1-blessed customisation path: override
+   Bulma's CSS custom properties at :root and let the cascade do the work.
+   No `!important`. Component-level overrides only where Bulma exposes
+   no variable for the value we need. Bespoke CSS reserved for things
+   Bulma doesn't model at all (vignette, brand wordmark, in-card
+   editorial layout). */
+
+/* ─── Our design tokens (referenced by Bulma overrides + custom CSS) ── */
+:root {
+    --bg: hsl(240, 18%, 5%);
+    --surface: hsl(240, 15%, 9%);
+    --surface-2: hsl(240, 14%, 13%);
+    --border: hsl(240, 11%, 19%);
+    --border-soft: hsl(240, 13%, 14%);
+    --text: hsl(240, 11%, 91%);
+    --text-dim: hsl(240, 5%, 50%);
+    --text-mute: hsl(240, 7%, 31%);
+    --accent: hsl(47, 100%, 62%);
+    --accent-soft: hsla(47, 100%, 62%, 0.14);
+    --accent-line: hsla(47, 100%, 62%, 0.4);
+    --accent-deep: hsl(45, 100%, 48%);
+    --cyan: hsl(190, 100%, 70%);
+    --danger: hsl(0, 100%, 68%);
+}
+
+/* ─── Bulma variable overrides (the heavy lifting) ─────────────────── */
+:root {
+    /* Scheme — flip Bulma to our dark palette. These cascade into card,
+       box, dropdown, notification, etc. backgrounds + text. */
+    --bulma-scheme-main: var(--bg);
+    --bulma-scheme-main-bis: var(--surface);
+    --bulma-scheme-main-ter: var(--surface-2);
+    --bulma-scheme-invert: var(--text);
+    --bulma-scheme-invert-bis: var(--text);
+    --bulma-scheme-invert-ter: var(--text);
+    --bulma-background: var(--surface);
+    --bulma-background-hover: var(--surface-2);
+    --bulma-border: var(--border);
+    --bulma-border-weak: var(--border-soft);
+    --bulma-border-hover: var(--accent-line);
+    --bulma-text: var(--text);
+    --bulma-text-strong: var(--text);
+    --bulma-text-weak: var(--text-dim);
+
+    /* Body — Bulma uses these for the document baseline. */
+    --bulma-body-background-color: var(--bg);
+    --bulma-body-color: var(--text);
+    --bulma-body-family: 'Inter', system-ui, -apple-system, sans-serif;
+    --bulma-body-line-height: 1.55;
+
+    /* Type families. .title takes secondary, body takes primary. */
+    --bulma-family-primary: 'Inter', system-ui, -apple-system, sans-serif;
+    --bulma-family-secondary: 'Orbitron', system-ui, sans-serif;
+    --bulma-family-code: ui-monospace, 'JetBrains Mono', Menlo, monospace;
+
+    /* Radii — synthwave look prefers small/tight corners. */
+    --bulma-radius-small: 4px;
+    --bulma-radius: 4px;
+    --bulma-radius-medium: 6px;
+    --bulma-radius-large: 8px;
+    --bulma-control-radius: 4px;
+    --bulma-control-radius-small: 3px;
+
+    /* Primary → banana yellow. The HSL components feed every
+       derived shade (.is-primary-light, -dark, -soft, etc.). */
+    --bulma-primary-h: 47;
+    --bulma-primary-s: 100%;
+    --bulma-primary-l: 62%;
+
+    /* Danger → tuned red. */
+    --bulma-danger-h: 0;
+    --bulma-danger-s: 100%;
+    --bulma-danger-l: 68%;
+
+    /* Title / subtitle typography. */
+    --bulma-title-color: var(--text);
+    --bulma-title-family: 'Orbitron', system-ui, sans-serif;
+    --bulma-title-weight: 700;
+    --bulma-title-line-height: 1.15;
+    --bulma-subtitle-color: var(--text-dim);
+    --bulma-subtitle-family: 'Inter', system-ui, sans-serif;
+    --bulma-subtitle-weight: 400;
+
+    /* Navbar. Sticky behaviour is set on .navbar directly (Bulma has
+       no variable for position). */
+    --bulma-navbar-background-color: hsla(240, 18%, 5%, 0.86);
+    --bulma-navbar-item-color: var(--text-dim);
+    --bulma-navbar-item-hover-background-color: transparent;
+    --bulma-navbar-item-hover-color: var(--text);
+    --bulma-navbar-item-active-background-color: transparent;
+    --bulma-navbar-item-active-color: var(--text);
+    --bulma-navbar-box-shadow-size: 0;
+    --bulma-navbar-height: 3.5rem;
+    --bulma-navbar-padding-vertical: 0.5rem;
+    --bulma-navbar-padding-horizontal: 1.25rem;
+
+    /* Breadcrumb. */
+    --bulma-breadcrumb-item-color: var(--text-dim);
+    --bulma-breadcrumb-item-hover-color: var(--text);
+    --bulma-breadcrumb-item-active-color: var(--text);
+    --bulma-breadcrumb-item-separator-color: var(--text-mute);
+
+    /* Card. */
+    --bulma-card-background-color: var(--surface);
+    --bulma-card-color: var(--text);
+    --bulma-card-shadow: none;
+    --bulma-card-radius: 8px;
+    --bulma-card-content-background-color: transparent;
+    --bulma-card-content-padding: 1.25rem 1.25rem 0.5rem;
+    --bulma-card-footer-background-color: transparent;
+    --bulma-card-footer-border-top: 1px solid var(--border-soft);
+    --bulma-card-footer-padding: 0.85rem 1.25rem;
+
+    /* Modal. */
+    --bulma-modal-background-background-color: hsla(240, 18%, 5%, 0.78);
+    --bulma-modal-card-head-background-color: transparent;
+    --bulma-modal-card-foot-background-color: transparent;
+    --bulma-modal-card-body-background-color: var(--surface);
+    --bulma-modal-card-title-color: var(--text);
+    --bulma-modal-card-title-size: 0.9rem;
+    --bulma-modal-card-title-line-height: 1.4;
+    --bulma-modal-card-head-padding: 1.25rem 1.5rem;
+    --bulma-modal-card-head-radius: 8px;
+    --bulma-modal-card-foot-radius: 8px;
+    --bulma-modal-card-body-padding: 1.25rem 1.5rem;
+
+    /* Notification (used by our empty state container). We zero out
+       Bulma's colored fill so the empty-state custom rules drive the look. */
+    --bulma-notification-background-l: 0%;
+    --bulma-notification-color-l: 100%;
+    --bulma-notification-radius: 12px;
+    --bulma-notification-padding: 3rem 1.5rem;
+
+    /* Buttons. Ghost gets the icon-button treatment for free. */
+    --bulma-button-family: 'Inter', system-ui, sans-serif;
+    --bulma-button-weight: 600;
+    --bulma-button-padding-horizontal: 1.1em;
+    --bulma-button-padding-vertical: 0.65em;
+    --bulma-button-ghost-color: var(--text-dim);
+    --bulma-button-ghost-hover-color: var(--text);
+    --bulma-button-ghost-background: transparent;
+    --bulma-button-ghost-decoration: none;
+    --bulma-button-ghost-hover-decoration: none;
+    --bulma-button-focus-box-shadow-size: 0 0 0 3px;
+    --bulma-button-disabled-opacity: 0.4;
+
+    /* Control (inputs share these). */
+    --bulma-control-border-width: 1px;
+}
+
+/* ─── Body atmosphere (Bulma has no variable for this) ─────────────── */
+
+html, body {
+    background: var(--bg);
+    color: var(--text);
+}
+
+body {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: 'cv11', 'ss01', 'tnum';
+    min-height: 100vh;
+    background-color: var(--bg);
+    background-image:
+        radial-gradient(ellipse 80% 600px at 50% -200px, hsla(47, 100%, 62%, 0.10), transparent 60%),
+        radial-gradient(ellipse 60% 400px at 50% -100px, hsla(190, 100%, 70%, 0.04), transparent 70%),
+        radial-gradient(circle at 1px 1px, hsla(0, 0%, 100%, 0.025) 1px, transparent 0);
+    background-size: 100% 100%, 100% 100%, 24px 24px;
+    background-repeat: no-repeat, no-repeat, repeat;
+    background-attachment: fixed, fixed, fixed;
+}
+
+/* Bulma .section is opaque by default; let the body atmosphere show through. */
+.section { background: transparent; }
+
+.container.is-max-desktop { max-width: 1080px; }
+
+/* ─── Navbar — bespoke bits Bulma has no variable for ──────────────── */
+
+.navbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border-soft);
+}
+
+/* Keep the menu visible on every viewport — our meta is tiny and we
+   don't want Bulma's burger toggle pattern. */
+@media screen and (max-width: 1023px) {
+    .navbar-burger { display: none; }
+    .navbar-menu.is-active {
+        background: transparent;
+        box-shadow: none;
+        padding: 0;
+    }
+    .navbar-menu .navbar-end {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        justify-content: flex-end;
+    }
+}
+
+/* Brand wordmark — synthwave-flavored, no Bulma equivalent. */
+.navbar-item.brand {
+    font-family: var(--bulma-family-secondary);
+    font-weight: 600;
+    font-size: 1rem;
+    letter-spacing: 0.08em;
+    color: var(--text);
+    text-transform: uppercase;
+}
+.navbar-item.brand:focus,
+.navbar-item.brand:hover {
+    background: transparent;
+    color: var(--text);
+}
+.brand-accent { color: var(--accent); font-weight: 800; }
+.brand-icon {
+    width: 22px; height: 22px;
+    margin-right: 0.55rem;
+    color: var(--accent);
+    filter: drop-shadow(0 0 8px hsla(47, 100%, 62%, 0.45));
+    display: inline-flex;
+    flex-shrink: 0;
+}
+.brand-icon svg { width: 100%; height: 100%; display: block; }
+
+.navbar-item.is-meta { font-size: 0.85rem; }
+.navbar-item.is-meta strong { color: var(--text); font-weight: 500; }
+
+/* "Log out" — outlined ghost variant. Lives on .button.is-logout (our
+   custom modifier). */
+.button.is-logout {
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    background: transparent;
+    font-size: 0.75rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    font-weight: 600;
+    min-height: 36px;
+}
+.button.is-logout:hover {
+    border-color: var(--accent);
+    color: var(--text);
+    background: transparent;
+}
+
+/* ─── Breadcrumb — micro-typography Bulma doesn't variable-ize ─────── */
+.breadcrumb {
+    font-size: 0.75rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin-bottom: 2rem;
+}
+
+/* ─── Page header (Bulma .level) ───────────────────────────────────── */
+.level.page-header { margin-bottom: 2.5rem; align-items: flex-start; }
+.level.page-header .subtitle {
+    margin-top: 0.35rem;
+    margin-bottom: 0;
+    max-width: 540px;
+}
+@media screen and (max-width: 768px) {
+    .level.page-header { flex-direction: column; align-items: stretch; gap: 1.25rem; }
+    .level.page-header .level-right { justify-content: flex-start; }
+}
+
+/* ─── Title sizes (Bulma's defaults are large for our editorial feel) ─ */
+.title.is-3 { font-size: 2rem; letter-spacing: -0.01em; }
+.title.is-4 { font-size: 1.4rem; letter-spacing: 0.005em; }
+.subtitle.is-6 { font-size: 0.95rem; line-height: 1.6; }
+
+/* ─── Buttons — primary needs uppercase wordmark treatment ─────────── */
+.button.is-primary {
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 700;
+    font-size: 0.78rem;
+    min-height: 44px;
+}
+
+/* Icon-only ghost button: 36px square, no padding. */
+.button.is-small.is-ghost {
+    width: 36px;
+    height: 36px;
+    min-height: 36px;
+    padding: 0;
+    border-radius: var(--bulma-radius-small);
+}
+.button.is-small.is-ghost:hover { background: var(--surface-2); }
+.button.is-small.is-ghost .icon svg { width: 16px; height: 16px; }
+
+/* Delete-variant icon button — turns red on hover. Custom modifier
+   avoids Bulma's .has-text-danger utility (which ships with !important). */
+.button.is-ghost.is-delete { color: var(--danger); }
+.button.is-ghost.is-delete:hover {
+    color: var(--danger);
+    background: hsla(0, 100%, 68%, 0.08);
+}
+
+/* ─── Card hover + top accent bar (no Bulma variable for these) ────── */
+.card.quiz-card {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border-soft);
+    position: relative;
+    overflow: hidden;
+    transition: border-color 200ms ease, transform 200ms ease;
+}
+.card.quiz-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border), transparent);
+    opacity: 0.8;
+}
+@media (hover: hover) {
+    .card.quiz-card:hover {
+        border-color: var(--accent-line);
+        transform: translateY(-1px);
+    }
+    .card.quiz-card:hover::before {
+        background: linear-gradient(90deg, transparent, var(--accent), transparent);
+        opacity: 1;
+    }
+}
+.card-content { flex: 1 1 auto; }
+.card-footer-item { color: var(--text-dim); font-size: 0.85rem; }
+.card-footer-item:first-child { justify-content: flex-start; }
+.card-footer-item:last-child { justify-content: flex-end; }
+
+/* ─── Quiz-card internals (genuinely custom — Bulma has no equivalent) ─ */
+.quiz-card-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.7rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-mute);
+    margin-bottom: 0.75rem;
+}
+.quiz-card-kind { color: var(--text-dim); }
+.quiz-card-when { color: var(--text-mute); }
+.quiz-card-title {
+    font-family: var(--bulma-family-secondary);
+    font-size: 1.1rem;
+    line-height: 1.25;
+    margin: 0 0 0.5rem;
+    color: var(--text);
+    font-weight: 600;
+}
+.quiz-card-title a { color: inherit; }
+.quiz-card-title a:hover { color: var(--accent); }
+.quiz-card-slug {
+    display: inline-block;
+    font-family: var(--bulma-family-code);
+    font-size: 0.72rem;
+    color: var(--cyan);
+    background: hsla(190, 100%, 70%, 0.08);
+    padding: 0.18rem 0.5rem;
+    border-radius: var(--bulma-radius-small);
+    margin-bottom: 0.85rem;
+}
+.quiz-card-desc {
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    line-height: 1.6;
+    margin: 0 0 1rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.quiz-card-counts strong { color: var(--text); font-weight: 600; margin-right: 0.25rem; }
+.quiz-card-actions { gap: 0.25rem; display: flex; }
+
+/* ─── Empty state — re-skins Bulma's .notification for our framing ──── */
+.empty.notification {
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--text);
+}
+.empty.notification .title { margin-bottom: 0.5rem; }
+.empty.notification .subtitle { margin-bottom: 1.5rem; }
+
+/* ─── Mockup-only helpers ─────────────────────────────────────────── */
+
+.eyebrow {
+    margin: 4rem 0 1rem;
+    font-size: 0.7rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-mute);
+}
+
+/* Static-preview modal: keeps it open inline (no JS) so the reviewer
+   can see it in context. */
+.modal.is-static-preview {
+    position: relative;
+    display: block;
+    height: auto;
+    width: 100%;
+    z-index: auto;
+}
+.modal.is-static-preview .modal-background {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+}
+.modal.is-static-preview .modal-card {
+    position: relative;
+    margin: 1.5rem auto;
+    z-index: 1;
+}
