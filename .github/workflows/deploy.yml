@@ -55,9 +55,13 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          envs: IMAGE_NAME,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR
+          envs: SESSION_KEY,IMAGE_NAME,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR
           script: |
             set -e
+            if [ -z "$SESSION_KEY" ]; then
+              echo "ERROR: SESSION_KEY is empty or unset; refusing to deploy" >&2
+              exit 1
+            fi
             mkdir -p ~/topbanana-staging
             cd ~/topbanana-staging
             umask 077
@@ -75,8 +79,16 @@ jobs:
 
       - name: Verify staging deployment
         run: |
-          sleep 10
-          curl -f "${{ secrets.HEALTH_URL }}" || echo "Health check failed, but deployment may still be starting up"
+          for i in $(seq 1 12); do
+            if curl -fsS "${{ secrets.HEALTH_URL }}" >/dev/null; then
+              echo "Health check passed (attempt $i)"
+              exit 0
+            fi
+            echo "Health check attempt $i/12 failed; retrying in 5s..."
+            sleep 5
+          done
+          echo "Health check failed after 12 attempts (60s); failing the deploy" >&2
+          exit 1
 
   deploy-production:
     runs-on: ubuntu-latest
@@ -123,11 +135,16 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          envs: IMAGE_NAME,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR
+          envs: SESSION_KEY,IMAGE_NAME,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR
           script: |
             set -e
+            if [ -z "$SESSION_KEY" ]; then
+              echo "ERROR: SESSION_KEY is empty or unset; refusing to deploy" >&2
+              exit 1
+            fi
             mkdir -p ~/topbanana-production
             cd ~/topbanana-production
+            umask 077
             cat > .env <<EOF
             SESSION_KEY=${SESSION_KEY}
             IMAGE_NAME=${IMAGE_NAME}
@@ -142,5 +159,13 @@ jobs:
 
       - name: Verify production deployment
         run: |
-          sleep 10
-          curl -f "${{ secrets.HEALTH_URL }}" || echo "Health check failed, but deployment may still be starting up"
+          for i in $(seq 1 12); do
+            if curl -fsS "${{ secrets.HEALTH_URL }}" >/dev/null; then
+              echo "Health check passed (attempt $i)"
+              exit 0
+            fi
+            echo "Health check attempt $i/12 failed; retrying in 5s..."
+            sleep 5
+          done
+          echo "Health check failed after 12 attempts (60s); failing the deploy" >&2
+          exit 1
