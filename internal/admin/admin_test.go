@@ -313,8 +313,9 @@ func TestHandleQuizList(t *testing.T) {
 		if got, want := body, "Quiz Two"; !strings.Contains(got, want) {
 			t.Fatalf("got: %q, should contain: %q", got, want)
 		}
-		if got, want := body, "Last edited"; !strings.Contains(got, want) {
-			t.Fatalf("body should contain column header %q, got: %q", want, got)
+		// Populated path renders the Bulma card grid (see #207).
+		if got, want := body, `class="card quiz-card"`; !strings.Contains(got, want) {
+			t.Fatalf("body should contain quiz-card markup %q, got: %q", want, got)
 		}
 		// Quiz One: 2 hr ago. Quiz Two: just now.
 		if got, want := body, "2 hr ago"; !strings.Contains(got, want) {
@@ -353,14 +354,14 @@ func TestHandleQuizList(t *testing.T) {
 		}
 
 		body := rr.Body.String()
-		// The count for Quiz One (id=1) should appear inside its row's
-		// linked count cell. Anchor on the href so we don't accidentally
-		// match unrelated digits elsewhere on the page.
-		if got, want := body, `href="/admin/quizzes/1">5</a>`; !strings.Contains(got, want) {
-			t.Errorf("body should contain count cell %q, got %q", want, got)
+		// The count for Quiz One (id=1) renders in the card-footer as
+		// "<strong>5</strong>&nbsp;questions". Anchor on the surrounding
+		// markup so unrelated digits don't accidentally match.
+		if got, want := body, `<strong>5</strong>&nbsp;questions`; !strings.Contains(got, want) {
+			t.Errorf("body should contain count %q, got %q", want, got)
 		}
-		if got, want := body, `href="/admin/quizzes/2">0</a>`; !strings.Contains(got, want) {
-			t.Errorf("body should contain zero-count cell %q (missing key → 0), got %q", want, got)
+		if got, want := body, `<strong>0</strong>&nbsp;questions`; !strings.Contains(got, want) {
+			t.Errorf("body should contain zero count %q (missing key → 0), got %q", want, got)
 		}
 	})
 
@@ -413,7 +414,11 @@ func TestHandleQuizList(t *testing.T) {
 		if got, want := body, "Admin Dashboard - Quiz List"; !strings.Contains(got, want) {
 			t.Fatalf("got: %q, should contain: %q", got, want)
 		}
-		if got, want := body, "No quizzes found."; !strings.Contains(got, want) {
+		// Empty path renders the Bulma .empty.notification panel (see #207).
+		if got, want := body, `class="empty notification`; !strings.Contains(got, want) {
+			t.Fatalf("got: %q, should contain empty-state markup: %q", got, want)
+		}
+		if got, want := body, "No quizzes yet"; !strings.Contains(got, want) {
 			t.Fatalf("got: %q, should contain: %q", got, want)
 		}
 	})
@@ -1202,7 +1207,9 @@ func TestHandleQuestionCreate(t *testing.T) {
 	if got, want := rr.Code, http.StatusOK; got != want {
 		t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
 	}
-	if got, want := rr.Body.String(), "List of Quizzes"; !strings.Contains(got, want) {
+	// Sanity check that the navbar brand renders so we know the layout
+	// rendered end-to-end and not just a fragment.
+	if got, want := rr.Body.String(), `class="navbar-item brand"`; !strings.Contains(got, want) {
 		t.Fatalf("got: %v, should contain: %q", got, want)
 	}
 }

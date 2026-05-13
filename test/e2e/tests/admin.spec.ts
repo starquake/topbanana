@@ -20,22 +20,22 @@ test('register, create a quiz with varied questions, and see them on the quiz vi
     await expect(row.locator('.has-text-success')).toHaveCount(q.correctIndices.length);
   }
 
-  // The new quiz title should appear in the admin quiz list. Match by cell
-  // (rather than by row position) so the assertion is stable across runs that
-  // share a long-lived SQLite file.
+  // The new quiz title should appear in the admin quiz list. The redesigned
+  // list (#207) renders each quiz as a card whose title is a link, so match
+  // the link by name rather than a table cell.
   await page.goto('/admin/quizzes');
-  await expect(page.getByRole('cell', { name: quizTitle })).toBeVisible();
+  await expect(page.locator('.card.quiz-card').getByRole('link', { name: quizTitle })).toBeVisible();
 
-  // The "Top Banana!" brand in the navbar should be a real link that lands
-  // on /admin — guards against regressing back to href="#".
-  await page.getByRole('link', { name: 'Top Banana!' }).click();
+  // The "TOPBANANA" brand wordmark in the navbar should be a real link
+  // that lands on /admin — guards against regressing back to href="#".
+  await page.locator('.navbar-item.brand').click();
   await expect(page).toHaveURL(/\/admin$/);
 
   // Open the share modal on the quiz view and confirm the rendered share
   // URL points at /play/<slug>-<id>. Don't try to verify the clipboard
   // (browser permission model varies); just check the user-visible link.
   await page.goto('/admin/quizzes');
-  await page.getByRole('cell', { name: quizTitle }).click();
+  await page.locator('.card.quiz-card').getByRole('link', { name: quizTitle }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
   await page.getByRole('link', { name: 'Share quiz' }).click();
   const shareLinkText = await page.locator('.share-link').textContent();

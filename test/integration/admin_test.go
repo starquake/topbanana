@@ -226,6 +226,14 @@ func TestAdmin_Integration(t *testing.T) {
 	if got, want := string(body), quizTitle; !strings.Contains(got, want) {
 		t.Errorf("string(body) = %q, should contain %q", got, want)
 	}
+	// Pin the new Bulma navbar + quiz-card markup so regressions to the
+	// old table/page-title layout are caught here (see #207).
+	if got, want := string(body), `class="navbar-brand"`; !strings.Contains(got, want) {
+		t.Errorf("string(body) = %q, should contain %q", got, want)
+	}
+	if got, want := string(body), `class="card quiz-card"`; !strings.Contains(got, want) {
+		t.Errorf("string(body) = %q, should contain %q", got, want)
+	}
 
 	// Verify quiz details
 	req, err = http.NewRequestWithContext(

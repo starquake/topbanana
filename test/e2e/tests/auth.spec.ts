@@ -13,9 +13,10 @@ test('register, log out, log back in, and reach the admin dashboard', async ({ p
   await page.locator('input[name=password]').fill(password);
   await page.locator('button[type=submit]').click();
 
-  // Successful registration redirects to /admin/quizzes.
+  // Successful registration redirects to /admin/quizzes — the redesigned
+  // page header (#207) renders the heading "Quizzes" inside h1.title.is-3.
   await expect(page).toHaveURL(/\/admin\/quizzes$/);
-  await expect(page.locator('h1.title')).toContainText('Admin Dashboard');
+  await expect(page.locator('h1.title')).toContainText('Quizzes');
 
   // Log out via the navbar button. The form posts to /logout, the server
   // clears the cookie and 303s to /login, and the browser follows the redirect.
@@ -35,5 +36,5 @@ test('register, log out, log back in, and reach the admin dashboard', async ({ p
   await page.locator('button[type=submit]').click();
 
   await expect(page).toHaveURL(/\/admin\/quizzes$/);
-  await expect(page.locator('h1.title')).toContainText('Admin Dashboard');
+  await expect(page.locator('h1.title')).toContainText('Quizzes');
 });
