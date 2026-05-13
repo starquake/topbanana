@@ -45,6 +45,16 @@ test-integration:
 test-all:
 	go test -v -race -tags=integration ./...
 
+# Run tests matching the given name regex. Pass NAME=TestFoo to filter, or
+# NAME='TestFoo/sub-case' for a sub-test. The integration build tag is set
+# so both unit and integration tests are reachable.
+#
+# Example: make test-one NAME=TestConfig_SecureCookies
+.PHONY: test-one
+test-one:
+	@test -n "$(NAME)" || { echo "Usage: make test-one NAME=TestFoo"; exit 1; }
+	go test -v -race -tags=integration -run '$(NAME)' ./...
+
 .PHONY: test-coverage
 test-coverage:
 	mkdir -p $(COV_DIR)
