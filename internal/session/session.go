@@ -5,8 +5,10 @@
 //
 //	base64url(playerID|issuedAt) + "." + base64url(hmac_sha256(key, playerID|issuedAt))
 //
-// The cookie is HttpOnly, SameSite=Lax, and Secure. Browsers treat http://localhost as a
-// secure context, so Secure cookies still work in local development without TLS.
+// The cookie is always HttpOnly and SameSite=Lax. The Secure attribute is
+// controlled per Manager via [New]'s secureCookies argument: production
+// callers pass true; development callers pass false so the dev server is
+// reachable over plain HTTP from any LAN hostname (see #205).
 //
 // MaxAge serves double duty: it is both the client-side cookie lifetime and the
 // server-side accept window. A cookie whose issuedAt is older than MaxAge seconds
@@ -47,30 +49,34 @@ const issuedAtBitSize = 64
 // the clock so callers do not have to thread these parameters through every
 // call site, and so tests can fix the clock without touching package-level state.
 type Manager struct {
-	key []byte
-	now func() time.Time
+	key           []byte
+	now           func() time.Time
+	secureCookies bool
 }
 
-// New returns a Manager that signs cookies with the given key.
-func New(key []byte) *Manager {
-	return newWithClock(key, time.Now)
+// New returns a Manager that signs cookies with the given key. secureCookies
+// controls the Secure attribute on issued cookies — see Config.SecureCookies
+// in internal/config for the dev-versus-production policy and #205 for why
+// this is gated.
+func New(key []byte, secureCookies bool) *Manager {
+	return newWithClock(key, secureCookies, time.Now)
 }
 
 // newWithClock returns a Manager with a caller-supplied clock. It exists for
 // internal tests that need to fix time without depending on a package-level
 // variable.
-func newWithClock(key []byte, now func() time.Time) *Manager {
-	return &Manager{key: key, now: now}
+func newWithClock(key []byte, secureCookies bool, now func() time.Time) *Manager {
+	return &Manager{key: key, now: now, secureCookies: secureCookies}
 }
 
 // Set writes a signed session cookie containing the given player ID to w.
 func (m *Manager) Set(w http.ResponseWriter, playerID int64) {
-	http.SetCookie(w, newCookie(encode(playerID, m.now().Unix(), m.key), MaxAge))
+	http.SetCookie(w, m.newCookie(encode(playerID, m.now().Unix(), m.key), MaxAge))
 }
 
 // Clear deletes the session cookie by setting it with an empty value and a negative MaxAge.
-func (*Manager) Clear(w http.ResponseWriter) {
-	http.SetCookie(w, newCookie("", clearedMaxAge))
+func (m *Manager) Clear(w http.ResponseWriter) {
+	http.SetCookie(w, m.newCookie("", clearedMaxAge))
 }
 
 // PlayerID returns the player ID encoded in the request's session cookie.
@@ -86,16 +92,19 @@ func (m *Manager) PlayerID(r *http.Request) (int64, bool) {
 }
 
 // newCookie returns the session cookie with the safe defaults always applied:
-// HttpOnly, SameSite=Lax, and Secure. Browsers treat http://localhost as a
-// secure context, so the Secure flag does not break local development.
-func newCookie(value string, maxAge int) *http.Cookie {
+// HttpOnly and SameSite=Lax. The Secure attribute follows the Manager's
+// secureCookies field — see [New]'s doc comment for the rationale.
+func (m *Manager) newCookie(value string, maxAge int) *http.Cookie {
+	//nolint:gosec // G124: Secure is intentionally policy-driven (production
+	// passes true via cfg.SecureCookies(); dev passes false so plain-HTTP
+	// LAN access works). See #205.
 	return &http.Cookie{
 		Name:     CookieName,
 		Value:    value,
 		Path:     "/",
 		MaxAge:   maxAge,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   m.secureCookies,
 		SameSite: http.SameSiteLaxMode,
 	}
 }

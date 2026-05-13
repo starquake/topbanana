@@ -344,3 +344,31 @@ func TestParse_AdminUsernames(t *testing.T) {
 		})
 	}
 }
+
+func TestConfig_SecureCookies(t *testing.T) {
+	t.Parallel()
+	// SecureCookies decides whether session + CSRF cookies get the
+	// Secure attribute. Production must, development must not — see
+	// #205 for why dev drops the flag.
+
+	tests := []struct {
+		name string
+		env  string
+		want bool
+	}{
+		{name: "production", env: "production", want: true},
+		{name: "development", env: "development", want: false},
+		{name: "unset", env: "", want: false},          // empty env never matches production
+		{name: "staging", env: "staging", want: false}, // anything-other-than-production is dev-shaped
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			c := &Config{AppEnvironment: tt.env}
+			if got, want := c.SecureCookies(), tt.want; got != want {
+				t.Errorf("SecureCookies() = %v, want %v (AppEnvironment=%q)", got, want, tt.env)
+			}
+		})
+	}
+}

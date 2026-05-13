@@ -42,7 +42,7 @@ func TestRequireAdmin_AllowsAdmin(t *testing.T) {
 		w.WriteHeader(http.StatusTeapot)
 	})
 
-	sessions := session.New([]byte("k"))
+	sessions := session.New([]byte("k"), true)
 	mw := auth.RequireAdmin(next, store, sessions, nil, discardLogger())
 
 	rec := httptest.NewRecorder()
@@ -89,7 +89,7 @@ func TestRequireAdmin_DeniesPlayer(t *testing.T) {
 		t.Error("next should not be called for player role")
 	})
 
-	sessions := session.New([]byte("k"))
+	sessions := session.New([]byte("k"), true)
 	mw := auth.RequireAdmin(next, store, sessions, nil, discardLogger())
 
 	rec := httptest.NewRecorder()
@@ -120,7 +120,7 @@ func TestRequireAdmin_NoCookie_RedirectsToLogin(t *testing.T) {
 		t.Error("next should not be called without cookie")
 	})
 
-	mw := auth.RequireAdmin(next, store, session.New([]byte("k")), nil, discardLogger())
+	mw := auth.RequireAdmin(next, store, session.New([]byte("k"), true), nil, discardLogger())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
 	rec := httptest.NewRecorder()
@@ -142,7 +142,7 @@ func TestRequireAdmin_UnknownPlayerID_RedirectsToLogin(t *testing.T) {
 		t.Error("next should not be called for unknown player")
 	})
 
-	sessions := session.New([]byte("k"))
+	sessions := session.New([]byte("k"), true)
 	mw := auth.RequireAdmin(next, store, sessions, nil, discardLogger())
 
 	rec := httptest.NewRecorder()
@@ -173,7 +173,7 @@ func TestRequireAdmin_StoreError_500(t *testing.T) {
 		t.Error("next should not be called when store errors")
 	})
 
-	sessions := session.New([]byte("k"))
+	sessions := session.New([]byte("k"), true)
 	mw := auth.RequireAdmin(next, store, sessions, nil, discardLogger())
 
 	rec := httptest.NewRecorder()
@@ -194,7 +194,7 @@ func TestEnsurePlayer_NoCookie_CreatesAnonymousAndSetsCookie(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	sessions := session.New([]byte("k"))
+	sessions := session.New([]byte("k"), true)
 
 	var seenPlayer *auth.Player
 	called := false
@@ -249,7 +249,7 @@ func TestEnsurePlayer_ValidCookie_ReusesExistingRow(t *testing.T) {
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
 
-	sessions := session.New([]byte("k"))
+	sessions := session.New([]byte("k"), true)
 
 	var seenPlayer *auth.Player
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -282,7 +282,7 @@ func TestEnsurePlayer_DeletedPlayer_MintsNewAnonymous(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	sessions := session.New([]byte("k"))
+	sessions := session.New([]byte("k"), true)
 
 	var seenPlayer *auth.Player
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -319,7 +319,7 @@ func TestEnsurePlayer_TwoCookielessRequests_TwoDistinctPlayers(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	sessions := session.New([]byte("k"))
+	sessions := session.New([]byte("k"), true)
 
 	var seenIDs []int64
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -350,7 +350,7 @@ func TestEnsurePlayer_PetnameCollision_Retries(t *testing.T) {
 	// ErrUsernameTaken; the fourth attempt should succeed and produce a
 	// regular petname row.
 	store.forceAnonCollisions = 3
-	sessions := session.New([]byte("k"))
+	sessions := session.New([]byte("k"), true)
 
 	var seenPlayer *auth.Player
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -381,7 +381,7 @@ func TestEnsurePlayer_PetnameExhausted_FallsBackToXid(t *testing.T) {
 	// Force every petname attempt (5) to collide so the fallback xid path
 	// has to run.
 	store.forceAnonCollisions = 5
-	sessions := session.New([]byte("k"))
+	sessions := session.New([]byte("k"), true)
 
 	var seenPlayer *auth.Player
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -407,7 +407,7 @@ func TestEnsurePlayer_CreateAnonymousNonCollisionError_500(t *testing.T) {
 
 	store := newStubPlayerStore()
 	store.forceAnonErr = errors.New("boom")
-	sessions := session.New([]byte("k"))
+	sessions := session.New([]byte("k"), true)
 
 	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		t.Error("next should not be called when CreateAnonymousPlayer returns a non-collision error")
@@ -434,7 +434,7 @@ func TestEnsurePlayer_GetPlayerError_500(t *testing.T) {
 	}
 	store.failGet = true
 
-	sessions := session.New([]byte("k"))
+	sessions := session.New([]byte("k"), true)
 
 	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		t.Error("next should not be called on store error")

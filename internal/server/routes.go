@@ -23,8 +23,8 @@ func addRoutes(
 	gameService *game.Service,
 	cfg *config.Config,
 ) {
-	sessions := session.New([]byte(cfg.SessionKey))
-	csrfMgr := csrf.New([]byte(cfg.SessionKey))
+	sessions := session.New([]byte(cfg.SessionKey), cfg.SecureCookies())
+	csrfMgr := csrf.New([]byte(cfg.SessionKey), cfg.SecureCookies())
 
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg)
 	addAdminRoutes(mux, logger, stores, gameService, sessions, csrfMgr)
