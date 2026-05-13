@@ -46,11 +46,11 @@ jobs:
       - name: Deploy to staging server
         uses: appleboy/ssh-action@v1.2.5
         env:
+          SESSION_KEY: ${{ secrets.SESSION_KEY }}
           IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           IMAGE_TAG: edge
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
-          SESSION_KEY: ${{ secrets.SESSION_KEY }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
@@ -60,6 +60,12 @@ jobs:
             set -e
             mkdir -p ~/topbanana-staging
             cd ~/topbanana-staging
+            umask 077
+            cat > .env <<EOF
+            SESSION_KEY=${SESSION_KEY}
+            IMAGE_NAME=${IMAGE_NAME}
+            IMAGE_TAG=${IMAGE_TAG}
+            EOF
             mv -f docker-compose.staging.yml docker-compose.yml
             echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
             docker compose pull
@@ -108,11 +114,11 @@ jobs:
       - name: Deploy to production server
         uses: appleboy/ssh-action@v1.2.5
         env:
+          SESSION_KEY: ${{ secrets.SESSION_KEY }}
           IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           IMAGE_TAG: ${{ steps.tag.outputs.tag }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
-          SESSION_KEY: ${{ secrets.SESSION_KEY }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
@@ -122,6 +128,11 @@ jobs:
             set -e
             mkdir -p ~/topbanana-production
             cd ~/topbanana-production
+            cat > .env <<EOF
+            SESSION_KEY=${SESSION_KEY}
+            IMAGE_NAME=${IMAGE_NAME}
+            IMAGE_TAG=${IMAGE_TAG}
+            EOF
             mv -f docker-compose.production.yml docker-compose.yml
             echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
             docker compose pull
