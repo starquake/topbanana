@@ -12,7 +12,14 @@ make smoke            # validate startup against the existing dev DB (no HTTP li
 
 ## Commits
 
-Never create commits yourself. When work is ready to commit, suggest a one-line commit message and wait for the user to review and commit. Use plain language — avoid jargon. Prefer simple verbs like "change", "update", "fix", "add", "remove". Start the message with a capital letter.
+You may create commits, but only after the user has reviewed and signed off on every line of the diff. Workflow:
+
+1. Show the user the change (or point at the diff they need to read).
+2. Ask explicitly: "Did the review look OK?" or equivalent. Wait for their explicit go-ahead — silence is not consent.
+3. Only then run `git add` / `git commit`.
+4. Use plain language commit messages — avoid jargon. Prefer simple verbs like "change", "update", "fix", "add", "remove". Start the message with a capital letter.
+
+If you make further changes after the sign-off (e.g. fixing a lint issue, addressing a comment), ask for sign-off on the new lines too before committing.
 
 ## Testing
 
