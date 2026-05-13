@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quizzes — top banana admin (Bulma variable-first skin)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@500;600;700;800;900&display=swap">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav class="navbar" role="navigation" aria-label="Primary">
+        <div class="navbar-brand">
+            <a class="navbar-item brand" href="index.html">
+                <span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13c3.5-2 8-2 10 2a5.5 5.5 0 0 1 8 5"/><path d="M5.15 17.89c5.52-1.52 8.65-6.89 7-12C11.55 4 11.5 2 13 2c3.22 0 5 5.5 5 8 0 6.5-4.2 12-10.49 12C5.11 22 2 22 2 20c0-1.5 1.14-1.55 3.15-2.11Z"/></svg></span>
+                TOP<span class="brand-accent">BANANA</span>
+            </a>
+        </div>
+        <div class="navbar-menu is-active">
+            <div class="navbar-end">
+                <div class="navbar-item is-meta">Signed in as&nbsp;<strong>alice</strong></div>
+                <div class="navbar-item">
+                    <a class="button is-small is-logout" href="#" aria-label="Log out">Log out</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <section class="section">
+        <div class="container is-max-desktop">
+            <nav class="breadcrumb" aria-label="breadcrumbs">
+                <ul>
+                    <li><a href="index.html">Admin</a></li>
+                    <li class="is-active"><a href="#" aria-current="page">Quizzes</a></li>
+                </ul>
+            </nav>
+
+            <div class="level page-header">
+                <div class="level-left">
+                    <div>
+                        <h1 class="title is-3">Quizzes</h1>
+                        <p class="subtitle is-6">Author, share, and review quizzes. Tap a card to manage questions.</p>
+                    </div>
+                </div>
+                <div class="level-right">
+                    <a class="button is-primary" href="#">
+                        <span class="icon is-small">
+                            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5a.5.5 0 0 1 .5.5v5.5H14a.5.5 0 0 1 0 1H8.5V14a.5.5 0 0 1-1 0V8.5H2a.5.5 0 0 1 0-1h5.5V2a.5.5 0 0 1 .5-.5z"/></svg>
+                        </span>
+                        <span>New quiz</span>
+                    </a>
+                </div>
+            </div>
+
+            <div class="columns is-multiline">
+                <div class="column is-half-tablet is-one-third-desktop">
+                    <article class="card quiz-card">
+                        <div class="card-content">
+                            <div class="quiz-card-meta">
+                                <span class="quiz-card-kind">Quiz · 12 plays</span>
+                                <time class="quiz-card-when">3 hr ago</time>
+                            </div>
+                            <h3 class="quiz-card-title"><a href="#">Capital Cities of Europe</a></h3>
+                            <code class="quiz-card-slug">/play/capital-cities-of-europe-7</code>
+                            <p class="quiz-card-desc">A geography refresher. Twelve quick-fire questions covering EU capitals, with one curveball about a country that joined in 2007.</p>
+                        </div>
+                        <footer class="card-footer">
+                            <span class="card-footer-item quiz-card-counts"><strong>12</strong>&nbsp;questions</span>
+                            <span class="card-footer-item quiz-card-actions">
+                                <a class="button is-small is-ghost" aria-label="View" title="View">
+                                    <span class="icon"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M16 8s-3-5.5-8-5.5S0 8 0 8s3 5.5 8 5.5S16 8 16 8zM1.173 8a13.13 13.13 0 0 1 1.66-2.043C4.12 4.668 5.88 3.5 8 3.5c2.12 0 3.879 1.168 5.168 2.457A13.13 13.13 0 0 1 14.828 8a13.13 13.13 0 0 1-1.66 2.043C11.879 11.332 10.119 12.5 8 12.5c-2.12 0-3.879-1.168-5.168-2.457A13.13 13.13 0 0 1 1.172 8z"/><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM4.5 8a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0z"/></svg></span>
+                                </a>
+                                <a class="button is-small is-ghost" aria-label="Edit" title="Edit">
+                                    <span class="icon"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg></span>
+                                </a>
+                                <button class="button is-small is-ghost is-delete" aria-label="Delete" title="Delete">
+                                    <span class="icon"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5zM11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1H11z"/></svg></span>
+                                </button>
+                            </span>
+                        </footer>
+                    </article>
+                </div>
+
+                <div class="column is-half-tablet is-one-third-desktop">
+                    <article class="card quiz-card">
+                        <div class="card-content">
+                            <div class="quiz-card-meta">
+                                <span class="quiz-card-kind">Quiz · 47 plays</span>
+                                <time class="quiz-card-when">2 days ago</time>
+                            </div>
+                            <h3 class="quiz-card-title"><a href="#">Films of the 90s</a></h3>
+                            <code class="quiz-card-slug">/play/films-of-the-90s-3</code>
+                            <p class="quiz-card-desc">Working titles, taglines, and one director identification round. Built for the office quiz night — light on trivia, heavy on visuals.</p>
+                        </div>
+                        <footer class="card-footer">
+                            <span class="card-footer-item quiz-card-counts"><strong>8</strong>&nbsp;questions</span>
+                            <span class="card-footer-item quiz-card-actions">
+                                <a class="button is-small is-ghost" aria-label="View" title="View">
+                                    <span class="icon"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M16 8s-3-5.5-8-5.5S0 8 0 8s3 5.5 8 5.5S16 8 16 8zM1.173 8a13.13 13.13 0 0 1 1.66-2.043C4.12 4.668 5.88 3.5 8 3.5c2.12 0 3.879 1.168 5.168 2.457A13.13 13.13 0 0 1 14.828 8a13.13 13.13 0 0 1-1.66 2.043C11.879 11.332 10.119 12.5 8 12.5c-2.12 0-3.879-1.168-5.168-2.457A13.13 13.13 0 0 1 1.172 8z"/><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM4.5 8a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0z"/></svg></span>
+                                </a>
+                                <a class="button is-small is-ghost" aria-label="Edit" title="Edit">
+                                    <span class="icon"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg></span>
+                                </a>
+                                <button class="button is-small is-ghost is-delete" aria-label="Delete" title="Delete">
+                                    <span class="icon"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5zM11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1H11z"/></svg></span>
+                                </button>
+                            </span>
+                        </footer>
+                    </article>
+                </div>
+
+                <div class="column is-half-tablet is-one-third-desktop">
+                    <article class="card quiz-card">
+                        <div class="card-content">
+                            <div class="quiz-card-meta">
+                                <span class="quiz-card-kind">Quiz · 0 plays</span>
+                                <time class="quiz-card-when">Just now</time>
+                            </div>
+                            <h3 class="quiz-card-title"><a href="#">Pub Quiz: Half&nbsp;1</a></h3>
+                            <code class="quiz-card-slug">/play/pub-quiz-half-1-12</code>
+                            <p class="quiz-card-desc">Draft. Geography, music from 1965–1985, two picture rounds. Aiming for fifteen questions before Thursday.</p>
+                        </div>
+                        <footer class="card-footer">
+                            <span class="card-footer-item quiz-card-counts"><strong>3</strong>&nbsp;questions</span>
+                            <span class="card-footer-item quiz-card-actions">
+                                <a class="button is-small is-ghost" aria-label="View" title="View">
+                                    <span class="icon"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M16 8s-3-5.5-8-5.5S0 8 0 8s3 5.5 8 5.5S16 8 16 8zM1.173 8a13.13 13.13 0 0 1 1.66-2.043C4.12 4.668 5.88 3.5 8 3.5c2.12 0 3.879 1.168 5.168 2.457A13.13 13.13 0 0 1 14.828 8a13.13 13.13 0 0 1-1.66 2.043C11.879 11.332 10.119 12.5 8 12.5c-2.12 0-3.879-1.168-5.168-2.457A13.13 13.13 0 0 1 1.172 8z"/><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM4.5 8a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0z"/></svg></span>
+                                </a>
+                                <a class="button is-small is-ghost" aria-label="Edit" title="Edit">
+                                    <span class="icon"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg></span>
+                                </a>
+                                <button class="button is-small is-ghost is-delete" aria-label="Delete" title="Delete">
+                                    <span class="icon"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5zM11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1H11z"/></svg></span>
+                                </button>
+                            </span>
+                        </footer>
+                    </article>
+                </div>
+            </div>
+
+            <section class="empty-preview">
+                <p class="eyebrow">Empty state · preview</p>
+                <div class="empty notification has-text-centered">
+                    <h2 class="title is-4">No quizzes yet</h2>
+                    <p class="subtitle is-6">Create your first quiz to get going. You can add questions, share a link, and watch the leaderboard fill in.</p>
+                    <a class="button is-primary" href="#">Create your first quiz</a>
+                </div>
+            </section>
+
+            <section class="modal-preview">
+                <p class="eyebrow">Delete modal · preview</p>
+                <div class="modal is-active is-static-preview" aria-label="Delete confirmation preview">
+                    <div class="modal-background"></div>
+                    <div class="modal-card">
+                        <header class="modal-card-head">
+                            <p class="modal-card-title">Delete quiz</p>
+                            <button class="delete" aria-label="close"></button>
+                        </header>
+                        <section class="modal-card-body">
+                            Are you sure you want to delete quiz <strong>&ldquo;Capital Cities of Europe&rdquo;</strong>? This will also delete all its questions and options. This action cannot be undone.
+                        </section>
+                        <footer class="modal-card-foot">
+                            <div class="buttons is-justify-content-flex-end">
+                                <button class="button">Cancel</button>
+                                <button class="button is-danger">Delete</button>
+                            </div>
+                        </footer>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </section>
+</body>
+</html>
