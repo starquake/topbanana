@@ -17,7 +17,7 @@ You may create commits, but only after the user has reviewed and signed off on e
 1. Show the user the change (or point at the diff they need to read).
 2. Ask explicitly: "Did the review look OK?" or equivalent. Wait for their explicit go-ahead — silence is not consent.
 3. Only then run `git add` / `git commit`.
-4. Use plain language commit messages — avoid jargon. Prefer simple verbs like "change", "update", "fix", "add", "remove". Start the message with a capital letter.
+4. Use plain language commit messages — avoid jargon. Prefer simple verbs like "change", "update", "fix", "add", "remove". Start the message with a capital letter. Keep them to a single short subject line; do not add a body, Summary, or rationale paragraphs.
 
 If you make further changes after the sign-off (e.g. fixing a lint issue, addressing a comment), ask for sign-off on the new lines too before committing.
 
