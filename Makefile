@@ -136,9 +136,12 @@ $(TAILWIND_BIN):
 tailwind: $(TAILWIND_BIN)
 	$(TAILWIND_BIN) -i $(TAILWIND_INPUT) -o $(TAILWIND_OUTPUT) --minify
 
+# --watch + --minify so every rebuild matches what `make tailwind` would
+# produce — without --minify the watcher emits pretty-printed CSS that
+# would diverge from the committed admin.css and fail tailwind-check.
 .PHONY: tailwind-watch
 tailwind-watch: $(TAILWIND_BIN)
-	$(TAILWIND_BIN) -i $(TAILWIND_INPUT) -o $(TAILWIND_OUTPUT) --watch
+	$(TAILWIND_BIN) -i $(TAILWIND_INPUT) -o $(TAILWIND_OUTPUT) --watch --minify
 
 # Regenerate into a temp file and diff against the committed admin.css. Wired
 # into `make check` so a template class change without `make tailwind` fails
