@@ -6,24 +6,16 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"strings"
 	"testing"
-	"time"
 
-	_ "modernc.org/sqlite"
-
-	"github.com/starquake/topbanana/cmd/server/app"
-	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/session"
 	"github.com/starquake/topbanana/internal/store"
-	"github.com/starquake/topbanana/internal/testutil"
 )
 
 // TestAnonymous_Integration exercises the score-claiming acceptance criteria:
@@ -34,44 +26,13 @@ import (
 func TestAnonymous_Integration(t *testing.T) {
 	t.Parallel()
 
-	ctx, stop := testutil.SignalCtx(t)
-
-	stdout := testutil.NewTestWriter(t)
-
-	dbURI, cleanup := dbtest.SetupTestDB(t)
-	t.Cleanup(cleanup)
-
-	getenv := func(key string) string {
-		env := map[string]string{
-			"HOST":   "localhost",
-			"PORT":   "0",
-			"DB_URI": dbURI,
-		}
-
-		return env[key]
-	}
-
-	listenConfig := &net.ListenConfig{}
-	ln, err := listenConfig.Listen(ctx, "tcp", net.JoinHostPort(getenv("HOST"), getenv("PORT")))
-	if err != nil {
-		t.Fatalf("failed to listen: %v", err)
-	}
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- app.Run(ctx, getenv, stdout, ln)
-	}()
-
-	serverAddr := ln.Addr().String()
-	baseURL := "http://" + serverAddr
-	if readyErr := testutil.WaitForReady(ctx, t, 10*time.Second, baseURL+"/healthz"); readyErr != nil {
-		t.Fatalf("error waiting for server to be ready: %v", readyErr)
-	}
+	ctx, srv := startServer(t, nil)
+	baseURL := srv.BaseURL
 
 	// Seed a quiz directly via the DB so we can ask the API to start a
 	// game against it. Using the store keeps this independent of the admin
 	// HTTP flow exercised in admin_test.go.
-	dbConn, err := sql.Open("sqlite", dbURI)
+	dbConn, err := sql.Open("sqlite", srv.DBURI)
 	if err != nil {
 		t.Fatalf("failed to open db: %v", err)
 	}
@@ -222,16 +183,6 @@ func TestAnonymous_Integration(t *testing.T) {
 	// what the integration test pins down.
 	if got, want := patchPlayerUsername(ctx, t, clientA, baseURL, "   "), http.StatusBadRequest; got != want {
 		t.Errorf("[scenario 6] whitespace PATCH status = %d, want %d", got, want)
-	}
-
-	stop()
-	select {
-	case err = <-errCh:
-		if err != nil && !errors.Is(err, context.Canceled) {
-			t.Errorf("run() returned error: %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Error("server failed to shutdown in time")
 	}
 }
 

@@ -13,18 +13,19 @@ test('register, create a quiz with varied questions, and see them on the quiz vi
 
   // After the last addQuestion the quiz view is loaded. For each question,
   // assert its row exists and contains the expected number of "correct" icons.
-  // This covers the 1-correct, 0-correct, all-correct, and 3-of-4 cases.
+  // The "Correct" marker is a span with aria-label="Correct" wrapping an
+  // inline SVG — switched from the old Bulma `.has-text-success` class
+  // selector to a role-based locator so the test survives further reskins.
   for (const [index, q] of QUIZ_QUESTIONS.entries()) {
     const row = page.locator('table tbody tr').nth(index);
     await expect(row).toContainText(q.text);
-    await expect(row.locator('.has-text-success')).toHaveCount(q.correctIndices.length);
+    await expect(row.getByLabel('Correct')).toHaveCount(q.correctIndices.length);
   }
 
-  // The new quiz title should appear in the admin quiz list. Match by cell
-  // (rather than by row position) so the assertion is stable across runs that
-  // share a long-lived SQLite file.
+  // The new quiz title should appear in the admin quiz list. The list is
+  // a Tailwind card grid; we key off the link role.
   await page.goto('/admin/quizzes');
-  await expect(page.getByRole('cell', { name: quizTitle })).toBeVisible();
+  await expect(page.getByRole('link', { name: quizTitle })).toBeVisible();
 
   // The "Top Banana!" brand in the navbar should be a real link that lands
   // on /admin — guards against regressing back to href="#".
@@ -35,9 +36,9 @@ test('register, create a quiz with varied questions, and see them on the quiz vi
   // URL points at /play/<slug>-<id>. Don't try to verify the clipboard
   // (browser permission model varies); just check the user-visible link.
   await page.goto('/admin/quizzes');
-  await page.getByRole('cell', { name: quizTitle }).click();
+  await page.getByRole('link', { name: quizTitle }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
-  await page.getByRole('link', { name: 'Share quiz' }).click();
+  await page.getByRole('button', { name: 'Share' }).click();
   const shareLinkText = await page.locator('.share-link').textContent();
   expect(shareLinkText).toMatch(/\/play\/[a-z0-9-]+-\d+$/);
 });

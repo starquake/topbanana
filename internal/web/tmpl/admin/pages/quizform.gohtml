@@ -1,7 +1,17 @@
 {{define "content"}}
+    {{/* Breadcrumb */}}
+    <nav aria-label="breadcrumbs" class="mb-8">
+        <ol class="flex items-center text-xs uppercase tracking-[0.14em]">
+            <li><a href="/admin" class="pr-2 text-text-dim hover:text-text">Admin</a></li>
+            <li class="text-text-mute" aria-hidden="true">/</li>
+            <li><a href="/admin/quizzes" class="px-2 text-text-dim hover:text-text">Quizzes</a></li>
+            <li class="text-text-mute" aria-hidden="true">/</li>
+            <li><span class="pl-2 text-text" aria-current="page">{{if .Quiz.ID}}Edit{{else}}New{{end}}</span></li>
+        </ol>
+    </nav>
 
-    <div class="quiz-edit">
-        <h1 class="title is-1">{{.Title}}</h1>
+    <div class="max-w-2xl">
+        <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight mb-6">{{.Title}}</h1>
 
         <form
                 {{if .Quiz.ID}}
@@ -12,39 +22,27 @@
                 method="POST">
             <input type="hidden" name="csrf_token" value="{{csrfToken}}">
 
-            <div class="field">
-                <label class="label" for="title">Title</label>
-                <div class="control">
-                    <input id="title" name="title" class="input" type="text" value="{{.Quiz.Title}}">
-                </div>
+            <div class="mb-5">
+                <label for="title" class="form-label">Title</label>
+                <input id="title" name="title" type="text" value="{{.Quiz.Title}}" class="form-input">
             </div>
 
             {{if .Quiz.ID}}
-            <div class="field">
-                <label class="label" for="slug">Slug</label>
-                <div class="control">
-                    <input id="slug" class="input is-static" type="text" readonly value="{{.Quiz.Slug}}">
+                <div class="mb-5">
+                    <label for="slug" class="form-label">Slug</label>
+                    <input id="slug" type="text" readonly value="{{.Quiz.Slug}}"
+                           class="form-input bg-surface-2 text-text-dim cursor-not-allowed">
                 </div>
-            </div>
             {{end}}
 
-            <div class="field">
-                <label class="label" for="description">Description</label>
-                <div class="control">
-                    <input id="description" name="description" class="input" type="text"
-                           value="{{.Quiz.Description}}">
-                </div>
+            <div class="mb-5">
+                <label for="description" class="form-label">Description</label>
+                <input id="description" name="description" type="text" value="{{.Quiz.Description}}" class="form-input">
             </div>
 
-            <div class="level">
-                <div class="level-left">
-                    <div class="level-item">
-                        <input type="submit" name="action" class="button is-primary is-right" value="Save">
-                    </div>
-                    <div class="level-item">
-                        <a href="/admin/quizzes">Cancel</a>
-                    </div>
-                </div>
+            <div class="flex items-center gap-4 mt-8">
+                <button type="submit" name="action" value="Save" class="btn-primary">Save</button>
+                <a href="/admin/quizzes" class="text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">Cancel</a>
             </div>
         </form>
     </div>

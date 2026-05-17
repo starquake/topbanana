@@ -4,24 +4,16 @@ package integration_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
-	_ "modernc.org/sqlite"
-
-	"github.com/starquake/topbanana/cmd/server/app"
 	"github.com/starquake/topbanana/internal/csrf"
-	"github.com/starquake/topbanana/internal/dbtest"
-	"github.com/starquake/topbanana/internal/testutil"
 )
 
 // csrfTokenPattern extracts the value of the hidden CSRF form field a
@@ -69,43 +61,10 @@ func fetchCSRFToken(ctx context.Context, t *testing.T, client *http.Client, form
 func TestAdmin_Integration(t *testing.T) {
 	t.Parallel()
 
-	var err error
-
-	ctx, stop := testutil.SignalCtx(t)
-
-	stdout := testutil.NewTestWriter(t)
-
-	dbURI, cleanup := dbtest.SetupTestDB(t)
-	defer cleanup()
-
-	getenv := func(key string) string {
-		env := map[string]string{
-			"HOST":                 "localhost",
-			"PORT":                 "0", // Let the OS choose an available port
-			"DB_URI":               dbURI,
-			"REGISTRATION_ENABLED": "true",
-		}
-
-		return env[key]
-	}
-
-	listenConfig := &net.ListenConfig{}
-	var ln net.Listener
-	ln, err = listenConfig.Listen(ctx, "tcp", net.JoinHostPort(getenv("HOST"), getenv("PORT")))
-	if err != nil {
-		t.Fatalf("failed to listen: %v", err)
-	}
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- app.Run(ctx, getenv, stdout, ln)
-	}()
-
-	serverAddr := ln.Addr().String()
-	err = testutil.WaitForReady(ctx, t, 10*time.Second, fmt.Sprintf("http://%s/healthz", serverAddr))
-	if err != nil {
-		t.Fatalf("error waiting for server to be ready: %v", err)
-	}
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+	})
+	baseURL := srv.BaseURL
 
 	// Start of the integration test
 
@@ -127,7 +86,7 @@ func TestAdmin_Integration(t *testing.T) {
 	// Register the first user (becomes admin) so subsequent /admin/* requests succeed.
 	// Fetching the GET form first sets the CSRF nonce cookie on the jar and
 	// returns the hidden token, both of which the POST then carries.
-	registerToken := fetchCSRFToken(ctx, t, client, fmt.Sprintf("http://%s/register", serverAddr))
+	registerToken := fetchCSRFToken(ctx, t, client, baseURL+"/register")
 
 	registerForm := url.Values{}
 	registerForm.Add("username", "integration-admin")
@@ -137,7 +96,7 @@ func TestAdmin_Integration(t *testing.T) {
 	registerReq, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
-		fmt.Sprintf("http://%s/register", serverAddr),
+		baseURL+"/register",
 		strings.NewReader(registerForm.Encode()),
 	)
 	if err != nil {
@@ -157,7 +116,7 @@ func TestAdmin_Integration(t *testing.T) {
 
 	// Visit the quiz-create form GET so we can pull a fresh CSRF token tied
 	// to the now-authenticated session jar.
-	quizCreateToken := fetchCSRFToken(ctx, t, client, fmt.Sprintf("http://%s/admin/quizzes/new", serverAddr))
+	quizCreateToken := fetchCSRFToken(ctx, t, client, baseURL+"/admin/quizzes/new")
 
 	quizForm := url.Values{}
 	quizForm.Add("title", quizTitle)
@@ -168,7 +127,7 @@ func TestAdmin_Integration(t *testing.T) {
 	req, err = http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
-		fmt.Sprintf("http://%s/admin/quizzes", serverAddr),
+		baseURL+"/admin/quizzes",
 		strings.NewReader(quizForm.Encode()),
 	)
 	if err != nil {
@@ -201,7 +160,7 @@ func TestAdmin_Integration(t *testing.T) {
 	req, err = http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
-		fmt.Sprintf("http://%s/admin/quizzes", serverAddr),
+		baseURL+"/admin/quizzes",
 		strings.NewReader(quizForm.Encode()),
 	)
 	if err != nil {
@@ -227,11 +186,23 @@ func TestAdmin_Integration(t *testing.T) {
 		t.Errorf("string(body) = %q, should contain %q", got, want)
 	}
 
+	// Pin Tailwind classes on the quiz list. max-w-shell is a custom
+	// theme token from tailwind-src.css used by the navbar shell;
+	// bg-cyan-soft is the play-URL chip pill rendered per quiz card.
+	// Together they prove both the navbar and the per-card reskin
+	// rendered. See #213.
+	if got, want := string(body), `class="max-w-shell`; !strings.Contains(got, want) {
+		t.Errorf("string(body) should contain Tailwind shell class %q, got %q", want, got)
+	}
+	if got, want := string(body), `bg-cyan-soft`; !strings.Contains(got, want) {
+		t.Errorf("string(body) should contain per-card Tailwind class %q, got %q", want, got)
+	}
+
 	// Verify quiz details
 	req, err = http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
-		fmt.Sprintf("http://%s%s", serverAddr, quizLocation),
+		baseURL+quizLocation,
 		strings.NewReader(quizForm.Encode()),
 	)
 	if err != nil {
@@ -270,7 +241,7 @@ func TestAdmin_Integration(t *testing.T) {
 		ctx,
 		t,
 		client,
-		fmt.Sprintf("http://%s%s/questions/new", serverAddr, quizLocation),
+		baseURL+quizLocation+"/questions/new",
 	)
 
 	questionForm := url.Values{}
@@ -287,7 +258,7 @@ func TestAdmin_Integration(t *testing.T) {
 	req, err = http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
-		fmt.Sprintf("http://%s%s/questions", serverAddr, quizLocation),
+		baseURL+quizLocation+"/questions",
 		strings.NewReader(questionForm.Encode()),
 	)
 	if err != nil {
@@ -320,7 +291,7 @@ func TestAdmin_Integration(t *testing.T) {
 	req, err = http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
-		fmt.Sprintf("http://%s%s", serverAddr, quizLocation),
+		baseURL+quizLocation,
 		strings.NewReader(quizForm.Encode()),
 	)
 	if err != nil {
@@ -362,17 +333,5 @@ func TestAdmin_Integration(t *testing.T) {
 	}
 	if got, want := string(body), questionOption4; !strings.Contains(got, want) {
 		t.Errorf("string(body) = %q, should contain %q", got, want)
-	}
-
-	// Shutdown server
-	stop()
-	select {
-	case err = <-errCh:
-		// Ignore context.Canceled because we triggered it ourselves via stop()
-		if err != nil && !errors.Is(err, context.Background().Err()) && !errors.Is(err, context.Canceled) {
-			t.Errorf("run() returned error: %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Error("server failed to shutdown in time")
 	}
 }

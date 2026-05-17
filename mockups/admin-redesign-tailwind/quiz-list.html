@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quizzes — top banana admin (Tailwind Play CDN)</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@500;600;700;800;900&display=swap">
+
+    <!-- Tailwind Play CDN — compiles classes in the browser. Not for prod. -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Theme tokens. Same palette as the other mockups so the comparison
+         is apples-to-apples. -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        bg: '#0a0a0f',
+                        surface: '#15151c',
+                        'surface-2': '#1d1d26',
+                        border: { DEFAULT: '#2a2a35', soft: '#1f1f28' },
+                        text: { DEFAULT: '#e8e8ee', dim: '#7a7a85', mute: '#4a4a55' },
+                        accent: {
+                            DEFAULT: '#ffd23f',
+                            soft: 'rgba(255, 210, 63, 0.14)',
+                            line: 'rgba(255, 210, 63, 0.4)',
+                            deep: '#f5b800',
+                        },
+                        cyan: { DEFAULT: '#66e8ff', soft: 'rgba(102, 232, 255, 0.08)' },
+                        danger: '#ff5c5c',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+                        display: ['Orbitron', 'system-ui', 'sans-serif'],
+                        mono: ['ui-monospace', 'JetBrains Mono', 'Menlo', 'monospace'],
+                    },
+                    borderRadius: {
+                        DEFAULT: '4px',
+                        sm: '3px',
+                        md: '6px',
+                        lg: '8px',
+                        xl: '12px',
+                    },
+                    boxShadow: {
+                        focus: '0 0 0 3px rgba(255, 210, 63, 0.14)',
+                    },
+                    maxWidth: {
+                        shell: '1080px',
+                    },
+                },
+            },
+        };
+    </script>
+
+    <!-- The few things Tailwind has no utility for (multi-layer radial
+         gradients, font-feature-settings). Everything else uses Tailwind
+         classes inline. -->
+    <style>
+        body {
+            font-feature-settings: 'cv11', 'ss01', 'tnum';
+            background-image:
+                radial-gradient(ellipse 80% 600px at 50% -200px, rgba(255, 210, 63, 0.10), transparent 60%),
+                radial-gradient(ellipse 60% 400px at 50% -100px, rgba(102, 232, 255, 0.04), transparent 70%),
+                radial-gradient(circle at 1px 1px, rgba(255,255,255,0.025) 1px, transparent 0);
+            background-size: 100% 100%, 100% 100%, 24px 24px;
+            background-attachment: fixed, fixed, fixed;
+        }
+    </style>
+</head>
+<body class="bg-bg text-text font-sans antialiased min-h-screen leading-relaxed">
+
+    <!-- Navbar -->
+    <nav class="sticky top-0 z-30 bg-bg/80 backdrop-blur-xl border-b border-border-soft" aria-label="Primary">
+        <div class="max-w-shell mx-auto px-5 py-2 flex items-center justify-between gap-4 min-h-[3.5rem]">
+            <a href="#" class="inline-flex items-center font-display font-semibold text-base tracking-[0.08em] uppercase text-text hover:text-text">
+                <span class="w-[22px] h-[22px] mr-[0.55rem] text-accent drop-shadow-[0_0_8px_rgba(255,210,63,0.45)] inline-flex shrink-0" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M4 13c3.5-2 8-2 10 2a5.5 5.5 0 0 1 8 5"/><path d="M5.15 17.89c5.52-1.52 8.65-6.89 7-12C11.55 4 11.5 2 13 2c3.22 0 5 5.5 5 8 0 6.5-4.2 12-10.49 12C5.11 22 2 22 2 20c0-1.5 1.14-1.55 3.15-2.11Z"/></svg>
+                </span>
+                TOP<span class="text-accent font-extrabold">BANANA</span>
+            </a>
+            <div class="flex items-center gap-4 text-sm">
+                <span class="hidden sm:inline text-text-dim">Signed in as <strong class="text-text font-medium">alice</strong></span>
+                <a href="#" aria-label="Log out"
+                   class="inline-flex items-center min-h-[36px] px-3 py-2 border border-border rounded-sm text-text-dim text-xs uppercase font-semibold tracking-[0.14em]
+                          transition-colors hover:border-accent hover:text-text
+                          focus-visible:outline-none focus-visible:shadow-focus focus-visible:border-accent">
+                    Log out
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-shell mx-auto px-5 pt-10 pb-24 md:pt-12">
+
+        <!-- Breadcrumb -->
+        <nav aria-label="breadcrumbs" class="mb-8">
+            <ol class="flex items-center text-xs uppercase tracking-[0.14em]">
+                <li><a href="#" class="pr-2 text-text-dim hover:text-text">Admin</a></li>
+                <li class="text-text-mute" aria-hidden="true">/</li>
+                <li><span class="pl-2 text-text" aria-current="page">Quizzes</span></li>
+            </ol>
+        </nav>
+
+        <!-- Page header -->
+        <header class="flex flex-col md:flex-row md:items-start md:justify-between gap-5 mb-10">
+            <div>
+                <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight">Quizzes</h1>
+                <p class="mt-1.5 max-w-[540px] text-text-dim text-[0.95rem]">Author, share, and review quizzes. Tap a card to manage questions.</p>
+            </div>
+            <a href="#"
+               class="self-start inline-flex items-center gap-2 min-h-[44px] px-4 rounded-sm bg-accent text-[#1a1a1f] font-bold text-xs uppercase tracking-[0.12em]
+                      transition-colors hover:bg-accent-deep
+                      focus-visible:outline-none focus-visible:shadow-focus">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5a.5.5 0 0 1 .5.5v5.5H14a.5.5 0 0 1 0 1H8.5V14a.5.5 0 0 1-1 0V8.5H2a.5.5 0 0 1 0-1h5.5V2a.5.5 0 0 1 .5-.5z"/></svg>
+                <span>New quiz</span>
+            </a>
+        </header>
+
+        <!-- Quiz grid -->
+        <section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5" aria-label="Your quizzes">
+
+            <!-- Card 1 -->
+            <article class="group relative flex flex-col h-full bg-surface border border-border-soft rounded-lg overflow-hidden transition-all duration-200 hover:border-accent-line hover:-translate-y-px">
+                <div class="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-border to-transparent transition-colors group-hover:via-accent"></div>
+                <div class="flex-1 p-5 pb-2">
+                    <div class="flex items-center justify-between mb-3 text-[0.7rem] uppercase tracking-[0.16em] text-text-mute">
+                        <span class="text-text-dim">Quiz · 12 plays</span>
+                        <time>3 hr ago</time>
+                    </div>
+                    <h3 class="mb-2 font-display text-lg leading-[1.25] font-semibold">
+                        <a href="#" class="text-text hover:text-accent">Capital Cities of Europe</a>
+                    </h3>
+                    <code class="inline-block mb-3.5 px-2 py-0.5 rounded-sm font-mono text-[0.72rem] text-cyan bg-cyan-soft">/play/capital-cities-of-europe-7</code>
+                    <p class="mb-4 text-text-dim text-sm leading-relaxed line-clamp-2">A geography refresher. Twelve quick-fire questions covering EU capitals, with one curveball about a country that joined in 2007.</p>
+                </div>
+                <footer class="flex items-center justify-between px-5 py-3.5 border-t border-border-soft text-text-dim text-sm">
+                    <span><strong class="text-text font-semibold mr-1">12</strong>&nbsp;questions</span>
+                    <div class="flex items-center gap-1">
+                        <a href="#" aria-label="View" title="View" class="w-9 h-9 inline-flex items-center justify-center rounded-sm text-text-dim hover:text-text hover:bg-surface-2 focus-visible:outline-none focus-visible:shadow-focus transition-colors">
+                            <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M16 8s-3-5.5-8-5.5S0 8 0 8s3 5.5 8 5.5S16 8 16 8zM1.173 8a13.13 13.13 0 0 1 1.66-2.043C4.12 4.668 5.88 3.5 8 3.5c2.12 0 3.879 1.168 5.168 2.457A13.13 13.13 0 0 1 14.828 8a13.13 13.13 0 0 1-1.66 2.043C11.879 11.332 10.119 12.5 8 12.5c-2.12 0-3.879-1.168-5.168-2.457A13.13 13.13 0 0 1 1.172 8z"/><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM4.5 8a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0z"/></svg>
+                        </a>
+                        <a href="#" aria-label="Edit" title="Edit" class="w-9 h-9 inline-flex items-center justify-center rounded-sm text-text-dim hover:text-text hover:bg-surface-2 focus-visible:outline-none focus-visible:shadow-focus transition-colors">
+                            <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>
+                        </a>
+                        <button aria-label="Delete" title="Delete" class="w-9 h-9 inline-flex items-center justify-center rounded-sm text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:shadow-focus transition-colors">
+                            <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5zM11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1H11z"/></svg>
+                        </button>
+                    </div>
+                </footer>
+            </article>
+
+            <!-- Card 2 -->
+            <article class="group relative flex flex-col h-full bg-surface border border-border-soft rounded-lg overflow-hidden transition-all duration-200 hover:border-accent-line hover:-translate-y-px">
+                <div class="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-border to-transparent transition-colors group-hover:via-accent"></div>
+                <div class="flex-1 p-5 pb-2">
+                    <div class="flex items-center justify-between mb-3 text-[0.7rem] uppercase tracking-[0.16em] text-text-mute">
+                        <span class="text-text-dim">Quiz · 47 plays</span>
+                        <time>2 days ago</time>
+                    </div>
+                    <h3 class="mb-2 font-display text-lg leading-[1.25] font-semibold">
+                        <a href="#" class="text-text hover:text-accent">Films of the 90s</a>
+                    </h3>
+                    <code class="inline-block mb-3.5 px-2 py-0.5 rounded-sm font-mono text-[0.72rem] text-cyan bg-cyan-soft">/play/films-of-the-90s-3</code>
+                    <p class="mb-4 text-text-dim text-sm leading-relaxed line-clamp-2">Working titles, taglines, and one director identification round. Built for the office quiz night — light on trivia, heavy on visuals.</p>
+                </div>
+                <footer class="flex items-center justify-between px-5 py-3.5 border-t border-border-soft text-text-dim text-sm">
+                    <span><strong class="text-text font-semibold mr-1">8</strong>&nbsp;questions</span>
+                    <div class="flex items-center gap-1">
+                        <a href="#" aria-label="View" title="View" class="w-9 h-9 inline-flex items-center justify-center rounded-sm text-text-dim hover:text-text hover:bg-surface-2 focus-visible:outline-none focus-visible:shadow-focus transition-colors">
+                            <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M16 8s-3-5.5-8-5.5S0 8 0 8s3 5.5 8 5.5S16 8 16 8zM1.173 8a13.13 13.13 0 0 1 1.66-2.043C4.12 4.668 5.88 3.5 8 3.5c2.12 0 3.879 1.168 5.168 2.457A13.13 13.13 0 0 1 14.828 8a13.13 13.13 0 0 1-1.66 2.043C11.879 11.332 10.119 12.5 8 12.5c-2.12 0-3.879-1.168-5.168-2.457A13.13 13.13 0 0 1 1.172 8z"/><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM4.5 8a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0z"/></svg>
+                        </a>
+                        <a href="#" aria-label="Edit" title="Edit" class="w-9 h-9 inline-flex items-center justify-center rounded-sm text-text-dim hover:text-text hover:bg-surface-2 focus-visible:outline-none focus-visible:shadow-focus transition-colors">
+                            <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>
+                        </a>
+                        <button aria-label="Delete" title="Delete" class="w-9 h-9 inline-flex items-center justify-center rounded-sm text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:shadow-focus transition-colors">
+                            <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5zM11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1H11z"/></svg>
+                        </button>
+                    </div>
+                </footer>
+            </article>
+
+            <!-- Card 3 -->
+            <article class="group relative flex flex-col h-full bg-surface border border-border-soft rounded-lg overflow-hidden transition-all duration-200 hover:border-accent-line hover:-translate-y-px">
+                <div class="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-border to-transparent transition-colors group-hover:via-accent"></div>
+                <div class="flex-1 p-5 pb-2">
+                    <div class="flex items-center justify-between mb-3 text-[0.7rem] uppercase tracking-[0.16em] text-text-mute">
+                        <span class="text-text-dim">Quiz · 0 plays</span>
+                        <time>Just now</time>
+                    </div>
+                    <h3 class="mb-2 font-display text-lg leading-[1.25] font-semibold">
+                        <a href="#" class="text-text hover:text-accent">Pub Quiz: Half&nbsp;1</a>
+                    </h3>
+                    <code class="inline-block mb-3.5 px-2 py-0.5 rounded-sm font-mono text-[0.72rem] text-cyan bg-cyan-soft">/play/pub-quiz-half-1-12</code>
+                    <p class="mb-4 text-text-dim text-sm leading-relaxed line-clamp-2">Draft. Geography, music from 1965–1985, two picture rounds. Aiming for fifteen questions before Thursday.</p>
+                </div>
+                <footer class="flex items-center justify-between px-5 py-3.5 border-t border-border-soft text-text-dim text-sm">
+                    <span><strong class="text-text font-semibold mr-1">3</strong>&nbsp;questions</span>
+                    <div class="flex items-center gap-1">
+                        <a href="#" aria-label="View" title="View" class="w-9 h-9 inline-flex items-center justify-center rounded-sm text-text-dim hover:text-text hover:bg-surface-2 focus-visible:outline-none focus-visible:shadow-focus transition-colors">
+                            <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M16 8s-3-5.5-8-5.5S0 8 0 8s3 5.5 8 5.5S16 8 16 8zM1.173 8a13.13 13.13 0 0 1 1.66-2.043C4.12 4.668 5.88 3.5 8 3.5c2.12 0 3.879 1.168 5.168 2.457A13.13 13.13 0 0 1 14.828 8a13.13 13.13 0 0 1-1.66 2.043C11.879 11.332 10.119 12.5 8 12.5c-2.12 0-3.879-1.168-5.168-2.457A13.13 13.13 0 0 1 1.172 8z"/><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM4.5 8a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0z"/></svg>
+                        </a>
+                        <a href="#" aria-label="Edit" title="Edit" class="w-9 h-9 inline-flex items-center justify-center rounded-sm text-text-dim hover:text-text hover:bg-surface-2 focus-visible:outline-none focus-visible:shadow-focus transition-colors">
+                            <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>
+                        </a>
+                        <button aria-label="Delete" title="Delete" class="w-9 h-9 inline-flex items-center justify-center rounded-sm text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:shadow-focus transition-colors">
+                            <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5zM11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1H11z"/></svg>
+                        </button>
+                    </div>
+                </footer>
+            </article>
+
+        </section>
+
+        <!-- Empty state preview -->
+        <section class="mt-16">
+            <p class="mb-4 text-[0.7rem] uppercase tracking-[0.18em] text-text-mute">Empty state · preview</p>
+            <div class="border border-dashed border-border rounded-xl p-12 text-center">
+                <h2 class="mb-2 font-display text-2xl font-bold">No quizzes yet</h2>
+                <p class="mb-6 text-text-dim text-[0.95rem]">Create your first quiz to get going. You can add questions, share a link, and watch the leaderboard fill in.</p>
+                <a href="#" class="inline-flex items-center min-h-[44px] px-4 rounded-sm bg-accent text-[#1a1a1f] font-bold text-xs uppercase tracking-[0.12em] transition-colors hover:bg-accent-deep">Create your first quiz</a>
+            </div>
+        </section>
+
+        <!-- Modal preview (static, no JS) -->
+        <section class="mt-16">
+            <p class="mb-4 text-[0.7rem] uppercase tracking-[0.18em] text-text-mute">Delete modal · preview</p>
+            <div class="relative max-w-[480px] mx-auto my-6">
+                <div class="absolute inset-0 rounded-lg bg-bg/80 backdrop-blur-sm" aria-hidden="true"></div>
+                <div class="relative bg-surface border border-accent-line rounded-lg shadow-2xl">
+                    <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
+                        <p class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Delete quiz</p>
+                        <button aria-label="close" class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim hover:bg-border hover:text-text">×</button>
+                    </header>
+                    <section class="px-6 py-5 text-[0.95rem]">
+                        Are you sure you want to delete quiz <strong class="text-text">"Capital Cities of Europe"</strong>? This will also delete all its questions and options. This action cannot be undone.
+                    </section>
+                    <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
+                        <button class="inline-flex items-center min-h-[44px] px-4 rounded-sm bg-transparent text-text border border-border font-semibold text-xs uppercase tracking-[0.12em] transition-colors hover:border-accent">Cancel</button>
+                        <button class="inline-flex items-center min-h-[44px] px-4 rounded-sm bg-danger text-[#1a1a1f] font-bold text-xs uppercase tracking-[0.12em] transition-[filter] hover:brightness-110">Delete</button>
+                    </footer>
+                </div>
+            </div>
+        </section>
+
+    </main>
+</body>
+</html>
