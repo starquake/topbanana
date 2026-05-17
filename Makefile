@@ -24,6 +24,12 @@ UNAME_M := $(shell uname -m)
 GOLANGCI_VERSION := v2.12.2
 GOLANGCI_BIN     := $(BIN_DIR)/golangci-lint
 
+# sqlc version + binary path. Same parse-time-expansion reason for the
+# placement. Dependabot watches /tools/go.mod for new releases; mirror
+# any bump there into the version below.
+SQLC_VERSION := v1.31.1
+SQLC_BIN     := $(BIN_DIR)/sqlc
+
 # Developer check before committing
 .PHONY: check
 check: lint sql-lint tailwind-check build test-coverage
@@ -37,8 +43,8 @@ lint-fix: $(GOLANGCI_BIN)
 	$(GOLANGCI_BIN) run --fix
 
 .PHONY: sql-lint
-sql-lint:
-	sqlc vet
+sql-lint: $(SQLC_BIN)
+	$(SQLC_BIN) vet
 
 .PHONY: build
 build:
@@ -212,6 +218,45 @@ $(GOLANGCI_BIN):
 	        https://github.com/golangci/golangci-lint/releases/download/$(GOLANGCI_VERSION)/$(GOLANGCI_TARBALL) && \
 	    tar -xzf $$tmp/golangci.tar.gz -C $$tmp && \
 	    mv $$tmp/$(GOLANGCI_DIR)/golangci-lint $@ && \
+	    rm -rf $$tmp
+	@chmod +x $@
+
+# --- sqlc --------------------------------------------------------------------
+#
+# SQLC_VERSION / SQLC_BIN are defined at the top of the file for the same
+# parse-time-expansion reason as GOLANGCI_BIN. Asset naming differs from
+# golangci-lint (sqlc uses underscores and ships the binary at the root
+# of the tarball, not inside a versioned directory), so the two sections
+# don't share a target.
+
+SQLC_VER_NUM := $(SQLC_VERSION:v%=%)
+
+ifeq ($(UNAME_S),Linux)
+    ifeq ($(UNAME_M),aarch64)
+        SQLC_ASSET := linux_arm64
+    else
+        SQLC_ASSET := linux_amd64
+    endif
+else ifeq ($(UNAME_S),Darwin)
+    ifeq ($(UNAME_M),arm64)
+        SQLC_ASSET := darwin_arm64
+    else
+        SQLC_ASSET := darwin_amd64
+    endif
+else
+    SQLC_ASSET := linux_amd64
+endif
+
+SQLC_TARBALL := sqlc_$(SQLC_VER_NUM)_$(SQLC_ASSET).tar.gz
+
+$(SQLC_BIN):
+	@mkdir -p $(BIN_DIR)
+	@echo "Downloading sqlc $(SQLC_VERSION) ($(SQLC_ASSET))..."
+	@tmp=$$(mktemp -d) && \
+	    curl -sSfL -o $$tmp/sqlc.tar.gz \
+	        https://github.com/sqlc-dev/sqlc/releases/download/$(SQLC_VERSION)/$(SQLC_TARBALL) && \
+	    tar -xzf $$tmp/sqlc.tar.gz -C $$tmp && \
+	    mv $$tmp/sqlc $@ && \
 	    rm -rf $$tmp
 	@chmod +x $@
 
