@@ -47,27 +47,63 @@ func NewTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, templatePat
 	}
 }
 
-// Render renders a template to the writer (w) giving a templatePath and data.
-// It does not return an error because the headers have already been written. So we can't render an error page anyway.
+// Render renders the full base layout with the supplied data. It does not
+// return an error because the headers have already been written by the
+// time ExecuteTemplate runs — an error page is no longer an option, so
+// failures are logged.
 //
-// The clone-and-override dance lets the navbar template call {{currentUser}}
-// without every handler having to thread the username into its data struct:
-// the placeholder registered in parseTemplate satisfies the parser, and here
-// we swap in a real implementation that reads the authenticated player from
-// the request context.
-//
-// The same dance also wires up {{csrfToken}}: parseTemplate registers a
-// placeholder so templates parse cleanly; here we replace it with one that
-// asks the CSRF manager for the token, which sets a nonce cookie on the
-// response if needed. Calling Token before WriteHeader is required because
-// [http.SetCookie] is a header write.
+// The clone-and-override dance behind prepare lets the navbar template
+// call {{currentUser}} and any form call {{csrfToken}} without every
+// handler having to thread those values into its data struct.
 func (tr *TemplateRenderer) Render(w http.ResponseWriter, r *http.Request, status int, data any) {
+	t, ok := tr.prepare(w, r)
+	if !ok {
+		return
+	}
+
+	w.WriteHeader(status)
+	if err := t.ExecuteTemplate(w, "base.gohtml", data); err != nil {
+		tr.logger.ErrorContext(r.Context(), "error executing template", slog.Any("err", err))
+	}
+}
+
+// RenderPartial executes a named template (typically a partial from
+// admin/partials/) instead of the full base layout. Used by HTMX-aware
+// handlers that want to return only the fragment that needs swapping.
+func (tr *TemplateRenderer) RenderPartial(w http.ResponseWriter, r *http.Request, name string, data any) {
+	t, ok := tr.prepare(w, r)
+	if !ok {
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	if err := t.ExecuteTemplate(w, name, data); err != nil {
+		tr.logger.ErrorContext(
+			r.Context(),
+			"error executing partial template",
+			slog.String("name", name),
+			slog.Any("err", err),
+		)
+	}
+}
+
+// prepare clones the renderer's template tree and binds per-request
+// implementations of the {{currentUser}} and {{csrfToken}} funcs that
+// parseTemplate registered as placeholders. Returns the prepared template
+// and true on success; on Clone failure it surfaces 500 Internal Server
+// Error and returns false so the caller can early-return.
+//
+// The csrf.Token call must run before any WriteHeader because setting the
+// nonce cookie is a header write — callers must defer their own header
+// writes until after prepare returns.
+func (tr *TemplateRenderer) prepare(w http.ResponseWriter, r *http.Request) (*template.Template, bool) {
 	t, err := tr.t.Clone()
 	if err != nil {
 		tr.logger.ErrorContext(r.Context(), "error cloning template", slog.Any("err", err))
 		http.Error(w, "internal error", http.StatusInternalServerError)
 
-		return
+		return nil, false
 	}
 
 	username := ""
@@ -80,15 +116,10 @@ func (tr *TemplateRenderer) Render(w http.ResponseWriter, r *http.Request, statu
 		csrfToken = tr.csrf.Token(w, r)
 	}
 
-	t = t.Funcs(template.FuncMap{
+	return t.Funcs(template.FuncMap{
 		"currentUser": func() string { return username },
 		"csrfToken":   func() string { return csrfToken },
-	})
-
-	w.WriteHeader(status)
-	if err := t.ExecuteTemplate(w, "base.gohtml", data); err != nil {
-		tr.logger.ErrorContext(r.Context(), "error executing template", slog.Any("err", err))
-	}
+	}), true
 }
 
 // QuizData is the data for the quiz list page, it shows multiple quizzes when available.
@@ -214,11 +245,15 @@ func parseTemplate(path string) *template.Template {
 		"csrfToken":    func() string { return "" },
 		"humanizeTime": humanizeTime,
 	}
-	layouts := template.Must(
+	base := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "admin/layouts/*.gohtml"),
 	)
+	// Partials are pulled in alongside layouts so any page (or any
+	// HTMX-fragment handler) can {{template "name" .}} a shared block
+	// without re-listing it per-call site.
+	base = template.Must(base.ParseFS(tmpl.FS, "admin/partials/*.gohtml"))
 
-	return template.Must(template.Must(layouts.Clone()).ParseFS(tmpl.FS, path))
+	return template.Must(template.Must(base.Clone()).ParseFS(tmpl.FS, path))
 }
 
 // hoursPerDay is the bucket size for switching humanizeTime from hours to days.
@@ -887,6 +922,17 @@ func HandleQuizDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz
 // 500. After a successful swap we redirect back to the quiz view; the
 // re-rendered page reflects the new order from the database.
 func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+	// The HX-Request path renders only the questions_list partial. Reuse
+	// the quiz-view template tree because parseTemplate loads every
+	// admin/partials/*.gohtml alongside any page template, so the partial
+	// is in scope for ExecuteTemplate by name.
+	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
+
+	type partialData struct {
+		Quiz              *QuizData
+		LastQuestionIndex int
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
 
@@ -901,6 +947,8 @@ func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 		}
 
 		direction := r.PathValue("direction")
+		// HTMX wire header is HX-Request; Hx-Request is Go's canonical form.
+		isHX := r.Header.Get("Hx-Request") == "true"
 
 		if err := quizStore.SwapQuestionPositions(r.Context(), quizID, questionID, direction); err != nil {
 			switch {
@@ -909,17 +957,39 @@ func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 			case errors.Is(err, quiz.ErrQuestionAtTop),
 				errors.Is(err, quiz.ErrQuestionAtBottom):
 				// Boundary case: the button should have been disabled in
-				// the UI, so a request here is unusual but harmless.
-				// Redirect back to the view without surfacing an error.
+				// the UI, so a request here is unusual but harmless. For
+				// HTMX, 204 leaves the existing DOM untouched; for the
+				// classic form post, redirect back to the view.
 				// strconv.FormatInt avoids gosec's open-redirect taint
 				// heuristic (G710) — same pattern as HandleQuestionSave.
-				http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(quizID, 10), http.StatusSeeOther)
+				if isHX {
+					w.WriteHeader(http.StatusNoContent)
+				} else {
+					http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(quizID, 10), http.StatusSeeOther)
+				}
 			case errors.Is(err, quiz.ErrQuestionNotFound):
 				render404(w, r, logger, csrfMgr)
 			default:
 				logger.ErrorContext(r.Context(), "error swapping question positions", slog.Any("err", err))
 				render500(w, r, logger, csrfMgr)
 			}
+
+			return
+		}
+
+		if isHX {
+			// Refetch with the new order and render only the question
+			// list. The whole-page render keeps happening on a hard
+			// refresh; this branch just spares the round-trip.
+			qz, fetchOK := quizByID(w, r, logger, csrfMgr, quizStore, quizID)
+			if !fetchOK {
+				return
+			}
+			quizData := quizDataFromQuiz(qz)
+			render.RenderPartial(w, r, "questions_list", partialData{
+				Quiz:              quizData,
+				LastQuestionIndex: len(quizData.Questions) - 1,
+			})
 
 			return
 		}
