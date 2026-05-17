@@ -89,19 +89,16 @@ smoke:
 # first use (which is gitignored via build/) and reused on subsequent runs.
 #
 # v4 dropped tailwind.config.js — configuration now lives in CSS via the
-# @theme directive in internal/client/static/css/tailwind-src.css. The
-# preflight reset is opted out by importing only the theme and utilities
-# sub-layers (Bulma is still loaded on un-reskinned pages and provides its
-# own reset).
+# @theme directive in internal/web/static-src/tailwind-src.css.
 #
-# The generated output (internal/client/static/css/admin.css) IS committed,
+# The generated output (internal/web/static/css/admin.css) IS committed,
 # so the binary only has to exist on machines that intend to regenerate it.
 # CI can call `make tailwind-check` to catch drift.
 
 TAILWIND_VERSION    := v4.3.0
 TAILWIND_BIN        := $(BIN_DIR)/tailwindcss-v4
-TAILWIND_INPUT      := internal/client/static/css/tailwind-src.css
-TAILWIND_OUTPUT     := internal/client/static/css/admin.css
+TAILWIND_INPUT      := internal/web/static-src/tailwind-src.css
+TAILWIND_OUTPUT     := internal/web/static/css/admin.css
 
 # Pick the right asset for the current host. The release page ships
 # Linux x64/arm64, macOS x64/arm64, and Windows x64 — which covers every
@@ -155,6 +152,12 @@ tailwind-check: $(TAILWIND_BIN)
 	    fi; \
 	    rm -f $$tmp; \
 	    echo "$(TAILWIND_OUTPUT) is up to date."
+
+# Run the Go server in development. Pair with `make tailwind-watch` in a
+# second terminal to regenerate admin.css on template edits.
+.PHONY: server
+server:
+	go run ./cmd/server/
 
 .PHONY: clean
 clean:

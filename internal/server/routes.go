@@ -14,6 +14,7 @@ import (
 	"github.com/starquake/topbanana/internal/health"
 	"github.com/starquake/topbanana/internal/session"
 	"github.com/starquake/topbanana/internal/store"
+	"github.com/starquake/topbanana/internal/web"
 )
 
 func addRoutes(
@@ -33,6 +34,9 @@ func addRoutes(
 	// Client
 	clientHandler := client.Handler(cfg)
 	mux.Handle("/client/", clientHandler)
+
+	// Admin + auth static assets (Tailwind output, embedded in the binary).
+	mux.Handle("/assets/", web.Handler(cfg))
 
 	// Per-quiz share URL. Serves the same SPA shell as /client/ but the
 	// frontend reads the slug-id off the path and pre-selects the quiz.

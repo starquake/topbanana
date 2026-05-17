@@ -20,8 +20,8 @@
 /* Limit Tailwind's class scanner to the admin + auth Go-HTML templates.
  * The player client (internal/client/static/*) does not use Tailwind, so
  * excluding it from the scan keeps the generated CSS lean. */
-@source "../../../web/tmpl/admin";
-@source "../../../web/tmpl/auth";
+@source "../tmpl/admin";
+@source "../tmpl/auth";
 
 @theme {
     /* Palette — same tokens as mockups/admin-redesign-tailwind/quiz-list.html. */
