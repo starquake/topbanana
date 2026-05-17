@@ -1590,21 +1590,22 @@ func TestQuestionEditSave_OptionIDsRoundTrip(t *testing.T) {
 	}
 }
 
-// scrapeFormFields extracts (name, value) pairs from <input> elements in body
-// the way a browser would when submitting the surrounding form: disabled
-// inputs are skipped, and unchecked checkboxes are excluded.
+// scrapeFormFields extracts (name, value) pairs from <input> and <textarea>
+// elements in body the way a browser would when submitting the surrounding
+// form: disabled fields are skipped, and unchecked checkboxes are excluded.
 //
 // Limitation: every <input type="submit"> is included. A real browser only
 // sends the submit button that was actually clicked, so callers must ensure
 // the rendered form has at most one submit input — otherwise the resulting
 // POST will include both and the handler may not behave like production.
 var (
-	inputElementRe = regexp.MustCompile(`<input\b([^>]*)>`)
-	inputNameRe    = regexp.MustCompile(`\bname="([^"]+)"`)
-	inputValueRe   = regexp.MustCompile(`\bvalue="([^"]*)"`)
-	inputTypeRe    = regexp.MustCompile(`\btype="([^"]+)"`)
-	disabledAttrRe = regexp.MustCompile(`\bdisabled\b`)
-	checkedAttrRe  = regexp.MustCompile(`\bchecked\b`)
+	inputElementRe    = regexp.MustCompile(`<input\b([^>]*)>`)
+	textareaElementRe = regexp.MustCompile(`(?s)<textarea\b([^>]*)>(.*?)</textarea>`)
+	inputNameRe       = regexp.MustCompile(`\bname="([^"]+)"`)
+	inputValueRe      = regexp.MustCompile(`\bvalue="([^"]*)"`)
+	inputTypeRe       = regexp.MustCompile(`\btype="([^"]+)"`)
+	disabledAttrRe    = regexp.MustCompile(`\bdisabled\b`)
+	checkedAttrRe     = regexp.MustCompile(`\bchecked\b`)
 )
 
 func scrapeFormFields(t *testing.T, body string) url.Values {
@@ -1636,6 +1637,19 @@ func scrapeFormFields(t *testing.T, body string) url.Values {
 		}
 
 		values.Add(name, value)
+	}
+
+	// Textareas — browsers submit their inner text as the field value.
+	for _, match := range textareaElementRe.FindAllStringSubmatch(body, -1) {
+		attrs := match[1]
+		if disabledAttrRe.MatchString(attrs) {
+			continue
+		}
+		nameMatch := inputNameRe.FindStringSubmatch(attrs)
+		if nameMatch == nil {
+			continue
+		}
+		values.Add(nameMatch[1], match[2])
 	}
 
 	return values

@@ -1,30 +1,47 @@
 {{define "content"}}
     {{/* Breadcrumb */}}
-    <nav aria-label="breadcrumbs" class="mb-8">
-        <ol class="flex items-center text-xs uppercase tracking-[0.14em]">
-            <li><a href="/admin" class="pr-2 text-text-dim hover:text-text">Admin</a></li>
-            <li class="text-text-mute" aria-hidden="true">/</li>
-            <li><a href="/admin/quizzes" class="px-2 text-text-dim hover:text-text">Quizzes</a></li>
-            <li class="text-text-mute" aria-hidden="true">/</li>
-            <li><span class="pl-2 text-text" aria-current="page">{{if .Quiz}}{{.Quiz.Title}}{{else}}Not found{{end}}</span></li>
-        </ol>
+    <nav aria-label="breadcrumbs" class="crumb">
+        <a href="/admin">Admin</a>
+        <span class="crumb-sep" aria-hidden="true">/</span>
+        <a href="/admin/quizzes">Quizzes</a>
+        <span class="crumb-sep" aria-hidden="true">/</span>
+        <span class="text-text" aria-current="page">{{if .Quiz}}{{.Quiz.Title}}{{else}}Not found{{end}}</span>
     </nav>
 
     {{if .Quiz}}
-        {{/* Header: quiz title + action buttons (edit/share/delete) */}}
-        <header class="flex flex-col md:flex-row md:items-start md:justify-between gap-5 mb-10">
-            <div>
-                <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight">#{{.Quiz.ID}} - {{.Quiz.Title}}</h1>
-                {{if .Quiz.Description}}
-                    <p class="mt-1.5 max-w-[640px] text-text-dim text-[0.95rem]">{{.Quiz.Description}}</p>
-                {{end}}
+        {{/* Quiz hero: visibility pill + eyebrow meta, big title with inline
+             edit affordance, description, share URL chip, action buttons. */}}
+        <header class="mb-10 pb-6 border-b border-border-soft">
+            <div class="mb-3 flex flex-wrap items-center gap-3">
+                {{/* Visibility is not yet modelled; show a default Public pill
+                     so the structure is in place for #103. */}}
+                <span class="pill pill-public">Public</span>
+                <span class="m-0 text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.18em]">Quiz #{{.Quiz.ID}}</span>
             </div>
-            <div class="flex items-center gap-2">
+
+            <h1 class="mb-3 flex items-center gap-3 font-display font-extrabold leading-[1.05] tracking-tight uppercase text-[clamp(1.85rem,5.5vw,2.5rem)]">
+                <span>{{.Quiz.Title}}</span>
                 <a href="/admin/quizzes/{{.Quiz.ID}}/edit"
-                   class="btn-ghost gap-2">
-                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>
-                    <span>Edit</span>
+                   title="Edit quiz" aria-label="Edit quiz"
+                   class="inline-flex text-text-mute hover:text-accent transition-colors">
+                    <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>
                 </a>
+            </h1>
+
+            {{if .Quiz.Description}}
+                <p class="mb-5 max-w-[58ch] text-text-dim">{{.Quiz.Description}}</p>
+            {{end}}
+
+            <div class="mb-4 flex items-center gap-2 max-w-max px-3 py-2 bg-surface border border-border-soft rounded-sm font-mono text-[0.78rem] text-text-dim">
+                <span>/play/{{.Quiz.Slug}}-{{.Quiz.ID}}</span>
+                <button type="button"
+                        data-copy-path="/play/{{.Quiz.Slug}}-{{.Quiz.ID}}"
+                        class="ml-2 bg-transparent border-0 cursor-pointer text-cyan font-sans text-[0.72rem] font-semibold uppercase tracking-[0.12em] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus rounded-sm">
+                    Copy link
+                </button>
+            </div>
+
+            <div class="flex flex-wrap gap-2">
                 <button type="button"
                         onclick="openModal('modal-share-quiz-{{.Quiz.ID}}')"
                         class="btn-ghost gap-2">
@@ -104,92 +121,80 @@
         </div>
 
         {{/* Questions section */}}
-        <section class="mb-10" aria-label="Questions">
-            <div class="flex items-center justify-between mb-4">
-                <h2 class="font-display text-xl font-semibold">Questions</h2>
-                <a href="/admin/quizzes/{{.Quiz.ID}}/questions/new"
-                   class="btn-primary gap-2">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5a.5.5 0 0 1 .5.5v5.5H14a.5.5 0 0 1 0 1H8.5V14a.5.5 0 0 1-1 0V8.5H2a.5.5 0 0 1 0-1h5.5V2a.5.5 0 0 1 .5-.5z"/></svg>
-                    <span>Add question</span>
-                </a>
+        <section aria-label="Questions">
+            <div class="section-head">
+                <h2>Questions</h2>
+                {{if .Quiz.Questions}}
+                    <span class="section-count">{{len .Quiz.Questions}} question{{if ne (len .Quiz.Questions) 1}}s{{end}}</span>
+                {{end}}
             </div>
 
             {{if .Quiz.Questions}}
-                <div class="overflow-x-auto rounded-lg border border-border-soft">
-                    <table class="w-full text-sm">
-                        <thead class="bg-surface-2 text-text-dim uppercase text-xs tracking-[0.12em]">
-                            <tr>
-                                <th class="px-4 py-3 text-left font-semibold w-28">Order</th>
-                                <th class="px-4 py-3 text-left font-semibold">Question</th>
-                                <th class="px-4 py-3 text-left font-semibold">Options</th>
-                                <th class="px-4 py-3 text-left font-semibold w-40">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {{range $i, $q := .Quiz.Questions}}
-                                <tr class="border-t border-border-soft bg-surface">
-                                    <td class="px-4 py-3 align-top">
-                                        <div class="flex items-center gap-1">
-                                            <form method="post"
-                                                  action="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/move/up"
-                                                  class="inline-flex">
-                                                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                                                <button type="submit"
-                                                        title="Move up"
-                                                        aria-label="Move up"
-                                                        class="icon-btn"
-                                                        {{if eq $i 0}}disabled{{end}}>
-                                                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M8 12a.5.5 0 0 0 .5-.5V5.707l2.146 2.147a.5.5 0 0 0 .708-.708l-3-3a.5.5 0 0 0-.708 0l-3 3a.5.5 0 1 0 .708.708L7.5 5.707V11.5a.5.5 0 0 0 .5.5z"/></svg>
-                                                </button>
-                                            </form>
-                                            <form method="post"
-                                                  action="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/move/down"
-                                                  class="inline-flex">
-                                                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                                                <button type="submit"
-                                                        title="Move down"
-                                                        aria-label="Move down"
-                                                        class="icon-btn"
-                                                        {{if eq $i $.LastQuestionIndex}}disabled{{end}}>
-                                                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M8 4a.5.5 0 0 1 .5.5v5.793l2.146-2.147a.5.5 0 0 1 .708.708l-3 3a.5.5 0 0 1-.708 0l-3-3a.5.5 0 1 1 .708-.708L7.5 10.293V4.5A.5.5 0 0 1 8 4z"/></svg>
-                                                </button>
-                                            </form>
-                                        </div>
-                                    </td>
-                                    <td class="px-4 py-3 align-top">{{$q.Text}}</td>
-                                    <td class="px-4 py-3 align-top">
-                                        <ul class="space-y-1">
-                                            {{range $q.Options}}
-                                                <li class="flex items-center gap-2">
-                                                    <span>{{.Text}}</span>
-                                                    {{if .Correct}}
-                                                        <span class="inline-flex items-center text-success" aria-label="Correct">
-                                                            <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/></svg>
-                                                        </span>
-                                                    {{end}}
-                                                </li>
+                <div class="flex flex-col gap-3">
+                    {{range $i, $q := .Quiz.Questions}}
+                        <article class="q-row">
+                            <div class="q-position">{{printf "%02d" $q.Position}}</div>
+                            <div class="q-thumb">
+                                {{if $q.ImageURL}}
+                                    <img src="{{$q.ImageURL}}" alt="" class="w-full h-full object-cover">
+                                {{else}}
+                                    IMG
+                                {{end}}
+                            </div>
+                            <div class="q-body">
+                                <p class="q-text">{{$q.Text}}</p>
+                                <ul class="q-options">
+                                    {{range $q.Options}}
+                                        <li{{if .Correct}} class="correct"{{end}}>
+                                            <span>{{.Text}}</span>
+                                            {{if .Correct}}
+                                                <span class="sr-only" aria-label="Correct">Correct</span>
                                             {{end}}
-                                        </ul>
-                                    </td>
-                                    <td class="px-4 py-3 align-top">
-                                        <div class="flex items-center gap-1">
-                                            <a href="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/edit"
-                                               aria-label="Edit question" title="Edit question"
-                                               class="icon-btn">
-                                                <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>
-                                            </a>
-                                            <button type="button"
-                                                    onclick="openModal('modal-delete-question-{{$q.ID}}')"
-                                                    aria-label="Delete question" title="Delete question"
-                                                    class="w-9 h-9 inline-flex items-center justify-center rounded-sm bg-transparent border-0 text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:shadow-focus transition-colors cursor-pointer">
-                                                <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5zM11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1H11z"/></svg>
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            {{end}}
-                        </tbody>
-                    </table>
+                                        </li>
+                                    {{end}}
+                                </ul>
+                            </div>
+                            <div class="q-actions">
+                                <form method="post"
+                                      action="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/move/up"
+                                      class="inline-flex">
+                                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                                    <button type="submit"
+                                            title="Move up"
+                                            aria-label="Move up"
+                                            class="icon-btn"
+                                            {{if eq $i 0}}disabled{{end}}>
+                                        <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M8 12a.5.5 0 0 0 .5-.5V5.707l2.146 2.147a.5.5 0 0 0 .708-.708l-3-3a.5.5 0 0 0-.708 0l-3 3a.5.5 0 1 0 .708.708L7.5 5.707V11.5a.5.5 0 0 0 .5.5z"/></svg>
+                                    </button>
+                                </form>
+                                <form method="post"
+                                      action="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/move/down"
+                                      class="inline-flex">
+                                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                                    <button type="submit"
+                                            title="Move down"
+                                            aria-label="Move down"
+                                            class="icon-btn"
+                                            {{if eq $i $.LastQuestionIndex}}disabled{{end}}>
+                                        <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M8 4a.5.5 0 0 1 .5.5v5.793l2.146-2.147a.5.5 0 0 1 .708.708l-3 3a.5.5 0 0 1-.708 0l-3-3a.5.5 0 1 1 .708-.708L7.5 10.293V4.5A.5.5 0 0 1 8 4z"/></svg>
+                                    </button>
+                                </form>
+                            </div>
+                            <div class="q-actions">
+                                <a href="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/edit"
+                                   aria-label="Edit question" title="Edit question"
+                                   class="icon-btn">
+                                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>
+                                </a>
+                                <button type="button"
+                                        onclick="openModal('modal-delete-question-{{$q.ID}}')"
+                                        aria-label="Delete question" title="Delete question"
+                                        class="w-9 h-9 inline-flex items-center justify-center rounded-sm bg-transparent border-0 text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:shadow-focus transition-colors cursor-pointer">
+                                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5zM11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1H11z"/></svg>
+                                </button>
+                            </div>
+                        </article>
+                    {{end}}
                 </div>
 
                 {{/* Delete-question modals */}}
@@ -223,38 +228,38 @@
                     This quiz has no questions yet.
                 </div>
             {{end}}
+
+            <div class="mt-6">
+                <a href="/admin/quizzes/{{.Quiz.ID}}/questions/new"
+                   class="btn-primary gap-2">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5a.5.5 0 0 1 .5.5v5.5H14a.5.5 0 0 1 0 1H8.5V14a.5.5 0 0 1-1 0V8.5H2a.5.5 0 0 1 0-1h5.5V2a.5.5 0 0 1 .5-.5z"/></svg>
+                    <span>Add question</span>
+                </a>
+            </div>
         </section>
 
         {{/* Players section */}}
         <section aria-label="Played by">
-            <h2 class="font-display text-xl font-semibold mb-4">Played by</h2>
+            <div class="section-head">
+                <h2>Played by</h2>
+                {{if .Players}}
+                    <span class="section-count">{{len .Players}} player{{if ne (len .Players) 1}}s{{end}}</span>
+                {{end}}
+            </div>
             {{if .Players}}
-                <div class="overflow-x-auto rounded-lg border border-border-soft">
-                    <table class="w-full text-sm">
-                        <thead class="bg-surface-2 text-text-dim uppercase text-xs tracking-[0.12em]">
-                            <tr>
-                                <th class="px-4 py-3 text-left font-semibold">Player</th>
-                                <th class="px-4 py-3 text-left font-semibold">Score</th>
-                                <th class="px-4 py-3 text-left font-semibold w-40">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {{range .Players}}
-                                <tr class="border-t border-border-soft bg-surface">
-                                    <td class="px-4 py-3 align-top">{{.Username}}</td>
-                                    <td class="px-4 py-3 align-top tabular-nums">{{.Score}}</td>
-                                    <td class="px-4 py-3 align-top">
-                                        <button type="button"
-                                                onclick="openModal('modal-reset-player-{{.PlayerID}}')"
-                                                class="inline-flex items-center gap-2 px-3 py-2 rounded-sm bg-transparent border border-warning/40 text-warning font-semibold text-xs uppercase tracking-[0.12em] hover:bg-warning/10 hover:border-warning focus-visible:outline-none focus-visible:shadow-focus cursor-pointer transition-colors">
-                                            <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/><path d="M8 4.466V.534a.25.25 0 0 0-.41-.192L5.23 2.308a.25.25 0 0 0 0 .384l2.36 1.966A.25.25 0 0 0 8 4.466z"/></svg>
-                                            <span>Reset</span>
-                                        </button>
-                                    </td>
-                                </tr>
-                            {{end}}
-                        </tbody>
-                    </table>
+                <div class="player-list">
+                    {{range .Players}}
+                        <div class="player-row">
+                            <div class="player-name">{{.Username}}</div>
+                            <div class="player-score tabular-nums">{{.Score}}</div>
+                            <button type="button"
+                                    onclick="openModal('modal-reset-player-{{.PlayerID}}')"
+                                    class="player-reset"
+                                    aria-label="Reset {{.Username}}">
+                                Reset
+                            </button>
+                        </div>
+                    {{end}}
                 </div>
 
                 {{range .Players}}
@@ -297,6 +302,24 @@
     {{end}}
 
     <script>
+        // Inline copy-link pills (next to the share URL chip). On click,
+        // write the full URL to the clipboard and briefly swap the
+        // label to give the user a confirmation. Falls back to a manual
+        // prompt if clipboard access is denied (e.g. non-secure context).
+        document.querySelectorAll('[data-copy-path]').forEach(function (btn) {
+            btn.addEventListener('click', async function () {
+                const url = window.location.origin + btn.dataset.copyPath;
+                const original = btn.textContent;
+                try {
+                    await navigator.clipboard.writeText(url);
+                    btn.textContent = 'Copied!';
+                } catch (err) {
+                    btn.textContent = 'Press ⌘C';
+                }
+                setTimeout(function () { btn.textContent = original; }, 1500);
+            });
+        });
+
         // Wire share-modal buttons. The share modal body carries the
         // path and title in data-* attributes; the absolute URL is
         // derived at click time from window.location.origin so the

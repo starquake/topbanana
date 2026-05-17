@@ -119,7 +119,198 @@
                placeholder:text-text-mute
                focus-visible:outline-none focus-visible:shadow-focus focus-visible:border-accent;
     }
+    .form-input-readonly {
+        @apply bg-surface-2 text-text-dim border-dashed cursor-not-allowed;
+    }
     .form-label {
         @apply block mb-1.5 text-sm font-medium text-text;
+    }
+
+    /* Microtype label used as field/section eyebrow. Appears on every form
+     * field (question form + quiz form + auth forms) so it earns its keep. */
+    .label-eyebrow {
+        @apply block mb-2 text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.16em];
+    }
+    .label-hint {
+        @apply ml-2 text-text-mute text-[0.78rem] font-normal normal-case tracking-normal;
+    }
+
+    /* Breadcrumb trail — admin + auth share this exact pattern. The
+     * separator `.crumb-sep` mirrors the mockup's `.crumb .sep`. */
+    .crumb {
+        @apply mb-5 flex items-center gap-1.5 text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.16em];
+    }
+    .crumb a {
+        @apply text-text-dim hover:text-text;
+    }
+    .crumb-sep {
+        @apply text-text-mute;
+    }
+
+    /* Section header — h2 plus optional right-aligned count, separator
+     * rule across the bottom. Used by the quiz view's Questions and
+     * Played-by sections. */
+    .section-head {
+        @apply mt-10 mb-4 pb-3 flex items-baseline justify-between gap-4 border-b border-border-soft;
+    }
+    .section-head h2 {
+        @apply m-0 text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.18em];
+    }
+    .section-count {
+        @apply text-text-mute text-[0.8rem] font-medium tabular-nums;
+    }
+
+    /* Visibility pill (Public / Unlisted / Private). The default ::before
+     * dot is text-mute; sub-classes recolour it without re-declaring the
+     * box. */
+    .pill {
+        @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full
+               bg-surface border border-border text-text-dim
+               text-[0.68rem] font-semibold uppercase tracking-[0.14em]
+               before:content-[''] before:w-1.5 before:h-1.5 before:rounded-full before:bg-text-mute;
+    }
+    .pill-public {
+        @apply before:bg-cyan;
+    }
+    .pill-unlisted {
+        @apply before:bg-warning;
+    }
+    .pill-private {
+        @apply before:bg-text-mute;
+    }
+
+    /* Question rows. Two-up grid on mobile (position+thumb stacked), full
+     * five-column grid from md upward. The mockup's grid is auto/80/1fr/auto/auto;
+     * we hard-pin the position column at 48px and the thumb at 80px to match. */
+    .q-row {
+        @apply bg-surface border border-border-soft rounded-lg p-5
+               grid gap-4 items-start
+               grid-cols-[auto_1fr]
+               md:grid-cols-[48px_80px_1fr_auto_auto] md:items-center md:py-4 md:px-5;
+    }
+    .q-position {
+        @apply font-display font-extrabold text-[1.75rem] leading-none tracking-wide
+               text-accent tabular-nums opacity-90
+               md:w-12 md:text-center md:text-[2rem];
+    }
+    .q-thumb {
+        @apply flex items-center justify-center shrink-0
+               w-12 h-12 rounded-sm bg-surface-2 border border-border-soft
+               text-text-mute text-[0.65rem] font-semibold uppercase tracking-[0.14em]
+               md:w-16 md:h-16
+               overflow-hidden;
+    }
+    .q-body {
+        @apply col-span-2 md:col-auto flex flex-col gap-2 min-w-0;
+    }
+    .q-text {
+        @apply m-0 text-text text-base leading-snug;
+    }
+    .q-options {
+        @apply list-none m-0 p-0 grid gap-1 text-text-dim text-[0.85rem];
+    }
+    .q-options li {
+        @apply flex items-center gap-2
+               before:content-[''] before:w-3.5 before:h-3.5 before:rounded-full
+               before:border before:border-border before:bg-surface-2 before:shrink-0;
+    }
+    .q-options li.correct {
+        @apply text-cyan
+               before:bg-cyan before:border-cyan before:shadow-[inset_0_0_0_3px_var(--color-surface)];
+    }
+    /* The trailing action clusters wrap below the body on mobile, slot
+     * into columns 4 and 5 on desktop. */
+    .q-actions {
+        @apply col-span-2 flex justify-end gap-1 w-full
+               pt-3 mt-1 border-t border-dashed border-border-soft
+               md:col-auto md:w-auto md:p-0 md:m-0 md:border-0;
+    }
+
+    /* Players list — striped, edge-to-edge, rounded outer container. */
+    .player-list {
+        @apply flex flex-col border border-border-soft rounded-lg overflow-hidden;
+    }
+    .player-row {
+        @apply grid grid-cols-[1fr_auto_auto] gap-4 items-center px-5 py-3.5
+               border-b border-border-soft bg-surface
+               last:border-b-0 even:bg-surface-2;
+    }
+    .player-name {
+        @apply text-text text-[0.95rem] font-medium truncate;
+    }
+    .player-name .username-meta {
+        @apply ml-2 text-text-dim text-[0.75rem] font-normal;
+    }
+    .player-score {
+        @apply tabular-nums text-text text-base font-semibold min-w-[4ch] text-right;
+    }
+    .player-reset {
+        @apply bg-transparent border-0 px-2 py-2 cursor-pointer
+               text-text-mute text-[0.7rem] font-semibold uppercase tracking-[0.14em]
+               transition-colors hover:text-warning
+               focus-visible:outline-none focus-visible:shadow-focus;
+    }
+
+    /* Form shell — narrow centred column used by question-form, quiz-form,
+     * and the auth pages. */
+    .form-shell {
+        @apply max-w-[640px] mx-auto;
+    }
+    .form-field {
+        @apply mb-7;
+    }
+    .form-actions {
+        @apply flex flex-wrap items-center gap-3 mt-10 pt-6 border-t border-border-soft;
+    }
+
+    /* Option editor row used inside the question form. Grid: letter, input,
+     * correct pill. Pills below recolour to cyan when the sibling input is
+     * checked. */
+    .option-row {
+        @apply grid grid-cols-[auto_1fr_auto] gap-3 items-center
+               py-3 border-b border-border-soft last:border-b-0;
+    }
+    .option-letter {
+        @apply font-display font-bold text-[1.05rem] leading-none
+               text-accent opacity-75 w-6 text-center tracking-wide;
+    }
+    .option-check {
+        @apply relative inline-flex items-center cursor-pointer select-none;
+    }
+    .option-check input {
+        @apply absolute opacity-0 pointer-events-none;
+    }
+    .option-check-pill {
+        @apply inline-flex items-center gap-1.5 px-3 py-2 min-h-[32px]
+               border border-border rounded-full bg-surface text-text-dim
+               text-[0.7rem] font-semibold uppercase tracking-[0.14em]
+               transition-colors
+               before:content-[''] before:w-2 before:h-2 before:rounded-full
+               before:border before:border-current before:transition-colors;
+    }
+    .option-check input:checked ~ .option-check-pill {
+        @apply bg-cyan-soft border-cyan text-cyan before:bg-cyan before:border-cyan;
+    }
+    .option-check input:focus-visible ~ .option-check-pill {
+        @apply shadow-[0_0_0_3px_var(--color-cyan-soft)];
+    }
+
+    /* Dropzone — image upload placeholder on the question form. */
+    .dropzone {
+        @apply border-2 border-dashed border-border rounded-lg
+               px-6 py-10 text-center text-text-dim
+               bg-surface/40 transition-colors hover:border-accent;
+    }
+    .dropzone-icon {
+        @apply mx-auto mb-3 w-11 h-11 rounded-full bg-surface border border-border
+               flex items-center justify-center text-text-dim;
+    }
+    .dropzone-strong {
+        @apply block mb-1 text-text font-medium;
+    }
+
+    /* Auth + admin error shared layout: centred card on dark backdrop. */
+    .auth-shell {
+        @apply max-w-md mx-auto;
     }
 }

@@ -1,49 +1,66 @@
 {{define "content"}}
     {{/* Breadcrumb */}}
-    <nav aria-label="breadcrumbs" class="mb-8">
-        <ol class="flex items-center text-xs uppercase tracking-[0.14em]">
-            <li><a href="/admin" class="pr-2 text-text-dim hover:text-text">Admin</a></li>
-            <li class="text-text-mute" aria-hidden="true">/</li>
-            <li><a href="/admin/quizzes" class="px-2 text-text-dim hover:text-text">Quizzes</a></li>
-            <li class="text-text-mute" aria-hidden="true">/</li>
-            <li><span class="pl-2 text-text" aria-current="page">{{if .Quiz.ID}}Edit{{else}}New{{end}}</span></li>
-        </ol>
+    <nav aria-label="breadcrumbs" class="crumb">
+        <a href="/admin">Admin</a>
+        <span class="crumb-sep" aria-hidden="true">/</span>
+        <a href="/admin/quizzes">Quizzes</a>
+        <span class="crumb-sep" aria-hidden="true">/</span>
+        <span class="text-text" aria-current="page">{{if .Quiz.ID}}Edit &ldquo;{{.Quiz.Title}}&rdquo;{{else}}New quiz{{end}}</span>
     </nav>
 
-    <div class="max-w-2xl">
-        <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight mb-6">{{.Title}}</h1>
-
-        <form
+    <header class="flex flex-col md:flex-row md:items-end md:justify-between gap-6 mb-10 pb-6 border-b border-border-soft">
+        <div>
+            <h1 class="m-0 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(2rem,6vw,2.75rem)]">{{.Title}}</h1>
+            <p class="mt-2 max-w-[50ch] text-text-dim text-[0.95rem]">
                 {{if .Quiz.ID}}
-                    action="/admin/quizzes/{{.Quiz.ID}}"
+                    Update the quiz title and description. The slug is derived from the title and is stable for the life of the quiz.
                 {{else}}
-                    action="/admin/quizzes"
+                    Give your quiz a title and short description. You'll add questions on the next screen.
                 {{end}}
-                method="POST">
-            <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+            </p>
+        </div>
+    </header>
 
-            <div class="mb-5">
-                <label for="title" class="form-label">Title</label>
-                <input id="title" name="title" type="text" value="{{.Quiz.Title}}" class="form-input">
-            </div>
-
+    <form class="form-shell"
             {{if .Quiz.ID}}
-                <div class="mb-5">
-                    <label for="slug" class="form-label">Slug</label>
-                    <input id="slug" type="text" readonly value="{{.Quiz.Slug}}"
-                           class="form-input bg-surface-2 text-text-dim cursor-not-allowed">
-                </div>
+                action="/admin/quizzes/{{.Quiz.ID}}"
+            {{else}}
+                action="/admin/quizzes"
             {{end}}
+            method="POST">
+        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
 
-            <div class="mb-5">
-                <label for="description" class="form-label">Description</label>
-                <input id="description" name="description" type="text" value="{{.Quiz.Description}}" class="form-input">
-            </div>
+        <div class="form-field">
+            <label class="label-eyebrow" for="title">Title</label>
+            <input id="title" name="title" type="text" value="{{.Quiz.Title}}"
+                   placeholder="Capital Cities of Europe"
+                   class="form-input">
+        </div>
 
-            <div class="flex items-center gap-4 mt-8">
-                <button type="submit" name="action" value="Save" class="btn-primary">Save</button>
-                <a href="/admin/quizzes" class="text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">Cancel</a>
+        {{if .Quiz.ID}}
+            <div class="form-field">
+                <label class="label-eyebrow" for="slug">
+                    Slug
+                    <span class="label-hint">Locked once the quiz exists</span>
+                </label>
+                <input id="slug" type="text" readonly value="{{.Quiz.Slug}}"
+                       class="form-input form-input-readonly font-mono text-[0.85rem]">
             </div>
-        </form>
-    </div>
+        {{end}}
+
+        <div class="form-field">
+            <label class="label-eyebrow" for="description">
+                Description
+                <span class="label-hint">A short summary players see when picking a quiz</span>
+            </label>
+            <textarea id="description" name="description" rows="3"
+                      placeholder="A geography refresher. Twelve quick-fire questions covering EU capitals."
+                      class="form-input min-h-[100px] resize-y">{{.Quiz.Description}}</textarea>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" name="action" value="Save" class="btn-primary">Save quiz</button>
+            <a href="{{if .Quiz.ID}}/admin/quizzes/{{.Quiz.ID}}{{else}}/admin/quizzes{{end}}" class="btn-ghost">Cancel</a>
+        </div>
+    </form>
 {{end}}

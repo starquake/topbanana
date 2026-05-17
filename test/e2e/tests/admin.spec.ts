@@ -11,13 +11,12 @@ test('register, create a quiz with varied questions, and see them on the quiz vi
   await registerAdmin(page, username);
   await createQuizWithQuestions(page, quizTitle);
 
-  // After the last addQuestion the quiz view is loaded. For each question,
-  // assert its row exists and contains the expected number of "correct" icons.
-  // The "Correct" marker is a span with aria-label="Correct" wrapping an
-  // inline SVG — switched from the old Bulma `.has-text-success` class
-  // selector to a role-based locator so the test survives further reskins.
+  // After the last addQuestion the quiz view is loaded. The redesign
+  // replaced the old questions <table> with a card-style article grid;
+  // each question lives inside an <article class="q-row">. Correct
+  // options are marked with aria-label="Correct" on a hidden span.
   for (const [index, q] of QUIZ_QUESTIONS.entries()) {
-    const row = page.locator('table tbody tr').nth(index);
+    const row = page.locator('article.q-row').nth(index);
     await expect(row).toContainText(q.text);
     await expect(row.getByLabel('Correct')).toHaveCount(q.correctIndices.length);
   }

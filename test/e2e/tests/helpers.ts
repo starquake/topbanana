@@ -63,7 +63,9 @@ export async function createQuizWithQuestions(
   // /admin/quizzes/{id}, where each question is added in turn.
   await page.goto('/admin/quizzes/new');
   await page.locator('input[name=title]').fill(title);
-  await page.locator('input[name=description]').fill('E2E generated quiz');
+  // The description is rendered as a <textarea> on the redesigned form,
+  // not an <input>. The :is() selector keeps the helper resilient to either.
+  await page.locator(':is(input, textarea)[name=description]').fill('E2E generated quiz');
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
@@ -71,7 +73,8 @@ export async function createQuizWithQuestions(
     await page.getByRole('link', { name: /add question/i }).click();
     await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/new$/);
 
-    await page.locator('input[name=text]').fill(q.text);
+    // Question text became a <textarea> in the redesign.
+    await page.locator(':is(input, textarea)[name=text]').fill(q.text);
     // Position is auto-assigned by the server now (#16) — no input field
     // on the question form. The index variable is kept on the for-of
     // signature so future helpers can use it without re-binding.
@@ -82,13 +85,16 @@ export async function createQuizWithQuestions(
     for (let i = 0; i < q.options.length; i++) {
       await page.locator(`input[name="option[${i}].text"]`).fill(q.options[i]);
       if (q.correctIndices.includes(i)) {
-        // scrollIntoViewIfNeeded gives Firefox a frame to settle before the
-        // click — without it CI occasionally surfaces "Clicking the checkbox
-        // did not change its state" when the form's still styling under
-        // CDN-loaded Bulma CSS.
-        const checkbox = page.locator(`input[name="option[${i}].correct"]`);
-        await checkbox.scrollIntoViewIfNeeded();
-        await checkbox.check();
+        // The redesigned form hides the real checkbox (opacity: 0,
+        // pointer-events: none) and exposes a styled <label class="option-check">
+        // pill instead. Click the label to mirror what a real user does —
+        // the browser propagates the click to the wrapped input. Drives
+        // the actual user-facing affordance instead of force-clicking the
+        // hidden control, so a regression in the label/input wiring would
+        // surface here.
+        const label = page.locator('label.option-check').nth(i);
+        await label.scrollIntoViewIfNeeded();
+        await label.click();
       }
     }
     await page.getByRole('button', { name: 'Save' }).click();
