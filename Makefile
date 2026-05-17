@@ -9,17 +9,32 @@ BUILD_DIR := build
 BIN_DIR := $(BUILD_DIR)/bin
 COV_DIR := $(BUILD_DIR)/coverage
 
+# Host detection. Used by both the Tailwind and golangci-lint download
+# targets to pick the right release asset. Defined here once instead of
+# inside each tool section so future binary pins can reuse the values.
+UNAME_S := $(shell uname -s)
+UNAME_M := $(shell uname -m)
+
+# golangci-lint version + binary path. Defined up here (not next to the
+# download rule lower down) because Make expands prerequisites at parse
+# time: if `lint: $(GOLANGCI_BIN)` runs before this variable is defined,
+# the prereq evaluates to empty and the download never fires. The
+# version MUST match `with: version:` in .github/workflows/golangci-lint.yml
+# — bump both together; dependabot does not track this field.
+GOLANGCI_VERSION := v2.12.2
+GOLANGCI_BIN     := $(BIN_DIR)/golangci-lint
+
 # Developer check before committing
 .PHONY: check
 check: lint sql-lint tailwind-check build test-coverage
 
 .PHONY: lint
-lint:
-	golangci-lint run
+lint: $(GOLANGCI_BIN)
+	$(GOLANGCI_BIN) run
 
 .PHONY: lint-fix
-lint-fix:
-	golangci-lint run --fix
+lint-fix: $(GOLANGCI_BIN)
+	$(GOLANGCI_BIN) run --fix
 
 .PHONY: sql-lint
 sql-lint:
@@ -106,9 +121,7 @@ TAILWIND_OUTPUT     := internal/web/static/css/admin.css
 # Pick the right asset for the current host. The release page ships
 # Linux x64/arm64, macOS x64/arm64, and Windows x64 — which covers every
 # machine we care about. Other hosts fall through to the Linux x64 binary
-# (works under WSL).
-UNAME_S := $(shell uname -s)
-UNAME_M := $(shell uname -m)
+# (works under WSL). UNAME_S / UNAME_M live at the top of the file.
 ifeq ($(UNAME_S),Linux)
     ifeq ($(UNAME_M),aarch64)
         TAILWIND_ASSET := tailwindcss-linux-arm64
@@ -158,6 +171,49 @@ tailwind-check: $(TAILWIND_BIN)
 	    fi; \
 	    rm -f $$tmp; \
 	    echo "$(TAILWIND_OUTPUT) is up to date."
+
+# --- golangci-lint -----------------------------------------------------------
+#
+# GOLANGCI_VERSION / GOLANGCI_BIN are defined at the top of the file so
+# the `lint` and `lint-fix` targets can use them as prerequisites; the
+# rest of the wiring (host asset selection + download rule) lives here.
+#
+# Same vendoring pattern as Tailwind: download once into $(BIN_DIR)
+# (gitignored via build/), reuse on every subsequent run.
+
+# The release tarball strips the leading `v` from the version in both the
+# directory name and the asset filename — keep a stripped copy for the URL.
+GOLANGCI_VER_NUM := $(GOLANGCI_VERSION:v%=%)
+
+ifeq ($(UNAME_S),Linux)
+    ifeq ($(UNAME_M),aarch64)
+        GOLANGCI_ASSET := linux-arm64
+    else
+        GOLANGCI_ASSET := linux-amd64
+    endif
+else ifeq ($(UNAME_S),Darwin)
+    ifeq ($(UNAME_M),arm64)
+        GOLANGCI_ASSET := darwin-arm64
+    else
+        GOLANGCI_ASSET := darwin-amd64
+    endif
+else
+    GOLANGCI_ASSET := linux-amd64
+endif
+
+GOLANGCI_DIR     := golangci-lint-$(GOLANGCI_VER_NUM)-$(GOLANGCI_ASSET)
+GOLANGCI_TARBALL := $(GOLANGCI_DIR).tar.gz
+
+$(GOLANGCI_BIN):
+	@mkdir -p $(BIN_DIR)
+	@echo "Downloading golangci-lint $(GOLANGCI_VERSION) ($(GOLANGCI_ASSET))..."
+	@tmp=$$(mktemp -d) && \
+	    curl -sSfL -o $$tmp/golangci.tar.gz \
+	        https://github.com/golangci/golangci-lint/releases/download/$(GOLANGCI_VERSION)/$(GOLANGCI_TARBALL) && \
+	    tar -xzf $$tmp/golangci.tar.gz -C $$tmp && \
+	    mv $$tmp/$(GOLANGCI_DIR)/golangci-lint $@ && \
+	    rm -rf $$tmp
+	@chmod +x $@
 
 # Run the Go server in development. Pair with `make tailwind-watch` in a
 # second terminal to regenerate admin.css on template edits.
