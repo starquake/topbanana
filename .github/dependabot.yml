@@ -5,6 +5,16 @@ updates:
     schedule:
       interval: "weekly"
 
+  # Tracking-only module for tools we install via release binaries (see
+  # GOLANGCI_VERSION in the Makefile). The main module does not import
+  # these — the entry exists so dependabot opens a PR when a tool tags a
+  # new release. Mirror the bump into the Makefile + the matching
+  # workflow `with: version:` by hand when a PR lands here.
+  - package-ecosystem: "gomod"
+    directory: "/tools"
+    schedule:
+      interval: "weekly"
+
   # Action versions pinned in .github/workflows/*.yml. Without this entry the
   # pins drift silently — actions/checkout, actions/setup-go, etc. age out
   # without a bump until something breaks.
