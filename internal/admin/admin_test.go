@@ -326,11 +326,11 @@ func TestHandleQuizList(t *testing.T) {
 		// (only generated when a class uses it) so its presence proves the
 		// reskinned navbar rendered.
 		if got, want := body, `class="max-w-shell`; !strings.Contains(got, want) {
-			t.Errorf("body should contain Tailwind shell class %q, got: %q", want, got)
+			t.Errorf("body got %q, should contain Tailwind shell class %q", got, want)
 		}
 		// And pin the dark-theme body class flipped on in base.gohtml.
 		if got, want := body, `class="bg-bg`; !strings.Contains(got, want) {
-			t.Errorf("body should contain Tailwind dark-bg class %q, got: %q", want, got)
+			t.Errorf("body got %q, should contain Tailwind dark-bg class %q", got, want)
 		}
 	})
 
@@ -367,10 +367,10 @@ func TestHandleQuizList(t *testing.T) {
 		// substring is bracketed by ">{count}</strong>" so we don't
 		// accidentally match unrelated digits elsewhere on the page.
 		if got, want := body, `>5</strong>`; !strings.Contains(got, want) {
-			t.Errorf("body should contain question-count strong %q, got %q", want, got)
+			t.Errorf("body got %q, should contain question-count strong %q", got, want)
 		}
 		if got, want := body, `>0</strong>`; !strings.Contains(got, want) {
-			t.Errorf("body should contain zero-count strong %q (missing key → 0), got %q", want, got)
+			t.Errorf("body got %q, should contain zero-count strong %q (missing key → 0)", got, want)
 		}
 	})
 
@@ -429,7 +429,7 @@ func TestHandleQuizList(t *testing.T) {
 		// Pin the dashed-border empty-state container — its border-dashed
 		// utility is unique to the Tailwind reskin.
 		if got, want := body, `border-dashed`; !strings.Contains(got, want) {
-			t.Errorf("body should contain Tailwind empty-state class %q, got: %q", want, got)
+			t.Errorf("body got %q, should contain Tailwind empty-state class %q", got, want)
 		}
 	})
 }

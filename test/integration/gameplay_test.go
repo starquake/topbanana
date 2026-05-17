@@ -6,25 +6,17 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"testing"
-	"time"
 
-	_ "modernc.org/sqlite"
-
-	"github.com/starquake/topbanana/cmd/server/app"
-	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
-	"github.com/starquake/topbanana/internal/testutil"
 )
 
 // httpGet issues a GET with a request-scoped context so the noctx linter is
@@ -178,60 +170,23 @@ func registerAdminAndResetPlayer(
 // needs. Context is intentionally returned separately from the struct (passed
 // out of setupIntegration as the first return value) to avoid containedctx.
 type integrationSetup struct {
-	Stop    context.CancelFunc
-	ErrCh   chan error
 	BaseURL string
 	Stores  *store.Stores
 }
 
+// setupIntegration is a gameplay-flavoured wrapper around startServer that
+// opens a *sql.DB against the same dbURI and exposes a store.Stores for
+// direct seeding. REGISTRATION_ENABLED is on so the admin-reset portion of
+// the test can register the first user (who becomes the admin) and POST to
+// /admin/quizzes/.../reset.
 func setupIntegration(t *testing.T) (context.Context, integrationSetup) {
 	t.Helper()
 
-	var err error
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+	})
 
-	ctx, stop := testutil.SignalCtx(t)
-
-	stdout := testutil.NewTestWriter(t)
-
-	dbURI, cleanup := dbtest.SetupTestDB(t)
-	t.Cleanup(cleanup)
-
-	getenv := func(key string) string {
-		env := map[string]string{
-			"HOST": "localhost",
-			"PORT": "0", // Let the OS choose an available port
-			// REGISTRATION_ENABLED=true so the admin-reset portion of the
-			// gameplay test can register the first user (which becomes the
-			// admin) and POST to /admin/quizzes/.../reset. The first
-			// registered user is the admin per the existing auth flow.
-			"REGISTRATION_ENABLED": "true",
-			"DB_URI":               dbURI,
-		}
-
-		return env[key]
-	}
-
-	listenConfig := &net.ListenConfig{}
-	var ln net.Listener
-	ln, err = listenConfig.Listen(ctx, "tcp", net.JoinHostPort(getenv("HOST"), getenv("PORT")))
-	if err != nil {
-		t.Fatalf("failed to listen: %v", err)
-	}
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- app.Run(ctx, getenv, stdout, ln)
-	}()
-
-	serverAddr := ln.Addr().String()
-	baseURL := "http://" + serverAddr
-	err = testutil.WaitForReady(ctx, t, 10*time.Second, baseURL+"/healthz")
-	if err != nil {
-		t.Fatalf("error waiting for server to be ready: %v", err)
-	}
-
-	// Setup seed data for the integration test
-	db, err := sql.Open("sqlite", dbURI)
+	db, err := sql.Open("sqlite", srv.DBURI)
 	if err != nil {
 		t.Fatalf("failed to open db: %v", err)
 	}
@@ -241,13 +196,9 @@ func setupIntegration(t *testing.T) (context.Context, integrationSetup) {
 		}
 	})
 
-	stores := store.New(db, slog.Default())
-
 	return ctx, integrationSetup{
-		Stop:    stop,
-		ErrCh:   errCh,
-		BaseURL: baseURL,
-		Stores:  stores,
+		BaseURL: srv.BaseURL,
+		Stores:  store.New(db, slog.Default()),
 	}
 }
 
@@ -262,8 +213,6 @@ func TestGameplay_Integration(t *testing.T) {
 	t.Parallel()
 
 	ctx, setup := setupIntegration(t)
-	stop := setup.Stop
-	errCh := setup.ErrCh
 	baseURL := setup.BaseURL
 	stores := setup.Stores
 
@@ -1053,16 +1002,4 @@ func TestGameplay_Integration(t *testing.T) {
 			t.Errorf("quizzes after delete len = %d, want %d", got, want)
 		}
 	})
-
-	// Shutdown server
-	stop()
-	select {
-	case err := <-errCh:
-		// Ignore context.Canceled because we triggered it ourselves via stop()
-		if err != nil && !errors.Is(err, context.Background().Err()) && !errors.Is(err, context.Canceled) {
-			t.Errorf("run() returned error: %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Error("server failed to shutdown in time")
-	}
 }

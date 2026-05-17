@@ -11,7 +11,7 @@ COV_DIR := $(BUILD_DIR)/coverage
 
 # Developer check before committing
 .PHONY: check
-check: lint sql-lint build test-coverage
+check: lint sql-lint tailwind-check build test-coverage
 
 .PHONY: lint
 lint:
@@ -89,7 +89,10 @@ smoke:
 # first use (which is gitignored via build/) and reused on subsequent runs.
 #
 # v4 dropped tailwind.config.js — configuration now lives in CSS via the
-# @theme directive in internal/web/static-src/tailwind-src.css.
+# @theme directive in internal/web/static/css/_tailwind.css. The leading
+# underscore tells go:embed to skip the file (the same convention Go uses
+# for test helpers), so the source CSS is not shipped in the binary even
+# though it sits next to the generated output.
 #
 # The generated output (internal/web/static/css/admin.css) IS committed,
 # so the binary only has to exist on machines that intend to regenerate it.
@@ -97,7 +100,7 @@ smoke:
 
 TAILWIND_VERSION    := v4.3.0
 TAILWIND_BIN        := $(BIN_DIR)/tailwindcss-v4
-TAILWIND_INPUT      := internal/web/static-src/tailwind-src.css
+TAILWIND_INPUT      := internal/web/static/css/_tailwind.css
 TAILWIND_OUTPUT     := internal/web/static/css/admin.css
 
 # Pick the right asset for the current host. The release page ships
@@ -137,9 +140,9 @@ tailwind: $(TAILWIND_BIN)
 tailwind-watch: $(TAILWIND_BIN)
 	$(TAILWIND_BIN) -i $(TAILWIND_INPUT) -o $(TAILWIND_OUTPUT) --watch
 
-# Regenerate into a temp file and diff against the committed admin.css. CI can
-# call this to catch the case where someone changes a template class but
-# forgets to rerun `make tailwind`. Not wired into `make check` yet — see #213.
+# Regenerate into a temp file and diff against the committed admin.css. Wired
+# into `make check` so a template class change without `make tailwind` fails
+# pre-commit instead of slipping into a PR.
 .PHONY: tailwind-check
 tailwind-check: $(TAILWIND_BIN)
 	@tmp=$$(mktemp) && \
