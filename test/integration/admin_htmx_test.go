@@ -117,13 +117,10 @@ func TestAdminHTMX_QuestionReorder(t *testing.T) {
 		t.Fatalf("NewRequest err = %v, want nil", err)
 	}
 	hxReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	// HX-Request is the wire-convention name HTMX sends. Go canonicalises
-	// to Hx-Request internally for header map lookups; using the
-	// HTMX-canonical casing here keeps the test readable against the
-	// HTMX docs and is what golangci-lint's canonicalheader expects to
-	// see written.
-	//nolint:canonicalheader // intentional: literal HTMX header name
-	hxReq.Header.Set("HX-Request", "true")
+	// HTMX sends "HX-Request: true" on the wire; using Go's canonical
+	// form here keeps canonicalheader happy and matches the spelling the
+	// handler reads back via r.Header.Get.
+	hxReq.Header.Set("Hx-Request", "true")
 
 	hxResp, err := client.Do(hxReq)
 	if err != nil {

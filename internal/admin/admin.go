@@ -947,7 +947,8 @@ func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 		}
 
 		direction := r.PathValue("direction")
-		isHX := r.Header.Get("HX-Request") == "true"
+		// HTMX wire header is HX-Request; Hx-Request is Go's canonical form.
+		isHX := r.Header.Get("Hx-Request") == "true"
 
 		if err := quizStore.SwapQuestionPositions(r.Context(), quizID, questionID, direction); err != nil {
 			switch {
