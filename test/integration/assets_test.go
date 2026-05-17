@@ -64,6 +64,9 @@ func TestAssets_Integration(t *testing.T) {
 		"btn-primary",   // @apply component class
 		"border-dashed", // arbitrary utility used in the empty-state card
 		"shadow-focus",  // custom --shadow-focus token + focus-visible: variants
+		"q-row",         // quizview's question card pattern
+		"option-row",    // questionform's option editor pattern
+		"pill-public",   // visibility pill (currently hardcoded; #103)
 	}
 	var missing []string
 	for _, cls := range wantClasses {

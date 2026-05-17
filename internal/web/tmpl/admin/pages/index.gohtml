@@ -1,9 +1,29 @@
 {{define "content"}}
-    <div class="max-w-xl">
-        <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight mb-6">{{.Title}}</h1>
-        <div class="flex flex-col sm:flex-row gap-3">
-            <a href="/admin/quizzes/new" class="btn-primary">Create new quiz</a>
-            <a href="/admin/quizzes" class="btn-ghost">List quizzes</a>
+    <nav aria-label="breadcrumbs" class="crumb">
+        <span class="text-text" aria-current="page">Admin</span>
+    </nav>
+
+    <header class="flex flex-col md:flex-row md:items-end md:justify-between gap-6 mb-10 pb-6 border-b border-border-soft">
+        <div>
+            <h1 class="m-0 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(2rem,6vw,2.75rem)]">{{.Title}}</h1>
+            <p class="mt-2 max-w-[50ch] text-text-dim text-[0.95rem]">
+                Author, share, and review quizzes. Pick where to go next.
+            </p>
         </div>
+    </header>
+
+    <div class="grid gap-5 grid-cols-1 md:grid-cols-2 max-w-3xl">
+        <a href="/admin/quizzes"
+           class="group relative flex flex-col gap-3 p-6 bg-surface border border-border-soft rounded-lg transition-colors hover:border-accent-line">
+            <span class="text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.16em]">Manage</span>
+            <h2 class="m-0 font-display text-lg font-semibold uppercase tracking-tight group-hover:text-accent transition-colors">List quizzes</h2>
+            <p class="m-0 text-text-dim text-sm">Browse every quiz, see question counts, and jump in to edit or share.</p>
+        </a>
+        <a href="/admin/quizzes/new"
+           class="group relative flex flex-col gap-3 p-6 bg-surface border border-border-soft rounded-lg transition-colors hover:border-accent-line">
+            <span class="text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.16em]">Create</span>
+            <h2 class="m-0 font-display text-lg font-semibold uppercase tracking-tight group-hover:text-accent transition-colors">New quiz</h2>
+            <p class="m-0 text-text-dim text-sm">Start a fresh quiz: title, description, and questions on the next screen.</p>
+        </a>
     </div>
 {{end}}
