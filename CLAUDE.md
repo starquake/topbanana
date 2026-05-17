@@ -26,7 +26,15 @@ If you make further changes after the sign-off (e.g. fixing a lint issue, addres
 Every change or new feature must have tests. Run `make lint-fix`, `make check`, `make test-e2e`, and `make smoke` before marking work done.
 `make check` only exercises a fresh DB, so migration or startup issues that only surface against populated data otherwise slip through. `make smoke` runs `go run ./cmd/server/ -check` to parse config, open the dev DB, run migrations, and exit — no port juggling, no leftover process.
 
-**Prefer integration tests over ad-hoc smoke scripts.** When verifying a new endpoint or flow, write a test under `test/integration/` rather than running one-off `curl` commands or scripted Playwright sessions. A scripted check verifies behaviour once at implementation time; an integration test catches regressions forever. The harness in `test/integration/` already provides a real server, real DB, and cookie jars — add scenarios to existing tests or create a new `*_test.go` there. Use one-off scripts only for genuinely interactive debugging that can't be expressed as a test (e.g. visual layout in a browser).
+**Write a test instead of an ad-hoc check script.** When you need to verify something works — a new endpoint, a flow, a config side effect, an asset getting served — express it as a test, not as a one-off `curl`, `wget`, scripted Playwright session, or bash probe. A scripted check verifies behaviour once at implementation time and gets thrown away; a test catches regressions forever.
+
+Pick the right layer:
+
+- **Unit test** (`*_test.go` next to the code) — pure logic, no I/O.
+- **Integration test** (`test/integration/`, `-tags=integration`) — anything that touches the real server, DB, HTTP routing, or embedded assets. The harness provides a real server, real DB, and cookie jars; add scenarios to an existing `*_test.go` or create a new one.
+- **E2E test** (`test/e2e/`, Playwright) — behaviour that only makes sense in a real browser: clicks, navigation, form flows, JS-driven UI.
+
+One-off scripts are reserved for genuinely interactive debugging that can't be expressed as a test (e.g. eyeballing a visual layout, attaching a debugger). If you find yourself writing the same `curl` twice, it's a test.
 
 ## Workflow
 
