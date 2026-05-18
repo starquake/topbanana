@@ -14,11 +14,19 @@
             <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight">Quizzes</h1>
             <p class="mt-1.5 max-w-[540px] text-text-dim text-[0.95rem]">{{.Title}}. Author, share, and review quizzes. Tap a card to manage questions.</p>
         </div>
-        <a href="/admin/quizzes/new"
-           class="btn-primary self-start gap-2">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5a.5.5 0 0 1 .5.5v5.5H14a.5.5 0 0 1 0 1H8.5V14a.5.5 0 0 1-1 0V8.5H2a.5.5 0 0 1 0-1h5.5V2a.5.5 0 0 1 .5-.5z"/></svg>
-            <span>New quiz</span>
-        </a>
+        <div class="flex flex-wrap gap-2 self-start">
+            <a href="/admin/quizzes/new"
+               class="btn-primary gap-2">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5a.5.5 0 0 1 .5.5v5.5H14a.5.5 0 0 1 0 1H8.5V14a.5.5 0 0 1-1 0V8.5H2a.5.5 0 0 1 0-1h5.5V2a.5.5 0 0 1 .5-.5z"/></svg>
+                <span>New quiz</span>
+            </a>
+            <a href="/admin/quizzes/import"
+               class="btn-ghost gap-2"
+               title="Paste a JSON document to create a quiz in one shot — see the example on the import page">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8.5 1.5a.5.5 0 0 0-1 0V10.293L4.354 7.146a.5.5 0 1 0-.708.708l4 4a.5.5 0 0 0 .708 0l4-4a.5.5 0 0 0-.708-.708L8.5 10.293V1.5zM3 13.5a.5.5 0 0 0-1 0v1A1.5 1.5 0 0 0 3.5 16h9a1.5 1.5 0 0 0 1.5-1.5v-1a.5.5 0 0 0-1 0v1a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5v-1z"/></svg>
+                <span>Import JSON</span>
+            </a>
+        </div>
     </header>
 
     {{if .Quizzes}}
