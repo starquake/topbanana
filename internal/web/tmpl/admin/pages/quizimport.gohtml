@@ -1,0 +1,54 @@
+{{define "content"}}
+    {{/* Breadcrumb */}}
+    <nav aria-label="breadcrumbs" class="crumb">
+        <a href="/admin">Admin</a>
+        <span class="crumb-sep" aria-hidden="true">/</span>
+        <a href="/admin/quizzes">Quizzes</a>
+        <span class="crumb-sep" aria-hidden="true">/</span>
+        <span class="text-text" aria-current="page">Import</span>
+    </nav>
+
+    <header class="flex flex-col md:flex-row md:items-end md:justify-between gap-6 mb-10 pb-6 border-b border-border-soft">
+        <div>
+            <h1 class="m-0 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(2rem,6vw,2.75rem)]">{{.Title}}</h1>
+            <p class="mt-2 max-w-[60ch] text-text-dim text-[0.95rem]">
+                Paste a JSON document into the textarea to create a quiz in one shot. The shape below is what an LLM should produce —
+                copy the example into a chat, ask it to generate a quiz in the same shape, paste the response back here and submit.
+            </p>
+        </div>
+    </header>
+
+    {{if .Error}}
+        <div class="mb-6 px-4 py-3 rounded-sm bg-danger/10 border border-danger/40 text-danger text-[0.9rem]" role="alert">
+            {{.Error}}
+        </div>
+    {{end}}
+
+    <form class="form-shell" action="/admin/quizzes/import" method="POST">
+        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+
+        <div class="form-field">
+            <label class="label-eyebrow" for="json">
+                Quiz JSON
+                <span class="label-hint">UTF-8, no comments, unknown fields are rejected</span>
+            </label>
+            <textarea id="json" name="json" rows="18" spellcheck="false"
+                      placeholder="Paste your quiz JSON here..."
+                      class="form-input min-h-[360px] resize-y font-mono text-[0.85rem]">{{.JSON}}</textarea>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn-primary">Import quiz</button>
+            <a href="/admin/quizzes" class="btn-ghost">Cancel</a>
+        </div>
+    </form>
+
+    <section aria-label="Example JSON" class="form-shell mt-12">
+        <h2 class="label-eyebrow mb-3 text-text">Example shape</h2>
+        <p class="mb-3 text-text-dim text-[0.9rem]">
+            Copy this into your chat verbatim so the model knows the expected fields. Positions are auto-assigned in array order;
+            <code class="font-mono text-[0.8rem]">slug</code> is optional and defaults to a slugified <code class="font-mono text-[0.8rem]">title</code> when omitted.
+        </p>
+        <pre class="overflow-auto p-4 rounded-sm bg-surface border border-border-soft font-mono text-[0.78rem] leading-[1.5] text-text-dim"><code>{{.Example}}</code></pre>
+    </section>
+{{end}}
