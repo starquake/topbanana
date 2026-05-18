@@ -11,7 +11,7 @@ import (
 
 // TestAssets_Integration guards the admin/auth asset pipeline end to end:
 // the route at /assets/ is mounted, the embedded FS sees the generated
-// admin.css, and the file contains utilities that prove Tailwind scanned
+// app.css, and the file contains utilities that prove Tailwind scanned
 // the right templates. If anyone moves the source file or breaks the
 // @source paths in _tailwind.css, the regenerated CSS would still serve
 // (200 OK) but lose its custom utilities — only a class-presence check
@@ -21,13 +21,13 @@ func TestAssets_Integration(t *testing.T) {
 
 	ctx, srv := startServer(t, nil)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.BaseURL+"/assets/css/admin.css", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.BaseURL+"/assets/css/app.css", nil)
 	if err != nil {
 		t.Fatalf("failed to build request: %v", err)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("failed to GET admin.css: %v", err)
+		t.Fatalf("failed to GET app.css: %v", err)
 	}
 	defer func() {
 		if cerr := resp.Body.Close(); cerr != nil {
@@ -51,7 +51,7 @@ func TestAssets_Integration(t *testing.T) {
 	// If @source paths are broken, Tailwind emits preflight + theme only —
 	// well under 5KB. Real output with utilities sits around 30KB.
 	if got, want := len(css), 10_000; got < want {
-		t.Errorf("admin.css length = %d bytes, want > %d (Tailwind likely scanned no templates)", got, want)
+		t.Errorf("app.css length = %d bytes, want > %d (Tailwind likely scanned no templates)", got, want)
 	}
 
 	// Each class below requires both a working theme token AND a template
@@ -76,7 +76,7 @@ func TestAssets_Integration(t *testing.T) {
 	}
 	if len(missing) > 0 {
 		t.Errorf(
-			"admin.css missing %d expected classes %v (Tailwind didn't scan templates or theme tokens missing)",
+			"app.css missing %d expected classes %v (Tailwind didn't scan templates or theme tokens missing)",
 			len(missing),
 			missing,
 		)

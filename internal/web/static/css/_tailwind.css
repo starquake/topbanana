@@ -1,8 +1,8 @@
 /* Tailwind v4 entry point shared by every surface in the app.
  *
- * Generated output lives at admin.css (also committed) — see `make tailwind`.
- * The filename is historical; admin, auth, and the player client all link
- * the same generated file via /assets/css/admin.css.
+ * Generated output lives at app.css (also committed) — see `make tailwind`.
+ * Admin, auth, and the player client all link the same generated file
+ * via /assets/css/app.css.
  *
  * v4 uses CSS-first configuration: there is no tailwind.config.js. All
  * theme tokens live in the @theme block below and are emitted as CSS

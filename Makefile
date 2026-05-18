@@ -115,14 +115,14 @@ smoke:
 # for test helpers), so the source CSS is not shipped in the binary even
 # though it sits next to the generated output.
 #
-# The generated output (internal/web/static/css/admin.css) IS committed,
+# The generated output (internal/web/static/css/app.css) IS committed,
 # so the binary only has to exist on machines that intend to regenerate it.
 # CI can call `make tailwind-check` to catch drift.
 
 TAILWIND_VERSION    := v4.3.0
 TAILWIND_BIN        := $(BIN_DIR)/tailwindcss-v4
 TAILWIND_INPUT      := internal/web/static/css/_tailwind.css
-TAILWIND_OUTPUT     := internal/web/static/css/admin.css
+TAILWIND_OUTPUT     := internal/web/static/css/app.css
 
 # Pick the right asset for the current host. The release page ships
 # Linux x64/arm64, macOS x64/arm64, and Windows x64 — which covers every
@@ -157,12 +157,12 @@ tailwind: $(TAILWIND_BIN)
 
 # --watch + --minify so every rebuild matches what `make tailwind` would
 # produce — without --minify the watcher emits pretty-printed CSS that
-# would diverge from the committed admin.css and fail tailwind-check.
+# would diverge from the committed app.css and fail tailwind-check.
 .PHONY: tailwind-watch
 tailwind-watch: $(TAILWIND_BIN)
 	$(TAILWIND_BIN) -i $(TAILWIND_INPUT) -o $(TAILWIND_OUTPUT) --watch --minify
 
-# Regenerate into a temp file and diff against the committed admin.css. Wired
+# Regenerate into a temp file and diff against the committed app.css. Wired
 # into `make check` so a template class change without `make tailwind` fails
 # pre-commit instead of slipping into a PR.
 .PHONY: tailwind-check
@@ -261,7 +261,7 @@ $(SQLC_BIN):
 	@chmod +x $@
 
 # Run the Go server in development. Pair with `make tailwind-watch` in a
-# second terminal to regenerate admin.css on template edits.
+# second terminal to regenerate app.css on template edits.
 .PHONY: server
 server:
 	go run ./cmd/server/
