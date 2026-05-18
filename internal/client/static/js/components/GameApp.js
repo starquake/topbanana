@@ -309,14 +309,14 @@ export class GameApp {
     animateFeedback(correct) {
         requestAnimationFrame(() => {
             if (correct) {
-                runAnim('.notification', {
+                runAnim('[data-feedback]', {
                     scale: [0.9, 1.06, 1],
                     rotate: ['-1.2deg', '1deg', '0deg'],
                     duration: 560,
                     easing: 'easeOutBack',
                 });
             } else {
-                runAnim('.notification', {
+                runAnim('[data-feedback]', {
                     translateX: [-18, 18, -14, 14, -8, 8, 0],
                     duration: 460,
                     easing: 'easeOutQuad',
@@ -331,7 +331,7 @@ export class GameApp {
     // should feel like a gentle "moving on" rather than a buzzer.
     animateTimeout() {
         requestAnimationFrame(() => {
-            runAnim('.notification', {
+            runAnim('[data-feedback]', {
                 opacity: [0, 1],
                 scale: [0.96, 1],
                 duration: 420,

@@ -52,7 +52,7 @@ test('timing out a question shows the Time out banner and the rest of the quiz s
     { timeout: PROGRESS_DRAIN_BUDGET_MS },
   );
 
-  const timeoutBanner = page.locator('.notification.is-warning');
+  const timeoutBanner = page.locator('.feedback-warning');
   await expect(timeoutBanner).toBeVisible({ timeout: SETTLE_MS });
   await expect(timeoutBanner).toContainText('Time out!');
 
@@ -82,7 +82,7 @@ test('timing out a question shows the Time out banner and the rest of the quiz s
   // is prime) both score positive when picking option 0. Regex form
   // avoids the stringly comparison to literal '0' so a future number
   // format (e.g. thousands separators) doesn't silently weaken the check.
-  const playerRow = page.locator('table tbody tr.is-selected');
+  const playerRow = page.locator('table tbody tr[aria-current="true"]');
   await expect(playerRow).toBeVisible();
   await expect(playerRow.locator('td').nth(2)).toHaveText(/^[1-9]\d*$/);
 });

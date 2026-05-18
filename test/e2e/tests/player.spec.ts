@@ -56,10 +56,10 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
     await optionButton.click();
 
     if (wasCorrect) {
-      await expect(page.locator('.notification.is-success')).toBeVisible();
+      await expect(page.locator('.feedback-success')).toBeVisible();
       expectedSuccesses++;
     } else {
-      await expect(page.locator('.notification.is-danger')).toBeVisible();
+      await expect(page.locator('.feedback-danger')).toBeVisible();
     }
   }
 
@@ -70,12 +70,12 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   await expect(page.getByRole('heading', { name: 'Game Finished!' })).toBeVisible({ timeout: 15_000 });
 
   // The leaderboard table renders rank/player/score; the player just played, so
-  // their row must be marked with .is-selected. The score column for that row
+  // their row must be marked with aria-current="true". The score column for that row
   // must not be 0 — Q3 (all correct) and Q4 (idx 0 is prime) both yield a hit
   // when picking the first option, so scoring being broken (always-0) needs
   // to fail the test.
   await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
-  const playerRow = page.locator('table tbody tr.is-selected');
+  const playerRow = page.locator('table tbody tr[aria-current="true"]');
   await expect(playerRow).toBeVisible();
   await expect(playerRow.locator('td').nth(2)).not.toHaveText('0');
 
@@ -100,7 +100,7 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   // to click Start to discover they're locked out.
   await page.goto('/client/');
   await page.locator('select').selectOption({ label: quizTitle });
-  await expect(page.locator('.notification.is-danger'))
+  await expect(page.locator('.feedback-danger'))
     .toContainText('already completed');
   await expect(page.getByRole('button', { name: 'Start Game' })).toBeDisabled();
 });

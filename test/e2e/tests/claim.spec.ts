@@ -44,7 +44,7 @@ test('submitting a name via the start-screen modal updates the Playing as card i
 
   // Open the shared modal via the start-screen affordance.
   await page.getByRole('button', { name: 'Set your name' }).click();
-  const modal = page.locator('.modal.is-active');
+  const modal = page.locator('[role="dialog"]');
   await expect(modal).toBeVisible();
 
   // Unique-per-run name so chromium and firefox don't collide on the shared
@@ -95,7 +95,7 @@ test('claim modal auto-opens on top of the leaderboard for a fresh anonymous vis
 
   // Modal is visible — gate is `!hasCustomName()`, which is true for a fresh
   // anonymous visitor who never PATCHed /api/players/me.
-  const modal = page.locator('.modal.is-active');
+  const modal = page.locator('[role="dialog"]');
   await expect(modal).toBeVisible();
   await expect(modal.locator('#claim-modal-title')).toHaveText('Pick a display name');
 });
@@ -123,7 +123,7 @@ test('claim modal does not auto-open for a visitor who already claimed a name', 
   await expect(page.locator('.claim-cta:visible')).toBeVisible();
   await page.getByRole('button', { name: 'Set your name' }).click();
 
-  const startModal = page.locator('.modal.is-active');
+  const startModal = page.locator('[role="dialog"]');
   await expect(startModal).toBeVisible();
   await startModal.locator('input#claim-name-modal').fill(chosenName);
   await startModal.getByRole('button', { name: 'Save' }).click();
@@ -136,12 +136,12 @@ test('claim modal does not auto-open for a visitor who already claimed a name', 
 
   // The claim modal must NOT auto-open: the player already has a custom name,
   // so the `!hasCustomName()` gate in nextQuestion() short-circuits.
-  await expect(page.locator('.modal.is-active')).toHaveCount(0);
+  await expect(page.locator('[role="dialog"]')).toHaveCount(0);
 
   // The leaderboard row for the current player should already show the
   // chosen name (no second claim step required). Match within the
-  // .is-selected row to ignore any other rows.
-  const playerRow = page.locator('table tbody tr.is-selected');
+  // aria-current row to ignore any other rows.
+  const playerRow = page.locator('table tbody tr[aria-current="true"]');
   await expect(playerRow).toBeVisible();
   await expect(playerRow).toContainText(chosenName);
 });
