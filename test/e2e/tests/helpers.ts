@@ -142,9 +142,9 @@ export async function answerRemainingQuestions(page: Page, fromIndex = 0): Promi
     await optionButton.click();
 
     if (wasCorrect) {
-      await expect(page.locator('.notification.is-success')).toBeVisible();
+      await expect(page.locator('.feedback-success')).toBeVisible();
     } else {
-      await expect(page.locator('.notification.is-danger')).toBeVisible();
+      await expect(page.locator('.feedback-danger')).toBeVisible();
     }
   }
 
