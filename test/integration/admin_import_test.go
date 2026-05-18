@@ -1,0 +1,242 @@
+//go:build integration
+
+package integration_test
+
+import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/cookiejar"
+	"net/url"
+	"strings"
+	"testing"
+)
+
+// TestAdminImport_Integration covers the JSON import flow added in #231:
+// an admin pastes a quiz JSON document into /admin/quizzes/import, the
+// server creates the quiz tree atomically, and the redirect lands on the
+// new quiz's view page. The test also checks the rendered import form
+// carries the example block — that's the whole point of the page.
+func TestAdminImport_Integration(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+	})
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New err = %v, want nil", err)
+	}
+	client := &http.Client{
+		Jar: jar,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
+
+	// Fetching the import form should both seed the CSRF nonce on the jar
+	// AND render the example JSON block — without the example the page is
+	// useless to the LLM round-trip workflow this feature exists for.
+	importURL := srv.BaseURL + "/admin/quizzes/import"
+	getReq, err := http.NewRequestWithContext(ctx, http.MethodGet, importURL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	getResp, err := client.Do(getReq)
+	if err != nil {
+		t.Fatalf("GET import client.Do err = %v, want nil", err)
+	}
+	formBody, err := io.ReadAll(getResp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll err = %v, want nil", err)
+	}
+	if cerr := getResp.Body.Close(); cerr != nil {
+		t.Errorf("Body.Close err = %v, want nil", cerr)
+	}
+	if got, want := getResp.StatusCode, http.StatusOK; got != want {
+		t.Errorf("GET import status = %d, want %d", got, want)
+	}
+	if got := string(formBody); !strings.Contains(got, "European Capitals") {
+		t.Errorf("import form body got %q, should contain the example title %q", got, "European Capitals")
+	}
+
+	// CSRF token is the same scrape the regular admin tests use.
+	csrfToken := fetchCSRFToken(ctx, t, client, importURL)
+
+	// Post a minimal but valid quiz. The slug is intentionally omitted to
+	// exercise the auto-derive-from-title path.
+	const quizJSON = `{
+  "title": "Import Round-Trip",
+  "description": "Round-trip integration test for the JSON importer.",
+  "questions": [
+    {
+      "text": "What is the capital of the Czech Republic?",
+      "options": [
+        { "text": "Prague",   "correct": true  },
+        { "text": "Warsaw",   "correct": false },
+        { "text": "Budapest", "correct": false },
+        { "text": "Vienna",   "correct": false }
+      ]
+    },
+    {
+      "text": "Lisbon is the capital of which country?",
+      "options": [
+        { "text": "Spain",    "correct": false },
+        { "text": "Portugal", "correct": true  }
+      ]
+    }
+  ]
+}`
+
+	form := url.Values{}
+	form.Add("json", quizJSON)
+	form.Add("csrf_token", csrfToken)
+
+	postReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, importURL, strings.NewReader(form.Encode()),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	postResp, err := client.Do(postReq)
+	if err != nil {
+		t.Fatalf("POST import client.Do err = %v, want nil", err)
+	}
+	if cerr := postResp.Body.Close(); cerr != nil {
+		t.Errorf("Body.Close err = %v, want nil", cerr)
+	}
+
+	if got, want := postResp.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("POST import status = %d, want %d", got, want)
+	}
+	location := postResp.Header.Get("Location")
+	if !strings.HasPrefix(location, "/admin/quizzes/") {
+		t.Fatalf("POST import Location = %q, want prefix /admin/quizzes/", location)
+	}
+
+	// Follow the redirect and verify both question texts render on the
+	// resulting quiz view — confirming the tree (quiz + questions +
+	// options) was persisted, not just the quiz row.
+	viewURL := srv.BaseURL + location
+	viewReq, err := http.NewRequestWithContext(ctx, http.MethodGet, viewURL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	viewResp, err := client.Do(viewReq)
+	if err != nil {
+		t.Fatalf("GET quiz view client.Do err = %v, want nil", err)
+	}
+	viewBody, err := io.ReadAll(viewResp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll err = %v, want nil", err)
+	}
+	if cerr := viewResp.Body.Close(); cerr != nil {
+		t.Errorf("Body.Close err = %v, want nil", cerr)
+	}
+	if got, want := viewResp.StatusCode, http.StatusOK; got != want {
+		t.Errorf("GET quiz view status = %d, want %d", got, want)
+	}
+	body := string(viewBody)
+	for _, want := range []string{
+		"Import Round-Trip",
+		"What is the capital of the Czech Republic?",
+		"Lisbon is the capital of which country?",
+		"Prague",
+		"Portugal",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("quiz view body got %q, should contain %q", body, want)
+		}
+	}
+
+	// Negative paths. Each subtest posts a different malformed JSON and
+	// asserts the corresponding error branch: invalid JSON syntax,
+	// unknown fields (rejected by DisallowUnknownFields), and
+	// well-formed JSON that fails the domain Valid() check.
+	t.Run("syntactically broken JSON", func(t *testing.T) {
+		t.Parallel()
+		// html/template HTML-escapes the textarea content, so the literal
+		// `"title": "x"` we POSTed appears in the response as
+		// `&#34;title&#34;: &#34;x&#34;` — pin that exact form to catch
+		// both "form re-rendered" and "user's text survived the round-trip".
+		postImportRejection(ctx, t, client, importURL,
+			`{"title": "x", "questions": [`,
+			[]string{"invalid JSON", `&#34;title&#34;: &#34;x&#34;`},
+		)
+	})
+
+	t.Run("unknown JSON field rejected", func(t *testing.T) {
+		t.Parallel()
+		// `slug` was deliberately removed from the wire shape; the
+		// DisallowUnknownFields decoder must reject it so a caller that
+		// thinks it can override the server-derived slug finds out at
+		// import time, not at quiz-load time.
+		postImportRejection(ctx, t, client, importURL,
+			`{"title": "x", "slug": "x", "description": "y", "questions": []}`,
+			[]string{"invalid JSON", `&#34;slug&#34;`},
+		)
+	})
+
+	t.Run("domain validation failure", func(t *testing.T) {
+		t.Parallel()
+		// Empty title trips quiz.Quiz.Valid (Title is required). The
+		// "validation errors:" prefix is what the handler prepends to
+		// any map of field problems — pin it so a future refactor of
+		// the error rendering doesn't silently swallow this branch.
+		postImportRejection(
+			ctx,
+			t,
+			client,
+			importURL,
+			`{"title": "", "description": "ok", "questions": [{"text": "Q", "options": [{"text": "A", "correct": true}]}]}`,
+			[]string{"validation errors", "Title is required"},
+		)
+	})
+}
+
+// postImportRejection posts the given JSON to the import endpoint and
+// asserts the response is 400 + the form re-rendered with each
+// substring in wantSubstrings present in the body. Factored out to keep
+// the negative-path subtests small.
+func postImportRejection(
+	ctx context.Context, t *testing.T, client *http.Client, importURL, jsonBody string, wantSubstrings []string,
+) {
+	t.Helper()
+
+	csrfToken := fetchCSRFToken(ctx, t, client, importURL)
+	form := url.Values{}
+	form.Add("json", jsonBody)
+	form.Add("csrf_token", csrfToken)
+
+	req, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, importURL, strings.NewReader(form.Encode()),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("client.Do err = %v, want nil", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll err = %v, want nil", err)
+	}
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("Body.Close err = %v, want nil", cerr)
+	}
+
+	if got, want := resp.StatusCode, http.StatusBadRequest; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	rendered := string(body)
+	for _, want := range wantSubstrings {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("body got %q, should contain %q", rendered, want)
+		}
+	}
+}

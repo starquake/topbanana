@@ -3,6 +3,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gosimple/slug"
@@ -771,6 +773,162 @@ func HandleQuizEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 		}
 		render.Render(w, r, http.StatusOK, data)
 	})
+}
+
+// quizImportPayload mirrors the JSON shape an admin pastes into the import
+// textarea. Decoupled from quiz.Quiz so the wire shape stays small and
+// LLM-friendly (no IDs, timestamps, position fields, or slugs — the slug
+// is derived server-side from the title). The handler translates this
+// into the full domain model before validation.
+type quizImportPayload struct {
+	Title       string                      `json:"title"`
+	Description string                      `json:"description"`
+	Questions   []quizImportQuestionPayload `json:"questions"`
+}
+
+type quizImportQuestionPayload struct {
+	Text     string                    `json:"text"`
+	ImageURL string                    `json:"imageUrl,omitempty"`
+	Options  []quizImportOptionPayload `json:"options"`
+}
+
+type quizImportOptionPayload struct {
+	Text    string `json:"text"`
+	Correct bool   `json:"correct"`
+}
+
+// quizImportExample is the JSON block rendered on the import page so the
+// admin can copy it into a chat with Claude (or any LLM), have it generate
+// a quiz, and paste the result back. Kept here as a const string rather
+// than in the template so the rendered example stays byte-identical to
+// what the handler will actually accept.
+const quizImportExample = `{
+  "title": "European Capitals",
+  "description": "Twelve quick-fire questions covering EU capitals.",
+  "questions": [
+    {
+      "text": "Which city sits on the river Vltava?",
+      "options": [
+        { "text": "Bratislava", "correct": false },
+        { "text": "Budapest",  "correct": false },
+        { "text": "Prague",    "correct": true  },
+        { "text": "Warsaw",    "correct": false }
+      ]
+    }
+  ]
+}`
+
+// quizImportPageData is the render-time data for quizimport.gohtml. Both
+// the form (GET) and save (POST) handlers populate it, so the type is
+// declared once at package scope rather than re-declared per handler.
+type quizImportPageData struct {
+	Title   string
+	JSON    string
+	Example string
+	Error   string
+}
+
+// HandleQuizImportForm renders the JSON-import page. The textarea is empty
+// on a fresh GET; the POST handler re-renders this template with the
+// submitted JSON intact when validation fails.
+func HandleQuizImportForm(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
+	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizimport.gohtml")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		render.Render(w, r, http.StatusOK, quizImportPageData{
+			Title:   "Admin Dashboard - Import Quiz",
+			Example: quizImportExample,
+		})
+	})
+}
+
+// HandleQuizImportSave parses the JSON pasted into the import form, builds
+// a fresh quiz.Quiz from it, and persists via the existing store path so
+// the resulting row is indistinguishable from one created via the regular
+// quiz form. Validation errors re-render the form with the submitted JSON
+// preserved so the admin can fix the payload without re-pasting.
+func HandleQuizImportSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizimport.gohtml")
+
+	renderErr := func(w http.ResponseWriter, r *http.Request, jsonText, msg string) {
+		render.Render(w, r, http.StatusBadRequest, quizImportPageData{
+			Title:   "Admin Dashboard - Import Quiz",
+			JSON:    jsonText,
+			Example: quizImportExample,
+			Error:   msg,
+		})
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxFormSize)
+		if err := r.ParseForm(); err != nil {
+			logger.ErrorContext(r.Context(), "error parsing import form", slog.Any("err", err))
+			renderErr(w, r, "", "request body too large or malformed")
+
+			return
+		}
+
+		jsonText := r.PostFormValue("json")
+		if jsonText == "" {
+			renderErr(w, r, "", "json field is required")
+
+			return
+		}
+
+		var payload quizImportPayload
+		dec := json.NewDecoder(strings.NewReader(jsonText))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&payload); err != nil {
+			renderErr(w, r, jsonText, fmt.Sprintf("invalid JSON: %v", err))
+
+			return
+		}
+
+		qz := quizFromImportPayload(payload)
+		if problems := qz.Valid(r.Context()); len(problems) > 0 {
+			renderErr(w, r, jsonText, fmt.Sprintf("validation errors: %v", problems))
+
+			return
+		}
+
+		if !storeQuiz(w, r, logger, csrfMgr, quizStore, qz) {
+			return
+		}
+
+		http.Redirect(w, r, fmt.Sprintf("/admin/quizzes/%d", qz.ID), http.StatusSeeOther)
+	})
+}
+
+// quizFromImportPayload converts the wire-shape payload into the domain
+// model. The slug is always derived from the title — the payload doesn't
+// carry one because LLMs are bad at picking a stable slug and the
+// admin form does the same derivation. Positions are assigned 1..N in
+// the order questions appear in the JSON.
+func quizFromImportPayload(p quizImportPayload) *quiz.Quiz {
+	qz := &quiz.Quiz{
+		Title:       p.Title,
+		Slug:        slug.Make(p.Title),
+		Description: p.Description,
+	}
+
+	qz.Questions = make([]*quiz.Question, 0, len(p.Questions))
+	for i, qIn := range p.Questions {
+		qs := &quiz.Question{
+			Text:     qIn.Text,
+			ImageURL: qIn.ImageURL,
+			Position: i + 1,
+		}
+		qs.Options = make([]*quiz.Option, 0, len(qIn.Options))
+		for _, oIn := range qIn.Options {
+			qs.Options = append(qs.Options, &quiz.Option{
+				Text:    oIn.Text,
+				Correct: oIn.Correct,
+			})
+		}
+		qz.Questions = append(qz.Questions, qs)
+	}
+
+	return qz
 }
 
 // HandleQuizSave saves the quiz to the database.

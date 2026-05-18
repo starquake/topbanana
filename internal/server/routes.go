@@ -111,6 +111,11 @@ func addAdminRoutes(
 	)
 	mux.Handle("GET /admin/quizzes/new", requireAdmin(admin.HandleQuizCreate(logger, csrfMgr)))
 	mux.Handle("POST /admin/quizzes", csrfMW(requireAdmin(admin.HandleQuizSave(logger, csrfMgr, stores.Quizzes))))
+	mux.Handle("GET /admin/quizzes/import", requireAdmin(admin.HandleQuizImportForm(logger, csrfMgr)))
+	mux.Handle(
+		"POST /admin/quizzes/import",
+		csrfMW(requireAdmin(admin.HandleQuizImportSave(logger, csrfMgr, stores.Quizzes))),
+	)
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}/edit",
 		requireAdmin(admin.HandleQuizEdit(logger, csrfMgr, stores.Quizzes)),
