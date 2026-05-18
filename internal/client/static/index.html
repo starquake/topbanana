@@ -7,18 +7,27 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css">
-    <link rel="stylesheet" href="/client/css/tokens.css">
-    <link rel="stylesheet" href="/client/css/synthwave.css">
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@500;600;700;800;900&display=swap">
+    <link rel="stylesheet" href="/assets/css/admin.css">
     <script src="https://cdn.jsdelivr.net/npm/animejs@4.2.0/dist/bundles/anime.umd.min.js"></script>
     <script type="module" src="/client/js/app.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
-<body>
-    <section class="section">
-        <div class="container" x-data="gameApp" @keydown.escape.window="claimModalOpen && closeClaimModal()">
-            <h1 class="title">Top Banana!</h1>
+<body class="bg-bg text-text font-sans antialiased min-h-screen leading-relaxed">
+    <main class="max-w-[720px] mx-auto px-5 py-10 sm:py-16">
+        <div x-data="gameApp" @keydown.escape.window="claimModalOpen && closeClaimModal()">
+            <!-- Brand mark: same banana SVG + Top/Banana/! pattern as the
+                 admin navbar (see internal/web/tmpl/admin/layouts/navbar.gohtml).
+                 aria-label pins the accessible name so role-based locators
+                 keep working; visible text is split so "Banana" can carry
+                 the accent colour. -->
+            <h1 aria-label="Top Banana!"
+                class="mb-10 inline-flex items-center font-display font-extrabold text-2xl tracking-wide uppercase text-text">
+                <span class="w-7 h-7 mr-3 text-accent drop-shadow-[0_0_8px_rgba(255,210,63,0.45)] inline-flex shrink-0" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M4 13c3.5-2 8-2 10 2a5.5 5.5 0 0 1 8 5"/><path d="M5.15 17.89c5.52-1.52 8.65-6.89 7-12C11.55 4 11.5 2 13 2c3.22 0 5 5.5 5 8 0 6.5-4.2 12-10.49 12C5.11 22 2 22 2 20c0-1.5 1.14-1.55 3.15-2.11Z"/></svg>
+                </span>
+                <span aria-hidden="true">Top<span class="text-accent">Banana</span>!</span>
+            </h1>
 
             <div x-show="!gameId">
                 <!-- Entry 3: anytime affordance on the start screen.
@@ -38,81 +47,86 @@
                      byte-identical so future copy edits are a single
                      search-and-replace. -->
                 <template x-if="isAnonymous()">
-                    <article class="claim-cta mb-5">
-                        <p class="claim-cta-label">Playing as</p>
-                        <p class="claim-cta-name" x-text="player ? player.username : ''"></p>
-                        <p class="claim-cta-body" x-show="!hasCustomName()">
+                    <article class="claim-cta">
+                        <p class="label-eyebrow">Playing as</p>
+                        <p class="claim-cta-name font-mono text-accent text-[1.05rem] mb-4 break-all" x-text="player ? player.username : ''"></p>
+                        <p class="claim-cta-body text-text-dim mb-5 leading-relaxed" x-show="!hasCustomName()">
                             Pick a display name and your leaderboard row will show it
                             instead of the random one above.
                         </p>
-                        <p class="claim-cta-body" x-show="hasCustomName()">
+                        <p class="claim-cta-body text-text-dim mb-5 leading-relaxed" x-show="hasCustomName()">
                             Not happy with it? Pick a different display name.
                         </p>
-                        <button class="button is-primary" @click="openClaimModal()">
+                        <button class="btn-primary" @click="openClaimModal()">
                             <span x-show="!hasCustomName()">Set your name</span>
                             <span x-show="hasCustomName()">Change your name</span>
                         </button>
                     </article>
                 </template>
 
-                <div x-show="!deepLinkedQuiz" class="field">
-                    <label class="label" for="quiz-select">Select a Quiz</label>
-                    <div class="control">
-                        <div class="select">
-                            <select id="quiz-select" x-model="selectedQuizId" @change="checkAlreadyPlayed()">
-                                <template x-for="quiz in quizzes" :key="quiz.id">
-                                    <option :value="quiz.id" x-text="quiz.title"></option>
-                                </template>
-                            </select>
-                        </div>
-                    </div>
+                <div x-show="!deepLinkedQuiz" class="mb-6">
+                    <label class="label-eyebrow" for="quiz-select">Select a Quiz</label>
+                    <select id="quiz-select"
+                            class="form-input"
+                            x-model="selectedQuizId"
+                            @change="checkAlreadyPlayed()">
+                        <template x-for="quiz in quizzes" :key="quiz.id">
+                            <option :value="quiz.id" x-text="quiz.title"></option>
+                        </template>
+                    </select>
                 </div>
                 <template x-if="deepLinkedQuiz">
-                    <div class="content">
-                        <h2 class="subtitle" x-text="deepLinkedQuiz.title"></h2>
-                        <p x-text="deepLinkedQuiz.description"></p>
+                    <div class="mb-6">
+                        <h2 class="mb-2 font-display text-2xl font-semibold text-text" x-text="deepLinkedQuiz.title"></h2>
+                        <p class="text-text-dim leading-relaxed" x-text="deepLinkedQuiz.description"></p>
                     </div>
                 </template>
                 <template x-if="startError">
-                    <div class="notification is-danger" x-text="startError"></div>
+                    <div class="feedback-banner feedback-danger mb-5" x-text="startError"></div>
                 </template>
-                <button class="button is-primary" @click="startGame()" :disabled="!selectedQuizId || !!startError">Start Game</button>
+                <button class="btn-primary" @click="startGame()" :disabled="!selectedQuizId || !!startError">Start Game</button>
             </div>
 
             <div x-show="gameId && !finished">
                 <template x-if="question">
                     <div>
-                        <progress class="progress is-primary" :value="progress" max="100"></progress>
-                        <h2 class="subtitle" x-text="question.text"></h2>
+                        <!-- Question countdown. JS drives the :value via x-bind; the
+                             100ms client-side interpolation lives in GameApp.js. -->
+                        <progress class="progress block w-full h-[3px] bg-border rounded-full overflow-hidden mb-6 [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:bg-accent [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear [&::-moz-progress-bar]:bg-accent"
+                                  :value="progress" max="100"></progress>
+
+                        <h2 class="mb-6 font-display text-[clamp(1.6rem,5vw,2.4rem)] font-bold leading-[1.15] tracking-tight text-text" x-text="question.text"></h2>
 
                         <template x-if="question.imageUrl">
-                            <figure class="image">
+                            <figure class="image mb-6">
                                 <img alt="" :src="question.imageUrl" :alt="question.text"
+                                     class="block max-w-full h-auto rounded-sm border border-border"
                                      x-show="!imageError"
                                      @error="imageError = true">
                             </figure>
                         </template>
 
                         <template x-if="feedback">
-                            <div class="notification"
-                                 :class="feedback.timedOut ? 'is-warning' : feedback.correct ? 'is-success' : 'is-danger'">
-                                <p class="is-size-4"
+                            <div data-feedback
+                                 class="feedback-banner mb-6"
+                                 :class="feedback.timedOut ? 'feedback-warning' : feedback.correct ? 'feedback-success' : 'feedback-danger'">
+                                <p class="font-display text-xl font-semibold"
                                    x-text="feedback.timedOut ? 'Time out! ⏰' : feedback.correct ? 'Correct! ✅' : 'Wrong! ❌'"></p>
                                 <template x-if="!feedback.timedOut">
-                                    <p>Score: <span x-text="feedback.score"></span></p>
+                                    <p class="mt-1 text-text-dim">Score: <span class="text-text font-semibold" x-text="feedback.score"></span></p>
                                 </template>
                             </div>
                         </template>
 
-                        <div class="buttons" x-show="!feedback">
+                        <div class="flex flex-col gap-2.5" x-show="!feedback">
                             <template x-for="option in question.options" :key="option.id">
-                                <button class="button is-fullwidth" @click="submitAnswer(option.id)" x-text="option.text"></button>
+                                <button class="btn-answer" @click="submitAnswer(option.id)" x-text="option.text"></button>
                             </template>
                         </div>
                     </div>
                 </template>
                 <template x-if="!question">
-                    <p>Loading question...</p>
+                    <p class="text-text-dim">Loading question...</p>
                 </template>
             </div>
 
@@ -120,7 +134,7 @@
                  finished; the claim modal (below) opens on top of it
                  for anonymous players. -->
             <div x-show="finished">
-                <h2 class="subtitle">Game Finished!</h2>
+                <h2 class="mb-6 font-display text-2xl font-semibold text-text-dim">Game Finished!</h2>
 
                 <!-- Persistent claim affordance on the leaderboard screen.
                      Renders for any anonymous player (no password) so a
@@ -130,17 +144,17 @@
                      cut. Markup mirrors the start-screen instance above
                      byte-for-byte (see comment there). -->
                 <template x-if="isAnonymous()">
-                    <article class="claim-cta mb-5">
-                        <p class="claim-cta-label">Playing as</p>
-                        <p class="claim-cta-name" x-text="player ? player.username : ''"></p>
-                        <p class="claim-cta-body" x-show="!hasCustomName()">
+                    <article class="claim-cta mb-6">
+                        <p class="label-eyebrow">Playing as</p>
+                        <p class="claim-cta-name font-mono text-accent text-[1.05rem] mb-4 break-all" x-text="player ? player.username : ''"></p>
+                        <p class="claim-cta-body text-text-dim mb-5 leading-relaxed" x-show="!hasCustomName()">
                             Pick a display name and your leaderboard row will show it
                             instead of the random one above.
                         </p>
-                        <p class="claim-cta-body" x-show="hasCustomName()">
+                        <p class="claim-cta-body text-text-dim mb-5 leading-relaxed" x-show="hasCustomName()">
                             Not happy with it? Pick a different display name.
                         </p>
-                        <button class="button is-primary" @click="openClaimModal()">
+                        <button class="btn-primary" @click="openClaimModal()">
                             <span x-show="!hasCustomName()">Set your name</span>
                             <span x-show="hasCustomName()">Change your name</span>
                         </button>
@@ -148,9 +162,9 @@
                 </template>
 
                 <template x-if="leaderboard">
-                    <div class="content">
-                        <h3>Leaderboard</h3>
-                        <table class="table is-striped is-fullwidth">
+                    <div>
+                        <h3 class="label-eyebrow mb-3">Leaderboard</h3>
+                        <table class="player-table">
                             <thead>
                                 <tr>
                                     <th>Rank</th>
@@ -160,21 +174,19 @@
                             </thead>
                             <tbody>
                                 <template x-for="entry in leaderboard.entries" :key="entry.playerId">
-                                    <tr :class="entry.isCurrentPlayer ? 'is-selected' : ''">
+                                    <tr :aria-current="entry.isCurrentPlayer ? 'true' : null">
                                         <td x-text="entry.rank"></td>
                                         <td>
                                             <span x-text="entry.username"></span>
                                             <!-- Entry 2: leaderboard-row pencil that
                                                  opens the same shared modal. Only
                                                  renders for the current player while
-                                                 they have not yet picked a name. A
-                                                 stripped-down icon button (no Bulma
-                                                 .button styling) so it sits inline
-                                                 with the username without eating a
-                                                 row-worth of space (#204). -->
+                                                 they have not yet picked a name.
+                                                 Inline icon button (no chrome) so it
+                                                 sits inline with the username (#204). -->
                                             <template x-if="entry.isCurrentPlayer && !hasCustomName()">
                                                 <button type="button"
-                                                        class="icon-button ml-2"
+                                                        class="ml-2 inline-flex align-middle bg-transparent border-0 p-0 cursor-pointer text-current opacity-65 transition-opacity hover:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 focus-visible:opacity-100"
                                                         title="Set my name"
                                                         aria-label="Set my name"
                                                         @click="openClaimModal()">
@@ -199,20 +211,20 @@
                      score below the table so they don't leave the
                      screen with nothing to show. See #181. -->
                 <template x-if="hasOffLeaderboardStanding()">
-                    <article class="standing-card mt-5">
-                        <p class="standing-label">Your score</p>
-                        <p class="standing-line">
+                    <article class="standing-card mt-6">
+                        <p class="label-eyebrow">Your score</p>
+                        <p class="text-text text-[1.05rem] leading-relaxed">
                             Rank
-                            <span class="standing-rank" x-text="leaderboard.currentPlayer.rank"></span>
+                            <span class="text-cyan font-semibold" x-text="leaderboard.currentPlayer.rank"></span>
                             ·
-                            <span class="standing-score" x-text="leaderboard.currentPlayer.score"></span>
+                            <span class="text-cyan font-semibold" x-text="leaderboard.currentPlayer.score"></span>
                              points
                         </p>
                     </article>
                 </template>
 
                 <template x-if="!leaderboard">
-                    <p>Loading leaderboard...</p>
+                    <p class="text-text-dim">Loading leaderboard...</p>
                 </template>
             </div>
 
@@ -221,58 +233,56 @@
                  cleared error). All three entry points
                  (pre-leaderboard auto-open, leaderboard-row link,
                  start-screen link) flip the same claimModalOpen flag
-                 and wire the same claimFromModal callback. -->
+                 and wire the same claimFromModal callback.
+
+                 Vertical alignment uses the visual viewport (set by
+                 app.js as --visual-viewport-height) so the modal stays
+                 above the on-screen keyboard on mobile (#196). -->
             <template x-if="claimModalOpen">
-                <div class="modal is-active" role="dialog" aria-modal="true" aria-labelledby="claim-modal-title">
-                    <div class="modal-background" @click="closeClaimModal()"></div>
-                    <div class="modal-card"
+                <div class="fixed inset-0 z-40 flex flex-col items-center bg-bg/80 backdrop-blur-sm p-4 sm:justify-center" role="dialog" aria-modal="true" aria-labelledby="claim-modal-title">
+                    <div class="absolute inset-0" @click="closeClaimModal()"></div>
+                    <div class="relative w-full max-w-[480px] mx-auto mt-4 sm:mt-0 bg-surface border border-accent-line rounded-lg shadow-2xl flex flex-col overflow-hidden"
+                         style="max-height: calc(var(--visual-viewport-height, 100svh) - 2rem)"
                          x-data="claimNameForm({
                                 submitLabel: 'Save',
                                 cancelLabel: 'Cancel',
                                 onSubmit: (name) => claimFromModal(name),
                                 onCancel: () => closeClaimModal(),
                              })">
-                        <header class="modal-card-head">
-                            <p class="modal-card-title" id="claim-modal-title">Pick a display name</p>
-                            <button class="delete" aria-label="close" @click="cancel()" :disabled="submitting"></button>
+                        <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
+                            <p class="font-display text-sm font-semibold uppercase tracking-[0.14em]" id="claim-modal-title">Pick a display name</p>
+                            <button class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer disabled:opacity-40"
+                                    aria-label="close" @click="cancel()" :disabled="submitting">&times;</button>
                         </header>
-                        <section class="modal-card-body">
-                            <p class="mb-3">This is the name that will appear on the leaderboard.</p>
-                            <div class="field">
-                                <label class="label" for="claim-name-modal">Display name</label>
-                                <div class="control">
-                                    <input id="claim-name-modal" type="text" class="input"
-                                           maxlength="64" autocomplete="off"
-                                           x-init="$nextTick(() => $el.focus())"
-                                           x-model="username"
-                                           @keydown.enter.prevent="submit()"
-                                           :disabled="submitting">
-                                </div>
+                        <section class="px-6 py-5 text-[0.95rem] flex-1 overflow-auto">
+                            <p class="mb-3 text-text-dim">This is the name that will appear on the leaderboard.</p>
+                            <div>
+                                <label class="label-eyebrow" for="claim-name-modal">Display name</label>
+                                <input id="claim-name-modal" type="text" class="form-input"
+                                       maxlength="64" autocomplete="off"
+                                       x-init="$nextTick(() => $el.focus())"
+                                       x-model="username"
+                                       @keydown.enter.prevent="submit()"
+                                       :disabled="submitting">
                             </div>
                             <template x-if="error">
-                                <div class="notification is-danger" x-text="error"></div>
+                                <div class="feedback-banner feedback-danger mt-4" x-text="error"></div>
                             </template>
                         </section>
-                        <footer class="modal-card-foot">
-                            <div class="field is-grouped">
-                                <div class="control">
-                                    <button class="button is-primary"
-                                            @click="submit()"
-                                            :disabled="submitting"
-                                            x-text="submitting ? 'Saving...' : submitLabel"></button>
-                                </div>
-                                <div class="control">
-                                    <button class="button is-light"
-                                            @click="cancel()"
-                                            :disabled="submitting"
-                                            x-text="cancelLabel"></button>
-                                </div>
-                            </div>
+                        <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
+                            <button class="btn-ghost"
+                                    @click="cancel()"
+                                    :disabled="submitting"
+                                    x-text="cancelLabel"></button>
+                            <button class="btn-primary"
+                                    @click="submit()"
+                                    :disabled="submitting"
+                                    x-text="submitting ? 'Saving...' : submitLabel"></button>
                         </footer>
                     </div>
                 </div>
             </template>
         </div>
-    </section>
+    </main>
 </body>
 </html>

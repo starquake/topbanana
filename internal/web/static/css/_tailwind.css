@@ -1,27 +1,28 @@
-/* Tailwind v4 entry point for the admin reskin.
+/* Tailwind v4 entry point shared by every surface in the app.
  *
  * Generated output lives at admin.css (also committed) — see `make tailwind`.
+ * The filename is historical; admin, auth, and the player client all link
+ * the same generated file via /assets/css/admin.css.
  *
  * v4 uses CSS-first configuration: there is no tailwind.config.js. All
  * theme tokens live in the @theme block below and are emitted as CSS
  * custom properties, which Tailwind then surfaces as utilities
  * (--color-bg → bg-bg, text-bg, border-bg, etc.).
  *
- * Bulma has been fully removed across admin + auth templates. Tailwind's
- * preflight reset is the only baseline now. The player client at
- * internal/client/static/index.html still uses Bulma directly via CDN —
- * that's a separate surface and is intentionally out of scope here.
+ * Bulma is gone everywhere — admin + auth migrated in #219, and the
+ * player surface was migrated in #238.
  */
 
 @import "tailwindcss/preflight.css" layer(base);
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
 
-/* Limit Tailwind's class scanner to the admin + auth Go-HTML templates.
- * The player client (internal/client/static/*) does not use Tailwind, so
- * excluding it from the scan keeps the generated CSS lean. */
+/* Scan every surface so utility classes used in any of them survive
+ * tree-shaking. Paths are relative to this file at
+ * internal/web/static/css/_tailwind.css. */
 @source "../../tmpl/admin";
 @source "../../tmpl/auth";
+@source "../../../client/static";
 
 @theme {
     /* Palette — same tokens as mockups/admin-redesign-tailwind/quiz-list.html. */
@@ -312,5 +313,89 @@
     /* Auth + admin error shared layout: centred card on dark backdrop. */
     .auth-shell {
         @apply max-w-md mx-auto;
+    }
+
+    /* --- Player-surface components (#238). Lifted from the old
+     * synthwave.css. Used only by internal/client/static/index.html;
+     * named generically so admin can pick them up if a future page
+     * needs the same affordance. */
+
+    /* Left-stripe call-to-action card — the "Playing as <petname>"
+     * banner that prompts an anonymous player to claim a name. The
+     * accent stripe sets it apart from neutral surface cards. */
+    .claim-cta {
+        @apply mb-6 bg-surface border border-border-soft border-l-[3px] border-l-accent rounded-md px-6 py-5;
+    }
+
+    /* Same shape, cyan stripe — "Your score" card shown to players who
+     * finished but landed off the visible top-N (#181). */
+    .standing-card {
+        @apply bg-surface border border-border-soft border-l-[3px] border-l-cyan rounded-md px-6 py-5;
+    }
+
+    /* Fullwidth answer button. Left-aligned text (matches how options
+     * are listed in the admin question form), 44px touch target on
+     * mobile (#194), idle = surface, hover/focus = accent ring. */
+    .btn-answer {
+        @apply w-full min-h-[44px] sm:min-h-14 px-5 py-3 text-left justify-start
+               inline-flex items-center
+               bg-surface text-text border border-border rounded-sm
+               font-medium text-[0.95rem]
+               transition-colors hover:border-accent hover:bg-surface-2
+               focus-visible:outline-none focus-visible:border-accent focus-visible:bg-surface-2 focus-visible:shadow-focus
+               disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-surface disabled:hover:border-border
+               cursor-pointer;
+    }
+
+    /* Per-question feedback banner. Restrained card with a single
+     * accent-coloured top border — three semantic variants. The
+     * `[data-feedback]` selector on the same element is what
+     * GameApp.js's anime.js animation hooks into; the class drives
+     * styling, the attribute drives motion. */
+    .feedback-banner {
+        @apply bg-surface text-text border border-border border-t-2 border-t-accent rounded-sm px-5 py-4;
+    }
+    .feedback-success {
+        @apply border-t-cyan;
+    }
+    .feedback-success p:first-child {
+        @apply text-cyan;
+    }
+    .feedback-danger {
+        @apply border-t-danger;
+    }
+    .feedback-danger p:first-child {
+        @apply text-danger;
+    }
+    .feedback-warning {
+        @apply border-t-warning;
+    }
+    .feedback-warning p:first-child {
+        @apply text-warning;
+    }
+
+    /* Leaderboard table — flat surface, striped rows, accent-tinted
+     * highlight on the current player's row (driven by aria-current
+     * instead of an is-* class). */
+    .player-table {
+        @apply w-full bg-surface border border-border-soft rounded-md overflow-hidden;
+    }
+    .player-table th {
+        @apply px-4 py-3 text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-left border-b border-border-soft;
+    }
+    .player-table td {
+        @apply px-4 py-3 text-text border-b border-border-soft;
+    }
+    .player-table tbody tr:last-child td {
+        @apply border-b-0;
+    }
+    .player-table tbody tr:nth-child(even):not([aria-current]) {
+        @apply bg-surface-2;
+    }
+    .player-table tbody tr[aria-current="true"] {
+        @apply bg-accent-soft;
+    }
+    .player-table tbody tr[aria-current="true"] td {
+        @apply text-accent border-accent-line;
     }
 }
