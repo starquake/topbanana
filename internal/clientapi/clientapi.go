@@ -2,6 +2,8 @@
 package clientapi
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,6 +15,7 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/handlers"
+	"github.com/starquake/topbanana/internal/leaderboard"
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
@@ -136,6 +139,90 @@ func HandleQuizGet(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 	})
 }
 
+// leaderboardLimit caps the number of rows the REST + SSE leaderboards
+// return. Frontend renders the rest of the player's standing via the
+// currentPlayer field below (#181).
+const leaderboardLimit = 10
+
+// quizLeaderboardEntryResponse is one row of the leaderboard wire shape.
+// Declared at package scope so both HandleQuizLeaderboard and
+// HandleQuizLeaderboardStream can build it.
+type quizLeaderboardEntryResponse struct {
+	PlayerID        int64  `json:"playerId"`
+	Username        string `json:"username"`
+	Score           int    `json:"score"`
+	Rank            int    `json:"rank"`
+	IsCurrentPlayer bool   `json:"isCurrentPlayer"`
+}
+
+// quizLeaderboardResponse is the full leaderboard wire shape. The SSE
+// endpoint sends one of these per event; the REST endpoint sends one.
+type quizLeaderboardResponse struct {
+	QuizID        int64                          `json:"quizId"`
+	Entries       []quizLeaderboardEntryResponse `json:"entries"`
+	CurrentPlayer *quizLeaderboardEntryResponse  `json:"currentPlayer"`
+}
+
+func toEntryResponse(e game.LeaderboardEntry) quizLeaderboardEntryResponse {
+	return quizLeaderboardEntryResponse{
+		PlayerID:        e.PlayerID,
+		Username:        e.Username,
+		Score:           e.Score,
+		Rank:            e.Rank,
+		IsCurrentPlayer: e.IsCurrentPlayer,
+	}
+}
+
+// fetchQuizLeaderboard wraps the service call and shape translation so
+// the two leaderboard handlers (REST + SSE) share one code path. Pure:
+// it does not touch the [http.ResponseWriter] so the SSE handler can
+// call it mid-stream (after headers are committed) without risk of
+// writing an HTTP error response into the event-stream body. Callers
+// map the returned error to the appropriate transport-level signal.
+func fetchQuizLeaderboard(
+	ctx context.Context,
+	service *game.Service,
+	quizID, playerID int64,
+) (quizLeaderboardResponse, error) {
+	result, err := service.GetQuizLeaderboard(ctx, quizID, playerID, leaderboardLimit)
+	if err != nil {
+		return quizLeaderboardResponse{}, fmt.Errorf("fetch quiz leaderboard: %w", err)
+	}
+
+	respEntries := make([]quizLeaderboardEntryResponse, 0, len(result.Entries))
+	for _, e := range result.Entries {
+		respEntries = append(respEntries, toEntryResponse(e))
+	}
+
+	res := quizLeaderboardResponse{QuizID: quizID, Entries: respEntries}
+	if result.CurrentPlayer != nil {
+		cp := toEntryResponse(*result.CurrentPlayer)
+		res.CurrentPlayer = &cp
+	}
+
+	return res, nil
+}
+
+// writeQuizLeaderboardError translates a fetchQuizLeaderboard error into
+// the right HTTP error response. Only safe to call before any response
+// body has been written — the SSE handler uses this for the initial
+// snapshot only, and just exits the stream on subsequent errors.
+func writeQuizLeaderboardError(
+	ctx context.Context,
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	err error,
+) {
+	if errors.Is(err, quiz.ErrQuizNotFound) {
+		http.NotFound(w, r)
+
+		return
+	}
+	logger.ErrorContext(ctx, "error retrieving quiz leaderboard", slog.Any("err", err))
+	http.Error(w, err.Error(), http.StatusInternalServerError)
+}
+
 // HandleQuizLeaderboard returns the top scoring players for the given quiz.
 // Each player appears at most once, with their total score for the quiz; ties
 // are broken by ascending username for a stable order. IsCurrentPlayer is set
@@ -147,32 +234,6 @@ func HandleQuizGet(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 // the truncated top-N. Frontend uses this to render an off-leaderboard
 // "Your score" card — see #181.
 func HandleQuizLeaderboard(logger *slog.Logger, service *game.Service) http.Handler {
-	const leaderboardLimit = 10
-
-	type entryResponse struct {
-		PlayerID        int64  `json:"playerId"`
-		Username        string `json:"username"`
-		Score           int    `json:"score"`
-		Rank            int    `json:"rank"`
-		IsCurrentPlayer bool   `json:"isCurrentPlayer"`
-	}
-
-	type leaderboardResponse struct {
-		QuizID        int64           `json:"quizId"`
-		Entries       []entryResponse `json:"entries"`
-		CurrentPlayer *entryResponse  `json:"currentPlayer"`
-	}
-
-	toEntryResponse := func(e game.LeaderboardEntry) entryResponse {
-		return entryResponse{
-			PlayerID:        e.PlayerID,
-			Username:        e.Username,
-			Score:           e.Score,
-			Rank:            e.Rank,
-			IsCurrentPlayer: e.IsCurrentPlayer,
-		}
-	}
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
@@ -191,36 +252,157 @@ func HandleQuizLeaderboard(logger *slog.Logger, service *game.Service) http.Hand
 			return
 		}
 
-		result, err := service.GetQuizLeaderboard(ctx, quizID, player.ID, leaderboardLimit)
+		res, err := fetchQuizLeaderboard(ctx, service, quizID, player.ID)
 		if err != nil {
-			if errors.Is(err, quiz.ErrQuizNotFound) {
-				http.NotFound(w, r)
-
-				return
-			}
-			logger.ErrorContext(ctx, "error retrieving quiz leaderboard", slog.Any("err", err))
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeQuizLeaderboardError(ctx, w, r, logger, err)
 
 			return
 		}
 
-		respEntries := make([]entryResponse, 0, len(result.Entries))
-		for _, e := range result.Entries {
-			respEntries = append(respEntries, toEntryResponse(e))
-		}
-
-		res := leaderboardResponse{QuizID: quizID, Entries: respEntries}
-		if result.CurrentPlayer != nil {
-			cp := toEntryResponse(*result.CurrentPlayer)
-			res.CurrentPlayer = &cp
-		}
-
-		if err = handlers.EncodeJSON(w, http.StatusOK, res); err != nil {
+		if err := handlers.EncodeJSON(w, http.StatusOK, res); err != nil {
 			logger.ErrorContext(ctx, "error encoding leaderboardResponse", slog.Any("err", err))
 
 			return
 		}
 	})
+}
+
+// leaderboardStreamer bundles the per-request dependencies of the SSE
+// leaderboard stream. Methods on this type keep helper signatures
+// small instead of threading six parameters through each call.
+type leaderboardStreamer struct {
+	w        http.ResponseWriter
+	rc       *http.ResponseController
+	logger   *slog.Logger
+	service  *game.Service
+	quizID   int64
+	playerID int64
+}
+
+// writeEvent writes the given leaderboard response as a single SSE
+// `data:` frame and flushes. Returns false on any write/flush failure
+// (client disconnected, broken pipe, encoding error) so the caller can
+// exit the stream loop cleanly.
+func (s *leaderboardStreamer) writeEvent(ctx context.Context, res quizLeaderboardResponse) bool {
+	payload, err := json.Marshal(res)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "error marshalling leaderboard event", slog.Any("err", err))
+
+		return false
+	}
+	if _, err := fmt.Fprintf(s.w, "data: %s\n\n", payload); err != nil {
+		return false
+	}
+	if err := s.rc.Flush(); err != nil {
+		return false
+	}
+
+	return true
+}
+
+// HandleQuizLeaderboardStream pushes the leaderboard down a long-lived
+// Server-Sent Events connection. Every time game.Service.SubmitAnswer
+// commits an answer for this quiz, the hub fires a tick and this handler
+// re-fetches the leaderboard and writes one `data:` event. Subscribers
+// see the initial snapshot on connect; per-event payloads are the same
+// JSON shape HandleQuizLeaderboard returns, so the client can reuse one
+// parser path.
+//
+// Lifecycle:
+//   - Connect: subscribe to hub, emit initial snapshot, then loop.
+//   - On every tick from the hub: re-fetch + emit one SSE event.
+//   - On client disconnect (r.Context().Done()): unsubscribe and return.
+//
+// Coalescing: the hub buffer is 1 per subscriber, so if answers commit
+// faster than the client drains, the client sees a single repaint that
+// reflects the latest state. No event is "lost data" — we always send
+// the current full snapshot, not a delta.
+func HandleQuizLeaderboardStream(
+	logger *slog.Logger, service *game.Service, hub *leaderboard.Hub,
+) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		quizID, ok := handlers.ParseIDFromSlugPath(w, r, logger, "slugID")
+		if !ok {
+			return
+		}
+
+		player, ok := auth.PlayerFromContext(ctx)
+		if !ok {
+			logger.ErrorContext(ctx, "missing player on context for leaderboard stream")
+			http.Error(w, "internal error", http.StatusInternalServerError)
+
+			return
+		}
+
+		// Subscribe BEFORE the initial snapshot so we never miss a publish
+		// that lands between fetch and subscribe.
+		events, unsubscribe := hub.Subscribe(quizID)
+		defer unsubscribe()
+
+		// Initial fetch BEFORE any header write so an error (ErrQuizNotFound,
+		// store hiccup) can still be surfaced as a proper HTTP status.
+		// Subsequent fetch errors inside the loop happen after the response
+		// is committed as text/event-stream, so they cannot be reported as
+		// HTTP status codes — we log and end the stream there.
+		res, err := fetchQuizLeaderboard(ctx, service, quizID, player.ID)
+		if err != nil {
+			writeQuizLeaderboardError(ctx, w, r, logger, err)
+
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Connection", "keep-alive")
+		// Disable proxy-level buffering (nginx etc.) so the client sees
+		// events promptly rather than in large flushes.
+		w.Header().Set("X-Accel-Buffering", "no")
+
+		streamer := &leaderboardStreamer{
+			w:        w,
+			rc:       http.NewResponseController(w),
+			logger:   logger,
+			service:  service,
+			quizID:   quizID,
+			playerID: player.ID,
+		}
+
+		if !streamer.writeEvent(ctx, res) {
+			return
+		}
+
+		streamer.run(ctx, events)
+	})
+}
+
+// run drains the hub channel and writes one SSE frame per tick until
+// the client disconnects or the channel closes. Refresh errors after
+// the initial snapshot cannot be reported as HTTP status (the response
+// is already committed as text/event-stream), so the loop logs and
+// exits — the client will reconnect via EventSource and re-run the
+// initial-snapshot path, which can surface the error cleanly.
+func (s *leaderboardStreamer) run(ctx context.Context, events <-chan struct{}) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-events:
+			if !ok {
+				return
+			}
+			res, err := fetchQuizLeaderboard(ctx, s.service, s.quizID, s.playerID)
+			if err != nil {
+				s.logger.ErrorContext(ctx, "error refreshing leaderboard for SSE", slog.Any("err", err))
+
+				return
+			}
+			if !s.writeEvent(ctx, res) {
+				return
+			}
+		}
+	}
 }
 
 // HandleCreateGame creates a new game.

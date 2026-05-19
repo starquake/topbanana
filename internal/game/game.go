@@ -180,11 +180,21 @@ type Store interface {
 	DeleteGamesForPlayerOnQuiz(ctx context.Context, playerID, quizID int64) error
 }
 
-// Service represents a game service.
+// LeaderboardPublisher is the tiny seam Service uses to signal that a
+// quiz's leaderboard has moved. Implemented by *leaderboard.Hub in
+// production; nil-by-default so tests that don't care about streaming
+// don't have to wire anything up.
+type LeaderboardPublisher interface {
+	Publish(quizID int64)
+}
+
+// Service exposes the quiz-gameplay use cases on top of the store layer
+// (game + quiz). Holds a logger and an optional LeaderboardPublisher.
 type Service struct {
-	store     Store
-	quizStore quiz.Store
-	logger    *slog.Logger
+	store                Store
+	quizStore            quiz.Store
+	logger               *slog.Logger
+	leaderboardPublisher LeaderboardPublisher
 }
 
 // NewService initializes and returns a new instance of Service with the provided game and quiz stores.
@@ -194,6 +204,19 @@ func NewService(gameStore Store, quizStore quiz.Store, logger *slog.Logger) *Ser
 		quizStore: quizStore,
 		logger:    logger,
 	}
+}
+
+// SetLeaderboardPublisher wires a publisher invoked on every successful
+// SubmitAnswer so SSE subscribers (or any other listener) learn about
+// score changes. Optional — Service works fine without one.
+//
+// Not safe for concurrent use: must be called during startup wiring,
+// before the service is handed to any HTTP handler that may invoke
+// SubmitAnswer. There is no in-flight reconfiguration use case for
+// this field; if one ever appears, swap the bare field for an
+// atomic.Pointer.
+func (s *Service) SetLeaderboardPublisher(p LeaderboardPublisher) {
+	s.leaderboardPublisher = p
 }
 
 // IsCompleted reports whether the game has had every quiz question issued.
@@ -409,6 +432,13 @@ func (s *Service) SubmitAnswer(
 
 	if err = s.store.CreateAnswer(ctx, a); err != nil {
 		return nil, fmt.Errorf("failed to create answer: %w", err)
+	}
+
+	// Signal SSE subscribers that the leaderboard has moved. Non-blocking
+	// (the hub buffers one event per subscriber and drops on backpressure),
+	// so this never delays the answer-submit response.
+	if s.leaderboardPublisher != nil {
+		s.leaderboardPublisher.Publish(g.QuizID)
 	}
 
 	return a, nil
