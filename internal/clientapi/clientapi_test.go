@@ -31,6 +31,7 @@ type stubQuizStore struct {
 	getQuiz     func(ctx context.Context, id int64) (*quiz.Quiz, error)
 	quizExists  func(ctx context.Context, id int64) (bool, error)
 	getOption   func(ctx context.Context, id int64) (*quiz.Option, error)
+	getQuestion func(ctx context.Context, id int64) (*quiz.Question, error)
 }
 
 func (stubQuizStore) Ping(_ context.Context) error { return nil }
@@ -89,8 +90,12 @@ func (stubQuizStore) ListQuestions(_ context.Context, _ int64) ([]*quiz.Question
 	return nil, errStub
 }
 
-func (stubQuizStore) GetQuestion(_ context.Context, _ int64) (*quiz.Question, error) {
-	return nil, errStub
+func (s stubQuizStore) GetQuestion(ctx context.Context, id int64) (*quiz.Question, error) {
+	if s.getQuestion == nil {
+		return nil, errStub
+	}
+
+	return s.getQuestion(ctx, id)
 }
 
 func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Option, error) {
@@ -1043,13 +1048,15 @@ func TestHandleAnswerPost(t *testing.T) {
 				},
 			},
 			stubQuizStore{
-				getOption: func(_ context.Context, _ int64) (*quiz.Option, error) {
-					// Return an option that belongs to a different question (QuestionID: 99).
-					return &quiz.Option{
-						ID:         200,
-						QuestionID: 99,
-						Text:       "Option from another question",
-						Correct:    true,
+				getQuestion: func(_ context.Context, id int64) (*quiz.Question, error) {
+					// Return a question whose option set does not include
+					// option 200 — SubmitAnswer must surface
+					// ErrOptionNotInQuestion, which the handler maps to 400.
+					return &quiz.Question{
+						ID:      id,
+						QuizID:  1,
+						Text:    "Q",
+						Options: []*quiz.Option{{ID: 50, QuestionID: id}},
 					}, nil
 				},
 			},

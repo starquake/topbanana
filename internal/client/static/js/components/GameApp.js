@@ -456,20 +456,28 @@ export class GameApp {
         if (this.feedback || this.submittingAnswer) return;
         this.submittingAnswer = true;
         try {
-            this.feedback = await gameService.submitAnswer(this.gameId, this.question.id, optionId);
+            const fb = await gameService.submitAnswer(this.gameId, this.question.id, optionId);
+            // Track which option the player picked so the template can
+            // keep the buttons visible during feedback and style the
+            // pick separately from the correct option(s) — see #233.
+            fb.pickedOptionId = optionId;
+            this.feedback = fb;
             this.animateFeedback(this.feedback.correct);
         } finally {
             this.submittingAnswer = false;
         }
 
         // Stop the countdown so it cannot fire handleTimeout on top
-        // of a real submission while we wait for the 2s feedback pause.
+        // of a real submission while we wait for the feedback pause.
         if (this.timer) {
             clearInterval(this.timer);
             this.timer = null;
         }
 
-        await this.resolveAndAdvance();
+        // Hold longer when the pick was wrong so the player has time
+        // to read the highlighted correct option (#233).
+        const pauseMs = this.feedback.correct ? 2000 : 3000;
+        await this.resolveAndAdvance(pauseMs);
     }
 
     // resolveAndAdvance waits the per-question feedback pause and then
@@ -481,11 +489,29 @@ export class GameApp {
     // buttons region (gated only on `!feedback`) re-mounts for one
     // frame with the old question's options before nextQuestion()
     // resolves and re-binds them.
-    async resolveAndAdvance() {
-        await new Promise(resolve => setTimeout(resolve, 2000));
+    async resolveAndAdvance(pauseMs = 2000) {
+        await new Promise(resolve => setTimeout(resolve, pauseMs));
         this.question = null;
         this.feedback = null;
         await this.nextQuestion();
+    }
+
+    // optionStateClass picks the per-button styling during feedback so
+    // the buttons themselves communicate correctness, not just the
+    // banner. Returns one of:
+    //   - 'btn-answer-correct' when the option is in feedback.correctOptionIds
+    //   - 'btn-answer-wrong' when the option is the player's pick AND it was wrong
+    //   - 'btn-answer-dim' for the remaining options (not the pick, not correct)
+    //   - 'btn-answer' (the default) when no feedback is set yet
+    // Timed-out questions have no correctOptionIds (the server is not
+    // told about a timeout, so the client doesn't have the data); the
+    // function falls back to the default class in that case.
+    optionStateClass(option) {
+        if (!this.feedback) return 'btn-answer';
+        const correctIds = this.feedback.correctOptionIds || [];
+        if (correctIds.includes(option.id)) return 'btn-answer-correct';
+        if (this.feedback.pickedOptionId === option.id) return 'btn-answer-wrong';
+        return 'btn-answer-dim';
     }
 
 }

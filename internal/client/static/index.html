@@ -218,9 +218,24 @@
                             </div>
                         </template>
 
-                        <div class="flex flex-col gap-2.5" x-show="!feedback">
+                        <!-- The button container stays visible during
+                             feedback so the per-option styling (correct
+                             / wrong / dim) can reveal the right answer
+                             after a wrong pick — see #233. The buttons
+                             remain in the DOM; their click handlers are
+                             guarded by the feedback gate inside
+                             submitAnswer, and the disabled attribute
+                             prevents focus-and-enter activation while
+                             feedback is shown. optionStateClass picks
+                             the per-button class based on whether the
+                             option is the player's pick, one of the
+                             correct ones, or neither. -->
+                        <div class="flex flex-col gap-2.5">
                             <template x-for="option in question.options" :key="option.id">
-                                <button class="btn-answer" @click="submitAnswer(option.id)" x-text="option.text"></button>
+                                <button :class="optionStateClass(option)"
+                                        :disabled="!!feedback"
+                                        @click="submitAnswer(option.id)"
+                                        x-text="option.text"></button>
                             </template>
                         </div>
                     </div>

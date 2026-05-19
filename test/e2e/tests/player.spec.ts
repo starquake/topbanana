@@ -60,6 +60,15 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
       expectedSuccesses++;
     } else {
       await expect(page.locator('.feedback-danger')).toBeVisible();
+      // #233 — after a wrong pick the correct option(s) light up so
+      // the player can learn what was right before the next question
+      // loads. Only assert the reveal on questions that actually have
+      // a correct option (the "Which animals are mammals?" fixture
+      // entry has correctIndices: [], i.e. no correct answers, so
+      // there's nothing for the client to highlight there).
+      if (q.correctIndices.length > 0) {
+        await expect(page.locator('.btn-answer-correct').first()).toBeVisible();
+      }
     }
   }
 
