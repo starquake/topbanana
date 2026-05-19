@@ -601,6 +601,44 @@ func (q *Queries) ListParticipantsByGameID(ctx context.Context, gameID string) (
 	return items, nil
 }
 
+const listQuizIDsForPlayer = `-- name: ListQuizIDsForPlayer :many
+SELECT DISTINCT g.quiz_id
+FROM game_answers ga
+         JOIN games g ON g.id = ga.game_id
+WHERE ga.player_id = ?
+`
+
+// Lists distinct quiz IDs where the given player has at least one
+// recorded answer. The claim-name flow uses this to know which
+// leaderboard SSE streams to repaint when a player updates their
+// display name: every quiz they appear on gets a fresh snapshot
+// pushed to its subscribers. Filtering on game_answers rather than
+// game_participants means we skip quizzes the player joined but
+// never actually answered on, which would not show up on the
+// leaderboard anyway.
+func (q *Queries) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listQuizIDsForPlayer, playerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var quiz_id int64
+		if err := rows.Scan(&quiz_id); err != nil {
+			return nil, err
+		}
+		items = append(items, quiz_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const startGame = `-- name: StartGame :execresult
 UPDATE games
 SET started_at = CURRENT_TIMESTAMP

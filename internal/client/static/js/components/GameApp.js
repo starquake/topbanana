@@ -80,6 +80,17 @@ export class GameApp {
         // and overwrite the real feedback with a timeout banner — see
         // the race notes on handleTimeout for #175.
         this.submittingAnswer = false;
+        // Server-Sent Events handle for the leaderboard live stream
+        // (#239). Opened when the leaderboard becomes visible; closed on
+        // navigation away. Null when no subscription is active.
+        this.leaderboardEventSource = null;
+        // Register the unload cleanup exactly once. Doing it here
+        // (rather than per-subscribe) means repeat subscriptions don't
+        // stack up redundant listeners. closeLeaderboardStream is a
+        // safe no-op when there's no active subscription.
+        if (typeof window !== 'undefined') {
+            window.addEventListener('beforeunload', () => this.closeLeaderboardStream());
+        }
     }
 
     async init() {
@@ -204,13 +215,35 @@ export class GameApp {
     // after reset so a returning player sees the lockout immediately.
     // Returns the existing game payload (or null) so callers can avoid a
     // second round-trip in startGame.
+    //
+    // When the player has already completed the selected quiz, the
+    // method also primes the leaderboard view (finished=true,
+    // quizSlugId set, leaderboard fetched, SSE subscription opened) so
+    // the leaderboard renders alongside the start-screen lockout
+    // banner. The closeLeaderboardStream / state-reset block at the
+    // top makes the helper safe to call repeatedly on dropdown
+    // changes: switching to a fresh quiz tears down any leftover
+    // already-played view before probing again.
     async checkAlreadyPlayed() {
         this.startError = null;
+        // Reset any prior already-played view before probing the new
+        // selection. Idempotent: no-ops when nothing is open.
+        this.closeLeaderboardStream();
+        this.finished = false;
+        this.leaderboard = null;
+        this.quizSlugId = null;
+
         const slugId = this.slugIdFor(this.selectedQuizId);
         if (!slugId) return null;
         const existing = await gameService.getMyGameForQuiz(slugId);
         if (existing && existing.completed) {
             this.startError = "You've already completed this quiz.";
+            this.quizSlugId = slugId;
+            this.leaderboard = await gameService.getQuizLeaderboard(slugId);
+            this.finished = true;
+            // SSE stream so the row repaints when other finishers land
+            // (or this player renames themselves via the claim flow).
+            this.subscribeLeaderboardStream();
         }
         return existing;
     }
@@ -252,6 +285,11 @@ export class GameApp {
             // auto-petname to the chosen name.
             this.leaderboard = await gameService.getQuizLeaderboard(this.quizSlugId);
             this.animateLeaderboard();
+            // Live updates for new finishers landing after this player.
+            // EventSource auto-reconnects on transient drops; we close
+            // it explicitly on beforeunload so the server-side
+            // subscriber map stays clean.
+            this.subscribeLeaderboardStream();
             if (!this.hasCustomName()) {
                 this.openClaimModal();
             }
@@ -285,6 +323,41 @@ export class GameApp {
                 easing: 'easeOutQuart',
             });
         });
+    }
+
+    // subscribeLeaderboardStream opens a Server-Sent Events connection
+    // for the current quiz's leaderboard and updates `this.leaderboard`
+    // on every event. Idempotent: a second call closes any prior
+    // subscription before opening a new one. Safe no-op when the
+    // browser lacks EventSource (very old WebKit).
+    subscribeLeaderboardStream() {
+        this.closeLeaderboardStream();
+        if (typeof EventSource === 'undefined' || !this.quizSlugId) return;
+        const url = `/api/quizzes/${encodeURIComponent(this.quizSlugId)}/leaderboard/stream`;
+        const source = new EventSource(url);
+        source.onmessage = (ev) => {
+            try {
+                this.leaderboard = JSON.parse(ev.data);
+            } catch (err) {
+                console.warn('leaderboard SSE payload was not valid JSON', err);
+            }
+        };
+        source.onerror = () => {
+            // EventSource auto-reconnects unless we close it. Leave the
+            // existing leaderboard in place so the UI doesn't flicker
+            // while the browser retries.
+        };
+        this.leaderboardEventSource = source;
+    }
+
+    // closeLeaderboardStream is safe to call regardless of subscription
+    // state. Used both to clean up after a finished quiz and as a
+    // defensive guard before opening a fresh subscription.
+    closeLeaderboardStream() {
+        if (this.leaderboardEventSource) {
+            this.leaderboardEventSource.close();
+            this.leaderboardEventSource = null;
+        }
     }
 
     // animateLeaderboard slides the leaderboard rows in from the right

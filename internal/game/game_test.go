@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ type stubStore struct {
 	listAnswersForQuizLeaderboard func(ctx context.Context, quizID int64) ([]*LeaderboardAnswer, error)
 	getGameByPlayerAndQuiz        func(ctx context.Context, playerID, quizID int64) (*Game, error)
 	deleteGamesForPlayerOnQuiz    func(ctx context.Context, playerID, quizID int64) error
+	listQuizIDsForPlayer          func(ctx context.Context, playerID int64) ([]int64, error)
 }
 
 func (stubStore) Ping(_ context.Context) error { return nil }
@@ -69,6 +71,14 @@ func (s stubStore) DeleteGamesForPlayerOnQuiz(
 	}
 
 	return s.deleteGamesForPlayerOnQuiz(ctx, playerID, quizID)
+}
+
+func (s stubStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]int64, error) {
+	if s.listQuizIDsForPlayer == nil {
+		return nil, nil
+	}
+
+	return s.listQuizIDsForPlayer(ctx, playerID)
 }
 
 // stubQuizStore satisfies quiz.Store for service-level tests. Only GetQuiz
@@ -1098,6 +1108,100 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 		}
 		if result.CurrentPlayer != nil {
 			t.Errorf("CurrentPlayer = %+v, want nil (player has no row)", result.CurrentPlayer)
+		}
+	})
+}
+
+// recordingPublisher captures every Publish call so a test can assert
+// the exact set of quiz IDs that were notified.
+type recordingPublisher struct {
+	published []int64
+}
+
+// Publish records the quiz ID in the order the call was made so the
+// test can assert which leaderboards the fan-out ticked.
+func (p *recordingPublisher) Publish(quizID int64) {
+	p.published = append(p.published, quizID)
+}
+
+func TestService_PublishLeaderboardForPlayer(t *testing.T) {
+	t.Parallel()
+
+	t.Run("publishes once per quiz the player has answered on", func(t *testing.T) {
+		t.Parallel()
+
+		pub := &recordingPublisher{}
+		svc := NewService(
+			stubStore{
+				listQuizIDsForPlayer: func(_ context.Context, playerID int64) ([]int64, error) {
+					if got, want := playerID, int64(42); got != want {
+						t.Errorf("ListQuizIDsForPlayer playerID = %d, want %d", got, want)
+					}
+
+					return []int64{7, 11, 13}, nil
+				},
+			},
+			stubQuizStore{},
+			slog.New(slog.DiscardHandler),
+		)
+		svc.SetLeaderboardPublisher(pub)
+
+		if err := svc.PublishLeaderboardForPlayer(t.Context(), 42); err != nil {
+			t.Fatalf("PublishLeaderboardForPlayer err = %v, want nil", err)
+		}
+
+		want := []int64{7, 11, 13}
+		if got := pub.published; !slices.Equal(got, want) {
+			t.Errorf("PublishLeaderboardForPlayer recorded %v, want %v", got, want)
+		}
+	})
+
+	t.Run("no publisher wired is a no-op", func(t *testing.T) {
+		t.Parallel()
+
+		svc := NewService(
+			stubStore{
+				listQuizIDsForPlayer: func(_ context.Context, _ int64) ([]int64, error) {
+					t.Error("ListQuizIDsForPlayer must not be called when no publisher is wired")
+
+					return nil, nil
+				},
+			},
+			stubQuizStore{},
+			slog.New(slog.DiscardHandler),
+		)
+
+		if err := svc.PublishLeaderboardForPlayer(t.Context(), 1); err != nil {
+			t.Errorf("PublishLeaderboardForPlayer err = %v, want nil", err)
+		}
+	})
+
+	t.Run("store error is wrapped and surfaced", func(t *testing.T) {
+		t.Parallel()
+
+		pub := &recordingPublisher{}
+		boom := errors.New("boom")
+		svc := NewService(
+			stubStore{
+				listQuizIDsForPlayer: func(_ context.Context, _ int64) ([]int64, error) {
+					return nil, boom
+				},
+			},
+			stubQuizStore{},
+			slog.New(slog.DiscardHandler),
+		)
+		svc.SetLeaderboardPublisher(pub)
+
+		err := svc.PublishLeaderboardForPlayer(t.Context(), 1)
+		if got, want := err, boom; !errors.Is(got, want) {
+			t.Errorf("PublishLeaderboardForPlayer err = %v, want wrap of %v", got, want)
+		}
+		if got, want := len(pub.published), 0; got != want {
+			t.Errorf(
+				"PublishLeaderboardForPlayer recorded %d calls, want %d (listing failed before any publish)",
+				got,
+				want,
+			)
 		}
 	})
 }

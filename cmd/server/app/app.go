@@ -23,6 +23,7 @@ import (
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/database"
 	"github.com/starquake/topbanana/internal/game"
+	"github.com/starquake/topbanana/internal/leaderboard"
 	"github.com/starquake/topbanana/internal/server"
 	"github.com/starquake/topbanana/internal/store"
 )
@@ -286,8 +287,13 @@ func Run(
 
 	stores := store.New(conn, logger)
 	gameService := game.NewService(stores.Games, stores.Quizzes, logger)
+	// Process-local pub/sub for the leaderboard SSE stream (#239). The
+	// same hub is handed to the game service (publisher) and the server
+	// (subscriber side) so submitted answers fan out to live viewers.
+	leaderboardHub := leaderboard.NewHub()
+	gameService.SetLeaderboardPublisher(leaderboardHub)
 
-	srv := server.New(logger, stores, gameService, cfg)
+	srv := server.New(logger, stores, gameService, leaderboardHub, cfg)
 	if ln == nil {
 		ln, err = listener(signalCtx, cfg, logger)
 		if err != nil {

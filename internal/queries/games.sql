@@ -85,6 +85,20 @@ WHERE gp.player_id = ?
 ORDER BY g.created_at DESC
 LIMIT 1;
 
+-- name: ListQuizIDsForPlayer :many
+-- Lists distinct quiz IDs where the given player has at least one
+-- recorded answer. The claim-name flow uses this to know which
+-- leaderboard SSE streams to repaint when a player updates their
+-- display name: every quiz they appear on gets a fresh snapshot
+-- pushed to its subscribers. Filtering on game_answers rather than
+-- game_participants means we skip quizzes the player joined but
+-- never actually answered on, which would not show up on the
+-- leaderboard anyway.
+SELECT DISTINCT g.quiz_id
+FROM game_answers ga
+         JOIN games g ON g.id = ga.game_id
+WHERE ga.player_id = ?;
+
 -- name: ListGameIDsForPlayerOnQuiz :many
 -- Lists every game ID the player has on the given quiz. The reset flow
 -- collects these once at the start of the in-Go transaction and feeds them

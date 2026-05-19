@@ -12,6 +12,7 @@ import (
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/health"
+	"github.com/starquake/topbanana/internal/leaderboard"
 	"github.com/starquake/topbanana/internal/session"
 	"github.com/starquake/topbanana/internal/store"
 	"github.com/starquake/topbanana/internal/web"
@@ -22,6 +23,7 @@ func addRoutes(
 	logger *slog.Logger,
 	stores *store.Stores,
 	gameService *game.Service,
+	leaderboardHub *leaderboard.Hub,
 	cfg *config.Config,
 ) {
 	sessions := session.New([]byte(cfg.SessionKey), cfg.SecureCookies())
@@ -29,7 +31,7 @@ func addRoutes(
 
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg)
 	addAdminRoutes(mux, logger, stores, gameService, sessions, csrfMgr)
-	addAPIRoutes(mux, logger, stores, gameService, sessions)
+	addAPIRoutes(mux, logger, stores, gameService, leaderboardHub, sessions)
 
 	// Client
 	clientHandler := client.Handler(cfg)
@@ -174,6 +176,7 @@ func addAPIRoutes(
 	logger *slog.Logger,
 	stores *store.Stores,
 	gameService *game.Service,
+	leaderboardHub *leaderboard.Hub,
 	sessions *session.Manager,
 ) {
 	ensurePlayer := func(h http.Handler) http.Handler {
@@ -183,13 +186,17 @@ func addAPIRoutes(
 	mux.Handle("GET /api/players/me", ensurePlayer(clientapi.HandlePlayerGetMe(logger)))
 	mux.Handle(
 		"PATCH /api/players/me",
-		ensurePlayer(clientapi.HandlePlayerClaimName(logger, stores.Players)),
+		ensurePlayer(clientapi.HandlePlayerClaimName(logger, stores.Players, gameService)),
 	)
 	mux.Handle("GET /api/quizzes", ensurePlayer(clientapi.HandleQuizList(logger, stores.Quizzes)))
 	mux.Handle("GET /api/quizzes/{slugID}", ensurePlayer(clientapi.HandleQuizGet(logger, stores.Quizzes)))
 	mux.Handle(
 		"GET /api/quizzes/{slugID}/leaderboard",
 		ensurePlayer(clientapi.HandleQuizLeaderboard(logger, gameService)),
+	)
+	mux.Handle(
+		"GET /api/quizzes/{slugID}/leaderboard/stream",
+		ensurePlayer(clientapi.HandleQuizLeaderboardStream(logger, gameService, leaderboardHub)),
 	)
 	mux.Handle(
 		"GET /api/quizzes/{slugID}/my-game",

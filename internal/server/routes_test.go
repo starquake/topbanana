@@ -15,6 +15,7 @@ import (
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/game"
+	"github.com/starquake/topbanana/internal/leaderboard"
 	"github.com/starquake/topbanana/internal/quiz"
 	. "github.com/starquake/topbanana/internal/server"
 	"github.com/starquake/topbanana/internal/store"
@@ -166,6 +167,10 @@ func (stubGameStore) DeleteGamesForPlayerOnQuiz(_ context.Context, _, _ int64) e
 	return nil
 }
 
+func (stubGameStore) ListQuizIDsForPlayer(_ context.Context, _ int64) ([]int64, error) {
+	return nil, nil
+}
+
 func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 	t.Parallel()
 
@@ -176,7 +181,7 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 	}
 	gameSvc := game.NewService(stubGameStore{}, stubQuizStore{}, logger)
 	mux := http.NewServeMux()
-	ExportAddRoutes(mux, logger, stores, gameSvc, &config.Config{RegistrationEnabled: true})
+	ExportAddRoutes(mux, logger, stores, gameSvc, leaderboard.NewHub(), &config.Config{RegistrationEnabled: true})
 
 	tests := []struct {
 		name   string
@@ -244,7 +249,7 @@ func TestAddRoutes_RegisterDisabled_Returns404(t *testing.T) {
 	gameSvc := game.NewService(stubGameStore{}, stubQuizStore{}, logger)
 	mux := http.NewServeMux()
 	// Default-false RegistrationEnabled — /register routes should not be registered.
-	ExportAddRoutes(mux, logger, stores, gameSvc, &config.Config{})
+	ExportAddRoutes(mux, logger, stores, gameSvc, leaderboard.NewHub(), &config.Config{})
 
 	tests := []struct {
 		name   string
@@ -280,7 +285,14 @@ func TestAddRoutes_UnknownRouteReturns404(t *testing.T) {
 		Players: stubPlayerStore{},
 	}
 	mux := http.NewServeMux()
-	ExportAddRoutes(mux, logger, stores, game.NewService(stubGameStore{}, stubQuizStore{}, logger), &config.Config{})
+	ExportAddRoutes(
+		mux,
+		logger,
+		stores,
+		game.NewService(stubGameStore{}, stubQuizStore{}, logger),
+		leaderboard.NewHub(),
+		&config.Config{},
+	)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/unknown/path", nil)
 	rec := httptest.NewRecorder()
@@ -311,7 +323,14 @@ func TestAddRoutes_LoginPOST_RejectsMissingCSRF(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	cfg := &config.Config{SessionKey: "test-session-key"}
-	ExportAddRoutes(mux, logger, stores, game.NewService(stubGameStore{}, stubQuizStore{}, logger), cfg)
+	ExportAddRoutes(
+		mux,
+		logger,
+		stores,
+		game.NewService(stubGameStore{}, stubQuizStore{}, logger),
+		leaderboard.NewHub(),
+		cfg,
+	)
 
 	t.Run("missing token returns 403", func(t *testing.T) {
 		t.Parallel()
@@ -392,7 +411,14 @@ func TestAddRoutes_AdminRouteWithoutSession_RedirectsToLogin(t *testing.T) {
 		Players: stubPlayerStore{},
 	}
 	mux := http.NewServeMux()
-	ExportAddRoutes(mux, logger, stores, game.NewService(stubGameStore{}, stubQuizStore{}, logger), &config.Config{})
+	ExportAddRoutes(
+		mux,
+		logger,
+		stores,
+		game.NewService(stubGameStore{}, stubQuizStore{}, logger),
+		leaderboard.NewHub(),
+		&config.Config{},
+	)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
 	rec := httptest.NewRecorder()
@@ -421,7 +447,14 @@ func TestAddRoutes_AdminPOSTWithoutCSRF_Returns403_NotAuthRedirect(t *testing.T)
 	}
 	mux := http.NewServeMux()
 	cfg := &config.Config{SessionKey: "test-session-key"}
-	ExportAddRoutes(mux, logger, stores, game.NewService(stubGameStore{}, stubQuizStore{}, logger), cfg)
+	ExportAddRoutes(
+		mux,
+		logger,
+		stores,
+		game.NewService(stubGameStore{}, stubQuizStore{}, logger),
+		leaderboard.NewHub(),
+		cfg,
+	)
 
 	body := strings.NewReader(url.Values{}.Encode())
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/1/delete", body)
