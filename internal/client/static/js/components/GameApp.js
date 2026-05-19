@@ -215,13 +215,35 @@ export class GameApp {
     // after reset so a returning player sees the lockout immediately.
     // Returns the existing game payload (or null) so callers can avoid a
     // second round-trip in startGame.
+    //
+    // When the player has already completed the selected quiz, the
+    // method also primes the leaderboard view (finished=true,
+    // quizSlugId set, leaderboard fetched, SSE subscription opened) so
+    // the leaderboard renders alongside the start-screen lockout
+    // banner. The closeLeaderboardStream / state-reset block at the
+    // top makes the helper safe to call repeatedly on dropdown
+    // changes: switching to a fresh quiz tears down any leftover
+    // already-played view before probing again.
     async checkAlreadyPlayed() {
         this.startError = null;
+        // Reset any prior already-played view before probing the new
+        // selection. Idempotent: no-ops when nothing is open.
+        this.closeLeaderboardStream();
+        this.finished = false;
+        this.leaderboard = null;
+        this.quizSlugId = null;
+
         const slugId = this.slugIdFor(this.selectedQuizId);
         if (!slugId) return null;
         const existing = await gameService.getMyGameForQuiz(slugId);
         if (existing && existing.completed) {
             this.startError = "You've already completed this quiz.";
+            this.quizSlugId = slugId;
+            this.leaderboard = await gameService.getQuizLeaderboard(slugId);
+            this.finished = true;
+            // SSE stream so the row repaints when other finishers land
+            // (or this player renames themselves via the claim flow).
+            this.subscribeLeaderboardStream();
         }
         return existing;
     }

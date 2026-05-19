@@ -29,137 +29,43 @@
                 <span aria-hidden="true">Top<span class="text-accent">Banana</span>!</span>
             </h1>
 
-            <div x-show="!gameId">
-                <!-- Entry 3: anytime affordance on the start screen.
-                     Renders for any anonymous player (no password yet),
-                     even after they have already claimed a display name,
-                     so they can keep tweaking it before they start a
-                     quiz. The body text and button label adapt to whether
-                     they have already picked something. The end-of-quiz
-                     modal is the one-shot "auto-prompt" path and gates on
-                     hasCustomName() instead — see #165.
+            <!-- Single claim-name CTA, lifted out of the start-screen
+                 and finished-leaderboard views so the leaderboard
+                 always sits in the same position on the page —
+                 directly below the CTA — whether the player just
+                 finished a quiz or revisited an already-completed
+                 one. Hidden during gameplay (gameId && !finished) so
+                 the player's attention stays on the question.
+                 The end-of-quiz modal is the one-shot "auto-prompt"
+                 path and gates on hasCustomName() instead — see #165. -->
+            <template x-if="isAnonymous() && (!gameId || finished)">
+                <article class="claim-cta mb-6">
+                    <p class="label-eyebrow">Playing as</p>
+                    <p class="claim-cta-name font-mono text-accent text-[1.05rem] mb-4 break-all" x-text="player ? player.username : ''"></p>
+                    <p class="claim-cta-body text-text-dim mb-5 leading-relaxed" x-show="!hasCustomName()">
+                        Pick a display name and your leaderboard row will show it
+                        instead of the random one above.
+                    </p>
+                    <p class="claim-cta-body text-text-dim mb-5 leading-relaxed" x-show="hasCustomName()">
+                        Not happy with it? Pick a different display name.
+                    </p>
+                    <button class="btn-primary" @click="openClaimModal()">
+                        <span x-show="!hasCustomName()">Set your name</span>
+                        <span x-show="hasCustomName()">Change your name</span>
+                    </button>
+                </article>
+            </template>
 
-                     NB: this article is duplicated below inside the
-                     finished-leaderboard view because the two need
-                     different visual positions (above the quiz selector
-                     here, above the table there) and Alpine has no
-                     template-include primitive. The markup is kept
-                     byte-identical so future copy edits are a single
-                     search-and-replace. -->
-                <template x-if="isAnonymous()">
-                    <article class="claim-cta">
-                        <p class="label-eyebrow">Playing as</p>
-                        <p class="claim-cta-name font-mono text-accent text-[1.05rem] mb-4 break-all" x-text="player ? player.username : ''"></p>
-                        <p class="claim-cta-body text-text-dim mb-5 leading-relaxed" x-show="!hasCustomName()">
-                            Pick a display name and your leaderboard row will show it
-                            instead of the random one above.
-                        </p>
-                        <p class="claim-cta-body text-text-dim mb-5 leading-relaxed" x-show="hasCustomName()">
-                            Not happy with it? Pick a different display name.
-                        </p>
-                        <button class="btn-primary" @click="openClaimModal()">
-                            <span x-show="!hasCustomName()">Set your name</span>
-                            <span x-show="hasCustomName()">Change your name</span>
-                        </button>
-                    </article>
-                </template>
-
-                <div x-show="!deepLinkedQuiz" class="mb-6">
-                    <label class="label-eyebrow" for="quiz-select">Select a Quiz</label>
-                    <select id="quiz-select"
-                            class="form-input"
-                            x-model="selectedQuizId"
-                            @change="checkAlreadyPlayed()">
-                        <template x-for="quiz in quizzes" :key="quiz.id">
-                            <option :value="quiz.id" x-text="quiz.title"></option>
-                        </template>
-                    </select>
-                </div>
-                <template x-if="deepLinkedQuiz">
-                    <div class="mb-6">
-                        <h2 class="mb-2 font-display text-2xl font-semibold text-text" x-text="deepLinkedQuiz.title"></h2>
-                        <p class="text-text-dim leading-relaxed" x-text="deepLinkedQuiz.description"></p>
-                    </div>
-                </template>
-                <template x-if="startError">
-                    <div class="feedback-banner feedback-danger mb-5" x-text="startError"></div>
-                </template>
-                <button class="btn-primary" @click="startGame()" :disabled="!selectedQuizId || !!startError">Start Game</button>
-            </div>
-
-            <div x-show="gameId && !finished">
-                <template x-if="question">
-                    <div>
-                        <!-- Question countdown. JS drives the :value via x-bind; the
-                             100ms client-side interpolation lives in GameApp.js. -->
-                        <progress class="progress block w-full h-[3px] bg-border rounded-full overflow-hidden mb-6 [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:bg-accent [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear [&::-moz-progress-bar]:bg-accent"
-                                  :value="progress" max="100"></progress>
-
-                        <h2 class="mb-6 font-display text-[clamp(1.6rem,5vw,2.4rem)] font-bold leading-[1.15] tracking-tight text-text" x-text="question.text"></h2>
-
-                        <template x-if="question.imageUrl">
-                            <figure class="image mb-6">
-                                <img alt="" :src="question.imageUrl" :alt="question.text"
-                                     class="block max-w-full h-auto rounded-sm border border-border"
-                                     x-show="!imageError"
-                                     @error="imageError = true">
-                            </figure>
-                        </template>
-
-                        <template x-if="feedback">
-                            <div data-feedback
-                                 class="feedback-banner mb-6"
-                                 :class="feedback.timedOut ? 'feedback-warning' : feedback.correct ? 'feedback-success' : 'feedback-danger'">
-                                <p class="font-display text-xl font-semibold"
-                                   x-text="feedback.timedOut ? 'Time out! ⏰' : feedback.correct ? 'Correct! ✅' : 'Wrong! ❌'"></p>
-                                <template x-if="!feedback.timedOut">
-                                    <p class="mt-1 text-text-dim">Score: <span class="text-text font-semibold" x-text="feedback.score"></span></p>
-                                </template>
-                            </div>
-                        </template>
-
-                        <div class="flex flex-col gap-2.5" x-show="!feedback">
-                            <template x-for="option in question.options" :key="option.id">
-                                <button class="btn-answer" @click="submitAnswer(option.id)" x-text="option.text"></button>
-                            </template>
-                        </div>
-                    </div>
-                </template>
-                <template x-if="!question">
-                    <p class="text-text-dim">Loading question...</p>
-                </template>
-            </div>
-
-            <!-- Leaderboard view. Renders as soon as the quiz is
-                 finished; the claim modal (below) opens on top of it
-                 for anonymous players. -->
+            <!-- Leaderboard view. Renders whenever the player has a
+                 completed game for the selected quiz: either they
+                 just finished it (fresh-finish path in nextQuestion)
+                 or they re-visited an already-played quiz (the
+                 already-played path in checkAlreadyPlayed). Source
+                 order puts it directly below the CTA so the
+                 leaderboard stays in the same spot on screen in both
+                 cases. -->
             <div x-show="finished">
                 <h2 class="mb-6 font-display text-2xl font-semibold text-text-dim">Game Finished!</h2>
-
-                <!-- Persistent claim affordance on the leaderboard screen.
-                     Renders for any anonymous player (no password) so a
-                     player who landed outside the top 10 can still pick or
-                     change their name — the inline row-level link in the
-                     table only shows up if the current player made the
-                     cut. Markup mirrors the start-screen instance above
-                     byte-for-byte (see comment there). -->
-                <template x-if="isAnonymous()">
-                    <article class="claim-cta mb-6">
-                        <p class="label-eyebrow">Playing as</p>
-                        <p class="claim-cta-name font-mono text-accent text-[1.05rem] mb-4 break-all" x-text="player ? player.username : ''"></p>
-                        <p class="claim-cta-body text-text-dim mb-5 leading-relaxed" x-show="!hasCustomName()">
-                            Pick a display name and your leaderboard row will show it
-                            instead of the random one above.
-                        </p>
-                        <p class="claim-cta-body text-text-dim mb-5 leading-relaxed" x-show="hasCustomName()">
-                            Not happy with it? Pick a different display name.
-                        </p>
-                        <button class="btn-primary" @click="openClaimModal()">
-                            <span x-show="!hasCustomName()">Set your name</span>
-                            <span x-show="hasCustomName()">Change your name</span>
-                        </button>
-                    </article>
-                </template>
 
                 <template x-if="leaderboard">
                     <div>
@@ -225,6 +131,87 @@
 
                 <template x-if="!leaderboard">
                     <p class="text-text-dim">Loading leaderboard...</p>
+                </template>
+            </div>
+
+            <!-- Start screen. Renders whenever there is no live game
+                 (so it shows on first load, on dropdown changes, and
+                 alongside the leaderboard view on an already-played
+                 revisit). Source-ordered AFTER the leaderboard view so
+                 the leaderboard stays directly under the CTA on
+                 revisits — see the CTA comment above. -->
+            <div x-show="!gameId">
+                <!-- TODO: replace this picker with a link to a dedicated
+                     "list of quizzes" page once that view exists. The
+                     dropdown was always a placeholder for the eventual
+                     gallery / catalogue page; deep links and the start
+                     screen each carry one quiz, so the picker only
+                     matters on the bare /client/ entry point. -->
+                <div x-show="!deepLinkedQuiz" class="mb-6">
+                    <label class="label-eyebrow" for="quiz-select">Select a Quiz</label>
+                    <select id="quiz-select"
+                            class="form-input"
+                            x-model="selectedQuizId"
+                            @change="checkAlreadyPlayed()">
+                        <template x-for="quiz in quizzes" :key="quiz.id">
+                            <option :value="quiz.id" x-text="quiz.title"></option>
+                        </template>
+                    </select>
+                </div>
+                <template x-if="deepLinkedQuiz">
+                    <div class="mb-6">
+                        <h2 class="mb-2 font-display text-2xl font-semibold text-text" x-text="deepLinkedQuiz.title"></h2>
+                        <p class="text-text-dim leading-relaxed" x-text="deepLinkedQuiz.description"></p>
+                    </div>
+                </template>
+                <template x-if="startError">
+                    <div class="feedback-banner feedback-danger mb-5" x-text="startError"></div>
+                </template>
+                <button class="btn-primary" @click="startGame()" :disabled="!selectedQuizId || !!startError">Start Game</button>
+            </div>
+
+            <!-- Gameplay view: question, countdown, answer buttons,
+                 per-question feedback. -->
+            <div x-show="gameId && !finished">
+                <template x-if="question">
+                    <div>
+                        <!-- Question countdown. JS drives the :value via x-bind; the
+                             100ms client-side interpolation lives in GameApp.js. -->
+                        <progress class="progress block w-full h-[3px] bg-border rounded-full overflow-hidden mb-6 [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:bg-accent [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear [&::-moz-progress-bar]:bg-accent"
+                                  :value="progress" max="100"></progress>
+
+                        <h2 class="mb-6 font-display text-[clamp(1.6rem,5vw,2.4rem)] font-bold leading-[1.15] tracking-tight text-text" x-text="question.text"></h2>
+
+                        <template x-if="question.imageUrl">
+                            <figure class="image mb-6">
+                                <img alt="" :src="question.imageUrl" :alt="question.text"
+                                     class="block max-w-full h-auto rounded-sm border border-border"
+                                     x-show="!imageError"
+                                     @error="imageError = true">
+                            </figure>
+                        </template>
+
+                        <template x-if="feedback">
+                            <div data-feedback
+                                 class="feedback-banner mb-6"
+                                 :class="feedback.timedOut ? 'feedback-warning' : feedback.correct ? 'feedback-success' : 'feedback-danger'">
+                                <p class="font-display text-xl font-semibold"
+                                   x-text="feedback.timedOut ? 'Time out! ⏰' : feedback.correct ? 'Correct! ✅' : 'Wrong! ❌'"></p>
+                                <template x-if="!feedback.timedOut">
+                                    <p class="mt-1 text-text-dim">Score: <span class="text-text font-semibold" x-text="feedback.score"></span></p>
+                                </template>
+                            </div>
+                        </template>
+
+                        <div class="flex flex-col gap-2.5" x-show="!feedback">
+                            <template x-for="option in question.options" :key="option.id">
+                                <button class="btn-answer" @click="submitAnswer(option.id)" x-text="option.text"></button>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+                <template x-if="!question">
+                    <p class="text-text-dim">Loading question...</p>
                 </template>
             </div>
 

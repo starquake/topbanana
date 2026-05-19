@@ -1197,7 +1197,11 @@ func TestService_PublishLeaderboardForPlayer(t *testing.T) {
 			t.Errorf("PublishLeaderboardForPlayer err = %v, want wrap of %v", got, want)
 		}
 		if got, want := len(pub.published), 0; got != want {
-			t.Errorf("PublishLeaderboardForPlayer recorded %d calls, want %d (listing failed before any publish)", got, want)
+			t.Errorf(
+				"PublishLeaderboardForPlayer recorded %d calls, want %d (listing failed before any publish)",
+				got,
+				want,
+			)
 		}
 	})
 }

@@ -97,10 +97,14 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   // quiz and #145 enforces one attempt per (player, quiz), the start
   // screen must surface the "already completed" lockout notification
   // proactively and disable the Start button — without the player having
-  // to click Start to discover they're locked out.
+  // to click Start to discover they're locked out. The leaderboard for
+  // the completed quiz also renders below the lockout so the returning
+  // player can see their score without re-playing.
   await page.goto('/client/');
   await page.locator('select').selectOption({ label: quizTitle });
   await expect(page.locator('.feedback-danger'))
     .toContainText('already completed');
   await expect(page.getByRole('button', { name: 'Start Game' })).toBeDisabled();
+  await expect(page.getByRole('heading', { name: 'Game Finished!' })).toBeVisible();
+  await expect(page.locator('.player-table')).toBeVisible();
 });
