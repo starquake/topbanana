@@ -347,6 +347,36 @@
                cursor-pointer;
     }
 
+    /* Per-option feedback skin (#233). Applied after the player
+     * submits an answer so the buttons themselves reveal what was
+     * right, not just the banner. Each variant overrides the
+     * base .btn-answer border + background to mirror the matching
+     * feedback-banner colour: cyan for correct, danger for wrong,
+     * dimmed surface for the rest. All three use !important to
+     * win against the `disabled:hover:bg-surface` override from
+     * .btn-answer (the buttons are disabled during feedback). */
+    .btn-answer-correct {
+        @apply w-full min-h-[44px] sm:min-h-14 px-5 py-3 text-left justify-start
+               inline-flex items-center
+               bg-cyan-soft text-cyan border border-cyan rounded-sm
+               font-medium text-[0.95rem]
+               disabled:opacity-100 cursor-default;
+    }
+    .btn-answer-wrong {
+        @apply w-full min-h-[44px] sm:min-h-14 px-5 py-3 text-left justify-start
+               inline-flex items-center
+               bg-surface text-danger border border-danger rounded-sm
+               font-medium text-[0.95rem]
+               disabled:opacity-100 cursor-default;
+    }
+    .btn-answer-dim {
+        @apply w-full min-h-[44px] sm:min-h-14 px-5 py-3 text-left justify-start
+               inline-flex items-center
+               bg-surface text-text-dim border border-border rounded-sm
+               font-medium text-[0.95rem] opacity-50
+               disabled:opacity-50 cursor-default;
+    }
+
     /* Per-question feedback banner. Restrained card with a single
      * accent-coloured top border — three semantic variants. The
      * `[data-feedback]` selector on the same element is what

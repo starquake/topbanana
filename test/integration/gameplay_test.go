@@ -424,8 +424,9 @@ func TestGameplay_Integration(t *testing.T) {
 			}
 
 			var answerRes struct {
-				Correct bool `json:"correct"`
-				Score   int  `json:"score"`
+				Correct          bool    `json:"correct"`
+				Score            int     `json:"score"`
+				CorrectOptionIDs []int64 `json:"correctOptionIds"`
 			}
 			err = json.NewDecoder(resp.Body).Decode(&answerRes)
 			if cerr := resp.Body.Close(); cerr != nil {
@@ -436,6 +437,14 @@ func TestGameplay_Integration(t *testing.T) {
 			}
 			if got, want := answerRes.Correct, targetCorrect; got != want {
 				t.Fatalf("got correct %v, want %v", got, want)
+			}
+			// Every question in this fixture has exactly one correct
+			// option, so the response must always carry one ID — the
+			// client uses it to highlight the correct answer post-pick
+			// (#233). Asserting len(...) > 0 is enough; the value
+			// itself depends on insertion order.
+			if got, want := len(answerRes.CorrectOptionIDs), 1; got != want {
+				t.Errorf("answer CorrectOptionIDs len = %d, want %d", got, want)
 			}
 			runningScore += answerRes.Score
 		}

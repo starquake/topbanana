@@ -441,9 +441,31 @@ func (s *Service) SubmitAnswer(
 		return nil, fmt.Errorf("question %d not found in game %s: %w", questionID, gameID, ErrQuestionNotInGame)
 	}
 
-	option, err := s.quizStore.GetOption(ctx, optionID)
+	// Load the quiz question with its full option set in one shot so
+	// callers can read both the selected option and the correct ones
+	// (so the player client can light up the right answer after a wrong
+	// pick — #233) without a second store round-trip.
+	quizQuestion, err := s.quizStore.GetQuestion(ctx, question.QuestionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get option: %w", err)
+		return nil, fmt.Errorf("failed to get question: %w", err)
+	}
+	question.QuizQuestion = quizQuestion
+
+	var option *quiz.Option
+	for _, o := range quizQuestion.Options {
+		if o.ID == optionID {
+			option = o
+
+			break
+		}
+	}
+	if option == nil {
+		return nil, fmt.Errorf(
+			"option %d not in question %d: %w",
+			optionID,
+			question.QuestionID,
+			ErrOptionNotInQuestion,
+		)
 	}
 
 	if option.QuestionID != question.QuestionID {

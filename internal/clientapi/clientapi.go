@@ -606,6 +606,26 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 	})
 }
 
+// correctOptionIDsFromAnswer extracts the IDs of every option flagged
+// correct on the question the player just answered. SubmitAnswer
+// populates Answer.Question.QuizQuestion with the full option set so
+// this read is local — no extra store round-trip. Returns nil when the
+// quiz question was not populated (defensive; shouldn't happen in the
+// production code path).
+func correctOptionIDsFromAnswer(a *game.Answer) []int64 {
+	if a.Question == nil || a.Question.QuizQuestion == nil {
+		return nil
+	}
+	var ids []int64
+	for _, o := range a.Question.QuizQuestion.Options {
+		if o.Correct {
+			ids = append(ids, o.ID)
+		}
+	}
+
+	return ids
+}
+
 // HandleAnswerPost handles the submission of an answer for a game question.
 // It decodes the request body, extracts game and question IDs from the path,
 // and uses the game service to submit the answer.
@@ -614,9 +634,13 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 		OptionID int64 `json:"optionId"`
 	}
 
+	// CorrectOptionIDs always carries the question's correct option set
+	// so the client can light up the right answer after a wrong pick
+	// (#233) without branching on Correct.
 	type answerResponse struct {
-		Correct bool `json:"correct"`
-		Score   int  `json:"score"`
+		Correct          bool    `json:"correct"`
+		Score            int     `json:"score"`
+		CorrectOptionIDs []int64 `json:"correctOptionIds"`
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -669,8 +693,9 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 		score := service.CalculateScore(r.Context(), a)
 
 		res := answerResponse{
-			Correct: a.Option.Correct,
-			Score:   score,
+			Correct:          a.Option.Correct,
+			Score:            score,
+			CorrectOptionIDs: correctOptionIDsFromAnswer(a),
 		}
 
 		err = handlers.EncodeJSON(w, http.StatusOK, res)
