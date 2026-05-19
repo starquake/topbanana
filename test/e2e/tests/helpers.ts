@@ -138,7 +138,11 @@ export async function answerRemainingQuestions(page: Page, fromIndex = 0): Promi
     const wasCorrect = q.correctIndices.includes(0);
 
     const optionButton = page.getByRole('button', { name: choice });
-    await expect(optionButton).toBeVisible();
+    // Per-question wait must cover the prior feedback pause (up to 3s
+    // on a wrong pick, #233) plus this question's reveal-countdown
+    // beat (3s, #247). The default 5s toBeVisible timeout isn't
+    // enough; 10s gives headroom for slow CI runners.
+    await expect(optionButton).toBeVisible({ timeout: 10_000 });
     await optionButton.click();
 
     if (wasCorrect) {

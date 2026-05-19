@@ -15,8 +15,15 @@ import {
 // progress bar to drain before the banner appears. Bumping or lowering
 // the server's defaultExpiration only needs this budget to stay larger
 // than the new value.
+// PROGRESS_DRAIN_BUDGET_MS now also has to cover the 3s reveal-countdown
+// (#247) before the per-question progress bar even appears, on top of
+// the existing 10s answer window.
 const PROGRESS_DRAIN_BUDGET_MS = 20_000;
-const SETTLE_MS = 4_000;
+// SETTLE_MS gates the post-timeout waits (feedback banner appearing,
+// next question's button appearing). The next-question path spans the
+// 2s feedback pause plus the 3s reveal-countdown (#247), so 8s gives
+// comfortable headroom.
+const SETTLE_MS = 8_000;
 
 // Letting the timer expire without answering takes one full countdown
 // plus the 2s feedback pause plus the next question's render time.

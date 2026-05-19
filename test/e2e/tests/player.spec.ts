@@ -2,10 +2,11 @@ import { test, expect } from '@playwright/test';
 import { registerAdmin, createQuizWithQuestions, QUIZ_QUESTIONS } from './helpers';
 
 test('admin sets up a multi-question quiz, then a player plays it through to the results screen', async ({ page, browserName }) => {
-  // Four questions × ~2s feedback + ~10s admin setup + browser overhead push
-  // this test close to Playwright's 30s default. Bump explicitly so a slow CI
-  // run doesn't trip the timeout on a successful path.
-  test.setTimeout(60_000);
+  // Four questions × ~3s reveal delay (#247) × ~2s/3s feedback + ~10s admin
+  // setup + browser overhead push this test well past Playwright's 30s
+  // default. Bump explicitly so a slow CI run doesn't trip the timeout on
+  // a successful path.
+  test.setTimeout(90_000);
 
   // Per-project unique names so chromium and firefox runs don't collide on the
   // shared server's SQLite file.
@@ -34,6 +35,13 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
 
   await page.getByRole('button', { name: 'Start Game' }).click();
 
+  // The reveal beat (#247) holds the answer buttons hidden for ~3s
+  // after the first question lands. The progress bar carries that
+  // phase visually by filling 0 → 100 in cyan (.progress-reveal),
+  // then switching to .progress-answer once buttons appear. Asserting
+  // the reveal class is on the bar pins the gate to the happy path.
+  await expect(page.locator('progress.progress-reveal')).toBeVisible();
+
   // Walk every question. We always click the first option; whether that picks
   // a correct answer is determined by the spec (correctIndices includes 0).
   let expectedSuccesses = 0;
@@ -43,9 +51,12 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
     const wasCorrect = q.correctIndices.includes(0);
 
     // Wait for the new question to be live before asserting on its image so
-    // we don't read state from the previous question's render.
+    // we don't read state from the previous question's render. The timeout
+    // must span the prior question's feedback pause (up to 3s on a wrong
+    // pick, #233) plus this question's reveal-countdown (3s, #247) —
+    // 10s gives headroom for slow CI.
     const optionButton = page.getByRole('button', { name: choice });
-    await expect(optionButton).toBeVisible();
+    await expect(optionButton).toBeVisible({ timeout: 10_000 });
 
     if (q.expectImageVisible === true) {
       await expect(figureImg).toBeVisible();

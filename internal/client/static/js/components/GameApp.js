@@ -80,6 +80,15 @@ export class GameApp {
         // and overwrite the real feedback with a timeout banner — see
         // the race notes on handleTimeout for #175.
         this.submittingAnswer = false;
+        // True while the per-question reveal beat is still running —
+        // the answer buttons stay hidden during this phase (#247).
+        // The progress bar handles both phases visually: it fills
+        // 0 → 100 in cyan while `revealing` is true, then once it
+        // reaches 100 the buttons appear and the same bar drains
+        // 100 → 0 in accent over the answer window. Single visual
+        // element across the whole question lifetime.
+        this.revealing = false;
+        this.revealTimer = null;
         // Server-Sent Events handle for the leaderboard live stream
         // (#239). Opened when the leaderboard becomes visible; closed on
         // navigation away. Null when no subscription is active.
@@ -268,6 +277,11 @@ export class GameApp {
             clearInterval(this.timer);
             this.timer = null;
         }
+        if (this.revealTimer) {
+            clearInterval(this.revealTimer);
+            this.revealTimer = null;
+        }
+        this.revealing = false;
         const question = await gameService.getNextQuestion(this.gameId);
         if (!question) {
             this.finished = true;
@@ -297,8 +311,44 @@ export class GameApp {
         }
         this.imageError = false;
         this.question = question;
-        this.startCountdown();
+        this.startRevealCountdown();
         this.animateQuestionEntrance();
+    }
+
+    // startRevealCountdown drives the pre-answer beat (#247) by filling
+    // the same progress bar that runs the answer-window countdown.
+    // The bar grows 0 → 100 in cyan during the reveal, then on
+    // completion the helper flips to startCountdown, which drains the
+    // bar 100 → 0 in accent. One element, two phases, continuous
+    // visual story.
+    //
+    // Falls through to startCountdown immediately if the server's
+    // startedAt is already in the past — resume on an older game
+    // (issued before #247) should not stall on a reveal it never
+    // had.
+    startRevealCountdown() {
+        const startAt = new Date(this.question.startedAt).getTime();
+        const revealStart = Date.now();
+        if (revealStart >= startAt) {
+            this.revealing = false;
+            this.startCountdown();
+            return;
+        }
+        const revealTotal = startAt - revealStart;
+        this.revealing = true;
+        this.progress = 0;
+        this.revealTimer = setInterval(() => {
+            const now = Date.now();
+            if (now >= startAt) {
+                this.progress = 100;
+                clearInterval(this.revealTimer);
+                this.revealTimer = null;
+                this.revealing = false;
+                this.startCountdown();
+                return;
+            }
+            this.progress = Math.min(100, ((now - revealStart) / revealTotal) * 100);
+        }, 100);
     }
 
     // animateQuestionEntrance carries the question and answer buttons in

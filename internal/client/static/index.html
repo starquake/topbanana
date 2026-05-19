@@ -186,13 +186,29 @@
             </div>
 
             <!-- Gameplay view: question, countdown, answer buttons,
-                 per-question feedback. -->
+                 per-question feedback.
+                 The inner wrapper is a flex column with a viewport-
+                 tall minimum so the answer buttons (`mt-auto` below)
+                 anchor to the bottom of the screen instead of
+                 floating just under the question. svh keeps the
+                 layout steady when mobile browser chrome shows /
+                 hides. The subtracted value covers the title block
+                 plus the <main>'s top + bottom padding (py-10 on
+                 mobile → 2 × 2.5rem; sm:py-16 → 2 × 4rem) so the
+                 buttons land at the visual bottom without spilling
+                 into a scrollbar. -->
             <div x-show="gameId && !finished">
                 <template x-if="question">
-                    <div>
-                        <!-- Question countdown. JS drives the :value via x-bind; the
-                             100ms client-side interpolation lives in GameApp.js. -->
-                        <progress class="progress block w-full h-[3px] bg-border rounded-full overflow-hidden mb-6 [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:bg-accent [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear [&::-moz-progress-bar]:bg-accent"
+                    <div class="flex flex-col min-h-[calc(100svh-9rem)] sm:min-h-[calc(100svh-12rem)]">
+                        <!-- The progress bar carries TWO phases for each
+                             question (#247): while `revealing` is true
+                             it fills 0 → 100 in cyan ("get ready"),
+                             then drains 100 → 0 in accent during the
+                             answer window. JS drives :value via :progress;
+                             :class swaps the value colour between
+                             phases. One element, continuous visual. -->
+                        <progress class="progress block w-full h-[3px] bg-border rounded-full overflow-hidden mb-6 [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear"
+                                  :class="revealing ? 'progress-reveal' : 'progress-answer'"
                                   :value="progress" max="100"></progress>
 
                         <h2 class="mb-6 font-display text-[clamp(1.6rem,5vw,2.4rem)] font-bold leading-[1.15] tracking-tight text-text" x-text="question.text"></h2>
@@ -229,8 +245,17 @@
                              feedback is shown. optionStateClass picks
                              the per-button class based on whether the
                              option is the player's pick, one of the
-                             correct ones, or neither. -->
-                        <div class="flex flex-col gap-2.5">
+                             correct ones, or neither.
+                             Hidden during the pre-answer reveal (#247)
+                             so the player isn't tempted to click before
+                             they've actually had time to read the
+                             question.
+                             `mt-auto` keeps the buttons anchored to
+                             the bottom of the gameplay flex column so
+                             they sit consistently at the bottom of the
+                             viewport across questions, regardless of
+                             how tall the question text or image are. -->
+                        <div class="flex flex-col gap-2.5 mt-auto" x-show="!revealing">
                             <template x-for="option in question.options" :key="option.id">
                                 <button :class="optionStateClass(option)"
                                         :disabled="!!feedback"

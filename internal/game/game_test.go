@@ -708,6 +708,74 @@ func TestService_GetNextQuestion(t *testing.T) {
 			t.Errorf("got qs: %+v, want %+v", gq.QuizQuestion, testQuiz.Questions[1])
 		}
 	})
+
+	t.Run("started_at sits in the future to honour the reveal delay", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+
+		testGame := newTestGame(t, testQuiz)
+		if err := gameStore.CreateGame(ctx, testGame); err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+
+		service := NewService(gameStore, quizStore, slog.Default())
+		issuedAt := time.Now()
+		gq, err := service.GetNextQuestion(ctx, testGame.ID)
+		if err != nil {
+			t.Fatalf("GetNextQuestion err = %v, want nil", err)
+		}
+
+		// StartedAt must be at least 2 seconds in the future relative
+		// to issuedAt — the 3s reveal delay (#247) gives the player
+		// time to read the question before the answer window opens.
+		// 2s lower bound is forgiving of clock granularity on the
+		// test machine; the production constant is 3s.
+		if got, lower := gq.StartedAt.Sub(issuedAt), 2*time.Second; got < lower {
+			t.Errorf("StartedAt - issuedAt = %v, want >= %v (reveal delay)", got, lower)
+		}
+		// ExpiredAt sits one answer window further. The window is 10s
+		// (the unexported defaultExpiration constant); duplicated here
+		// as a literal so this external_test file doesn't have to
+		// reach into package internals.
+		if got, want := gq.ExpiredAt.Sub(gq.StartedAt), 10*time.Second; got != want {
+			t.Errorf("ExpiredAt - StartedAt = %v, want %v", got, want)
+		}
+	})
+}
+
+func TestService_CalculateScore_EarlyAnswerClamps(t *testing.T) {
+	t.Parallel()
+
+	// Hand-crafted client could POST an answer before StartedAt (which
+	// sits in the future during the reveal delay — #247). The clamp
+	// in CalculateScore must treat the answer as arriving AT
+	// StartedAt rather than producing a score above maxPoints from a
+	// negative duration.
+	svc := NewService(stubStore{}, stubQuizStore{}, slog.New(slog.DiscardHandler))
+
+	start := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	a := &Answer{
+		AnsweredAt: start.Add(-1 * time.Second), // 1s before the reveal lands
+		Question: &Question{
+			StartedAt: start,
+			ExpiredAt: start.Add(10 * time.Second),
+		},
+		Option: &quiz.Option{Correct: true},
+	}
+
+	if got, want := svc.CalculateScore(t.Context(), a), 1000; got != want {
+		t.Errorf("CalculateScore for AnsweredAt - StartedAt = -1s, got %d, want %d (clamped to maxPoints)", got, want)
+	}
 }
 
 // makeAnswer produces a flat LeaderboardAnswer answered at the start of the
