@@ -14,14 +14,18 @@
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body class="bg-bg text-text font-sans antialiased min-h-screen leading-relaxed">
-    <main class="max-w-[720px] mx-auto px-5 py-10 sm:py-16">
+    <main class="max-w-[720px] lg:max-w-5xl mx-auto px-5 lg:px-8 py-10 sm:py-16">
         <div x-data="gameApp" @keydown.escape.window="claimModalOpen && closeClaimModal()">
             <!-- Brand mark: same banana SVG + Top/Banana/! pattern as the
                  admin navbar (see internal/web/tmpl/admin/layouts/navbar.gohtml).
                  aria-label pins the accessible name so role-based locators
                  keep working; visible text is split so "Banana" can carry
-                 the accent colour. -->
+                 the accent colour.
+                 Hidden during gameplay (#253) so the question gets the
+                 whole vertical canvas — still visible on the start
+                 screen and the post-game leaderboard. -->
             <h1 aria-label="Top Banana!"
+                x-show="!(gameId && !finished)"
                 class="mb-10 inline-flex items-center font-display font-extrabold text-2xl tracking-wide uppercase text-text">
                 <span class="w-7 h-7 mr-3 text-accent drop-shadow-[0_0_8px_rgba(255,210,63,0.45)] inline-flex shrink-0" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M4 13c3.5-2 8-2 10 2a5.5 5.5 0 0 1 8 5"/><path d="M5.15 17.89c5.52-1.52 8.65-6.89 7-12C11.55 4 11.5 2 13 2c3.22 0 5 5.5 5 8 0 6.5-4.2 12-10.49 12C5.11 22 2 22 2 20c0-1.5 1.14-1.55 3.15-2.11Z"/></svg>
@@ -192,14 +196,23 @@
                  anchor to the bottom of the screen instead of
                  floating just under the question. svh keeps the
                  layout steady when mobile browser chrome shows /
-                 hides. The subtracted value covers the title block
-                 plus the <main>'s top + bottom padding (py-10 on
-                 mobile → 2 × 2.5rem; sm:py-16 → 2 × 4rem) so the
-                 buttons land at the visual bottom without spilling
-                 into a scrollbar. -->
+                 hides. The subtracted value covers the <main>'s
+                 top + bottom padding (py-10 → 2 × 2.5rem;
+                 sm:py-16 → 2 × 4rem). The brand title is hidden
+                 during gameplay (#253) so we don't subtract for it
+                 here. -->
             <div x-show="gameId && !finished">
                 <template x-if="question">
-                    <div class="flex flex-col min-h-[calc(100svh-9rem)] sm:min-h-[calc(100svh-12rem)]">
+                    <div class="flex flex-col min-h-[calc(100svh-5rem)] sm:min-h-[calc(100svh-8rem)]">
+                        <!-- HUD chips: Q n/total + running score (#253). -->
+                        <div class="flex justify-end gap-2 mb-4">
+                            <span class="hud-chip">
+                                Q <span class="hud-chip-value" x-text="question.position"></span>/<span class="hud-chip-value" x-text="question.total"></span>
+                            </span>
+                            <span class="hud-chip">
+                                Score <span class="hud-chip-value" x-text="score"></span>
+                            </span>
+                        </div>
                         <!-- The progress bar carries TWO phases for each
                              question (#247): while `revealing` is true
                              it fills 0 → 100 in cyan ("get ready"),
@@ -211,7 +224,11 @@
                                   :class="revealing ? 'progress-reveal' : 'progress-answer'"
                                   :value="progress" max="100"></progress>
 
-                        <h2 class="mb-6 font-display text-[clamp(1.6rem,5vw,2.4rem)] font-bold leading-[1.15] tracking-tight text-text" x-text="question.text"></h2>
+                        <h2 class="mb-6 lg:mb-10 font-display font-bold leading-[1.1] tracking-tight text-text
+                                   text-[clamp(1.4rem,4.5vw,2.4rem)]
+                                   lg:text-[clamp(2.25rem,4vw,4rem)]
+                                   2xl:text-[clamp(3rem,3.5vw,5.5rem)]"
+                            x-text="question.text"></h2>
 
                         <template x-if="question.imageUrl">
                             <figure class="image mb-6">
@@ -222,17 +239,11 @@
                             </figure>
                         </template>
 
-                        <template x-if="feedback">
-                            <div data-feedback
-                                 class="feedback-banner mb-6"
-                                 :class="feedback.timedOut ? 'feedback-warning' : feedback.correct ? 'feedback-success' : 'feedback-danger'">
-                                <p class="font-display text-xl font-semibold"
-                                   x-text="feedback.timedOut ? 'Time out! ⏰' : feedback.correct ? 'Correct! ✅' : 'Wrong! ❌'"></p>
-                                <template x-if="!feedback.timedOut">
-                                    <p class="mt-1 text-text-dim">Score: <span class="text-text font-semibold" x-text="feedback.score"></span></p>
-                                </template>
-                            </div>
-                        </template>
+                        <!-- The inline feedback banner was removed in
+                             #253 — the verdict is now carried by the
+                             full-screen splash overlay below, and the
+                             post-pick button-level reveal (#233)
+                             remains in place after the splash fades. -->
 
                         <!-- The button container stays visible during
                              feedback so the per-option styling (correct
@@ -255,9 +266,13 @@
                              they sit consistently at the bottom of the
                              viewport across questions, regardless of
                              how tall the question text or image are. -->
-                        <div class="flex flex-col gap-2.5 mt-auto" x-show="!revealing">
-                            <template x-for="option in question.options" :key="option.id">
-                                <button :class="optionStateClass(option)"
+                        <!-- Single column on phone; 2×2 grid on landscape
+                             tablet / desktop (#253) so the buttons get
+                             bigger tiles and a Jackbox-style layout. -->
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-2.5 lg:gap-4 mt-auto"
+                             x-show="!revealing">
+                            <template x-for="(option, idx) in question.options" :key="option.id">
+                                <button :class="optionStateClass(option, idx)"
                                         :disabled="!!feedback"
                                         @click="submitAnswer(option.id)"
                                         x-text="option.text"></button>
@@ -268,6 +283,31 @@
                 <template x-if="!question">
                     <p class="text-text-dim">Loading question...</p>
                 </template>
+            </div>
+
+            <!-- Full-screen verdict splash (#253). Sits above every
+                 view for a brief moment after the player submits (or
+                 the per-question timer expires). x-show + x-transition
+                 (not x-if) so Alpine handles both the fade-in AND a
+                 matching fade-out when `splash` flips back to null;
+                 an x-if would unmount instantly with no leave
+                 animation. The motion-reduce rule on .splash-overlay
+                 in _tailwind.css zeroes out the transitions for
+                 reduced-motion users, so the verdict still shows but
+                 without easing. -->
+            <div x-show="splashOn"
+                 x-transition:enter="splash-anim splash-anim-enter"
+                 x-transition:enter-start="splash-anim-enter-from"
+                 x-transition:enter-end="splash-anim-enter-to"
+                 x-transition:leave="splash-anim splash-anim-leave"
+                 x-transition:leave-start="splash-anim-leave-from"
+                 x-transition:leave-end="splash-anim-leave-to"
+                 data-splash
+                 class="splash-overlay"
+                 :class="splash === 'correct' ? 'splash-correct' : splash === 'wrong' ? 'splash-wrong' : 'splash-timeout'"
+                 style="display: none">
+                <p class="splash-text"
+                   x-text="splash === 'correct' ? 'Correct!' : splash === 'wrong' ? 'Wrong!' : 'Time out!'"></p>
             </div>
 
             <!-- Shared claim-name modal. Mounted via x-if so each open

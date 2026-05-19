@@ -67,18 +67,20 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
     await optionButton.click();
 
     if (wasCorrect) {
-      await expect(page.locator('.feedback-success')).toBeVisible();
+      await expect(page.locator('.splash-correct')).toBeVisible();
       expectedSuccesses++;
     } else {
-      await expect(page.locator('.feedback-danger')).toBeVisible();
+      await expect(page.locator('.splash-wrong')).toBeVisible();
       // #233 — after a wrong pick the correct option(s) light up so
       // the player can learn what was right before the next question
-      // loads. Only assert the reveal on questions that actually have
-      // a correct option (the "Which animals are mammals?" fixture
-      // entry has correctIndices: [], i.e. no correct answers, so
-      // there's nothing for the client to highlight there).
+      // loads. The splash above auto-clears after ~950ms, so this
+      // assertion catches the underlying button-level reveal that
+      // remains for the rest of the feedback pause. Only fires on
+      // questions that actually have a correct option (the
+      // "Which animals are mammals?" fixture has correctIndices: [],
+      // i.e. no correct answers, so nothing to highlight there).
       if (q.correctIndices.length > 0) {
-        await expect(page.locator('.btn-answer-correct').first()).toBeVisible();
+        await expect(page.locator('.btn-answer-correct').first()).toBeVisible({ timeout: 2000 });
       }
     }
   }
@@ -124,7 +126,11 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   await page.locator('select').selectOption({ label: quizTitle });
   await expect(page.getByRole('heading', { name: 'Game Finished!' })).toBeVisible();
   await expect(page.locator('.player-table')).toBeVisible();
-  await expect(page.locator('.feedback-danger')).toBeHidden();
+  // The start-screen lockout banner (uses .feedback-banner.feedback-danger)
+  // is hidden on the already-played revisit; this test only asserts the
+  // gameplay screen state, so the locator below matches that
+  // start-screen instance, not the in-game splash overlay.
+  await expect(page.locator('.feedback-banner.feedback-danger')).toBeHidden();
   await expect(page.getByRole('button', { name: 'Start Game' })).toBeHidden();
   // Quiz picker still visible — the player can pick another quiz.
   await expect(page.locator('select')).toBeVisible();

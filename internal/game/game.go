@@ -92,6 +92,15 @@ type Question struct {
 	// TODO: change this to time duration like 10s instead of timestamp?
 	ExpiredAt time.Time
 	Answers   []*Answer
+	// Position is the 1-indexed ordinal of this question in the
+	// game's issued sequence ("Q 3 of 4"). Populated by
+	// [Service.GetNextQuestion]; zero on Questions loaded from the
+	// store for other purposes (resume probe, leaderboard pipe).
+	Position int
+	// Total is the count of questions in the quiz that owns this
+	// game. Populated alongside Position by [Service.GetNextQuestion];
+	// zero on store-loaded Questions for the same reason as above.
+	Total int
 }
 
 // Answer represents an answer for a question. Answers are recorded for a specific game and player.
@@ -413,6 +422,12 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string) (*Question
 			QuizQuestion: nextQuestion,
 			StartedAt:    revealAt,
 			ExpiredAt:    revealAt.Add(defaultExpiration),
+			// Position counts the newly-issued question itself, so
+			// it's the prior asked count + 1 (the player just
+			// received this question; previous answers were the N-1
+			// before it).
+			Position: len(g.Questions) + 1,
+			Total:    len(qz.Questions),
 		}
 		if err = s.store.CreateQuestion(ctx, gq); err != nil {
 			return nil, fmt.Errorf("failed to record game question: %w", err)

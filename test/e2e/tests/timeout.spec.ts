@@ -59,12 +59,13 @@ test('timing out a question shows the Time out banner and the rest of the quiz s
     { timeout: PROGRESS_DRAIN_BUDGET_MS },
   );
 
-  const timeoutBanner = page.locator('.feedback-warning');
-  await expect(timeoutBanner).toBeVisible({ timeout: SETTLE_MS });
-  await expect(timeoutBanner).toContainText('Time out!');
-
-  // No score line on a timeout — the warning banner shows just the headline.
-  await expect(timeoutBanner).not.toContainText('Score:');
+  // The full-screen verdict splash (#253) carries the time-out
+  // message — `splash-timeout` is the class GameApp.showSplash
+  // applies for the timeout case. It auto-clears at ~950 ms so the
+  // assertions below check while it is still on screen.
+  const timeoutSplash = page.locator('.splash-timeout');
+  await expect(timeoutSplash).toBeVisible({ timeout: SETTLE_MS });
+  await expect(timeoutSplash).toContainText('Time out!');
 
   // Answer buttons are gone while feedback is shown; the option that was
   // visible above must not be clickable now. Use the visibility check to
