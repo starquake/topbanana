@@ -537,6 +537,7 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 		Text string `json:"text"`
 	}
 
+	// Position/Total drive the in-game HUD chip (#253).
 	type questionResponse struct {
 		ID        int64            `json:"id"`
 		Text      string           `json:"text"`
@@ -544,6 +545,8 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 		Options   []optionResponse `json:"options"`
 		StartedAt time.Time        `json:"startedAt"`
 		ExpiredAt time.Time        `json:"expiredAt"`
+		Position  int              `json:"position"`
+		Total     int              `json:"total"`
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -595,6 +598,8 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 			Options:   resOptions,
 			StartedAt: gq.StartedAt,
 			ExpiredAt: gq.ExpiredAt,
+			Position:  gq.Position,
+			Total:     gq.Total,
 		}
 
 		err = handlers.EncodeJSON(w, http.StatusOK, res)

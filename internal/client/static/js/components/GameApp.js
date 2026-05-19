@@ -80,6 +80,20 @@ export class GameApp {
         // and overwrite the real feedback with a timeout banner — see
         // the race notes on handleTimeout for #175.
         this.submittingAnswer = false;
+        // Running total of points the player has accumulated this
+        // game. Each successful submitAnswer adds its score; the
+        // value drives the "Score: N" chip in the gameplay header
+        // (#253). Reset when a new game starts via startGame.
+        this.score = 0;
+        // Drives the full-screen verdict splash (#253). `splash` is the
+        // variant ('correct' / 'wrong' / 'timeout') and drives both the
+        // skin class and the verdict text; `splashOn` is the visibility
+        // flag x-show watches. We flip splashOn off (not splash) to
+        // start the leave transition, so the variant stays set during
+        // the fade-out and the text doesn't flicker through to the
+        // fall-through ternary branch.
+        this.splash = null;
+        this.splashOn = false;
         // True while the per-question reveal beat is still running —
         // the answer buttons stay hidden during this phase (#247).
         // The progress bar handles both phases visually: it fills
@@ -263,6 +277,7 @@ export class GameApp {
         const slugId = this.slugIdFor(this.selectedQuizId);
         if (!slugId) return;
         this.quizSlugId = slugId;
+        this.score = 0;
         if (existing) {
             this.gameId = existing.gameId;
         } else {
@@ -282,6 +297,8 @@ export class GameApp {
             this.revealTimer = null;
         }
         this.revealing = false;
+        this.splash = null;
+        this.splashOn = false;
         const question = await gameService.getNextQuestion(this.gameId);
         if (!question) {
             this.finished = true;
@@ -448,6 +465,39 @@ export class GameApp {
         });
     }
 
+    // showSplash flashes a full-screen verdict overlay (#253) for a
+    // brief hold before auto-clearing. The fade-in AND the fade-out
+    // are both driven by Alpine x-transition classes on the splash
+    // element — here we just flip `this.splash` to a variant and
+    // then back to null; Alpine animates the transitions in/out via
+    // the matching CSS classes (.splash-anim-*).
+    //
+    // Variants:
+    //   'correct'  -> success skin
+    //   'wrong'    -> danger skin
+    //   'timeout'  -> warning skin
+    //
+    // Reduced-motion users still see the verdict — the media-query
+    // override in _tailwind.css zeroes out the transitions so the
+    // element snaps in and out without easing. The button-level
+    // correctness reveal (#233) underneath stays visible for the
+    // rest of the resolveAndAdvance pause.
+    showSplash(variant) {
+        this.splash = variant;
+        this.splashOn = true;
+        // 700ms visible hold before the leave transition kicks in.
+        // Combined with the ~280ms enter and ~280ms leave the splash
+        // is gone after ~1.26s, well within the resolveAndAdvance
+        // pause (2–3s) so the button-level reveal still has time
+        // to land. Only `splashOn` flips back — `splash` stays set so
+        // the verdict text and skin remain stable through the fade-out
+        // (otherwise the ternary in x-text would fall through to
+        // 'Time out!' during leave).
+        setTimeout(() => {
+            this.splashOn = false;
+        }, 700);
+    }
+
     // animateTimeout settles the timeout banner in with a soft scale + fade,
     // intentionally quieter than the wrong-answer shake: the player did not
     // make a wrong decision — the clock simply ran out — so the motion
@@ -487,17 +537,20 @@ export class GameApp {
 
     // handleTimeout fires when the per-question countdown reaches zero
     // without a submitted answer. Skips when feedback is already set
-    // (the user beat the clock) or while a submit is in flight (the
+    // (the user beat the clock), while a submit is in flight (the
     // POST is racing the timer — let it finish and use the real
-    // result). On a real timeout it shows a "Time out!" notification
-    // and auto-advances via resolveAndAdvance after the same 2s pause
-    // the answered path uses. No POST is issued: the server's
+    // result), or when a splash is already on screen (defence in
+    // depth against the verdict splash being overwritten with
+    // "Time out!" right after the player saw "Correct!"). On a real
+    // timeout it shows a "Time out!" splash and auto-advances via
+    // resolveAndAdvance. No POST is issued: the server's
     // GetNextQuestion advances on the "asked" set rather than the
     // "answered" set, and a missing answer row already produces a
     // zero-score on the leaderboard.
     async handleTimeout() {
-        if (this.feedback || this.submittingAnswer) return;
+        if (this.feedback || this.submittingAnswer || this.splashOn) return;
         this.feedback = { timedOut: true, correct: false, score: 0 };
+        this.showSplash('timeout');
         this.animateTimeout();
         await this.resolveAndAdvance();
     }
@@ -505,6 +558,18 @@ export class GameApp {
     async submitAnswer(optionId) {
         if (this.feedback || this.submittingAnswer) return;
         this.submittingAnswer = true;
+        // Stop the per-question countdown the moment the player
+        // clicks, BEFORE the POST is in flight. Without this, a
+        // setInterval tick could fire during the POST, hit
+        // progress<=0, and queue handleTimeout — and even though
+        // handleTimeout's guards normally catch the race, an
+        // unlucky interleaving showed up in practice as
+        // "Correct! → Time out!" rapidly swapping in the splash.
+        // Clearing here eliminates the race at its source.
+        if (this.timer) {
+            clearInterval(this.timer);
+            this.timer = null;
+        }
         try {
             const fb = await gameService.submitAnswer(this.gameId, this.question.id, optionId);
             // Track which option the player picked so the template can
@@ -512,16 +577,11 @@ export class GameApp {
             // pick separately from the correct option(s) — see #233.
             fb.pickedOptionId = optionId;
             this.feedback = fb;
+            this.score += fb.score || 0;
+            this.showSplash(fb.correct ? 'correct' : 'wrong');
             this.animateFeedback(this.feedback.correct);
         } finally {
             this.submittingAnswer = false;
-        }
-
-        // Stop the countdown so it cannot fire handleTimeout on top
-        // of a real submission while we wait for the feedback pause.
-        if (this.timer) {
-            clearInterval(this.timer);
-            this.timer = null;
         }
 
         // Hold longer when the pick was wrong so the player has time
@@ -546,22 +606,25 @@ export class GameApp {
         await this.nextQuestion();
     }
 
-    // optionStateClass picks the per-button styling during feedback so
-    // the buttons themselves communicate correctness, not just the
-    // banner. Returns one of:
-    //   - 'btn-answer-correct' when the option is in feedback.correctOptionIds
-    //   - 'btn-answer-wrong' when the option is the player's pick AND it was wrong
-    //   - 'btn-answer-dim' for the remaining options (not the pick, not correct)
-    //   - 'btn-answer' (the default) when no feedback is set yet
-    // Timed-out questions have no correctOptionIds (the server is not
-    // told about a timeout, so the client doesn't have the data); the
-    // function falls back to the default class in that case.
-    optionStateClass(option) {
-        if (!this.feedback) return 'btn-answer';
-        const correctIds = this.feedback.correctOptionIds || [];
-        if (correctIds.includes(option.id)) return 'btn-answer-correct';
-        if (this.feedback.pickedOptionId === option.id) return 'btn-answer-wrong';
-        return 'btn-answer-dim';
+    // optionStateClass returns the class string for an answer button.
+    // Composes two layers:
+    //   1. Answer-phase TONE — Kahoot-style per-option colour driven
+    //      by the option's index, applied on top of .btn-answer
+    //      (#253).
+    //   2. Feedback SKIN — once the player picks, the correctness
+    //      state (correct / wrong / dim) overrides the tone entirely
+    //      so the reveal (#233) wins post-pick.
+    // Timed-out questions have no correctOptionIds (the server isn't
+    // told about a timeout), so every option falls through to dim.
+    optionStateClass(option, idx) {
+        if (this.feedback) {
+            const correctIds = this.feedback.correctOptionIds || [];
+            if (correctIds.includes(option.id)) return 'btn-answer-correct';
+            if (this.feedback.pickedOptionId === option.id) return 'btn-answer-wrong';
+            return 'btn-answer-dim';
+        }
+        const tones = ['btn-answer-tone-a', 'btn-answer-tone-b', 'btn-answer-tone-c', 'btn-answer-tone-d'];
+        return `btn-answer ${tones[idx % tones.length]}`;
     }
 
 }

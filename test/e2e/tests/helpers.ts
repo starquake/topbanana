@@ -146,9 +146,9 @@ export async function answerRemainingQuestions(page: Page, fromIndex = 0): Promi
     await optionButton.click();
 
     if (wasCorrect) {
-      await expect(page.locator('.feedback-success')).toBeVisible();
+      await expect(page.locator('.splash-correct')).toBeVisible();
     } else {
-      await expect(page.locator('.feedback-danger')).toBeVisible();
+      await expect(page.locator('.splash-wrong')).toBeVisible();
     }
   }
 

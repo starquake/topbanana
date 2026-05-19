@@ -40,6 +40,12 @@
     --color-accent-deep: #f5b800;
     --color-cyan: #66e8ff;
     --color-cyan-soft: rgba(102, 232, 255, 0.08);
+    /* Magenta is the fourth Kahoot-style answer tone (#253). The
+     * synthwave brand originally used this hue before the brand
+     * swap to accent yellow; restored here purely as an answer-tone
+     * accent, not for navigation or focus chrome. */
+    --color-magenta: #ff2d95;
+    --color-magenta-soft: rgba(255, 45, 149, 0.10);
     --color-danger: #ff5c5c;
     --color-success: #4ade80;
     --color-warning: #fbbf24;
@@ -335,46 +341,121 @@
 
     /* Fullwidth answer button. Left-aligned text (matches how options
      * are listed in the admin question form), 44px touch target on
-     * mobile (#194), idle = surface, hover/focus = accent ring. */
+     * mobile (#194), idle = surface, hover/focus = accent ring.
+     * Scales up across breakpoints for the fullscreen-app feel
+     * (#253): bigger tiles + bigger type on landscape tablets and
+     * desktop, even more on wide displays. */
     .btn-answer {
-        @apply w-full min-h-[44px] sm:min-h-14 px-5 py-3 text-left justify-start
-               inline-flex items-center
+        @apply w-full
+               min-h-[44px] sm:min-h-14 lg:min-h-32 2xl:min-h-40
+               px-5 py-3 lg:px-8 lg:py-6 2xl:px-10 2xl:py-8
+               text-left justify-start inline-flex items-center
                bg-surface text-text border border-border rounded-sm
-               font-medium text-[0.95rem]
+               font-medium text-[0.95rem] lg:text-3xl 2xl:text-4xl
                transition-colors hover:border-accent hover:bg-surface-2
                focus-visible:outline-none focus-visible:border-accent focus-visible:bg-surface-2 focus-visible:shadow-focus
                disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-surface disabled:hover:border-border
                cursor-pointer;
     }
 
+    /* Per-option Kahoot-style tone (#253). Applied to .btn-answer in
+     * the answer phase by GameApp.optionStateClass — four distinct
+     * accent colours so the options are scannable at a glance. The
+     * feedback skins below (correct / wrong / dim) override these
+     * once the player picks, so the answer's tone is only visible
+     * until submission. Pairs the existing .btn-answer geometry
+     * with a 2px coloured border + matching hover bg. */
+    .btn-answer-tone-a { @apply border-cyan    hover:bg-cyan-soft    text-cyan; }
+    .btn-answer-tone-b { @apply border-magenta hover:bg-magenta-soft text-magenta; }
+    .btn-answer-tone-c { @apply border-accent  hover:bg-accent-soft  text-accent; }
+    .btn-answer-tone-d { @apply border-success hover:bg-surface-2    text-success; }
+
     /* Per-option feedback skin (#233). Applied after the player
-     * submits an answer so the buttons themselves reveal what was
-     * right, not just the banner. Each variant overrides the
-     * base .btn-answer border + background to mirror the matching
-     * feedback-banner colour: cyan for correct, danger for wrong,
-     * dimmed surface for the rest. All three use !important to
-     * win against the `disabled:hover:bg-surface` override from
-     * .btn-answer (the buttons are disabled during feedback). */
+     * submits so the buttons reveal what was right. Filled bg
+     * (vs the tone variants' bordered-only look) so the post-pick
+     * state is unmistakable even when an option happens to share
+     * a colour with its base tone. Geometry matches .btn-answer
+     * across breakpoints so the buttons don't visibly resize
+     * between answer and feedback phases. */
     .btn-answer-correct {
-        @apply w-full min-h-[44px] sm:min-h-14 px-5 py-3 text-left justify-start
-               inline-flex items-center
-               bg-cyan-soft text-cyan border border-cyan rounded-sm
-               font-medium text-[0.95rem]
+        @apply w-full
+               min-h-[44px] sm:min-h-14 lg:min-h-32 2xl:min-h-40
+               px-5 py-3 lg:px-8 lg:py-6 2xl:px-10 2xl:py-8
+               text-left justify-start inline-flex items-center
+               bg-success text-bg border-2 border-success rounded-sm
+               font-semibold text-[0.95rem] lg:text-3xl 2xl:text-4xl
                disabled:opacity-100 cursor-default;
     }
     .btn-answer-wrong {
-        @apply w-full min-h-[44px] sm:min-h-14 px-5 py-3 text-left justify-start
-               inline-flex items-center
-               bg-surface text-danger border border-danger rounded-sm
-               font-medium text-[0.95rem]
+        @apply w-full
+               min-h-[44px] sm:min-h-14 lg:min-h-32 2xl:min-h-40
+               px-5 py-3 lg:px-8 lg:py-6 2xl:px-10 2xl:py-8
+               text-left justify-start inline-flex items-center
+               bg-danger text-bg border-2 border-danger rounded-sm
+               font-semibold text-[0.95rem] lg:text-3xl 2xl:text-4xl
                disabled:opacity-100 cursor-default;
     }
     .btn-answer-dim {
-        @apply w-full min-h-[44px] sm:min-h-14 px-5 py-3 text-left justify-start
-               inline-flex items-center
+        @apply w-full
+               min-h-[44px] sm:min-h-14 lg:min-h-32 2xl:min-h-40
+               px-5 py-3 lg:px-8 lg:py-6 2xl:px-10 2xl:py-8
+               text-left justify-start inline-flex items-center
                bg-surface text-text-dim border border-border rounded-sm
-               font-medium text-[0.95rem] opacity-50
-               disabled:opacity-50 cursor-default;
+               font-medium text-[0.95rem] lg:text-3xl 2xl:text-4xl opacity-40
+               disabled:opacity-40 cursor-default;
+    }
+
+    /* Full-screen verdict splash (#253). Sits on top of everything
+     * for ~950ms after a submit so the player sees a clear
+     * Correct / Wrong / Time-out moment before the button-level
+     * reveal (#233) takes over for the remainder of the pause.
+     * pointer-events-none keeps clicks from being eaten while the
+     * overlay is animating in or fading out (the buttons are
+     * already disabled during feedback anyway). */
+    .splash-overlay {
+        @apply fixed inset-0 z-30 flex items-center justify-center
+               bg-bg/85 backdrop-blur-sm pointer-events-none;
+    }
+    .splash-text {
+        @apply font-display font-extrabold tracking-tight
+               text-[clamp(3rem,14vw,8rem)] leading-none;
+    }
+    .splash-correct .splash-text { @apply text-success; }
+    .splash-wrong   .splash-text { @apply text-danger; }
+    .splash-timeout .splash-text { @apply text-warning; }
+
+    /* Alpine x-transition classes for the splash (#253). Drives both
+     * fade-in and fade-out symmetrically so the verdict eases out
+     * the same way it eased in. The splash-anim base class sets the
+     * shared transition geometry; the *-enter / *-leave classes
+     * pick a different easing for each phase, matching the
+     * easeOutQuart-ish feel the prior manual anime.js call used. */
+    .splash-anim        { transition-property: opacity, transform; transition-duration: 280ms; }
+    .splash-anim-enter  { transition-timing-function: cubic-bezier(0.165, 0.84, 0.44, 1); }
+    .splash-anim-leave  { transition-timing-function: cubic-bezier(0.55, 0.085, 0.68, 0.53); }
+    .splash-anim-enter-from { opacity: 0; transform: scale(0.9); }
+    .splash-anim-enter-to   { opacity: 1; transform: scale(1); }
+    .splash-anim-leave-from { opacity: 1; transform: scale(1); }
+    .splash-anim-leave-to   { opacity: 0; transform: scale(0.95); }
+
+    /* Reduced-motion: zero out the splash transitions so the element
+     * still snaps in and out and the verdict text is visible — just
+     * without the easing. */
+    @media (prefers-reduced-motion: reduce) {
+        .splash-anim { transition-duration: 0ms; }
+    }
+
+    /* Header chips for the in-game HUD (#253). Tiny rounded pills
+     * sitting in the top-right of the gameplay view with the
+     * question counter and running score. Lowercase tokens so they
+     * read as labels, not headlines. */
+    .hud-chip {
+        @apply inline-flex items-center gap-2 px-4 py-1.5 lg:px-5 lg:py-2
+               bg-surface border border-border rounded-full
+               text-sm lg:text-base font-mono tracking-wider uppercase text-text-dim;
+    }
+    .hud-chip-value {
+        @apply text-text font-semibold tabular-nums;
     }
 
     /* The .progress bar carries two phases of each question (#247).
