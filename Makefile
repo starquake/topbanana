@@ -88,9 +88,39 @@ test-coverage-html: test-coverage
 
 # Run end-to-end browser tests. Requires Node.js and Playwright. The
 # `npx playwright install` step downloads Chromium on first run.
+#
+# Chromium and Firefox each get their own Playwright invocation forked
+# into the background so they run in parallel locally — same shape as
+# the CI matrix (#252). Each invocation:
+#   - listens on a distinct port (TOPBANANA_E2E_PORT) so the two
+#     webServer instances do not collide on :8181
+#   - lets playwright.config.ts mint its own SQLite temp dir
+#     (TOPBANANA_E2E_DATA_DIR is left unset so the config's
+#     mkdtempSync fallback fires per-invocation)
+# Total wall-clock cost on a local box is whichever browser is
+# slower, not the sum.
+#
+# Stdout interleaves but Playwright's `list` reporter prefixes every
+# line with the browser project, so it stays readable.
+#
+# Exit status is the OR of the two child statuses so make fails if
+# either browser fails.
+#
+# Shell gotcha: `cd test/e2e && cmd1 & cmd2` is parsed as
+# `(cd test/e2e && cmd1) & cmd2`, so the cd only applies to the
+# backgrounded subshell — cmd2 then runs in the original cwd and
+# fails to find playwright.config.ts. The body below uses
+# `cd test/e2e || exit 1;` instead so the cd lands in the parent
+# shell and both backgrounded playwright runs inherit it.
 .PHONY: test-e2e
 test-e2e:
-	cd test/e2e && npm ci && npx playwright install chromium firefox && npm test
+	cd test/e2e && npm ci && npx playwright install chromium firefox
+	cd test/e2e || exit 1; \
+	  TOPBANANA_E2E_PORT=8181 npx playwright test --project=chromium & C=$$!; \
+	  TOPBANANA_E2E_PORT=8182 npx playwright test --project=firefox  & F=$$!; \
+	  wait $$C; CS=$$?; \
+	  wait $$F; FS=$$?; \
+	  test $$CS -eq 0 -a $$FS -eq 0
 
 # Smoke-test the binary against the existing dev DB: parses config, opens
 # the DB, runs migrations, and exits 0. Catches startup / migration / config
