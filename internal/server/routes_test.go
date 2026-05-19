@@ -167,6 +167,10 @@ func (stubGameStore) DeleteGamesForPlayerOnQuiz(_ context.Context, _, _ int64) e
 	return nil
 }
 
+func (stubGameStore) ListQuizIDsForPlayer(_ context.Context, _ int64) ([]int64, error) {
+	return nil, nil
+}
+
 func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 	t.Parallel()
 

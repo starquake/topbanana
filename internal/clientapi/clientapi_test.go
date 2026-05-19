@@ -107,6 +107,7 @@ type stubGameStore struct {
 	createAnswer                  func(ctx context.Context, a *game.Answer) error
 	listAnswersForQuizLeaderboard func(ctx context.Context, quizID int64) ([]*game.LeaderboardAnswer, error)
 	deleteGamesForPlayerOnQuiz    func(ctx context.Context, playerID, quizID int64) error
+	listQuizIDsForPlayer          func(ctx context.Context, playerID int64) ([]int64, error)
 }
 
 func (stubGameStore) Ping(_ context.Context) error { return nil }
@@ -147,6 +148,14 @@ func (s stubGameStore) DeleteGamesForPlayerOnQuiz(
 	}
 
 	return s.deleteGamesForPlayerOnQuiz(ctx, playerID, quizID)
+}
+
+func (s stubGameStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]int64, error) {
+	if s.listQuizIDsForPlayer == nil {
+		return nil, nil
+	}
+
+	return s.listQuizIDsForPlayer(ctx, playerID)
 }
 
 func (s stubGameStore) StartGame(ctx context.Context, id string) error {

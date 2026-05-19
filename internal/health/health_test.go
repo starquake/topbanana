@@ -86,6 +86,10 @@ func (*stubGameStore) DeleteGamesForPlayerOnQuiz(_ context.Context, _, _ int64) 
 	return nil
 }
 
+func (*stubGameStore) ListQuizIDsForPlayer(_ context.Context, _ int64) ([]int64, error) {
+	return nil, nil
+}
+
 func TestHandleHealthz(t *testing.T) {
 	t.Parallel()
 

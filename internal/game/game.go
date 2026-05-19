@@ -178,6 +178,11 @@ type Store interface {
 	// when the player has no games for the quiz: the admin reset flow is
 	// idempotent.
 	DeleteGamesForPlayerOnQuiz(ctx context.Context, playerID, quizID int64) error
+	// ListQuizIDsForPlayer returns the distinct quiz IDs where the player
+	// has at least one recorded answer. Used by the claim-name flow to
+	// fan out a leaderboard republish on every quiz the player appears
+	// on.
+	ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]int64, error)
 }
 
 // LeaderboardPublisher is the tiny seam Service uses to signal that a
@@ -217,6 +222,30 @@ func NewService(gameStore Store, quizStore quiz.Store, logger *slog.Logger) *Ser
 // atomic.Pointer.
 func (s *Service) SetLeaderboardPublisher(p LeaderboardPublisher) {
 	s.leaderboardPublisher = p
+}
+
+// PublishLeaderboardForPlayer fans out a leaderboard tick on every
+// quiz where the given player has at least one answer. The claim-name
+// flow calls this after a successful rename so all SSE subscribers see
+// the new display name on the player's existing row without waiting
+// for the next answer-submit publish.
+//
+// The store lookup error is returned to the caller; per-publish steps
+// are best-effort (the publisher is nil-tolerant and the Publish call
+// itself never returns).
+func (s *Service) PublishLeaderboardForPlayer(ctx context.Context, playerID int64) error {
+	if s.leaderboardPublisher == nil {
+		return nil
+	}
+	quizIDs, err := s.store.ListQuizIDsForPlayer(ctx, playerID)
+	if err != nil {
+		return fmt.Errorf("list quiz IDs for player %d: %w", playerID, err)
+	}
+	for _, quizID := range quizIDs {
+		s.leaderboardPublisher.Publish(quizID)
+	}
+
+	return nil
 }
 
 // IsCompleted reports whether the game has had every quiz question issued.

@@ -748,7 +748,9 @@ func HandlePlayerGetMe(logger *slog.Logger) http.Handler {
 //     is set). Both are conflict states; the distinct error messages let
 //     the client distinguish them.
 //   - 500 on any other error.
-func HandlePlayerClaimName(logger *slog.Logger, players auth.PlayerStore) http.Handler {
+func HandlePlayerClaimName(
+	logger *slog.Logger, players auth.PlayerStore, gameService *game.Service,
+) http.Handler {
 	type claimNameRequest struct {
 		Username string `json:"username"`
 	}
@@ -791,6 +793,16 @@ func HandlePlayerClaimName(logger *slog.Logger, players auth.PlayerStore) http.H
 			}
 
 			return
+		}
+
+		// Republish leaderboard ticks on every quiz the renamed player
+		// appears on so other clients' SSE streams pick up the new
+		// display name without waiting for the next answer-submit
+		// publish. Best-effort: a failure here logs but does not fail
+		// the HTTP response — the rename itself already succeeded.
+		if perr := gameService.PublishLeaderboardForPlayer(ctx, current.ID); perr != nil {
+			logger.ErrorContext(ctx, "error publishing leaderboard for renamed player",
+				slog.Int64("playerId", current.ID), slog.Any("err", perr))
 		}
 
 		if err = handlers.EncodeJSON(w, http.StatusOK, newPlayerResponse(updated)); err != nil {

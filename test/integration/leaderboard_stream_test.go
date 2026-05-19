@@ -224,6 +224,234 @@ func TestLeaderboardStream_UnknownQuiz_Returns404(t *testing.T) {
 	}
 }
 
+// TestLeaderboardStream_NameUpdate_RepaintsSubscribers covers the
+// claim-name flow's leaderboard fan-out (#239 follow-up):
+//
+//  1. Seed a single-question quiz.
+//  2. Client B plays it to completion so they land on the leaderboard
+//     with an auto-petname username.
+//  3. Client A subscribes to the leaderboard stream and drains the
+//     initial snapshot (which already shows client B's row).
+//  4. Client B PATCHes /api/players/me with a chosen display name.
+//  5. Client A must receive a fresh event whose entry for client B
+//     carries the new username.
+//
+// Without the fan-out wired into PATCH /api/players/me, the third step
+// would never repaint subscribed clients and this test would time out
+// on readSSEEvent at the end.
+func TestLeaderboardStream_NameUpdate_RepaintsSubscribers(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, nil)
+
+	db, err := sql.Open("sqlite", srv.DBURI)
+	if err != nil {
+		t.Fatalf("sql.Open err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v, want nil", cerr)
+		}
+	})
+	stores := store.New(db, slog.Default())
+
+	qz := &quiz.Quiz{
+		Title:       "Name Update Quiz",
+		Slug:        "name-update-quiz",
+		Description: "seed for the claim-name SSE fan-out test",
+		Questions: []*quiz.Question{
+			{
+				Text:     "What is 2+2?",
+				Position: 1,
+				Options: []*quiz.Option{
+					{Text: "4", Correct: true},
+					{Text: "5"},
+				},
+			},
+		},
+	}
+	if cerr := stores.Quizzes.CreateQuiz(ctx, qz); cerr != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", cerr)
+	}
+
+	// Client B plays the quiz to completion FIRST so they appear on the
+	// leaderboard (which currently only lists completed games).
+	clientB := newCookieJarClient(t)
+	playSingleQuestionQuizToCompletion(ctx, t, srv.BaseURL, clientB, qz.ID)
+
+	// Capture client B's auto-assigned username from /api/players/me so
+	// we know what to compare against in the post-PATCH event.
+	originalName := getMyUsername(ctx, t, srv.BaseURL, clientB)
+
+	// Client A subscribes and drains the initial snapshot. It should
+	// already see client B's row.
+	streamCtx, streamCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer streamCancel()
+
+	streamURL := fmt.Sprintf("%s/api/quizzes/%s-%d/leaderboard/stream", srv.BaseURL, qz.Slug, qz.ID)
+	streamReq, err := http.NewRequestWithContext(streamCtx, http.MethodGet, streamURL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest stream err = %v, want nil", err)
+	}
+	streamResp, err := http.DefaultClient.Do(streamReq)
+	if err != nil {
+		t.Fatalf("stream Do err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := streamResp.Body.Close(); cerr != nil {
+			t.Errorf("stream Body.Close err = %v, want nil", cerr)
+		}
+	})
+
+	scanner := bufio.NewScanner(streamResp.Body)
+	initial := readSSEEvent(t, scanner)
+	if got, want := len(initial.Entries), 1; got != want {
+		t.Fatalf("initial event entries len = %d, want %d (client B should be on the board)", got, want)
+	}
+	if got, want := initial.Entries[0].Username, originalName; got != want {
+		t.Errorf("initial event username = %q, want %q (auto-petname)", got, want)
+	}
+
+	// Client B claims a custom display name.
+	const claimedName = "renamed-player"
+	patchReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPatch, srv.BaseURL+"/api/players/me",
+		strings.NewReader(fmt.Sprintf(`{"username": %q}`, claimedName)),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest patch err = %v, want nil", err)
+	}
+	patchReq.Header.Set("Content-Type", "application/json")
+	patchResp, err := clientB.Do(patchReq)
+	if err != nil {
+		t.Fatalf("patch Do err = %v, want nil", err)
+	}
+	if got, want := patchResp.StatusCode, http.StatusOK; got != want {
+		t.Errorf("patch status = %d, want %d", got, want)
+	}
+	if cerr := patchResp.Body.Close(); cerr != nil {
+		t.Errorf("patch Body.Close err = %v, want nil", cerr)
+	}
+
+	// Client A should receive a second event whose row carries the new
+	// username.
+	second := readSSEEvent(t, scanner)
+	if got, want := len(second.Entries), 1; got != want {
+		t.Fatalf("post-rename entries len = %d, want %d", got, want)
+	}
+	if got, want := second.Entries[0].Username, claimedName; got != want {
+		t.Errorf("post-rename username = %q, want %q (claim should propagate via SSE)", got, want)
+	}
+}
+
+// playSingleQuestionQuizToCompletion runs the full create-game / next-question /
+// submit-answer sequence with the given client so the resulting game
+// is "completed" by the store's leaderboard query definition. Single-
+// question quiz only: the helper assumes one /next call is enough.
+func playSingleQuestionQuizToCompletion(
+	ctx context.Context,
+	t *testing.T,
+	baseURL string,
+	client *http.Client,
+	quizID int64,
+) {
+	t.Helper()
+
+	createReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, baseURL+"/api/games",
+		strings.NewReader(fmt.Sprintf(`{"quizId": %d}`, quizID)),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest create err = %v, want nil", err)
+	}
+	createReq.Header.Set("Content-Type", "application/json")
+	createResp, err := client.Do(createReq)
+	if err != nil {
+		t.Fatalf("create game Do err = %v, want nil", err)
+	}
+	gameID := decodeGameID(t, createResp)
+	if cerr := createResp.Body.Close(); cerr != nil {
+		t.Errorf("create game Body.Close err = %v, want nil", cerr)
+	}
+
+	nextReq, err := http.NewRequestWithContext(
+		ctx, http.MethodGet,
+		fmt.Sprintf("%s/api/games/%s/questions/next", baseURL, gameID), nil,
+	)
+	if err != nil {
+		t.Fatalf("NewRequest next err = %v, want nil", err)
+	}
+	nextResp, err := client.Do(nextReq)
+	if err != nil {
+		t.Fatalf("next Do err = %v, want nil", err)
+	}
+	pick := decodeFirstCorrectOption(t, nextResp)
+	if cerr := nextResp.Body.Close(); cerr != nil {
+		t.Errorf("next Body.Close err = %v, want nil", cerr)
+	}
+
+	answerURL := fmt.Sprintf("%s/api/games/%s/questions/%d/answers", baseURL, gameID, pick.QuestionID)
+	answerBody := fmt.Sprintf(`{"optionId": %d}`, pick.OptionID)
+	answerReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, answerURL, strings.NewReader(answerBody),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest answer err = %v, want nil", err)
+	}
+	answerReq.Header.Set("Content-Type", "application/json")
+	answerResp, err := client.Do(answerReq)
+	if err != nil {
+		t.Fatalf("answer Do err = %v, want nil", err)
+	}
+	if got, want := answerResp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("answer status = %d, want %d", got, want)
+	}
+	if cerr := answerResp.Body.Close(); cerr != nil {
+		t.Errorf("answer Body.Close err = %v, want nil", cerr)
+	}
+}
+
+// playerMeResponse is the JSON shape of GET /api/players/me. Only the
+// username field is modelled here.
+type playerMeResponse struct {
+	Username string `json:"username"`
+}
+
+// getMyUsername hits GET /api/players/me with the given cookie-jar
+// client and returns the username on file. The EnsurePlayer middleware
+// mints a row on first contact, so this also doubles as the "create a
+// player session" probe.
+func getMyUsername(ctx context.Context, t *testing.T, baseURL string, client *http.Client) string {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/players/me", nil)
+	if err != nil {
+		t.Fatalf("NewRequest /me err = %v, want nil", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("/me Do err = %v, want nil", err)
+	}
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			t.Errorf("/me Body.Close err = %v, want nil", cerr)
+		}
+	}()
+
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("/me status = %d, want %d", got, want)
+	}
+	var out playerMeResponse
+	if derr := json.NewDecoder(resp.Body).Decode(&out); derr != nil {
+		t.Fatalf("/me decode err = %v, want nil", derr)
+	}
+	if out.Username == "" {
+		t.Fatal("/me returned empty username")
+	}
+
+	return out.Username
+}
+
 // leaderboardEventEntry mirrors one row in the SSE leaderboard payload.
 // Lifted to package scope so revive's nested-structs rule is happy.
 type leaderboardEventEntry struct {

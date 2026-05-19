@@ -250,6 +250,19 @@ func (s *GameStore) ListAnswersForQuizLeaderboard(
 	return answers, nil
 }
 
+// ListQuizIDsForPlayer returns the distinct quiz IDs where the player
+// has at least one answer. Used by the claim-name flow to repaint every
+// affected leaderboard SSE stream when a player changes their display
+// name.
+func (s *GameStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]int64, error) {
+	ids, err := s.q.ListQuizIDsForPlayer(ctx, playerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list quiz IDs for player %d: %w", playerID, err)
+	}
+
+	return ids, nil
+}
+
 func (s *GameStore) deleteGamesForPlayerOnQuizTx(
 	ctx context.Context, tx *sql.Tx, playerID, quizID int64,
 ) error {
