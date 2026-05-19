@@ -63,8 +63,14 @@
                  already-played path in checkAlreadyPlayed). Source
                  order puts it directly below the CTA so the
                  leaderboard stays in the same spot on screen in both
-                 cases. -->
-            <div x-show="finished">
+                 cases.
+
+                 mb-6 on the outer div gives a uniform gap to whatever
+                 view renders next (start-screen picker, deep-link
+                 title + description, etc.) on the already-played
+                 revisit. Harmless on fresh-finish where the
+                 leaderboard is the only visible block. -->
+            <div x-show="finished" class="mb-6">
                 <h2 class="mb-6 font-display text-2xl font-semibold text-text-dim">Game Finished!</h2>
 
                 <template x-if="leaderboard">
@@ -158,16 +164,25 @@
                         </template>
                     </select>
                 </div>
-                <template x-if="deepLinkedQuiz">
+                <!-- Deep-link title/description, the "already completed"
+                     lockout banner, and the Start button all hide on
+                     the already-played revisit (finished=true with no
+                     gameId). The leaderboard view above already says
+                     "Game Finished!" and the row carries the player's
+                     score, so the lockout copy and a disabled Start
+                     are just noise on top of that. The quiz picker
+                     stays visible so the player can pick a different
+                     quiz to play next. -->
+                <template x-if="deepLinkedQuiz && !finished">
                     <div class="mb-6">
                         <h2 class="mb-2 font-display text-2xl font-semibold text-text" x-text="deepLinkedQuiz.title"></h2>
                         <p class="text-text-dim leading-relaxed" x-text="deepLinkedQuiz.description"></p>
                     </div>
                 </template>
-                <template x-if="startError">
+                <template x-if="startError && !finished">
                     <div class="feedback-banner feedback-danger mb-5" x-text="startError"></div>
                 </template>
-                <button class="btn-primary" @click="startGame()" :disabled="!selectedQuizId || !!startError">Start Game</button>
+                <button x-show="!finished" class="btn-primary" @click="startGame()" :disabled="!selectedQuizId || !!startError">Start Game</button>
             </div>
 
             <!-- Gameplay view: question, countdown, answer buttons,

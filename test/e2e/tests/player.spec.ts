@@ -93,18 +93,19 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   // loudly so the score-not-zero guard above can't silently degrade.
   expect(expectedSuccesses).toBe(2);
 
-  // Re-visit the start screen. Because the player already completed this
-  // quiz and #145 enforces one attempt per (player, quiz), the start
-  // screen must surface the "already completed" lockout notification
-  // proactively and disable the Start button — without the player having
-  // to click Start to discover they're locked out. The leaderboard for
-  // the completed quiz also renders below the lockout so the returning
-  // player can see their score without re-playing.
+  // Re-visit the start screen. The player has already completed this
+  // quiz (#145 enforces one attempt per (player, quiz)), so the
+  // leaderboard view takes over with the "Game Finished!" heading and
+  // the player's row visible. The lockout banner and the Start button
+  // both disappear because the leaderboard view already conveys the
+  // "you played this" message; only the quiz picker stays visible so
+  // the player can pick a different quiz to play.
   await page.goto('/client/');
   await page.locator('select').selectOption({ label: quizTitle });
-  await expect(page.locator('.feedback-danger'))
-    .toContainText('already completed');
-  await expect(page.getByRole('button', { name: 'Start Game' })).toBeDisabled();
   await expect(page.getByRole('heading', { name: 'Game Finished!' })).toBeVisible();
   await expect(page.locator('.player-table')).toBeVisible();
+  await expect(page.locator('.feedback-danger')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Start Game' })).toBeHidden();
+  // Quiz picker still visible — the player can pick another quiz.
+  await expect(page.locator('select')).toBeVisible();
 });
