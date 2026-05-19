@@ -584,11 +584,7 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 
 		resOptions := make([]optionResponse, len(gq.QuizQuestion.Options))
 		for i, o := range gq.QuizQuestion.Options {
-			resOption := optionResponse{
-				ID:   o.ID,
-				Text: o.Text,
-			}
-			resOptions[i] = resOption
+			resOptions[i] = optionResponse{ID: o.ID, Text: o.Text}
 		}
 
 		res := questionResponse{
