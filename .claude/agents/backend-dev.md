@@ -108,6 +108,12 @@ Hand-written Store and Service methods that read from the database use the `Get*
 8. **Route** — register the handler in `internal/server/routes.go`.
 9. **Tests** — unit tests alongside the source file; integration tests under `test/integration/`.
 
+## Review loop
+
+After every code change, run `/review` followed by `/go-style-review` on the current branch. Fix every actionable finding. Re-run both reviews and repeat until they each report no issues to fix. Only then is the change ready to be shown to the user for sign-off.
+
+The two reviews catch different things — `/review` covers correctness, conventions, and design; `/go-style-review` applies Google Go Style. A finding from either is in scope.
+
 ## Testing conventions
 
 - Unit tests use `internal/dbtest` to get an in-memory SQLite DB (already migrated).
