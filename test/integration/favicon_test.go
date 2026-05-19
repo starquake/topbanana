@@ -20,9 +20,12 @@ import (
 func TestFavicon_Integration(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, nil)
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+	})
 
 	t.Run("svg served at /assets/banana.svg", func(t *testing.T) {
+		t.Parallel()
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.BaseURL+"/assets/banana.svg", nil)
 		if err != nil {
 			t.Fatalf("NewRequest err = %v, want nil", err)
@@ -59,19 +62,31 @@ func TestFavicon_Integration(t *testing.T) {
 	})
 
 	t.Run("auth login page links the favicon", func(t *testing.T) {
+		t.Parallel()
 		assertFaviconLink(ctx, t, http.DefaultClient, srv.BaseURL+"/login")
 	})
 
 	t.Run("player index links the favicon", func(t *testing.T) {
+		t.Parallel()
 		assertFaviconLink(ctx, t, http.DefaultClient, srv.BaseURL+"/client/")
 	})
 
 	t.Run("admin index links the favicon", func(t *testing.T) {
+		t.Parallel()
 		jar, err := cookiejar.New(nil)
 		if err != nil {
 			t.Fatalf("cookiejar.New err = %v, want nil", err)
 		}
-		client := &http.Client{Jar: jar}
+		// CheckRedirect: ErrUseLastResponse so registerAdminViaHTTP sees the
+		// 303 it expects (the default client would follow it). Once the
+		// session cookie is set, GET /admin still returns 200 directly so
+		// the redirect override doesn't affect the favicon check below.
+		client := &http.Client{
+			Jar: jar,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
 		registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
 		assertFaviconLink(ctx, t, client, srv.BaseURL+"/admin")
 	})
