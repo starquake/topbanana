@@ -377,6 +377,19 @@
                disabled:opacity-50 cursor-default;
     }
 
+    /* The .progress bar carries two phases of each question (#247).
+     * .progress-reveal paints the value in cyan while it fills
+     * 0 → 100 during the pre-answer beat; .progress-answer paints it
+     * in accent yellow while it drains 100 → 0 during the answer
+     * window. Same base element (.progress) handles geometry and
+     * track colour; only the value colour swaps. */
+    .progress-reveal {
+        @apply [&::-webkit-progress-value]:bg-cyan [&::-moz-progress-bar]:bg-cyan;
+    }
+    .progress-answer {
+        @apply [&::-webkit-progress-value]:bg-accent [&::-moz-progress-bar]:bg-accent;
+    }
+
     /* Per-question feedback banner. Restrained card with a single
      * accent-coloured top border — three semantic variants. The
      * `[data-feedback]` selector on the same element is what

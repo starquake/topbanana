@@ -15,7 +15,15 @@ import (
 )
 
 const (
-	defaultExpiration       = 10 * time.Second
+	defaultExpiration = 10 * time.Second
+	// defaultRevealDelay is the wall-clock gap between issuing a
+	// question and revealing the answer options. The player sees the
+	// question text immediately and gets the delay "for free" to read
+	// it before the per-question countdown starts — see #247. The
+	// server shifts StartedAt into the future by this amount so the
+	// answer window (StartedAt → ExpiredAt) starts AFTER the reveal,
+	// not from the moment the question was issued.
+	defaultRevealDelay      = 3 * time.Second
 	maxPoints               = 1000
 	defaultLeaderboardLimit = 10
 )
@@ -391,14 +399,20 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string) (*Question
 	}
 
 	var gq *Question
-	// If we found a quiz question, register it as a GameQuestion (starting the timer)
+	// If we found a quiz question, register it as a GameQuestion. The
+	// answer window (StartedAt → ExpiredAt) is anchored at
+	// now + defaultRevealDelay, not "now" — the reveal delay gives the
+	// player a brief beat to read the question before the option
+	// buttons appear (#247). Submissions before StartedAt are scored
+	// as if they arrived AT StartedAt (see CalculateScore's clamp).
 	if nextQuestion != nil {
+		revealAt := time.Now().Add(defaultRevealDelay)
 		gq = &Question{
 			GameID:       gameID,
 			QuestionID:   nextQuestion.ID,
 			QuizQuestion: nextQuestion,
-			StartedAt:    time.Now(),
-			ExpiredAt:    time.Now().Add(defaultExpiration), // 10s limit
+			StartedAt:    revealAt,
+			ExpiredAt:    revealAt.Add(defaultExpiration),
 		}
 		if err = s.store.CreateQuestion(ctx, gq); err != nil {
 			return nil, fmt.Errorf("failed to record game question: %w", err)
@@ -679,7 +693,13 @@ func (s *Service) CalculateScore(ctx context.Context, a *Answer) int {
 	}
 
 	answerWindow := a.Question.ExpiredAt.Sub(a.Question.StartedAt)
-	duration := a.AnsweredAt.Sub(a.Question.StartedAt)
+	duration := max(
+		// Defensive clamp: a hand-crafted client could POST an answer
+		// before StartedAt (which sits in the future due to the reveal
+		// delay — #247). Without clamping, a negative duration would
+		// score above maxPoints. Treat early arrivals as if they landed
+		// at StartedAt.
+		a.AnsweredAt.Sub(a.Question.StartedAt), 0)
 
 	score := int(float64(maxPoints) - (duration.Seconds() / answerWindow.Seconds() * float64(maxPoints)))
 
