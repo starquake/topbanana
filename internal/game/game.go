@@ -217,15 +217,28 @@ type Service struct {
 	quizStore            quiz.Store
 	logger               *slog.Logger
 	leaderboardPublisher LeaderboardPublisher
+	revealDelay          time.Duration
 }
 
 // NewService initializes and returns a new instance of Service with the provided game and quiz stores.
 func NewService(gameStore Store, quizStore quiz.Store, logger *slog.Logger) *Service {
 	return &Service{
-		store:     gameStore,
-		quizStore: quizStore,
-		logger:    logger,
+		store:       gameStore,
+		quizStore:   quizStore,
+		logger:      logger,
+		revealDelay: defaultRevealDelay,
 	}
+}
+
+// SetRevealDelay overrides the per-question reveal beat (#247). The default
+// is 3 s — long enough to read the prompt before the option buttons appear.
+// E2E and load-test deployments shrink this to a few hundred ms to speed up
+// runs without losing the visual reveal phase.
+//
+// Not safe for concurrent use: must be called during startup wiring, before
+// the service is handed to any HTTP handler that may invoke GetNextQuestion.
+func (s *Service) SetRevealDelay(d time.Duration) {
+	s.revealDelay = d
 }
 
 // SetLeaderboardPublisher wires a publisher invoked on every successful
@@ -415,7 +428,7 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string) (*Question
 	// buttons appear (#247). Submissions before StartedAt are scored
 	// as if they arrived AT StartedAt (see CalculateScore's clamp).
 	if nextQuestion != nil {
-		revealAt := time.Now().Add(defaultRevealDelay)
+		revealAt := time.Now().Add(s.revealDelay)
 		gq = &Question{
 			GameID:       gameID,
 			QuestionID:   nextQuestion.ID,

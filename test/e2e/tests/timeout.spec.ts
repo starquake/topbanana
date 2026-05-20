@@ -15,14 +15,16 @@ import {
 // progress bar to drain before the banner appears. Bumping or lowering
 // the server's defaultExpiration only needs this budget to stay larger
 // than the new value.
-// PROGRESS_DRAIN_BUDGET_MS now also has to cover the 3s reveal-countdown
+// PROGRESS_DRAIN_BUDGET_MS now also has to cover the reveal-countdown
 // (#247) before the per-question progress bar even appears, on top of
-// the existing 10s answer window.
+// the existing 10s answer window. The e2e config shrinks the reveal
+// to 500ms (REVEAL_DELAY env), but the budget stays generous so a
+// future config tweak that lengthens it doesn't silently flake here.
 const PROGRESS_DRAIN_BUDGET_MS = 20_000;
 // SETTLE_MS gates the post-timeout waits (feedback banner appearing,
 // next question's button appearing). The next-question path spans the
-// 2s feedback pause plus the 3s reveal-countdown (#247), so 8s gives
-// comfortable headroom.
+// 2s feedback pause plus the reveal-countdown (#247, 500ms in e2e via
+// REVEAL_DELAY), so 8s gives comfortable headroom.
 const SETTLE_MS = 8_000;
 
 // Letting the timer expire without answering takes one full countdown

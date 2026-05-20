@@ -21,6 +21,11 @@ var ErrDBURINotSetInProduction = errors.New("DB_URI must be set in production")
 // back to an ephemeral random key so localhost runs need no configuration.
 var ErrSessionKeyRequired = errors.New("SESSION_KEY must be set")
 
+// ErrRevealDelayNegative is returned when REVEAL_DELAY parses to a negative
+// duration. The reveal beat sits in the future on every question, so a
+// negative value would silently break the gameplay timing contract.
+var ErrRevealDelayNegative = errors.New("REVEAL_DELAY must not be negative")
+
 const (
 	// AppEnvironmentDefault is the default application environment.
 	AppEnvironmentDefault = "development"
@@ -76,6 +81,12 @@ type Config struct {
 	// RegistrationEnabled gates the /register routes. Defaults to false so registration is
 	// opt-in per deployment. Parsed from the REGISTRATION_ENABLED env var via strconv.ParseBool.
 	RegistrationEnabled bool
+
+	// RevealDelay overrides the per-question reveal beat (#247). Zero means
+	// "use the built-in default" (3 s). Parsed from the REVEAL_DELAY env var
+	// via time.ParseDuration; e2e and load-test deployments shrink this to a
+	// few hundred ms to speed up runs without losing the visual reveal phase.
+	RevealDelay time.Duration
 }
 
 // SecureCookies reports whether session and CSRF cookies should be issued
@@ -174,6 +185,17 @@ func parseTypedEnvVars(getenv func(string) string, c *Config) error {
 			return fmt.Errorf("invalid REGISTRATION_ENABLED: %q, err: %w", val, err)
 		}
 		c.RegistrationEnabled = b
+	}
+
+	if val := getenv("REVEAL_DELAY"); val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil {
+			return fmt.Errorf("invalid REVEAL_DELAY: %q, err: %w", val, err)
+		}
+		if d < 0 {
+			return fmt.Errorf("%w: %q", ErrRevealDelayNegative, val)
+		}
+		c.RevealDelay = d
 	}
 
 	return nil

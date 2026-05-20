@@ -55,6 +55,11 @@ export default defineConfig({
       DB_URI: `file:${dbPath}?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)`,
       SESSION_KEY: 'e2e-test-session-key-do-not-use-in-prod-1234567890abcdef',
       REGISTRATION_ENABLED: 'true',
+      // Shrink the per-question reveal beat (#247, default 3s) so the
+      // suite isn't paying ~12s of dead time per gameplay spec. 500ms
+      // still leaves the .progress-reveal phase observable for the
+      // visibility assertion in player.spec.ts.
+      REVEAL_DELAY: '500ms',
       // Whitelist every per-browser username the specs register so each project's
       // registrant is promoted to admin regardless of who got there first. The
       // bootstrap-admin rule (first password-bearing player becomes admin) only

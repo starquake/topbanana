@@ -45,7 +45,8 @@ test('retry banner appears when answers POST fails, and a re-click advances the 
   const firstChoice = QUIZ_QUESTIONS[0].options[0];
   const firstButton = page.getByRole('button', { name: firstChoice });
 
-  // Wait through the 3s reveal-countdown (#247) before the buttons appear.
+  // Wait through the reveal-countdown (#247, e2e shrinks to 500ms via
+  // REVEAL_DELAY) before the buttons appear.
   await expect(firstButton).toBeVisible({ timeout: 10_000 });
   await firstButton.click();
 
