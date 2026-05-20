@@ -35,20 +35,17 @@ func addRoutes(
 
 	// Client
 	clientHandler := client.Handler(cfg)
+	shell := client.NewShellHandlers(cfg, stores.Quizzes, logger)
+	// The SPA root and the per-quiz share URL both go through the shell
+	// handler so the index template can render Open Graph metadata. The
+	// shell route wins over the file-server fallback below because Go's
+	// mux picks the more specific pattern (`{$}` + method).
+	mux.Handle("GET /client/{$}", http.HandlerFunc(shell.Index))
 	mux.Handle("/client/", clientHandler)
+	mux.Handle("GET /play/{slugID}", http.HandlerFunc(shell.Play))
 
 	// Admin + auth static assets (Tailwind output, embedded in the binary).
 	mux.Handle("/assets/", web.Handler(cfg))
-
-	// Per-quiz share URL. Serves the same SPA shell as /client/ but the
-	// frontend reads the slug-id off the path and pre-selects the quiz.
-	// Path is rewritten to /client/ so the existing file server (and its
-	// production minification middleware) keeps doing the work.
-	mux.Handle("GET /play/{slugID}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r2 := r.Clone(r.Context())
-		r2.URL.Path = "/client/"
-		clientHandler.ServeHTTP(w, r2)
-	}))
 
 	// Health
 	mux.Handle("GET /healthz", health.HandleHealthz(logger, stores))

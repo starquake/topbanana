@@ -1,0 +1,26 @@
+<!--
+  Source for og-image.png (1200x630, used as the og:image / twitter:image
+  meta value across topbanana). The PNG is the committed artifact; this
+  SVG is kept here so the wordmark + tagline are editable.
+
+  Regenerate (Orbitron is fetched into a temp dir so we don't vendor it):
+    mkdir -p /tmp/og-fonts && \
+    curl -fsSL -o /tmp/og-fonts/Orbitron.ttf \
+      'https://github.com/google/fonts/raw/main/ofl/orbitron/Orbitron%5Bwght%5D.ttf' && \
+    FONTCONFIG_FILE=<(printf '<fontconfig><dir>/tmp/og-fonts</dir><dir>/usr/share/fonts</dir><dir>/usr/local/share/fonts</dir><cachedir>/tmp/og-fc-cache</cachedir></fontconfig>') \
+      rsvg-convert -w 1200 -h 630 internal/web/static/_og-image.svg \
+        -o internal/web/static/og-image.png
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#0a0a0f"/>
+
+  <!-- Banana icon, scaled from the favicon's 24x24 viewBox to 280x280. -->
+  <g transform="translate(80 175) scale(11.6667)" fill="none" stroke="#ffd23f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 13c3.5-2 8-2 10 2a5.5 5.5 0 0 1 8 5"/>
+    <path d="M5.15 17.89c5.52-1.52 8.65-6.89 7-12C11.55 4 11.5 2 13 2c3.22 0 5 5.5 5 8 0 6.5-4.2 12-10.49 12C5.11 22 2 22 2 20c0-1.5 1.14-1.55 3.15-2.11Z"/>
+  </g>
+
+  <text x="430" y="290" font-family="Orbitron" font-weight="600" font-size="72" fill="#e8e8ee" letter-spacing="2">Be the</text>
+  <text x="430" y="400" font-family="Orbitron" font-weight="900" font-size="96" fill="#ffd23f" letter-spacing="2">Top Banana!</text>
+  <text x="430" y="470" font-family="Open Sans" font-weight="400" font-size="28" fill="#7a7a85">Make a quiz, share the link, see who's the top banana.</text>
+</svg>
