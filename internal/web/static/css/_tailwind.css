@@ -22,6 +22,7 @@
  * internal/web/static/css/_tailwind.css. */
 @source "../../tmpl/admin";
 @source "../../tmpl/auth";
+@source "../../tmpl/home";
 @source "../../../client/static";
 
 @theme {

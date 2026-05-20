@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}}</title>
+    {{/* Home page is the sitewide front door. It shares the admin/auth
+         Tailwind theme so brand chrome (font stack, palette tokens,
+         banana icon) stays consistent. New utility classes used in
+         home/* must be picked up by `make tailwind`; the @source line
+         in _tailwind.css already covers this directory. */}}
+    <link rel="icon" type="image/svg+xml" href="/assets/banana.svg" sizes="any">
+    <meta property="og:site_name" content="Top Banana!">
+    <meta property="og:title" content="Be the Top Banana!">
+    <meta property="og:description" content="Make a quiz, share the link, see who's the top banana.">
+    <meta property="og:type" content="website">
+    <meta property="og:image" content="/assets/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Top Banana! - banana icon and wordmark on a dark background">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Be the Top Banana!">
+    <meta name="twitter:description" content="Make a quiz, share the link, see who's the top banana.">
+    <meta name="twitter:image" content="/assets/og-image.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@500;600;700;800;900&display=swap">
+    <link rel="stylesheet" href="/assets/css/app.css">
+</head>
+<body class="bg-bg text-text font-sans antialiased min-h-screen leading-relaxed flex flex-col">
+<section class="max-w-shell mx-auto px-5 py-10 w-full flex-1">
+    {{template "content" .}}
+</section>
+{{/* Discreet admin link in the footer per #166: the start page is for
+     players; quiz authors are a tiny minority of visitors, so the link
+     into the admin dashboard sits at the bottom, low-contrast, rather
+     than in the brand navbar. /admin redirects to /login when the
+     visitor is not signed in as an admin. */}}
+<footer class="max-w-shell mx-auto px-5 py-6 w-full text-xs text-text-mute flex items-center justify-between">
+    <span>Top Banana!</span>
+    <a href="/admin" class="hover:text-text-dim underline-offset-2 hover:underline">Manage quizzes</a>
+</footer>
+</body>
+</html>

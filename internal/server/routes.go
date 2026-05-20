@@ -12,6 +12,7 @@ import (
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/health"
+	"github.com/starquake/topbanana/internal/home"
 	"github.com/starquake/topbanana/internal/leaderboard"
 	"github.com/starquake/topbanana/internal/session"
 	"github.com/starquake/topbanana/internal/store"
@@ -50,8 +51,9 @@ func addRoutes(
 	// Health
 	mux.Handle("GET /healthz", health.HandleHealthz(logger, stores))
 
-	// Not found
-	mux.Handle("/", http.NotFoundHandler())
+	// Public start page (#166). Registered as `GET /{$}` so only the exact
+	// root matches; unknown paths fall through to Go's mux default 404.
+	mux.Handle("GET /{$}", home.Handle(logger, stores.Home))
 }
 
 // addAuthRoutes registers the unauthenticated auth-flow routes. Registration
