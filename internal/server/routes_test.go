@@ -15,6 +15,7 @@ import (
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/game"
+	"github.com/starquake/topbanana/internal/home"
 	"github.com/starquake/topbanana/internal/leaderboard"
 	"github.com/starquake/topbanana/internal/quiz"
 	. "github.com/starquake/topbanana/internal/server"
@@ -171,6 +172,16 @@ func (stubGameStore) ListQuizIDsForPlayer(_ context.Context, _ int64) ([]int64, 
 	return nil, nil
 }
 
+type stubHomeStore struct{}
+
+func (stubHomeStore) ListPopularQuizzes(_ context.Context) ([]*home.PopularQuiz, error) {
+	return nil, nil
+}
+
+func (stubHomeStore) ListMostActivePlayers(_ context.Context) ([]*home.ActivePlayer, error) {
+	return nil, nil
+}
+
 func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 	t.Parallel()
 
@@ -178,6 +189,7 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 	stores := &store.Stores{
 		Quizzes: stubQuizStore{},
 		Players: stubPlayerStore{},
+		Home:    stubHomeStore{},
 	}
 	gameSvc := game.NewService(stubGameStore{}, stubQuizStore{}, logger)
 	mux := http.NewServeMux()
@@ -216,6 +228,8 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 		{name: "Question Save (create)", method: http.MethodPost, path: "/admin/quizzes/1/questions"},
 		{name: "Question Save (update)", method: http.MethodPost, path: "/admin/quizzes/1/questions/1"},
 
+		{name: "Home Start Page", method: http.MethodGet, path: "/"},
+
 		{name: "Auth Register GET", method: http.MethodGet, path: "/register"},
 		{name: "Auth Register POST", method: http.MethodPost, path: "/register"},
 		{name: "Auth Login GET", method: http.MethodGet, path: "/login"},
@@ -245,6 +259,7 @@ func TestAddRoutes_RegisterDisabled_Returns404(t *testing.T) {
 	stores := &store.Stores{
 		Quizzes: stubQuizStore{},
 		Players: stubPlayerStore{},
+		Home:    stubHomeStore{},
 	}
 	gameSvc := game.NewService(stubGameStore{}, stubQuizStore{}, logger)
 	mux := http.NewServeMux()
@@ -283,6 +298,7 @@ func TestAddRoutes_UnknownRouteReturns404(t *testing.T) {
 	stores := &store.Stores{
 		Quizzes: stubQuizStore{},
 		Players: stubPlayerStore{},
+		Home:    stubHomeStore{},
 	}
 	mux := http.NewServeMux()
 	ExportAddRoutes(
@@ -320,6 +336,7 @@ func TestAddRoutes_LoginPOST_RejectsMissingCSRF(t *testing.T) {
 	stores := &store.Stores{
 		Quizzes: stubQuizStore{},
 		Players: stubPlayerStore{},
+		Home:    stubHomeStore{},
 	}
 	mux := http.NewServeMux()
 	cfg := &config.Config{SessionKey: "test-session-key"}
@@ -409,6 +426,7 @@ func TestAddRoutes_AdminRouteWithoutSession_RedirectsToLogin(t *testing.T) {
 	stores := &store.Stores{
 		Quizzes: stubQuizStore{},
 		Players: stubPlayerStore{},
+		Home:    stubHomeStore{},
 	}
 	mux := http.NewServeMux()
 	ExportAddRoutes(
@@ -444,6 +462,7 @@ func TestAddRoutes_AdminPOSTWithoutCSRF_Returns403_NotAuthRedirect(t *testing.T)
 	stores := &store.Stores{
 		Quizzes: stubQuizStore{},
 		Players: stubPlayerStore{},
+		Home:    stubHomeStore{},
 	}
 	mux := http.NewServeMux()
 	cfg := &config.Config{SessionKey: "test-session-key"}
