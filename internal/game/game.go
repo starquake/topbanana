@@ -489,8 +489,6 @@ func (s *Service) SubmitAnswer(
 	gameID string,
 	playerID, questionID, optionID int64,
 ) (*Answer, error) {
-	var err error
-
 	g, err := s.store.GetGame(ctx, gameID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get game: %w", err)
