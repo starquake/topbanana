@@ -19,6 +19,20 @@ import (
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
+// writeInternalError records an internal failure and writes a generic
+// 500 body. The wrapped error stays in the operator's logs (with
+// context msg) but never reaches the client, where it would otherwise
+// leak table names, SQL fragments, file paths, and other internals
+// produced by sqlc / SQLite (#274).
+//
+// Callers pass `msg` as a short, fixed context phrase ("error
+// retrieving leaderboard"), not user-controlled text. The body the
+// client sees is "internal error" with the appropriate status.
+func writeInternalError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, msg string, err error) {
+	logger.ErrorContext(r.Context(), msg, slog.Any("err", err))
+	http.Error(w, "internal error", http.StatusInternalServerError)
+}
+
 // gameRequest extracts the gameID path parameter and the session player
 // off the request. Every /api/games/{gameID}/* handler runs this gate
 // once at the top of its closure so the participant check (#272) and
@@ -65,8 +79,7 @@ func HandleQuizList(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 
 		quizzes, err := quizStore.ListQuizzes(r.Context())
 		if err != nil {
-			logger.ErrorContext(r.Context(), "error retrieving quizzes from store", slog.Any("err", err))
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, r, logger, "error retrieving quizzes from store", err)
 
 			return
 		}
@@ -129,8 +142,7 @@ func HandleQuizGet(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 
 				return
 			}
-			logger.ErrorContext(r.Context(), "error retrieving quiz from store", slog.Any("err", err))
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, r, logger, "error retrieving quiz from store", err)
 
 			return
 		}
@@ -237,7 +249,6 @@ func fetchQuizLeaderboard(
 // body has been written — the SSE handler uses this for the initial
 // snapshot only, and just exits the stream on subsequent errors.
 func writeQuizLeaderboardError(
-	ctx context.Context,
 	w http.ResponseWriter,
 	r *http.Request,
 	logger *slog.Logger,
@@ -248,8 +259,7 @@ func writeQuizLeaderboardError(
 
 		return
 	}
-	logger.ErrorContext(ctx, "error retrieving quiz leaderboard", slog.Any("err", err))
-	http.Error(w, err.Error(), http.StatusInternalServerError)
+	writeInternalError(w, r, logger, "error retrieving quiz leaderboard", err)
 }
 
 // HandleQuizLeaderboard returns the top scoring players for the given quiz.
@@ -283,7 +293,7 @@ func HandleQuizLeaderboard(logger *slog.Logger, service *game.Service) http.Hand
 
 		res, err := fetchQuizLeaderboard(ctx, service, quizID, player.ID)
 		if err != nil {
-			writeQuizLeaderboardError(ctx, w, r, logger, err)
+			writeQuizLeaderboardError(w, r, logger, err)
 
 			return
 		}
@@ -377,7 +387,7 @@ func HandleQuizLeaderboardStream(
 		// HTTP status codes — we log and end the stream there.
 		res, err := fetchQuizLeaderboard(ctx, service, quizID, player.ID)
 		if err != nil {
-			writeQuizLeaderboardError(ctx, w, r, logger, err)
+			writeQuizLeaderboardError(w, r, logger, err)
 
 			return
 		}
@@ -487,8 +497,7 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 
 				return
 			}
-			logger.ErrorContext(ctx, "error creating game", slog.Any("err", err))
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, r, logger, "error creating game", err)
 
 			return
 		}
@@ -542,8 +551,7 @@ func HandleGameForQuiz(logger *slog.Logger, service *game.Service) http.Handler 
 
 				return
 			}
-			logger.ErrorContext(ctx, "error retrieving game for quiz", slog.Any("err", err))
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, r, logger, "error retrieving game for quiz", err)
 
 			return
 		}
@@ -601,8 +609,7 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 
 				return
 			}
-			logger.ErrorContext(r.Context(), "error retrieving next question", slog.Any("err", err))
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, r, logger, "error retrieving next question", err)
 
 			return
 		}
@@ -699,8 +706,7 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 
 				return
 			}
-			logger.ErrorContext(r.Context(), "error submitting answer", slog.Any("err", err))
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, r, logger, "error submitting answer", err)
 
 			return
 		}
@@ -828,8 +834,7 @@ func HandlePlayerClaimName(
 			case errors.Is(err, auth.ErrUsernameEmpty):
 				http.Error(w, "username is required", http.StatusBadRequest)
 			default:
-				logger.ErrorContext(ctx, "error updating player username", slog.Any("err", err))
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				writeInternalError(w, r, logger, "error updating player username", err)
 			}
 
 			return
@@ -881,8 +886,7 @@ func HandleGameResults(logger *slog.Logger, service *game.Service) http.Handler 
 
 				return
 			}
-			logger.ErrorContext(r.Context(), "error retrieving game results", slog.Any("err", err))
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, r, logger, "error retrieving game results", err)
 
 			return
 		}
