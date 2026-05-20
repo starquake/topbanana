@@ -15,13 +15,18 @@ const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
   testDir: './tests',
-  fullyParallel: false,
+  // Every spec creates its own admin user + quiz titled per-browser, and the
+  // anonymous-visitor specs in claim.spec.ts use isolated Playwright contexts
+  // so their auto-minted petnames never collide. The SQLite store is shared
+  // within a project but uses WAL + a 5s busy_timeout, which absorbs the
+  // short writer contention this introduces.
+  fullyParallel: true,
   forbidOnly: !!process.env.CI,
   // Tests register per-project usernames and rely on the registration succeeding
   // exactly once per run — a retry would just hit ErrUsernameTaken from the prior
   // attempt and fail again, so retries provide no value here.
   retries: 0,
-  workers: 1,
+  workers: 4,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL,
