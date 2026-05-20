@@ -8,6 +8,8 @@ import (
 	"log/slog"
 
 	"github.com/rs/xid"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/starquake/topbanana/internal/database"
 	"github.com/starquake/topbanana/internal/db"
@@ -137,11 +139,25 @@ func (s *GameStore) StartGame(ctx context.Context, id string) error {
 	return nil
 }
 
-// CreateParticipant adds a new participant to a game and populates the participant's ID and joined time fields.
+// CreateParticipant adds a new participant to a game and populates the
+// participant's ID and joined time fields. The UNIQUE INDEX on
+// game_participants (player_id, quiz_id) added in
+// 20260520180000_unique_participant_per_player_quiz.sql will surface a
+// SQLite UNIQUE constraint failure here when a second concurrent
+// Service.CreateGame for the same (player, quiz) loses the race; the
+// caller maps it to [game.ErrGameAlreadyExists] (#273).
 func (s *GameStore) CreateParticipant(ctx context.Context, p *game.Participant) error {
-	var err error
-	row, err := s.q.CreateParticipant(ctx, db.CreateParticipantParams{GameID: p.GameID, PlayerID: p.PlayerID})
+	row, err := s.q.CreateParticipant(ctx, db.CreateParticipantParams{
+		GameID:   p.GameID,
+		PlayerID: p.PlayerID,
+		QuizID:   sql.NullInt64{Int64: p.QuizID, Valid: true},
+	})
 	if err != nil {
+		var sqliteErr *sqlite.Error
+		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+			return game.ErrGameAlreadyExists
+		}
+
 		return fmt.Errorf("failed to create participant: %w", err)
 	}
 
@@ -333,12 +349,20 @@ func (s *GameStore) listParticipants(ctx context.Context, gameID string) ([]*gam
 
 	participants := make([]*game.Participant, 0, len(rows))
 	for _, r := range rows {
-		participants = append(participants, &game.Participant{
+		p := &game.Participant{
 			ID:       r.ID,
 			GameID:   r.GameID,
 			PlayerID: r.PlayerID,
 			JoinedAt: r.JoinedAt,
-		})
+		}
+		// quiz_id was added in the #273 migration and backfilled from
+		// games.quiz_id. New rows always set it; legacy rows from
+		// before the migration also carry it after the backfill. The
+		// nullable wrapper only widens the type for sqlc's sake.
+		if r.QuizID.Valid {
+			p.QuizID = r.QuizID.Int64
+		}
+		participants = append(participants, p)
 	}
 
 	return participants, nil

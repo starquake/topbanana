@@ -30,6 +30,7 @@ type GameParticipant struct {
 	GameID   string
 	PlayerID int64
 	JoinedAt time.Time
+	QuizID   sql.NullInt64
 }
 
 type GameQuestion struct {

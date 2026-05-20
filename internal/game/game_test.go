@@ -551,7 +551,10 @@ func TestService_GetResults(t *testing.T) {
 		// participant row, otherwise SubmitAnswer rejects them as a
 		// non-participant. The bug-fix for #272 made the gate strict;
 		// pre-fix this test inadvertently relied on the missing check.
-		if err = gameStore.CreateParticipant(ctx, &Participant{GameID: g.ID, PlayerID: 2}); err != nil {
+		if err = gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: g.ID, PlayerID: 2, QuizID: testQuiz.ID},
+		); err != nil {
 			t.Fatalf("failed to create participant for player 2: %v", err)
 		}
 
@@ -609,7 +612,10 @@ func TestService_GetResults(t *testing.T) {
 		// participant row, otherwise SubmitAnswer rejects them as a
 		// non-participant. The bug-fix for #272 made the gate strict;
 		// pre-fix this test inadvertently relied on the missing check.
-		if err = gameStore.CreateParticipant(ctx, &Participant{GameID: g.ID, PlayerID: 2}); err != nil {
+		if err = gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: g.ID, PlayerID: 2, QuizID: testQuiz.ID},
+		); err != nil {
 			t.Fatalf("failed to create participant for player 2: %v", err)
 		}
 
@@ -663,7 +669,10 @@ func TestService_GetNextQuestion(t *testing.T) {
 		// aren't on the participant list. These tests bypass the
 		// service's CreateGame, so the participant row has to be
 		// seeded explicitly here.
-		if err = gameStore.CreateParticipant(ctx, &Participant{GameID: testGame.ID, PlayerID: 1}); err != nil {
+		if err = gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
+		); err != nil {
 			t.Fatalf("failed to create participant: %v", err)
 		}
 
@@ -711,7 +720,10 @@ func TestService_GetNextQuestion(t *testing.T) {
 		// aren't on the participant list. These tests bypass the
 		// service's CreateGame, so the participant row has to be
 		// seeded explicitly here.
-		if err = gameStore.CreateParticipant(ctx, &Participant{GameID: testGame.ID, PlayerID: 1}); err != nil {
+		if err = gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
+		); err != nil {
 			t.Fatalf("failed to create participant: %v", err)
 		}
 
@@ -757,7 +769,10 @@ func TestService_GetNextQuestion(t *testing.T) {
 		}
 		// Participant gate (#272): seed the participant directly since
 		// these tests bypass Service.CreateGame.
-		if err := gameStore.CreateParticipant(ctx, &Participant{GameID: testGame.ID, PlayerID: 1}); err != nil {
+		if err := gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
+		); err != nil {
 			t.Fatalf("CreateParticipant err = %v, want nil", err)
 		}
 
@@ -805,7 +820,10 @@ func TestService_GetNextQuestion(t *testing.T) {
 		}
 		// Participant gate (#272): seed the participant directly since
 		// these tests bypass Service.CreateGame.
-		if err := gameStore.CreateParticipant(ctx, &Participant{GameID: testGame.ID, PlayerID: 1}); err != nil {
+		if err := gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
+		); err != nil {
 			t.Fatalf("CreateParticipant err = %v, want nil", err)
 		}
 

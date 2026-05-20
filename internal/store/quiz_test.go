@@ -1484,7 +1484,7 @@ func TestQuizStore_DeleteQuiz(t *testing.T) {
 			t.Fatalf("failed to create game: %v", err)
 		}
 		if err = gameStore.CreateParticipant(
-			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID},
+			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID, QuizID: testQuiz.ID},
 		); err != nil {
 			t.Fatalf("failed to create participant: %v", err)
 		}
@@ -1607,7 +1607,7 @@ func TestQuizStore_DeleteQuestion(t *testing.T) {
 			t.Fatalf("failed to create game: %v", err)
 		}
 		if err = gameStore.CreateParticipant(
-			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID},
+			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID, QuizID: testQuiz.ID},
 		); err != nil {
 			t.Fatalf("failed to create participant: %v", err)
 		}

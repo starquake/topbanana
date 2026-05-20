@@ -74,11 +74,16 @@ type Player struct {
 	CreatedAt time.Time
 }
 
-// Participant represents a player participating in a game.
+// Participant represents a player participating in a game. QuizID is
+// denormalised from the parent game so the UNIQUE INDEX on
+// game_participants (player_id, quiz_id) can enforce the
+// one-attempt-per-(player, quiz) rule at the DB level (#273); callers
+// populate it from the game they just created.
 type Participant struct {
 	ID       int64
 	GameID   string
 	PlayerID int64
+	QuizID   int64
 	JoinedAt time.Time
 }
 
@@ -306,24 +311,24 @@ func (g *Game) IsCompleted() bool {
 	return len(g.Questions) >= len(g.Quiz.Questions) && len(g.Quiz.Questions) > 0
 }
 
-// CreateGame creates a new game with the specified quiz and player, linking the player and starting the game immediately.
-// Returns the newly created game or an error if the operation fails.
+// CreateGame creates a new game with the specified quiz and player, linking
+// the player and starting the game immediately. Returns the newly created
+// game or an error if the operation fails.
 //
 // Returns [ErrGameAlreadyExists] when the player already has a game for the
-// quiz (in-progress or completed). Callers that need to render a "resume"
-// affordance should call [Service.GetGameForPlayerOnQuiz] first; the
-// AlreadyExists error here is a defensive backstop, not the primary signal.
+// quiz. The fast-path check via GetGameByPlayerAndQuiz keeps the error
+// friendly for sequential callers; the authoritative enforcement lives on
+// the UNIQUE INDEX on game_participants (player_id, quiz_id) introduced by
+// the 20260520180000 migration (#273). A second concurrent call that races
+// past the check surfaces as a UNIQUE constraint failure on
+// CreateParticipant, which the store translates back into
+// ErrGameAlreadyExists — same return shape from either path.
 func (s *Service) CreateGame(ctx context.Context, quizID, playerID int64) (*Game, error) {
-	var err error
-	// verify that the quiz exists
 	qz, err := s.quizStore.GetQuiz(ctx, quizID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quiz: %w", err)
 	}
 
-	// One-attempt-per-(player, quiz) enforcement. Checked here rather than
-	// at the DB level because the schema doesn't carry the constraint —
-	// see #145 for the design discussion.
 	existing, err := s.store.GetGameByPlayerAndQuiz(ctx, playerID, qz.ID)
 	if err != nil && !errors.Is(err, ErrGameNotFound) {
 		return nil, fmt.Errorf("failed to check existing game: %w", err)
@@ -332,7 +337,6 @@ func (s *Service) CreateGame(ctx context.Context, quizID, playerID int64) (*Game
 		return nil, ErrGameAlreadyExists
 	}
 
-	// Create the game record
 	g := &Game{QuizID: qz.ID}
 	if err = s.store.CreateGame(ctx, g); err != nil {
 		return nil, fmt.Errorf("failed to create game: %w", err)
@@ -340,13 +344,24 @@ func (s *Service) CreateGame(ctx context.Context, quizID, playerID int64) (*Game
 
 	g.Quiz = qz
 
-	// Add the player to the game
-	pa := &Participant{GameID: g.ID, PlayerID: playerID}
+	pa := &Participant{GameID: g.ID, PlayerID: playerID, QuizID: qz.ID}
 	if err = s.store.CreateParticipant(ctx, pa); err != nil {
+		// The UNIQUE constraint loser arrives here as
+		// ErrGameAlreadyExists from the store; propagate it unwrapped
+		// so callers can errors.Is it. Other errors get the usual
+		// wrap.
+		if errors.Is(err, ErrGameAlreadyExists) {
+			// The orphan game row inserted just above is harmless —
+			// it has no participant, no questions, and no SSE traffic
+			// pinned to it. A future cleanup pass can sweep these,
+			// but they don't violate any constraint or change any
+			// player-visible state.
+			return nil, ErrGameAlreadyExists
+		}
+
 		return nil, fmt.Errorf("failed to create participant: %w", err)
 	}
 
-	// Start the game (Single player game starts immediately)
 	if err = s.store.StartGame(ctx, g.ID); err != nil {
 		return nil, fmt.Errorf("failed to start game: %w", err)
 	}

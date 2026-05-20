@@ -46,15 +46,17 @@ type homeSeed struct {
 }
 
 // seedHomeDB seeds two quizzes, two claimed players, and the games that
-// drive the home page ranking:
-//   - quiz1 has 3 finished games (popular #1)
-//   - quiz2 has 1 finished game (popular #2)
-//   - player1 finishes 3 games (active #1)
-//   - player2 finishes 1 game (active #2)
+// drive the home page ranking. The one-attempt-per-(player, quiz) rule
+// (#273) means each player plays a quiz at most once, so distinct play
+// counts come from distinct players:
+//   - quiz1 has 3 finished games (alice + bob + ghost) — popular #1
+//   - quiz2 has 1 finished game (alice) — popular #2
+//   - alice finishes 2 games (quiz1 + quiz2) — active #1
+//   - bob finishes 1 game (quiz1) — active #2
 //   - an anonymous (unclaimed) player finishes 1 game and must NOT
 //     appear in the active list
-//   - an in-progress game (no game_questions) for quiz1 must NOT
-//     bump the play count
+//   - an in-progress game (no game_questions) for an unrelated player
+//     must NOT bump the play count
 func seedHomeDB(t *testing.T) homeSeed {
 	t.Helper()
 	db := dbtest.Open(t)
@@ -98,24 +100,32 @@ func seedHomeDB(t *testing.T) homeSeed {
 		t.Fatalf("CreateAnonymousPlayer ghost err = %v, want nil", err)
 	}
 
-	// alice: 2 finished games on quiz1 + 1 finished on quiz2 = 3 total
-	finishGameFor(t, games, alice.ID, quiz1)
-	finishGameFor(t, games, alice.ID, quiz1)
-	finishGameFor(t, games, alice.ID, quiz2)
-	// bob: 1 finished game on quiz1 = 1 total
-	finishGameFor(t, games, bob.ID, quiz1)
-	// ghost: 1 finished game on quiz1 — bumps quiz1's play count to 4
-	// but must NOT show up in the active list.
-	finishGameFor(t, games, ghost.ID, quiz1)
+	// alice: quiz1 + quiz2 = 2 finished total
+	finishGameFor(t, games, alice.ID, quiz1, quiz1.ID)
+	finishGameFor(t, games, alice.ID, quiz2, quiz2.ID)
+	// bob: quiz1 = 1 finished total
+	finishGameFor(t, games, bob.ID, quiz1, quiz1.ID)
+	// ghost: quiz1 = 1 finished, bumps quiz1 play count to 3 but must
+	// NOT show up in the active list (unclaimed username).
+	finishGameFor(t, games, ghost.ID, quiz1, quiz1.ID)
 
-	// In-progress game on quiz1: created, participant added, but no
-	// game_questions issued. The home queries should not count it as
-	// a play of quiz1.
+	// In-progress game on quiz1 by a fresh anonymous bystander: created,
+	// participant added, but no game_questions issued. The home queries
+	// should not count it as a play. The bystander has to be a fresh
+	// player because alice + bob + ghost all already have a participant
+	// row on quiz1 (the UNIQUE INDEX from the #273 migration disallows
+	// duplicates).
+	bystander, err := players.CreateAnonymousPlayer(t.Context(), "bystander-inflight")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer bystander err = %v, want nil", err)
+	}
 	g := &game.Game{QuizID: quiz1.ID}
 	if err := games.CreateGame(t.Context(), g); err != nil {
 		t.Fatalf("CreateGame in-progress err = %v, want nil", err)
 	}
-	if err := games.CreateParticipant(t.Context(), &game.Participant{GameID: g.ID, PlayerID: alice.ID}); err != nil {
+	if err := games.CreateParticipant(t.Context(), &game.Participant{
+		GameID: g.ID, PlayerID: bystander.ID, QuizID: quiz1.ID,
+	}); err != nil {
 		t.Fatalf("CreateParticipant in-progress err = %v, want nil", err)
 	}
 
@@ -123,14 +133,20 @@ func seedHomeDB(t *testing.T) homeSeed {
 }
 
 // finishGameFor creates a finished game for the (player, quiz) pair:
-// game + participant + one game_question per quiz question.
-func finishGameFor(t *testing.T, games *GameStore, playerID int64, q *quiz.Quiz) {
+// game + participant + one game_question per quiz question. The
+// explicit quizID argument is denormalised onto game_participants per
+// the #273 migration so the UNIQUE INDEX on (player_id, quiz_id) can
+// fire if a test accidentally calls this twice for the same pair —
+// the failure now surfaces as ErrGameAlreadyExists.
+func finishGameFor(t *testing.T, games *GameStore, playerID int64, q *quiz.Quiz, quizID int64) {
 	t.Helper()
 	g := &game.Game{QuizID: q.ID}
 	if err := games.CreateGame(t.Context(), g); err != nil {
 		t.Fatalf("CreateGame err = %v, want nil", err)
 	}
-	if err := games.CreateParticipant(t.Context(), &game.Participant{GameID: g.ID, PlayerID: playerID}); err != nil {
+	if err := games.CreateParticipant(t.Context(), &game.Participant{
+		GameID: g.ID, PlayerID: playerID, QuizID: quizID,
+	}); err != nil {
 		t.Fatalf("CreateParticipant err = %v, want nil", err)
 	}
 	finishGame(t, games, g, q)
@@ -150,12 +166,13 @@ func TestHomeStore_ListPopularQuizzes(t *testing.T) {
 		t.Fatalf("len(rows) = %d, want %d (rows=%+v)", got, want, rows)
 	}
 
-	// quiz1 has 4 finished plays (alice x2, bob, ghost); quiz2 has 1.
-	// In-progress game on quiz1 must not bump the count.
+	// quiz1 has 3 finished plays (alice, bob, ghost); quiz2 has 1
+	// (alice). The in-progress game by the bystander on quiz1 must
+	// not bump the count.
 	if got, want := rows[0].ID, seed.Quiz1.ID; got != want {
 		t.Errorf("rows[0].ID = %d, want %d (quiz1 should rank first)", got, want)
 	}
-	if got, want := rows[0].PlayCount, 4; got != want {
+	if got, want := rows[0].PlayCount, 3; got != want {
 		t.Errorf("rows[0].PlayCount = %d, want %d", got, want)
 	}
 	if got, want := rows[1].ID, seed.Quiz2.ID; got != want {
@@ -185,7 +202,7 @@ func TestHomeStore_ListMostActivePlayers(t *testing.T) {
 	if got, want := rows[0].ID, seed.Alice.ID; got != want {
 		t.Errorf("rows[0].ID = %d, want %d (alice should rank first)", got, want)
 	}
-	if got, want := rows[0].FinishedCount, 3; got != want {
+	if got, want := rows[0].FinishedCount, 2; got != want {
 		t.Errorf("rows[0].FinishedCount = %d, want %d", got, want)
 	}
 	if got, want := rows[1].ID, seed.Bob.ID; got != want {
