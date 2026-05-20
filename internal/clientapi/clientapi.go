@@ -19,6 +19,35 @@ import (
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
+// gameRequest extracts the gameID path parameter and the session player
+// off the request. Every /api/games/{gameID}/* handler runs this gate
+// once at the top of its closure so the participant check (#272) and
+// the gameID validation stay in lockstep — the service refuses calls
+// from a non-participant by returning ErrGameNotFound, which the
+// handler maps to 404 alongside the genuine missing-game case.
+//
+// Writes the response and returns ok=false on any failure so the
+// caller can early-return without re-handling errors.
+func gameRequest(w http.ResponseWriter, r *http.Request, logger *slog.Logger) (string, int64, bool) {
+	gameID := r.PathValue("gameID")
+	if gameID == "" {
+		logger.ErrorContext(r.Context(), "missing gameID in request path")
+		http.Error(w, "missing gameID", http.StatusBadRequest)
+
+		return "", 0, false
+	}
+
+	p, ok := auth.PlayerFromContext(r.Context())
+	if !ok {
+		logger.ErrorContext(r.Context(), "missing player on context for game request")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+
+		return "", 0, false
+	}
+
+	return gameID, p.ID, true
+}
+
 // HandleQuizList returns a list of quizzes.
 func HandleQuizList(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 	type quizResponse struct {
@@ -550,16 +579,12 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var err error
-		var gameID string
-		if gameID = r.PathValue("gameID"); gameID == "" {
-			logger.ErrorContext(r.Context(), "missing GameID in request path")
-			http.Error(w, "missing GameID in request path", http.StatusBadRequest)
-
+		gameID, playerID, ok := gameRequest(w, r, logger)
+		if !ok {
 			return
 		}
 
-		gq, err := service.GetNextQuestion(r.Context(), gameID)
+		gq, err := service.GetNextQuestion(r.Context(), gameID, playerID)
 		if err != nil {
 			if errors.Is(err, game.ErrGameNotFound) {
 				http.Error(w, err.Error(), http.StatusNotFound)
@@ -645,11 +670,8 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var err error
-		var gameID string
-		if gameID = r.PathValue("gameID"); gameID == "" {
-			http.Error(w, "missing gameID", http.StatusBadRequest)
-
+		gameID, playerID, ok := gameRequest(w, r, logger)
+		if !ok {
 			return
 		}
 
@@ -665,15 +687,7 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 			return
 		}
 
-		player, ok := auth.PlayerFromContext(r.Context())
-		if !ok {
-			logger.ErrorContext(r.Context(), "missing player on context for submit answer")
-			http.Error(w, "internal error", http.StatusInternalServerError)
-
-			return
-		}
-
-		a, err := service.SubmitAnswer(r.Context(), gameID, player.ID, questionID, req.OptionID)
+		a, err := service.SubmitAnswer(r.Context(), gameID, playerID, questionID, req.OptionID)
 		if err != nil {
 			if errors.Is(err, game.ErrGameNotFound) || errors.Is(err, game.ErrQuestionNotInGame) {
 				http.Error(w, err.Error(), http.StatusNotFound)
@@ -854,14 +868,12 @@ func HandleGameResults(logger *slog.Logger, service *game.Service) http.Handler 
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var err error
-		var gameID string
-		if gameID = r.PathValue("gameID"); gameID == "" {
-			http.Error(w, "missing gameID", http.StatusBadRequest)
-
+		gameID, playerID, ok := gameRequest(w, r, logger)
+		if !ok {
 			return
 		}
-		results, err := service.GetResults(r.Context(), gameID)
+
+		results, err := service.GetResults(r.Context(), gameID, playerID)
 		if err != nil {
 			if errors.Is(err, game.ErrGameNotFound) {
 				logger.ErrorContext(r.Context(), "game not found", slog.Any("err", err))

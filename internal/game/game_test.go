@@ -465,7 +465,7 @@ func TestService_SubmitAnswer(t *testing.T) {
 			t.Fatalf("failed to create game: %v", err)
 		}
 
-		gq, err := svc.GetNextQuestion(ctx, g.ID)
+		gq, err := svc.GetNextQuestion(ctx, g.ID, 1)
 		if err != nil {
 			t.Fatalf("failed to get next question: %v", err)
 		}
@@ -500,7 +500,7 @@ func TestService_SubmitAnswer(t *testing.T) {
 			t.Fatalf("failed to create game: %v", err)
 		}
 
-		gq, err := svc.GetNextQuestion(ctx, g.ID)
+		gq, err := svc.GetNextQuestion(ctx, g.ID, 1)
 		if err != nil {
 			t.Fatalf("failed to get next question: %v", err)
 		}
@@ -538,7 +538,7 @@ func TestService_GetResults(t *testing.T) {
 			t.Fatalf("failed to create game: %v", err)
 		}
 
-		gq, err := svc.GetNextQuestion(ctx, g.ID)
+		gq, err := svc.GetNextQuestion(ctx, g.ID, 1)
 		if err != nil {
 			t.Fatalf("failed to get next question: %v", err)
 		}
@@ -546,6 +546,13 @@ func TestService_GetResults(t *testing.T) {
 		insertPlayer2 := `INSERT INTO players (id, username, email, created_at) VALUES (2, 'player2', 'player2@test.com', CURRENT_TIMESTAMP)`
 		if _, err = db.ExecContext(ctx, insertPlayer2); err != nil {
 			t.Fatalf("failed to insert player 2: %v", err)
+		}
+		// Participant gate (#272): player 2 needs an explicit
+		// participant row, otherwise SubmitAnswer rejects them as a
+		// non-participant. The bug-fix for #272 made the gate strict;
+		// pre-fix this test inadvertently relied on the missing check.
+		if err = gameStore.CreateParticipant(ctx, &Participant{GameID: g.ID, PlayerID: 2}); err != nil {
+			t.Fatalf("failed to create participant for player 2: %v", err)
 		}
 
 		correctOption := testQuiz.Questions[0].Options[0] // Paris, Correct: true
@@ -558,7 +565,7 @@ func TestService_GetResults(t *testing.T) {
 			t.Fatalf("failed to submit answer for player 2: %v", err)
 		}
 
-		results, err := svc.GetResults(ctx, g.ID)
+		results, err := svc.GetResults(ctx, g.ID, 1)
 		if err != nil {
 			t.Fatalf("failed to get results: %v", err)
 		}
@@ -589,7 +596,7 @@ func TestService_GetResults(t *testing.T) {
 			t.Fatalf("failed to create game: %v", err)
 		}
 
-		gq, err := svc.GetNextQuestion(ctx, g.ID)
+		gq, err := svc.GetNextQuestion(ctx, g.ID, 1)
 		if err != nil {
 			t.Fatalf("failed to get next question: %v", err)
 		}
@@ -597,6 +604,13 @@ func TestService_GetResults(t *testing.T) {
 		insertPlayer2 := `INSERT INTO players (id, username, email, created_at) VALUES (2, 'player2', 'player2@test.com', CURRENT_TIMESTAMP)`
 		if _, err = db.ExecContext(ctx, insertPlayer2); err != nil {
 			t.Fatalf("failed to insert player 2: %v", err)
+		}
+		// Participant gate (#272): player 2 needs an explicit
+		// participant row, otherwise SubmitAnswer rejects them as a
+		// non-participant. The bug-fix for #272 made the gate strict;
+		// pre-fix this test inadvertently relied on the missing check.
+		if err = gameStore.CreateParticipant(ctx, &Participant{GameID: g.ID, PlayerID: 2}); err != nil {
+			t.Fatalf("failed to create participant for player 2: %v", err)
 		}
 
 		wrongOption := testQuiz.Questions[0].Options[1] // London, Correct: false
@@ -608,7 +622,7 @@ func TestService_GetResults(t *testing.T) {
 			t.Fatalf("failed to submit answer for player 2: %v", err)
 		}
 
-		results, err := svc.GetResults(ctx, g.ID)
+		results, err := svc.GetResults(ctx, g.ID, 1)
 		if err != nil {
 			t.Fatalf("failed to get results: %v", err)
 		}
@@ -645,9 +659,16 @@ func TestService_GetNextQuestion(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create game: %v", err)
 		}
+		// Participant gate (#272): the service rejects callers that
+		// aren't on the participant list. These tests bypass the
+		// service's CreateGame, so the participant row has to be
+		// seeded explicitly here.
+		if err = gameStore.CreateParticipant(ctx, &Participant{GameID: testGame.ID, PlayerID: 1}); err != nil {
+			t.Fatalf("failed to create participant: %v", err)
+		}
 
 		service := NewService(gameStore, quizStore, slog.Default())
-		gq, err := service.GetNextQuestion(ctx, testGame.ID)
+		gq, err := service.GetNextQuestion(ctx, testGame.ID, 1)
 		if err != nil {
 			t.Fatalf("failed to get next question: %v", err)
 		}
@@ -686,6 +707,13 @@ func TestService_GetNextQuestion(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create game: %v", err)
 		}
+		// Participant gate (#272): the service rejects callers that
+		// aren't on the participant list. These tests bypass the
+		// service's CreateGame, so the participant row has to be
+		// seeded explicitly here.
+		if err = gameStore.CreateParticipant(ctx, &Participant{GameID: testGame.ID, PlayerID: 1}); err != nil {
+			t.Fatalf("failed to create participant: %v", err)
+		}
 
 		err = gameStore.CreateQuestion(ctx, &Question{GameID: testGame.ID, QuestionID: testQuiz.Questions[0].ID})
 		if err != nil {
@@ -693,7 +721,7 @@ func TestService_GetNextQuestion(t *testing.T) {
 		}
 
 		service := NewService(gameStore, quizStore, slog.Default())
-		gq, err := service.GetNextQuestion(ctx, testGame.ID)
+		gq, err := service.GetNextQuestion(ctx, testGame.ID, 1)
 		if err != nil {
 			t.Fatalf("failed to get next question: %v", err)
 		}
@@ -727,10 +755,15 @@ func TestService_GetNextQuestion(t *testing.T) {
 		if err := gameStore.CreateGame(ctx, testGame); err != nil {
 			t.Fatalf("CreateGame err = %v, want nil", err)
 		}
+		// Participant gate (#272): seed the participant directly since
+		// these tests bypass Service.CreateGame.
+		if err := gameStore.CreateParticipant(ctx, &Participant{GameID: testGame.ID, PlayerID: 1}); err != nil {
+			t.Fatalf("CreateParticipant err = %v, want nil", err)
+		}
 
 		service := NewService(gameStore, quizStore, slog.Default())
 		issuedAt := time.Now()
-		gq, err := service.GetNextQuestion(ctx, testGame.ID)
+		gq, err := service.GetNextQuestion(ctx, testGame.ID, 1)
 		if err != nil {
 			t.Fatalf("GetNextQuestion err = %v, want nil", err)
 		}
@@ -770,13 +803,18 @@ func TestService_GetNextQuestion(t *testing.T) {
 		if err := gameStore.CreateGame(ctx, testGame); err != nil {
 			t.Fatalf("CreateGame err = %v, want nil", err)
 		}
+		// Participant gate (#272): seed the participant directly since
+		// these tests bypass Service.CreateGame.
+		if err := gameStore.CreateParticipant(ctx, &Participant{GameID: testGame.ID, PlayerID: 1}); err != nil {
+			t.Fatalf("CreateParticipant err = %v, want nil", err)
+		}
 
 		// Sub-second reveal mirrors the e2e config: shorter than the
 		// default 3s but still leaves the reveal phase observable.
 		service := NewService(gameStore, quizStore, slog.Default())
 		service.SetRevealDelay(200 * time.Millisecond)
 		issuedAt := time.Now()
-		gq, err := service.GetNextQuestion(ctx, testGame.ID)
+		gq, err := service.GetNextQuestion(ctx, testGame.ID, 1)
 		if err != nil {
 			t.Fatalf("GetNextQuestion err = %v, want nil", err)
 		}
