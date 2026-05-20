@@ -99,24 +99,30 @@ func (q *Queries) CreateGameQuestion(ctx context.Context, arg CreateGameQuestion
 }
 
 const createParticipant = `-- name: CreateParticipant :one
-INSERT INTO game_participants (game_id, player_id)
-VALUES (?, ?)
-RETURNING id, game_id, player_id, joined_at
+INSERT INTO game_participants (game_id, player_id, quiz_id)
+VALUES (?, ?, ?)
+RETURNING id, game_id, player_id, joined_at, quiz_id
 `
 
 type CreateParticipantParams struct {
 	GameID   string
 	PlayerID int64
+	QuizID   sql.NullInt64
 }
 
+// quiz_id is denormalised onto game_participants so the UNIQUE INDEX
+// on (player_id, quiz_id) can enforce the one-attempt-per-(player, quiz)
+// rule at the DB level (#273). Callers populate it from games.quiz_id
+// inside the same Service.CreateGame call.
 func (q *Queries) CreateParticipant(ctx context.Context, arg CreateParticipantParams) (GameParticipant, error) {
-	row := q.db.QueryRowContext(ctx, createParticipant, arg.GameID, arg.PlayerID)
+	row := q.db.QueryRowContext(ctx, createParticipant, arg.GameID, arg.PlayerID, arg.QuizID)
 	var i GameParticipant
 	err := row.Scan(
 		&i.ID,
 		&i.GameID,
 		&i.PlayerID,
 		&i.JoinedAt,
+		&i.QuizID,
 	)
 	return i, err
 }
@@ -568,7 +574,7 @@ func (q *Queries) ListGameQuestionsByGameID(ctx context.Context, gameID string) 
 }
 
 const listParticipantsByGameID = `-- name: ListParticipantsByGameID :many
-SELECT id, game_id, player_id, joined_at
+SELECT id, game_id, player_id, joined_at, quiz_id
 FROM game_participants
 WHERE game_id = ?
 `
@@ -587,6 +593,7 @@ func (q *Queries) ListParticipantsByGameID(ctx context.Context, gameID string) (
 			&i.GameID,
 			&i.PlayerID,
 			&i.JoinedAt,
+			&i.QuizID,
 		); err != nil {
 			return nil, err
 		}

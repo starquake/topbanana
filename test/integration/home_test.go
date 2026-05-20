@@ -57,9 +57,10 @@ func TestHome_Integration(t *testing.T) {
 		t.Fatalf("CreatePlayer bob err = %v, want nil", err)
 	}
 
-	// alice: 2 finished on quiz1 + 1 finished on quiz2; bob: 1 finished
-	// on quiz1. Quiz1 = 3 plays, Quiz2 = 1 play.
-	finishGameInt(t, stores.Games, alice.ID, quiz1)
+	// alice plays quiz1 + quiz2; bob plays quiz1. The one-attempt-per-
+	// (player, quiz) rule (#273) means each pair shows up at most once,
+	// so popular ranking is driven by distinct-player counts: quiz1 = 2
+	// plays (alice + bob), quiz2 = 1 play (alice).
 	finishGameInt(t, stores.Games, alice.ID, quiz1)
 	finishGameInt(t, stores.Games, alice.ID, quiz2)
 	finishGameInt(t, stores.Games, bob.ID, quiz1)
@@ -154,7 +155,9 @@ func finishGameInt(t *testing.T, games game.Store, playerID int64, q *quiz.Quiz)
 	if err := games.CreateGame(ctx, g); err != nil {
 		t.Fatalf("CreateGame err = %v, want nil", err)
 	}
-	if err := games.CreateParticipant(ctx, &game.Participant{GameID: g.ID, PlayerID: playerID}); err != nil {
+	if err := games.CreateParticipant(ctx, &game.Participant{
+		GameID: g.ID, PlayerID: playerID, QuizID: q.ID,
+	}); err != nil {
 		t.Fatalf("CreateParticipant err = %v, want nil", err)
 	}
 	now := time.Now()

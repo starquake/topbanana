@@ -19,8 +19,12 @@ FROM game_participants
 WHERE game_id = ?;
 
 -- name: CreateParticipant :one
-INSERT INTO game_participants (game_id, player_id)
-VALUES (?, ?)
+-- quiz_id is denormalised onto game_participants so the UNIQUE INDEX
+-- on (player_id, quiz_id) can enforce the one-attempt-per-(player, quiz)
+-- rule at the DB level (#273). Callers populate it from games.quiz_id
+-- inside the same Service.CreateGame call.
+INSERT INTO game_participants (game_id, player_id, quiz_id)
+VALUES (?, ?, ?)
 RETURNING *;
 
 -- name: CreateAnswer :one

@@ -167,7 +167,7 @@ func TestGameStore_CreateParticipant(t *testing.T) {
 			t.Fatalf("failed to create game: %v", err)
 		}
 
-		p := &game.Participant{GameID: g.ID, PlayerID: 1}
+		p := &game.Participant{GameID: g.ID, PlayerID: 1, QuizID: testQuiz.ID}
 		if err := gameStore.CreateParticipant(t.Context(), p); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -302,7 +302,7 @@ func TestGameStore_GetGameByPlayerAndQuiz(t *testing.T) {
 			t.Fatalf("failed to create game: %v", err)
 		}
 		if err = gameStore.CreateParticipant(
-			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID},
+			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID, QuizID: testQuiz.ID},
 		); err != nil {
 			t.Fatalf("failed to create participant: %v", err)
 		}
@@ -345,7 +345,7 @@ func TestGameStore_DeleteGamesForPlayerOnQuiz(t *testing.T) {
 			t.Fatalf("failed to create game: %v", err)
 		}
 		if err = gameStore.CreateParticipant(
-			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID},
+			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID, QuizID: testQuiz.ID},
 		); err != nil {
 			t.Fatalf("failed to create participant: %v", err)
 		}
@@ -433,7 +433,7 @@ func TestGameStore_DeleteGamesForPlayerOnQuiz(t *testing.T) {
 			t.Fatalf("failed to create victim game: %v", err)
 		}
 		if err = gameStore.CreateParticipant(
-			t.Context(), &game.Participant{GameID: victimGame.ID, PlayerID: victim.ID},
+			t.Context(), &game.Participant{GameID: victimGame.ID, PlayerID: victim.ID, QuizID: testQuiz.ID},
 		); err != nil {
 			t.Fatalf("failed to create victim participant: %v", err)
 		}
@@ -443,7 +443,7 @@ func TestGameStore_DeleteGamesForPlayerOnQuiz(t *testing.T) {
 			t.Fatalf("failed to create bystander game: %v", err)
 		}
 		if err = gameStore.CreateParticipant(
-			t.Context(), &game.Participant{GameID: bystanderGame.ID, PlayerID: bystander.ID},
+			t.Context(), &game.Participant{GameID: bystanderGame.ID, PlayerID: bystander.ID, QuizID: testQuiz.ID},
 		); err != nil {
 			t.Fatalf("failed to create bystander participant: %v", err)
 		}
@@ -504,7 +504,7 @@ func TestGameStore_ListAnswersForQuizLeaderboard(t *testing.T) {
 			t.Fatalf("failed to create game: %v", err)
 		}
 		if err = gameStore.CreateParticipant(
-			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID},
+			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID, QuizID: testQuiz.ID},
 		); err != nil {
 			t.Fatalf("failed to create participant: %v", err)
 		}
@@ -580,7 +580,7 @@ func TestGameStore_ListAnswersForQuizLeaderboard(t *testing.T) {
 			t.Fatalf("failed to create game: %v", err)
 		}
 		if err = gameStore.CreateParticipant(
-			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID},
+			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID, QuizID: testQuiz.ID},
 		); err != nil {
 			t.Fatalf("failed to create participant: %v", err)
 		}
@@ -651,7 +651,7 @@ func TestGameStore_ListAnswersForQuizLeaderboard(t *testing.T) {
 			t.Fatalf("failed to create game B: %v", err)
 		}
 		if err = gameStore.CreateParticipant(
-			t.Context(), &game.Participant{GameID: gB.ID, PlayerID: player.ID},
+			t.Context(), &game.Participant{GameID: gB.ID, PlayerID: player.ID, QuizID: quizB.ID},
 		); err != nil {
 			t.Fatalf("failed to create participant for game B: %v", err)
 		}
