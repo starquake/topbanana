@@ -263,20 +263,45 @@ export class GameApp {
     }
 
     // shareCurrentResult opens the share dialog with a brag-and-
-    // challenge message after the player has finished a quiz. Uses
-    // the live `score` field (kept current through submitAnswer) and
-    // the quizSlugId set at game start, so the share text always
-    // matches what the player just saw on the leaderboard.
+    // challenge message after the player has finished a quiz. The
+    // score is read from the loaded leaderboard payload (see
+    // scoreFromLeaderboard) so a revisit or post-finish refresh
+    // shares the actual score instead of the JS counter's default
+    // of zero.
     shareCurrentResult() {
         if (!this.quizSlugId) return;
         const quiz = this.quizzes.find(q => `${q.slug}-${q.id}` === this.quizSlugId);
         const title = quiz ? quiz.title : 'Top Banana!';
         const url = new URL(`/play/${this.quizSlugId}`, window.location.origin).href;
+        const score = this.scoreFromLeaderboard();
         openShareDialog({
             title,
-            text: `I scored ${this.score} on ${title} — think you can beat me?`,
+            text: `I scored ${score} on ${title} — think you can beat me?`,
             url,
         });
+    }
+
+    // scoreFromLeaderboard returns the requesting player's final
+    // score for the current quiz. Prefers the server-computed value
+    // carried by the leaderboard payload: a top-N finisher appears
+    // in `entries` with isCurrentPlayer=true; an off-leaderboard
+    // finisher (#181) only carries `currentPlayer`. Either path
+    // yields the correct score regardless of whether the player
+    // just finished or revisited an already-played quiz.
+    //
+    // Falls back to the in-memory accumulator when the leaderboard
+    // is somehow null at call time — that shouldn't happen because
+    // the share button is gated on quizSlugId and the leaderboard
+    // is loaded before quizSlugId is set, but the fallback keeps
+    // the share text honest if the order ever changes.
+    scoreFromLeaderboard() {
+        if (this.leaderboard) {
+            const me = this.leaderboard.entries.find(e => e.isCurrentPlayer);
+            if (me) return me.score;
+            if (this.leaderboard.currentPlayer) return this.leaderboard.currentPlayer.score;
+        }
+
+        return this.score;
     }
 
     // checkAlreadyPlayed pre-flights the resume probe so the start screen

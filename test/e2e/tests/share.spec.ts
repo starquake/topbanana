@@ -86,6 +86,68 @@ test('player client finish screen has a share button that includes the score', a
   await expect(reddit).toHaveAttribute('href', new RegExp(`reddit\\.com/submit.*title=I%20scored%20\\d+%20on%20E2E%20Share%20Finish%20Quiz%20${browserName}`));
 });
 
+// Regression for the "shared score is always 0" bug: revisiting an
+// already-played quiz (or refreshing the page after finishing)
+// loads the finished view via checkAlreadyPlayed but never restores
+// the in-memory score counter. Sharing from that state used to
+// brag about scoring zero; the fix reads the score from the loaded
+// leaderboard payload instead. This spec exercises the revisit
+// path: play through, navigate away, come back, share.
+test('share-result reads score from the leaderboard so a revisit still brags the real number', async ({ page, browserName }) => {
+  const username = `e2e-admin-share-revisit-${browserName}`;
+  const quizTitle = `E2E Share Revisit Quiz ${browserName}`;
+
+  await registerAdmin(page, username);
+  await createQuizWithQuestions(page, quizTitle);
+
+  // First play-through as anonymous so the score lands on the
+  // leaderboard against the auto-petname player row.
+  await page.context().clearCookies();
+  await startQuizAsAnonymous(page, quizTitle);
+  await answerRemainingQuestions(page);
+
+  // Capture the score the player just earned so we can assert the
+  // share text matches. The leaderboard row carrying the current
+  // player is the canonical source — same row the share helper
+  // now reads from.
+  const myRow = page.locator('table.player-table tbody tr[aria-current="true"]');
+  await expect(myRow).toBeVisible();
+  const scoreText = await myRow.locator('td').nth(2).textContent();
+  const score = (scoreText ?? '').trim();
+  expect(score).not.toBe('');
+  expect(score).not.toBe('0');
+
+  // Navigate away to a fresh /client/ session — this drops the
+  // in-memory score counter but keeps the player cookie, so the
+  // server still recognises the player as a finisher of this quiz.
+  await page.goto('/client/');
+  await page.locator('select').selectOption({ label: quizTitle });
+
+  // The "Game Finished!" heading + leaderboard table confirm we
+  // are on the already-played revisit path. The lockout banner
+  // is intentionally hidden on this path (template gates it on
+  // `startError && !finished`), so the heading is the canonical
+  // visible marker.
+  await expect(page.getByRole('heading', { name: 'Game Finished!' })).toBeVisible();
+  await expect(page.locator('table.player-table')).toBeVisible();
+
+  // Dismiss the claim modal if it auto-opened, then share.
+  await page.keyboard.press('Escape');
+
+  const shareBtn = page.getByRole('button', { name: 'Share result' });
+  await expect(shareBtn).toBeVisible();
+  await shareBtn.click();
+
+  const dialog = page.locator('dialog.share-dialog');
+  await expect(dialog).toBeVisible();
+
+  // The WhatsApp link must carry the actual score, not zero. We
+  // assert via the encoded "I%20scored%20<n>" prefix so the regex
+  // pins the score value to the leaderboard reading captured above.
+  const whatsapp = dialog.locator('a[data-share-network="whatsapp"]');
+  await expect(whatsapp).toHaveAttribute('href', new RegExp(`wa\\.me/\\?text=I%20scored%20${score}%20on%20`));
+});
+
 test('home page popular-card share button opens the dialog with invitation text', async ({ page, browserName }) => {
   const username = `e2e-admin-share-home-${browserName}`;
   const quizTitle = `E2E Share Home Quiz ${browserName}`;
