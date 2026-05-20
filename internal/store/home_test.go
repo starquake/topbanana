@@ -221,6 +221,66 @@ func TestHomeStore_ListMostActivePlayers(t *testing.T) {
 	}
 }
 
+// TestHomeStore_ExcludesEmptyQuizFromRankings pins the #275 fix: a
+// quiz with zero questions used to satisfy the finisher predicate
+// (0 >= 0) and surface on the popular list. The EXISTS gate added to
+// both home queries now requires the quiz to have at least one
+// question, matching game.Game.IsCompleted's `len(Quiz.Questions) > 0`
+// rule.
+func TestHomeStore_ExcludesEmptyQuizFromRankings(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	logger := slog.Default()
+	quizzes := NewQuizStore(db, logger)
+	games := NewGameStore(db, logger)
+	players := NewPlayerStore(db, logger)
+	hs := NewHomeStore(db, logger)
+
+	// Author a quiz with no questions and seed a game + participant on
+	// it. Before the fix the home queries would happily count this as a
+	// finished play. quiz.Quiz doesn't currently require questions to
+	// validate, so the admin can produce one of these any time they
+	// start authoring and never get back to it.
+	emptyQuiz := &quiz.Quiz{
+		Title:       "Empty",
+		Slug:        "empty",
+		Description: "no questions",
+	}
+	if err := quizzes.CreateQuiz(t.Context(), emptyQuiz); err != nil {
+		t.Fatalf("CreateQuiz empty err = %v, want nil", err)
+	}
+	player, err := players.CreatePlayer(t.Context(), "lonely", "hash", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	g := &game.Game{QuizID: emptyQuiz.ID}
+	if err = games.CreateGame(t.Context(), g); err != nil {
+		t.Fatalf("CreateGame err = %v, want nil", err)
+	}
+	if err = games.CreateParticipant(t.Context(), &game.Participant{
+		GameID: g.ID, PlayerID: player.ID, QuizID: emptyQuiz.ID,
+	}); err != nil {
+		t.Fatalf("CreateParticipant err = %v, want nil", err)
+	}
+
+	popular, err := hs.ListPopularQuizzes(t.Context())
+	if err != nil {
+		t.Fatalf("ListPopularQuizzes err = %v, want nil", err)
+	}
+	if got, want := len(popular), 0; got != want {
+		t.Errorf("ListPopularQuizzes returned %d rows, want %d (empty quiz must not surface)", got, want)
+	}
+
+	active, err := hs.ListMostActivePlayers(t.Context())
+	if err != nil {
+		t.Fatalf("ListMostActivePlayers err = %v, want nil", err)
+	}
+	if got, want := len(active), 0; got != want {
+		t.Errorf("ListMostActivePlayers returned %d rows, want %d (empty-quiz play must not bump activity)", got, want)
+	}
+}
+
 func TestHomeStore_EmptyDB(t *testing.T) {
 	t.Parallel()
 

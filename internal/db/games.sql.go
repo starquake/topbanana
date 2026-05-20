@@ -101,7 +101,7 @@ func (q *Queries) CreateGameQuestion(ctx context.Context, arg CreateGameQuestion
 const createParticipant = `-- name: CreateParticipant :one
 INSERT INTO game_participants (game_id, player_id, quiz_id)
 VALUES (?, ?, ?)
-RETURNING id, game_id, player_id, joined_at, quiz_id
+RETURNING id, game_id, player_id, quiz_id, joined_at
 `
 
 type CreateParticipantParams struct {
@@ -121,8 +121,8 @@ func (q *Queries) CreateParticipant(ctx context.Context, arg CreateParticipantPa
 		&i.ID,
 		&i.GameID,
 		&i.PlayerID,
-		&i.JoinedAt,
 		&i.QuizID,
+		&i.JoinedAt,
 	)
 	return i, err
 }
@@ -574,7 +574,7 @@ func (q *Queries) ListGameQuestionsByGameID(ctx context.Context, gameID string) 
 }
 
 const listParticipantsByGameID = `-- name: ListParticipantsByGameID :many
-SELECT id, game_id, player_id, joined_at, quiz_id
+SELECT id, game_id, player_id, quiz_id, joined_at
 FROM game_participants
 WHERE game_id = ?
 `
@@ -592,8 +592,8 @@ func (q *Queries) ListParticipantsByGameID(ctx context.Context, gameID string) (
 			&i.ID,
 			&i.GameID,
 			&i.PlayerID,
-			&i.JoinedAt,
 			&i.QuizID,
+			&i.JoinedAt,
 		); err != nil {
 			return nil, err
 		}

@@ -29,8 +29,8 @@ type GameParticipant struct {
 	ID       int64
 	GameID   string
 	PlayerID int64
-	JoinedAt time.Time
 	QuizID   sql.NullInt64
+	JoinedAt time.Time
 }
 
 type GameQuestion struct {
