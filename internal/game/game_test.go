@@ -751,6 +751,42 @@ func TestService_GetNextQuestion(t *testing.T) {
 			t.Errorf("ExpiredAt - StartedAt = %v, want %v", got, want)
 		}
 	})
+
+	t.Run("SetRevealDelay shrinks the reveal-to-answer gap", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+
+		testGame := newTestGame(t, testQuiz)
+		if err := gameStore.CreateGame(ctx, testGame); err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+
+		// Sub-second reveal mirrors the e2e config: shorter than the
+		// default 3s but still leaves the reveal phase observable.
+		service := NewService(gameStore, quizStore, slog.Default())
+		service.SetRevealDelay(200 * time.Millisecond)
+		issuedAt := time.Now()
+		gq, err := service.GetNextQuestion(ctx, testGame.ID)
+		if err != nil {
+			t.Fatalf("GetNextQuestion err = %v, want nil", err)
+		}
+
+		// StartedAt should sit close to (issuedAt + 200ms). Generous
+		// upper bound to absorb scheduler jitter on busy CI runners.
+		if got, upper := gq.StartedAt.Sub(issuedAt), 1*time.Second; got >= upper {
+			t.Errorf("StartedAt - issuedAt = %v, want < %v (override should shrink reveal)", got, upper)
+		}
+	})
 }
 
 func TestService_CalculateScore_EarlyAnswerClamps(t *testing.T) {

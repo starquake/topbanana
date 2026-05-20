@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	. "github.com/starquake/topbanana/internal/config"
 )
@@ -328,6 +329,67 @@ func TestParse_RegistrationEnabled(t *testing.T) {
 		}
 		if got, want := err.Error(), "invalid REGISTRATION_ENABLED"; !strings.Contains(got, want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+}
+
+func TestParse_RevealDelay(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid values", func(t *testing.T) {
+		t.Parallel()
+
+		tests := []struct {
+			name  string
+			value string
+			want  time.Duration
+		}{
+			{"unset defaults to zero", "", 0},
+			{"explicit zero parses", "0s", 0},
+			{"500ms parses", "500ms", 500 * time.Millisecond},
+			{"3s parses", "3s", 3 * time.Second},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+
+				getenv := func(key string) string {
+					if key == "REVEAL_DELAY" {
+						return tt.value
+					}
+
+					return ""
+				}
+
+				c, err := Parse(getenv)
+				if err != nil {
+					t.Fatalf("Parse() err = %v, want nil", err)
+				}
+				if got, want := c.RevealDelay, tt.want; got != want {
+					t.Errorf("RevealDelay = %v, want %v", got, want)
+				}
+			})
+		}
+	})
+
+	t.Run("unparseable value returns error", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := Parse(getenvFailure("REVEAL_DELAY", "fast"))
+		if err == nil {
+			t.Fatal("Parse() with invalid REVEAL_DELAY: err = nil, want non-nil")
+		}
+		if got, want := err.Error(), "invalid REVEAL_DELAY"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+
+	t.Run("negative value returns error", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := Parse(getenvFailure("REVEAL_DELAY", "-1s"))
+		if got, want := err, ErrRevealDelayNegative; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
 		}
 	})
 }

@@ -2,10 +2,10 @@ import { test, expect } from '@playwright/test';
 import { registerAdmin, createQuizWithQuestions, QUIZ_QUESTIONS } from './helpers';
 
 test('admin sets up a multi-question quiz, then a player plays it through to the results screen', async ({ page, browserName }) => {
-  // Four questions × ~3s reveal delay (#247) × ~2s/3s feedback + ~10s admin
-  // setup + browser overhead push this test well past Playwright's 30s
-  // default. Bump explicitly so a slow CI run doesn't trip the timeout on
-  // a successful path.
+  // Four questions × ~500ms reveal delay (#247, shrunk via REVEAL_DELAY) ×
+  // ~2s/3s feedback + ~10s admin setup + browser overhead. Even with the
+  // shorter reveal, slow CI can drift past Playwright's 30s default, so
+  // keep the explicit bump.
   test.setTimeout(90_000);
 
   // Per-project unique names so chromium and firefox runs don't collide on the
