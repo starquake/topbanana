@@ -768,7 +768,7 @@ func TestHandleQuestionNext(t *testing.T) {
 		mux.Handle("GET /api/games/{gameID}/questions/next", HandleQuestionNext(logger, svc))
 
 		req := httptest.NewRequestWithContext(
-			context.Background(), http.MethodGet, "/api/games/missing-game/questions/next", nil,
+			withPlayer(t.Context(), 7), http.MethodGet, "/api/games/missing-game/questions/next", nil,
 		)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
@@ -784,7 +784,11 @@ func TestHandleQuestionNext(t *testing.T) {
 		svc := newService(
 			stubGameStore{
 				getGame: func(_ context.Context, id string) (*game.Game, error) {
-					return &game.Game{ID: id, QuizID: 1}, nil
+					return &game.Game{
+						ID:           id,
+						QuizID:       1,
+						Participants: []*game.Participant{{GameID: id, PlayerID: 7}},
+					}, nil
 				},
 			},
 			stubQuizStore{
@@ -798,7 +802,7 @@ func TestHandleQuestionNext(t *testing.T) {
 		mux.Handle("GET /api/games/{gameID}/questions/next", HandleQuestionNext(logger, svc))
 
 		req := httptest.NewRequestWithContext(
-			context.Background(), http.MethodGet, "/api/games/game-1/questions/next", nil,
+			withPlayer(t.Context(), 7), http.MethodGet, "/api/games/game-1/questions/next", nil,
 		)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
@@ -820,6 +824,7 @@ func TestHandleQuestionNext(t *testing.T) {
 						Questions: []*game.Question{
 							{QuestionID: 10},
 						},
+						Participants: []*game.Participant{{GameID: id, PlayerID: 7}},
 					}, nil
 				},
 			},
@@ -839,7 +844,7 @@ func TestHandleQuestionNext(t *testing.T) {
 		mux.Handle("GET /api/games/{gameID}/questions/next", HandleQuestionNext(logger, svc))
 
 		req := httptest.NewRequestWithContext(
-			context.Background(), http.MethodGet, "/api/games/game-1/questions/next", nil,
+			withPlayer(t.Context(), 7), http.MethodGet, "/api/games/game-1/questions/next", nil,
 		)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
@@ -862,7 +867,7 @@ func TestHandleQuestionNext(t *testing.T) {
 		mux.Handle("GET /api/games/{gameID}/questions/next", HandleQuestionNext(logger, svc))
 
 		req := httptest.NewRequestWithContext(
-			context.Background(), http.MethodGet, "/api/games/game-1/questions/next", nil,
+			withPlayer(t.Context(), 7), http.MethodGet, "/api/games/game-1/questions/next", nil,
 		)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
@@ -879,7 +884,11 @@ func TestHandleQuestionNext(t *testing.T) {
 		svc := newService(
 			stubGameStore{
 				getGame: func(_ context.Context, id string) (*game.Game, error) {
-					return &game.Game{ID: id, QuizID: 1}, nil
+					return &game.Game{
+						ID:           id,
+						QuizID:       1,
+						Participants: []*game.Participant{{GameID: id, PlayerID: 7}},
+					}, nil
 				},
 				createQuestion: func(_ context.Context, _ *game.Question) error { return nil },
 			},
@@ -899,7 +908,7 @@ func TestHandleQuestionNext(t *testing.T) {
 		mux.Handle("GET /api/games/{gameID}/questions/next", HandleQuestionNext(logger, svc))
 
 		req := httptest.NewRequestWithContext(
-			context.Background(), http.MethodGet, "/api/games/game-1/questions/next", nil,
+			withPlayer(t.Context(), 7), http.MethodGet, "/api/games/game-1/questions/next", nil,
 		)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
@@ -942,7 +951,7 @@ func TestHandleAnswerPost(t *testing.T) {
 		)
 
 		req := httptest.NewRequestWithContext(
-			context.Background(), http.MethodPost,
+			withPlayer(t.Context(), 7), http.MethodPost,
 			"/api/games/game-1/questions/not-a-number/answers",
 			strings.NewReader(`{"optionId": 1}`),
 		)
@@ -964,7 +973,7 @@ func TestHandleAnswerPost(t *testing.T) {
 		)
 
 		req := httptest.NewRequestWithContext(
-			context.Background(), http.MethodPost,
+			withPlayer(t.Context(), 7), http.MethodPost,
 			"/api/games/game-1/questions/1/answers",
 			strings.NewReader("{bad json}"),
 		)
@@ -1044,6 +1053,11 @@ func TestHandleAnswerPost(t *testing.T) {
 						Questions: []*game.Question{
 							{ID: 1, GameID: id, QuestionID: 10},
 						},
+						// Participant gate (#272): player 7 must be a
+						// participant of the game for the service to
+						// pass through to the option-validation path
+						// that's under test here.
+						Participants: []*game.Participant{{GameID: id, PlayerID: 7}},
 					}, nil
 				},
 			},
@@ -1179,7 +1193,7 @@ func TestHandleGameResults(t *testing.T) {
 		mux.Handle("GET /api/games/{gameID}/results", HandleGameResults(logger, svc))
 
 		req := httptest.NewRequestWithContext(
-			context.Background(), http.MethodGet, "/api/games/missing-game/results", nil,
+			withPlayer(t.Context(), 7), http.MethodGet, "/api/games/missing-game/results", nil,
 		)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
@@ -1202,7 +1216,7 @@ func TestHandleGameResults(t *testing.T) {
 		mux.Handle("GET /api/games/{gameID}/results", HandleGameResults(logger, svc))
 
 		req := httptest.NewRequestWithContext(
-			context.Background(), http.MethodGet, "/api/games/game-1/results", nil,
+			withPlayer(t.Context(), 7), http.MethodGet, "/api/games/game-1/results", nil,
 		)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)

@@ -278,6 +278,21 @@ func (s *Service) PublishLeaderboardForPlayer(ctx context.Context, playerID int6
 	return nil
 }
 
+// hasParticipant reports whether playerID is one of the game's
+// participants. Used by the service entry points to gate gameID-keyed
+// reads and writes on participant membership (#272) so a stranger who
+// somehow obtains another player's gameID cannot probe or mutate that
+// game.
+func hasParticipant(g *Game, playerID int64) bool {
+	for _, p := range g.Participants {
+		if p.PlayerID == playerID {
+			return true
+		}
+	}
+
+	return false
+}
+
 // IsCompleted reports whether the game has had every quiz question issued.
 // A question that was issued but never answered still counts as "asked"
 // because it has a [Question] row, matching [Service.GetNextQuestion]'s
@@ -388,12 +403,23 @@ func (s *Service) ResetGamesForPlayerOnQuiz(ctx context.Context, playerID, quizI
 	return nil
 }
 
-// GetNextQuestion retrieves the next unanswered question for the specified game or returns nil if all are answered.
-func (s *Service) GetNextQuestion(ctx context.Context, gameID string) (*Question, error) {
+// GetNextQuestion retrieves the next unanswered question for the specified
+// game or returns nil if all are answered. Requires playerID to identify
+// the caller — the participant gate (#272) makes the method 404 for any
+// player who is not a `game_participants` row on the supplied gameID, so
+// the gameID alone is no longer a capability.
+func (s *Service) GetNextQuestion(ctx context.Context, gameID string, playerID int64) (*Question, error) {
 	// Get the game
 	g, err := s.store.GetGame(ctx, gameID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get game: %w", err)
+	}
+
+	// Participant gate (#272): non-participants get ErrGameNotFound so
+	// the error path is indistinguishable from a genuinely missing
+	// game — the gameID stays opaque to outsiders.
+	if !hasParticipant(g, playerID) {
+		return nil, ErrGameNotFound
 	}
 
 	// Get the quiz
@@ -470,6 +496,14 @@ func (s *Service) SubmitAnswer(
 		return nil, fmt.Errorf("failed to get game: %w", err)
 	}
 
+	// Participant gate (#272): non-participants get ErrGameNotFound. The
+	// answer-post path previously trusted the (gameID, playerID) pair the
+	// caller supplied, so a third party could land an answer row in
+	// someone else's game.
+	if !hasParticipant(g, playerID) {
+		return nil, ErrGameNotFound
+	}
+
 	var question *Question
 	for _, qs := range g.Questions {
 		if qs.QuestionID == questionID {
@@ -510,10 +544,6 @@ func (s *Service) SubmitAnswer(
 		)
 	}
 
-	if option.QuestionID != question.QuestionID {
-		return nil, ErrOptionNotInQuestion
-	}
-
 	a := &Answer{
 		GameID:     gameID,
 		PlayerID:   playerID,
@@ -537,11 +567,18 @@ func (s *Service) SubmitAnswer(
 	return a, nil
 }
 
-// GetResults calculates the accumulated score for each player in a game and returns the results.
-func (s *Service) GetResults(ctx context.Context, gameID string) (*Results, error) {
+// GetResults calculates the accumulated score for each player in a game and
+// returns the results. Requires playerID for the participant gate (#272);
+// non-participants get ErrGameNotFound so the gameID itself can't be used
+// to read the score map of a game the caller is not in.
+func (s *Service) GetResults(ctx context.Context, gameID string, playerID int64) (*Results, error) {
 	g, err := s.store.GetGame(ctx, gameID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get game: %w", err)
+	}
+
+	if !hasParticipant(g, playerID) {
+		return nil, ErrGameNotFound
 	}
 
 	// Collect all option IDs needed across all answers in one pass.
