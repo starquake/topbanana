@@ -213,8 +213,27 @@
     .q-text {
         @apply m-0 text-text text-base leading-snug;
     }
+    /* Spoiler wrapper around .q-options. Closed by default so admins can
+     * present the quiz on screen without exposing answers (#246). Native
+     * <details>/<summary> handles the click + keyboard toggle; the
+     * inline-flex summary keeps the disclosure triangle aligned with
+     * the chip-styled label. */
+    .q-spoiler {
+        @apply m-0;
+    }
+    .q-spoiler-summary {
+        @apply inline-flex items-center gap-1 cursor-pointer select-none
+               text-[0.75rem] uppercase tracking-[0.12em] font-semibold
+               text-text-mute hover:text-text
+               focus-visible:outline-none focus-visible:shadow-focus
+               rounded-sm;
+    }
+    .q-spoiler[open] .q-spoiler-show,
+    .q-spoiler:not([open]) .q-spoiler-hide {
+        @apply hidden;
+    }
     .q-options {
-        @apply list-none m-0 p-0 grid gap-1 text-text-dim text-[0.85rem];
+        @apply list-none m-0 mt-2 p-0 grid gap-1 text-text-dim text-[0.85rem];
     }
     .q-options li {
         @apply flex items-center gap-2

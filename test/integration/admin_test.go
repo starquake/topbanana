@@ -334,4 +334,19 @@ func TestAdmin_Integration(t *testing.T) {
 	if got, want := string(body), questionOption4; !strings.Contains(got, want) {
 		t.Errorf("string(body) = %q, should contain %q", got, want)
 	}
+
+	// #246 — options sit behind a <details class="q-spoiler"> wrapper so an
+	// admin can present the quiz without exposing answers. Server-rendered
+	// HTML still contains the option text (the closed-by-default state is
+	// CSS-controlled), so the integration test just pins the structural
+	// shape; the open/close click behaviour is covered by e2e.
+	if got, want := string(body), `<details class="q-spoiler">`; !strings.Contains(got, want) {
+		t.Errorf("string(body) should contain spoiler wrapper %q", want)
+	}
+	if got, want := string(body), `Show spoilers`; !strings.Contains(got, want) {
+		t.Errorf("string(body) should contain spoiler affordance label %q", want)
+	}
+	if got, want := string(body), `aria-label="Toggle answer options for question`; !strings.Contains(got, want) {
+		t.Errorf("string(body) should contain spoiler aria-label prefix %q", want)
+	}
 }

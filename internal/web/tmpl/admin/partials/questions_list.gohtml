@@ -26,16 +26,28 @@
             </div>
             <div class="q-body">
                 <p class="q-text">{{$q.Text}}</p>
-                <ul class="q-options">
-                    {{range $q.Options}}
-                        <li{{if .Correct}} class="correct"{{end}}>
-                            <span>{{.Text}}</span>
-                            {{if .Correct}}
-                                <span class="sr-only" aria-label="Correct">Correct</span>
-                            {{end}}
-                        </li>
-                    {{end}}
-                </ul>
+                {{/* #246 — options sit behind a per-question spoiler so an
+                     admin can present the quiz on screen without exposing
+                     answers. Native <details> gives keyboard activation
+                     (Enter/Space on the summary) and ARIA expanded state
+                     for free; the label swap is CSS-only via [open]. */}}
+                <details class="q-spoiler">
+                    <summary class="q-spoiler-summary"
+                             aria-label="Toggle answer options for question {{$q.Position}}">
+                        <span class="q-spoiler-show">Show spoilers</span>
+                        <span class="q-spoiler-hide">Hide spoilers</span>
+                    </summary>
+                    <ul class="q-options">
+                        {{range $q.Options}}
+                            <li{{if .Correct}} class="correct"{{end}}>
+                                <span>{{.Text}}</span>
+                                {{if .Correct}}
+                                    <span class="sr-only" aria-label="Correct">Correct</span>
+                                {{end}}
+                            </li>
+                        {{end}}
+                    </ul>
+                </details>
             </div>
             <div class="q-actions">
                 <form method="post"
