@@ -74,6 +74,9 @@ export default defineConfig({
         'e2e-admin-timeout-chromium', 'e2e-admin-timeout-firefox',          // timeout.spec.ts
         'e2e-admin-submit-err-chromium', 'e2e-admin-submit-err-firefox',    // submit-error.spec.ts
         'e2e-admin-spoiler-chromium', 'e2e-admin-spoiler-firefox',          // admin.spec.ts spoiler test
+        'e2e-admin-share-start-chromium', 'e2e-admin-share-start-firefox',  // share.spec.ts start-screen
+        'e2e-admin-share-finish-chromium', 'e2e-admin-share-finish-firefox',// share.spec.ts finish-screen
+        'e2e-admin-share-home-chromium', 'e2e-admin-share-home-firefox',    // share.spec.ts home-page
       ].join(','),
     },
     reuseExistingServer: false,

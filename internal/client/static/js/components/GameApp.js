@@ -1,6 +1,7 @@
 import { quizService } from '../services/QuizService.js';
 import { gameService } from '../services/GameService.js';
 import { playerService } from '../services/PlayerService.js';
+import { openShareDialog } from '/assets/js/share.js';
 
 // PLAY_PATH_PATTERN matches /play/<anything>-<integer>; the integer suffix
 // is the quiz ID.
@@ -234,6 +235,48 @@ export class GameApp {
     slugIdFor(quizId) {
         const quiz = this.quizzes.find(q => q.id === parseInt(quizId));
         return quiz ? `${quiz.slug}-${quiz.id}` : null;
+    }
+
+    // selectedQuiz returns the quiz row for selectedQuizId (or null).
+    // Drives the share buttons' enabled state and the dialog text;
+    // pulled out so the template can `:disabled="!selectedQuiz()"`
+    // without re-deriving the row every render.
+    selectedQuiz() {
+        if (!this.selectedQuizId) return null;
+        return this.quizzes.find(q => q.id === parseInt(this.selectedQuizId)) || null;
+    }
+
+    // shareCurrentQuiz opens the share dialog with an invitation
+    // message for the currently selected quiz. Used by the start-screen
+    // share button. The URL points at /play/{slug-id}, the same
+    // deep-link the admin share modal emits, so a recipient lands
+    // straight on the quiz with OG metadata pre-populated.
+    shareCurrentQuiz() {
+        const quiz = this.selectedQuiz();
+        if (!quiz) return;
+        const url = new URL(`/play/${quiz.slug}-${quiz.id}`, window.location.origin).href;
+        openShareDialog({
+            title: quiz.title,
+            text: `Play this quiz: ${quiz.title}`,
+            url,
+        });
+    }
+
+    // shareCurrentResult opens the share dialog with a brag-and-
+    // challenge message after the player has finished a quiz. Uses
+    // the live `score` field (kept current through submitAnswer) and
+    // the quizSlugId set at game start, so the share text always
+    // matches what the player just saw on the leaderboard.
+    shareCurrentResult() {
+        if (!this.quizSlugId) return;
+        const quiz = this.quizzes.find(q => `${q.slug}-${q.id}` === this.quizSlugId);
+        const title = quiz ? quiz.title : 'Top Banana!';
+        const url = new URL(`/play/${this.quizSlugId}`, window.location.origin).href;
+        openShareDialog({
+            title,
+            text: `I scored ${this.score} on ${title} — think you can beat me?`,
+            url,
+        });
     }
 
     // checkAlreadyPlayed pre-flights the resume probe so the start screen

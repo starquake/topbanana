@@ -86,6 +86,46 @@ func TestHome_Integration(t *testing.T) {
 		}
 	})
 
+	t.Run("GET / renders a share trigger per popular quiz", func(t *testing.T) {
+		t.Parallel()
+		body := getBody(ctx, t, baseURL+"/")
+
+		// Each popular-quiz card must carry the data-* attrs share.js
+		// reads to drive the dialog. We assert the per-quiz invitation
+		// text is composed correctly so a recipient sees the title
+		// the host actually shared.
+		for _, want := range []string{
+			`data-share-trigger`,
+			`data-share-path="/play/bananas-of-the-world-`,
+			`data-share-title="Bananas of the World"`,
+			`data-share-text="Play this quiz: Bananas of the World"`,
+			`data-share-path="/play/capital-cities-`,
+			`data-share-title="Capital Cities"`,
+			`<script type="module" src="/assets/js/share.js"></script>`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("body missing share-trigger marker %q", want)
+			}
+		}
+	})
+
+	t.Run("share.js asset is served", func(t *testing.T) {
+		t.Parallel()
+		resp := httpGet(ctx, t, &http.Client{}, baseURL+"/assets/js/share.js")
+		defer closeBody(t, resp.Body)
+
+		if got, want := resp.StatusCode, http.StatusOK; got != want {
+			t.Errorf("status = %d, want %d", got, want)
+		}
+		if got, want := resp.Header.Get("Content-Type"), "text/javascript"; !strings.HasPrefix(got, want) {
+			// Static file server uses application/javascript on
+			// some Go versions; accept either.
+			if !strings.HasPrefix(got, "application/javascript") {
+				t.Errorf("Content-Type = %q, want text/javascript or application/javascript", got)
+			}
+		}
+	})
+
 	t.Run("GET / exposes sitewide Open Graph defaults", func(t *testing.T) {
 		t.Parallel()
 		assertSitewideOG(ctx, t, baseURL+"/")
