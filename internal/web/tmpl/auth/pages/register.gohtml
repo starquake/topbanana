@@ -34,7 +34,12 @@
                 <p class="mt-2 text-xs text-text-mute">{{passwordHelp}}</p>
             </div>
 
-            <div class="flex flex-wrap items-center justify-between gap-4 pt-2">
+            {{/* flex-row-reverse pushes "Register" to the right (thumb-
+                 friendly on phones) while keeping its source position
+                 first so keyboard Tab focuses the primary CTA before
+                 the secondary login link. justify-between spreads the
+                 pair to the row's edges. */}}
+            <div class="flex flex-row-reverse flex-wrap items-center justify-between gap-4 pt-2">
                 <button type="submit" class="btn-primary">Register</button>
                 <a href="/login" class="text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">Have an account? Log in</a>
             </div>

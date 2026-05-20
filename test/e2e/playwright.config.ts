@@ -77,6 +77,7 @@ export default defineConfig({
         'e2e-admin-share-start-chromium', 'e2e-admin-share-start-firefox',  // share.spec.ts start-screen
         'e2e-admin-share-finish-chromium', 'e2e-admin-share-finish-firefox',// share.spec.ts finish-screen
         'e2e-admin-share-home-chromium', 'e2e-admin-share-home-firefox',    // share.spec.ts home-page
+        'e2e-admin-share-revisit-chromium', 'e2e-admin-share-revisit-firefox', // share.spec.ts revisit
       ].join(','),
     },
     reuseExistingServer: false,

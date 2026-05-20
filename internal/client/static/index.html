@@ -77,10 +77,17 @@
                     <p class="claim-cta-body text-text-dim mb-5 leading-relaxed" x-show="hasCustomName()">
                         Not happy with it? Pick a different display name.
                     </p>
-                    <button class="btn-primary" @click="openClaimModal()">
-                        <span x-show="!hasCustomName()">Set your name</span>
-                        <span x-show="hasCustomName()">Change your name</span>
-                    </button>
+                    {{/* Right-aligned to keep the claim CTA's primary
+                         action under the right thumb on phones — same
+                         positioning rationale as the Start Game button
+                         below. The wrapper avoids changing button-level
+                         classes (.btn-primary is reused elsewhere). */}}
+                    <div class="flex justify-end">
+                        <button class="btn-primary" @click="openClaimModal()">
+                            <span x-show="!hasCustomName()">Set your name</span>
+                            <span x-show="hasCustomName()">Change your name</span>
+                        </button>
+                    </div>
                 </article>
             </template>
 
@@ -224,7 +231,14 @@
                 <template x-if="startError && !finished">
                     <div class="feedback-banner feedback-danger mb-5" x-text="startError"></div>
                 </template>
-                <div x-show="!finished" class="flex flex-wrap items-center gap-3">
+                {{/* flex-row-reverse pushes Start Game to the right edge
+                     of the row (thumb-friendly on phones) while keeping
+                     its source position first, so keyboard Tab still
+                     lands on the primary CTA before the Share button.
+                     Default justify-start packs items from the main-axis
+                     start which, under row-reverse, is the visual right
+                     edge — exactly the cluster we want. */}}
+                <div x-show="!finished" class="flex flex-row-reverse flex-wrap items-center gap-3">
                     <button class="btn-primary" @click="startGame()" :disabled="!selectedQuizId || !!startError">Start Game</button>
                     {{/* Share button for #176 — invitation form ("Play
                          this quiz: <title>"). Hidden while no quiz is

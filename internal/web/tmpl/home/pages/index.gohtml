@@ -52,15 +52,17 @@
                                 {{/* Accent-tinted pill so the share affordance reads as
                                      a real action rather than a footer link. Sits on
                                      z-10 above the stretched-link pseudo so the click
-                                     reaches this button, not the play URL. Hover
-                                     inverts to solid accent for stronger feedback. */}}
+                                     reaches this button, not the play URL. Anchored
+                                     left (self-start) so a tap aimed at the card's
+                                     right edge — the natural reach for the play CTA —
+                                     can't land on Share by accident. */}}
                                 <button type="button"
                                         data-share-trigger
                                         data-share-path="{{.PlayURL}}"
                                         data-share-title="{{.Title}}"
                                         data-share-text="Play this quiz: {{.Title}}"
                                         aria-label="Share {{.Title}}"
-                                        class="relative z-10 self-end mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-[0.1em] bg-accent-soft text-accent border border-accent-line hover:bg-accent hover:text-bg transition-colors cursor-pointer">
+                                        class="relative z-10 self-start mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-[0.1em] bg-accent-soft text-accent border border-accent-line hover:bg-accent hover:text-bg transition-colors cursor-pointer">
                                     <svg viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5" aria-hidden="true"><path d="M13.5 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.5 2.5 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5zm-8.5 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm11 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>
                                     <span>Share</span>
                                 </button>
