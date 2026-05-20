@@ -33,7 +33,7 @@ const (
 	// behaviours flip on this (see [Config.SecureCookies] and the DB_URI /
 	// SESSION_KEY validation in [Parse]).
 	AppEnvironmentProduction = "production"
-	// ClientDirDefault specifies the default directory for client-side static files.
+	// ClientDirDefault specifies the default directory for the player-client static files.
 	ClientDirDefault = ""
 
 	// HostDefault is the default host to listen on. Can be an IP address or hostname.
