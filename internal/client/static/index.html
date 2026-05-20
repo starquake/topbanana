@@ -36,19 +36,25 @@
         <div x-data="gameApp" @keydown.escape.window="claimModalOpen && closeClaimModal()">
             <!-- Brand mark: same banana SVG + Top/Banana/! pattern as the
                  admin navbar (see internal/web/tmpl/admin/layouts/navbar.gohtml).
-                 aria-label pins the accessible name so role-based locators
-                 keep working; visible text is split so "Banana" can carry
+                 The brand wraps an <a href="/"> so clicking the logo
+                 always returns to the public start page — the
+                 convention every visitor expects from a header logo.
+                 The aria-label sits on the <a> so role-based locators
+                 (`getByRole('link', { name: 'Top Banana!' })`) keep
+                 working; visible text is split so "Banana" can carry
                  the accent colour.
                  Hidden during gameplay (#253) so the question gets the
                  whole vertical canvas — still visible on the start
                  screen and the post-game leaderboard. -->
-            <h1 aria-label="Top Banana!"
-                x-show="!(gameId && !finished)"
-                class="mb-10 inline-flex items-center font-display font-extrabold text-2xl tracking-wide uppercase text-text">
-                <span class="w-7 h-7 mr-3 text-accent drop-shadow-[0_0_8px_rgba(255,210,63,0.45)] inline-flex shrink-0" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M4 13c3.5-2 8-2 10 2a5.5 5.5 0 0 1 8 5"/><path d="M5.15 17.89c5.52-1.52 8.65-6.89 7-12C11.55 4 11.5 2 13 2c3.22 0 5 5.5 5 8 0 6.5-4.2 12-10.49 12C5.11 22 2 22 2 20c0-1.5 1.14-1.55 3.15-2.11Z"/></svg>
-                </span>
-                <span aria-hidden="true">Top<span class="text-accent">Banana</span>!</span>
+            <h1 x-show="!(gameId && !finished)"
+                class="mb-10 font-display font-extrabold text-2xl tracking-wide uppercase">
+                <a href="/" aria-label="Top Banana!"
+                   class="inline-flex items-center text-text no-underline hover:text-text">
+                    <span class="w-7 h-7 mr-3 text-accent drop-shadow-[0_0_8px_rgba(255,210,63,0.45)] inline-flex shrink-0" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M4 13c3.5-2 8-2 10 2a5.5 5.5 0 0 1 8 5"/><path d="M5.15 17.89c5.52-1.52 8.65-6.89 7-12C11.55 4 11.5 2 13 2c3.22 0 5 5.5 5 8 0 6.5-4.2 12-10.49 12C5.11 22 2 22 2 20c0-1.5 1.14-1.55 3.15-2.11Z"/></svg>
+                    </span>
+                    <span aria-hidden="true">Top<span class="text-accent">Banana</span>!</span>
+                </a>
             </h1>
 
             <!-- Single claim-name CTA, lifted out of the start-screen
@@ -93,7 +99,21 @@
                  revisit. Harmless on fresh-finish where the
                  leaderboard is the only visible block. -->
             <div x-show="finished" class="mb-6">
-                <h2 class="mb-6 font-display text-2xl font-semibold text-text-dim">Game Finished!</h2>
+                <div class="flex items-center justify-between gap-3 mb-6">
+                    <h2 class="m-0 font-display text-2xl font-semibold text-text-dim">Game Finished!</h2>
+                    {{/* Share button for #176 — opens the dialog with
+                         the player's score baked into the message text.
+                         Visible only while `finished` is true so the
+                         button doesn't ghost-render on the start screen
+                         before a game exists. */}}
+                    <button type="button"
+                            class="btn-ghost gap-2"
+                            x-show="quizSlugId"
+                            @click="shareCurrentResult()">
+                        <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M13.5 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.5 2.5 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5zm-8.5 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm11 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>
+                        <span>Share result</span>
+                    </button>
+                </div>
 
                 <template x-if="leaderboard">
                     <div>
@@ -204,7 +224,21 @@
                 <template x-if="startError && !finished">
                     <div class="feedback-banner feedback-danger mb-5" x-text="startError"></div>
                 </template>
-                <button x-show="!finished" class="btn-primary" @click="startGame()" :disabled="!selectedQuizId || !!startError">Start Game</button>
+                <div x-show="!finished" class="flex flex-wrap items-center gap-3">
+                    <button class="btn-primary" @click="startGame()" :disabled="!selectedQuizId || !!startError">Start Game</button>
+                    {{/* Share button for #176 — invitation form ("Play
+                         this quiz: <title>"). Hidden while no quiz is
+                         selected (e.g. the empty-quiz-list edge case)
+                         so the button never opens a dialog with a
+                         bogus URL. */}}
+                    <button type="button"
+                            class="btn-ghost gap-2"
+                            x-show="!!selectedQuizId"
+                            @click="shareCurrentQuiz()">
+                        <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M13.5 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.5 2.5 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5zm-8.5 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm11 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>
+                        <span>Share</span>
+                    </button>
+                </div>
             </div>
 
             <!-- Gameplay view: question, countdown, answer buttons,

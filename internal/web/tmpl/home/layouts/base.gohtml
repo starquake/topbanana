@@ -26,6 +26,11 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@500;600;700;800;900&display=swap">
     <link rel="stylesheet" href="/assets/css/app.css">
+    {{/* share.js auto-wires [data-share-trigger] buttons on the
+         popular-quiz cards below. Loaded as a module so the
+         openShareDialog export is available if other surfaces ever
+         want to drive the dialog programmatically. */}}
+    <script type="module" src="/assets/js/share.js"></script>
 </head>
 <body class="bg-bg text-text font-sans antialiased min-h-screen leading-relaxed flex flex-col">
 <section class="max-w-shell mx-auto px-5 py-10 w-full flex-1">
