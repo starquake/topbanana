@@ -47,8 +47,9 @@ type ClaimPlayerParams struct {
 //
 // username_claimed is set to 1 because the visitor is explicitly choosing
 // their username via the register form. This is the register-after-playing
-// path; from this point on the frontend should no longer offer the
-// claim-name affordances.
+// path: the row now represents a player who picked their own name, so it
+// must look identical to a CreatePlayerWithCredentials row to downstream
+// callers.
 func (q *Queries) ClaimPlayer(ctx context.Context, arg ClaimPlayerParams) (Player, error) {
 	row := q.db.QueryRowContext(ctx, claimPlayer,
 		arg.Username,
@@ -82,8 +83,8 @@ RETURNING id, username, email, password_hash, role, created_at, username_claimed
 // anonymous row never qualifies for promotion.
 //
 // username_claimed defaults to 0: the auto-generated petname is not a name
-// the visitor picked, so the frontend should keep offering the claim-name
-// affordance until they pick one explicitly.
+// the visitor picked, so the row is unclaimed until they rename via the
+// PATCH /api/players/me endpoint or sign up through ClaimPlayer below.
 func (q *Queries) CreateAnonymousPlayer(ctx context.Context, username string) (Player, error) {
 	row := q.db.QueryRowContext(ctx, createAnonymousPlayer, username)
 	var i Player
@@ -132,9 +133,9 @@ type CreatePlayerWithCredentialsParams struct {
 // (legacy seed admin without a password is intentionally ignored).
 //
 // username_claimed is set to 1 because a registering user explicitly chose
-// their username at the form. The frontend uses this flag (surfaced as
-// hasCustomName) to decide whether to show the claim-name affordances, so
-// a fresh registrant must not see them.
+// their username at the register form. The column tracks "did the player
+// pick this name themselves" (vs auto-generated petname), so a fresh
+// registrant must be marked as claimed from the moment the row is written.
 func (q *Queries) CreatePlayerWithCredentials(ctx context.Context, arg CreatePlayerWithCredentialsParams) (Player, error) {
 	row := q.db.QueryRowContext(ctx, createPlayerWithCredentials, arg.Username, arg.PasswordHash, arg.RequestedRole)
 	var i Player
@@ -218,8 +219,8 @@ type UpdatePlayerUsernameParams struct {
 //
 // username_claimed is set to 1 because this is the dedicated claim-name
 // endpoint (PATCH /api/players/me); the visitor is explicitly picking
-// their display name. The frontend gates the claim-name modal on the
-// flipped flag so it does not re-open on subsequent visits.
+// their display name. After this update the row reads as "player chose
+// this name" identically to the credentialled-registration path.
 func (q *Queries) UpdatePlayerUsername(ctx context.Context, arg UpdatePlayerUsernameParams) (Player, error) {
 	row := q.db.QueryRowContext(ctx, updatePlayerUsername, arg.Username, arg.ID)
 	var i Player

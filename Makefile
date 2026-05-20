@@ -46,6 +46,19 @@ lint-fix: $(GOLANGCI_BIN)
 sql-lint: $(SQLC_BIN)
 	$(SQLC_BIN) vet
 
+# Advisory grep for cross-file rationale in comments (#177). Server-side
+# comments that explain what the frontend does with a value rot silently
+# when the frontend changes. This target surfaces candidates to rewrite;
+# it never fails the build. Test files are excluded because a test
+# comment is pinned by the test itself. internal/db/ is excluded because
+# it's regenerated from internal/queries/.
+.PHONY: lint-cross-refs
+lint-cross-refs:
+	@rg -n '(?i)\b(frontend|client-side)\b' \
+	   --type go --type sql \
+	   -g '!*_test.go' -g '!internal/db/**' \
+	   internal/ || echo "no cross-file refs found"
+
 .PHONY: build
 build:
 	mkdir -p $(BIN_DIR)

@@ -140,8 +140,8 @@ func HandleQuizGet(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 }
 
 // leaderboardLimit caps the number of rows the REST + SSE leaderboards
-// return. Frontend renders the rest of the player's standing via the
-// currentPlayer field below (#181).
+// return. The current player's standing — if they're outside the top
+// N — is carried separately on currentPlayer below (#181).
 const leaderboardLimit = 10
 
 // quizLeaderboardEntryResponse is one row of the leaderboard wire shape.
@@ -231,8 +231,8 @@ func writeQuizLeaderboardError(
 //
 // The response also carries a currentPlayer field with the requesting
 // player's rank and score, populated even when the player landed outside
-// the truncated top-N. Frontend uses this to render an off-leaderboard
-// "Your score" card — see #181.
+// the truncated top-N — so callers can show an off-leaderboard standing
+// without a second round-trip. See #181.
 func HandleQuizLeaderboard(logger *slog.Logger, service *game.Service) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -476,8 +476,8 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 }
 
 // HandleGameForQuiz returns the requesting player's game for the given quiz,
-// if any. The frontend uses this as the resume probe before deciding whether
-// to POST /api/games for a fresh attempt.
+// if any. Intended as a resume probe: callers can decide whether to start a
+// fresh game (POST /api/games) or continue an existing one.
 //
 // Returns 200 with {"gameId":..., "completed":...} when a game exists.
 // Returns 404 when the player has no game for the quiz, or when the quiz
@@ -710,8 +710,8 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 
 // playerResponse is the JSON shape returned by both GET and PATCH
 // /api/players/me. Shared so the two handlers cannot drift out of sync
-// when a field is added — the frontend's PlayerService.getMe() and
-// .claimName() decode into the same model.
+// when a field is added; any caller decoding either endpoint sees the
+// same shape.
 type playerResponse struct {
 	ID            int64  `json:"id"`
 	Username      string `json:"username"`
@@ -732,12 +732,12 @@ func newPlayerResponse(p *auth.Player) playerResponse {
 // HandlePlayerGetMe returns a handler for GET /api/players/me that reports
 // the calling player's id, username, whether they are still anonymous
 // (no password_hash set), and whether they have explicitly picked a
-// display name. The frontend uses hasCustomName to gate the "claim your
-// name" affordances; isAnonymous remains as a distinct, credential-level
-// concept (a registered user with a password is never anonymous, but a
-// claimed-but-passwordless visitor still is). The username is shown
-// verbatim so a fresh petname can be displayed as-is until the player
-// renames.
+// display name. hasCustomName and isAnonymous are deliberately
+// independent concepts: a registered user with a password is never
+// anonymous, but a claimed-but-passwordless visitor still is — callers
+// that care about "did this player choose this name" should look at
+// hasCustomName, not isAnonymous. The username is shown verbatim so a
+// fresh petname can be displayed as-is until the player renames.
 func HandlePlayerGetMe(logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()

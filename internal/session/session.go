@@ -10,10 +10,10 @@
 // callers pass true; development callers pass false so the dev server is
 // reachable over plain HTTP from any LAN hostname (see #205).
 //
-// MaxAge serves double duty: it is both the client-side cookie lifetime and the
-// server-side accept window. A cookie whose issuedAt is older than MaxAge seconds
-// is rejected even if the signature is still valid, so a copied cookie cannot be
-// replayed indefinitely.
+// MaxAge serves double duty: it is both the browser cookie lifetime
+// (Max-Age attribute) and the server-side accept window. A cookie whose
+// issuedAt is older than MaxAge seconds is rejected even if the signature
+// is still valid, so a copied cookie cannot be replayed indefinitely.
 package session
 
 import (

@@ -53,9 +53,10 @@ func (p *Player) IsAnonymous() bool {
 // HasCustomName reports whether the player has explicitly picked their
 // username. Anonymous rows start with HasCustomName=false (the username
 // is an auto-generated petname); they flip to true on a successful
-// PATCH /api/players/me or via the register flow. The frontend uses
-// this to decide whether to show the claim affordances; the existing
-// IsAnonymous() check (no password) is a different concern.
+// PATCH /api/players/me or via the register flow. Distinct from
+// IsAnonymous() (which is credential-level: no password): a
+// claimed-but-passwordless visitor has HasCustomName=true and
+// IsAnonymous()=true simultaneously.
 func (p *Player) HasCustomName() bool {
 	return p.UsernameClaimed
 }
