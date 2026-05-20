@@ -2,6 +2,30 @@
 
 What changed in each released version of Top Banana. The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.5.4 — 2026-05-20
+
+A public start page, share buttons, and tighter gates on the game endpoints.
+
+### Players
+- The start page at `/` lists popular quizzes from the last 30 days and the most active players. A footer link goes into the admin area.
+- Share button on three surfaces: each popular-quiz card on the home page, the quiz start screen, and the finish screen. On mobile it opens the native share sheet; on desktop it opens a dialog with Copy, WhatsApp, Telegram, Reddit, and X.
+- The "I scored ..." text in a result share reflects the actual score, including after a page refresh or when revisiting an already-completed quiz.
+- A failed answer submission (server error, dropped connection) now shows a "couldn't submit — please try again" banner instead of stalling.
+- One attempt per quiz per account is now enforced at the database level, so two parallel Start Game requests can't both succeed. Clearing cookies still mints a fresh anonymous player — the system has no way to tie a new session back to a previous one.
+- A game URL no longer reveals the participants' scores or advances the game when the requester is not a participant.
+
+### Hosts
+- Answer options on the admin quiz view sit behind a per-question spoiler toggle for screen-sharing safety.
+- Quiz titles and descriptions appear in link previews for `/play/...` URLs pasted into WhatsApp, Slack, Discord, etc.
+
+### Visual / chrome
+- The Top Banana logo on the player view and the home page links back to the start page.
+- Primary buttons on the player start screen and the auth pages — "Start Game", "Set your name", "Log in", "Register" — moved to the right of their rows. Secondary controls (Share, register / log-in cross-links) sit on the left.
+
+### Behind the scenes
+- A `REVEAL_DELAY` environment variable shortens the per-question reveal beat. The default 3-second pause stays in production; load tests and demos can drop it to a few hundred milliseconds.
+- Server 500 responses no longer include wrapped Go error messages in the body.
+
 ## v2026.5.3 — 2026-05-19
 
 Live leaderboard updates, a fullscreen gameplay screen, and a finished visual refresh across every page.
