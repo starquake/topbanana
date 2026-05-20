@@ -50,6 +50,10 @@ export class GameApp {
         this.leaderboard = null;
         this.quizSlugId = null;
         this.feedback = null;
+        // Surfaces the "couldn't submit your answer" retry banner when
+        // a submitAnswer POST throws (server 5xx, network drop). Cleared
+        // on the next click or when a fresh question loads — see #179.
+        this.submitError = false;
         this.progress = 100;
         this.timer = null;
         // Reset per-question; the <img> element is reused across questions
@@ -299,6 +303,7 @@ export class GameApp {
         this.revealing = false;
         this.splash = null;
         this.splashOn = false;
+        this.submitError = false;
         const question = await gameService.getNextQuestion(this.gameId);
         if (!question) {
             this.finished = true;
@@ -557,6 +562,9 @@ export class GameApp {
 
     async submitAnswer(optionId) {
         if (this.feedback || this.submittingAnswer) return;
+        // Clear any prior retry banner so re-clicking after a failed
+        // POST visibly dismisses it before the new attempt starts.
+        this.submitError = false;
         this.submittingAnswer = true;
         // Stop the per-question countdown the moment the player
         // clicks, BEFORE the POST is in flight. Without this, a
@@ -580,6 +588,19 @@ export class GameApp {
             this.score += fb.score || 0;
             this.showSplash(fb.correct ? 'correct' : 'wrong');
             this.animateFeedback(this.feedback.correct);
+        } catch (err) {
+            // POST failed (server 5xx, network drop, …). Don't penalize
+            // the player for the network blip: re-arm the countdown so
+            // they keep the time they had left (expiredAt is server-set
+            // and absolute, so startCountdown computes the real
+            // remaining window) and surface a retry banner. If
+            // expiredAt has already passed, the next tick fires
+            // handleTimeout normally and the game still advances —
+            // see #179.
+            console.error('submitAnswer:', err);
+            this.submitError = true;
+            this.startCountdown();
+            return;
         } finally {
             this.submittingAnswer = false;
         }
