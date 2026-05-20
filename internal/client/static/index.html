@@ -284,10 +284,27 @@
                              they sit consistently at the bottom of the
                              viewport across questions, regardless of
                              how tall the question text or image are. -->
+                        <!-- Retry banner (#179): shown when the previous
+                             submitAnswer POST threw and we re-armed the
+                             countdown. Sits above the buttons grid so
+                             the next click happens within the same eye
+                             line. Cleared on the next click or when
+                             nextQuestion resets state. -->
+                        <div x-show="submitError && !feedback"
+                             role="alert"
+                             class="feedback-banner feedback-danger mb-3 mt-auto">
+                            Couldn't submit your answer — please try again.
+                        </div>
+
                         <!-- Single column on phone; 2×2 grid on landscape
                              tablet / desktop (#253) so the buttons get
-                             bigger tiles and a Jackbox-style layout. -->
-                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-2.5 lg:gap-4 mt-auto"
+                             bigger tiles and a Jackbox-style layout.
+                             `mt-auto` only applies when the retry banner
+                             above is hidden — otherwise the banner takes
+                             the bottom-anchoring role so the two stay
+                             grouped. -->
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-2.5 lg:gap-4"
+                             :class="{ 'mt-auto': !submitError || !!feedback }"
                              x-show="!revealing">
                             <template x-for="(option, idx) in question.options" :key="option.id">
                                 <button :class="optionStateClass(option, idx)"
