@@ -10,7 +10,7 @@ make test-e2e         # end-to-end browser tests (Playwright; requires Node.js)
 make smoke            # validate startup against the existing dev DB (no HTTP listener)
 ```
 
-## Commits
+## Commits and PRs
 
 You may create commits, but only after the user has reviewed and signed off on every line of the diff. Workflow:
 
@@ -20,6 +20,13 @@ You may create commits, but only after the user has reviewed and signed off on e
 4. Use plain language commit messages — avoid jargon. Prefer simple verbs like "change", "update", "fix", "add", "remove". Start the message with a capital letter. Keep them to a single short subject line; do not add a body, Summary, or rationale paragraphs.
 
 If you make further changes after the sign-off (e.g. fixing a lint issue, addressing a comment), ask for sign-off on the new lines too before committing.
+
+### Linking a PR to a ticket
+
+- The commit subject and PR title stay **clean of `Closes #N` / `Fixes #N` keywords**. They describe what changed, not which ticket they reference.
+- When a PR resolves a tracked ticket, put `Closes #N` in the **PR description** (`gh pr create --body "Closes #N"`). GitHub auto-closes the issue on squash merge because it picks up the keyword from the merged commit body, which is the PR description.
+- For a PR that only partially addresses a ticket, omit the keyword and close the ticket manually with a summary once all slices land.
+- A PR that has no associated ticket gets an empty body (`--body ""`); nothing else belongs there.
 
 ## Testing
 
