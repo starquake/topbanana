@@ -854,12 +854,16 @@ func TestHandleQuestionNext(t *testing.T) {
 		}
 	})
 
-	t.Run("returns 500 on unexpected error", func(t *testing.T) {
+	t.Run("returns 500 on unexpected error without leaking wrapped error to body", func(t *testing.T) {
 		t.Parallel()
 
+		// Use an error whose message is recognisable so the assertion
+		// below can pin its absence from the response body. Before #274
+		// the body would echo the wrapped string verbatim.
+		secretErr := errors.New("internal-database-table-name-leak")
 		svc := newService(stubGameStore{
 			getGame: func(_ context.Context, _ string) (*game.Game, error) {
-				return nil, errStub
+				return nil, secretErr
 			},
 		}, stubQuizStore{})
 
@@ -871,6 +875,13 @@ func TestHandleQuestionNext(t *testing.T) {
 		)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
+
+		// Response body must not carry the wrapped error string (#274).
+		// The handler logs it via slog instead and writes a generic
+		// "internal error" body.
+		if got := rec.Body.String(); strings.Contains(got, "internal-database-table-name-leak") {
+			t.Errorf("5xx body leaked wrapped error: %q", got)
+		}
 
 		if got, want := rec.Code, http.StatusInternalServerError; got != want {
 			t.Errorf("status code = %v, want %v", got, want)
