@@ -73,6 +73,7 @@ export default defineConfig({
         'e2e-admin-claim-skip-chromium', 'e2e-admin-claim-skip-firefox',    // claim.spec.ts test 4
         'e2e-admin-timeout-chromium', 'e2e-admin-timeout-firefox',          // timeout.spec.ts
         'e2e-admin-submit-err-chromium', 'e2e-admin-submit-err-firefox',    // submit-error.spec.ts
+        'e2e-admin-spoiler-chromium', 'e2e-admin-spoiler-firefox',          // admin.spec.ts spoiler test
       ].join(','),
     },
     reuseExistingServer: false,
