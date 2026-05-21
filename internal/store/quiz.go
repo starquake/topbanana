@@ -43,14 +43,23 @@ func (s *QuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 
 	quizzes := make([]*quiz.Quiz, 0, len(rows))
 	for _, r := range rows {
-		quizzes = append(quizzes, &quiz.Quiz{
-			ID:          r.ID,
-			Title:       r.Title,
-			Slug:        r.Slug,
-			Description: r.Description,
-			CreatedAt:   r.CreatedAt,
-			UpdatedAt:   r.UpdatedAt,
-		})
+		qz := &quiz.Quiz{
+			ID:                r.ID,
+			Title:             r.Title,
+			Slug:              r.Slug,
+			Description:       r.Description,
+			CreatedAt:         r.CreatedAt,
+			UpdatedAt:         r.UpdatedAt,
+			CreatedByPlayerID: r.CreatedByPlayerID,
+		}
+		// created_by_username comes from a LEFT JOIN on players; a
+		// player row deleted out from under a quiz would leave the
+		// FK dangling, but the column itself stays NOT NULL so the
+		// username is the only nullable field on the join.
+		if r.CreatedByUsername.Valid {
+			qz.CreatedByUsername = r.CreatedByUsername.String
+		}
+		quizzes = append(quizzes, qz)
 	}
 
 	return quizzes, nil
@@ -101,12 +110,16 @@ func (s *QuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 	}
 
 	qz := &quiz.Quiz{
-		ID:          row.ID,
-		Title:       row.Title,
-		Slug:        row.Slug,
-		Description: row.Description,
-		CreatedAt:   row.CreatedAt,
-		UpdatedAt:   row.UpdatedAt,
+		ID:                row.ID,
+		Title:             row.Title,
+		Slug:              row.Slug,
+		Description:       row.Description,
+		CreatedAt:         row.CreatedAt,
+		UpdatedAt:         row.UpdatedAt,
+		CreatedByPlayerID: row.CreatedByPlayerID,
+	}
+	if row.CreatedByUsername.Valid {
+		qz.CreatedByUsername = row.CreatedByUsername.String
 	}
 
 	questions, err := s.ListQuestions(ctx, id)
@@ -393,11 +406,14 @@ func (s *QuizStore) GetOptionsByIDs(ctx context.Context, ids []int64) ([]*quiz.O
 }
 
 func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.Quiz) error {
-	var err error
+	if qz.CreatedByPlayerID == 0 {
+		return quiz.ErrCreatorRequired
+	}
 	row, err := q.CreateQuiz(ctx, db.CreateQuizParams{
-		Title:       qz.Title,
-		Slug:        qz.Slug,
-		Description: qz.Description,
+		Title:             qz.Title,
+		Slug:              qz.Slug,
+		Description:       qz.Description,
+		CreatedByPlayerID: qz.CreatedByPlayerID,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create quiz: %w", err)

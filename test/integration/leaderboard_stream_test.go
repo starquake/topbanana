@@ -49,9 +49,10 @@ func TestLeaderboardStream_Integration(t *testing.T) {
 
 	// Seed: one quiz, one question, two options (one correct).
 	qz := &quiz.Quiz{
-		Title:       "Stream Quiz",
-		Slug:        "stream-quiz",
-		Description: "seed for the SSE leaderboard test",
+		Title:             "Stream Quiz",
+		Slug:              "stream-quiz",
+		Description:       "seed for the SSE leaderboard test",
+		CreatedByPlayerID: seededAdminID,
 		Questions: []*quiz.Question{
 			{
 				Text:     "What is 2+2?",
@@ -256,9 +257,10 @@ func TestLeaderboardStream_NameUpdate_RepaintsSubscribers(t *testing.T) {
 	stores := store.New(db, slog.Default())
 
 	qz := &quiz.Quiz{
-		Title:       "Name Update Quiz",
-		Slug:        "name-update-quiz",
-		Description: "seed for the claim-name SSE fan-out test",
+		Title:             "Name Update Quiz",
+		Slug:              "name-update-quiz",
+		Description:       "seed for the claim-name SSE fan-out test",
+		CreatedByPlayerID: seededAdminID,
 		Questions: []*quiz.Question{
 			{
 				Text:     "What is 2+2?",

@@ -124,15 +124,23 @@ func (tr *TemplateRenderer) prepare(w http.ResponseWriter, r *http.Request) (*te
 	}), true
 }
 
-// QuizData is the data for the quiz list page, it shows multiple quizzes when available.
+// QuizData is the data for the quiz list page, it shows multiple
+// quizzes when available. CanEdit is the resolved
+// "current-session-admin == creator" decision so the templates and
+// the questions_list partial do not have to recompute the rule (#281)
+// — handlers populate it via [attachCanEdit] before rendering, and a
+// rule change lives entirely in Go.
 type QuizData struct {
-	ID            int64
-	Title         string
-	Slug          string
-	Description   string
-	UpdatedAt     time.Time
-	QuestionCount int
-	Questions     []*QuestionData
+	ID                int64
+	Title             string
+	Slug              string
+	Description       string
+	UpdatedAt         time.Time
+	QuestionCount     int
+	CreatedByPlayerID int64
+	CreatedByUsername string
+	CanEdit           bool
+	Questions         []*QuestionData
 }
 
 // QuestionData is the data for a question.
@@ -159,18 +167,42 @@ const (
 	maxFormSize = 1 << 20 // 1 MB
 )
 
+// canEditQuiz is the single source of truth for the creator-only-edit
+// rule (#281): the session player must be present and must match the
+// quiz's CreatedByPlayerID. Both [attachCanEdit] (read paths) and
+// [requireQuizOwner] (mutating paths) call this so the policy lives
+// in one place — a future change (additional roles, transferred
+// ownership, etc.) only touches this function.
+func canEditQuiz(r *http.Request, createdByPlayerID int64) bool {
+	p, ok := auth.PlayerFromContext(r.Context())
+
+	return ok && p.ID == createdByPlayerID
+}
+
+// attachCanEdit stamps qzd.CanEdit from the session player so templates
+// can render the per-row affordances directly without recomputing the
+// rule.
+func attachCanEdit(r *http.Request, qzd *QuizData) {
+	if qzd == nil {
+		return
+	}
+	qzd.CanEdit = canEditQuiz(r, qzd.CreatedByPlayerID)
+}
+
 func quizDataFromQuiz(qz *quiz.Quiz) *QuizData {
 	// QuestionCount defaults to len(Questions); the list handler overrides
 	// it from a separate count query because ListQuizzes doesn't load the
 	// question tree.
 	return &QuizData{
-		ID:            qz.ID,
-		Title:         qz.Title,
-		Slug:          qz.Slug,
-		Description:   qz.Description,
-		UpdatedAt:     qz.UpdatedAt,
-		QuestionCount: len(qz.Questions),
-		Questions:     questionDataFromQuestions(qz.Questions),
+		ID:                qz.ID,
+		Title:             qz.Title,
+		Slug:              qz.Slug,
+		Description:       qz.Description,
+		UpdatedAt:         qz.UpdatedAt,
+		QuestionCount:     len(qz.Questions),
+		CreatedByPlayerID: qz.CreatedByPlayerID,
+		CreatedByUsername: qz.CreatedByUsername,
+		Questions:         questionDataFromQuestions(qz.Questions),
 	}
 }
 
@@ -320,11 +352,78 @@ func render404(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrf
 	render.Render(w, r, http.StatusNotFound, nil)
 }
 
+// render403 renders the 403 error page with a message that names the
+// quiz the caller tried to modify and the admin who owns it. Used by
+// requireQuizOwner so a wrong-owner attempt surfaces a clear "not your
+// quiz, ask <name> to make the change" instead of a generic 403.
+func render403(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrfMgr *csrf.Manager, msg string) {
+	render := &TemplateRenderer{logger: logger, csrf: csrfMgr, t: parseTemplate("admin/errors/403.gohtml")}
+	data := struct {
+		Title   string
+		Message string
+	}{
+		Title:   "Forbidden",
+		Message: msg,
+	}
+	render.Render(w, r, http.StatusForbidden, data)
+}
+
 // render500 renders the 500 error page.
 // Should be used as the final handler in the chain and probably be followed by a return.
 func render500(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrfMgr *csrf.Manager) {
 	render := &TemplateRenderer{logger: logger, csrf: csrfMgr, t: parseTemplate("admin/errors/500.gohtml")}
 	render.Render(w, r, http.StatusInternalServerError, nil)
+}
+
+// requireQuizOwner loads the quiz with the given ID and gates the
+// request on the session player being the creator. Returns the loaded
+// quiz (saving the caller a second fetch) and true on success; writes
+// a 403 page and returns false when the session player is not the
+// creator.
+//
+// CreatedByPlayerID is NOT NULL at the DB level (#281, migration
+// 20260520200000) and existing rows were backfilled to the lowest-id
+// admin, so there is no "legacy quiz" bypass — every quiz has a real
+// owner.
+//
+// Render-style errors (quiz missing, store failure, session missing)
+// surface as 404 / 500 via the existing render helpers; this helper
+// reads as the single mutating-route gate so individual handlers stay
+// short.
+func requireQuizOwner(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	quizStore quiz.Store,
+	id int64,
+) (*quiz.Quiz, bool) {
+	qz, ok := quizByID(w, r, logger, csrfMgr, quizStore, id)
+	if !ok {
+		return nil, false
+	}
+
+	if _, present := auth.PlayerFromContext(r.Context()); !present {
+		logger.ErrorContext(r.Context(), "no player on context for owner-gated route")
+		render500(w, r, logger, csrfMgr)
+
+		return nil, false
+	}
+
+	if canEditQuiz(r, qz.CreatedByPlayerID) {
+		return qz, true
+	}
+
+	owner := qz.CreatedByUsername
+	if owner == "" {
+		owner = "another admin"
+	}
+	render403(w, r, logger, csrfMgr, fmt.Sprintf(
+		"Only %s can edit \"%s\". Ask them to make the change, or have them transfer ownership.",
+		owner, qz.Title,
+	))
+
+	return nil, false
 }
 
 // quizByID returns the quiz with the given ID from the store. It includes the questions.
@@ -597,6 +696,7 @@ func HandleQuizList(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 		qzd := quizDataFromQuizzes(quizzes)
 		for _, qd := range qzd {
 			qd.QuestionCount = counts[qd.ID]
+			attachCanEdit(r, qd)
 		}
 
 		data := quizListData{
@@ -678,6 +778,7 @@ func HandleQuizView(
 		}
 
 		quizData := quizDataFromQuiz(qz)
+		attachCanEdit(r, quizData)
 		data := quizViewData{
 			Title:             "Admin Dashboard - View Quiz",
 			Quiz:              quizData,
@@ -693,13 +794,20 @@ func HandleQuizView(
 // games, it is a 303-redirect no-op. The admin reset button on the quiz
 // view page POSTs here.
 func HandleResetGameForPlayer(
-	logger *slog.Logger, csrfMgr *csrf.Manager, gameService *game.Service,
+	logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store, gameService *game.Service,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
 
 		var quizID int64
 		if quizID, ok = handlers.ParseIDFromPath(w, r, logger, "quizID"); !ok {
+			return
+		}
+
+		// Owner gate (#281): only the quiz's creator can reset another
+		// player's attempt on it. Same rule as every other mutating
+		// admin route.
+		if _, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
 
@@ -763,8 +871,10 @@ func HandleQuizEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 			return
 		}
 
+		// Owner gate on the edit form itself so non-owners get a 403
+		// up front instead of opening an editor they can't submit.
 		var qz *quiz.Quiz
-		if qz, ok = quizByID(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+		if qz, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
 		data := quizEditData{
@@ -891,6 +1001,12 @@ func HandleQuizImportSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 			return
 		}
 
+		// Stamp the session admin as the creator so the downstream
+		// owner-gated mutating routes can match (#281).
+		if p, present := auth.PlayerFromContext(r.Context()); present {
+			qz.CreatedByPlayerID = p.ID
+		}
+
 		if !storeQuiz(w, r, logger, csrfMgr, quizStore, qz) {
 			return
 		}
@@ -944,9 +1060,16 @@ func HandleQuizSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 		newQuiz := quizID == 0
 		var qz *quiz.Quiz
 		if newQuiz {
+			// CREATE: stamp the session admin as the creator so the
+			// owner-gated mutating routes downstream can match (#281).
 			qz = &quiz.Quiz{}
+			if p, present := auth.PlayerFromContext(r.Context()); present {
+				qz.CreatedByPlayerID = p.ID
+			}
 		} else {
-			if qz, ok = quizByID(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+			// UPDATE: only the creator may save. requireQuizOwner
+			// loads the quiz and 403s anyone else (#281).
+			if qz, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 				return
 			}
 		}
@@ -981,8 +1104,10 @@ func HandleQuestionCreate(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 			return
 		}
 
+		// Owner gate on the question-create form: non-owners 403
+		// instead of seeing a form whose POST would fail anyway.
 		var qz *quiz.Quiz
-		if qz, ok = quizByID(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+		if qz, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
 
@@ -1019,7 +1144,7 @@ func HandleQuestionEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 		}
 		newQuestion := questionID == 0
 
-		qz, ok := quizByID(w, r, logger, csrfMgr, quizStore, quizID)
+		qz, ok := requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID)
 		if !ok {
 			return
 		}
@@ -1056,6 +1181,10 @@ func HandleQuizDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz
 			return
 		}
 
+		if _, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+			return
+		}
+
 		if err := quizStore.DeleteQuiz(r.Context(), quizID); err != nil {
 			if errors.Is(err, quiz.ErrDeletingQuizNoRowsAffected) {
 				render404(w, r, logger, csrfMgr)
@@ -1070,6 +1199,52 @@ func HandleQuizDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz
 
 		http.Redirect(w, r, "/admin/quizzes", http.StatusSeeOther)
 	})
+}
+
+// renderQuestionMoveError translates a SwapQuestionPositions failure
+// into the right HTTP response. Pulled out of HandleQuestionMove so the
+// cognitive complexity of the handler stays under the revive limit
+// after the owner gate was added in #281.
+//
+// htmxResponder is true when the caller is an HX-Request fragment swap
+// — boundary errors return 204 in that mode so the existing DOM stays
+// in place. Classic form posts redirect back to the quiz view; the
+// rerendered page reflects the (unchanged) order from the database.
+//
+// Uses [strconv.FormatInt] for the redirect path to dodge gosec's
+// open-redirect taint heuristic (G710) — same dance as
+// HandleQuestionSave.
+//
+//nolint:revive // htmxResponder is a wire-format selector, not a flag-as-mode toggle; splitting the function in two would duplicate the switch rather than clarify it.
+func renderQuestionMoveError(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	quizID int64,
+	err error,
+	htmxResponder bool,
+) {
+	switch {
+	case errors.Is(err, quiz.ErrInvalidDirection):
+		render400(w, r, logger, csrfMgr, "invalid direction")
+	case errors.Is(err, quiz.ErrQuestionAtTop),
+		errors.Is(err, quiz.ErrQuestionAtBottom):
+		// Boundary case: the button should have been disabled in
+		// the UI, so a request here is unusual but harmless. For
+		// HTMX, 204 leaves the existing DOM untouched; for the
+		// classic form post, redirect back to the view.
+		if htmxResponder {
+			w.WriteHeader(http.StatusNoContent)
+		} else {
+			http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(quizID, 10), http.StatusSeeOther)
+		}
+	case errors.Is(err, quiz.ErrQuestionNotFound):
+		render404(w, r, logger, csrfMgr)
+	default:
+		logger.ErrorContext(r.Context(), "error swapping question positions", slog.Any("err", err))
+		render500(w, r, logger, csrfMgr)
+	}
 }
 
 // HandleQuestionMove handles the per-row Up/Down reorder buttons on the
@@ -1099,6 +1274,10 @@ func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 			return
 		}
 
+		if _, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+			return
+		}
+
 		var questionID int64
 		if questionID, ok = handlers.ParseIDFromPath(w, r, logger, "questionID"); !ok {
 			return
@@ -1109,28 +1288,7 @@ func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 		isHX := r.Header.Get("Hx-Request") == "true"
 
 		if err := quizStore.SwapQuestionPositions(r.Context(), quizID, questionID, direction); err != nil {
-			switch {
-			case errors.Is(err, quiz.ErrInvalidDirection):
-				render400(w, r, logger, csrfMgr, "invalid direction")
-			case errors.Is(err, quiz.ErrQuestionAtTop),
-				errors.Is(err, quiz.ErrQuestionAtBottom):
-				// Boundary case: the button should have been disabled in
-				// the UI, so a request here is unusual but harmless. For
-				// HTMX, 204 leaves the existing DOM untouched; for the
-				// classic form post, redirect back to the view.
-				// strconv.FormatInt avoids gosec's open-redirect taint
-				// heuristic (G710) — same pattern as HandleQuestionSave.
-				if isHX {
-					w.WriteHeader(http.StatusNoContent)
-				} else {
-					http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(quizID, 10), http.StatusSeeOther)
-				}
-			case errors.Is(err, quiz.ErrQuestionNotFound):
-				render404(w, r, logger, csrfMgr)
-			default:
-				logger.ErrorContext(r.Context(), "error swapping question positions", slog.Any("err", err))
-				render500(w, r, logger, csrfMgr)
-			}
+			renderQuestionMoveError(w, r, logger, csrfMgr, quizID, err, isHX)
 
 			return
 		}
@@ -1144,6 +1302,7 @@ func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 				return
 			}
 			quizData := quizDataFromQuiz(qz)
+			attachCanEdit(r, quizData)
 			render.RenderPartial(w, r, "questions_list", partialData{
 				Quiz:              quizData,
 				LastQuestionIndex: len(quizData.Questions) - 1,
@@ -1163,6 +1322,10 @@ func HandleQuestionDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 
 		var quizID int64
 		if quizID, ok = handlers.ParseIDFromPath(w, r, logger, "quizID"); !ok {
+			return
+		}
+
+		if _, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
 
@@ -1205,9 +1368,11 @@ func HandleQuestionSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 
 		newQuestion := questionID == 0
 
-		// Retrieve quiz and question from the store
+		// Owner gate (#281) before loading the question and writing.
+		// requireQuizOwner returns the loaded quiz, so the subsequent
+		// question handling can reuse it without a second fetch.
 		var qz *quiz.Quiz
-		if qz, ok = quizByID(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+		if qz, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
 

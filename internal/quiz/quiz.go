@@ -99,6 +99,12 @@ var (
 	// ErrInvalidDirection is returned by SwapQuestionPositions when the
 	// supplied direction is neither "up" nor "down".
 	ErrInvalidDirection = errors.New("invalid direction")
+	// ErrCreatorRequired is returned by CreateQuiz when the caller did
+	// not set Quiz.CreatedByPlayerID. The column is NOT NULL at the DB
+	// level (#281, migration 20260520200000); the sentinel lets handler
+	// and store callers surface a clear error before they hit the FK
+	// failure from SQLite.
+	ErrCreatorRequired = errors.New("quiz creator player id required")
 )
 
 // Reorder directions accepted by [Store.SwapQuestionPositions].
@@ -107,15 +113,23 @@ const (
 	DirectionDown = "down"
 )
 
-// Quiz represents a quiz.
+// Quiz represents a quiz. CreatedByPlayerID + CreatedByUsername were
+// added in migration 20260520200000 to support the creator-only-edit
+// rule from #281. CreatedByPlayerID is NOT NULL at the DB level;
+// existing rows were backfilled to the lowest-id admin during the
+// migration. A zero value here means "caller forgot to set it";
+// [QuizStore.CreateQuiz] surfaces ErrCreatorRequired rather than
+// letting the FK insert fail at the wire.
 type Quiz struct {
-	ID          int64
-	Title       string
-	Slug        string
-	Description string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	Questions   []*Question
+	ID                int64
+	Title             string
+	Slug              string
+	Description       string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	CreatedByPlayerID int64
+	CreatedByUsername string
+	Questions         []*Question
 }
 
 // Valid checks if the quiz, its questions, and its options are valid.

@@ -24,6 +24,22 @@ import (
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
+// testAdminID is the player id the admin-handler unit tests pose as
+// for owner-gated routes (#281). Owner-gated handlers refuse the
+// request when no Player is on context, so tests attach a player via
+// withTestAdmin; stub quizzes return CreatedByPlayerID == testAdminID
+// so the requireQuizOwner check passes.
+const testAdminID int64 = 1
+
+// withTestAdmin returns r with an auth.Player on its context. Drop-in
+// substitute for tests that previously skipped the auth middleware —
+// the owner gate added in #281 needs the player to know who's asking.
+func withTestAdmin(r *http.Request) *http.Request {
+	signedIn := &auth.Player{ID: testAdminID, Username: "admin", Role: auth.RoleAdmin}
+
+	return r.WithContext(auth.WithPlayer(r.Context(), signedIn))
+}
+
 // stubGameStore satisfies game.Store for admin handler tests; only the
 // methods the admin code actually exercises are wired up. The leaderboard
 // fetch on the quiz view defaults to "no rows" so test cases that don't
@@ -306,7 +322,7 @@ func TestHandleQuizList(t *testing.T) {
 		}
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusOK; got != want {
 			t.Fatalf("status code = %v, want %v", got, want)
@@ -364,7 +380,7 @@ func TestHandleQuizList(t *testing.T) {
 		handler := HandleQuizList(logger, nil, store)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
 		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusOK; got != want {
 			t.Fatalf("status = %d, want %d", got, want)
@@ -398,7 +414,7 @@ func TestHandleQuizList(t *testing.T) {
 		handler := HandleQuizList(logger, nil, store)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
 		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusInternalServerError; got != want {
 			t.Errorf("status = %d, want %d", got, want)
@@ -422,7 +438,7 @@ func TestHandleQuizList(t *testing.T) {
 		}
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusOK; got != want {
 			t.Fatalf("status code = %v, want %v", got, want)
@@ -503,7 +519,7 @@ func TestHandleQuizList_ErrorHandling(t *testing.T) {
 		}
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusInternalServerError; got != want {
 			t.Fatalf("status code = %v, want %v", got, want)
@@ -525,7 +541,7 @@ func TestHandleIndex(t *testing.T) {
 	}
 	rr := httptest.NewRecorder()
 
-	handler.ServeHTTP(rr, req)
+	handler.ServeHTTP(rr, withTestAdmin(req))
 
 	if got, want := rr.Code, http.StatusOK; got != want {
 		t.Errorf("got status code %v, want %v", got, want)
@@ -579,7 +595,7 @@ func TestHandleQuizView(t *testing.T) {
 		req.SetPathValue("quizID", "1")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusOK; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -609,7 +625,7 @@ func TestHandleQuizView(t *testing.T) {
 		req.SetPathValue("quizID", "1")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusNotFound; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -639,7 +655,7 @@ func TestHandleQuizView_ErrorHandling(t *testing.T) {
 		req.SetPathValue("quizID", "abc")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -671,7 +687,7 @@ func TestHandleQuizView_ErrorHandling(t *testing.T) {
 		req.SetPathValue("quizID", "1")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusInternalServerError; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -695,7 +711,7 @@ func TestHandleQuizCreate(t *testing.T) {
 	}
 	rr := httptest.NewRecorder()
 
-	handler.ServeHTTP(rr, req)
+	handler.ServeHTTP(rr, withTestAdmin(req))
 
 	if got, want := rr.Code, http.StatusOK; got != want {
 		t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -716,7 +732,13 @@ func TestHandleQuizEdit(t *testing.T) {
 
 		quizStore := stubQuizStore{
 			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{ID: 1, Title: "Quiz One", Slug: "quiz-one", Description: "First"}, nil
+				return &quiz.Quiz{
+					ID:                1,
+					Title:             "Quiz One",
+					Slug:              "quiz-one",
+					Description:       "First",
+					CreatedByPlayerID: testAdminID,
+				}, nil
 			},
 		}
 
@@ -728,7 +750,7 @@ func TestHandleQuizEdit(t *testing.T) {
 		req.SetPathValue("quizID", "1")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusOK; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -758,7 +780,7 @@ func TestHandleQuizEdit(t *testing.T) {
 		req.SetPathValue("quizID", "1")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusNotFound; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -785,7 +807,7 @@ func TestHandleQuizEdit_ErrorHandling(t *testing.T) {
 		req.SetPathValue("quizID", "not-an-int")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -817,7 +839,7 @@ func TestHandleQuizEdit_ErrorHandling(t *testing.T) {
 		req.SetPathValue("quizID", "1")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusInternalServerError; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -834,7 +856,7 @@ func TestHandleQuizSave(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-		testQuiz := quiz.Quiz{Title: "Quiz One", Slug: "quiz-one", Description: "First"}
+		testQuiz := quiz.Quiz{Title: "Quiz One", Slug: "quiz-one", Description: "First", CreatedByPlayerID: testAdminID}
 
 		var createdQuizID int64
 		var quizzes []*quiz.Quiz
@@ -866,7 +888,7 @@ func TestHandleQuizSave(t *testing.T) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		log := buf.String()
 		if got, want := rr.Code, http.StatusSeeOther; got != want {
@@ -894,12 +916,19 @@ func TestHandleQuizSave(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-		originalQuiz := quiz.Quiz{ID: 123456789, Title: "Quiz One", Slug: "quiz-one", Description: "First"}
+		originalQuiz := quiz.Quiz{
+			ID:                123456789,
+			Title:             "Quiz One",
+			Slug:              "quiz-one",
+			Description:       "First",
+			CreatedByPlayerID: testAdminID,
+		}
 		updatedQuiz := quiz.Quiz{
-			ID:          originalQuiz.ID,
-			Title:       originalQuiz.Title + " Updated",
-			Slug:        "quiz-one-updated",
-			Description: originalQuiz.Description + " Updated",
+			ID:                originalQuiz.ID,
+			Title:             originalQuiz.Title + " Updated",
+			Slug:              "quiz-one-updated",
+			Description:       originalQuiz.Description + " Updated",
+			CreatedByPlayerID: originalQuiz.CreatedByPlayerID,
 		}
 
 		var quizzes []*quiz.Quiz
@@ -938,7 +967,7 @@ func TestHandleQuizSave(t *testing.T) {
 
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusSeeOther; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -975,7 +1004,7 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -1007,7 +1036,7 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 		req.SetPathValue("quizID", "1")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusInternalServerError; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -1034,7 +1063,7 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -1068,7 +1097,7 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -1113,7 +1142,7 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusInternalServerError; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -1134,7 +1163,13 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-		originalQuiz := quiz.Quiz{ID: 123456789, Title: "Quiz One", Slug: "quiz-one", Description: "First"}
+		originalQuiz := quiz.Quiz{
+			ID:                123456789,
+			Title:             "Quiz One",
+			Slug:              "quiz-one",
+			Description:       "First",
+			CreatedByPlayerID: testAdminID,
+		}
 		updatedQuiz := quiz.Quiz{
 			ID:          originalQuiz.ID,
 			Title:       originalQuiz.Title + " Updated",
@@ -1178,7 +1213,7 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusInternalServerError; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -1200,7 +1235,13 @@ func TestHandleQuestionCreate(t *testing.T) {
 	buf := bytes.Buffer{}
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-	testQuiz := quiz.Quiz{ID: 123456789, Title: "Quiz One", Slug: "quiz-one", Description: "First"}
+	testQuiz := quiz.Quiz{
+		ID:                123456789,
+		Title:             "Quiz One",
+		Slug:              "quiz-one",
+		Description:       "First",
+		CreatedByPlayerID: testAdminID,
+	}
 
 	quizStore := stubQuizStore{
 		getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
@@ -1221,7 +1262,7 @@ func TestHandleQuestionCreate(t *testing.T) {
 	req.SetPathValue("quizID", strconv.FormatInt(testQuiz.ID, 10))
 	rr := httptest.NewRecorder()
 
-	handler.ServeHTTP(rr, req)
+	handler.ServeHTTP(rr, withTestAdmin(req))
 
 	if got, want := rr.Code, http.StatusOK; got != want {
 		t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -1255,7 +1296,7 @@ func TestHandleQuestionCreate_ErrorHandling(t *testing.T) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -1295,7 +1336,7 @@ func TestHandleQuestionCreate_ErrorHandling(t *testing.T) {
 		req.SetPathValue("quizID", strconv.FormatInt(int64(testQuizID), 10))
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		log := buf.String()
 		if got, want := rr.Code, http.StatusInternalServerError; got != want {
@@ -1316,7 +1357,13 @@ func TestHandleQuestionEdit(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-		testQuiz := quiz.Quiz{ID: 1234, Title: "Quiz One", Slug: "quiz-one", Description: "First"}
+		testQuiz := quiz.Quiz{
+			ID:                1234,
+			Title:             "Quiz One",
+			Slug:              "quiz-one",
+			Description:       "First",
+			CreatedByPlayerID: testAdminID,
+		}
 
 		quizStore := stubQuizStore{
 			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
@@ -1342,7 +1389,7 @@ func TestHandleQuestionEdit(t *testing.T) {
 		req.SetPathValue("quizID", strconv.FormatInt(testQuiz.ID, 10))
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusOK; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -1364,7 +1411,8 @@ func TestHandleQuestionEdit(t *testing.T) {
 		}
 		testQuiz := quiz.Quiz{
 			ID: 1234, Title: "Quiz One", Slug: "quiz-one", Description: "First",
-			Questions: []*quiz.Question{&testQuestion},
+			CreatedByPlayerID: testAdminID,
+			Questions:         []*quiz.Question{&testQuestion},
 		}
 
 		quizStore := stubQuizStore{
@@ -1399,7 +1447,7 @@ func TestHandleQuestionEdit(t *testing.T) {
 		req.SetPathValue("questionID", strconv.FormatInt(testQuestion.ID, 10))
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusOK; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -1433,7 +1481,7 @@ func TestHandleQuestionEdit(t *testing.T) {
 		req.SetPathValue("questionID", strconv.Itoa(5678))
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		log := buf.String()
 		if got, want := rr.Code, http.StatusNotFound; got != want {
@@ -1450,7 +1498,13 @@ func TestHandleQuestionEdit(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-		testQuiz := quiz.Quiz{ID: 1234, Title: "Quiz One", Slug: "quiz-one", Description: "First"}
+		testQuiz := quiz.Quiz{
+			ID:                1234,
+			Title:             "Quiz One",
+			Slug:              "quiz-one",
+			Description:       "First",
+			CreatedByPlayerID: testAdminID,
+		}
 
 		quizStore := stubQuizStore{
 			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
@@ -1480,7 +1534,7 @@ func TestHandleQuestionEdit(t *testing.T) {
 		req.SetPathValue("questionID", strconv.Itoa(5678))
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		log := buf.String()
 		if got, want := rr.Code, http.StatusNotFound; got != want {
@@ -1518,7 +1572,13 @@ func TestQuestionEditSave_OptionIDsRoundTrip(t *testing.T) {
 			{ID: originalIDs[3], Text: originalTexts[3], Correct: originalCorrect[3]},
 		},
 	}
-	q := quiz.Quiz{ID: 1234, Title: "Q1", Slug: "q-1", Questions: []*quiz.Question{&original}}
+	q := quiz.Quiz{
+		ID:                1234,
+		Title:             "Q1",
+		Slug:              "q-1",
+		CreatedByPlayerID: testAdminID,
+		Questions:         []*quiz.Question{&original},
+	}
 
 	// Snapshot the option fields the handler sees at update-time. The handler
 	// mutates the loaded question's options in place, so we have to capture
@@ -1552,7 +1612,7 @@ func TestQuestionEditSave_OptionIDsRoundTrip(t *testing.T) {
 	editReq.SetPathValue("quizID", strconv.FormatInt(q.ID, 10))
 	editReq.SetPathValue("questionID", strconv.FormatInt(original.ID, 10))
 	editRec := httptest.NewRecorder()
-	HandleQuestionEdit(logger, nil, store).ServeHTTP(editRec, editReq)
+	HandleQuestionEdit(logger, nil, store).ServeHTTP(editRec, withTestAdmin(editReq))
 
 	if got, want := editRec.Code, http.StatusOK; got != want {
 		t.Fatalf("edit form status = %d, want %d", got, want)
@@ -1571,7 +1631,7 @@ func TestQuestionEditSave_OptionIDsRoundTrip(t *testing.T) {
 	saveReq.SetPathValue("quizID", strconv.FormatInt(q.ID, 10))
 	saveReq.SetPathValue("questionID", strconv.FormatInt(original.ID, 10))
 	saveRec := httptest.NewRecorder()
-	HandleQuestionSave(logger, nil, store).ServeHTTP(saveRec, saveReq)
+	HandleQuestionSave(logger, nil, store).ServeHTTP(saveRec, withTestAdmin(saveReq))
 
 	if got, want := saveRec.Code, http.StatusSeeOther; got != want {
 		t.Fatalf("save status = %d, want %d (body=%q)", got, want, saveRec.Body.String())
@@ -1691,7 +1751,7 @@ func TestHandleQuestionEdit_HandleError(t *testing.T) {
 		req.SetPathValue("quizID", "not-an-int")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -1726,7 +1786,7 @@ func TestHandleQuestionEdit_HandleError(t *testing.T) {
 		req.SetPathValue("questionID", "questionID")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -1746,7 +1806,7 @@ func TestHandleQuestionEdit_HandleError(t *testing.T) {
 
 		quizStore := stubQuizStore{
 			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{}, nil
+				return &quiz.Quiz{CreatedByPlayerID: testAdminID}, nil
 			},
 			getQuestionByID: func(_ context.Context, _ int64) (*quiz.Question, error) {
 				return nil, testError
@@ -1770,7 +1830,7 @@ func TestHandleQuestionEdit_HandleError(t *testing.T) {
 		req.SetPathValue("questionID", questionID)
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusInternalServerError; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -1792,6 +1852,7 @@ func TestHandleQuestionSave(t *testing.T) {
 
 		testQuiz := quiz.Quiz{
 			ID: 1234, Title: "Quiz One", Slug: "quiz-one", Description: "First",
+			CreatedByPlayerID: testAdminID,
 			Questions: []*quiz.Question{
 				{
 					ID:       5678,
@@ -1897,7 +1958,7 @@ func TestHandleQuestionSave(t *testing.T) {
 		req.SetPathValue("quizID", strconv.FormatInt(testQuiz.ID, 10))
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		log := buf.String()
 		if got, want := rr.Code, http.StatusSeeOther; got != want {
@@ -1931,7 +1992,13 @@ func TestHandleQuestionSave(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-		originalQuiz := quiz.Quiz{ID: 1234, Title: "Quiz One", Slug: "quiz-one", Description: "First"}
+		originalQuiz := quiz.Quiz{
+			ID:                1234,
+			Title:             "Quiz One",
+			Slug:              "quiz-one",
+			Description:       "First",
+			CreatedByPlayerID: testAdminID,
+		}
 		originalQuestion := quiz.Question{
 			ID:       1,
 			QuizID:   originalQuiz.ID,
@@ -2037,7 +2104,7 @@ func TestHandleQuestionSave(t *testing.T) {
 		req.SetPathValue("questionID", strconv.FormatInt(originalQuestion.ID, 10))
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		log := buf.String()
 		if got, want := rr.Code, http.StatusSeeOther; got != want {
@@ -2084,7 +2151,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -2120,7 +2187,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -2138,7 +2205,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 
 		quizStore := stubQuizStore{
 			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{}, nil
+				return &quiz.Quiz{CreatedByPlayerID: testAdminID}, nil
 			},
 		}
 
@@ -2151,7 +2218,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -2169,7 +2236,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 
 		quizStore := stubQuizStore{
 			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{}, nil
+				return &quiz.Quiz{CreatedByPlayerID: testAdminID}, nil
 			},
 		}
 
@@ -2195,7 +2262,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -2213,7 +2280,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 
 		quizStore := stubQuizStore{
 			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{}, nil
+				return &quiz.Quiz{CreatedByPlayerID: testAdminID}, nil
 			},
 		}
 
@@ -2237,7 +2304,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -2253,7 +2320,13 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-		testQuiz := quiz.Quiz{ID: 1234, Title: "Quiz One", Slug: "quiz-one", Description: "First"}
+		testQuiz := quiz.Quiz{
+			ID:                1234,
+			Title:             "Quiz One",
+			Slug:              "quiz-one",
+			Description:       "First",
+			CreatedByPlayerID: testAdminID,
+		}
 		testQuestion := quiz.Question{
 			Text:     "Question One",
 			ImageURL: "https://example.com/image.png",
@@ -2313,7 +2386,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 		req.SetPathValue("quizID", strconv.FormatInt(testQuiz.ID, 10))
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusInternalServerError; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -2334,7 +2407,13 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-		testQuiz := quiz.Quiz{ID: 1234, Title: "Quiz One", Slug: "quiz-one", Description: "First"}
+		testQuiz := quiz.Quiz{
+			ID:                1234,
+			Title:             "Quiz One",
+			Slug:              "quiz-one",
+			Description:       "First",
+			CreatedByPlayerID: testAdminID,
+		}
 		testQuestion := quiz.Question{
 			ID:       1,
 			QuizID:   testQuiz.ID,
@@ -2404,7 +2483,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 		req.SetPathValue("questionID", strconv.FormatInt(testQuestion.ID, 10))
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusInternalServerError; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -2438,7 +2517,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 		}
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusNotFound; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -2454,7 +2533,13 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-		testQuiz := quiz.Quiz{ID: 1234, Title: "Quiz One", Slug: "quiz-one", Description: "First"}
+		testQuiz := quiz.Quiz{
+			ID:                1234,
+			Title:             "Quiz One",
+			Slug:              "quiz-one",
+			Description:       "First",
+			CreatedByPlayerID: testAdminID,
+		}
 		testQuestionID := int64(1)
 
 		quizStore := stubQuizStore{
@@ -2480,7 +2565,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 		req.SetPathValue("questionID", strconv.FormatInt(testQuestionID, 10))
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusNotFound; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -2499,6 +2584,11 @@ func TestHandleQuizDelete(t *testing.T) {
 
 		var deletedID int64
 		quizStore := stubQuizStore{
+			// Owned by the test admin so requireQuizOwner (#281)
+			// lets the delete path through.
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Title: "Q", CreatedByPlayerID: testAdminID}, nil
+			},
 			deleteQuiz: func(_ context.Context, id int64) error {
 				deletedID = id
 
@@ -2514,7 +2604,7 @@ func TestHandleQuizDelete(t *testing.T) {
 		req.SetPathValue("quizID", "1")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusSeeOther; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -2545,7 +2635,7 @@ func TestHandleQuizDelete_ErrorHandling(t *testing.T) {
 		req.SetPathValue("quizID", "not-an-int")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -2558,9 +2648,11 @@ func TestHandleQuizDelete_ErrorHandling(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
+		// requireQuizOwner runs first now (#281); a missing quiz
+		// surfaces from GetQuiz, not from the DeleteQuiz return path.
 		quizStore := stubQuizStore{
-			deleteQuiz: func(_ context.Context, _ int64) error {
-				return quiz.ErrDeletingQuizNoRowsAffected
+			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
+				return nil, quiz.ErrQuizNotFound
 			},
 		}
 
@@ -2572,7 +2664,7 @@ func TestHandleQuizDelete_ErrorHandling(t *testing.T) {
 		req.SetPathValue("quizID", "999")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusNotFound; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -2588,6 +2680,11 @@ func TestHandleQuizDelete_ErrorHandling(t *testing.T) {
 		testError := errors.New("test error")
 
 		quizStore := stubQuizStore{
+			// Owned by the test admin so requireQuizOwner (#281)
+			// passes and the handler reaches DeleteQuiz.
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Title: "Q", CreatedByPlayerID: testAdminID}, nil
+			},
 			deleteQuiz: func(_ context.Context, _ int64) error {
 				return testError
 			},
@@ -2601,7 +2698,7 @@ func TestHandleQuizDelete_ErrorHandling(t *testing.T) {
 		req.SetPathValue("quizID", "1")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusInternalServerError; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -2626,6 +2723,11 @@ func TestHandleQuestionMove(t *testing.T) {
 			direction          string
 		}
 		store := stubQuizStore{
+			// Owned by the test admin so requireQuizOwner (#281)
+			// passes and the handler reaches SwapQuestionPositions.
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Title: "Q", CreatedByPlayerID: testAdminID}, nil
+			},
 			swapQuestionPositions: func(_ context.Context, quizID, questionID int64, direction string) error {
 				seen.quizID, seen.questionID, seen.direction = quizID, questionID, direction
 
@@ -2645,7 +2747,7 @@ func TestHandleQuestionMove(t *testing.T) {
 		req.SetPathValue("questionID", "42")
 		req.SetPathValue("direction", "up")
 		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusSeeOther; got != want {
 			t.Fatalf("status = %d, want %d, log:\n%v", got, want, buf.String())
@@ -2673,6 +2775,9 @@ func TestHandleQuestionMove(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 		store := stubQuizStore{
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Title: "Q", CreatedByPlayerID: testAdminID}, nil
+			},
 			swapQuestionPositions: func(_ context.Context, _, _ int64, _ string) error {
 				return quiz.ErrQuestionAtTop
 			},
@@ -2690,7 +2795,7 @@ func TestHandleQuestionMove(t *testing.T) {
 		req.SetPathValue("questionID", "42")
 		req.SetPathValue("direction", "up")
 		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusSeeOther; got != want {
 			t.Fatalf("status = %d, want %d, log:\n%v", got, want, buf.String())
@@ -2703,6 +2808,9 @@ func TestHandleQuestionMove(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 		store := stubQuizStore{
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Title: "Q", CreatedByPlayerID: testAdminID}, nil
+			},
 			swapQuestionPositions: func(_ context.Context, _, _ int64, _ string) error {
 				return quiz.ErrInvalidDirection
 			},
@@ -2720,7 +2828,7 @@ func TestHandleQuestionMove(t *testing.T) {
 		req.SetPathValue("questionID", "42")
 		req.SetPathValue("direction", "sideways")
 		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
 			t.Errorf("status = %d, want %d, log:\n%v", got, want, buf.String())
@@ -2739,6 +2847,11 @@ func TestHandleQuestionDelete(t *testing.T) {
 
 		var deletedID int64
 		quizStore := stubQuizStore{
+			// Owned by the test admin so requireQuizOwner (#281)
+			// passes and the handler reaches DeleteQuestion.
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Title: "Q", CreatedByPlayerID: testAdminID}, nil
+			},
 			deleteQuestion: func(_ context.Context, id int64) error {
 				deletedID = id
 
@@ -2760,7 +2873,7 @@ func TestHandleQuestionDelete(t *testing.T) {
 		req.SetPathValue("questionID", "5")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusSeeOther; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -2797,7 +2910,7 @@ func TestHandleQuestionDelete_ErrorHandling(t *testing.T) {
 		req.SetPathValue("questionID", "5")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -2810,7 +2923,14 @@ func TestHandleQuestionDelete_ErrorHandling(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-		handler := HandleQuestionDelete(logger, nil, stubQuizStore{})
+		// requireQuizOwner (#281) runs first; supply a legacy quiz so
+		// the path reaches the questionID parse failure under test.
+		store := stubQuizStore{
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Title: "Q", CreatedByPlayerID: testAdminID}, nil
+			},
+		}
+		handler := HandleQuestionDelete(logger, nil, store)
 		req, err := http.NewRequestWithContext(
 			t.Context(),
 			http.MethodPost,
@@ -2824,7 +2944,7 @@ func TestHandleQuestionDelete_ErrorHandling(t *testing.T) {
 		req.SetPathValue("questionID", "not-an-int")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -2838,6 +2958,9 @@ func TestHandleQuestionDelete_ErrorHandling(t *testing.T) {
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
 		quizStore := stubQuizStore{
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Title: "Q", CreatedByPlayerID: testAdminID}, nil
+			},
 			deleteQuestion: func(_ context.Context, _ int64) error {
 				return quiz.ErrDeletingQuestionNoRowsAffected
 			},
@@ -2857,7 +2980,7 @@ func TestHandleQuestionDelete_ErrorHandling(t *testing.T) {
 		req.SetPathValue("questionID", "999")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusNotFound; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -2873,6 +2996,9 @@ func TestHandleQuestionDelete_ErrorHandling(t *testing.T) {
 		testError := errors.New("test error")
 
 		quizStore := stubQuizStore{
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Title: "Q", CreatedByPlayerID: testAdminID}, nil
+			},
 			deleteQuestion: func(_ context.Context, _ int64) error {
 				return testError
 			},
@@ -2892,7 +3018,7 @@ func TestHandleQuestionDelete_ErrorHandling(t *testing.T) {
 		req.SetPathValue("questionID", "5")
 		rr := httptest.NewRecorder()
 
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusInternalServerError; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
@@ -2913,7 +3039,7 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 
 		quizStore := stubQuizStore{
 			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{ID: id, Title: "Q1", Slug: "q-1"}, nil
+				return &quiz.Quiz{ID: id, Title: "Q1", Slug: "q-1", CreatedByPlayerID: testAdminID}, nil
 			},
 			quizExists: func(_ context.Context, _ int64) (bool, error) {
 				return true, nil
@@ -2944,7 +3070,7 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", "1")
 		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusOK; got != want {
 			t.Fatalf("status = %d, want %d", got, want)
@@ -2975,7 +3101,7 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 
 		quizStore := stubQuizStore{
 			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{ID: id, Title: "Q1", Slug: "q-1"}, nil
+				return &quiz.Quiz{ID: id, Title: "Q1", Slug: "q-1", CreatedByPlayerID: testAdminID}, nil
 			},
 			quizExists: func(_ context.Context, _ int64) (bool, error) {
 				return true, nil
@@ -2987,7 +3113,7 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", "1")
 		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusOK; got != want {
 			t.Fatalf("status = %d, want %d", got, want)
@@ -3012,7 +3138,7 @@ func TestHandleResetGameForPlayer(t *testing.T) {
 		)
 		quizStore := stubQuizStore{
 			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{ID: id, Title: "Q1"}, nil
+				return &quiz.Quiz{ID: id, Title: "Q1", CreatedByPlayerID: testAdminID}, nil
 			},
 			quizExists: func(_ context.Context, _ int64) (bool, error) {
 				return true, nil
@@ -3027,7 +3153,7 @@ func TestHandleResetGameForPlayer(t *testing.T) {
 			},
 		}
 
-		handler := HandleResetGameForPlayer(logger, nil, newGameService(gameStore, quizStore))
+		handler := HandleResetGameForPlayer(logger, nil, quizStore, newGameService(gameStore, quizStore))
 		req := httptest.NewRequestWithContext(
 			t.Context(), http.MethodPost,
 			"/admin/quizzes/42/players/7/reset", nil,
@@ -3035,7 +3161,7 @@ func TestHandleResetGameForPlayer(t *testing.T) {
 		req.SetPathValue("quizID", "42")
 		req.SetPathValue("playerID", "7")
 		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusSeeOther; got != want {
 			t.Fatalf("status = %d, want %d", got, want)
@@ -3054,13 +3180,15 @@ func TestHandleResetGameForPlayer(t *testing.T) {
 	t.Run("404 when quiz does not exist", func(t *testing.T) {
 		t.Parallel()
 
+		// requireQuizOwner now runs first (#281); a missing quiz is
+		// reported by GetQuiz, not by the gameService.ResetGames path.
 		quizStore := stubQuizStore{
-			quizExists: func(_ context.Context, _ int64) (bool, error) {
-				return false, nil
+			getQuizByID: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
+				return nil, quiz.ErrQuizNotFound
 			},
 		}
 
-		handler := HandleResetGameForPlayer(logger, nil, newGameService(stubGameStore{}, quizStore))
+		handler := HandleResetGameForPlayer(logger, nil, quizStore, newGameService(stubGameStore{}, quizStore))
 		req := httptest.NewRequestWithContext(
 			t.Context(), http.MethodPost,
 			"/admin/quizzes/99/players/7/reset", nil,
@@ -3068,7 +3196,7 @@ func TestHandleResetGameForPlayer(t *testing.T) {
 		req.SetPathValue("quizID", "99")
 		req.SetPathValue("playerID", "7")
 		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusNotFound; got != want {
 			t.Errorf("status = %d, want %d", got, want)
@@ -3080,7 +3208,7 @@ func TestHandleResetGameForPlayer(t *testing.T) {
 
 		quizStore := stubQuizStore{
 			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{ID: id}, nil
+				return &quiz.Quiz{ID: id, CreatedByPlayerID: testAdminID}, nil
 			},
 			quizExists: func(_ context.Context, _ int64) (bool, error) {
 				return true, nil
@@ -3092,7 +3220,7 @@ func TestHandleResetGameForPlayer(t *testing.T) {
 			},
 		}
 
-		handler := HandleResetGameForPlayer(logger, nil, newGameService(gameStore, quizStore))
+		handler := HandleResetGameForPlayer(logger, nil, quizStore, newGameService(gameStore, quizStore))
 		req := httptest.NewRequestWithContext(
 			t.Context(), http.MethodPost,
 			"/admin/quizzes/1/players/2/reset", nil,
@@ -3100,7 +3228,7 @@ func TestHandleResetGameForPlayer(t *testing.T) {
 		req.SetPathValue("quizID", "1")
 		req.SetPathValue("playerID", "2")
 		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusInternalServerError; got != want {
 			t.Errorf("status = %d, want %d", got, want)
@@ -3110,7 +3238,19 @@ func TestHandleResetGameForPlayer(t *testing.T) {
 	t.Run("400 when playerID path value is non-numeric", func(t *testing.T) {
 		t.Parallel()
 
-		handler := HandleResetGameForPlayer(logger, nil, newGameService(stubGameStore{}, stubQuizStore{}))
+		// Owner gate runs first now (#281); stub a legacy quiz so the
+		// 400-on-playerID assertion reflects the real handler path.
+		quizStoreLegacy := stubQuizStore{
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Title: "Legacy", CreatedByPlayerID: testAdminID}, nil
+			},
+		}
+		handler := HandleResetGameForPlayer(
+			logger,
+			nil,
+			quizStoreLegacy,
+			newGameService(stubGameStore{}, quizStoreLegacy),
+		)
 		req := httptest.NewRequestWithContext(
 			t.Context(), http.MethodPost,
 			"/admin/quizzes/1/players/abc/reset", nil,
@@ -3118,7 +3258,7 @@ func TestHandleResetGameForPlayer(t *testing.T) {
 		req.SetPathValue("quizID", "1")
 		req.SetPathValue("playerID", "abc")
 		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
 			t.Errorf("status = %d, want %d", got, want)

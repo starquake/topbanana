@@ -29,7 +29,8 @@ func TestHome_Integration(t *testing.T) {
 	// make quiz1 the popular leader and alice the active leader.
 	quiz1 := &quiz.Quiz{
 		Title: "Bananas of the World", Slug: "bananas-of-the-world",
-		Description: "Twenty rounds on cultivars.",
+		Description:       "Twenty rounds on cultivars.",
+		CreatedByPlayerID: seededAdminID,
 		Questions: []*quiz.Question{
 			{Text: "Q1", Position: 1, Options: []*quiz.Option{{Text: "a"}, {Text: "b", Correct: true}}},
 		},
@@ -39,7 +40,8 @@ func TestHome_Integration(t *testing.T) {
 	}
 	quiz2 := &quiz.Quiz{
 		Title: "Capital Cities", Slug: "capital-cities",
-		Description: "Geography quickfire.",
+		Description:       "Geography quickfire.",
+		CreatedByPlayerID: seededAdminID,
 		Questions: []*quiz.Question{
 			{Text: "Q1", Position: 1, Options: []*quiz.Option{{Text: "c", Correct: true}}},
 		},

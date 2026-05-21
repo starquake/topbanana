@@ -67,10 +67,11 @@ type Question struct {
 }
 
 type Quiz struct {
-	ID          int64
-	Title       string
-	Slug        string
-	Description string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID                int64
+	Title             string
+	Slug              string
+	Description       string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	CreatedByPlayerID int64
 }
