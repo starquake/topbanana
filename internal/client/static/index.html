@@ -96,22 +96,13 @@
                 </article>
             </template>
 
-            <!-- Leaderboard view. Renders whenever the player has a
-                 completed game for the selected quiz: either they
-                 just finished it (fresh-finish path in nextQuestion)
-                 or they re-visited an already-played quiz (the
-                 already-played path in checkAlreadyPlayed). Source
-                 order puts it directly below the CTA so the
-                 leaderboard stays in the same spot on screen in both
-                 cases.
-
-                 mb-6 on the outer div gives a uniform gap to whatever
-                 view renders next (start-screen picker, deep-link
-                 title + description, etc.) on the already-played
-                 revisit. Harmless on fresh-finish where the
-                 leaderboard is the only visible block. -->
-            <div x-show="finished" class="mb-6">
-                <div class="flex items-center justify-between gap-3 mb-6">
+            <!-- "Game Finished!" header + share button. Post-game only.
+                 Sits above the shared leaderboard block below so the
+                 finished-screen layout is header → leaderboard →
+                 off-leaderboard → picker, matching what existed before
+                 the start-screen leaderboard hoist (#234). -->
+            <template x-if="finished">
+                <div class="mb-6 flex items-center justify-between gap-3">
                     <h2 class="m-0 font-display text-2xl font-semibold text-text-dim">Game Finished!</h2>
                     {{/* Share button for #176 — opens the dialog with
                          the player's score baked into the message text.
@@ -126,73 +117,7 @@
                         <span>Share result</span>
                     </button>
                 </div>
-
-                <template x-if="leaderboard">
-                    <div>
-                        <h3 class="label-eyebrow mb-3">Leaderboard</h3>
-                        <table class="player-table">
-                            <thead>
-                                <tr>
-                                    <th>Rank</th>
-                                    <th>Player</th>
-                                    <th>Score</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <template x-for="entry in leaderboard.entries" :key="entry.playerId">
-                                    <tr :aria-current="entry.isCurrentPlayer ? 'true' : null">
-                                        <td x-text="entry.rank"></td>
-                                        <td>
-                                            <span x-text="entry.username"></span>
-                                            <!-- Entry 2: leaderboard-row pencil that
-                                                 opens the same shared modal. Only
-                                                 renders for the current player while
-                                                 they have not yet picked a name.
-                                                 Inline icon button (no chrome) so it
-                                                 sits inline with the username (#204). -->
-                                            <template x-if="entry.isCurrentPlayer && !hasCustomName()">
-                                                <button type="button"
-                                                        class="ml-2 inline-flex align-middle bg-transparent border-0 p-0 cursor-pointer text-current opacity-65 transition-opacity hover:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 focus-visible:opacity-100"
-                                                        title="Set my name"
-                                                        aria-label="Set my name"
-                                                        @click="openClaimModal()">
-                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
-                                                        <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/>
-                                                    </svg>
-                                                </button>
-                                            </template>
-                                        </td>
-                                        <td x-text="entry.score"></td>
-                                    </tr>
-                                </template>
-                            </tbody>
-                        </table>
-                    </div>
-                </template>
-
-                <!-- Off-leaderboard standing: when the player has a row
-                     for this quiz but didn't make the visible top N
-                     (currentPlayer is set, no entry carries
-                     isCurrentPlayer), show the player's own rank and
-                     score below the table so they don't leave the
-                     screen with nothing to show. See #181. -->
-                <template x-if="hasOffLeaderboardStanding()">
-                    <article class="standing-card mt-6">
-                        <p class="label-eyebrow">Your score</p>
-                        <p class="text-text text-[1.05rem] leading-relaxed">
-                            Rank
-                            <span class="text-cyan font-semibold" x-text="leaderboard.currentPlayer.rank"></span>
-                            ·
-                            <span class="text-cyan font-semibold" x-text="leaderboard.currentPlayer.score"></span>
-                             points
-                        </p>
-                    </article>
-                </template>
-
-                <template x-if="!leaderboard">
-                    <p class="text-text-dim">Loading leaderboard...</p>
-                </template>
-            </div>
+            </template>
 
             <!-- Start screen. Renders whenever there is no live game
                  (so it shows on first load, on dropdown changes, and
@@ -258,7 +183,102 @@
                         <span>Share</span>
                     </button>
                 </div>
+
             </div>
+
+            {{/* Single leaderboard table (#234) shared between the
+                 start-screen preview and the post-game results view.
+                 Visible whenever the player has a quiz selected and
+                 isn't actively in gameplay — the pencil + aria-current
+                 inside the row are dormant on the start screen because
+                 isCurrentPlayer can only be true after the player
+                 finished this quiz. One source of truth, no duplicate
+                 DOM nodes (which previously confused Playwright counts
+                 in player.spec.ts). Sits AFTER the action area so the
+                 picker + Start button are the primary affordance on
+                 both views — the leaderboard is supplemental below.
+
+                 Gate: `(!gameId || finished) && leaderboard`. The
+                 fresh-finish state keeps gameId set (the just-played
+                 game id), so a bare `!gameId` check would hide the
+                 results from a player who actually finished without
+                 navigating away first. */}}
+            <template x-if="(!gameId || finished) && leaderboard">
+                <div class="mb-6">
+                    <h3 class="label-eyebrow mb-3">Leaderboard</h3>
+                    <template x-if="leaderboard.entries.length > 0">
+                        <table class="player-table">
+                            <thead>
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>Player</th>
+                                    <th>Score</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="entry in leaderboard.entries" :key="entry.playerId">
+                                    <tr :aria-current="entry.isCurrentPlayer ? 'true' : null">
+                                        <td x-text="entry.rank"></td>
+                                        <td>
+                                            <span x-text="entry.username"></span>
+                                            <!-- Entry 2: leaderboard-row pencil that
+                                                 opens the same shared modal. Only
+                                                 renders for the current player while
+                                                 they have not yet picked a name.
+                                                 Inline icon button (no chrome) so it
+                                                 sits inline with the username (#204). -->
+                                            <template x-if="entry.isCurrentPlayer && !hasCustomName()">
+                                                <button type="button"
+                                                        class="ml-2 inline-flex align-middle bg-transparent border-0 p-0 cursor-pointer text-current opacity-65 transition-opacity hover:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 focus-visible:opacity-100"
+                                                        title="Set my name"
+                                                        aria-label="Set my name"
+                                                        @click="openClaimModal()">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
+                                                        <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/>
+                                                    </svg>
+                                                </button>
+                                            </template>
+                                        </td>
+                                        <td x-text="entry.score"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </template>
+                    <template x-if="leaderboard.entries.length === 0">
+                        <p class="text-text-dim">No finishers yet — be the first.</p>
+                    </template>
+                </div>
+            </template>
+
+            <!-- Loading state: brief window between quiz selection and
+                 the leaderboard fetch returning. Setting quizSlugId is
+                 the marker for "fetch in flight"; once leaderboard is
+                 set the block above takes over. Gate mirrors the
+                 leaderboard template's so the fresh-finish state
+                 (gameId set, finished=true) also gets the fallback. -->
+            <template x-if="(!gameId || finished) && quizSlugId && !leaderboard">
+                <p class="mb-6 text-text-dim">Loading leaderboard...</p>
+            </template>
+
+            <!-- Off-leaderboard standing: when the player has a row
+                 for this quiz but didn't make the visible top N
+                 (currentPlayer is set, no entry carries
+                 isCurrentPlayer), show the player's own rank and
+                 score below the table so they don't leave the
+                 screen with nothing to show. See #181. -->
+            <template x-if="finished && hasOffLeaderboardStanding()">
+                <article class="standing-card mb-6">
+                    <p class="label-eyebrow">Your score</p>
+                    <p class="text-text text-[1.05rem] leading-relaxed">
+                        Rank
+                        <span class="text-cyan font-semibold" x-text="leaderboard.currentPlayer.rank"></span>
+                        ·
+                        <span class="text-cyan font-semibold" x-text="leaderboard.currentPlayer.score"></span>
+                         points
+                    </p>
+                </article>
+            </template>
 
             <!-- Gameplay view: question, countdown, answer buttons,
                  per-question feedback.
