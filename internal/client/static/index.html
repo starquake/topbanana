@@ -28,9 +28,13 @@
     <link rel="stylesheet"
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@500;600;700;800;900&display=swap">
     <link rel="stylesheet" href="/assets/css/app.css">
-    <script src="https://cdn.jsdelivr.net/npm/animejs@4.2.0/dist/bundles/anime.umd.min.js"></script>
+    {{/* anime.js (4.2.0, MIT) and Alpine.js (3.15.12, MIT) are vendored
+         under js/vendor/. Self-hosted (#295) so the player client cannot
+         be MITM'd via a compromised cdn.jsdelivr.net and the pinned
+         versions ship to players deterministically — see NOTICES.md. */}}
+    <script src="/client/js/vendor/anime.umd.min.js"></script>
     <script type="module" src="/client/js/app.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script defer src="/client/js/vendor/alpine.min.js"></script>
 </head>
 <body class="bg-bg text-text font-sans antialiased min-h-screen leading-relaxed">
     <main class="max-w-[720px] lg:max-w-5xl mx-auto px-5 lg:px-8 py-10 sm:py-16">
