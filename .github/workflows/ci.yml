@@ -25,6 +25,18 @@ jobs:
       with:
         go-version: "stable"
 
+    # Catch drift between internal/web/static/css/app.css and what
+    # `make tailwind` would produce for the current templates +
+    # tailwindcss binary version. Without this guard, a template
+    # change that adds a utility class can ship without the
+    # corresponding CSS, and local `make check` only catches it for
+    # contributors who happen to run it. Lint lives in its own
+    # golangci-lint workflow (the github-action handles caching + PR
+    # annotations natively, which `make lint` does not), so the build
+    # job only needs the tailwind gap-filler.
+    - name: Tailwind drift check
+      run: make tailwind-check
+
     # `make test-coverage` runs the full suite with -tags=integration,
     # so a separate integration step would just duplicate the work.
     # Dropped here as part of #202.
