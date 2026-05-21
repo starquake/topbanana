@@ -30,7 +30,24 @@ const MinPasswordLength = 13
 // already knows what that means. Both check the same byte length.
 const MaxPasswordLength = 72
 
-const adminLandingPath = "/admin/quizzes"
+const (
+	adminLandingPath  = "/admin/quizzes"
+	playerLandingPath = "/"
+)
+
+// landingPathFor returns the post-auth redirect target for the given
+// role. Admins land on the quiz dashboard; everyone else lands on the
+// public home page, which is the only place a non-admin player has
+// reason to be after signing in (#288). Sending players to
+// adminLandingPath used to bounce them to the "Access denied" page,
+// which is honest but useless.
+func landingPathFor(role string) string {
+	if role == RoleAdmin {
+		return adminLandingPath
+	}
+
+	return playerLandingPath
+}
 
 // maxFormBodySize caps the request body for login/register form posts.
 // 64 KiB is comfortable for username + password + csrf_token while denying
@@ -138,7 +155,7 @@ func HandleRegisterSubmit(
 		}
 
 		sessions.Set(w, player.ID)
-		http.Redirect(w, r, adminLandingPath, http.StatusSeeOther)
+		http.Redirect(w, r, landingPathFor(player.Role), http.StatusSeeOther)
 	})
 }
 
@@ -291,7 +308,7 @@ func HandleLoginSubmit(
 		}
 
 		sessions.Set(w, player.ID)
-		http.Redirect(w, r, adminLandingPath, http.StatusSeeOther)
+		http.Redirect(w, r, landingPathFor(player.Role), http.StatusSeeOther)
 	})
 }
 

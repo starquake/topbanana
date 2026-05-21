@@ -319,6 +319,11 @@ func TestHandleRegisterSubmit_SecondUser_DefaultsToPlayer(t *testing.T) {
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
 	}
+	// #288: a non-admin must NOT land on /admin/quizzes, which would
+	// bounce them through RequireAdmin to the Access Denied page.
+	if got, want := rec.Header().Get("Location"), "/"; got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
 
 	p, err := store.GetPlayerByUsername(t.Context(), "bob")
 	if err != nil {
@@ -670,6 +675,40 @@ func TestHandleLoginSubmit_Success(t *testing.T) {
 		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
 	}
 	if got, want := rec.Header().Get("Location"), "/admin/quizzes"; got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+}
+
+// TestHandleLoginSubmit_Success_Player pins the #288 fix: a non-admin
+// must land on the public home page, not the admin dashboard (which
+// would bounce them straight through RequireAdmin to "Access denied").
+func TestHandleLoginSubmit_Success_Player(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	// Pre-seed an admin so the "first password-bearing registrant
+	// becomes admin" rule doesn't accidentally promote bob.
+	if _, err := store.CreatePlayer(t.Context(), "first-admin", "h", auth.RoleAdmin); err != nil {
+		t.Fatalf("seed CreatePlayer err = %v, want nil", err)
+	}
+	hash, err := auth.HashPassword("correctbattery")
+	if err != nil {
+		t.Fatalf("HashPassword err = %v, want nil", err)
+	}
+	if _, err := store.CreatePlayer(t.Context(), "bob", hash, auth.RolePlayer); err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+
+	handler := auth.HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), false)
+	rec := postForm(t, handler, "/login", url.Values{
+		"username": {"bob"},
+		"password": {"correctbattery"},
+	})
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
+	}
+	if got, want := rec.Header().Get("Location"), "/"; got != want {
 		t.Errorf("Location = %q, want %q", got, want)
 	}
 }
