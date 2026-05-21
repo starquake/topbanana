@@ -125,12 +125,18 @@ export class GameApp {
         // Kick off both in parallel; neither depends on the other.
         // playerService.getMe is best-effort: a null result just means
         // the claim affordances stay hidden, the rest of the page is
-        // unaffected.
-        const [quizzes, player] = await Promise.all([
-            quizService.getQuizzes(),
+        // unaffected. quizService.getQuizzes throws on non-2xx (#287);
+        // a startup-time list failure is similarly best-effort — the
+        // page renders an empty state and the player can refresh
+        // later instead of seeing an uncaught rejection.
+        const [quizzesResult, player] = await Promise.all([
+            quizService.getQuizzes().catch(err => {
+                console.error('init: getQuizzes failed', err);
+                return [];
+            }),
             playerService.getMe(),
         ]);
-        this.quizzes = quizzes;
+        this.quizzes = quizzesResult;
         this.player = player;
         const deepLinked = this.findDeepLinkedQuiz();
         if (deepLinked) {
@@ -365,8 +371,30 @@ export class GameApp {
         if (existing) {
             this.gameId = existing.gameId;
         } else {
-            const data = await gameService.startGame(this.selectedQuizId);
-            this.gameId = data.id;
+            try {
+                const data = await gameService.startGame(this.selectedQuizId);
+                this.gameId = data.id;
+            } catch (err) {
+                // #287: 409 means a game already exists for this
+                // (player, quiz) pair — usually a two-tab race past
+                // the checkAlreadyPlayed gate above. Recover by
+                // re-fetching the existing game so the player still
+                // gets through; any other error (500, network) gives
+                // up with a visible startError.
+                if (err && err.status === 409) {
+                    const recovered = await gameService.getMyGameForQuiz(slugId);
+                    if (!recovered) {
+                        console.error('startGame: 409 with no recoverable game', err);
+                        this.startError = "Couldn't start the quiz — please refresh and try again.";
+                        return;
+                    }
+                    this.gameId = recovered.gameId;
+                } else {
+                    console.error('startGame failed', err);
+                    this.startError = "Couldn't start the quiz — please refresh and try again.";
+                    return;
+                }
+            }
         }
         await this.nextQuestion();
     }
@@ -669,17 +697,37 @@ export class GameApp {
             this.showSplash(fb.correct ? 'correct' : 'wrong');
             this.animateFeedback(this.feedback.correct);
         } catch (err) {
-            // POST failed (server 5xx, network drop, …). Don't penalize
-            // the player for the network blip: re-arm the countdown so
-            // they keep the time they had left (expiredAt is server-set
-            // and absolute, so startCountdown computes the real
-            // remaining window) and surface a retry banner. If
-            // expiredAt has already passed, the next tick fires
-            // handleTimeout normally and the game still advances —
-            // see #179.
+            // POST failed. The retry banner (#179) only makes sense
+            // for transient failures the player can recover from by
+            // re-clicking: 5xx and network drops. A 400/404 means the
+            // server rejected the option or game-question for a
+            // permanent reason, so re-clicking would just re-fail —
+            // log and let the countdown / timeout flow advance the
+            // game instead of pinning the player on a bad banner
+            // (#287). Status undefined == network (no response).
+            const status = err && err.status;
+            const retryable = status === undefined || status >= 500;
             console.error('submitAnswer:', err);
-            this.submitError = true;
-            this.startCountdown();
+            if (retryable) {
+                // Re-arm the countdown so the player keeps the time
+                // they had left (expiredAt is server-set and absolute,
+                // so startCountdown computes the real remaining
+                // window). If expiredAt has already passed, the next
+                // tick fires handleTimeout normally and the game
+                // still advances.
+                this.submitError = true;
+                this.startCountdown();
+
+                return;
+            }
+            // Non-retryable: synthesize a "no answer" feedback so the
+            // splash beat + auto-advance path runs and the player
+            // doesn't get stuck on a blank, button-less screen.
+            this.feedback = { timedOut: true, correct: false, score: 0 };
+            this.showSplash('timeout');
+            this.animateTimeout();
+            await this.resolveAndAdvance();
+
             return;
         } finally {
             this.submittingAnswer = false;

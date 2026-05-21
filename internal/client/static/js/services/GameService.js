@@ -1,3 +1,11 @@
+import { jsonOrThrow } from './api.js';
+
+// GameService wraps the gameplay REST endpoints. Every method throws
+// [ApiError] on non-2xx (#287) so callers can branch on status
+// instead of falling into a JSON-parse SyntaxError. The two methods
+// where 404 has a defined "absent" meaning (next question, my-game)
+// short-circuit before jsonOrThrow so callers keep the existing
+// null return signal.
 export class GameService {
     async startGame(quizId) {
         const response = await fetch('/api/games', {
@@ -5,7 +13,7 @@ export class GameService {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ quizId: parseInt(quizId) })
         });
-        return await response.json();
+        return jsonOrThrow(response);
     }
 
     async getNextQuestion(gameId) {
@@ -13,7 +21,7 @@ export class GameService {
         if (response.status === 404) {
             return null;
         }
-        return await response.json();
+        return jsonOrThrow(response);
     }
 
     async getMyGameForQuiz(slugId) {
@@ -21,7 +29,7 @@ export class GameService {
         if (response.status === 404) {
             return null;
         }
-        return await response.json();
+        return jsonOrThrow(response);
     }
 
     async submitAnswer(gameId, questionId, optionId) {
@@ -30,17 +38,17 @@ export class GameService {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ optionId: optionId })
         });
-        return await response.json();
+        return jsonOrThrow(response);
     }
 
     async getResults(gameId) {
         const response = await fetch(`/api/games/${gameId}/results`);
-        return await response.json();
+        return jsonOrThrow(response);
     }
 
     async getQuizLeaderboard(slugId) {
         const response = await fetch(`/api/quizzes/${slugId}/leaderboard`);
-        return await response.json();
+        return jsonOrThrow(response);
     }
 }
 
