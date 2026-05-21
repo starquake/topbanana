@@ -41,3 +41,8 @@ go.work.sum
 
 # Distrobox
 distrobox.ini
+
+# Claude Code per-session lock file. Created at session start, deleted
+# on exit; cluttering `git status` between runs is the only reason this
+# is listed here.
+.claude/*.lock
