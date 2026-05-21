@@ -131,7 +131,7 @@ func TestHome_Integration(t *testing.T) {
 
 	t.Run("GET / exposes sitewide Open Graph defaults", func(t *testing.T) {
 		t.Parallel()
-		assertSitewideOG(ctx, t, baseURL+"/")
+		assertSitewideOG(ctx, t, baseURL+"/", baseURL)
 	})
 
 	t.Run("unknown path still 404s after start page is registered", func(t *testing.T) {

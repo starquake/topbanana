@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
 
@@ -91,8 +92,22 @@ func Handle(logger *slog.Logger, store Store) http.Handler {
 			data.ActivePlayers = truncate(players)
 		}
 
+		// Clone before binding the per-request ogImage func so concurrent
+		// renders don't race on the shared template tree. Mirrors the
+		// admin/auth renderers; the home template only needs ogImage
+		// at request time (#294).
+		rt, cerr := t.Clone()
+		if cerr != nil {
+			logger.ErrorContext(r.Context(), "clone home template", slog.Any("err", cerr))
+			http.Error(w, "internal error", http.StatusInternalServerError)
+
+			return
+		}
+		rt = rt.Funcs(template.FuncMap{
+			"ogImage": func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
+		})
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := t.ExecuteTemplate(w, "base.gohtml", data); err != nil {
+		if err := rt.ExecuteTemplate(w, "base.gohtml", data); err != nil {
 			logger.ErrorContext(r.Context(), "render home template", slog.Any("err", err))
 		}
 	})
@@ -116,7 +131,8 @@ func truncate[T any](rows []T) []T {
 // so it is registered here.
 func parseTemplate() *template.Template {
 	funcs := template.FuncMap{
-		"add": func(a, b int) int { return a + b },
+		"add":     func(a, b int) int { return a + b },
+		"ogImage": func() string { return "" },
 	}
 	base := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmplFS(), "home/layouts/*.gohtml"),

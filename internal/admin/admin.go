@@ -16,6 +16,7 @@ import (
 
 	"github.com/gosimple/slug"
 
+	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/game"
@@ -121,6 +122,7 @@ func (tr *TemplateRenderer) prepare(w http.ResponseWriter, r *http.Request) (*te
 	return t.Funcs(template.FuncMap{
 		"currentUser": func() string { return username },
 		"csrfToken":   func() string { return csrfToken },
+		"ogImage":     func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
 	}), true
 }
 
@@ -277,6 +279,7 @@ func parseTemplate(path string) *template.Template {
 	funcs := template.FuncMap{
 		"currentUser":  func() string { return "" },
 		"csrfToken":    func() string { return "" },
+		"ogImage":      func() string { return "" },
 		"humanizeTime": humanizeTime,
 	}
 	base := template.Must(

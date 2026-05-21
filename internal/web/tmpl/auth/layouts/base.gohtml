@@ -11,21 +11,22 @@
     <link rel="icon" type="image/svg+xml" href="/assets/banana.svg" sizes="any">
     {{/* Open Graph / Twitter Card metadata. Sitewide defaults — the same
          card shows on every auth page. Per-quiz overrides happen on
-         /play/{slugID} in the player SPA, not here. The og:image path is
-         relative; chat-app scrapers (WhatsApp, Slack, Discord, Twitter)
-         resolve it against the request URL in practice. */}}
+         /play/{slugID} in the player SPA, not here. og:image is absolute
+         per the OG spec (WhatsApp's parser in particular rejects relative
+         paths) — {{ogImage}} resolves to scheme://host/assets/og-image.png
+         at render time (#294). */}}
     <meta property="og:site_name" content="Top Banana!">
     <meta property="og:title" content="Be the Top Banana!">
     <meta property="og:description" content="Make a quiz, share the link, see who's the top banana.">
     <meta property="og:type" content="website">
-    <meta property="og:image" content="/assets/og-image.png">
+    <meta property="og:image" content="{{ogImage}}">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta property="og:image:alt" content="Top Banana! — banana icon and wordmark on a dark background">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Be the Top Banana!">
     <meta name="twitter:description" content="Make a quiz, share the link, see who's the top banana.">
-    <meta name="twitter:image" content="/assets/og-image.png">
+    <meta name="twitter:image" content="{{ogImage}}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@500;600;700;800;900&display=swap">
