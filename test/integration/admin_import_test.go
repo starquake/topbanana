@@ -164,6 +164,7 @@ func TestAdminImport_Integration(t *testing.T) {
 		// both "form re-rendered" and "user's text survived the round-trip".
 		postImportRejection(ctx, t, client, importURL,
 			`{"title": "x", "questions": [`,
+			http.StatusBadRequest,
 			[]string{"invalid JSON", `&#34;title&#34;: &#34;x&#34;`},
 		)
 	})
@@ -176,6 +177,7 @@ func TestAdminImport_Integration(t *testing.T) {
 		// import time, not at quiz-load time.
 		postImportRejection(ctx, t, client, importURL,
 			`{"title": "x", "slug": "x", "description": "y", "questions": []}`,
+			http.StatusBadRequest,
 			[]string{"invalid JSON", `&#34;slug&#34;`},
 		)
 	})
@@ -192,17 +194,54 @@ func TestAdminImport_Integration(t *testing.T) {
 			client,
 			importURL,
 			`{"title": "", "description": "ok", "questions": [{"text": "Q", "options": [{"text": "A", "correct": true}]}]}`,
+			http.StatusBadRequest,
 			[]string{"validation errors", "Title is required"},
+		)
+	})
+
+	t.Run("duplicate title returns 409", func(t *testing.T) {
+		t.Parallel()
+		// The first import above succeeded with title "Import Round-Trip"
+		// and slug "import-round-trip". A second import with the same
+		// title derives the same slug, which now collides with the
+		// existing row. The fix (#293) maps the SQLite UNIQUE failure
+		// to ErrSlugTaken and re-renders the import form at 409 with
+		// the JSON intact so the admin can rename and resubmit without
+		// re-pasting.
+		const dupJSON = `{
+  "title": "Import Round-Trip",
+  "description": "Same title as the earlier successful import.",
+  "questions": [
+    {
+      "text": "Anything?",
+      "options": [
+        { "text": "A", "correct": true  },
+        { "text": "B", "correct": false }
+      ]
+    }
+  ]
+}`
+		postImportRejection(
+			ctx,
+			t,
+			client,
+			importURL,
+			dupJSON,
+			http.StatusConflict,
+			[]string{"already exists", "Import Round-Trip"},
 		)
 	})
 }
 
 // postImportRejection posts the given JSON to the import endpoint and
-// asserts the response is 400 + the form re-rendered with each
-// substring in wantSubstrings present in the body. Factored out to keep
-// the negative-path subtests small.
+// asserts the response status equals wantStatus and the form re-rendered
+// with each substring in wantSubstrings present in the body. Factored
+// out to keep the negative-path subtests small. wantStatus is the
+// expected HTTP status: 400 for validation errors, 409 for slug
+// collisions (#293).
 func postImportRejection(
-	ctx context.Context, t *testing.T, client *http.Client, importURL, jsonBody string, wantSubstrings []string,
+	ctx context.Context, t *testing.T, client *http.Client,
+	importURL, jsonBody string, wantStatus int, wantSubstrings []string,
 ) {
 	t.Helper()
 
@@ -230,7 +269,7 @@ func postImportRejection(
 		t.Errorf("Body.Close err = %v, want nil", cerr)
 	}
 
-	if got, want := resp.StatusCode, http.StatusBadRequest; got != want {
+	if got, want := resp.StatusCode, wantStatus; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
 	rendered := string(body)

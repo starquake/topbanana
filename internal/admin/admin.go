@@ -586,32 +586,25 @@ func fillQuestionFromForm(
 	return true
 }
 
-func storeQuiz(
-	w http.ResponseWriter,
-	r *http.Request,
-	logger *slog.Logger,
-	csrfMgr *csrf.Manager,
-	quizStore quiz.Store,
-	qz *quiz.Quiz,
-) bool {
-	var err error
+// storeQuiz persists qz via the appropriate Create/Update path. It does
+// no rendering; callers branch on the returned error so they can pick
+// the right user-facing response — in particular [quiz.ErrSlugTaken],
+// which both HandleQuizSave and HandleQuizImportSave translate into a
+// 409 + form re-render with an inline message (#293) rather than the
+// generic 500 the wrapped SQL error used to produce.
+func storeQuiz(ctx context.Context, quizStore quiz.Store, qz *quiz.Quiz) error {
 	if qz.ID == 0 {
-		if err = quizStore.CreateQuiz(r.Context(), qz); err != nil {
-			logger.ErrorContext(r.Context(), "error creating quiz", slog.Any("err", err))
-			render500(w, r, logger, csrfMgr)
-
-			return false
+		if err := quizStore.CreateQuiz(ctx, qz); err != nil {
+			return fmt.Errorf("create quiz: %w", err)
 		}
-	} else {
-		if err = quizStore.UpdateQuiz(r.Context(), qz); err != nil {
-			logger.ErrorContext(r.Context(), "error updating quiz", slog.Any("err", err))
-			render500(w, r, logger, csrfMgr)
 
-			return false
-		}
+		return nil
+	}
+	if err := quizStore.UpdateQuiz(ctx, qz); err != nil {
+		return fmt.Errorf("update quiz: %w", err)
 	}
 
-	return true
+	return nil
 }
 
 // storeQuestion creates or updates a question in the store.
@@ -843,28 +836,17 @@ func HandleResetGameForPlayer(
 func HandleQuizCreate(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizform.gohtml")
 
-	type quizCreateData struct {
-		Title string
-		Quiz  *QuizData
-	}
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data := quizCreateData{
-			Title: "Admin Dashboard - Create Quiz",
+		render.Render(w, r, http.StatusOK, quizFormData{
+			Title: quizFormCreateTitle,
 			Quiz:  &QuizData{},
-		}
-		render.Render(w, r, http.StatusOK, data)
+		})
 	})
 }
 
 // HandleQuizEdit handles the display of the quiz edit page in the admin dashboard.
 func HandleQuizEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizform.gohtml")
-
-	type quizEditData struct {
-		Title string
-		Quiz  *QuizData
-	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
@@ -880,11 +862,10 @@ func HandleQuizEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 		if qz, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
-		data := quizEditData{
-			Title: "Admin Dashboard - Edit Quiz",
+		render.Render(w, r, http.StatusOK, quizFormData{
+			Title: quizFormEditTitle,
 			Quiz:  quizDataFromQuiz(qz),
-		}
-		render.Render(w, r, http.StatusOK, data)
+		})
 	})
 }
 
@@ -963,13 +944,16 @@ func HandleQuizImportForm(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handl
 func HandleQuizImportSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizimport.gohtml")
 
-	renderErr := func(w http.ResponseWriter, r *http.Request, jsonText, msg string) {
-		render.Render(w, r, http.StatusBadRequest, quizImportPageData{
+	renderStatus := func(w http.ResponseWriter, r *http.Request, status int, jsonText, msg string) {
+		render.Render(w, r, status, quizImportPageData{
 			Title:   "Admin Dashboard - Import Quiz",
 			JSON:    jsonText,
 			Example: quizImportExample,
 			Error:   msg,
 		})
+	}
+	renderErr := func(w http.ResponseWriter, r *http.Request, jsonText, msg string) {
+		renderStatus(w, r, http.StatusBadRequest, jsonText, msg)
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1010,7 +994,21 @@ func HandleQuizImportSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 			qz.CreatedByPlayerID = p.ID
 		}
 
-		if !storeQuiz(w, r, logger, csrfMgr, quizStore, qz) {
+		if err := storeQuiz(r.Context(), quizStore, qz); err != nil {
+			if errors.Is(err, quiz.ErrSlugTaken) {
+				// Same slug-derivation rule applies on the import path
+				// (#293): re-render at 409 with the JSON intact so the
+				// admin can rename and resubmit without re-pasting.
+				renderStatus(
+					w, r, http.StatusConflict, jsonText,
+					"A quiz with this title already exists — change the title in the JSON and resubmit.",
+				)
+
+				return
+			}
+			logger.ErrorContext(r.Context(), "error storing imported quiz", slog.Any("err", err))
+			render500(w, r, logger, csrfMgr)
+
 			return
 		}
 
@@ -1050,8 +1048,21 @@ func quizFromImportPayload(p quizImportPayload) *quiz.Quiz {
 	return qz
 }
 
+// quizFormData backs the quizform.gohtml template. Error is non-empty
+// when the POST handler re-renders the form after a recoverable
+// failure (currently the slug-collision 409 from #293); the form
+// preserves the submitted Title/Description so the admin can fix and
+// retry without re-typing.
+type quizFormData struct {
+	Title string
+	Quiz  *QuizData
+	Error string
+}
+
 // HandleQuizSave saves the quiz to the database.
 func HandleQuizSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+	formRenderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizform.gohtml")
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
 
@@ -1081,13 +1092,54 @@ func HandleQuizSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 			return
 		}
 
-		if !storeQuiz(w, r, logger, csrfMgr, quizStore, qz) {
+		if err := storeQuiz(r.Context(), quizStore, qz); err != nil {
+			title := quizFormEditTitle
+			if newQuiz {
+				title = quizFormCreateTitle
+			}
+			renderQuizSaveError(w, r, logger, csrfMgr, formRenderer, qz, title, err)
+
 			return
 		}
 
 		http.Redirect(w, r, fmt.Sprintf("/admin/quizzes/%d", qz.ID), http.StatusSeeOther)
 	})
 }
+
+// renderQuizSaveError handles the storeQuiz failure paths for
+// HandleQuizSave. Split out so HandleQuizSave's main flow keeps a single
+// happy-path return. [quiz.ErrSlugTaken] re-renders the form at 409
+// with the submitted Title/Description preserved (#293); anything else
+// is treated as a genuine 500. pageTitle is the rendered <title> — the
+// caller picks it from quizFormCreateTitle / quizFormEditTitle based on
+// whether the POST landed on create or edit.
+func renderQuizSaveError(
+	w http.ResponseWriter, r *http.Request,
+	logger *slog.Logger, csrfMgr *csrf.Manager,
+	formRenderer *TemplateRenderer,
+	qz *quiz.Quiz, pageTitle string, err error,
+) {
+	if errors.Is(err, quiz.ErrSlugTaken) {
+		formRenderer.Render(w, r, http.StatusConflict, quizFormData{
+			Title: pageTitle,
+			Quiz:  quizDataFromQuiz(qz),
+			Error: "A quiz with this title already exists — pick a different title (or rename the existing quiz).",
+		})
+
+		return
+	}
+	logger.ErrorContext(r.Context(), "error storing quiz", slog.Any("err", err))
+	render500(w, r, logger, csrfMgr)
+}
+
+// Page <title> strings for the quiz create/edit form. Exposed as
+// package-level constants so the GET (HandleQuizCreate / HandleQuizEdit)
+// and the slug-conflict re-render path (HandleQuizSave) share one
+// source of truth — a rename has to touch both renders together (#293).
+const (
+	quizFormCreateTitle = "Admin Dashboard - Create Quiz"
+	quizFormEditTitle   = "Admin Dashboard - Edit Quiz"
+)
 
 // HandleQuestionCreate creates a question.
 func HandleQuestionCreate(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {

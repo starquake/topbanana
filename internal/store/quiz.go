@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
+
 	"github.com/starquake/topbanana/internal/database"
 	"github.com/starquake/topbanana/internal/db"
 	"github.com/starquake/topbanana/internal/quiz"
@@ -405,6 +408,24 @@ func (s *QuizStore) GetOptionsByIDs(ctx context.Context, ids []int64) ([]*quiz.O
 	return options, nil
 }
 
+// classifySlugConflictErr maps a CreateQuiz / UpdateQuiz storage error
+// onto [quiz.ErrSlugTaken] when the underlying SQLite failure is a
+// UNIQUE-constraint violation. `slug` is the only UNIQUE column on the
+// quizzes table (see migration 20251201084529 / 20260520200000), so a
+// SQLITE_CONSTRAINT_UNIQUE on this path can only mean a slug collision —
+// the classifier doesn't need to inspect the error message to
+// disambiguate. The wrapped err is still returned via %w so callers
+// using [errors.Is] can still recover the original sqlite.Error if
+// they need details for logging (#293).
+func classifySlugConflictErr(err error, op string) error {
+	var sqliteErr *sqlite.Error
+	if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+		return quiz.ErrSlugTaken
+	}
+
+	return fmt.Errorf("%s: %w", op, err)
+}
+
 func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.Quiz) error {
 	if qz.CreatedByPlayerID == 0 {
 		return quiz.ErrCreatorRequired
@@ -416,7 +437,7 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 		CreatedByPlayerID: qz.CreatedByPlayerID,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create quiz: %w", err)
+		return classifySlugConflictErr(err, "failed to create quiz")
 	}
 
 	qz.ID = row.ID
@@ -448,7 +469,7 @@ func (s *QuizStore) execUpdateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 		ID:          qz.ID,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to update quiz: %w", err)
+		return classifySlugConflictErr(err, "failed to update quiz")
 	}
 
 	if database.MustRowsAffected(res) == 0 {

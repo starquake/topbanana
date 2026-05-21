@@ -30,6 +30,16 @@
             method="POST">
         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
 
+        {{if .Error}}
+            {{/* Recoverable validation error from the POST handler —
+                 currently only the slug-collision 409 (#293). Mirrors
+                 the import page's danger banner classes so the
+                 affordance looks identical across both surfaces. */}}
+            <div class="mb-6 px-4 py-3 rounded-sm bg-danger/10 border border-danger/40 text-danger text-[0.9rem]" role="alert">
+                {{.Error}}
+            </div>
+        {{end}}
+
         <div class="form-field">
             <label class="label-eyebrow" for="title">Title</label>
             <input id="title" name="title" type="text" value="{{.Quiz.Title}}"
