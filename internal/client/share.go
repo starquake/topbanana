@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/quiz"
@@ -89,7 +90,10 @@ func (s *ShellHandlers) Play(w http.ResponseWriter, r *http.Request) {
 // rebuild. Page loads are infrequent compared to /api/* traffic, so the
 // extra allocation is in the noise.
 func (s *ShellHandlers) render(w http.ResponseWriter, r *http.Request, data shellData) {
-	t, err := template.ParseFS(s.fsys(), "index.html")
+	funcs := template.FuncMap{
+		"ogImage": func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
+	}
+	t, err := template.New("index.html").Funcs(funcs).ParseFS(s.fsys(), "index.html")
 	if err != nil {
 		s.logger.ErrorContext(r.Context(), "parse index template", slog.Any("err", err))
 		http.Error(w, "internal error", http.StatusInternalServerError)

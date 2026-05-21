@@ -8,20 +8,21 @@
     {{/* Open Graph / Twitter Card metadata. /client/{$} renders the
          sitewide defaults; /play/{slugID} swaps og:title and og:description
          for the quiz's own values so a shared link previews the quiz, not
-         generic site copy. og:image stays relative — scrapers (WhatsApp,
-         Slack, Discord, Twitter) resolve it against the page URL. */}}
+         generic site copy. og:image is absolute per the OG spec (and
+         WhatsApp's stricter parser) — {{ogImage}} resolves to
+         scheme://host/assets/og-image.png at render time (#294). */}}
     <meta property="og:site_name" content="Top Banana!">
     <meta property="og:title" content="{{.Title}}">
     <meta property="og:description" content="{{.Description}}">
     <meta property="og:type" content="website">
-    <meta property="og:image" content="/assets/og-image.png">
+    <meta property="og:image" content="{{ogImage}}">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta property="og:image:alt" content="Top Banana! — banana icon and wordmark on a dark background">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="{{.Title}}">
     <meta name="twitter:description" content="{{.Description}}">
-    <meta name="twitter:image" content="/assets/og-image.png">
+    <meta name="twitter:image" content="{{ogImage}}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet"

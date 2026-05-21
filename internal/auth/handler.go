@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/session"
 	"github.com/starquake/topbanana/internal/web/tmpl"
@@ -394,6 +395,7 @@ func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string
 	// touching the constants directly.
 	funcs := template.FuncMap{
 		"csrfToken": func() string { return "" },
+		"ogImage":   func() string { return "" },
 		"passwordHelp": func() string {
 			return fmt.Sprintf("Must be %d–%d characters.", MinPasswordLength, MaxPasswordLength)
 		},
@@ -425,6 +427,7 @@ func (tr *templateRenderer) render(w http.ResponseWriter, r *http.Request, statu
 
 	t = t.Funcs(template.FuncMap{
 		"csrfToken": func() string { return csrfToken },
+		"ogImage":   func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
 	})
 
 	w.WriteHeader(status)
