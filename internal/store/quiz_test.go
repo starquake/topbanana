@@ -728,6 +728,37 @@ func TestQuizStore_CreateQuiz_ErrorHandling(t *testing.T) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
+
+	t.Run("duplicate slug returns ErrSlugTaken", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		first := &quiz.Quiz{
+			Title:             "Capitals of Europe",
+			Slug:              "capitals-of-europe",
+			Description:       "First insert.",
+			CreatedByPlayerID: seededAdminID,
+		}
+		if err := quizStore.CreateQuiz(t.Context(), first); err != nil {
+			t.Fatalf("first CreateQuiz err = %v, want nil", err)
+		}
+
+		clash := &quiz.Quiz{
+			Title:             "Capitals of Europe",
+			Slug:              "capitals-of-europe",
+			Description:       "Second insert with the same slug — must surface ErrSlugTaken (#293).",
+			CreatedByPlayerID: seededAdminID,
+		}
+		err := quizStore.CreateQuiz(t.Context(), clash)
+		if err == nil {
+			t.Fatal("got nil, want ErrSlugTaken")
+		}
+		if got, want := err, quiz.ErrSlugTaken; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
 }
 
 func TestQuizStore_UpdateQuiz(t *testing.T) {

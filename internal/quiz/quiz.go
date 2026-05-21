@@ -105,6 +105,12 @@ var (
 	// and store callers surface a clear error before they hit the FK
 	// failure from SQLite.
 	ErrCreatorRequired = errors.New("quiz creator player id required")
+	// ErrSlugTaken is returned by CreateQuiz / UpdateQuiz when the
+	// requested slug collides with an existing row. quizzes.slug carries
+	// a UNIQUE NOT NULL constraint; the sentinel lets the admin handlers
+	// translate the collision into a 409 + inline form error instead of
+	// the generic 500 the wrapped SQLite error would produce (#293).
+	ErrSlugTaken = errors.New("quiz slug already in use")
 )
 
 // Reorder directions accepted by [Store.SwapQuestionPositions].

@@ -1149,10 +1149,13 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 		}
 
 		log := buf.String()
-		if got, want := log, "error creating quiz"; !strings.Contains(got, want) {
+		if got, want := log, "error storing quiz"; !strings.Contains(got, want) {
 			t.Fatalf("got: %q, should contain: %q", got, want)
 		}
-		if got, want := log, fmt.Sprintf("err=%q", testError); !strings.Contains(got, want) {
+		// The wrapped error carries "create quiz:" so the per-op path is
+		// still distinguishable in the log even after the unified
+		// "error storing quiz" message (#293).
+		if got, want := log, "create quiz: test error"; !strings.Contains(got, want) {
 			t.Fatalf("got: %q, should contain: %q", got, want)
 		}
 	})
@@ -1220,10 +1223,13 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 		}
 
 		log := buf.String()
-		if got, want := log, "error updating quiz"; !strings.Contains(got, want) {
+		if got, want := log, "error storing quiz"; !strings.Contains(got, want) {
 			t.Fatalf("got: %q, should contain: %q", got, want)
 		}
-		if got, want := log, fmt.Sprintf("err=%q", testError); !strings.Contains(got, want) {
+		// The wrapped error carries "update quiz:" so the per-op path is
+		// still distinguishable in the log even after the unified
+		// "error storing quiz" message (#293).
+		if got, want := log, "update quiz: test error"; !strings.Contains(got, want) {
 			t.Fatalf("got: %q, should contain: %q", got, want)
 		}
 	})
