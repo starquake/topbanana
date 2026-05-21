@@ -483,3 +483,43 @@ func TestPlayerStore_UpdatePlayerUsername(t *testing.T) {
 		}
 	})
 }
+
+// TestPlayerStore_SetPlayerPasswordHash_AlsoMarksUsernameClaimed pins
+// the #289 fix: the operator's -reset-password CLI eventually calls
+// this store method to give the seed admin a password. Before the
+// fix the SQL only updated password_hash, leaving username_claimed=0
+// on a row whose `password_hash IS NOT NULL` — which dragged the
+// player client into the "claim your name" modal for a logged-in
+// admin. The combined update now keeps the two columns in lockstep.
+func TestPlayerStore_SetPlayerPasswordHash_AlsoMarksUsernameClaimed(t *testing.T) {
+	t.Parallel()
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	// CreateAnonymousPlayer inserts with password_hash=NULL and
+	// username_claimed=0 — the same starting state the seed admin
+	// is in after migration 20260111110308 but before the operator
+	// has run -reset-password.
+	anon, err := ps.CreateAnonymousPlayer(t.Context(), "anon-claim-after-pw")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	if got, want := anon.HasCustomName(), false; got != want {
+		t.Fatalf("seed HasCustomName() = %v, want %v", got, want)
+	}
+
+	if setErr := ps.SetPlayerPasswordHash(t.Context(), anon.Username, "h"); setErr != nil {
+		t.Fatalf("SetPlayerPasswordHash err = %v, want nil", setErr)
+	}
+
+	got, err := ps.GetPlayerByUsername(t.Context(), anon.Username)
+	if err != nil {
+		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+	}
+	if got.PasswordHash == "" {
+		t.Error("PasswordHash empty after reset, want a non-empty hash")
+	}
+	if got, want := got.HasCustomName(), true; got != want {
+		t.Errorf("HasCustomName() = %v, want %v (SetPlayerPasswordHash must also flip username_claimed)", got, want)
+	}
+}

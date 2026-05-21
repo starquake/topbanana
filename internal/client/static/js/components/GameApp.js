@@ -216,6 +216,18 @@ export class GameApp {
                     console.warn('leaderboard re-fetch after claim failed; row will update on next load', err);
                 }
             }
+            return result;
+        }
+        // #289: the server says this account is already non-anonymous,
+        // which means our cached `this.player.hasCustomName` was stale
+        // (a logged-in admin with a freshly-set password_hash but
+        // username_claimed still 0 ended up here). Refresh /me so
+        // hasCustomName flips to true, then dismiss the modal — there
+        // is nothing for the user to do here.
+        if (result.kind === 'already_claimed') {
+            const refreshed = await playerService.getMe();
+            if (refreshed) this.player = refreshed;
+            this.claimModalOpen = false;
         }
         return result;
     }

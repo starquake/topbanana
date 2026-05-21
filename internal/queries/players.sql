@@ -84,8 +84,17 @@ RETURNING *;
 -- player's password without disturbing username / role / email. Returns the
 -- number of affected rows so the caller can map "no rows" to a "username not
 -- found" error.
+--
+-- username_claimed is set to 1 alongside the password because once an
+-- operator has set a password on a row, the username is no longer an
+-- auto-assigned petname the player should be nudged to replace (#289). The
+-- migration 20260511120000 ran the same backfill at the time, but only for
+-- rows that already had a password_hash; later password sets via this
+-- query previously left username_claimed at 0, which made the seed
+-- admin (id=1) keep popping the claim-name modal in the player client.
 UPDATE players
-SET password_hash = sqlc.arg('password_hash')
+SET password_hash    = sqlc.arg('password_hash'),
+    username_claimed = 1
 WHERE username = sqlc.arg('username');
 
 -- name: UpdatePlayerUsername :one
