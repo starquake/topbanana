@@ -147,7 +147,7 @@ func TestLeaderboardStream_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("next Do err = %v, want nil", err)
 	}
-	pick := decodeFirstCorrectOption(t, nextResp)
+	pick := decodeQuestionAndPickCorrect(t, nextResp, qz)
 	if cerr := nextResp.Body.Close(); cerr != nil {
 		t.Errorf("next Body.Close err = %v, want nil", cerr)
 	}
@@ -279,7 +279,7 @@ func TestLeaderboardStream_NameUpdate_RepaintsSubscribers(t *testing.T) {
 	// Client B plays the quiz to completion FIRST so they appear on the
 	// leaderboard (which currently only lists completed games).
 	clientB := newCookieJarClient(t)
-	playSingleQuestionQuizToCompletion(ctx, t, srv.BaseURL, clientB, qz.ID)
+	playSingleQuestionQuizToCompletion(ctx, t, srv.BaseURL, clientB, qz)
 
 	// Capture client B's auto-assigned username from /api/players/me so
 	// we know what to compare against in the post-PATCH event.
@@ -355,13 +355,13 @@ func playSingleQuestionQuizToCompletion(
 	t *testing.T,
 	baseURL string,
 	client *http.Client,
-	quizID int64,
+	qz *quiz.Quiz,
 ) {
 	t.Helper()
 
 	createReq, err := http.NewRequestWithContext(
 		ctx, http.MethodPost, baseURL+"/api/games",
-		strings.NewReader(fmt.Sprintf(`{"quizId": %d}`, quizID)),
+		strings.NewReader(fmt.Sprintf(`{"quizId": %d}`, qz.ID)),
 	)
 	if err != nil {
 		t.Fatalf("NewRequest create err = %v, want nil", err)
@@ -387,7 +387,7 @@ func playSingleQuestionQuizToCompletion(
 	if err != nil {
 		t.Fatalf("next Do err = %v, want nil", err)
 	}
-	pick := decodeFirstCorrectOption(t, nextResp)
+	pick := decodeQuestionAndPickCorrect(t, nextResp, qz)
 	if cerr := nextResp.Body.Close(); cerr != nil {
 		t.Errorf("next Body.Close err = %v, want nil", cerr)
 	}
@@ -539,19 +539,20 @@ type streamTestQuestionResponse struct {
 	Options []streamTestQuestionOption `json:"options"`
 }
 
-// firstCorrectOption is the typed return for decodeFirstCorrectOption.
+// pickedOption is the typed return for [decodeQuestionAndPickCorrect].
 // Returning a struct (instead of (int64, int64)) keeps both
 // nonamedreturns and confusing-results lint rules happy.
-type firstCorrectOption struct {
+type pickedOption struct {
 	QuestionID int64
 	OptionID   int64
 }
 
-// decodeFirstCorrectOption reads GET /api/games/.../questions/next and
-// returns the question ID plus the FIRST option's ID. The test seeds
-// the question so option[0] is the correct one — submitting it earns
-// a non-zero score and triggers a hub Publish for the SSE subscriber.
-func decodeFirstCorrectOption(t *testing.T, resp *http.Response) firstCorrectOption {
+// decodeQuestionAndPickCorrect reads GET /api/games/.../questions/next
+// and returns the question ID plus the seeded-correct option's ID for
+// that question. The API shuffles option order per-game (#297), so
+// "options[0]" is no longer reliably the correct answer — the helper
+// walks the seeded quiz to find the option flagged Correct instead.
+func decodeQuestionAndPickCorrect(t *testing.T, resp *http.Response, qz *quiz.Quiz) pickedOption {
 	t.Helper()
 
 	if got, want := resp.StatusCode, http.StatusOK; got != want {
@@ -565,7 +566,19 @@ func decodeFirstCorrectOption(t *testing.T, resp *http.Response) firstCorrectOpt
 		t.Fatal("next returned no options")
 	}
 
-	return firstCorrectOption{QuestionID: out.ID, OptionID: out.Options[0].ID}
+	for _, q := range qz.Questions {
+		if q.ID != out.ID {
+			continue
+		}
+		for _, o := range q.Options {
+			if o.Correct {
+				return pickedOption{QuestionID: out.ID, OptionID: o.ID}
+			}
+		}
+	}
+	t.Fatalf("no Correct option in seeded quiz %d for question %d", qz.ID, out.ID)
+
+	return pickedOption{}
 }
 
 // newCookieJarClient returns an http.Client with a fresh cookie jar so
