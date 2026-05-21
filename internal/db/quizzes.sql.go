@@ -9,6 +9,7 @@ import (
 	"context"
 	"database/sql"
 	"strings"
+	"time"
 )
 
 const createOption = `-- name: CreateOption :one
@@ -67,19 +68,29 @@ func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) 
 }
 
 const createQuiz = `-- name: CreateQuiz :one
-INSERT INTO quizzes (title, slug, description, updated_at)
-VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-RETURNING id, title, slug, description, created_at, updated_at
+INSERT INTO quizzes (title, slug, description, created_by_player_id, updated_at)
+VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+RETURNING id, title, slug, description, created_at, updated_at, created_by_player_id
 `
 
 type CreateQuizParams struct {
-	Title       string
-	Slug        string
-	Description string
+	Title             string
+	Slug              string
+	Description       string
+	CreatedByPlayerID int64
 }
 
+// created_by_player_id is NOT NULL with an FK to players.id (migration
+// 20260520200000 / #281). [QuizStore.CreateQuiz] short-circuits with
+// ErrCreatorRequired when the caller forgot to stamp the session
+// admin, so the FK constraint is the second line of defence.
 func (q *Queries) CreateQuiz(ctx context.Context, arg CreateQuizParams) (Quiz, error) {
-	row := q.db.QueryRowContext(ctx, createQuiz, arg.Title, arg.Slug, arg.Description)
+	row := q.db.QueryRowContext(ctx, createQuiz,
+		arg.Title,
+		arg.Slug,
+		arg.Description,
+		arg.CreatedByPlayerID,
+	)
 	var i Quiz
 	err := row.Scan(
 		&i.ID,
@@ -88,6 +99,7 @@ func (q *Queries) CreateQuiz(ctx context.Context, arg CreateQuizParams) (Quiz, e
 		&i.Description,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CreatedByPlayerID,
 	)
 	return i, err
 }
@@ -204,15 +216,36 @@ func (q *Queries) GetQuestion(ctx context.Context, id int64) (Question, error) {
 }
 
 const getQuiz = `-- name: GetQuiz :one
-SELECT id, title, slug, description, created_at, updated_at
-FROM quizzes
-WHERE id = ?
+SELECT q.id,
+       q.title,
+       q.slug,
+       q.description,
+       q.created_at,
+       q.updated_at,
+       q.created_by_player_id,
+       p.username AS created_by_username
+FROM quizzes q
+         LEFT JOIN players p ON p.id = q.created_by_player_id
+WHERE q.id = ?
 LIMIT 1
 `
 
-func (q *Queries) GetQuiz(ctx context.Context, id int64) (Quiz, error) {
+type GetQuizRow struct {
+	ID                int64
+	Title             string
+	Slug              string
+	Description       string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	CreatedByPlayerID int64
+	CreatedByUsername sql.NullString
+}
+
+// Same LEFT JOIN as ListQuizzes so single-quiz fetches carry the
+// creator's username for the admin view's "Created by ..." line.
+func (q *Queries) GetQuiz(ctx context.Context, id int64) (GetQuizRow, error) {
 	row := q.db.QueryRowContext(ctx, getQuiz, id)
-	var i Quiz
+	var i GetQuizRow
 	err := row.Scan(
 		&i.ID,
 		&i.Title,
@@ -220,6 +253,8 @@ func (q *Queries) GetQuiz(ctx context.Context, id int64) (Quiz, error) {
 		&i.Description,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CreatedByPlayerID,
+		&i.CreatedByUsername,
 	)
 	return i, err
 }
@@ -354,20 +389,44 @@ func (q *Queries) ListQuestionsByQuizID(ctx context.Context, quizID int64) ([]Qu
 }
 
 const listQuizzes = `-- name: ListQuizzes :many
-SELECT id, title, slug, description, created_at, updated_at
-FROM quizzes
-ORDER BY updated_at DESC, id DESC
+SELECT q.id,
+       q.title,
+       q.slug,
+       q.description,
+       q.created_at,
+       q.updated_at,
+       q.created_by_player_id,
+       p.username AS created_by_username
+FROM quizzes q
+         LEFT JOIN players p ON p.id = q.created_by_player_id
+ORDER BY q.updated_at DESC, q.id DESC
 `
 
-func (q *Queries) ListQuizzes(ctx context.Context) ([]Quiz, error) {
+type ListQuizzesRow struct {
+	ID                int64
+	Title             string
+	Slug              string
+	Description       string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	CreatedByPlayerID int64
+	CreatedByUsername sql.NullString
+}
+
+// LEFT JOIN on players so the admin list can render "Created by ..."
+// alongside each quiz without an N+1 lookup. Every quiz has a creator
+// (NOT NULL since migration 20260520200000 / #281); the JOIN tolerates
+// a deleted player row by surfacing created_by_username NULL, so the
+// store decodes that field via sql.NullString.
+func (q *Queries) ListQuizzes(ctx context.Context) ([]ListQuizzesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listQuizzes)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Quiz
+	var items []ListQuizzesRow
 	for rows.Next() {
-		var i Quiz
+		var i ListQuizzesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Title,
@@ -375,6 +434,8 @@ func (q *Queries) ListQuizzes(ctx context.Context) ([]Quiz, error) {
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CreatedByPlayerID,
+			&i.CreatedByUsername,
 		); err != nil {
 			return nil, err
 		}

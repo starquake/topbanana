@@ -67,6 +67,7 @@ func seedHomeDB(t *testing.T) homeSeed {
 
 	quiz1 := &quiz.Quiz{
 		Title: "Q1", Slug: "q1", Description: "Q1 desc",
+		CreatedByPlayerID: seededAdminID,
 		Questions: []*quiz.Question{
 			{Text: "Q1-Q1", Position: 1, Options: []*quiz.Option{{Text: "a"}, {Text: "b", Correct: true}}},
 			{Text: "Q1-Q2", Position: 2, Options: []*quiz.Option{{Text: "c"}, {Text: "d", Correct: true}}},
@@ -77,6 +78,7 @@ func seedHomeDB(t *testing.T) homeSeed {
 	}
 	quiz2 := &quiz.Quiz{
 		Title: "Q2", Slug: "q2", Description: "Q2 desc",
+		CreatedByPlayerID: seededAdminID,
 		Questions: []*quiz.Question{
 			{Text: "Q2-Q1", Position: 1, Options: []*quiz.Option{{Text: "e", Correct: true}}},
 		},
@@ -243,9 +245,10 @@ func TestHomeStore_ExcludesEmptyQuizFromRankings(t *testing.T) {
 	// validate, so the admin can produce one of these any time they
 	// start authoring and never get back to it.
 	emptyQuiz := &quiz.Quiz{
-		Title:       "Empty",
-		Slug:        "empty",
-		Description: "no questions",
+		Title:             "Empty",
+		Slug:              "empty",
+		Description:       "no questions",
+		CreatedByPlayerID: seededAdminID,
 	}
 	if err := quizzes.CreateQuiz(t.Context(), emptyQuiz); err != nil {
 		t.Fatalf("CreateQuiz empty err = %v, want nil", err)

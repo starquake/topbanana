@@ -47,7 +47,7 @@ One-off scripts are reserved for genuinely interactive debugging that can't be e
 
 When starting work on a new ticket: switch to `main`, run `git pull`, then create a new branch. Branch names use dashes (not slashes) and are prefixed with the ticket number — e.g. `1-fix-bugs`. Ask for the ticket number if not provided. Omit the prefix if there is no ticket.
 When asked to update a branch, do it by rebasing onto main (`git rebase origin/main`), never by merging.
-ThAlways let the user wrap up and merge — never suggest merging yourself.
+Never suggest merging on your own and never infer that a merge is wanted (CI passing is not approval, and an earlier PR's merge instruction does not carry to the next PR). Run `gh pr merge` only when the user explicitly asks for *this* PR — phrases like "merge it", "go ahead and merge", or "commit, push, merge" in one breath count as that ask.
 After each piece of work, provide the PR URL: `https://github.com/starquake/topbanana/compare/<branch-name>`
 When implementing review findings or other non-trivial code changes, delegate to the appropriate dev agent — `backend-dev` for Go code under `internal/`, `cmd/`, migrations and queries; `frontend-dev` for the player client and admin templates — so project conventions are consistently applied.
 

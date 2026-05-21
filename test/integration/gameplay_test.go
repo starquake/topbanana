@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
 )
@@ -94,46 +95,79 @@ type leaderboardRes struct {
 	Entries []leaderboardEntryRes `json:"entries"`
 }
 
-// registerAdminAndResetPlayer registers a fresh admin via the public
-// /register form (the first password-bearing registrant becomes admin),
-// then POSTs to /admin/quizzes/{quizID}/players/{playerID}/reset with a
-// freshly-fetched CSRF token. Used by the gameplay test to exercise the
-// admin reset path end-to-end after a player has finished a quiz.
-func registerAdminAndResetPlayer(
+const (
+	gameplayAdminUsername = "gameplay-admin"
+	gameplayAdminPassword = "gameplay-admin-pass-123"
+)
+
+// seedGameplayAdmin registers the gameplay-admin via a throwaway jar
+// and returns the resulting auth.Player. The caller seeds the test
+// quiz under this admin's id so owner-gated admin routes (#281) accept
+// the reset / delete probes later in the test.
+func seedGameplayAdmin(
+	ctx context.Context, t *testing.T, baseURL string, stores *store.Stores,
+) *auth.Player {
+	t.Helper()
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New err = %v, want nil", err)
+	}
+	client := &http.Client{
+		Jar: jar,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	registerGameplayAdmin(ctx, t, client, baseURL)
+
+	p, err := stores.Players.GetPlayerByUsername(ctx, gameplayAdminUsername)
+	if err != nil {
+		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+	}
+
+	return p
+}
+
+// loginAdminAndResetPlayer signs the pre-seeded gameplay-admin into
+// the supplied client (jar) via /login and POSTs the admin reset for
+// the given player. Replaces an earlier register-based variant — the
+// admin is now registered up front (so the quiz can be attributed to
+// them before the player flow runs), so the recovery jar logs in
+// rather than re-registering.
+func loginAdminAndResetPlayer(
 	ctx context.Context, t *testing.T, client *http.Client, baseURL string, quizID, playerID int64,
 ) {
 	t.Helper()
 
-	// Step 1: GET /register to seed the CSRF nonce on the jar and pull
-	// the matching hidden token out of the form.
-	registerToken := fetchCSRFToken(ctx, t, client, baseURL+"/register")
+	loginToken := fetchCSRFToken(ctx, t, client, baseURL+"/login")
 
-	registerForm := url.Values{}
-	registerForm.Add("username", "gameplay-admin")
-	registerForm.Add("password", "gameplay-admin-pass-123")
-	registerForm.Add("csrf_token", registerToken)
+	loginForm := url.Values{}
+	loginForm.Add("username", gameplayAdminUsername)
+	loginForm.Add("password", gameplayAdminPassword)
+	loginForm.Add("csrf_token", loginToken)
 
-	registerReq, err := http.NewRequestWithContext(
-		ctx, http.MethodPost, baseURL+"/register",
-		strings.NewReader(registerForm.Encode()),
+	loginReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, baseURL+"/login",
+		strings.NewReader(loginForm.Encode()),
 	)
 	if err != nil {
-		t.Fatalf("failed to build register request: %v", err)
+		t.Fatalf("failed to build login request: %v", err)
 	}
-	registerReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	registerResp, err := client.Do(registerReq)
+	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	loginResp, err := client.Do(loginReq)
 	if err != nil {
-		t.Fatalf("failed to register: %v", err)
+		t.Fatalf("failed to login: %v", err)
 	}
-	if got, want := registerResp.StatusCode, http.StatusSeeOther; got != want {
-		t.Fatalf("register status = %d, want %d", got, want)
+	if got, want := loginResp.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("login status = %d, want %d", got, want)
 	}
-	if cerr := registerResp.Body.Close(); cerr != nil {
-		t.Errorf("register body close err = %v", cerr)
+	if cerr := loginResp.Body.Close(); cerr != nil {
+		t.Errorf("login body close err = %v", cerr)
 	}
 
-	// Step 2: GET the quiz view to receive a CSRF token tied to the
-	// admin session jar.
+	// GET the quiz view to receive a CSRF token tied to the admin
+	// session jar.
 	quizViewURL := fmt.Sprintf("%s/admin/quizzes/%d", baseURL, quizID)
 	resetToken := fetchCSRFToken(ctx, t, client, quizViewURL)
 
@@ -163,6 +197,39 @@ func registerAdminAndResetPlayer(
 	wantLocation := fmt.Sprintf("/admin/quizzes/%d", quizID)
 	if got, want := resetResp.Header.Get("Location"), wantLocation; got != want {
 		t.Errorf("admin reset Location = %q, want %q", got, want)
+	}
+}
+
+// registerGameplayAdmin posts /register through the supplied client so
+// the response sets the session cookie on its jar. The first
+// password-bearing registrant is promoted to admin.
+func registerGameplayAdmin(ctx context.Context, t *testing.T, client *http.Client, baseURL string) {
+	t.Helper()
+
+	registerToken := fetchCSRFToken(ctx, t, client, baseURL+"/register")
+
+	registerForm := url.Values{}
+	registerForm.Add("username", gameplayAdminUsername)
+	registerForm.Add("password", gameplayAdminPassword)
+	registerForm.Add("csrf_token", registerToken)
+
+	registerReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, baseURL+"/register",
+		strings.NewReader(registerForm.Encode()),
+	)
+	if err != nil {
+		t.Fatalf("failed to build register request: %v", err)
+	}
+	registerReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	registerResp, err := client.Do(registerReq)
+	if err != nil {
+		t.Fatalf("failed to register: %v", err)
+	}
+	if got, want := registerResp.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("register status = %d, want %d", got, want)
+	}
+	if cerr := registerResp.Body.Close(); cerr != nil {
+		t.Errorf("register body close err = %v", cerr)
 	}
 }
 
@@ -216,10 +283,18 @@ func TestGameplay_Integration(t *testing.T) {
 	baseURL := setup.BaseURL
 	stores := setup.Stores
 
+	// Register the gameplay-admin up front via a throwaway jar so we
+	// know their player id; the quiz is attributed to that id so the
+	// owner-gated admin routes (#281) accept the later reset / delete
+	// probes. The actual adminClient session is built fresh further
+	// down via a /login flow.
+	adminPlayer := seedGameplayAdmin(ctx, t, baseURL, stores)
+
 	qz := &quiz.Quiz{
-		Title:       "Integration Quiz",
-		Slug:        "integration-quiz",
-		Description: "A quiz for integration testing",
+		Title:             "Integration Quiz",
+		Slug:              "integration-quiz",
+		Description:       "A quiz for integration testing",
+		CreatedByPlayerID: adminPlayer.ID,
 		Questions: []*quiz.Question{
 			{
 				Text:     "Question 1",
@@ -760,7 +835,7 @@ func TestGameplay_Integration(t *testing.T) {
 				return http.ErrUseLastResponse
 			},
 		}
-		registerAdminAndResetPlayer(ctx, t, adminClient, baseURL, qz.ID, completedPlayerID)
+		loginAdminAndResetPlayer(ctx, t, adminClient, baseURL, qz.ID, completedPlayerID)
 
 		// After reset, GET /my-game returns 404 — no game for this (player, quiz).
 		resp := httpGet(ctx, t, client, myGameURL)
@@ -967,7 +1042,7 @@ func TestGameplay_Integration(t *testing.T) {
 
 	t.Run("admin can delete a played quiz and clears it from the listing", func(t *testing.T) {
 		// Admin POSTs /admin/quizzes/{id}/delete with a CSRF token tied to
-		// the admin session jar created by registerAdminAndResetPlayer above.
+		// the admin session jar created by loginAdminAndResetPlayer above.
 		quizDetailURL := fmt.Sprintf("%s/admin/quizzes/%d", baseURL, qz.ID)
 		deleteToken := fetchCSRFToken(ctx, t, adminClient, quizDetailURL)
 

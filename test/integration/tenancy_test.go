@@ -41,9 +41,10 @@ func TestGameTenancy_Integration(t *testing.T) {
 	})
 
 	qz := &quiz.Quiz{
-		Title:       "Tenancy Quiz",
-		Slug:        "tenancy-quiz",
-		Description: "for the tenancy integration test",
+		Title:             "Tenancy Quiz",
+		Slug:              "tenancy-quiz",
+		Description:       "for the tenancy integration test",
+		CreatedByPlayerID: seededAdminID,
 		Questions: []*quiz.Question{
 			{
 				Text:     "Q1",

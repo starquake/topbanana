@@ -139,12 +139,19 @@ func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Opti
 	return nil, nil
 }
 
+// seededAdminID is the id of the admin row inserted by migration
+// 20260111110308_add_admin_player.sql. Quiz fixtures attribute
+// themselves to this admin so the NOT NULL created_by_player_id
+// column from migration 20260520200000 (#281) is satisfied.
+const seededAdminID int64 = 1
+
 func newTestQuiz(t *testing.T) *quiz.Quiz {
 	t.Helper()
 
 	return &quiz.Quiz{
-		Title: "Flurpsydurpsy",
-		Slug:  "flurpsydurpsy",
+		Title:             "Flurpsydurpsy",
+		Slug:              "flurpsydurpsy",
+		CreatedByPlayerID: seededAdminID,
 		Questions: []*quiz.Question{
 			{
 				Text:     "What is the capital of France?",

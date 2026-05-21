@@ -27,12 +27,25 @@ var (
 	lessOptions   = func(a, b *quiz.Option) bool { return a.Text < b.Text }
 )
 
+// seededAdminID is the id of the admin row inserted by migration
+// 20260111110308_add_admin_player.sql. Test fixtures attribute
+// quizzes to this admin so the NOT NULL created_by_player_id FK
+// from migration 20260520200000 is satisfied. The seed migration
+// hard-codes id = 1, so reference the constant here rather than
+// duplicating the literal in every fixture.
+const (
+	seededAdminID       int64 = 1
+	seededAdminUsername       = "admin"
+)
+
 func newTestQuizzes() []*quiz.Quiz {
 	return []*quiz.Quiz{
 		{
-			Title:       "Quiz 1",
-			Slug:        "quiz-1",
-			Description: "Quiz 1 Description",
+			Title:             "Quiz 1",
+			Slug:              "quiz-1",
+			Description:       "Quiz 1 Description",
+			CreatedByPlayerID: seededAdminID,
+			CreatedByUsername: seededAdminUsername,
 			Questions: []*quiz.Question{
 				{
 					Text:     "Question 1-1",
@@ -57,9 +70,11 @@ func newTestQuizzes() []*quiz.Quiz {
 			},
 		},
 		{
-			Title:       "Quiz 2",
-			Slug:        "quiz-2",
-			Description: "Quiz 2 Description",
+			Title:             "Quiz 2",
+			Slug:              "quiz-2",
+			Description:       "Quiz 2 Description",
+			CreatedByPlayerID: seededAdminID,
+			CreatedByUsername: seededAdminUsername,
 			Questions: []*quiz.Question{
 				{
 					Text:     "Question 2-1",
@@ -89,10 +104,12 @@ func newTestQuizzes() []*quiz.Quiz {
 func existingTestQuizzes() []*quiz.Quiz {
 	return []*quiz.Quiz{
 		{
-			ID:          1,
-			Title:       "Quiz 1",
-			Slug:        "quiz-1",
-			Description: "Quiz 1 Description",
+			ID:                1,
+			Title:             "Quiz 1",
+			Slug:              "quiz-1",
+			Description:       "Quiz 1 Description",
+			CreatedByPlayerID: seededAdminID,
+			CreatedByUsername: seededAdminUsername,
 			Questions: []*quiz.Question{
 				{
 					ID:       1,
@@ -119,9 +136,11 @@ func existingTestQuizzes() []*quiz.Quiz {
 			},
 		},
 		{
-			Title:       "Quiz 2",
-			Slug:        "quiz-2",
-			Description: "Quiz 2 Description",
+			Title:             "Quiz 2",
+			Slug:              "quiz-2",
+			Description:       "Quiz 2 Description",
+			CreatedByPlayerID: seededAdminID,
+			CreatedByUsername: seededAdminUsername,
 			Questions: []*quiz.Question{
 				{
 					ID:       3,
@@ -227,12 +246,14 @@ func TestQuizStore_ListQuizzes(t *testing.T) {
 	summaries := make([]*quiz.Quiz, 0, len(testQuizzes))
 	for _, qz := range testQuizzes {
 		summaries = append(summaries, &quiz.Quiz{
-			ID:          qz.ID,
-			Title:       qz.Title,
-			Slug:        qz.Slug,
-			Description: qz.Description,
-			CreatedAt:   qz.CreatedAt,
-			UpdatedAt:   qz.UpdatedAt,
+			ID:                qz.ID,
+			Title:             qz.Title,
+			Slug:              qz.Slug,
+			Description:       qz.Description,
+			CreatedAt:         qz.CreatedAt,
+			UpdatedAt:         qz.UpdatedAt,
+			CreatedByPlayerID: qz.CreatedByPlayerID,
+			CreatedByUsername: qz.CreatedByUsername,
 		})
 	}
 
@@ -254,6 +275,7 @@ func TestQuizStore_QuestionCountsByQuiz(t *testing.T) {
 	// at all so we can assert it's absent from the map.
 	withQuestions := &quiz.Quiz{
 		Title: "With questions", Slug: "with-questions", Description: "x",
+		CreatedByPlayerID: seededAdminID,
 		Questions: []*quiz.Question{
 			{Text: "Q1", Options: []*quiz.Option{{Text: "a", Correct: true}}},
 			{Text: "Q2", Options: []*quiz.Option{{Text: "b"}}},
@@ -264,7 +286,7 @@ func TestQuizStore_QuestionCountsByQuiz(t *testing.T) {
 		t.Fatalf("CreateQuiz err = %v, want nil", err)
 	}
 
-	empty := &quiz.Quiz{Title: "Empty", Slug: "empty", Description: "y"}
+	empty := &quiz.Quiz{Title: "Empty", Slug: "empty", Description: "y", CreatedByPlayerID: seededAdminID}
 	if err := quizStore.CreateQuiz(t.Context(), empty); err != nil {
 		t.Fatalf("CreateQuiz err = %v, want nil", err)
 	}
@@ -727,12 +749,14 @@ func TestQuizStore_UpdateQuiz(t *testing.T) {
 	}
 
 	updatedQuiz := &quiz.Quiz{
-		ID:          originalQuiz.ID,
-		Title:       originalQuiz.Title + " Updated",
-		Slug:        originalQuiz.Slug + "-updated",
-		Description: originalQuiz.Description + " Updated",
-		CreatedAt:   originalQuiz.CreatedAt,
-		UpdatedAt:   originalQuiz.UpdatedAt,
+		ID:                originalQuiz.ID,
+		Title:             originalQuiz.Title + " Updated",
+		Slug:              originalQuiz.Slug + "-updated",
+		Description:       originalQuiz.Description + " Updated",
+		CreatedAt:         originalQuiz.CreatedAt,
+		UpdatedAt:         originalQuiz.UpdatedAt,
+		CreatedByPlayerID: originalQuiz.CreatedByPlayerID,
+		CreatedByUsername: originalQuiz.CreatedByUsername,
 		Questions: []*quiz.Question{
 			{
 				ID:     originalQuiz.Questions[0].ID,
@@ -1836,14 +1860,14 @@ func TestQuizStore_ListQuizzes_OrderedByUpdatedAtDesc(t *testing.T) {
 	db := dbtest.Open(t)
 	quizStore := NewQuizStore(db, slog.Default())
 
-	first := &quiz.Quiz{Title: "First", Slug: "first", Description: "first"}
+	first := &quiz.Quiz{Title: "First", Slug: "first", Description: "first", CreatedByPlayerID: seededAdminID}
 	if err := quizStore.CreateQuiz(t.Context(), first); err != nil {
 		t.Fatalf("failed to create first quiz: %v", err)
 	}
 
 	time.Sleep(updatedAtBumpDelay)
 
-	second := &quiz.Quiz{Title: "Second", Slug: "second", Description: "second"}
+	second := &quiz.Quiz{Title: "Second", Slug: "second", Description: "second", CreatedByPlayerID: seededAdminID}
 	if err := quizStore.CreateQuiz(t.Context(), second); err != nil {
 		t.Fatalf("failed to create second quiz: %v", err)
 	}
@@ -1886,7 +1910,12 @@ func TestQuizStore_ListQuizzes_OrderedByUpdatedAtDesc(t *testing.T) {
 func seedQuizWithQuestions(t *testing.T, quizStore *QuizStore, n int) *quiz.Quiz {
 	t.Helper()
 
-	qz := &quiz.Quiz{Title: "Reorder Quiz", Slug: "reorder-quiz", Description: "for reorder tests"}
+	qz := &quiz.Quiz{
+		Title:             "Reorder Quiz",
+		Slug:              "reorder-quiz",
+		Description:       "for reorder tests",
+		CreatedByPlayerID: seededAdminID,
+	}
 	for i := 1; i <= n; i++ {
 		qz.Questions = append(qz.Questions, &quiz.Question{
 			Text:     fmt.Sprintf("Q%d", i),
@@ -1911,7 +1940,7 @@ func TestQuizStore_NextQuestionPosition(t *testing.T) {
 	t.Run("returns 1 for an empty quiz", func(t *testing.T) {
 		t.Parallel()
 		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
-		qz := &quiz.Quiz{Title: "Empty", Slug: "empty", Description: "no questions"}
+		qz := &quiz.Quiz{Title: "Empty", Slug: "empty", Description: "no questions", CreatedByPlayerID: seededAdminID}
 		if err := quizStore.CreateQuiz(t.Context(), qz); err != nil {
 			t.Fatalf("CreateQuiz err = %v, want nil", err)
 		}

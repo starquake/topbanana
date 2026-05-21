@@ -43,9 +43,10 @@ func TestAnonymous_Integration(t *testing.T) {
 	})
 
 	qz := &quiz.Quiz{
-		Title:       "Anonymous Quiz",
-		Slug:        "anonymous-quiz",
-		Description: "for the anonymous integration test",
+		Title:             "Anonymous Quiz",
+		Slug:              "anonymous-quiz",
+		Description:       "for the anonymous integration test",
+		CreatedByPlayerID: seededAdminID,
 		Questions: []*quiz.Question{
 			{
 				Text:     "Q1",

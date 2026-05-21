@@ -40,9 +40,10 @@ func TestCreateGameRace_Integration(t *testing.T) {
 	})
 
 	qz := &quiz.Quiz{
-		Title:       "Race Quiz",
-		Slug:        "race-quiz",
-		Description: "for the create-game race test",
+		Title:             "Race Quiz",
+		Slug:              "race-quiz",
+		Description:       "for the create-game race test",
+		CreatedByPlayerID: seededAdminID,
 		Questions: []*quiz.Question{
 			{
 				Text:     "Q1",

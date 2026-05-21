@@ -49,14 +49,36 @@ func TestAdminHTMX_QuestionReorder(t *testing.T) {
 	})
 	stores := store.New(db, slog.Default())
 
+	// Register an admin via the HTTP flow first so we can attribute the
+	// seeded quiz to their player id. Owner-gated routes (#281) reject
+	// the reorder POST if the session player isn't the quiz creator,
+	// so seeding under the seeded admin would 403 every probe.
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New err = %v, want nil", err)
+	}
+	client := &http.Client{
+		Jar: jar,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
+
+	adminPlayer, err := stores.Players.GetPlayerByUsername(ctx, "htmx-admin")
+	if err != nil {
+		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+	}
+
 	const (
 		questionOneText = "What is the river running through Prague?"
 		questionTwoText = "What is the capital of Portugal?"
 	)
 	qz := &quiz.Quiz{
-		Title:       "HTMX Reorder Quiz",
-		Slug:        "htmx-reorder",
-		Description: "seed for the HTMX integration test",
+		Title:             "HTMX Reorder Quiz",
+		Slug:              "htmx-reorder",
+		Description:       "seed for the HTMX integration test",
+		CreatedByPlayerID: adminPlayer.ID,
 		Questions: []*quiz.Question{
 			{
 				Text:     questionOneText,
@@ -79,21 +101,6 @@ func TestAdminHTMX_QuestionReorder(t *testing.T) {
 	if cerr := stores.Quizzes.CreateQuiz(ctx, qz); cerr != nil {
 		t.Fatalf("CreateQuiz err = %v, want nil", cerr)
 	}
-
-	// Register an admin via the HTTP flow — the registration handler
-	// owns the password-hash bookkeeping and the first registered user
-	// becomes the admin (so subsequent /admin/* requests pass auth).
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		t.Fatalf("cookiejar.New err = %v, want nil", err)
-	}
-	client := &http.Client{
-		Jar: jar,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-	registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
 
 	// Fetch the quiz view to seed the CSRF nonce on the jar and pull
 	// out the matching hidden token. The reorder POST has to carry

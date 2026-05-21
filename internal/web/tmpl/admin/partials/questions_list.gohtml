@@ -13,6 +13,10 @@
      Required data: .Quiz.Questions (slice) and .LastQuestionIndex (int),
      plus the csrfToken template func registered by TemplateRenderer. */}}
 {{define "questions_list"}}
+{{/* canEdit is passed in via .Quiz.CanEdit, resolved server-side by
+     admin.go's attachCanEdit. The partial never recomputes the rule
+     itself — a future policy change is a Go-only edit. */}}
+{{$canEdit := .Quiz.CanEdit}}
 <div id="questions-list" class="flex flex-col gap-3">
     {{range $i, $q := .Quiz.Questions}}
         <article class="q-row">
@@ -49,6 +53,7 @@
                     </ul>
                 </details>
             </div>
+            {{if $canEdit}}
             <div class="q-actions">
                 <form method="post"
                       action="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/move/up"
@@ -94,6 +99,7 @@
                     <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5zM11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1H11z"/></svg>
                 </button>
             </div>
+            {{end}}
         </article>
     {{end}}
 </div>

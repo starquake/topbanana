@@ -1,7 +1,20 @@
 -- name: ListQuizzes :many
-SELECT *
-FROM quizzes
-ORDER BY updated_at DESC, id DESC;
+-- LEFT JOIN on players so the admin list can render "Created by ..."
+-- alongside each quiz without an N+1 lookup. Every quiz has a creator
+-- (NOT NULL since migration 20260520200000 / #281); the JOIN tolerates
+-- a deleted player row by surfacing created_by_username NULL, so the
+-- store decodes that field via sql.NullString.
+SELECT q.id,
+       q.title,
+       q.slug,
+       q.description,
+       q.created_at,
+       q.updated_at,
+       q.created_by_player_id,
+       p.username AS created_by_username
+FROM quizzes q
+         LEFT JOIN players p ON p.id = q.created_by_player_id
+ORDER BY q.updated_at DESC, q.id DESC;
 
 -- name: QuestionCountsByQuiz :many
 -- Returns one row per quiz that has at least one question. Quizzes with
@@ -13,9 +26,19 @@ FROM questions
 GROUP BY quiz_id;
 
 -- name: GetQuiz :one
-SELECT *
-FROM quizzes
-WHERE id = ?
+-- Same LEFT JOIN as ListQuizzes so single-quiz fetches carry the
+-- creator's username for the admin view's "Created by ..." line.
+SELECT q.id,
+       q.title,
+       q.slug,
+       q.description,
+       q.created_at,
+       q.updated_at,
+       q.created_by_player_id,
+       p.username AS created_by_username
+FROM quizzes q
+         LEFT JOIN players p ON p.id = q.created_by_player_id
+WHERE q.id = ?
 LIMIT 1;
 
 -- name: QuizExists :one
@@ -26,8 +49,12 @@ LIMIT 1;
 SELECT EXISTS(SELECT 1 FROM quizzes WHERE id = ?) AS quiz_exists;
 
 -- name: CreateQuiz :one
-INSERT INTO quizzes (title, slug, description, updated_at)
-VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+-- created_by_player_id is NOT NULL with an FK to players.id (migration
+-- 20260520200000 / #281). [QuizStore.CreateQuiz] short-circuits with
+-- ErrCreatorRequired when the caller forgot to stamp the session
+-- admin, so the FK constraint is the second line of defence.
+INSERT INTO quizzes (title, slug, description, created_by_player_id, updated_at)
+VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
 RETURNING *;
 
 -- name: UpdateQuiz :execresult

@@ -24,6 +24,13 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
+// seededAdminID is the id of the admin row inserted by migration
+// 20260111110308_add_admin_player.sql. Integration tests that seed
+// quizzes directly through the store attribute them to this admin so
+// the NOT NULL created_by_player_id column (migration 20260520200000,
+// #281) is satisfied.
+const seededAdminID int64 = 1
+
 // testServer is the addressable surface a started integration server
 // exposes. BaseURL covers HTTP-driven tests; DBURI is only needed by tests
 // that open their own *sql.DB for direct store access (e.g. gameplay).

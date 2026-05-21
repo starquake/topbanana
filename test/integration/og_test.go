@@ -29,9 +29,10 @@ func TestOGMetadata_Integration(t *testing.T) {
 	// unknown-slug fallback. Description is non-trivial — proving it
 	// reaches og:description rather than the default.
 	qz := &quiz.Quiz{
-		Title:       "Bananas of the World",
-		Slug:        "bananas-of-the-world",
-		Description: "Twenty rounds on cultivars, cuisines, and corporate history.",
+		Title:             "Bananas of the World",
+		Slug:              "bananas-of-the-world",
+		Description:       "Twenty rounds on cultivars, cuisines, and corporate history.",
+		CreatedByPlayerID: seededAdminID,
 	}
 	if err := setup.Stores.Quizzes.CreateQuiz(ctx, qz); err != nil {
 		t.Fatalf("CreateQuiz err = %v, want nil", err)

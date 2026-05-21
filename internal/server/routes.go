@@ -131,7 +131,7 @@ func addAdminRoutes(
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/players/{playerID}/reset",
-		csrfMW(requireAdmin(admin.HandleResetGameForPlayer(logger, csrfMgr, gameService))),
+		csrfMW(requireAdmin(admin.HandleResetGameForPlayer(logger, csrfMgr, stores.Quizzes, gameService))),
 	)
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}/questions/new",
