@@ -33,6 +33,29 @@ func writeInternalError(w http.ResponseWriter, r *http.Request, logger *slog.Log
 	http.Error(w, "internal error", http.StatusInternalServerError)
 }
 
+// writeClaimNameError writes a small JSON error body for the
+// PATCH /api/players/me handler. The client (PlayerService.claimName)
+// branches on `code` to differentiate "name already in use" from
+// "this account is already non-anonymous" (#289). Falls back to the
+// plain-text message on encode failure so the client at least sees a
+// status + body it can render.
+func writeClaimNameError(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	status int,
+	code, message string,
+) {
+	body := struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}{Code: code, Message: message}
+	if err := handlers.EncodeJSON(w, status, body); err != nil {
+		logger.ErrorContext(r.Context(), "error encoding claimNameError", slog.Any("err", err))
+		http.Error(w, message, status)
+	}
+}
+
 // gameRequest extracts the gameID path parameter and the session player
 // off the request. Every /api/games/{gameID}/* handler runs this gate
 // once at the top of its closure so the participant check (#272) and
@@ -828,11 +851,19 @@ func HandlePlayerClaimName(
 		if err != nil {
 			switch {
 			case errors.Is(err, auth.ErrUsernameTaken):
-				http.Error(w, "username already taken", http.StatusConflict)
+				writeClaimNameError(w, r, logger,
+					http.StatusConflict, "username_taken", "username already taken")
 			case errors.Is(err, auth.ErrPlayerNotAnonymous):
-				http.Error(w, "username already set for this account", http.StatusConflict)
+				// #289: distinct code so the JS can tell "name in use
+				// by someone else" from "this account already has a
+				// claimed name". The latter is a state-drift signal —
+				// the client should re-fetch /me and dismiss the
+				// modal, not show "name is taken".
+				writeClaimNameError(w, r, logger,
+					http.StatusConflict, "already_claimed", "username already set for this account")
 			case errors.Is(err, auth.ErrUsernameEmpty):
-				http.Error(w, "username is required", http.StatusBadRequest)
+				writeClaimNameError(w, r, logger,
+					http.StatusBadRequest, "username_required", "username is required")
 			default:
 				writeInternalError(w, r, logger, "error updating player username", err)
 			}
