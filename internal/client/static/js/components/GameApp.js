@@ -348,16 +348,32 @@ export class GameApp {
 
         const slugId = this.slugIdFor(this.selectedQuizId);
         if (!slugId) return null;
+
+        // Hoist quizSlugId + leaderboard fetch above the completed gate
+        // so the start screen surfaces the leaderboard for the selected
+        // quiz BEFORE the player clicks Start (#234). The completed
+        // branch below still upgrades to the "Game Finished!" view +
+        // SSE; the start-screen case stays read-only (no SSE — the
+        // player sees current scores at decision time, not a live
+        // ticker). Best-effort: a failed fetch lands an empty entries
+        // list so the section degrades to its "be the first" state.
+        this.quizSlugId = slugId;
+        try {
+            this.leaderboard = await gameService.getQuizLeaderboard(slugId);
+        } catch (err) {
+            console.warn('start-screen leaderboard fetch failed', err);
+            this.leaderboard = { quizId: 0, entries: [], currentPlayer: null };
+        }
+
         const existing = await gameService.getMyGameForQuiz(slugId);
         if (existing && existing.completed) {
             this.startError = "You've already completed this quiz.";
-            this.quizSlugId = slugId;
-            this.leaderboard = await gameService.getQuizLeaderboard(slugId);
             this.finished = true;
             // SSE stream so the row repaints when other finishers land
             // (or this player renames themselves via the claim flow).
             this.subscribeLeaderboardStream();
         }
+
         return existing;
     }
 

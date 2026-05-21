@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { registerAdmin, createQuizWithQuestions, QUIZ_QUESTIONS } from './helpers';
 
-test('admin sets up a multi-question quiz, then a player plays it through to the results screen', async ({ page, browserName }) => {
+test('admin sets up a multi-question quiz, then a player plays it through to the results screen', async ({ page, browser, browserName }) => {
   // Four questions × ~500ms reveal delay (#247, shrunk via REVEAL_DELAY) ×
   // ~2s/3s feedback + ~10s admin setup + browser overhead. Even with the
   // shorter reveal, slow CI can drift past Playwright's 30s default, so
@@ -33,6 +33,12 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   await expect(select.locator('option', { hasText: quizTitle })).toHaveCount(1);
   await select.selectOption({ label: quizTitle });
 
+  // #234 — the start screen surfaces the quiz leaderboard before the
+  // player clicks Start. On a fresh quiz the empty-state copy is the
+  // only thing that should appear under the "Leaderboard" heading.
+  await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
+  await expect(page.getByText('No finishers yet')).toBeVisible();
+
   await page.getByRole('button', { name: 'Start Game' }).click();
 
   // The reveal beat (#247) holds the answer buttons hidden for ~3s
@@ -42,9 +48,16 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   // the reveal class is on the bar pins the gate to the happy path.
   await expect(page.locator('progress.progress-reveal')).toBeVisible();
 
+  // The HUD's Score chip (#253) carries the running total. Its value
+  // sits in the second `.hud-chip` (the first is the Q n/total chip),
+  // and the digit lives in a `.hud-chip-value` span underneath. Pulled
+  // out so the loop below can re-read it after every answer (#234).
+  const scoreChipValue = page.locator('.hud-chip', { hasText: 'Score' }).locator('.hud-chip-value');
+
   // Walk every question. We always click the first option; whether that picks
   // a correct answer is determined by the spec (correctIndices includes 0).
   let expectedSuccesses = 0;
+  let prevScore = 0;
   const figureImg = page.locator('figure.image img');
   for (const q of QUIZ_QUESTIONS) {
     const choice = q.options[0];
@@ -58,6 +71,12 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
     const optionButton = page.getByRole('button', { name: choice });
     await expect(optionButton).toBeVisible({ timeout: 10_000 });
 
+    // #234 — before submitting, the running score chip must still
+    // reflect only what's been scored so far. Pinning this here
+    // catches a regression where a wrong answer or timeout
+    // accidentally adds to the total.
+    await expect(scoreChipValue).toHaveText(String(prevScore));
+
     if (q.expectImageVisible === true) {
       await expect(figureImg).toBeVisible();
     } else if (q.expectImageVisible === false) {
@@ -69,6 +88,16 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
     if (wasCorrect) {
       await expect(page.locator('.splash-correct')).toBeVisible();
       expectedSuccesses++;
+      // #234 — after a correct answer, the chip MUST have grown.
+      // We don't pin a specific value because CalculateScore depends
+      // on submit-time vs StartedAt; "strictly greater than prevScore"
+      // is the regression-proof invariant.
+      const scoreAfter = await scoreChipValue.textContent();
+      const scoreAfterNum = parseInt(scoreAfter ?? '0', 10);
+      expect(scoreAfterNum,
+        `Score chip after correct pick = ${scoreAfterNum}, want > ${prevScore}`,
+      ).toBeGreaterThan(prevScore);
+      prevScore = scoreAfterNum;
     } else {
       await expect(page.locator('.splash-wrong')).toBeVisible();
       // #233 — after a wrong pick the correct option(s) light up so
@@ -82,6 +111,9 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
       if (q.correctIndices.length > 0) {
         await expect(page.locator('.btn-answer-correct').first()).toBeVisible({ timeout: 2000 });
       }
+      // #234 — a wrong pick MUST NOT increase the score; pin the
+      // chip to its prior value before the next question loads.
+      await expect(scoreChipValue).toHaveText(String(prevScore));
     }
   }
 
@@ -134,4 +166,29 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   await expect(page.getByRole('button', { name: 'Start Game' })).toBeHidden();
   // Quiz picker still visible — the player can pick another quiz.
   await expect(page.locator('select')).toBeVisible();
+
+  // #234 — a brand-new anonymous visitor (fresh browser context, no
+  // cookie carryover) picking the same quiz on the start screen must
+  // now see a populated leaderboard with the previous player's row.
+  // This is the headline social-proof case: arriving on the start
+  // screen, you see who you're up against before you even click Start.
+  const otherContext = await browser.newContext();
+  try {
+    const otherPage = await otherContext.newPage();
+    await otherPage.goto('/client/');
+    const otherSelect = otherPage.locator('select');
+    await expect(otherSelect.locator('option', { hasText: quizTitle })).toHaveCount(1);
+    await otherSelect.selectOption({ label: quizTitle });
+
+    // The leaderboard heading + at least one populated row must
+    // render BEFORE Start Game is clicked. We don't pin the score —
+    // CalculateScore depends on timing — only that the row exists
+    // and the empty-state copy is gone.
+    await expect(otherPage.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
+    await expect(otherPage.getByText('No finishers yet')).toBeHidden();
+    await expect(otherPage.locator('.player-table tbody tr')).toHaveCount(1);
+    await expect(otherPage.getByRole('button', { name: 'Start Game' })).toBeVisible();
+  } finally {
+    await otherContext.close();
+  }
 });
