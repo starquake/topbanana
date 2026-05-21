@@ -32,7 +32,14 @@
          want to drive the dialog programmatically. */}}
     <script type="module" src="/assets/js/share.js"></script>
 </head>
-<body class="bg-bg text-text font-sans antialiased min-h-screen leading-relaxed flex flex-col">
+{{/* min-h-dvh (not min-h-screen / 100vh) so the sticky-footer column
+     measures the *visible* viewport rather than the layout viewport.
+     With 100vh, mobile browsers include the collapsing URL bar in
+     the height — so the body is reliably ~footer-tall taller than
+     the visible area and the page scrolls a few pixels even on
+     short content (#285). dvh tracks the visible viewport across
+     URL-bar collapse, eliminating the constant overflow. */}}
+<body class="bg-bg text-text font-sans antialiased min-h-dvh leading-relaxed flex flex-col">
 <section class="max-w-shell mx-auto px-5 py-10 w-full flex-1">
     {{template "content" .}}
 </section>

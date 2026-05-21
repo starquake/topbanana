@@ -1,5 +1,29 @@
 import { test, expect } from '@playwright/test';
 
+// #285 — the body used `min-h-screen` (100vh), which on mobile
+// browsers includes the collapsing URL bar in the height; the page
+// reliably scrolled by ~footer-height even when the lists fit. Fixed
+// by switching to min-h-dvh. The test pins the no-overflow invariant
+// at desktop viewports too so the sticky-footer column math stays
+// honest if anyone touches the layout again. 1px tolerance for
+// sub-pixel rounding (the AC mandates it).
+test('start page fits within the viewport on a fresh DB', async ({ page }) => {
+  await page.goto('/');
+
+  // Wait for the body to render and any web-font swap to settle so
+  // the measurement is taken against final layout, not the initial
+  // FOUT pass.
+  await expect(page.getByRole('heading', { name: 'Popular quizzes' })).toBeVisible();
+
+  const measurement = await page.evaluate(() => ({
+    scrollHeight: document.documentElement.scrollHeight,
+    innerHeight: window.innerHeight,
+  }));
+  expect(measurement.scrollHeight,
+    `documentElement.scrollHeight (${measurement.scrollHeight}) > window.innerHeight (${measurement.innerHeight}) — home page overflows the viewport on empty-DB content`,
+  ).toBeLessThanOrEqual(measurement.innerHeight + 1);
+});
+
 // #166 — the public start page at GET /. The test relies on nothing
 // beyond what every project starts with: the page renders even with an
 // empty database (empty-state messaging is part of the contract). Both
