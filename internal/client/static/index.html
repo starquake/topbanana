@@ -36,7 +36,14 @@
     <script type="module" src="/client/js/app.js"></script>
     <script defer src="/client/js/vendor/alpine.min.js"></script>
 </head>
-<body class="bg-bg text-text font-sans antialiased min-h-screen leading-relaxed">
+{{/* min-h-dvh (not min-h-screen / 100vh) so the body tracks the
+     visible viewport on mobile browsers. With 100vh the body resolves
+     to the URL-bar-collapsed height, so on Chrome Mobile and Firefox
+     Mobile the player can scroll the URL bar away mid-game (#308).
+     dvh tracks the visible viewport across URL-bar collapse so the
+     gameplay screen never offers a tap target that's actually a
+     scroll. Same fix as the home page got in #285. */}}
+<body class="bg-bg text-text font-sans antialiased min-h-dvh leading-relaxed">
     <main class="max-w-[720px] lg:max-w-5xl mx-auto px-5 lg:px-8 py-10 sm:py-16">
         <div x-data="gameApp" @keydown.escape.window="claimModalOpen && closeClaimModal()">
             <!-- Brand mark: same banana SVG + Top/Banana/! pattern as the
