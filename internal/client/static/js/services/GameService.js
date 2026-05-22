@@ -32,11 +32,16 @@ export class GameService {
         return jsonOrThrow(response);
     }
 
-    async submitAnswer(gameId, questionId, optionId) {
+    // tappedAt is captured by the caller at click time and forwarded
+    // here so the server can refund the network-latency portion of
+    // AnsweredAt instead of stamping commit time (#237). ISO-8601 so
+    // the server's time.Time JSON decoder accepts it directly; the
+    // service-side clamp re-validates the value either way.
+    async submitAnswer(gameId, questionId, optionId, tappedAt) {
         const response = await fetch(`/api/games/${gameId}/questions/${questionId}/answers`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ optionId: optionId })
+            body: JSON.stringify({ optionId: optionId, tappedAt: tappedAt })
         });
         return jsonOrThrow(response);
     }

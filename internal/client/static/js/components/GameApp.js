@@ -768,6 +768,13 @@ export class GameApp {
 
     async submitAnswer(optionId) {
         if (this.feedback || this.submittingAnswer) return;
+        // Capture the tap time at the top of the handler, BEFORE any
+        // awaits, so the server-side clamp gets the click instant
+        // rather than the post-POST commit time. The server re-clamps
+        // it against [question.startedAt, time.Now()] so we can send
+        // Date.now() verbatim — no need to apply clockOffset here
+        // (#237).
+        const tappedAt = new Date().toISOString();
         // Clear any prior retry banner so re-clicking after a failed
         // POST visibly dismisses it before the new attempt starts.
         this.submitError = false;
@@ -785,7 +792,7 @@ export class GameApp {
             this.timer = null;
         }
         try {
-            const fb = await gameService.submitAnswer(this.gameId, this.question.id, optionId);
+            const fb = await gameService.submitAnswer(this.gameId, this.question.id, optionId, tappedAt);
             // Track which option the player picked so the template can
             // keep the buttons visible during feedback and style the
             // pick separately from the correct option(s) — see #233.
