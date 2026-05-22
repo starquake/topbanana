@@ -83,6 +83,13 @@ test('409 on startGame recovers via getMyGameForQuiz', async ({ page, browserNam
   const select = page.locator('select');
   await expect(select.locator('option', { hasText: quizTitle })).toHaveCount(1);
   await select.selectOption({ label: quizTitle });
+  // Wait for Alpine's checkAlreadyPlayed (kicked off by the @change on
+  // the select) to finish before installing the route stubs below —
+  // its real-server /my-game call would otherwise increment myGameCount
+  // and break the count the test asserts on. The Leaderboard heading
+  // appears only after the leaderboard fetch resolves (#234), which
+  // happens after the /my-game call, so it's the right gating marker.
+  await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
 
   // Intercept the start-game POST with a 409 (one shot) and let
   // /my-game return a real game synthesised on the fly. The test
