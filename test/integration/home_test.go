@@ -89,6 +89,32 @@ func TestHome_Integration(t *testing.T) {
 		}
 	})
 
+	t.Run("GET / renders Browse all link below the popular quizzes", func(t *testing.T) {
+		t.Parallel()
+		body := getBody(ctx, t, baseURL+"/")
+
+		const browse = `href="/quizzes"`
+		// invariant pinned by #315: the Browse all link sits AFTER the
+		// last popular-quiz card, not in the section header. We assert
+		// position by index so a future move back to the header surfaces
+		// the regression.
+		browseIdx := strings.Index(body, browse)
+		if browseIdx == -1 {
+			t.Fatalf("body missing %q", browse)
+		}
+		lastCardIdx := strings.LastIndex(body, "/play/")
+		if lastCardIdx == -1 {
+			t.Fatal("body missing a /play/ link")
+		}
+		if got, want := browseIdx > lastCardIdx, true; got != want {
+			t.Errorf(
+				"Browse all link at %d, last /play/ at %d — want Browse all after the cards",
+				browseIdx,
+				lastCardIdx,
+			)
+		}
+	})
+
 	t.Run("GET / renders a share trigger per popular quiz", func(t *testing.T) {
 		t.Parallel()
 		body := getBody(ctx, t, baseURL+"/")
