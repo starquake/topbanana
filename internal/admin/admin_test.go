@@ -546,8 +546,20 @@ func TestHandleIndex(t *testing.T) {
 	if got, want := rr.Code, http.StatusOK; got != want {
 		t.Errorf("got status code %v, want %v", got, want)
 	}
-	if got, want := rr.Body.String(), "Admin Dashboard"; !strings.Contains(got, want) {
-		t.Errorf("rr.Body.String() = %q, want %q", got, want)
+	// invariant pinned by #316: the landing page surfaces a tile for
+	// each of the three top-level admin entry points so a fresh admin
+	// can discover them without typing URLs.
+	body := rr.Body.String()
+	for _, want := range []string{
+		"Admin Dashboard",
+		`href="/admin/quizzes"`,
+		`href="/admin/quizzes/new"`,
+		`href="/admin/quizzes/import"`,
+		"Import quiz",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q", want)
+		}
 	}
 }
 
