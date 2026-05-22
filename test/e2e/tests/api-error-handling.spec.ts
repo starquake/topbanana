@@ -6,16 +6,6 @@ import {
   QUIZ_QUESTIONS,
 } from './helpers';
 
-// #312: chromium runs in CI stall before the first question's option
-// button renders after startQuizAsAnonymous — root cause not yet
-// pinned. Retries don't help because the tests register a per-project
-// admin username up front and a retry collides with ErrUsernameTaken,
-// so until #312 is debugged the chromium project is opted out at the
-// file level. Firefox runs both tests.
-test.beforeEach(({ browserName }) => {
-  test.skip(browserName === 'chromium', 'flake tracked in #312');
-});
-
 // Covers issue #287: the player-client JS services used to call
 // response.json() on every response, which threw SyntaxError on
 // plain-text 4xx/5xx bodies. The retry banner — wired to that catch —
