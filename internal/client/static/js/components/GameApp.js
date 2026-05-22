@@ -108,6 +108,12 @@ export class GameApp {
         // element across the whole question lifetime.
         this.revealing = false;
         this.revealTimer = null;
+        // Offset between the server clock and Date.now() in ms,
+        // refreshed from `serverNow` in every question payload (#180).
+        // serverTime() applies it so the per-question countdown runs
+        // against the server's view of "now" instead of the device's,
+        // which can be minutes off on phones with stale time.
+        this.clockOffset = 0;
         // Server-Sent Events handle for the leaderboard live stream
         // (#239). Opened when the leaderboard becomes visible; closed on
         // navigation away. Null when no subscription is active.
@@ -507,9 +513,34 @@ export class GameApp {
             return;
         }
         this.imageError = false;
+        this.syncClockFrom(question);
         this.question = question;
         this.startRevealCountdown();
         this.animateQuestionEntrance();
+    }
+
+    // syncClockFrom recomputes clockOffset from the serverNow that
+    // travels with every question payload. A per-question reset keeps
+    // drift bounded without needing a separate clock-sync endpoint;
+    // the only remaining error is one-way network delay (RTT/2), which
+    // is negligible against a 10-second answer window. A missing
+    // serverNow (older server) leaves clockOffset at 0 — the existing
+    // skew-vulnerable behaviour, not a regression.
+    syncClockFrom(question) {
+        if (!question || !question.serverNow) return;
+        const serverMs = new Date(question.serverNow).getTime();
+        if (!Number.isFinite(serverMs)) return;
+        this.clockOffset = serverMs - Date.now();
+    }
+
+    // serverTime returns the current time in ms as the server sees it,
+    // using clockOffset captured on the last question payload. All
+    // per-question countdown math goes through this helper so a
+    // skewed device clock can't push the timer past expiredAt
+    // (forward skew) or hold it open past the server window (backward
+    // skew) — see #180.
+    serverTime() {
+        return Date.now() + this.clockOffset;
     }
 
     // startRevealCountdown drives the pre-answer beat (#247) by filling
@@ -525,7 +556,7 @@ export class GameApp {
     // had.
     startRevealCountdown() {
         const startAt = new Date(this.question.startedAt).getTime();
-        const revealStart = Date.now();
+        const revealStart = this.serverTime();
         if (revealStart >= startAt) {
             this.revealing = false;
             this.startCountdown();
@@ -535,7 +566,7 @@ export class GameApp {
         this.revealing = true;
         this.progress = 0;
         this.revealTimer = setInterval(() => {
-            const now = Date.now();
+            const now = this.serverTime();
             if (now >= startAt) {
                 this.progress = 100;
                 clearInterval(this.revealTimer);
@@ -701,7 +732,7 @@ export class GameApp {
         this.progress = 100;
 
         this.timer = setInterval(() => {
-            const now = new Date().getTime();
+            const now = this.serverTime();
             const remaining = end - now;
             this.progress = Math.max(0, (remaining / total) * 100);
 

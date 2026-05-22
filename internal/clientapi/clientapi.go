@@ -646,7 +646,8 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 		Text string `json:"text"`
 	}
 
-	// Position/Total drive the in-game HUD chip (#253).
+	// Position/Total drive the in-game HUD chip (#253); ServerNow
+	// drives the client clock-offset correction (#180).
 	type questionResponse struct {
 		ID        int64            `json:"id"`
 		Text      string           `json:"text"`
@@ -654,6 +655,7 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 		Options   []optionResponse `json:"options"`
 		StartedAt time.Time        `json:"startedAt"`
 		ExpiredAt time.Time        `json:"expiredAt"`
+		ServerNow time.Time        `json:"serverNow"`
 		Position  int              `json:"position"`
 		Total     int              `json:"total"`
 	}
@@ -666,22 +668,14 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 
 		gq, err := service.GetNextQuestion(r.Context(), gameID, playerID)
 		if err != nil {
-			if errors.Is(err, game.ErrGameNotFound) {
+			switch {
+			case errors.Is(err, game.ErrGameNotFound),
+				errors.Is(err, quiz.ErrQuizNotFound),
+				errors.Is(err, game.ErrNoMoreQuestions):
 				http.Error(w, err.Error(), http.StatusNotFound)
-
-				return
+			default:
+				writeInternalError(w, r, logger, "error retrieving next question", err)
 			}
-			if errors.Is(err, quiz.ErrQuizNotFound) {
-				http.Error(w, err.Error(), http.StatusNotFound)
-
-				return
-			}
-			if errors.Is(err, game.ErrNoMoreQuestions) {
-				http.Error(w, err.Error(), http.StatusNotFound)
-
-				return
-			}
-			writeInternalError(w, r, logger, "error retrieving next question", err)
 
 			return
 		}
@@ -705,6 +699,7 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 			Options:   resOptions,
 			StartedAt: gq.StartedAt,
 			ExpiredAt: gq.ExpiredAt,
+			ServerNow: time.Now().UTC(),
 			Position:  gq.Position,
 			Total:     gq.Total,
 		}
