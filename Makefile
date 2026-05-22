@@ -146,6 +146,16 @@ test-e2e:
 smoke:
 	go run ./cmd/server/ -check
 
+# Populate the local dev DB from dev/fixtures/quizzes.json so the
+# player and admin UIs are easy to eyeball with realistic content. The
+# seeder is idempotent on quizzes (re-running skips slug collisions
+# via quiz.ErrSlugTaken), but each invocation creates a fresh batch of
+# anonymous players + finished games — so repeated runs grow the
+# popular and active-players lists.
+.PHONY: seed-dev
+seed-dev:
+	go run ./cmd/seed-dev/
+
 # --- Tailwind ---------------------------------------------------------------
 #
 # We use the Tailwind CLI v4 standalone binary so there is no Node.js, npm,
