@@ -131,6 +131,19 @@
     .form-input-readonly {
         @apply bg-surface-2 text-text-dim border-dashed cursor-not-allowed;
     }
+    /* Invalid-field treatment used on inline form validation re-render
+     * (#32). Borrows the danger token so the affordance reads as
+     * "something wrong here" without yanking the eye away from the
+     * focused control. */
+    .form-input-error {
+        @apply border-danger;
+    }
+    /* Per-field help message rendered under an invalid input. Mirrors
+     * the danger banner used at the top of the form (#293) but inline
+     * and tighter so multiple field errors stack cleanly. */
+    .form-help-error {
+        @apply mt-1.5 text-danger text-[0.78rem];
+    }
     .form-label {
         @apply block mb-1.5 text-sm font-medium text-text;
     }

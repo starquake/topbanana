@@ -33,9 +33,15 @@
         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
         <input type="hidden" name="id" value="{{.Question.ID}}">
 
+        {{$textErr := index .FieldErrors "text"}}
         <div class="form-field">
             <label class="label-eyebrow" for="text">Question text</label>
-            <textarea id="text" name="text" rows="3" class="form-input min-h-[100px] resize-y">{{.Question.Text}}</textarea>
+            <textarea id="text" name="text" rows="3"
+                      class="form-input min-h-[100px] resize-y{{if $textErr}} form-input-error{{end}}"
+                      {{if $textErr}}aria-invalid="true" aria-describedby="text-error"{{end}}>{{.Question.Text}}</textarea>
+            {{if $textErr}}
+                <p id="text-error" class="form-help-error" role="alert">{{$textErr}}</p>
+            {{end}}
         </div>
 
         <div class="form-field">
@@ -60,11 +66,15 @@
             </div>
         </div>
 
+        {{$optionsErr := index .FieldErrors "options"}}
         <div class="form-field">
             <label class="label-eyebrow" for="option[0].text">
                 Options
                 <span class="label-hint">Tap &ldquo;Correct&rdquo; to mark the right answer(s)</span>
             </label>
+            {{if $optionsErr}}
+                <p class="form-help-error" role="alert">{{$optionsErr}}</p>
+            {{end}}
             <div>
                 <div class="option-row">
                     <span class="option-letter" aria-hidden="true">A</span>
