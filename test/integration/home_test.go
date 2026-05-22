@@ -143,6 +143,47 @@ func TestHome_Integration(t *testing.T) {
 			t.Errorf("status = %d, want %d", got, want)
 		}
 	})
+
+	// #284 — /quizzes is the public list of every visible quiz. The
+	// headline AC is "includes a quiz that has never been played": the
+	// home page's popular list filters by play count over the last 30
+	// days, so a brand-new quiz wouldn't surface there. Seeding a
+	// never-played quiz here pins that the /quizzes path does NOT
+	// inherit the same filter.
+	neverPlayed := &quiz.Quiz{
+		Title:             "Newly Authored",
+		Slug:              "newly-authored",
+		Description:       "Just published — no one has played yet.",
+		CreatedByPlayerID: seededAdminID,
+		Questions: []*quiz.Question{
+			{Text: "Q1", Position: 1, Options: []*quiz.Option{{Text: "ok", Correct: true}}},
+		},
+	}
+	if err := stores.Quizzes.CreateQuiz(ctx, neverPlayed); err != nil {
+		t.Fatalf("CreateQuiz neverPlayed err = %v, want nil", err)
+	}
+
+	t.Run("GET /quizzes lists every quiz including ones with zero plays", func(t *testing.T) {
+		t.Parallel()
+		body := getBody(ctx, t, baseURL+"/quizzes")
+
+		for _, want := range []string{
+			`<title>All quizzes — Top Banana!</title>`,
+			"Bananas of the World",
+			"Capital Cities",
+			// The never-played quiz must appear — the home page would
+			// hide it (0 plays in the popular-30-day window) but
+			// /quizzes is the discoverable home for it.
+			"Newly Authored",
+			"Just published — no one has played yet.",
+			`href="/play/newly-authored-`,
+			`1 question`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("body missing %q", want)
+			}
+		}
+	})
 }
 
 // finishGameInt creates a finished game for the (player, quiz) pair:

@@ -23,9 +23,16 @@
              primary action for a visitor landing here, so it earns the
              real estate. The list collapses to a single column under md. */}}
         <section class="md:col-span-2" aria-labelledby="popular-heading">
-            <h2 id="popular-heading" class="font-display text-sm font-semibold uppercase tracking-[0.16em] text-text-dim mb-4">
-                Popular quizzes
-            </h2>
+            {{/* "Browse all" link sits inline with the section header so
+                 it's discoverable without competing with the popular
+                 cards below. Points at /quizzes (#284) for visitors who
+                 want to see beyond the top-six 30-day window. */}}
+            <div class="flex items-baseline justify-between gap-3 mb-4">
+                <h2 id="popular-heading" class="font-display text-sm font-semibold uppercase tracking-[0.16em] text-text-dim">
+                    Popular quizzes
+                </h2>
+                <a href="/quizzes" class="text-xs text-text-dim hover:text-text underline-offset-2 hover:underline">Browse all</a>
+            </div>
             {{if .PopularQuizzes}}
                 {{/* Stretched-link pattern (same as admin/quizlist):
                      the play link is anchored to the title and uses a

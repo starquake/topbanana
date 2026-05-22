@@ -77,18 +77,16 @@ test('409 on startGame recovers via getMyGameForQuiz', async ({ page, browserNam
   await page.getByRole('button', { name: 'Log out' }).click();
   await expect(page).toHaveURL(/\/login$/);
 
-  // Visit /client/ first so /api/players/me mints an anonymous player;
-  // the recovery /my-game stub then ties a fake game to that player.
-  await page.goto('/client/');
-  const select = page.locator('select');
-  await expect(select.locator('option', { hasText: quizTitle })).toHaveCount(1);
-  await select.selectOption({ label: quizTitle });
-  // Wait for Alpine's checkAlreadyPlayed (kicked off by the @change on
-  // the select) to finish before installing the route stubs below —
-  // its real-server /my-game call would otherwise increment myGameCount
-  // and break the count the test asserts on. The Leaderboard heading
-  // appears only after the leaderboard fetch resolves (#234), which
-  // happens after the /my-game call, so it's the right gating marker.
+  // Navigate via the public list (#284) so /api/players/me mints an
+  // anonymous player and the resulting /play/{slug-id} pre-selects the
+  // quiz. Wait for Alpine init's checkAlreadyPlayed to finish (its
+  // /my-game + /leaderboard calls would otherwise hit the route stubs
+  // set up below and corrupt the counts the test asserts on); the
+  // Leaderboard heading is visible only AFTER the leaderboard fetch
+  // resolves, so it's the right gating marker.
+  await page.goto('/quizzes');
+  await page.getByRole('link', { name: quizTitle }).click();
+  await expect(page).toHaveURL(/\/play\//);
   await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
 
   // Intercept the start-game POST with a 409 (one shot) and let

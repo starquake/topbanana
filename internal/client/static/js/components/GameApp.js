@@ -142,9 +142,12 @@ export class GameApp {
         if (deepLinked) {
             this.deepLinkedQuiz = deepLinked;
             this.selectedQuizId = deepLinked.id;
-        } else if (this.quizzes.length > 0) {
-            this.selectedQuizId = this.quizzes[0].id;
         }
+        // No auto-default to quizzes[0] (#284): the in-page picker was
+        // replaced by a link to /quizzes, so /client/ without a deep
+        // link has no selection to drive. Leaving selectedQuizId null
+        // hides the Start button + leaderboard until the player picks
+        // a quiz via /quizzes.
         await this.checkAlreadyPlayed();
     }
 

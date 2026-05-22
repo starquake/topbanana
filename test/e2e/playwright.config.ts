@@ -80,6 +80,7 @@ export default defineConfig({
         'e2e-admin-share-revisit-chromium', 'e2e-admin-share-revisit-firefox', // share.spec.ts revisit
         'e2e-admin-287-chromium', 'e2e-admin-287-firefox',                          // api-error-handling.spec.ts 400 branch
         'e2e-admin-287-conflict-chromium', 'e2e-admin-287-conflict-firefox',        // api-error-handling.spec.ts 409 branch
+        'e2e-admin-quizzes-chromium', 'e2e-admin-quizzes-firefox',                  // player.spec.ts #284 public list test
       ].join(','),
     },
     reuseExistingServer: false,
