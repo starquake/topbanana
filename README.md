@@ -4,7 +4,11 @@ Top Banana! is a self-hosted quiz service built with Go, focussing on simplicity
 [![Go Report Card](https://goreportcard.com/badge/github.com/starquake/topbanana)](https://goreportcard.com/report/github.com/starquake/topbanana)
 ![coverage](https://raw.githubusercontent.com/starquake/topbanana/badges/.badges/main/coverage.svg)
 
-This repository also serves as a showcase for my software engineering and Go skills. Learn more about the [Technical Stack & Techniques](#technical-stack--techniques).
+## AI use
+
+I use AI extensively while writing this codebase. Every single line of code is reviewed and signed off before it lands. Media (sounds, images, videos) is not AI-generated.
+
+If contributions come in later, I'll start from [Ghostty's AI_POLICY.md](https://github.com/ghostty-org/ghostty/blob/main/AI_POLICY.md) as a baseline.
 
 ## Demo
 
@@ -17,112 +21,134 @@ This repository also serves as a showcase for my software engineering and Go ski
 A link to a live demo will be provided soon.
 
 ## Features
-- **Quiz Creation**: Create and edit quizzes with questions and answers.
-- **Gameplay**: Play quizzes solo or with friends (soon&trade;).
-- **Self-Hosted**: Run directly or with Docker.
+- **Quiz authoring**: Create and edit quizzes from the admin UI — title, description, and multi-option questions.
+- **Gameplay**: Each player plays at their own pace; the leaderboard updates as they finish.
+- **Self-hosted**: Run as a Go binary or via Docker.
 
-## Demo
+## Installation
 
-A demo will be provided soon.
+### Local development
 
-## Technical Stack & Techniques
+Prerequisites:
 
-### Backend & Architecture
-- **Modern Go Implementation**: Build using the latest language features and standard library enhancements.
-- **Enhanced Routing**: Uses the Go 1.22+ `http.ServeMux` for pattern-based routing, reducing reliance on third-party web frameworks.
-- **Modular Monolith**: Using packages to separate concerns into logical domains (API, game logic, storage), following the [standard Go server project layout](https://go.dev/doc/modules/layout#server-project).   
-- **Service Layer Pattern**: Business logic is decoupled from both transport (HTTP) and persistence (SQL) layers which should make it easier to maintain and extend in the future.
-- **Dependency Injection**: Explicitly managed dependencies through constructor injection and interfaces providing loose coupling and better testability.
-- **Graceful Shutdown**: Handling of SIGTERM signals to gracefully shutdown the server, handling in-flight requests, and closing database connections.
-- **Structured Logging**: Using `log/slog` for consistent machine-readable structured logging.
+- **Go** — the version pinned in [`go.mod`](go.mod).
+- **Node.js 20+** — only needed for `make test-e2e`. The rest of the workflow runs without it.
+- **`golangci-lint` and `sqlc`** are downloaded automatically into `build/bin/` by the Makefile targets that need them.
 
-### Persistence & Data Modeling
-- **Type-Safe SQL with [sqlc](https://github.com/sqlc-dev/sqlc)**: SQL-first development that generates type-safe Go code from raw queries, providing compile-time guarantees for database interactions.
-- **CGO-Free SQLite**: Uses modernc.org/sqlite to keep the project portable and cross-platform, avoiding the need for CGO and any C dependencies.
-- **Automated Migrations**: Schema versiong and evolution managed by [goose](https://github.com/pressly/goose).
-- **Global Unique IDs**: Uses [xid](https://github.com/rs/xid) for generating globally unique, sortable and URL-friendly identifiers.
-- **Database Transactions**: Ensuring atomicity of database operations by wrapping them in a transaction.
+Clone, build, and run:
 
-### Quality Assurance
-- **Thorough Testing Suite**
-  - **Unit Testing**: Targeted tests for individual packages and functions.
-  - **Integration Testing**: Full-cycle tests against a real database instance.
-- **Concurrency Safety**: Tests run with Go race detector (`-race`) and parrallel test execution for every test.
-- **Static Analysis & Linting**: Integration of `golangci-lint` and `sqlc vet` into the development workflow to maintain high code quality and SQL correctness.
-- **Test Coverage**: Automated coverage checks in CI using `go-test-coverage` to maintain high testing standards.
-- **Dependency Updates**: Periodic dependency checks with Dependabot to ensure up-to-date dependencies.
+```bash
+git clone https://github.com/starquake/topbanana.git
+cd topbanana
+make build
+go run ./cmd/server/
+```
 
-### CI/CD DevOps
-- **GitHub Actions**: Automated pipelines for:
-  - **Continuous Integration**: Linting and testing on every pull request.
-  - **Docker Automation**: Multi-stage Docker builds pushed to GitHub Container Registry (GHCR).
-  - **Automated Deployment**: Staging and production deployments triggered by successful builds.
-- **Secure Containerization**:
-  - **Distroless Images**: Uses Google's `distroless` images to minimize attack surface and image size.
-  - **Non-Root Execution**: Runs as a non-root user with limited privileges.
-- **Supply Chain Security**: Docker images are signed using `cosign` to ensure image integrity.
-- **Environment Variables**: Configuration via environment variables with support for .env files.
+The server listens on `http://localhost:8080` by default. Verify it's up:
 
-### Development Experience (DX)
-- **Makefile Automation**: A unified interface for common tasks: `make check`, `make test`, `make build`.
-- **Server-Side Rendering (SSR)**: Admin interface built with Go's `html/template`.
-- **Minimalist Frontend**: A clean client interface using modern JavaScript and CSS without the overhead of a framework.
-- **Hot Reloading**: Changes in HTML or JavaScript files are immediately reflected in the browser on a page reload.    
+```bash
+curl http://localhost:8080/healthz
+# {"status":"ok"}
+```
+
+`go run ./cmd/server/` writes the SQLite database to `topbanana.sqlite` in the working directory and runs pending migrations on every start.
+
+### Docker Compose
+
+The repo's [`docker-compose.yml`](docker-compose.yml) builds the image from the project's [`Dockerfile`](Dockerfile) and runs it with a named volume for the SQLite file:
+
+```bash
+docker compose up --build
+```
+
+The compose file sets `REGISTRATION_ENABLED=true` and `ADMIN_USERNAMES=admin`, so a fresh stack lets you register the first `admin` user without further setup. The SQLite database lives in the `topbanana_data` Docker volume at `/home/nonroot/data/topbanana.sqlite`.
+
+### Bootstrapping the first admin
+
+Registration is closed by default. Two ways to create the first admin:
+
+1. **Open registration briefly.** Start the server with `REGISTRATION_ENABLED=true`, visit `/register`, sign up — the first password-bearing registrant is auto-promoted to admin — then restart with the variable unset.
+2. **Whitelist a username.** Set `ADMIN_USERNAMES=alice` (comma-separated), keep registration open, and any user that registers with one of those usernames is promoted on signup. Useful for self-hosted deployments where you control the username up front.
 
 ## Project Structure
 
 Following the official guidelines for a [standard Go server project layout](https://go.dev/doc/modules/layout#server-project).
 
 ### Folders
-- `cmd/topbanana`: Application entrypoint.
-- `deployments`: Docker compose configuration for the Demo. Can be used as an example.
+- `cmd/server`: Application entrypoint.
+- `cmd/seed-dev`: Seeds the local dev database with example quizzes.
+- `deployments`: Docker compose configurations for the staging and production demo deployments.
 - `docs`: Documentation for the project.
 - `internal/`: Private library code, including domain logic, database operations, HTTP handlers.
-  - `admin`: Business Logic for the admin interface.
-  - `client`: Client interface using Javascript and CSS.
-  - `clientapi`: API used by the client.
+  - `absurl`: Builds absolute URLs from a request for share links and Open Graph cards.
+  - `admin`: Business logic for the admin interface.
+  - `auth`: Session players and role-based access helpers.
+  - `client`: Player client shell — embedded HTML/JS/CSS.
+  - `clientapi`: JSON API used by the player client.
   - `config`: Configuration management.
+  - `csrf`: CSRF token issuance and validation.
   - `database`: Database connection and utilities.
   - `db`: Database operations and models generated by `sqlc`.
   - `dbtest`: Helpers for testing database operations.
   - `game`: Business logic for gameplay.
-  - `health`: Health check endpoint.
   - `handlers`: HTTP utilities for handlers, parsing query parameters, encoding and decoding JSON, and more.
+  - `health`: Health check endpoint.
+  - `home`: Public landing page and `/quizzes` directory.
+  - `leaderboard`: Live leaderboard pub/sub hub used by the SSE stream.
   - `migrations`: Database migrations.
-  - `queries`: SQL queries used by the `sqlc` for the application.
+  - `queries`: SQL queries used by `sqlc`.
   - `quiz`: Business logic for quiz creation and management.
   - `server`: HTTP server, routes, and middleware.
+  - `session`: Cookie session encoding and verification.
   - `store`: Database storage layer for quizzes and games.
   - `testutil`: Helpers for testing the application.
-  - `web`: Admin interface using `html/template`.
-- `test`: Integration tests for the application.
+  - `web`: Admin templates and embedded static assets (`html/template` + Tailwind).
+- `test`: Integration and end-to-end tests.
 
 ### Files
-- `.env.example`: Example environment variables file.
 - `.golangci.yaml`: Configuration for `golangci-lint`.
 - `docker-compose.yml`: Docker compose configuration for development.
 - `Dockerfile`: Dockerfile for building the application.
 - `sqlc.yaml`: Configuration for `sqlc`.
 - `Makefile`: Makefile for common tasks.
 
-## Installation
-
-Instructions will be provided soon.
-
 ## Configuration
 
-Top Banana is configured through environment variables. The variables introduced with the register / login flow are:
+Top Banana is configured through environment variables. Sensible defaults apply in development; production deployments must set at least `SESSION_KEY` and `DB_URI`.
+
+### Server
+
+- **`APP_ENV`** — `development` (default) or `production`. Production mode enforces `SESSION_KEY` and `DB_URI`.
+- **`HOST`** — interface to bind. Defaults to the empty string (all interfaces).
+- **`PORT`** — TCP port. Defaults to `8080`.
+- **`DB_URI`** — modernc.org/sqlite connection string. Defaults to `file:topbanana.sqlite` in development; **required** in production.
+- **`CLIENT_DIR`** — development-only override that serves the player client from a directory on disk instead of the embedded FS, so HTML/JS edits hot-reload on page reload.
+
+### Database tuning
+
+- **`DB_MAX_OPEN_CONNS`** — `database/sql` max open connections.
+- **`DB_MAX_IDLE_CONNS`** — max idle connections held in the pool.
+- **`DB_CONN_MAX_LIFETIME`** — Go duration string (e.g. `30m`) after which idle connections are recycled.
+
+### Auth and access
 
 - **`SESSION_KEY`** — secret used to HMAC-sign session cookies. Defaults to a random ephemeral key in development; **required** in production. Treat as a credential — rotating it invalidates every active session.
 - **`ADMIN_USERNAMES`** — comma-separated list of usernames. A registrant whose trimmed username matches an entry is promoted to `admin` on registration. The very first password-bearing registrant becomes admin regardless of this list. Defaults to empty.
 - **`REGISTRATION_ENABLED`** — when `false` (the default), `GET/POST /register` return `404` and the "No account? Register" link is hidden on `/login`. Set to `true` to allow new sign-ups — typically just long enough to bootstrap your first admin, then unset to lock the instance down.
 
-## Development
+### Gameplay
 
-### Code Organization
-- All packages are organized into packages based on functionality.
-- Package have names that reflect their purpose.
-- Packages are focused on a single responsibility.
+- **`REVEAL_DELAY`** — Go duration string (e.g. `1500ms`) for the per-question reveal beat. Defaults to a small value chosen for live play.
+
+## Troubleshooting
+
+- **`address already in use` on `:8080`** — another process holds the port. Either stop it or set `PORT` to a free one (`PORT=8081 go run ./cmd/server/`).
+- **`SESSION_KEY must be set in production`** — `APP_ENV=production` and no `SESSION_KEY`. Generate one (`openssl rand -hex 32`), set it, and restart.
+- **`database is locked` under load** — SQLite serialises writes. The compose file's connection string already enables WAL mode and a `busy_timeout`; for local dev add the same `?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)` to your `DB_URI`.
+- **`make check` reports `app.css is out of date`** — Tailwind output drifted. Run `make tailwind` and commit the regenerated `internal/web/static/css/app.css`.
+- **E2E setup** — see [`docs/e2e.md`](docs/e2e.md) for Playwright prerequisites and the `make test-e2e` workflow.
+
+## Development
 
 ### Code Style
 This project uses conventions used by the standard library and the following style guides:
