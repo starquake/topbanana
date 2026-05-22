@@ -1,7 +1,8 @@
-// Package home renders the public start page at GET /. It surfaces the
-// most-played quizzes from the last 30 days and the most active players,
-// alongside a discreet link into the admin dashboard. The page is
-// server-rendered HTML; no auth required.
+// Package home renders the public-facing pages at GET / and GET
+// /quizzes. The start page (/) surfaces popular quizzes + most active
+// players; the all-quizzes page (#284) surfaces every visible quiz so
+// niche or recently-authored quizzes are findable beyond the top-six
+// popular list. Both are server-rendered HTML and require no auth.
 package home
 
 import (
@@ -13,6 +14,7 @@ import (
 	"net/http"
 
 	"github.com/starquake/topbanana/internal/absurl"
+	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
 
@@ -73,7 +75,7 @@ type pageData struct {
 // renders an empty state for the failing section so the admin link
 // stays reachable even if the database is having a bad day.
 func Handle(logger *slog.Logger, store Store) http.Handler {
-	t := parseTemplate()
+	t := parseTemplate("home/pages/index.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data := pageData{Title: "Top Banana!"}
@@ -92,25 +94,110 @@ func Handle(logger *slog.Logger, store Store) http.Handler {
 			data.ActivePlayers = truncate(players)
 		}
 
-		// Clone before binding the per-request ogImage func so concurrent
-		// renders don't race on the shared template tree. Mirrors the
-		// admin/auth renderers; the home template only needs ogImage
-		// at request time (#294).
-		rt, cerr := t.Clone()
-		if cerr != nil {
-			logger.ErrorContext(r.Context(), "clone home template", slog.Any("err", cerr))
-			http.Error(w, "internal error", http.StatusInternalServerError)
-
-			return
-		}
-		rt = rt.Funcs(template.FuncMap{
-			"ogImage": func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
-		})
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := rt.ExecuteTemplate(w, "base.gohtml", data); err != nil {
-			logger.ErrorContext(r.Context(), "render home template", slog.Any("err", err))
-		}
+		executeWithOGImage(w, r, logger, t, "render home template", data)
 	})
+}
+
+// QuizLister is the read-only data dependency the all-quizzes handler
+// needs. Implemented by store.QuizStore (already exposes both methods
+// for the admin list); a separate interface keeps the home package
+// free of any direct dependency on the *store package.
+type QuizLister interface {
+	ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error)
+	QuestionCountsByQuiz(ctx context.Context) (map[int64]int, error)
+}
+
+// AllQuizRow is one row in the /quizzes list. Strictly a presentation
+// type — no behaviour beyond [AllQuizRow.PlayURL] — so the template
+// doesn't need to know anything about quiz.Quiz internals.
+type AllQuizRow struct {
+	ID                int64
+	Title             string
+	Slug              string
+	Description       string
+	QuestionCount     int
+	CreatedByUsername string
+}
+
+// PlayURL is the share-able deep link the row card points at. Mirrors
+// [PopularQuiz.PlayURL] so a player landing on /quizzes vs the home
+// page picks up the same share path.
+func (a AllQuizRow) PlayURL() string {
+	return fmt.Sprintf("/play/%s-%d", a.Slug, a.ID)
+}
+
+// allQuizzesData backs all-quizzes.gohtml. The slice can be empty when
+// no quizzes exist yet — the template renders an empty-state message
+// rather than a bare page.
+type allQuizzesData struct {
+	Title   string
+	Quizzes []*AllQuizRow
+}
+
+// HandleAllQuizzes returns the [http.Handler] for GET /quizzes (#284).
+// Lists every quiz, most-recently-updated first, so newly-authored or
+// off-the-30-day-window quizzes stay findable. Question counts come
+// from a single QuestionCountsByQuiz call to avoid the N+1 a per-row
+// lookup would produce. A failure in either underlying query renders
+// the page with the empty list rather than 500-ing — the admin link
+// in the footer stays reachable.
+//
+// Once quiz visibility (#103) lands this query must filter on
+// `visibility = 'public'`; until then "every quiz" means every row.
+func HandleAllQuizzes(logger *slog.Logger, store QuizLister) http.Handler {
+	t := parseTemplate("home/pages/all-quizzes.gohtml")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data := allQuizzesData{Title: "All quizzes — Top Banana!"}
+
+		quizzes, err := store.ListQuizzes(r.Context())
+		if err != nil {
+			logger.ErrorContext(r.Context(), "list all quizzes", slog.Any("err", err))
+		}
+		counts, err := store.QuestionCountsByQuiz(r.Context())
+		if err != nil {
+			logger.ErrorContext(r.Context(), "question counts by quiz", slog.Any("err", err))
+			counts = map[int64]int{}
+		}
+
+		data.Quizzes = make([]*AllQuizRow, 0, len(quizzes))
+		for _, qz := range quizzes {
+			data.Quizzes = append(data.Quizzes, &AllQuizRow{
+				ID:                qz.ID,
+				Title:             qz.Title,
+				Slug:              qz.Slug,
+				Description:       qz.Description,
+				QuestionCount:     counts[qz.ID],
+				CreatedByUsername: qz.CreatedByUsername,
+			})
+		}
+
+		executeWithOGImage(w, r, logger, t, "render all-quizzes template", data)
+	})
+}
+
+// executeWithOGImage clones t, binds the per-request `ogImage` func,
+// and runs base.gohtml. Pulled out so [Handle] and [HandleAllQuizzes]
+// share the clone-and-Funcs dance — without the clone, concurrent
+// renders race on the shared template tree (#294).
+func executeWithOGImage(
+	w http.ResponseWriter, r *http.Request, logger *slog.Logger,
+	t *template.Template, errMsg string, data any,
+) {
+	rt, cerr := t.Clone()
+	if cerr != nil {
+		logger.ErrorContext(r.Context(), "clone template", slog.Any("err", cerr))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+
+		return
+	}
+	rt = rt.Funcs(template.FuncMap{
+		"ogImage": func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
+	})
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := rt.ExecuteTemplate(w, "base.gohtml", data); err != nil {
+		logger.ErrorContext(r.Context(), errMsg, slog.Any("err", err))
+	}
 }
 
 // truncate caps the slice at [maxItems]. The home page lists are
@@ -125,11 +212,16 @@ func truncate[T any](rows []T) []T {
 	return rows
 }
 
-// parseTemplate loads the home layout + page templates from the embedded
-// tmpl.FS. The {{add}} func renders a 1-based rank next to each entry
-// in the active-players list; html/template has no arithmetic builtin,
-// so it is registered here.
-func parseTemplate() *template.Template {
+// parseTemplate loads the home layout plus one page template from the
+// embedded tmpl.FS. Each page declares its own `content` block, so
+// parsing the layout + a single page keeps the block definitions
+// unambiguous — a glob across pages would clobber `content` to whatever
+// file came last (#284 added the second page).
+//
+// The {{add}} func renders a 1-based rank next to each entry in the
+// active-players list; html/template has no arithmetic builtin, so it
+// is registered here.
+func parseTemplate(page string) *template.Template {
 	funcs := template.FuncMap{
 		"add":     func(a, b int) int { return a + b },
 		"ogImage": func() string { return "" },
@@ -138,7 +230,7 @@ func parseTemplate() *template.Template {
 		template.New("").Funcs(funcs).ParseFS(tmplFS(), "home/layouts/*.gohtml"),
 	)
 
-	return template.Must(base.ParseFS(tmplFS(), "home/pages/*.gohtml"))
+	return template.Must(base.ParseFS(tmplFS(), page))
 }
 
 // tmplFS exposes the embedded template FS as [fs.FS] so the parse

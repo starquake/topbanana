@@ -111,17 +111,19 @@ export async function playThroughQuiz(page: Page, quizTitle: string): Promise<vo
   await answerRemainingQuestions(page);
 }
 
-// startQuizAsAnonymous navigates to /client/, picks the named quiz from the
-// dropdown, and clicks Start Game. Stops before the first question's options
-// are clicked so a caller can interleave timer/timeout behaviour between the
-// start and the answer loop.
+// startQuizAsAnonymous navigates to the public /quizzes list, clicks the
+// card matching quizTitle (which lands on /play/{slug-id}), and clicks
+// Start Game. Replaces the pre-#284 dropdown-on-/client/ flow — the
+// SPA's quiz picker was retired in favour of the dedicated list page.
+// Stops before the first question's options are clicked so a caller
+// can interleave timer/timeout behaviour between the start and the
+// answer loop.
 export async function startQuizAsAnonymous(page: Page, quizTitle: string): Promise<void> {
-  await page.goto('/client/');
-
-  // Alpine fetches the quiz list asynchronously, so wait for our title.
-  const select = page.locator('select');
-  await expect(select.locator('option', { hasText: quizTitle })).toHaveCount(1);
-  await select.selectOption({ label: quizTitle });
+  await page.goto('/quizzes');
+  // The card title is rendered as a stretched <a> so getByRole('link')
+  // finds the play-deep-link anchor. Clicking it lands on the SPA
+  // shell at /play/{slug-id} with the quiz pre-selected.
+  await page.getByRole('link', { name: quizTitle }).click();
   await page.getByRole('button', { name: 'Start Game' }).click();
 }
 

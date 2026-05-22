@@ -17,17 +17,13 @@ test('player client start screen has a share button that opens the dialog with i
   await registerAdmin(page, username);
   await createQuizWithQuestions(page, quizTitle);
 
-  // Drop the admin session and visit /client/ as an anonymous
-  // player so the start screen renders.
+  // Drop the admin session and navigate via the public list (#284)
+  // so the deep-link /play/{slug-id} carries the quiz selection
+  // forward without the retired dropdown.
   await page.context().clearCookies();
-  await page.goto('/client/');
-
-  // Pick the quiz from the dropdown. Without a selection the share
-  // button is hidden (x-show="!!selectedQuizId"), so the click
-  // would land on the wrong target.
-  const select = page.locator('select');
-  await expect(select.locator('option', { hasText: quizTitle })).toHaveCount(1);
-  await select.selectOption({ label: quizTitle });
+  await page.goto('/quizzes');
+  await page.getByRole('link', { name: quizTitle }).click();
+  await expect(page).toHaveURL(/\/play\//);
 
   const shareBtn = page.getByRole('button', { name: 'Share', exact: true });
   await expect(shareBtn).toBeVisible();
@@ -117,11 +113,13 @@ test('share-result reads score from the leaderboard so a revisit still brags the
   expect(score).not.toBe('');
   expect(score).not.toBe('0');
 
-  // Navigate away to a fresh /client/ session — this drops the
-  // in-memory score counter but keeps the player cookie, so the
-  // server still recognises the player as a finisher of this quiz.
-  await page.goto('/client/');
-  await page.locator('select').selectOption({ label: quizTitle });
+  // Navigate to a fresh session via the public list (#284) — this
+  // drops the in-memory score counter but keeps the player cookie,
+  // so the server still recognises the player as a finisher of this
+  // quiz on the resulting /play/{slug-id} deep link.
+  await page.goto('/quizzes');
+  await page.getByRole('link', { name: quizTitle }).click();
+  await expect(page).toHaveURL(/\/play\//);
 
   // The "Game Finished!" heading + leaderboard table confirm we
   // are on the already-played revisit path. The lockout banner

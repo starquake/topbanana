@@ -22,16 +22,14 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   await page.getByRole('button', { name: 'Log out' }).click();
   await expect(page).toHaveURL(/\/login$/);
 
-  // ---- Player flow: pick the quiz, then walk every question by clicking the
-  // first option each time. Predict success/danger feedback per the spec.
-  await page.goto('/client/');
-
-  // Alpine fetches the quiz list asynchronously, so wait for our title to
-  // appear as a real <option> before selecting it. Selecting by label avoids
-  // depending on quiz IDs (the SQLite file accumulates state across specs).
-  const select = page.locator('select');
-  await expect(select.locator('option', { hasText: quizTitle })).toHaveCount(1);
-  await select.selectOption({ label: quizTitle });
+  // ---- Player flow: visit /quizzes (the public list, #284), click the
+  // quiz card to land on /play/{slug-id}, then walk every question by
+  // clicking the first option each time. Predict success/danger
+  // feedback per the spec.
+  await page.goto('/quizzes');
+  await expect(page.getByRole('link', { name: quizTitle })).toBeVisible();
+  await page.getByRole('link', { name: quizTitle }).click();
+  await expect(page).toHaveURL(/\/play\//);
 
   // #234 — the start screen surfaces the quiz leaderboard before the
   // player clicks Start. On a fresh quiz the empty-state copy is the
@@ -147,15 +145,15 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   // loudly so the score-not-zero guard above can't silently degrade.
   expect(expectedSuccesses).toBe(2);
 
-  // Re-visit the start screen. The player has already completed this
-  // quiz (#145 enforces one attempt per (player, quiz)), so the
-  // leaderboard view takes over with the "Game Finished!" heading and
-  // the player's row visible. The lockout banner and the Start button
-  // both disappear because the leaderboard view already conveys the
-  // "you played this" message; only the quiz picker stays visible so
-  // the player can pick a different quiz to play.
-  await page.goto('/client/');
-  await page.locator('select').selectOption({ label: quizTitle });
+  // Re-visit via the public list (#284). The player has already
+  // completed this quiz (#145 enforces one attempt per (player, quiz)),
+  // so the leaderboard view takes over on the deep-link with the
+  // "Game Finished!" heading and the player's row visible. The lockout
+  // banner and the Start button both disappear because the leaderboard
+  // view already conveys the "you played this" message.
+  await page.goto('/quizzes');
+  await page.getByRole('link', { name: quizTitle }).click();
+  await expect(page).toHaveURL(/\/play\//);
   await expect(page.getByRole('heading', { name: 'Game Finished!' })).toBeVisible();
   await expect(page.locator('.player-table')).toBeVisible();
   // The start-screen lockout banner (uses .feedback-banner.feedback-danger)
@@ -164,21 +162,17 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   // start-screen instance, not the in-game splash overlay.
   await expect(page.locator('.feedback-banner.feedback-danger')).toBeHidden();
   await expect(page.getByRole('button', { name: 'Start Game' })).toBeHidden();
-  // Quiz picker still visible — the player can pick another quiz.
-  await expect(page.locator('select')).toBeVisible();
 
   // #234 — a brand-new anonymous visitor (fresh browser context, no
-  // cookie carryover) picking the same quiz on the start screen must
-  // now see a populated leaderboard with the previous player's row.
-  // This is the headline social-proof case: arriving on the start
-  // screen, you see who you're up against before you even click Start.
+  // cookie carryover) deep-linking into the same quiz must see a
+  // populated leaderboard with the previous player's row BEFORE they
+  // click Start. This is the headline social-proof case.
   const otherContext = await browser.newContext();
   try {
     const otherPage = await otherContext.newPage();
-    await otherPage.goto('/client/');
-    const otherSelect = otherPage.locator('select');
-    await expect(otherSelect.locator('option', { hasText: quizTitle })).toHaveCount(1);
-    await otherSelect.selectOption({ label: quizTitle });
+    await otherPage.goto('/quizzes');
+    await otherPage.getByRole('link', { name: quizTitle }).click();
+    await expect(otherPage).toHaveURL(/\/play\//);
 
     // The leaderboard heading + at least one populated row must
     // render BEFORE Start Game is clicked. We don't pin the score —
@@ -191,4 +185,27 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   } finally {
     await otherContext.close();
   }
+});
+
+// #284 — the public list page at /quizzes lists every quiz, and
+// clicking a card lands on its /play/{slug-id} deep link. Pinning this
+// because the SPA's dropdown was retired (the picker now lives at
+// /quizzes), so the navigation contract has to stay green.
+test('public /quizzes lists every quiz and click navigates to play deep-link', async ({ page, browserName }) => {
+  test.setTimeout(60_000);
+
+  const adminUser = `e2e-admin-quizzes-${browserName}`;
+  const quizTitle = `E2E Public List ${browserName}`;
+
+  await registerAdmin(page, adminUser);
+  await createQuizWithQuestions(page, quizTitle);
+  await page.getByRole('button', { name: 'Log out' }).click();
+  await expect(page).toHaveURL(/\/login$/);
+
+  await page.goto('/quizzes');
+  const card = page.getByRole('link', { name: quizTitle });
+  await expect(card).toBeVisible();
+  await card.click();
+  await expect(page).toHaveURL(/\/play\/[^/]+-\d+$/);
+  await expect(page.getByRole('button', { name: 'Start Game' })).toBeVisible();
 });

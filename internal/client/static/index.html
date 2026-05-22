@@ -126,22 +126,15 @@
                  the leaderboard stays directly under the CTA on
                  revisits — see the CTA comment above. -->
             <div x-show="!gameId">
-                <!-- TODO: replace this picker with a link to a dedicated
-                     "list of quizzes" page once that view exists. The
-                     dropdown was always a placeholder for the eventual
-                     gallery / catalogue page; deep links and the start
-                     screen each carry one quiz, so the picker only
-                     matters on the bare /client/ entry point. -->
-                <div x-show="!deepLinkedQuiz" class="mb-6">
-                    <label class="label-eyebrow" for="quiz-select">Select a Quiz</label>
-                    <select id="quiz-select"
-                            class="form-input"
-                            x-model="selectedQuizId"
-                            @change="checkAlreadyPlayed()">
-                        <template x-for="quiz in quizzes" :key="quiz.id">
-                            <option :value="quiz.id" x-text="quiz.title"></option>
-                        </template>
-                    </select>
+                {{/* No quiz pre-selected (the bare /client/ entry,
+                     not a /play/{slug-id} deep link) — surface the
+                     /quizzes browse page as the only affordance.
+                     Replaces the Alpine <select> the SPA carried
+                     pre-#284 as a placeholder for this dedicated
+                     listing page. */}}
+                <div x-show="!deepLinkedQuiz" class="mb-6 flex flex-col gap-3">
+                    <p class="text-text-dim">Pick a quiz to play:</p>
+                    <a href="/quizzes" class="btn-primary self-start">Browse all quizzes</a>
                 </div>
                 <!-- Deep-link title/description, the "already completed"
                      lockout banner, and the Start button all hide on

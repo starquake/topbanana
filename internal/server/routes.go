@@ -54,6 +54,9 @@ func addRoutes(
 	// Public start page (#166). Registered as `GET /{$}` so only the exact
 	// root matches; unknown paths fall through to Go's mux default 404.
 	mux.Handle("GET /{$}", home.Handle(logger, stores.Home))
+	// Public quizzes list (#284). Lists every visible quiz so players
+	// can find ones outside the home page's top-six popular slice.
+	mux.Handle("GET /quizzes", home.HandleAllQuizzes(logger, stores.Quizzes))
 }
 
 // addAuthRoutes registers the unauthenticated auth-flow routes. Registration
