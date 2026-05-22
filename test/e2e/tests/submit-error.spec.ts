@@ -6,16 +6,6 @@ import {
   QUIZ_QUESTIONS,
 } from './helpers';
 
-// #312: chromium runs in CI stall before the first question's option
-// button renders after startQuizAsAnonymous — root cause not yet
-// pinned. Retries don't help because the test registers a per-project
-// admin username up front and a retry collides with ErrUsernameTaken,
-// so until #312 is debugged the chromium project is opted out at the
-// file level. Firefox still runs the test.
-test.beforeEach(({ browserName }) => {
-  test.skip(browserName === 'chromium', 'flake tracked in #312');
-});
-
 // Covers issue #179: when the answers POST throws (server 5xx, network
 // drop), the player client used to leave the question on screen with no
 // feedback, timer drained, and no path forward. The fix re-arms the

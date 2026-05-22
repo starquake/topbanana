@@ -124,6 +124,17 @@ export async function startQuizAsAnonymous(page: Page, quizTitle: string): Promi
   // finds the play-deep-link anchor. Clicking it lands on the SPA
   // shell at /play/{slug-id} with the quiz pre-selected.
   await page.getByRole('link', { name: quizTitle }).click();
+  // #312 — wait for Alpine's init() to have wired the start screen
+  // before clicking. The "Leaderboard" heading is only emitted once
+  // checkAlreadyPlayed has set this.quizSlugId, which happens at the
+  // tail of init(). Without this gate Playwright on chromium races
+  // Alpine's first reactivity tick: the button is in the DOM (visible,
+  // not yet `:disabled` because the binding hasn't evaluated) so the
+  // click "succeeds" but the @click handler isn't attached yet —
+  // startGame() never fires, no POST /api/games leaves the wire, and
+  // the page sits on the start screen until the toBeVisible budget
+  // expires.
+  await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
   await page.getByRole('button', { name: 'Start Game' }).click();
 }
 
