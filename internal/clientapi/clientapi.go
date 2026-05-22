@@ -544,6 +544,13 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 // fresh game (POST /api/games) or continue an existing one.
 //
 // Returns 200 with {"gameId":..., "completed":...} when a game exists.
+// `completed` is true only when the game is truly done from the player's
+// perspective: every quiz question issued AND no question still in its
+// answer window. A reload on the final question (every question issued,
+// last one not yet answered) returns completed=false so the client
+// resumes on the open question instead of showing the post-game
+// leaderboard — see #310.
+//
 // Returns 404 when the player has no game for the quiz, or when the quiz
 // itself does not exist (consistent with other ErrQuizNotFound mappings).
 // Returns 500 when EnsurePlayer hasn't populated the player on the context
@@ -582,7 +589,7 @@ func HandleGameForQuiz(logger *slog.Logger, service *game.Service) http.Handler 
 			return
 		}
 
-		res := gameForQuizResponse{GameID: g.ID, Completed: g.IsCompleted()}
+		res := gameForQuizResponse{GameID: g.ID, Completed: g.IsCompleted() && !g.HasOpenQuestion()}
 
 		if err = handlers.EncodeJSON(w, http.StatusOK, res); err != nil {
 			logger.ErrorContext(ctx, "error encoding gameForQuizResponse", slog.Any("err", err))

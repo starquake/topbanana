@@ -250,6 +250,87 @@ func TestGame_IsCompleted(t *testing.T) {
 	})
 }
 
+func TestGame_HasOpenQuestion(t *testing.T) {
+	t.Parallel()
+
+	t.Run("true when latest issued question is unanswered and unexpired", func(t *testing.T) {
+		t.Parallel()
+
+		future := time.Now().Add(5 * time.Second)
+		g := &Game{
+			Questions: []*Question{
+				{ID: 1, ExpiredAt: future},
+			},
+		}
+		if got, want := g.HasOpenQuestion(), true; got != want {
+			t.Errorf("HasOpenQuestion() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("false when latest question has an answer", func(t *testing.T) {
+		t.Parallel()
+
+		future := time.Now().Add(5 * time.Second)
+		g := &Game{
+			Questions: []*Question{
+				{ID: 1, ExpiredAt: future, Answers: []*Answer{{ID: 1}}},
+			},
+		}
+		if got, want := g.HasOpenQuestion(), false; got != want {
+			t.Errorf("HasOpenQuestion() = %v, want %v (answered question cannot be resumed)", got, want)
+		}
+	})
+
+	t.Run("false when latest question has expired", func(t *testing.T) {
+		t.Parallel()
+
+		past := time.Now().Add(-1 * time.Minute)
+		g := &Game{
+			Questions: []*Question{
+				{ID: 1, ExpiredAt: past},
+			},
+		}
+		if got, want := g.HasOpenQuestion(), false; got != want {
+			t.Errorf("HasOpenQuestion() = %v, want %v (expired question cannot be resumed)", got, want)
+		}
+	})
+
+	t.Run("false when no questions issued yet", func(t *testing.T) {
+		t.Parallel()
+
+		g := &Game{}
+		if got, want := g.HasOpenQuestion(), false; got != want {
+			t.Errorf("HasOpenQuestion() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("true on the final question when window still open", func(t *testing.T) {
+		t.Parallel()
+
+		// Pins the #310 lockout fix: a game with every quiz question
+		// issued must still report HasOpenQuestion when the last one
+		// is unanswered and unexpired, so the /my-game probe can
+		// flip its `completed` field to false and let the client
+		// resume instead of dumping the player on the leaderboard.
+		future := time.Now().Add(5 * time.Second)
+		g := &Game{
+			Quiz: &quiz.Quiz{
+				Questions: []*quiz.Question{{ID: 1}, {ID: 2}},
+			},
+			Questions: []*Question{
+				{ID: 1, ExpiredAt: future.Add(-10 * time.Second), Answers: []*Answer{{ID: 1}}},
+				{ID: 2, ExpiredAt: future},
+			},
+		}
+		if got, want := g.IsCompleted(), true; got != want {
+			t.Errorf("IsCompleted() = %v, want %v (every quiz question has been issued)", got, want)
+		}
+		if got, want := g.HasOpenQuestion(), true; got != want {
+			t.Errorf("HasOpenQuestion() = %v, want %v (last question must be resumable)", got, want)
+		}
+	})
+}
+
 func TestService_GetGameForPlayerOnQuiz(t *testing.T) {
 	t.Parallel()
 
@@ -804,6 +885,119 @@ func TestService_GetNextQuestion(t *testing.T) {
 		// reach into package internals.
 		if got, want := gq.ExpiredAt.Sub(gq.StartedAt), 10*time.Second; got != want {
 			t.Errorf("ExpiredAt - StartedAt = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("back-to-back calls return the same in-flight question", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+
+		testGame := newTestGame(t, testQuiz)
+		if err := gameStore.CreateGame(ctx, testGame); err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		// Participant gate (#272): seed the participant directly since
+		// these tests bypass Service.CreateGame.
+		if err := gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("CreateParticipant err = %v, want nil", err)
+		}
+
+		service := NewService(gameStore, quizStore, slog.Default())
+		first, err := service.GetNextQuestion(ctx, testGame.ID, 1)
+		if err != nil {
+			t.Fatalf("first GetNextQuestion err = %v, want nil", err)
+		}
+
+		// Second call without submitting an answer must return the same
+		// game_questions row — same ID, same timing anchors — so a
+		// mid-question reload doesn't skip the question.
+		second, err := service.GetNextQuestion(ctx, testGame.ID, 1)
+		if err != nil {
+			t.Fatalf("second GetNextQuestion err = %v, want nil", err)
+		}
+		if got, want := second.ID, first.ID; got != want {
+			t.Errorf("second.ID = %d, want %d (resume must hand back same row)", got, want)
+		}
+		if got, want := second.QuizQuestion.ID, first.QuizQuestion.ID; got != want {
+			t.Errorf("second.QuizQuestion.ID = %d, want %d", got, want)
+		}
+		if got, want := second.StartedAt, first.StartedAt; !got.Equal(want) {
+			t.Errorf("second.StartedAt = %v, want %v (timing anchor must not reset)", got, want)
+		}
+		if got, want := second.ExpiredAt, first.ExpiredAt; !got.Equal(want) {
+			t.Errorf("second.ExpiredAt = %v, want %v", got, want)
+		}
+
+		// And no extra game_questions row was inserted.
+		g, err := gameStore.GetGame(ctx, testGame.ID)
+		if err != nil {
+			t.Fatalf("GetGame err = %v, want nil", err)
+		}
+		if got, want := len(g.Questions), 1; got != want {
+			t.Errorf("game_questions count = %d, want %d (resume must not insert)", got, want)
+		}
+	})
+
+	t.Run("advance after an expired unanswered question", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+
+		testGame := newTestGame(t, testQuiz)
+		if err := gameStore.CreateGame(ctx, testGame); err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		if err := gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("CreateParticipant err = %v, want nil", err)
+		}
+
+		// Seed an unanswered game_question whose answer window has
+		// already closed — the timeout path leaves rows like this.
+		// The advance branch must move past it instead of pinning the
+		// player on the expired question.
+		past := time.Now().Add(-1 * time.Minute)
+		expired := &Question{
+			GameID:     testGame.ID,
+			QuestionID: testQuiz.Questions[0].ID,
+			StartedAt:  past,
+			ExpiredAt:  past.Add(10 * time.Second),
+		}
+		if err := gameStore.CreateQuestion(ctx, expired); err != nil {
+			t.Fatalf("CreateQuestion err = %v, want nil", err)
+		}
+
+		service := NewService(gameStore, quizStore, slog.Default())
+		gq, err := service.GetNextQuestion(ctx, testGame.ID, 1)
+		if err != nil {
+			t.Fatalf("GetNextQuestion err = %v, want nil", err)
+		}
+		if got, want := gq.QuizQuestion.ID, testQuiz.Questions[1].ID; got != want {
+			t.Errorf("advanced to QuizQuestion.ID = %d, want %d (expired Q1 must not pin)", got, want)
 		}
 	})
 

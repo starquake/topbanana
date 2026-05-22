@@ -542,8 +542,12 @@ const listGameQuestionsByGameID = `-- name: ListGameQuestionsByGameID :many
 SELECT id, game_id, question_id, started_at, expired_at
 FROM game_questions
 WHERE game_id = ?
+ORDER BY id
 `
 
+// Ordered by id so callers can rely on the last element being the
+// most recently issued question. GetNextQuestion's resume path needs
+// that to decide whether to return the in-flight question or advance.
 func (q *Queries) ListGameQuestionsByGameID(ctx context.Context, gameID string) ([]GameQuestion, error) {
 	rows, err := q.db.QueryContext(ctx, listGameQuestionsByGameID, gameID)
 	if err != nil {
