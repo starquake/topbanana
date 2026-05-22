@@ -2,6 +2,31 @@
 
 What changed in each released version of Top Banana. The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.5.5 — 2026-05-22
+
+Mid-question resume on reload, a public quizzes list, and per-quiz creator ownership.
+
+### Players
+- A page reload mid-quiz now resumes on the same question with the timer intact, instead of dropping the player back on the start screen.
+- A page at `/quizzes` lists every quiz. Clicking a card opens the play page for that quiz.
+- The leaderboard now appears on the start screen as well as on the finish screen, with the requesting player's row highlighted on both.
+- Two different players answering the same question now see the answer options in different orders.
+- The "couldn't submit — please try again" banner now appears only for transient failures (server error, dropped connection). 4xx errors advance the game instead of pinning the banner.
+- A successful login or registration as a non-admin player lands on the home page; admins still land on the admin quiz list.
+- Quiz images now appear in link previews for `/play/...` URLs alongside the title.
+
+### Hosts
+- Each quiz now has a creator. Only the creator and admins can edit, delete, or reset a quiz; everyone can still play it.
+- Submitting a quiz with a title that conflicts with an existing quiz's URL now shows an inline error on the form instead of returning a 500.
+- The seed admin no longer sees the "claim your display name" modal after finishing a quiz.
+
+### Visual / chrome
+- On mobile, the home page no longer shifts by a footer's height when the browser's URL bar collapses or expands.
+- The player view no longer lets mobile browsers scroll the URL bar off-screen during a quiz.
+
+### Behind the scenes
+- The Alpine.js and anime.js bundles are now served from `/client/js/vendor/` instead of being fetched from jsdelivr at page load.
+
 ## v2026.5.4 — 2026-05-20
 
 A public start page, share buttons, and tighter gates on the game endpoints.
