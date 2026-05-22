@@ -148,7 +148,55 @@ export class GameApp {
         // link has no selection to drive. Leaving selectedQuizId null
         // hides the Start button + leaderboard until the player picks
         // a quiz via /quizzes.
-        await this.checkAlreadyPlayed();
+        const existing = await this.checkAlreadyPlayed();
+        // Resume on reload (#310): when the player is mid-game (e.g. a
+        // mobile pull-to-refresh bounces them off the question screen),
+        // skip the start screen and jump straight back into the
+        // question. /questions/next is idempotent while the current
+        // question's answer window is open, so the same question comes
+        // back with the same StartedAt/ExpiredAt anchor — the
+        // countdown picks up where it left off rather than restarting.
+        // The `=== false` form fails closed if the server ever omits
+        // the field (rather than silently resuming on an unknown
+        // game state).
+        if (existing && existing.completed === false) {
+            this.gameId = existing.gameId;
+            // Hydrate the running-total chip from the server before
+            // rendering the resumed question so the HUD picks up the
+            // points already banked instead of starting from zero.
+            // Best-effort: a failed fetch just leaves the chip at 0,
+            // which is the pre-fix behaviour.
+            await this.hydrateScoreFromResults();
+            try {
+                await this.nextQuestion();
+            } catch (err) {
+                // Roll back so the start screen renders and the player
+                // can retry via the Start button — without this, a
+                // transient 5xx on the resume's /questions/next leaves
+                // the SPA in a blank half-loaded state with no
+                // affordance to recover.
+                console.error('resume on init failed', err);
+                this.gameId = null;
+                this.question = null;
+            }
+        }
+    }
+
+    // hydrateScoreFromResults pulls the player's accumulated points
+    // from /api/games/{id}/results so the HUD score chip reflects the
+    // pre-reload total on a resume. Silently no-ops when /results
+    // fails or the player id is unknown — the chip just stays at 0.
+    async hydrateScoreFromResults() {
+        if (!this.gameId || !this.player) return;
+        try {
+            const results = await gameService.getResults(this.gameId);
+            const playerScores = results && results.playerScores;
+            if (!Array.isArray(playerScores)) return;
+            const mine = playerScores.find(p => p.playerId === this.player.id);
+            if (mine) this.score = mine.score;
+        } catch (err) {
+            console.warn('hydrateScoreFromResults failed', err);
+        }
     }
 
     // hasCustomName reports whether the current player has explicitly

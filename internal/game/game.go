@@ -311,6 +311,21 @@ func (g *Game) IsCompleted() bool {
 	return len(g.Questions) >= len(g.Quiz.Questions) && len(g.Quiz.Questions) > 0
 }
 
+// HasOpenQuestion reports whether the most recently issued question for
+// this game is still resumable: unanswered, with the answer window not
+// yet closed. The HTTP resume probe (/my-game, #310) treats a game with
+// an open question as "not completed" even when every quiz question
+// has already been issued, so a reload on the final question lands
+// back on the question rather than the post-game leaderboard.
+func (g *Game) HasOpenQuestion() bool {
+	if len(g.Questions) == 0 {
+		return false
+	}
+	latest := g.Questions[len(g.Questions)-1]
+
+	return len(latest.Answers) == 0 && time.Now().Before(latest.ExpiredAt)
+}
+
 // CreateGame creates a new game with the specified quiz and player, linking
 // the player and starting the game immediately. Returns the newly created
 // game or an error if the operation fails.
@@ -423,6 +438,15 @@ func (s *Service) ResetGamesForPlayerOnQuiz(ctx context.Context, playerID, quizI
 // the caller — the participant gate (#272) makes the method 404 for any
 // player who is not a `game_participants` row on the supplied gameID, so
 // the gameID alone is no longer a capability.
+//
+// Idempotent while the answer window is still open: if the most-recently
+// issued question has no answer and ExpiredAt is still in the future,
+// the same question is returned without inserting a new game_questions
+// row. A reload (e.g. mobile pull-to-refresh) resumes on the same
+// question with the original StartedAt/ExpiredAt anchor, so the timer
+// keeps ticking from where it left off. Once ExpiredAt passes the
+// advance path runs as usual, so a client-side timeout call still
+// moves the game forward.
 func (s *Service) GetNextQuestion(ctx context.Context, gameID string, playerID int64) (*Question, error) {
 	// Get the game
 	g, err := s.store.GetGame(ctx, gameID)
@@ -445,6 +469,13 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string, playerID i
 
 	g.Quiz = qz
 
+	// Resume path: when the latest issued game_question is unanswered
+	// and the answer window is still open, hand back the same row so a
+	// reload doesn't skip the question.
+	if gq := resumeCandidate(g, qz); gq != nil {
+		return gq, nil
+	}
+
 	// Create a lookup map for questions already asked in this game
 	askedQuestions := make(map[int64]bool)
 	for _, gqs := range g.Questions {
@@ -461,38 +492,75 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string, playerID i
 		}
 	}
 
-	var gq *Question
-	// If we found a quiz question, register it as a GameQuestion. The
-	// answer window (StartedAt → ExpiredAt) is anchored at
-	// now + defaultRevealDelay, not "now" — the reveal delay gives the
-	// player a brief beat to read the question before the option
-	// buttons appear (#247). Submissions before StartedAt are scored
-	// as if they arrived AT StartedAt (see CalculateScore's clamp).
-	if nextQuestion != nil {
-		revealAt := time.Now().Add(s.revealDelay)
-		gq = &Question{
-			GameID:       gameID,
-			QuestionID:   nextQuestion.ID,
-			QuizQuestion: nextQuestion,
-			StartedAt:    revealAt,
-			ExpiredAt:    revealAt.Add(defaultExpiration),
-			// Position counts the newly-issued question itself, so
-			// it's the prior asked count + 1 (the player just
-			// received this question; previous answers were the N-1
-			// before it).
-			Position: len(g.Questions) + 1,
-			Total:    len(qz.Questions),
-		}
-		if err = s.store.CreateQuestion(ctx, gq); err != nil {
-			return nil, fmt.Errorf("failed to record game question: %w", err)
-		}
-	}
-
 	if nextQuestion == nil {
 		return nil, ErrNoMoreQuestions
 	}
 
+	// Register the chosen quiz question as a GameQuestion. The answer
+	// window (StartedAt → ExpiredAt) is anchored at now + revealDelay,
+	// not "now" — the reveal delay gives the player a brief beat to
+	// read the question before the option buttons appear (#247).
+	// Submissions before StartedAt are scored as if they arrived AT
+	// StartedAt (see CalculateScore's clamp).
+	revealAt := time.Now().Add(s.revealDelay)
+	gq := &Question{
+		GameID:       gameID,
+		QuestionID:   nextQuestion.ID,
+		QuizQuestion: nextQuestion,
+		StartedAt:    revealAt,
+		ExpiredAt:    revealAt.Add(defaultExpiration),
+		// Position counts the newly-issued question itself, so it's
+		// the prior asked count + 1 (the player just received this
+		// question; previous answers were the N-1 before it).
+		Position: len(g.Questions) + 1,
+		Total:    len(qz.Questions),
+	}
+	if err = s.store.CreateQuestion(ctx, gq); err != nil {
+		return nil, fmt.Errorf("failed to record game question: %w", err)
+	}
+
 	return gq, nil
+}
+
+// resumeCandidate returns the most recently issued game_question for
+// the game when it can be handed back as-is (unanswered, answer window
+// still open, quiz question still on the quiz). Returns nil when the
+// caller should advance to the next question instead — including the
+// defensive case where the latest row points at a quiz question that
+// no longer exists (admin edited the quiz mid-game), in which case
+// the advance branch will issue the next valid question.
+//
+// The returned Question is a shallow copy of the store-loaded row;
+// callers that iterate g.Questions afterwards keep seeing the
+// untouched store values (Position/Total zero, QuizQuestion nil), so
+// the invariant documented on those fields stays honest.
+func resumeCandidate(g *Game, qz *quiz.Quiz) *Question {
+	if !g.HasOpenQuestion() {
+		return nil
+	}
+	latest := g.Questions[len(g.Questions)-1]
+	qq := findQuizQuestion(qz, latest.QuestionID)
+	if qq == nil {
+		return nil
+	}
+	resumed := *latest
+	resumed.QuizQuestion = qq
+	resumed.Position = len(g.Questions)
+	resumed.Total = len(qz.Questions)
+
+	return &resumed
+}
+
+// findQuizQuestion returns the quiz question with the given ID, or nil
+// if no such question exists on the quiz.
+func findQuizQuestion(qz *quiz.Quiz, questionID int64) *quiz.Question {
+	for _, q := range qz.Questions {
+		if q.ID == questionID {
+			return q
+		}
+	}
+
+	return nil
 }
 
 // SubmitAnswer records an answer from a player for a specific question in a game.

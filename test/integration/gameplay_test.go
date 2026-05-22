@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/quiz"
@@ -62,9 +63,10 @@ type nextQuestionOption struct {
 
 // nextQuestionRes is the decode target for GET /api/games/.../next.
 type nextQuestionRes struct {
-	ID      int64                `json:"id"`
-	Text    string               `json:"text"`
-	Options []nextQuestionOption `json:"options"`
+	ID        int64                `json:"id"`
+	Text      string               `json:"text"`
+	Options   []nextQuestionOption `json:"options"`
+	StartedAt time.Time            `json:"startedAt"`
 }
 
 // playerScoreRes mirrors one player_scores entry in the GET .../results
@@ -945,6 +947,177 @@ func TestGameplay_Integration(t *testing.T) {
 		}
 		if got, want := inFlightMyGame.Completed, false; got != want {
 			t.Errorf("in-flight my-game Completed = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("my-game reports completed=false while the final question is still resumable", func(t *testing.T) {
+		// Reload-on-final-question (#310): if the player issues Q1–Q_{N-1},
+		// answers all but the very last, then refreshes mid-Q_N, the
+		// server must report completed=false so the client resumes
+		// instead of bouncing them onto the post-game leaderboard. This
+		// pins the gap the original /my-game contract (every-question-
+		// issued) left behind.
+		finalQz := &quiz.Quiz{
+			Title:             "Final Question Resume Quiz",
+			Slug:              "final-question-resume",
+			Description:       "Integration coverage for #310 final-question reload",
+			CreatedByPlayerID: adminPlayer.ID,
+			Questions: []*quiz.Question{
+				{
+					Text:     "Q1",
+					Position: 1,
+					Options: []*quiz.Option{
+						{Text: "A", Correct: true},
+						{Text: "B"},
+					},
+				},
+				{
+					Text:     "Q2",
+					Position: 2,
+					Options: []*quiz.Option{
+						{Text: "A", Correct: true},
+						{Text: "B"},
+					},
+				},
+			},
+		}
+		if err := stores.Quizzes.CreateQuiz(ctx, finalQz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+		// Tear the dedicated quiz down so later subtests that count
+		// the public quiz listing (admin delete) keep their pre-PR
+		// expectations — registered up-front so a t.Fatalf below
+		// still runs the cleanup.
+		t.Cleanup(func() {
+			if derr := stores.Quizzes.DeleteQuiz(ctx, finalQz.ID); derr != nil {
+				t.Errorf("DeleteQuiz cleanup err = %v, want nil", derr)
+			}
+		})
+
+		// Fresh anonymous player so the existing freshGameID flow
+		// stays untouched.
+		finalJar, err := cookiejar.New(nil)
+		if err != nil {
+			t.Fatalf("cookiejar.New err = %v, want nil", err)
+		}
+		finalClient := &http.Client{Jar: finalJar}
+
+		startGameURL := baseURL + "/api/games"
+		startBody := fmt.Sprintf(`{"quizId": %d}`, finalQz.ID)
+		startResp := httpPostJSON(ctx, t, finalClient, startGameURL, startBody)
+		if got, want := startResp.StatusCode, http.StatusCreated; got != want {
+			t.Fatalf("start game status = %d, want %d", got, want)
+		}
+		var startedGame struct {
+			ID string `json:"id"`
+		}
+		if derr := json.NewDecoder(startResp.Body).Decode(&startedGame); derr != nil {
+			t.Fatalf("decode start game: %v", derr)
+		}
+		if cerr := startResp.Body.Close(); cerr != nil {
+			t.Errorf("startResp.Body.Close err = %v", cerr)
+		}
+
+		nextURL := fmt.Sprintf("%s/api/games/%s/questions/next", baseURL, startedGame.ID)
+		nextResp := httpGet(ctx, t, finalClient, nextURL)
+		var q1 nextQuestionRes
+		if derr := json.NewDecoder(nextResp.Body).Decode(&q1); derr != nil {
+			t.Fatalf("decode Q1: %v", derr)
+		}
+		if cerr := nextResp.Body.Close(); cerr != nil {
+			t.Errorf("nextResp.Body.Close err = %v", cerr)
+		}
+
+		answerURL := fmt.Sprintf("%s/api/games/%s/questions/%d/answers", baseURL, startedGame.ID, q1.ID)
+		answerResp := httpPostJSON(ctx, t, finalClient, answerURL, fmt.Sprintf(`{"optionId": %d}`, q1.Options[0].ID))
+		if got, want := answerResp.StatusCode, http.StatusOK; got != want {
+			t.Fatalf("Q1 answer status = %d, want %d", got, want)
+		}
+		if cerr := answerResp.Body.Close(); cerr != nil {
+			t.Errorf("answerResp.Body.Close err = %v", cerr)
+		}
+
+		// Issue Q2 (the final question) but leave it unanswered.
+		issueQ2 := httpGet(ctx, t, finalClient, nextURL)
+		if got, want := issueQ2.StatusCode, http.StatusOK; got != want {
+			t.Fatalf("Q2 issue status = %d, want %d", got, want)
+		}
+		if cerr := issueQ2.Body.Close(); cerr != nil {
+			t.Errorf("issueQ2.Body.Close err = %v", cerr)
+		}
+
+		// At this point every quiz question has been issued
+		// (IsCompleted() is true) but the player has not answered
+		// Q2 yet. /my-game must report completed=false.
+		finalMyGameURL := fmt.Sprintf("%s/api/quizzes/%s-%d/my-game", baseURL, finalQz.Slug, finalQz.ID)
+		probe := httpGet(ctx, t, finalClient, finalMyGameURL)
+		if got, want := probe.StatusCode, http.StatusOK; got != want {
+			t.Fatalf("final-question /my-game status = %d, want %d", got, want)
+		}
+		var probeRes struct {
+			GameID    string `json:"gameId"`
+			Completed bool   `json:"completed"`
+		}
+		if derr := json.NewDecoder(probe.Body).Decode(&probeRes); derr != nil {
+			t.Fatalf("decode /my-game: %v", derr)
+		}
+		if cerr := probe.Body.Close(); cerr != nil {
+			t.Errorf("probe.Body.Close err = %v", cerr)
+		}
+		if got, want := probeRes.Completed, false; got != want {
+			t.Errorf("/my-game completed = %v, want %v (open final question must be resumable)", got, want)
+		}
+	})
+
+	t.Run("questions/next is idempotent while the question is still open", func(t *testing.T) {
+		// Reload-on-mobile (#310): the player has answered Q1 above, so
+		// the next call to /questions/next will issue Q2. A second
+		// back-to-back call must return that SAME Q2 (same game_question
+		// ID, same StartedAt) instead of advancing — otherwise a refresh
+		// mid-question would skip the question and silently turn it into
+		// a zero-score timeout.
+		nextURL := fmt.Sprintf("%s/api/games/%s/questions/next", baseURL, freshGameID)
+
+		resp := httpGet(ctx, t, client, nextURL)
+		if got, want := resp.StatusCode, http.StatusOK; got != want {
+			t.Fatalf("first /questions/next status = %d, want %d", got, want)
+		}
+		var first nextQuestionRes
+		if derr := json.NewDecoder(resp.Body).Decode(&first); derr != nil {
+			t.Fatalf("decode first /questions/next: %v", derr)
+		}
+		if cerr := resp.Body.Close(); cerr != nil {
+			t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+		}
+
+		resp = httpGet(ctx, t, client, nextURL)
+		if got, want := resp.StatusCode, http.StatusOK; got != want {
+			t.Fatalf("second /questions/next status = %d, want %d", got, want)
+		}
+		var second nextQuestionRes
+		if derr := json.NewDecoder(resp.Body).Decode(&second); derr != nil {
+			t.Fatalf("decode second /questions/next: %v", derr)
+		}
+		if cerr := resp.Body.Close(); cerr != nil {
+			t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+		}
+
+		if got, want := second.ID, first.ID; got != want {
+			t.Errorf("second.ID = %d, want %d (reload must not advance)", got, want)
+		}
+		if got, want := second.StartedAt, first.StartedAt; !got.Equal(want) {
+			t.Errorf("second.StartedAt = %v, want %v (timer must not reset)", got, want)
+		}
+
+		// The freshGameID game has answered Q1 (answered above) and is
+		// currently on Q2 — exactly two game_questions rows. If the
+		// second call had advanced, len would be three.
+		g, err := stores.Games.GetGame(ctx, freshGameID)
+		if err != nil {
+			t.Fatalf("GetGame err = %v, want nil", err)
+		}
+		if got, want := len(g.Questions), 2; got != want {
+			t.Errorf("game_questions rows = %d, want %d (reload must not insert)", got, want)
 		}
 	})
 

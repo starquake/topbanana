@@ -38,9 +38,13 @@ FROM players
 WHERE id = ?;
 
 -- name: ListGameQuestionsByGameID :many
+-- Ordered by id so callers can rely on the last element being the
+-- most recently issued question. GetNextQuestion's resume path needs
+-- that to decide whether to return the in-flight question or advance.
 SELECT *
 FROM game_questions
-WHERE game_id = ?;
+WHERE game_id = ?
+ORDER BY id;
 
 -- name: ListAnswersByGameQuestionID :many
 SELECT *
