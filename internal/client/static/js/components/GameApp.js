@@ -233,11 +233,11 @@ export class GameApp {
         return !this.leaderboard.entries.some(e => e.isCurrentPlayer);
     }
 
-    // openClaimModal is the single entry point that any of the three
-    // affordances (pre-leaderboard auto-open, inline "Set my name"
-    // link, start-screen "Set your name" link) calls. The modal
-    // template is mounted via x-if so each open gets a fresh
-    // claimNameForm instance with empty input/error state.
+    // openClaimModal is the single entry point that both claim
+    // affordances (pre-leaderboard auto-open, start-screen "Set your
+    // name" link) call. The modal template is mounted via x-if so
+    // each open gets a fresh claimNameForm instance with empty
+    // input/error state.
     openClaimModal() {
         this.claimModalOpen = true;
     }

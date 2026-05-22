@@ -1,10 +1,9 @@
 // claimNameForm is the Alpine x-data factory for the shared
-// "pick a name" form rendered in three contexts: the pre-leaderboard
-// prompt, the inline edit on the leaderboard row, and the start-screen
-// "set your name" affordance. Each instance owns its own input value,
-// submitting flag, and error text, so opening the inline form on the
-// leaderboard doesn't carry stray state from a dismissed start-screen
-// form.
+// "pick a name" form rendered in two contexts: the pre-leaderboard
+// prompt and the start-screen "set your name" affordance. Each
+// instance owns its own input value, submitting flag, and error
+// text, so opening the start-screen form doesn't carry stray state
+// from a dismissed pre-leaderboard form.
 //
 // The parent gameApp injects two callbacks via Alpine's $data:
 //   onSubmit(username) -> { ok, message }  (resolves to the
