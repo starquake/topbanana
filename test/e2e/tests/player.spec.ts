@@ -37,6 +37,19 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
   await expect(page.getByText('No finishers yet')).toBeVisible();
 
+  // #308 — the SPA shell's body must use min-h-dvh, not min-h-screen,
+  // so mobile browsers can't scroll the URL bar away mid-game. The
+  // start-screen content fits comfortably on a desktop viewport;
+  // pinning scrollHeight <= innerHeight + 1 here would fail loudly
+  // if someone re-introduces min-h-screen on the player-client body.
+  const startMeasurement = await page.evaluate(() => ({
+    scrollHeight: document.documentElement.scrollHeight,
+    innerHeight: window.innerHeight,
+  }));
+  expect(startMeasurement.scrollHeight,
+    `start-screen documentElement.scrollHeight (${startMeasurement.scrollHeight}) > window.innerHeight (${startMeasurement.innerHeight}) — player SPA overflows the viewport on a fresh quiz`,
+  ).toBeLessThanOrEqual(startMeasurement.innerHeight + 1);
+
   await page.getByRole('button', { name: 'Start Game' }).click();
 
   // The reveal beat (#247) holds the answer buttons hidden for ~3s
