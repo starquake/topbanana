@@ -35,7 +35,6 @@ func HandleHealthz(logger *slog.Logger, stores *store.Stores) http.HandlerFunc {
 			health.Checks["database"] = "healthy"
 		}
 
-		logger.InfoContext(ctx, "health check performed")
 		if err := handlers.EncodeJSON(w, httpStatus, health); err != nil {
 			logger.ErrorContext(ctx, "error encoding health response", slog.Any("err", err))
 		}
