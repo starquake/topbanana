@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main ]
 
 # Cancel the older run when a new push lands on the same branch / PR.
 # Saves runner minutes on fixup pushes (#202).

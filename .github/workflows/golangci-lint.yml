@@ -1,9 +1,9 @@
 name: golangci-lint
 on:
   push:
-    branches: [ main, develop]
+    branches: [ main ]
   pull_request:
-    branches: [ main, develop]
+    branches: [ main ]
 
 # Cancel the older run when a new push lands on the same branch / PR (#202).
 concurrency:
