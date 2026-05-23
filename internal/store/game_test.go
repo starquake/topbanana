@@ -217,7 +217,7 @@ func TestGameStore_CreateQuestion(t *testing.T) {
 func TestGameStore_CreateAnswer(t *testing.T) {
 	t.Parallel()
 
-	t.Run("populates ID and AnsweredAt", func(t *testing.T) {
+	t.Run("populates ID and round-trips caller-supplied AnsweredAt", func(t *testing.T) {
 		t.Parallel()
 		db := dbtest.Open(t)
 		quizStore := NewQuizStore(db, slog.Default())
@@ -243,11 +243,18 @@ func TestGameStore_CreateAnswer(t *testing.T) {
 			t.Fatalf("failed to create game question: %v", err)
 		}
 
+		// #237: AnsweredAt is now caller-supplied (the service clamps
+		// client tappedAt before this call), not stamped by SQLite. We
+		// assert the value the caller passed survives the round-trip.
+		// SQLite truncates to second precision, so we pick a whole
+		// second to keep the comparison stable.
+		tappedAt := now.Add(3 * time.Second).Truncate(time.Second)
 		a := &game.Answer{
 			GameID:     g.ID,
 			PlayerID:   1,
 			QuestionID: gq.ID,
 			OptionID:   testQuiz.Questions[0].Options[0].ID,
+			AnsweredAt: tappedAt,
 		}
 		if err := gameStore.CreateAnswer(t.Context(), a); err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -255,8 +262,8 @@ func TestGameStore_CreateAnswer(t *testing.T) {
 		if a.ID == 0 {
 			t.Error("a.ID is 0, want non-zero")
 		}
-		if a.AnsweredAt.IsZero() {
-			t.Error("a.AnsweredAt is zero, want non-zero time")
+		if got, want := a.AnsweredAt, tappedAt; !got.Equal(want) {
+			t.Errorf("a.AnsweredAt = %v, want %v", got, want)
 		}
 	})
 }

@@ -561,7 +561,7 @@ func TestService_SubmitAnswer(t *testing.T) {
 		// Use a correct option from the second question (different from the active question).
 		wrongQuestionOption := testQuiz.Questions[1].Options[0] // Berlin, Correct: true, but for question 2
 
-		_, err = svc.SubmitAnswer(ctx, g.ID, 1, gq.QuizQuestion.ID, wrongQuestionOption.ID)
+		_, err = svc.SubmitAnswer(ctx, g.ID, 1, gq.QuizQuestion.ID, wrongQuestionOption.ID, time.Time{})
 		if got, want := err, ErrOptionNotInQuestion; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
@@ -595,7 +595,7 @@ func TestService_SubmitAnswer(t *testing.T) {
 
 		correctOption := testQuiz.Questions[0].Options[0] // Paris, Correct: true
 
-		_, err = svc.SubmitAnswer(ctx, g.ID, 1, gq.QuizQuestion.ID, correctOption.ID)
+		_, err = svc.SubmitAnswer(ctx, g.ID, 1, gq.QuizQuestion.ID, correctOption.ID, time.Time{})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -649,10 +649,10 @@ func TestService_GetResults(t *testing.T) {
 		correctOption := testQuiz.Questions[0].Options[0] // Paris, Correct: true
 		wrongOption := testQuiz.Questions[0].Options[1]   // London, Correct: false
 
-		if _, err = svc.SubmitAnswer(ctx, g.ID, 1, gq.QuizQuestion.ID, correctOption.ID); err != nil {
+		if _, err = svc.SubmitAnswer(ctx, g.ID, 1, gq.QuizQuestion.ID, correctOption.ID, time.Time{}); err != nil {
 			t.Fatalf("failed to submit answer for player 1: %v", err)
 		}
-		if _, err = svc.SubmitAnswer(ctx, g.ID, 2, gq.QuizQuestion.ID, wrongOption.ID); err != nil {
+		if _, err = svc.SubmitAnswer(ctx, g.ID, 2, gq.QuizQuestion.ID, wrongOption.ID, time.Time{}); err != nil {
 			t.Fatalf("failed to submit answer for player 2: %v", err)
 		}
 
@@ -709,10 +709,10 @@ func TestService_GetResults(t *testing.T) {
 
 		wrongOption := testQuiz.Questions[0].Options[1] // London, Correct: false
 
-		if _, err = svc.SubmitAnswer(ctx, g.ID, 1, gq.QuizQuestion.ID, wrongOption.ID); err != nil {
+		if _, err = svc.SubmitAnswer(ctx, g.ID, 1, gq.QuizQuestion.ID, wrongOption.ID, time.Time{}); err != nil {
 			t.Fatalf("failed to submit answer for player 1: %v", err)
 		}
-		if _, err = svc.SubmitAnswer(ctx, g.ID, 2, gq.QuizQuestion.ID, wrongOption.ID); err != nil {
+		if _, err = svc.SubmitAnswer(ctx, g.ID, 2, gq.QuizQuestion.ID, wrongOption.ID, time.Time{}); err != nil {
 			t.Fatalf("failed to submit answer for player 2: %v", err)
 		}
 

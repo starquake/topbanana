@@ -737,8 +737,14 @@ func correctOptionIDsFromAnswer(a *game.Answer) []int64 {
 // It decodes the request body, extracts game and question IDs from the path,
 // and uses the game service to submit the answer.
 func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
+	// TappedAt is what the client claims as the moment of the tap; the
+	// service clamps it to [question.StartedAt, time.Now()] so an
+	// honest player on a slow link doesn't get scored late by accident
+	// (#237). Missing/zero falls back to the server's now on the
+	// service side.
 	type answerRequest struct {
-		OptionID int64 `json:"optionId"`
+		OptionID int64     `json:"optionId"`
+		TappedAt time.Time `json:"tappedAt"`
 	}
 
 	// CorrectOptionIDs always carries the question's correct option set
@@ -768,7 +774,7 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 			return
 		}
 
-		a, err := service.SubmitAnswer(r.Context(), gameID, playerID, questionID, req.OptionID)
+		a, err := service.SubmitAnswer(r.Context(), gameID, playerID, questionID, req.OptionID, req.TappedAt)
 		if err != nil {
 			if errors.Is(err, game.ErrGameNotFound) || errors.Is(err, game.ErrQuestionNotInGame) {
 				http.Error(w, err.Error(), http.StatusNotFound)

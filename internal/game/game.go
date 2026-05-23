@@ -567,10 +567,20 @@ func findQuizQuestion(qz *quiz.Quiz, questionID int64) *quiz.Question {
 // It validates that the game exists and the question belongs to the game before saving the answer.
 // Returns the saved answer or nil if the question was not found in the game.
 // Returns an error if the operation fails.
+//
+// tappedAt is what the player's client claims as the moment of the tap.
+// We clamp it to [question.StartedAt, serverNow] so an honest player on
+// a slow link gets the network latency refunded (their tappedAt pulls
+// the recorded AnsweredAt earlier than the receive time), while a
+// dishonest or clock-skewed client can't claim a moment outside the
+// window: anything before StartedAt or after serverNow falls back to
+// serverNow. The asymmetry is intentional — claims can only ever make
+// the recorded time earlier, never later (#237).
 func (s *Service) SubmitAnswer(
 	ctx context.Context,
 	gameID string,
 	playerID, questionID, optionID int64,
+	tappedAt time.Time,
 ) (*Answer, error) {
 	g, err := s.store.GetGame(ctx, gameID)
 	if err != nil {
@@ -632,6 +642,7 @@ func (s *Service) SubmitAnswer(
 		Question:   question,
 		OptionID:   optionID,
 		Option:     option,
+		AnsweredAt: clampTappedAt(tappedAt, question.StartedAt, time.Now()),
 	}
 
 	if err = s.store.CreateAnswer(ctx, a); err != nil {
@@ -646,6 +657,19 @@ func (s *Service) SubmitAnswer(
 	}
 
 	return a, nil
+}
+
+// clampTappedAt applies the #237 trust window: the recorded answer time
+// is the client-supplied tappedAt when it falls inside [startedAt,
+// serverNow], otherwise it's serverNow. The fallback is intentionally
+// the upper bound — an out-of-range claim should never give the player
+// a faster score than they earned in real time.
+func clampTappedAt(tappedAt, startedAt, serverNow time.Time) time.Time {
+	if tappedAt.IsZero() || tappedAt.Before(startedAt) || tappedAt.After(serverNow) {
+		return serverNow
+	}
+
+	return tappedAt
 }
 
 // GetResults calculates the accumulated score for each player in a game and

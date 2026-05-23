@@ -14,7 +14,7 @@ import (
 
 const createAnswer = `-- name: CreateAnswer :one
 INSERT INTO game_answers (game_id, player_id, game_question_id, option_id, answered_at)
-VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+VALUES (?, ?, ?, ?, ?)
 RETURNING id, game_id, player_id, game_question_id, option_id, answered_at
 `
 
@@ -23,14 +23,22 @@ type CreateAnswerParams struct {
 	PlayerID       int64
 	GameQuestionID int64
 	OptionID       int64
+	AnsweredAt     time.Time
 }
 
+// answered_at is passed in from the handler instead of being SQLite's
+// CURRENT_TIMESTAMP (#237). The handler accepts the client's tappedAt
+// and clamps it to [question.started_at, time.Now()] before this
+// INSERT runs, so an honest player on a slow link gets the network
+// latency refunded instead of being scored late, and a malicious or
+// clock-skewed client can't claim a time outside that window.
 func (q *Queries) CreateAnswer(ctx context.Context, arg CreateAnswerParams) (GameAnswer, error) {
 	row := q.db.QueryRowContext(ctx, createAnswer,
 		arg.GameID,
 		arg.PlayerID,
 		arg.GameQuestionID,
 		arg.OptionID,
+		arg.AnsweredAt,
 	)
 	var i GameAnswer
 	err := row.Scan(

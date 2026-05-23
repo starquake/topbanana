@@ -191,10 +191,19 @@ func (s *GameStore) CreateQuestion(ctx context.Context, gq *game.Question) error
 }
 
 // CreateAnswer saves a new answer in the database and updates the provided Answer object with generated values.
+// The caller supplies a.AnsweredAt — the service clamps the client's tappedAt
+// to [question.StartedAt, [time.Now]] before invoking the store (#237) so the
+// recorded value is always a Go-passed parameter rather than SQLite's
+// CURRENT_TIMESTAMP, which would otherwise reflect commit time rather than
+// when the player actually tapped.
 func (s *GameStore) CreateAnswer(ctx context.Context, a *game.Answer) error {
 	var err error
 	row, err := s.q.CreateAnswer(ctx, db.CreateAnswerParams{
-		GameID: a.GameID, PlayerID: a.PlayerID, GameQuestionID: a.QuestionID, OptionID: a.OptionID,
+		GameID:         a.GameID,
+		PlayerID:       a.PlayerID,
+		GameQuestionID: a.QuestionID,
+		OptionID:       a.OptionID,
+		AnsweredAt:     a.AnsweredAt,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create answer: %w", err)
