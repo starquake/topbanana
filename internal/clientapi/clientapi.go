@@ -71,7 +71,9 @@ func writeClaimNameError(
 func gameRequest(w http.ResponseWriter, r *http.Request, logger *slog.Logger) (string, int64, bool) {
 	gameID := r.PathValue("gameID")
 	if gameID == "" {
-		logger.ErrorContext(r.Context(), "missing gameID in request path")
+		// User-supplied 4xx — log at Info so the response carries the
+		// signal, not an alert-triggering ERROR (#369).
+		logger.InfoContext(r.Context(), "missing gameID in request path")
 		http.Error(w, "missing gameID", http.StatusBadRequest)
 
 		return "", 0, false
@@ -796,7 +798,7 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 			case errors.Is(err, game.ErrGameNotFound),
 				errors.Is(err, quiz.ErrQuizNotFound),
 				errors.Is(err, game.ErrNoMoreQuestions):
-				http.Error(w, err.Error(), http.StatusNotFound)
+				http.NotFound(w, r)
 			default:
 				writeInternalError(w, r, logger, "error retrieving next question", err)
 			}
@@ -868,7 +870,7 @@ func correctOptionIDsFromAnswer(a *game.Answer) []int64 {
 func writeSubmitAnswerError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err error) {
 	switch {
 	case errors.Is(err, game.ErrGameNotFound), errors.Is(err, game.ErrQuestionNotInGame):
-		http.Error(w, err.Error(), http.StatusNotFound)
+		http.NotFound(w, r)
 	case errors.Is(err, game.ErrOptionNotInQuestion):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, game.ErrAnswerAlreadyRecorded):
@@ -1104,8 +1106,9 @@ func HandleGameResults(logger *slog.Logger, service *game.Service) http.Handler 
 		results, err := service.GetResults(r.Context(), gameID, playerID)
 		if err != nil {
 			if errors.Is(err, game.ErrGameNotFound) {
-				logger.ErrorContext(r.Context(), "game not found", slog.Any("err", err))
-				http.Error(w, err.Error(), http.StatusNotFound)
+				// User-supplied bad ID — Info, not Error (#369).
+				logger.InfoContext(r.Context(), "game not found", slog.Any("err", err))
+				http.NotFound(w, r)
 
 				return
 			}
