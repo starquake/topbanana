@@ -17,9 +17,9 @@
 -- caller slices the result. Real-world traffic is tiny enough that this
 -- is fine.
 --
--- Visibility gate (#103) is not yet enforced. Once that ticket lands this
--- query must filter on q.visibility = 'public' so unlisted or private
--- quizzes do not surface on the public start page.
+-- Visibility gate (#103): only quizzes the public can play surface on
+-- the start page. Unlisted is link-only; private requires a logged-in
+-- player, neither of which fits this anonymous list.
 SELECT q.id          AS id,
        q.title       AS title,
        q.slug        AS slug,
@@ -29,6 +29,7 @@ SELECT q.id          AS id,
 FROM quizzes q
 JOIN games g ON g.quiz_id = q.id
 WHERE g.created_at >= datetime('now', '-30 days')
+  AND q.visibility = 'public'
   AND EXISTS (SELECT 1 FROM questions qe WHERE qe.quiz_id = q.id)
   AND (SELECT COUNT(*) FROM game_questions gq WHERE gq.game_id = g.id) >=
       (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = q.id)

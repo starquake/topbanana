@@ -103,7 +103,7 @@ func Handle(logger *slog.Logger, store Store) http.Handler {
 // for the admin list); a separate interface keeps the home package
 // free of any direct dependency on the *store package.
 type QuizLister interface {
-	ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error)
+	ListPublicQuizzes(ctx context.Context) ([]*quiz.Quiz, error)
 	QuestionCountsByQuiz(ctx context.Context) (map[int64]int, error)
 }
 
@@ -135,24 +135,22 @@ type allQuizzesData struct {
 }
 
 // HandleAllQuizzes returns the [http.Handler] for GET /quizzes (#284).
-// Lists every quiz, most-recently-updated first, so newly-authored or
-// off-the-30-day-window quizzes stay findable. Question counts come
-// from a single QuestionCountsByQuiz call to avoid the N+1 a per-row
-// lookup would produce. A failure in either underlying query renders
-// the page with the empty list rather than 500-ing — the admin link
-// in the footer stays reachable.
-//
-// Once quiz visibility (#103) lands this query must filter on
-// `visibility = 'public'`; until then "every quiz" means every row.
+// Lists every public quiz, most-recently-updated first, so newly-authored
+// or off-the-30-day-window quizzes stay findable. Unlisted and private
+// quizzes are excluded by the visibility gate (#103). Question counts
+// come from a single QuestionCountsByQuiz call to avoid the N+1 a per-row
+// lookup would produce. A failure in either underlying query renders the
+// page with the empty list rather than 500-ing — the admin link in the
+// footer stays reachable.
 func HandleAllQuizzes(logger *slog.Logger, store QuizLister) http.Handler {
 	t := parseTemplate("home/pages/all-quizzes.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data := allQuizzesData{Title: "All quizzes — Top Banana!"}
 
-		quizzes, err := store.ListQuizzes(r.Context())
+		quizzes, err := store.ListPublicQuizzes(r.Context())
 		if err != nil {
-			logger.ErrorContext(r.Context(), "list all quizzes", slog.Any("err", err))
+			logger.ErrorContext(r.Context(), "list public quizzes", slog.Any("err", err))
 		}
 		counts, err := store.QuestionCountsByQuiz(r.Context())
 		if err != nil {

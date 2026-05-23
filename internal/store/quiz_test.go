@@ -46,11 +46,13 @@ func newTestQuizzes() []*quiz.Quiz {
 			Description:       "Quiz 1 Description",
 			CreatedByPlayerID: seededAdminID,
 			CreatedByUsername: seededAdminUsername,
-			// #99: the store normalises a zero TimeLimitSeconds to the
-			// project-wide default before INSERT; the fixture mirrors
-			// that so cmp.Diff comparisons against rows read back from
-			// the DB succeed without per-test ignore directives.
+			// #99 / #103: the store normalises a zero TimeLimitSeconds
+			// to the project-wide default and a blank Visibility to
+			// public before INSERT; the fixture mirrors that so
+			// cmp.Diff comparisons against rows read back from the DB
+			// succeed without per-test ignore directives.
 			TimeLimitSeconds: quiz.DefaultTimeLimitSeconds,
+			Visibility:       quiz.VisibilityPublic,
 			Questions: []*quiz.Question{
 				{
 					Text:     "Question 1-1",
@@ -81,6 +83,7 @@ func newTestQuizzes() []*quiz.Quiz {
 			CreatedByPlayerID: seededAdminID,
 			CreatedByUsername: seededAdminUsername,
 			TimeLimitSeconds:  quiz.DefaultTimeLimitSeconds,
+			Visibility:        quiz.VisibilityPublic,
 			Questions: []*quiz.Question{
 				{
 					Text:     "Question 2-1",
@@ -116,6 +119,13 @@ func existingTestQuizzes() []*quiz.Quiz {
 			Description:       "Quiz 1 Description",
 			CreatedByPlayerID: seededAdminID,
 			CreatedByUsername: seededAdminUsername,
+			// #99 / #103: the store normalises a zero TimeLimitSeconds
+			// to the project-wide default and a blank Visibility to
+			// public before INSERT; the fixture mirrors that so
+			// cmp.Diff comparisons against rows read back from the DB
+			// succeed without per-test ignore directives.
+			TimeLimitSeconds: quiz.DefaultTimeLimitSeconds,
+			Visibility:       quiz.VisibilityPublic,
 			Questions: []*quiz.Question{
 				{
 					ID:       1,
@@ -148,6 +158,7 @@ func existingTestQuizzes() []*quiz.Quiz {
 			CreatedByPlayerID: seededAdminID,
 			CreatedByUsername: seededAdminUsername,
 			TimeLimitSeconds:  quiz.DefaultTimeLimitSeconds,
+			Visibility:        quiz.VisibilityPublic,
 			Questions: []*quiz.Question{
 				{
 					ID:       3,
@@ -262,6 +273,7 @@ func TestQuizStore_ListQuizzes(t *testing.T) {
 			CreatedByPlayerID: qz.CreatedByPlayerID,
 			CreatedByUsername: qz.CreatedByUsername,
 			TimeLimitSeconds:  qz.TimeLimitSeconds,
+			Visibility:        qz.Visibility,
 		})
 	}
 
@@ -797,6 +809,7 @@ func TestQuizStore_UpdateQuiz(t *testing.T) {
 		CreatedByPlayerID: originalQuiz.CreatedByPlayerID,
 		CreatedByUsername: originalQuiz.CreatedByUsername,
 		TimeLimitSeconds:  originalQuiz.TimeLimitSeconds,
+		Visibility:        originalQuiz.Visibility,
 		Questions: []*quiz.Question{
 			{
 				ID:     originalQuiz.Questions[0].ID,

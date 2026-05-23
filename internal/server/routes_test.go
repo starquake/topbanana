@@ -91,6 +91,10 @@ func (stubQuizStore) ListQuizzes(_ context.Context) ([]*quiz.Quiz, error) {
 	}, nil
 }
 
+func (s stubQuizStore) ListPublicQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
+	return s.ListQuizzes(ctx)
+}
+
 func (stubQuizStore) QuestionCountsByQuiz(_ context.Context) (map[int64]int, error) {
 	return map[int64]int{}, nil
 }

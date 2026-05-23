@@ -38,6 +38,8 @@ func (s *QuizStore) Ping(ctx context.Context) error {
 }
 
 // ListQuizzes returns a summary list of quizzes without questions or options.
+// Includes rows of every visibility — use [QuizStore.ListPublicQuizzes] from
+// public-facing handlers.
 func (s *QuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 	rows, err := s.q.ListQuizzes(ctx)
 	if err != nil {
@@ -55,11 +57,43 @@ func (s *QuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 			UpdatedAt:         r.UpdatedAt,
 			CreatedByPlayerID: r.CreatedByPlayerID,
 			TimeLimitSeconds:  int(r.TimeLimitSeconds),
+			Visibility:        r.Visibility,
 		}
 		// created_by_username comes from a LEFT JOIN on players; a
 		// player row deleted out from under a quiz would leave the
 		// FK dangling, but the column itself stays NOT NULL so the
 		// username is the only nullable field on the join.
+		if r.CreatedByUsername.Valid {
+			qz.CreatedByUsername = r.CreatedByUsername.String
+		}
+		quizzes = append(quizzes, qz)
+	}
+
+	return quizzes, nil
+}
+
+// ListPublicQuizzes returns the visibility=public subset of
+// [QuizStore.ListQuizzes] (#103). Same shape, same ordering — just the
+// rows safe to surface to anonymous traffic.
+func (s *QuizStore) ListPublicQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
+	rows, err := s.q.ListPublicQuizzes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list public quizzes: %w", err)
+	}
+
+	quizzes := make([]*quiz.Quiz, 0, len(rows))
+	for _, r := range rows {
+		qz := &quiz.Quiz{
+			ID:                r.ID,
+			Title:             r.Title,
+			Slug:              r.Slug,
+			Description:       r.Description,
+			CreatedAt:         r.CreatedAt,
+			UpdatedAt:         r.UpdatedAt,
+			CreatedByPlayerID: r.CreatedByPlayerID,
+			TimeLimitSeconds:  int(r.TimeLimitSeconds),
+			Visibility:        r.Visibility,
+		}
 		if r.CreatedByUsername.Valid {
 			qz.CreatedByUsername = r.CreatedByUsername.String
 		}
@@ -122,6 +156,7 @@ func (s *QuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 		UpdatedAt:         row.UpdatedAt,
 		CreatedByPlayerID: row.CreatedByPlayerID,
 		TimeLimitSeconds:  int(row.TimeLimitSeconds),
+		Visibility:        row.Visibility,
 	}
 	if row.CreatedByUsername.Valid {
 		qz.CreatedByUsername = row.CreatedByUsername.String
@@ -434,13 +469,17 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 	if qz.CreatedByPlayerID == 0 {
 		return quiz.ErrCreatorRequired
 	}
+	// The migration's DB DEFAULT only fires for INSERTs that omit the
+	// column; we always supply both. Backfill the project-wide values
+	// here so test fixtures and the JSON-import path don't have to
+	// repeat them (#99 / #103).
 	timeLimit := qz.TimeLimitSeconds
 	if timeLimit == 0 {
-		// The migration's DB DEFAULT only fires for INSERTs that omit
-		// the column; we always supply it. Backfill the project-wide
-		// default here so test fixtures and the JSON-import path don't
-		// have to repeat the value (#99).
 		timeLimit = quiz.DefaultTimeLimitSeconds
+	}
+	visibility := qz.Visibility
+	if visibility == "" {
+		visibility = quiz.VisibilityPublic
 	}
 	row, err := q.CreateQuiz(ctx, db.CreateQuizParams{
 		Title:             qz.Title,
@@ -448,6 +487,7 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 		Description:       qz.Description,
 		CreatedByPlayerID: qz.CreatedByPlayerID,
 		TimeLimitSeconds:  int64(timeLimit),
+		Visibility:        visibility,
 	})
 	if err != nil {
 		return classifySlugConflictErr(err, "failed to create quiz")
@@ -457,6 +497,7 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 	qz.CreatedAt = row.CreatedAt
 	qz.UpdatedAt = row.UpdatedAt
 	qz.TimeLimitSeconds = int(row.TimeLimitSeconds)
+	qz.Visibility = row.Visibility
 
 	for _, qs := range qz.Questions {
 		qs.ID = 0
@@ -475,6 +516,10 @@ func (s *QuizStore) execUpdateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 		return quiz.ErrCannotUpdateQuizWithIDZero
 	}
 
+	visibility := qz.Visibility
+	if visibility == "" {
+		visibility = quiz.VisibilityPublic
+	}
 	var err error
 	timeLimit := qz.TimeLimitSeconds
 	if timeLimit == 0 {
@@ -485,6 +530,7 @@ func (s *QuizStore) execUpdateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 		Slug:             qz.Slug,
 		Description:      qz.Description,
 		TimeLimitSeconds: int64(timeLimit),
+		Visibility:       visibility,
 		ID:               qz.ID,
 	})
 	if err != nil {

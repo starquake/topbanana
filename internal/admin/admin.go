@@ -143,6 +143,11 @@ type QuizData struct {
 	CreatedByUsername string
 	CanEdit           bool
 	TimeLimitSeconds  int
+	Visibility        string
+	// VisibilityOptions feeds the admin form's selector — pulled
+	// straight from the domain constants so a future level addition
+	// only touches one place.
+	VisibilityOptions []string
 	Questions         []*QuestionData
 }
 
@@ -200,6 +205,11 @@ func quizDataFromQuiz(qz *quiz.Quiz) *QuizData {
 	// QuestionCount defaults to len(Questions); the list handler overrides
 	// it from a separate count query because ListQuizzes doesn't load the
 	// question tree.
+	visibility := qz.Visibility
+	if visibility == "" {
+		visibility = quiz.VisibilityPublic
+	}
+
 	return &QuizData{
 		ID:                qz.ID,
 		Title:             qz.Title,
@@ -210,6 +220,8 @@ func quizDataFromQuiz(qz *quiz.Quiz) *QuizData {
 		CreatedByPlayerID: qz.CreatedByPlayerID,
 		CreatedByUsername: qz.CreatedByUsername,
 		TimeLimitSeconds:  qz.TimeLimitSeconds,
+		Visibility:        visibility,
+		VisibilityOptions: quiz.VisibilityValues(),
 		Questions:         questionDataFromQuestions(qz.Questions),
 	}
 }
@@ -543,6 +555,14 @@ func fillQuizFromForm(
 			n = 0
 		}
 		qz.TimeLimitSeconds = n
+	}
+	// Visibility input (#103). Defaults to public if the form omits it
+	// (older admin clients or curl probes); an unrecognised value is
+	// passed through verbatim so Quiz.Valid surfaces an inline error.
+	if v := r.PostFormValue("visibility"); v != "" {
+		qz.Visibility = v
+	} else {
+		qz.Visibility = quiz.VisibilityPublic
 	}
 	if problems := qz.Valid(r.Context()); len(problems) > 0 {
 		return lowercaseDomainFieldKeys(problems), true
@@ -907,7 +927,11 @@ func HandleQuizCreate(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
 		// min=1/max=600 would otherwise reject the zero-value (#99).
 		render.Render(w, r, http.StatusOK, quizFormData{
 			Title: quizFormCreateTitle,
-			Quiz:  &QuizData{TimeLimitSeconds: quiz.DefaultTimeLimitSeconds},
+			Quiz: &QuizData{
+				TimeLimitSeconds:  quiz.DefaultTimeLimitSeconds,
+				Visibility:        quiz.VisibilityPublic,
+				VisibilityOptions: quiz.VisibilityValues(),
+			},
 		})
 	})
 }

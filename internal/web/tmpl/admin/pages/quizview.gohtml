@@ -42,6 +42,13 @@
                 <p class="mb-5 max-w-[58ch] text-text-dim">{{.Quiz.Description}}</p>
             {{end}}
 
+            {{if .Quiz.Visibility}}
+                <p class="mb-4 inline-flex items-center gap-2 max-w-max px-3 py-1 bg-surface border border-border-soft rounded-sm text-[0.72rem] uppercase tracking-[0.12em] text-text-dim">
+                    <span class="text-text-mute">Visibility</span>
+                    <span class="text-text">{{.Quiz.Visibility}}</span>
+                </p>
+            {{end}}
+
             <div class="mb-4 flex items-center gap-2 max-w-max px-3 py-2 bg-surface border border-border-soft rounded-sm font-mono text-[0.78rem] text-text-dim">
                 <span>/play/{{.Quiz.Slug}}-{{.Quiz.ID}}</span>
                 <button type="button"

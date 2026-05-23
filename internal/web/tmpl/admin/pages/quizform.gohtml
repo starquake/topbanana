@@ -108,6 +108,24 @@
             {{end}}
         </div>
 
+        {{$visibilityErr := index .FieldErrors "visibility"}}
+        <div class="form-field">
+            <label class="label-eyebrow" for="visibility">
+                Visibility
+                <span class="label-hint">Public — everyone can find and play it. Unlisted — only people with the link. Private — only logged-in players.</span>
+            </label>
+            <select id="visibility" name="visibility"
+                    class="form-input max-w-[260px]{{if $visibilityErr}} form-input-error{{end}}"
+                    {{if $visibilityErr}}aria-invalid="true" aria-describedby="visibility-error"{{end}}>
+                {{range .Quiz.VisibilityOptions}}
+                    <option value="{{.}}" {{if eq . $.Quiz.Visibility}}selected{{end}}>{{.}}</option>
+                {{end}}
+            </select>
+            {{if $visibilityErr}}
+                <p id="visibility-error" class="form-help-error" role="alert">{{$visibilityErr}}</p>
+            {{end}}
+        </div>
+
         <div class="form-actions">
             <button type="submit" name="action" value="Save" class="btn-primary">Save quiz</button>
             <a href="{{if .Quiz.ID}}/admin/quizzes/{{.Quiz.ID}}{{else}}/admin/quizzes{{end}}" class="btn-ghost">Cancel</a>

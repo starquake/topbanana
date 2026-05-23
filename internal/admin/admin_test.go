@@ -168,6 +168,10 @@ func (s stubQuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 	return s.listQuizzes(ctx)
 }
 
+func (s stubQuizStore) ListPublicQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
+	return s.ListQuizzes(ctx)
+}
+
 func (s stubQuizStore) QuestionCountsByQuiz(ctx context.Context) (map[int64]int, error) {
 	if s.questionCountsByQuiz == nil {
 		return map[int64]int{}, nil
@@ -868,15 +872,16 @@ func TestHandleQuizSave(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-		// #99: handler defaults blank time_limit_seconds to the
-		// project-wide default so the persisted struct carries 10 even
-		// though the form omits the field.
+		// #99 / #103: handler defaults a blank time_limit_seconds to the
+		// project default and missing visibility to "public" so the
+		// stored row carries both even though the form omits them.
 		testQuiz := quiz.Quiz{
 			Title:             "Quiz One",
 			Slug:              "quiz-one",
 			Description:       "First",
 			CreatedByPlayerID: testAdminID,
 			TimeLimitSeconds:  quiz.DefaultTimeLimitSeconds,
+			Visibility:        quiz.VisibilityPublic,
 		}
 
 		var createdQuizID int64
@@ -950,9 +955,10 @@ func TestHandleQuizSave(t *testing.T) {
 			Slug:              "quiz-one-updated",
 			Description:       originalQuiz.Description + " Updated",
 			CreatedByPlayerID: originalQuiz.CreatedByPlayerID,
-			// #99: handler defaults blank time_limit_seconds to the
-			// project-wide value.
+			// #99 / #103: handler defaults a blank time_limit_seconds
+			// to the project default and a blank visibility to "public".
 			TimeLimitSeconds: quiz.DefaultTimeLimitSeconds,
+			Visibility:       quiz.VisibilityPublic,
 		}
 
 		var quizzes []*quiz.Quiz

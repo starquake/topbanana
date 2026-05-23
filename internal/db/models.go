@@ -76,4 +76,5 @@ type Quiz struct {
 	UpdatedAt         time.Time
 	CreatedByPlayerID int64
 	TimeLimitSeconds  int64
+	Visibility        string
 }

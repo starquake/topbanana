@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -14,8 +15,14 @@ import (
 type Store interface {
 	// Ping returns the status of the database connection.
 	Ping(ctx context.Context) error
-	// ListQuizzes returns all quizzes.
+	// ListQuizzes returns all quizzes regardless of visibility. Used by
+	// admin surfaces; public-facing callers should use ListPublicQuizzes.
 	ListQuizzes(ctx context.Context) ([]*Quiz, error)
+	// ListPublicQuizzes returns the visibility=public subset of
+	// ListQuizzes (#103). Unlisted quizzes are reachable only by their
+	// share link; private quizzes are gated behind authentication at
+	// the handler layer.
+	ListPublicQuizzes(ctx context.Context) ([]*Quiz, error)
 	// QuestionCountsByQuiz returns the number of questions per quiz, keyed by
 	// quiz ID. Quizzes with no questions are absent from the map; callers
 	// should treat a missing entry as 0. Used alongside ListQuizzes by the
@@ -129,6 +136,35 @@ const (
 	DefaultTimeLimitSeconds = 10
 )
 
+// Visibility levels (#103). The DB CHECK on quizzes.visibility enforces
+// the same set; keeping them here as typed constants means handlers and
+// templates don't sprinkle stringly-typed values across the codebase.
+//
+//   - VisibilityPublic — listed everywhere and playable by anyone.
+//   - VisibilityUnlisted — not on any list; reachable only by sharing
+//     the /play/<slug>-<id> link.
+//   - VisibilityPrivate — reachable only by logged-in players.
+//     Anonymous visitors get a 404 from every read and write surface.
+const (
+	VisibilityPublic   = "public"
+	VisibilityUnlisted = "unlisted"
+	VisibilityPrivate  = "private"
+)
+
+// VisibilityValues lists the visibility levels in the order the admin
+// form's selector renders them. Returned as a fresh slice on every call
+// so callers can range over it without worrying about a shared backing
+// array (and to keep the gochecknoglobals linter happy).
+func VisibilityValues() []string {
+	return []string{VisibilityPublic, VisibilityUnlisted, VisibilityPrivate}
+}
+
+// IsValidVisibility reports whether v is one of the recognised
+// visibility levels (#103).
+func IsValidVisibility(v string) bool {
+	return slices.Contains(VisibilityValues(), v)
+}
+
 // Quiz represents a quiz. CreatedByPlayerID + CreatedByUsername were
 // added in migration 20260520200000 to support the creator-only-edit
 // rule from #281. CreatedByPlayerID is NOT NULL at the DB level;
@@ -151,7 +187,13 @@ type Quiz struct {
 	// when issuing a question (#99). The DB default is 10 so existing
 	// rows match the historical hard-coded window.
 	TimeLimitSeconds int
-	Questions        []*Question
+	// Visibility controls who can find and play the quiz (#103). One of
+	// VisibilityPublic, VisibilityUnlisted, VisibilityPrivate. A zero
+	// value (empty string) is treated as VisibilityPublic by the store
+	// layer so existing fixtures and the JSON-import path don't need to
+	// repeat the default.
+	Visibility string
+	Questions  []*Question
 }
 
 // Valid checks if the quiz, its questions, and its options are valid.
@@ -177,6 +219,12 @@ func (q *Quiz) Valid(ctx context.Context) map[string]string {
 			"Time limit must be between %d and %d seconds",
 			MinTimeLimitSeconds, MaxTimeLimitSeconds,
 		)
+	}
+	// An empty visibility is treated as "public" by the store; only
+	// flag genuinely unrecognised values so the admin form's selector
+	// can surface them inline.
+	if q.Visibility != "" && !IsValidVisibility(q.Visibility) {
+		problems["Visibility"] = "Visibility must be one of: public, unlisted, private"
 	}
 	for qsIndex, question := range q.Questions {
 		if qsProblems := question.Valid(ctx); len(qsProblems) > 0 {

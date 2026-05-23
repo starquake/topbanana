@@ -235,6 +235,19 @@ func NewService(gameStore Store, quizStore quiz.Store, logger *slog.Logger) *Ser
 	}
 }
 
+// GetQuiz proxies to the wrapped quiz store. Exposed so clientapi
+// handlers can apply the #103 visibility gate without taking a separate
+// quiz.Store parameter (every leaderboard / my-game / create-game
+// handler already needs the *Service).
+func (s *Service) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
+	qz, err := s.quizStore.GetQuiz(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get quiz %d: %w", id, err)
+	}
+
+	return qz, nil
+}
+
 // SetRevealDelay overrides the per-question reveal beat (#247). The default
 // is 3 s — long enough to read the prompt before the option buttons appear.
 // E2E and load-test deployments shrink this to a few hundred ms to speed up
