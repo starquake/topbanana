@@ -59,11 +59,12 @@ type Player struct {
 }
 
 type Question struct {
-	ID       int64
-	QuizID   int64
-	Text     string
-	Position int64
-	ImageUrl string
+	ID               int64
+	QuizID           int64
+	Text             string
+	Position         int64
+	ImageUrl         string
+	TimeLimitSeconds sql.NullInt64
 }
 
 type Quiz struct {
@@ -74,4 +75,5 @@ type Quiz struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	CreatedByPlayerID int64
+	TimeLimitSeconds  int64
 }

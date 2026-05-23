@@ -119,6 +119,16 @@ const (
 	DirectionDown = "down"
 )
 
+// Per-question / per-quiz answer-window bounds (#99). The DB CHECK on
+// time_limit_seconds enforces the same range; these constants drive the
+// admin form's validation message and stay in lockstep with the
+// migration.
+const (
+	MinTimeLimitSeconds     = 1
+	MaxTimeLimitSeconds     = 600
+	DefaultTimeLimitSeconds = 10
+)
+
 // Quiz represents a quiz. CreatedByPlayerID + CreatedByUsername were
 // added in migration 20260520200000 to support the creator-only-edit
 // rule from #281. CreatedByPlayerID is NOT NULL at the DB level;
@@ -135,7 +145,13 @@ type Quiz struct {
 	UpdatedAt         time.Time
 	CreatedByPlayerID int64
 	CreatedByUsername string
-	Questions         []*Question
+	// TimeLimitSeconds is the default per-question answer window in
+	// seconds. The game service resolves the priority chain
+	// (Question.TimeLimitSeconds → Quiz.TimeLimitSeconds → defaultExpiration)
+	// when issuing a question (#99). The DB default is 10 so existing
+	// rows match the historical hard-coded window.
+	TimeLimitSeconds int
+	Questions        []*Question
 }
 
 // Valid checks if the quiz, its questions, and its options are valid.
@@ -149,6 +165,18 @@ func (q *Quiz) Valid(ctx context.Context) map[string]string {
 	}
 	if q.Description == "" {
 		problems["Description"] = "Description is required"
+	}
+	// Only flag the time-limit range when the caller actually set a
+	// value; a zero TimeLimitSeconds means "unset" (the store layer
+	// rewrites it to DefaultTimeLimitSeconds before INSERT), so we
+	// must not reject the zero-value case that test fixtures and the
+	// JSON-import path both rely on.
+	if q.TimeLimitSeconds != 0 &&
+		(q.TimeLimitSeconds < MinTimeLimitSeconds || q.TimeLimitSeconds > MaxTimeLimitSeconds) {
+		problems["TimeLimitSeconds"] = fmt.Sprintf(
+			"Time limit must be between %d and %d seconds",
+			MinTimeLimitSeconds, MaxTimeLimitSeconds,
+		)
 	}
 	for qsIndex, question := range q.Questions {
 		if qsProblems := question.Valid(ctx); len(qsProblems) > 0 {
@@ -176,13 +204,18 @@ func validQuestionOptions(ctx context.Context, question *Question, problems map[
 }
 
 // Question represents a question in a quiz.
+//
+// TimeLimitSeconds is the per-question override. Nil means "inherit the
+// quiz default" — the game service applies the priority chain at
+// question-issue time (#99).
 type Question struct {
-	ID       int64
-	QuizID   int64
-	Text     string
-	ImageURL string
-	Position int
-	Options  []*Option
+	ID               int64
+	QuizID           int64
+	Text             string
+	ImageURL         string
+	Position         int
+	TimeLimitSeconds *int
+	Options          []*Option
 }
 
 // Valid checks if the question and its options are valid.
@@ -193,6 +226,15 @@ func (q *Question) Valid(_ context.Context) map[string]string {
 	}
 	if len(q.Options) == 0 {
 		problems["Options"] = "Options are required"
+	}
+	if q.TimeLimitSeconds != nil {
+		v := *q.TimeLimitSeconds
+		if v < MinTimeLimitSeconds || v > MaxTimeLimitSeconds {
+			problems["TimeLimitSeconds"] = fmt.Sprintf(
+				"Time limit must be between %d and %d seconds, or blank to inherit the quiz default",
+				MinTimeLimitSeconds, MaxTimeLimitSeconds,
+			)
+		}
 	}
 
 	return problems

@@ -54,6 +54,7 @@ func (s *QuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 			CreatedAt:         r.CreatedAt,
 			UpdatedAt:         r.UpdatedAt,
 			CreatedByPlayerID: r.CreatedByPlayerID,
+			TimeLimitSeconds:  int(r.TimeLimitSeconds),
 		}
 		// created_by_username comes from a LEFT JOIN on players; a
 		// player row deleted out from under a quiz would leave the
@@ -120,6 +121,7 @@ func (s *QuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 		CreatedAt:         row.CreatedAt,
 		UpdatedAt:         row.UpdatedAt,
 		CreatedByPlayerID: row.CreatedByPlayerID,
+		TimeLimitSeconds:  int(row.TimeLimitSeconds),
 	}
 	if row.CreatedByUsername.Valid {
 		qz.CreatedByUsername = row.CreatedByUsername.String
@@ -169,11 +171,12 @@ func (s *QuizStore) ListQuestions(ctx context.Context, quizID int64) ([]*quiz.Qu
 	questions := make([]*quiz.Question, 0, len(rows))
 	for _, r := range rows {
 		qs := &quiz.Question{
-			ID:       r.ID,
-			QuizID:   r.QuizID,
-			Text:     r.Text,
-			Position: int(r.Position),
-			ImageURL: r.ImageUrl,
+			ID:               r.ID,
+			QuizID:           r.QuizID,
+			Text:             r.Text,
+			Position:         int(r.Position),
+			ImageURL:         r.ImageUrl,
+			TimeLimitSeconds: nullableTimeLimitToPtr(r.TimeLimitSeconds),
 		}
 
 		options, listErr := s.listOptions(ctx, qs.ID)
@@ -201,11 +204,12 @@ func (s *QuizStore) GetQuestion(ctx context.Context, id int64) (*quiz.Question, 
 	}
 
 	qs := &quiz.Question{
-		ID:       row.ID,
-		QuizID:   row.QuizID,
-		Text:     row.Text,
-		Position: int(row.Position),
-		ImageURL: row.ImageUrl,
+		ID:               row.ID,
+		QuizID:           row.QuizID,
+		Text:             row.Text,
+		Position:         int(row.Position),
+		ImageURL:         row.ImageUrl,
+		TimeLimitSeconds: nullableTimeLimitToPtr(row.TimeLimitSeconds),
 	}
 
 	options, err := s.listOptions(ctx, qs.ID)
@@ -430,11 +434,20 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 	if qz.CreatedByPlayerID == 0 {
 		return quiz.ErrCreatorRequired
 	}
+	timeLimit := qz.TimeLimitSeconds
+	if timeLimit == 0 {
+		// The migration's DB DEFAULT only fires for INSERTs that omit
+		// the column; we always supply it. Backfill the project-wide
+		// default here so test fixtures and the JSON-import path don't
+		// have to repeat the value (#99).
+		timeLimit = quiz.DefaultTimeLimitSeconds
+	}
 	row, err := q.CreateQuiz(ctx, db.CreateQuizParams{
 		Title:             qz.Title,
 		Slug:              qz.Slug,
 		Description:       qz.Description,
 		CreatedByPlayerID: qz.CreatedByPlayerID,
+		TimeLimitSeconds:  int64(timeLimit),
 	})
 	if err != nil {
 		return classifySlugConflictErr(err, "failed to create quiz")
@@ -443,6 +456,7 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 	qz.ID = row.ID
 	qz.CreatedAt = row.CreatedAt
 	qz.UpdatedAt = row.UpdatedAt
+	qz.TimeLimitSeconds = int(row.TimeLimitSeconds)
 
 	for _, qs := range qz.Questions {
 		qs.ID = 0
@@ -462,11 +476,16 @@ func (s *QuizStore) execUpdateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 	}
 
 	var err error
+	timeLimit := qz.TimeLimitSeconds
+	if timeLimit == 0 {
+		timeLimit = quiz.DefaultTimeLimitSeconds
+	}
 	res, err := q.UpdateQuiz(ctx, db.UpdateQuizParams{
-		Title:       qz.Title,
-		Slug:        qz.Slug,
-		Description: qz.Description,
-		ID:          qz.ID,
+		Title:            qz.Title,
+		Slug:             qz.Slug,
+		Description:      qz.Description,
+		TimeLimitSeconds: int64(timeLimit),
+		ID:               qz.ID,
 	})
 	if err != nil {
 		return classifySlugConflictErr(err, "failed to update quiz")
@@ -529,16 +548,18 @@ func (s *QuizStore) handleQuestions(ctx context.Context, q *db.Queries, qz *quiz
 // execCreateQuestion creates a new question.
 func (s *QuizStore) execCreateQuestion(ctx context.Context, q *db.Queries, qs *quiz.Question) error {
 	row, err := q.CreateQuestion(ctx, db.CreateQuestionParams{
-		QuizID:   qs.QuizID,
-		Text:     qs.Text,
-		Position: int64(qs.Position),
-		ImageUrl: qs.ImageURL,
+		QuizID:           qs.QuizID,
+		Text:             qs.Text,
+		Position:         int64(qs.Position),
+		ImageUrl:         qs.ImageURL,
+		TimeLimitSeconds: nullableTimeLimit(qs.TimeLimitSeconds),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create question: %w", err)
 	}
 
 	qs.ID = row.ID
+	qs.TimeLimitSeconds = nullableTimeLimitToPtr(row.TimeLimitSeconds)
 	for _, o := range qs.Options {
 		o.ID = 0
 		o.QuestionID = qs.ID
@@ -558,10 +579,11 @@ func (s *QuizStore) execUpdateQuestion(ctx context.Context, q *db.Queries, qs *q
 
 	var err error
 	res, err := q.UpdateQuestion(ctx, db.UpdateQuestionParams{
-		Text:     qs.Text,
-		Position: int64(qs.Position),
-		ImageUrl: qs.ImageURL,
-		ID:       qs.ID,
+		Text:             qs.Text,
+		Position:         int64(qs.Position),
+		ImageUrl:         qs.ImageURL,
+		TimeLimitSeconds: nullableTimeLimit(qs.TimeLimitSeconds),
+		ID:               qs.ID,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to update question: %w", err)
@@ -777,4 +799,26 @@ func (*QuizStore) deleteOption(ctx context.Context, q *db.Queries, id int64) err
 	}
 
 	return nil
+}
+
+// nullableTimeLimit packs a *int into the [sql.NullInt64] the sqlc-generated
+// params expect for questions.time_limit_seconds. nil → NULL, which the
+// game service treats as "inherit the quiz default" (#99).
+func nullableTimeLimit(v *int) sql.NullInt64 {
+	if v == nil {
+		return sql.NullInt64{}
+	}
+
+	return sql.NullInt64{Int64: int64(*v), Valid: true}
+}
+
+// nullableTimeLimitToPtr is the inverse of nullableTimeLimit, used when
+// hydrating Question domain values from sqlc RETURNING / SELECT rows.
+func nullableTimeLimitToPtr(v sql.NullInt64) *int {
+	if !v.Valid {
+		return nil
+	}
+	out := int(v.Int64)
+
+	return &out
 }

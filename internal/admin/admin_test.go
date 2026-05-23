@@ -868,7 +868,16 @@ func TestHandleQuizSave(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-		testQuiz := quiz.Quiz{Title: "Quiz One", Slug: "quiz-one", Description: "First", CreatedByPlayerID: testAdminID}
+		// #99: handler defaults blank time_limit_seconds to the
+		// project-wide default so the persisted struct carries 10 even
+		// though the form omits the field.
+		testQuiz := quiz.Quiz{
+			Title:             "Quiz One",
+			Slug:              "quiz-one",
+			Description:       "First",
+			CreatedByPlayerID: testAdminID,
+			TimeLimitSeconds:  quiz.DefaultTimeLimitSeconds,
+		}
 
 		var createdQuizID int64
 		var quizzes []*quiz.Quiz
@@ -941,6 +950,9 @@ func TestHandleQuizSave(t *testing.T) {
 			Slug:              "quiz-one-updated",
 			Description:       originalQuiz.Description + " Updated",
 			CreatedByPlayerID: originalQuiz.CreatedByPlayerID,
+			// #99: handler defaults blank time_limit_seconds to the
+			// project-wide value.
+			TimeLimitSeconds: quiz.DefaultTimeLimitSeconds,
 		}
 
 		var quizzes []*quiz.Quiz

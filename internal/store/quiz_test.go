@@ -46,6 +46,11 @@ func newTestQuizzes() []*quiz.Quiz {
 			Description:       "Quiz 1 Description",
 			CreatedByPlayerID: seededAdminID,
 			CreatedByUsername: seededAdminUsername,
+			// #99: the store normalises a zero TimeLimitSeconds to the
+			// project-wide default before INSERT; the fixture mirrors
+			// that so cmp.Diff comparisons against rows read back from
+			// the DB succeed without per-test ignore directives.
+			TimeLimitSeconds: quiz.DefaultTimeLimitSeconds,
 			Questions: []*quiz.Question{
 				{
 					Text:     "Question 1-1",
@@ -75,6 +80,7 @@ func newTestQuizzes() []*quiz.Quiz {
 			Description:       "Quiz 2 Description",
 			CreatedByPlayerID: seededAdminID,
 			CreatedByUsername: seededAdminUsername,
+			TimeLimitSeconds:  quiz.DefaultTimeLimitSeconds,
 			Questions: []*quiz.Question{
 				{
 					Text:     "Question 2-1",
@@ -141,6 +147,7 @@ func existingTestQuizzes() []*quiz.Quiz {
 			Description:       "Quiz 2 Description",
 			CreatedByPlayerID: seededAdminID,
 			CreatedByUsername: seededAdminUsername,
+			TimeLimitSeconds:  quiz.DefaultTimeLimitSeconds,
 			Questions: []*quiz.Question{
 				{
 					ID:       3,
@@ -254,6 +261,7 @@ func TestQuizStore_ListQuizzes(t *testing.T) {
 			UpdatedAt:         qz.UpdatedAt,
 			CreatedByPlayerID: qz.CreatedByPlayerID,
 			CreatedByUsername: qz.CreatedByUsername,
+			TimeLimitSeconds:  qz.TimeLimitSeconds,
 		})
 	}
 
@@ -788,6 +796,7 @@ func TestQuizStore_UpdateQuiz(t *testing.T) {
 		UpdatedAt:         originalQuiz.UpdatedAt,
 		CreatedByPlayerID: originalQuiz.CreatedByPlayerID,
 		CreatedByUsername: originalQuiz.CreatedByUsername,
+		TimeLimitSeconds:  originalQuiz.TimeLimitSeconds,
 		Questions: []*quiz.Question{
 			{
 				ID:     originalQuiz.Questions[0].ID,

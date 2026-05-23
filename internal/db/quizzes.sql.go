@@ -37,16 +37,17 @@ func (q *Queries) CreateOption(ctx context.Context, arg CreateOptionParams) (Opt
 }
 
 const createQuestion = `-- name: CreateQuestion :one
-INSERT INTO questions (quiz_id, text, position, image_url)
-VALUES (?, ?, ?, ?)
-RETURNING id, quiz_id, text, position, image_url
+INSERT INTO questions (quiz_id, text, position, image_url, time_limit_seconds)
+VALUES (?, ?, ?, ?, ?)
+RETURNING id, quiz_id, text, position, image_url, time_limit_seconds
 `
 
 type CreateQuestionParams struct {
-	QuizID   int64
-	Text     string
-	Position int64
-	ImageUrl string
+	QuizID           int64
+	Text             string
+	Position         int64
+	ImageUrl         string
+	TimeLimitSeconds sql.NullInt64
 }
 
 func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) (Question, error) {
@@ -55,6 +56,7 @@ func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) 
 		arg.Text,
 		arg.Position,
 		arg.ImageUrl,
+		arg.TimeLimitSeconds,
 	)
 	var i Question
 	err := row.Scan(
@@ -63,14 +65,15 @@ func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) 
 		&i.Text,
 		&i.Position,
 		&i.ImageUrl,
+		&i.TimeLimitSeconds,
 	)
 	return i, err
 }
 
 const createQuiz = `-- name: CreateQuiz :one
-INSERT INTO quizzes (title, slug, description, created_by_player_id, updated_at)
-VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-RETURNING id, title, slug, description, created_at, updated_at, created_by_player_id
+INSERT INTO quizzes (title, slug, description, created_by_player_id, time_limit_seconds, updated_at)
+VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+RETURNING id, title, slug, description, created_at, updated_at, created_by_player_id, time_limit_seconds
 `
 
 type CreateQuizParams struct {
@@ -78,6 +81,7 @@ type CreateQuizParams struct {
 	Slug              string
 	Description       string
 	CreatedByPlayerID int64
+	TimeLimitSeconds  int64
 }
 
 // created_by_player_id is NOT NULL with an FK to players.id (migration
@@ -90,6 +94,7 @@ func (q *Queries) CreateQuiz(ctx context.Context, arg CreateQuizParams) (Quiz, e
 		arg.Slug,
 		arg.Description,
 		arg.CreatedByPlayerID,
+		arg.TimeLimitSeconds,
 	)
 	var i Quiz
 	err := row.Scan(
@@ -100,6 +105,7 @@ func (q *Queries) CreateQuiz(ctx context.Context, arg CreateQuizParams) (Quiz, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CreatedByPlayerID,
+		&i.TimeLimitSeconds,
 	)
 	return i, err
 }
@@ -196,7 +202,7 @@ func (q *Queries) GetOptionsByIDs(ctx context.Context, ids []int64) ([]Option, e
 }
 
 const getQuestion = `-- name: GetQuestion :one
-SELECT id, quiz_id, text, position, image_url
+SELECT id, quiz_id, text, position, image_url, time_limit_seconds
 FROM questions
 WHERE id = ?
 LIMIT 1
@@ -211,6 +217,7 @@ func (q *Queries) GetQuestion(ctx context.Context, id int64) (Question, error) {
 		&i.Text,
 		&i.Position,
 		&i.ImageUrl,
+		&i.TimeLimitSeconds,
 	)
 	return i, err
 }
@@ -223,6 +230,7 @@ SELECT q.id,
        q.created_at,
        q.updated_at,
        q.created_by_player_id,
+       q.time_limit_seconds,
        p.username AS created_by_username
 FROM quizzes q
          LEFT JOIN players p ON p.id = q.created_by_player_id
@@ -238,6 +246,7 @@ type GetQuizRow struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	CreatedByPlayerID int64
+	TimeLimitSeconds  int64
 	CreatedByUsername sql.NullString
 }
 
@@ -254,6 +263,7 @@ func (q *Queries) GetQuiz(ctx context.Context, id int64) (GetQuizRow, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CreatedByPlayerID,
+		&i.TimeLimitSeconds,
 		&i.CreatedByUsername,
 	)
 	return i, err
@@ -353,7 +363,7 @@ func (q *Queries) ListQuestionIDsByQuizID(ctx context.Context, quizID int64) ([]
 }
 
 const listQuestionsByQuizID = `-- name: ListQuestionsByQuizID :many
-SELECT id, quiz_id, text, position, image_url
+SELECT id, quiz_id, text, position, image_url, time_limit_seconds
 FROM questions
 WHERE quiz_id = ?
 ORDER BY position
@@ -374,6 +384,7 @@ func (q *Queries) ListQuestionsByQuizID(ctx context.Context, quizID int64) ([]Qu
 			&i.Text,
 			&i.Position,
 			&i.ImageUrl,
+			&i.TimeLimitSeconds,
 		); err != nil {
 			return nil, err
 		}
@@ -396,6 +407,7 @@ SELECT q.id,
        q.created_at,
        q.updated_at,
        q.created_by_player_id,
+       q.time_limit_seconds,
        p.username AS created_by_username
 FROM quizzes q
          LEFT JOIN players p ON p.id = q.created_by_player_id
@@ -410,6 +422,7 @@ type ListQuizzesRow struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	CreatedByPlayerID int64
+	TimeLimitSeconds  int64
 	CreatedByUsername sql.NullString
 }
 
@@ -435,6 +448,7 @@ func (q *Queries) ListQuizzes(ctx context.Context) ([]ListQuizzesRow, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.CreatedByPlayerID,
+			&i.TimeLimitSeconds,
 			&i.CreatedByUsername,
 		); err != nil {
 			return nil, err
@@ -539,17 +553,19 @@ func (q *Queries) UpdateOption(ctx context.Context, arg UpdateOptionParams) (sql
 
 const updateQuestion = `-- name: UpdateQuestion :execresult
 UPDATE questions
-SET text = ?,
-    position = ?,
-    image_url = ?
+SET text               = ?,
+    position           = ?,
+    image_url          = ?,
+    time_limit_seconds = ?
 WHERE id = ?
 `
 
 type UpdateQuestionParams struct {
-	Text     string
-	Position int64
-	ImageUrl string
-	ID       int64
+	Text             string
+	Position         int64
+	ImageUrl         string
+	TimeLimitSeconds sql.NullInt64
+	ID               int64
 }
 
 func (q *Queries) UpdateQuestion(ctx context.Context, arg UpdateQuestionParams) (sql.Result, error) {
@@ -557,6 +573,7 @@ func (q *Queries) UpdateQuestion(ctx context.Context, arg UpdateQuestionParams) 
 		arg.Text,
 		arg.Position,
 		arg.ImageUrl,
+		arg.TimeLimitSeconds,
 		arg.ID,
 	)
 }
@@ -581,18 +598,20 @@ func (q *Queries) UpdateQuestionPosition(ctx context.Context, arg UpdateQuestion
 
 const updateQuiz = `-- name: UpdateQuiz :execresult
 UPDATE quizzes
-SET title       = ?,
-    slug        = ?,
-    description = ?,
-    updated_at  = CURRENT_TIMESTAMP
+SET title              = ?,
+    slug               = ?,
+    description        = ?,
+    time_limit_seconds = ?,
+    updated_at         = CURRENT_TIMESTAMP
 WHERE id = ?
 `
 
 type UpdateQuizParams struct {
-	Title       string
-	Slug        string
-	Description string
-	ID          int64
+	Title            string
+	Slug             string
+	Description      string
+	TimeLimitSeconds int64
+	ID               int64
 }
 
 func (q *Queries) UpdateQuiz(ctx context.Context, arg UpdateQuizParams) (sql.Result, error) {
@@ -600,6 +619,7 @@ func (q *Queries) UpdateQuiz(ctx context.Context, arg UpdateQuizParams) (sql.Res
 		arg.Title,
 		arg.Slug,
 		arg.Description,
+		arg.TimeLimitSeconds,
 		arg.ID,
 	)
 }

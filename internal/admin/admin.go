@@ -142,17 +142,22 @@ type QuizData struct {
 	CreatedByPlayerID int64
 	CreatedByUsername string
 	CanEdit           bool
+	TimeLimitSeconds  int
 	Questions         []*QuestionData
 }
 
-// QuestionData is the data for a question.
+// QuestionData is the data for a question. TimeLimitSecondsValue is the
+// pre-formatted value bound to the optional per-question time-limit
+// input — empty when the question inherits the quiz default (#99), so
+// the form's <input type="number"> stays blank rather than rendering 0.
 type QuestionData struct {
-	ID       int64
-	QuizID   int64
-	Text     string
-	ImageURL string
-	Position int
-	Options  []*OptionData
+	ID                    int64
+	QuizID                int64
+	Text                  string
+	ImageURL              string
+	Position              int
+	TimeLimitSecondsValue string
+	Options               []*OptionData
 }
 
 // OptionData is the data for an option.
@@ -204,6 +209,7 @@ func quizDataFromQuiz(qz *quiz.Quiz) *QuizData {
 		QuestionCount:     len(qz.Questions),
 		CreatedByPlayerID: qz.CreatedByPlayerID,
 		CreatedByUsername: qz.CreatedByUsername,
+		TimeLimitSeconds:  qz.TimeLimitSeconds,
 		Questions:         questionDataFromQuestions(qz.Questions),
 	}
 }
@@ -218,13 +224,19 @@ func quizDataFromQuizzes(quizzes []*quiz.Quiz) []*QuizData {
 }
 
 func questionDataFromQuestion(q *quiz.Question) *QuestionData {
+	timeLimit := ""
+	if q.TimeLimitSeconds != nil {
+		timeLimit = strconv.Itoa(*q.TimeLimitSeconds)
+	}
+
 	return &QuestionData{
-		ID:       q.ID,
-		QuizID:   q.QuizID,
-		Text:     q.Text,
-		ImageURL: q.ImageURL,
-		Position: q.Position,
-		Options:  optionDataFromOptions(q.Options),
+		ID:                    q.ID,
+		QuizID:                q.QuizID,
+		Text:                  q.Text,
+		ImageURL:              q.ImageURL,
+		Position:              q.Position,
+		TimeLimitSecondsValue: timeLimit,
+		Options:               optionDataFromOptions(q.Options),
 	}
 }
 
@@ -517,11 +529,43 @@ func fillQuizFromForm(
 	qz.Title = r.PostFormValue("title")
 	qz.Slug = slug.Make(qz.Title)
 	qz.Description = r.PostFormValue("description")
+	// Per-quiz default time limit (#99). Empty input falls back to the
+	// migration default so a host that never touched the field still
+	// gets the historical 10-second window; an unparseable value lands
+	// 0, which the Quiz.Valid range check rejects with an inline error.
+	raw := strings.TrimSpace(r.PostFormValue("time_limit_seconds"))
+	switch raw {
+	case "":
+		qz.TimeLimitSeconds = quiz.DefaultTimeLimitSeconds
+	default:
+		n, parseErr := strconv.Atoi(raw)
+		if parseErr != nil {
+			n = 0
+		}
+		qz.TimeLimitSeconds = n
+	}
 	if problems := qz.Valid(r.Context()); len(problems) > 0 {
 		return lowercaseDomainFieldKeys(problems), true
 	}
 
 	return nil, true
+}
+
+// parseOptionalTimeLimit interprets the optional per-question
+// time_limit_seconds input. Blank → nil (inherit the quiz default).
+// Garbage → a non-nil pointer to 0, which Question.Valid catches and
+// surfaces as an inline range error.
+func parseOptionalTimeLimit(raw string) *int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		n = 0
+	}
+
+	return &n
 }
 
 // lowercaseDomainFieldKeys translates Quiz.Valid / Question.Valid map
@@ -565,6 +609,11 @@ func fillQuestionFromForm(
 
 	qs.Text = r.PostFormValue("text")
 	qs.ImageURL = r.PostFormValue("image_url")
+	// Optional per-question override (#99). Blank input clears any
+	// previous override (NULL → inherit the quiz default); a parse
+	// failure lands a zero, which Question.Valid rejects with an
+	// inline range error rather than silently saving a bad value.
+	qs.TimeLimitSeconds = parseOptionalTimeLimit(r.PostFormValue("time_limit_seconds"))
 
 	newOptions := make([]*quiz.Option, 0, maxOptions)
 
@@ -852,9 +901,13 @@ func HandleQuizCreate(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizform.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Pre-fill the time-limit input with the project-wide default
+		// so the form is a valid submission without the author having
+		// to touch the new field; the HTML5 number input with
+		// min=1/max=600 would otherwise reject the zero-value (#99).
 		render.Render(w, r, http.StatusOK, quizFormData{
 			Title: quizFormCreateTitle,
-			Quiz:  &QuizData{},
+			Quiz:  &QuizData{TimeLimitSeconds: quiz.DefaultTimeLimitSeconds},
 		})
 	})
 }
@@ -890,15 +943,24 @@ func HandleQuizEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 // is derived server-side from the title). The handler translates this
 // into the full domain model before validation.
 type quizImportPayload struct {
-	Title       string                      `json:"title"`
-	Description string                      `json:"description"`
-	Questions   []quizImportQuestionPayload `json:"questions"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	// TimeLimitSeconds is the per-quiz default answer window (#99).
+	// Optional in the payload — omitted maps to
+	// [quiz.DefaultTimeLimitSeconds], matching the admin form's
+	// new-quiz default.
+	TimeLimitSeconds *int                        `json:"timeLimitSeconds,omitempty"`
+	Questions        []quizImportQuestionPayload `json:"questions"`
 }
 
 type quizImportQuestionPayload struct {
-	Text     string                    `json:"text"`
-	ImageURL string                    `json:"imageUrl,omitempty"`
-	Options  []quizImportOptionPayload `json:"options"`
+	Text     string `json:"text"`
+	ImageURL string `json:"imageUrl,omitempty"`
+	// TimeLimitSeconds overrides the quiz default for this question
+	// (#99). Optional — omitted means "inherit the quiz value at
+	// game time", same as leaving the admin form's field blank.
+	TimeLimitSeconds *int                      `json:"timeLimitSeconds,omitempty"`
+	Options          []quizImportOptionPayload `json:"options"`
 }
 
 type quizImportOptionPayload struct {
@@ -914,9 +976,11 @@ type quizImportOptionPayload struct {
 const quizImportExample = `{
   "title": "European Capitals",
   "description": "Twelve quick-fire questions covering EU capitals.",
+  "timeLimitSeconds": 10,
   "questions": [
     {
       "text": "Which city sits on the river Vltava?",
+      "timeLimitSeconds": 15,
       "options": [
         { "text": "Bratislava", "correct": false },
         { "text": "Budapest",  "correct": false },
@@ -1037,10 +1101,18 @@ func HandleQuizImportSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 // admin form does the same derivation. Positions are assigned 1..N in
 // the order questions appear in the JSON.
 func quizFromImportPayload(p quizImportPayload) *quiz.Quiz {
+	// #99: honour the payload's per-quiz default when present; fall
+	// back to the project value so authors who don't care can omit
+	// the field entirely and still pass Quiz.Valid's range check.
+	timeLimit := quiz.DefaultTimeLimitSeconds
+	if p.TimeLimitSeconds != nil {
+		timeLimit = *p.TimeLimitSeconds
+	}
 	qz := &quiz.Quiz{
-		Title:       p.Title,
-		Slug:        slug.Make(p.Title),
-		Description: p.Description,
+		Title:            p.Title,
+		Slug:             slug.Make(p.Title),
+		Description:      p.Description,
+		TimeLimitSeconds: timeLimit,
 	}
 
 	qz.Questions = make([]*quiz.Question, 0, len(p.Questions))
@@ -1049,6 +1121,9 @@ func quizFromImportPayload(p quizImportPayload) *quiz.Quiz {
 			Text:     qIn.Text,
 			ImageURL: qIn.ImageURL,
 			Position: i + 1,
+			// nil → "inherit the quiz default", the same semantics
+			// the admin form's blank input carries (#99).
+			TimeLimitSeconds: qIn.TimeLimitSeconds,
 		}
 		qs.Options = make([]*quiz.Option, 0, len(qIn.Options))
 		for _, oIn := range qIn.Options {
