@@ -168,7 +168,13 @@ test('409 on startGame recovers via getMyGameForQuiz', async ({ page, browserNam
   // template emits.
   await expect(page.locator('text=/leaderboard/i').first()).toBeVisible({ timeout: 5_000 });
 
+  // Poll the counters instead of asserting once. The leaderboard
+  // heading above matches the start-screen Leaderboard that's
+  // already on screen pre-Start, so it isn't a gate on the 409
+  // recovery completing — and firefox sometimes hasn't fired the
+  // second /my-game probe by the time a single-shot assertion runs
+  // (#332).
+  await expect.poll(() => createGameCount, { timeout: 5_000 }).toBeGreaterThan(0);
+  await expect.poll(() => myGameCount, { timeout: 5_000 }).toBeGreaterThanOrEqual(2);
   expect(consoleErrors, `page errors during recovery: ${consoleErrors.join(', ')}`).toEqual([]);
-  expect(createGameCount).toBeGreaterThan(0);
-  expect(myGameCount).toBeGreaterThanOrEqual(2);
 });
