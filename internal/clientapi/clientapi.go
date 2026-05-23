@@ -424,6 +424,30 @@ func (s *leaderboardStreamer) writeEvent(ctx context.Context, res quizLeaderboar
 	return true
 }
 
+// writeHeartbeat writes a single SSE comment frame and flushes. The
+// frame is `:\n\n` — comment lines start with a colon and the spec
+// requires EventSource implementations to ignore them, so this never
+// fires a client-side `onmessage`. Its only job is to keep the TCP
+// connection warm so Firefox / intermediate proxies don't tear down
+// an idle SSE stream as NS_ERROR_PARTIAL_TRANSFER (#244 follow-up).
+// Returns false on write/flush failure so the caller can exit cleanly.
+func (s *leaderboardStreamer) writeHeartbeat() bool {
+	if _, err := fmt.Fprint(s.w, ":\n\n"); err != nil {
+		return false
+	}
+	if err := s.rc.Flush(); err != nil {
+		return false
+	}
+
+	return true
+}
+
+// leaderboardHeartbeatInterval is how often the SSE handler emits a
+// no-op comment frame to keep the connection alive when the hub is
+// quiet. Picked at 20s — under Firefox's ~30s idle-SSE close window
+// but long enough not to be visible in the network log on a busy quiz.
+const leaderboardHeartbeatInterval = 20 * time.Second
+
 // HandleQuizLeaderboardStream pushes the leaderboard down a long-lived
 // Server-Sent Events connection. Every time game.Service.SubmitAnswer
 // commits an answer for this quiz, the hub fires a tick and this handler
@@ -511,7 +535,14 @@ func HandleQuizLeaderboardStream(
 // is already committed as text/event-stream), so the loop logs and
 // exits — the client will reconnect via EventSource and re-run the
 // initial-snapshot path, which can surface the error cleanly.
+//
+// The heartbeat ticker emits a no-op SSE comment frame every
+// leaderboardHeartbeatInterval to keep the connection warm; without
+// it Firefox closes idle streams after ~30s with NS_ERROR_PARTIAL_TRANSFER.
 func (s *leaderboardStreamer) run(ctx context.Context, events <-chan struct{}) {
+	heartbeat := time.NewTicker(leaderboardHeartbeatInterval)
+	defer heartbeat.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -527,6 +558,10 @@ func (s *leaderboardStreamer) run(ctx context.Context, events <-chan struct{}) {
 				return
 			}
 			if !s.writeEvent(ctx, res) {
+				return
+			}
+		case <-heartbeat.C:
+			if !s.writeHeartbeat() {
 				return
 			}
 		}
