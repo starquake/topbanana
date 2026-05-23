@@ -119,7 +119,7 @@ Top Banana is configured through environment variables. Sensible defaults apply 
 ### Server
 
 - **`APP_ENV`** — `development` (default) or `production`. Production mode enforces `SESSION_KEY` and `DB_URI`.
-- **`HOST`** — interface to bind. Defaults to the empty string (all interfaces).
+- **`HOST`** — interface to bind. Defaults to `localhost`. The provided Docker image overrides this to `0.0.0.0`; set it explicitly in your own compose / k8s manifest if you bind directly to the binary.
 - **`PORT`** — TCP port. Defaults to `8080`.
 - **`DB_URI`** — modernc.org/sqlite connection string. Defaults to `file:topbanana.sqlite` in development; **required** in production.
 - **`CLIENT_DIR`** — development-only override that serves the player client from a directory on disk instead of the embedded FS, so HTML/JS edits hot-reload on page reload.
