@@ -4,6 +4,10 @@
 -- (NOT NULL since migration 20260520200000 / #281); the JOIN tolerates
 -- a deleted player row by surfacing created_by_username NULL, so the
 -- store decodes that field via sql.NullString.
+--
+-- visibility comes back unfiltered so the admin list can show every
+-- row regardless of who can play it; the public-facing API filters
+-- explicitly via ListPublicQuizzes (#103).
 SELECT q.id,
        q.title,
        q.slug,
@@ -12,9 +16,29 @@ SELECT q.id,
        q.updated_at,
        q.created_by_player_id,
        q.time_limit_seconds,
+       q.visibility,
        p.username AS created_by_username
 FROM quizzes q
          LEFT JOIN players p ON p.id = q.created_by_player_id
+ORDER BY q.updated_at DESC, q.id DESC;
+
+-- name: ListPublicQuizzes :many
+-- Public-facing variant of ListQuizzes (#103). Filters to visibility =
+-- 'public' so unlisted and private quizzes never appear in the player
+-- client's quiz picker or on the home page's all-quizzes view.
+SELECT q.id,
+       q.title,
+       q.slug,
+       q.description,
+       q.created_at,
+       q.updated_at,
+       q.created_by_player_id,
+       q.time_limit_seconds,
+       q.visibility,
+       p.username AS created_by_username
+FROM quizzes q
+         LEFT JOIN players p ON p.id = q.created_by_player_id
+WHERE q.visibility = 'public'
 ORDER BY q.updated_at DESC, q.id DESC;
 
 -- name: QuestionCountsByQuiz :many
@@ -37,6 +61,7 @@ SELECT q.id,
        q.updated_at,
        q.created_by_player_id,
        q.time_limit_seconds,
+       q.visibility,
        p.username AS created_by_username
 FROM quizzes q
          LEFT JOIN players p ON p.id = q.created_by_player_id
@@ -55,8 +80,8 @@ SELECT EXISTS(SELECT 1 FROM quizzes WHERE id = ?) AS quiz_exists;
 -- 20260520200000 / #281). [QuizStore.CreateQuiz] short-circuits with
 -- ErrCreatorRequired when the caller forgot to stamp the session
 -- admin, so the FK constraint is the second line of defence.
-INSERT INTO quizzes (title, slug, description, created_by_player_id, time_limit_seconds, updated_at)
-VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+INSERT INTO quizzes (title, slug, description, created_by_player_id, time_limit_seconds, visibility, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 RETURNING *;
 
 -- name: UpdateQuiz :execresult
@@ -65,6 +90,7 @@ SET title              = ?,
     slug               = ?,
     description        = ?,
     time_limit_seconds = ?,
+    visibility         = ?,
     updated_at         = CURRENT_TIMESTAMP
 WHERE id = ?;
 

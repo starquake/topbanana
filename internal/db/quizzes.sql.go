@@ -71,9 +71,9 @@ func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) 
 }
 
 const createQuiz = `-- name: CreateQuiz :one
-INSERT INTO quizzes (title, slug, description, created_by_player_id, time_limit_seconds, updated_at)
-VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-RETURNING id, title, slug, description, created_at, updated_at, created_by_player_id, time_limit_seconds
+INSERT INTO quizzes (title, slug, description, created_by_player_id, time_limit_seconds, visibility, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+RETURNING id, title, slug, description, created_at, updated_at, created_by_player_id, time_limit_seconds, visibility
 `
 
 type CreateQuizParams struct {
@@ -82,6 +82,7 @@ type CreateQuizParams struct {
 	Description       string
 	CreatedByPlayerID int64
 	TimeLimitSeconds  int64
+	Visibility        string
 }
 
 // created_by_player_id is NOT NULL with an FK to players.id (migration
@@ -95,6 +96,7 @@ func (q *Queries) CreateQuiz(ctx context.Context, arg CreateQuizParams) (Quiz, e
 		arg.Description,
 		arg.CreatedByPlayerID,
 		arg.TimeLimitSeconds,
+		arg.Visibility,
 	)
 	var i Quiz
 	err := row.Scan(
@@ -106,6 +108,7 @@ func (q *Queries) CreateQuiz(ctx context.Context, arg CreateQuizParams) (Quiz, e
 		&i.UpdatedAt,
 		&i.CreatedByPlayerID,
 		&i.TimeLimitSeconds,
+		&i.Visibility,
 	)
 	return i, err
 }
@@ -231,6 +234,7 @@ SELECT q.id,
        q.updated_at,
        q.created_by_player_id,
        q.time_limit_seconds,
+       q.visibility,
        p.username AS created_by_username
 FROM quizzes q
          LEFT JOIN players p ON p.id = q.created_by_player_id
@@ -247,6 +251,7 @@ type GetQuizRow struct {
 	UpdatedAt         time.Time
 	CreatedByPlayerID int64
 	TimeLimitSeconds  int64
+	Visibility        string
 	CreatedByUsername sql.NullString
 }
 
@@ -264,6 +269,7 @@ func (q *Queries) GetQuiz(ctx context.Context, id int64) (GetQuizRow, error) {
 		&i.UpdatedAt,
 		&i.CreatedByPlayerID,
 		&i.TimeLimitSeconds,
+		&i.Visibility,
 		&i.CreatedByUsername,
 	)
 	return i, err
@@ -318,6 +324,73 @@ func (q *Queries) ListOptionsByQuestionID(ctx context.Context, questionID int64)
 			&i.QuestionID,
 			&i.Text,
 			&i.IsCorrect,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPublicQuizzes = `-- name: ListPublicQuizzes :many
+SELECT q.id,
+       q.title,
+       q.slug,
+       q.description,
+       q.created_at,
+       q.updated_at,
+       q.created_by_player_id,
+       q.time_limit_seconds,
+       q.visibility,
+       p.username AS created_by_username
+FROM quizzes q
+         LEFT JOIN players p ON p.id = q.created_by_player_id
+WHERE q.visibility = 'public'
+ORDER BY q.updated_at DESC, q.id DESC
+`
+
+type ListPublicQuizzesRow struct {
+	ID                int64
+	Title             string
+	Slug              string
+	Description       string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	CreatedByPlayerID int64
+	TimeLimitSeconds  int64
+	Visibility        string
+	CreatedByUsername sql.NullString
+}
+
+// Public-facing variant of ListQuizzes (#103). Filters to visibility =
+// 'public' so unlisted and private quizzes never appear in the player
+// client's quiz picker or on the home page's all-quizzes view.
+func (q *Queries) ListPublicQuizzes(ctx context.Context) ([]ListPublicQuizzesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPublicQuizzes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPublicQuizzesRow
+	for rows.Next() {
+		var i ListPublicQuizzesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Slug,
+			&i.Description,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CreatedByPlayerID,
+			&i.TimeLimitSeconds,
+			&i.Visibility,
+			&i.CreatedByUsername,
 		); err != nil {
 			return nil, err
 		}
@@ -408,6 +481,7 @@ SELECT q.id,
        q.updated_at,
        q.created_by_player_id,
        q.time_limit_seconds,
+       q.visibility,
        p.username AS created_by_username
 FROM quizzes q
          LEFT JOIN players p ON p.id = q.created_by_player_id
@@ -423,6 +497,7 @@ type ListQuizzesRow struct {
 	UpdatedAt         time.Time
 	CreatedByPlayerID int64
 	TimeLimitSeconds  int64
+	Visibility        string
 	CreatedByUsername sql.NullString
 }
 
@@ -431,6 +506,10 @@ type ListQuizzesRow struct {
 // (NOT NULL since migration 20260520200000 / #281); the JOIN tolerates
 // a deleted player row by surfacing created_by_username NULL, so the
 // store decodes that field via sql.NullString.
+//
+// visibility comes back unfiltered so the admin list can show every
+// row regardless of who can play it; the public-facing API filters
+// explicitly via ListPublicQuizzes (#103).
 func (q *Queries) ListQuizzes(ctx context.Context) ([]ListQuizzesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listQuizzes)
 	if err != nil {
@@ -449,6 +528,7 @@ func (q *Queries) ListQuizzes(ctx context.Context) ([]ListQuizzesRow, error) {
 			&i.UpdatedAt,
 			&i.CreatedByPlayerID,
 			&i.TimeLimitSeconds,
+			&i.Visibility,
 			&i.CreatedByUsername,
 		); err != nil {
 			return nil, err
@@ -602,6 +682,7 @@ SET title              = ?,
     slug               = ?,
     description        = ?,
     time_limit_seconds = ?,
+    visibility         = ?,
     updated_at         = CURRENT_TIMESTAMP
 WHERE id = ?
 `
@@ -611,6 +692,7 @@ type UpdateQuizParams struct {
 	Slug             string
 	Description      string
 	TimeLimitSeconds int64
+	Visibility       string
 	ID               int64
 }
 
@@ -620,6 +702,7 @@ func (q *Queries) UpdateQuiz(ctx context.Context, arg UpdateQuizParams) (sql.Res
 		arg.Slug,
 		arg.Description,
 		arg.TimeLimitSeconds,
+		arg.Visibility,
 		arg.ID,
 	)
 }

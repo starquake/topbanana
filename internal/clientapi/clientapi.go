@@ -88,7 +88,9 @@ func gameRequest(w http.ResponseWriter, r *http.Request, logger *slog.Logger) (s
 	return gameID, p.ID, true
 }
 
-// HandleQuizList returns a list of quizzes.
+// HandleQuizList returns a list of quizzes. Only visibility=public rows
+// surface — unlisted is link-only and private is gated per-request at
+// the GetQuiz path, neither of which fits a list (#103).
 func HandleQuizList(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 	type quizResponse struct {
 		ID          int64     `json:"id"`
@@ -103,7 +105,7 @@ func HandleQuizList(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var err error
 
-		quizzes, err := quizStore.ListQuizzes(r.Context())
+		quizzes, err := quizStore.ListPublicQuizzes(r.Context())
 		if err != nil {
 			writeInternalError(w, r, logger, "error retrieving quizzes from store", err)
 
@@ -129,6 +131,49 @@ func HandleQuizList(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 			return
 		}
 	})
+}
+
+// canReadQuiz applies the #103 visibility gate. Public and unlisted are
+// reachable by anyone (unlisted requires guessing the slug+ID, which is
+// out of scope for this ticket); private requires an authenticated
+// player. Returns false when the caller is not authorised, in which
+// case the response has already been written as a 404 so the gate is
+// indistinguishable from a genuinely missing quiz.
+func canReadQuiz(w http.ResponseWriter, r *http.Request, qz *quiz.Quiz) bool {
+	if qz.Visibility != quiz.VisibilityPrivate {
+		return true
+	}
+	p, ok := auth.PlayerFromContext(r.Context())
+	if !ok || p.IsAnonymous() {
+		http.NotFound(w, r)
+
+		return false
+	}
+
+	return true
+}
+
+// gateQuizRead loads the quiz by ID via the game service's quiz store
+// proxy and applies canReadQuiz so the leaderboard, leaderboard-stream,
+// my-game, and create-game handlers can reject access without
+// duplicating the load + check + 404 dance.
+func gateQuizRead(
+	w http.ResponseWriter, r *http.Request,
+	logger *slog.Logger, service *game.Service, quizID int64,
+) bool {
+	qz, err := service.GetQuiz(r.Context(), quizID)
+	if err != nil {
+		if errors.Is(err, quiz.ErrQuizNotFound) {
+			http.NotFound(w, r)
+
+			return false
+		}
+		writeInternalError(w, r, logger, "error retrieving quiz for visibility gate", err)
+
+		return false
+	}
+
+	return canReadQuiz(w, r, qz)
 }
 
 // HandleQuizGet returns a single quiz with its questions and options.
@@ -170,6 +215,9 @@ func HandleQuizGet(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 			}
 			writeInternalError(w, r, logger, "error retrieving quiz from store", err)
 
+			return
+		}
+		if !canReadQuiz(w, r, qz) {
 			return
 		}
 
@@ -307,6 +355,10 @@ func HandleQuizLeaderboard(logger *slog.Logger, service *game.Service) http.Hand
 			return
 		}
 
+		if !gateQuizRead(w, r, logger, service, quizID) {
+			return
+		}
+
 		player, ok := auth.PlayerFromContext(ctx)
 		if !ok {
 			// EnsurePlayer middleware should have populated this; reaching
@@ -390,6 +442,10 @@ func HandleQuizLeaderboardStream(
 
 		quizID, ok := handlers.ParseIDFromSlugPath(w, r, logger, "slugID")
 		if !ok {
+			return
+		}
+
+		if !gateQuizRead(w, r, logger, service, quizID) {
 			return
 		}
 
@@ -511,6 +567,10 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 			return
 		}
 
+		if !gateQuizRead(w, r, logger, service, req.QuizID) {
+			return
+		}
+
 		g, err := service.CreateGame(ctx, req.QuizID, player.ID)
 		if err != nil {
 			if errors.Is(err, quiz.ErrQuizNotFound) {
@@ -566,6 +626,10 @@ func HandleGameForQuiz(logger *slog.Logger, service *game.Service) http.Handler 
 
 		quizID, ok := handlers.ParseIDFromSlugPath(w, r, logger, "slugID")
 		if !ok {
+			return
+		}
+
+		if !gateQuizRead(w, r, logger, service, quizID) {
 			return
 		}
 

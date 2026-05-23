@@ -27,11 +27,12 @@ func withPlayer(ctx context.Context, id int64) context.Context {
 var errStub = errors.New("stub error")
 
 type stubQuizStore struct {
-	listQuizzes func(ctx context.Context) ([]*quiz.Quiz, error)
-	getQuiz     func(ctx context.Context, id int64) (*quiz.Quiz, error)
-	quizExists  func(ctx context.Context, id int64) (bool, error)
-	getOption   func(ctx context.Context, id int64) (*quiz.Option, error)
-	getQuestion func(ctx context.Context, id int64) (*quiz.Question, error)
+	listQuizzes       func(ctx context.Context) ([]*quiz.Quiz, error)
+	listPublicQuizzes func(ctx context.Context) ([]*quiz.Quiz, error)
+	getQuiz           func(ctx context.Context, id int64) (*quiz.Quiz, error)
+	quizExists        func(ctx context.Context, id int64) (bool, error)
+	getOption         func(ctx context.Context, id int64) (*quiz.Option, error)
+	getQuestion       func(ctx context.Context, id int64) (*quiz.Question, error)
 }
 
 func (stubQuizStore) Ping(_ context.Context) error { return nil }
@@ -42,6 +43,17 @@ func (s stubQuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 	}
 
 	return s.listQuizzes(ctx)
+}
+
+func (s stubQuizStore) ListPublicQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
+	if s.listPublicQuizzes != nil {
+		return s.listPublicQuizzes(ctx)
+	}
+	if s.listQuizzes != nil {
+		return s.listQuizzes(ctx)
+	}
+
+	return nil, errStub
 }
 
 func (stubQuizStore) QuestionCountsByQuiz(_ context.Context) (map[int64]int, error) {
@@ -1295,6 +1307,12 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 			quizExists: func(_ context.Context, _ int64) (bool, error) {
 				return true, nil
 			},
+			// #103: gate loads the quiz via service.GetQuiz to check
+			// visibility before serving the leaderboard. Returning a
+			// public quiz here lets the gate pass through.
+			getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Visibility: quiz.VisibilityPublic}, nil
+			},
 		}
 		handler := HandleQuizLeaderboard(logger, newService(gs, qs))
 
@@ -1360,6 +1378,12 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 			quizExists: func(_ context.Context, _ int64) (bool, error) {
 				return false, nil
 			},
+			// #103: gate hits service.GetQuiz before the service path
+			// runs. ErrQuizNotFound here mirrors the missing-row reply
+			// the gate maps to a 404.
+			getQuiz: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
+				return nil, quiz.ErrQuizNotFound
+			},
 		}
 		handler := HandleQuizLeaderboard(logger, newService(stubGameStore{}, qs))
 
@@ -1406,6 +1430,12 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 		qs := stubQuizStore{
 			quizExists: func(_ context.Context, _ int64) (bool, error) {
 				return true, nil
+			},
+			// #103: gate loads the quiz via service.GetQuiz to check
+			// visibility before serving the leaderboard. Returning a
+			// public quiz here lets the gate pass through.
+			getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Visibility: quiz.VisibilityPublic}, nil
 			},
 		}
 		handler := HandleQuizLeaderboard(logger, newService(gs, qs))
