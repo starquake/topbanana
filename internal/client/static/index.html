@@ -206,8 +206,14 @@
             <template x-if="(!gameId || finished) && leaderboard">
                 <div class="mb-6">
                     <h3 class="label-eyebrow mb-3">Leaderboard</h3>
+                    <template x-if="leaderboardStale">
+                        <div class="leaderboard-stale-banner" role="status">
+                            <span>Live updates paused.</span>
+                            <button type="button" class="btn-ghost" @click="retryLeaderboardStream()">Retry</button>
+                        </div>
+                    </template>
                     <template x-if="leaderboard.entries.length > 0">
-                        <table class="player-table">
+                        <table class="player-table" :class="{ 'leaderboard-stale': leaderboardStale }">
                             <thead>
                                 <tr>
                                     <th>Rank</th>

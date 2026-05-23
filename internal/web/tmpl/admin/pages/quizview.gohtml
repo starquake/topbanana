@@ -77,11 +77,11 @@
         </header>
 
         {{/* Share modal */}}
-        <div id="modal-share-quiz-{{.Quiz.ID}}" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
+        <div id="modal-share-quiz-{{.Quiz.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-share-quiz-{{.Quiz.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
             <div class="absolute inset-0" onclick="closeModal('modal-share-quiz-{{.Quiz.ID}}')"></div>
             <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
                 <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
-                    <p class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Share quiz</p>
+                    <p id="modal-share-quiz-{{.Quiz.ID}}-title" class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Share quiz</p>
                     <button type="button"
                             aria-label="close"
                             onclick="closeModal('modal-share-quiz-{{.Quiz.ID}}')"
@@ -115,11 +115,11 @@
         </div>
 
         {{/* Delete-quiz modal */}}
-        <div id="modal-delete-quiz-{{.Quiz.ID}}" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
+        <div id="modal-delete-quiz-{{.Quiz.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-delete-quiz-{{.Quiz.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
             <div class="absolute inset-0" onclick="closeModal('modal-delete-quiz-{{.Quiz.ID}}')"></div>
             <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
                 <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
-                    <p class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Delete quiz</p>
+                    <p id="modal-delete-quiz-{{.Quiz.ID}}-title" class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Delete quiz</p>
                     <button type="button" aria-label="close"
                             onclick="closeModal('modal-delete-quiz-{{.Quiz.ID}}')"
                             class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer">&times;</button>
@@ -157,11 +157,11 @@
                      buttons on the same rule. */}}
                 {{if $canEdit}}
                 {{range .Quiz.Questions}}
-                    <div id="modal-delete-question-{{.ID}}" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
+                    <div id="modal-delete-question-{{.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-delete-question-{{.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
                         <div class="absolute inset-0" onclick="closeModal('modal-delete-question-{{.ID}}')"></div>
                         <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
                             <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
-                                <p class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Delete question</p>
+                                <p id="modal-delete-question-{{.ID}}-title" class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Delete question</p>
                                 <button type="button" aria-label="close"
                                         onclick="closeModal('modal-delete-question-{{.ID}}')"
                                         class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer">&times;</button>
@@ -224,11 +224,11 @@
                 </div>
 
                 {{range .Players}}
-                    <div id="modal-reset-player-{{.PlayerID}}" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
+                    <div id="modal-reset-player-{{.PlayerID}}" role="dialog" aria-modal="true" aria-labelledby="modal-reset-player-{{.PlayerID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
                         <div class="absolute inset-0" onclick="closeModal('modal-reset-player-{{.PlayerID}}')"></div>
                         <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
                             <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
-                                <p class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Reset quiz attempt</p>
+                                <p id="modal-reset-player-{{.PlayerID}}-title" class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Reset quiz attempt</p>
                                 <button type="button" aria-label="close"
                                         onclick="closeModal('modal-reset-player-{{.PlayerID}}')"
                                         class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer">&times;</button>

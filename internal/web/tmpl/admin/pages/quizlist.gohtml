@@ -86,11 +86,11 @@
              for quizzes the current admin can actually delete (#281). */}}
         {{range .Quizzes}}
             {{if .CanEdit}}
-            <div id="modal-delete-quiz-{{.ID}}" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
+            <div id="modal-delete-quiz-{{.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-delete-quiz-{{.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
                 <div class="absolute inset-0" onclick="closeModal('modal-delete-quiz-{{.ID}}')"></div>
                 <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
                     <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
-                        <p class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Delete quiz</p>
+                        <p id="modal-delete-quiz-{{.ID}}-title" class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Delete quiz</p>
                         <button type="button"
                                 aria-label="close"
                                 onclick="closeModal('modal-delete-quiz-{{.ID}}')"

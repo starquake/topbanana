@@ -37,8 +37,67 @@
     {{template "content" .}}
 </section>
 <script>
-    function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
-    function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+    // Admin modals get dialog ARIA + focus management + Esc-to-close
+    // wiring at open time (#364). Templates only declare:
+    //   - the outer wrapper with id="modal-..."
+    //   - role="dialog" + aria-modal="true" + aria-labelledby="<title-id>"
+    //   - a title element carrying the referenced id
+    // Everything else (focus capture/restore, Tab cycling, Esc) lives
+    // here so all five admin modals share one behaviour.
+    const modalState = new Map();
+
+    function focusableInModal(modal) {
+        const sel = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]),'
+            + ' textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+        return Array.from(modal.querySelectorAll(sel))
+            .filter((el) => !el.closest('[aria-hidden="true"]'));
+    }
+
+    function openModal(id) {
+        const modal = document.getElementById(id);
+        if (!modal) return;
+        modal.classList.remove('hidden');
+
+        const previouslyFocused = document.activeElement;
+        const focusables = focusableInModal(modal);
+        if (focusables.length > 0) {
+            focusables[0].focus();
+        }
+
+        const onKey = (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                closeModal(id);
+                return;
+            }
+            if (e.key !== 'Tab' || focusables.length === 0) return;
+            const first = focusables[0];
+            const last = focusables[focusables.length - 1];
+            if (e.shiftKey && document.activeElement === first) {
+                e.preventDefault();
+                last.focus();
+            } else if (!e.shiftKey && document.activeElement === last) {
+                e.preventDefault();
+                first.focus();
+            }
+        };
+        document.addEventListener('keydown', onKey);
+        modalState.set(id, { onKey, previouslyFocused });
+    }
+
+    function closeModal(id) {
+        const modal = document.getElementById(id);
+        if (!modal) return;
+        modal.classList.add('hidden');
+
+        const state = modalState.get(id);
+        if (!state) return;
+        document.removeEventListener('keydown', state.onKey);
+        if (state.previouslyFocused && typeof state.previouslyFocused.focus === 'function') {
+            state.previouslyFocused.focus();
+        }
+        modalState.delete(id);
+    }
 </script>
 </body>
 </html>
