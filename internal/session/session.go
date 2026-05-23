@@ -94,6 +94,11 @@ func (m *Manager) PlayerID(r *http.Request) (int64, bool) {
 // newCookie returns the session cookie with the safe defaults always applied:
 // HttpOnly and SameSite=Lax. The Secure attribute follows the Manager's
 // secureCookies field — see [New]'s doc comment for the rationale.
+//
+// SameSite=Lax is load-bearing: it is the only CSRF defence for the /api/*
+// routes (see addAPIRoutes in internal/server/routes.go), which authenticate
+// via this cookie. Weakening it to None or removing it requires adding an
+// Origin / Sec-Fetch-Site check on unsafe methods first.
 func (m *Manager) newCookie(value string, maxAge int) *http.Cookie {
 	//nolint:gosec // G124: Secure is intentionally policy-driven (production
 	// passes true via cfg.SecureCookies(); dev passes false so plain-HTTP
