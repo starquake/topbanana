@@ -163,9 +163,10 @@ func addAdminRoutes(
 }
 
 // addAPIRoutes registers the JSON API routes consumed by the game client.
-// These do not need CSRF protection: they expect application/json bodies and
-// do not rely on cookie auth, so the classic browser-form CSRF threat does
-// not apply.
+// API routes use the same session cookie as the rest of the app. CSRF
+// protection is provided entirely by SameSite=Lax on the session cookie
+// (see internal/session/session.go). Removing or weakening SameSite
+// requires adding an Origin / Sec-Fetch-Site check on unsafe methods.
 //
 // Every route is wrapped in EnsurePlayer so a cookieless visitor is silently
 // upgraded to an anonymous players row before the handler runs. This means
