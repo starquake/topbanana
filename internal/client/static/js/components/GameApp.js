@@ -7,6 +7,14 @@ import { openShareDialog } from '/assets/js/share.js';
 // is the quiz ID.
 const PLAY_PATH_PATTERN = /^\/play\/.+-(\d+)\/?$/;
 
+// leaderboardErrorRetryLimit is how many consecutive EventSource
+// onerror callbacks we tolerate before declaring the leaderboard
+// stream stale and surfacing the dimmed indicator (#362). 3 covers
+// the typical short reconnect-storm without giving up on the first
+// transient drop; the browser auto-retries between each onerror so
+// the actual elapsed time is ~9s before we flip.
+const leaderboardErrorRetryLimit = 3;
+
 // reducedMotion returns true when the OS-level preference is set; all
 // JS-driven animation calls below short-circuit in that case so the page
 // behaves identically to a no-animation build for affected users.
@@ -28,17 +36,6 @@ function runAnim(targets, params) {
     } else if (typeof a === 'function') {
         a({ targets, ...params });
     }
-}
-
-// staggerDelay returns a value usable as anime.js's `delay`. Prefers the
-// real anime.stagger when available, falls back to an index-based
-// computation so the staggered effect still happens on older builds.
-function staggerDelay(step) {
-    const a = typeof window !== 'undefined' ? window.anime : null;
-    if (a && typeof a.stagger === 'function') {
-        return a.stagger(step);
-    }
-    return (_el, i) => i * step;
 }
 
 export class GameApp {
@@ -118,12 +115,29 @@ export class GameApp {
         // (#239). Opened when the leaderboard becomes visible; closed on
         // navigation away. Null when no subscription is active.
         this.leaderboardEventSource = null;
+        // Stale-indicator state (#362). Flipped true after
+        // leaderboardErrorRetryLimit consecutive SSE errors so the
+        // template can dim the leaderboard and surface a Retry; reset
+        // to false on every successful message. Tracked here so
+        // Alpine picks the change up reactively.
+        this.leaderboardStale = false;
+        this.leaderboardErrorCount = 0;
         // Register the unload cleanup exactly once. Doing it here
         // (rather than per-subscribe) means repeat subscriptions don't
         // stack up redundant listeners. closeLeaderboardStream is a
         // safe no-op when there's no active subscription.
         if (typeof window !== 'undefined') {
             window.addEventListener('beforeunload', () => this.closeLeaderboardStream());
+            // Resubscribe when the tab becomes visible again so the
+            // dimmed stale state self-heals once the page is
+            // foreground again (#362). Browsers throttle background
+            // EventSource reconnects, so this gives the user a fresh
+            // attempt the moment they look.
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible' && this.leaderboardStale && this.quizSlugId) {
+                    this.subscribeLeaderboardStream();
+                }
+            });
         }
     }
 
@@ -274,7 +288,6 @@ export class GameApp {
             if (this.finished && this.quizSlugId) {
                 try {
                     this.leaderboard = await gameService.getQuizLeaderboard(this.quizSlugId);
-                    this.animateLeaderboard();
                 } catch (err) {
                     console.warn('leaderboard re-fetch after claim failed; row will update on next load', err);
                 }
@@ -517,8 +530,18 @@ export class GameApp {
             // SSE never connected — re-subscribing here would tear
             // down the live connection and produce a spurious
             // NS_ERROR_PARTIAL_TRANSFER in Firefox.
-            this.leaderboard = await gameService.getQuizLeaderboard(this.quizSlugId);
-            this.animateLeaderboard();
+            //
+            // A 5xx / network blip on this fetch used to escape past
+            // finished=true and leave the player stuck on the
+            // "Loading leaderboard..." fallback; degrade gracefully
+            // to an empty board so the SSE event (or the next page
+            // load) can repaint it (#361).
+            try {
+                this.leaderboard = await gameService.getQuizLeaderboard(this.quizSlugId);
+            } catch (err) {
+                console.warn('finish leaderboard fetch failed', err);
+                this.leaderboard = { quizId: 0, entries: [], currentPlayer: null };
+            }
             if (!this.hasCustomName()) {
                 this.openClaimModal();
             }
@@ -528,7 +551,6 @@ export class GameApp {
         this.syncClockFrom(question);
         this.question = question;
         this.startRevealCountdown();
-        this.animateQuestionEntrance();
     }
 
     // syncClockFrom recomputes clockOffset from the serverNow that
@@ -591,30 +613,6 @@ export class GameApp {
         }, 100);
     }
 
-    // animateQuestionEntrance carries the question and answer buttons in
-    // with generous travel and a longer settle — the page is intentionally
-    // calm at rest, so the entrance is where the personality lives. Run
-    // inside requestAnimationFrame so Alpine has committed the new markup
-    // before anime.js targets it.
-    animateQuestionEntrance() {
-        requestAnimationFrame(() => {
-            runAnim('.subtitle', {
-                opacity: [0, 1],
-                translateY: [36, 0],
-                duration: 520,
-                easing: 'easeOutQuart',
-            });
-            runAnim('.buttons .button', {
-                opacity: [0, 1],
-                translateY: [48, 0],
-                scale: [0.96, 1],
-                duration: 460,
-                delay: staggerDelay(85),
-                easing: 'easeOutQuart',
-            });
-        });
-    }
-
     // subscribeLeaderboardStream opens a Server-Sent Events connection
     // for the current quiz's leaderboard and updates `this.leaderboard`
     // on every event. Idempotent: a second call closes any prior
@@ -623,9 +621,18 @@ export class GameApp {
     subscribeLeaderboardStream() {
         this.closeLeaderboardStream();
         if (typeof EventSource === 'undefined' || !this.quizSlugId) return;
+        // Resubscribing resets the stale state (#362) so a manual
+        // Retry click or a visibility-change retry can clear the dim.
+        this.leaderboardStale = false;
+        this.leaderboardErrorCount = 0;
         const url = `/api/quizzes/${encodeURIComponent(this.quizSlugId)}/leaderboard/stream`;
         const source = new EventSource(url);
         source.onmessage = (ev) => {
+            // Successful frame — the stream is alive, reset the error
+            // budget so a transient drop later doesn't immediately
+            // promote to stale.
+            this.leaderboardErrorCount = 0;
+            this.leaderboardStale = false;
             try {
                 this.leaderboard = JSON.parse(ev.data);
             } catch (err) {
@@ -633,11 +640,31 @@ export class GameApp {
             }
         };
         source.onerror = () => {
-            // EventSource auto-reconnects unless we close it. Leave the
-            // existing leaderboard in place so the UI doesn't flicker
-            // while the browser retries.
+            // EventSource auto-reconnects unless we close it. Tolerate
+            // a few transient drops, but if the server is truly gone
+            // (quiz deleted, network gone) close the stream and flip
+            // the stale flag so the template can dim the table and
+            // offer a Retry instead of silently retrying forever
+            // (#362).
+            this.leaderboardErrorCount += 1;
+            if (
+                source.readyState === EventSource.CLOSED
+                || this.leaderboardErrorCount >= leaderboardErrorRetryLimit
+            ) {
+                source.close();
+                this.leaderboardEventSource = null;
+                this.leaderboardStale = true;
+            }
         };
         this.leaderboardEventSource = source;
+    }
+
+    // retryLeaderboardStream is the click handler for the stale-data
+    // Retry button (#362). It just re-opens the subscription;
+    // subscribeLeaderboardStream resets the stale flag on a successful
+    // message.
+    retryLeaderboardStream() {
+        this.subscribeLeaderboardStream();
     }
 
     // closeLeaderboardStream is safe to call regardless of subscription
@@ -648,21 +675,6 @@ export class GameApp {
             this.leaderboardEventSource.close();
             this.leaderboardEventSource = null;
         }
-    }
-
-    // animateLeaderboard slides the leaderboard rows in from the right
-    // with a generous stagger so the table assembles itself one row at a
-    // time. Defensive against an empty leaderboard.
-    animateLeaderboard() {
-        requestAnimationFrame(() => {
-            runAnim('.table tbody tr', {
-                opacity: [0, 1],
-                translateX: [40, 0],
-                duration: 480,
-                delay: staggerDelay(85),
-                easing: 'easeOutQuart',
-            });
-        });
     }
 
     // animateFeedback gives the feedback notification a noticeable kick
