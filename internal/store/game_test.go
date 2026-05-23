@@ -857,6 +857,59 @@ func TestGameStore_ListParticipantsForQuizLeaderboard(t *testing.T) {
 	})
 }
 
+// TestGameStore_ListQuizIDsForPlayer_IncludesJoinedButUnanswered pins
+// the #354 fix: a player who clicked Start on a quiz but never
+// submitted an answer must surface in the fan-out list so the
+// claim-name flow republishes their leaderboard row when they
+// rename. Pre-fix the query read from game_answers and missed them.
+func TestGameStore_ListQuizIDsForPlayer_IncludesJoinedButUnanswered(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	logger := slog.Default()
+	quizzes := NewQuizStore(db, logger)
+	games := NewGameStore(db, logger)
+	playerStore := NewPlayerStore(db, logger)
+
+	q := &quiz.Quiz{
+		Title: "Pre-Answer Quiz", Slug: "pre-answer-quiz",
+		CreatedByPlayerID: seededAdminID,
+		Questions: []*quiz.Question{
+			{Text: "Anything?", Position: 1, Options: []*quiz.Option{{Text: "yes", Correct: true}}},
+		},
+	}
+	if err := quizzes.CreateQuiz(t.Context(), q); err != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", err)
+	}
+
+	player, err := playerStore.CreateAnonymousPlayer(t.Context(), "anon-prejoin")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	g := &game.Game{QuizID: q.ID}
+	if err = games.CreateGame(t.Context(), g); err != nil {
+		t.Fatalf("CreateGame err = %v, want nil", err)
+	}
+	if err = games.CreateParticipant(t.Context(), &game.Participant{
+		GameID: g.ID, PlayerID: player.ID, QuizID: q.ID,
+	}); err != nil {
+		t.Fatalf("CreateParticipant err = %v, want nil", err)
+	}
+	// No CreateAnswer — that's the whole point.
+
+	ids, err := games.ListQuizIDsForPlayer(t.Context(), player.ID)
+	if err != nil {
+		t.Fatalf("ListQuizIDsForPlayer err = %v, want nil", err)
+	}
+	if got, want := len(ids), 1; got != want {
+		t.Fatalf("len(ids) = %d, want %d (joined-but-unanswered must surface)", got, want)
+	}
+	if got, want := ids[0], q.ID; got != want {
+		t.Errorf("ids[0] = %d, want %d", got, want)
+	}
+}
+
 func TestGameStore_ListAnswersForQuizLeaderboard_UsesQuizIDIndex(t *testing.T) {
 	t.Parallel()
 

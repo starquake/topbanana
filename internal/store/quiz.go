@@ -58,13 +58,9 @@ func (s *QuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 			CreatedByPlayerID: r.CreatedByPlayerID,
 			TimeLimitSeconds:  int(r.TimeLimitSeconds),
 			Visibility:        r.Visibility,
-		}
-		// created_by_username comes from a LEFT JOIN on players; a
-		// player row deleted out from under a quiz would leave the
-		// FK dangling, but the column itself stays NOT NULL so the
-		// username is the only nullable field on the join.
-		if r.CreatedByUsername.Valid {
-			qz.CreatedByUsername = r.CreatedByUsername.String
+			// INNER JOIN on players makes this a plain string (#359);
+			// the FK guarantees a creator row exists.
+			CreatedByUsername: r.CreatedByUsername,
 		}
 		quizzes = append(quizzes, qz)
 	}
@@ -93,9 +89,8 @@ func (s *QuizStore) ListPublicQuizzes(ctx context.Context) ([]*quiz.Quiz, error)
 			CreatedByPlayerID: r.CreatedByPlayerID,
 			TimeLimitSeconds:  int(r.TimeLimitSeconds),
 			Visibility:        r.Visibility,
-		}
-		if r.CreatedByUsername.Valid {
-			qz.CreatedByUsername = r.CreatedByUsername.String
+			// INNER JOIN, see ListQuizzes (#359).
+			CreatedByUsername: r.CreatedByUsername,
 		}
 		quizzes = append(quizzes, qz)
 	}
@@ -157,9 +152,8 @@ func (s *QuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 		CreatedByPlayerID: row.CreatedByPlayerID,
 		TimeLimitSeconds:  int(row.TimeLimitSeconds),
 		Visibility:        row.Visibility,
-	}
-	if row.CreatedByUsername.Valid {
-		qz.CreatedByUsername = row.CreatedByUsername.String
+		// INNER JOIN, see ListQuizzes (#359).
+		CreatedByUsername: row.CreatedByUsername,
 	}
 
 	questions, err := s.ListQuestions(ctx, id)

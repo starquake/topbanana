@@ -223,6 +223,67 @@ func TestHomeStore_ListMostActivePlayers(t *testing.T) {
 	}
 }
 
+// TestHomeStore_ListMostActivePlayers_AppliesThirtyDayWindow pins
+// #355: a player who finished a game more than 30 days ago must NOT
+// surface in the active list. Without the window the home page's
+// two leaderboards disagree on what "recently active" means.
+func TestHomeStore_ListMostActivePlayers_AppliesThirtyDayWindow(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	logger := slog.Default()
+	quizzes := NewQuizStore(db, logger)
+	games := NewGameStore(db, logger)
+	players := NewPlayerStore(db, logger)
+	hs := NewHomeStore(db, logger)
+
+	q := &quiz.Quiz{
+		Title: "T", Slug: "t", Description: "",
+		CreatedByPlayerID: seededAdminID,
+		Questions: []*quiz.Question{
+			{Text: "Q1", Position: 1, Options: []*quiz.Option{{Text: "a", Correct: true}}},
+		},
+	}
+	if err := quizzes.CreateQuiz(t.Context(), q); err != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", err)
+	}
+
+	stale, err := players.CreatePlayer(t.Context(), "stale-winner", "hash", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer stale err = %v, want nil", err)
+	}
+	recent, err := players.CreatePlayer(t.Context(), "recent-winner", "hash", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer recent err = %v, want nil", err)
+	}
+
+	finishGameFor(t, games, stale.ID, q, q.ID)
+	finishGameFor(t, games, recent.ID, q, q.ID)
+
+	// Backdate the stale player's game 60 days. The query filters on
+	// games.created_at, so this should drop the stale player from the
+	// active list while leaving the recent player.
+	_, err = db.ExecContext(
+		t.Context(),
+		"UPDATE games SET created_at = datetime('now', '-60 days') WHERE id IN (SELECT game_id FROM game_participants WHERE player_id = ?)",
+		stale.ID,
+	)
+	if err != nil {
+		t.Fatalf("backdate stale game err = %v, want nil", err)
+	}
+
+	rows, err := hs.ListMostActivePlayers(t.Context())
+	if err != nil {
+		t.Fatalf("ListMostActivePlayers err = %v, want nil", err)
+	}
+	if got, want := len(rows), 1; got != want {
+		t.Fatalf("len(rows) = %d, want %d (stale player must be filtered out)", got, want)
+	}
+	if got, want := rows[0].ID, recent.ID; got != want {
+		t.Errorf("rows[0].ID = %d, want %d (recent player should be the only row)", got, want)
+	}
+}
+
 // TestHomeStore_ExcludesEmptyQuizFromRankings pins the #275 fix: a
 // quiz with zero questions used to satisfy the finisher predicate
 // (0 >= 0) and surface on the popular list. The EXISTS gate added to

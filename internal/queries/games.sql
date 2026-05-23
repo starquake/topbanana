@@ -128,18 +128,22 @@ ORDER BY g.created_at DESC
 LIMIT 1;
 
 -- name: ListQuizIDsForPlayer :many
--- Lists distinct quiz IDs where the given player has at least one
--- recorded answer. The claim-name flow uses this to know which
--- leaderboard SSE streams to repaint when a player updates their
--- display name: every quiz they appear on gets a fresh snapshot
--- pushed to its subscribers. Filtering on game_answers rather than
--- game_participants means we skip quizzes the player joined but
--- never actually answered on, which would not show up on the
--- leaderboard anyway.
-SELECT DISTINCT g.quiz_id
-FROM game_answers ga
-         JOIN games g ON g.id = ga.game_id
-WHERE ga.player_id = ?;
+-- Lists distinct quiz IDs the given player has joined. The claim-name
+-- flow uses this to know which leaderboard SSE streams to repaint
+-- when a player updates their display name: every quiz they appear
+-- on gets a fresh snapshot pushed to its subscribers.
+--
+-- Post-#335 the live leaderboard surfaces a player as soon as they
+-- create a game (before any answer commits), so the fan-out must
+-- read from game_participants -- filtering on game_answers would
+-- skip joined-but-unanswered quizzes and leave their subscribers
+-- stuck on the stale auto-petname (#354). The IS NOT NULL guard
+-- belt-and-braces the column until the planned NOT NULL migration
+-- (#357) lands.
+SELECT DISTINCT gp.quiz_id
+FROM game_participants gp
+WHERE gp.player_id = ?
+  AND gp.quiz_id IS NOT NULL;
 
 -- name: ListGameIDsForPlayerOnQuiz :many
 -- Lists every game ID the player has on the given quiz. The reset flow

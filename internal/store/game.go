@@ -306,14 +306,27 @@ func (s *GameStore) ListParticipantsForQuizLeaderboard(
 	return participants, nil
 }
 
-// ListQuizIDsForPlayer returns the distinct quiz IDs where the player
-// has at least one answer. Used by the claim-name flow to repaint every
-// affected leaderboard SSE stream when a player changes their display
-// name.
+// ListQuizIDsForPlayer returns the distinct quiz IDs the player has
+// joined. Used by the claim-name flow to repaint every affected
+// leaderboard SSE stream when a player changes their display name.
+//
+// Post-#335 a player can appear on the leaderboard before any answer
+// commits (just by clicking Start), so this reads from
+// game_participants. The generated layer surfaces gp.quiz_id as
+// [sql.NullInt64] because the column is nullable in the schema; the
+// query filters NULLs and the wrapper unpacks the rest into a plain
+// []int64 the service can iterate without a Valid check (#354).
 func (s *GameStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]int64, error) {
-	ids, err := s.q.ListQuizIDsForPlayer(ctx, playerID)
+	rows, err := s.q.ListQuizIDsForPlayer(ctx, playerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list quiz IDs for player %d: %w", playerID, err)
+	}
+
+	ids := make([]int64, 0, len(rows))
+	for _, r := range rows {
+		if r.Valid {
+			ids = append(ids, r.Int64)
+		}
 	}
 
 	return ids, nil

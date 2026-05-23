@@ -237,7 +237,7 @@ SELECT q.id,
        q.visibility,
        p.username AS created_by_username
 FROM quizzes q
-         LEFT JOIN players p ON p.id = q.created_by_player_id
+         JOIN players p ON p.id = q.created_by_player_id
 WHERE q.id = ?
 LIMIT 1
 `
@@ -252,11 +252,12 @@ type GetQuizRow struct {
 	CreatedByPlayerID int64
 	TimeLimitSeconds  int64
 	Visibility        string
-	CreatedByUsername sql.NullString
+	CreatedByUsername string
 }
 
-// Same LEFT JOIN as ListQuizzes so single-quiz fetches carry the
-// creator's username for the admin view's "Created by ..." line.
+// Same INNER JOIN as ListQuizzes so single-quiz fetches carry the
+// creator's username for the admin view's "Created by ..." line. See
+// ListQuizzes for why the LEFT JOIN was dropped (#359).
 func (q *Queries) GetQuiz(ctx context.Context, id int64) (GetQuizRow, error) {
 	row := q.db.QueryRowContext(ctx, getQuiz, id)
 	var i GetQuizRow
@@ -350,7 +351,7 @@ SELECT q.id,
        q.visibility,
        p.username AS created_by_username
 FROM quizzes q
-         LEFT JOIN players p ON p.id = q.created_by_player_id
+         JOIN players p ON p.id = q.created_by_player_id
 WHERE q.visibility = 'public'
 ORDER BY q.updated_at DESC, q.id DESC
 `
@@ -365,7 +366,7 @@ type ListPublicQuizzesRow struct {
 	CreatedByPlayerID int64
 	TimeLimitSeconds  int64
 	Visibility        string
-	CreatedByUsername sql.NullString
+	CreatedByUsername string
 }
 
 // Public-facing variant of ListQuizzes (#103). Filters to visibility =
@@ -484,7 +485,7 @@ SELECT q.id,
        q.visibility,
        p.username AS created_by_username
 FROM quizzes q
-         LEFT JOIN players p ON p.id = q.created_by_player_id
+         JOIN players p ON p.id = q.created_by_player_id
 ORDER BY q.updated_at DESC, q.id DESC
 `
 
@@ -498,14 +499,18 @@ type ListQuizzesRow struct {
 	CreatedByPlayerID int64
 	TimeLimitSeconds  int64
 	Visibility        string
-	CreatedByUsername sql.NullString
+	CreatedByUsername string
 }
 
-// LEFT JOIN on players so the admin list can render "Created by ..."
-// alongside each quiz without an N+1 lookup. Every quiz has a creator
-// (NOT NULL since migration 20260520200000 / #281); the JOIN tolerates
-// a deleted player row by surfacing created_by_username NULL, so the
-// store decodes that field via sql.NullString.
+// INNER JOIN on players so the admin list can render "Created by ..."
+// alongside each quiz without an N+1 lookup. created_by_player_id is
+// NOT NULL (since migration 20260520200000 / #281) and references
+// players(id) with no player-delete path, so the join always matches;
+// the previous LEFT JOIN + sql.NullString in the wrapper was dead
+// defensive code that masked a real invariant (#359). If a future
+// migration adds player deletion, restore the LEFT JOIN with an
+// explicit "Unknown" rendering instead of letting deleted-creator
+// quizzes silently render a blank "Created by" line.
 //
 // visibility comes back unfiltered so the admin list can show every
 // row regardless of who can play it; the public-facing API filters
