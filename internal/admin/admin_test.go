@@ -86,6 +86,39 @@ func (s stubGameStore) ListAnswersForQuizLeaderboard(
 	return s.listAnswersForQuizLeaderboard(ctx, quizID)
 }
 
+// ListParticipantsForQuizLeaderboard derives the participants list
+// from the configured answer stub so existing PlayedBy tests
+// (seeded with answers only) keep passing. The participants list is
+// the canonical entry source post-#335.
+func (s stubGameStore) ListParticipantsForQuizLeaderboard(
+	ctx context.Context, quizID int64,
+) ([]*game.LeaderboardParticipant, error) {
+	if s.listAnswersForQuizLeaderboard == nil {
+		return nil, nil
+	}
+
+	answers, err := s.listAnswersForQuizLeaderboard(ctx, quizID)
+	if err != nil {
+		return nil, err
+	}
+
+	seen := make(map[int64]int)
+	var out []*game.LeaderboardParticipant
+	for _, a := range answers {
+		if i, ok := seen[a.PlayerID]; ok {
+			out[i].IsCompleted = a.IsCompleted
+
+			continue
+		}
+		seen[a.PlayerID] = len(out)
+		out = append(out, &game.LeaderboardParticipant{
+			PlayerID: a.PlayerID, Username: a.Username, IsCompleted: a.IsCompleted,
+		})
+	}
+
+	return out, nil
+}
+
 func (s stubGameStore) DeleteGamesForPlayerOnQuiz(
 	ctx context.Context, playerID, quizID int64,
 ) error {
@@ -3114,12 +3147,12 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 					{
 						PlayerID: 1, Username: "alice",
 						QuestionStartedAt: now, QuestionExpiredAt: now.Add(10 * time.Second),
-						AnsweredAt: now, Correct: true,
+						AnsweredAt: now, Correct: true, IsCompleted: true,
 					},
 					{
 						PlayerID: 2, Username: "bob",
 						QuestionStartedAt: now, QuestionExpiredAt: now.Add(10 * time.Second),
-						AnsweredAt: now, Correct: true,
+						AnsweredAt: now, Correct: true, IsCompleted: true,
 					},
 				}, nil
 			},

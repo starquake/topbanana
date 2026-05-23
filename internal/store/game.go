@@ -279,6 +279,33 @@ func (s *GameStore) ListAnswersForQuizLeaderboard(
 	return answers, nil
 }
 
+// ListParticipantsForQuizLeaderboard returns one row per player who
+// joined a game for the given quiz, with the same is_completed flag the
+// answer rows carry. The Service uses this list as the canonical set of
+// leaderboard entries so a player who clicked Start but has not yet
+// submitted an answer still appears on the live leaderboard (#335).
+func (s *GameStore) ListParticipantsForQuizLeaderboard(
+	ctx context.Context, quizID int64,
+) ([]*game.LeaderboardParticipant, error) {
+	rows, err := s.q.ListParticipantsForQuizLeaderboard(ctx, quizID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list leaderboard participants for quiz %d: %w", quizID, err)
+	}
+
+	participants := make([]*game.LeaderboardParticipant, 0, len(rows))
+	for _, r := range rows {
+		participants = append(participants, &game.LeaderboardParticipant{
+			PlayerID: r.PlayerID,
+			Username: r.Username,
+			// CASE returns 1/0; treat non-zero as "every quiz question
+			// has been issued for this participant's game".
+			IsCompleted: r.IsCompleted != 0,
+		})
+	}
+
+	return participants, nil
+}
+
 // ListQuizIDsForPlayer returns the distinct quiz IDs where the player
 // has at least one answer. Used by the claim-name flow to repaint every
 // affected leaderboard SSE stream when a player changes their display

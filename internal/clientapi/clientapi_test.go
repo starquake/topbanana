@@ -115,16 +115,17 @@ func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Opti
 }
 
 type stubGameStore struct {
-	getGame                       func(ctx context.Context, id string) (*game.Game, error)
-	getGameByPlayerAndQuiz        func(ctx context.Context, playerID, quizID int64) (*game.Game, error)
-	createGame                    func(ctx context.Context, g *game.Game) error
-	startGame                     func(ctx context.Context, id string) error
-	createParticipant             func(ctx context.Context, p *game.Participant) error
-	createQuestion                func(ctx context.Context, gq *game.Question) error
-	createAnswer                  func(ctx context.Context, a *game.Answer) error
-	listAnswersForQuizLeaderboard func(ctx context.Context, quizID int64) ([]*game.LeaderboardAnswer, error)
-	deleteGamesForPlayerOnQuiz    func(ctx context.Context, playerID, quizID int64) error
-	listQuizIDsForPlayer          func(ctx context.Context, playerID int64) ([]int64, error)
+	getGame                            func(ctx context.Context, id string) (*game.Game, error)
+	getGameByPlayerAndQuiz             func(ctx context.Context, playerID, quizID int64) (*game.Game, error)
+	createGame                         func(ctx context.Context, g *game.Game) error
+	startGame                          func(ctx context.Context, id string) error
+	createParticipant                  func(ctx context.Context, p *game.Participant) error
+	createQuestion                     func(ctx context.Context, gq *game.Question) error
+	createAnswer                       func(ctx context.Context, a *game.Answer) error
+	listAnswersForQuizLeaderboard      func(ctx context.Context, quizID int64) ([]*game.LeaderboardAnswer, error)
+	listParticipantsForQuizLeaderboard func(ctx context.Context, quizID int64) ([]*game.LeaderboardParticipant, error)
+	deleteGamesForPlayerOnQuiz         func(ctx context.Context, playerID, quizID int64) error
+	listQuizIDsForPlayer               func(ctx context.Context, playerID int64) ([]int64, error)
 }
 
 func (stubGameStore) Ping(_ context.Context) error { return nil }
@@ -215,6 +216,43 @@ func (s stubGameStore) ListAnswersForQuizLeaderboard(
 	}
 
 	return s.listAnswersForQuizLeaderboard(ctx, quizID)
+}
+
+// ListParticipantsForQuizLeaderboard serves the participants stub when
+// set; otherwise it derives participants from the configured answer
+// stub so existing leaderboard tests don't have to wire both. Tests
+// that need to exercise the no-answer-participant path (#335) set the
+// participants stub explicitly.
+func (s stubGameStore) ListParticipantsForQuizLeaderboard(
+	ctx context.Context, quizID int64,
+) ([]*game.LeaderboardParticipant, error) {
+	if s.listParticipantsForQuizLeaderboard != nil {
+		return s.listParticipantsForQuizLeaderboard(ctx, quizID)
+	}
+	if s.listAnswersForQuizLeaderboard == nil {
+		return nil, errStub
+	}
+
+	answers, err := s.listAnswersForQuizLeaderboard(ctx, quizID)
+	if err != nil {
+		return nil, err
+	}
+
+	seen := make(map[int64]int)
+	var out []*game.LeaderboardParticipant
+	for _, a := range answers {
+		if i, ok := seen[a.PlayerID]; ok {
+			out[i].IsCompleted = a.IsCompleted
+
+			continue
+		}
+		seen[a.PlayerID] = len(out)
+		out = append(out, &game.LeaderboardParticipant{
+			PlayerID: a.PlayerID, Username: a.Username, IsCompleted: a.IsCompleted,
+		})
+	}
+
+	return out, nil
 }
 
 func newService(gs stubGameStore, qs stubQuizStore) *game.Service {

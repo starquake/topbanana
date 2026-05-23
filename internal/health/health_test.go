@@ -86,6 +86,12 @@ func (*stubGameStore) ListAnswersForQuizLeaderboard(
 	return nil, nil
 }
 
+func (*stubGameStore) ListParticipantsForQuizLeaderboard(
+	_ context.Context, _ int64,
+) ([]*game.LeaderboardParticipant, error) {
+	return nil, nil
+}
+
 func (*stubGameStore) DeleteGamesForPlayerOnQuiz(_ context.Context, _, _ int64) error {
 	return nil
 }
