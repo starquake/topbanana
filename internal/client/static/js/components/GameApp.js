@@ -409,11 +409,14 @@ export class GameApp {
         // Hoist quizSlugId + leaderboard fetch above the completed gate
         // so the start screen surfaces the leaderboard for the selected
         // quiz BEFORE the player clicks Start (#234). The completed
-        // branch below still upgrades to the "Game Finished!" view +
-        // SSE; the start-screen case stays read-only (no SSE — the
-        // player sees current scores at decision time, not a live
-        // ticker). Best-effort: a failed fetch lands an empty entries
-        // list so the section degrades to its "be the first" state.
+        // branch below still upgrades to the "Game Finished!" view; the
+        // SSE subscription opened here covers the start-screen view too
+        // (#244) so a fresh finisher landing in another tab updates the
+        // current player's start-screen leaderboard in real time. The
+        // in-game view is intentionally leaderboard-free to keep the
+        // answer flow uncluttered. Best-effort: a failed fetch lands an
+        // empty entries list so the section degrades to its "be the
+        // first" state.
         this.quizSlugId = slugId;
         try {
             this.leaderboard = await gameService.getQuizLeaderboard(slugId);
@@ -421,6 +424,7 @@ export class GameApp {
             console.warn('start-screen leaderboard fetch failed', err);
             this.leaderboard = { quizId: 0, entries: [], currentPlayer: null };
         }
+        this.subscribeLeaderboardStream();
 
         const existing = await gameService.getMyGameForQuiz(slugId);
         if (existing && existing.completed) {
@@ -469,20 +473,6 @@ export class GameApp {
                 }
             }
         }
-        // #244: open the leaderboard SSE stream as soon as the game
-        // starts so mid-quiz players (including this one) show up on
-        // the live board while still answering. The previous wiring
-        // only opened on the post-game finish branch, which meant the
-        // player never saw their own running total until the quiz
-        // ended. Both the initial REST fetch and the SSE subscribe are
-        // best-effort: failures don't block gameplay, and a finish-time
-        // re-fetch still lands the final snapshot.
-        try {
-            this.leaderboard = await gameService.getQuizLeaderboard(this.quizSlugId);
-        } catch (err) {
-            console.error('startGame: initial leaderboard fetch failed', err);
-        }
-        this.subscribeLeaderboardStream();
         await this.nextQuestion();
     }
 
