@@ -25,6 +25,11 @@ func New(
 	addRoutes(mux, logger, stores, gameService, leaderboardHub, cfg)
 	var handler http.Handler = mux
 	handler = logRequests(logger, handler)
+	// recoverPanic is the OUTERMOST wrapper so a handler panic still
+	// captures the request fields logRequests would have recorded and
+	// the 500 reaches the client cleanly instead of leaking a half-
+	// written response (#346).
+	handler = recoverPanic(logger, handler)
 
 	return handler
 }

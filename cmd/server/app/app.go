@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -267,7 +268,11 @@ func Run(
 	ln net.Listener,
 ) error {
 	var err error
-	signalCtx, stop := signal.NotifyContext(ctx, os.Interrupt)
+	// SIGTERM is what Docker / k8s send on container stop; without it
+	// the graceful-shutdown path (httpServer.Shutdown + DB close) never
+	// runs in prod and the container is hard-killed at the
+	// orchestrator's grace timeout (#342).
+	signalCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	logger := slog.New(slog.NewTextHandler(stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))

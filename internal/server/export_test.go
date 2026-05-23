@@ -1,6 +1,7 @@
 package server
 
 var (
-	ExportAddRoutes   = addRoutes
-	ExportLogRequests = logRequests
+	ExportAddRoutes    = addRoutes
+	ExportLogRequests  = logRequests
+	ExportRecoverPanic = recoverPanic
 )
