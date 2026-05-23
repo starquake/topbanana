@@ -47,12 +47,21 @@ type Store interface {
 	GetQuestion(ctx context.Context, questionID int64) (*Question, error)
 	// CreateQuestion creates a question.
 	CreateQuestion(ctx context.Context, qs *Question) error
+	// CreateQuestionAtNextPosition reads max(position)+1 and inserts
+	// the question with that position inside a single transaction.
+	// The new admin question-save flow uses this to dodge the TOCTOU
+	// race between NextQuestionPosition and CreateQuestion that
+	// produced two questions at the same position under concurrent
+	// "Add question" clicks (#352).
+	CreateQuestionAtNextPosition(ctx context.Context, qs *Question) error
 	// UpdateQuestion updates a question.
 	UpdateQuestion(ctx context.Context, qs *Question) error
 	// NextQuestionPosition returns max(position)+1 for the given quiz,
 	// or 1 when the quiz has no questions yet. Used by the question-
 	// creation flow to auto-assign positions so authors do not have to
-	// type integers manually (#16).
+	// type integers manually (#16). Prefer
+	// CreateQuestionAtNextPosition for new-question creation; this
+	// method is retained for callers that need the read on its own.
 	NextQuestionPosition(ctx context.Context, quizID int64) (int, error)
 	// SwapQuestionPositions swaps the question with questionID against
 	// its neighbour on the given side ("up" = previous position,

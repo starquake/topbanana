@@ -304,6 +304,11 @@ func (s *QuizStore) UpdateQuestion(ctx context.Context, qs *quiz.Question) error
 // when the quiz has no questions yet. The SQL COALESCE keeps the typed
 // return as int64 even on an empty quiz; we add 1 here so callers get
 // the position they should assign on a new question.
+//
+// Prefer [QuizStore.CreateQuestionAtNextPosition] over manually pairing
+// this read with a CreateQuestion write — the unwrapped pair races
+// under concurrent "Add question" clicks and lands two questions at
+// the same position (#352).
 func (s *QuizStore) NextQuestionPosition(ctx context.Context, quizID int64) (int, error) {
 	maxPos, err := s.q.MaxQuestionPosition(ctx, quizID)
 	if err != nil {
@@ -311,6 +316,56 @@ func (s *QuizStore) NextQuestionPosition(ctx context.Context, quizID int64) (int
 	}
 
 	return int(maxPos) + 1, nil
+}
+
+// createQuestionAtNextPositionRetries caps the optimistic retry loop in
+// [QuizStore.CreateQuestionAtNextPosition] so two genuinely concurrent
+// callers eventually serialize without spinning forever. Three attempts
+// covers the realistic admin-double-click case (one slot collision)
+// while still giving up loudly if something stranger is going on.
+const createQuestionAtNextPositionRetries = 3
+
+// CreateQuestionAtNextPosition reads max(position)+1 and inserts the
+// question with that position inside a single transaction. The UNIQUE
+// INDEX on questions(quiz_id, position) (#352) catches the race when two
+// transactions both pick the same slot; this method retries up to
+// [createQuestionAtNextPositionRetries] times so genuinely concurrent
+// admin clicks succeed without surfacing the constraint to the caller.
+//
+// Returns [quiz.ErrCreatingQuestion] (wrapped) on any non-conflict
+// failure; surfaces the raw SQLite UNIQUE error after the retry budget
+// is exhausted so callers can distinguish "system busy" from "broken
+// invariant".
+func (s *QuizStore) CreateQuestionAtNextPosition(ctx context.Context, qs *quiz.Question) error {
+	var lastErr error
+	for range createQuestionAtNextPositionRetries {
+		txErr := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+			maxPos, err := q.MaxQuestionPosition(ctx, qs.QuizID)
+			if err != nil {
+				return fmt.Errorf("read max question position: %w", err)
+			}
+			qs.Position = int(maxPos) + 1
+
+			return s.execCreateQuestion(ctx, q, qs)
+		})
+		if txErr == nil {
+			return nil
+		}
+		var sqliteErr *sqlite.Error
+		if errors.As(txErr, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+			lastErr = txErr
+
+			continue
+		}
+
+		return fmt.Errorf("failed to create question at next position: %w", txErr)
+	}
+
+	return fmt.Errorf(
+		"failed to create question after %d position retries: %w",
+		createQuestionAtNextPositionRetries,
+		lastErr,
+	)
 }
 
 // SwapQuestionPositions swaps the questionID's position with its
@@ -372,28 +427,43 @@ func (s *QuizStore) SwapQuestionPositions(
 	current, neighbour := rows[idx], rows[neighbourIdx]
 
 	err = database.ExecTx(ctx, s.db, func(q *db.Queries) error {
-		// Two position-only updates inside the same transaction. The
-		// schema has no UNIQUE constraint on (quiz_id, position), so
-		// the order does not matter for correctness — but the txn
-		// boundary keeps any reader on the table from seeing two
-		// rows with the same position mid-swap.
-		if _, swapErr := q.UpdateQuestionPosition(ctx, db.UpdateQuestionPositionParams{
-			Position: neighbour.Position,
-			ID:       current.ID,
-		}); swapErr != nil {
-			return fmt.Errorf("failed to update current question position: %w", swapErr)
-		}
-		if _, swapErr := q.UpdateQuestionPosition(ctx, db.UpdateQuestionPositionParams{
-			Position: current.Position,
-			ID:       neighbour.ID,
-		}); swapErr != nil {
-			return fmt.Errorf("failed to update neighbour question position: %w", swapErr)
-		}
-
-		return nil
+		return execSwapQuestionPositions(ctx, q, current.ID, current.Position, neighbour.ID, neighbour.Position)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to swap question positions: %w", err)
+	}
+
+	return nil
+}
+
+// execSwapQuestionPositions is the three-step swap body of
+// [QuizStore.SwapQuestionPositions]; pulled out so the public method
+// stays under revive's function-length limit. SQLite checks
+// UNIQUE(quiz_id, position) per statement (no deferred uniqueness),
+// so a naive two-step swap trips the constraint on the first UPDATE.
+// Park the current row at -current.ID — guaranteed unique because IDs
+// are positive — move the neighbour into the current row's slot,
+// then settle the current row into the neighbour's old slot.
+func execSwapQuestionPositions(
+	ctx context.Context, q *db.Queries, currentID, currentPos, neighbourID, neighbourPos int64,
+) error {
+	if _, err := q.UpdateQuestionPosition(ctx, db.UpdateQuestionPositionParams{
+		Position: -currentID,
+		ID:       currentID,
+	}); err != nil {
+		return fmt.Errorf("park current question position: %w", err)
+	}
+	if _, err := q.UpdateQuestionPosition(ctx, db.UpdateQuestionPositionParams{
+		Position: currentPos,
+		ID:       neighbourID,
+	}); err != nil {
+		return fmt.Errorf("update neighbour question position: %w", err)
+	}
+	if _, err := q.UpdateQuestionPosition(ctx, db.UpdateQuestionPositionParams{
+		Position: neighbourPos,
+		ID:       currentID,
+	}); err != nil {
+		return fmt.Errorf("update current question position: %w", err)
 	}
 
 	return nil

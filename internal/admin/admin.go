@@ -708,7 +708,11 @@ func storeQuiz(ctx context.Context, quizStore quiz.Store, qz *quiz.Quiz) error {
 	return nil
 }
 
-// storeQuestion creates or updates a question in the store.
+// storeQuestion creates or updates a question in the store. On a new
+// question (ID == 0) it routes through CreateQuestionAtNextPosition so
+// the position read + insert run inside a single transaction, killing
+// the TOCTOU race that produced two questions at the same position
+// under concurrent "Add question" clicks (#352).
 func storeQuestion(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -719,7 +723,7 @@ func storeQuestion(
 ) bool {
 	var err error
 	if qs.ID == 0 {
-		err = quizStore.CreateQuestion(r.Context(), qs)
+		err = quizStore.CreateQuestionAtNextPosition(r.Context(), qs)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error creating question", slog.Any("err", err))
 			render500(w, r, logger, csrfMgr)
@@ -1596,20 +1600,11 @@ func HandleQuestionSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 			return
 		}
 
-		// Auto-assign position for new questions so authors do not have
-		// to type integers (#16). Called after form validation so form
-		// errors surface as 400 before this hits the store.
-		if qctx.IsNew {
-			nextPos, posErr := quizStore.NextQuestionPosition(r.Context(), qctx.Quiz.ID)
-			if posErr != nil {
-				logger.ErrorContext(r.Context(), "error fetching next question position", slog.Any("err", posErr))
-				render500(w, r, logger, csrfMgr)
-
-				return
-			}
-			qctx.Question.Position = nextPos
-		}
-
+		// New questions get their position assigned inside the store's
+		// txn-wrapped CreateQuestionAtNextPosition (#352) so the
+		// max+1 read can't race with a concurrent insert. The handler
+		// just passes the question through; storeQuestion picks the
+		// right store method based on qs.ID.
 		if !storeQuestion(w, r, logger, csrfMgr, quizStore, qctx.Question) {
 			return
 		}

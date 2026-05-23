@@ -167,6 +167,78 @@ func (s *GameStore) CreateParticipant(ctx context.Context, p *game.Participant) 
 	return nil
 }
 
+// CreateGameAndParticipant inserts the games row, the matching
+// game_participants row, and stamps started_at all inside a single
+// transaction so a crash mid-flow can't leave an orphan games row
+// without a participant (#351). On success g.ID / g.CreatedAt and
+// p.ID / p.JoinedAt are populated as if the three writes had been
+// called individually. The UNIQUE(player_id, quiz_id) constraint
+// added by migration 20260520180000 still surfaces as
+// [game.ErrGameAlreadyExists] inside the txn so callers don't have
+// to special-case the loser of a concurrent insert race.
+func (s *GameStore) CreateGameAndParticipant(
+	ctx context.Context, g *game.Game, p *game.Participant,
+) error {
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		return execCreateGameAndParticipant(ctx, q, g, p)
+	})
+	if err != nil {
+		// ErrGameAlreadyExists must propagate as the sentinel so
+		// callers can errors.Is it directly (the service maps it to
+		// the "resume" path); other failures get a wrap for context.
+		if errors.Is(err, game.ErrGameAlreadyExists) {
+			return game.ErrGameAlreadyExists
+		}
+
+		return fmt.Errorf("failed to create game and participant: %w", err)
+	}
+
+	return nil
+}
+
+// execCreateGameAndParticipant is the body of the
+// [GameStore.CreateGameAndParticipant] transaction; pulled out so the
+// public method stays under revive's function-length limit and the
+// txn flow reads top-to-bottom.
+func execCreateGameAndParticipant(
+	ctx context.Context, q *db.Queries, g *game.Game, p *game.Participant,
+) error {
+	id := xid.New()
+	gameRow, err := q.CreateGame(ctx, db.CreateGameParams{ID: id.String(), QuizID: g.QuizID})
+	if err != nil {
+		return fmt.Errorf("create game: %w", err)
+	}
+	g.ID = gameRow.ID
+	g.CreatedAt = gameRow.CreatedAt
+
+	p.GameID = g.ID
+	partRow, err := q.CreateParticipant(ctx, db.CreateParticipantParams{
+		GameID:   p.GameID,
+		PlayerID: p.PlayerID,
+		QuizID:   sql.NullInt64{Int64: p.QuizID, Valid: true},
+	})
+	if err != nil {
+		var sqliteErr *sqlite.Error
+		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+			return game.ErrGameAlreadyExists
+		}
+
+		return fmt.Errorf("create participant: %w", err)
+	}
+	p.ID = partRow.ID
+	p.JoinedAt = partRow.JoinedAt
+
+	res, err := q.StartGame(ctx, g.ID)
+	if err != nil {
+		return fmt.Errorf("start game: %w", err)
+	}
+	if database.MustRowsAffected(res) == 0 {
+		return fmt.Errorf("start game with id %q: %w", g.ID, game.ErrStartingGameNoRowsAffected)
+	}
+
+	return nil
+}
+
 // CreateQuestion saves a new game question in the database and updates the provided Question object with generated values.
 func (s *GameStore) CreateQuestion(ctx context.Context, gq *game.Question) error {
 	var err error
@@ -196,8 +268,12 @@ func (s *GameStore) CreateQuestion(ctx context.Context, gq *game.Question) error
 // recorded value is always a Go-passed parameter rather than SQLite's
 // CURRENT_TIMESTAMP, which would otherwise reflect commit time rather than
 // when the player actually tapped.
+//
+// Returns [game.ErrAnswerAlreadyRecorded] when the UNIQUE(game_id,
+// player_id, game_question_id) constraint trips — a double-tap or
+// network retry — so the handler can serve an idempotent response
+// instead of a 500 (#353).
 func (s *GameStore) CreateAnswer(ctx context.Context, a *game.Answer) error {
-	var err error
 	row, err := s.q.CreateAnswer(ctx, db.CreateAnswerParams{
 		GameID:         a.GameID,
 		PlayerID:       a.PlayerID,
@@ -206,6 +282,11 @@ func (s *GameStore) CreateAnswer(ctx context.Context, a *game.Answer) error {
 		AnsweredAt:     a.AnsweredAt,
 	})
 	if err != nil {
+		var sqliteErr *sqlite.Error
+		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+			return game.ErrAnswerAlreadyRecorded
+		}
+
 		return fmt.Errorf("failed to create answer: %w", err)
 	}
 

@@ -48,7 +48,10 @@ func (s stubStore) GetGameByPlayerAndQuiz(
 
 	return s.getGameByPlayerAndQuiz(ctx, playerID, quizID)
 }
-func (stubStore) CreateGame(_ context.Context, _ *Game) error               { return errStub }
+func (stubStore) CreateGame(_ context.Context, _ *Game) error { return errStub }
+func (stubStore) CreateGameAndParticipant(_ context.Context, _ *Game, _ *Participant) error {
+	return errStub
+}
 func (stubStore) StartGame(_ context.Context, _ string) error               { return errStub }
 func (stubStore) CreateParticipant(_ context.Context, _ *Participant) error { return errStub }
 func (stubStore) CreateQuestion(_ context.Context, _ *Question) error       { return errStub }
@@ -157,6 +160,9 @@ func (stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error         {
 func (stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error         { return nil }
 func (stubQuizStore) DeleteQuiz(_ context.Context, _ int64) error              { return nil }
 func (stubQuizStore) CreateQuestion(_ context.Context, _ *quiz.Question) error { return nil }
+func (stubQuizStore) CreateQuestionAtNextPosition(_ context.Context, _ *quiz.Question) error {
+	return nil
+}
 func (stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error { return nil }
 func (stubQuizStore) NextQuestionPosition(_ context.Context, _ int64) (int, error) {
 	return 0, errStub

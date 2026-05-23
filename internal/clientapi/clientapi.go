@@ -857,6 +857,27 @@ func correctOptionIDsFromAnswer(a *game.Answer) []int64 {
 	return ids
 }
 
+// writeSubmitAnswerError maps the sentinels returned by
+// [game.Service.SubmitAnswer] to the right HTTP status. Pulled out of
+// HandleAnswerPost so the handler stays under revive's
+// function-length limit.
+//   - ErrGameNotFound / ErrQuestionNotInGame → 404
+//   - ErrOptionNotInQuestion → 400
+//   - ErrAnswerAlreadyRecorded → 409 (double-tap / retry; #353)
+//   - anything else → 500 via writeInternalError
+func writeSubmitAnswerError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err error) {
+	switch {
+	case errors.Is(err, game.ErrGameNotFound), errors.Is(err, game.ErrQuestionNotInGame):
+		http.Error(w, err.Error(), http.StatusNotFound)
+	case errors.Is(err, game.ErrOptionNotInQuestion):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	case errors.Is(err, game.ErrAnswerAlreadyRecorded):
+		http.Error(w, err.Error(), http.StatusConflict)
+	default:
+		writeInternalError(w, r, logger, "error submitting answer", err)
+	}
+}
+
 // HandleAnswerPost handles the submission of an answer for a game question.
 // It decodes the request body, extracts game and question IDs from the path,
 // and uses the game service to submit the answer.
@@ -900,17 +921,7 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 
 		a, err := service.SubmitAnswer(r.Context(), gameID, playerID, questionID, req.OptionID, req.TappedAt)
 		if err != nil {
-			if errors.Is(err, game.ErrGameNotFound) || errors.Is(err, game.ErrQuestionNotInGame) {
-				http.Error(w, err.Error(), http.StatusNotFound)
-
-				return
-			}
-			if errors.Is(err, game.ErrOptionNotInQuestion) {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-
-				return
-			}
-			writeInternalError(w, r, logger, "error submitting answer", err)
+			writeSubmitAnswerError(w, r, logger, err)
 
 			return
 		}

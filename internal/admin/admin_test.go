@@ -63,6 +63,10 @@ func (stubGameStore) GetGameByPlayerAndQuiz(_ context.Context, _, _ int64) (*gam
 func (stubGameStore) CreateGame(_ context.Context, _ *game.Game) error {
 	return errors.ErrUnsupported
 }
+
+func (stubGameStore) CreateGameAndParticipant(_ context.Context, _ *game.Game, _ *game.Participant) error {
+	return errors.ErrUnsupported
+}
 func (stubGameStore) StartGame(_ context.Context, _ string) error { return errors.ErrUnsupported }
 func (stubGameStore) CreateParticipant(_ context.Context, _ *game.Participant) error {
 	return errors.ErrUnsupported
@@ -149,20 +153,21 @@ func (e errReader) Read(_ []byte) (int, error) { return 0, e.err }
 func (errReader) Close() error                 { return nil }
 
 type stubQuizStore struct {
-	listQuizzes           func(ctx context.Context) ([]*quiz.Quiz, error)
-	questionCountsByQuiz  func(ctx context.Context) (map[int64]int, error)
-	getQuizByID           func(ctx context.Context, id int64) (*quiz.Quiz, error)
-	quizExists            func(ctx context.Context, id int64) (bool, error)
-	createQuiz            func(ctx context.Context, qz *quiz.Quiz) error
-	updateQuiz            func(ctx context.Context, qz *quiz.Quiz) error
-	deleteQuiz            func(ctx context.Context, id int64) error
-	getQuestionByID       func(ctx context.Context, id int64) (*quiz.Question, error)
-	createQuestion        func(ctx context.Context, qs *quiz.Question) error
-	updateQuestion        func(ctx context.Context, qs *quiz.Question) error
-	deleteQuestion        func(ctx context.Context, id int64) error
-	listQuestions         func(ctx context.Context, quizID int64) ([]*quiz.Question, error)
-	nextQuestionPosition  func(ctx context.Context, quizID int64) (int, error)
-	swapQuestionPositions func(ctx context.Context, quizID, questionID int64, direction string) error
+	listQuizzes             func(ctx context.Context) ([]*quiz.Quiz, error)
+	questionCountsByQuiz    func(ctx context.Context) (map[int64]int, error)
+	getQuizByID             func(ctx context.Context, id int64) (*quiz.Quiz, error)
+	quizExists              func(ctx context.Context, id int64) (bool, error)
+	createQuiz              func(ctx context.Context, qz *quiz.Quiz) error
+	updateQuiz              func(ctx context.Context, qz *quiz.Quiz) error
+	deleteQuiz              func(ctx context.Context, id int64) error
+	getQuestionByID         func(ctx context.Context, id int64) (*quiz.Question, error)
+	createQuestion          func(ctx context.Context, qs *quiz.Question) error
+	createQuestionAtNextPos func(ctx context.Context, qs *quiz.Question) error
+	updateQuestion          func(ctx context.Context, qs *quiz.Question) error
+	deleteQuestion          func(ctx context.Context, id int64) error
+	listQuestions           func(ctx context.Context, quizID int64) ([]*quiz.Question, error)
+	nextQuestionPosition    func(ctx context.Context, quizID int64) (int, error)
+	swapQuestionPositions   func(ctx context.Context, quizID, questionID int64, direction string) error
 }
 
 func (stubQuizStore) Ping(_ context.Context) error {
@@ -241,6 +246,26 @@ func (s stubQuizStore) CreateQuestion(ctx context.Context, qs *quiz.Question) er
 	if s.createQuestion == nil {
 		return errors.New("createQuestion not supplied in stub")
 	}
+
+	return s.createQuestion(ctx, qs)
+}
+
+// CreateQuestionAtNextPosition serves the dedicated stub when set;
+// otherwise it falls back to calling nextQuestionPosition +
+// createQuestion in sequence, which preserves the test setups that
+// existed before #352 collapsed the pair into one store method.
+func (s stubQuizStore) CreateQuestionAtNextPosition(ctx context.Context, qs *quiz.Question) error {
+	if s.createQuestionAtNextPos != nil {
+		return s.createQuestionAtNextPos(ctx, qs)
+	}
+	if s.nextQuestionPosition == nil || s.createQuestion == nil {
+		return errors.New("createQuestionAtNextPos (or nextQuestionPosition + createQuestion) not supplied in stub")
+	}
+	pos, err := s.nextQuestionPosition(ctx, qs.QuizID)
+	if err != nil {
+		return err
+	}
+	qs.Position = pos
 
 	return s.createQuestion(ctx, qs)
 }
