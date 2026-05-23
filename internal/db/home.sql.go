@@ -17,7 +17,8 @@ SELECT p.id              AS id,
 FROM players p
 JOIN game_participants gp ON gp.player_id = p.id
 JOIN games g ON g.id = gp.game_id
-WHERE p.username_claimed = 1
+WHERE g.created_at >= datetime('now', '-30 days')
+  AND p.username_claimed = 1
   AND EXISTS (SELECT 1 FROM questions qe WHERE qe.quiz_id = g.quiz_id)
   AND (SELECT COUNT(*) FROM game_questions gq WHERE gq.game_id = g.id) >=
       (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)
@@ -31,9 +32,12 @@ type ListMostActivePlayersRow struct {
 	FinishedCount int64
 }
 
-// Returns the players with the most finished games, descending. The
-// finished definition matches ListPopularQuizzes and
-// ListAnswersForQuizLeaderboard.
+// Returns the players with the most finished games in the last 30
+// days, descending. The finished definition matches
+// ListPopularQuizzes and ListAnswersForQuizLeaderboard, and the
+// 30-day window matches ListPopularQuizzes -- without it the home
+// page's two leaderboards disagreed on what "recently active" meant
+// and a long-dormant player could outrank a current one (#355).
 //
 // Anonymous (auto-petname) players are filtered out via
 // username_claimed = 1 so the public list only shows names a player

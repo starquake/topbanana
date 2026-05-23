@@ -681,29 +681,33 @@ func (q *Queries) ListParticipantsForQuizLeaderboard(ctx context.Context, quizID
 }
 
 const listQuizIDsForPlayer = `-- name: ListQuizIDsForPlayer :many
-SELECT DISTINCT g.quiz_id
-FROM game_answers ga
-         JOIN games g ON g.id = ga.game_id
-WHERE ga.player_id = ?
+SELECT DISTINCT gp.quiz_id
+FROM game_participants gp
+WHERE gp.player_id = ?
+  AND gp.quiz_id IS NOT NULL
 `
 
-// Lists distinct quiz IDs where the given player has at least one
-// recorded answer. The claim-name flow uses this to know which
-// leaderboard SSE streams to repaint when a player updates their
-// display name: every quiz they appear on gets a fresh snapshot
-// pushed to its subscribers. Filtering on game_answers rather than
-// game_participants means we skip quizzes the player joined but
-// never actually answered on, which would not show up on the
-// leaderboard anyway.
-func (q *Queries) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]int64, error) {
+// Lists distinct quiz IDs the given player has joined. The claim-name
+// flow uses this to know which leaderboard SSE streams to repaint
+// when a player updates their display name: every quiz they appear
+// on gets a fresh snapshot pushed to its subscribers.
+//
+// Post-#335 the live leaderboard surfaces a player as soon as they
+// create a game (before any answer commits), so the fan-out must
+// read from game_participants -- filtering on game_answers would
+// skip joined-but-unanswered quizzes and leave their subscribers
+// stuck on the stale auto-petname (#354). The IS NOT NULL guard
+// belt-and-braces the column until the planned NOT NULL migration
+// (#357) lands.
+func (q *Queries) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]sql.NullInt64, error) {
 	rows, err := q.db.QueryContext(ctx, listQuizIDsForPlayer, playerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []int64
+	var items []sql.NullInt64
 	for rows.Next() {
-		var quiz_id int64
+		var quiz_id sql.NullInt64
 		if err := rows.Scan(&quiz_id); err != nil {
 			return nil, err
 		}
