@@ -144,6 +144,18 @@
     .form-help-error {
         @apply mt-1.5 text-danger text-[0.78rem];
     }
+    /* Quick-pick chip used by the time-limit input rows on the quiz +
+     * question forms (#99). Visual sibling of .btn-ghost but shorter
+     * and tighter so a row of 7+ chips reads as a single picker rather
+     * than a row of equal-weight buttons. */
+    .preset-chip {
+        @apply inline-flex items-center px-2.5 py-1 rounded-full
+               bg-transparent text-text-dim border border-border
+               text-xs font-semibold uppercase tracking-[0.1em]
+               transition-colors hover:border-accent hover:text-text
+               focus-visible:outline-none focus-visible:shadow-focus
+               cursor-pointer;
+    }
     /* Mid-quiz "still answering" dot on the live leaderboard (#244).
      * Pulsing cyan circle, no text — universal "live" / "active"
      * signal (Twitch, Discord, Slack). Cyan keeps it visually

@@ -187,11 +187,6 @@ func TestLeaderboardStream_Integration(t *testing.T) {
 	}
 }
 
-// TestLeaderboardStream_UnknownQuiz_Returns404 locks in the initial-fetch
-// error path: an unknown quiz ID must respond with a proper HTTP 404 (not
-// a half-open text/event-stream that smuggles the error into the body).
-// This is the regression guard for the fetchQuizLeaderboard refactor that
-// stopped writing http.Error into the SSE body.
 // TestLeaderboardStream_HeartbeatKeepsConnectionAlivePastWriteTimeout
 // pins the #244 follow-up that disables the per-request write deadline
 // on the SSE handler and emits a periodic comment heartbeat. Before the
@@ -287,6 +282,8 @@ func TestLeaderboardStream_HeartbeatKeepsConnectionAlivePastWriteTimeout(t *test
 			sawInitialData = true
 		case strings.HasPrefix(line, ":"):
 			heartbeatLines++
+		default:
+			// Blank separator lines and "event:" framing — ignore.
 		}
 	}
 	elapsed := time.Since(start)
@@ -305,6 +302,11 @@ func TestLeaderboardStream_HeartbeatKeepsConnectionAlivePastWriteTimeout(t *test
 	}
 }
 
+// TestLeaderboardStream_UnknownQuiz_Returns404 locks in the initial-fetch
+// error path: an unknown quiz ID must respond with a proper HTTP 404 (not
+// a half-open text/event-stream that smuggles the error into the body).
+// This is the regression guard for the fetchQuizLeaderboard refactor that
+// stopped writing http.Error into the SSE body.
 func TestLeaderboardStream_UnknownQuiz_Returns404(t *testing.T) {
 	t.Parallel()
 
