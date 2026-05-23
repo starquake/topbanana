@@ -11,6 +11,7 @@ SELECT q.id,
        q.created_at,
        q.updated_at,
        q.created_by_player_id,
+       q.time_limit_seconds,
        p.username AS created_by_username
 FROM quizzes q
          LEFT JOIN players p ON p.id = q.created_by_player_id
@@ -35,6 +36,7 @@ SELECT q.id,
        q.created_at,
        q.updated_at,
        q.created_by_player_id,
+       q.time_limit_seconds,
        p.username AS created_by_username
 FROM quizzes q
          LEFT JOIN players p ON p.id = q.created_by_player_id
@@ -53,16 +55,17 @@ SELECT EXISTS(SELECT 1 FROM quizzes WHERE id = ?) AS quiz_exists;
 -- 20260520200000 / #281). [QuizStore.CreateQuiz] short-circuits with
 -- ErrCreatorRequired when the caller forgot to stamp the session
 -- admin, so the FK constraint is the second line of defence.
-INSERT INTO quizzes (title, slug, description, created_by_player_id, updated_at)
-VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+INSERT INTO quizzes (title, slug, description, created_by_player_id, time_limit_seconds, updated_at)
+VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 RETURNING *;
 
 -- name: UpdateQuiz :execresult
 UPDATE quizzes
-SET title       = ?,
-    slug        = ?,
-    description = ?,
-    updated_at  = CURRENT_TIMESTAMP
+SET title              = ?,
+    slug               = ?,
+    description        = ?,
+    time_limit_seconds = ?,
+    updated_at         = CURRENT_TIMESTAMP
 WHERE id = ?;
 
 -- name: DeleteQuiz :execresult
@@ -89,15 +92,16 @@ WHERE quiz_id = ?
 ORDER BY position;
 
 -- name: CreateQuestion :one
-INSERT INTO questions (quiz_id, text, position, image_url)
-VALUES (?, ?, ?, ?)
+INSERT INTO questions (quiz_id, text, position, image_url, time_limit_seconds)
+VALUES (?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: UpdateQuestion :execresult
 UPDATE questions
-SET text = ?,
-    position = ?,
-    image_url = ?
+SET text               = ?,
+    position           = ?,
+    image_url          = ?,
+    time_limit_seconds = ?
 WHERE id = ?;
 
 -- name: UpdateQuestionPosition :execresult

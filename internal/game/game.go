@@ -508,7 +508,7 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string, playerID i
 		QuestionID:   nextQuestion.ID,
 		QuizQuestion: nextQuestion,
 		StartedAt:    revealAt,
-		ExpiredAt:    revealAt.Add(defaultExpiration),
+		ExpiredAt:    revealAt.Add(resolveAnswerWindow(nextQuestion, qz)),
 		// Position counts the newly-issued question itself, so it's
 		// the prior asked count + 1 (the player just received this
 		// question; previous answers were the N-1 before it).
@@ -657,6 +657,22 @@ func (s *Service) SubmitAnswer(
 	}
 
 	return a, nil
+}
+
+// resolveAnswerWindow picks the per-question answer window from #99's
+// priority chain: the question's own time_limit_seconds wins; falling
+// back to the quiz default; falling back to defaultExpiration when both
+// are unset or zero. Returning a [time.Duration] keeps the call site
+// arithmetic identical to the prior hard-coded path.
+func resolveAnswerWindow(q *quiz.Question, qz *quiz.Quiz) time.Duration {
+	if q != nil && q.TimeLimitSeconds != nil && *q.TimeLimitSeconds > 0 {
+		return time.Duration(*q.TimeLimitSeconds) * time.Second
+	}
+	if qz != nil && qz.TimeLimitSeconds > 0 {
+		return time.Duration(qz.TimeLimitSeconds) * time.Second
+	}
+
+	return defaultExpiration
 }
 
 // clampTappedAt applies the #237 trust window: the recorded answer time

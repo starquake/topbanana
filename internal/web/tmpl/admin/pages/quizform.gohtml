@@ -78,6 +78,22 @@
             {{end}}
         </div>
 
+        {{$timeLimitErr := index .FieldErrors "timelimitseconds"}}
+        <div class="form-field">
+            <label class="label-eyebrow" for="time_limit_seconds">
+                Time limit per question (seconds)
+                <span class="label-hint">Default for every question in this quiz. Individual questions can override it.</span>
+            </label>
+            <input id="time_limit_seconds" name="time_limit_seconds" type="number"
+                   min="1" max="600" step="1"
+                   value="{{.Quiz.TimeLimitSeconds}}"
+                   class="form-input max-w-[160px]{{if $timeLimitErr}} form-input-error{{end}}"
+                   {{if $timeLimitErr}}aria-invalid="true" aria-describedby="time_limit_seconds-error"{{end}}>
+            {{if $timeLimitErr}}
+                <p id="time_limit_seconds-error" class="form-help-error" role="alert">{{$timeLimitErr}}</p>
+            {{end}}
+        </div>
+
         <div class="form-actions">
             <button type="submit" name="action" value="Save" class="btn-primary">Save quiz</button>
             <a href="{{if .Quiz.ID}}/admin/quizzes/{{.Quiz.ID}}{{else}}/admin/quizzes{{end}}" class="btn-ghost">Cancel</a>
