@@ -175,10 +175,6 @@
         0%, 100% { opacity: 1; }
         50%      { opacity: 0.35; }
     }
-    .form-label {
-        @apply block mb-1.5 text-sm font-medium text-text;
-    }
-
     /* Microtype label used as field/section eyebrow. Appears on every form
      * field (question form + quiz form + auth forms) so it earns its keep. */
     .label-eyebrow {
@@ -224,12 +220,6 @@
     }
     .pill-public {
         @apply before:bg-cyan;
-    }
-    .pill-unlisted {
-        @apply before:bg-warning;
-    }
-    .pill-private {
-        @apply before:bg-text-mute;
     }
 
     /* Question rows. Two-up grid on mobile (position+thumb stacked), full
@@ -309,9 +299,6 @@
     }
     .player-name {
         @apply text-text text-[0.95rem] font-medium truncate;
-    }
-    .player-name .username-meta {
-        @apply ml-2 text-text-dim text-[0.75rem] font-normal;
     }
     .player-score {
         @apply tabular-nums text-text text-base font-semibold min-w-[4ch] text-right;
@@ -544,23 +531,11 @@
     .feedback-banner {
         @apply bg-surface text-text border border-border border-t-2 border-t-accent rounded-sm px-5 py-4;
     }
-    .feedback-success {
-        @apply border-t-cyan;
-    }
-    .feedback-success p:first-child {
-        @apply text-cyan;
-    }
     .feedback-danger {
         @apply border-t-danger;
     }
     .feedback-danger p:first-child {
         @apply text-danger;
-    }
-    .feedback-warning {
-        @apply border-t-warning;
-    }
-    .feedback-warning p:first-child {
-        @apply text-warning;
     }
 
     /* Leaderboard table — flat surface, striped rows, accent-tinted
