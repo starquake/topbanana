@@ -81,12 +81,12 @@
             <template x-if="isAnonymous() && (!gameId || finished)">
                 <article class="claim-cta mb-6">
                     <p class="label-eyebrow">Playing as</p>
-                    <p class="claim-cta-name font-mono text-accent text-[1.05rem] mb-4 break-all" x-text="player ? player.username : ''"></p>
-                    <p class="claim-cta-body text-text-dim mb-5 leading-relaxed" x-show="!hasCustomName()">
+                    <p data-testid="claim-cta-name" class="font-mono text-accent text-[1.05rem] mb-4 break-all" x-text="player ? player.username : ''"></p>
+                    <p class="text-text-dim mb-5 leading-relaxed" x-show="!hasCustomName()">
                         Pick a display name and your leaderboard row will show it
                         instead of the random one above.
                     </p>
-                    <p class="claim-cta-body text-text-dim mb-5 leading-relaxed" x-show="hasCustomName()">
+                    <p class="text-text-dim mb-5 leading-relaxed" x-show="hasCustomName()">
                         Not happy with it? Pick a different display name.
                     </p>
                     {{/* Right-aligned to keep the claim CTA's primary
