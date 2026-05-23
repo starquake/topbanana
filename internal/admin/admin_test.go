@@ -2944,6 +2944,13 @@ func TestHandleQuestionDelete(t *testing.T) {
 			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
 				return &quiz.Quiz{ID: id, Title: "Q", CreatedByPlayerID: testAdminID}, nil
 			},
+			// #339: HandleQuestionDelete now cross-checks question
+			// ownership via questionByID before deleting; the stub
+			// must return a question scoped to quizID=1 for the
+			// happy-path test to reach DeleteQuestion.
+			getQuestionByID: func(_ context.Context, id int64) (*quiz.Question, error) {
+				return &quiz.Question{ID: id, QuizID: 1, Text: "Q"}, nil
+			},
 			deleteQuestion: func(_ context.Context, id int64) error {
 				deletedID = id
 
@@ -3049,12 +3056,17 @@ func TestHandleQuestionDelete_ErrorHandling(t *testing.T) {
 		buf := bytes.Buffer{}
 		logger := slog.New(slog.NewTextHandler(&buf, nil))
 
+		// #339: HandleQuestionDelete now loads the question first via
+		// questionByID to enforce the cross-quiz check, so a missing
+		// question surfaces from the load path rather than the delete
+		// path. The two paths both render 404, but the realistic
+		// scenario today is "question doesn't exist in the store".
 		quizStore := stubQuizStore{
 			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
 				return &quiz.Quiz{ID: id, Title: "Q", CreatedByPlayerID: testAdminID}, nil
 			},
-			deleteQuestion: func(_ context.Context, _ int64) error {
-				return quiz.ErrDeletingQuestionNoRowsAffected
+			getQuestionByID: func(_ context.Context, _ int64) (*quiz.Question, error) {
+				return nil, quiz.ErrQuestionNotFound
 			},
 		}
 
@@ -3090,6 +3102,12 @@ func TestHandleQuestionDelete_ErrorHandling(t *testing.T) {
 		quizStore := stubQuizStore{
 			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
 				return &quiz.Quiz{ID: id, Title: "Q", CreatedByPlayerID: testAdminID}, nil
+			},
+			// #339: questionByID runs before the delete now; return a
+			// question scoped to quizID=1 so the cross-quiz gate passes
+			// and the test exercises the delete-error path it intends.
+			getQuestionByID: func(_ context.Context, id int64) (*quiz.Question, error) {
+				return &quiz.Question{ID: id, QuizID: 1, Text: "Q"}, nil
 			},
 			deleteQuestion: func(_ context.Context, _ int64) error {
 				return testError

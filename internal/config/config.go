@@ -90,14 +90,16 @@ type Config struct {
 }
 
 // SecureCookies reports whether session and CSRF cookies should be issued
-// with the Secure attribute. Returns true only in production. In
-// development the flag is dropped so the dev server is reachable from any
+// with the Secure attribute. Default is true; only the explicit
+// `development` env opts out so the dev server is reachable from any
 // LAN hostname over plain HTTP (chip.local, 192.168.x.x, devtunnels, …) —
 // browsers reject Secure cookies on non-HTTPS contexts and the rejection
-// cascades into "forbidden: invalid CSRF token" failures otherwise. See
-// #205.
+// cascades into "forbidden: invalid CSRF token" failures otherwise (#205).
+// Every other env (production, staging, demo, qa, unset) gets the flag so
+// a credential-bearing cookie can't accidentally leak over plain HTTP on
+// a non-production deploy (#340).
 func (c *Config) SecureCookies() bool {
-	return c.IsProduction()
+	return c.AppEnvironment != AppEnvironmentDefault
 }
 
 // Parse parses environment variables into the config.

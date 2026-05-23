@@ -445,8 +445,12 @@ func TestConfig_SecureCookies(t *testing.T) {
 	}{
 		{name: "production", env: "production", want: true},
 		{name: "development", env: "development", want: false},
-		{name: "unset", env: "", want: false},          // empty env never matches production
-		{name: "staging", env: "staging", want: false}, // anything-other-than-production is dev-shaped
+		// #340: any env that isn't explicit "development" now gets Secure,
+		// so a staging / demo / qa deploy doesn't issue credentials in the
+		// clear if the operator forgets to set APP_ENV=production.
+		{name: "staging", env: "staging", want: true},
+		{name: "demo", env: "demo", want: true},
+		{name: "unset", env: "", want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
