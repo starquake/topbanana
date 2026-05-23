@@ -156,6 +156,25 @@
                focus-visible:outline-none focus-visible:shadow-focus
                cursor-pointer;
     }
+    /* Mid-quiz "still answering" dot on the live leaderboard (#244).
+     * Pulsing cyan circle, no text — universal "live" / "active"
+     * signal (Twitch, Discord, Slack). Cyan keeps it visually
+     * distinct from the warm-accent current-player highlight. The
+     * empty span carries the `title` + aria-label so the meaning
+     * survives for screen readers and hover. */
+    .leaderboard-in-progress {
+        @apply ml-2 inline-block w-2 h-2 rounded-full bg-cyan align-middle;
+        animation: leaderboard-pulse 1.6s ease-in-out infinite;
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .leaderboard-in-progress {
+            animation: none;
+        }
+    }
+    @keyframes leaderboard-pulse {
+        0%, 100% { opacity: 1; }
+        50%      { opacity: 0.35; }
+    }
     .form-label {
         @apply block mb-1.5 text-sm font-medium text-text;
     }

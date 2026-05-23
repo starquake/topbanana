@@ -63,28 +63,32 @@ VALUES (?, ?, ?, ?)
 RETURNING *;
 
 -- name: ListAnswersForQuizLeaderboard :many
--- Selects the per-answer scoring inputs for every completed game of the
--- given quiz. A game counts as complete when every quiz question has
--- been issued, i.e. the count of game_questions rows for the game has
--- caught up with the count of questions on the quiz. Partial games
--- (where the player walked away mid-quiz) are filtered out so the
--- leaderboard only compares finishers. The one-attempt-per-(player,
--- quiz) constraint enforced by #145 keeps a player from showing up more
--- than once.
+-- Selects the per-answer scoring inputs for every game of the given
+-- quiz (finished AND in-progress, #244). The completed-only filter
+-- previously hid mid-quiz players from the leaderboard; the live
+-- leaderboard now needs them so the host (and the player themselves)
+-- can watch the standings move in real time.
+--
+-- is_completed carries the same finisher predicate that used to live
+-- in the WHERE clause: a game counts as complete when every quiz
+-- question has been issued (game_questions rows >= quiz questions
+-- count). The Go layer collapses one row per (player, game) into a
+-- single LeaderboardEntry with the per-player Completed flag.
 SELECT ga.player_id        AS player_id,
        p.username           AS username,
        gq.started_at        AS question_started_at,
        gq.expired_at        AS question_expired_at,
        ga.answered_at       AS answered_at,
-       o.is_correct         AS is_correct
+       o.is_correct         AS is_correct,
+       CASE WHEN (SELECT COUNT(*) FROM game_questions gqc WHERE gqc.game_id = g.id) >=
+                 (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)
+            THEN 1 ELSE 0 END AS is_completed
 FROM game_answers ga
          JOIN games g ON g.id = ga.game_id
          JOIN game_questions gq ON gq.id = ga.game_question_id
          JOIN options o ON o.id = ga.option_id
          JOIN players p ON p.id = ga.player_id
-WHERE g.quiz_id = ?
-  AND (SELECT COUNT(*) FROM game_questions gqc WHERE gqc.game_id = g.id) >=
-      (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id);
+WHERE g.quiz_id = ?;
 
 -- name: GetGameByPlayerAndQuiz :one
 -- Returns the most-recent game for the given (player, quiz) pair. Used by the

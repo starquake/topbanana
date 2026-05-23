@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -183,6 +184,121 @@ func TestLeaderboardStream_Integration(t *testing.T) {
 	}
 	if got := second.Entries[0].Score; got <= 0 {
 		t.Errorf("second event top score = %d, want > 0 (correct answer should score)", got)
+	}
+}
+
+// TestLeaderboardStream_HeartbeatKeepsConnectionAlivePastWriteTimeout
+// pins the #244 follow-up that disables the per-request write deadline
+// on the SSE handler and emits a periodic comment heartbeat. Before the
+// fix, the HTTP server's 10s WriteTimeout would kill every leaderboard
+// stream at exactly 10.003s — silent (no error to the client beyond
+// NS_ERROR_PARTIAL_TRANSFER in the browser) but fatal to anything that
+// expected the stream to stay open while no answers were committing.
+//
+// The test opens a stream against a fresh quiz with no players, waits
+// past the 10s WriteTimeout AND past one heartbeat tick (25s), and
+// asserts:
+//   - the connection is still alive at the end of the window (no
+//     premature EOF — proves the WriteTimeout fix),
+//   - at least one heartbeat comment (`:` line) arrived after the
+//     initial snapshot (proves the heartbeat is firing).
+//
+// 27s wall-clock makes this one of the slower integration tests, but
+// it runs in parallel so the suite's critical path doesn't grow.
+func TestLeaderboardStream_HeartbeatKeepsConnectionAlivePastWriteTimeout(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, nil)
+
+	db, err := sql.Open("sqlite", srv.DBURI)
+	if err != nil {
+		t.Fatalf("sql.Open err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v, want nil", cerr)
+		}
+	})
+	stores := store.New(db, slog.Default())
+
+	qz := &quiz.Quiz{
+		Title:             "Heartbeat Quiz",
+		Slug:              "heartbeat-quiz",
+		Description:       "seed for the SSE write-deadline regression test",
+		CreatedByPlayerID: seededAdminID,
+		Questions: []*quiz.Question{
+			{
+				Text:     "Anything?",
+				Position: 1,
+				Options:  []*quiz.Option{{Text: "yes", Correct: true}, {Text: "no"}},
+			},
+		},
+	}
+	if cerr := stores.Quizzes.CreateQuiz(ctx, qz); cerr != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", cerr)
+	}
+
+	// 27s is past the 10s WriteTimeout AND past the 25s heartbeat
+	// interval, so a working server emits at least one heartbeat
+	// inside the window. The request context cancels at the end, which
+	// unblocks the scanner loop below.
+	const window = 27 * time.Second
+	streamCtx, streamCancel := context.WithTimeout(ctx, window)
+	defer streamCancel()
+
+	streamURL := fmt.Sprintf("%s/api/quizzes/%s-%d/leaderboard/stream", srv.BaseURL, qz.Slug, qz.ID)
+	streamReq, err := http.NewRequestWithContext(streamCtx, http.MethodGet, streamURL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	streamReq.Header.Set("Accept", "text/event-stream")
+
+	start := time.Now()
+	streamResp, err := http.DefaultClient.Do(streamReq)
+	if err != nil {
+		t.Fatalf("stream Do err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := streamResp.Body.Close(); cerr != nil && !errors.Is(cerr, context.DeadlineExceeded) {
+			t.Errorf("stream Body.Close err = %v", cerr)
+		}
+	})
+
+	if got, want := streamResp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("stream status = %d, want %d", got, want)
+	}
+
+	// Drain lines as they arrive. heartbeatLines counts SSE comment
+	// frames (lines beginning with ":"); a single one past the 10s
+	// mark proves the WriteTimeout fix is in place AND the heartbeat
+	// is firing.
+	scanner := bufio.NewScanner(streamResp.Body)
+	var heartbeatLines int
+	var sawInitialData bool
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case strings.HasPrefix(line, "data: "):
+			sawInitialData = true
+		case strings.HasPrefix(line, ":"):
+			heartbeatLines++
+		default:
+			// Blank separator lines and "event:" framing — ignore.
+		}
+	}
+	elapsed := time.Since(start)
+
+	if !sawInitialData {
+		t.Fatal("never received the initial-snapshot SSE event")
+	}
+	// The scanner only exits when the context cancels (after `window`)
+	// or the server closes the body. If we got out in well under the
+	// window, the server closed early — WriteTimeout still bites.
+	if elapsed < window-2*time.Second {
+		t.Fatalf("stream closed after %v, want stream to stay open the full %v window", elapsed, window)
+	}
+	if heartbeatLines == 0 {
+		t.Errorf("got 0 heartbeat (`:` ...) lines in %v, want at least 1", window)
 	}
 }
 

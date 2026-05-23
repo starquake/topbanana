@@ -1079,6 +1079,13 @@ func TestService_CalculateScore_EarlyAnswerClamps(t *testing.T) {
 // 10s answer window (matching defaultExpiration) so CalculateScore yields a
 // predictable maxPoints (1000) for a correct answer or 0 for a wrong one.
 func makeAnswer(playerID int64, username string, correct bool) *LeaderboardAnswer {
+	return makeAnswerCompleted(playerID, username, correct, true)
+}
+
+// makeAnswerCompleted is the long-form factory used by the #244
+// in-progress test cases. The default makeAnswer keeps IsCompleted=true
+// so existing tests don't need to know about the flag.
+func makeAnswerCompleted(playerID int64, username string, correct, isCompleted bool) *LeaderboardAnswer {
 	const window = 10 * time.Second
 	start := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 
@@ -1089,6 +1096,7 @@ func makeAnswer(playerID int64, username string, correct bool) *LeaderboardAnswe
 		QuestionExpiredAt: start.Add(window),
 		AnsweredAt:        start,
 		Correct:           correct,
+		IsCompleted:       isCompleted,
 	}
 }
 
@@ -1179,6 +1187,45 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 		}
 		if got, want := result.Entries[0].Rank, 1; got != want {
 			t.Errorf("entries[0].Rank = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("in-progress player is counted with partial score and Completed=false", func(t *testing.T) {
+		t.Parallel()
+
+		// #244: a mid-quiz player's rows arrive with IsCompleted=false;
+		// the service must still aggregate them into a leaderboard
+		// entry, stamp Completed=false on the entry, and keep the
+		// running partial score.
+		svc := NewService(
+			stubStore{
+				listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*LeaderboardAnswer, error) {
+					return []*LeaderboardAnswer{
+						makeAnswerCompleted(1, "alice", true, false),
+						makeAnswerCompleted(1, "alice", true, false),
+					}, nil
+				},
+			},
+			stubQuizStore{
+				quizExists: func(_ context.Context, _ int64) (bool, error) {
+					return true, nil
+				},
+			},
+			slog.New(slog.DiscardHandler),
+		)
+
+		result, err := svc.GetQuizLeaderboard(t.Context(), 1, 0, 10)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got, want := len(result.Entries), 1; got != want {
+			t.Fatalf("len(entries) = %d, want %d", got, want)
+		}
+		if got, want := result.Entries[0].Score, 2000; got != want {
+			t.Errorf("entries[0].Score = %d, want %d (partial total)", got, want)
+		}
+		if got, want := result.Entries[0].Completed, false; got != want {
+			t.Errorf("entries[0].Completed = %v, want %v", got, want)
 		}
 	})
 

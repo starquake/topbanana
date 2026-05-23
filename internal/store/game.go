@@ -269,6 +269,10 @@ func (s *GameStore) ListAnswersForQuizLeaderboard(
 			QuestionExpiredAt: r.QuestionExpiredAt,
 			AnsweredAt:        r.AnsweredAt,
 			Correct:           r.IsCorrect,
+			// is_completed is a SQLite CASE expression that comes back
+			// as 1/0; treat anything non-zero as "this row belongs to a
+			// game that has issued every quiz question".
+			IsCompleted: r.IsCompleted != 0,
 		})
 	}
 

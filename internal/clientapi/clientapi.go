@@ -262,12 +262,18 @@ const leaderboardLimit = 10
 // quizLeaderboardEntryResponse is one row of the leaderboard wire shape.
 // Declared at package scope so both HandleQuizLeaderboard and
 // HandleQuizLeaderboardStream can build it.
+//
+// InProgress is true when the player is still mid-quiz (#244); Score is
+// the running partial total in that case. Picked as the wire name
+// instead of Completed so the client only has to branch on a positive
+// signal ("answering now") to render the badge.
 type quizLeaderboardEntryResponse struct {
 	PlayerID        int64  `json:"playerId"`
 	Username        string `json:"username"`
 	Score           int    `json:"score"`
 	Rank            int    `json:"rank"`
 	IsCurrentPlayer bool   `json:"isCurrentPlayer"`
+	InProgress      bool   `json:"inProgress"`
 }
 
 // quizLeaderboardResponse is the full leaderboard wire shape. The SSE
@@ -285,6 +291,7 @@ func toEntryResponse(e game.LeaderboardEntry) quizLeaderboardEntryResponse {
 		Score:           e.Score,
 		Rank:            e.Rank,
 		IsCurrentPlayer: e.IsCurrentPlayer,
+		InProgress:      !e.Completed,
 	}
 }
 
@@ -417,6 +424,35 @@ func (s *leaderboardStreamer) writeEvent(ctx context.Context, res quizLeaderboar
 	return true
 }
 
+// writeHeartbeat writes a single SSE comment frame and flushes. The
+// frame is `:\n\n` — comment lines start with a colon and the spec
+// requires EventSource implementations to ignore them, so this never
+// fires a client-side `onmessage`. Its only job is to keep the TCP
+// connection warm so Firefox / intermediate proxies don't tear down
+// an idle SSE stream as NS_ERROR_PARTIAL_TRANSFER (#244 follow-up).
+// Returns false on write/flush failure so the caller can exit cleanly.
+func (s *leaderboardStreamer) writeHeartbeat() bool {
+	if _, err := fmt.Fprint(s.w, ":\n\n"); err != nil {
+		return false
+	}
+	if err := s.rc.Flush(); err != nil {
+		return false
+	}
+
+	return true
+}
+
+// leaderboardHeartbeatInterval is how often the SSE handler emits a
+// no-op comment frame to keep the connection alive when the hub is
+// quiet. The HTTP server's WriteTimeout no longer kills the response
+// (the handler clears its own write deadline), so this only exists as
+// insurance against intermediate proxy / NAT / mobile-carrier idle
+// timeouts that aren't visible during local-dev testing — nginx
+// defaults to 60s, HAProxy ~50s, mobile NATs sometimes 30s. 25s lands
+// comfortably inside all of those without the keep-alive cost of a
+// 10s tick.
+const leaderboardHeartbeatInterval = 25 * time.Second
+
 // HandleQuizLeaderboardStream pushes the leaderboard down a long-lived
 // Server-Sent Events connection. Every time game.Service.SubmitAnswer
 // commits an answer for this quiz, the hub fires a tick and this handler
@@ -481,9 +517,21 @@ func HandleQuizLeaderboardStream(
 		// events promptly rather than in large flushes.
 		w.Header().Set("X-Accel-Buffering", "no")
 
+		rc := http.NewResponseController(w)
+		// The HTTP server's WriteTimeout (10s) would otherwise kill
+		// this long-lived response on the first write past the deadline
+		// — every heartbeat after 10s fails and the loop exits, which
+		// shows up as a 10.003s stream that EventSource has to
+		// reconnect. Zero disables the per-request deadline. The
+		// underlying TCP connection stays governed by OS keepalives
+		// and the request context (cancelled on client disconnect).
+		if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+			logger.WarnContext(ctx, "could not clear SSE write deadline", slog.Any("err", err))
+		}
+
 		streamer := &leaderboardStreamer{
 			w:        w,
-			rc:       http.NewResponseController(w),
+			rc:       rc,
 			logger:   logger,
 			service:  service,
 			quizID:   quizID,
@@ -504,7 +552,14 @@ func HandleQuizLeaderboardStream(
 // is already committed as text/event-stream), so the loop logs and
 // exits — the client will reconnect via EventSource and re-run the
 // initial-snapshot path, which can surface the error cleanly.
+//
+// The heartbeat ticker emits a no-op SSE comment frame every
+// leaderboardHeartbeatInterval to keep the connection warm; without
+// it Firefox closes idle streams after ~30s with NS_ERROR_PARTIAL_TRANSFER.
 func (s *leaderboardStreamer) run(ctx context.Context, events <-chan struct{}) {
+	heartbeat := time.NewTicker(leaderboardHeartbeatInterval)
+	defer heartbeat.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -520,6 +575,10 @@ func (s *leaderboardStreamer) run(ctx context.Context, events <-chan struct{}) {
 				return
 			}
 			if !s.writeEvent(ctx, res) {
+				return
+			}
+		case <-heartbeat.C:
+			if !s.writeHeartbeat() {
 				return
 			}
 		}

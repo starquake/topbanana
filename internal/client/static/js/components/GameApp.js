@@ -396,39 +396,51 @@ export class GameApp {
     // already-played view before probing again.
     async checkAlreadyPlayed() {
         this.startError = null;
-        // Reset any prior already-played view before probing the new
-        // selection. Idempotent: no-ops when nothing is open.
-        this.closeLeaderboardStream();
-        this.finished = false;
-        this.leaderboard = null;
-        this.quizSlugId = null;
 
         const slugId = this.slugIdFor(this.selectedQuizId);
+        // Only tear down the prior leaderboard view when the selected
+        // quiz actually changed. checkAlreadyPlayed is also re-entered
+        // from startGame() for the same quiz; closing + reopening the
+        // SSE there shows up as a spurious NS_ERROR_PARTIAL_TRANSFER
+        // in Firefox even though the round-trip is intentional.
+        if (slugId !== this.quizSlugId) {
+            this.closeLeaderboardStream();
+            this.finished = false;
+            this.leaderboard = null;
+            this.quizSlugId = null;
+        }
+
         if (!slugId) return null;
 
         // Hoist quizSlugId + leaderboard fetch above the completed gate
         // so the start screen surfaces the leaderboard for the selected
         // quiz BEFORE the player clicks Start (#234). The completed
-        // branch below still upgrades to the "Game Finished!" view +
-        // SSE; the start-screen case stays read-only (no SSE — the
-        // player sees current scores at decision time, not a live
-        // ticker). Best-effort: a failed fetch lands an empty entries
-        // list so the section degrades to its "be the first" state.
+        // branch below still upgrades to the "Game Finished!" view; the
+        // SSE subscription opened here covers the start-screen view too
+        // (#244) so a fresh finisher landing in another tab updates the
+        // current player's start-screen leaderboard in real time. The
+        // in-game view is intentionally leaderboard-free to keep the
+        // answer flow uncluttered. Best-effort: a failed fetch lands an
+        // empty entries list so the section degrades to its "be the
+        // first" state.
+        const firstVisitForQuiz = this.quizSlugId !== slugId;
         this.quizSlugId = slugId;
-        try {
-            this.leaderboard = await gameService.getQuizLeaderboard(slugId);
-        } catch (err) {
-            console.warn('start-screen leaderboard fetch failed', err);
-            this.leaderboard = { quizId: 0, entries: [], currentPlayer: null };
+        if (firstVisitForQuiz) {
+            try {
+                this.leaderboard = await gameService.getQuizLeaderboard(slugId);
+            } catch (err) {
+                console.warn('start-screen leaderboard fetch failed', err);
+                this.leaderboard = { quizId: 0, entries: [], currentPlayer: null };
+            }
+            this.subscribeLeaderboardStream();
         }
 
         const existing = await gameService.getMyGameForQuiz(slugId);
         if (existing && existing.completed) {
             this.startError = "You've already completed this quiz.";
             this.finished = true;
-            // SSE stream so the row repaints when other finishers land
-            // (or this player renames themselves via the claim flow).
-            this.subscribeLeaderboardStream();
+            // SSE was already opened above so the completed-view row
+            // updates live too — no extra subscribe needed here.
         }
 
         return existing;
@@ -499,14 +511,14 @@ export class GameApp {
             // top — but only if the player has not already chosen a
             // display name. On a successful claim the modal handler
             // re-fetches the leaderboard so the row updates from the
-            // auto-petname to the chosen name.
+            // auto-petname to the chosen name. The SSE stream was
+            // already opened in checkAlreadyPlayed() (#244), so this
+            // fetch is just a defensive snapshot for the case where
+            // SSE never connected — re-subscribing here would tear
+            // down the live connection and produce a spurious
+            // NS_ERROR_PARTIAL_TRANSFER in Firefox.
             this.leaderboard = await gameService.getQuizLeaderboard(this.quizSlugId);
             this.animateLeaderboard();
-            // Live updates for new finishers landing after this player.
-            // EventSource auto-reconnects on transient drops; we close
-            // it explicitly on beforeunload so the server-side
-            // subscriber map stays clean.
-            this.subscribeLeaderboardStream();
             if (!this.hasCustomName()) {
                 this.openClaimModal();
             }
