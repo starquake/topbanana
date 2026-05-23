@@ -188,10 +188,14 @@ func existingTestQuizzes() []*quiz.Quiz {
 }
 
 func newTestQuestions() []*quiz.Question {
+	// Position 30 avoids colliding with the 10 / 20 positions
+	// newTestQuizzes already uses when these questions get attached to
+	// existing quizzes — the new UNIQUE(quiz_id, position) index from
+	// #352 would otherwise reject the insert.
 	return []*quiz.Question{
 		{
 			Text:     "Question 5",
-			Position: 10,
+			Position: 30,
 			Options: []*quiz.Option{
 				{Text: "Option 5-1"},
 				{Text: "Option 5-2"},
@@ -297,9 +301,9 @@ func TestQuizStore_QuestionCountsByQuiz(t *testing.T) {
 		Title: "With questions", Slug: "with-questions", Description: "x",
 		CreatedByPlayerID: seededAdminID,
 		Questions: []*quiz.Question{
-			{Text: "Q1", Options: []*quiz.Option{{Text: "a", Correct: true}}},
-			{Text: "Q2", Options: []*quiz.Option{{Text: "b"}}},
-			{Text: "Q3", Options: []*quiz.Option{{Text: "c"}}},
+			{Text: "Q1", Position: 1, Options: []*quiz.Option{{Text: "a", Correct: true}}},
+			{Text: "Q2", Position: 2, Options: []*quiz.Option{{Text: "b"}}},
+			{Text: "Q3", Position: 3, Options: []*quiz.Option{{Text: "c"}}},
 		},
 	}
 	if err := quizStore.CreateQuiz(t.Context(), withQuestions); err != nil {

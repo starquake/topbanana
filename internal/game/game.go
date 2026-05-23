@@ -38,6 +38,13 @@ var (
 	// [Service.GetGameForPlayerOnQuiz] first.
 	ErrGameAlreadyExists = errors.New("game already exists for this player and quiz")
 
+	// ErrAnswerAlreadyRecorded is returned by [GameStore.CreateAnswer]
+	// when a second answer for the same (game, player, game_question)
+	// trips the UNIQUE constraint. Handlers treat this as an idempotent
+	// retry rather than a 500 — see [Service.SubmitAnswer] and
+	// HandleAnswerPost for the recovery path (#353).
+	ErrAnswerAlreadyRecorded = errors.New("answer already recorded for this question")
+
 	// ErrNoMoreQuestions is returned by [Service.GetNextQuestion] when
 	// every quiz question has already been issued for the game.
 	ErrNoMoreQuestions = errors.New("no more questions")
@@ -210,6 +217,14 @@ type Store interface {
 	GetGameByPlayerAndQuiz(ctx context.Context, playerID, quizID int64) (*Game, error)
 	// CreateGame creates a new game.
 	CreateGame(ctx context.Context, g *Game) error
+	// CreateGameAndParticipant inserts a games row + matching
+	// game_participants row + stamps started_at inside a single
+	// transaction so a crash mid-flow can't leave an orphan game
+	// (#351). On the UNIQUE(player_id, quiz_id) loser this returns
+	// [ErrGameAlreadyExists] from within the txn. Preferred over
+	// manually pairing CreateGame + CreateParticipant + StartGame
+	// for the new-game flow.
+	CreateGameAndParticipant(ctx context.Context, g *Game, p *Participant) error
 	StartGame(ctx context.Context, id string) error
 	CreateParticipant(ctx context.Context, p *Participant) error
 	CreateQuestion(ctx context.Context, gq *Question) error
@@ -397,34 +412,20 @@ func (s *Service) CreateGame(ctx context.Context, quizID, playerID int64) (*Game
 		return nil, ErrGameAlreadyExists
 	}
 
+	// CreateGame + CreateParticipant + StartGame run in a single
+	// transaction (#351) so a crash mid-flow can't leave an orphan
+	// games row. The UNIQUE(player_id, quiz_id) loser surfaces as
+	// ErrGameAlreadyExists from inside the txn.
 	g := &Game{QuizID: qz.ID}
-	if err = s.store.CreateGame(ctx, g); err != nil {
-		return nil, fmt.Errorf("failed to create game: %w", err)
-	}
-
-	g.Quiz = qz
-
-	pa := &Participant{GameID: g.ID, PlayerID: playerID, QuizID: qz.ID}
-	if err = s.store.CreateParticipant(ctx, pa); err != nil {
-		// The UNIQUE constraint loser arrives here as
-		// ErrGameAlreadyExists from the store; propagate it unwrapped
-		// so callers can errors.Is it. Other errors get the usual
-		// wrap.
+	pa := &Participant{PlayerID: playerID, QuizID: qz.ID}
+	if err = s.store.CreateGameAndParticipant(ctx, g, pa); err != nil {
 		if errors.Is(err, ErrGameAlreadyExists) {
-			// The orphan game row inserted just above is harmless —
-			// it has no participant, no questions, and no SSE traffic
-			// pinned to it. A future cleanup pass can sweep these,
-			// but they don't violate any constraint or change any
-			// player-visible state.
 			return nil, ErrGameAlreadyExists
 		}
 
-		return nil, fmt.Errorf("failed to create participant: %w", err)
+		return nil, fmt.Errorf("failed to create game and participant: %w", err)
 	}
-
-	if err = s.store.StartGame(ctx, g.ID); err != nil {
-		return nil, fmt.Errorf("failed to start game: %w", err)
-	}
+	g.Quiz = qz
 
 	// Repaint subscribers so the new participant appears on the live
 	// leaderboard at score 0 / in-progress immediately (#335). Without
@@ -651,44 +652,9 @@ func (s *Service) SubmitAnswer(
 		return nil, ErrGameNotFound
 	}
 
-	var question *Question
-	for _, qs := range g.Questions {
-		if qs.QuestionID == questionID {
-			question = qs
-
-			break
-		}
-	}
-
-	if question == nil {
-		return nil, fmt.Errorf("question %d not found in game %s: %w", questionID, gameID, ErrQuestionNotInGame)
-	}
-
-	// Load the quiz question with its full option set in one shot so
-	// callers can read both the selected option and the correct ones
-	// (so the player client can light up the right answer after a wrong
-	// pick — #233) without a second store round-trip.
-	quizQuestion, err := s.quizStore.GetQuestion(ctx, question.QuestionID)
+	question, option, err := s.resolveAnswerTarget(ctx, g, gameID, questionID, optionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get question: %w", err)
-	}
-	question.QuizQuestion = quizQuestion
-
-	var option *quiz.Option
-	for _, o := range quizQuestion.Options {
-		if o.ID == optionID {
-			option = o
-
-			break
-		}
-	}
-	if option == nil {
-		return nil, fmt.Errorf(
-			"option %d not in question %d: %w",
-			optionID,
-			question.QuestionID,
-			ErrOptionNotInQuestion,
-		)
+		return nil, err
 	}
 
 	a := &Answer{
@@ -702,6 +668,13 @@ func (s *Service) SubmitAnswer(
 	}
 
 	if err = s.store.CreateAnswer(ctx, a); err != nil {
+		// Pass ErrAnswerAlreadyRecorded through unwrapped so the
+		// handler can map it to 409 instead of 500 — a double-tap is
+		// a retry, not a server fault (#353).
+		if errors.Is(err, ErrAnswerAlreadyRecorded) {
+			return nil, ErrAnswerAlreadyRecorded
+		}
+
 		return nil, fmt.Errorf("failed to create answer: %w", err)
 	}
 
@@ -955,4 +928,48 @@ func (s *Service) CalculateScore(ctx context.Context, a *Answer) int {
 	score := int(float64(maxPoints) - (duration.Seconds() / answerWindow.Seconds() * float64(maxPoints)))
 
 	return score
+}
+
+// resolveAnswerTarget finds the issued game_question for the supplied
+// questionID and the option for the supplied optionID, loading the
+// option set in one round-trip so [Service.SubmitAnswer] can also
+// surface the correct options on a wrong-pick reveal (#233). Returns
+// [ErrQuestionNotInGame] or [ErrOptionNotInQuestion] when the lookup
+// misses; pulled out of SubmitAnswer to keep it under revive's
+// function-length cap.
+func (s *Service) resolveAnswerTarget(
+	ctx context.Context, g *Game, gameID string, questionID, optionID int64,
+) (*Question, *quiz.Option, error) {
+	var question *Question
+	for _, qs := range g.Questions {
+		if qs.QuestionID == questionID {
+			question = qs
+
+			break
+		}
+	}
+	if question == nil {
+		return nil, nil, fmt.Errorf(
+			"question %d not found in game %s: %w", questionID, gameID, ErrQuestionNotInGame,
+		)
+	}
+
+	quizQuestion, err := s.quizStore.GetQuestion(ctx, question.QuestionID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get question: %w", err)
+	}
+	question.QuizQuestion = quizQuestion
+
+	for _, o := range quizQuestion.Options {
+		if o.ID == optionID {
+			return question, o, nil
+		}
+	}
+
+	return nil, nil, fmt.Errorf(
+		"option %d not in question %d: %w",
+		optionID,
+		question.QuestionID,
+		ErrOptionNotInQuestion,
+	)
 }

@@ -115,6 +115,10 @@ func (stubQuizStore) CreateQuestion(_ context.Context, _ *quiz.Question) error {
 	return nil
 }
 
+func (stubQuizStore) CreateQuestionAtNextPosition(_ context.Context, _ *quiz.Question) error {
+	return nil
+}
+
 func (stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error {
 	return nil
 }
@@ -158,6 +162,10 @@ func (stubGameStore) GetGameByPlayerAndQuiz(_ context.Context, _, _ int64) (*gam
 func (stubGameStore) CreateGame(_ context.Context, _ *game.Game) error { return errRouteStub }
 func (stubGameStore) StartGame(_ context.Context, _ string) error      { return errRouteStub }
 func (stubGameStore) CreateParticipant(_ context.Context, _ *game.Participant) error {
+	return errRouteStub
+}
+
+func (stubGameStore) CreateGameAndParticipant(_ context.Context, _ *game.Game, _ *game.Participant) error {
 	return errRouteStub
 }
 func (stubGameStore) CreateQuestion(_ context.Context, _ *game.Question) error { return errRouteStub }

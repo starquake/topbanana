@@ -88,6 +88,9 @@ func (stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error         {
 func (stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error         { return nil }
 func (stubQuizStore) DeleteQuiz(_ context.Context, _ int64) error              { return nil }
 func (stubQuizStore) CreateQuestion(_ context.Context, _ *quiz.Question) error { return nil }
+func (stubQuizStore) CreateQuestionAtNextPosition(_ context.Context, _ *quiz.Question) error {
+	return nil
+}
 func (stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error { return nil }
 func (stubQuizStore) NextQuestionPosition(_ context.Context, _ int64) (int, error) {
 	return 0, errStub
@@ -118,6 +121,7 @@ type stubGameStore struct {
 	getGame                            func(ctx context.Context, id string) (*game.Game, error)
 	getGameByPlayerAndQuiz             func(ctx context.Context, playerID, quizID int64) (*game.Game, error)
 	createGame                         func(ctx context.Context, g *game.Game) error
+	createGameAndParticipant           func(ctx context.Context, g *game.Game, p *game.Participant) error
 	startGame                          func(ctx context.Context, id string) error
 	createParticipant                  func(ctx context.Context, p *game.Participant) error
 	createQuestion                     func(ctx context.Context, gq *game.Question) error
@@ -190,6 +194,39 @@ func (s stubGameStore) CreateParticipant(ctx context.Context, p *game.Participan
 	}
 
 	return s.createParticipant(ctx, p)
+}
+
+// CreateGameAndParticipant serves the dedicated stub when set;
+// otherwise falls back to calling createGame + createParticipant +
+// startGame in sequence so test setups written against the old
+// three-call shape keep working without per-test churn. New tests
+// that need to assert the transaction boundary (e.g. participant
+// fails after game inserts) should wire createGameAndParticipant
+// directly.
+func (s stubGameStore) CreateGameAndParticipant(
+	ctx context.Context, g *game.Game, p *game.Participant,
+) error {
+	if s.createGameAndParticipant != nil {
+		return s.createGameAndParticipant(ctx, g, p)
+	}
+	if s.createGame != nil {
+		if err := s.createGame(ctx, g); err != nil {
+			return err
+		}
+	}
+	p.GameID = g.ID
+	if s.createParticipant != nil {
+		if err := s.createParticipant(ctx, p); err != nil {
+			return err
+		}
+	}
+	if s.startGame != nil {
+		if err := s.startGame(ctx, g.ID); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (s stubGameStore) CreateQuestion(ctx context.Context, gq *game.Question) error {
