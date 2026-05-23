@@ -943,15 +943,24 @@ func HandleQuizEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 // is derived server-side from the title). The handler translates this
 // into the full domain model before validation.
 type quizImportPayload struct {
-	Title       string                      `json:"title"`
-	Description string                      `json:"description"`
-	Questions   []quizImportQuestionPayload `json:"questions"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	// TimeLimitSeconds is the per-quiz default answer window (#99).
+	// Optional in the payload — omitted maps to
+	// [quiz.DefaultTimeLimitSeconds], matching the admin form's
+	// new-quiz default.
+	TimeLimitSeconds *int                        `json:"timeLimitSeconds,omitempty"`
+	Questions        []quizImportQuestionPayload `json:"questions"`
 }
 
 type quizImportQuestionPayload struct {
-	Text     string                    `json:"text"`
-	ImageURL string                    `json:"imageUrl,omitempty"`
-	Options  []quizImportOptionPayload `json:"options"`
+	Text     string `json:"text"`
+	ImageURL string `json:"imageUrl,omitempty"`
+	// TimeLimitSeconds overrides the quiz default for this question
+	// (#99). Optional — omitted means "inherit the quiz value at
+	// game time", same as leaving the admin form's field blank.
+	TimeLimitSeconds *int                      `json:"timeLimitSeconds,omitempty"`
+	Options          []quizImportOptionPayload `json:"options"`
 }
 
 type quizImportOptionPayload struct {
@@ -967,9 +976,11 @@ type quizImportOptionPayload struct {
 const quizImportExample = `{
   "title": "European Capitals",
   "description": "Twelve quick-fire questions covering EU capitals.",
+  "timeLimitSeconds": 10,
   "questions": [
     {
       "text": "Which city sits on the river Vltava?",
+      "timeLimitSeconds": 15,
       "options": [
         { "text": "Bratislava", "correct": false },
         { "text": "Budapest",  "correct": false },
@@ -1090,15 +1101,18 @@ func HandleQuizImportSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 // admin form does the same derivation. Positions are assigned 1..N in
 // the order questions appear in the JSON.
 func quizFromImportPayload(p quizImportPayload) *quiz.Quiz {
+	// #99: honour the payload's per-quiz default when present; fall
+	// back to the project value so authors who don't care can omit
+	// the field entirely and still pass Quiz.Valid's range check.
+	timeLimit := quiz.DefaultTimeLimitSeconds
+	if p.TimeLimitSeconds != nil {
+		timeLimit = *p.TimeLimitSeconds
+	}
 	qz := &quiz.Quiz{
-		Title:       p.Title,
-		Slug:        slug.Make(p.Title),
-		Description: p.Description,
-		// Import payloads don't carry a time limit today; default to
-		// the project-wide value so the row passes Quiz.Valid's range
-		// check (#99). Authors can adjust it from the admin form
-		// afterwards.
-		TimeLimitSeconds: quiz.DefaultTimeLimitSeconds,
+		Title:            p.Title,
+		Slug:             slug.Make(p.Title),
+		Description:      p.Description,
+		TimeLimitSeconds: timeLimit,
 	}
 
 	qz.Questions = make([]*quiz.Question, 0, len(p.Questions))
@@ -1107,6 +1121,9 @@ func quizFromImportPayload(p quizImportPayload) *quiz.Quiz {
 			Text:     qIn.Text,
 			ImageURL: qIn.ImageURL,
 			Position: i + 1,
+			// nil → "inherit the quiz default", the same semantics
+			// the admin form's blank input carries (#99).
+			TimeLimitSeconds: qIn.TimeLimitSeconds,
 		}
 		qs.Options = make([]*quiz.Option, 0, len(qIn.Options))
 		for _, oIn := range qIn.Options {

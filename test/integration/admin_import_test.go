@@ -199,6 +199,84 @@ func TestAdminImport_Integration(t *testing.T) {
 		)
 	})
 
+	t.Run("imported quiz carries the payload's timeLimitSeconds", func(t *testing.T) {
+		t.Parallel()
+		// #99: the payload exposes timeLimitSeconds at both the quiz
+		// and per-question level. The quiz value lands on Quiz.TimeLimitSeconds
+		// (visible on the edit form as value="15") and the question
+		// override drops the inherit-the-default behaviour for that
+		// row (visible on the question's edit form). Assert both by
+		// scraping the edit-form HTML, which is the same path the
+		// admin would use to verify the value stuck.
+		csrf := fetchCSRFToken(ctx, t, client, importURL)
+		const tlJSON = `{
+  "title": "Time-Limit Import",
+  "description": "Round-trip the per-quiz + per-question time limits.",
+  "timeLimitSeconds": 15,
+  "questions": [
+    {
+      "text": "Override question.",
+      "timeLimitSeconds": 5,
+      "options": [
+        { "text": "A", "correct": true  },
+        { "text": "B", "correct": false }
+      ]
+    }
+  ]
+}`
+		tlForm := url.Values{}
+		tlForm.Add("json", tlJSON)
+		tlForm.Add("csrf_token", csrf)
+		req, err := http.NewRequestWithContext(
+			ctx, http.MethodPost, importURL, strings.NewReader(tlForm.Encode()),
+		)
+		if err != nil {
+			t.Fatalf("NewRequest err = %v, want nil", err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("POST import client.Do err = %v, want nil", err)
+		}
+		if cerr := resp.Body.Close(); cerr != nil {
+			t.Errorf("Body.Close err = %v, want nil", cerr)
+		}
+		if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
+			t.Fatalf("POST import status = %d, want %d", got, want)
+		}
+		quizPath := resp.Header.Get("Location")
+		if !strings.HasPrefix(quizPath, "/admin/quizzes/") {
+			t.Fatalf("Location = %q, want prefix /admin/quizzes/", quizPath)
+		}
+
+		// Edit form for the quiz must reflect the imported 15s default.
+		// Use the authenticated client (the bare getBody helper has no
+		// session cookie, so it would 303 to /login).
+		editReq, err := http.NewRequestWithContext(
+			ctx, http.MethodGet, srv.BaseURL+quizPath+"/edit", nil,
+		)
+		if err != nil {
+			t.Fatalf("NewRequest err = %v, want nil", err)
+		}
+		editResp, err := client.Do(editReq)
+		if err != nil {
+			t.Fatalf("GET edit client.Do err = %v, want nil", err)
+		}
+		editBytes, err := io.ReadAll(editResp.Body)
+		if err != nil {
+			t.Fatalf("ReadAll err = %v, want nil", err)
+		}
+		if cerr := editResp.Body.Close(); cerr != nil {
+			t.Errorf("Body.Close err = %v, want nil", cerr)
+		}
+		if got, want := editResp.StatusCode, http.StatusOK; got != want {
+			t.Fatalf("GET edit status = %d, want %d", got, want)
+		}
+		if want := `value="15"`; !strings.Contains(string(editBytes), want) {
+			t.Errorf("quiz edit form missing %q (the imported default time limit)", want)
+		}
+	})
+
 	t.Run("duplicate title returns 409", func(t *testing.T) {
 		t.Parallel()
 		// The first import above succeeded with title "Import Round-Trip"
