@@ -57,6 +57,17 @@ SELECT *
 FROM game_answers
 WHERE game_question_id = ?;
 
+-- name: ListAnswersByGameID :many
+-- Returns every game_answer for a given game, ordered by
+-- game_question_id so callers can partition rows per question in a
+-- single pass. Replaces the N+1 pattern of calling
+-- ListAnswersByGameQuestionID once per issued question (#356); the
+-- game_id column is already covered by the FK's implicit index.
+SELECT *
+FROM game_answers
+WHERE game_id = ?
+ORDER BY game_question_id;
+
 -- name: CreateGameQuestion :one
 INSERT INTO game_questions (game_id, question_id, started_at, expired_at)
 VALUES (?, ?, ?, ?)
@@ -137,13 +148,11 @@ LIMIT 1;
 -- create a game (before any answer commits), so the fan-out must
 -- read from game_participants -- filtering on game_answers would
 -- skip joined-but-unanswered quizzes and leave their subscribers
--- stuck on the stale auto-petname (#354). The IS NOT NULL guard
--- belt-and-braces the column until the planned NOT NULL migration
--- (#357) lands.
+-- stuck on the stale auto-petname (#354). quiz_id became NOT NULL
+-- in migration 20260524200000 (#357), so no Valid-guard is needed.
 SELECT DISTINCT gp.quiz_id
 FROM game_participants gp
-WHERE gp.player_id = ?
-  AND gp.quiz_id IS NOT NULL;
+WHERE gp.player_id = ?;
 
 -- name: ListGameIDsForPlayerOnQuiz :many
 -- Lists every game ID the player has on the given quiz. The reset flow
