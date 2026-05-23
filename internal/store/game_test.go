@@ -564,7 +564,7 @@ func TestGameStore_ListAnswersForQuizLeaderboard(t *testing.T) {
 		}
 	})
 
-	t.Run("filters out partial games where not every question was issued", func(t *testing.T) {
+	t.Run("partial games appear with IsCompleted=false", func(t *testing.T) {
 		t.Parallel()
 		db := dbtest.Open(t)
 		quizStore := NewQuizStore(db, slog.Default())
@@ -616,8 +616,15 @@ func TestGameStore_ListAnswersForQuizLeaderboard(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got, want := len(rows), 0; got != want {
-			t.Errorf("len(rows) = %d, want %d (partial games must be filtered out)", got, want)
+		// #244: partial games now surface on the live leaderboard with
+		// IsCompleted=false so the host can see who's still answering.
+		// The old store-level filter is gone; the Go aggregation layer
+		// stamps the per-player Completed flag from these rows.
+		if got, want := len(rows), 1; got != want {
+			t.Fatalf("len(rows) = %d, want %d", got, want)
+		}
+		if got, want := rows[0].IsCompleted, false; got != want {
+			t.Errorf("rows[0].IsCompleted = %v, want %v", got, want)
 		}
 	})
 

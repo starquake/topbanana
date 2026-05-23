@@ -469,6 +469,20 @@ export class GameApp {
                 }
             }
         }
+        // #244: open the leaderboard SSE stream as soon as the game
+        // starts so mid-quiz players (including this one) show up on
+        // the live board while still answering. The previous wiring
+        // only opened on the post-game finish branch, which meant the
+        // player never saw their own running total until the quiz
+        // ended. Both the initial REST fetch and the SSE subscribe are
+        // best-effort: failures don't block gameplay, and a finish-time
+        // re-fetch still lands the final snapshot.
+        try {
+            this.leaderboard = await gameService.getQuizLeaderboard(this.quizSlugId);
+        } catch (err) {
+            console.error('startGame: initial leaderboard fetch failed', err);
+        }
+        this.subscribeLeaderboardStream();
         await this.nextQuestion();
     }
 

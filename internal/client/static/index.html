@@ -221,6 +221,9 @@
                                         <td x-text="entry.rank"></td>
                                         <td>
                                             <span x-text="entry.username"></span>
+                                            <template x-if="entry.inProgress">
+                                                <span class="leaderboard-in-progress" title="Still answering">answering…</span>
+                                            </template>
                                         </td>
                                         <td x-text="entry.score"></td>
                                     </tr>
@@ -373,6 +376,38 @@
                 </template>
                 <template x-if="!question">
                     <p class="text-text-dim">Loading question...</p>
+                </template>
+
+                <!-- #244: live leaderboard rendered during gameplay.
+                     Sits BELOW the question + answer buttons so it
+                     doesn't compete with the answer flow but stays
+                     visible at a glance. The SSE stream opened in
+                     startGame() pushes a fresh snapshot on every
+                     answer; mid-quiz rows show a small "answering"
+                     pill that drops once they finish. The post-game
+                     leaderboard view (gated on `finished`) above is
+                     the same data with a denser layout — kept
+                     separate so the gameplay view stays compact. -->
+                <template x-if="leaderboard && leaderboard.entries && leaderboard.entries.length > 0">
+                    <aside class="mt-10 pt-6 border-t border-border-soft" aria-label="Live leaderboard">
+                        <h3 class="label-eyebrow mb-3">Live leaderboard</h3>
+                        <ol class="bg-surface border border-border-soft rounded-sm divide-y divide-border-soft text-sm">
+                            <template x-for="entry in leaderboard.entries" :key="entry.playerId">
+                                <li class="flex items-center justify-between gap-3 px-3 py-2"
+                                    :aria-current="entry.isCurrentPlayer ? 'true' : null"
+                                    :class="entry.isCurrentPlayer ? 'text-accent' : 'text-text-dim'">
+                                    <span class="flex items-center gap-2 min-w-0">
+                                        <span class="font-mono text-xs text-text-mute w-5 text-right" x-text="entry.rank"></span>
+                                        <span class="truncate" x-text="entry.username"></span>
+                                        <template x-if="entry.inProgress">
+                                            <span class="leaderboard-in-progress" title="Still answering">answering…</span>
+                                        </template>
+                                    </span>
+                                    <span class="font-mono text-xs" x-text="entry.score"></span>
+                                </li>
+                            </template>
+                        </ol>
+                    </aside>
                 </template>
             </div>
 

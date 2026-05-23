@@ -262,12 +262,18 @@ const leaderboardLimit = 10
 // quizLeaderboardEntryResponse is one row of the leaderboard wire shape.
 // Declared at package scope so both HandleQuizLeaderboard and
 // HandleQuizLeaderboardStream can build it.
+//
+// InProgress is true when the player is still mid-quiz (#244); Score is
+// the running partial total in that case. Picked as the wire name
+// instead of Completed so the client only has to branch on a positive
+// signal ("answering now") to render the badge.
 type quizLeaderboardEntryResponse struct {
 	PlayerID        int64  `json:"playerId"`
 	Username        string `json:"username"`
 	Score           int    `json:"score"`
 	Rank            int    `json:"rank"`
 	IsCurrentPlayer bool   `json:"isCurrentPlayer"`
+	InProgress      bool   `json:"inProgress"`
 }
 
 // quizLeaderboardResponse is the full leaderboard wire shape. The SSE
@@ -285,6 +291,7 @@ func toEntryResponse(e game.LeaderboardEntry) quizLeaderboardEntryResponse {
 		Score:           e.Score,
 		Rank:            e.Rank,
 		IsCurrentPlayer: e.IsCurrentPlayer,
+		InProgress:      !e.Completed,
 	}
 }
 

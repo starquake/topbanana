@@ -135,10 +135,10 @@ type Results struct {
 // leaderboard. It carries every field [Service.CalculateScore] needs (the
 // option's correctness, the question's start/expiry timestamps, and the
 // answer's submission time) plus the player's username and ID for the
-// leaderboard row. The store filters these rows to completed games only
-// (every quiz question issued), and the one-attempt-per-(player, quiz)
-// constraint enforced by [Service.CreateGame] and the admin reset flow
-// keeps a player from showing up more than once.
+// leaderboard row. The store returns rows for both finished and
+// in-progress games (#244); the IsCompleted flag distinguishes the two
+// so [Service.GetQuizLeaderboard] can stamp the per-player Completed
+// flag on the aggregated entries.
 type LeaderboardAnswer struct {
 	PlayerID          int64
 	Username          string
@@ -146,6 +146,7 @@ type LeaderboardAnswer struct {
 	QuestionExpiredAt time.Time
 	AnsweredAt        time.Time
 	Correct           bool
+	IsCompleted       bool
 }
 
 // LeaderboardEntry is a single row of a per-quiz leaderboard: the player's
@@ -154,12 +155,17 @@ type LeaderboardAnswer struct {
 // returned outside the truncated top-N. IsCurrentPlayer is true when the
 // entry belongs to the player making the request, which lets the client
 // highlight the row.
+//
+// Completed is false when the player is still mid-quiz and the Score is
+// only their partial running total (#244). The client renders an
+// "answering..." badge on those rows.
 type LeaderboardEntry struct {
 	PlayerID        int64
 	Username        string
 	Score           int
 	Rank            int
 	IsCurrentPlayer bool
+	Completed       bool
 }
 
 // LeaderboardResult bundles the truncated top-N entries with the requesting
@@ -802,9 +808,21 @@ func (s *Service) GetQuizLeaderboard(
 
 	playerTotals := make(map[int64]int)
 	usernames := make(map[int64]string)
+	// playerCompleted tracks whether a given player's game has finished
+	// (#244). Every row for a finished game carries IsCompleted=true; an
+	// in-progress player's rows all carry false. AND-ing across rows
+	// keeps the entry "in-progress" the moment any row says so — the DB
+	// query consistently emits the same value per game anyway, so this
+	// is a defence in depth rather than a routine merge.
+	playerCompleted := make(map[int64]bool)
 
 	for _, r := range rows {
 		usernames[r.PlayerID] = r.Username
+		if existing, seen := playerCompleted[r.PlayerID]; seen {
+			playerCompleted[r.PlayerID] = existing && r.IsCompleted
+		} else {
+			playerCompleted[r.PlayerID] = r.IsCompleted
+		}
 
 		// Synthesise just enough of an *Answer / *Question / *quiz.Option
 		// for CalculateScore. The formula touches only Option.Correct,
@@ -827,6 +845,7 @@ func (s *Service) GetQuizLeaderboard(
 			Username:        usernames[playerID],
 			Score:           score,
 			IsCurrentPlayer: playerID == currentPlayerID,
+			Completed:       playerCompleted[playerID],
 		})
 	}
 
