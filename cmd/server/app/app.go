@@ -32,7 +32,13 @@ const (
 	readHeaderTimeout = 5 * time.Second
 	readTimeout       = 10 * time.Second
 	writeTimeout      = 10 * time.Second
-	shutdownTimeout   = 5 * time.Second
+	// idleTimeout caps how long a keep-alive connection can sit unused before the
+	// server closes it. Without this, idle connections behind a pooled proxy or
+	// CDN linger indefinitely and leak file descriptors. 120s is the conventional
+	// upper bound; long enough for legitimate keep-alive reuse, short enough to
+	// reclaim sockets from stale clients.
+	idleTimeout     = 120 * time.Second
+	shutdownTimeout = 5 * time.Second
 )
 
 // Sentinel errors for ResetPassword; defined at package level so err113 stays
@@ -314,6 +320,7 @@ func runHTTPServer(ctx, signalCtx context.Context, ln net.Listener, srv http.Han
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
 		Handler:           srv,
 	}
 
