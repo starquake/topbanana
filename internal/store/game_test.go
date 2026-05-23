@@ -952,3 +952,44 @@ func TestGameStore_ListAnswersForQuizLeaderboard_UsesQuizIDIndex(t *testing.T) {
 		t.Errorf("EXPLAIN QUERY PLAN output should contain %q; got:\n%s", want, got)
 	}
 }
+
+// TestGameStore_ListAnswersByGameQuestionID_UsesIndex pins the #356
+// migration: a game_answers lookup by game_question_id must hit the
+// new game_answers_game_question_id_idx instead of full-scanning the
+// table. Same EXPLAIN QUERY PLAN pattern as the quiz_id sibling.
+func TestGameStore_ListAnswersByGameQuestionID_UsesIndex(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	rows, err := db.QueryContext(t.Context(),
+		"EXPLAIN QUERY PLAN SELECT 1 FROM game_answers WHERE game_question_id = ?",
+		int64(1),
+	)
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN err = %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			t.Errorf("rows.Close err = %v", closeErr)
+		}
+	})
+
+	var plan []string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if scanErr := rows.Scan(&id, &parent, &notused, &detail); scanErr != nil {
+			t.Fatalf("scan plan row err = %v", scanErr)
+		}
+		plan = append(plan, detail)
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		t.Fatalf("plan rows iteration err = %v", rowsErr)
+	}
+
+	joined := strings.Join(plan, "\n")
+	t.Logf("EXPLAIN QUERY PLAN output:\n%s", joined)
+	if got, want := joined, "game_answers_game_question_id_idx"; !strings.Contains(got, want) {
+		t.Errorf("EXPLAIN QUERY PLAN output should contain %q; got:\n%s", want, got)
+	}
+}

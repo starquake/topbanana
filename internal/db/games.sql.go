@@ -115,7 +115,7 @@ RETURNING id, game_id, player_id, quiz_id, joined_at
 type CreateParticipantParams struct {
 	GameID   string
 	PlayerID int64
-	QuizID   sql.NullInt64
+	QuizID   int64
 }
 
 // quiz_id is denormalised onto game_participants so the UNIQUE INDEX
@@ -335,6 +335,48 @@ func (q *Queries) GetPlayer(ctx context.Context, id int64) (Player, error) {
 		&i.UsernameClaimed,
 	)
 	return i, err
+}
+
+const listAnswersByGameID = `-- name: ListAnswersByGameID :many
+SELECT id, game_id, player_id, game_question_id, option_id, answered_at
+FROM game_answers
+WHERE game_id = ?
+ORDER BY game_question_id
+`
+
+// Returns every game_answer for a given game, ordered by
+// game_question_id so callers can partition rows per question in a
+// single pass. Replaces the N+1 pattern of calling
+// ListAnswersByGameQuestionID once per issued question (#356); the
+// game_id column is already covered by the FK's implicit index.
+func (q *Queries) ListAnswersByGameID(ctx context.Context, gameID string) ([]GameAnswer, error) {
+	rows, err := q.db.QueryContext(ctx, listAnswersByGameID, gameID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GameAnswer
+	for rows.Next() {
+		var i GameAnswer
+		if err := rows.Scan(
+			&i.ID,
+			&i.GameID,
+			&i.PlayerID,
+			&i.GameQuestionID,
+			&i.OptionID,
+			&i.AnsweredAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAnswersByGameQuestionID = `-- name: ListAnswersByGameQuestionID :many
@@ -684,7 +726,6 @@ const listQuizIDsForPlayer = `-- name: ListQuizIDsForPlayer :many
 SELECT DISTINCT gp.quiz_id
 FROM game_participants gp
 WHERE gp.player_id = ?
-  AND gp.quiz_id IS NOT NULL
 `
 
 // Lists distinct quiz IDs the given player has joined. The claim-name
@@ -696,18 +737,17 @@ WHERE gp.player_id = ?
 // create a game (before any answer commits), so the fan-out must
 // read from game_participants -- filtering on game_answers would
 // skip joined-but-unanswered quizzes and leave their subscribers
-// stuck on the stale auto-petname (#354). The IS NOT NULL guard
-// belt-and-braces the column until the planned NOT NULL migration
-// (#357) lands.
-func (q *Queries) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]sql.NullInt64, error) {
+// stuck on the stale auto-petname (#354). quiz_id became NOT NULL
+// in migration 20260524200000 (#357), so no Valid-guard is needed.
+func (q *Queries) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]int64, error) {
 	rows, err := q.db.QueryContext(ctx, listQuizIDsForPlayer, playerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []sql.NullInt64
+	var items []int64
 	for rows.Next() {
-		var quiz_id sql.NullInt64
+		var quiz_id int64
 		if err := rows.Scan(&quiz_id); err != nil {
 			return nil, err
 		}

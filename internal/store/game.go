@@ -150,7 +150,7 @@ func (s *GameStore) CreateParticipant(ctx context.Context, p *game.Participant) 
 	row, err := s.q.CreateParticipant(ctx, db.CreateParticipantParams{
 		GameID:   p.GameID,
 		PlayerID: p.PlayerID,
-		QuizID:   sql.NullInt64{Int64: p.QuizID, Valid: true},
+		QuizID:   p.QuizID,
 	})
 	if err != nil {
 		var sqliteErr *sqlite.Error
@@ -215,7 +215,7 @@ func execCreateGameAndParticipant(
 	partRow, err := q.CreateParticipant(ctx, db.CreateParticipantParams{
 		GameID:   p.GameID,
 		PlayerID: p.PlayerID,
-		QuizID:   sql.NullInt64{Int64: p.QuizID, Valid: true},
+		QuizID:   p.QuizID,
 	})
 	if err != nil {
 		var sqliteErr *sqlite.Error
@@ -391,23 +391,14 @@ func (s *GameStore) ListParticipantsForQuizLeaderboard(
 // joined. Used by the claim-name flow to repaint every affected
 // leaderboard SSE stream when a player changes their display name.
 //
-// Post-#335 a player can appear on the leaderboard before any answer
-// commits (just by clicking Start), so this reads from
-// game_participants. The generated layer surfaces gp.quiz_id as
-// [sql.NullInt64] because the column is nullable in the schema; the
-// query filters NULLs and the wrapper unpacks the rest into a plain
-// []int64 the service can iterate without a Valid check (#354).
+// Reads from game_participants so post-#335 joined-but-unanswered
+// players also get their leaderboard repainted on rename (#354).
+// quiz_id is NOT NULL since migration 20260524200000 (#357), so the
+// generated layer returns plain []int64.
 func (s *GameStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]int64, error) {
-	rows, err := s.q.ListQuizIDsForPlayer(ctx, playerID)
+	ids, err := s.q.ListQuizIDsForPlayer(ctx, playerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list quiz IDs for player %d: %w", playerID, err)
-	}
-
-	ids := make([]int64, 0, len(rows))
-	for _, r := range rows {
-		if r.Valid {
-			ids = append(ids, r.Int64)
-		}
 	}
 
 	return ids, nil
@@ -447,28 +438,41 @@ func (s *GameStore) deleteGamesForPlayerOnQuizTx(
 }
 
 func (s *GameStore) listGameQuestions(ctx context.Context, gameID string) ([]*game.Question, error) {
-	var err error
 	rows, err := s.q.ListGameQuestionsByGameID(ctx, gameID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list game questions for game %q: %w", gameID, err)
 	}
 
+	// One shot for every answer in the game, partitioned in Go below
+	// (#356). The old per-question fetch was an N+1 against
+	// game_answers and forced a full-table scan per call until the
+	// game_question_id index landed in the same bundle.
+	answerRows, err := s.q.ListAnswersByGameID(ctx, gameID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list answers for game %q: %w", gameID, err)
+	}
+	answersByGQ := make(map[int64][]*game.Answer, len(rows))
+	for _, r := range answerRows {
+		answersByGQ[r.GameQuestionID] = append(answersByGQ[r.GameQuestionID], &game.Answer{
+			ID:         r.ID,
+			GameID:     r.GameID,
+			PlayerID:   r.PlayerID,
+			QuestionID: r.GameQuestionID,
+			OptionID:   r.OptionID,
+			AnsweredAt: r.AnsweredAt,
+		})
+	}
+
 	gameQuestions := make([]*game.Question, 0, len(rows))
 	for _, r := range rows {
-		gqs := &game.Question{
+		gameQuestions = append(gameQuestions, &game.Question{
 			ID:         r.ID,
 			GameID:     r.GameID,
 			QuestionID: r.QuestionID,
 			StartedAt:  r.StartedAt,
 			ExpiredAt:  r.ExpiredAt,
-		}
-
-		gqs.Answers, err = s.listAnswers(ctx, gqs.ID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list answers for game question: %w", err)
-		}
-
-		gameQuestions = append(gameQuestions, gqs)
+			Answers:    answersByGQ[r.ID],
+		})
 	}
 
 	return gameQuestions, nil
@@ -483,44 +487,16 @@ func (s *GameStore) listParticipants(ctx context.Context, gameID string) ([]*gam
 
 	participants := make([]*game.Participant, 0, len(rows))
 	for _, r := range rows {
-		p := &game.Participant{
+		// quiz_id became NOT NULL in 20260524200000 (#357), so the
+		// generated row carries it as int64 — no more Valid-guard.
+		participants = append(participants, &game.Participant{
 			ID:       r.ID,
 			GameID:   r.GameID,
 			PlayerID: r.PlayerID,
+			QuizID:   r.QuizID,
 			JoinedAt: r.JoinedAt,
-		}
-		// quiz_id was added in the #273 migration and backfilled from
-		// games.quiz_id. New rows always set it; legacy rows from
-		// before the migration also carry it after the backfill. The
-		// nullable wrapper only widens the type for sqlc's sake.
-		if r.QuizID.Valid {
-			p.QuizID = r.QuizID.Int64
-		}
-		participants = append(participants, p)
+		})
 	}
 
 	return participants, nil
-}
-
-func (s *GameStore) listAnswers(ctx context.Context, gameQuestionID int64) ([]*game.Answer, error) {
-	var err error
-	rows, err := s.q.ListAnswersByGameQuestionID(ctx, gameQuestionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list answers for game question: %w", err)
-	}
-	answers := make([]*game.Answer, 0, len(rows))
-	for _, r := range rows {
-		a := &game.Answer{
-			ID:         r.ID,
-			GameID:     r.GameID,
-			PlayerID:   r.PlayerID,
-			QuestionID: r.GameQuestionID,
-			OptionID:   r.OptionID,
-			AnsweredAt: r.AnsweredAt,
-		}
-
-		answers = append(answers, a)
-	}
-
-	return answers, nil
 }
