@@ -430,13 +430,11 @@ func requireQuizOwner(
 		return nil, false
 	}
 
-	if _, present := auth.PlayerFromContext(r.Context()); !present {
-		logger.ErrorContext(r.Context(), "no player on context for owner-gated route")
-		render500(w, r, logger, csrfMgr)
-
-		return nil, false
-	}
-
+	// RequireAdmin (auth/middleware.go) already enforces a populated
+	// player on the context before any admin handler runs, and
+	// canEditQuiz below handles the not-present case correctly. The
+	// previous explicit check rendered 500 on a state that's
+	// unreachable under the production wiring (#371).
 	if canEditQuiz(r, qz.CreatedByPlayerID) {
 		return qz, true
 	}
@@ -466,7 +464,9 @@ func quizByID(
 	q, err := quizStore.GetQuiz(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, quiz.ErrQuizNotFound) || errors.Is(err, quiz.ErrQuestionNotFound) {
-			logger.ErrorContext(r.Context(), "quiz not found", slog.Any("err", err))
+			// User-supplied bad ID (or stale link after delete) — Info,
+			// not Error (#369).
+			logger.InfoContext(r.Context(), "quiz not found", slog.Any("err", err))
 			render404(w, r, logger, csrfMgr)
 
 			return nil, false
