@@ -480,20 +480,27 @@ func quizByID(
 	return q, true
 }
 
-// questionByID returns the question with the given ID from the store.
-// It logs any errors that occur, renders the errorpage and returns false.
+// questionByID loads the question with the given ID and verifies it
+// belongs to the supplied quizID. A mismatch renders as 404 (not 403)
+// so the route never leaks "this question exists on another quiz"
+// — the IDOR fix for #339 lives here: every mutating question route
+// is quiz-scoped in the URL, so loading by questionID alone would let
+// an admin who owns quizA edit a question on quizB by mounting it as
+// /admin/quizzes/A/questions/B-question. SwapQuestionPositions does
+// its own quiz-scoping; the read + write + delete paths route through
+// this helper.
 func questionByID(
 	w http.ResponseWriter,
 	r *http.Request,
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
 	quizStore quiz.Store,
-	questionID int64,
+	quizID, questionID int64,
 ) (*quiz.Question, bool) {
 	qs, err := quizStore.GetQuestion(r.Context(), questionID)
 	if err != nil {
 		if errors.Is(err, quiz.ErrQuestionNotFound) {
-			logger.ErrorContext(
+			logger.InfoContext(
 				r.Context(),
 				fmt.Sprintf("question with ID %d not found", questionID),
 				slog.Any("err", err),
@@ -508,6 +515,16 @@ func questionByID(
 			slog.Any("err", err),
 		)
 		render500(w, r, logger, csrfMgr)
+
+		return nil, false
+	}
+
+	if qs.QuizID != quizID {
+		logger.InfoContext(
+			r.Context(),
+			fmt.Sprintf("question %d belongs to quiz %d, not URL-scoped quiz %d", questionID, qs.QuizID, quizID),
+		)
+		render404(w, r, logger, csrfMgr)
 
 		return nil, false
 	}
@@ -1350,7 +1367,7 @@ func HandleQuestionEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 				QuizID: quizID,
 			}
 		} else {
-			qs, ok = questionByID(w, r, logger, csrfMgr, quizStore, questionID)
+			qs, ok = questionByID(w, r, logger, csrfMgr, quizStore, quizID, questionID)
 			if !ok {
 				return
 			}
@@ -1527,6 +1544,13 @@ func HandleQuestionDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 			return
 		}
 
+		// Reject cross-quiz deletes (#339); without this gate an admin
+		// who owns quizID could delete a question on a different quiz
+		// by mounting it on this URL.
+		if _, ok = questionByID(w, r, logger, csrfMgr, quizStore, quizID, questionID); !ok {
+			return
+		}
+
 		if err := quizStore.DeleteQuestion(r.Context(), questionID); err != nil {
 			if errors.Is(err, quiz.ErrDeletingQuestionNoRowsAffected) {
 				render404(w, r, logger, csrfMgr)
@@ -1625,7 +1649,7 @@ func loadQuestionForSave(
 	if questionID == 0 {
 		return &questionSaveCtx{Quiz: qz, Question: &quiz.Question{QuizID: qz.ID}, IsNew: true}, true
 	}
-	qs, ok := questionByID(w, r, logger, csrfMgr, quizStore, questionID)
+	qs, ok := questionByID(w, r, logger, csrfMgr, quizStore, qz.ID, questionID)
 	if !ok {
 		return nil, false
 	}
