@@ -98,7 +98,8 @@ export async function createQuizWithQuestions(
       }
     }
     await page.getByRole('button', { name: 'Save' }).click();
-    await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+    // waitForURL beats toHaveURL here — see #384
+    await page.waitForURL(/\/admin\/quizzes\/\d+$/, { timeout: 10_000 });
   }
 }
 
