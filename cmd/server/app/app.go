@@ -321,7 +321,9 @@ func runHTTPServer(ctx, signalCtx context.Context, ln net.Listener, srv http.Han
 
 	g.Go(func() error {
 		logger.InfoContext(gCtx, "listening on "+ln.Addr().String(), slog.String("addr", ln.Addr().String()))
-		logger.InfoContext(gCtx, fmt.Sprintf("visit http://%s/admin/quizzes to manage quizzes", ln.Addr().String()))
+		addr := ln.Addr().String()
+		logger.InfoContext(gCtx, fmt.Sprintf("visit http://%s/admin to manage quizzes", addr))
+		logger.InfoContext(gCtx, fmt.Sprintf("visit http://%s/ to play", addr))
 		httpErr := httpServer.Serve(ln)
 		if httpErr != nil && !errors.Is(httpErr, http.ErrServerClosed) {
 			msg := "error listening and serving"
