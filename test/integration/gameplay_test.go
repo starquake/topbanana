@@ -67,6 +67,7 @@ type nextQuestionRes struct {
 	Text      string               `json:"text"`
 	Options   []nextQuestionOption `json:"options"`
 	StartedAt time.Time            `json:"startedAt"`
+	ServerNow time.Time            `json:"serverNow"`
 }
 
 // playerScoreRes mirrors one player_scores entry in the GET .../results
@@ -453,6 +454,7 @@ func TestGameplay_Integration(t *testing.T) {
 		// Walk through questions
 		for i := range 3 {
 			// Get Next Question
+			before := time.Now()
 			resp = httpGet(ctx, t, client, fmt.Sprintf("%s/api/games/%s/questions/next", baseURL, gameID))
 			if got, want := resp.StatusCode, http.StatusOK; got != want {
 				t.Fatalf("next question status = %d, want %d", got, want)
@@ -465,6 +467,16 @@ func TestGameplay_Integration(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("failed to decode next question response: %v", err)
+			}
+			// invariant pinned by #180: the server stamps a fresh
+			// serverNow on every question so the client can correct
+			// for system-clock skew. It must land between the
+			// pre-request "before" and a tolerant upper bound past
+			// the HTTP round-trip — anything outside that window
+			// means the server is sending a stale or wrong field.
+			after := time.Now().Add(5 * time.Second)
+			if got := nextQsRes.ServerNow; got.Before(before) || got.After(after) {
+				t.Errorf("ServerNow = %v, want within [%v, %v]", got, before, after)
 			}
 
 			// Find correct or incorrect option
