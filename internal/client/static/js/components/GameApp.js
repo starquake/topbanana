@@ -396,14 +396,20 @@ export class GameApp {
     // already-played view before probing again.
     async checkAlreadyPlayed() {
         this.startError = null;
-        // Reset any prior already-played view before probing the new
-        // selection. Idempotent: no-ops when nothing is open.
-        this.closeLeaderboardStream();
-        this.finished = false;
-        this.leaderboard = null;
-        this.quizSlugId = null;
 
         const slugId = this.slugIdFor(this.selectedQuizId);
+        // Only tear down the prior leaderboard view when the selected
+        // quiz actually changed. checkAlreadyPlayed is also re-entered
+        // from startGame() for the same quiz; closing + reopening the
+        // SSE there shows up as a spurious NS_ERROR_PARTIAL_TRANSFER
+        // in Firefox even though the round-trip is intentional.
+        if (slugId !== this.quizSlugId) {
+            this.closeLeaderboardStream();
+            this.finished = false;
+            this.leaderboard = null;
+            this.quizSlugId = null;
+        }
+
         if (!slugId) return null;
 
         // Hoist quizSlugId + leaderboard fetch above the completed gate
@@ -417,14 +423,17 @@ export class GameApp {
         // answer flow uncluttered. Best-effort: a failed fetch lands an
         // empty entries list so the section degrades to its "be the
         // first" state.
+        const firstVisitForQuiz = this.quizSlugId !== slugId;
         this.quizSlugId = slugId;
-        try {
-            this.leaderboard = await gameService.getQuizLeaderboard(slugId);
-        } catch (err) {
-            console.warn('start-screen leaderboard fetch failed', err);
-            this.leaderboard = { quizId: 0, entries: [], currentPlayer: null };
+        if (firstVisitForQuiz) {
+            try {
+                this.leaderboard = await gameService.getQuizLeaderboard(slugId);
+            } catch (err) {
+                console.warn('start-screen leaderboard fetch failed', err);
+                this.leaderboard = { quizId: 0, entries: [], currentPlayer: null };
+            }
+            this.subscribeLeaderboardStream();
         }
-        this.subscribeLeaderboardStream();
 
         const existing = await gameService.getMyGameForQuiz(slugId);
         if (existing && existing.completed) {
