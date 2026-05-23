@@ -341,6 +341,26 @@ $(SQLC_BIN):
 server:
 	go run ./cmd/server/
 
+# Run the Go server with auto-restart on source changes. Watches cmd/,
+# internal/, and the go.mod/go.sum pair; ignores the generated sqlc
+# output and the regenerated Tailwind bundle so a `make tailwind-watch`
+# in a second terminal doesn't bounce the server. SIGTERM lets the
+# server's shutdown handler drain in-flight requests before exit.
+# watchexec is user-installed (see CLI tools in CLAUDE.md / README).
+.PHONY: dev
+dev:
+	@command -v watchexec >/dev/null 2>&1 || { echo "watchexec not found — install from https://github.com/watchexec/watchexec"; exit 1; }
+	watchexec \
+	    --restart \
+	    --stop-signal SIGTERM \
+	    --watch cmd \
+	    --watch internal \
+	    --watch go.mod \
+	    --watch go.sum \
+	    --ignore 'internal/db/**' \
+	    --ignore 'internal/web/static/css/app.css' \
+	    -- go run ./cmd/server/
+
 .PHONY: clean
 clean:
 	rm -rf $(BUILD_DIR)
