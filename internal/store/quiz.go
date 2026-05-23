@@ -300,24 +300,6 @@ func (s *QuizStore) UpdateQuestion(ctx context.Context, qs *quiz.Question) error
 	return nil
 }
 
-// NextQuestionPosition returns max(position)+1 for the given quiz, or 1
-// when the quiz has no questions yet. The SQL COALESCE keeps the typed
-// return as int64 even on an empty quiz; we add 1 here so callers get
-// the position they should assign on a new question.
-//
-// Prefer [QuizStore.CreateQuestionAtNextPosition] over manually pairing
-// this read with a CreateQuestion write — the unwrapped pair races
-// under concurrent "Add question" clicks and lands two questions at
-// the same position (#352).
-func (s *QuizStore) NextQuestionPosition(ctx context.Context, quizID int64) (int, error) {
-	maxPos, err := s.q.MaxQuestionPosition(ctx, quizID)
-	if err != nil {
-		return 0, fmt.Errorf("failed to read max question position: %w", err)
-	}
-
-	return int(maxPos) + 1, nil
-}
-
 // createQuestionAtNextPositionRetries caps the optimistic retry loop in
 // [QuizStore.CreateQuestionAtNextPosition] so two genuinely concurrent
 // callers eventually serialize without spinning forever. Three attempts
