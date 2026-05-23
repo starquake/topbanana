@@ -1111,11 +1111,23 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 
 		handler.ServeHTTP(rr, withTestAdmin(req))
 
+		// #32: a validation failure now re-renders the form at 400
+		// with per-field error messages instead of a generic
+		// "validation errors" page. Assert the messages from the
+		// domain Valid map surface inline.
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
 		}
-		if got, want := rr.Body.String(), "validation errors"; !strings.Contains(got, want) {
-			t.Fatalf("got: %q, should contain: %q", got, want)
+		body := rr.Body.String()
+		for _, want := range []string{
+			"Title is required",
+			"Description is required",
+			`name="title"`,
+			`name="description"`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("body missing %q", want)
+			}
 		}
 	})
 
@@ -2324,11 +2336,22 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 
 		handler.ServeHTTP(rr, withTestAdmin(req))
 
+		// #32: a validation failure re-renders the question form at
+		// 400 with the per-field error message inline. Asserting on
+		// the message + form field name pins both the FieldErrors map
+		// and the template wiring in one shot.
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
 			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
 		}
-		if got, want := rr.Body.String(), "validation errors"; !strings.Contains(got, want) {
-			t.Fatalf("got: %v, should contain: %q", got, want)
+		body := rr.Body.String()
+		for _, want := range []string{
+			"Text is required",
+			"Options are required",
+			`name="text"`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("body missing %q", want)
+			}
 		}
 	})
 

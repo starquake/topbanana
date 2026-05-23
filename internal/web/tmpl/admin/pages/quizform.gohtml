@@ -40,11 +40,16 @@
             </div>
         {{end}}
 
+        {{$titleErr := index .FieldErrors "title"}}
         <div class="form-field">
             <label class="label-eyebrow" for="title">Title</label>
             <input id="title" name="title" type="text" value="{{.Quiz.Title}}"
                    placeholder="Capital Cities of Europe"
-                   class="form-input">
+                   class="form-input{{if $titleErr}} form-input-error{{end}}"
+                   {{if $titleErr}}aria-invalid="true" aria-describedby="title-error"{{end}}>
+            {{if $titleErr}}
+                <p id="title-error" class="form-help-error" role="alert">{{$titleErr}}</p>
+            {{end}}
         </div>
 
         {{if .Quiz.ID}}
@@ -58,6 +63,7 @@
             </div>
         {{end}}
 
+        {{$descErr := index .FieldErrors "description"}}
         <div class="form-field">
             <label class="label-eyebrow" for="description">
                 Description
@@ -65,7 +71,11 @@
             </label>
             <textarea id="description" name="description" rows="3"
                       placeholder="A geography refresher. Twelve quick-fire questions covering EU capitals."
-                      class="form-input min-h-[100px] resize-y">{{.Quiz.Description}}</textarea>
+                      class="form-input min-h-[100px] resize-y{{if $descErr}} form-input-error{{end}}"
+                      {{if $descErr}}aria-invalid="true" aria-describedby="description-error"{{end}}>{{.Quiz.Description}}</textarea>
+            {{if $descErr}}
+                <p id="description-error" class="form-help-error" role="alert">{{$descErr}}</p>
+            {{end}}
         </div>
 
         <div class="form-actions">
