@@ -17,7 +17,11 @@ env:
 
 
 jobs:
-  build:
+  # Renamed from `build` to `docker-build` so it no longer collides
+  # with the `build` job in ci.yml (#347). The branch-protection
+  # required-checks list keeps `build` (the Go one) as the gating
+  # context; this image-build is informational.
+  docker-build:
     runs-on: ubuntu-latest
     permissions:
       contents: read

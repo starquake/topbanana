@@ -41,5 +41,11 @@ ENV HOST=0.0.0.0
 ENV PORT=8080
 ENV DB_URI="file:data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)"
 
+# The image is distroless (no shell, no wget/curl) so the healthcheck
+# reuses the server binary itself with -healthcheck -- does an HTTP
+# GET against 127.0.0.1:$PORT/healthz and exits 0/1 (#344).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD ["/home/nonroot/server", "-healthcheck"]
+
 # Run the server
 ENTRYPOINT ["/home/nonroot/server"]
