@@ -26,6 +26,13 @@
 @source "../js";
 @source "../../../client/static";
 
+/* Exclude per-agent worktrees from Tailwind v4's auto-content-detection.
+ * The harness leaves `.claude/worktrees/<agent>/` checkouts behind even
+ * after agents complete, and Tailwind v4 walks them despite .gitignore —
+ * which inflates app.css with utilities only referenced inside those
+ * stale checkouts and fails tailwind-check in CI (#386). */
+@source not "../../../../.claude/worktrees/**";
+
 @theme {
     /* Palette — same tokens as mockups/admin-redesign-tailwind/quiz-list.html. */
     --color-bg: #0a0a0f;
