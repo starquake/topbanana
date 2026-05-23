@@ -166,7 +166,6 @@ type stubQuizStore struct {
 	updateQuestion          func(ctx context.Context, qs *quiz.Question) error
 	deleteQuestion          func(ctx context.Context, id int64) error
 	listQuestions           func(ctx context.Context, quizID int64) ([]*quiz.Question, error)
-	nextQuestionPosition    func(ctx context.Context, quizID int64) (int, error)
 	swapQuestionPositions   func(ctx context.Context, quizID, questionID int64, direction string) error
 }
 
@@ -250,24 +249,12 @@ func (s stubQuizStore) CreateQuestion(ctx context.Context, qs *quiz.Question) er
 	return s.createQuestion(ctx, qs)
 }
 
-// CreateQuestionAtNextPosition serves the dedicated stub when set;
-// otherwise it falls back to calling nextQuestionPosition +
-// createQuestion in sequence, which preserves the test setups that
-// existed before #352 collapsed the pair into one store method.
 func (s stubQuizStore) CreateQuestionAtNextPosition(ctx context.Context, qs *quiz.Question) error {
-	if s.createQuestionAtNextPos != nil {
-		return s.createQuestionAtNextPos(ctx, qs)
+	if s.createQuestionAtNextPos == nil {
+		return errors.New("createQuestionAtNextPos not supplied in stub")
 	}
-	if s.nextQuestionPosition == nil || s.createQuestion == nil {
-		return errors.New("createQuestionAtNextPos (or nextQuestionPosition + createQuestion) not supplied in stub")
-	}
-	pos, err := s.nextQuestionPosition(ctx, qs.QuizID)
-	if err != nil {
-		return err
-	}
-	qs.Position = pos
 
-	return s.createQuestion(ctx, qs)
+	return s.createQuestionAtNextPos(ctx, qs)
 }
 
 func (s stubQuizStore) UpdateQuestion(ctx context.Context, qs *quiz.Question) error {
@@ -276,14 +263,6 @@ func (s stubQuizStore) UpdateQuestion(ctx context.Context, qs *quiz.Question) er
 	}
 
 	return s.updateQuestion(ctx, qs)
-}
-
-func (s stubQuizStore) NextQuestionPosition(ctx context.Context, quizID int64) (int, error) {
-	if s.nextQuestionPosition == nil {
-		return 0, errors.New("nextQuestionPosition not supplied in stub")
-	}
-
-	return s.nextQuestionPosition(ctx, quizID)
 }
 
 func (s stubQuizStore) SwapQuestionPositions(
@@ -2023,10 +2002,8 @@ func TestHandleQuestionSave(t *testing.T) {
 
 				return &testQuiz, nil
 			},
-			nextQuestionPosition: func(_ context.Context, _ int64) (int, error) {
-				return autoAssignedPosition, nil
-			},
-			createQuestion: func(_ context.Context, q *quiz.Question) error {
+			createQuestionAtNextPos: func(_ context.Context, q *quiz.Question) error {
+				q.Position = autoAssignedPosition
 				q.ID = int64(len(questions) + 1)
 				for i, option := range q.Options {
 					option.ID = int64(i) + 1 // index starts at 1
@@ -2470,10 +2447,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 
 				return &testQuiz, nil
 			},
-			nextQuestionPosition: func(_ context.Context, _ int64) (int, error) {
-				return 10, nil
-			},
-			createQuestion: func(_ context.Context, _ *quiz.Question) error {
+			createQuestionAtNextPos: func(_ context.Context, _ *quiz.Question) error {
 				return testError
 			},
 		}

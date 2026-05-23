@@ -1556,11 +1556,6 @@ func HandleQuestionDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 		}
 
 		if err := quizStore.DeleteQuestion(r.Context(), questionID); err != nil {
-			if errors.Is(err, quiz.ErrDeletingQuestionNoRowsAffected) {
-				render404(w, r, logger, csrfMgr)
-
-				return
-			}
 			logger.ErrorContext(r.Context(), "error deleting question", slog.Any("err", err))
 			render500(w, r, logger, csrfMgr)
 

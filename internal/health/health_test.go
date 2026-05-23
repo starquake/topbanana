@@ -52,9 +52,6 @@ func (*stubQuizStore) CreateQuestionAtNextPosition(_ context.Context, _ *quiz.Qu
 	return nil
 }
 func (*stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error { return nil }
-func (*stubQuizStore) NextQuestionPosition(_ context.Context, _ int64) (int, error) {
-	return 0, errors.ErrUnsupported
-}
 
 func (*stubQuizStore) SwapQuestionPositions(_ context.Context, _, _ int64, _ string) error {
 	return errors.ErrUnsupported

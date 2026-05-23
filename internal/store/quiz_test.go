@@ -1991,41 +1991,6 @@ func seedQuizWithQuestions(t *testing.T, quizStore *QuizStore, n int) *quiz.Quiz
 	return qz
 }
 
-func TestQuizStore_NextQuestionPosition(t *testing.T) {
-	t.Parallel()
-
-	t.Run("returns 1 for an empty quiz", func(t *testing.T) {
-		t.Parallel()
-		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
-		qz := &quiz.Quiz{Title: "Empty", Slug: "empty", Description: "no questions", CreatedByPlayerID: seededAdminID}
-		if err := quizStore.CreateQuiz(t.Context(), qz); err != nil {
-			t.Fatalf("CreateQuiz err = %v, want nil", err)
-		}
-
-		got, err := quizStore.NextQuestionPosition(t.Context(), qz.ID)
-		if err != nil {
-			t.Fatalf("NextQuestionPosition err = %v, want nil", err)
-		}
-		if want := 1; got != want {
-			t.Errorf("NextQuestionPosition = %d, want %d", got, want)
-		}
-	})
-
-	t.Run("returns max+1 for an existing quiz", func(t *testing.T) {
-		t.Parallel()
-		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
-		qz := seedQuizWithQuestions(t, quizStore, 3) // positions 10, 20, 30
-
-		got, err := quizStore.NextQuestionPosition(t.Context(), qz.ID)
-		if err != nil {
-			t.Fatalf("NextQuestionPosition err = %v, want nil", err)
-		}
-		if want := 31; got != want {
-			t.Errorf("NextQuestionPosition = %d, want %d (30+1)", got, want)
-		}
-	})
-}
-
 func TestQuizStore_SwapQuestionPositions(t *testing.T) {
 	t.Parallel()
 
