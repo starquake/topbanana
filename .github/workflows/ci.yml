@@ -54,3 +54,19 @@ jobs:
         ## name of branch where badges are stored
         ## ideally this should be orphan branch (see below how to create this branch)
         git-branch: badges
+
+    # Smoke against a seeded fixture DB (#349): test-coverage's fresh
+    # DB doesn't exercise migrations against populated rows, so a
+    # migration that breaks on existing data slips through and only
+    # surfaces at deploy time. seed-dev populates a development-shaped
+    # DB; `go run ./cmd/server/ -check` then opens it, applies any
+    # pending migrations, and exits — the exact code path a real
+    # deploy hits before binding the listener.
+    #
+    # Wired as a non-required check first so a flake doesn't gate PRs
+    # while the new step beds in; promote to required-checks once it's
+    # been stable across a release cycle.
+    - name: Smoke against seeded DB
+      run: |
+        make seed-dev
+        make smoke

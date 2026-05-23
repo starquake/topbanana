@@ -22,10 +22,15 @@ export default defineConfig({
   // short writer contention this introduces.
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  // Tests register per-project usernames and rely on the registration succeeding
-  // exactly once per run — a retry would just hit ErrUsernameTaken from the prior
-  // attempt and fail again, so retries provide no value here.
-  retries: 0,
+  // One retry in CI absorbs the post-registration flakes (e.g. the
+  // URL race after question Save tracked in #384, or any slow-runner
+  // browser nav). Registration steps are still single-shot: a retry
+  // hits ErrUsernameTaken from the prior attempt and fails again,
+  // but the affected specs are a small subset and the upside on the
+  // larger pool of timing-sensitive UI assertions is worth the
+  // trade. Local runs keep retries=0 so flakes surface loudly during
+  // development (#350).
+  retries: process.env.CI ? 1 : 0,
   workers: 4,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {

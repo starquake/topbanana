@@ -26,6 +26,13 @@ func main() {
 			" The server should not be running concurrently against the same database."+
 			" Takes precedence over -check when both are supplied",
 	)
+	healthcheckOnly := flag.Bool(
+		"healthcheck",
+		false,
+		"probe http://127.0.0.1:$PORT/healthz and exit 0/1 based on the response."+
+			" Designed for Dockerfile HEALTHCHECK on distroless images (#344) so the image"+
+			" doesn't need a separate wget/curl binary",
+	)
 	flag.Parse()
 
 	ctx := context.Background()
@@ -38,6 +45,8 @@ func main() {
 		err = app.ResetPassword(ctx, os.Getenv, os.Stdin, os.Stdout, os.Stderr, *resetPasswordFor)
 	case *checkOnly:
 		err = app.Check(ctx, os.Getenv, os.Stdout)
+	case *healthcheckOnly:
+		err = app.Healthcheck(ctx, os.Getenv)
 	default:
 		err = app.Run(ctx, os.Getenv, os.Stdout, nil)
 	}

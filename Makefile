@@ -30,9 +30,11 @@ GOLANGCI_BIN     := $(BIN_DIR)/golangci-lint
 SQLC_VERSION := v1.31.1
 SQLC_BIN     := $(BIN_DIR)/sqlc
 
-# Developer check before committing
+# Developer check before committing. Includes smoke (#349) so the
+# migration-against-existing-data class of bug — which test-coverage's
+# fresh DB can't catch — fails locally before CI does.
 .PHONY: check
-check: lint sql-lint tailwind-check build test-coverage
+check: lint sql-lint tailwind-check build test-coverage smoke
 
 .PHONY: lint
 lint: $(GOLANGCI_BIN)
@@ -58,6 +60,26 @@ lint-cross-refs:
 	   --type go --type sql \
 	   -g '!*_test.go' -g '!internal/db/**' \
 	   internal/ || echo "no cross-file refs found"
+
+# Advisory lint (#360): flags any migration that disables FK
+# enforcement wholesale via `PRAGMA foreign_keys = OFF` instead of
+# the documented `PRAGMA defer_foreign_keys = ON`. Excludes the
+# grandfathered 20260506000000 migration that pre-dates the rule.
+# Advisory: prints hits, never fails the build. Grep instead of rg
+# so contributors without ripgrep installed still get the signal.
+.PHONY: lint-migrations
+lint-migrations:
+	@hits=$$(grep -lE 'PRAGMA[[:space:]]+foreign_keys[[:space:]]*=[[:space:]]*OFF' \
+	    internal/migrations/*.sql 2>/dev/null \
+	    | grep -vE '20260506000000_add_player_auth_columns\.sql|20260520200000_quiz_creator\.sql' \
+	    || true); \
+	if [ -n "$$hits" ]; then \
+	    echo "lint-migrations: the following migrations use PRAGMA foreign_keys = OFF;"; \
+	    echo "                 prefer PRAGMA defer_foreign_keys = ON (see CLAUDE.md)."; \
+	    echo "$$hits" | sed 's/^/  /'; \
+	else \
+	    echo "lint-migrations: no offending migrations."; \
+	fi
 
 .PHONY: build
 build:

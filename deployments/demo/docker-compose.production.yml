@@ -15,6 +15,15 @@ services:
     networks:
       - web
     restart: unless-stopped
+    # Mirrors the Dockerfile HEALTHCHECK so `docker ps` reports a
+    # health column and any compose-aware orchestrator (rolling
+    # deploys, blue/green) has something to wait on (#344).
+    healthcheck:
+      test: ["CMD", "/home/nonroot/server", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
 
 volumes:
   topbanana_production_data:

@@ -229,6 +229,52 @@ func newPasswordReader(stdin io.Reader, stdout io.Writer) func(prompt string) (s
 	}
 }
 
+// errHealthcheckUnhealthy is wrapped by [Healthcheck] when /healthz
+// returns a non-2xx status; defined at package scope so callers can
+// [errors.Is] it without string-matching.
+var errHealthcheckUnhealthy = errors.New("healthcheck unhealthy")
+
+// Healthcheck probes http://127.0.0.1:$PORT/healthz on the local
+// listener and returns nil iff the response is 2xx. Designed for the
+// Dockerfile HEALTHCHECK directive (#344) so distroless images can
+// run the existing server binary as their probe instead of carrying a
+// separate wget / curl.
+//
+// Reads PORT from the environment so the probe targets whatever
+// listener the server actually bound (the image defaults to 8080).
+// Uses 127.0.0.1 rather than HOST to keep the probe loopback-only --
+// HOST is the bind interface, not the right address to dial.
+func Healthcheck(ctx context.Context, getenv func(string) string) error {
+	port := getenv("PORT")
+	if port == "" {
+		port = config.PortDefault
+	}
+
+	const (
+		healthcheckTimeout = 3 * time.Second
+		statusOKMin        = 200
+		statusOKMax        = 300
+	)
+	probeCtx, cancel := context.WithTimeout(ctx, healthcheckTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, "http://127.0.0.1:"+port+"/healthz", nil)
+	if err != nil {
+		return fmt.Errorf("build healthcheck request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("healthcheck request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < statusOKMin || resp.StatusCode >= statusOKMax {
+		return fmt.Errorf("%w: status %d", errHealthcheckUnhealthy, resp.StatusCode)
+	}
+
+	return nil
+}
+
 // Check validates that the server can start: it parses config, opens the
 // database, and runs migrations, then closes the connection and returns. No
 // TCP listener is bound. Used by the `make smoke` target so a contributor
