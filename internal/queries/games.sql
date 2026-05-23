@@ -80,7 +80,8 @@ SELECT ga.player_id        AS player_id,
        gq.expired_at        AS question_expired_at,
        ga.answered_at       AS answered_at,
        o.is_correct         AS is_correct,
-       CASE WHEN (SELECT COUNT(*) FROM game_questions gqc WHERE gqc.game_id = g.id) >=
+       CASE WHEN (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id) > 0
+             AND (SELECT COUNT(*) FROM game_questions gqc WHERE gqc.game_id = g.id) >=
                  (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)
             THEN 1 ELSE 0 END AS is_completed
 FROM game_answers ga
@@ -88,6 +89,29 @@ FROM game_answers ga
          JOIN game_questions gq ON gq.id = ga.game_question_id
          JOIN options o ON o.id = ga.option_id
          JOIN players p ON p.id = ga.player_id
+WHERE g.quiz_id = ?;
+
+-- name: ListParticipantsForQuizLeaderboard :many
+-- Lists every player who has joined a game for the given quiz, with the
+-- same is_completed predicate ListAnswersForQuizLeaderboard carries on
+-- the answer rows. The Service uses this list as the canonical set of
+-- leaderboard entries (#335) so a player who clicked Start but has not
+-- yet submitted an answer still appears with a 0 score and the
+-- in-progress dot, instead of being invisible until their first answer
+-- commits. The answers query then contributes the per-row scoring
+-- inputs used to roll up each entry's running total.
+-- Joins through `games` so the WHERE filters on games.quiz_id (NOT
+-- NULL); game_participants.quiz_id is nullable in the schema, which
+-- would otherwise force sqlc to infer sql.NullInt64 for the parameter.
+SELECT gp.player_id AS player_id,
+       p.username   AS username,
+       CASE WHEN (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id) > 0
+             AND (SELECT COUNT(*) FROM game_questions gqc WHERE gqc.game_id = gp.game_id) >=
+                 (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)
+            THEN 1 ELSE 0 END AS is_completed
+FROM game_participants gp
+         JOIN games g   ON g.id = gp.game_id
+         JOIN players p ON p.id = gp.player_id
 WHERE g.quiz_id = ?;
 
 -- name: GetGameByPlayerAndQuiz :one

@@ -789,9 +789,11 @@ func HandleQuizList(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 }
 
 // PlayerScoreData represents one row of the "Played by" table on the quiz
-// view page: a player who has at least one answer recorded for the quiz,
-// alongside their accumulated score (computed by the game service in the
-// same way the public leaderboard computes its scores).
+// view page: a player who has finished every quiz question, alongside
+// their accumulated score (computed by the game service in the same way
+// the public leaderboard computes its scores). HandleQuizView filters out
+// in-progress and pre-answer participants (#244/#335) so the admin's
+// Reset button is only offered for games the host can safely wipe.
 type PlayerScoreData struct {
 	PlayerID int64
 	Username string
@@ -848,8 +850,16 @@ func HandleQuizView(
 			return
 		}
 
+		// Skip mid-quiz / pre-answer entries (#244/#335). The public
+		// leaderboard surfaces them so other players can see who's still
+		// in the game, but the admin "Played by" only lists finished
+		// attempts so the Reset button never pulls the rug from a live
+		// session.
 		players := make([]PlayerScoreData, 0, len(result.Entries))
 		for _, e := range result.Entries {
+			if !e.Completed {
+				continue
+			}
 			players = append(players, PlayerScoreData{
 				PlayerID: e.PlayerID,
 				Username: e.Username,

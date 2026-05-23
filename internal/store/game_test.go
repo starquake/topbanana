@@ -9,6 +9,7 @@ import (
 
 	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/game"
+	"github.com/starquake/topbanana/internal/quiz"
 	. "github.com/starquake/topbanana/internal/store"
 )
 
@@ -697,6 +698,161 @@ func TestGameStore_ListAnswersForQuizLeaderboard(t *testing.T) {
 		}
 		if len(rows) != 0 {
 			t.Errorf("len(rows) = %d, want 0 (only quiz B has answers)", len(rows))
+		}
+	})
+}
+
+func TestGameStore_ListParticipantsForQuizLeaderboard(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns participant with IsCompleted=false before any question is issued", func(t *testing.T) {
+		t.Parallel()
+
+		// #335: a player who has clicked Start (game + participant row
+		// exist) but has not yet been issued a question should still
+		// surface so the live leaderboard can show them at 0 / dotted
+		// instead of leaving the table empty.
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		playerStore := NewPlayerStore(db, slog.Default())
+		player, err := playerStore.CreateAnonymousPlayer(t.Context(), "anon-participant-pre-answer")
+		if err != nil {
+			t.Fatalf("failed to create player: %v", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		g := &game.Game{QuizID: testQuiz.ID}
+		if err = gameStore.CreateGame(t.Context(), g); err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+		if err = gameStore.CreateParticipant(
+			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("failed to create participant: %v", err)
+		}
+
+		rows, err := gameStore.ListParticipantsForQuizLeaderboard(t.Context(), testQuiz.ID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got, want := len(rows), 1; got != want {
+			t.Fatalf("len(rows) = %d, want %d", got, want)
+		}
+		if got, want := rows[0].PlayerID, player.ID; got != want {
+			t.Errorf("rows[0].PlayerID = %d, want %d", got, want)
+		}
+		if got, want := rows[0].Username, player.Username; got != want {
+			t.Errorf("rows[0].Username = %q, want %q", got, want)
+		}
+		if got, want := rows[0].IsCompleted, false; got != want {
+			t.Errorf("rows[0].IsCompleted = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns participant with IsCompleted=true once every question is issued", func(t *testing.T) {
+		t.Parallel()
+
+		// Bound the CASE predicate: a regression that flipped `>=` to
+		// `<=` or always returned 0 would pass the pre-answer subtest
+		// above. This sibling exercises the true-branch by issuing
+		// every quiz question.
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		playerStore := NewPlayerStore(db, slog.Default())
+		player, err := playerStore.CreateAnonymousPlayer(t.Context(), "anon-participant-completed")
+		if err != nil {
+			t.Fatalf("failed to create player: %v", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		g := &game.Game{QuizID: testQuiz.ID}
+		if err = gameStore.CreateGame(t.Context(), g); err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+		if err = gameStore.CreateParticipant(
+			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("failed to create participant: %v", err)
+		}
+
+		now := time.Now().UTC().Truncate(time.Second)
+		for _, q := range testQuiz.Questions {
+			gq := &game.Question{
+				GameID:     g.ID,
+				QuestionID: q.ID,
+				StartedAt:  now,
+				ExpiredAt:  now.Add(10 * time.Second),
+			}
+			if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+				t.Fatalf("failed to create game question: %v", err)
+			}
+		}
+
+		rows, err := gameStore.ListParticipantsForQuizLeaderboard(t.Context(), testQuiz.ID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got, want := len(rows), 1; got != want {
+			t.Fatalf("len(rows) = %d, want %d", got, want)
+		}
+		if got, want := rows[0].IsCompleted, true; got != want {
+			t.Errorf("rows[0].IsCompleted = %v, want %v (every quiz question issued)", got, want)
+		}
+	})
+
+	t.Run("returns participant with IsCompleted=false on a zero-question quiz", func(t *testing.T) {
+		t.Parallel()
+
+		// #335: prevents the CASE from evaluating 0>=0 → true and
+		// marking a freshly-joined participant on an empty quiz as
+		// Completed when there is literally no question to answer.
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		emptyQuiz := &quiz.Quiz{
+			Title:             "Empty Quiz",
+			Slug:              "empty-quiz",
+			CreatedByPlayerID: seededAdminID,
+		}
+		if err := quizStore.CreateQuiz(t.Context(), emptyQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		playerStore := NewPlayerStore(db, slog.Default())
+		player, err := playerStore.CreateAnonymousPlayer(t.Context(), "anon-participant-empty-quiz")
+		if err != nil {
+			t.Fatalf("failed to create player: %v", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		g := &game.Game{QuizID: emptyQuiz.ID}
+		if err = gameStore.CreateGame(t.Context(), g); err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+		if err = gameStore.CreateParticipant(
+			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID, QuizID: emptyQuiz.ID},
+		); err != nil {
+			t.Fatalf("failed to create participant: %v", err)
+		}
+
+		rows, err := gameStore.ListParticipantsForQuizLeaderboard(t.Context(), emptyQuiz.ID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got, want := len(rows), 1; got != want {
+			t.Fatalf("len(rows) = %d, want %d", got, want)
+		}
+		if got, want := rows[0].IsCompleted, false; got != want {
+			t.Errorf("rows[0].IsCompleted = %v, want %v (no questions defined)", got, want)
 		}
 	})
 }

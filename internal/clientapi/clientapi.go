@@ -263,10 +263,11 @@ const leaderboardLimit = 10
 // Declared at package scope so both HandleQuizLeaderboard and
 // HandleQuizLeaderboardStream can build it.
 //
-// InProgress is true when the player is still mid-quiz (#244); Score is
-// the running partial total in that case. Picked as the wire name
-// instead of Completed so the client only has to branch on a positive
-// signal ("answering now") to render the badge.
+// InProgress is true when the player is still mid-quiz: Score may be a
+// running partial total (#244) or zero if the player has clicked Start
+// but not yet submitted their first answer (#335). Picked as the wire
+// name instead of Completed so the client only has to branch on a
+// positive signal to render the badge.
 type quizLeaderboardEntryResponse struct {
 	PlayerID        int64  `json:"playerId"`
 	Username        string `json:"username"`

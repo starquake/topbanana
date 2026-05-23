@@ -136,9 +136,13 @@ type Results struct {
 // option's correctness, the question's start/expiry timestamps, and the
 // answer's submission time) plus the player's username and ID for the
 // leaderboard row. The store returns rows for both finished and
-// in-progress games (#244); the IsCompleted flag distinguishes the two
-// so [Service.GetQuizLeaderboard] can stamp the per-player Completed
-// flag on the aggregated entries.
+// in-progress games (#244).
+//
+// IsCompleted is no longer read by [Service.GetQuizLeaderboard] (#335
+// moved the per-player Completed flag onto [LeaderboardParticipant]
+// since the participants list is now the canonical entry source); the
+// column stays on the wire so the store-level test can pin the
+// per-game completion predicate without an end-to-end fixture.
 type LeaderboardAnswer struct {
 	PlayerID          int64
 	Username          string
@@ -149,6 +153,20 @@ type LeaderboardAnswer struct {
 	IsCompleted       bool
 }
 
+// LeaderboardParticipant is the minimum needed to surface a player on
+// the live leaderboard before their first answer commits (#335):
+// player_id and username for the row, and the same is_completed flag
+// the answer rows carry so the entry can be marked in-progress. The
+// store returns one of these per participant; [Service.GetQuizLeaderboard]
+// uses the list as the canonical set of leaderboard entries and folds
+// in the per-answer scoring inputs from
+// [Store.ListAnswersForQuizLeaderboard].
+type LeaderboardParticipant struct {
+	PlayerID    int64
+	Username    string
+	IsCompleted bool
+}
+
 // LeaderboardEntry is a single row of a per-quiz leaderboard: the player's
 // total score for that quiz. Rank is 1-indexed and computed before
 // truncation, so the value remains meaningful for a CurrentPlayer entry
@@ -156,9 +174,10 @@ type LeaderboardAnswer struct {
 // entry belongs to the player making the request, which lets the client
 // highlight the row.
 //
-// Completed is false when the player is still mid-quiz and the Score is
-// only their partial running total (#244). The client renders an
-// "answering..." badge on those rows.
+// Completed is false when the player is still mid-quiz: the Score may
+// be a partial running total (#244) or zero if the player has clicked
+// Start but not yet submitted their first answer (#335). The client
+// surfaces these rows as in-progress on the wire (`inProgress: true`).
 type LeaderboardEntry struct {
 	PlayerID        int64
 	Username        string
@@ -196,11 +215,18 @@ type Store interface {
 	CreateQuestion(ctx context.Context, gq *Question) error
 	CreateAnswer(ctx context.Context, a *Answer) error
 	// ListAnswersForQuizLeaderboard returns one row per game_answer for
-	// completed games of the given quiz, joined with the fields the
-	// Service needs to score each answer. A game counts as completed when
-	// every quiz question has been issued (answered or timed out); partial
-	// games are filtered out at the store layer.
+	// every game (finished or in-progress) of the given quiz, joined with
+	// the fields the Service needs to score each answer. The
+	// LeaderboardAnswer.IsCompleted flag tells the caller whether the
+	// row belongs to a game that has issued every quiz question (#244).
 	ListAnswersForQuizLeaderboard(ctx context.Context, quizID int64) ([]*LeaderboardAnswer, error)
+	// ListParticipantsForQuizLeaderboard returns one row per player who
+	// joined a game for the given quiz, with the same is_completed flag
+	// that ListAnswersForQuizLeaderboard carries. The Service uses this
+	// list as the canonical set of leaderboard entries (#335) so a
+	// player who has clicked Start but not yet submitted an answer
+	// still appears with a 0 score and the in-progress dot.
+	ListParticipantsForQuizLeaderboard(ctx context.Context, quizID int64) ([]*LeaderboardParticipant, error)
 	// DeleteGamesForPlayerOnQuiz hard-deletes every game (and dependent
 	// rows) that belongs to the given player on the given quiz. No error
 	// when the player has no games for the quiz: the admin reset flow is
@@ -398,6 +424,17 @@ func (s *Service) CreateGame(ctx context.Context, quizID, playerID int64) (*Game
 
 	if err = s.store.StartGame(ctx, g.ID); err != nil {
 		return nil, fmt.Errorf("failed to start game: %w", err)
+	}
+
+	// Repaint subscribers so the new participant appears on the live
+	// leaderboard at score 0 / in-progress immediately (#335). Without
+	// this fire, existing subscribers (hosts watching the start screen,
+	// other players on the same quiz) would only see the row once the
+	// player committed their first answer. Nil-guarded to match
+	// PublishLeaderboardForPlayer / SubmitAnswer — tests can construct
+	// a Service without wiring a publisher.
+	if s.leaderboardPublisher != nil {
+		s.leaderboardPublisher.Publish(qz.ID)
 	}
 
 	return g, nil
@@ -766,12 +803,14 @@ func (s *Service) GetResults(ctx context.Context, gameID string, playerID int64)
 // Scoring reuses [Service.CalculateScore] so values stay consistent with
 // [Service.GetResults].
 //
-// Only completed games (every quiz question issued, answered or timed
-// out) are counted; partial games are filtered out by the store so a
-// player who walked away mid-quiz does not take a slot. Combined with
-// the one-attempt-per-(player, quiz) constraint enforced by
-// [Service.CreateGame] and the admin reset flow, that means each player
-// either appears with their final score for the quiz or not at all.
+// Every player who has joined a game for the quiz appears on the
+// leaderboard, including those still mid-quiz (running partial score,
+// [LeaderboardEntry.Completed] = false) and those who have clicked
+// Start but not yet submitted their first answer (score 0,
+// [LeaderboardEntry.Completed] = false). The
+// one-attempt-per-(player, quiz) constraint enforced by
+// [Service.CreateGame] and the admin reset flow keeps each player to
+// at most one row.
 //
 // Ordering: descending by score; ties are broken by ascending username for
 // determinism so a tied scoreboard is stable across requests.
@@ -801,29 +840,23 @@ func (s *Service) GetQuizLeaderboard(
 		return nil, quiz.ErrQuizNotFound
 	}
 
+	// Participants is the canonical set of leaderboard entries (#335):
+	// every player who joined a game for this quiz, including those who
+	// have not submitted an answer yet. The answers query below only
+	// contributes per-row scoring inputs that roll up into each entry's
+	// running total.
+	participants, err := s.store.ListParticipantsForQuizLeaderboard(ctx, quizID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list leaderboard participants: %w", err)
+	}
+
 	rows, err := s.store.ListAnswersForQuizLeaderboard(ctx, quizID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list leaderboard answers: %w", err)
 	}
 
 	playerTotals := make(map[int64]int)
-	usernames := make(map[int64]string)
-	// playerCompleted tracks whether a given player's game has finished
-	// (#244). Every row for a finished game carries IsCompleted=true; an
-	// in-progress player's rows all carry false. AND-ing across rows
-	// keeps the entry "in-progress" the moment any row says so — the DB
-	// query consistently emits the same value per game anyway, so this
-	// is a defence in depth rather than a routine merge.
-	playerCompleted := make(map[int64]bool)
-
 	for _, r := range rows {
-		usernames[r.PlayerID] = r.Username
-		if existing, seen := playerCompleted[r.PlayerID]; seen {
-			playerCompleted[r.PlayerID] = existing && r.IsCompleted
-		} else {
-			playerCompleted[r.PlayerID] = r.IsCompleted
-		}
-
 		// Synthesise just enough of an *Answer / *Question / *quiz.Option
 		// for CalculateScore. The formula touches only Option.Correct,
 		// Question.StartedAt, Question.ExpiredAt, and Answer.AnsweredAt.
@@ -838,14 +871,14 @@ func (s *Service) GetQuizLeaderboard(
 		playerTotals[r.PlayerID] += s.CalculateScore(ctx, a)
 	}
 
-	entries := make([]LeaderboardEntry, 0, len(playerTotals))
-	for playerID, score := range playerTotals {
+	entries := make([]LeaderboardEntry, 0, len(participants))
+	for _, p := range participants {
 		entries = append(entries, LeaderboardEntry{
-			PlayerID:        playerID,
-			Username:        usernames[playerID],
-			Score:           score,
-			IsCurrentPlayer: playerID == currentPlayerID,
-			Completed:       playerCompleted[playerID],
+			PlayerID:        p.PlayerID,
+			Username:        p.Username,
+			Score:           playerTotals[p.PlayerID],
+			IsCurrentPlayer: p.PlayerID == currentPlayerID,
+			Completed:       p.IsCompleted,
 		})
 	}
 

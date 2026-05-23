@@ -134,6 +134,22 @@ func TestLeaderboardStream_Integration(t *testing.T) {
 		t.Errorf("create game Body.Close err = %v, want nil", cerr)
 	}
 
+	// CreateGame fires a leaderboard publish (#335) so client A sees B
+	// land on the board at score 0 / in-progress before any answer
+	// commits. Drain that event before submitting the answer; otherwise
+	// the answer-commit event below would race with this one and the
+	// score assertion could read the pre-answer tick by mistake.
+	afterJoin := readSSEEvent(t, scanner)
+	if got, want := len(afterJoin.Entries), 1; got != want {
+		t.Fatalf("after-join entries len = %d, want %d (CreateGame must publish a tick)", got, want)
+	}
+	if got, want := afterJoin.Entries[0].Score, 0; got != want {
+		t.Errorf("after-join top score = %d, want %d (no answers yet)", got, want)
+	}
+	if got, want := afterJoin.Entries[0].InProgress, true; got != want {
+		t.Errorf("after-join inProgress = %v, want %v", got, want)
+	}
+
 	// Fetch the question (server records started_at on first /next call,
 	// otherwise the answer-submit is rejected because the question wasn't
 	// served).
@@ -184,6 +200,14 @@ func TestLeaderboardStream_Integration(t *testing.T) {
 	}
 	if got := second.Entries[0].Score; got <= 0 {
 		t.Errorf("second event top score = %d, want > 0 (correct answer should score)", got)
+	}
+	// Bound the is_completed predicate (#335): client B answered the
+	// only quiz question, so their entry must flip out of the
+	// in-progress state. A regression that hard-codes inProgress=true
+	// (or returns 0 from the CASE) would pass the pre-answer integration
+	// test; this assertion catches that.
+	if got, want := second.Entries[0].InProgress, false; got != want {
+		t.Errorf("second event top inProgress = %v, want %v (game completed)", got, want)
 	}
 }
 
@@ -338,6 +362,110 @@ func TestLeaderboardStream_UnknownQuiz_Returns404(t *testing.T) {
 	}
 	if got, want := resp.Header.Get("Content-Type"), "text/event-stream"; strings.HasPrefix(got, want) {
 		t.Errorf("Content-Type = %q, must not start with %q (error path must not pose as SSE)", got, want)
+	}
+}
+
+// TestQuizLeaderboard_ShowsParticipantBeforeAnyAnswer pins #335: a
+// player who has clicked Start (POST /api/games) but has not yet
+// submitted an answer must already appear on the GET /leaderboard
+// response with a score of 0 and inProgress=true. Before #335 the
+// leaderboard was empty until the first answer committed, which left
+// the host and other players staring at "be the first" during the
+// first ~10s of a session.
+func TestQuizLeaderboard_ShowsParticipantBeforeAnyAnswer(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, nil)
+
+	db, err := sql.Open("sqlite", srv.DBURI)
+	if err != nil {
+		t.Fatalf("sql.Open err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v, want nil", cerr)
+		}
+	})
+	stores := store.New(db, slog.Default())
+
+	qz := &quiz.Quiz{
+		Title:             "Pre-Answer Quiz",
+		Slug:              "pre-answer-quiz",
+		Description:       "seed for #335",
+		CreatedByPlayerID: seededAdminID,
+		Questions: []*quiz.Question{
+			{
+				Text:     "Anything?",
+				Position: 1,
+				Options:  []*quiz.Option{{Text: "yes", Correct: true}, {Text: "no"}},
+			},
+		},
+	}
+	if cerr := stores.Quizzes.CreateQuiz(ctx, qz); cerr != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", cerr)
+	}
+
+	client := newCookieJarClient(t)
+
+	createReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, srv.BaseURL+"/api/games",
+		strings.NewReader(fmt.Sprintf(`{"quizId": %d}`, qz.ID)),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest create err = %v, want nil", err)
+	}
+	createReq.Header.Set("Content-Type", "application/json")
+	createResp, err := client.Do(createReq)
+	if err != nil {
+		t.Fatalf("create game Do err = %v, want nil", err)
+	}
+	_ = decodeGameID(t, createResp)
+	if cerr := createResp.Body.Close(); cerr != nil {
+		t.Errorf("create game Body.Close err = %v, want nil", cerr)
+	}
+
+	// Skip the /questions/next call: the point of the test is that the
+	// leaderboard surfaces the player BEFORE any question is issued or
+	// answered. Querying /leaderboard now must already include them.
+	lbURL := fmt.Sprintf("%s/api/quizzes/%s-%d/leaderboard", srv.BaseURL, qz.Slug, qz.ID)
+	lbReq, err := http.NewRequestWithContext(ctx, http.MethodGet, lbURL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest leaderboard err = %v, want nil", err)
+	}
+	lbResp, err := client.Do(lbReq)
+	if err != nil {
+		t.Fatalf("leaderboard Do err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := lbResp.Body.Close(); cerr != nil {
+			t.Errorf("leaderboard Body.Close err = %v, want nil", cerr)
+		}
+	})
+
+	if got, want := lbResp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("leaderboard status = %d, want %d", got, want)
+	}
+
+	var payload leaderboardEventPayload
+	if err = json.NewDecoder(lbResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("Decode leaderboard err = %v, want nil", err)
+	}
+
+	if got, want := len(payload.Entries), 1; got != want {
+		t.Fatalf("len(entries) = %d, want %d (the player who just started must surface)", got, want)
+	}
+	entry := payload.Entries[0]
+	if got, want := entry.Score, 0; got != want {
+		t.Errorf("entry.Score = %d, want %d (no answers committed yet)", got, want)
+	}
+	if got, want := entry.InProgress, true; got != want {
+		t.Errorf("entry.InProgress = %v, want %v", got, want)
+	}
+	if got, want := entry.Rank, 1; got != want {
+		t.Errorf("entry.Rank = %d, want %d", got, want)
+	}
+	if got, want := entry.IsCurrentPlayer, true; got != want {
+		t.Errorf("entry.IsCurrentPlayer = %v, want %v", got, want)
 	}
 }
 
@@ -578,6 +706,7 @@ type leaderboardEventEntry struct {
 	Score           int    `json:"score"`
 	Rank            int    `json:"rank"`
 	IsCurrentPlayer bool   `json:"isCurrentPlayer"`
+	InProgress      bool   `json:"inProgress"`
 }
 
 // leaderboardEventPayload mirrors the JSON shape the SSE handler emits.

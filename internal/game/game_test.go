@@ -26,10 +26,11 @@ var errStub = errors.New("stub error")
 // getGameByPlayerAndQuiz field defaults to "not found" rather than errStub
 // so the existing CreateGame happy-path tests do not have to opt in.
 type stubStore struct {
-	listAnswersForQuizLeaderboard func(ctx context.Context, quizID int64) ([]*LeaderboardAnswer, error)
-	getGameByPlayerAndQuiz        func(ctx context.Context, playerID, quizID int64) (*Game, error)
-	deleteGamesForPlayerOnQuiz    func(ctx context.Context, playerID, quizID int64) error
-	listQuizIDsForPlayer          func(ctx context.Context, playerID int64) ([]int64, error)
+	listAnswersForQuizLeaderboard      func(ctx context.Context, quizID int64) ([]*LeaderboardAnswer, error)
+	listParticipantsForQuizLeaderboard func(ctx context.Context, quizID int64) ([]*LeaderboardParticipant, error)
+	getGameByPlayerAndQuiz             func(ctx context.Context, playerID, quizID int64) (*Game, error)
+	deleteGamesForPlayerOnQuiz         func(ctx context.Context, playerID, quizID int64) error
+	listQuizIDsForPlayer               func(ctx context.Context, playerID int64) ([]int64, error)
 }
 
 func (stubStore) Ping(_ context.Context) error { return nil }
@@ -61,6 +62,44 @@ func (s stubStore) ListAnswersForQuizLeaderboard(
 	}
 
 	return s.listAnswersForQuizLeaderboard(ctx, quizID)
+}
+
+// ListParticipantsForQuizLeaderboard serves the participants stub when
+// set; otherwise it derives participants from the configured answer
+// stub so existing leaderboard tests (which only seeded answers) keep
+// passing. The #335 service-level test sets the participants stub
+// explicitly to exercise the no-answer-participant path the fallback
+// can't represent.
+func (s stubStore) ListParticipantsForQuizLeaderboard(
+	ctx context.Context, quizID int64,
+) ([]*LeaderboardParticipant, error) {
+	if s.listParticipantsForQuizLeaderboard != nil {
+		return s.listParticipantsForQuizLeaderboard(ctx, quizID)
+	}
+	if s.listAnswersForQuizLeaderboard == nil {
+		return nil, errStub
+	}
+
+	answers, err := s.listAnswersForQuizLeaderboard(ctx, quizID)
+	if err != nil {
+		return nil, err
+	}
+
+	seen := make(map[int64]int) // playerID -> index in out
+	var out []*LeaderboardParticipant
+	for _, a := range answers {
+		if i, ok := seen[a.PlayerID]; ok {
+			out[i].IsCompleted = a.IsCompleted
+
+			continue
+		}
+		seen[a.PlayerID] = len(out)
+		out = append(out, &LeaderboardParticipant{
+			PlayerID: a.PlayerID, Username: a.Username, IsCompleted: a.IsCompleted,
+		})
+	}
+
+	return out, nil
 }
 
 func (s stubStore) DeleteGamesForPlayerOnQuiz(
@@ -1187,6 +1226,70 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 		}
 		if got, want := result.Entries[0].Rank, 1; got != want {
 			t.Errorf("entries[0].Rank = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("participant with no answers appears with score 0 and Completed=false", func(t *testing.T) {
+		t.Parallel()
+
+		// #335: alice has clicked Start but not submitted an answer
+		// yet; bob has answered two correct questions. Both must
+		// appear, bob ranked first with 2000 and alice ranked second
+		// with 0 — and alice's entry must carry Completed=false so
+		// the client renders the in-progress dot.
+		svc := NewService(
+			stubStore{
+				listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*LeaderboardAnswer, error) {
+					return []*LeaderboardAnswer{
+						makeAnswerCompleted(2, "bob", true, false),
+						makeAnswerCompleted(2, "bob", true, false),
+					}, nil
+				},
+				listParticipantsForQuizLeaderboard: func(_ context.Context, _ int64) ([]*LeaderboardParticipant, error) {
+					return []*LeaderboardParticipant{
+						{PlayerID: 1, Username: "alice", IsCompleted: false},
+						{PlayerID: 2, Username: "bob", IsCompleted: false},
+					}, nil
+				},
+			},
+			stubQuizStore{
+				quizExists: func(_ context.Context, _ int64) (bool, error) {
+					return true, nil
+				},
+			},
+			slog.New(slog.DiscardHandler),
+		)
+
+		result, err := svc.GetQuizLeaderboard(t.Context(), 1, 0, 10)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got, want := len(result.Entries), 2; got != want {
+			t.Fatalf("len(entries) = %d, want %d", got, want)
+		}
+		if got, want := result.Entries[0].Username, "bob"; got != want {
+			t.Errorf("entries[0].Username = %q, want %q", got, want)
+		}
+		if got, want := result.Entries[0].Score, 2000; got != want {
+			t.Errorf("entries[0].Score = %d, want %d", got, want)
+		}
+		if got, want := result.Entries[0].Rank, 1; got != want {
+			t.Errorf("entries[0].Rank = %d, want %d", got, want)
+		}
+		if got, want := result.Entries[0].Completed, false; got != want {
+			t.Errorf("entries[0].Completed = %v, want %v (bob's participant row has IsCompleted=false)", got, want)
+		}
+		if got, want := result.Entries[1].Username, "alice"; got != want {
+			t.Errorf("entries[1].Username = %q, want %q", got, want)
+		}
+		if got, want := result.Entries[1].Score, 0; got != want {
+			t.Errorf("entries[1].Score = %d, want %d (no-answer participant)", got, want)
+		}
+		if got, want := result.Entries[1].Rank, 2; got != want {
+			t.Errorf("entries[1].Rank = %d, want %d", got, want)
+		}
+		if got, want := result.Entries[1].Completed, false; got != want {
+			t.Errorf("entries[1].Completed = %v, want %v (no-answer participants are in-progress)", got, want)
 		}
 	})
 
