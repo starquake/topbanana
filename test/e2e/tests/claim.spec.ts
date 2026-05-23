@@ -20,13 +20,11 @@ test('start screen shows a Playing as card with an auto-generated petname for a 
   await expect(card).toBeVisible();
 
   // Petname format: Adjective-Adjective-Noun, each segment Title-cased.
-  const name = await page.locator('.claim-cta-name:visible').textContent();
+  const name = await card.getByTestId('claim-cta-name').textContent();
   expect(name).toMatch(PETNAME_PATTERN);
 
   // Body copy and button label both default to the "no name picked yet" branch.
-  // Both .claim-cta-body paragraphs stay in the DOM (Alpine's x-show toggles
-  // CSS, not DOM presence), so scope to the visible one.
-  await expect(page.locator('.claim-cta-body:visible')).toContainText('Pick a display name');
+  await expect(card.getByText('Pick a display name', { exact: false })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Set your name' })).toBeVisible();
 });
 
@@ -39,7 +37,7 @@ test('submitting a name via the start-screen modal updates the Playing as card i
   // both kept in DOM by `x-show`); scope to the visible one.
   const card = page.locator('.claim-cta:visible');
   await expect(card).toBeVisible();
-  const petname = await page.locator('.claim-cta-name:visible').textContent();
+  const petname = await card.getByTestId('claim-cta-name').textContent();
   expect(petname).toMatch(PETNAME_PATTERN);
 
   // Open the shared modal via the start-screen affordance.
@@ -57,10 +55,9 @@ test('submitting a name via the start-screen modal updates the Playing as card i
   // The modal closes on successful PATCH, and the card re-renders with the
   // chosen name plus the "already claimed" branch of body copy and button label.
   await expect(modal).toBeHidden();
-  await expect(page.locator('.claim-cta-name:visible')).toHaveText(chosenName);
-  await expect(page.locator('.claim-cta-name:visible')).not.toHaveText(petname ?? '');
-  // Both paragraphs stay in the DOM via x-show, so scope to the visible one.
-  await expect(page.locator('.claim-cta-body:visible')).toContainText('Not happy with it?');
+  await expect(card.getByTestId('claim-cta-name')).toHaveText(chosenName);
+  await expect(card.getByTestId('claim-cta-name')).not.toHaveText(petname ?? '');
+  await expect(card.getByText('Not happy with it?', { exact: false })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Change your name' })).toBeVisible();
   // The "Set your name" span is also still in the DOM (gated by x-show), so
   // assert on its visibility rather than DOM count.
