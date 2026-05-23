@@ -430,9 +430,8 @@ export class GameApp {
         if (existing && existing.completed) {
             this.startError = "You've already completed this quiz.";
             this.finished = true;
-            // SSE stream so the row repaints when other finishers land
-            // (or this player renames themselves via the claim flow).
-            this.subscribeLeaderboardStream();
+            // SSE was already opened above so the completed-view row
+            // updates live too — no extra subscribe needed here.
         }
 
         return existing;
@@ -503,14 +502,14 @@ export class GameApp {
             // top — but only if the player has not already chosen a
             // display name. On a successful claim the modal handler
             // re-fetches the leaderboard so the row updates from the
-            // auto-petname to the chosen name.
+            // auto-petname to the chosen name. The SSE stream was
+            // already opened in checkAlreadyPlayed() (#244), so this
+            // fetch is just a defensive snapshot for the case where
+            // SSE never connected — re-subscribing here would tear
+            // down the live connection and produce a spurious
+            // NS_ERROR_PARTIAL_TRANSFER in Firefox.
             this.leaderboard = await gameService.getQuizLeaderboard(this.quizSlugId);
             this.animateLeaderboard();
-            // Live updates for new finishers landing after this player.
-            // EventSource auto-reconnects on transient drops; we close
-            // it explicitly on beforeunload so the server-side
-            // subscriber map stays clean.
-            this.subscribeLeaderboardStream();
             if (!this.hasCustomName()) {
                 this.openClaimModal();
             }
