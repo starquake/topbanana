@@ -84,6 +84,20 @@
                 Time limit per question (seconds)
                 <span class="label-hint">Default for every question in this quiz. Individual questions can override it.</span>
             </label>
+            {{/* Quick-pick chips set the number input below. The input
+                 stays the source of truth so the existing form submit,
+                 server-side validation, and error re-render path don't
+                 change. Anything not on the chip row is still reachable
+                 by typing it directly. */}}
+            <div class="flex flex-wrap gap-1.5 mb-2" role="group" aria-label="Quick pick">
+                <button type="button" class="preset-chip" onclick="document.getElementById('time_limit_seconds').value=3">3s</button>
+                <button type="button" class="preset-chip" onclick="document.getElementById('time_limit_seconds').value=6">6s</button>
+                <button type="button" class="preset-chip" onclick="document.getElementById('time_limit_seconds').value=8">8s</button>
+                <button type="button" class="preset-chip" onclick="document.getElementById('time_limit_seconds').value=10">10s</button>
+                <button type="button" class="preset-chip" onclick="document.getElementById('time_limit_seconds').value=12">12s</button>
+                <button type="button" class="preset-chip" onclick="document.getElementById('time_limit_seconds').value=15">15s</button>
+                <button type="button" class="preset-chip" onclick="document.getElementById('time_limit_seconds').value=20">20s</button>
+            </div>
             <input id="time_limit_seconds" name="time_limit_seconds" type="number"
                    min="1" max="600" step="1"
                    value="{{.Quiz.TimeLimitSeconds}}"
