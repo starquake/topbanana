@@ -444,9 +444,14 @@ func (s *leaderboardStreamer) writeHeartbeat() bool {
 
 // leaderboardHeartbeatInterval is how often the SSE handler emits a
 // no-op comment frame to keep the connection alive when the hub is
-// quiet. Picked at 20s — under Firefox's ~30s idle-SSE close window
-// but long enough not to be visible in the network log on a busy quiz.
-const leaderboardHeartbeatInterval = 20 * time.Second
+// quiet. The HTTP server's WriteTimeout no longer kills the response
+// (the handler clears its own write deadline), so this only exists as
+// insurance against intermediate proxy / NAT / mobile-carrier idle
+// timeouts that aren't visible during local-dev testing — nginx
+// defaults to 60s, HAProxy ~50s, mobile NATs sometimes 30s. 25s lands
+// comfortably inside all of those without the keep-alive cost of a
+// 10s tick.
+const leaderboardHeartbeatInterval = 25 * time.Second
 
 // HandleQuizLeaderboardStream pushes the leaderboard down a long-lived
 // Server-Sent Events connection. Every time game.Service.SubmitAnswer
@@ -512,9 +517,21 @@ func HandleQuizLeaderboardStream(
 		// events promptly rather than in large flushes.
 		w.Header().Set("X-Accel-Buffering", "no")
 
+		rc := http.NewResponseController(w)
+		// The HTTP server's WriteTimeout (10s) would otherwise kill
+		// this long-lived response on the first write past the deadline
+		// — every heartbeat after 10s fails and the loop exits, which
+		// shows up as a 10.003s stream that EventSource has to
+		// reconnect. Zero disables the per-request deadline. The
+		// underlying TCP connection stays governed by OS keepalives
+		// and the request context (cancelled on client disconnect).
+		if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+			logger.WarnContext(ctx, "could not clear SSE write deadline", slog.Any("err", err))
+		}
+
 		streamer := &leaderboardStreamer{
 			w:        w,
-			rc:       http.NewResponseController(w),
+			rc:       rc,
 			logger:   logger,
 			service:  service,
 			quizID:   quizID,
