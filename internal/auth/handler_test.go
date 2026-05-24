@@ -239,7 +239,13 @@ func postForm(t *testing.T, handler http.Handler, path string, values url.Values
 func TestHandleRegisterForm_GET_RendersForm(t *testing.T) {
 	t.Parallel()
 
-	handler := auth.HandleRegisterForm(discardLogger(), nil, false)
+	handler := auth.HandleRegisterForm(
+		discardLogger(),
+		nil,
+		newStubPlayerStore(),
+		session.New([]byte("k"), true),
+		false,
+	)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/register", nil)
 	rec := httptest.NewRecorder()
@@ -606,7 +612,14 @@ func TestHandleRegisterSubmit_ClaimAlreadyClaimed_FallsBackToCreate(t *testing.T
 func TestHandleLoginForm_GET_RendersForm(t *testing.T) {
 	t.Parallel()
 
-	handler := auth.HandleLoginForm(discardLogger(), nil, false, false)
+	handler := auth.HandleLoginForm(
+		discardLogger(),
+		nil,
+		newStubPlayerStore(),
+		session.New([]byte("k"), true),
+		false,
+		false,
+	)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login", nil)
 	rec := httptest.NewRecorder()
@@ -623,7 +636,14 @@ func TestHandleLoginForm_GET_RendersForm(t *testing.T) {
 func TestHandleLoginForm_RegistrationDisabled_HidesRegisterLink(t *testing.T) {
 	t.Parallel()
 
-	handler := auth.HandleLoginForm(discardLogger(), nil, false, false)
+	handler := auth.HandleLoginForm(
+		discardLogger(),
+		nil,
+		newStubPlayerStore(),
+		session.New([]byte("k"), true),
+		false,
+		false,
+	)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login", nil)
 	rec := httptest.NewRecorder()
@@ -640,7 +660,14 @@ func TestHandleLoginForm_RegistrationDisabled_HidesRegisterLink(t *testing.T) {
 func TestHandleLoginForm_RegistrationEnabled_ShowsRegisterLink(t *testing.T) {
 	t.Parallel()
 
-	handler := auth.HandleLoginForm(discardLogger(), nil, true, false)
+	handler := auth.HandleLoginForm(
+		discardLogger(),
+		nil,
+		newStubPlayerStore(),
+		session.New([]byte("k"), true),
+		true,
+		false,
+	)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login", nil)
 	rec := httptest.NewRecorder()
@@ -651,6 +678,82 @@ func TestHandleLoginForm_RegistrationEnabled_ShowsRegisterLink(t *testing.T) {
 	}
 	if got, want := rec.Body.String(), `href="/register"`; !strings.Contains(got, want) {
 		t.Errorf("body should contain %q when registration is enabled, got %q", want, got)
+	}
+}
+
+// TestHandleLoginForm_AlreadySignedIn_RedirectsToLanding pins the "skip
+// the form if the visitor is already authenticated" rule. Without it,
+// a returning player who clicked Log in by reflex would see the form
+// again and could accidentally rotate their session.
+func TestHandleLoginForm_AlreadySignedIn_RedirectsToLanding(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	hash, err := auth.HashPassword("correctbattery")
+	if err != nil {
+		t.Fatalf("HashPassword err = %v, want nil", err)
+	}
+	// Seed an admin first so the stub's "first password-bearing
+	// registrant becomes admin" rule (mirroring the production SQL)
+	// promotes that row, not carol. Carol then stays as a plain
+	// player and the redirect lands on / instead of /admin/quizzes.
+	if _, seedErr := store.CreatePlayer(t.Context(), "first-admin", hash, auth.RoleAdmin); seedErr != nil {
+		t.Fatalf("seed admin err = %v, want nil", seedErr)
+	}
+	player, err := store.CreatePlayer(t.Context(), "carol", hash, auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+
+	sessions := session.New([]byte("k"), true)
+	handler := auth.HandleLoginForm(discardLogger(), nil, store, sessions, false, false)
+
+	rec := httptest.NewRecorder()
+	sessions.Set(rec, player.ID)
+	cookie := rec.Result().Cookies()[0]
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login", nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Errorf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
+	}
+	if got, want := rec.Header().Get("Location"), "/"; got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+}
+
+// TestHandleLoginForm_AnonymousSession_RendersForm pins the partner to
+// the redirect rule: a visitor with only an anonymous (EnsurePlayer-
+// stub) session is NOT authenticated and must see the login form.
+func TestHandleLoginForm_AnonymousSession_RendersForm(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	anon, err := store.CreateAnonymousPlayer(t.Context(), "anon-fancy")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	sessions := session.New([]byte("k"), true)
+	handler := auth.HandleLoginForm(discardLogger(), nil, store, sessions, false, false)
+
+	rec := httptest.NewRecorder()
+	sessions.Set(rec, anon.ID)
+	cookie := rec.Result().Cookies()[0]
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login", nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusOK; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := rec.Body.String(), "Log in"; !strings.Contains(got, want) {
+		t.Errorf("body should render login form, got %q", got)
 	}
 }
 

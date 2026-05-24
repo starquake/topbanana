@@ -68,6 +68,18 @@ func (p *Player) HasCustomName() bool {
 	return p.UsernameClaimed
 }
 
+// IsAuthenticated reports whether the visitor is known to the system —
+// they have a password hash, an OAuth-verified email, or the seeded
+// admin role. Distinct from !IsAnonymous() because an OAuth-only
+// player has no password hash yet is still authenticated; flipping
+// the existing IsAnonymous definition would change the semantics of
+// the claim-flow code paths that depend on it. Used by surfaces that
+// gate on "is the visitor signed in?" rather than "is the row a
+// fresh claimable stub?", e.g. /login's already-signed-in redirect.
+func (p *Player) IsAuthenticated() bool {
+	return p.PasswordHash != "" || p.Email != "" || p.Role == RoleAdmin
+}
+
 // PlayerStore is the persistence interface used by the auth package.
 type PlayerStore interface {
 	// GetPlayerByUsername returns the player with the given username.
