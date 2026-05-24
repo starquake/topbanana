@@ -454,6 +454,27 @@
                             <template x-if="error">
                                 <div class="feedback-banner feedback-danger mt-4" x-text="error"></div>
                             </template>
+
+                            {{/* Sign-in escape hatch (#407). Provider-
+                                 agnostic on purpose: the link goes to
+                                 /login, where every enabled sign-in
+                                 method (password, Google, future
+                                 GitHub/Apple/...) is rendered already.
+                                 Hidden mid-quiz (gameId && !finished)
+                                 because navigating away there resets
+                                 the in-flight question state and the
+                                 OAuth callback redirects to / not back
+                                 to the quiz — same constraint that
+                                 will eventually be lifted by a
+                                 return-to-quiz query param on the
+                                 callback. */}}
+                            <template x-if="!gameId || finished">
+                                <div class="mt-6 pt-5 border-t border-border-soft text-center text-sm text-text-dim">
+                                    Or
+                                    <a href="/login" class="text-text hover:text-accent underline-offset-2 hover:underline">sign in</a>
+                                    to keep this name across devices.
+                                </div>
+                            </template>
                         </section>
                         <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
                             <button class="btn-ghost"
