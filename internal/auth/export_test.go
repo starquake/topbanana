@@ -28,3 +28,29 @@ func ExportSignState(key []byte, nonce string) string {
 func ExportVerifySignedState(key []byte, cookieValue, queryValue string) error {
 	return verifySignedState(key, cookieValue, queryValue)
 }
+
+// ExportClaimAnonymousSessionPlayer exposes claimAnonymousSessionPlayer
+// so the race-recovery branch (ClaimPlayerForOAuth returns
+// ErrPlayerNotFound but the identity is already linked elsewhere) can
+// be unit-tested with a stub store, without staging the whole
+// linkOrCreateGooglePlayer flow.
+func ExportClaimAnonymousSessionPlayer(
+	ctx context.Context,
+	identities OAuthIdentityStore,
+	sessionPlayerID int64,
+	subject, email string,
+) (*Player, error) {
+	return claimAnonymousSessionPlayer(ctx, identities, sessionPlayerID, subject, email)
+}
+
+// ExportCreateGooglePlayer exposes createGooglePlayer so the
+// race-recovery branch (LinkProviderIdentity returns
+// ErrIdentityAlreadyLinked because another callback won) can be
+// unit-tested with a stub store.
+func ExportCreateGooglePlayer(
+	ctx context.Context,
+	identities OAuthIdentityStore,
+	subject, email string,
+) (*Player, error) {
+	return createGooglePlayer(ctx, identities, subject, email)
+}

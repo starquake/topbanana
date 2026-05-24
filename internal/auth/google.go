@@ -363,6 +363,24 @@ func claimAnonymousSessionPlayer(
 	claimed, err := identities.ClaimPlayerForOAuth(ctx, sessionPlayerID, email)
 	if err != nil {
 		if errors.Is(err, ErrPlayerNotFound) {
+			// The session row is no longer claimable. Before reporting
+			// "fall through to create", check whether a concurrent
+			// callback for the same (provider, subject) already linked
+			// the identity onto another row. The window opens when two
+			// OAuth callbacks for the same anonymous session race and
+			// the loser arrives here AFTER the winner finished claiming
+			// + linking; without this re-read the loser would create a
+			// duplicate row and then fail at LinkProviderIdentity with
+			// ErrIdentityAlreadyLinked. Mirrors the recovery branch in
+			// linkExistingPlayerByEmail.
+			if existing, lookupErr := identities.GetPlayerByProviderSubject(
+				ctx, ProviderGoogle, subject,
+			); lookupErr == nil {
+				return existing, nil
+			} else if !errors.Is(lookupErr, ErrPlayerNotFound) {
+				return nil, fmt.Errorf("lookup after claim race: %w", lookupErr)
+			}
+
 			return nil, ErrPlayerNotFound
 		}
 
@@ -452,6 +470,25 @@ func createGooglePlayer(
 			return nil, fmt.Errorf("create player from oauth: %w", err)
 		}
 		if linkErr := identities.LinkProviderIdentity(ctx, player.ID, ProviderGoogle, subject); linkErr != nil {
+			if errors.Is(linkErr, ErrIdentityAlreadyLinked) {
+				// Symmetric race recovery to claimAnonymousSessionPlayer
+				// and linkExistingPlayerByEmail: a concurrent callback
+				// for the same (provider, subject) linked the identity
+				// onto a different row between our identity-miss and
+				// our LinkProviderIdentity call. Return that row so the
+				// session points at the canonical OAuth-linked player.
+				// The row we just created stays in the DB as an unlinked
+				// orphan; harmless but visible to operators.
+				refetched, refetchErr := identities.GetPlayerByProviderSubject(
+					ctx, ProviderGoogle, subject,
+				)
+				if refetchErr != nil {
+					return nil, fmt.Errorf("refetch after create race: %w", refetchErr)
+				}
+
+				return refetched, nil
+			}
+
 			return nil, fmt.Errorf("link identity to new player: %w", linkErr)
 		}
 
