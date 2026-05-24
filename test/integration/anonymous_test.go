@@ -261,10 +261,11 @@ func fetchAPIQuizzes(ctx context.Context, t *testing.T, client *http.Client, bas
 // to the integration test rather than imported from clientapi so the test
 // double-pins the wire contract the front-end consumes.
 type meResponse struct {
-	ID            int64  `json:"id"`
-	Username      string `json:"username"`
-	IsAnonymous   bool   `json:"isAnonymous"`
-	HasCustomName bool   `json:"hasCustomName"`
+	ID              int64  `json:"id"`
+	Username        string `json:"username"`
+	IsAnonymous     bool   `json:"isAnonymous"`
+	HasCustomName   bool   `json:"hasCustomName"`
+	IsAuthenticated bool   `json:"isAuthenticated"`
 }
 
 // fetchPlayerMe issues GET /api/players/me on the supplied client and

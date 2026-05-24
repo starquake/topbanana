@@ -949,20 +949,30 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 // /api/players/me. Shared so the two handlers cannot drift out of sync
 // when a field is added; any caller decoding either endpoint sees the
 // same shape.
+//
+// isAuthenticated is distinct from !isAnonymous: an OAuth-only player
+// has no password_hash (so isAnonymous == true) yet IS known to the
+// system through their linked identity (so isAuthenticated == true).
+// The player-client gates the claim-name modal on isAuthenticated so
+// a signed-in player never sees the "Set your name" affordance,
+// without having to teach the client about the
+// password-vs-OAuth-vs-admin nuance.
 type playerResponse struct {
-	ID            int64  `json:"id"`
-	Username      string `json:"username"`
-	IsAnonymous   bool   `json:"isAnonymous"`
-	HasCustomName bool   `json:"hasCustomName"`
+	ID              int64  `json:"id"`
+	Username        string `json:"username"`
+	IsAnonymous     bool   `json:"isAnonymous"`
+	HasCustomName   bool   `json:"hasCustomName"`
+	IsAuthenticated bool   `json:"isAuthenticated"`
 }
 
 // newPlayerResponse projects an auth.Player onto the wire format.
 func newPlayerResponse(p *auth.Player) playerResponse {
 	return playerResponse{
-		ID:            p.ID,
-		Username:      p.Username,
-		IsAnonymous:   p.IsAnonymous(),
-		HasCustomName: p.HasCustomName(),
+		ID:              p.ID,
+		Username:        p.Username,
+		IsAnonymous:     p.IsAnonymous(),
+		HasCustomName:   p.HasCustomName(),
+		IsAuthenticated: p.IsAuthenticated(),
 	}
 }
 
