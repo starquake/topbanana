@@ -53,10 +53,35 @@ func addRoutes(
 
 	// Public start page (#166). Registered as `GET /{$}` so only the exact
 	// root matches; unknown paths fall through to Go's mux default 404.
-	mux.Handle("GET /{$}", home.Handle(logger, stores.Home))
+	// The home pages share two per-request closures: viewerFunc resolves
+	// the session's player for the "Signed in as X" footer (#408);
+	// csrfTokenFunc seeds the log-out form so POST /logout passes the
+	// CSRF middleware.
+	viewerFunc := homeViewerFunc(stores.Players, sessions)
+	csrfTokenFunc := home.CSRFTokenFunc(csrfMgr.Token)
+	mux.Handle("GET /{$}", home.Handle(logger, stores.Home, viewerFunc, csrfTokenFunc))
 	// Public quizzes list (#284). Lists every visible quiz so players
 	// can find ones outside the home page's top-six popular slice.
-	mux.Handle("GET /quizzes", home.HandleAllQuizzes(logger, stores.Quizzes))
+	mux.Handle("GET /quizzes", home.HandleAllQuizzes(logger, stores.Quizzes, viewerFunc, csrfTokenFunc))
+}
+
+// homeViewerFunc returns a closure that resolves the signed-in player
+// for the home-page footer affordance. Returns nil for anonymous
+// sessions (or any lookup error) so the template falls back to the
+// "Log in" link path.
+func homeViewerFunc(players auth.PlayerStore, sessions *session.Manager) home.ViewerFunc {
+	return func(r *http.Request) *home.Viewer {
+		id, ok := sessions.PlayerID(r)
+		if !ok {
+			return nil
+		}
+		p, err := players.GetPlayerByID(r.Context(), id)
+		if err != nil || !p.IsAuthenticated() {
+			return nil
+		}
+
+		return &home.Viewer{Username: p.Username}
+	}
 }
 
 // addAuthRoutes registers the unauthenticated auth-flow routes. Registration

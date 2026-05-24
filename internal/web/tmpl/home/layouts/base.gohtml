@@ -45,16 +45,25 @@
 </section>
 {{/* Discreet footer links per #166: the start page is for players;
      quiz authors are a tiny minority of visitors, so the admin link
-     stays low-contrast at the bottom. "Log in" sits alongside so a
-     returning player can find the sign-in surface (password or
-     Google) without having to guess at /login. Both links are
-     rendered unconditionally — /login already does the right thing
-     for an already-signed-in visitor (the form renders; submitting
-     replaces the session). */}}
+     stays low-contrast at the bottom. The auth slot flips between
+     two states: an anonymous visitor sees "Log in"; a signed-in
+     visitor sees their username and a Log out button so they have a
+     visible way out of the session without having to know about
+     /admin. Log out is a POST to keep the existing CSRF middleware
+     happy; the form's inline styling keeps it visually flush with
+     the surrounding link. */}}
 <footer class="max-w-shell mx-auto px-5 py-6 w-full text-xs text-text-mute flex items-center justify-between">
     <span>Top Banana!</span>
     <div class="flex items-center gap-4">
-        <a href="/login" class="hover:text-text-dim underline-offset-2 hover:underline">Log in</a>
+        {{if .Viewer}}
+            <span>Signed in as <span class="text-text-dim">{{.Viewer.Username}}</span></span>
+            <form action="/logout" method="POST" class="m-0 p-0 inline">
+                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                <button type="submit" class="m-0 p-0 bg-transparent border-0 cursor-pointer text-text-mute hover:text-text-dim underline-offset-2 hover:underline">Log out</button>
+            </form>
+        {{else}}
+            <a href="/login" class="hover:text-text-dim underline-offset-2 hover:underline">Log in</a>
+        {{end}}
         <a href="/admin" class="hover:text-text-dim underline-offset-2 hover:underline">Manage quizzes</a>
     </div>
 </footer>

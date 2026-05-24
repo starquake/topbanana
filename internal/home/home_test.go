@@ -123,7 +123,7 @@ func TestHandle_StoreErrorsDegradeToEmptyState(t *testing.T) {
 		activeErr:  errors.New("boom"),
 	}
 	rec := httptest.NewRecorder()
-	handler := home.Handle(slog.New(slog.DiscardHandler), store)
+	handler := home.Handle(slog.New(slog.DiscardHandler), store, nil, nil)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	handler.ServeHTTP(rec, req)
 
@@ -170,7 +170,7 @@ func TestHandle_TruncatesToTopN(t *testing.T) {
 func serve(t *testing.T, store *stubStore) string {
 	t.Helper()
 
-	handler := home.Handle(slog.New(slog.DiscardHandler), store)
+	handler := home.Handle(slog.New(slog.DiscardHandler), store, nil, nil)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	handler.ServeHTTP(rec, req)
