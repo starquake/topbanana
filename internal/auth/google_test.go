@@ -158,8 +158,10 @@ func (s *stubOAuthStore) seedAnonymous(username string) *auth.Player {
 }
 
 // seed inserts a player row directly so the linking test has an
-// existing target without going through CreatePlayerFromOAuth.
-func (s *stubOAuthStore) seed(email, username, role string) *auth.Player {
+// existing target without going through CreatePlayerFromOAuth. Always
+// inserts as a plain "player" — the OAuth race-recovery tests don't
+// exercise admin-promotion paths, so the role is fixed.
+func (s *stubOAuthStore) seed(email, username string) *auth.Player {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -167,7 +169,7 @@ func (s *stubOAuthStore) seed(email, username, role string) *auth.Player {
 		ID:       s.nextID,
 		Username: username,
 		Email:    email,
-		Role:     role,
+		Role:     auth.RolePlayer,
 	}
 	s.nextID++
 	s.players[p.ID] = p
@@ -224,7 +226,7 @@ func TestLinkOrCreateGooglePlayer_LinkExistingEmail(t *testing.T) {
 	t.Parallel()
 
 	store := newStubOAuthStore()
-	existing := store.seed("alice@example.test", "alice", auth.RolePlayer)
+	existing := store.seed("alice@example.test", "alice")
 
 	player, err := auth.ExportLinkOrCreateGooglePlayer(
 		t.Context(), store, "google-sub-2", "alice@example.test", nil,
@@ -340,7 +342,7 @@ func TestLinkOrCreateGooglePlayer_SessionWithNonAnonymousRowFallsThrough(t *test
 	t.Parallel()
 
 	store := newStubOAuthStore()
-	credentialled := store.seed("settled@example.test", "settled", auth.RolePlayer)
+	credentialled := store.seed("settled@example.test", "settled")
 
 	player, err := auth.ExportLinkOrCreateGooglePlayer(
 		t.Context(), store, "google-sub-fallthrough", "newcomer@example.test", &credentialled.ID,
@@ -354,6 +356,103 @@ func TestLinkOrCreateGooglePlayer_SessionWithNonAnonymousRowFallsThrough(t *test
 	if got, want := player.Email, "newcomer@example.test"; got != want {
 		t.Errorf("player.Email = %q, want %q", got, want)
 	}
+}
+
+// TestClaimAnonymousSessionPlayer_RecoversFromConcurrentLink pins the
+// race-recovery branch in claimAnonymousSessionPlayer: when
+// ClaimPlayerForOAuth returns ErrPlayerNotFound (because a concurrent
+// callback for the same session already credentialled the row), the
+// code now re-reads by (provider, subject) and returns the
+// already-linked player instead of falling through to create a
+// duplicate. The stub simulates the post-race state directly: the
+// session row has email already set (so the claim guard fails) AND
+// the identity is already linked to a different row, mirroring what
+// the loser of a real concurrent race would observe.
+func TestClaimAnonymousSessionPlayer_RecoversFromConcurrentLink(t *testing.T) {
+	t.Parallel()
+
+	store := newStubOAuthStore()
+
+	// Row 1: the session's row, already "claimed" by the winning
+	// callback (email set) so ClaimPlayerForOAuth's anonymous-only
+	// guard rejects this caller.
+	winner := store.seed("winner@example.test", "winner")
+	// Pre-link the identity to the winning row so the recovery
+	// lookup finds it.
+	if err := store.LinkProviderIdentity(t.Context(), winner.ID, auth.ProviderGoogle, "google-sub-race"); err != nil {
+		t.Fatalf("seed LinkProviderIdentity err = %v, want nil", err)
+	}
+
+	// The loser passes its own session player id (also pointing at
+	// "winner.ID" because both callbacks share the cookie) and the
+	// same email + subject the winner used.
+	got, err := auth.ExportClaimAnonymousSessionPlayer(
+		t.Context(), store, winner.ID, "google-sub-race", "winner@example.test",
+	)
+	if err != nil {
+		t.Fatalf("ExportClaimAnonymousSessionPlayer err = %v, want nil", err)
+	}
+	if got == nil || got.ID != winner.ID {
+		t.Errorf("recovered player.ID = %v, want %d (the winner's row)", got, winner.ID)
+	}
+}
+
+// TestClaimAnonymousSessionPlayer_NoRaceFallsThrough pins the
+// no-race path: a failed claim with no concurrent linker still
+// returns ErrPlayerNotFound so the caller falls through to
+// createGooglePlayer.
+func TestClaimAnonymousSessionPlayer_NoRaceFallsThrough(t *testing.T) {
+	t.Parallel()
+
+	store := newStubOAuthStore()
+	// Row exists but is no longer claimable (email already set);
+	// nothing has linked the subject yet.
+	row := store.seed("stale@example.test", "stale")
+
+	got, err := auth.ExportClaimAnonymousSessionPlayer(
+		t.Context(), store, row.ID, "google-sub-unlinked", "stale@example.test",
+	)
+	if err == nil {
+		t.Fatalf("err = nil, want ErrPlayerNotFound (got player=%v)", got)
+	}
+	if !errors.Is(err, auth.ErrPlayerNotFound) {
+		t.Errorf("err = %v, want it to wrap ErrPlayerNotFound", err)
+	}
+}
+
+// TestCreateGooglePlayer_RecoversFromConcurrentLink pins the
+// symmetric race-recovery branch in createGooglePlayer: a concurrent
+// callback for the same (provider, subject) linked the identity onto
+// another row between our identity-lookup miss and our
+// LinkProviderIdentity call. The code now returns the
+// already-linked row instead of erroring out.
+func TestCreateGooglePlayer_RecoversFromConcurrentLink(t *testing.T) {
+	t.Parallel()
+
+	store := newStubOAuthStore()
+	winner := store.seed("racewinner@example.test", "racewinner")
+	if err := store.LinkProviderIdentity(
+		t.Context(),
+		winner.ID,
+		auth.ProviderGoogle,
+		"google-sub-create-race",
+	); err != nil {
+		t.Fatalf("seed LinkProviderIdentity err = %v, want nil", err)
+	}
+
+	got, err := auth.ExportCreateGooglePlayer(
+		t.Context(), store, "google-sub-create-race", "newcomer@example.test",
+	)
+	if err != nil {
+		t.Fatalf("ExportCreateGooglePlayer err = %v, want nil", err)
+	}
+	if got == nil || got.ID != winner.ID {
+		t.Errorf("recovered player.ID = %v, want %d (the winner's row)", got, winner.ID)
+	}
+	// The orphan row that createGooglePlayer's CreatePlayerFromOAuth
+	// inserted before the link failure is observable but harmless
+	// (nothing links to it). The test does not assert its absence —
+	// future cleanup is the operator's call.
 }
 
 // TestSignAndValidateState_RoundTrip pins the state-cookie HMAC: a
