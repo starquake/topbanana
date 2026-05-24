@@ -16,7 +16,7 @@ Workflow:
 
 1. After the change passes `make lint-fix`, `make check`, `make test-e2e`, and `make smoke`, stage the files explicitly (`git add <paths>` — never `-A` or `.`), commit, push the branch, and open a draft PR so the user can review the diff on GitHub. PR body follows "Linking a PR to a ticket" below.
 2. Use plain language commit messages — avoid jargon. Prefer simple verbs like "change", "update", "fix", "add", "remove". Start the message with a capital letter. Keep them to a single short subject line; do not add a body, Summary, or rationale paragraphs.
-3. Ask explicitly: "Did the review look OK?" or equivalent. Wait for their explicit go-ahead — silence is not consent. Do not merge before sign-off.
+3. Ask explicitly: "Did the review look OK?" or equivalent. Wait for their explicit go-ahead — silence is not consent. Do not merge before sign-off; do not merge while the PR is still a Draft.
 
 If you make further changes after the sign-off (e.g. fixing a lint issue, addressing a comment), commit and push them, then ask for sign-off on the new lines too.
 
