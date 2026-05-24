@@ -10,6 +10,13 @@ services:
       - REGISTRATION_ENABLED=true
       - ADMIN_USERNAMES=admin
       - SESSION_KEY=${SESSION_KEY:?SESSION_KEY must be set in .env or environment}
+      # Google sign-in stays off when any of the three is unset. Set all
+      # three in .env to enable the "Sign in with Google" button. The
+      # redirect URL must exactly match the entry in the Google Cloud
+      # Console OAuth client.
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_REDIRECT_URL=${GOOGLE_REDIRECT_URL:-}
     volumes:
       - topbanana_production_data:/home/nonroot/data
     networks:

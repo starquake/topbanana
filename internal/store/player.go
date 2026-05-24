@@ -182,6 +182,119 @@ func (s *PlayerStore) UpdatePlayerUsername(
 	return playerFromRow(row), nil
 }
 
+// GetPlayerByEmail returns the player whose email matches. Returns
+// auth.ErrPlayerNotFound when no row matches. The email is wrapped in a
+// [sql.NullString] with Valid=true so a literal NULL row never matches a
+// caller-supplied empty string.
+func (s *PlayerStore) GetPlayerByEmail(ctx context.Context, email string) (*auth.Player, error) {
+	row, err := s.q.GetPlayerByEmail(ctx, sql.NullString{String: email, Valid: true})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, auth.ErrPlayerNotFound
+		}
+
+		return nil, fmt.Errorf("failed to get player by email: %w", err)
+	}
+
+	return playerFromRow(row), nil
+}
+
+// GetPlayerByProviderSubject returns the player whose player_identities
+// row matches (provider, subject). Returns auth.ErrPlayerNotFound when
+// no identity is linked yet.
+func (s *PlayerStore) GetPlayerByProviderSubject(
+	ctx context.Context,
+	provider, subject string,
+) (*auth.Player, error) {
+	row, err := s.q.GetPlayerByProviderSubject(ctx, db.GetPlayerByProviderSubjectParams{
+		Provider: provider,
+		Subject:  subject,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, auth.ErrPlayerNotFound
+		}
+
+		return nil, fmt.Errorf("failed to get player by provider subject: %w", err)
+	}
+
+	return playerFromRow(row), nil
+}
+
+// CreatePlayerFromOAuth inserts a new players row with the supplied
+// username + email and no password_hash. Returns auth.ErrUsernameTaken
+// when the username collides (the OAuth handler retries on this
+// sentinel with a fresh petname).
+func (s *PlayerStore) CreatePlayerFromOAuth(
+	ctx context.Context,
+	username, email string,
+) (*auth.Player, error) {
+	row, err := s.q.CreatePlayerFromOAuth(ctx, db.CreatePlayerFromOAuthParams{
+		Username: strings.TrimSpace(username),
+		Email:    sql.NullString{String: email, Valid: true},
+	})
+	if err != nil {
+		var sqliteErr *sqlite.Error
+		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+			return nil, auth.ErrUsernameTaken
+		}
+
+		return nil, fmt.Errorf("failed to create player from oauth: %w", err)
+	}
+
+	return playerFromRow(row), nil
+}
+
+// ClaimPlayerForOAuth attaches an OAuth-verified email to an existing
+// anonymous (no password_hash, no email) players row. Returns
+// auth.ErrPlayerNotFound when the row does not match the
+// anonymous-only guards in the SQL — the OAuth handler treats that
+// sentinel as "fall through to create a new row" so a session
+// pointing at a deleted, credentialled, or already-OAuth-linked row
+// degrades gracefully.
+func (s *PlayerStore) ClaimPlayerForOAuth(
+	ctx context.Context,
+	playerID int64,
+	email string,
+) (*auth.Player, error) {
+	row, err := s.q.ClaimPlayerForOAuth(ctx, db.ClaimPlayerForOAuthParams{
+		ID:    playerID,
+		Email: sql.NullString{String: email, Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, auth.ErrPlayerNotFound
+		}
+
+		return nil, fmt.Errorf("failed to claim player for oauth: %w", err)
+	}
+
+	return playerFromRow(row), nil
+}
+
+// LinkProviderIdentity inserts a player_identities row tying the given
+// player to the (provider, subject) pair. Returns
+// auth.ErrIdentityAlreadyLinked when the UNIQUE (provider, subject)
+// constraint fires; the caller treats this as "another request beat us
+// to it" and re-reads the identity row.
+func (s *PlayerStore) LinkProviderIdentity(ctx context.Context, playerID int64, provider, subject string) error {
+	err := s.q.LinkProviderIdentity(ctx, db.LinkProviderIdentityParams{
+		PlayerID: playerID,
+		Provider: provider,
+		Subject:  subject,
+	})
+	if err != nil {
+		var sqliteErr *sqlite.Error
+		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+			return auth.ErrIdentityAlreadyLinked
+		}
+
+		return fmt.Errorf("failed to link provider identity: %w", err)
+	}
+
+	return nil
+}
+
 // SetPlayerPasswordHash overwrites the password_hash on the row identified
 // by username. Returns auth.ErrPlayerNotFound when no row matches; intended
 // for the cmd/server -reset-password operator tool, not the public auth flow.

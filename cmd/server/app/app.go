@@ -290,6 +290,7 @@ func Check(ctx context.Context, getenv func(string) string, stdout io.Writer) er
 
 		return fmt.Errorf("%s: %w", msg, err)
 	}
+	logConfigSummary(ctx, logger, cfg)
 
 	conn, err := setupDB(ctx, cfg, logger)
 	if err != nil {
@@ -330,6 +331,7 @@ func Run(
 
 		return fmt.Errorf("%s: %w", msg, err)
 	}
+	logConfigSummary(signalCtx, logger, cfg)
 
 	conn, err := setupDB(signalCtx, cfg, logger)
 	if err != nil {
@@ -439,6 +441,20 @@ func setupDB(signalCtx context.Context, cfg *config.Config, logger *slog.Logger)
 	}
 
 	return conn, nil
+}
+
+// logConfigSummary emits the operator-relevant config knobs at startup so
+// debugging "the cookie was/wasn't Secure" or "I thought I'd disabled
+// Google sign-in" doesn't require a fresh read of the env file. APP_ENV
+// is logged raw so an unset value shows as the empty string — that is
+// itself a meaningful signal (fail-secure defaults kick in).
+func logConfigSummary(ctx context.Context, logger *slog.Logger, cfg *config.Config) {
+	logger.InfoContext(ctx, "config parsed",
+		slog.String("app_env", cfg.AppEnvironment),
+		slog.Bool("secure_cookies", cfg.SecureCookies()),
+		slog.Bool("registration_enabled", cfg.RegistrationEnabled),
+		slog.Bool("google_login_enabled", cfg.GoogleLoginEnabled()),
+	)
 }
 
 func listener(ctx context.Context, cfg *config.Config, logger *slog.Logger) (net.Listener, error) {

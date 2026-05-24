@@ -3,12 +3,14 @@ module github.com/starquake/topbanana
 go 1.25.7
 
 require (
+	github.com/coreos/go-oidc/v3 v3.18.0
 	github.com/google/go-cmp v0.7.0
 	github.com/gosimple/slug v1.15.0
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/rs/xid v1.6.0
 	github.com/tdewolff/minify/v2 v2.24.13
 	golang.org/x/crypto v0.51.0
+	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.20.0
 	golang.org/x/term v0.43.0
 	modernc.org/sqlite v1.50.1
@@ -16,6 +18,7 @@ require (
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gosimple/unidecode v1.0.1 // indirect
 	github.com/mattn/go-isatty v0.0.21 // indirect

@@ -64,15 +64,32 @@ type formData struct {
 	// ShowRegister controls whether the login template renders the
 	// "No account? Register" link. False when REGISTRATION_ENABLED is unset/false.
 	ShowRegister bool
+	// ShowGoogle controls whether the login template renders the
+	// "Sign in with Google" button. False when any of the
+	// GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URL
+	// env vars is unset.
+	ShowGoogle bool
 }
 
 // HandleRegisterForm returns a handler for GET /register that renders the
-// registration form.
-func HandleRegisterForm(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
+// registration form. googleEnabled controls whether the template shows
+// the "Sign up with Google" button. An already-authenticated visitor is
+// redirected to the role-appropriate landing page instead — the
+// register form is a no-op for someone who already has an account.
+func HandleRegisterForm(
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	players PlayerStore,
+	sessions *session.Manager,
+	googleEnabled bool,
+) http.Handler {
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/register.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		render.render(w, r, http.StatusOK, formData{Title: "Register"})
+		if redirectIfSignedIn(w, r, players, sessions) {
+			return
+		}
+		render.render(w, r, http.StatusOK, formData{Title: "Register", ShowGoogle: googleEnabled})
 	})
 }
 
@@ -99,6 +116,7 @@ func HandleRegisterSubmit(
 	players PlayerStore,
 	sessions *session.Manager,
 	adminUsernames []string,
+	googleEnabled bool,
 ) http.Handler {
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/register.gohtml")
 
@@ -117,9 +135,10 @@ func HandleRegisterSubmit(
 		input := validateRegisterInput(rawUsername, password)
 		if !input.OK {
 			render.render(w, r, http.StatusBadRequest, formData{
-				Title:    "Register",
-				Username: input.Cleaned,
-				Message:  input.ErrMsg,
+				Title:      "Register",
+				Username:   input.Cleaned,
+				Message:    input.ErrMsg,
+				ShowGoogle: googleEnabled,
 			})
 
 			return
@@ -142,9 +161,10 @@ func HandleRegisterSubmit(
 		if err != nil {
 			if errors.Is(err, ErrUsernameTaken) {
 				render.render(w, r, http.StatusConflict, formData{
-					Title:    "Register",
-					Username: input.Cleaned,
-					Message:  "Username is already taken.",
+					Title:      "Register",
+					Username:   input.Cleaned,
+					Message:    "Username is already taken.",
+					ShowGoogle: googleEnabled,
 				})
 
 				return
@@ -229,23 +249,66 @@ func createPlayerWrapped(
 
 // HandleLoginForm returns a handler for GET /login that renders the login form.
 // registrationEnabled controls whether the template shows the "No account? Register" link.
-func HandleLoginForm(logger *slog.Logger, csrfMgr *csrf.Manager, registrationEnabled bool) http.Handler {
+// googleEnabled controls whether the "Sign in with Google" button is rendered.
+// An already-authenticated visitor is redirected to the role-appropriate
+// landing page so they don't see the form for an account they've already
+// signed into.
+func HandleLoginForm(
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	players PlayerStore,
+	sessions *session.Manager,
+	registrationEnabled, googleEnabled bool,
+) http.Handler {
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		render.render(w, r, http.StatusOK, formData{Title: "Log in", ShowRegister: registrationEnabled})
+		if redirectIfSignedIn(w, r, players, sessions) {
+			return
+		}
+		render.render(w, r, http.StatusOK, formData{
+			Title:        "Log in",
+			ShowRegister: registrationEnabled,
+			ShowGoogle:   googleEnabled,
+		})
 	})
+}
+
+// redirectIfSignedIn writes a 303 to the role-appropriate landing page
+// when the request already carries a session pointing at an
+// authenticated player. Returns true if it wrote a response — the
+// caller must skip its own render in that case. Errors during the
+// session/player lookup fall through to a normal render so a
+// transient DB hiccup doesn't lock the visitor out of the auth pages.
+func redirectIfSignedIn(
+	w http.ResponseWriter,
+	r *http.Request,
+	players PlayerStore,
+	sessions *session.Manager,
+) bool {
+	playerID, ok := sessions.PlayerID(r)
+	if !ok {
+		return false
+	}
+	player, err := players.GetPlayerByID(r.Context(), playerID)
+	if err != nil || !player.IsAuthenticated() {
+		return false
+	}
+	http.Redirect(w, r, landingPathFor(player.Role), http.StatusSeeOther)
+
+	return true
 }
 
 // HandleLoginSubmit returns a handler for POST /login. It verifies the
 // credentials, signs the player in, and redirects to the admin landing page.
 // registrationEnabled controls whether error renders show the "No account? Register" link.
+// googleEnabled controls whether error renders show the "Sign in with Google" button.
 func HandleLoginSubmit(
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
 	players PlayerStore,
 	sessions *session.Manager,
-	registrationEnabled bool,
+	registrationEnabled, googleEnabled bool,
 ) http.Handler {
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
 
@@ -283,7 +346,7 @@ func HandleLoginSubmit(
 				// Equalise timing with the valid-username path so an attacker
 				// cannot enumerate usernames by response time.
 				_ = CheckPassword(dummyHash(), password)
-				renderInvalidCredentials(render, w, r, username, registrationEnabled)
+				renderInvalidCredentials(render, w, r, username, registrationEnabled, googleEnabled)
 
 				return
 			}
@@ -297,13 +360,13 @@ func HandleLoginSubmit(
 			// Player has no password set (e.g. legacy seed admin). Run the
 			// dummy compare to keep timing consistent.
 			_ = CheckPassword(dummyHash(), password)
-			renderInvalidCredentials(render, w, r, username, registrationEnabled)
+			renderInvalidCredentials(render, w, r, username, registrationEnabled, googleEnabled)
 
 			return
 		}
 
 		if err := CheckPassword(player.PasswordHash, password); err != nil {
-			renderInvalidCredentials(render, w, r, username, registrationEnabled)
+			renderInvalidCredentials(render, w, r, username, registrationEnabled, googleEnabled)
 
 			return
 		}
@@ -365,13 +428,14 @@ func renderInvalidCredentials(
 	w http.ResponseWriter,
 	r *http.Request,
 	username string,
-	registrationEnabled bool,
+	registrationEnabled, googleEnabled bool,
 ) {
 	render.render(w, r, http.StatusUnauthorized, formData{
 		Title:        "Log in",
 		Username:     username,
 		Message:      "Invalid username or password.",
 		ShowRegister: registrationEnabled,
+		ShowGoogle:   googleEnabled,
 	})
 }
 

@@ -5,6 +5,13 @@ ifneq (,$(wildcard ./.env))
     export
 endif
 
+# APP_ENV unset means fail-secure (Secure cookies, SESSION_KEY required) —
+# the production-safe default. For local dev that's friction, so default it
+# to "development" here. ?= keeps whatever .env or the parent shell set;
+# only an actually-unset value gets the development override.
+APP_ENV ?= development
+export APP_ENV
+
 BUILD_DIR := build
 BIN_DIR := $(BUILD_DIR)/bin
 COV_DIR := $(BUILD_DIR)/coverage

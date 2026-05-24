@@ -5,7 +5,7 @@ WHERE username = ?
 LIMIT 1;
 
 -- name: CreatePlayerWithCredentials :one
--- The role decision lives in SQL so the "first password-bearing registrant
+-- The role decision lives in SQL so the "first credentialled registrant
 -- becomes admin" rule is atomic. Two concurrent first-registrations would
 -- both observe count == 0 if we computed the role in Go and called INSERT
 -- separately, leaving us with two admins. Folding the check into the same
@@ -13,8 +13,11 @@ LIMIT 1;
 --
 -- The third placeholder is the role requested by the caller (env-list match,
 -- otherwise "player"). If "admin" is requested explicitly we honour that;
--- otherwise we promote when there are no other rows with a password_hash
--- (legacy seed admin without a password is intentionally ignored).
+-- otherwise we promote only when no credentialled player exists yet. A
+-- "credentialled" player has either a password_hash or a linked OAuth
+-- identity (player_identities row). The seeded admin (id=1) has neither
+-- and is intentionally ignored so the operator's first real registration
+-- replaces it as admin.
 --
 -- username_claimed is set to 1 because a registering user explicitly chose
 -- their username at the register form. The column tracks "did the player
@@ -26,7 +29,11 @@ VALUES (
     sqlc.arg('password_hash'),
     CASE
         WHEN CAST(sqlc.arg('requested_role') AS TEXT) = 'admin' THEN 'admin'
-        WHEN (SELECT COUNT(*) FROM players WHERE password_hash IS NOT NULL) = 0 THEN 'admin'
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN 'admin'
         ELSE 'player'
     END,
     1
@@ -55,11 +62,13 @@ RETURNING *;
 -- store maps to ErrPlayerAlreadyClaimed.
 --
 -- The role CASE mirrors CreatePlayerWithCredentials so the "first
--- password-bearing registrant becomes admin" rule still triggers when the
+-- credentialled registrant becomes admin" rule still triggers when the
 -- very first sign-up happens through the claim path (i.e. the registrant
 -- played anonymously first). The subquery aliases the players table as pp
 -- so the column reference in the WHERE is unambiguous against the row
--- being updated.
+-- being updated. The credentialled-player check covers both password and
+-- OAuth identity so a deployment that bootstrapped its admin via Google
+-- doesn't auto-promote later password claimers.
 --
 -- username_claimed is set to 1 because the visitor is explicitly choosing
 -- their username via the register form. This is the register-after-playing
@@ -71,7 +80,11 @@ SET username = sqlc.arg('username'),
     password_hash = sqlc.arg('password_hash'),
     role = CASE
         WHEN CAST(sqlc.arg('requested_role') AS TEXT) = 'admin' THEN 'admin'
-        WHEN (SELECT COUNT(*) FROM players AS pp WHERE pp.password_hash IS NOT NULL) = 0 THEN 'admin'
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN 'admin'
         ELSE 'player'
     END,
     username_claimed = 1
@@ -96,6 +109,104 @@ UPDATE players
 SET password_hash    = sqlc.arg('password_hash'),
     username_claimed = 1
 WHERE username = sqlc.arg('username');
+
+-- name: GetPlayerByEmail :one
+-- Look up a player by email so the Google OAuth callback can link a
+-- fresh identity onto an existing row when the verified email matches
+-- (instead of creating a duplicate player). Returns sql.ErrNoRows when
+-- no row matches, which the store maps to ErrPlayerNotFound.
+SELECT *
+FROM players
+WHERE email = ?
+LIMIT 1;
+
+-- name: GetPlayerByProviderSubject :one
+-- Look up a player via their player_identities row. The OAuth callback
+-- runs this first; on a hit the caller knows the identity already
+-- exists and signs the player in without touching the email-based
+-- linking path.
+SELECT p.*
+FROM players p
+JOIN player_identities pi ON pi.player_id = p.id
+WHERE pi.provider = ? AND pi.subject = ?
+LIMIT 1;
+
+-- name: CreatePlayerFromOAuth :one
+-- Insert a brand-new player row for a first-time OAuth sign-in. No
+-- password_hash (the player has no local credential), email comes from
+-- the verified id-token claim, username_claimed is set to 1 because the
+-- caller supplies an auto-generated petname that the player will be
+-- prompted to change via the existing claim-name modal.
+--
+-- The role CASE mirrors CreatePlayerWithCredentials so an OAuth-only
+-- first registrant still earns the admin promotion atomically. This is
+-- intentional: a deployment that only uses Google sign-in must still
+-- be able to bootstrap its first admin without an out-of-band password
+-- step. Counting credentialled players (password OR linked OAuth
+-- identity) instead of only password-bearing rows keeps OAuth-only
+-- deployments from promoting *every* sign-in to admin. Without this,
+-- the second-and-onward Google sign-ins on a fresh DB would all see
+-- count(password_hash IS NOT NULL) == 0 and become admin.
+INSERT INTO players (username, email, role, username_claimed)
+VALUES (
+    sqlc.arg('username'),
+    sqlc.arg('email'),
+    CASE
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN 'admin'
+        ELSE 'player'
+    END,
+    1
+)
+RETURNING *;
+
+-- name: LinkProviderIdentity :exec
+-- Attach a (provider, subject) pair to an existing players row. Called
+-- after CreatePlayerFromOAuth for the new-account path and after
+-- GetPlayerByEmail for the existing-email link path. The UNIQUE
+-- constraint on (provider, subject) prevents two players from claiming
+-- the same external identity.
+INSERT INTO player_identities (player_id, provider, subject)
+VALUES (?, ?, ?);
+
+-- name: ClaimPlayerForOAuth :one
+-- Upgrades a fully anonymous players row (no password_hash, no email)
+-- in place by attaching the OAuth-verified email. Lets a visitor who
+-- played anonymously keep their existing player_id (and therefore
+-- their game history and any custom username) when they sign in with
+-- Google for the first time. The username is left untouched: the
+-- visitor's auto-petname or PATCH-claimed name carries through onto
+-- the OAuth-linked row.
+--
+-- The role CASE mirrors CreatePlayerFromOAuth so the first OAuth-only
+-- registrant still earns the admin promotion atomically. ELSE 'player'
+-- matches CreateAnonymousPlayer's fixed default; anonymous rows
+-- always start as 'player', so re-asserting it is a no-op in
+-- practice.
+--
+-- The WHERE guards (password_hash IS NULL AND email IS NULL) make
+-- the update idempotent under concurrent callbacks. A second
+-- callback that lost the race sees the row already credentialled
+-- and matches no rows; the wrapper maps that to ErrPlayerNotFound
+-- so the handler can fall through to the create path with the same
+-- petname-collision retry it uses for cookieless visitors.
+UPDATE players
+SET email = sqlc.arg('email'),
+    role = CASE
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN 'admin'
+        ELSE 'player'
+    END
+WHERE players.id = sqlc.arg('id')
+  AND players.password_hash IS NULL
+  AND players.email IS NULL
+RETURNING *;
 
 -- name: UpdatePlayerUsername :one
 -- Updates the username on an anonymous player row in place. The WHERE

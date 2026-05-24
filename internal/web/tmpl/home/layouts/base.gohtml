@@ -43,14 +43,20 @@
 <section class="max-w-shell mx-auto px-5 py-10 w-full flex-1">
     {{template "content" .}}
 </section>
-{{/* Discreet admin link in the footer per #166: the start page is for
-     players; quiz authors are a tiny minority of visitors, so the link
-     into the admin dashboard sits at the bottom, low-contrast, rather
-     than in the brand navbar. /admin redirects to /login when the
-     visitor is not signed in as an admin. */}}
+{{/* Discreet footer links per #166: the start page is for players;
+     quiz authors are a tiny minority of visitors, so the admin link
+     stays low-contrast at the bottom. "Log in" sits alongside so a
+     returning player can find the sign-in surface (password or
+     Google) without having to guess at /login. Both links are
+     rendered unconditionally — /login already does the right thing
+     for an already-signed-in visitor (the form renders; submitting
+     replaces the session). */}}
 <footer class="max-w-shell mx-auto px-5 py-6 w-full text-xs text-text-mute flex items-center justify-between">
     <span>Top Banana!</span>
-    <a href="/admin" class="hover:text-text-dim underline-offset-2 hover:underline">Manage quizzes</a>
+    <div class="flex items-center gap-4">
+        <a href="/login" class="hover:text-text-dim underline-offset-2 hover:underline">Log in</a>
+        <a href="/admin" class="hover:text-text-dim underline-offset-2 hover:underline">Manage quizzes</a>
+    </div>
 </footer>
 </body>
 </html>

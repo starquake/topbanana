@@ -27,6 +27,13 @@ var ErrPlayerNotAnonymous = errors.New("player is not anonymous")
 // so callers can map it to a 400 without re-validating themselves.
 var ErrUsernameEmpty = errors.New("username is empty")
 
+// ErrIdentityAlreadyLinked is returned by LinkProviderIdentity when the
+// (provider, subject) pair already exists. Distinct from ErrUsernameTaken
+// so the Google callback can distinguish a race between two concurrent
+// first-time sign-ins (handled by retrying the lookup) from a true
+// collision (handled as a 500).
+var ErrIdentityAlreadyLinked = errors.New("identity already linked")
+
 // Player represents an authenticated user (admin or player).
 type Player struct {
 	ID              int64
@@ -59,6 +66,25 @@ func (p *Player) IsAnonymous() bool {
 // IsAnonymous()=true simultaneously.
 func (p *Player) HasCustomName() bool {
 	return p.UsernameClaimed
+}
+
+// IsAuthenticated reports whether the visitor is known to the system —
+// they have a password hash, an OAuth-verified email, or the seeded
+// admin role. Distinct from !IsAnonymous() because an OAuth-only
+// player has no password hash yet is still authenticated; flipping
+// the existing IsAnonymous definition would change the semantics of
+// the claim-flow code paths that depend on it. Used by surfaces that
+// gate on "is the visitor signed in?" rather than "is the row a
+// fresh claimable stub?", e.g. /login's already-signed-in redirect.
+//
+// The Email != "" branch is safe today because password registration
+// does not write an email; the only rows with email set are OAuth-
+// linked. When #111 starts capturing email on password registration,
+// revisit this predicate so an unverified password account does not
+// count as authenticated. See the footnote on #111 for the parallel
+// concern on linkExistingPlayerByEmail.
+func (p *Player) IsAuthenticated() bool {
+	return p.PasswordHash != "" || p.Email != "" || p.Role == RoleAdmin
 }
 
 // PlayerStore is the persistence interface used by the auth package.

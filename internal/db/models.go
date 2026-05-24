@@ -58,6 +58,14 @@ type Player struct {
 	UsernameClaimed int64
 }
 
+type PlayerIdentity struct {
+	ID        int64
+	PlayerID  int64
+	Provider  string
+	Subject   string
+	CreatedAt time.Time
+}
+
 type Question struct {
 	ID               int64
 	QuizID           int64
