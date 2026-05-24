@@ -151,6 +151,38 @@ RETURNING *;
 INSERT INTO player_identities (player_id, provider, subject)
 VALUES (?, ?, ?);
 
+-- name: ClaimPlayerForOAuth :one
+-- Upgrades a fully anonymous players row (no password_hash, no email)
+-- in place by attaching the OAuth-verified email. Lets a visitor who
+-- played anonymously keep their existing player_id (and therefore
+-- their game history and any custom username) when they sign in with
+-- Google for the first time. The username is left untouched: the
+-- visitor's auto-petname or PATCH-claimed name carries through onto
+-- the OAuth-linked row.
+--
+-- The role CASE mirrors CreatePlayerFromOAuth so the first OAuth-only
+-- registrant still earns the admin promotion atomically. ELSE 'player'
+-- matches CreateAnonymousPlayer's fixed default; anonymous rows
+-- always start as 'player', so re-asserting it is a no-op in
+-- practice.
+--
+-- The WHERE guards (password_hash IS NULL AND email IS NULL) make
+-- the update idempotent under concurrent callbacks. A second
+-- callback that lost the race sees the row already credentialled
+-- and matches no rows; the wrapper maps that to ErrPlayerNotFound
+-- so the handler can fall through to the create path with the same
+-- petname-collision retry it uses for cookieless visitors.
+UPDATE players
+SET email = sqlc.arg('email'),
+    role = CASE
+        WHEN (SELECT COUNT(*) FROM players AS pp WHERE pp.password_hash IS NOT NULL) = 0 THEN 'admin'
+        ELSE 'player'
+    END
+WHERE players.id = sqlc.arg('id')
+  AND players.password_hash IS NULL
+  AND players.email IS NULL
+RETURNING *;
+
 -- name: UpdatePlayerUsername :one
 -- Updates the username on an anonymous player row in place. The WHERE
 -- clause refuses the update when the player has already claimed a

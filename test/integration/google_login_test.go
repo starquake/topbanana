@@ -164,6 +164,45 @@ func TestGoogleLogin_CallbackRejectsUnverifiedEmail(t *testing.T) {
 	requireDBRowCounts(t, srv.DBURI, mock.email, 0, 0)
 }
 
+// TestGoogleLogin_CallbackClaimsAnonymousSession pins the
+// continuity-across-sign-in rule: a visitor who has been playing
+// anonymously (session cookie pointing at an auto-petname row) and
+// then signs in with Google for the first time keeps that same
+// player_id and username. No new row is created; the existing row
+// just gains the verified email and an identity link.
+func TestGoogleLogin_CallbackClaimsAnonymousSession(t *testing.T) {
+	t.Parallel()
+
+	mock := newGoogleMock(t)
+	mock.email = "anon-then-google@example.test"
+	mock.emailVerified = true
+
+	ctx, srv := startGoogleServer(t, mock)
+
+	client := authClient(t)
+
+	// Touch the public API once so EnsurePlayer creates an anonymous
+	// players row and sets the session cookie on the client's jar.
+	priming := doGet(ctx, t, client, srv.BaseURL+"/api/players/me")
+	if got, want := priming.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("priming GET /api/players/me status = %d, want %d", got, want)
+	}
+
+	preID := lookupOnlyPlayerID(t, srv.DBURI)
+
+	finalResp := driveGoogleFlow(ctx, t, client, srv.BaseURL, mock)
+	if got, want := finalResp.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("callback status = %d, want %d (location=%q)", got, want, finalResp.Location)
+	}
+
+	requireDBRowCounts(t, srv.DBURI, mock.email, 1, 1)
+
+	postID := lookupPlayerIDByEmail(t, srv.DBURI, mock.email)
+	if got, want := postID, preID; got != want {
+		t.Errorf("player id after Google sign-in = %d, want %d (anonymous row reused, not replaced)", got, want)
+	}
+}
+
 // TestGoogleLogin_CallbackRejectsStateMismatch pins the OAuth CSRF
 // defence: a callback whose `state` query does not match the cookie
 // is refused before any token exchange.
@@ -309,6 +348,76 @@ func requireDBRowCounts(t *testing.T, dbURI, email string, wantPlayers, wantIden
 	if got, want := identityRows, wantIdentities; got != want {
 		t.Errorf("player_identities row count = %d, want %d", got, want)
 	}
+}
+
+// lookupOnlyPlayerID returns the id of the single non-seeded players
+// row, asserting that exactly one such row exists. The migration
+// seeds an admin row (id=1) that the anonymous-priming flow does not
+// touch; this helper filters it out so the test can refer to "the
+// anonymous row" unambiguously.
+func lookupOnlyPlayerID(t *testing.T, dbURI string) int64 {
+	t.Helper()
+
+	db, err := sql.Open("sqlite", dbURI)
+	if err != nil {
+		t.Fatalf("sql.Open err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v, want nil", cerr)
+		}
+	})
+
+	rows, err := db.QueryContext(t.Context(),
+		`SELECT id FROM players WHERE id != 1 ORDER BY id`,
+	)
+	if err != nil {
+		t.Fatalf("query players err = %v, want nil", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if scanErr := rows.Scan(&id); scanErr != nil {
+			t.Fatalf("scan player id err = %v, want nil", scanErr)
+		}
+		ids = append(ids, id)
+	}
+	if rerr := rows.Err(); rerr != nil {
+		t.Fatalf("rows iteration err = %v, want nil", rerr)
+	}
+	if got, want := len(ids), 1; got != want {
+		t.Fatalf("non-seeded players row count = %d, want %d (ids=%v)", got, want, ids)
+	}
+
+	return ids[0]
+}
+
+// lookupPlayerIDByEmail returns the id of the players row whose
+// email matches. Fails the test when zero or more than one row is
+// found so the caller's assertion stays unambiguous.
+func lookupPlayerIDByEmail(t *testing.T, dbURI, email string) int64 {
+	t.Helper()
+
+	db, err := sql.Open("sqlite", dbURI)
+	if err != nil {
+		t.Fatalf("sql.Open err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v, want nil", cerr)
+		}
+	})
+
+	var id int64
+	if scanErr := db.QueryRowContext(t.Context(),
+		`SELECT id FROM players WHERE email = ?`, email,
+	).Scan(&id); scanErr != nil {
+		t.Fatalf("lookup player by email %q err = %v, want nil", email, scanErr)
+	}
+
+	return id
 }
 
 // seedPlayerWithEmail inserts a row with the given username + email

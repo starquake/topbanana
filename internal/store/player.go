@@ -245,6 +245,33 @@ func (s *PlayerStore) CreatePlayerFromOAuth(
 	return playerFromRow(row), nil
 }
 
+// ClaimPlayerForOAuth attaches an OAuth-verified email to an existing
+// anonymous (no password_hash, no email) players row. Returns
+// auth.ErrPlayerNotFound when the row does not match the
+// anonymous-only guards in the SQL — the OAuth handler treats that
+// sentinel as "fall through to create a new row" so a session
+// pointing at a deleted, credentialled, or already-OAuth-linked row
+// degrades gracefully.
+func (s *PlayerStore) ClaimPlayerForOAuth(
+	ctx context.Context,
+	playerID int64,
+	email string,
+) (*auth.Player, error) {
+	row, err := s.q.ClaimPlayerForOAuth(ctx, db.ClaimPlayerForOAuthParams{
+		ID:    playerID,
+		Email: sql.NullString{String: email, Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, auth.ErrPlayerNotFound
+		}
+
+		return nil, fmt.Errorf("failed to claim player for oauth: %w", err)
+	}
+
+	return playerFromRow(row), nil
+}
+
 // LinkProviderIdentity inserts a player_identities row tying the given
 // player to the (provider, subject) pair. Returns
 // auth.ErrIdentityAlreadyLinked when the UNIQUE (provider, subject)

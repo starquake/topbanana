@@ -70,6 +70,59 @@ func (q *Queries) ClaimPlayer(ctx context.Context, arg ClaimPlayerParams) (Playe
 	return i, err
 }
 
+const claimPlayerForOAuth = `-- name: ClaimPlayerForOAuth :one
+UPDATE players
+SET email = ?1,
+    role = CASE
+        WHEN (SELECT COUNT(*) FROM players AS pp WHERE pp.password_hash IS NOT NULL) = 0 THEN 'admin'
+        ELSE 'player'
+    END
+WHERE players.id = ?2
+  AND players.password_hash IS NULL
+  AND players.email IS NULL
+RETURNING id, username, email, password_hash, role, created_at, username_claimed
+`
+
+type ClaimPlayerForOAuthParams struct {
+	Email sql.NullString
+	ID    int64
+}
+
+// Upgrades a fully anonymous players row (no password_hash, no email)
+// in place by attaching the OAuth-verified email. Lets a visitor who
+// played anonymously keep their existing player_id (and therefore
+// their game history and any custom username) when they sign in with
+// Google for the first time. The username is left untouched: the
+// visitor's auto-petname or PATCH-claimed name carries through onto
+// the OAuth-linked row.
+//
+// The role CASE mirrors CreatePlayerFromOAuth so the first OAuth-only
+// registrant still earns the admin promotion atomically. ELSE 'player'
+// matches CreateAnonymousPlayer's fixed default; anonymous rows
+// always start as 'player', so re-asserting it is a no-op in
+// practice.
+//
+// The WHERE guards (password_hash IS NULL AND email IS NULL) make
+// the update idempotent under concurrent callbacks. A second
+// callback that lost the race sees the row already credentialled
+// and matches no rows; the wrapper maps that to ErrPlayerNotFound
+// so the handler can fall through to the create path with the same
+// petname-collision retry it uses for cookieless visitors.
+func (q *Queries) ClaimPlayerForOAuth(ctx context.Context, arg ClaimPlayerForOAuthParams) (Player, error) {
+	row := q.db.QueryRowContext(ctx, claimPlayerForOAuth, arg.Email, arg.ID)
+	var i Player
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.Email,
+		&i.PasswordHash,
+		&i.Role,
+		&i.CreatedAt,
+		&i.UsernameClaimed,
+	)
+	return i, err
+}
+
 const createAnonymousPlayer = `-- name: CreateAnonymousPlayer :one
 INSERT INTO players (username, role)
 VALUES (?1, 'player')

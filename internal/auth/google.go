@@ -166,7 +166,13 @@ func HandleGoogleCallback(
 			return
 		}
 
-		player, err := linkOrCreateGooglePlayer(r.Context(), identities, result.Subject, result.Email)
+		var sessionPlayerID *int64
+		if id, ok := sessions.PlayerID(r); ok {
+			sessionPlayerID = &id
+		}
+		player, err := linkOrCreateGooglePlayer(
+			r.Context(), identities, result.Subject, result.Email, sessionPlayerID,
+		)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error linking google player", slog.Any("err", err))
 			renderGoogleError(render, w, r, "Sign-in failed. Please try again.", registrationEnabled)
@@ -286,23 +292,29 @@ func (a *GoogleAuthenticator) exchangeAndVerify(r *http.Request, logger *slog.Lo
 // verified Google sign-in. The order of operations is:
 //
 //  1. Identity already linked? Return the existing player.
-//  2. A players row with the same email exists? Link the new identity
-//     onto it (silent account linking on verified-email match).
-//  3. Otherwise create a fresh players row with an auto-petname and
+//  2. A players row with the same email exists? Link the new
+//     identity onto it (silent account linking on verified-email
+//     match).
+//  3. The request has a session pointing at a fully anonymous row
+//     (no password, no email)? Upgrade that row in place so the
+//     visitor's pre-sign-in player_id, game history, and any custom
+//     username carry onto the Google identity.
+//  4. Otherwise create a fresh players row with an auto-petname and
 //     link the identity onto it.
 //
-// Silent linking is gated by email_verified=true at the handler
-// because that is the security boundary that lets us trust the email
-// claim. Without that guard step 2 would let a malicious Google
-// account take over an arbitrary player.
+// Silent linking (step 2) is gated by email_verified=true at the
+// handler because that is the security boundary that lets us trust
+// the email claim. Without that guard step 2 would let a malicious
+// Google account take over an arbitrary player.
 //
-// Petname collisions are retried a bounded number of times because the
-// petname pool is large but not infinite; an unlucky string of
-// collisions is exponentially unlikely.
+// Petname collisions in step 4 are retried a bounded number of times
+// because the petname pool is large but not infinite; an unlucky
+// string of collisions is exponentially unlikely.
 func linkOrCreateGooglePlayer(
 	ctx context.Context,
 	identities OAuthIdentityStore,
 	subject, email string,
+	sessionPlayerID *int64,
 ) (*Player, error) {
 	existing, err := identities.GetPlayerByProviderSubject(ctx, ProviderGoogle, subject)
 	if err == nil {
@@ -322,7 +334,60 @@ func linkOrCreateGooglePlayer(
 		}
 	}
 
+	if sessionPlayerID != nil {
+		claimed, claimErr := claimAnonymousSessionPlayer(ctx, identities, *sessionPlayerID, subject, email)
+		if claimErr == nil {
+			return claimed, nil
+		}
+		if !errors.Is(claimErr, ErrPlayerNotFound) {
+			return nil, claimErr
+		}
+	}
+
 	return createGooglePlayer(ctx, identities, subject, email)
+}
+
+// claimAnonymousSessionPlayer upgrades the row identified by
+// sessionPlayerID in place — attaching the OAuth-verified email and
+// linking the (provider, subject) identity onto it — so the visitor's
+// existing player_id carries forward. Returns ErrPlayerNotFound when
+// the row is missing, already credentialled, or already carries an
+// email; the caller falls through to createGooglePlayer on that
+// sentinel.
+func claimAnonymousSessionPlayer(
+	ctx context.Context,
+	identities OAuthIdentityStore,
+	sessionPlayerID int64,
+	subject, email string,
+) (*Player, error) {
+	claimed, err := identities.ClaimPlayerForOAuth(ctx, sessionPlayerID, email)
+	if err != nil {
+		if errors.Is(err, ErrPlayerNotFound) {
+			return nil, ErrPlayerNotFound
+		}
+
+		return nil, fmt.Errorf("claim anonymous player for oauth: %w", err)
+	}
+
+	if linkErr := identities.LinkProviderIdentity(ctx, claimed.ID, ProviderGoogle, subject); linkErr != nil {
+		if errors.Is(linkErr, ErrIdentityAlreadyLinked) {
+			// Lost a race with a concurrent callback that already
+			// linked this (provider, subject) onto a different row.
+			// Re-read by subject and return that row instead so the
+			// session ends up pointing at the canonical OAuth-linked
+			// player.
+			refetched, refetchErr := identities.GetPlayerByProviderSubject(ctx, ProviderGoogle, subject)
+			if refetchErr != nil {
+				return nil, fmt.Errorf("refetch after link race: %w", refetchErr)
+			}
+
+			return refetched, nil
+		}
+
+		return nil, fmt.Errorf("link identity to claimed anonymous player: %w", linkErr)
+	}
+
+	return claimed, nil
 }
 
 // linkExistingPlayerByEmail looks up a player by verified email and,

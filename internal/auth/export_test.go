@@ -10,8 +10,9 @@ func ExportLinkOrCreateGooglePlayer(
 	ctx context.Context,
 	store OAuthIdentityStore,
 	subject, email string,
+	sessionPlayerID *int64,
 ) (*Player, error) {
-	return linkOrCreateGooglePlayer(ctx, store, subject, email)
+	return linkOrCreateGooglePlayer(ctx, store, subject, email, sessionPlayerID)
 }
 
 // ExportSignState exposes signState so tests can assert the cookie

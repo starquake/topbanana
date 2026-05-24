@@ -117,6 +117,46 @@ func (s *stubOAuthStore) LinkProviderIdentity(_ context.Context, playerID int64,
 	return nil
 }
 
+func (s *stubOAuthStore) ClaimPlayerForOAuth(_ context.Context, playerID int64, email string) (*auth.Player, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	p, ok := s.players[playerID]
+	if !ok {
+		return nil, auth.ErrPlayerNotFound
+	}
+	// Mirror the SQL's "anonymous only" guard so the stub fails the
+	// same way the production query would when the row has already
+	// been credentialled or carries an email.
+	if p.PasswordHash != "" || p.Email != "" {
+		return nil, auth.ErrPlayerNotFound
+	}
+	p.Email = email
+	if email != "" {
+		s.byEmail[email] = p
+	}
+
+	return p, nil
+}
+
+// seedAnonymous inserts a fully anonymous players row (no password,
+// no email) so the session-claim test has a target the
+// ClaimPlayerForOAuth guard accepts.
+func (s *stubOAuthStore) seedAnonymous(username string) *auth.Player {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	p := &auth.Player{
+		ID:       s.nextID,
+		Username: username,
+		Role:     auth.RolePlayer,
+	}
+	s.nextID++
+	s.players[p.ID] = p
+
+	return p
+}
+
 // seed inserts a player row directly so the linking test has an
 // existing target without going through CreatePlayerFromOAuth.
 func (s *stubOAuthStore) seed(email, username, role string) *auth.Player {
@@ -145,7 +185,9 @@ func TestLinkOrCreateGooglePlayer_NewPlayer(t *testing.T) {
 	t.Parallel()
 
 	store := newStubOAuthStore()
-	player, err := auth.ExportLinkOrCreateGooglePlayer(t.Context(), store, "google-sub-1", "fresh@example.test")
+	player, err := auth.ExportLinkOrCreateGooglePlayer(
+		t.Context(), store, "google-sub-1", "fresh@example.test", nil,
+	)
 	if err != nil {
 		t.Fatalf("ExportLinkOrCreateGooglePlayer err = %v, want nil", err)
 	}
@@ -163,7 +205,9 @@ func TestLinkOrCreateGooglePlayer_NewPlayer(t *testing.T) {
 
 	// A second call with the same subject reads the existing identity
 	// row and returns the same player.
-	again, err := auth.ExportLinkOrCreateGooglePlayer(t.Context(), store, "google-sub-1", "fresh@example.test")
+	again, err := auth.ExportLinkOrCreateGooglePlayer(
+		t.Context(), store, "google-sub-1", "fresh@example.test", nil,
+	)
 	if err != nil {
 		t.Fatalf("second ExportLinkOrCreateGooglePlayer err = %v, want nil", err)
 	}
@@ -182,7 +226,9 @@ func TestLinkOrCreateGooglePlayer_LinkExistingEmail(t *testing.T) {
 	store := newStubOAuthStore()
 	existing := store.seed("alice@example.test", "alice", auth.RolePlayer)
 
-	player, err := auth.ExportLinkOrCreateGooglePlayer(t.Context(), store, "google-sub-2", "alice@example.test")
+	player, err := auth.ExportLinkOrCreateGooglePlayer(
+		t.Context(), store, "google-sub-2", "alice@example.test", nil,
+	)
 	if err != nil {
 		t.Fatalf("ExportLinkOrCreateGooglePlayer err = %v, want nil", err)
 	}
@@ -213,7 +259,9 @@ func TestLinkOrCreateGooglePlayer_RetriesPetnameCollision(t *testing.T) {
 	store := newStubOAuthStore()
 	store.createColl = 2
 
-	player, err := auth.ExportLinkOrCreateGooglePlayer(t.Context(), store, "google-sub-retry", "retry@example.test")
+	player, err := auth.ExportLinkOrCreateGooglePlayer(
+		t.Context(), store, "google-sub-retry", "retry@example.test", nil,
+	)
 	if err != nil {
 		t.Fatalf("ExportLinkOrCreateGooglePlayer err = %v, want nil", err)
 	}
@@ -234,12 +282,77 @@ func TestLinkOrCreateGooglePlayer_ExhaustsRetries(t *testing.T) {
 	store := newStubOAuthStore()
 	store.createColl = 100 // far more than the loop allows
 
-	_, err := auth.ExportLinkOrCreateGooglePlayer(t.Context(), store, "google-sub-exhaust", "exhaust@example.test")
+	_, err := auth.ExportLinkOrCreateGooglePlayer(
+		t.Context(), store, "google-sub-exhaust", "exhaust@example.test", nil,
+	)
 	if err == nil {
 		t.Fatal("ExportLinkOrCreateGooglePlayer err = nil, want non-nil after exhausting retries")
 	}
 	if got, want := err, auth.ErrUsernameTaken; !errors.Is(got, want) {
 		t.Errorf("err = %v, want it to wrap %v", got, want)
+	}
+}
+
+// TestLinkOrCreateGooglePlayer_ClaimsAnonymousSession pins the
+// session-claim path: when the request already has a session pointing
+// at a fully anonymous players row, the OAuth callback upgrades that
+// row in place instead of creating a new one. The visitor keeps their
+// player_id (and any custom username) on first Google sign-in.
+func TestLinkOrCreateGooglePlayer_ClaimsAnonymousSession(t *testing.T) {
+	t.Parallel()
+
+	store := newStubOAuthStore()
+	anon := store.seedAnonymous("happy-banana")
+
+	player, err := auth.ExportLinkOrCreateGooglePlayer(
+		t.Context(), store, "google-sub-claim", "claim@example.test", &anon.ID,
+	)
+	if err != nil {
+		t.Fatalf("ExportLinkOrCreateGooglePlayer err = %v, want nil", err)
+	}
+	if got, want := player.ID, anon.ID; got != want {
+		t.Errorf("player.ID = %d, want %d (anonymous row reused, not replaced)", got, want)
+	}
+	if got, want := player.Username, "happy-banana"; got != want {
+		t.Errorf("player.Username = %q, want %q (preserved across claim)", got, want)
+	}
+	if got, want := player.Email, "claim@example.test"; got != want {
+		t.Errorf("player.Email = %q, want %q (set on claim)", got, want)
+	}
+
+	// A subsequent sign-in with the same subject resolves through the
+	// identity lookup and lands on the same row.
+	bySubject, err := store.GetPlayerByProviderSubject(t.Context(), auth.ProviderGoogle, "google-sub-claim")
+	if err != nil {
+		t.Fatalf("GetPlayerByProviderSubject err = %v, want nil", err)
+	}
+	if got, want := bySubject.ID, anon.ID; got != want {
+		t.Errorf("bySubject.ID = %d, want %d", got, want)
+	}
+}
+
+// TestLinkOrCreateGooglePlayer_SessionWithNonAnonymousRowFallsThrough
+// pins the safety guard: a session pointing at a row that is no
+// longer anonymous (e.g. password-registered in another tab, or
+// previously OAuth-linked) skips the claim and falls through to the
+// create-fresh-player path. The stale-session row is left untouched.
+func TestLinkOrCreateGooglePlayer_SessionWithNonAnonymousRowFallsThrough(t *testing.T) {
+	t.Parallel()
+
+	store := newStubOAuthStore()
+	credentialled := store.seed("settled@example.test", "settled", auth.RolePlayer)
+
+	player, err := auth.ExportLinkOrCreateGooglePlayer(
+		t.Context(), store, "google-sub-fallthrough", "newcomer@example.test", &credentialled.ID,
+	)
+	if err != nil {
+		t.Fatalf("ExportLinkOrCreateGooglePlayer err = %v, want nil", err)
+	}
+	if got, want := player.ID, credentialled.ID; got == want {
+		t.Errorf("player.ID = %d, must differ from stale-session row id %d", got, want)
+	}
+	if got, want := player.Email, "newcomer@example.test"; got != want {
+		t.Errorf("player.Email = %q, want %q", got, want)
 	}
 }
 
