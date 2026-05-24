@@ -15,6 +15,17 @@ const PLAY_PATH_PATTERN = /^\/play\/.+-(\d+)\/?$/;
 // the actual elapsed time is ~9s before we flip.
 const leaderboardErrorRetryLimit = 3;
 
+// leaderboardSelfStaleThresholdMs is how long the client tolerates
+// silence on the SSE stream before flipping the local view's own
+// row to "you appear offline" (#336). 50s = 2x the 25s server
+// heartbeat + slack, so a single dropped heartbeat doesn't trip it.
+const leaderboardSelfStaleThresholdMs = 50_000;
+
+// leaderboardSelfStaleCheckMs is how often the self-stale poll
+// runs. 5s gives the indicator sub-threshold reaction time without
+// burning CPU on a per-frame timer.
+const leaderboardSelfStaleCheckMs = 5_000;
+
 // reducedMotion returns true when the OS-level preference is set; all
 // JS-driven animation calls below short-circuit in that case so the page
 // behaves identically to a no-animation build for affected users.
@@ -122,6 +133,14 @@ export class GameApp {
         // Alpine picks the change up reactively.
         this.leaderboardStale = false;
         this.leaderboardErrorCount = 0;
+        // Self-stale indicator (#336): flipped true when the SSE
+        // stream goes silent for > leaderboardSelfStaleThresholdMs.
+        // Distinct from leaderboardStale (which fires on EventSource
+        // errors): the connection may look fine while traffic is
+        // actually dead. Only the current player's row reacts to it.
+        this.leaderboardSelfStale = false;
+        this.leaderboardLastFrameAt = 0;
+        this.leaderboardSelfStaleTimer = null;
         // Register the unload cleanup exactly once. Doing it here
         // (rather than per-subscribe) means repeat subscriptions don't
         // stack up redundant listeners. closeLeaderboardStream is a
@@ -625,20 +644,32 @@ export class GameApp {
         // Retry click or a visibility-change retry can clear the dim.
         this.leaderboardStale = false;
         this.leaderboardErrorCount = 0;
+        this.leaderboardSelfStale = false;
+        this.leaderboardLastFrameAt = Date.now();
         const url = `/api/quizzes/${encodeURIComponent(this.quizSlugId)}/leaderboard/stream`;
         const source = new EventSource(url);
+        const markAlive = () => {
+            this.leaderboardLastFrameAt = Date.now();
+            this.leaderboardSelfStale = false;
+        };
         source.onmessage = (ev) => {
-            // Successful frame — the stream is alive, reset the error
-            // budget so a transient drop later doesn't immediately
-            // promote to stale.
+            // Successful frame -- the stream is alive, reset the
+            // error budget so a transient drop later doesn't
+            // immediately promote to stale.
             this.leaderboardErrorCount = 0;
             this.leaderboardStale = false;
+            markAlive();
             try {
                 this.leaderboard = JSON.parse(ev.data);
             } catch (err) {
                 console.warn('leaderboard SSE payload was not valid JSON', err);
             }
         };
+        // Typed heartbeat (#336): server emits one every 25s. Doesn't
+        // change the leaderboard data, just keeps markAlive ticking
+        // so a quiet stream isn't mistaken for a dead one.
+        source.addEventListener('heartbeat', markAlive);
+        this.startLeaderboardSelfStaleTimer();
         source.onerror = () => {
             // EventSource auto-reconnects unless we close it. Tolerate
             // a few transient drops, but if the server is truly gone
@@ -675,6 +706,23 @@ export class GameApp {
             this.leaderboardEventSource.close();
             this.leaderboardEventSource = null;
         }
+        if (this.leaderboardSelfStaleTimer) {
+            clearInterval(this.leaderboardSelfStaleTimer);
+            this.leaderboardSelfStaleTimer = null;
+        }
+    }
+
+    // startLeaderboardSelfStaleTimer polls every few seconds (#336):
+    // if the SSE stream has been silent past the threshold, flip the
+    // self-stale flag so the current player's row drops the dot and
+    // dims. The next live frame (data or heartbeat) clears it.
+    startLeaderboardSelfStaleTimer() {
+        if (this.leaderboardSelfStaleTimer || typeof setInterval !== 'function') return;
+        this.leaderboardSelfStaleTimer = setInterval(() => {
+            if (Date.now() - this.leaderboardLastFrameAt > leaderboardSelfStaleThresholdMs) {
+                this.leaderboardSelfStale = true;
+            }
+        }, leaderboardSelfStaleCheckMs);
     }
 
     // animateFeedback gives the feedback notification a noticeable kick

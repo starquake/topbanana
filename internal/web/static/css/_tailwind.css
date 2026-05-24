@@ -193,6 +193,16 @@
     .leaderboard-stale {
         @apply opacity-60;
     }
+    /* Per-row dim + label when the viewer's own SSE stream has been
+     * silent for > 50s (#336). Distinct from .leaderboard-stale: only
+     * the current player's row reacts, since this is a local signal
+     * about the viewer's connection, not the leaderboard data. */
+    .leaderboard-self-stale {
+        @apply opacity-60;
+    }
+    .leaderboard-self-stale-label {
+        @apply ml-2 text-text-mute text-[0.78rem];
+    }
     /* Microtype label used as field/section eyebrow. Appears on every form
      * field (question form + quiz form + auth forms) so it earns its keep. */
     .label-eyebrow {

@@ -427,15 +427,13 @@ func (s *leaderboardStreamer) writeEvent(ctx context.Context, res quizLeaderboar
 	return true
 }
 
-// writeHeartbeat writes a single SSE comment frame and flushes. The
-// frame is `:\n\n` — comment lines start with a colon and the spec
-// requires EventSource implementations to ignore them, so this never
-// fires a client-side `onmessage`. Its only job is to keep the TCP
-// connection warm so Firefox / intermediate proxies don't tear down
-// an idle SSE stream as NS_ERROR_PARTIAL_TRANSFER (#244 follow-up).
-// Returns false on write/flush failure so the caller can exit cleanly.
+// writeHeartbeat writes a typed `heartbeat` SSE event and flushes.
+// Keeps the TCP connection warm (Firefox tears down idle streams as
+// NS_ERROR_PARTIAL_TRANSFER, #244 follow-up). Typed rather than a
+// `:` comment so the client can listen via addEventListener and
+// reset its last-frame timestamp (#336 self-stale dot drop).
 func (s *leaderboardStreamer) writeHeartbeat() bool {
-	if _, err := fmt.Fprint(s.w, ":\n\n"); err != nil {
+	if _, err := fmt.Fprint(s.w, "event: heartbeat\ndata: ping\n\n"); err != nil {
 		return false
 	}
 	if err := s.rc.Flush(); err != nil {

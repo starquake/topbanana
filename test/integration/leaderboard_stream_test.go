@@ -292,22 +292,25 @@ func TestLeaderboardStream_HeartbeatKeepsConnectionAlivePastWriteTimeout(t *test
 		t.Fatalf("stream status = %d, want %d", got, want)
 	}
 
-	// Drain lines as they arrive. heartbeatLines counts SSE comment
-	// frames (lines beginning with ":"); a single one past the 10s
-	// mark proves the WriteTimeout fix is in place AND the heartbeat
-	// is firing.
+	// Drain lines as they arrive. heartbeatLines counts typed
+	// heartbeat events (`event: heartbeat`); a single one past the
+	// 10s mark proves the WriteTimeout fix is in place AND the
+	// heartbeat is firing. The heartbeat moved from a `:` comment
+	// frame to a typed event in #336 so the client can listen for
+	// it via addEventListener and reset its last-frame timestamp.
 	scanner := bufio.NewScanner(streamResp.Body)
 	var heartbeatLines int
 	var sawInitialData bool
 	for scanner.Scan() {
 		line := scanner.Text()
 		switch {
-		case strings.HasPrefix(line, "data: "):
-			sawInitialData = true
-		case strings.HasPrefix(line, ":"):
+		case line == "event: heartbeat":
 			heartbeatLines++
+		case strings.HasPrefix(line, "data: ") && line != "data: ping":
+			sawInitialData = true
 		default:
-			// Blank separator lines and "event:" framing — ignore.
+			// Blank separator lines, the heartbeat's `data: ping`,
+			// and other framing -- ignore.
 		}
 	}
 	elapsed := time.Since(start)

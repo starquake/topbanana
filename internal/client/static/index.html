@@ -223,12 +223,16 @@
                             </thead>
                             <tbody>
                                 <template x-for="entry in leaderboard.entries" :key="entry.playerId">
-                                    <tr :aria-current="entry.isCurrentPlayer ? 'true' : null">
+                                    <tr :aria-current="entry.isCurrentPlayer ? 'true' : null"
+                                        :class="{ 'leaderboard-self-stale': entry.isCurrentPlayer && leaderboardSelfStale }">
                                         <td x-text="entry.rank"></td>
                                         <td>
                                             <span x-text="entry.username"></span>
-                                            <template x-if="entry.inProgress">
+                                            <template x-if="entry.inProgress && !(entry.isCurrentPlayer && leaderboardSelfStale)">
                                                 <span class="leaderboard-in-progress" role="img" aria-label="Still answering" title="Still answering"></span>
+                                            </template>
+                                            <template x-if="entry.isCurrentPlayer && leaderboardSelfStale">
+                                                <span class="leaderboard-self-stale-label" role="status">You appear offline</span>
                                             </template>
                                         </td>
                                         <td x-text="entry.score"></td>
