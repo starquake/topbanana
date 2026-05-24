@@ -137,7 +137,9 @@ func HandleGoogleCallback(
 	authn *GoogleAuthenticator,
 	csrfMgr *csrf.Manager,
 	identities OAuthIdentityStore,
+	players PlayerStore,
 	sessions *session.Manager,
+	games AnonymousGameMigrator,
 	registrationEnabled bool,
 ) http.Handler {
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
@@ -181,6 +183,7 @@ func HandleGoogleCallback(
 		}
 
 		sessions.Set(w, player.ID)
+		migrateGamesAfterSignIn(r.Context(), logger, players, games, sessionPlayerID, player.ID)
 		http.Redirect(w, r, landingPathFor(player.Role), http.StatusSeeOther)
 	})
 }

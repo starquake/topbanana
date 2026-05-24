@@ -12,12 +12,18 @@ import (
 )
 
 // Stores is a collection of stores for the application.
+//
+// GameStore satisfies both game.Store (the broad interface the game
+// service uses) and auth.AnonymousGameMigrator (the narrow one the
+// post-sign-in migration uses); both slots point at the same concrete
+// instance so consumers only see the methods relevant to their flow.
 type Stores struct {
-	Quizzes quiz.Store
-	Games   game.Store
-	Players auth.PlayerStore
-	OAuth   auth.OAuthIdentityStore
-	Home    home.Store
+	Quizzes      quiz.Store
+	Games        game.Store
+	GameMigrator auth.AnonymousGameMigrator
+	Players      auth.PlayerStore
+	OAuth        auth.OAuthIdentityStore
+	Home         home.Store
 }
 
 // New initializes a new Stores instance with the provided database connection.
@@ -27,12 +33,14 @@ type Stores struct {
 // so they only see the methods relevant to their flow.
 func New(conn *sql.DB, logger *slog.Logger) *Stores {
 	players := NewPlayerStore(conn, logger)
+	games := NewGameStore(conn, logger)
 
 	return &Stores{
-		Quizzes: NewQuizStore(conn, logger),
-		Games:   NewGameStore(conn, logger),
-		Players: players,
-		OAuth:   players,
-		Home:    NewHomeStore(conn, logger),
+		Quizzes:      NewQuizStore(conn, logger),
+		Games:        games,
+		GameMigrator: games,
+		Players:      players,
+		OAuth:        players,
+		Home:         NewHomeStore(conn, logger),
 	}
 }

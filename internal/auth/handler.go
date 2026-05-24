@@ -303,11 +303,17 @@ func redirectIfSignedIn(
 // credentials, signs the player in, and redirects to the admin landing page.
 // registrationEnabled controls whether error renders show the "No account? Register" link.
 // googleEnabled controls whether error renders show the "Sign in with Google" button.
+// games is the post-login migration hook (#406): when the request
+// arrives with a session pointing at an anonymous row, that row's
+// game history is carried onto the signed-in account. Nil disables
+// the migration — accepted by callers (tests) that don't care about
+// the migration path.
 func HandleLoginSubmit(
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
 	players PlayerStore,
 	sessions *session.Manager,
+	games AnonymousGameMigrator,
 	registrationEnabled, googleEnabled bool,
 ) http.Handler {
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
@@ -371,7 +377,12 @@ func HandleLoginSubmit(
 			return
 		}
 
+		var priorSessionPlayerID *int64
+		if id, ok := sessions.PlayerID(r); ok {
+			priorSessionPlayerID = &id
+		}
 		sessions.Set(w, player.ID)
+		migrateGamesAfterSignIn(r.Context(), logger, players, games, priorSessionPlayerID, player.ID)
 		http.Redirect(w, r, landingPathFor(player.Role), http.StatusSeeOther)
 	})
 }

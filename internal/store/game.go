@@ -406,6 +406,53 @@ func (s *GameStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([
 	return ids, nil
 }
 
+// ReattributeGames moves every game_answers + game_participants row
+// from fromPlayerID onto toPlayerID, skipping quizzes the destination
+// player has already played (the UNIQUE (player_id, quiz_id) index on
+// game_participants would otherwise reject the move). The two
+// statements run in a single transaction so a crash in the middle
+// cannot leave answers attributed to a player who has no participant
+// row for the same game.
+//
+// Returns the participant-row count that moved. Zero is a valid
+// "nothing to do" outcome — callers can short-circuit any post-move
+// work (SSE refresh, orphan cleanup) on it.
+//
+// Used by the post-login migration (#406) when a visitor's session
+// flipped from an anonymous row to a different signed-in account; the
+// anonymous row's game history is carried onto the signed-in account
+// so a leaderboard entry the visitor just earned does not disappear.
+func (s *GameStore) ReattributeGames(ctx context.Context, fromPlayerID, toPlayerID int64) (int64, error) {
+	var movedParticipants int64
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		// Move answers first while the participant rows on
+		// fromPlayerID still exist — the answers query joins through
+		// game_participants to scope which games are eligible.
+		if _, aErr := q.ReattributeGameAnswers(ctx, db.ReattributeGameAnswersParams{
+			ToPlayerID:   toPlayerID,
+			FromPlayerID: fromPlayerID,
+		}); aErr != nil {
+			return fmt.Errorf("reattribute game_answers: %w", aErr)
+		}
+
+		moved, pErr := q.ReattributeGameParticipants(ctx, db.ReattributeGameParticipantsParams{
+			ToPlayerID:   toPlayerID,
+			FromPlayerID: fromPlayerID,
+		})
+		if pErr != nil {
+			return fmt.Errorf("reattribute game_participants: %w", pErr)
+		}
+		movedParticipants = moved
+
+		return nil
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to reattribute games from %d to %d: %w", fromPlayerID, toPlayerID, err)
+	}
+
+	return movedParticipants, nil
+}
+
 func (s *GameStore) deleteGamesForPlayerOnQuizTx(
 	ctx context.Context, tx *sql.Tx, playerID, quizID int64,
 ) error {

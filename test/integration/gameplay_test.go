@@ -241,6 +241,7 @@ func registerGameplayAdmin(ctx context.Context, t *testing.T, client *http.Clien
 // out of setupIntegration as the first return value) to avoid containedctx.
 type integrationSetup struct {
 	BaseURL string
+	DBURI   string
 	Stores  *store.Stores
 }
 
@@ -268,6 +269,7 @@ func setupIntegration(t *testing.T) (context.Context, integrationSetup) {
 
 	return ctx, integrationSetup{
 		BaseURL: srv.BaseURL,
+		DBURI:   srv.DBURI,
 		Stores:  store.New(db, slog.Default()),
 	}
 }
