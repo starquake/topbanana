@@ -36,6 +36,28 @@ type PopularQuiz struct {
 	PlayCount   int
 }
 
+// Viewer is the slice of the signed-in player the home layout needs to
+// render the "Signed in as X · Log out" footer affordance. Nil when
+// the request is anonymous (no session, or a session pointing at an
+// EnsurePlayer auto-petname row).
+type Viewer struct {
+	Username string
+}
+
+// ViewerFunc resolves the signed-in player for a request, or returns
+// nil when the request is anonymous. The home handler invokes this
+// per-request; keeping it a function (not an interface) lets the
+// wiring layer pull the session + player store dependencies together
+// without home having to import either internal/auth or internal/store.
+type ViewerFunc func(r *http.Request) *Viewer
+
+// CSRFTokenFunc returns a CSRF token bound to the request's cookie.
+// Used to populate the hidden field of the footer's log-out form so
+// the CSRF middleware on POST /logout accepts the submission. Same
+// "pass a function, don't import the csrf package" rationale as
+// [ViewerFunc].
+type CSRFTokenFunc func(w http.ResponseWriter, r *http.Request) string
+
 // PlayURL is the share-able deep link the home page card points at.
 // Mirrors the per-quiz share path the admin list uses.
 func (p PopularQuiz) PlayURL() string {
@@ -61,11 +83,14 @@ type Store interface {
 
 // pageData is the render-time payload for index.gohtml. Top-N slices
 // are bounded at [maxItems] so the handler never feeds the template a
-// pathologically long list even if the store returns one.
+// pathologically long list even if the store returns one. Viewer is
+// nil for anonymous requests; the base template renders the footer's
+// log-out affordance only when non-nil.
 type pageData struct {
 	Title          string
 	PopularQuizzes []*PopularQuiz
 	ActivePlayers  []*ActivePlayer
+	Viewer         *Viewer
 }
 
 // Handle returns the [http.Handler] for GET /. The template tree is
@@ -74,11 +99,26 @@ type pageData struct {
 // each render. Errors fetching either list degrade gracefully: the page
 // renders an empty state for the failing section so the admin link
 // stays reachable even if the database is having a bad day.
-func Handle(logger *slog.Logger, store Store) http.Handler {
+//
+// viewer and csrfToken are nullable: when both are nil the footer
+// renders the "Log in" link instead of the signed-in affordance, and
+// the log-out form's CSRF field stays blank (the form would fail the
+// middleware check on submit, but it is not rendered in that branch
+// anyway). Tests that don't care about the auth state pass nil for
+// both.
+func Handle(
+	logger *slog.Logger,
+	store Store,
+	viewer ViewerFunc,
+	csrfToken CSRFTokenFunc,
+) http.Handler {
 	t := parseTemplate("home/pages/index.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data := pageData{Title: "Top Banana!"}
+		if viewer != nil {
+			data.Viewer = viewer(r)
+		}
 
 		quizzes, err := store.ListPopularQuizzes(r.Context())
 		if err != nil {
@@ -94,7 +134,7 @@ func Handle(logger *slog.Logger, store Store) http.Handler {
 			data.ActivePlayers = truncate(players)
 		}
 
-		executeWithOGImage(w, r, logger, t, "render home template", data)
+		executeTemplate(w, r, logger, t, csrfToken, "render home template", data)
 	})
 }
 
@@ -128,10 +168,12 @@ func (a AllQuizRow) PlayURL() string {
 
 // allQuizzesData backs all-quizzes.gohtml. The slice can be empty when
 // no quizzes exist yet — the template renders an empty-state message
-// rather than a bare page.
+// rather than a bare page. Viewer wires the same footer affordance as
+// the home page (see [pageData.Viewer]).
 type allQuizzesData struct {
 	Title   string
 	Quizzes []*AllQuizRow
+	Viewer  *Viewer
 }
 
 // HandleAllQuizzes returns the [http.Handler] for GET /quizzes (#284).
@@ -142,11 +184,19 @@ type allQuizzesData struct {
 // lookup would produce. A failure in either underlying query renders the
 // page with the empty list rather than 500-ing — the admin link in the
 // footer stays reachable.
-func HandleAllQuizzes(logger *slog.Logger, store QuizLister) http.Handler {
+func HandleAllQuizzes(
+	logger *slog.Logger,
+	store QuizLister,
+	viewer ViewerFunc,
+	csrfToken CSRFTokenFunc,
+) http.Handler {
 	t := parseTemplate("home/pages/all-quizzes.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data := allQuizzesData{Title: "All quizzes — Top Banana!"}
+		if viewer != nil {
+			data.Viewer = viewer(r)
+		}
 
 		quizzes, err := store.ListPublicQuizzes(r.Context())
 		if err != nil {
@@ -170,17 +220,23 @@ func HandleAllQuizzes(logger *slog.Logger, store QuizLister) http.Handler {
 			})
 		}
 
-		executeWithOGImage(w, r, logger, t, "render all-quizzes template", data)
+		executeTemplate(w, r, logger, t, csrfToken, "render all-quizzes template", data)
 	})
 }
 
-// executeWithOGImage clones t, binds the per-request `ogImage` func,
-// and runs base.gohtml. Pulled out so [Handle] and [HandleAllQuizzes]
-// share the clone-and-Funcs dance — without the clone, concurrent
-// renders race on the shared template tree (#294).
-func executeWithOGImage(
+// executeTemplate clones t, binds the per-request `ogImage` and
+// `csrfToken` funcs, and runs base.gohtml. Pulled out so [Handle] and
+// [HandleAllQuizzes] share the clone-and-Funcs dance — without the
+// clone, concurrent renders race on the shared template tree (#294).
+//
+// csrfToken may be nil — the no-op shim registered in [parseTemplate]
+// stays in place, and any {{csrfToken}} call in the template emits
+// the empty string. The footer's log-out form is only rendered when
+// .Viewer is non-nil, so a nil csrfToken paired with a nil viewer
+// resolver is a coherent "no auth wiring" state for tests.
+func executeTemplate(
 	w http.ResponseWriter, r *http.Request, logger *slog.Logger,
-	t *template.Template, errMsg string, data any,
+	t *template.Template, csrfToken CSRFTokenFunc, errMsg string, data any,
 ) {
 	rt, cerr := t.Clone()
 	if cerr != nil {
@@ -189,9 +245,13 @@ func executeWithOGImage(
 
 		return
 	}
-	rt = rt.Funcs(template.FuncMap{
+	funcs := template.FuncMap{
 		"ogImage": func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
-	})
+	}
+	if csrfToken != nil {
+		funcs["csrfToken"] = func() string { return csrfToken(w, r) }
+	}
+	rt = rt.Funcs(funcs)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := rt.ExecuteTemplate(w, "base.gohtml", data); err != nil {
 		logger.ErrorContext(r.Context(), errMsg, slog.Any("err", err))
@@ -221,8 +281,9 @@ func truncate[T any](rows []T) []T {
 // is registered here.
 func parseTemplate(page string) *template.Template {
 	funcs := template.FuncMap{
-		"add":     func(a, b int) int { return a + b },
-		"ogImage": func() string { return "" },
+		"add":       func(a, b int) int { return a + b },
+		"ogImage":   func() string { return "" },
+		"csrfToken": func() string { return "" },
 	}
 	base := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmplFS(), "home/layouts/*.gohtml"),

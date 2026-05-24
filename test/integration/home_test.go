@@ -3,7 +3,11 @@
 package integration_test
 
 import (
+	"context"
+	"io"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -210,6 +214,164 @@ func TestHome_Integration(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestHome_Integration_FooterAffordance covers #408: the home-page
+// footer flips between "Log in" (anonymous) and "Signed in as X · Log
+// out" (authenticated). Drives both states against a real server and
+// also verifies the rendered log-out form actually clears the session
+// via POST /logout.
+//
+//nolint:paralleltest,tparallel // subtests share the seeded admin and the same client jars; sequencing is intentional.
+func TestHome_Integration_FooterAffordance(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+	})
+
+	// Register a password account so the home-page session resolves to
+	// an authenticated player. authClient + the existing register-form
+	// helpers come from auth_redirect_test.go in the same package.
+	regClient := authClient(t)
+	location := registerForRedirect(ctx, t, regClient, srv.BaseURL, "homefooter-admin", "correct-battery-13")
+	if got, want := location, "/admin/quizzes"; got != want {
+		t.Fatalf("register Location = %q, want %q (first user becomes admin)", got, want)
+	}
+
+	t.Run("anonymous request renders the Log in link", func(t *testing.T) {
+		snap := fetchWithClient(ctx, t, authClient(t), srv.BaseURL+"/")
+		if got, want := snap.StatusCode, http.StatusOK; got != want {
+			t.Fatalf("status = %d, want %d", got, want)
+		}
+		if !strings.Contains(snap.Body, `href="/login"`) {
+			t.Error(`body missing /login link for anonymous visitor`)
+		}
+		if strings.Contains(snap.Body, "Signed in as") {
+			t.Error("body contains signed-in affordance for anonymous visitor")
+		}
+		if strings.Contains(snap.Body, `action="/logout"`) {
+			t.Error(`body contains log-out form for anonymous visitor`)
+		}
+	})
+
+	t.Run("authenticated request renders username and log-out form", func(t *testing.T) {
+		snap := fetchWithClient(ctx, t, regClient, srv.BaseURL+"/")
+		if got, want := snap.StatusCode, http.StatusOK; got != want {
+			t.Fatalf("status = %d, want %d", got, want)
+		}
+		if !strings.Contains(snap.Body, "Signed in as") {
+			t.Error("body missing signed-in affordance")
+		}
+		if !strings.Contains(snap.Body, "homefooter-admin") {
+			t.Error("body missing signed-in username")
+		}
+		if !strings.Contains(snap.Body, `action="/logout"`) {
+			t.Error("body missing log-out form")
+		}
+		if strings.Contains(snap.Body, `href="/login"`) {
+			t.Error(`body still contains /login link while signed in`)
+		}
+	})
+
+	t.Run("log-out form actually clears the session", func(t *testing.T) {
+		// Submit the form the home page rendered. The handler returns
+		// 303 to /login on success and clears the session cookie.
+		logoutSnap := postLogoutFromHome(ctx, t, regClient, srv.BaseURL)
+		if got, want := logoutSnap.StatusCode, http.StatusSeeOther; got != want {
+			t.Fatalf("logout status = %d, want %d", got, want)
+		}
+		if got, want := logoutSnap.Location, "/login"; got != want {
+			t.Errorf("logout Location = %q, want %q", got, want)
+		}
+
+		// The same client should now see the anonymous footer.
+		snap := fetchWithClient(ctx, t, regClient, srv.BaseURL+"/")
+		if !strings.Contains(snap.Body, `href="/login"`) {
+			t.Error(`body missing /login link after log-out`)
+		}
+		if strings.Contains(snap.Body, "Signed in as") {
+			t.Error("body still shows signed-in affordance after log-out")
+		}
+	})
+}
+
+// pageSnapshot is the readable slice of a home-page response the
+// affordance tests assert against. Pulled out as a struct so the
+// fetch helper can drain + close the body before returning, keeping
+// bodyclose happy without callers having to manage Response lifetimes.
+type pageSnapshot struct {
+	StatusCode int
+	Location   string
+	Body       string
+}
+
+// fetchWithClient fetches a URL with the supplied client (so its
+// cookie jar carries the session + CSRF cookies between requests) and
+// returns the captured snapshot. Distinct from the package's existing
+// getBody helper, which always uses a fresh http.Client and so cannot
+// test signed-in flows that depend on cookie continuity.
+func fetchWithClient(ctx context.Context, t *testing.T, client *http.Client, target string) pageSnapshot {
+	t.Helper()
+
+	resp := httpGet(ctx, t, client, target)
+	defer closeBody(t, resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll err = %v, want nil", err)
+	}
+
+	return pageSnapshot{
+		StatusCode: resp.StatusCode,
+		Location:   resp.Header.Get("Location"),
+		Body:       string(body),
+	}
+}
+
+// postLogoutFromHome reads the home page to extract the CSRF token
+// the log-out form was rendered with, then POSTs the form with the
+// same client (cookie jar carries the session + CSRF nonce cookies).
+// Returns a snapshot of the logout response.
+func postLogoutFromHome(ctx context.Context, t *testing.T, client *http.Client, baseURL string) pageSnapshot {
+	t.Helper()
+
+	priming := fetchWithClient(ctx, t, client, baseURL+"/")
+	token := extractCSRFToken(t, priming.Body)
+
+	form := url.Values{"csrf_token": {token}}
+	req, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, baseURL+"/logout", strings.NewReader(form.Encode()),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("client.Do err = %v, want nil", err)
+	}
+	defer closeBody(t, resp.Body)
+
+	return pageSnapshot{
+		StatusCode: resp.StatusCode,
+		Location:   resp.Header.Get("Location"),
+	}
+}
+
+// extractCSRFToken pulls the csrf_token value out of the home-page
+// log-out form. The form's hidden input is the only one that matters
+// here; a regex keeps the helper independent of the surrounding
+// markup.
+func extractCSRFToken(t *testing.T, body string) string {
+	t.Helper()
+
+	re := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`)
+	matches := re.FindStringSubmatch(body)
+	if len(matches) < 2 {
+		t.Fatalf("csrf token missing from body (body excerpt: %.200q)", body)
+	}
+
+	return matches[1]
 }
 
 // finishGameInt creates a finished game for the (player, quiz) pair:
