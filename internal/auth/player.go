@@ -87,6 +87,22 @@ func (p *Player) IsAuthenticated() bool {
 	return p.PasswordHash != "" || p.Email != "" || p.Role == RoleAdmin
 }
 
+// AnonymousGameMigrator carries an anonymous visitor's game data onto
+// the account they just signed into. Implemented by store.GameStore;
+// defined here so the auth package can call into it without importing
+// internal/game or internal/store, keeping the dep graph narrow and
+// the post-login migration testable with a small stub.
+//
+// ReattributeGames moves every game_answers + game_participants row
+// from fromPlayerID onto toPlayerID, skipping quizzes the destination
+// player has already played (UNIQUE (player_id, quiz_id) on
+// game_participants). Both moves run in a single transaction; the
+// return value is the number of participant rows that actually
+// moved (zero is a valid "nothing to do" outcome).
+type AnonymousGameMigrator interface {
+	ReattributeGames(ctx context.Context, fromPlayerID, toPlayerID int64) (int64, error)
+}
+
 // PlayerStore is the persistence interface used by the auth package.
 type PlayerStore interface {
 	// GetPlayerByUsername returns the player with the given username.

@@ -124,7 +124,8 @@ func addAuthRoutes(
 	mux.Handle(
 		"POST /login",
 		csrfMW(auth.HandleLoginSubmit(
-			logger, csrfMgr, stores.Players, sessions, cfg.RegistrationEnabled, googleEnabled,
+			logger, csrfMgr, stores.Players, sessions, stores.GameMigrator,
+			cfg.RegistrationEnabled, googleEnabled,
 		)),
 	)
 	mux.Handle("POST /logout", csrfMW(auth.HandleLogout(sessions)))
@@ -140,7 +141,10 @@ func addAuthRoutes(
 		mux.Handle("GET /login/google", auth.HandleGoogleLogin(logger, googleAuth))
 		mux.Handle(
 			"GET /login/google/callback",
-			auth.HandleGoogleCallback(logger, googleAuth, csrfMgr, stores.OAuth, sessions, cfg.RegistrationEnabled),
+			auth.HandleGoogleCallback(
+				logger, googleAuth, csrfMgr, stores.OAuth, stores.Players, sessions, stores.GameMigrator,
+				cfg.RegistrationEnabled,
+			),
 		)
 	} else {
 		logger.Info(

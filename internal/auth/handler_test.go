@@ -793,7 +793,7 @@ func TestHandleLoginSubmit_Success(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := auth.HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), false, false)
+	handler := auth.HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false, false)
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"alice"},
 		"password": {"correctbattery"},
@@ -827,7 +827,7 @@ func TestHandleLoginSubmit_Success_Player(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := auth.HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), false, false)
+	handler := auth.HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false, false)
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"bob"},
 		"password": {"correctbattery"},
@@ -845,7 +845,7 @@ func TestHandleLoginSubmit_BadCredentials_UnknownUser(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := auth.HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), false, false)
+	handler := auth.HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false, false)
 
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"ghost"},
@@ -872,7 +872,7 @@ func TestHandleLoginSubmit_BadCredentials_WrongPassword(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := auth.HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), false, false)
+	handler := auth.HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false, false)
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"alice"},
 		"password": {"wrong-password-no"},
@@ -895,7 +895,7 @@ func TestHandleLoginSubmit_RejectsEmptyHash(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := auth.HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), false, false)
+	handler := auth.HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false, false)
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"legacy"},
 		"password": {"anything-goes-here-13"},

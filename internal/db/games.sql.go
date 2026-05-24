@@ -777,6 +777,77 @@ func (q *Queries) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]i
 	return items, nil
 }
 
+const reattributeGameAnswers = `-- name: ReattributeGameAnswers :execrows
+UPDATE game_answers
+SET player_id = ?1
+WHERE game_answers.player_id = ?2
+  AND game_answers.game_id IN (
+      SELECT gp.game_id FROM game_participants gp
+      WHERE gp.player_id = ?2
+        AND NOT EXISTS (
+            SELECT 1 FROM game_participants gp2
+            WHERE gp2.player_id = ?1
+              AND gp2.quiz_id = gp.quiz_id
+        )
+  )
+`
+
+type ReattributeGameAnswersParams struct {
+	ToPlayerID   int64
+	FromPlayerID int64
+}
+
+// Re-assigns game_answers rows from from_player_id to to_player_id for
+// the games belonging to from_player_id whose quizzes the destination
+// player has not yet played. Skipping the conflict cases keeps the
+// UNIQUE INDEX on game_participants (player_id, quiz_id) satisfied
+// when ReattributeGameParticipants runs immediately after.
+//
+// Used by the post-login migration (#406) that carries an anonymous
+// visitor's game history onto the account they just signed into.
+// Returns the affected row count so the caller can decide whether to
+// broadcast an SSE refresh or skip the no-op case.
+//
+// The two queries are called inside a single transaction at the
+// service layer so a partial migration cannot leave answers
+// attributed to a player who has no participant row for that game.
+func (q *Queries) ReattributeGameAnswers(ctx context.Context, arg ReattributeGameAnswersParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, reattributeGameAnswers, arg.ToPlayerID, arg.FromPlayerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const reattributeGameParticipants = `-- name: ReattributeGameParticipants :execrows
+UPDATE game_participants
+SET player_id = ?1
+WHERE game_participants.player_id = ?2
+  AND NOT EXISTS (
+      SELECT 1 FROM game_participants gp2
+      WHERE gp2.player_id = ?1
+        AND gp2.quiz_id = game_participants.quiz_id
+  )
+`
+
+type ReattributeGameParticipantsParams struct {
+	ToPlayerID   int64
+	FromPlayerID int64
+}
+
+// Re-assigns the participant rows themselves, skipping any quiz the
+// destination player has already played (UNIQUE (player_id, quiz_id)
+// would otherwise reject the UPDATE). Run after
+// ReattributeGameAnswers inside the same transaction so the answers
+// are moved while the source participation still exists.
+func (q *Queries) ReattributeGameParticipants(ctx context.Context, arg ReattributeGameParticipantsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, reattributeGameParticipants, arg.ToPlayerID, arg.FromPlayerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const startGame = `-- name: StartGame :execresult
 UPDATE games
 SET started_at = CURRENT_TIMESTAMP

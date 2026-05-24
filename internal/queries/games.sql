@@ -235,3 +235,46 @@ WHERE game_id IN (sqlc.slice('game_ids'));
 DELETE
 FROM games
 WHERE id IN (sqlc.slice('ids'));
+
+-- name: ReattributeGameAnswers :execrows
+-- Re-assigns game_answers rows from from_player_id to to_player_id for
+-- the games belonging to from_player_id whose quizzes the destination
+-- player has not yet played. Skipping the conflict cases keeps the
+-- UNIQUE INDEX on game_participants (player_id, quiz_id) satisfied
+-- when ReattributeGameParticipants runs immediately after.
+--
+-- Used by the post-login migration (#406) that carries an anonymous
+-- visitor's game history onto the account they just signed into.
+-- Returns the affected row count so the caller can decide whether to
+-- broadcast an SSE refresh or skip the no-op case.
+--
+-- The two queries are called inside a single transaction at the
+-- service layer so a partial migration cannot leave answers
+-- attributed to a player who has no participant row for that game.
+UPDATE game_answers
+SET player_id = sqlc.arg('to_player_id')
+WHERE game_answers.player_id = sqlc.arg('from_player_id')
+  AND game_answers.game_id IN (
+      SELECT gp.game_id FROM game_participants gp
+      WHERE gp.player_id = sqlc.arg('from_player_id')
+        AND NOT EXISTS (
+            SELECT 1 FROM game_participants gp2
+            WHERE gp2.player_id = sqlc.arg('to_player_id')
+              AND gp2.quiz_id = gp.quiz_id
+        )
+  );
+
+-- name: ReattributeGameParticipants :execrows
+-- Re-assigns the participant rows themselves, skipping any quiz the
+-- destination player has already played (UNIQUE (player_id, quiz_id)
+-- would otherwise reject the UPDATE). Run after
+-- ReattributeGameAnswers inside the same transaction so the answers
+-- are moved while the source participation still exists.
+UPDATE game_participants
+SET player_id = sqlc.arg('to_player_id')
+WHERE game_participants.player_id = sqlc.arg('from_player_id')
+  AND NOT EXISTS (
+      SELECT 1 FROM game_participants gp2
+      WHERE gp2.player_id = sqlc.arg('to_player_id')
+        AND gp2.quiz_id = game_participants.quiz_id
+  );
