@@ -97,6 +97,60 @@ SET password_hash    = sqlc.arg('password_hash'),
     username_claimed = 1
 WHERE username = sqlc.arg('username');
 
+-- name: GetPlayerByEmail :one
+-- Look up a player by email so the Google OAuth callback can link a
+-- fresh identity onto an existing row when the verified email matches
+-- (instead of creating a duplicate player). Returns sql.ErrNoRows when
+-- no row matches, which the store maps to ErrPlayerNotFound.
+SELECT *
+FROM players
+WHERE email = ?
+LIMIT 1;
+
+-- name: GetPlayerByProviderSubject :one
+-- Look up a player via their player_identities row. The OAuth callback
+-- runs this first; on a hit the caller knows the identity already
+-- exists and signs the player in without touching the email-based
+-- linking path.
+SELECT p.*
+FROM players p
+JOIN player_identities pi ON pi.player_id = p.id
+WHERE pi.provider = ? AND pi.subject = ?
+LIMIT 1;
+
+-- name: CreatePlayerFromOAuth :one
+-- Insert a brand-new player row for a first-time OAuth sign-in. No
+-- password_hash (the player has no local credential), email comes from
+-- the verified id-token claim, username_claimed is set to 1 because the
+-- caller supplies an auto-generated petname that the player will be
+-- prompted to change via the existing claim-name modal.
+--
+-- The role CASE mirrors CreatePlayerWithCredentials so an OAuth-only
+-- first registrant still earns the admin promotion atomically. This is
+-- intentional: a deployment that only uses Google sign-in must still
+-- be able to bootstrap its first admin without an out-of-band password
+-- step.
+INSERT INTO players (username, email, role, username_claimed)
+VALUES (
+    sqlc.arg('username'),
+    sqlc.arg('email'),
+    CASE
+        WHEN (SELECT COUNT(*) FROM players WHERE password_hash IS NOT NULL) = 0 THEN 'admin'
+        ELSE 'player'
+    END,
+    1
+)
+RETURNING *;
+
+-- name: LinkProviderIdentity :exec
+-- Attach a (provider, subject) pair to an existing players row. Called
+-- after CreatePlayerFromOAuth for the new-account path and after
+-- GetPlayerByEmail for the existing-email link path. The UNIQUE
+-- constraint on (provider, subject) prevents two players from claiming
+-- the same external identity.
+INSERT INTO player_identities (player_id, provider, subject)
+VALUES (?, ?, ?);
+
 -- name: UpdatePlayerUsername :one
 -- Updates the username on an anonymous player row in place. The WHERE
 -- clause refuses the update when the player has already claimed a

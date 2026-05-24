@@ -1,0 +1,556 @@
+package auth
+
+import (
+	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"sync"
+
+	"github.com/coreos/go-oidc/v3/oidc"
+	"golang.org/x/oauth2"
+
+	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/session"
+)
+
+// googleStateCookieName is the short-lived cookie that pins the OAuth
+// `state` parameter. Distinct from the form CSRF cookie because OAuth
+// state has different semantics: it round-trips through Google and is
+// only validated on the callback, whereas the form CSRF token is
+// validated on every unsafe POST.
+const googleStateCookieName = "tb_google_state"
+
+// googleStateMaxAge bounds how long a freshly issued state cookie
+// stays valid. The user has to click "Sign in", complete Google's
+// consent screen, and return - usually well under a minute. Ten
+// minutes gives slow flows headroom without leaving the cookie usable
+// indefinitely if a user wanders off.
+const googleStateMaxAge = 10 * 60
+
+// googleStateNonceLength is the length of the random nonce embedded
+// in the state value. 24 raw bytes (32 base64url chars) is comfortably
+// above the 128-bit collision threshold without bloating the cookie.
+const googleStateNonceLength = 24
+
+// googleStateDerivationLabel is mixed into the SESSION_KEY to derive
+// the HMAC key used to sign the state cookie. Versioned so we can
+// rotate without breaking outstanding cookies.
+const googleStateDerivationLabel = "google-state-v1"
+
+// googleDefaultIssuer is the production OIDC issuer URL. go-oidc
+// fetches <issuer>/.well-known/openid-configuration to bootstrap; the
+// integration test overrides this with an httptest.Server URL.
+const googleDefaultIssuer = "https://accounts.google.com"
+
+// ErrGoogleStateMismatch is returned when the state value submitted to
+// the callback does not match the cookie. Either CSRF, a stale cookie,
+// or a tampered redirect.
+var ErrGoogleStateMismatch = errors.New("google state mismatch")
+
+// GoogleConfig groups the runtime knobs needed by HandleGoogleLogin
+// and HandleGoogleCallback. Lets the route wiring stay readable
+// instead of threading half-a-dozen parameters through each handler.
+type GoogleConfig struct {
+	ClientID      string
+	ClientSecret  string
+	RedirectURL   string
+	IssuerURL     string
+	SecureCookies bool
+}
+
+// GoogleAuthenticator bundles the OIDC provider + state-cookie key
+// once at startup so each request reuses the same cached discovery
+// document and signing key. Safe for concurrent use.
+type GoogleAuthenticator struct {
+	cfg      GoogleConfig
+	stateKey []byte
+
+	initOnce sync.Once
+	initErr  error
+	provider *oidc.Provider
+	verifier *oidc.IDTokenVerifier
+	oauth2   *oauth2.Config
+}
+
+// NewGoogleAuthenticator returns an authenticator ready to serve the
+// /login/google + callback routes. sessionKey is reused (via HMAC
+// derivation) to sign the state cookie so the deployment does not
+// need a second secret.
+func NewGoogleAuthenticator(cfg GoogleConfig, sessionKey []byte) *GoogleAuthenticator {
+	h := hmac.New(sha256.New, sessionKey)
+	_, _ = h.Write([]byte(googleStateDerivationLabel))
+
+	return &GoogleAuthenticator{
+		cfg:      cfg,
+		stateKey: h.Sum(nil),
+	}
+}
+
+// HandleGoogleLogin renders the initial redirect to Google's consent
+// screen. It mints a random state value, signs it into a short-lived
+// cookie, and redirects the browser to the authorization URL with the
+// same value in the `state` query parameter.
+func HandleGoogleLogin(logger *slog.Logger, authn *GoogleAuthenticator) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := authn.ensureProvider(r.Context()); err != nil {
+			logger.ErrorContext(r.Context(), "error initialising oidc provider", slog.Any("err", err))
+			http.Error(w, "internal error", http.StatusInternalServerError)
+
+			return
+		}
+
+		nonce, err := newStateNonce()
+		if err != nil {
+			logger.ErrorContext(r.Context(), "error generating state nonce", slog.Any("err", err))
+			http.Error(w, "internal error", http.StatusInternalServerError)
+
+			return
+		}
+
+		state := signState(authn.stateKey, nonce)
+		http.SetCookie(w, googleStateCookie(state, authn.cfg.SecureCookies, googleStateMaxAge))
+
+		http.Redirect(w, r, authn.oauth2.AuthCodeURL(state, oauth2.AccessTypeOnline), http.StatusFound)
+	})
+}
+
+// HandleGoogleCallback handles the redirect back from Google. It
+// validates the state cookie, exchanges the code for tokens, verifies
+// the id_token, finds-or-links a player, signs them in, and redirects
+// to the role-appropriate landing page.
+//
+// On any user-facing failure the handler re-renders the login template
+// with a short error message instead of 500-ing, so the player sees a
+// recoverable form rather than a stack trace.
+//
+// The find-or-link decision lives in linkOrCreateGooglePlayer; this
+// handler is just the request-shaped wrapper around it.
+func HandleGoogleCallback(
+	logger *slog.Logger,
+	authn *GoogleAuthenticator,
+	csrfMgr *csrf.Manager,
+	identities OAuthIdentityStore,
+	sessions *session.Manager,
+	registrationEnabled bool,
+) http.Handler {
+	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Clear the state cookie unconditionally on entry so a single
+		// callback URL cannot be replayed even if the rest of the
+		// handler returns early.
+		http.SetCookie(w, googleStateCookie("", authn.cfg.SecureCookies, -1))
+
+		if msg, ok := validateCallbackRequest(authn.stateKey, r); !ok {
+			renderGoogleError(render, w, r, msg, registrationEnabled)
+
+			return
+		}
+
+		result := authn.exchangeAndVerify(r, logger)
+		if result.Fatal {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+
+			return
+		}
+		if result.UserMessage != "" {
+			renderGoogleError(render, w, r, result.UserMessage, registrationEnabled)
+
+			return
+		}
+
+		player, err := linkOrCreateGooglePlayer(r.Context(), identities, result.Subject, result.Email)
+		if err != nil {
+			logger.ErrorContext(r.Context(), "error linking google player", slog.Any("err", err))
+			renderGoogleError(render, w, r, "Sign-in failed. Please try again.", registrationEnabled)
+
+			return
+		}
+
+		sessions.Set(w, player.ID)
+		http.Redirect(w, r, landingPathFor(player.Role), http.StatusSeeOther)
+	})
+}
+
+// validateCallbackRequest walks the cheap up-front checks on a
+// callback: state validation, Google-reported error, and missing
+// code. Returns ("", true) when the request passes; otherwise returns
+// a user-facing message and false. Splitting this out keeps
+// HandleGoogleCallback under the function-length linter limit and
+// makes the early-exit paths trivially testable.
+func validateCallbackRequest(stateKey []byte, r *http.Request) (string, bool) {
+	if validateState(stateKey, r) != nil {
+		return "Sign-in expired. Please try again.", false
+	}
+
+	if errParam := r.URL.Query().Get("error"); errParam != "" {
+		// Google reports user-side failures (consent declined,
+		// account chooser closed) by redirecting with ?error=...
+		// instead of an error code; keep the message generic.
+		return "Google sign-in was cancelled.", false
+	}
+
+	if r.URL.Query().Get("code") == "" {
+		return "Google sign-in failed. Please try again.", false
+	}
+
+	return "", true
+}
+
+// callbackResult holds the outcome of exchangeAndVerify. Exactly one
+// of Fatal=true, UserMessage!="", or (Subject!="" && Email!="") is
+// populated on return; the callback handler branches on those three
+// states.
+type callbackResult struct {
+	Subject     string
+	Email       string
+	UserMessage string
+	Fatal       bool
+}
+
+// googleClaims is the slice of the id_token payload the handler reads.
+// The struct's JSON keys are OIDC-spec snake_case; the nolint
+// directive overrides the project-wide camelCase rule for that
+// reason.
+//
+//nolint:tagliatelle // OIDC id_token claims are spec-defined snake_case.
+type googleClaims struct {
+	Email         string `json:"email"`
+	EmailVerified bool   `json:"email_verified"`
+}
+
+// exchangeAndVerify performs the token exchange + id_token
+// verification half of the callback. The three populated states on
+// the returned [callbackResult] map to the three outcomes: success
+// (Subject + Email populated); 500-worthy internal failure
+// (Fatal=true); user-facing failure that re-renders the login form
+// (UserMessage populated). email_verified=false is mapped to a
+// UserMessage so the caller never reaches the silent-link path with
+// an unverified address.
+func (a *GoogleAuthenticator) exchangeAndVerify(r *http.Request, logger *slog.Logger) callbackResult {
+	if err := a.ensureProvider(r.Context()); err != nil {
+		logger.ErrorContext(r.Context(), "error initialising oidc provider", slog.Any("err", err))
+
+		return callbackResult{Fatal: true}
+	}
+
+	token, err := a.oauth2.Exchange(r.Context(), r.URL.Query().Get("code"))
+	if err != nil {
+		logger.ErrorContext(r.Context(), "error exchanging oauth code", slog.Any("err", err))
+
+		return callbackResult{UserMessage: "Google sign-in failed. Please try again."}
+	}
+
+	rawIDToken, ok := token.Extra("id_token").(string)
+	if !ok || rawIDToken == "" {
+		logger.ErrorContext(r.Context(), "missing id_token from google token response")
+
+		return callbackResult{UserMessage: "Google sign-in failed. Please try again."}
+	}
+
+	idToken, err := a.verifier.Verify(r.Context(), rawIDToken)
+	if err != nil {
+		logger.ErrorContext(r.Context(), "id token verification failed", slog.Any("err", err))
+
+		return callbackResult{UserMessage: "Could not verify your Google sign-in."}
+	}
+
+	var claims googleClaims
+	if cErr := idToken.Claims(&claims); cErr != nil {
+		logger.ErrorContext(r.Context(), "id token claim parse failed", slog.Any("err", cErr))
+
+		return callbackResult{UserMessage: "Could not verify your Google sign-in."}
+	}
+
+	// email_verified is the security boundary for the silent
+	// account-linking path. Without it, anyone who can take over an
+	// unverified Google address could attach themselves to an
+	// existing Top Banana account with the same address.
+	if !claims.EmailVerified {
+		return callbackResult{
+			UserMessage: "Your Google account email is not verified. Verify it with Google and try again.",
+		}
+	}
+
+	return callbackResult{Subject: idToken.Subject, Email: claims.Email}
+}
+
+// linkOrCreateGooglePlayer is the database-side decision for a
+// verified Google sign-in. The order of operations is:
+//
+//  1. Identity already linked? Return the existing player.
+//  2. A players row with the same email exists? Link the new identity
+//     onto it (silent account linking on verified-email match).
+//  3. Otherwise create a fresh players row with an auto-petname and
+//     link the identity onto it.
+//
+// Silent linking is gated by email_verified=true at the handler
+// because that is the security boundary that lets us trust the email
+// claim. Without that guard step 2 would let a malicious Google
+// account take over an arbitrary player.
+//
+// Petname collisions are retried a bounded number of times because the
+// petname pool is large but not infinite; an unlucky string of
+// collisions is exponentially unlikely.
+func linkOrCreateGooglePlayer(
+	ctx context.Context,
+	identities OAuthIdentityStore,
+	subject, email string,
+) (*Player, error) {
+	existing, err := identities.GetPlayerByProviderSubject(ctx, ProviderGoogle, subject)
+	if err == nil {
+		return existing, nil
+	}
+	if !errors.Is(err, ErrPlayerNotFound) {
+		return nil, fmt.Errorf("get player by google subject: %w", err)
+	}
+
+	if email != "" {
+		linked, linkErr := linkExistingPlayerByEmail(ctx, identities, subject, email)
+		if linkErr == nil {
+			return linked, nil
+		}
+		if !errors.Is(linkErr, ErrPlayerNotFound) {
+			return nil, linkErr
+		}
+	}
+
+	return createGooglePlayer(ctx, identities, subject, email)
+}
+
+// linkExistingPlayerByEmail looks up a player by verified email and,
+// if one is found, links the supplied (provider, subject) onto it.
+// Returns ErrPlayerNotFound when no row matches the email; the
+// caller treats that sentinel as "no email match, create instead".
+func linkExistingPlayerByEmail(
+	ctx context.Context,
+	identities OAuthIdentityStore,
+	subject, email string,
+) (*Player, error) {
+	player, err := identities.GetPlayerByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, ErrPlayerNotFound) {
+			return nil, ErrPlayerNotFound
+		}
+
+		return nil, fmt.Errorf("get player by email: %w", err)
+	}
+
+	if linkErr := identities.LinkProviderIdentity(ctx, player.ID, ProviderGoogle, subject); linkErr != nil {
+		if errors.Is(linkErr, ErrIdentityAlreadyLinked) {
+			// Lost a race with a concurrent callback for the same
+			// (provider, subject). Re-read by subject and return that
+			// row.
+			refetched, refetchErr := identities.GetPlayerByProviderSubject(ctx, ProviderGoogle, subject)
+			if refetchErr != nil {
+				return nil, fmt.Errorf("refetch after link race: %w", refetchErr)
+			}
+
+			return refetched, nil
+		}
+
+		return nil, fmt.Errorf("link identity to existing player: %w", linkErr)
+	}
+
+	return player, nil
+}
+
+// createGooglePlayer creates a fresh players row + linked identity.
+// Retries a handful of petname collisions before giving up; the pool
+// is large enough that a real production deployment should never run
+// out, but a tight test loop could hit the same petname twice in a
+// row.
+func createGooglePlayer(
+	ctx context.Context,
+	identities OAuthIdentityStore,
+	subject, email string,
+) (*Player, error) {
+	const maxPetnameAttempts = 5
+	var lastErr error
+	for range maxPetnameAttempts {
+		username := GeneratePetname()
+		player, err := identities.CreatePlayerFromOAuth(ctx, username, email)
+		if err != nil {
+			if errors.Is(err, ErrUsernameTaken) {
+				lastErr = err
+
+				continue
+			}
+
+			return nil, fmt.Errorf("create player from oauth: %w", err)
+		}
+		if linkErr := identities.LinkProviderIdentity(ctx, player.ID, ProviderGoogle, subject); linkErr != nil {
+			return nil, fmt.Errorf("link identity to new player: %w", linkErr)
+		}
+
+		return player, nil
+	}
+
+	return nil, fmt.Errorf("create player after %d attempts: %w", maxPetnameAttempts, lastErr)
+}
+
+// ensureProvider lazily initialises the OIDC provider, verifier, and
+// oauth2.Config the first time a request arrives. Deferring this past
+// startup keeps the process bootable when Google (or the test mock) is
+// briefly unreachable, and the [sync.Once] means concurrent requests
+// share a single discovery fetch.
+func (a *GoogleAuthenticator) ensureProvider(ctx context.Context) error {
+	a.initOnce.Do(func() {
+		issuer := a.cfg.IssuerURL
+		if issuer == "" {
+			issuer = googleDefaultIssuer
+		}
+
+		provider, err := oidc.NewProvider(ctx, issuer)
+		if err != nil {
+			a.initErr = fmt.Errorf("oidc new provider: %w", err)
+
+			return
+		}
+
+		a.provider = provider
+		a.verifier = provider.Verifier(&oidc.Config{ClientID: a.cfg.ClientID})
+		a.oauth2 = &oauth2.Config{
+			ClientID:     a.cfg.ClientID,
+			ClientSecret: a.cfg.ClientSecret,
+			RedirectURL:  a.cfg.RedirectURL,
+			Endpoint:     provider.Endpoint(),
+			Scopes:       []string{oidc.ScopeOpenID, "email", "profile"},
+		}
+	})
+
+	if a.initErr != nil {
+		// Allow a retry on the next request after a transient failure
+		// (e.g. discovery endpoint flaky during deploy) by resetting
+		// the sync.Once on error. Without this an unlucky first
+		// request would pin the server in a permanent "init failed"
+		// state until restart.
+		err := a.initErr
+		a.initOnce = sync.Once{}
+		a.initErr = nil
+
+		return err
+	}
+
+	return nil
+}
+
+// newStateNonce returns a fresh random nonce as base64url-encoded
+// bytes. Falls back to a no-fallback error so the handler 500s rather
+// than issuing a predictable state value.
+func newStateNonce() (string, error) {
+	b := make([]byte, googleStateNonceLength)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate state nonce: %w", err)
+	}
+
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// signState returns the cookie value: nonce + "." + HMAC(nonce). The
+// HMAC binds the nonce to the deployment's secret so a value captured
+// elsewhere cannot be replayed against this server.
+func signState(key []byte, nonce string) string {
+	h := hmac.New(sha256.New, key)
+	_, _ = h.Write([]byte(nonce))
+
+	return nonce + "." + base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+}
+
+// validateState compares the state from the cookie with the state in
+// the query string in constant time, and re-verifies the HMAC so a
+// forged cookie cannot bypass the check.
+func validateState(key []byte, r *http.Request) error {
+	cookie, err := r.Cookie(googleStateCookieName)
+	if err != nil || cookie.Value == "" {
+		return ErrGoogleStateMismatch
+	}
+
+	submitted := r.URL.Query().Get("state")
+	if submitted == "" {
+		return ErrGoogleStateMismatch
+	}
+
+	if subtle.ConstantTimeCompare([]byte(submitted), []byte(cookie.Value)) != 1 {
+		return ErrGoogleStateMismatch
+	}
+
+	parts, ok := splitState(cookie.Value)
+	if !ok {
+		return ErrGoogleStateMismatch
+	}
+	h := hmac.New(sha256.New, key)
+	_, _ = h.Write([]byte(parts.Nonce))
+	wantMAC := h.Sum(nil)
+	gotMAC, decErr := base64.RawURLEncoding.DecodeString(parts.MAC)
+	if decErr != nil {
+		return ErrGoogleStateMismatch
+	}
+	if !hmac.Equal(gotMAC, wantMAC) {
+		return ErrGoogleStateMismatch
+	}
+
+	return nil
+}
+
+// splitState splits "nonce.mac" into its two pieces; ok is false when
+// the input is malformed.
+func splitState(value string) (stateParts, bool) {
+	for i := range value {
+		if value[i] == '.' {
+			return stateParts{Nonce: value[:i], MAC: value[i+1:]}, true
+		}
+	}
+
+	return stateParts{}, false
+}
+
+// stateParts holds the decoded pieces of a state cookie value.
+type stateParts struct {
+	Nonce string
+	MAC   string
+}
+
+// googleStateCookie returns the state cookie with the safe defaults.
+// HttpOnly is on; Secure follows the per-deployment policy (same
+// rationale as session/csrf - see [Config.SecureCookies]).
+func googleStateCookie(value string, secure bool, maxAge int) *http.Cookie {
+	//nolint:gosec // G124: Secure is intentionally policy-driven (production
+	// passes true via cfg.SecureCookies(); dev passes false so plain-HTTP
+	// LAN access works). See #205.
+	return &http.Cookie{
+		Name:     googleStateCookieName,
+		Value:    value,
+		Path:     "/login/google",
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+	}
+}
+
+// renderGoogleError re-renders the login template with a short
+// message. Keeps the failed-OAuth-flow UX consistent with the
+// invalid-credentials flow - a recoverable form, not an HTTP error
+// page.
+func renderGoogleError(
+	render *templateRenderer,
+	w http.ResponseWriter,
+	r *http.Request,
+	message string,
+	registrationEnabled bool,
+) {
+	render.render(w, r, http.StatusUnauthorized, formData{
+		Title:        "Log in",
+		Message:      message,
+		ShowRegister: registrationEnabled,
+		ShowGoogle:   true,
+	})
+}

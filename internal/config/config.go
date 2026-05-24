@@ -87,6 +87,23 @@ type Config struct {
 	// via time.ParseDuration; e2e and load-test deployments shrink this to a
 	// few hundred ms to speed up runs without losing the visual reveal phase.
 	RevealDelay time.Duration
+
+	// GoogleClientID, GoogleClientSecret, and GoogleRedirectURL are the
+	// Google OAuth 2.0 credentials issued in the Google Cloud Console.
+	// All three must be set for the /login/google routes to register; if
+	// any is empty the feature stays off (the button hides, the routes
+	// 404). Mirrors the RegistrationEnabled opt-in pattern so a fresh
+	// deployment does not surprise operators with extra surface.
+	GoogleClientID     string
+	GoogleClientSecret string
+	GoogleRedirectURL  string
+
+	// GoogleIssuerURL overrides the OIDC issuer base URL. Tests point
+	// this at an httptest.Server so the OIDC verifier fetches its
+	// discovery and JWKS from the mock instead of Google. Empty in
+	// production; the handler falls back to Google's documented
+	// issuer ("https://accounts.google.com") when this is unset.
+	GoogleIssuerURL string
 }
 
 // SecureCookies reports whether session and CSRF cookies should be issued
@@ -151,7 +168,21 @@ func Parse(getenv func(string) string) (*Config, error) {
 
 	c.AdminUsernames = parseAdminUsernames(getenv("ADMIN_USERNAMES"))
 
+	c.GoogleClientID = getenv("GOOGLE_CLIENT_ID")
+	c.GoogleClientSecret = getenv("GOOGLE_CLIENT_SECRET")
+	c.GoogleRedirectURL = getenv("GOOGLE_REDIRECT_URL")
+	c.GoogleIssuerURL = getenv("GOOGLE_ISSUER_URL")
+
 	return &c, nil
+}
+
+// GoogleLoginEnabled reports whether all three Google OAuth env vars are
+// populated. The Google sign-in routes only register when this returns
+// true; the login template hides the button as well. Lets a deployment
+// roll out the feature by setting credentials rather than flipping a
+// separate REGISTRATION_ENABLED-style switch.
+func (c *Config) GoogleLoginEnabled() bool {
+	return c.GoogleClientID != "" && c.GoogleClientSecret != "" && c.GoogleRedirectURL != ""
 }
 
 // parseTypedEnvVars reads strict-typed env vars (ints, durations, bools) into c. It returns a

@@ -100,6 +100,51 @@ func (q *Queries) CreateAnonymousPlayer(ctx context.Context, username string) (P
 	return i, err
 }
 
+const createPlayerFromOAuth = `-- name: CreatePlayerFromOAuth :one
+INSERT INTO players (username, email, role, username_claimed)
+VALUES (
+    ?1,
+    ?2,
+    CASE
+        WHEN (SELECT COUNT(*) FROM players WHERE password_hash IS NOT NULL) = 0 THEN 'admin'
+        ELSE 'player'
+    END,
+    1
+)
+RETURNING id, username, email, password_hash, role, created_at, username_claimed
+`
+
+type CreatePlayerFromOAuthParams struct {
+	Username string
+	Email    sql.NullString
+}
+
+// Insert a brand-new player row for a first-time OAuth sign-in. No
+// password_hash (the player has no local credential), email comes from
+// the verified id-token claim, username_claimed is set to 1 because the
+// caller supplies an auto-generated petname that the player will be
+// prompted to change via the existing claim-name modal.
+//
+// The role CASE mirrors CreatePlayerWithCredentials so an OAuth-only
+// first registrant still earns the admin promotion atomically. This is
+// intentional: a deployment that only uses Google sign-in must still
+// be able to bootstrap its first admin without an out-of-band password
+// step.
+func (q *Queries) CreatePlayerFromOAuth(ctx context.Context, arg CreatePlayerFromOAuthParams) (Player, error) {
+	row := q.db.QueryRowContext(ctx, createPlayerFromOAuth, arg.Username, arg.Email)
+	var i Player
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.Email,
+		&i.PasswordHash,
+		&i.Role,
+		&i.CreatedAt,
+		&i.UsernameClaimed,
+	)
+	return i, err
+}
+
 const createPlayerWithCredentials = `-- name: CreatePlayerWithCredentials :one
 INSERT INTO players (username, password_hash, role, username_claimed)
 VALUES (
@@ -151,6 +196,64 @@ func (q *Queries) CreatePlayerWithCredentials(ctx context.Context, arg CreatePla
 	return i, err
 }
 
+const getPlayerByEmail = `-- name: GetPlayerByEmail :one
+SELECT id, username, email, password_hash, role, created_at, username_claimed
+FROM players
+WHERE email = ?
+LIMIT 1
+`
+
+// Look up a player by email so the Google OAuth callback can link a
+// fresh identity onto an existing row when the verified email matches
+// (instead of creating a duplicate player). Returns sql.ErrNoRows when
+// no row matches, which the store maps to ErrPlayerNotFound.
+func (q *Queries) GetPlayerByEmail(ctx context.Context, email sql.NullString) (Player, error) {
+	row := q.db.QueryRowContext(ctx, getPlayerByEmail, email)
+	var i Player
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.Email,
+		&i.PasswordHash,
+		&i.Role,
+		&i.CreatedAt,
+		&i.UsernameClaimed,
+	)
+	return i, err
+}
+
+const getPlayerByProviderSubject = `-- name: GetPlayerByProviderSubject :one
+SELECT p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed
+FROM players p
+JOIN player_identities pi ON pi.player_id = p.id
+WHERE pi.provider = ? AND pi.subject = ?
+LIMIT 1
+`
+
+type GetPlayerByProviderSubjectParams struct {
+	Provider string
+	Subject  string
+}
+
+// Look up a player via their player_identities row. The OAuth callback
+// runs this first; on a hit the caller knows the identity already
+// exists and signs the player in without touching the email-based
+// linking path.
+func (q *Queries) GetPlayerByProviderSubject(ctx context.Context, arg GetPlayerByProviderSubjectParams) (Player, error) {
+	row := q.db.QueryRowContext(ctx, getPlayerByProviderSubject, arg.Provider, arg.Subject)
+	var i Player
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.Email,
+		&i.PasswordHash,
+		&i.Role,
+		&i.CreatedAt,
+		&i.UsernameClaimed,
+	)
+	return i, err
+}
+
 const getPlayerByUsername = `-- name: GetPlayerByUsername :one
 SELECT id, username, email, password_hash, role, created_at, username_claimed
 FROM players
@@ -171,6 +274,27 @@ func (q *Queries) GetPlayerByUsername(ctx context.Context, username string) (Pla
 		&i.UsernameClaimed,
 	)
 	return i, err
+}
+
+const linkProviderIdentity = `-- name: LinkProviderIdentity :exec
+INSERT INTO player_identities (player_id, provider, subject)
+VALUES (?, ?, ?)
+`
+
+type LinkProviderIdentityParams struct {
+	PlayerID int64
+	Provider string
+	Subject  string
+}
+
+// Attach a (provider, subject) pair to an existing players row. Called
+// after CreatePlayerFromOAuth for the new-account path and after
+// GetPlayerByEmail for the existing-email link path. The UNIQUE
+// constraint on (provider, subject) prevents two players from claiming
+// the same external identity.
+func (q *Queries) LinkProviderIdentity(ctx context.Context, arg LinkProviderIdentityParams) error {
+	_, err := q.db.ExecContext(ctx, linkProviderIdentity, arg.PlayerID, arg.Provider, arg.Subject)
+	return err
 }
 
 const setPlayerPasswordHash = `-- name: SetPlayerPasswordHash :execrows

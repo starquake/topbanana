@@ -432,6 +432,70 @@ func TestParse_AdminUsernames(t *testing.T) {
 	}
 }
 
+func TestParse_GoogleOAuth(t *testing.T) {
+	t.Parallel()
+
+	t.Run("all three vars wire through", func(t *testing.T) {
+		t.Parallel()
+
+		envs := map[string]string{
+			"GOOGLE_CLIENT_ID":     "id-123",
+			"GOOGLE_CLIENT_SECRET": "secret-abc",
+			"GOOGLE_REDIRECT_URL":  "https://example.test/login/google/callback",
+			"GOOGLE_ISSUER_URL":    "https://example.test",
+		}
+		getenv := func(key string) string { return envs[key] }
+		c, err := Parse(getenv)
+		if err != nil {
+			t.Fatalf("Parse() err = %v, want nil", err)
+		}
+		if got, want := c.GoogleClientID, envs["GOOGLE_CLIENT_ID"]; got != want {
+			t.Errorf("GoogleClientID = %q, want %q", got, want)
+		}
+		if got, want := c.GoogleClientSecret, envs["GOOGLE_CLIENT_SECRET"]; got != want {
+			t.Errorf("GoogleClientSecret = %q, want %q", got, want)
+		}
+		if got, want := c.GoogleRedirectURL, envs["GOOGLE_REDIRECT_URL"]; got != want {
+			t.Errorf("GoogleRedirectURL = %q, want %q", got, want)
+		}
+		if got, want := c.GoogleIssuerURL, envs["GOOGLE_ISSUER_URL"]; got != want {
+			t.Errorf("GoogleIssuerURL = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestConfig_GoogleLoginEnabled(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		clientID     string
+		clientSecret string
+		redirectURL  string
+		want         bool
+	}{
+		{name: "all set", clientID: "id", clientSecret: "secret", redirectURL: "url", want: true},
+		{name: "no vars", want: false},
+		{name: "missing client id", clientSecret: "secret", redirectURL: "url", want: false},
+		{name: "missing client secret", clientID: "id", redirectURL: "url", want: false},
+		{name: "missing redirect url", clientID: "id", clientSecret: "secret", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			c := &Config{
+				GoogleClientID:     tt.clientID,
+				GoogleClientSecret: tt.clientSecret,
+				GoogleRedirectURL:  tt.redirectURL,
+			}
+			if got, want := c.GoogleLoginEnabled(), tt.want; got != want {
+				t.Errorf("GoogleLoginEnabled() = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 func TestConfig_SecureCookies(t *testing.T) {
 	t.Parallel()
 	// SecureCookies decides whether session + CSRF cookies get the

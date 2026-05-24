@@ -61,10 +61,15 @@ func addRoutes(
 
 // addAuthRoutes registers the unauthenticated auth-flow routes. Registration
 // is only registered when REGISTRATION_ENABLED is true; when disabled,
-// /register naturally 404s from the mux, which is the desired UX.
+// /register naturally 404s from the mux, which is the desired UX. The
+// /login/google routes follow the same pattern: registered only when
+// every Google OAuth env var is set, 404 otherwise.
 //
 // The CSRF middleware guards every unsafe method; safe methods pass through so
-// the GET form renderer can still set the nonce cookie.
+// the GET form renderer can still set the nonce cookie. The Google OAuth
+// routes are intentionally GET-only (initial redirect + callback) and do
+// not need the form CSRF middleware; the OAuth state parameter is the
+// CSRF token for that flow.
 func addAuthRoutes(
 	mux *http.ServeMux,
 	logger *slog.Logger,
@@ -74,6 +79,7 @@ func addAuthRoutes(
 	cfg *config.Config,
 ) {
 	csrfMW := csrfMgr.Middleware
+	googleEnabled := cfg.GoogleLoginEnabled()
 
 	if cfg.RegistrationEnabled {
 		mux.Handle("GET /register", auth.HandleRegisterForm(logger, csrfMgr))
@@ -82,12 +88,33 @@ func addAuthRoutes(
 			csrfMW(auth.HandleRegisterSubmit(logger, csrfMgr, stores.Players, sessions, cfg.AdminUsernames)),
 		)
 	}
-	mux.Handle("GET /login", auth.HandleLoginForm(logger, csrfMgr, cfg.RegistrationEnabled))
+	mux.Handle("GET /login", auth.HandleLoginForm(logger, csrfMgr, cfg.RegistrationEnabled, googleEnabled))
 	mux.Handle(
 		"POST /login",
-		csrfMW(auth.HandleLoginSubmit(logger, csrfMgr, stores.Players, sessions, cfg.RegistrationEnabled)),
+		csrfMW(auth.HandleLoginSubmit(
+			logger, csrfMgr, stores.Players, sessions, cfg.RegistrationEnabled, googleEnabled,
+		)),
 	)
 	mux.Handle("POST /logout", csrfMW(auth.HandleLogout(sessions)))
+
+	if googleEnabled {
+		googleAuth := auth.NewGoogleAuthenticator(auth.GoogleConfig{
+			ClientID:      cfg.GoogleClientID,
+			ClientSecret:  cfg.GoogleClientSecret,
+			RedirectURL:   cfg.GoogleRedirectURL,
+			IssuerURL:     cfg.GoogleIssuerURL,
+			SecureCookies: cfg.SecureCookies(),
+		}, []byte(cfg.SessionKey))
+		mux.Handle("GET /login/google", auth.HandleGoogleLogin(logger, googleAuth))
+		mux.Handle(
+			"GET /login/google/callback",
+			auth.HandleGoogleCallback(logger, googleAuth, csrfMgr, stores.OAuth, sessions, cfg.RegistrationEnabled),
+		)
+	} else {
+		logger.Info(
+			"google sign-in disabled (set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URL to enable)",
+		)
+	}
 }
 
 // addAdminRoutes registers every /admin/* route. Each unsafe (POST/PUT/...)

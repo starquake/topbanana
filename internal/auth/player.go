@@ -27,6 +27,13 @@ var ErrPlayerNotAnonymous = errors.New("player is not anonymous")
 // so callers can map it to a 400 without re-validating themselves.
 var ErrUsernameEmpty = errors.New("username is empty")
 
+// ErrIdentityAlreadyLinked is returned by LinkProviderIdentity when the
+// (provider, subject) pair already exists. Distinct from ErrUsernameTaken
+// so the Google callback can distinguish a race between two concurrent
+// first-time sign-ins (handled by retrying the lookup) from a true
+// collision (handled as a 500).
+var ErrIdentityAlreadyLinked = errors.New("identity already linked")
+
 // Player represents an authenticated user (admin or player).
 type Player struct {
 	ID              int64
