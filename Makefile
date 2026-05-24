@@ -81,6 +81,22 @@ lint-migrations:
 	    echo "lint-migrations: no offending migrations."; \
 	fi
 
+# Advisory: flags non-ASCII bytes in Go/SQL sources (sqlc v1.31.1
+# breaks downstream queries on em-dashed SQL comments). Never fails
+# the build.
+.PHONY: lint-ascii
+lint-ascii:
+	@hits=$$(LC_ALL=C grep -rnP '[^\x00-\x7f]' \
+	    --include='*.go' --include='*.sql' \
+	    --exclude-dir='internal/db' \
+	    internal/ cmd/ 2>/dev/null || true); \
+	if [ -n "$$hits" ]; then \
+	    echo "lint-ascii: non-ASCII bytes in source (em dashes break sqlc; see CLAUDE.md):"; \
+	    echo "$$hits" | sed 's/^/  /'; \
+	else \
+	    echo "lint-ascii: no non-ASCII bytes in Go or SQL sources."; \
+	fi
+
 .PHONY: build
 build:
 	mkdir -p $(BIN_DIR)
