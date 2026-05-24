@@ -81,9 +81,16 @@ func TestParse(t *testing.T) {
 			wantFn func(c Config) bool
 		}{
 			{
-				name:   "fallback App Environment",
+				// APP_ENV unset must NOT silently fall back to
+				// "development" — that would make Secure cookies and
+				// the SESSION_KEY requirement opt-in rather than the
+				// fail-secure default. Parse leaves AppEnvironment as
+				// the empty string instead; the Makefile defaults
+				// APP_ENV=development for local dev targets so the
+				// loose behaviour stays opt-in via explicit config.
+				name:   "fallback App Environment is empty (fail-secure)",
 				key:    "APP_ENV",
-				wantFn: func(c Config) bool { return c.AppEnvironment == AppEnvironmentDefault },
+				wantFn: func(c Config) bool { return c.AppEnvironment == "" },
 			},
 			{
 				name:   "fallback Host",
@@ -305,6 +312,9 @@ func TestParse_RegistrationEnabled(t *testing.T) {
 					if key == "REGISTRATION_ENABLED" {
 						return tt.value
 					}
+					if key == "APP_ENV" {
+						return "development"
+					}
 
 					return ""
 				}
@@ -356,6 +366,9 @@ func TestParse_RevealDelay(t *testing.T) {
 				getenv := func(key string) string {
 					if key == "REVEAL_DELAY" {
 						return tt.value
+					}
+					if key == "APP_ENV" {
+						return "development"
 					}
 
 					return ""
@@ -417,6 +430,9 @@ func TestParse_AdminUsernames(t *testing.T) {
 				if key == "ADMIN_USERNAMES" {
 					return tt.value
 				}
+				if key == "APP_ENV" {
+					return "development"
+				}
 
 				return ""
 			}
@@ -439,6 +455,7 @@ func TestParse_GoogleOAuth(t *testing.T) {
 		t.Parallel()
 
 		envs := map[string]string{
+			"APP_ENV":              "development",
 			"GOOGLE_CLIENT_ID":     "id-123",
 			"GOOGLE_CLIENT_SECRET": "secret-abc",
 			"GOOGLE_REDIRECT_URL":  "https://example.test/login/google/callback",

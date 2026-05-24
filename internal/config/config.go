@@ -114,7 +114,9 @@ type Config struct {
 // cascades into "forbidden: invalid CSRF token" failures otherwise (#205).
 // Every other env (production, staging, demo, qa, unset) gets the flag so
 // a credential-bearing cookie can't accidentally leak over plain HTTP on
-// a non-production deploy (#340).
+// a non-production deploy (#340). Unset is intentionally fail-secure —
+// Parse leaves AppEnvironment as the empty string when APP_ENV is unset
+// so a bare-binary boot in a production-like context defaults to Secure.
 func (c *Config) SecureCookies() bool {
 	return c.AppEnvironment != AppEnvironmentDefault
 }
@@ -122,7 +124,6 @@ func (c *Config) SecureCookies() bool {
 // Parse parses environment variables into the config.
 func Parse(getenv func(string) string) (*Config, error) {
 	c := Config{
-		AppEnvironment:    AppEnvironmentDefault,
 		ClientDir:         ClientDirDefault,
 		Host:              HostDefault,
 		Port:              PortDefault,
@@ -132,7 +133,14 @@ func Parse(getenv func(string) string) (*Config, error) {
 		DBMaxIdleConns:    DBMaxIdleConnsDefault,
 		DBConnMaxLifetime: DBConnMaxLifetimeDefault,
 	}
-	// Overwrite defaults with environment variables.
+	// AppEnvironment is intentionally NOT pre-initialised to the
+	// development default: an unset APP_ENV is meant to fail-secure
+	// (Secure cookies on, SESSION_KEY required) so a bare-binary boot
+	// in a production-like context never silently drops the Secure
+	// attribute. Operators opt into the relaxed dev behaviour by
+	// setting APP_ENV=development explicitly (the Makefile defaults
+	// this for make server / dev / smoke). See [Config.SecureCookies]
+	// and #378.
 	if val := getenv("APP_ENV"); val != "" {
 		c.AppEnvironment = val
 	}

@@ -58,10 +58,15 @@ func startServer(t *testing.T, extraEnv map[string]string) (context.Context, tes
 	t.Cleanup(cleanup)
 
 	getenv := func(key string) string {
+		// APP_ENV=development keeps cookies non-Secure so the
+		// integration tests' http.Client (no TLS) gets the cookies
+		// the handlers set. Tests that need to exercise Secure-cookie
+		// behaviour can override APP_ENV via extraEnv.
 		env := map[string]string{
-			"HOST":   "localhost",
-			"PORT":   "0",
-			"DB_URI": dbURI,
+			"APP_ENV": "development",
+			"HOST":    "localhost",
+			"PORT":    "0",
+			"DB_URI":  dbURI,
 		}
 		maps.Copy(env, extraEnv)
 

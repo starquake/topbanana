@@ -31,7 +31,7 @@ func TestCheck_FreshDB_Succeeds(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	getenv := func(key string) string {
-		return map[string]string{"DB_URI": dbURI, "PORT": "0"}[key]
+		return map[string]string{"APP_ENV": "development", "DB_URI": dbURI, "PORT": "0"}[key]
 	}
 
 	var stdout bytes.Buffer
@@ -127,7 +127,7 @@ func fetchSeededPlayer(t *testing.T, dbURI string) *auth.Player {
 // only present so [config.Parse] is satisfied.
 func envFor(dbURI string) func(string) string {
 	return func(key string) string {
-		return map[string]string{"DB_URI": dbURI, "PORT": "0"}[key]
+		return map[string]string{"APP_ENV": "development", "DB_URI": dbURI, "PORT": "0"}[key]
 	}
 }
 
