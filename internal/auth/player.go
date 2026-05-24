@@ -76,6 +76,13 @@ func (p *Player) HasCustomName() bool {
 // the claim-flow code paths that depend on it. Used by surfaces that
 // gate on "is the visitor signed in?" rather than "is the row a
 // fresh claimable stub?", e.g. /login's already-signed-in redirect.
+//
+// The Email != "" branch is safe today because password registration
+// does not write an email; the only rows with email set are OAuth-
+// linked. When #111 starts capturing email on password registration,
+// revisit this predicate so an unverified password account does not
+// count as authenticated. See the footnote on #111 for the parallel
+// concern on linkExistingPlayerByEmail.
 func (p *Player) IsAuthenticated() bool {
 	return p.PasswordHash != "" || p.Email != "" || p.Role == RoleAdmin
 }

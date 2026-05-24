@@ -115,6 +115,45 @@ func TestGoogleLogin_CallbackCreatesPlayer(t *testing.T) {
 	requireDBRowCounts(t, srv.DBURI, mock.email, 1, 1)
 }
 
+// TestGoogleLogin_CallbackSecondUser_IsPlayer pins the credentialled
+// player promotion rule: only the very first credentialled registrant
+// becomes admin. Without this regression check, the OAuth-promotion
+// SQL that counts password-bearing rows would promote every Google
+// sign-in to admin on an OAuth-only deployment (no row ever has a
+// password_hash, so the count stays 0 forever).
+func TestGoogleLogin_CallbackSecondUser_IsPlayer(t *testing.T) {
+	t.Parallel()
+
+	mock := newGoogleMock(t)
+	mock.email = "first@example.test"
+	mock.subject = "google-sub-first"
+	mock.emailVerified = true
+	ctx, srv := startGoogleServer(t, mock)
+
+	// First Google sign-in becomes admin via the bootstrap path. Use
+	// a fresh client so the second flow does not inherit the session
+	// cookie this one sets.
+	first := driveGoogleFlow(ctx, t, authClient(t), srv.BaseURL, mock)
+	if got, want := first.Location, "/admin/quizzes"; got != want {
+		t.Fatalf("first Google sign-in Location = %q, want %q (bootstrap admin)", got, want)
+	}
+
+	// Re-point the mock at a different Google identity and drive a
+	// fresh flow. Same mock + same signing key + same discovery URL,
+	// so the verifier still trusts the id_token; only the subject and
+	// email change, which is what a second Google account looks like
+	// to the OAuth callback.
+	mock.mu.Lock()
+	mock.email = "second@example.test"
+	mock.subject = "google-sub-second"
+	mock.mu.Unlock()
+
+	second := driveGoogleFlow(ctx, t, authClient(t), srv.BaseURL, mock)
+	if got, want := second.Location, "/"; got != want {
+		t.Errorf("second Google sign-in Location = %q, want %q (player, not admin)", got, want)
+	}
+}
+
 // TestGoogleLogin_CallbackLinksExistingEmail pins the silent
 // account-linking rule: a Google sign-in whose verified email matches
 // an existing players row attaches the identity to it (no duplicate
@@ -482,6 +521,13 @@ type googleMock struct {
 	code          string
 	email         string
 	emailVerified bool
+	// subject is the Google-side stable user id minted into the
+	// id_token's `sub` claim. Defaults to testGoogleSubject in
+	// newGoogleMock so single-user tests can leave it alone; multi-
+	// user tests (e.g. the second-user-is-not-admin regression
+	// check) flip it between flows to simulate distinct Google
+	// accounts.
+	subject string
 }
 
 func newGoogleMock(t *testing.T) *googleMock {
@@ -492,7 +538,7 @@ func newGoogleMock(t *testing.T) *googleMock {
 		t.Fatalf("rsa.GenerateKey err = %v, want nil", err)
 	}
 
-	m := &googleMock{key: key}
+	m := &googleMock{key: key, subject: testGoogleSubject}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", m.handleDiscovery)
@@ -615,6 +661,7 @@ func (m *googleMock) handleToken(w http.ResponseWriter, r *http.Request) {
 	wantCode := m.code
 	email := m.email
 	emailVerified := m.emailVerified
+	subject := m.subject
 	m.mu.Unlock()
 
 	if got, want := r.FormValue("code"), wantCode; got != want {
@@ -637,7 +684,7 @@ func (m *googleMock) handleToken(w http.ResponseWriter, r *http.Request) {
 		AccessToken: "mock-access-token",
 		TokenType:   "Bearer",
 		ExpiresIn:   3600,
-		IDToken:     m.signIDToken(email, emailVerified),
+		IDToken:     m.signIDToken(subject, email, emailVerified),
 	}
 	writeJSON(w, resp)
 }
@@ -645,13 +692,13 @@ func (m *googleMock) handleToken(w http.ResponseWriter, r *http.Request) {
 // signIDToken mints an RS256 id_token whose iss / aud / sub / email /
 // email_verified claims match what the callback expects. The kid in
 // the header matches the JWKS entry so VerifyIDToken finds the key.
-func (m *googleMock) signIDToken(email string, emailVerified bool) string {
+func (m *googleMock) signIDToken(subject, email string, emailVerified bool) string {
 	header := mockJWTHeader{Alg: "RS256", Typ: "JWT", Kid: testGoogleKID}
 	now := time.Now().Unix()
 	payload := mockIDTokenClaims{
 		Iss:           m.URL,
 		Aud:           testGoogleClientID,
-		Sub:           testGoogleSubject,
+		Sub:           subject,
 		Email:         email,
 		EmailVerified: emailVerified,
 		Iat:           now,

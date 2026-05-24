@@ -16,7 +16,11 @@ SET username = ?1,
     password_hash = ?2,
     role = CASE
         WHEN CAST(?3 AS TEXT) = 'admin' THEN 'admin'
-        WHEN (SELECT COUNT(*) FROM players AS pp WHERE pp.password_hash IS NOT NULL) = 0 THEN 'admin'
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN 'admin'
         ELSE 'player'
     END,
     username_claimed = 1
@@ -39,11 +43,13 @@ type ClaimPlayerParams struct {
 // store maps to ErrPlayerAlreadyClaimed.
 //
 // The role CASE mirrors CreatePlayerWithCredentials so the "first
-// password-bearing registrant becomes admin" rule still triggers when the
+// credentialled registrant becomes admin" rule still triggers when the
 // very first sign-up happens through the claim path (i.e. the registrant
 // played anonymously first). The subquery aliases the players table as pp
 // so the column reference in the WHERE is unambiguous against the row
-// being updated.
+// being updated. The credentialled-player check covers both password and
+// OAuth identity so a deployment that bootstrapped its admin via Google
+// doesn't auto-promote later password claimers.
 //
 // username_claimed is set to 1 because the visitor is explicitly choosing
 // their username via the register form. This is the register-after-playing
@@ -74,7 +80,11 @@ const claimPlayerForOAuth = `-- name: ClaimPlayerForOAuth :one
 UPDATE players
 SET email = ?1,
     role = CASE
-        WHEN (SELECT COUNT(*) FROM players AS pp WHERE pp.password_hash IS NOT NULL) = 0 THEN 'admin'
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN 'admin'
         ELSE 'player'
     END
 WHERE players.id = ?2
@@ -159,7 +169,11 @@ VALUES (
     ?1,
     ?2,
     CASE
-        WHEN (SELECT COUNT(*) FROM players WHERE password_hash IS NOT NULL) = 0 THEN 'admin'
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN 'admin'
         ELSE 'player'
     END,
     1
@@ -182,7 +196,11 @@ type CreatePlayerFromOAuthParams struct {
 // first registrant still earns the admin promotion atomically. This is
 // intentional: a deployment that only uses Google sign-in must still
 // be able to bootstrap its first admin without an out-of-band password
-// step.
+// step. Counting credentialled players (password OR linked OAuth
+// identity) instead of only password-bearing rows keeps OAuth-only
+// deployments from promoting *every* sign-in to admin. Without this,
+// the second-and-onward Google sign-ins on a fresh DB would all see
+// count(password_hash IS NOT NULL) == 0 and become admin.
 func (q *Queries) CreatePlayerFromOAuth(ctx context.Context, arg CreatePlayerFromOAuthParams) (Player, error) {
 	row := q.db.QueryRowContext(ctx, createPlayerFromOAuth, arg.Username, arg.Email)
 	var i Player
@@ -205,7 +223,11 @@ VALUES (
     ?2,
     CASE
         WHEN CAST(?3 AS TEXT) = 'admin' THEN 'admin'
-        WHEN (SELECT COUNT(*) FROM players WHERE password_hash IS NOT NULL) = 0 THEN 'admin'
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN 'admin'
         ELSE 'player'
     END,
     1
@@ -219,7 +241,7 @@ type CreatePlayerWithCredentialsParams struct {
 	RequestedRole string
 }
 
-// The role decision lives in SQL so the "first password-bearing registrant
+// The role decision lives in SQL so the "first credentialled registrant
 // becomes admin" rule is atomic. Two concurrent first-registrations would
 // both observe count == 0 if we computed the role in Go and called INSERT
 // separately, leaving us with two admins. Folding the check into the same
@@ -227,8 +249,11 @@ type CreatePlayerWithCredentialsParams struct {
 //
 // The third placeholder is the role requested by the caller (env-list match,
 // otherwise "player"). If "admin" is requested explicitly we honour that;
-// otherwise we promote when there are no other rows with a password_hash
-// (legacy seed admin without a password is intentionally ignored).
+// otherwise we promote only when no credentialled player exists yet. A
+// "credentialled" player has either a password_hash or a linked OAuth
+// identity (player_identities row). The seeded admin (id=1) has neither
+// and is intentionally ignored so the operator's first real registration
+// replaces it as admin.
 //
 // username_claimed is set to 1 because a registering user explicitly chose
 // their username at the register form. The column tracks "did the player

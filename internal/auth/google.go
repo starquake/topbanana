@@ -593,6 +593,14 @@ type stateParts struct {
 // googleStateCookie returns the state cookie with the safe defaults.
 // HttpOnly is on; Secure follows the per-deployment policy (same
 // rationale as session/csrf - see [Config.SecureCookies]).
+//
+// Path is "/login/google" so the cookie is only sent on /login/google
+// and /login/google/callback, not on every page. RFC 6265 path-match
+// allows the cookie on /login/google/callback because the cookie-path
+// is a proper prefix and the next character of the request-path is
+// "/". Renaming the route to anything that doesn't share this prefix
+// would silently break the OAuth flow — keep the cookie path and the
+// route prefix in lockstep.
 func googleStateCookie(value string, secure bool, maxAge int) *http.Cookie {
 	//nolint:gosec // G124: Secure is intentionally policy-driven (production
 	// passes true via cfg.SecureCookies(); dev passes false so plain-HTTP
