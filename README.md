@@ -155,6 +155,10 @@ This project uses conventions used by the standard library and the following sty
 - [Go Style Guide](https://google.github.io/styleguide/go/)
 - [Go Code Review Comments](https://go.dev/wiki/CodeReviewComments)
 
+### Running the dev server
+- `make server` runs the Go server once.
+- `make dev` runs it with [watchexec](https://github.com/watchexec/watchexec), which SIGTERMs and restarts it on Go, template, or migration changes. Pair with `make tailwind-watch` in a second terminal for CSS regeneration on template edits.
+
 ### Running tests
 - To run unit tests: `make test`
 - To run integration tests: `make test-integration`
