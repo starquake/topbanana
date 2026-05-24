@@ -14,6 +14,17 @@ services:
       # three in .env to enable the "Sign in with Google" button. The
       # redirect URL must exactly match the entry in the Google Cloud
       # Console OAuth client.
+      #
+      # The deploy-production job in .github/workflows/deploy.yml does
+      # NOT currently forward GOOGLE_* secrets from GitHub Actions to
+      # the host's .env. To turn on Google sign-in for production you
+      # must (1) flip the defaults below from `${VAR:-}` to
+      # `${VAR:?…}` (mirroring the staging file), and (2) add the
+      # three GOOGLE_* vars to the deploy-production job's `env:`
+      # block, `envs:` allowlist, AND the .env heredoc. Skip step (2)
+      # and appleboy/ssh-action silently forwards an empty value,
+      # the heredoc bakes in a blank, and the container boots with
+      # Google sign-in silently disabled.
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       - GOOGLE_REDIRECT_URL=${GOOGLE_REDIRECT_URL:-}

@@ -47,6 +47,9 @@ jobs:
         uses: appleboy/ssh-action@v1.2.5
         env:
           SESSION_KEY: ${{ secrets.SESSION_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REDIRECT_URL: ${{ secrets.GOOGLE_REDIRECT_URL }}
           IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           IMAGE_TAG: edge
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -55,18 +58,32 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          envs: SESSION_KEY,IMAGE_NAME,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR
+          # appleboy/ssh-action only forwards env vars named here; missing
+          # one means the script sees an empty value and the .env heredoc
+          # bakes in a blank, which the compose ${VAR:?…} guard then
+          # rejects on boot. Keep this list in lockstep with the env block
+          # above and the .env heredoc below.
+          envs: SESSION_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URL,IMAGE_NAME,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR
           script: |
             set -e
             if [ -z "$SESSION_KEY" ]; then
               echo "ERROR: SESSION_KEY is empty or unset; refusing to deploy" >&2
               exit 1
             fi
+            for var in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REDIRECT_URL; do
+              if [ -z "${!var}" ]; then
+                echo "ERROR: $var is empty or unset; refusing to deploy (set it as a GitHub Actions secret on the staging environment)" >&2
+                exit 1
+              fi
+            done
             mkdir -p ~/topbanana-staging
             cd ~/topbanana-staging
             umask 077
             cat > .env <<EOF
             SESSION_KEY=${SESSION_KEY}
+            GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+            GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+            GOOGLE_REDIRECT_URL=${GOOGLE_REDIRECT_URL}
             IMAGE_NAME=${IMAGE_NAME}
             IMAGE_TAG=${IMAGE_TAG}
             EOF
