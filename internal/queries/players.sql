@@ -226,3 +226,22 @@ SET username = sqlc.arg('username'),
     username_claimed = 1
 WHERE id = sqlc.arg('id') AND password_hash IS NULL
 RETURNING *;
+
+-- name: RenamePlayer :one
+-- Renames any player row by id, regardless of password / email / role.
+-- The dedicated profile-page endpoint (POST /profile/username, #410)
+-- uses this so authenticated players (password, OAuth, admin) can
+-- change their display name. Anonymous rows have their own narrower
+-- path via UpdatePlayerUsername above; this query is intentionally
+-- not gated by password_hash so the OAuth-only and admin cases also
+-- work.
+--
+-- Returns the updated row when one was affected; the store wrapper
+-- maps sql.ErrNoRows to ErrPlayerNotFound and a UNIQUE constraint
+-- failure on players.username to ErrUsernameTaken so the handler can
+-- map both onto user-facing form errors.
+UPDATE players
+SET username = sqlc.arg('username'),
+    username_claimed = 1
+WHERE id = sqlc.arg('id')
+RETURNING *;

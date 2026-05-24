@@ -53,6 +53,10 @@ func (stubPlayerStore) UpdatePlayerUsername(_ context.Context, _ int64, _ string
 	return nil, errRouteStub
 }
 
+func (stubPlayerStore) RenamePlayer(_ context.Context, _ int64, _ string) (*auth.Player, error) {
+	return nil, errRouteStub
+}
+
 var errRouteStub = errors.New("stub")
 
 type stubQuizStore struct{}

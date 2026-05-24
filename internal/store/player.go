@@ -182,6 +182,41 @@ func (s *PlayerStore) UpdatePlayerUsername(
 	return playerFromRow(row), nil
 }
 
+// RenamePlayer changes the display name on an arbitrary player row,
+// not just an anonymous one. Used by the profile-page rename endpoint
+// (POST /profile/username, #410) so authenticated players (password,
+// OAuth, admin) can edit their own name. Returns auth.ErrUsernameEmpty
+// when the input trims to "", auth.ErrUsernameTaken on a UNIQUE
+// collision, and auth.ErrPlayerNotFound when no row matches the id.
+func (s *PlayerStore) RenamePlayer(
+	ctx context.Context,
+	playerID int64,
+	username string,
+) (*auth.Player, error) {
+	cleaned := strings.TrimSpace(username)
+	if cleaned == "" {
+		return nil, auth.ErrUsernameEmpty
+	}
+
+	row, err := s.q.RenamePlayer(ctx, db.RenamePlayerParams{
+		Username: cleaned,
+		ID:       playerID,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, auth.ErrPlayerNotFound
+		}
+		var sqliteErr *sqlite.Error
+		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+			return nil, auth.ErrUsernameTaken
+		}
+
+		return nil, fmt.Errorf("failed to rename player: %w", err)
+	}
+
+	return playerFromRow(row), nil
+}
+
 // GetPlayerByEmail returns the player whose email matches. Returns
 // auth.ErrPlayerNotFound when no row matches. The email is wrapped in a
 // [sql.NullString] with Valid=true so a literal NULL row never matches a

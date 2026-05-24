@@ -14,6 +14,7 @@ import (
 	"github.com/starquake/topbanana/internal/health"
 	"github.com/starquake/topbanana/internal/home"
 	"github.com/starquake/topbanana/internal/leaderboard"
+	"github.com/starquake/topbanana/internal/profile"
 	"github.com/starquake/topbanana/internal/session"
 	"github.com/starquake/topbanana/internal/store"
 	"github.com/starquake/topbanana/internal/web"
@@ -32,6 +33,7 @@ func addRoutes(
 
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg)
 	addAdminRoutes(mux, logger, stores, gameService, sessions, csrfMgr)
+	addProfileRoutes(mux, logger, stores, sessions, csrfMgr)
 	addAPIRoutes(mux, logger, stores, gameService, leaderboardHub, sessions)
 
 	// Client
@@ -145,6 +147,29 @@ func addAuthRoutes(
 			"google sign-in disabled (set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URL to enable)",
 		)
 	}
+}
+
+// addProfileRoutes registers the per-player profile page (#410). The
+// GET and POST routes are both wrapped in RequireAuthenticated so an
+// anonymous-session visitor is redirected to /login before reaching
+// the handler. The POST is additionally CSRF-protected via csrfMW.
+func addProfileRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	stores *store.Stores,
+	sessions *session.Manager,
+	csrfMgr *csrf.Manager,
+) {
+	csrfMW := csrfMgr.Middleware
+	requireAuthn := func(h http.Handler) http.Handler {
+		return auth.RequireAuthenticated(h, stores.Players, sessions, logger)
+	}
+
+	mux.Handle("GET /profile", requireAuthn(profile.HandleProfile(logger, csrfMgr)))
+	mux.Handle(
+		"POST /profile/username",
+		csrfMW(requireAuthn(profile.HandleProfileUsername(logger, csrfMgr, stores.Players))),
+	)
 }
 
 // addAdminRoutes registers every /admin/* route. Each unsafe (POST/PUT/...)
