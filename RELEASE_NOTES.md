@@ -2,6 +2,39 @@
 
 What changed in each released version of Top Banana. The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.5.6 — 2026-05-24
+
+Live leaderboard adds in-progress players, two new host controls (per-quiz visibility, per-question time limit), and a batch of leaderboard and timing fixes.
+
+### Players
+- The live leaderboard lists every participant, including those who joined a quiz but have not answered a question yet.
+- The countdown on the player view stays in sync with the server clock.
+- The leaderboard's answer time reflects when the player tapped, not when the server received the request.
+- The finish-screen leaderboard shows an error and a retry option when its fetch fails, instead of staying on "Loading leaderboard…" forever.
+- The live leaderboard closes the stream and shows a stale-data indicator after repeated SSE errors.
+- The question-entrance animation and the post-finish leaderboard slide-in animation run again.
+- The "most active players" list on the start page uses the same 30-day window as "popular quizzes".
+
+### Hosts
+- Each quiz can be set to public, unlisted, or private. Public quizzes appear on the home page and `/quizzes`; unlisted quizzes are reachable only by direct link; private quizzes are visible only to their creator and admins.
+- Each question can be given its own time limit, set by the quiz author.
+- Admin form validation errors render inline on the form instead of as a generic error page.
+- The admin landing page shows an "Import quiz" tile next to the existing "New quiz" tile.
+- Admin modals are real dialogs: focus stays trapped inside while open, Escape closes them, and focus returns to the element that opened them.
+
+### Visual / chrome
+- The "Browse all" link on the start page's popular-quizzes block sits at the bottom of the block instead of next to the section heading.
+- The inline pencil for renaming yourself on a leaderboard row is gone. The claim-name modal is the only way to set a display name.
+
+### Behind the scenes
+- Session cookies carry the `Secure` flag in every environment except `development`; previously only production set the flag.
+- The Docker image declares a `HEALTHCHECK`; CI runs `make smoke` on every change.
+- HTTP idle connections close after a configured timeout.
+- `/healthz` probes are no longer logged at Info on every request.
+- Panics in HTTP handlers are recovered into a 500; SIGTERM triggers a clean shutdown.
+- A new `make dev` target restarts the server when sources change.
+- The startup log includes the play URL alongside the admin URL, and the admin URL points at `/admin` instead of `/admin/quizzes`.
+
 ## v2026.5.5 — 2026-05-22
 
 Mid-question resume on reload, a public quizzes list, and per-quiz creator ownership.
