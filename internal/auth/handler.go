@@ -72,12 +72,13 @@ type formData struct {
 }
 
 // HandleRegisterForm returns a handler for GET /register that renders the
-// registration form.
-func HandleRegisterForm(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
+// registration form. googleEnabled controls whether the template shows
+// the "Sign up with Google" button.
+func HandleRegisterForm(logger *slog.Logger, csrfMgr *csrf.Manager, googleEnabled bool) http.Handler {
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/register.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		render.render(w, r, http.StatusOK, formData{Title: "Register"})
+		render.render(w, r, http.StatusOK, formData{Title: "Register", ShowGoogle: googleEnabled})
 	})
 }
 
@@ -104,6 +105,7 @@ func HandleRegisterSubmit(
 	players PlayerStore,
 	sessions *session.Manager,
 	adminUsernames []string,
+	googleEnabled bool,
 ) http.Handler {
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/register.gohtml")
 
@@ -122,9 +124,10 @@ func HandleRegisterSubmit(
 		input := validateRegisterInput(rawUsername, password)
 		if !input.OK {
 			render.render(w, r, http.StatusBadRequest, formData{
-				Title:    "Register",
-				Username: input.Cleaned,
-				Message:  input.ErrMsg,
+				Title:      "Register",
+				Username:   input.Cleaned,
+				Message:    input.ErrMsg,
+				ShowGoogle: googleEnabled,
 			})
 
 			return
@@ -147,9 +150,10 @@ func HandleRegisterSubmit(
 		if err != nil {
 			if errors.Is(err, ErrUsernameTaken) {
 				render.render(w, r, http.StatusConflict, formData{
-					Title:    "Register",
-					Username: input.Cleaned,
-					Message:  "Username is already taken.",
+					Title:      "Register",
+					Username:   input.Cleaned,
+					Message:    "Username is already taken.",
+					ShowGoogle: googleEnabled,
 				})
 
 				return

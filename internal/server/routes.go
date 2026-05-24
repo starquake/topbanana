@@ -82,10 +82,12 @@ func addAuthRoutes(
 	googleEnabled := cfg.GoogleLoginEnabled()
 
 	if cfg.RegistrationEnabled {
-		mux.Handle("GET /register", auth.HandleRegisterForm(logger, csrfMgr))
+		mux.Handle("GET /register", auth.HandleRegisterForm(logger, csrfMgr, googleEnabled))
 		mux.Handle(
 			"POST /register",
-			csrfMW(auth.HandleRegisterSubmit(logger, csrfMgr, stores.Players, sessions, cfg.AdminUsernames)),
+			csrfMW(auth.HandleRegisterSubmit(
+				logger, csrfMgr, stores.Players, sessions, cfg.AdminUsernames, googleEnabled,
+			)),
 		)
 	}
 	mux.Handle("GET /login", auth.HandleLoginForm(logger, csrfMgr, cfg.RegistrationEnabled, googleEnabled))

@@ -239,7 +239,7 @@ func postForm(t *testing.T, handler http.Handler, path string, values url.Values
 func TestHandleRegisterForm_GET_RendersForm(t *testing.T) {
 	t.Parallel()
 
-	handler := auth.HandleRegisterForm(discardLogger(), nil)
+	handler := auth.HandleRegisterForm(discardLogger(), nil, false)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/register", nil)
 	rec := httptest.NewRecorder()
@@ -266,7 +266,7 @@ func TestHandleRegisterSubmit_FirstUser_BecomesAdmin(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil)
+	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
 
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"alice"},
@@ -310,7 +310,7 @@ func TestHandleRegisterSubmit_SecondUser_DefaultsToPlayer(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil)
+	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"bob"},
 		"password": {"correctbattery"},
@@ -349,6 +349,7 @@ func TestHandleRegisterSubmit_AdminUsernamesEnv_PromotesToAdmin(t *testing.T) {
 		store,
 		session.New([]byte("k"), true),
 		[]string{"alice", "carol"},
+		false,
 	)
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"carol"},
@@ -372,7 +373,7 @@ func TestHandleRegisterSubmit_PasswordTooShort(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil)
+	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
 
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"alice"},
@@ -399,7 +400,7 @@ func TestHandleRegisterSubmit_PasswordTooLong(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil)
+	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
 
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"alice"},
@@ -426,7 +427,7 @@ func TestHandleRegisterSubmit_DuplicateUsername(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil)
+	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"alice"},
 		"password": {"correctbattery"},
@@ -455,7 +456,7 @@ func TestHandleRegisterSubmit_ClaimsAnonymousSession(t *testing.T) {
 	}
 
 	sessions := session.New([]byte("k"), true)
-	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, sessions, nil)
+	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, sessions, nil, false)
 
 	// Build a request that already carries the anonymous session cookie.
 	rec := httptest.NewRecorder()
@@ -512,7 +513,7 @@ func TestHandleRegisterSubmit_ClaimWithTakenUsername(t *testing.T) {
 	}
 
 	sessions := session.New([]byte("k"), true)
-	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, sessions, nil)
+	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, sessions, nil, false)
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, anon.ID)
@@ -571,7 +572,7 @@ func TestHandleRegisterSubmit_ClaimAlreadyClaimed_FallsBackToCreate(t *testing.T
 	}
 
 	sessions := session.New([]byte("k"), true)
-	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, sessions, nil)
+	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, sessions, nil, false)
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, anon.ID) // cookie still points at the now-claimed row
@@ -782,7 +783,7 @@ func TestHandleRegisterSubmit_WhitespaceOnlyUsername(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil)
+	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
 
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"   "},
@@ -805,7 +806,7 @@ func TestHandleRegisterSubmit_PasswordExactlyMinLength(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil)
+	handler := auth.HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
 
 	password := strings.Repeat("a", auth.MinPasswordLength) // exactly 13 characters
 	rec := postForm(t, handler, "/register", url.Values{
