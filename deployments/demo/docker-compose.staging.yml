@@ -15,6 +15,15 @@ services:
       # boot loudly instead of silently rendering /login without the
       # button. The redirect URL must exactly match the entry in the
       # Google Cloud Console OAuth client.
+      #
+      # The values are sourced from GitHub Actions secrets on the
+      # `staging` environment and written into the host's .env by
+      # .github/workflows/deploy.yml. Adding a new GOOGLE_* var here
+      # requires three matching edits in deploy.yml's deploy-staging
+      # job: the `env:` block, the `envs:` allowlist, and the .env
+      # heredoc. Skip any of those and appleboy/ssh-action silently
+      # forwards an empty value, the heredoc bakes in a blank, and
+      # this `${VAR:?…}` guard refuses the boot.
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:?GOOGLE_CLIENT_ID must be set in .env or environment}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:?GOOGLE_CLIENT_SECRET must be set in .env or environment}
       - GOOGLE_REDIRECT_URL=${GOOGLE_REDIRECT_URL:?GOOGLE_REDIRECT_URL must be set in .env or environment}
