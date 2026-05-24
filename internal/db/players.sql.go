@@ -375,6 +375,46 @@ func (q *Queries) LinkProviderIdentity(ctx context.Context, arg LinkProviderIden
 	return err
 }
 
+const renamePlayer = `-- name: RenamePlayer :one
+UPDATE players
+SET username = ?1,
+    username_claimed = 1
+WHERE id = ?2
+RETURNING id, username, email, password_hash, role, created_at, username_claimed
+`
+
+type RenamePlayerParams struct {
+	Username string
+	ID       int64
+}
+
+// Renames any player row by id, regardless of password / email / role.
+// The dedicated profile-page endpoint (POST /profile/username, #410)
+// uses this so authenticated players (password, OAuth, admin) can
+// change their display name. Anonymous rows have their own narrower
+// path via UpdatePlayerUsername above; this query is intentionally
+// not gated by password_hash so the OAuth-only and admin cases also
+// work.
+//
+// Returns the updated row when one was affected; the store wrapper
+// maps sql.ErrNoRows to ErrPlayerNotFound and a UNIQUE constraint
+// failure on players.username to ErrUsernameTaken so the handler can
+// map both onto user-facing form errors.
+func (q *Queries) RenamePlayer(ctx context.Context, arg RenamePlayerParams) (Player, error) {
+	row := q.db.QueryRowContext(ctx, renamePlayer, arg.Username, arg.ID)
+	var i Player
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.Email,
+		&i.PasswordHash,
+		&i.Role,
+		&i.CreatedAt,
+		&i.UsernameClaimed,
+	)
+	return i, err
+}
+
 const setPlayerPasswordHash = `-- name: SetPlayerPasswordHash :execrows
 UPDATE players
 SET password_hash    = ?1,

@@ -173,3 +173,49 @@ func RequireAdmin(
 		next.ServeHTTP(w, r.WithContext(WithPlayer(r.Context(), player)))
 	})
 }
+
+// RequireAuthenticated wraps the next handler so only credentialled
+// players (password, OAuth identity, or the seeded admin role) can
+// reach it. Anonymous-session visitors and cookieless requests are
+// redirected to /login with HTTP 303 — softer than RequireAdmin's
+// 403, because the page they're missing is typically reachable for
+// them after they sign in (the profile page, future personal
+// dashboards, etc.). Stashes the loaded *Player on the request
+// context via WithPlayer so downstream handlers can read it without
+// a second lookup.
+func RequireAuthenticated(
+	next http.Handler,
+	players PlayerStore,
+	sessions *session.Manager,
+	logger *slog.Logger,
+) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		playerID, ok := sessions.PlayerID(r)
+		if !ok {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+
+			return
+		}
+
+		player, err := players.GetPlayerByID(r.Context(), playerID)
+		if err != nil {
+			if errors.Is(err, ErrPlayerNotFound) {
+				http.Redirect(w, r, "/login", http.StatusSeeOther)
+
+				return
+			}
+			logger.ErrorContext(r.Context(), "error loading player for authn check", slog.Any("err", err))
+			http.Error(w, "internal error", http.StatusInternalServerError)
+
+			return
+		}
+
+		if !player.IsAuthenticated() {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+
+			return
+		}
+
+		next.ServeHTTP(w, r.WithContext(WithPlayer(r.Context(), player)))
+	})
+}

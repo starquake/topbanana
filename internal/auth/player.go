@@ -134,4 +134,13 @@ type PlayerStore interface {
 	// password_hash (i.e. it is no longer a valid target for a username-only
 	// update), and ErrPlayerNotFound when no row matches the id.
 	UpdatePlayerUsername(ctx context.Context, playerID int64, username string) (*Player, error)
+	// RenamePlayer changes the display name on any player row, regardless
+	// of password_hash / email / role. Used by the profile-page rename
+	// endpoint so authenticated players (password, OAuth, admin) can
+	// update their own name; anonymous rows still go through
+	// UpdatePlayerUsername.
+	// Returns ErrUsernameEmpty for whitespace-only input, ErrUsernameTaken
+	// on a UNIQUE collision, and ErrPlayerNotFound when the id does not
+	// exist.
+	RenamePlayer(ctx context.Context, playerID int64, username string) (*Player, error)
 }

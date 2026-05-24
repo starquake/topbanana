@@ -193,6 +193,30 @@ func (s *stubPlayerStore) UpdatePlayerUsername(
 	return existing, nil
 }
 
+func (s *stubPlayerStore) RenamePlayer(
+	_ context.Context, playerID int64, username string,
+) (*auth.Player, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if strings.TrimSpace(username) == "" {
+		return nil, auth.ErrUsernameEmpty
+	}
+	existing, ok := s.byID[playerID]
+	if !ok {
+		return nil, auth.ErrPlayerNotFound
+	}
+	if other, exists := s.byName[username]; exists && other.ID != playerID {
+		return nil, auth.ErrUsernameTaken
+	}
+
+	delete(s.byName, existing.Username)
+	existing.Username = username
+	s.byName[username] = existing
+
+	return existing, nil
+}
+
 func (s *stubPlayerStore) SetPlayerPasswordHash(_ context.Context, username, passwordHash string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
