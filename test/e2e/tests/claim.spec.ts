@@ -142,3 +142,53 @@ test('claim modal does not auto-open for a visitor who already claimed a name', 
   await expect(playerRow).toBeVisible();
   await expect(playerRow).toContainText(chosenName);
 });
+
+// Test 4 — "Change your name" pre-fills the input with the current
+// custom name so a small edit doesn't require retyping (#409).
+test('Change your name modal pre-fills the input with the current display name', async ({ page, browserName }) => {
+  await page.goto('/client/');
+
+  // First claim a custom name so the "Change" branch is reachable.
+  const chosenName = `Edit-${browserName}-${Date.now()}`;
+  await page.getByRole('button', { name: 'Set your name' }).click();
+  const firstModal = page.locator('[role="dialog"]');
+  await firstModal.locator('input#claim-name-modal').fill(chosenName);
+  await firstModal.getByRole('button', { name: 'Save' }).click();
+  await expect(firstModal).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Change your name' })).toBeVisible();
+
+  // Re-open via the "Change your name" affordance. The input must
+  // start populated with the just-saved name instead of empty, so a
+  // small edit (e.g. fixing a typo) does not require retyping the
+  // whole thing.
+  await page.getByRole('button', { name: 'Change your name' }).click();
+  const editModal = page.locator('[role="dialog"]');
+  await expect(editModal).toBeVisible();
+  await expect(editModal.locator('input#claim-name-modal')).toHaveValue(chosenName);
+});
+
+// Test 5 — authenticated players never see the claim CTA (#409). Their
+// username is stable and changes go through the future profile page
+// (#410), so the in-game prompt would be noise. Registers as a plain
+// player rather than relying on registerAdmin so the test is robust
+// to ordering — other tests in the same e2e worker may have already
+// claimed the "first registrant becomes admin" slot.
+test('signed-in player does not see the claim-name CTA on the player client', async ({ page, browserName }) => {
+  const username = `e2e-claim-authn-${browserName}-${Date.now()}`;
+  await page.goto('/register');
+  await page.locator('input[name=username]').fill(username);
+  await page.locator('input[name=password]').fill('correct-battery-13');
+  await page.locator('button[type=submit]').click();
+  // Admin lands on /admin/quizzes; subsequent registrants land on /.
+  // Either signals a successful registration + session cookie set.
+  await expect(page).toHaveURL(/(\/admin\/quizzes|\/)$/);
+
+  await page.goto('/client/');
+
+  // The "Playing as" card and both name buttons are gated on
+  // !isAuthenticated(). A signed-in visitor sees neither, just the
+  // bare start screen.
+  await expect(page.locator('.claim-cta')).not.toBeVisible();
+  await expect(page.getByRole('button', { name: 'Set your name' })).not.toBeVisible();
+  await expect(page.getByRole('button', { name: 'Change your name' })).not.toBeVisible();
+});

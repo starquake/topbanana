@@ -235,11 +235,22 @@ export class GameApp {
     // isAnonymous reports whether the current player has no password set
     // (anonymous in the credential sense). Distinct from hasCustomName:
     // a player who claims a display name without registering stays
-    // anonymous. The start-screen "Playing as" card uses this so the
-    // affordance keeps showing post-claim, letting the player retune
-    // their name before they start a quiz.
+    // anonymous. Distinct from !isAuthenticated: an OAuth-only player
+    // also has no password but IS authenticated. Retained for paths
+    // that specifically care about the credential layer.
     isAnonymous() {
         return !!(this.player && this.player.isAnonymous);
+    }
+
+    // isAuthenticated reports whether the player is known to the
+    // system through some credential (password, OAuth identity, or
+    // the seeded admin role). The claim-name CTA and end-of-quiz
+    // auto-open both gate on the negation of this: a signed-in
+    // player already has a stable identity and should never see the
+    // "Set your name" prompt — username changes for them belong on
+    // the future profile page (#410), not the in-game modal.
+    isAuthenticated() {
+        return !!(this.player && this.player.isAuthenticated);
     }
 
     // hasOffLeaderboardStanding reports whether the requesting player
@@ -542,7 +553,15 @@ export class GameApp {
                 console.warn('finish leaderboard fetch failed', err);
                 this.leaderboard = { quizId: 0, entries: [], currentPlayer: null };
             }
-            if (!this.hasCustomName()) {
+            // Auto-open the claim modal only for visitors who have not
+            // both (a) authenticated AND (b) picked a custom name yet.
+            // Authenticated players never see the modal — their
+            // username is already stable and changes go through the
+            // profile page (#410). Anonymous players who claimed a
+            // petname via PATCH /api/players/me also skip the prompt
+            // (hasCustomName true) so the modal does not re-open on
+            // every finished quiz (#165).
+            if (!this.isAuthenticated() && !this.hasCustomName()) {
                 this.openClaimModal();
             }
             return;

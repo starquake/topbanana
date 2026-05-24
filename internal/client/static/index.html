@@ -75,10 +75,13 @@
                  directly below the CTA — whether the player just
                  finished a quiz or revisited an already-completed
                  one. Hidden during gameplay (gameId && !finished) so
-                 the player's attention stays on the question.
-                 The end-of-quiz modal is the one-shot "auto-prompt"
-                 path and gates on hasCustomName() instead — see #165. -->
-            <template x-if="isAnonymous() && (!gameId || finished)">
+                 the player's attention stays on the question. Also
+                 hidden for authenticated players (#409) since their
+                 username is stable and changes go through the future
+                 profile page (#410). The end-of-quiz modal is the
+                 one-shot "auto-prompt" path and gates on
+                 hasCustomName() instead — see #165. -->
+            <template x-if="!isAuthenticated() && (!gameId || finished)">
                 <article class="claim-cta mb-6">
                     <p class="label-eyebrow">Playing as</p>
                     <p data-testid="claim-cta-name" class="font-mono text-accent text-[1.05rem] mb-4 break-all" x-text="player ? player.username : ''"></p>
@@ -428,6 +431,7 @@
                          x-data="claimNameForm({
                                 submitLabel: 'Save',
                                 cancelLabel: 'Cancel',
+                                initialValue: hasCustomName() ? player.username : '',
                                 onSubmit: (name) => claimFromModal(name),
                                 onCancel: () => closeClaimModal(),
                              })">
