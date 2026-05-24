@@ -150,12 +150,7 @@ test-coverage-html: test-coverage
 .PHONY: test-e2e
 test-e2e:
 	cd test/e2e && npm ci && npx playwright install chromium firefox
-	cd test/e2e || exit 1; \
-	  TOPBANANA_E2E_PORT=8181 npx playwright test --project=chromium & C=$$!; \
-	  TOPBANANA_E2E_PORT=8182 npx playwright test --project=firefox  & F=$$!; \
-	  wait $$C; CS=$$?; \
-	  wait $$F; FS=$$?; \
-	  test $$CS -eq 0 -a $$FS -eq 0
+	cd test/e2e && npx playwright test
 
 # Smoke-test the binary against the existing dev DB: parses config, opens
 # the DB, runs migrations, and exits 0. Catches startup / migration / config

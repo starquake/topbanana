@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { registerAdmin, createQuizWithQuestions, QUIZ_QUESTIONS } from './helpers';
 
 // #246 — admin spoiler toggle. Options sit inside a <details> closed by

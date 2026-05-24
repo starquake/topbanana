@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 // #285 — the body used `min-h-screen` (100vh), which on mobile
 // browsers includes the collapsing URL bar in the height; the page
