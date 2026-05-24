@@ -581,8 +581,8 @@ func fillQuizFromForm(
 	} else {
 		qz.Visibility = quiz.VisibilityPublic
 	}
-	if problems := qz.Valid(r.Context()); len(problems) > 0 {
-		return lowercaseDomainFieldKeys(problems), true
+	if problems := (&quizForm{quiz: qz}).Valid(r.Context()); len(problems) > 0 {
+		return lowercaseFormFieldKeys(problems), true
 	}
 
 	return nil, true
@@ -603,21 +603,6 @@ func parseOptionalTimeLimit(raw string) *int {
 	}
 
 	return &n
-}
-
-// lowercaseDomainFieldKeys translates Quiz.Valid / Question.Valid map
-// keys ("Title", "Text", "Options", "Description") into the lowercased
-// form-field names the templates bind to ("title", "text", "options",
-// "description"). Keeping the domain Valid maps unchanged means
-// non-admin callers (none today, but the API surface is open) don't
-// see admin-form naming bleed in.
-func lowercaseDomainFieldKeys(problems map[string]string) map[string]string {
-	out := make(map[string]string, len(problems))
-	for k, v := range problems {
-		out[strings.ToLower(k)] = v
-	}
-
-	return out
 }
 
 // fillQuestionFromForm fills the question fields from the form values.
@@ -680,8 +665,8 @@ func fillQuestionFromForm(
 	}
 	qs.Options = newOptions
 
-	if problems := qs.Valid(r.Context()); len(problems) > 0 {
-		return lowercaseDomainFieldKeys(problems), true
+	if problems := (&questionForm{question: qs}).Valid(r.Context()); len(problems) > 0 {
+		return lowercaseFormFieldKeys(problems), true
 	}
 
 	return nil, true
@@ -1116,7 +1101,7 @@ func HandleQuizImportSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 		}
 
 		qz := quizFromImportPayload(payload)
-		if problems := qz.Valid(r.Context()); len(problems) > 0 {
+		if problems := (&quizForm{quiz: qz}).Valid(r.Context()); len(problems) > 0 {
 			renderErr(w, r, jsonText, fmt.Sprintf("validation errors: %v", problems))
 
 			return

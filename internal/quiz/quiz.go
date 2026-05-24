@@ -5,7 +5,6 @@ package quiz
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"time"
 )
@@ -197,61 +196,6 @@ type Quiz struct {
 	Questions  []*Question
 }
 
-// Valid checks if the quiz, its questions, and its options are valid.
-func (q *Quiz) Valid(ctx context.Context) map[string]string {
-	problems := make(map[string]string)
-	if q.Title == "" {
-		problems["Title"] = "Title is required"
-	}
-	if q.Slug == "" {
-		problems["Slug"] = "Slug is required"
-	}
-	if q.Description == "" {
-		problems["Description"] = "Description is required"
-	}
-	// Only flag the time-limit range when the caller actually set a
-	// value; a zero TimeLimitSeconds means "unset" (the store layer
-	// rewrites it to DefaultTimeLimitSeconds before INSERT), so we
-	// must not reject the zero-value case that test fixtures and the
-	// JSON-import path both rely on.
-	if q.TimeLimitSeconds != 0 &&
-		(q.TimeLimitSeconds < MinTimeLimitSeconds || q.TimeLimitSeconds > MaxTimeLimitSeconds) {
-		problems["TimeLimitSeconds"] = fmt.Sprintf(
-			"Time limit must be between %d and %d seconds",
-			MinTimeLimitSeconds, MaxTimeLimitSeconds,
-		)
-	}
-	// An empty visibility is treated as "public" by the store; only
-	// flag genuinely unrecognised values so the admin form's selector
-	// can surface them inline.
-	if q.Visibility != "" && !IsValidVisibility(q.Visibility) {
-		problems["Visibility"] = "Visibility must be one of: public, unlisted, private"
-	}
-	for qsIndex, question := range q.Questions {
-		if qsProblems := question.Valid(ctx); len(qsProblems) > 0 {
-			for qsProblemKey, v := range qsProblems {
-				problems[fmt.Sprintf("Questions[%d][%s]", qsIndex, qsProblemKey)] = v
-			}
-		}
-		validQuestionOptions(ctx, question, problems, qsIndex)
-	}
-
-	return problems
-}
-
-func validQuestionOptions(ctx context.Context, question *Question, problems map[string]string, qsIndex int) {
-	// Multi-correct, no-correct, and all-correct configurations are all
-	// supported by the data model and the admin UI; this validator only
-	// checks per-option text and other field-level constraints.
-	for oIndex, option := range question.Options {
-		if oProblems := option.Valid(ctx); len(oProblems) > 0 {
-			for oProblemKey, v := range oProblems {
-				problems[fmt.Sprintf("Questions[%d].Options[%d][%s]", qsIndex, oIndex, oProblemKey)] = v
-			}
-		}
-	}
-}
-
 // Question represents a question in a quiz.
 //
 // TimeLimitSeconds is the per-question override. Nil means "inherit the
@@ -267,42 +211,10 @@ type Question struct {
 	Options          []*Option
 }
 
-// Valid checks if the question and its options are valid.
-func (q *Question) Valid(_ context.Context) map[string]string {
-	problems := make(map[string]string)
-	if q.Text == "" {
-		problems["Text"] = "Text is required"
-	}
-	if len(q.Options) == 0 {
-		problems["Options"] = "Options are required"
-	}
-	if q.TimeLimitSeconds != nil {
-		v := *q.TimeLimitSeconds
-		if v < MinTimeLimitSeconds || v > MaxTimeLimitSeconds {
-			problems["TimeLimitSeconds"] = fmt.Sprintf(
-				"Time limit must be between %d and %d seconds, or blank to inherit the quiz default",
-				MinTimeLimitSeconds, MaxTimeLimitSeconds,
-			)
-		}
-	}
-
-	return problems
-}
-
 // Option represents an option for a question.
 type Option struct {
 	ID         int64
 	QuestionID int64
 	Text       string
 	Correct    bool
-}
-
-// Valid checks if the option is valid.
-func (o *Option) Valid(_ context.Context) map[string]string {
-	problems := make(map[string]string)
-	if o.Text == "" {
-		problems["Text"] = "Text is required"
-	}
-
-	return problems
 }
