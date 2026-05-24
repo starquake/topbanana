@@ -1,12 +1,6 @@
 package auth
 
-import (
-	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/base64"
-)
+import "context"
 
 // ExportLinkOrCreateGooglePlayer is the test-only alias for the
 // unexported find-or-link decision used by HandleGoogleCallback. Lets
@@ -27,30 +21,9 @@ func ExportSignState(key []byte, nonce string) string {
 	return signState(key, nonce)
 }
 
-// ExportValidateStateValues runs the same checks validateState does
-// against caller-supplied cookie + query values, sidestepping the
-// http.Request plumbing tests would otherwise have to build.
-func ExportValidateStateValues(key []byte, cookieValue, queryValue string) error {
-	if cookieValue == "" || queryValue == "" {
-		return ErrGoogleStateMismatch
-	}
-	if subtle.ConstantTimeCompare([]byte(cookieValue), []byte(queryValue)) != 1 {
-		return ErrGoogleStateMismatch
-	}
-	parts, ok := splitState(cookieValue)
-	if !ok {
-		return ErrGoogleStateMismatch
-	}
-	h := hmac.New(sha256.New, key)
-	_, _ = h.Write([]byte(parts.Nonce))
-	wantMAC := h.Sum(nil)
-	gotMAC, err := base64.RawURLEncoding.DecodeString(parts.MAC)
-	if err != nil {
-		return ErrGoogleStateMismatch
-	}
-	if !hmac.Equal(gotMAC, wantMAC) {
-		return ErrGoogleStateMismatch
-	}
-
-	return nil
+// ExportVerifySignedState exposes verifySignedState so tests can pin
+// the state-cookie HMAC round-trip from string inputs, exercising
+// exactly the production validation path.
+func ExportVerifySignedState(key []byte, cookieValue, queryValue string) error {
+	return verifySignedState(key, cookieValue, queryValue)
 }

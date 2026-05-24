@@ -464,25 +464,32 @@ func signState(key []byte, nonce string) string {
 	return nonce + "." + base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 }
 
-// validateState compares the state from the cookie with the state in
-// the query string in constant time, and re-verifies the HMAC so a
-// forged cookie cannot bypass the check.
+// validateState pulls the state cookie + query parameter off the
+// request and delegates to verifySignedState. Kept as the
+// [http.Request] adapter so the HMAC + constant-time logic stays
+// trivially testable from string inputs without test plumbing.
 func validateState(key []byte, r *http.Request) error {
 	cookie, err := r.Cookie(googleStateCookieName)
-	if err != nil || cookie.Value == "" {
+	if err != nil {
 		return ErrGoogleStateMismatch
 	}
 
-	submitted := r.URL.Query().Get("state")
-	if submitted == "" {
+	return verifySignedState(key, cookie.Value, r.URL.Query().Get("state"))
+}
+
+// verifySignedState compares the cookie and query values in constant
+// time and re-verifies the HMAC on the cookie so a forged value
+// cannot bypass the check. Returns ErrGoogleStateMismatch on any
+// failure path.
+func verifySignedState(key []byte, cookieValue, queryValue string) error {
+	if cookieValue == "" || queryValue == "" {
+		return ErrGoogleStateMismatch
+	}
+	if subtle.ConstantTimeCompare([]byte(queryValue), []byte(cookieValue)) != 1 {
 		return ErrGoogleStateMismatch
 	}
 
-	if subtle.ConstantTimeCompare([]byte(submitted), []byte(cookie.Value)) != 1 {
-		return ErrGoogleStateMismatch
-	}
-
-	parts, ok := splitState(cookie.Value)
+	parts, ok := splitState(cookieValue)
 	if !ok {
 		return ErrGoogleStateMismatch
 	}

@@ -259,12 +259,12 @@ func TestSignAndValidateState_RoundTrip(t *testing.T) {
 
 	// Same key, same nonce in the cookie, same value in the query =>
 	// valid.
-	if err := auth.ExportValidateStateValues(key, signed, signed); err != nil {
+	if err := auth.ExportVerifySignedState(key, signed, signed); err != nil {
 		t.Errorf("validateState(matching) err = %v, want nil", err)
 	}
 
 	// Different key => invalid signature.
-	if err := auth.ExportValidateStateValues(
+	if err := auth.ExportVerifySignedState(
 		[]byte("other"),
 		signed,
 		signed,
@@ -277,7 +277,7 @@ func TestSignAndValidateState_RoundTrip(t *testing.T) {
 
 	// Mismatched cookie vs query => invalid.
 	tampered := signed[:len(signed)-1] + "x"
-	if err := auth.ExportValidateStateValues(key, signed, tampered); !errors.Is(err, auth.ErrGoogleStateMismatch) {
+	if err := auth.ExportVerifySignedState(key, signed, tampered); !errors.Is(err, auth.ErrGoogleStateMismatch) {
 		t.Errorf("validateState(mismatch) err = %v, want %v", err, auth.ErrGoogleStateMismatch)
 	}
 }
