@@ -103,14 +103,11 @@ FROM game_answers ga
 WHERE g.quiz_id = ?;
 
 -- name: ListParticipantsForQuizLeaderboard :many
--- Lists every player who has joined a game for the given quiz, with the
--- same is_completed predicate ListAnswersForQuizLeaderboard carries on
--- the answer rows. The Service uses this list as the canonical set of
--- leaderboard entries (#335) so a player who clicked Start but has not
--- yet submitted an answer still appears with a 0 score and the
--- in-progress dot, instead of being invisible until their first answer
--- commits. The answers query then contributes the per-row scoring
--- inputs used to roll up each entry's running total.
+-- One row per player joined to the quiz, flagged with is_completed
+-- (every quiz question issued) and is_stale (#336: latest
+-- game_question unanswered and expired before stale_before).
+-- Canonical entry set per #335 so a joined-but-unanswered player
+-- still appears at 0.
 -- Joins through `games` so the WHERE filters on games.quiz_id (NOT
 -- NULL); game_participants.quiz_id is nullable in the schema, which
 -- would otherwise force sqlc to infer sql.NullInt64 for the parameter.
@@ -119,7 +116,14 @@ SELECT gp.player_id AS player_id,
        CASE WHEN (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id) > 0
              AND (SELECT COUNT(*) FROM game_questions gqc WHERE gqc.game_id = gp.game_id) >=
                  (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)
-            THEN 1 ELSE 0 END AS is_completed
+            THEN 1 ELSE 0 END AS is_completed,
+       CASE WHEN EXISTS (
+              SELECT 1 FROM game_questions gq
+              WHERE gq.game_id = gp.game_id
+                AND gq.expired_at < ?
+                AND NOT EXISTS (SELECT 1 FROM game_answers ga WHERE ga.game_question_id = gq.id)
+                AND NOT EXISTS (SELECT 1 FROM game_questions gqn WHERE gqn.game_id = gp.game_id AND gqn.id > gq.id)
+            ) THEN 1 ELSE 0 END AS is_stale
 FROM game_participants gp
          JOIN games g   ON g.id = gp.game_id
          JOIN players p ON p.id = gp.player_id

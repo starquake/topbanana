@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/health"
@@ -90,7 +91,7 @@ func (*stubGameStore) ListAnswersForQuizLeaderboard(
 }
 
 func (*stubGameStore) ListParticipantsForQuizLeaderboard(
-	_ context.Context, _ int64,
+	_ context.Context, _ int64, _ time.Time,
 ) ([]*game.LeaderboardParticipant, error) {
 	return nil, nil
 }

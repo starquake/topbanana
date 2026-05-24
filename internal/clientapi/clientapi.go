@@ -294,7 +294,7 @@ func toEntryResponse(e game.LeaderboardEntry) quizLeaderboardEntryResponse {
 		Score:           e.Score,
 		Rank:            e.Rank,
 		IsCurrentPlayer: e.IsCurrentPlayer,
-		InProgress:      !e.Completed,
+		InProgress:      e.InProgress,
 	}
 }
 

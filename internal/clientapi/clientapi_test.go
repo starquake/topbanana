@@ -124,7 +124,7 @@ type stubGameStore struct {
 	createQuestion                     func(ctx context.Context, gq *game.Question) error
 	createAnswer                       func(ctx context.Context, a *game.Answer) error
 	listAnswersForQuizLeaderboard      func(ctx context.Context, quizID int64) ([]*game.LeaderboardAnswer, error)
-	listParticipantsForQuizLeaderboard func(ctx context.Context, quizID int64) ([]*game.LeaderboardParticipant, error)
+	listParticipantsForQuizLeaderboard func(ctx context.Context, quizID int64, staleBefore time.Time) ([]*game.LeaderboardParticipant, error)
 	deleteGamesForPlayerOnQuiz         func(ctx context.Context, playerID, quizID int64) error
 	listQuizIDsForPlayer               func(ctx context.Context, playerID int64) ([]int64, error)
 }
@@ -258,10 +258,10 @@ func (s stubGameStore) ListAnswersForQuizLeaderboard(
 // that need to exercise the no-answer-participant path (#335) set the
 // participants stub explicitly.
 func (s stubGameStore) ListParticipantsForQuizLeaderboard(
-	ctx context.Context, quizID int64,
+	ctx context.Context, quizID int64, staleBefore time.Time,
 ) ([]*game.LeaderboardParticipant, error) {
 	if s.listParticipantsForQuizLeaderboard != nil {
-		return s.listParticipantsForQuizLeaderboard(ctx, quizID)
+		return s.listParticipantsForQuizLeaderboard(ctx, quizID, staleBefore)
 	}
 	if s.listAnswersForQuizLeaderboard == nil {
 		return nil, errStub

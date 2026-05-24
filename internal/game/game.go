@@ -26,6 +26,10 @@ const (
 	defaultRevealDelay      = 3 * time.Second
 	maxPoints               = 1000
 	defaultLeaderboardLimit = 10
+	// defaultStalePeriod is the grace window for the in-progress dot
+	// (#336): a 10s answer window plus slack for reveal beats and
+	// mobile network jitter.
+	defaultStalePeriod = 30 * time.Second
 )
 
 var (
@@ -169,9 +173,13 @@ type LeaderboardAnswer struct {
 // in the per-answer scoring inputs from
 // [Store.ListAnswersForQuizLeaderboard].
 type LeaderboardParticipant struct {
-	PlayerID    int64
-	Username    string
+	PlayerID int64
+	Username string
+	// IsCompleted: every quiz question has been issued to this game.
 	IsCompleted bool
+	// IsStale: latest game_question is unanswered and expired before
+	// the store's stale_before threshold (#336).
+	IsStale bool
 }
 
 // LeaderboardEntry is a single row of a per-quiz leaderboard: the player's
@@ -181,10 +189,10 @@ type LeaderboardParticipant struct {
 // entry belongs to the player making the request, which lets the client
 // highlight the row.
 //
-// Completed is false when the player is still mid-quiz: the Score may
-// be a partial running total (#244) or zero if the player has clicked
-// Start but not yet submitted their first answer (#335). The client
-// surfaces these rows as in-progress on the wire (`inProgress: true`).
+// Completed is true once every quiz question has been issued.
+// InProgress is true when the player is actively mid-quiz: not
+// completed AND not stale (#336). Wire renders the live dot from
+// InProgress; admin "Played by" filters on Completed.
 type LeaderboardEntry struct {
 	PlayerID        int64
 	Username        string
@@ -192,6 +200,7 @@ type LeaderboardEntry struct {
 	Rank            int
 	IsCurrentPlayer bool
 	Completed       bool
+	InProgress      bool
 }
 
 // LeaderboardResult bundles the truncated top-N entries with the requesting
@@ -235,13 +244,15 @@ type Store interface {
 	// LeaderboardAnswer.IsCompleted flag tells the caller whether the
 	// row belongs to a game that has issued every quiz question (#244).
 	ListAnswersForQuizLeaderboard(ctx context.Context, quizID int64) ([]*LeaderboardAnswer, error)
-	// ListParticipantsForQuizLeaderboard returns one row per player who
-	// joined a game for the given quiz, with the same is_completed flag
-	// that ListAnswersForQuizLeaderboard carries. The Service uses this
-	// list as the canonical set of leaderboard entries (#335) so a
-	// player who has clicked Start but not yet submitted an answer
-	// still appears with a 0 score and the in-progress dot.
-	ListParticipantsForQuizLeaderboard(ctx context.Context, quizID int64) ([]*LeaderboardParticipant, error)
+	// ListParticipantsForQuizLeaderboard returns one row per player
+	// joined to the quiz, flagged with IsCompleted and IsStale (#336).
+	// Canonical entry set per #335 so a joined-but-unanswered player
+	// still appears at 0.
+	ListParticipantsForQuizLeaderboard(
+		ctx context.Context,
+		quizID int64,
+		staleBefore time.Time,
+	) ([]*LeaderboardParticipant, error)
 	// DeleteGamesForPlayerOnQuiz hard-deletes every game (and dependent
 	// rows) that belongs to the given player on the given quiz. No error
 	// when the player has no games for the quiz: the admin reset flow is
@@ -270,6 +281,7 @@ type Service struct {
 	logger               *slog.Logger
 	leaderboardPublisher LeaderboardPublisher
 	revealDelay          time.Duration
+	stalePeriod          time.Duration
 }
 
 // NewService initializes and returns a new instance of Service with the provided game and quiz stores.
@@ -279,7 +291,14 @@ func NewService(gameStore Store, quizStore quiz.Store, logger *slog.Logger) *Ser
 		quizStore:   quizStore,
 		logger:      logger,
 		revealDelay: defaultRevealDelay,
+		stalePeriod: defaultStalePeriod,
 	}
+}
+
+// SetStalePeriod overrides the in-progress dot grace window (#336).
+// Not safe for concurrent use; call during startup wiring.
+func (s *Service) SetStalePeriod(d time.Duration) {
+	s.stalePeriod = d
 }
 
 // GetQuiz proxies to the wrapped quiz store. Exposed so clientapi
@@ -818,7 +837,7 @@ func (s *Service) GetQuizLeaderboard(
 	// have not submitted an answer yet. The answers query below only
 	// contributes per-row scoring inputs that roll up into each entry's
 	// running total.
-	participants, err := s.store.ListParticipantsForQuizLeaderboard(ctx, quizID)
+	participants, err := s.store.ListParticipantsForQuizLeaderboard(ctx, quizID, time.Now().Add(-s.stalePeriod))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list leaderboard participants: %w", err)
 	}
@@ -852,6 +871,8 @@ func (s *Service) GetQuizLeaderboard(
 			Score:           playerTotals[p.PlayerID],
 			IsCurrentPlayer: p.PlayerID == currentPlayerID,
 			Completed:       p.IsCompleted,
+			// Stale rows stay on the board (#336) but drop the dot.
+			InProgress: !p.IsCompleted && !p.IsStale,
 		})
 	}
 

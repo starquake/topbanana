@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/rs/xid"
 	"modernc.org/sqlite"
@@ -360,15 +361,16 @@ func (s *GameStore) ListAnswersForQuizLeaderboard(
 	return answers, nil
 }
 
-// ListParticipantsForQuizLeaderboard returns one row per player who
-// joined a game for the given quiz, with the same is_completed flag the
-// answer rows carry. The Service uses this list as the canonical set of
-// leaderboard entries so a player who clicked Start but has not yet
-// submitted an answer still appears on the live leaderboard (#335).
+// ListParticipantsForQuizLeaderboard returns one row per player joined
+// to the quiz, flagged with IsCompleted and IsStale (#336). Pass
+// [time.Now]-stalePeriod for staleBefore. Canonical entry set per #335.
 func (s *GameStore) ListParticipantsForQuizLeaderboard(
-	ctx context.Context, quizID int64,
+	ctx context.Context, quizID int64, staleBefore time.Time,
 ) ([]*game.LeaderboardParticipant, error) {
-	rows, err := s.q.ListParticipantsForQuizLeaderboard(ctx, quizID)
+	rows, err := s.q.ListParticipantsForQuizLeaderboard(ctx, db.ListParticipantsForQuizLeaderboardParams{
+		ExpiredAt: staleBefore,
+		QuizID:    quizID,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list leaderboard participants for quiz %d: %w", quizID, err)
 	}
@@ -378,9 +380,9 @@ func (s *GameStore) ListParticipantsForQuizLeaderboard(
 		participants = append(participants, &game.LeaderboardParticipant{
 			PlayerID: r.PlayerID,
 			Username: r.Username,
-			// CASE returns 1/0; treat non-zero as "every quiz question
-			// has been issued for this participant's game".
+			// CASE returns 1/0.
 			IsCompleted: r.IsCompleted != 0,
+			IsStale:     r.IsStale != 0,
 		})
 	}
 

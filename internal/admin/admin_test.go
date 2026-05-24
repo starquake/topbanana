@@ -95,7 +95,7 @@ func (s stubGameStore) ListAnswersForQuizLeaderboard(
 // (seeded with answers only) keep passing. The participants list is
 // the canonical entry source post-#335.
 func (s stubGameStore) ListParticipantsForQuizLeaderboard(
-	ctx context.Context, quizID int64,
+	ctx context.Context, quizID int64, _ time.Time,
 ) ([]*game.LeaderboardParticipant, error) {
 	if s.listAnswersForQuizLeaderboard == nil {
 		return nil, nil
