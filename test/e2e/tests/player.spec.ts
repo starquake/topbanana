@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { registerAdmin, createQuizWithQuestions, QUIZ_QUESTIONS } from './helpers';
 
 test('admin sets up a multi-question quiz, then a player plays it through to the results screen', async ({ page, browser, browserName }) => {

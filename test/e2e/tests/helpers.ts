@@ -1,5 +1,5 @@
-import type { Page } from '@playwright/test';
-import { expect } from '@playwright/test';
+import type { Page } from './fixtures';
+import { expect } from './fixtures';
 
 export const PASSWORD = 'correctbatterystaple';
 

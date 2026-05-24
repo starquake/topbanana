@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { registerAdmin, createQuizWithQuestions, playThroughQuiz } from './helpers';
 
 // Petname format: Title-cased Adjective-Adjective-Noun, e.g. "Steamy-Farty-Bear".

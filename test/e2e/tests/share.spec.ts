@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { registerAdmin, createQuizWithQuestions, startQuizAsAnonymous, answerRemainingQuestions } from './helpers';
 
 // #176 — share buttons on the player client (start screen + finish

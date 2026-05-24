@@ -1,4 +1,4 @@
-import { test, expect, Route, Request } from '@playwright/test';
+import { test, expect, Route, Request } from './fixtures';
 import {
   registerAdmin,
   createQuizWithQuestions,
