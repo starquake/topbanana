@@ -27,7 +27,7 @@ var errStub = errors.New("stub error")
 // so the existing CreateGame happy-path tests do not have to opt in.
 type stubStore struct {
 	listAnswersForQuizLeaderboard      func(ctx context.Context, quizID int64) ([]*LeaderboardAnswer, error)
-	listParticipantsForQuizLeaderboard func(ctx context.Context, quizID int64) ([]*LeaderboardParticipant, error)
+	listParticipantsForQuizLeaderboard func(ctx context.Context, quizID int64, staleBefore time.Time) ([]*LeaderboardParticipant, error)
 	getGameByPlayerAndQuiz             func(ctx context.Context, playerID, quizID int64) (*Game, error)
 	deleteGamesForPlayerOnQuiz         func(ctx context.Context, playerID, quizID int64) error
 	listQuizIDsForPlayer               func(ctx context.Context, playerID int64) ([]int64, error)
@@ -74,10 +74,10 @@ func (s stubStore) ListAnswersForQuizLeaderboard(
 // explicitly to exercise the no-answer-participant path the fallback
 // can't represent.
 func (s stubStore) ListParticipantsForQuizLeaderboard(
-	ctx context.Context, quizID int64,
+	ctx context.Context, quizID int64, staleBefore time.Time,
 ) ([]*LeaderboardParticipant, error) {
 	if s.listParticipantsForQuizLeaderboard != nil {
-		return s.listParticipantsForQuizLeaderboard(ctx, quizID)
+		return s.listParticipantsForQuizLeaderboard(ctx, quizID, staleBefore)
 	}
 	if s.listAnswersForQuizLeaderboard == nil {
 		return nil, errStub
@@ -1248,7 +1248,7 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 						makeAnswerCompleted(2, "bob", true, false),
 					}, nil
 				},
-				listParticipantsForQuizLeaderboard: func(_ context.Context, _ int64) ([]*LeaderboardParticipant, error) {
+				listParticipantsForQuizLeaderboard: func(_ context.Context, _ int64, _ time.Time) ([]*LeaderboardParticipant, error) {
 					return []*LeaderboardParticipant{
 						{PlayerID: 1, Username: "alice", IsCompleted: false},
 						{PlayerID: 2, Username: "bob", IsCompleted: false},
@@ -1626,6 +1626,73 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 		}
 		if result.CurrentPlayer != nil {
 			t.Errorf("CurrentPlayer = %+v, want nil (player has no row)", result.CurrentPlayer)
+		}
+	})
+
+	t.Run("stale participant has InProgress=false but stays on the board (#336)", func(t *testing.T) {
+		t.Parallel()
+
+		// Three participants: alice (active, mid-quiz), bob (completed),
+		// carol (stale: not completed but flagged abandoned by the
+		// store). The wire-shape consumer renders the live dot from
+		// InProgress, so carol must drop the dot even though her game
+		// is technically still open.
+		svc := NewService(
+			stubStore{
+				listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*LeaderboardAnswer, error) {
+					return nil, nil
+				},
+				listParticipantsForQuizLeaderboard: func(_ context.Context, _ int64, _ time.Time) ([]*LeaderboardParticipant, error) {
+					return []*LeaderboardParticipant{
+						{PlayerID: 1, Username: "alice", IsCompleted: false, IsStale: false},
+						{PlayerID: 2, Username: "bob", IsCompleted: true, IsStale: false},
+						{PlayerID: 3, Username: "carol", IsCompleted: false, IsStale: true},
+					}, nil
+				},
+			},
+			stubQuizStore{
+				quizExists: func(_ context.Context, _ int64) (bool, error) {
+					return true, nil
+				},
+			},
+			slog.New(slog.DiscardHandler),
+		)
+
+		result, err := svc.GetQuizLeaderboard(t.Context(), 1, 0, 10)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got, want := len(result.Entries), 3; got != want {
+			t.Fatalf("len(entries) = %d, want %d (stale participants stay on the board)", got, want)
+		}
+
+		byName := make(map[string]LeaderboardEntry, len(result.Entries))
+		for _, e := range result.Entries {
+			byName[e.Username] = e
+		}
+
+		alice := byName["alice"]
+		if got, want := alice.InProgress, true; got != want {
+			t.Errorf("alice.InProgress = %v, want %v (active mid-quiz)", got, want)
+		}
+		if got, want := alice.Completed, false; got != want {
+			t.Errorf("alice.Completed = %v, want %v", got, want)
+		}
+
+		bob := byName["bob"]
+		if got, want := bob.InProgress, false; got != want {
+			t.Errorf("bob.InProgress = %v, want %v (completed)", got, want)
+		}
+		if got, want := bob.Completed, true; got != want {
+			t.Errorf("bob.Completed = %v, want %v", got, want)
+		}
+
+		carol := byName["carol"]
+		if got, want := carol.InProgress, false; got != want {
+			t.Errorf("carol.InProgress = %v, want %v (stale: abandoned mid-quiz)", got, want)
+		}
+		if got, want := carol.Completed, false; got != want {
+			t.Errorf("carol.Completed = %v, want %v (stale != completed)", got, want)
 		}
 	})
 }

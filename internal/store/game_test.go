@@ -736,7 +736,7 @@ func TestGameStore_ListParticipantsForQuizLeaderboard(t *testing.T) {
 			t.Fatalf("failed to create participant: %v", err)
 		}
 
-		rows, err := gameStore.ListParticipantsForQuizLeaderboard(t.Context(), testQuiz.ID)
+		rows, err := gameStore.ListParticipantsForQuizLeaderboard(t.Context(), testQuiz.ID, time.Now())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -798,7 +798,7 @@ func TestGameStore_ListParticipantsForQuizLeaderboard(t *testing.T) {
 			}
 		}
 
-		rows, err := gameStore.ListParticipantsForQuizLeaderboard(t.Context(), testQuiz.ID)
+		rows, err := gameStore.ListParticipantsForQuizLeaderboard(t.Context(), testQuiz.ID, time.Now())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -844,7 +844,7 @@ func TestGameStore_ListParticipantsForQuizLeaderboard(t *testing.T) {
 			t.Fatalf("failed to create participant: %v", err)
 		}
 
-		rows, err := gameStore.ListParticipantsForQuizLeaderboard(t.Context(), emptyQuiz.ID)
+		rows, err := gameStore.ListParticipantsForQuizLeaderboard(t.Context(), emptyQuiz.ID, time.Now())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -855,6 +855,82 @@ func TestGameStore_ListParticipantsForQuizLeaderboard(t *testing.T) {
 			t.Errorf("rows[0].IsCompleted = %v, want %v (no questions defined)", got, want)
 		}
 	})
+
+	t.Run(
+		"returns IsStale=true when the latest game_question is unanswered and expired before staleBefore (#336)",
+		func(t *testing.T) {
+			t.Parallel()
+
+			// Insert a game_question whose expired_at is well in the past
+			// with no game_answer rows referencing it. With staleBefore set
+			// to now, the predicate should fire and surface the participant
+			// as stale even though they have not finished the quiz.
+			db := dbtest.Open(t)
+			quizStore := NewQuizStore(db, slog.Default())
+			testQuiz := newTestQuizzes()[0]
+			if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+				t.Fatalf("failed to create quiz: %v", err)
+			}
+
+			playerStore := NewPlayerStore(db, slog.Default())
+			player, err := playerStore.CreateAnonymousPlayer(t.Context(), "anon-participant-stale")
+			if err != nil {
+				t.Fatalf("failed to create player: %v", err)
+			}
+
+			gameStore := NewGameStore(db, slog.Default())
+			g := &game.Game{QuizID: testQuiz.ID}
+			if err = gameStore.CreateGame(t.Context(), g); err != nil {
+				t.Fatalf("failed to create game: %v", err)
+			}
+			if err = gameStore.CreateParticipant(
+				t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID, QuizID: testQuiz.ID},
+			); err != nil {
+				t.Fatalf("failed to create participant: %v", err)
+			}
+
+			// Issue the first quiz question with an expired_at far in the
+			// past, and skip the matching game_answer. The remaining quiz
+			// questions stay unissued so the participant is not Completed.
+			past := time.Now().UTC().Add(-2 * time.Minute).Truncate(time.Second)
+			gq := &game.Question{
+				GameID:     g.ID,
+				QuestionID: testQuiz.Questions[0].ID,
+				StartedAt:  past.Add(-10 * time.Second),
+				ExpiredAt:  past,
+			}
+			if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+				t.Fatalf("failed to create game question: %v", err)
+			}
+
+			// staleBefore = now: gq.expired_at (2 min ago) is before this,
+			// so the predicate fires.
+			rows, err := gameStore.ListParticipantsForQuizLeaderboard(t.Context(), testQuiz.ID, time.Now())
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got, want := len(rows), 1; got != want {
+				t.Fatalf("len(rows) = %d, want %d", got, want)
+			}
+			if got, want := rows[0].IsStale, true; got != want {
+				t.Errorf("rows[0].IsStale = %v, want %v (latest game_question expired without answer)", got, want)
+			}
+			if got, want := rows[0].IsCompleted, false; got != want {
+				t.Errorf("rows[0].IsCompleted = %v, want %v (only 1 of 3 questions issued)", got, want)
+			}
+
+			// staleBefore far enough in the past that gq's expiry is AFTER
+			// it: the predicate should not fire, confirming the threshold
+			// is honoured rather than the field's existence.
+			rows, err = gameStore.ListParticipantsForQuizLeaderboard(t.Context(), testQuiz.ID, past.Add(-time.Hour))
+			if err != nil {
+				t.Fatalf("unexpected error on past staleBefore: %v", err)
+			}
+			if got, want := rows[0].IsStale, false; got != want {
+				t.Errorf("rows[0].IsStale = %v, want %v (staleBefore predates the expiry)", got, want)
+			}
+		},
+	)
 }
 
 // TestGameStore_ListQuizIDsForPlayer_IncludesJoinedButUnanswered pins

@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/config"
@@ -173,7 +174,7 @@ func (stubGameStore) ListAnswersForQuizLeaderboard(
 }
 
 func (stubGameStore) ListParticipantsForQuizLeaderboard(
-	_ context.Context, _ int64,
+	_ context.Context, _ int64, _ time.Time,
 ) ([]*game.LeaderboardParticipant, error) {
 	return nil, nil
 }
