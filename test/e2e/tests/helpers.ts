@@ -98,8 +98,12 @@ export async function createQuizWithQuestions(
       }
     }
     await page.getByRole('button', { name: 'Save' }).click();
-    // waitForURL beats toHaveURL here — see #384
-    await page.waitForURL(/\/admin\/quizzes\/\d+$/, { timeout: 10_000 });
+    // Anchor on the question we just saved appearing in the quiz
+    // view's list, not on the URL bar (#396). waitForURL still
+    // races slow navigations on contended runners; waiting for the
+    // destination-page content also doubles as a check that the
+    // save round-tripped.
+    await expect(page.locator('.q-text', { hasText: q.text })).toBeVisible({ timeout: 15_000 });
   }
 }
 
