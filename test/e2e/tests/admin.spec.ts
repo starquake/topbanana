@@ -39,56 +39,67 @@ test('admin quiz view hides answer options behind a per-question spoiler toggle'
 });
 
 test('admin can add, edit, and delete a break on a quiz', async ({ page, browserName }) => {
-  // #167 slice 1 — break CRUD through the admin UI. The break renders
-  // in its own section on the quiz view; slice 2 will interleave with
-  // questions in the play loop.
+  // #167 — break CRUD through the admin UI. The break is placed into
+  // a slot in the play sequence via the "Insert after" dropdown, and
+  // the quiz view renders questions and breaks interleaved.
   const username = `e2e-admin-breaks-${browserName}`;
   const quizTitle = `E2E Breaks Quiz ${browserName}`;
 
   await registerAdmin(page, username);
-
-  // Create a bare quiz — we don't need any questions for the break
-  // flow, so skip the full createQuizWithQuestions helper.
-  await page.goto('/admin/quizzes/new');
-  await page.locator('input[name=title]').fill(quizTitle);
-  await page.locator(':is(input, textarea)[name=description]').fill('E2E quiz with breaks');
-  await page.getByRole('button', { name: 'Save' }).click();
+  await createQuizWithQuestions(page, quizTitle);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  // The empty-state placeholder confirms the Breaks section rendered.
-  await expect(page.getByText('This quiz has no breaks yet.')).toBeVisible();
-
-  // Add a break with some text.
+  // Add a break at the very beginning (position=0).
   await page.getByRole('link', { name: /add break/i }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/breaks\/new$/);
-  await page.locator(':is(input, textarea)[name=text]').fill('Halfway through!');
+  await page.locator(':is(input, textarea)[name=text]').fill('Welcome, take a breath');
+  await page.locator('select[name=position]').selectOption({ label: '(Beginning)' });
   await page.getByRole('button', { name: 'Save break' }).click();
 
-  // Lands on the quiz view; the break should show up under Breaks.
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
-  await expect(page.getByText('Halfway through!')).toBeVisible();
+  await expect(page.getByText('Welcome, take a breath')).toBeVisible();
 
-  // Edit the break and check the new text takes.
+  // The break sits BEFORE the first question in the interleaved
+  // sequence. q-row carries .q-row-break for break rows; ranging the
+  // sequence we expect the first row to be the break, then the first
+  // question.
+  const firstRow = page.locator('article.q-row').nth(0);
+  await expect(firstRow).toHaveClass(/q-row-break/);
+  await expect(firstRow).toContainText('Welcome, take a breath');
+  const secondRow = page.locator('article.q-row').nth(1);
+  await expect(secondRow).not.toHaveClass(/q-row-break/);
+  await expect(secondRow).toContainText('What is 2+2?');
+
+  // Edit the break - move it to "after Q1" and change the text.
   await page.getByRole('link', { name: 'Edit break' }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/breaks\/\d+\/edit$/);
   await page.locator(':is(input, textarea)[name=text]').fill('Take a deep breath');
+  await page.locator('select[name=position]').selectOption({ label: 'Question 1: What is 2+2?' });
   await page.getByRole('button', { name: 'Save break' }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
   await expect(page.getByText('Take a deep breath')).toBeVisible();
-  await expect(page.getByText('Halfway through!')).toBeHidden();
+  await expect(page.getByText('Welcome, take a breath')).toBeHidden();
+
+  // After the edit, the break should sit between Q1 and Q2 in the
+  // interleaved sequence (Q1 at idx 0, break at idx 1, Q2 at idx 2).
+  await expect(page.locator('article.q-row').nth(0)).toContainText('What is 2+2?');
+  await expect(page.locator('article.q-row').nth(1)).toHaveClass(/q-row-break/);
+  await expect(page.locator('article.q-row').nth(1)).toContainText('Take a deep breath');
+  await expect(page.locator('article.q-row').nth(2)).toContainText('Which animals are mammals?');
 
   // Delete the break via the per-row modal.
   await page.getByRole('button', { name: 'Delete break' }).click();
   // Scope to the visible delete-break dialog: every break renders its
   // own modal-delete-break-{id} node, all hidden until opened, so a
-  // slice-2 fixture with multiple breaks would make a prefix-only
-  // selector ambiguous. :visible narrows to the one the click opened.
+  // multi-break fixture would make a prefix-only selector ambiguous.
+  // :visible narrows to the one the click opened.
   const deleteDialog = page.locator('[id^="modal-delete-break-"]:visible');
   await deleteDialog.getByRole('button', { name: 'Delete' }).click();
 
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
   await expect(page.getByText('Take a deep breath')).toBeHidden();
-  await expect(page.getByText('This quiz has no breaks yet.')).toBeVisible();
+  // After deletion the sequence is back to questions only.
+  await expect(page.locator('article.q-row-break')).toHaveCount(0);
 });
 
 test('register, create a quiz with varied questions, and see them on the quiz view', async ({ page, browserName }) => {

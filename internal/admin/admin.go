@@ -816,18 +816,6 @@ func HandleQuizView(
 ) http.Handler {
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
 
-	type quizViewData struct {
-		Title             string
-		Quiz              *QuizData
-		Players           []PlayerScoreData
-		LastQuestionIndex int // len(.Quiz.Questions) - 1; used by the
-		// template to disable the Down button on the last row. Sized
-		// here because html/template lacks a `sub` builtin.
-		Breaks []*BreakData // ordered by position. Rendered in a
-		// separate section below Questions in slice 1 (#167); the
-		// interleaved view lands in slice 2.
-	}
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
 
@@ -846,30 +834,129 @@ func HandleQuizView(
 			return
 		}
 
-		// Breaks render in their own admin section below Questions
-		// (#167 slice 1). A missing-breaks fetch is a 500 — the section
-		// is wired into the same admin view that already needed the
-		// quiz tree, so an opaque DB failure shouldn't leak as an empty
-		// list.
-		breaks, err := quizStore.ListBreaksByQuiz(r.Context(), id)
-		if err != nil {
-			logger.ErrorContext(r.Context(), "error listing breaks for quiz view", slog.Any("err", err))
-			render500(w, r, logger, csrfMgr)
-
+		breaks, ok := loadBreaks(w, r, logger, csrfMgr, quizStore, id)
+		if !ok {
 			return
 		}
 
 		quizData := quizDataFromQuiz(qz)
 		attachCanEdit(r, quizData)
-		data := quizViewData{
-			Title:             "Admin Dashboard - View Quiz",
-			Quiz:              quizData,
-			Players:           players,
-			LastQuestionIndex: len(quizData.Questions) - 1,
-			Breaks:            breakDataFromBreaks(breaks),
-		}
+		data := newQuizViewData(quizData, players, breaks)
 		render.Render(w, r, http.StatusOK, data)
 	})
+}
+
+// QuizViewData is the data passed to the quiz view template. Sequence
+// is the merged question + break order; the template ranges over it
+// instead of the raw Questions/Breaks slices so the html stays simple
+// (#167).
+type QuizViewData struct {
+	Title   string
+	Quiz    *QuizData
+	Players []PlayerScoreData
+	// LastQuestionIndex is len(Quiz.Questions) - 1; the partial keys
+	// the move-down button's disabled state on it. Sized here because
+	// html/template lacks a sub builtin.
+	LastQuestionIndex int
+	// Sequence is the interleaved question + break play order.
+	Sequence []SequenceItem
+	// Breaks is the position-ordered break list, preserved for the
+	// delete-modal mount loop in the template (the partial only sees
+	// breaks via Sequence).
+	Breaks []*BreakData
+}
+
+// SequenceItem is one row in the interleaved question + break sequence
+// rendered by the quiz view. Exactly one of Question / Break is set;
+// the template branches on Kind so it can render the two visually
+// distinct row variants from a single range.
+type SequenceItem struct {
+	Kind     string // "question" or "break"
+	Question *QuestionData
+	Break    *BreakData
+	// QuestionIndex is the 0-based index of the question among the
+	// quiz's questions (used to size the move-up/move-down disabled
+	// state). Zero for break rows.
+	QuestionIndex int
+}
+
+const (
+	sequenceKindQuestion = "question"
+	sequenceKindBreak    = "break"
+)
+
+// buildSequence interleaves the quiz's questions with its breaks
+// according to break.Position semantics: a break with position 0 sits
+// before the first question; a break with position N sits immediately
+// after the question whose [QuestionData.Position] equals N. Questions
+// are sorted by their own Position before the merge so the resulting
+// slice reflects the play order (#167).
+//
+// Multiple breaks at the same slot are disallowed by the DB unique
+// index breaks_quiz_position_idx; if one ever slipped through the
+// merge still renders them in the order ListBreaksByQuiz returned them
+// (which is itself position-ordered).
+func buildSequence(questions []*QuestionData, breaks []*BreakData) []SequenceItem {
+	// Map position -> breaks at that slot, so a single linear pass over
+	// the (already-sorted) questions can pick them up. The "after slot
+	// N" semantics means a break with position 0 fires before question
+	// 1, so we emit the 0-slot first and then alternate (question,
+	// then any break at that question's position).
+	bySlot := make(map[int][]*BreakData, len(breaks))
+	for _, b := range breaks {
+		bySlot[b.Position] = append(bySlot[b.Position], b)
+	}
+
+	items := make([]SequenceItem, 0, len(questions)+len(breaks))
+	for _, b := range bySlot[0] {
+		items = append(items, SequenceItem{Kind: sequenceKindBreak, Break: b})
+	}
+	for i, q := range questions {
+		items = append(items, SequenceItem{
+			Kind:          sequenceKindQuestion,
+			Question:      q,
+			QuestionIndex: i,
+		})
+		for _, b := range bySlot[q.Position] {
+			items = append(items, SequenceItem{Kind: sequenceKindBreak, Break: b})
+		}
+	}
+
+	return items
+}
+
+// loadBreaks fetches the quiz's breaks in position order. Errors are
+// 500s because the section is part of the same admin view that already
+// loaded the quiz tree; surfacing an empty list would hide the
+// failure.
+func loadBreaks(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	quizStore quiz.Store,
+	quizID int64,
+) ([]*BreakData, bool) {
+	breaks, err := quizStore.ListBreaksByQuiz(r.Context(), quizID)
+	if err != nil {
+		logger.ErrorContext(r.Context(), "error listing breaks for quiz view", slog.Any("err", err))
+		render500(w, r, logger, csrfMgr)
+
+		return nil, false
+	}
+
+	return breakDataFromBreaks(breaks), true
+}
+
+func newQuizViewData(quizData *QuizData, players []PlayerScoreData, breaks []*BreakData) QuizViewData {
+	return QuizViewData{
+		Title:             "Admin Dashboard - View Quiz",
+		Quiz:              quizData,
+		Players:           players,
+		LastQuestionIndex: len(quizData.Questions) - 1,
+		Sequence:          buildSequence(quizData.Questions, breaks),
+		Breaks:            breaks,
+	}
 }
 
 // quizViewPlayersLimit is the upper bound on rows in the "Played by"
@@ -1491,9 +1578,15 @@ func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 	// is in scope for ExecuteTemplate by name.
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
 
+	// partialData mirrors the subset of QuizViewData the questions_list
+	// partial actually ranges over - questions interleaved with breaks
+	// by position, plus the index sentinel for the move-down disable
+	// state. Repeated verbatim here so the partial's contract stays
+	// machine-checkable.
 	type partialData struct {
 		Quiz              *QuizData
 		LastQuestionIndex int
+		Sequence          []SequenceItem
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1531,11 +1624,16 @@ func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 			if !fetchOK {
 				return
 			}
+			breaks, breaksOK := loadBreaks(w, r, logger, csrfMgr, quizStore, quizID)
+			if !breaksOK {
+				return
+			}
 			quizData := quizDataFromQuiz(qz)
 			attachCanEdit(r, quizData)
 			render.RenderPartial(w, r, "questions_list", partialData{
 				Quiz:              quizData,
 				LastQuestionIndex: len(quizData.Questions) - 1,
+				Sequence:          buildSequence(quizData.Questions, breaks),
 			})
 
 			return

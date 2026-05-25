@@ -91,7 +91,7 @@ func (*stubQuizStore) GetBreak(_ context.Context, _ int64) (*quiz.Break, error) 
 	return nil, errors.ErrUnsupported
 }
 
-func (*stubQuizStore) CreateBreakAtNextPosition(_ context.Context, _ *quiz.Break) error {
+func (*stubQuizStore) CreateBreak(_ context.Context, _ *quiz.Break) error {
 	return errors.ErrUnsupported
 }
 

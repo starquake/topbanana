@@ -193,7 +193,7 @@ func (stubQuizStore) GetBreak(_ context.Context, _ int64) (*quiz.Break, error) {
 	return nil, errStub
 }
 
-func (stubQuizStore) CreateBreakAtNextPosition(_ context.Context, _ *quiz.Break) error {
+func (stubQuizStore) CreateBreak(_ context.Context, _ *quiz.Break) error {
 	return errStub
 }
 func (stubQuizStore) UpdateBreak(_ context.Context, _ *quiz.Break) error { return errStub }

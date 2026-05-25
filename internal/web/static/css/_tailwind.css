@@ -256,6 +256,17 @@
                text-accent tabular-nums opacity-90
                md:w-12 md:text-center md:text-[2rem];
     }
+    /* Break rows reuse the .q-row grid but read as a paused interlude
+     * rather than a numbered question: dashed border + dimmer surface
+     * so the admin can scan the play order at a glance (#167). */
+    .q-row-break {
+        @apply border-dashed bg-surface-2;
+    }
+    .q-position-break {
+        @apply text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-text-dim
+               opacity-100
+               md:text-[0.7rem] md:font-semibold md:tracking-[0.18em] md:text-left md:text-text-dim;
+    }
     .q-thumb {
         @apply flex items-center justify-center shrink-0
                w-12 h-12 rounded-sm bg-surface-2 border border-border-soft

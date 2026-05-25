@@ -3,19 +3,27 @@ package admin
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"unicode/utf8"
 
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
-// BreakData backs the Breaks section on the quiz view template and
-// the standalone break form. Mirrors the QuestionData/QuizData shape
-// so the templates stay symmetric with their Questions equivalents
-// (#167).
+// positionFieldKey is the form-error map key the break form uses to
+// attach validation messages to the "Insert after" dropdown. Pulled
+// out as a constant so the multiple validation paths cannot drift
+// (revive add-constant).
+const positionFieldKey = "position"
+
+// BreakData backs the interleaved sequence on the quiz view template
+// and the standalone break form. Mirrors the QuestionData/QuizData
+// shape so the templates stay symmetric with their Questions
+// equivalents (#167).
 type BreakData struct {
 	ID       int64
 	QuizID   int64
@@ -41,17 +49,72 @@ func breakDataFromBreaks(breaks []*quiz.Break) []*BreakData {
 	return out
 }
 
+// BreakSlotOption is one entry in the "Insert after" dropdown on the
+// break form: a position value and the label rendered next to it.
+// Position 0 is the "(Beginning)" slot; positive positions name the
+// question they appear after.
+type BreakSlotOption struct {
+	Position int
+	Label    string
+}
+
 // breakFormData backs breakform.gohtml. FieldErrors is set when
 // HandleBreakSave re-renders the form after a validation failure
-// (mirrors questionFormData's contract). Text is the only
-// admin-authored field in slice 1, but FieldErrors stays a map so
-// future slices can attach errors to additional inputs without
-// reshaping the template wiring.
+// (mirrors questionFormData's contract). FormError carries a
+// banner-level message — used for slot-collision (#167), which is a
+// form-wide condition rather than a per-field issue.
 type breakFormData struct {
 	Title       string
 	Quiz        *QuizData
 	Break       *BreakData
+	SlotOptions []BreakSlotOption
 	FieldErrors map[string]string
+	FormError   string
+}
+
+// breakSlotMaxTextLen caps the per-question label in the "Insert after"
+// dropdown so the option list stays readable even when a quiz has a
+// long question. The first few words usually suffice for the admin to
+// pick the right slot.
+const breakSlotMaxTextLen = 60
+
+// buildSlotOptions translates the quiz's questions into the dropdown
+// entries the form renders. The list always starts with the
+// "(Beginning)" slot at position 0; every question contributes one
+// "Question {n}: {truncated text}" entry keyed by its own position.
+//
+// The truncation keeps the option list scannable on long-text quizzes.
+// Position 0 is intentionally a sibling of the question slots, not a
+// hidden default — the admin should be able to add a break before the
+// first question without scrolling. Truncation counts runes, not
+// bytes, so a multi-byte UTF-8 character cannot be sliced in half.
+func buildSlotOptions(questions []*quiz.Question) []BreakSlotOption {
+	opts := make([]BreakSlotOption, 0, len(questions)+1)
+	opts = append(opts, BreakSlotOption{Position: 0, Label: "(Beginning)"})
+	for _, q := range questions {
+		text := q.Text
+		if utf8.RuneCountInString(text) > breakSlotMaxTextLen {
+			text = string([]rune(text)[:breakSlotMaxTextLen]) + "..."
+		}
+		opts = append(opts, BreakSlotOption{
+			Position: q.Position,
+			Label:    "Question " + strconv.Itoa(q.Position) + ": " + text,
+		})
+	}
+
+	return opts
+}
+
+// defaultCreateSlot picks the position the create form pre-selects. An
+// empty quiz selects (Beginning); otherwise we default to the last
+// question's position so the admin can add a break at the end without
+// scrolling through a long list.
+func defaultCreateSlot(questions []*quiz.Question) int {
+	if len(questions) == 0 {
+		return 0
+	}
+
+	return questions[len(questions)-1].Position
 }
 
 // HandleBreakCreate renders the new-break form. Owner-gated so a
@@ -70,16 +133,18 @@ func HandleBreakCreate(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qui
 			return
 		}
 
+		slots := buildSlotOptions(qz.Questions)
 		render.Render(w, r, http.StatusOK, breakFormData{
-			Title: "Admin Dashboard - Break Create",
-			Quiz:  quizDataFromQuiz(qz),
-			Break: &BreakData{QuizID: qz.ID},
+			Title:       "Admin Dashboard - Break Create",
+			Quiz:        quizDataFromQuiz(qz),
+			Break:       &BreakData{QuizID: qz.ID, Position: defaultCreateSlot(qz.Questions)},
+			SlotOptions: slots,
 		})
 	})
 }
 
 // HandleBreakEdit renders the edit form for an existing break,
-// pre-filling Text.
+// pre-filling Text and the current insertion slot.
 func HandleBreakEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/breakform.gohtml")
 
@@ -104,9 +169,10 @@ func HandleBreakEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.
 		}
 
 		render.Render(w, r, http.StatusOK, breakFormData{
-			Title: "Admin Dashboard - Break Edit",
-			Quiz:  quizDataFromQuiz(qz),
-			Break: breakDataFromBreak(b),
+			Title:       "Admin Dashboard - Break Edit",
+			Quiz:        quizDataFromQuiz(qz),
+			Break:       breakDataFromBreak(b),
+			SlotOptions: buildSlotOptions(qz.Questions),
 		})
 	})
 }
@@ -124,22 +190,33 @@ func HandleBreakSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.
 			return
 		}
 
-		fieldErrors, ok := fillBreakFromForm(w, r, logger, csrfMgr, bctx.Break)
+		fieldErrors, ok := fillBreakFromForm(w, r, logger, csrfMgr, bctx.Quiz, bctx.Break)
 		if !ok {
 			return
 		}
 		if len(fieldErrors) > 0 {
-			renderBreakForm(w, r, formRenderer, bctx, fieldErrors)
+			renderBreakForm(w, r, formRenderer, bctx, fieldErrors, "")
 
 			return
 		}
 
-		if !storeBreak(w, r, logger, csrfMgr, quizStore, bctx.Break) {
+		if err := storeBreak(r.Context(), quizStore, bctx.Break); err != nil {
+			if errors.Is(err, quiz.ErrBreakPositionTaken) {
+				renderBreakForm(
+					w, r, formRenderer, bctx, nil,
+					"A break already exists at that slot - pick a different one.",
+				)
+
+				return
+			}
+			logger.ErrorContext(r.Context(), "error saving break", slog.Any("err", err))
+			render500(w, r, logger, csrfMgr)
+
 			return
 		}
 
 		// strconv.FormatInt dodges gosec G710's open-redirect heuristic
-		// — bctx.Quiz.ID came from a request parameter so a fmt.Sprintf
+		// - bctx.Quiz.ID came from a request parameter so a fmt.Sprintf
 		// with %d would taint the redirect path.
 		http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(bctx.Quiz.ID, 10), http.StatusSeeOther)
 	})
@@ -238,31 +315,38 @@ func renderBreakForm(
 	renderer *TemplateRenderer,
 	bctx *breakSaveCtx,
 	fieldErrors map[string]string,
+	formError string,
 ) {
 	title := "Admin Dashboard - Break Edit"
 	if bctx.IsNew {
 		title = "Admin Dashboard - Break Create"
 	}
-	renderer.Render(w, r, http.StatusBadRequest, breakFormData{
+	status := http.StatusBadRequest
+	if formError != "" && len(fieldErrors) == 0 {
+		status = http.StatusConflict
+	}
+	renderer.Render(w, r, status, breakFormData{
 		Title:       title,
 		Quiz:        quizDataFromQuiz(bctx.Quiz),
 		Break:       breakDataFromBreak(bctx.Break),
+		SlotOptions: buildSlotOptions(bctx.Quiz.Questions),
 		FieldErrors: fieldErrors,
+		FormError:   formError,
 	})
 }
 
 // fillBreakFromForm reads the form into the supplied break struct.
 // Mirrors fillQuestionFromForm's contract: a parse error renders a 400
 // and returns (nil, false); a validation error returns a non-empty map
-// + true; success returns (nil, true). Text is optional per #167 so
-// the form has nothing to validate in slice 1, but the function still
-// returns the map so future fields can be added without rewiring the
-// caller.
+// + true; success returns (nil, true). The supplied quiz is used to
+// validate the "Insert after" position against the quiz's questions
+// (#167).
 func fillBreakFromForm(
 	w http.ResponseWriter,
 	r *http.Request,
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
+	qz *quiz.Quiz,
 	b *quiz.Break,
 ) (map[string]string, bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxFormSize)
@@ -275,7 +359,18 @@ func fillBreakFromForm(
 	}
 	b.Text = r.PostFormValue("text")
 
-	problems := (&breakForm{}).Valid(r.Context())
+	// Position 0 is a valid value (the "before-first-question" slot),
+	// so the form always submits a numeric position; a missing or
+	// unparseable value is a programmer error that surfaces as the
+	// "invalid position" field message rather than silently defaulting.
+	posRaw := r.PostFormValue("position")
+	pos, parseErr := strconv.Atoi(posRaw)
+	if parseErr != nil {
+		return map[string]string{positionFieldKey: "Pick a slot to insert the break at."}, true
+	}
+	b.Position = pos
+
+	problems := (&breakForm{quiz: qz, brk: b}).Valid(r.Context())
 	if len(problems) > 0 {
 		return problems, true
 	}
@@ -284,36 +379,27 @@ func fillBreakFromForm(
 }
 
 func storeBreak(
-	w http.ResponseWriter,
-	r *http.Request,
-	logger *slog.Logger,
-	csrfMgr *csrf.Manager,
+	ctx context.Context,
 	quizStore quiz.Store,
 	b *quiz.Break,
-) bool {
+) error {
 	if b.ID == 0 {
-		if err := quizStore.CreateBreakAtNextPosition(r.Context(), b); err != nil {
-			logger.ErrorContext(r.Context(), "error creating break", slog.Any("err", err))
-			render500(w, r, logger, csrfMgr)
-
-			return false
+		if err := quizStore.CreateBreak(ctx, b); err != nil {
+			return fmt.Errorf("create break: %w", err)
 		}
 
-		return true
+		return nil
 	}
-	if err := quizStore.UpdateBreak(r.Context(), b); err != nil {
-		logger.ErrorContext(r.Context(), "error updating break", slog.Any("err", err))
-		render500(w, r, logger, csrfMgr)
-
-		return false
+	if err := quizStore.UpdateBreak(ctx, b); err != nil {
+		return fmt.Errorf("update break: %w", err)
 	}
 
-	return true
+	return nil
 }
 
 // breakByID loads a break and gates it on the URL-scoped quizID. A
 // mismatch renders as 404 (not 403) so the route never leaks "this
-// break exists on another quiz" — same IDOR rationale as
+// break exists on another quiz" - same IDOR rationale as
 // questionByID.
 func breakByID(
 	w http.ResponseWriter,
@@ -353,15 +439,34 @@ func breakByID(
 	return b, true
 }
 
-// breakForm is the validation hook for the admin break form. Text is
-// optional per #167 so Valid is a no-op today; the type stays so
-// future slices (image_url etc.) get a single place to wire field-
-// level rules without reshaping the caller. The wrapped break will
-// move onto the struct when there's something to validate against.
-type breakForm struct{}
+// breakForm is the validation hook for the admin break form. The
+// position field has to match either the "(Beginning)" slot (0) or the
+// position of one of the quiz's questions; anything else means a stale
+// dropdown (question deleted between form load and submit) or a
+// hand-crafted POST.
+type breakForm struct {
+	quiz *quiz.Quiz
+	brk  *quiz.Break
+}
 
 // Valid checks every form-level rule on the wrapped break. An empty
 // map means the form is valid.
-func (*breakForm) Valid(_ context.Context) map[string]string {
-	return map[string]string{}
+func (f *breakForm) Valid(_ context.Context) map[string]string {
+	problems := map[string]string{}
+	if f.brk.Position < 0 {
+		problems[positionFieldKey] = "Pick a slot to insert the break at."
+
+		return problems
+	}
+	if f.brk.Position == 0 {
+		return problems
+	}
+	for _, q := range f.quiz.Questions {
+		if q.Position == f.brk.Position {
+			return problems
+		}
+	}
+	problems[positionFieldKey] = "That question no longer exists - pick a different slot."
+
+	return problems
 }

@@ -7,7 +7,7 @@
         <span class="crumb-sep" aria-hidden="true">/</span>
         <a href="/admin/quizzes/{{.Quiz.ID}}">{{.Quiz.Title}}</a>
         <span class="crumb-sep" aria-hidden="true">/</span>
-        <span class="text-text" aria-current="page">{{if .Break.ID}}Break {{printf "%02d" .Break.Position}}{{else}}New break{{end}}</span>
+        <span class="text-text" aria-current="page">{{if .Break.ID}}Edit break{{else}}New break{{end}}</span>
     </nav>
 
     <header class="flex flex-col md:flex-row md:items-end md:justify-between gap-6 mb-10 pb-6 border-b border-border-soft">
@@ -15,13 +15,19 @@
             <h1 class="m-0 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(2rem,6vw,2.75rem)]">{{.Title}}</h1>
             <p class="mt-2 max-w-[50ch] text-text-dim text-[0.95rem]">
                 {{if .Break.ID}}
-                    Break {{printf "%02d" .Break.Position}} of &ldquo;{{.Quiz.Title}}&rdquo;.
+                    Edit the break attached to &ldquo;{{.Quiz.Title}}&rdquo;.
                 {{else}}
-                    Add a new break to &ldquo;{{.Quiz.Title}}&rdquo;. Breaks pause the play loop with optional author-supplied text.
+                    Add a new break to &ldquo;{{.Quiz.Title}}&rdquo;. Pick the slot the break sits in and add optional author-supplied text.
                 {{end}}
             </p>
         </div>
     </header>
+
+    {{if .FormError}}
+        <div class="mb-6 px-4 py-3 rounded-sm border border-danger/40 bg-danger/10 text-danger text-[0.95rem]" role="alert">
+            {{.FormError}}
+        </div>
+    {{end}}
 
     <form class="form-shell"
             {{if .Break.ID}}
@@ -32,6 +38,24 @@
             method="POST">
         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
         <input type="hidden" name="id" value="{{.Break.ID}}">
+
+        {{$positionErr := index .FieldErrors "position"}}
+        <div class="form-field">
+            <label class="label-eyebrow" for="position">
+                Insert after
+                <span class="label-hint">Where this break sits in the question sequence.</span>
+            </label>
+            <select id="position" name="position"
+                    class="form-input{{if $positionErr}} form-input-error{{end}}"
+                    {{if $positionErr}}aria-invalid="true" aria-describedby="position-error"{{end}}>
+                {{range .SlotOptions}}
+                    <option value="{{.Position}}"{{if eq .Position $.Break.Position}} selected{{end}}>{{.Label}}</option>
+                {{end}}
+            </select>
+            {{if $positionErr}}
+                <p id="position-error" class="form-help-error" role="alert">{{$positionErr}}</p>
+            {{end}}
+        </div>
 
         {{$textErr := index .FieldErrors "text"}}
         <div class="form-field">
@@ -46,15 +70,6 @@
                 <p id="text-error" class="form-help-error" role="alert">{{$textErr}}</p>
             {{end}}
         </div>
-
-        {{if .Break.ID}}
-            <div class="form-field">
-                <label class="label-eyebrow" for="position">Position</label>
-                <input id="position" type="text" readonly
-                       value="{{printf "%02d" .Break.Position}}"
-                       class="form-input form-input-readonly max-w-[120px]">
-            </div>
-        {{end}}
 
         <div class="form-actions">
             <button type="submit" name="action" value="Save" class="btn-primary">

@@ -140,19 +140,22 @@
             </div>
         </div>
 
-        {{/* Questions section */}}
-        <section aria-label="Questions">
+        {{/* Sequence section. Questions are shown interleaved with
+             breaks in the order they appear during play (#167). Break
+             rows are visually distinct from question rows so the admin
+             can scan the play order at a glance. */}}
+        <section aria-label="Sequence">
             <div class="section-head">
-                <h2>Questions</h2>
+                <h2>Sequence</h2>
                 {{if .Quiz.Questions}}
-                    <span class="section-count">{{len .Quiz.Questions}} question{{if ne (len .Quiz.Questions) 1}}s{{end}}</span>
+                    <span class="section-count">{{len .Quiz.Questions}} question{{if ne (len .Quiz.Questions) 1}}s{{end}}{{if .Breaks}}, {{len .Breaks}} break{{if ne (len .Breaks) 1}}s{{end}}{{end}}</span>
                 {{end}}
             </div>
 
-            {{if .Quiz.Questions}}
+            {{if or .Quiz.Questions .Breaks}}
                 {{template "questions_list" .}}
 
-                {{/* Delete-question modals — only mounted for the
+                {{/* Delete-question modals - only mounted for the
                      creator so non-owners can't open the dialog. The
                      questions_list partial gates the per-question
                      buttons on the same rule. */}}
@@ -182,67 +185,6 @@
                         </div>
                     </div>
                 {{end}}
-                {{end}}
-            {{else}}
-                <div class="border border-dashed border-border rounded-xl p-10 text-center text-text-dim">
-                    This quiz has no questions yet.
-                </div>
-            {{end}}
-
-            {{if $canEdit}}
-            <div class="mt-6">
-                <a href="/admin/quizzes/{{.Quiz.ID}}/questions/new"
-                   class="btn-primary gap-2">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5a.5.5 0 0 1 .5.5v5.5H14a.5.5 0 0 1 0 1H8.5V14a.5.5 0 0 1-1 0V8.5H2a.5.5 0 0 1 0-1h5.5V2a.5.5 0 0 1 .5-.5z"/></svg>
-                    <span>Add question</span>
-                </a>
-            </div>
-            {{end}}
-        </section>
-
-        {{/* Breaks section (#167 slice 1). Rendered as a separate
-             section beneath Questions; slice 2 will interleave them by
-             position in the play loop. */}}
-        <section aria-label="Breaks" class="mt-10">
-            <div class="section-head">
-                <h2>Breaks</h2>
-                {{if .Breaks}}
-                    <span class="section-count">{{len .Breaks}} break{{if ne (len .Breaks) 1}}s{{end}}</span>
-                {{end}}
-            </div>
-
-            {{if .Breaks}}
-                <div id="breaks-list" class="flex flex-col gap-3">
-                    {{range .Breaks}}
-                        <article class="q-row">
-                            <div class="q-position">{{printf "%02d" .Position}}</div>
-                            <div class="q-body">
-                                {{if .Text}}
-                                    <p class="q-text">{{.Text}}</p>
-                                {{else}}
-                                    <p class="q-text text-text-dim italic">No text</p>
-                                {{end}}
-                            </div>
-                            {{if $canEdit}}
-                            <div class="q-actions">
-                                <a href="/admin/quizzes/{{.QuizID}}/breaks/{{.ID}}/edit"
-                                   aria-label="Edit break" title="Edit break"
-                                   class="icon-btn">
-                                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>
-                                </a>
-                                <button type="button"
-                                        onclick="openModal('modal-delete-break-{{.ID}}')"
-                                        aria-label="Delete break" title="Delete break"
-                                        class="w-9 h-9 inline-flex items-center justify-center rounded-sm bg-transparent border-0 text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:shadow-focus transition-colors cursor-pointer">
-                                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5zM11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1H11z"/></svg>
-                                </button>
-                            </div>
-                            {{end}}
-                        </article>
-                    {{end}}
-                </div>
-
-                {{if $canEdit}}
                 {{range .Breaks}}
                     <div id="modal-delete-break-{{.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-delete-break-{{.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
                         <div class="absolute inset-0" onclick="closeModal('modal-delete-break-{{.ID}}')"></div>
@@ -271,14 +213,19 @@
                 {{end}}
             {{else}}
                 <div class="border border-dashed border-border rounded-xl p-10 text-center text-text-dim">
-                    This quiz has no breaks yet.
+                    This quiz has no questions yet.
                 </div>
             {{end}}
 
             {{if $canEdit}}
-            <div class="mt-6">
-                <a href="/admin/quizzes/{{.Quiz.ID}}/breaks/new"
+            <div class="mt-6 flex flex-wrap gap-2">
+                <a href="/admin/quizzes/{{.Quiz.ID}}/questions/new"
                    class="btn-primary gap-2">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5a.5.5 0 0 1 .5.5v5.5H14a.5.5 0 0 1 0 1H8.5V14a.5.5 0 0 1-1 0V8.5H2a.5.5 0 0 1 0-1h5.5V2a.5.5 0 0 1 .5-.5z"/></svg>
+                    <span>Add question</span>
+                </a>
+                <a href="/admin/quizzes/{{.Quiz.ID}}/breaks/new"
+                   class="btn-ghost gap-2">
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5a.5.5 0 0 1 .5.5v5.5H14a.5.5 0 0 1 0 1H8.5V14a.5.5 0 0 1-1 0V8.5H2a.5.5 0 0 1 0-1h5.5V2a.5.5 0 0 1 .5-.5z"/></svg>
                     <span>Add break</span>
                 </a>

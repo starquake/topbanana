@@ -169,7 +169,7 @@ type stubQuizStore struct {
 	swapQuestionPositions   func(ctx context.Context, quizID, questionID int64, direction string) error
 	listBreaksByQuiz        func(ctx context.Context, quizID int64) ([]*quiz.Break, error)
 	getBreakByID            func(ctx context.Context, id int64) (*quiz.Break, error)
-	createBreakAtNextPos    func(ctx context.Context, b *quiz.Break) error
+	createBreak             func(ctx context.Context, b *quiz.Break) error
 	updateBreak             func(ctx context.Context, b *quiz.Break) error
 	deleteBreak             func(ctx context.Context, id int64) error
 }
@@ -320,12 +320,12 @@ func (s stubQuizStore) GetBreak(ctx context.Context, id int64) (*quiz.Break, err
 	return s.getBreakByID(ctx, id)
 }
 
-func (s stubQuizStore) CreateBreakAtNextPosition(ctx context.Context, b *quiz.Break) error {
-	if s.createBreakAtNextPos == nil {
-		return errors.New("createBreakAtNextPos not supplied in stub")
+func (s stubQuizStore) CreateBreak(ctx context.Context, b *quiz.Break) error {
+	if s.createBreak == nil {
+		return errors.New("createBreak not supplied in stub")
 	}
 
-	return s.createBreakAtNextPos(ctx, b)
+	return s.createBreak(ctx, b)
 }
 
 func (s stubQuizStore) UpdateBreak(ctx context.Context, b *quiz.Break) error {

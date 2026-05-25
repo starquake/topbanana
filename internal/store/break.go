@@ -14,17 +14,9 @@ import (
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
-// createBreakAtNextPositionRetries caps the optimistic retry loop in
-// [QuizStore.CreateBreakAtNextPosition] so two genuinely concurrent
-// callers eventually serialize without spinning forever. Three attempts
-// covers the realistic admin-double-click case (one slot collision)
-// while still giving up loudly if something stranger is going on.
-// Mirrors createQuestionAtNextPositionRetries (#352).
-const createBreakAtNextPositionRetries = 3
-
 // ListBreaksByQuiz returns the breaks for a quiz in ascending position
-// order. Used by the admin quiz view to render the Breaks section
-// alongside Questions (#167).
+// order. Used by the admin quiz view to render breaks interleaved with
+// questions (#167).
 func (s *QuizStore) ListBreaksByQuiz(ctx context.Context, quizID int64) ([]*quiz.Break, error) {
 	rows, err := s.q.ListBreaksByQuiz(ctx, quizID)
 	if err != nil {
@@ -68,70 +60,51 @@ func (s *QuizStore) GetBreak(ctx context.Context, id int64) (*quiz.Break, error)
 	}, nil
 }
 
-// CreateBreakAtNextPosition reads max(position)+1 and inserts the
-// break with that position inside a single transaction. The UNIQUE
-// INDEX on breaks(quiz_id, position) catches the race when two
-// transactions both pick the same slot; this method retries up to
-// [createBreakAtNextPositionRetries] times so genuinely concurrent
-// admin clicks succeed without surfacing the constraint to the
-// caller. Mirrors [QuizStore.CreateQuestionAtNextPosition].
-func (s *QuizStore) CreateBreakAtNextPosition(ctx context.Context, b *quiz.Break) error {
-	var lastErr error
-	for range createBreakAtNextPositionRetries {
-		txErr := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
-			maxPos, err := q.NextBreakPosition(ctx, b.QuizID)
-			if err != nil {
-				return fmt.Errorf("read max break position: %w", err)
-			}
-			b.Position = int(maxPos) + 1
-
-			row, err := q.CreateBreak(ctx, db.CreateBreakParams{
-				QuizID:   b.QuizID,
-				Text:     b.Text,
-				Position: int64(b.Position),
-			})
-			if err != nil {
-				return fmt.Errorf("insert break: %w", err)
-			}
-			b.ID = row.ID
-			b.CreatedAt = row.CreatedAt
-			b.UpdatedAt = row.UpdatedAt
-
-			return nil
-		})
-		if txErr == nil {
-			return nil
-		}
-		var sqliteErr *sqlite.Error
-		if errors.As(txErr, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
-			lastErr = txErr
-
-			continue
+// CreateBreak inserts a break at the caller-supplied position. Position
+// is the "after question N" slot in the play sequence (0 = before the
+// first question, N = after the question whose position is N). The
+// UNIQUE INDEX breaks_quiz_position_idx surfaces a slot collision as
+// [quiz.ErrBreakPositionTaken] so the admin form can render an inline
+// error instead of a generic 500 (#167).
+func (s *QuizStore) CreateBreak(ctx context.Context, b *quiz.Break) error {
+	row, err := s.q.CreateBreak(ctx, db.CreateBreakParams{
+		QuizID:   b.QuizID,
+		Text:     b.Text,
+		Position: int64(b.Position),
+	})
+	if err != nil {
+		if isBreakUniqueViolation(err) {
+			return quiz.ErrBreakPositionTaken
 		}
 
-		return fmt.Errorf("failed to create break at next position: %w", txErr)
+		return fmt.Errorf("failed to create break: %w", err)
 	}
+	b.ID = row.ID
+	b.CreatedAt = row.CreatedAt
+	b.UpdatedAt = row.UpdatedAt
 
-	return fmt.Errorf(
-		"failed to create break after %d position retries: %w",
-		createBreakAtNextPositionRetries,
-		lastErr,
-	)
+	return nil
 }
 
-// UpdateBreak updates an existing break. Currently only Text is
-// mutable from the admin form (#167); position is reordered out of
-// band in a future slice.
+// UpdateBreak updates an existing break's mutable fields (text +
+// position). A position change that collides with another break on the
+// same quiz surfaces as [quiz.ErrBreakPositionTaken]; a stale id maps
+// to [quiz.ErrUpdatingBreakNoRowsAffected] (#167).
 func (s *QuizStore) UpdateBreak(ctx context.Context, b *quiz.Break) error {
 	if b.ID == 0 {
 		return quiz.ErrCannotUpdateBreakWithIDZero
 	}
 
 	res, err := s.q.UpdateBreak(ctx, db.UpdateBreakParams{
-		Text: b.Text,
-		ID:   b.ID,
+		Text:     b.Text,
+		Position: int64(b.Position),
+		ID:       b.ID,
 	})
 	if err != nil {
+		if isBreakUniqueViolation(err) {
+			return quiz.ErrBreakPositionTaken
+		}
+
 		return fmt.Errorf("failed to update break: %w", err)
 	}
 
@@ -140,6 +113,15 @@ func (s *QuizStore) UpdateBreak(ctx context.Context, b *quiz.Break) error {
 	}
 
 	return nil
+}
+
+// isBreakUniqueViolation reports whether err is the SQLite
+// SQLITE_CONSTRAINT_UNIQUE that breaks_quiz_position_idx raises when a
+// (quiz_id, position) slot is already in use.
+func isBreakUniqueViolation(err error) bool {
+	var sqliteErr *sqlite.Error
+
+	return errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE
 }
 
 // DeleteBreak removes a break by ID. Breaks don't own dependent rows

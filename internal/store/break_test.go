@@ -29,32 +29,32 @@ func newTestQuizForBreaks(t *testing.T, qs *QuizStore) *quiz.Quiz {
 	return qz
 }
 
-func TestQuizStore_CreateBreakAtNextPosition(t *testing.T) {
+func TestQuizStore_CreateBreak(t *testing.T) {
 	t.Parallel()
 
-	t.Run("assigns sequential positions", func(t *testing.T) {
+	t.Run("stores the supplied position", func(t *testing.T) {
 		t.Parallel()
 
 		db := dbtest.Open(t)
 		quizStore := NewQuizStore(db, slog.Default())
 		qz := newTestQuizForBreaks(t, quizStore)
 
-		first := &quiz.Break{QuizID: qz.ID, Text: "Halfway!"}
-		if err := quizStore.CreateBreakAtNextPosition(t.Context(), first); err != nil {
-			t.Fatalf("first CreateBreakAtNextPosition err = %v, want nil", err)
+		first := &quiz.Break{QuizID: qz.ID, Text: "Halfway!", Position: 0}
+		if err := quizStore.CreateBreak(t.Context(), first); err != nil {
+			t.Fatalf("CreateBreak err = %v, want nil", err)
 		}
-		if got, want := first.Position, 1; got != want {
+		if got, want := first.Position, 0; got != want {
 			t.Errorf("first.Position = %d, want %d", got, want)
 		}
 		if first.ID == 0 {
 			t.Error("first.ID = 0, want non-zero")
 		}
 
-		second := &quiz.Break{QuizID: qz.ID, Text: "Almost done"}
-		if err := quizStore.CreateBreakAtNextPosition(t.Context(), second); err != nil {
-			t.Fatalf("second CreateBreakAtNextPosition err = %v, want nil", err)
+		second := &quiz.Break{QuizID: qz.ID, Text: "After Q3", Position: 3}
+		if err := quizStore.CreateBreak(t.Context(), second); err != nil {
+			t.Fatalf("CreateBreak err = %v, want nil", err)
 		}
-		if got, want := second.Position, 2; got != want {
+		if got, want := second.Position, 3; got != want {
 			t.Errorf("second.Position = %d, want %d", got, want)
 		}
 	})
@@ -66,12 +66,31 @@ func TestQuizStore_CreateBreakAtNextPosition(t *testing.T) {
 		quizStore := NewQuizStore(db, slog.Default())
 		qz := newTestQuizForBreaks(t, quizStore)
 
-		b := &quiz.Break{QuizID: qz.ID}
-		if err := quizStore.CreateBreakAtNextPosition(t.Context(), b); err != nil {
-			t.Fatalf("CreateBreakAtNextPosition err = %v, want nil", err)
+		b := &quiz.Break{QuizID: qz.ID, Position: 1}
+		if err := quizStore.CreateBreak(t.Context(), b); err != nil {
+			t.Fatalf("CreateBreak err = %v, want nil", err)
 		}
 		if got, want := b.Text, ""; got != want {
 			t.Errorf("b.Text = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("position collision returns ErrBreakPositionTaken", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		qz := newTestQuizForBreaks(t, quizStore)
+
+		first := &quiz.Break{QuizID: qz.ID, Text: "first", Position: 2}
+		if err := quizStore.CreateBreak(t.Context(), first); err != nil {
+			t.Fatalf("first CreateBreak err = %v, want nil", err)
+		}
+
+		second := &quiz.Break{QuizID: qz.ID, Text: "second", Position: 2}
+		err := quizStore.CreateBreak(t.Context(), second)
+		if got, want := err, quiz.ErrBreakPositionTaken; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
 		}
 	})
 }
@@ -86,9 +105,9 @@ func TestQuizStore_GetBreak(t *testing.T) {
 		quizStore := NewQuizStore(db, slog.Default())
 		qz := newTestQuizForBreaks(t, quizStore)
 
-		created := &quiz.Break{QuizID: qz.ID, Text: "Pause"}
-		if err := quizStore.CreateBreakAtNextPosition(t.Context(), created); err != nil {
-			t.Fatalf("CreateBreakAtNextPosition err = %v", err)
+		created := &quiz.Break{QuizID: qz.ID, Text: "Pause", Position: 1}
+		if err := quizStore.CreateBreak(t.Context(), created); err != nil {
+			t.Fatalf("CreateBreak err = %v", err)
 		}
 
 		reloaded, err := quizStore.GetBreak(t.Context(), created.ID)
@@ -129,10 +148,14 @@ func TestQuizStore_ListBreaksByQuiz(t *testing.T) {
 		quizStore := NewQuizStore(db, slog.Default())
 		qz := newTestQuizForBreaks(t, quizStore)
 
-		for _, text := range []string{"first", "second", "third"} {
-			b := &quiz.Break{QuizID: qz.ID, Text: text}
-			if err := quizStore.CreateBreakAtNextPosition(t.Context(), b); err != nil {
-				t.Fatalf("CreateBreakAtNextPosition err = %v", err)
+		// Insert out of order so the ORDER BY in the query is the only
+		// thing producing the sorted output the assertions below pin.
+		positions := []int{2, 0, 1}
+		texts := []string{"after Q2", "before all", "after Q1"}
+		for i, pos := range positions {
+			b := &quiz.Break{QuizID: qz.ID, Text: texts[i], Position: pos}
+			if err := quizStore.CreateBreak(t.Context(), b); err != nil {
+				t.Fatalf("CreateBreak err = %v", err)
 			}
 		}
 
@@ -143,11 +166,8 @@ func TestQuizStore_ListBreaksByQuiz(t *testing.T) {
 		if got, want := len(breaks), 3; got != want {
 			t.Fatalf("len(breaks) = %d, want %d", got, want)
 		}
-		for i, wantText := range []string{"first", "second", "third"} {
-			if got, want := breaks[i].Text, wantText; got != want {
-				t.Errorf("breaks[%d].Text = %q, want %q", i, got, want)
-			}
-			if got, want := breaks[i].Position, i+1; got != want {
+		for i, wantPos := range []int{0, 1, 2} {
+			if got, want := breaks[i].Position, wantPos; got != want {
 				t.Errorf("breaks[%d].Position = %d, want %d", i, got, want)
 			}
 		}
@@ -173,19 +193,20 @@ func TestQuizStore_ListBreaksByQuiz(t *testing.T) {
 func TestQuizStore_UpdateBreak(t *testing.T) {
 	t.Parallel()
 
-	t.Run("updates text", func(t *testing.T) {
+	t.Run("updates text and position", func(t *testing.T) {
 		t.Parallel()
 
 		db := dbtest.Open(t)
 		quizStore := NewQuizStore(db, slog.Default())
 		qz := newTestQuizForBreaks(t, quizStore)
 
-		b := &quiz.Break{QuizID: qz.ID, Text: "before"}
-		if err := quizStore.CreateBreakAtNextPosition(t.Context(), b); err != nil {
-			t.Fatalf("CreateBreakAtNextPosition err = %v", err)
+		b := &quiz.Break{QuizID: qz.ID, Text: "before", Position: 1}
+		if err := quizStore.CreateBreak(t.Context(), b); err != nil {
+			t.Fatalf("CreateBreak err = %v", err)
 		}
 
 		b.Text = "after"
+		b.Position = 2
 		if err := quizStore.UpdateBreak(t.Context(), b); err != nil {
 			t.Fatalf("UpdateBreak err = %v, want nil", err)
 		}
@@ -196,6 +217,32 @@ func TestQuizStore_UpdateBreak(t *testing.T) {
 		}
 		if got, want := reloaded.Text, "after"; got != want {
 			t.Errorf("reloaded.Text = %q, want %q", got, want)
+		}
+		if got, want := reloaded.Position, 2; got != want {
+			t.Errorf("reloaded.Position = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("moving onto an occupied slot returns ErrBreakPositionTaken", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		qz := newTestQuizForBreaks(t, quizStore)
+
+		first := &quiz.Break{QuizID: qz.ID, Text: "first", Position: 1}
+		if err := quizStore.CreateBreak(t.Context(), first); err != nil {
+			t.Fatalf("first CreateBreak err = %v", err)
+		}
+		second := &quiz.Break{QuizID: qz.ID, Text: "second", Position: 2}
+		if err := quizStore.CreateBreak(t.Context(), second); err != nil {
+			t.Fatalf("second CreateBreak err = %v", err)
+		}
+
+		second.Position = 1
+		err := quizStore.UpdateBreak(t.Context(), second)
+		if got, want := err, quiz.ErrBreakPositionTaken; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
 		}
 	})
 
@@ -234,9 +281,9 @@ func TestQuizStore_DeleteBreak(t *testing.T) {
 		quizStore := NewQuizStore(db, slog.Default())
 		qz := newTestQuizForBreaks(t, quizStore)
 
-		b := &quiz.Break{QuizID: qz.ID, Text: "doomed"}
-		if err := quizStore.CreateBreakAtNextPosition(t.Context(), b); err != nil {
-			t.Fatalf("CreateBreakAtNextPosition err = %v", err)
+		b := &quiz.Break{QuizID: qz.ID, Text: "doomed", Position: 1}
+		if err := quizStore.CreateBreak(t.Context(), b); err != nil {
+			t.Fatalf("CreateBreak err = %v", err)
 		}
 
 		if err := quizStore.DeleteBreak(t.Context(), b.ID); err != nil {
@@ -269,9 +316,9 @@ func TestQuizStore_DeleteQuiz_CascadesBreaks(t *testing.T) {
 	quizStore := NewQuizStore(db, slog.Default())
 	qz := newTestQuizForBreaks(t, quizStore)
 
-	b := &quiz.Break{QuizID: qz.ID, Text: "should disappear"}
-	if err := quizStore.CreateBreakAtNextPosition(t.Context(), b); err != nil {
-		t.Fatalf("CreateBreakAtNextPosition err = %v", err)
+	b := &quiz.Break{QuizID: qz.ID, Text: "should disappear", Position: 1}
+	if err := quizStore.CreateBreak(t.Context(), b); err != nil {
+		t.Fatalf("CreateBreak err = %v", err)
 	}
 
 	if err := quizStore.DeleteQuiz(t.Context(), qz.ID); err != nil {

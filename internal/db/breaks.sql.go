@@ -103,36 +103,20 @@ func (q *Queries) ListBreaksByQuiz(ctx context.Context, quizID int64) ([]Break, 
 	return items, nil
 }
 
-const nextBreakPosition = `-- name: NextBreakPosition :one
-SELECT CAST(COALESCE(MAX(position), 0) AS INTEGER) AS max_position
-FROM breaks
-WHERE quiz_id = ?
-`
-
-// Returns the highest position in use for the given quiz, or 0 when the
-// quiz has no breaks yet. The CAST + COALESCE forces sqlc to type the
-// result as int64 instead of interface{} (raw MAX can return NULL).
-// Callers add 1 to get the next-position to assign on a new break.
-// Mirrors MaxQuestionPosition (#352).
-func (q *Queries) NextBreakPosition(ctx context.Context, quizID int64) (int64, error) {
-	row := q.db.QueryRowContext(ctx, nextBreakPosition, quizID)
-	var max_position int64
-	err := row.Scan(&max_position)
-	return max_position, err
-}
-
 const updateBreak = `-- name: UpdateBreak :execresult
 UPDATE breaks
 SET text       = ?,
+    position   = ?,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = ?
 `
 
 type UpdateBreakParams struct {
-	Text string
-	ID   int64
+	Text     string
+	Position int64
+	ID       int64
 }
 
 func (q *Queries) UpdateBreak(ctx context.Context, arg UpdateBreakParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, updateBreak, arg.Text, arg.ID)
+	return q.db.ExecContext(ctx, updateBreak, arg.Text, arg.Position, arg.ID)
 }

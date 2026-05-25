@@ -35,3 +35,24 @@ const PlayersPerPage = playersPerPage
 func ValidateQuizForm(ctx context.Context, q *quiz.Quiz) map[string]string {
 	return (&quizForm{quiz: q}).Valid(ctx)
 }
+
+// ValidateBreakForm exposes the unexported breakForm.Valid behaviour
+// for the same reason as ValidateQuizForm above (#167).
+func ValidateBreakForm(ctx context.Context, q *quiz.Quiz, b *quiz.Break) map[string]string {
+	return (&breakForm{quiz: q, brk: b}).Valid(ctx)
+}
+
+// BuildSequence exposes the unexported sequence-merging helper so the
+// external admin_test package can pin the interleave order without
+// running the full HTTP handler stack (#167).
+var BuildSequence = buildSequence
+
+// BuildSlotOptions exposes the unexported "Insert after" dropdown
+// builder so the external admin_test package can pin its labelling
+// and truncation rules (#167).
+var BuildSlotOptions = buildSlotOptions
+
+// DefaultCreateSlot exposes the unexported create-form default-slot
+// helper so the external admin_test package can pin the
+// last-question-vs-empty-quiz fork (#167).
+var DefaultCreateSlot = defaultCreateSlot

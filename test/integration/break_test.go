@@ -21,7 +21,7 @@ import (
 
 // postForm is a small wrapper around client.Do that always defers a
 // body close so the bodyclose linter stays happy. Returns the status
-// code, Location header, and (best-effort) body bytes — enough for the
+// code, Location header, and (best-effort) body bytes - enough for the
 // break CRUD assertions without leaking the response.
 func postForm(
 	ctx context.Context,
@@ -43,10 +43,38 @@ func postForm(
 	return resp.StatusCode, resp.Header.Get("Location"), body
 }
 
-// TestBreaks_CRUD covers the slice-1 admin routes for the new break
-// entity (#167). The flow registers an admin, creates a quiz, adds /
-// edits / deletes a break, and confirms the rendered quiz view picks
-// up each transition.
+// addQuestion posts a one-option question to the given quiz so the
+// break-form dropdown has something to point at. Returns nothing
+// because the only field downstream tests care about is the question's
+// auto-assigned position, which the admin form increments from
+// max(position)+1 (#352).
+func addQuestion(ctx context.Context, t *testing.T, client *http.Client, baseURL string, quizID int64, text string) {
+	t.Helper()
+	token := fetchCSRFToken(
+		ctx, t, client,
+		baseURL+fmt.Sprintf("/admin/quizzes/%d/questions/new", quizID),
+	)
+	form := url.Values{
+		"text":              {text},
+		"option[0].text":    {"option A"},
+		"option[0].correct": {"on"},
+		"option[1].text":    {"option B"},
+		"csrf_token":        {token},
+	}
+	status, _, body := postForm(
+		ctx, t, client,
+		baseURL+fmt.Sprintf("/admin/quizzes/%d/questions", quizID),
+		form,
+	)
+	if got, want := status, http.StatusSeeOther; got != want {
+		t.Fatalf("add question %q status = %d, want %d; body=%q", text, got, want, body)
+	}
+}
+
+// TestBreaks_CRUD covers the admin routes for the break entity (#167).
+// The flow creates two questions then drives a break through create
+// (at the beginning), edit (move to "after Q1"), and delete, checking
+// the rendered quiz view picks up each transition.
 func TestBreaks_CRUD(t *testing.T) {
 	t.Parallel()
 
@@ -59,7 +87,13 @@ func TestBreaks_CRUD(t *testing.T) {
 	client := registerAdminClient(ctx, t, baseURL, "break-admin")
 	quizID := createQuizAs(ctx, t, client, baseURL, "Quiz With Breaks")
 
-	// --- Create a break -----------------------------------------------------
+	// The break form's "Insert after" dropdown lists each question's
+	// position, plus a (Beginning) entry. Add two questions so the
+	// edit step has a non-zero slot to move the break onto.
+	addQuestion(ctx, t, client, baseURL, quizID, "Q1 - capital of France?")
+	addQuestion(ctx, t, client, baseURL, quizID, "Q2 - capital of Spain?")
+
+	// --- Create a break at the beginning ------------------------------------
 	createToken := fetchCSRFToken(
 		ctx, t, client, baseURL+fmt.Sprintf("/admin/quizzes/%d/breaks/new", quizID),
 	)
@@ -67,7 +101,8 @@ func TestBreaks_CRUD(t *testing.T) {
 		ctx, t, client,
 		baseURL+fmt.Sprintf("/admin/quizzes/%d/breaks", quizID),
 		url.Values{
-			"text":       {"Halfway, take a breather"},
+			"text":       {"Welcome, take a breath"},
+			"position":   {"0"},
 			"csrf_token": {createToken},
 		},
 	)
@@ -81,14 +116,19 @@ func TestBreaks_CRUD(t *testing.T) {
 	breakID := readFirstBreakID(ctx, t, client, baseURL, quizID)
 
 	viewBody := readBody(ctx, t, client, baseURL+fmt.Sprintf("/admin/quizzes/%d", quizID))
-	if got, want := viewBody, "Halfway, take a breather"; !strings.Contains(got, want) {
+	if got, want := viewBody, "Welcome, take a breath"; !strings.Contains(got, want) {
 		t.Errorf("quiz view should contain break text %q", want)
 	}
-	if got, want := viewBody, "Breaks"; !strings.Contains(got, want) {
-		t.Error("quiz view should contain Breaks section header")
+	// Position=0 break must precede the first question in the rendered
+	// sequence. Use the substring order as a cheap pin: break text
+	// appears before Q1 text in the body.
+	if breakIdx, q1Idx := strings.Index(viewBody, "Welcome, take a breath"),
+		strings.Index(viewBody, "Q1 - capital of France?"); breakIdx == -1 || q1Idx == -1 || breakIdx > q1Idx {
+		t.Errorf("expected break (idx=%d) to render before Q1 (idx=%d) in the sequence",
+			breakIdx, q1Idx)
 	}
 
-	// --- Edit the break -----------------------------------------------------
+	// --- Edit the break - move it to "after Q1" -----------------------------
 	editToken := fetchCSRFToken(
 		ctx, t, client,
 		baseURL+fmt.Sprintf("/admin/quizzes/%d/breaks/%d/edit", quizID, breakID),
@@ -98,6 +138,7 @@ func TestBreaks_CRUD(t *testing.T) {
 		baseURL+fmt.Sprintf("/admin/quizzes/%d/breaks/%d", quizID, breakID),
 		url.Values{
 			"text":       {"Almost done!"},
+			"position":   {"1"},
 			"csrf_token": {editToken},
 		},
 	)
@@ -109,8 +150,19 @@ func TestBreaks_CRUD(t *testing.T) {
 	if got, want := viewBody, "Almost done!"; !strings.Contains(got, want) {
 		t.Errorf("quiz view should contain updated break text %q", want)
 	}
-	if got, want := viewBody, "Halfway, take a breather"; strings.Contains(got, want) {
+	if got, want := viewBody, "Welcome, take a breath"; strings.Contains(got, want) {
 		t.Errorf("quiz view still contains the stale break text %q", want)
+	}
+	// After the edit, the break should sit between Q1 and Q2 in the
+	// sequence.
+	q1Idx := strings.Index(viewBody, "Q1 - capital of France?")
+	q2Idx := strings.Index(viewBody, "Q2 - capital of Spain?")
+	breakIdx := strings.Index(viewBody, "Almost done!")
+	if q1Idx == -1 || q2Idx == -1 || breakIdx == -1 || (q1Idx >= breakIdx || breakIdx >= q2Idx) {
+		t.Errorf(
+			"expected sequence order Q1(%d) < break(%d) < Q2(%d) after moving the break to position=1",
+			q1Idx, breakIdx, q2Idx,
+		)
 	}
 
 	// --- Delete the break ---------------------------------------------------
@@ -128,8 +180,61 @@ func TestBreaks_CRUD(t *testing.T) {
 	if got, want := viewBody, "Almost done!"; strings.Contains(got, want) {
 		t.Errorf("quiz view still contains deleted break text %q", want)
 	}
-	if got, want := viewBody, "This quiz has no breaks yet."; !strings.Contains(got, want) {
-		t.Error("quiz view should fall back to empty-state placeholder")
+}
+
+// TestBreaks_PositionCollision pins the inline-form-error rendered when
+// an admin tries to insert a break on a slot that already has one
+// (#167). Two breaks cannot share the same (quiz_id, position) slot.
+func TestBreaks_PositionCollision(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+		"ADMIN_USERNAMES":      "break-collision-admin",
+	})
+	baseURL := srv.BaseURL
+
+	client := registerAdminClient(ctx, t, baseURL, "break-collision-admin")
+	quizID := createQuizAs(ctx, t, client, baseURL, "Quiz Collision")
+	addQuestion(ctx, t, client, baseURL, quizID, "Sole question")
+
+	// First break at position 1 (after the only question).
+	createToken := fetchCSRFToken(
+		ctx, t, client, baseURL+fmt.Sprintf("/admin/quizzes/%d/breaks/new", quizID),
+	)
+	status, _, body := postForm(
+		ctx, t, client,
+		baseURL+fmt.Sprintf("/admin/quizzes/%d/breaks", quizID),
+		url.Values{
+			"text":       {"first"},
+			"position":   {"1"},
+			"csrf_token": {createToken},
+		},
+	)
+	if got, want := status, http.StatusSeeOther; got != want {
+		t.Fatalf("first create status = %d, want %d; body=%q", got, want, body)
+	}
+
+	// Second break submitting the same position - the unique index
+	// rejects this and the handler re-renders the form with the
+	// inline error.
+	secondToken := fetchCSRFToken(
+		ctx, t, client, baseURL+fmt.Sprintf("/admin/quizzes/%d/breaks/new", quizID),
+	)
+	status, _, body = postForm(
+		ctx, t, client,
+		baseURL+fmt.Sprintf("/admin/quizzes/%d/breaks", quizID),
+		url.Values{
+			"text":       {"second"},
+			"position":   {"1"},
+			"csrf_token": {secondToken},
+		},
+	)
+	if got, want := status, http.StatusConflict; got != want {
+		t.Fatalf("collision status = %d, want %d; body=%q", got, want, body)
+	}
+	if got, want := string(body), "A break already exists at that slot"; !strings.Contains(got, want) {
+		t.Errorf("collision body should contain %q; got=%q", want, body)
 	}
 }
 
@@ -165,7 +270,7 @@ func TestBreaks_NonOwnerForbidden(t *testing.T) {
 		status, _, _ := postForm(
 			ctx, t, adminB,
 			baseURL+fmt.Sprintf("/admin/quizzes/%d/breaks", quizID),
-			url.Values{"text": {"hijacked"}, "csrf_token": {token}},
+			url.Values{"text": {"hijacked"}, "position": {"0"}, "csrf_token": {token}},
 		)
 		if got, want := status, http.StatusForbidden; got != want {
 			t.Errorf("status = %d, want %d", got, want)
@@ -197,6 +302,7 @@ func TestBreaks_DeleteQuizCascadesBreaks(t *testing.T) {
 		baseURL+fmt.Sprintf("/admin/quizzes/%d/breaks", quizID),
 		url.Values{
 			"text":       {"breaks must cascade"},
+			"position":   {"0"},
 			"csrf_token": {createToken},
 		},
 	)
@@ -216,7 +322,7 @@ func TestBreaks_DeleteQuizCascadesBreaks(t *testing.T) {
 	}
 
 	// Open the same DB the server is using and probe the break via the
-	// sqlc-backed store. ErrBreakNotFound is the cascade signal — the
+	// sqlc-backed store. ErrBreakNotFound is the cascade signal - the
 	// row is gone with the parent quiz.
 	db, err := sql.Open("sqlite", srv.DBURI)
 	if err != nil {
