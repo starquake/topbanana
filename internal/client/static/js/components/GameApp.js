@@ -44,6 +44,29 @@ export class GameApp {
         this.selectedQuizId = null;
         this.gameId = null;
         this.question = null;
+        // Current break item shown to the player (#167 slice 2). Set
+        // when /next returns type=break; cleared when the player clicks
+        // Continue (markBreakSeen) before fetching the next item. Only
+        // one of `question` and `breakItem` is non-null at a time —
+        // the play sequence is strictly serial.
+        this.breakItem = null;
+        // Position of the last question issued. The server doesn't bump
+        // position over a break, so the HUD chip on the break card
+        // reads this value (rather than question.position, which gets
+        // nulled in resolveAndAdvance before the break payload lands).
+        // Zero on the start screen and on a break that fires before
+        // Q1 (position=0) — the chip is gated on > 0 so it just
+        // hides in that case.
+        this.lastQuestionPosition = 0;
+        // Surfaces a "couldn't continue" banner on the break card when
+        // the POST /breaks/{id}/seen call fails. Cleared on the next
+        // Continue click. Same shape as submitError, but distinct so a
+        // retry banner from a prior question doesn't ghost-render on
+        // the break card.
+        this.breakContinueError = false;
+        // True while the markBreakSeen POST is in flight. Guards the
+        // Continue button so a double-click doesn't fire two POSTs.
+        this.continuingBreak = false;
         this.finished = false;
         this.leaderboard = null;
         this.quizSlugId = null;
@@ -198,6 +221,7 @@ export class GameApp {
                 console.error('resume on init failed', err);
                 this.gameId = null;
                 this.question = null;
+                this.breakItem = null;
             }
         }
     }
@@ -477,6 +501,12 @@ export class GameApp {
         if (!slugId) return;
         this.quizSlugId = slugId;
         this.score = 0;
+        // Clear any leftover break-card state from a prior session in
+        // the same tab so the gameplay view doesn't render the old
+        // break card for one frame before /next resolves.
+        this.breakItem = null;
+        this.breakContinueError = false;
+        this.lastQuestionPosition = 0;
         if (existing) {
             this.gameId = existing.gameId;
         } else {
@@ -521,8 +551,8 @@ export class GameApp {
         this.splash = null;
         this.splashOn = false;
         this.submitError = false;
-        const question = await gameService.getNextQuestion(this.gameId);
-        if (!question) {
+        const item = await gameService.getNextQuestion(this.gameId);
+        if (!item) {
             this.finished = true;
             // Re-fetch /me so the player's claim status is current.
             // Could in principle have flipped since page load (rare,
@@ -566,9 +596,28 @@ export class GameApp {
             }
             return;
         }
+        // Break variant (#167 slice 2): no timing, no answer window —
+        // the player clicks Continue to acknowledge. The HUD chip on
+        // the break card reads `lastQuestionPosition` (the server
+        // doesn't bump position over a break, and resolveAndAdvance
+        // has already nulled `question` by the time we land here).
+        // serverNow lives on both variants, so the clock-offset
+        // reconciliation still happens.
+        if (item.type === 'break') {
+            this.syncClockFrom(item);
+            this.breakItem = item;
+            // Keep the running-score chip honest: the server hands us
+            // its authoritative total on the break payload so a
+            // resume mid-game also picks up the right value.
+            if (typeof item.score === 'number') this.score = item.score;
+
+            return;
+        }
         this.imageError = false;
-        this.syncClockFrom(question);
-        this.question = question;
+        this.syncClockFrom(item);
+        this.breakItem = null;
+        this.question = item;
+        if (typeof item.position === 'number') this.lastQuestionPosition = item.position;
         this.startRevealCountdown();
     }
 
@@ -810,6 +859,12 @@ export class GameApp {
     }
 
     async submitAnswer(optionId) {
+        // Defence in depth (#167 slice 2): no answer buttons render on
+        // the break card, but if a synthetic click ever reached here
+        // mid-break the POST would 404 (the questionID is from the
+        // prior question, which is already answered) and confuse the
+        // submitError retry path. Bail before the fetch.
+        if (this.breakItem) return;
         if (this.feedback || this.submittingAnswer) return;
         // Capture the tap time at the top of the handler, BEFORE any
         // awaits, so the server-side clamp gets the click instant
@@ -900,6 +955,33 @@ export class GameApp {
         await new Promise(resolve => setTimeout(resolve, pauseMs));
         this.question = null;
         this.feedback = null;
+        await this.nextQuestion();
+    }
+
+    // continueBreak is the Continue button's click handler on the break
+    // card (#167 slice 2). POSTs the seen ack, clears the break, then
+    // calls nextQuestion() to load whatever comes next (another break,
+    // a question, or 404 → finished).
+    //
+    // On a network / 5xx failure the break card stays visible with a
+    // retry banner — silently losing the click would strand the player
+    // on a screen with no affordance to recover. The store-side ack is
+    // idempotent so a retry after a transient failure is safe.
+    async continueBreak() {
+        if (!this.breakItem || this.continuingBreak) return;
+        this.continuingBreak = true;
+        this.breakContinueError = false;
+        try {
+            await gameService.markBreakSeen(this.gameId, this.breakItem.id);
+        } catch (err) {
+            console.error('continueBreak:', err);
+            this.breakContinueError = true;
+
+            return;
+        } finally {
+            this.continuingBreak = false;
+        }
+        this.breakItem = null;
         await this.nextQuestion();
     }
 

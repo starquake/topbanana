@@ -341,5 +341,9 @@ func addAPIRoutes(
 		"POST /api/games/{gameID}/questions/{questionID}/answers",
 		ensurePlayer(clientapi.HandleAnswerPost(logger, gameService)),
 	)
+	mux.Handle(
+		"POST /api/games/{gameID}/breaks/{breakID}/seen",
+		ensurePlayer(clientapi.HandleBreakSeen(logger, gameService)),
+	)
 	mux.Handle("GET /api/games/{gameID}/results", ensurePlayer(clientapi.HandleGameResults(logger, gameService)))
 }

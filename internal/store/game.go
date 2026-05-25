@@ -406,6 +406,35 @@ func (s *GameStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([
 	return ids, nil
 }
 
+// MarkBreakSeen records that the player passed through the given break
+// in the given game (#167 slice 2). The underlying INSERT uses
+// ON CONFLICT DO NOTHING so a duplicate call is a no-op success, which
+// lets POST /api/games/{gameID}/breaks/{breakID}/seen serve idempotent
+// 204s without the handler having to special-case the retry path.
+func (s *GameStore) MarkBreakSeen(ctx context.Context, gameID string, breakID int64) error {
+	if err := s.q.MarkBreakSeen(ctx, db.MarkBreakSeenParams{
+		GameID:  gameID,
+		BreakID: breakID,
+	}); err != nil {
+		return fmt.Errorf("failed to mark break %d seen on game %q: %w", breakID, gameID, err)
+	}
+
+	return nil
+}
+
+// ListSeenBreakIDsByGame returns the break IDs the player has
+// acknowledged in the given game. Used by the merged iterator in
+// [game.Service.GetNext] to skip past breaks the player already
+// dismissed (#167 slice 2).
+func (s *GameStore) ListSeenBreakIDsByGame(ctx context.Context, gameID string) ([]int64, error) {
+	ids, err := s.q.ListSeenBreakIDsByGame(ctx, gameID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list seen break IDs for game %q: %w", gameID, err)
+	}
+
+	return ids, nil
+}
+
 // ReattributeGames moves every game_answers + game_participants row
 // from fromPlayerID onto toPlayerID, skipping quizzes the destination
 // player has already played (the UNIQUE (player_id, quiz_id) index on

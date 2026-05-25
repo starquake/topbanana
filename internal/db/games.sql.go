@@ -777,6 +777,58 @@ func (q *Queries) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]i
 	return items, nil
 }
 
+const listSeenBreakIDsByGame = `-- name: ListSeenBreakIDsByGame :many
+SELECT break_id
+FROM game_seen_breaks
+WHERE game_id = ?
+`
+
+// Lists the break IDs the player has already passed through in the
+// given game. The merged-by-position iterator in game.Service.GetNext
+// uses the result set to skip past acknowledged breaks.
+func (q *Queries) ListSeenBreakIDsByGame(ctx context.Context, gameID string) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listSeenBreakIDsByGame, gameID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var break_id int64
+		if err := rows.Scan(&break_id); err != nil {
+			return nil, err
+		}
+		items = append(items, break_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markBreakSeen = `-- name: MarkBreakSeen :exec
+INSERT INTO game_seen_breaks (game_id, break_id)
+VALUES (?, ?)
+ON CONFLICT (game_id, break_id) DO NOTHING
+`
+
+type MarkBreakSeenParams struct {
+	GameID  string
+	BreakID int64
+}
+
+// Records that the player has acknowledged the given break in the
+// given game (#167 slice 2). ON CONFLICT DO NOTHING makes the
+// POST /breaks/{id}/seen endpoint idempotent: a second call returns
+// 204 without bumping seen_at or inserting a duplicate row.
+func (q *Queries) MarkBreakSeen(ctx context.Context, arg MarkBreakSeenParams) error {
+	_, err := q.db.ExecContext(ctx, markBreakSeen, arg.GameID, arg.BreakID)
+	return err
+}
+
 const reattributeGameAnswers = `-- name: ReattributeGameAnswers :execrows
 UPDATE game_answers
 SET player_id = ?1

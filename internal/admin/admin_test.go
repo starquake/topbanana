@@ -141,6 +141,14 @@ func (s stubGameStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64)
 	return s.listQuizIDsForPlayer(ctx, playerID)
 }
 
+func (stubGameStore) MarkBreakSeen(_ context.Context, _ string, _ int64) error {
+	return errors.ErrUnsupported
+}
+
+func (stubGameStore) ListSeenBreakIDsByGame(_ context.Context, _ string) ([]int64, error) {
+	return nil, errors.ErrUnsupported
+}
+
 // newGameService wires the supplied stubs into a [game.Service] so
 // admin handler tests can call the constructor with the real type.
 func newGameService(gs stubGameStore, qs stubQuizStore) *game.Service {

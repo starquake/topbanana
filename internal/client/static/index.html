@@ -289,7 +289,7 @@
                  during gameplay (#253) so we don't subtract for it
                  here. -->
             <div x-show="gameId && !finished">
-                <template x-if="question">
+                <template x-if="question && !breakItem">
                     <div class="flex flex-col min-h-[calc(100svh-5rem)] sm:min-h-[calc(100svh-8rem)]">
                         <!-- HUD chips: Q n/total + running score (#253). -->
                         <div class="flex justify-end gap-2 mb-4">
@@ -380,7 +380,75 @@
                         </div>
                     </div>
                 </template>
-                <template x-if="!question">
+                <!-- Break card (#167 slice 2). Renders when /next returns
+                     type=break and stays put until the player clicks
+                     Continue, which POSTs the seen ack and fetches the
+                     next item. Same flex-column shell as the question
+                     view so the layout doesn't jump on the question →
+                     break → question transition. The HUD chip uses the
+                     prior question's position (the server doesn't bump
+                     position across a break); the Q chip hides on a
+                     position=0 break that fires before Q1. -->
+                <template x-if="breakItem">
+                    <div class="flex flex-col min-h-[calc(100svh-5rem)] sm:min-h-[calc(100svh-8rem)]"
+                         data-testid="break-card">
+                        <div class="flex justify-end gap-2 mb-4">
+                            <template x-if="lastQuestionPosition > 0">
+                                <span class="hud-chip">
+                                    Q <span class="hud-chip-value" x-text="lastQuestionPosition"></span>/<span class="hud-chip-value" x-text="breakItem.total"></span>
+                                </span>
+                            </template>
+                            <span class="hud-chip">
+                                Score <span class="hud-chip-value" x-text="score"></span>
+                            </span>
+                        </div>
+
+                        <!-- Break headline: optional text in the same
+                             display-font scale as the question text so
+                             the screen reads as part of the same flow.
+                             Skipped entirely when text is empty (admin
+                             didn't bother) — the Continue button then
+                             stands alone with the running score above. -->
+                        <template x-if="breakItem.text">
+                            <h2 class="mb-6 lg:mb-10 font-display font-bold leading-[1.1] tracking-tight text-text text-center
+                                       text-[clamp(1.4rem,4.5vw,2.4rem)]
+                                       lg:text-[clamp(2.25rem,4vw,4rem)]
+                                       2xl:text-[clamp(3rem,3.5vw,5.5rem)]"
+                                x-text="breakItem.text"></h2>
+                        </template>
+
+                        <!-- Foreground the running score so the player
+                             sees their standing during the pause; the
+                             HUD chip above carries the same number but
+                             at a smaller scale. -->
+                        <p class="mb-8 text-center font-display font-semibold text-accent
+                                  text-[clamp(1.6rem,4vw,2.6rem)]"
+                           data-testid="break-score">
+                            Your score: <span x-text="score"></span>
+                        </p>
+
+                        <!-- Retry banner mirrors the answer-submit one
+                             (#179): a transient POST failure leaves the
+                             break card visible so the player can click
+                             Continue again. -->
+                        <div x-show="breakContinueError"
+                             role="alert"
+                             class="feedback-banner feedback-danger mb-3 mt-auto">
+                            Couldn't continue — please try again.
+                        </div>
+
+                        <button type="button"
+                                class="btn-primary"
+                                :class="{ 'mt-auto': !breakContinueError }"
+                                :disabled="continuingBreak"
+                                data-testid="break-continue"
+                                @click="continueBreak()">
+                            <span x-show="!continuingBreak">Continue</span>
+                            <span x-show="continuingBreak">Loading...</span>
+                        </button>
+                    </div>
+                </template>
+                <template x-if="!question && !breakItem">
                     <p class="text-text-dim">Loading question...</p>
                 </template>
             </div>

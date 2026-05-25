@@ -215,6 +215,14 @@ func (stubGameStore) ListQuizIDsForPlayer(_ context.Context, _ int64) ([]int64, 
 	return nil, errRouteStub
 }
 
+func (stubGameStore) MarkBreakSeen(_ context.Context, _ string, _ int64) error {
+	return errRouteStub
+}
+
+func (stubGameStore) ListSeenBreakIDsByGame(_ context.Context, _ string) ([]int64, error) {
+	return nil, errRouteStub
+}
+
 type stubHomeStore struct{}
 
 func (stubHomeStore) ListPopularQuizzes(_ context.Context) ([]*home.PopularQuiz, error) {

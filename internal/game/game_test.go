@@ -31,6 +31,8 @@ type stubStore struct {
 	getGameByPlayerAndQuiz             func(ctx context.Context, playerID, quizID int64) (*Game, error)
 	deleteGamesForPlayerOnQuiz         func(ctx context.Context, playerID, quizID int64) error
 	listQuizIDsForPlayer               func(ctx context.Context, playerID int64) ([]int64, error)
+	markBreakSeen                      func(ctx context.Context, gameID string, breakID int64) error
+	listSeenBreakIDsByGame             func(ctx context.Context, gameID string) ([]int64, error)
 }
 
 func (stubStore) Ping(_ context.Context) error { return nil }
@@ -123,6 +125,25 @@ func (s stubStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]
 	return s.listQuizIDsForPlayer(ctx, playerID)
 }
 
+func (s stubStore) MarkBreakSeen(ctx context.Context, gameID string, breakID int64) error {
+	if s.markBreakSeen == nil {
+		return errStub
+	}
+
+	return s.markBreakSeen(ctx, gameID, breakID)
+}
+
+// ListSeenBreakIDsByGame defaults to "no seen breaks" so tests that
+// don't care about breaks don't have to wire a stub. The merged
+// iterator in [Service.GetNext] calls this on every request.
+func (s stubStore) ListSeenBreakIDsByGame(ctx context.Context, gameID string) ([]int64, error) {
+	if s.listSeenBreakIDsByGame == nil {
+		return nil, nil
+	}
+
+	return s.listSeenBreakIDsByGame(ctx, gameID)
+}
+
 // stubQuizStore satisfies quiz.Store for service-level tests. Only GetQuiz
 // and QuizExists are overridable since the leaderboard/reset paths never
 // reach the other methods.
@@ -185,8 +206,11 @@ func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Opti
 	return nil, errStub
 }
 
+// ListBreaksByQuiz defaults to "no breaks" so GetNext-style tests that
+// don't care about breaks don't have to wire a stub. The merged
+// iterator in game.Service.GetNext calls this on every request.
 func (stubQuizStore) ListBreaksByQuiz(_ context.Context, _ int64) ([]*quiz.Break, error) {
-	return nil, errStub
+	return nil, nil
 }
 
 func (stubQuizStore) GetBreak(_ context.Context, _ int64) (*quiz.Break, error) {
@@ -1710,6 +1734,621 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 		}
 		if got, want := carol.Completed, false; got != want {
 			t.Errorf("carol.Completed = %v, want %v (stale != completed)", got, want)
+		}
+	})
+}
+
+func TestService_GetNext(t *testing.T) {
+	t.Parallel()
+
+	t.Run("no breaks: behaves like GetNextQuestion (first question)", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+
+		testGame := newTestGame(t, testQuiz)
+		if err := gameStore.CreateGame(ctx, testGame); err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		if err := gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("CreateParticipant err = %v, want nil", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+		item, err := svc.GetNext(ctx, testGame.ID, 1)
+		if err != nil {
+			t.Fatalf("GetNext err = %v, want nil", err)
+		}
+		if got, want := item.Type, ItemTypeQuestion; got != want {
+			t.Fatalf("item.Type = %q, want %q", got, want)
+		}
+		if got, want := item.Question.QuizQuestion.ID, testQuiz.Questions[0].ID; got != want {
+			t.Errorf("item.Question.QuizQuestion.ID = %d, want %d", got, want)
+		}
+		// Position chip is question-anchored.
+		if got, want := item.Question.Position, 1; got != want {
+			t.Errorf("item.Question.Position = %d, want %d", got, want)
+		}
+		if got, want := item.Question.Total, len(testQuiz.Questions); got != want {
+			t.Errorf("item.Question.Total = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("break at position 0 is returned before any question", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+		brk := &quiz.Break{QuizID: testQuiz.ID, Position: 0, Text: "Hello"}
+		if err := quizStore.CreateBreak(ctx, brk); err != nil {
+			t.Fatalf("CreateBreak err = %v, want nil", err)
+		}
+
+		testGame := newTestGame(t, testQuiz)
+		if err := gameStore.CreateGame(ctx, testGame); err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		if err := gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("CreateParticipant err = %v, want nil", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+		item, err := svc.GetNext(ctx, testGame.ID, 1)
+		if err != nil {
+			t.Fatalf("GetNext err = %v, want nil", err)
+		}
+		if got, want := item.Type, ItemTypeBreak; got != want {
+			t.Fatalf("item.Type = %q, want %q", got, want)
+		}
+		if got, want := item.Break.ID, brk.ID; got != want {
+			t.Errorf("item.Break.ID = %d, want %d", got, want)
+		}
+		if got, want := item.Total, len(testQuiz.Questions); got != want {
+			t.Errorf("item.Total = %d, want %d (question count carries through breaks)", got, want)
+		}
+	})
+
+	t.Run("break sandwiched between two questions fires after the first", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+		// Break after Q1 (Q1.Position == 10 in newTestQuiz).
+		brk := &quiz.Break{QuizID: testQuiz.ID, Position: 10, Text: "Halfway"}
+		if err := quizStore.CreateBreak(ctx, brk); err != nil {
+			t.Fatalf("CreateBreak err = %v, want nil", err)
+		}
+
+		testGame := newTestGame(t, testQuiz)
+		if err := gameStore.CreateGame(ctx, testGame); err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		if err := gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("CreateParticipant err = %v, want nil", err)
+		}
+
+		// Seed Q1 as already issued + answered so the merged iterator
+		// must advance past it to the break that lives at the same
+		// slot.
+		past := time.Now().Add(-1 * time.Minute)
+		issuedQ1 := &Question{
+			GameID:     testGame.ID,
+			QuestionID: testQuiz.Questions[0].ID,
+			StartedAt:  past,
+			ExpiredAt:  past.Add(10 * time.Second),
+		}
+		if err := gameStore.CreateQuestion(ctx, issuedQ1); err != nil {
+			t.Fatalf("CreateQuestion err = %v, want nil", err)
+		}
+		// Insert an answer so HasOpenQuestion is false and the resume
+		// path doesn't short-circuit.
+		correct := testQuiz.Questions[0].Options[0]
+		if err := gameStore.CreateAnswer(ctx, &Answer{
+			GameID:     testGame.ID,
+			PlayerID:   1,
+			QuestionID: issuedQ1.ID,
+			OptionID:   correct.ID,
+			AnsweredAt: past,
+		}); err != nil {
+			t.Fatalf("CreateAnswer err = %v, want nil", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+		item, err := svc.GetNext(ctx, testGame.ID, 1)
+		if err != nil {
+			t.Fatalf("GetNext err = %v, want nil", err)
+		}
+		if got, want := item.Type, ItemTypeBreak; got != want {
+			t.Fatalf("item.Type = %q, want %q (break must fire after Q1)", got, want)
+		}
+		if got, want := item.Break.ID, brk.ID; got != want {
+			t.Errorf("item.Break.ID = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("acknowledged break is skipped: next call returns Q2", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+		brk := &quiz.Break{QuizID: testQuiz.ID, Position: 10}
+		if err := quizStore.CreateBreak(ctx, brk); err != nil {
+			t.Fatalf("CreateBreak err = %v, want nil", err)
+		}
+
+		testGame := newTestGame(t, testQuiz)
+		if err := gameStore.CreateGame(ctx, testGame); err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		if err := gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("CreateParticipant err = %v, want nil", err)
+		}
+
+		// Seed Q1 as issued + answered, plus the break as seen.
+		past := time.Now().Add(-1 * time.Minute)
+		issuedQ1 := &Question{
+			GameID:     testGame.ID,
+			QuestionID: testQuiz.Questions[0].ID,
+			StartedAt:  past,
+			ExpiredAt:  past.Add(10 * time.Second),
+		}
+		if err := gameStore.CreateQuestion(ctx, issuedQ1); err != nil {
+			t.Fatalf("CreateQuestion err = %v, want nil", err)
+		}
+		correct := testQuiz.Questions[0].Options[0]
+		if err := gameStore.CreateAnswer(ctx, &Answer{
+			GameID:     testGame.ID,
+			PlayerID:   1,
+			QuestionID: issuedQ1.ID,
+			OptionID:   correct.ID,
+			AnsweredAt: past,
+		}); err != nil {
+			t.Fatalf("CreateAnswer err = %v, want nil", err)
+		}
+		if err := gameStore.MarkBreakSeen(ctx, testGame.ID, brk.ID); err != nil {
+			t.Fatalf("MarkBreakSeen err = %v, want nil", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+		item, err := svc.GetNext(ctx, testGame.ID, 1)
+		if err != nil {
+			t.Fatalf("GetNext err = %v, want nil", err)
+		}
+		if got, want := item.Type, ItemTypeQuestion; got != want {
+			t.Fatalf("item.Type = %q, want %q (acknowledged break must not refire)", got, want)
+		}
+		if got, want := item.Question.QuizQuestion.ID, testQuiz.Questions[1].ID; got != want {
+			t.Errorf("item.Question.QuizQuestion.ID = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("exhausted questions + unseen tail break returns the break", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+		// Break after the LAST question (Q3.Position == 30).
+		brk := &quiz.Break{QuizID: testQuiz.ID, Position: 30, Text: "All done"}
+		if err := quizStore.CreateBreak(ctx, brk); err != nil {
+			t.Fatalf("CreateBreak err = %v, want nil", err)
+		}
+
+		testGame := newTestGame(t, testQuiz)
+		if err := gameStore.CreateGame(ctx, testGame); err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		if err := gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("CreateParticipant err = %v, want nil", err)
+		}
+
+		// Seed all three questions as issued + answered.
+		past := time.Now().Add(-1 * time.Minute)
+		for _, q := range testQuiz.Questions {
+			gq := &Question{
+				GameID:     testGame.ID,
+				QuestionID: q.ID,
+				StartedAt:  past,
+				ExpiredAt:  past.Add(10 * time.Second),
+			}
+			if err := gameStore.CreateQuestion(ctx, gq); err != nil {
+				t.Fatalf("CreateQuestion err = %v, want nil", err)
+			}
+			if err := gameStore.CreateAnswer(ctx, &Answer{
+				GameID:     testGame.ID,
+				PlayerID:   1,
+				QuestionID: gq.ID,
+				OptionID:   q.Options[0].ID,
+				AnsweredAt: past,
+			}); err != nil {
+				t.Fatalf("CreateAnswer err = %v, want nil", err)
+			}
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+		item, err := svc.GetNext(ctx, testGame.ID, 1)
+		if err != nil {
+			t.Fatalf("GetNext err = %v, want nil", err)
+		}
+		if got, want := item.Type, ItemTypeBreak; got != want {
+			t.Fatalf("item.Type = %q, want %q (tail break must fire after all questions)", got, want)
+		}
+		if got, want := item.Break.ID, brk.ID; got != want {
+			t.Errorf("item.Break.ID = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("everything exhausted returns ErrNoMoreQuestions", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+		brk := &quiz.Break{QuizID: testQuiz.ID, Position: 30}
+		if err := quizStore.CreateBreak(ctx, brk); err != nil {
+			t.Fatalf("CreateBreak err = %v, want nil", err)
+		}
+
+		testGame := newTestGame(t, testQuiz)
+		if err := gameStore.CreateGame(ctx, testGame); err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		if err := gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("CreateParticipant err = %v, want nil", err)
+		}
+
+		past := time.Now().Add(-1 * time.Minute)
+		for _, q := range testQuiz.Questions {
+			gq := &Question{
+				GameID:     testGame.ID,
+				QuestionID: q.ID,
+				StartedAt:  past,
+				ExpiredAt:  past.Add(10 * time.Second),
+			}
+			if err := gameStore.CreateQuestion(ctx, gq); err != nil {
+				t.Fatalf("CreateQuestion err = %v, want nil", err)
+			}
+			if err := gameStore.CreateAnswer(ctx, &Answer{
+				GameID:     testGame.ID,
+				PlayerID:   1,
+				QuestionID: gq.ID,
+				OptionID:   q.Options[0].ID,
+				AnsweredAt: past,
+			}); err != nil {
+				t.Fatalf("CreateAnswer err = %v, want nil", err)
+			}
+		}
+		if err := gameStore.MarkBreakSeen(ctx, testGame.ID, brk.ID); err != nil {
+			t.Fatalf("MarkBreakSeen err = %v, want nil", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+		_, err := svc.GetNext(ctx, testGame.ID, 1)
+		if got, want := err, ErrNoMoreQuestions; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("break Score carries running total of player's correct answers", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+		brk := &quiz.Break{QuizID: testQuiz.ID, Position: 20, Text: "Score check"}
+		if err := quizStore.CreateBreak(ctx, brk); err != nil {
+			t.Fatalf("CreateBreak err = %v, want nil", err)
+		}
+
+		testGame := newTestGame(t, testQuiz)
+		if err := gameStore.CreateGame(ctx, testGame); err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		if err := gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("CreateParticipant err = %v, want nil", err)
+		}
+
+		// Q1 answered correctly at the answer-window start (maxPoints =
+		// 1000); Q2 answered wrongly (0). Running total at the break:
+		// 1000.
+		past := time.Now().Add(-1 * time.Minute)
+		for i, q := range testQuiz.Questions[:2] {
+			gq := &Question{
+				GameID:     testGame.ID,
+				QuestionID: q.ID,
+				StartedAt:  past,
+				ExpiredAt:  past.Add(10 * time.Second),
+			}
+			if err := gameStore.CreateQuestion(ctx, gq); err != nil {
+				t.Fatalf("CreateQuestion err = %v, want nil", err)
+			}
+			var optID int64
+			switch i {
+			case 0:
+				optID = q.Options[0].ID // correct
+			default:
+				optID = q.Options[1].ID // wrong
+			}
+			if err := gameStore.CreateAnswer(ctx, &Answer{
+				GameID:     testGame.ID,
+				PlayerID:   1,
+				QuestionID: gq.ID,
+				OptionID:   optID,
+				AnsweredAt: past,
+			}); err != nil {
+				t.Fatalf("CreateAnswer err = %v, want nil", err)
+			}
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+		item, err := svc.GetNext(ctx, testGame.ID, 1)
+		if err != nil {
+			t.Fatalf("GetNext err = %v, want nil", err)
+		}
+		if got, want := item.Type, ItemTypeBreak; got != want {
+			t.Fatalf("item.Type = %q, want %q", got, want)
+		}
+		// One correct (1000) + one wrong (0) = 1000.
+		if got, want := item.Score, 1000; got != want {
+			t.Errorf("item.Score = %d, want %d (one correct + one wrong)", got, want)
+		}
+	})
+
+	t.Run("resume path: open question short-circuits before the iterator", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+		// Break in slot 0 that would normally come first.
+		brk := &quiz.Break{QuizID: testQuiz.ID, Position: 0}
+		if err := quizStore.CreateBreak(ctx, brk); err != nil {
+			t.Fatalf("CreateBreak err = %v, want nil", err)
+		}
+
+		testGame := newTestGame(t, testQuiz)
+		if err := gameStore.CreateGame(ctx, testGame); err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		if err := gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("CreateParticipant err = %v, want nil", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+		// First call should return the break (slot 0 wins). Don't ack
+		// the break; instead simulate a state where the player has
+		// somehow received Q1 with the answer window open (e.g. the
+		// break was acked then the iterator advanced).
+		if err := gameStore.MarkBreakSeen(ctx, testGame.ID, brk.ID); err != nil {
+			t.Fatalf("MarkBreakSeen err = %v, want nil", err)
+		}
+		first, err := svc.GetNext(ctx, testGame.ID, 1)
+		if err != nil {
+			t.Fatalf("first GetNext err = %v, want nil", err)
+		}
+		if got, want := first.Type, ItemTypeQuestion; got != want {
+			t.Fatalf("first.Type = %q, want %q", got, want)
+		}
+		firstID := first.Question.ID
+
+		// Second call without answering returns the SAME row through
+		// the resume path, NOT the break (which is acked anyway).
+		second, err := svc.GetNext(ctx, testGame.ID, 1)
+		if err != nil {
+			t.Fatalf("second GetNext err = %v, want nil", err)
+		}
+		if got, want := second.Type, ItemTypeQuestion; got != want {
+			t.Fatalf("second.Type = %q, want %q (resume must keep returning the question)", got, want)
+		}
+		if got, want := second.Question.ID, firstID; got != want {
+			t.Errorf("second.Question.ID = %d, want %d (resume must hand back same row)", got, want)
+		}
+	})
+}
+
+func TestService_MarkBreakSeen(t *testing.T) {
+	t.Parallel()
+
+	t.Run("happy path: idempotent across two calls", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+		brk := &quiz.Break{QuizID: testQuiz.ID, Position: 0}
+		if err := quizStore.CreateBreak(ctx, brk); err != nil {
+			t.Fatalf("CreateBreak err = %v, want nil", err)
+		}
+
+		testGame := newTestGame(t, testQuiz)
+		if err := gameStore.CreateGame(ctx, testGame); err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		if err := gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("CreateParticipant err = %v, want nil", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+		if err := svc.MarkBreakSeen(ctx, testGame.ID, 1, brk.ID); err != nil {
+			t.Errorf("first MarkBreakSeen err = %v, want nil", err)
+		}
+		if err := svc.MarkBreakSeen(ctx, testGame.ID, 1, brk.ID); err != nil {
+			t.Errorf("second MarkBreakSeen err = %v, want nil (idempotent)", err)
+		}
+	})
+
+	t.Run("non-participant gets ErrGameNotFound", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+		brk := &quiz.Break{QuizID: testQuiz.ID, Position: 0}
+		if err := quizStore.CreateBreak(ctx, brk); err != nil {
+			t.Fatalf("CreateBreak err = %v, want nil", err)
+		}
+
+		testGame := newTestGame(t, testQuiz)
+		if err := gameStore.CreateGame(ctx, testGame); err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		if err := gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("CreateParticipant err = %v, want nil", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+		err := svc.MarkBreakSeen(ctx, testGame.ID, 999, brk.ID)
+		if got, want := err, ErrGameNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("break from a different quiz returns ErrBreakNotFound", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		// Two quizzes; break belongs to the second. The game is on the
+		// first, so the break does not belong to the game's quiz.
+		quizA := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, quizA); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+		quizB := newTestQuiz(t)
+		quizB.Slug = "other-quiz"
+		quizB.Title = "Other"
+		if err := quizStore.CreateQuiz(ctx, quizB); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+		brkOnB := &quiz.Break{QuizID: quizB.ID, Position: 0}
+		if err := quizStore.CreateBreak(ctx, brkOnB); err != nil {
+			t.Fatalf("CreateBreak err = %v, want nil", err)
+		}
+
+		testGame := newTestGame(t, quizA)
+		if err := gameStore.CreateGame(ctx, testGame); err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		if err := gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: quizA.ID},
+		); err != nil {
+			t.Fatalf("CreateParticipant err = %v, want nil", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+		err := svc.MarkBreakSeen(ctx, testGame.ID, 1, brkOnB.ID)
+		if got, want := err, quiz.ErrBreakNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
 		}
 	})
 }
