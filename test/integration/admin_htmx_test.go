@@ -207,6 +207,221 @@ func TestAdminHTMX_QuestionReorder(t *testing.T) {
 	}
 }
 
+// TestAdminHTMX_BreakMove pins the HX-Request branch on the break
+// reorder endpoint (#437). Mirrors TestAdminHTMX_QuestionReorder so
+// the break path stays symmetric with the question path: the HX
+// request gets a 200 fragment (page scroll preserved) and the no-JS
+// fallback still 303-redirects.
+//
+// Also covers the ErrBreakMoveImpossible HX branch (#439): asking to
+// move a break at position 0 up returns the unchanged partial at 200
+// rather than the 4xx the other sentinel errors get, because the
+// store's "target slot unavailable" outcome is treated as a no-op so
+// a stale-form click renders cleanly.
+func TestAdminHTMX_BreakMove(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+	})
+
+	db, err := sql.Open("sqlite", srv.DBURI)
+	if err != nil {
+		t.Fatalf("sql.Open err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v, want nil", cerr)
+		}
+	})
+	stores := store.New(db, slog.Default())
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New err = %v, want nil", err)
+	}
+	client := &http.Client{
+		Jar: jar,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
+
+	adminPlayer, err := stores.Players.GetPlayerByUsername(ctx, "htmx-admin")
+	if err != nil {
+		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+	}
+
+	const (
+		questionOneText = "What is the river running through Prague?"
+		questionTwoText = "What is the capital of Portugal?"
+		breakText       = "Take a sip of water"
+	)
+	qz := &quiz.Quiz{
+		Title:             "HTMX Break Reorder Quiz",
+		Slug:              "htmx-break-reorder",
+		Description:       "seed for the HTMX break-move integration test",
+		CreatedByPlayerID: adminPlayer.ID,
+		Questions: []*quiz.Question{
+			{
+				Text:     questionOneText,
+				Position: 1,
+				Options:  []*quiz.Option{{Text: "Vltava", Correct: true}, {Text: "Danube"}},
+			},
+			{
+				Text:     questionTwoText,
+				Position: 2,
+				Options:  []*quiz.Option{{Text: "Lisbon", Correct: true}, {Text: "Madrid"}},
+			},
+		},
+	}
+	if cerr := stores.Quizzes.CreateQuiz(ctx, qz); cerr != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", cerr)
+	}
+
+	// Seed a break at position 0 (Beginning) so the move-down click
+	// has a valid destination (after Q1) and the move-up click hits
+	// the ErrBreakMoveImpossible branch.
+	brk := &quiz.Break{QuizID: qz.ID, Position: 0, Text: breakText}
+	if cerr := stores.Quizzes.CreateBreak(ctx, brk); cerr != nil {
+		t.Fatalf("CreateBreak err = %v, want nil", cerr)
+	}
+
+	quizViewURL := fmt.Sprintf("%s/admin/quizzes/%d", srv.BaseURL, qz.ID)
+
+	moveDownURL := fmt.Sprintf(
+		"%s/admin/quizzes/%d/breaks/%d/move/down",
+		srv.BaseURL, qz.ID, brk.ID,
+	)
+
+	// HX-Request happy path: expect a 200 fragment carrying the
+	// break text, the wrapper id, and no full-page body classes.
+	csrfToken := fetchCSRFToken(ctx, t, client, quizViewURL)
+	hxBody := postHXBreakMove(ctx, t, client, moveDownURL, csrfToken)
+	if !strings.Contains(hxBody, breakText) {
+		t.Errorf("HX body = %q, should contain break text %q", hxBody, breakText)
+	}
+	if !strings.Contains(hxBody, questionOneText) {
+		t.Errorf("HX body = %q, should contain question one text %q", hxBody, questionOneText)
+	}
+	if !strings.Contains(hxBody, `id="questions-list"`) {
+		t.Errorf("HX body should keep id=\"questions-list\" on the wrapper, got %q", hxBody)
+	}
+	if strings.Contains(hxBody, `bg-bg text-text font-sans antialiased`) {
+		t.Errorf("HX body should NOT contain the full-page <body> classes, got %q", hxBody)
+	}
+
+	// HX-Request impossible-move: shift the break one more slot down
+	// via a plain POST so it sits at position 2 (after Q2). With no
+	// Q3, asking to move it down again hits ErrBreakMoveImpossible
+	// in the store - the HX path must still 200 + return the
+	// unchanged partial, not a 4xx.
+	csrfToken = fetchCSRFToken(ctx, t, client, quizViewURL)
+	setupForm := url.Values{}
+	setupForm.Add("csrf_token", csrfToken)
+	setupReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, moveDownURL, strings.NewReader(setupForm.Encode()),
+	)
+	if err != nil {
+		t.Fatalf("setup NewRequest err = %v, want nil", err)
+	}
+	setupReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	setupResp, err := client.Do(setupReq)
+	if err != nil {
+		t.Fatalf("setup client.Do err = %v, want nil", err)
+	}
+	if cerr := setupResp.Body.Close(); cerr != nil {
+		t.Errorf("setup Body.Close err = %v, want nil", cerr)
+	}
+	if got, want := setupResp.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("setup move-down status = %d, want %d", got, want)
+	}
+
+	csrfToken = fetchCSRFToken(ctx, t, client, quizViewURL)
+	hxImpossibleBody := postHXBreakMove(ctx, t, client, moveDownURL, csrfToken)
+	if !strings.Contains(hxImpossibleBody, breakText) {
+		t.Errorf("HX impossible body = %q, should still contain break text %q", hxImpossibleBody, breakText)
+	}
+	if !strings.Contains(hxImpossibleBody, `id="questions-list"`) {
+		t.Errorf("HX impossible body should keep id=\"questions-list\", got %q", hxImpossibleBody)
+	}
+
+	// Non-HX path: same endpoint, no HX-Request header. Classic 303
+	// redirect, matching TestBreaks_Move's existing assertion.
+	csrfToken = fetchCSRFToken(ctx, t, client, quizViewURL)
+	plainForm := url.Values{}
+	plainForm.Add("csrf_token", csrfToken)
+	plainReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, moveDownURL, strings.NewReader(plainForm.Encode()),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	plainReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	plainResp, err := client.Do(plainReq)
+	if err != nil {
+		t.Fatalf("client.Do err = %v, want nil", err)
+	}
+	if cerr := plainResp.Body.Close(); cerr != nil {
+		t.Errorf("Body.Close err = %v, want nil", cerr)
+	}
+	if got, want := plainResp.StatusCode, http.StatusSeeOther; got != want {
+		t.Errorf("non-HX status = %d, want %d", got, want)
+	}
+	if got, want := plainResp.Header.Get("Location"), fmt.Sprintf("/admin/quizzes/%d", qz.ID); got != want {
+		t.Errorf("non-HX Location = %q, want %q", got, want)
+	}
+}
+
+// postHXBreakMove submits an HTMX form POST to a break move endpoint
+// and returns the response body, asserting the response is a 200
+// text/html fragment along the way. Folded out of TestAdminHTMX_BreakMove
+// so the happy and impossible-move paths share their shape and only
+// the body checks differ.
+func postHXBreakMove(
+	ctx context.Context,
+	t *testing.T,
+	client *http.Client,
+	target, csrfToken string,
+) string {
+	t.Helper()
+
+	form := url.Values{}
+	form.Add("csrf_token", csrfToken)
+
+	req, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, target, strings.NewReader(form.Encode()),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Hx-Request", "true")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("client.Do err = %v, want nil", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll err = %v, want nil", err)
+	}
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("Body.Close err = %v, want nil", cerr)
+	}
+
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("HX status = %d, want %d, body = %q", got, want, body)
+	}
+	if got, want := resp.Header.Get("Content-Type"), "text/html"; !strings.HasPrefix(got, want) {
+		t.Errorf("HX Content-Type = %q, want prefix %q", got, want)
+	}
+
+	return string(body)
+}
+
 // registerAdminViaHTTP posts /register through the supplied client so
 // the response sets the session cookie on its jar. The first registered
 // user becomes the admin per the existing auth flow.
