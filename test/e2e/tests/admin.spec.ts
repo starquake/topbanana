@@ -79,9 +79,11 @@ test('admin can add, edit, and delete a break on a quiz', async ({ page, browser
 
   // Delete the break via the per-row modal.
   await page.getByRole('button', { name: 'Delete break' }).click();
-  // The modal's submit button is labelled "Delete" — scope to the
-  // delete-break dialog so it doesn't collide with the delete-quiz one.
-  const deleteDialog = page.locator('[id^="modal-delete-break-"]');
+  // Scope to the visible delete-break dialog: every break renders its
+  // own modal-delete-break-{id} node, all hidden until opened, so a
+  // slice-2 fixture with multiple breaks would make a prefix-only
+  // selector ambiguous. :visible narrows to the one the click opened.
+  const deleteDialog = page.locator('[id^="modal-delete-break-"]:visible');
   await deleteDialog.getByRole('button', { name: 'Delete' }).click();
 
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);

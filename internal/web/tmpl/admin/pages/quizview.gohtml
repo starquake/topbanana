@@ -22,10 +22,11 @@
                 {{end}}
             </div>
 
-            {{/* Quiz.CanEdit is resolved server-side from the session
-                 player + creator (admin.go's attachCanEdit). Pulled
-                 into a local alias for readability since the partial
-                 and a few inline conditionals all key on it. */}}
+            {{/* Pull CanEdit into a local alias so the partial below
+                 and a handful of inline conditionals all key on the
+                 same name. CanEdit is true when the requesting player
+                 owns the quiz (or is an admin); the rest of this
+                 template treats it as opaque. */}}
             {{$canEdit := .Quiz.CanEdit}}
             <h1 class="mb-3 flex items-center gap-3 font-display font-extrabold leading-[1.05] tracking-tight uppercase text-[clamp(1.85rem,5.5vw,2.5rem)]">
                 <span>{{.Quiz.Title}}</span>
