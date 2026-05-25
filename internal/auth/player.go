@@ -124,7 +124,7 @@ type PlayerListRow struct {
 // player who has never finished a quiz.
 type PlayerStats struct {
 	PlayerID       int64
-	FinishedCount  int
+	FinishedCount  int64
 	LastFinishedAt *time.Time
 }
 

@@ -393,7 +393,7 @@ const listAllPlayers = `-- name: ListAllPlayers :many
 SELECT
     p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed,
     EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id) AS has_oauth,
-    CAST(COALESCE((SELECT pi.provider FROM player_identities pi WHERE pi.player_id = p.id LIMIT 1), '') AS TEXT) AS oauth_provider
+    CAST(COALESCE((SELECT pi.provider FROM player_identities pi WHERE pi.player_id = p.id ORDER BY pi.provider LIMIT 1), '') AS TEXT) AS oauth_provider
 FROM players p
 ORDER BY p.created_at DESC, p.id DESC
 LIMIT ?2 OFFSET ?1
@@ -424,6 +424,10 @@ type ListAllPlayersRow struct {
 // ListPlayerFinishStats call against the page's player_ids; keeping
 // the aggregate out of this query keeps the SELECT under sqlc's
 // type-inference comfort zone and avoids a CTE / window function.
+// The oauth_provider subquery uses ORDER BY pi.provider so a player
+// with multiple linked identities (future multi-provider support)
+// always surfaces the same alphabetically-first one rather than a
+// nondeterministic pick.
 func (q *Queries) ListAllPlayers(ctx context.Context, arg ListAllPlayersParams) ([]ListAllPlayersRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAllPlayers, arg.RowOffset, arg.RowLimit)
 	if err != nil {
@@ -478,12 +482,12 @@ type ListPlayerFinishStatsRow struct {
 }
 
 // Returns (finished_count, last_finished_at) for each supplied
-// player_id. "Finished" matches the canonical definition used by
-// ListMostActivePlayers / ListPopularQuizzes: every question of the
-// quiz has been issued (game_questions rows >= questions rows) and
-// the quiz still has questions (empty-quiz games don't count). Used
-// by the admin players list (#423) to aggregate per-page without
-// folding the condition into ListAllPlayers' SELECT.
+// player_id. A game counts as finished when every question of its
+// quiz has been issued (game_questions row count >= questions row
+// count) and the quiz still has at least one question (an empty
+// quiz can't be finished). Used by the admin players list (#423)
+// to aggregate per-page without folding the condition into
+// ListAllPlayers' SELECT.
 // The CAST on MAX gives sqlc's SQLite engine an explicit type hint
 // so the generated row's LastFinishedAt lands as a string rather
 // than interface{}. sqlc cannot infer the type through MAX over a

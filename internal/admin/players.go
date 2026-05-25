@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -17,23 +18,23 @@ import (
 // store call share one value.
 const playersPerPage = 100
 
-// PlayerRow is one row in the admin players list template. Mirrors the
-// shape of auth.PlayerListRow + auth.PlayerStats merged together with
-// the AccountType label pre-derived so the template stays declarative.
-type PlayerRow struct {
+// playerRow is one row in the admin players list template. Mirrors
+// the shape of auth.PlayerListRow + auth.PlayerStats merged with the
+// AccountType label pre-derived so the template stays declarative.
+type playerRow struct {
 	ID             int64
 	Username       string
 	Email          string
 	AccountType    string
 	CreatedAt      time.Time
-	FinishedCount  int
+	FinishedCount  int64
 	LastFinishedAt *time.Time
 }
 
 // playersPageData backs the playerslist.gohtml template.
 type playersPageData struct {
 	Title      string
-	Players    []*PlayerRow
+	Players    []*playerRow
 	Page       int
 	TotalPages int
 	TotalRows  int64
@@ -74,11 +75,12 @@ func loadPlayersPage(
 	csrfMgr *csrf.Manager,
 	lister auth.PlayerLister,
 ) (playersPageData, bool) {
+	ctx := r.Context()
 	page := parsePageParam(r.URL.Query().Get("page"))
 
-	total, err := lister.CountAllPlayers(r.Context())
+	total, err := lister.CountAllPlayers(ctx)
 	if err != nil {
-		logger.ErrorContext(r.Context(), "error counting players", slog.Any("err", err))
+		logger.ErrorContext(ctx, "error counting players", slog.Any("err", err))
 		render500(w, r, logger, csrfMgr)
 
 		return playersPageData{}, false
@@ -93,17 +95,17 @@ func loadPlayersPage(
 	}
 
 	offset := int64(page-1) * playersPerPage
-	rows, err := lister.ListAllPlayers(r.Context(), playersPerPage, offset)
+	rows, err := lister.ListAllPlayers(ctx, playersPerPage, offset)
 	if err != nil {
-		logger.ErrorContext(r.Context(), "error listing players", slog.Any("err", err))
+		logger.ErrorContext(ctx, "error listing players", slog.Any("err", err))
 		render500(w, r, logger, csrfMgr)
 
 		return playersPageData{}, false
 	}
 
-	players, err := buildPlayerRows(r, lister, rows)
+	players, err := buildPlayerRows(ctx, lister, rows)
 	if err != nil {
-		logger.ErrorContext(r.Context(), "error loading finish stats", slog.Any("err", err))
+		logger.ErrorContext(ctx, "error building player rows", slog.Any("err", err))
 		render500(w, r, logger, csrfMgr)
 
 		return playersPageData{}, false
@@ -130,22 +132,30 @@ func loadPlayersPage(
 }
 
 // buildPlayerRows merges a page of [auth.PlayerListRow] with the
-// per-player finish-stats lookup into the template's PlayerRow shape.
+// per-player finish-stats lookup into the template's playerRow shape.
+// The finish-stats lookup is skipped on an empty page so the lister
+// never sees a `WHERE id IN ()`.
 func buildPlayerRows(
-	r *http.Request, lister auth.PlayerLister, rows []*auth.PlayerListRow,
-) ([]*PlayerRow, error) {
-	ids := make([]int64, 0, len(rows))
-	for _, p := range rows {
-		ids = append(ids, p.ID)
-	}
-	statsByID, err := finishStatsByID(r, lister, ids)
-	if err != nil {
-		return nil, err
+	ctx context.Context, lister auth.PlayerLister, rows []*auth.PlayerListRow,
+) ([]*playerRow, error) {
+	statsByID := map[int64]*auth.PlayerStats{}
+	if len(rows) > 0 {
+		ids := make([]int64, 0, len(rows))
+		for _, p := range rows {
+			ids = append(ids, p.ID)
+		}
+		stats, err := lister.ListPlayerFinishStats(ctx, ids)
+		if err != nil {
+			return nil, fmt.Errorf("list player finish stats: %w", err)
+		}
+		for _, s := range stats {
+			statsByID[s.PlayerID] = s
+		}
 	}
 
-	out := make([]*PlayerRow, 0, len(rows))
+	out := make([]*playerRow, 0, len(rows))
 	for _, p := range rows {
-		pr := &PlayerRow{
+		pr := &playerRow{
 			ID:          p.ID,
 			Username:    p.Username,
 			Email:       p.Email,
@@ -186,27 +196,6 @@ func totalPagesFor(total, perPage int64) int {
 	}
 
 	return int((total + perPage - 1) / perPage)
-}
-
-// finishStatsByID issues the per-page finish-stats lookup and returns a
-// playerID-keyed map for O(1) row enrichment. An empty id slice short-
-// circuits the store call so the lister never sees a `WHERE id IN ()`.
-func finishStatsByID(
-	r *http.Request, lister auth.PlayerLister, ids []int64,
-) (map[int64]*auth.PlayerStats, error) {
-	if len(ids) == 0 {
-		return map[int64]*auth.PlayerStats{}, nil
-	}
-	stats, err := lister.ListPlayerFinishStats(r.Context(), ids)
-	if err != nil {
-		return nil, fmt.Errorf("list player finish stats: %w", err)
-	}
-	out := make(map[int64]*auth.PlayerStats, len(stats))
-	for _, s := range stats {
-		out[s.PlayerID] = s
-	}
-
-	return out, nil
 }
 
 // accountTypeLabel maps a player row's role + credential + OAuth state

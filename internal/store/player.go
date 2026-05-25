@@ -406,32 +406,31 @@ func (s *PlayerStore) ListPlayerFinishStats(ctx context.Context, playerIDs []int
 
 	out := make([]*auth.PlayerStats, 0, len(rows))
 	for _, r := range rows {
-		stats := &auth.PlayerStats{
-			PlayerID:      r.PlayerID,
-			FinishedCount: int(r.FinishedCount),
-		}
-		// SQLite stores DATETIME as a text string; the CAST in the SQL
-		// pins it to a string return so sqlc can type the column.
-		// modernc.org/sqlite hands us back either the canonical
-		// "YYYY-MM-DD HH:MM:SS" or the RFC3339 form depending on how
-		// the row was inserted, so try the strict form first and fall
-		// back to RFC3339 on miss. A parse failure is logged and the
-		// column is left nil rather than failing the whole list page.
-		const sqliteDateTime = "2006-01-02 15:04:05"
-		if t, perr := time.Parse(sqliteDateTime, r.LastFinishedAt); perr == nil {
-			stats.LastFinishedAt = &t
-		} else if t, perr := time.Parse(time.RFC3339, r.LastFinishedAt); perr == nil {
-			stats.LastFinishedAt = &t
-		} else {
-			s.logger.WarnContext(ctx, "unparseable last_finished_at",
-				slog.Int64("player_id", r.PlayerID),
-				slog.String("raw", r.LastFinishedAt),
-			)
-		}
-		out = append(out, stats)
+		out = append(out, &auth.PlayerStats{
+			PlayerID:       r.PlayerID,
+			FinishedCount:  r.FinishedCount,
+			LastFinishedAt: parseSQLiteTimestamp(r.LastFinishedAt),
+		})
 	}
 
 	return out, nil
+}
+
+// parseSQLiteTimestamp accepts the two formats modernc.org/sqlite can
+// return for an aggregate over a DATETIME column ("YYYY-MM-DD
+// HH:MM:SS" if the column was written via SQLite helpers, RFC3339 if
+// written via [time.Time]). An unparseable value falls through to nil
+// so a single malformed row does not fail the whole admin list page.
+func parseSQLiteTimestamp(raw string) *time.Time {
+	const sqliteDateTime = "2006-01-02 15:04:05"
+	if t, err := time.Parse(sqliteDateTime, raw); err == nil {
+		return &t
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return &t
+	}
+
+	return nil
 }
 
 // classifyUpdateUsernameErr maps an UpdatePlayerUsername storage error onto

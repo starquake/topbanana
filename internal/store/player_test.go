@@ -579,6 +579,16 @@ func TestPlayerStore_ListAllPlayers_Pagination(t *testing.T) {
 	if first[0].ID == second[0].ID {
 		t.Errorf("pages overlap: first[0]=%d, second[0]=%d", first[0].ID, second[0].ID)
 	}
+	// All five rows share a created_at because they were inserted in
+	// the same test tick, so the tiebreaker ORDER BY p.id DESC kicks
+	// in: the newest id has to land first on page 1 and page 2 has to
+	// start with a strictly smaller id than page 1's tail.
+	if first[0].ID < first[1].ID {
+		t.Errorf("page 1 not in id-DESC order: %d before %d", first[0].ID, first[1].ID)
+	}
+	if first[1].ID <= second[0].ID {
+		t.Errorf("page 2 starts at id %d, want < page 1 tail %d", second[0].ID, first[1].ID)
+	}
 }
 
 // TestPlayerStore_ListPlayerFinishStats_NoGames asserts the short-
