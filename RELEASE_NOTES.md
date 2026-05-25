@@ -2,6 +2,25 @@
 
 What changed in each released version of Top Banana. The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.5.7 — 2026-05-25
+
+Google sign-in, a profile page, account-aware home and claim-name surfaces, and a new admin players list.
+
+### Players
+- Google sign-in is available alongside the existing password sign-in.
+- A profile page at `/profile` shows the signed-in player's name and accepts a rename.
+- The home page shows the signed-in player's name and a log-out button. Anonymous sessions still see only the "Log in" footer link.
+- The claim-name modal no longer opens for signed-in players, and pre-fills the input with the current name when an anonymous player re-opens it.
+- The claim-name modal also offers "Log in" and "Sign in with Google" buttons, except when opened mid-quiz.
+- Games finished anonymously are moved onto the signed-in account on next sign-in, unless that account already has a finished game for the same quiz.
+
+### Hosts
+- A new admin page at `/admin/players` lists every player on the instance with username, account type (admin, password, OAuth, anonymous), email, created date, finished-quiz count, and last-finished-at. The list is paginated.
+- The per-question image input and thumbnail no longer render in the admin question form or question list. The backend still accepts and stores image URLs.
+
+### Behind the scenes
+- The staging deployment requires Google OAuth env vars to be set, matching production.
+
 ## v2026.5.6 — 2026-05-24
 
 Live leaderboard adds in-progress players, two new host controls (per-quiz visibility, per-question time limit), and a batch of leaderboard and timing fixes.
