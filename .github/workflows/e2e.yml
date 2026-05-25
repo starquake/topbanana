@@ -63,13 +63,6 @@ jobs:
         run: npx playwright install-deps ${{ matrix.browser }}
         working-directory: test/e2e
 
-      # home.spec.ts shells out to the system sqlite3 CLI to wipe the
-      # worker DB between tests (#433). Pre-installed on the ubuntu-24.04
-      # runner image today, but installing it explicitly keeps the spec's
-      # tooling dep from disappearing under a future image bump.
-      - name: Install sqlite3 CLI
-        run: sudo apt-get install -y sqlite3
-
       - name: Run Playwright tests
         run: npx playwright test --project=${{ matrix.browser }}
         working-directory: test/e2e
