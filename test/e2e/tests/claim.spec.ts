@@ -23,8 +23,7 @@ test('start screen shows a Playing as card with an auto-generated petname for a 
   const name = await card.getByTestId('claim-cta-name').textContent();
   expect(name).toMatch(PETNAME_PATTERN);
 
-  // Body copy and button label both default to the "no name picked yet" branch.
-  await expect(card.getByText('Pick a display name', { exact: false })).toBeVisible();
+  // Button label defaults to the "no name picked yet" branch.
   await expect(page.getByRole('button', { name: 'Set your name' })).toBeVisible();
 });
 
@@ -53,11 +52,10 @@ test('submitting a name via the start-screen modal updates the Playing as card i
   await modal.getByRole('button', { name: 'Save' }).click();
 
   // The modal closes on successful PATCH, and the card re-renders with the
-  // chosen name plus the "already claimed" branch of body copy and button label.
+  // chosen name plus the "already claimed" branch of the button label.
   await expect(modal).toBeHidden();
   await expect(card.getByTestId('claim-cta-name')).toHaveText(chosenName);
   await expect(card.getByTestId('claim-cta-name')).not.toHaveText(petname ?? '');
-  await expect(card.getByText('Not happy with it?', { exact: false })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Change your name' })).toBeVisible();
   // The "Set your name" span is also still in the DOM (gated by x-show), so
   // assert on its visibility rather than DOM count.
@@ -193,30 +191,31 @@ test('signed-in player does not see the claim-name CTA on the player client', as
   await expect(page.getByRole('button', { name: 'Change your name' })).not.toBeVisible();
 });
 
-// Test 6 — provider-agnostic sign-in escape hatch in the modal (#407).
-// An anonymous visitor opening the claim modal should see a "sign in"
-// link that routes to /login (where every enabled provider lives) so
-// they have a path out of the anonymous flow without the client
-// having to know which auth methods are configured.
-test('claim modal includes a sign-in link that routes to /login', async ({ page }) => {
+// Test 6 — sign-in CTA on the claim-name callout (#431).
+test('claim-name callout includes a sign-in link that routes to /login', async ({ page }) => {
   await page.goto('/client/');
 
-  // Open the modal via the start-screen CTA. Use the visible variant
-  // because two .claim-cta nodes live in the DOM at once (x-show
-  // toggles CSS, not mount state).
-  await page.getByRole('button', { name: 'Set your name' }).click();
-  const modal = page.locator('[role="dialog"]');
-  await expect(modal).toBeVisible();
+  const card = page.locator('.claim-cta:visible');
+  await expect(card).toBeVisible();
 
-  // The sign-in row should be present (not mid-quiz, so the
-  // !gameId || finished gate is satisfied).
-  const signIn = modal.getByRole('link', { name: 'sign in' });
+  const signIn = card.getByTestId('claim-cta-signin');
   await expect(signIn).toBeVisible();
+  await expect(card.getByText('to keep this name across devices', { exact: false })).toBeVisible();
 
-  // Click navigates to /login. Wait on the URL change because the
-  // dialog backdrop is plain navigation, not an Alpine event.
+  // Wait on the URL change because the link is plain navigation, not an Alpine event.
   await Promise.all([
     page.waitForURL(/\/login$/),
     signIn.click(),
   ]);
+});
+
+// Test 7 — modal does not duplicate the callout's sign-in CTA (#431).
+test('claim modal does not include a sign-in link', async ({ page }) => {
+  await page.goto('/client/');
+
+  await page.getByRole('button', { name: 'Set your name' }).click();
+  const modal = page.locator('[role="dialog"]');
+  await expect(modal).toBeVisible();
+
+  await expect(modal.locator('a[href="/login"]')).toHaveCount(0);
 });
