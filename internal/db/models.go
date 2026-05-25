@@ -50,6 +50,12 @@ type GameQuestion struct {
 	ExpiredAt  time.Time
 }
 
+type GameSeenBreak struct {
+	GameID  string
+	BreakID int64
+	SeenAt  time.Time
+}
+
 type Option struct {
 	ID         int64
 	QuestionID int64

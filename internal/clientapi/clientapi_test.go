@@ -114,8 +114,12 @@ func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Opti
 	return nil, errStub
 }
 
+// ListBreaksByQuiz defaults to "no breaks" so existing GetNextQuestion
+// flow tests (#167 slice 2) don't have to opt in: the merged iterator
+// in game.Service.GetNext calls this on every /next request and an
+// errStub would 500 every test that doesn't care about breaks.
 func (stubQuizStore) ListBreaksByQuiz(_ context.Context, _ int64) ([]*quiz.Break, error) {
-	return nil, errStub
+	return nil, nil
 }
 
 func (stubQuizStore) GetBreak(_ context.Context, _ int64) (*quiz.Break, error) {
@@ -144,6 +148,8 @@ type stubGameStore struct {
 	listParticipantsForQuizLeaderboard func(ctx context.Context, quizID int64, staleBefore time.Time) ([]*game.LeaderboardParticipant, error)
 	deleteGamesForPlayerOnQuiz         func(ctx context.Context, playerID, quizID int64) error
 	listQuizIDsForPlayer               func(ctx context.Context, playerID int64) ([]int64, error)
+	markBreakSeen                      func(ctx context.Context, gameID string, breakID int64) error
+	listSeenBreakIDsByGame             func(ctx context.Context, gameID string) ([]int64, error)
 }
 
 func (stubGameStore) Ping(_ context.Context) error { return nil }
@@ -192,6 +198,26 @@ func (s stubGameStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64)
 	}
 
 	return s.listQuizIDsForPlayer(ctx, playerID)
+}
+
+func (s stubGameStore) MarkBreakSeen(ctx context.Context, gameID string, breakID int64) error {
+	if s.markBreakSeen == nil {
+		return errStub
+	}
+
+	return s.markBreakSeen(ctx, gameID, breakID)
+}
+
+// ListSeenBreakIDsByGame defaults to "no seen breaks" so existing
+// /next flow tests (#167 slice 2) don't have to opt in - the merged
+// iterator calls this on every request and an errStub would 500 every
+// test that doesn't care about breaks.
+func (s stubGameStore) ListSeenBreakIDsByGame(ctx context.Context, gameID string) ([]int64, error) {
+	if s.listSeenBreakIDsByGame == nil {
+		return nil, nil
+	}
+
+	return s.listSeenBreakIDsByGame(ctx, gameID)
 }
 
 func (s stubGameStore) StartGame(ctx context.Context, id string) error {

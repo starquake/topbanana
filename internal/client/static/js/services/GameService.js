@@ -1,4 +1,4 @@
-import { jsonOrThrow } from './api.js';
+import { ApiError, jsonOrThrow } from './api.js';
 
 // GameService wraps the gameplay REST endpoints. Every method throws
 // [ApiError] on non-2xx (#287) so callers can branch on status
@@ -49,6 +49,26 @@ export class GameService {
     async getResults(gameId) {
         const response = await fetch(`/api/games/${gameId}/results`);
         return jsonOrThrow(response);
+    }
+
+    // markBreakSeen acknowledges a break (#167 slice 2). The server
+    // returns 204 No Content; any other status is a real error the
+    // caller surfaces as a retry banner — silently dropping the click
+    // would strand the player on the break card with no recovery.
+    // Idempotent at the server, so a retry after a transient failure
+    // is safe.
+    async markBreakSeen(gameId, breakId) {
+        const response = await fetch(`/api/games/${gameId}/breaks/${breakId}/seen`, {
+            method: 'POST',
+        });
+        if (response.ok) return;
+        let body = '';
+        try {
+            body = await response.text();
+        } catch {
+            // status is the load-bearing field; empty body is fine.
+        }
+        throw new ApiError(`HTTP ${response.status}: ${body.slice(0, 200)}`, response.status, body);
     }
 
     async getQuizLeaderboard(slugId) {

@@ -30,6 +30,13 @@ const (
 	// (#336): a 10s answer window plus slack for reveal beats and
 	// mobile network jitter.
 	defaultStalePeriod = 30 * time.Second
+
+	// errGetGameFmt is the wrap format for store.GetGame errors. Every
+	// entry-point gate (GetNextQuestion, GetNext, MarkBreakSeen,
+	// SubmitAnswer, GetResults) wraps the failure with the same
+	// "failed to get game" prefix - revive's add-constant rule fires
+	// after four occurrences, so we hoist the format string here.
+	errGetGameFmt = "failed to get game: %w"
 )
 
 var (
@@ -96,6 +103,37 @@ type Participant struct {
 	PlayerID int64
 	QuizID   int64
 	JoinedAt time.Time
+}
+
+// ItemType discriminates the variants of [Item] returned by
+// [Service.GetNext]. The merged-by-position iterator emits one of these
+// per call so the player API can serve a question or a break through
+// the same endpoint (#167 slice 2).
+type ItemType string
+
+// Item kinds emitted by [Service.GetNext].
+const (
+	ItemTypeQuestion ItemType = "question"
+	ItemTypeBreak    ItemType = "break"
+)
+
+// Item is the union returned by [Service.GetNext]. Exactly one of
+// Question or Break is set, matched by Type.
+//
+// Score is populated for break items so the break screen can show the
+// player's running total; it is left zero on question items because
+// the HUD chip doesn't carry a score there (#167 slice 2).
+//
+// Total is populated for break items as well so the player UI can keep
+// rendering the "Q n / total" chip across a break without a second
+// round-trip. For question items, the total lives on
+// [Question.Total] (populated at issue time by [Service.GetNext]).
+type Item struct {
+	Type     ItemType
+	Question *Question
+	Break    *quiz.Break
+	Score    int
+	Total    int
 }
 
 // Question represents a question in a game. It references a quiz question.
@@ -263,6 +301,14 @@ type Store interface {
 	// fan out a leaderboard republish on every quiz the player appears
 	// on.
 	ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]int64, error)
+	// MarkBreakSeen records that the player has passed through the given
+	// break in the given game (#167 slice 2). Idempotent: a second call
+	// with the same (gameID, breakID) is a no-op.
+	MarkBreakSeen(ctx context.Context, gameID string, breakID int64) error
+	// ListSeenBreakIDsByGame returns the break IDs the player has
+	// acknowledged in the given game. The merged iterator in
+	// [Service.GetNext] uses this set to skip past seen breaks (#167).
+	ListSeenBreakIDsByGame(ctx context.Context, gameID string) ([]int64, error)
 }
 
 // LeaderboardPublisher is the tiny seam Service uses to signal that a
@@ -527,7 +573,7 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string, playerID i
 	// Get the game
 	g, err := s.store.GetGame(ctx, gameID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get game: %w", err)
+		return nil, fmt.Errorf(errGetGameFmt, err)
 	}
 
 	// Participant gate (#272): non-participants get ErrGameNotFound so
@@ -598,6 +644,195 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string, playerID i
 	return gq, nil
 }
 
+// GetNext returns the next item the player should see in the game's
+// play sequence (#167 slice 2). It walks the quiz's questions and
+// breaks together, ordered by their position, and emits the first one
+// the player has not yet been issued (questions) or acknowledged
+// (breaks).
+//
+// Returns [ErrNoMoreQuestions] when nothing is left so the handler can
+// keep mapping the exhausted state to 404 - the sentinel name is
+// historical from when only questions existed, and we keep using it
+// rather than introducing a duplicate "ErrNoMoreItems".
+//
+// Like [Service.GetNextQuestion], the resume path short-circuits: when
+// the most recently issued question is unanswered and the answer
+// window is still open, hand back the same question row so a reload
+// doesn't skip ahead.
+func (s *Service) GetNext(ctx context.Context, gameID string, playerID int64) (*Item, error) {
+	g, qz, err := s.loadGameForPlayer(ctx, gameID, playerID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Resume path: keep the player on an in-flight question through a
+	// reload, matching GetNextQuestion's semantics. A break is never
+	// "in flight" - it is either seen or unseen - so the resume path
+	// only fires for questions.
+	if gq := resumeCandidate(g, qz); gq != nil {
+		return &Item{Type: ItemTypeQuestion, Question: gq}, nil
+	}
+
+	breaks, err := s.quizStore.ListBreaksByQuiz(ctx, qz.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list breaks: %w", err)
+	}
+
+	seenIDs, err := s.store.ListSeenBreakIDsByGame(ctx, gameID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list seen breaks: %w", err)
+	}
+
+	askedQuestions := make(map[int64]bool, len(g.Questions))
+	for _, gq := range g.Questions {
+		askedQuestions[gq.QuestionID] = true
+	}
+	seenBreaks := make(map[int64]bool, len(seenIDs))
+	for _, id := range seenIDs {
+		seenBreaks[id] = true
+	}
+
+	switch next := pickNextSlot(qz.Questions, breaks, askedQuestions, seenBreaks); next.kind {
+	case sequenceKindBreak:
+		score, scoreErr := s.computeGameScore(ctx, g, playerID)
+		if scoreErr != nil {
+			return nil, scoreErr
+		}
+
+		return &Item{Type: ItemTypeBreak, Break: next.brk, Score: score, Total: len(qz.Questions)}, nil
+	case sequenceKindQuestion:
+		gq, qErr := s.issueQuestion(ctx, gameID, qz, next.question, len(g.Questions))
+		if qErr != nil {
+			return nil, qErr
+		}
+
+		return &Item{Type: ItemTypeQuestion, Question: gq}, nil
+	default:
+		return nil, ErrNoMoreQuestions
+	}
+}
+
+// MarkBreakSeen records that the player has acknowledged the given
+// break in the given game (#167 slice 2). Mirrors the participant +
+// belongs-to gates that [Service.SubmitAnswer] applies to questions:
+//   - [ErrGameNotFound] when the game does not exist or the caller is
+//     not on the participant list.
+//   - [quiz.ErrBreakNotFound] when the break id does not exist or does
+//     not belong to the game's quiz.
+//
+// Idempotent at the store layer (INSERT OR IGNORE) so a second call
+// with the same arguments is a no-op success.
+//
+// Race note: an admin can move a break to a new slot while a player
+// has it on screen. The player acknowledges the break by id, so the
+// row at the new slot is marked seen and the player skips past it on
+// the next call to [Service.GetNext]. The break's previous slot is
+// not re-shown — the seen set is by-id, not by-position. Acceptable
+// for the common case (admin pauses authoring during a live game);
+// flagged here so a future "show break again on slot change" feature
+// has a documented starting point.
+func (s *Service) MarkBreakSeen(ctx context.Context, gameID string, playerID, breakID int64) error {
+	g, err := s.store.GetGame(ctx, gameID)
+	if err != nil {
+		return fmt.Errorf(errGetGameFmt, err)
+	}
+	if !hasParticipant(g, playerID) {
+		return ErrGameNotFound
+	}
+
+	brk, err := s.quizStore.GetBreak(ctx, breakID)
+	if err != nil {
+		return fmt.Errorf("failed to get break: %w", err)
+	}
+	if brk.QuizID != g.QuizID {
+		return quiz.ErrBreakNotFound
+	}
+
+	if err := s.store.MarkBreakSeen(ctx, gameID, breakID); err != nil {
+		return fmt.Errorf("failed to mark break seen: %w", err)
+	}
+
+	return nil
+}
+
+// sequenceKind names the variant of [sequenceSlot]. The string values
+// match the admin template's [admin.SequenceItem] kinds so the same
+// vocabulary travels through the codebase, but the two types are not
+// shared because admin.SequenceItem carries template-only fields.
+const (
+	sequenceKindQuestion = "question"
+	sequenceKindBreak    = "break"
+)
+
+// sequenceSlot is one slot in the merged play sequence used by
+// [Service.GetNext]. Exactly one of question or brk is set, matched by
+// kind. A zero-value sequenceSlot (kind == "") means the walk reached
+// the end with nothing left to emit.
+type sequenceSlot struct {
+	kind     string
+	question *quiz.Question
+	brk      *quiz.Break
+}
+
+// pickNextSlot walks the quiz's questions interleaved with the breaks
+// (ordered by position, breaks fire AFTER the question at the same
+// slot - position 0 means before the first question) and returns the
+// first slot the player has neither been issued (question) nor
+// acknowledged (break). Mirrors [admin.buildSequence] for the play
+// surface; the two would diverge only if the admin merge ever
+// reorders, so we keep them in lockstep by hand instead of sharing
+// state across packages.
+func pickNextSlot(
+	questions []*quiz.Question,
+	breaks []*quiz.Break,
+	asked map[int64]bool,
+	seen map[int64]bool,
+) sequenceSlot {
+	bySlot := make(map[int][]*quiz.Break, len(breaks))
+	for _, b := range breaks {
+		bySlot[b.Position] = append(bySlot[b.Position], b)
+	}
+
+	for _, b := range bySlot[0] {
+		if !seen[b.ID] {
+			return sequenceSlot{kind: sequenceKindBreak, brk: b}
+		}
+	}
+
+	// Track which slots get visited by the main walk so we can sweep
+	// any orphaned breaks at the end. A break is orphaned when its
+	// position no longer matches a live question - for example after
+	// an admin deletes the question that used to anchor it. Without
+	// this sweep the break would sit in the DB forever, invisible to
+	// players. The sweep emits the orphan AT THE END of the sequence
+	// (after all live questions) instead of silently dropping it.
+	visited := make(map[int]bool, len(questions)+1)
+	visited[0] = true
+
+	for _, q := range questions {
+		if !asked[q.ID] {
+			return sequenceSlot{kind: sequenceKindQuestion, question: q}
+		}
+		visited[q.Position] = true
+		for _, b := range bySlot[q.Position] {
+			if !seen[b.ID] {
+				return sequenceSlot{kind: sequenceKindBreak, brk: b}
+			}
+		}
+	}
+
+	for _, b := range breaks {
+		if visited[b.Position] {
+			continue
+		}
+		if !seen[b.ID] {
+			return sequenceSlot{kind: sequenceKindBreak, brk: b}
+		}
+	}
+
+	return sequenceSlot{}
+}
+
 // resumeCandidate returns the most recently issued game_question for
 // the game when it can be handed back as-is (unanswered, answer window
 // still open, quiz question still on the quiz). Returns nil when the
@@ -660,7 +895,7 @@ func (s *Service) SubmitAnswer(
 ) (*Answer, error) {
 	g, err := s.store.GetGame(ctx, gameID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get game: %w", err)
+		return nil, fmt.Errorf(errGetGameFmt, err)
 	}
 
 	// Participant gate (#272): non-participants get ErrGameNotFound. The
@@ -743,7 +978,7 @@ func clampTappedAt(tappedAt, startedAt, serverNow time.Time) time.Time {
 func (s *Service) GetResults(ctx context.Context, gameID string, playerID int64) (*Results, error) {
 	g, err := s.store.GetGame(ctx, gameID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get game: %w", err)
+		return nil, fmt.Errorf(errGetGameFmt, err)
 	}
 
 	if !hasParticipant(g, playerID) {
@@ -993,4 +1228,105 @@ func (s *Service) resolveAnswerTarget(
 		question.QuestionID,
 		ErrOptionNotInQuestion,
 	)
+}
+
+// loadGameForPlayer is the entry-point gate shared by [Service.GetNext]
+// and the new MarkBreakSeen flow. It loads the game, applies the #272
+// participant check (non-participants get ErrGameNotFound so the gameID
+// stays opaque), and attaches the populated quiz. Pulled out so the two
+// callers stay short and the gate logic lives in one place.
+func (s *Service) loadGameForPlayer(
+	ctx context.Context, gameID string, playerID int64,
+) (*Game, *quiz.Quiz, error) {
+	g, err := s.store.GetGame(ctx, gameID)
+	if err != nil {
+		return nil, nil, fmt.Errorf(errGetGameFmt, err)
+	}
+	if !hasParticipant(g, playerID) {
+		return nil, nil, ErrGameNotFound
+	}
+
+	qz, err := s.quizStore.GetQuiz(ctx, g.QuizID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get quiz: %w", err)
+	}
+	g.Quiz = qz
+
+	return g, qz, nil
+}
+
+// issueQuestion creates the game_questions row for the chosen quiz
+// question and returns the populated [Question] the handler hands back
+// to the player. The reveal-delay + answer-window arithmetic matches
+// [Service.GetNextQuestion] exactly so the two entry points stay
+// behavior-equivalent on the question path (#167 slice 2 / #247).
+func (s *Service) issueQuestion(
+	ctx context.Context, gameID string, qz *quiz.Quiz, q *quiz.Question, askedCount int,
+) (*Question, error) {
+	revealAt := time.Now().Add(s.revealDelay)
+	gq := &Question{
+		GameID:       gameID,
+		QuestionID:   q.ID,
+		QuizQuestion: q,
+		StartedAt:    revealAt,
+		ExpiredAt:    revealAt.Add(resolveAnswerWindow(q, qz)),
+		Position:     askedCount + 1,
+		Total:        len(qz.Questions),
+	}
+	if err := s.store.CreateQuestion(ctx, gq); err != nil {
+		return nil, fmt.Errorf("failed to record game question: %w", err)
+	}
+
+	return gq, nil
+}
+
+// computeGameScore aggregates the requesting player's running score
+// across every game_answer recorded on the game so far, reusing
+// [Service.CalculateScore] for the per-answer points. Used by
+// [Service.GetNext] to populate the running total on a break item so
+// the player sees their score on the break screen without a separate
+// round-trip (#167 slice 2). Filters by playerID because the loaded
+// game carries answers from every participant.
+func (s *Service) computeGameScore(ctx context.Context, g *Game, playerID int64) (int, error) {
+	// Collect every option ID across every issued question's answers
+	// belonging to this player so we can fetch their correctness
+	// flags in one query.
+	var optionIDs []int64
+	for _, gq := range g.Questions {
+		for _, ga := range gq.Answers {
+			if ga.PlayerID != playerID {
+				continue
+			}
+			optionIDs = append(optionIDs, ga.OptionID)
+		}
+	}
+	if len(optionIDs) == 0 {
+		return 0, nil
+	}
+
+	options, err := s.quizStore.GetOptionsByIDs(ctx, optionIDs)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get options for break score: %w", err)
+	}
+	optionsByID := make(map[int64]*quiz.Option, len(options))
+	for _, o := range options {
+		optionsByID[o.ID] = o
+	}
+
+	total := 0
+	for _, gq := range g.Questions {
+		for _, ga := range gq.Answers {
+			if ga.PlayerID != playerID {
+				continue
+			}
+			ga.Question = gq
+			ga.Option = optionsByID[ga.OptionID]
+			if ga.Option == nil {
+				continue
+			}
+			total += s.CalculateScore(ctx, ga)
+		}
+	}
+
+	return total, nil
 }

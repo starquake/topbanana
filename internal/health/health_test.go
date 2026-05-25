@@ -154,6 +154,14 @@ func (*stubGameStore) ListQuizIDsForPlayer(_ context.Context, _ int64) ([]int64,
 	return nil, errors.ErrUnsupported
 }
 
+func (*stubGameStore) MarkBreakSeen(_ context.Context, _ string, _ int64) error {
+	return errors.ErrUnsupported
+}
+
+func (*stubGameStore) ListSeenBreakIDsByGame(_ context.Context, _ string) ([]int64, error) {
+	return nil, errors.ErrUnsupported
+}
+
 func TestHandleHealthz(t *testing.T) {
 	t.Parallel()
 

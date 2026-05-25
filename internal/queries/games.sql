@@ -236,6 +236,23 @@ DELETE
 FROM games
 WHERE id IN (sqlc.slice('ids'));
 
+-- name: MarkBreakSeen :exec
+-- Records that the player has acknowledged the given break in the
+-- given game (#167 slice 2). ON CONFLICT DO NOTHING makes the
+-- POST /breaks/{id}/seen endpoint idempotent: a second call returns
+-- 204 without bumping seen_at or inserting a duplicate row.
+INSERT INTO game_seen_breaks (game_id, break_id)
+VALUES (?, ?)
+ON CONFLICT (game_id, break_id) DO NOTHING;
+
+-- name: ListSeenBreakIDsByGame :many
+-- Lists the break IDs the player has already passed through in the
+-- given game. The merged-by-position iterator in game.Service.GetNext
+-- uses the result set to skip past acknowledged breaks.
+SELECT break_id
+FROM game_seen_breaks
+WHERE game_id = ?;
+
 -- name: ReattributeGameAnswers :execrows
 -- Re-assigns game_answers rows from from_player_id to to_player_id for
 -- the games belonging to from_player_id whose quizzes the destination

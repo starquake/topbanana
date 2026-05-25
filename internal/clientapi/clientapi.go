@@ -764,78 +764,187 @@ func shuffleByGame(gameID string, questionID int64, n int, swap func(i, j int)) 
 	rng.Shuffle(n, swap)
 }
 
-// HandleQuestionNext returns an HTTP handler for retrieving the next question of a game based on its ID and question ID.
-// It validates request parameters, fetches the game and question data from the provided stores, and encodes the response.
+// nextOptionResponse is one option on the `type=question` /next
+// variant. Hoisted to package scope so the handler can stay under the
+// revive function-length budget (#167 slice 2).
+type nextOptionResponse struct {
+	ID   int64  `json:"id"`
+	Text string `json:"text"`
+}
+
+// nextQuestionResponse is the wire shape for the `type=question`
+// /next variant. Position/Total drive the HUD chip (#253); ServerNow
+// drives the client clock-offset correction (#180).
+type nextQuestionResponse struct {
+	Type      string               `json:"type"`
+	ID        int64                `json:"id"`
+	Text      string               `json:"text"`
+	ImageURL  string               `json:"imageUrl"`
+	Options   []nextOptionResponse `json:"options"`
+	StartedAt time.Time            `json:"startedAt"`
+	ExpiredAt time.Time            `json:"expiredAt"`
+	ServerNow time.Time            `json:"serverNow"`
+	Position  int                  `json:"position"`
+	Total     int                  `json:"total"`
+}
+
+// nextBreakResponse is the wire shape for the `type=break` /next
+// variant. Breaks have no countdown so StartedAt/ExpiredAt are dropped
+// entirely; Score carries the player's running total for the break
+// screen, Total keeps the HUD chip rendering across the break (#167).
+type nextBreakResponse struct {
+	Type      string    `json:"type"`
+	ID        int64     `json:"id"`
+	Text      string    `json:"text"`
+	Score     int       `json:"score"`
+	ServerNow time.Time `json:"serverNow"`
+	Total     int       `json:"total"`
+}
+
+// HandleQuestionNext returns the next item in the play sequence. The
+// response is a tagged union (`type: "question"` | `"break"`) so the
+// player client can render the right surface without polling a second
+// endpoint (#167 slice 2). Breaks carry the running score so the
+// player sees their total on the break screen; questions carry the
+// usual timing and shuffled options.
+//
+// Wire-shape notes:
+//   - Type discriminates the variant. Question and break never share a
+//     payload - clients branch on Type before reading any other field.
+//   - Total is question-anchored: it counts quiz questions, NOT items.
+//     A break does NOT bump position; the HUD chip stays stable across
+//     breaks. Both variants carry total so the chip keeps rendering
+//     during the break.
+//   - StartedAt/ExpiredAt are omitted on the break variant - breaks
+//     have no countdown. Score is omitted on the question variant.
 func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler {
-	type optionResponse struct {
-		ID   int64  `json:"id"`
-		Text string `json:"text"`
-	}
-
-	// Position/Total drive the in-game HUD chip (#253); ServerNow
-	// drives the client clock-offset correction (#180).
-	type questionResponse struct {
-		ID        int64            `json:"id"`
-		Text      string           `json:"text"`
-		ImageURL  string           `json:"imageUrl"`
-		Options   []optionResponse `json:"options"`
-		StartedAt time.Time        `json:"startedAt"`
-		ExpiredAt time.Time        `json:"expiredAt"`
-		ServerNow time.Time        `json:"serverNow"`
-		Position  int              `json:"position"`
-		Total     int              `json:"total"`
-	}
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gameID, playerID, ok := gameRequest(w, r, logger)
 		if !ok {
 			return
 		}
 
-		gq, err := service.GetNextQuestion(r.Context(), gameID, playerID)
+		item, err := service.GetNext(r.Context(), gameID, playerID)
 		if err != nil {
+			writeGetNextError(w, r, logger, err)
+
+			return
+		}
+
+		if item.Type == game.ItemTypeBreak {
+			writeBreakItem(w, r, logger, item)
+
+			return
+		}
+		writeQuestionItem(w, r, logger, gameID, item.Question)
+	})
+}
+
+// writeGetNextError translates the sentinels returned by
+// [game.Service.GetNext] into the right HTTP status so HandleQuestionNext
+// stays under revive's function-length limit. Errors that should be
+// observable to the player (missing game, exhausted quiz) map to 404;
+// anything else surfaces as a generic 500 with the wrapped error in
+// the operator log (#274).
+func writeGetNextError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err error) {
+	switch {
+	case errors.Is(err, game.ErrGameNotFound),
+		errors.Is(err, quiz.ErrQuizNotFound),
+		errors.Is(err, game.ErrNoMoreQuestions):
+		http.NotFound(w, r)
+	default:
+		writeInternalError(w, r, logger, "error retrieving next item", err)
+	}
+}
+
+// writeBreakItem encodes a break-variant /next response. Split out of
+// HandleQuestionNext to keep that handler under the function-length
+// limit; the break path has no shuffle / timing arithmetic so the
+// helper is a thin field projection.
+func writeBreakItem(w http.ResponseWriter, r *http.Request, logger *slog.Logger, item *game.Item) {
+	res := nextBreakResponse{
+		Type:      string(game.ItemTypeBreak),
+		ID:        item.Break.ID,
+		Text:      item.Break.Text,
+		Score:     item.Score,
+		ServerNow: time.Now().UTC(),
+		Total:     item.Total,
+	}
+	if err := handlers.EncodeJSON(w, http.StatusOK, res); err != nil {
+		logger.ErrorContext(r.Context(), "error encoding break item", slog.Any("err", err))
+	}
+}
+
+// writeQuestionItem encodes a question-variant /next response. The
+// per-game stable shuffle of the option buttons (#297) is applied
+// here so a reload returns the same layout for the same (game,
+// question) pair; two players answering the same question in
+// different games see different orders.
+func writeQuestionItem(
+	w http.ResponseWriter, r *http.Request, logger *slog.Logger, gameID string, gq *game.Question,
+) {
+	resOptions := make([]nextOptionResponse, len(gq.QuizQuestion.Options))
+	for i, o := range gq.QuizQuestion.Options {
+		resOptions[i] = nextOptionResponse{ID: o.ID, Text: o.Text}
+	}
+	shuffleByGame(gameID, gq.QuestionID, len(resOptions), func(i, j int) {
+		resOptions[i], resOptions[j] = resOptions[j], resOptions[i]
+	})
+
+	res := nextQuestionResponse{
+		Type:      string(game.ItemTypeQuestion),
+		ID:        gq.QuizQuestion.ID,
+		Text:      gq.QuizQuestion.Text,
+		ImageURL:  gq.QuizQuestion.ImageURL,
+		Options:   resOptions,
+		StartedAt: gq.StartedAt,
+		ExpiredAt: gq.ExpiredAt,
+		ServerNow: time.Now().UTC(),
+		Position:  gq.Position,
+		Total:     gq.Total,
+	}
+
+	if err := handlers.EncodeJSON(w, http.StatusOK, res); err != nil {
+		logger.ErrorContext(r.Context(), "error encoding question item", slog.Any("err", err))
+	}
+}
+
+// HandleBreakSeen records that the player has acknowledged the break
+// at the given path id. Idempotent (#167 slice 2): a second call with
+// the same arguments is a no-op 204 because the store's INSERT runs
+// ON CONFLICT DO NOTHING.
+//
+// Returns:
+//   - 204 on success (including idempotent retries).
+//   - 404 when the game does not exist, the requester is not a
+//     participant, or the break does not belong to the game's quiz.
+//     Treating all three as 404 keeps the gameID and breakID opaque to
+//     outsiders, matching the gating policy on the answer-post route.
+//   - 500 on unexpected store errors.
+func HandleBreakSeen(logger *slog.Logger, service *game.Service) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gameID, playerID, ok := gameRequest(w, r, logger)
+		if !ok {
+			return
+		}
+
+		breakID, ok := handlers.ParseIDFromPath(w, r, logger, "breakID")
+		if !ok {
+			return
+		}
+
+		if err := service.MarkBreakSeen(r.Context(), gameID, playerID, breakID); err != nil {
 			switch {
-			case errors.Is(err, game.ErrGameNotFound),
-				errors.Is(err, quiz.ErrQuizNotFound),
-				errors.Is(err, game.ErrNoMoreQuestions):
+			case errors.Is(err, game.ErrGameNotFound), errors.Is(err, quiz.ErrBreakNotFound):
 				http.NotFound(w, r)
 			default:
-				writeInternalError(w, r, logger, "error retrieving next question", err)
+				writeInternalError(w, r, logger, "error marking break seen", err)
 			}
 
 			return
 		}
 
-		resOptions := make([]optionResponse, len(gq.QuizQuestion.Options))
-		for i, o := range gq.QuizQuestion.Options {
-			resOptions[i] = optionResponse{ID: o.ID, Text: o.Text}
-		}
-		// Per-game stable shuffle (#297): the seed pins the order for
-		// this (game, question) pair so a reload returns the same
-		// layout, but two different players answering the same question
-		// in two different games see different orders.
-		shuffleByGame(gameID, gq.QuestionID, len(resOptions), func(i, j int) {
-			resOptions[i], resOptions[j] = resOptions[j], resOptions[i]
-		})
-
-		res := questionResponse{
-			ID:        gq.QuizQuestion.ID,
-			Text:      gq.QuizQuestion.Text,
-			ImageURL:  gq.QuizQuestion.ImageURL,
-			Options:   resOptions,
-			StartedAt: gq.StartedAt,
-			ExpiredAt: gq.ExpiredAt,
-			ServerNow: time.Now().UTC(),
-			Position:  gq.Position,
-			Total:     gq.Total,
-		}
-
-		err = handlers.EncodeJSON(w, http.StatusOK, res)
-		if err != nil {
-			logger.ErrorContext(r.Context(), "error encoding questionResponse", slog.Any("err", err))
-
-			return
-		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 }
 
