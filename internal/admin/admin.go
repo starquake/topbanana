@@ -1017,6 +1017,46 @@ func newQuizViewData(quizData *QuizData, players []PlayerScoreData, breaks []*Br
 	}
 }
 
+// sequencePartialData mirrors the subset of QuizViewData the
+// questions_list partial actually ranges over. Shared by the question
+// and break move handlers so an HTMX swap keeps the page's scroll
+// position instead of bouncing through a 303.
+type sequencePartialData struct {
+	Quiz              *QuizData
+	LastQuestionIndex int
+	Sequence          []SequenceItem
+}
+
+// renderSequencePartial refetches the quiz tree and emits the
+// questions_list partial. Used by the HTMX paths of HandleQuestionMove
+// and HandleBreakMove so a successful (or knowingly-impossible) move
+// updates only the sequence block instead of a full page reload.
+func renderSequencePartial(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	render *TemplateRenderer,
+	quizStore quiz.Store,
+	quizID int64,
+) {
+	qz, ok := quizByID(w, r, logger, csrfMgr, quizStore, quizID)
+	if !ok {
+		return
+	}
+	breaks, ok := loadBreaks(w, r, logger, csrfMgr, quizStore, quizID)
+	if !ok {
+		return
+	}
+	quizData := quizDataFromQuiz(qz)
+	attachCanEdit(r, quizData)
+	render.RenderPartial(w, r, "questions_list", sequencePartialData{
+		Quiz:              quizData,
+		LastQuestionIndex: len(quizData.Questions) - 1,
+		Sequence:          buildSequence(quizData.Questions, breaks),
+	})
+}
+
 // quizViewPlayersLimit is the upper bound on rows in the "Played by"
 // section. Set high enough that real-world quiz playthroughs fit; #141
 // covers pagination for genuinely large rosters.
@@ -1636,17 +1676,6 @@ func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 	// is in scope for ExecuteTemplate by name.
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
 
-	// partialData mirrors the subset of QuizViewData the questions_list
-	// partial actually ranges over - questions interleaved with breaks
-	// by position, plus the index sentinel for the move-down disable
-	// state. Repeated verbatim here so the partial's contract stays
-	// machine-checkable.
-	type partialData struct {
-		Quiz              *QuizData
-		LastQuestionIndex int
-		Sequence          []SequenceItem
-	}
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
 
@@ -1675,24 +1704,7 @@ func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 		}
 
 		if isHX {
-			// Refetch with the new order and render only the question
-			// list. The whole-page render keeps happening on a hard
-			// refresh; this branch just spares the round-trip.
-			qz, fetchOK := quizByID(w, r, logger, csrfMgr, quizStore, quizID)
-			if !fetchOK {
-				return
-			}
-			breaks, breaksOK := loadBreaks(w, r, logger, csrfMgr, quizStore, quizID)
-			if !breaksOK {
-				return
-			}
-			quizData := quizDataFromQuiz(qz)
-			attachCanEdit(r, quizData)
-			render.RenderPartial(w, r, "questions_list", partialData{
-				Quiz:              quizData,
-				LastQuestionIndex: len(quizData.Questions) - 1,
-				Sequence:          buildSequence(quizData.Questions, breaks),
-			})
+			renderSequencePartial(w, r, logger, csrfMgr, render, quizStore, quizID)
 
 			return
 		}

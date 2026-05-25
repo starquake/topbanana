@@ -224,13 +224,15 @@ func HandleBreakSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.
 
 // HandleBreakMove handles the per-row up/down reorder buttons on the
 // quiz view's break rows (#167). Mirrors HandleQuestionMove's contract
-// but the store layer enforces slot eligibility - a break can only
-// land on the (Beginning) slot or after one of the quiz's questions,
-// and never on a slot another break already occupies. The arrows on
-// the template are hidden in advance via the per-break CanMoveUp /
-// CanMoveDown flags so a successful request is the common case; the
-// sentinel-error path here is defence in depth.
+// - HX-Request renders just the questions_list partial so the page
+// keeps its scroll position, plain POSTs fall back to the 303 redirect.
+// The store layer enforces slot eligibility (a break can only land on
+// the (Beginning) slot or after a question, never on a slot another
+// break already occupies); the template hides the arrow in advance via
+// CanMoveUp / CanMoveDown so a successful request is the common case.
 func HandleBreakMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		quizID, ok := handlers.ParseIDFromPath(w, r, logger, "quizID")
 		if !ok {
@@ -244,9 +246,24 @@ func HandleBreakMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.
 			return
 		}
 		direction := r.PathValue("direction")
+		isHX := r.Header.Get("Hx-Request") == "true"
 
-		if err := quizStore.MoveBreak(r.Context(), quizID, breakID, direction); err != nil {
-			renderBreakMoveError(w, r, logger, csrfMgr, quizID, err)
+		err := quizStore.MoveBreak(r.Context(), quizID, breakID, direction)
+		// ErrBreakMoveImpossible is a no-op outcome (the target slot
+		// went away under us) - render the unchanged state through the
+		// same partial/redirect path as a successful move. Other
+		// errors get a real HTTP status.
+		if err != nil && !errors.Is(err, quiz.ErrBreakMoveImpossible) {
+			renderBreakMoveError(w, r, logger, csrfMgr, err)
+
+			return
+		}
+		if errors.Is(err, quiz.ErrBreakMoveImpossible) {
+			logger.InfoContext(r.Context(), "break move skipped (target slot unavailable)", slog.Any("err", err))
+		}
+
+		if isHX {
+			renderSequencePartial(w, r, logger, csrfMgr, render, quizStore, quizID)
 
 			return
 		}
@@ -259,18 +276,14 @@ func HandleBreakMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.
 }
 
 // renderBreakMoveError translates a MoveBreak failure into the right
-// HTTP response. Pulled out so HandleBreakMove stays under revive's
-// cognitive-complexity budget. ErrBreakMoveImpossible is logged at
-// info level - the arrow should have been hidden in the UI, so this
-// path indicates a stale form or a hand-crafted POST rather than an
-// internal failure; the redirect re-renders the page with the
-// (unchanged) state.
+// HTTP status for the three non-recoverable cases. The
+// ErrBreakMoveImpossible no-op is handled by the caller because it
+// reuses the success-path renderer.
 func renderBreakMoveError(
 	w http.ResponseWriter,
 	r *http.Request,
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
-	quizID int64,
 	err error,
 ) {
 	switch {
@@ -278,9 +291,6 @@ func renderBreakMoveError(
 		render400(w, r, logger, csrfMgr, "invalid direction")
 	case errors.Is(err, quiz.ErrBreakNotFound):
 		render404(w, r, logger, csrfMgr)
-	case errors.Is(err, quiz.ErrBreakMoveImpossible):
-		logger.InfoContext(r.Context(), "break move skipped (target slot unavailable)", slog.Any("err", err))
-		http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(quizID, 10), http.StatusSeeOther)
 	default:
 		logger.ErrorContext(r.Context(), "error moving break", slog.Any("err", err))
 		render500(w, r, logger, csrfMgr)
