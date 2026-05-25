@@ -309,6 +309,179 @@ func TestQuizStore_DeleteBreak(t *testing.T) {
 	})
 }
 
+func TestQuizStore_MoveBreak(t *testing.T) {
+	t.Parallel()
+
+	// Each subtest needs a quiz with a couple of questions so the break
+	// has a non-trivial range of valid slots to move between. Pulled
+	// into a helper so the test bodies stay focused on the move
+	// behaviour they pin.
+	seed := func(t *testing.T) (*QuizStore, *quiz.Quiz) {
+		t.Helper()
+		db := dbtest.Open(t)
+		qs := NewQuizStore(db, slog.Default())
+		qz := newTestQuizForBreaks(t, qs)
+		for _, pos := range []int{1, 2, 3} {
+			if err := qs.CreateQuestion(t.Context(), &quiz.Question{
+				QuizID: qz.ID, Text: "Q", Position: pos,
+			}); err != nil {
+				t.Fatalf("CreateQuestion err = %v", err)
+			}
+		}
+
+		return qs, qz
+	}
+
+	t.Run("move up shifts the break by one slot", func(t *testing.T) {
+		t.Parallel()
+
+		qs, qz := seed(t)
+		b := &quiz.Break{QuizID: qz.ID, Text: "moves up", Position: 2}
+		if err := qs.CreateBreak(t.Context(), b); err != nil {
+			t.Fatalf("CreateBreak err = %v", err)
+		}
+
+		if err := qs.MoveBreak(t.Context(), qz.ID, b.ID, quiz.DirectionUp); err != nil {
+			t.Fatalf("MoveBreak up err = %v, want nil", err)
+		}
+
+		reloaded, err := qs.GetBreak(t.Context(), b.ID)
+		if err != nil {
+			t.Fatalf("GetBreak err = %v", err)
+		}
+		if got, want := reloaded.Position, 1; got != want {
+			t.Errorf("reloaded.Position = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("move down shifts the break by one slot", func(t *testing.T) {
+		t.Parallel()
+
+		qs, qz := seed(t)
+		b := &quiz.Break{QuizID: qz.ID, Text: "moves down", Position: 1}
+		if err := qs.CreateBreak(t.Context(), b); err != nil {
+			t.Fatalf("CreateBreak err = %v", err)
+		}
+
+		if err := qs.MoveBreak(t.Context(), qz.ID, b.ID, quiz.DirectionDown); err != nil {
+			t.Fatalf("MoveBreak down err = %v, want nil", err)
+		}
+
+		reloaded, err := qs.GetBreak(t.Context(), b.ID)
+		if err != nil {
+			t.Fatalf("GetBreak err = %v", err)
+		}
+		if got, want := reloaded.Position, 2; got != want {
+			t.Errorf("reloaded.Position = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("move into an occupied slot returns ErrBreakMoveImpossible", func(t *testing.T) {
+		t.Parallel()
+
+		qs, qz := seed(t)
+		first := &quiz.Break{QuizID: qz.ID, Text: "first", Position: 1}
+		if err := qs.CreateBreak(t.Context(), first); err != nil {
+			t.Fatalf("CreateBreak first err = %v", err)
+		}
+		second := &quiz.Break{QuizID: qz.ID, Text: "second", Position: 2}
+		if err := qs.CreateBreak(t.Context(), second); err != nil {
+			t.Fatalf("CreateBreak second err = %v", err)
+		}
+
+		// second wants to move up onto position 1 - already taken by
+		// first.
+		err := qs.MoveBreak(t.Context(), qz.ID, second.ID, quiz.DirectionUp)
+		if got, want := err, quiz.ErrBreakMoveImpossible; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+
+		// The row must stay put after the rejection.
+		reloaded, err := qs.GetBreak(t.Context(), second.ID)
+		if err != nil {
+			t.Fatalf("GetBreak err = %v", err)
+		}
+		if got, want := reloaded.Position, 2; got != want {
+			t.Errorf("reloaded.Position = %d, want %d (move should not have happened)", got, want)
+		}
+	})
+
+	t.Run("move up from position 0 returns ErrBreakMoveImpossible", func(t *testing.T) {
+		t.Parallel()
+
+		qs, qz := seed(t)
+		b := &quiz.Break{QuizID: qz.ID, Text: "at top", Position: 0}
+		if err := qs.CreateBreak(t.Context(), b); err != nil {
+			t.Fatalf("CreateBreak err = %v", err)
+		}
+
+		err := qs.MoveBreak(t.Context(), qz.ID, b.ID, quiz.DirectionUp)
+		if got, want := err, quiz.ErrBreakMoveImpossible; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("move down past the last question returns ErrBreakMoveImpossible", func(t *testing.T) {
+		t.Parallel()
+
+		qs, qz := seed(t)
+		// Last question is at position 3 so position 3 is the lowest
+		// "after the last question" slot.
+		b := &quiz.Break{QuizID: qz.ID, Text: "tail", Position: 3}
+		if err := qs.CreateBreak(t.Context(), b); err != nil {
+			t.Fatalf("CreateBreak err = %v", err)
+		}
+
+		err := qs.MoveBreak(t.Context(), qz.ID, b.ID, quiz.DirectionDown)
+		if got, want := err, quiz.ErrBreakMoveImpossible; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("invalid direction returns ErrInvalidDirection", func(t *testing.T) {
+		t.Parallel()
+
+		qs, qz := seed(t)
+		b := &quiz.Break{QuizID: qz.ID, Text: "x", Position: 1}
+		if err := qs.CreateBreak(t.Context(), b); err != nil {
+			t.Fatalf("CreateBreak err = %v", err)
+		}
+
+		err := qs.MoveBreak(t.Context(), qz.ID, b.ID, "sideways")
+		if got, want := err, quiz.ErrInvalidDirection; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("mismatched quiz returns ErrBreakNotFound", func(t *testing.T) {
+		t.Parallel()
+
+		qs, qz := seed(t)
+		b := &quiz.Break{QuizID: qz.ID, Text: "x", Position: 1}
+		if err := qs.CreateBreak(t.Context(), b); err != nil {
+			t.Fatalf("CreateBreak err = %v", err)
+		}
+
+		// Move b under a quiz id that does not own it - the gate has to
+		// reject before issuing the position update. Using qz.ID+1 is
+		// enough; the row simply does not belong to that quiz.
+		err := qs.MoveBreak(t.Context(), qz.ID+1, b.ID, quiz.DirectionUp)
+		if got, want := err, quiz.ErrBreakNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+
+		// The row must stay at its original position after the
+		// rejection - pin the invariant the IDOR gate relies on.
+		reloaded, err := qs.GetBreak(t.Context(), b.ID)
+		if err != nil {
+			t.Fatalf("GetBreak err = %v", err)
+		}
+		if got, want := reloaded.Position, 1; got != want {
+			t.Errorf("reloaded.Position = %d, want %d (move should not have happened)", got, want)
+		}
+	})
+}
+
 func TestQuizStore_DeleteQuiz_CascadesBreaks(t *testing.T) {
 	t.Parallel()
 

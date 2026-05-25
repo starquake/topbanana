@@ -87,6 +87,18 @@ test('admin can add, edit, and delete a break on a quiz', async ({ page, browser
   await expect(page.locator('article.q-row').nth(1)).toContainText('Take a deep breath');
   await expect(page.locator('article.q-row').nth(2)).toContainText('Which animals are mammals?');
 
+  // #167 - click the break's "Move break down" arrow. The break is at
+  // position 1 (after Q1) and the quiz has multiple questions, so the
+  // down arrow is rendered (not suppressed). After the click, the
+  // break should shift one slot - now between Q2 and Q3.
+  const breakRow = page.locator('article.q-row-break');
+  await breakRow.getByRole('button', { name: 'Move break down' }).click();
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+  await expect(page.locator('article.q-row').nth(0)).toContainText('What is 2+2?');
+  await expect(page.locator('article.q-row').nth(1)).toContainText('Which animals are mammals?');
+  await expect(page.locator('article.q-row').nth(2)).toHaveClass(/q-row-break/);
+  await expect(page.locator('article.q-row').nth(2)).toContainText('Take a deep breath');
+
   // Delete the break via the per-row modal.
   await page.getByRole('button', { name: 'Delete break' }).click();
   // Scope to the visible delete-break dialog: every break renders its

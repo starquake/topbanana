@@ -99,6 +99,9 @@ func (*stubQuizStore) UpdateBreak(_ context.Context, _ *quiz.Break) error {
 	return errors.ErrUnsupported
 }
 func (*stubQuizStore) DeleteBreak(_ context.Context, _ int64) error { return errors.ErrUnsupported }
+func (*stubQuizStore) MoveBreak(_ context.Context, _, _ int64, _ string) error {
+	return errors.ErrUnsupported
+}
 
 // stubGameStore satisfies game.Store for the /healthz handler tests.
 // Only Ping is exercised by the handler, so every other method returns

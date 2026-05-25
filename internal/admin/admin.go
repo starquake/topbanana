@@ -878,6 +878,15 @@ type SequenceItem struct {
 	// quiz's questions (used to size the move-up/move-down disabled
 	// state). Zero for break rows.
 	QuestionIndex int
+	// CanMoveUp and CanMoveDown drive the visibility of the per-row
+	// arrow buttons on break rows. A break can move up when the slot
+	// at position-1 exists in the play sequence (0 or one of the
+	// questions' positions) and is not already taken by another break;
+	// move down is the same check on position+1. Always false for
+	// question rows - questions use QuestionIndex / LastQuestionIndex
+	// instead.
+	CanMoveUp   bool
+	CanMoveDown bool
 }
 
 const (
@@ -892,11 +901,27 @@ const (
 // are sorted by their own Position before the merge so the resulting
 // slice reflects the play order (#167).
 //
+// Each break row also carries CanMoveUp / CanMoveDown so the template
+// can hide the arrow buttons that would land on an invalid or
+// occupied slot. The store's MoveBreak re-validates the same check,
+// so a stale form post never corrupts the play order; the per-row
+// flags are a UX nicety, not a security boundary.
+//
 // Multiple breaks at the same slot are disallowed by the DB unique
 // index breaks_quiz_position_idx; if one ever slipped through the
 // merge still renders them in the order ListBreaksByQuiz returned them
 // (which is itself position-ordered).
 func buildSequence(questions []*QuestionData, breaks []*BreakData) []SequenceItem {
+	validSlots := make(map[int]bool, len(questions)+1)
+	validSlots[0] = true
+	for _, q := range questions {
+		validSlots[q.Position] = true
+	}
+	occupied := make(map[int]bool, len(breaks))
+	for _, b := range breaks {
+		occupied[b.Position] = true
+	}
+
 	// Map position -> breaks at that slot, so a single linear pass over
 	// the (already-sorted) questions can pick them up. The "after slot
 	// N" semantics means a break with position 0 fires before question
@@ -909,7 +934,7 @@ func buildSequence(questions []*QuestionData, breaks []*BreakData) []SequenceIte
 
 	items := make([]SequenceItem, 0, len(questions)+len(breaks))
 	for _, b := range bySlot[0] {
-		items = append(items, SequenceItem{Kind: sequenceKindBreak, Break: b})
+		items = append(items, breakSequenceItem(b, validSlots, occupied))
 	}
 	for i, q := range questions {
 		items = append(items, SequenceItem{
@@ -918,11 +943,44 @@ func buildSequence(questions []*QuestionData, breaks []*BreakData) []SequenceIte
 			QuestionIndex: i,
 		})
 		for _, b := range bySlot[q.Position] {
-			items = append(items, SequenceItem{Kind: sequenceKindBreak, Break: b})
+			items = append(items, breakSequenceItem(b, validSlots, occupied))
 		}
 	}
 
 	return items
+}
+
+// breakSequenceItem builds the SequenceItem for one break, deciding
+// the per-row CanMoveUp / CanMoveDown flags off the validSlots +
+// occupied sets passed in by buildSequence. Extracted so the move
+// rules sit in one spot instead of being inlined in both branches of
+// the merge loop.
+func breakSequenceItem(b *BreakData, validSlots, occupied map[int]bool) SequenceItem {
+	return SequenceItem{
+		Kind:        sequenceKindBreak,
+		Break:       b,
+		CanMoveUp:   canMoveBreak(b.Position-1, validSlots, occupied),
+		CanMoveDown: canMoveBreak(b.Position+1, validSlots, occupied),
+	}
+}
+
+// canMoveBreak reports whether a break is allowed to settle at
+// targetPos: the slot must exist in the play sequence and must not
+// already be occupied by another break. The break being moved is not
+// part of occupied for this check - its own position is excluded by
+// the +/-1 step the caller chose.
+func canMoveBreak(targetPos int, validSlots, occupied map[int]bool) bool {
+	if targetPos < 0 {
+		return false
+	}
+	if !validSlots[targetPos] {
+		return false
+	}
+	if occupied[targetPos] {
+		return false
+	}
+
+	return true
 }
 
 // loadBreaks fetches the quiz's breaks in position order. Errors are

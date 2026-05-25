@@ -168,6 +168,10 @@ func (stubQuizStore) DeleteBreak(_ context.Context, _ int64) error {
 	return errRouteStub
 }
 
+func (stubQuizStore) MoveBreak(_ context.Context, _, _ int64, _ string) error {
+	return errRouteStub
+}
+
 type stubGameStore struct{}
 
 func (stubGameStore) Ping(_ context.Context) error { return nil }

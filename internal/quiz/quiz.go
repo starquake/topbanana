@@ -91,6 +91,17 @@ type Store interface {
 	// DeleteBreak removes a break by ID. Returns
 	// ErrDeletingBreakNoRowsAffected when the id does not match a row.
 	DeleteBreak(ctx context.Context, id int64) error
+	// MoveBreak shifts a break by one slot in the given direction
+	// ("up" = decrement position, "down" = increment position) within
+	// the same quiz. Returns ErrBreakNotFound when the break id does
+	// not belong to the quiz, ErrInvalidDirection when direction is
+	// neither "up" nor "down", and ErrBreakMoveImpossible when the
+	// target slot is out of range (e.g. would go below 0 or past the
+	// last question) or already occupied by another break. The store
+	// is the source of truth for slot eligibility; the admin template
+	// hides the arrow in advance via CanMoveUp/CanMoveDown but the
+	// store re-checks defensively.
+	MoveBreak(ctx context.Context, quizID, breakID int64, direction string) error
 }
 
 var (
@@ -158,6 +169,14 @@ var (
 	// ErrCannotUpdateBreakWithIDZero guards UpdateBreak against a
 	// caller that forgot to set the ID (#167).
 	ErrCannotUpdateBreakWithIDZero = errors.New("cannot update break with ID 0")
+	// ErrBreakMoveImpossible is returned by MoveBreak when the
+	// requested direction has no valid target slot - either the
+	// resulting position is out of range (below 0, or beyond the last
+	// question's position) or another break already occupies it. The
+	// admin handler maps this to a redirect rather than a 500: the
+	// arrow should never have been clickable; surfacing it as a
+	// no-op preserves UX symmetry with the question move (#167).
+	ErrBreakMoveImpossible = errors.New("break cannot move in that direction")
 )
 
 // Reorder directions accepted by [Store.SwapQuestionPositions].

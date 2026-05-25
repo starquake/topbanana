@@ -198,6 +198,9 @@ func (stubQuizStore) CreateBreak(_ context.Context, _ *quiz.Break) error {
 }
 func (stubQuizStore) UpdateBreak(_ context.Context, _ *quiz.Break) error { return errStub }
 func (stubQuizStore) DeleteBreak(_ context.Context, _ int64) error       { return errStub }
+func (stubQuizStore) MoveBreak(_ context.Context, _, _ int64, _ string) error {
+	return errStub
+}
 
 // seededAdminID is the id of the admin row inserted by migration
 // 20260111110308_add_admin_player.sql. Quiz fixtures attribute

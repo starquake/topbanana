@@ -127,6 +127,9 @@ func (stubQuizStore) CreateBreak(_ context.Context, _ *quiz.Break) error {
 }
 func (stubQuizStore) UpdateBreak(_ context.Context, _ *quiz.Break) error { return errStub }
 func (stubQuizStore) DeleteBreak(_ context.Context, _ int64) error       { return errStub }
+func (stubQuizStore) MoveBreak(_ context.Context, _, _ int64, _ string) error {
+	return errStub
+}
 
 type stubGameStore struct {
 	getGame                            func(ctx context.Context, id string) (*game.Game, error)

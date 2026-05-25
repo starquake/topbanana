@@ -182,6 +182,108 @@ func TestBreaks_CRUD(t *testing.T) {
 	}
 }
 
+// TestBreaks_Move drives the per-row up/down arrows on break rows
+// through the admin route (#167). The break starts after Q1; one
+// click on the down arrow lands it after Q2, then a click on the up
+// arrow brings it back to position 1 - checked each step against the
+// rendered quiz view's substring order.
+func TestBreaks_Move(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+		"ADMIN_USERNAMES":      "break-move-admin",
+	})
+	baseURL := srv.BaseURL
+
+	client := registerAdminClient(ctx, t, baseURL, "break-move-admin")
+	quizID := createQuizAs(ctx, t, client, baseURL, "Quiz With Break Moves")
+
+	addQuestion(ctx, t, client, baseURL, quizID, "Q1 - first")
+	addQuestion(ctx, t, client, baseURL, quizID, "Q2 - second")
+	addQuestion(ctx, t, client, baseURL, quizID, "Q3 - third")
+
+	// Create a break at position 1 (after Q1) - the middle slot, so
+	// both directions are valid for the first click.
+	createToken := fetchCSRFToken(
+		ctx, t, client, baseURL+fmt.Sprintf("/admin/quizzes/%d/breaks/new", quizID),
+	)
+	status, _, body := postForm(
+		ctx, t, client,
+		baseURL+fmt.Sprintf("/admin/quizzes/%d/breaks", quizID),
+		url.Values{
+			"text":       {"middle break"},
+			"position":   {"1"},
+			"csrf_token": {createToken},
+		},
+	)
+	if got, want := status, http.StatusSeeOther; got != want {
+		t.Fatalf("create break status = %d, want %d; body=%q", got, want, body)
+	}
+	breakID := readFirstBreakID(ctx, t, client, baseURL, quizID)
+
+	// Sanity check: rendered order is Q1, break, Q2, Q3.
+	viewBody := readBody(ctx, t, client, baseURL+fmt.Sprintf("/admin/quizzes/%d", quizID))
+	assertOrder(t, viewBody, "initial",
+		"Q1 - first", "middle break", "Q2 - second", "Q3 - third")
+
+	// Move down once - break shifts to position 2 (after Q2). Use the
+	// move-page CSRF token mounted on the quiz view itself.
+	moveToken := fetchCSRFToken(ctx, t, client, baseURL+fmt.Sprintf("/admin/quizzes/%d", quizID))
+	status, _, body = postForm(
+		ctx, t, client,
+		baseURL+fmt.Sprintf("/admin/quizzes/%d/breaks/%d/move/down", quizID, breakID),
+		url.Values{"csrf_token": {moveToken}},
+	)
+	if got, want := status, http.StatusSeeOther; got != want {
+		t.Fatalf("move-down status = %d, want %d; body=%q", got, want, body)
+	}
+
+	viewBody = readBody(ctx, t, client, baseURL+fmt.Sprintf("/admin/quizzes/%d", quizID))
+	assertOrder(t, viewBody, "after move-down",
+		"Q1 - first", "Q2 - second", "middle break", "Q3 - third")
+
+	// Move up - break settles back to position 1.
+	moveToken = fetchCSRFToken(ctx, t, client, baseURL+fmt.Sprintf("/admin/quizzes/%d", quizID))
+	status, _, body = postForm(
+		ctx, t, client,
+		baseURL+fmt.Sprintf("/admin/quizzes/%d/breaks/%d/move/up", quizID, breakID),
+		url.Values{"csrf_token": {moveToken}},
+	)
+	if got, want := status, http.StatusSeeOther; got != want {
+		t.Fatalf("move-up status = %d, want %d; body=%q", got, want, body)
+	}
+
+	viewBody = readBody(ctx, t, client, baseURL+fmt.Sprintf("/admin/quizzes/%d", quizID))
+	assertOrder(t, viewBody, "after move-up",
+		"Q1 - first", "middle break", "Q2 - second", "Q3 - third")
+}
+
+// assertOrder pins the substring order of needles in haystack and
+// reports the first violation with a stage label so failures point at
+// which click broke the sequence. Inline rather than parsing HTML
+// because the rendered admin view's substring order is the same
+// invariant the existing break tests use.
+func assertOrder(t *testing.T, haystack, stage string, needles ...string) {
+	t.Helper()
+	positions := make([]int, len(needles))
+	for i, n := range needles {
+		idx := strings.Index(haystack, n)
+		if idx == -1 {
+			t.Fatalf("%s: needle %q not found in body", stage, n)
+		}
+		positions[i] = idx
+	}
+	for i := 1; i < len(needles); i++ {
+		if positions[i-1] >= positions[i] {
+			t.Errorf(
+				"%s: expected %q (idx=%d) to appear before %q (idx=%d)",
+				stage, needles[i-1], positions[i-1], needles[i], positions[i],
+			)
+		}
+	}
+}
+
 // TestBreaks_PositionCollision pins the inline-form-error rendered when
 // an admin tries to insert a break on a slot that already has one
 // (#167). Two breaks cannot share the same (quiz_id, position) slot.

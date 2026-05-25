@@ -172,6 +172,7 @@ type stubQuizStore struct {
 	createBreak             func(ctx context.Context, b *quiz.Break) error
 	updateBreak             func(ctx context.Context, b *quiz.Break) error
 	deleteBreak             func(ctx context.Context, id int64) error
+	moveBreak               func(ctx context.Context, quizID, breakID int64, direction string) error
 }
 
 func (stubQuizStore) Ping(_ context.Context) error {
@@ -342,6 +343,14 @@ func (s stubQuizStore) DeleteBreak(ctx context.Context, id int64) error {
 	}
 
 	return s.deleteBreak(ctx, id)
+}
+
+func (s stubQuizStore) MoveBreak(ctx context.Context, quizID, breakID int64, direction string) error {
+	if s.moveBreak == nil {
+		return errors.New("moveBreak not supplied in stub")
+	}
+
+	return s.moveBreak(ctx, quizID, breakID, direction)
 }
 
 func TestTemplateRenderer_Render_LogsError(t *testing.T) {
@@ -2976,6 +2985,165 @@ func TestHandleQuestionMove(t *testing.T) {
 		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Errorf("status = %d, want %d, log:\n%v", got, want, buf.String())
+		}
+	})
+}
+
+func TestHandleBreakMove(t *testing.T) {
+	t.Parallel()
+
+	t.Run("move succeeds and redirects to quiz view", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+		var seen struct {
+			quizID, breakID int64
+			direction       string
+		}
+		store := stubQuizStore{
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Title: "Q", CreatedByPlayerID: testAdminID}, nil
+			},
+			moveBreak: func(_ context.Context, quizID, breakID int64, direction string) error {
+				seen.quizID, seen.breakID, seen.direction = quizID, breakID, direction
+
+				return nil
+			},
+		}
+
+		handler := HandleBreakMove(logger, nil, store)
+		req, err := http.NewRequestWithContext(
+			t.Context(), http.MethodPost,
+			"/admin/quizzes/7/breaks/9/move/up", nil,
+		)
+		if err != nil {
+			t.Fatalf("NewRequest err = %v, want nil", err)
+		}
+		req.SetPathValue("quizID", "7")
+		req.SetPathValue("breakID", "9")
+		req.SetPathValue("direction", "up")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, withTestAdmin(req))
+
+		if got, want := rr.Code, http.StatusSeeOther; got != want {
+			t.Fatalf("status = %d, want %d, log:\n%v", got, want, buf.String())
+		}
+		if got, want := rr.Header().Get("Location"), "/admin/quizzes/7"; got != want {
+			t.Errorf("Location = %q, want %q", got, want)
+		}
+		if got, want := seen.quizID, int64(7); got != want {
+			t.Errorf("seen.quizID = %d, want %d", got, want)
+		}
+		if got, want := seen.breakID, int64(9); got != want {
+			t.Errorf("seen.breakID = %d, want %d", got, want)
+		}
+		if got, want := seen.direction, "up"; got != want {
+			t.Errorf("seen.direction = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("impossible move redirects without surfacing the failure", func(t *testing.T) {
+		t.Parallel()
+		// The arrow is hidden in the UI when the move is impossible, so
+		// a request reaching the handler is a stale form post. Redirect
+		// back to the quiz view; the re-rendered page reflects the
+		// (unchanged) state.
+
+		buf := bytes.Buffer{}
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+		store := stubQuizStore{
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Title: "Q", CreatedByPlayerID: testAdminID}, nil
+			},
+			moveBreak: func(_ context.Context, _, _ int64, _ string) error {
+				return quiz.ErrBreakMoveImpossible
+			},
+		}
+
+		handler := HandleBreakMove(logger, nil, store)
+		req, err := http.NewRequestWithContext(
+			t.Context(), http.MethodPost,
+			"/admin/quizzes/7/breaks/9/move/down", nil,
+		)
+		if err != nil {
+			t.Fatalf("NewRequest err = %v, want nil", err)
+		}
+		req.SetPathValue("quizID", "7")
+		req.SetPathValue("breakID", "9")
+		req.SetPathValue("direction", "down")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, withTestAdmin(req))
+
+		if got, want := rr.Code, http.StatusSeeOther; got != want {
+			t.Fatalf("status = %d, want %d, log:\n%v", got, want, buf.String())
+		}
+	})
+
+	t.Run("invalid direction renders 400", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+		store := stubQuizStore{
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Title: "Q", CreatedByPlayerID: testAdminID}, nil
+			},
+			moveBreak: func(_ context.Context, _, _ int64, _ string) error {
+				return quiz.ErrInvalidDirection
+			},
+		}
+
+		handler := HandleBreakMove(logger, nil, store)
+		req, err := http.NewRequestWithContext(
+			t.Context(), http.MethodPost,
+			"/admin/quizzes/7/breaks/9/move/sideways", nil,
+		)
+		if err != nil {
+			t.Fatalf("NewRequest err = %v, want nil", err)
+		}
+		req.SetPathValue("quizID", "7")
+		req.SetPathValue("breakID", "9")
+		req.SetPathValue("direction", "sideways")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, withTestAdmin(req))
+
+		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Errorf("status = %d, want %d, log:\n%v", got, want, buf.String())
+		}
+	})
+
+	t.Run("missing break renders 404", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+		store := stubQuizStore{
+			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
+				return &quiz.Quiz{ID: id, Title: "Q", CreatedByPlayerID: testAdminID}, nil
+			},
+			moveBreak: func(_ context.Context, _, _ int64, _ string) error {
+				return quiz.ErrBreakNotFound
+			},
+		}
+
+		handler := HandleBreakMove(logger, nil, store)
+		req, err := http.NewRequestWithContext(
+			t.Context(), http.MethodPost,
+			"/admin/quizzes/7/breaks/9/move/up", nil,
+		)
+		if err != nil {
+			t.Fatalf("NewRequest err = %v, want nil", err)
+		}
+		req.SetPathValue("quizID", "7")
+		req.SetPathValue("breakID", "9")
+		req.SetPathValue("direction", "up")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, withTestAdmin(req))
+
+		if got, want := rr.Code, http.StatusNotFound; got != want {
 			t.Errorf("status = %d, want %d, log:\n%v", got, want, buf.String())
 		}
 	})

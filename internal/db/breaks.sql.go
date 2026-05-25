@@ -120,3 +120,22 @@ type UpdateBreakParams struct {
 func (q *Queries) UpdateBreak(ctx context.Context, arg UpdateBreakParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, updateBreak, arg.Text, arg.Position, arg.ID)
 }
+
+const updateBreakPosition = `-- name: UpdateBreakPosition :execresult
+UPDATE breaks
+SET position = ?
+WHERE id = ?
+`
+
+type UpdateBreakPositionParams struct {
+	Position int64
+	ID       int64
+}
+
+// Position-only update used by the per-row up/down reorder buttons on
+// the admin quiz view. Mirrors UpdateQuestionPosition so the move
+// path can rewrite a single column without touching text or
+// updated_at - the admin reorder is not a content edit.
+func (q *Queries) UpdateBreakPosition(ctx context.Context, arg UpdateBreakPositionParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, updateBreakPosition, arg.Position, arg.ID)
+}

@@ -222,6 +222,71 @@ func HandleBreakSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.
 	})
 }
 
+// HandleBreakMove handles the per-row up/down reorder buttons on the
+// quiz view's break rows (#167). Mirrors HandleQuestionMove's contract
+// but the store layer enforces slot eligibility - a break can only
+// land on the (Beginning) slot or after one of the quiz's questions,
+// and never on a slot another break already occupies. The arrows on
+// the template are hidden in advance via the per-break CanMoveUp /
+// CanMoveDown flags so a successful request is the common case; the
+// sentinel-error path here is defence in depth.
+func HandleBreakMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		quizID, ok := handlers.ParseIDFromPath(w, r, logger, "quizID")
+		if !ok {
+			return
+		}
+		if _, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+			return
+		}
+		breakID, ok := handlers.ParseIDFromPath(w, r, logger, "breakID")
+		if !ok {
+			return
+		}
+		direction := r.PathValue("direction")
+
+		if err := quizStore.MoveBreak(r.Context(), quizID, breakID, direction); err != nil {
+			renderBreakMoveError(w, r, logger, csrfMgr, quizID, err)
+
+			return
+		}
+
+		// strconv.FormatInt dodges gosec G710's open-redirect heuristic
+		// - quizID came from a request parameter so a fmt.Sprintf with
+		// %d would taint the redirect path.
+		http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(quizID, 10), http.StatusSeeOther)
+	})
+}
+
+// renderBreakMoveError translates a MoveBreak failure into the right
+// HTTP response. Pulled out so HandleBreakMove stays under revive's
+// cognitive-complexity budget. ErrBreakMoveImpossible is logged at
+// info level - the arrow should have been hidden in the UI, so this
+// path indicates a stale form or a hand-crafted POST rather than an
+// internal failure; the redirect re-renders the page with the
+// (unchanged) state.
+func renderBreakMoveError(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	quizID int64,
+	err error,
+) {
+	switch {
+	case errors.Is(err, quiz.ErrInvalidDirection):
+		render400(w, r, logger, csrfMgr, "invalid direction")
+	case errors.Is(err, quiz.ErrBreakNotFound):
+		render404(w, r, logger, csrfMgr)
+	case errors.Is(err, quiz.ErrBreakMoveImpossible):
+		logger.InfoContext(r.Context(), "break move skipped (target slot unavailable)", slog.Any("err", err))
+		http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(quizID, 10), http.StatusSeeOther)
+	default:
+		logger.ErrorContext(r.Context(), "error moving break", slog.Any("err", err))
+		render500(w, r, logger, csrfMgr)
+	}
+}
+
 // HandleBreakDelete removes a break. Owner-gated so only the quiz's
 // creator can drop one of its breaks.
 func HandleBreakDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {

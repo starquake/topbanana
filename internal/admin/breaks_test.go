@@ -94,6 +94,104 @@ func TestBuildSequence(t *testing.T) {
 	})
 }
 
+// TestBuildSequence_BreakMoveFlags pins the per-break CanMoveUp /
+// CanMoveDown flags buildSequence populates so the template can hide
+// arrows that would land on an invalid or occupied slot (#167). Every
+// case here mirrors a UX rule: position-0 break can't move up, last-
+// position break can't move down, and two adjacent breaks block each
+// other's arrows on the shared boundary.
+func TestBuildSequence_BreakMoveFlags(t *testing.T) {
+	t.Parallel()
+
+	type wantFlags struct {
+		breakID                int64
+		canMoveUp, canMoveDown bool
+	}
+
+	tests := []struct {
+		name      string
+		questions []*QuestionData
+		breaks    []*BreakData
+		want      []wantFlags
+	}{
+		{
+			name: "break at position 0 cannot move up; can move down",
+			questions: []*QuestionData{
+				{ID: 1, Position: 1, Text: "Q1"},
+				{ID: 2, Position: 2, Text: "Q2"},
+			},
+			breaks: []*BreakData{{ID: 10, Position: 0, Text: "intro"}},
+			want:   []wantFlags{{breakID: 10, canMoveUp: false, canMoveDown: true}},
+		},
+		{
+			name: "break at the last question's position cannot move down",
+			questions: []*QuestionData{
+				{ID: 1, Position: 1, Text: "Q1"},
+				{ID: 2, Position: 2, Text: "Q2"},
+			},
+			breaks: []*BreakData{{ID: 10, Position: 2, Text: "outro"}},
+			want:   []wantFlags{{breakID: 10, canMoveUp: true, canMoveDown: false}},
+		},
+		{
+			name: "adjacent breaks block each other on the shared boundary",
+			questions: []*QuestionData{
+				{ID: 1, Position: 1, Text: "Q1"},
+				{ID: 2, Position: 2, Text: "Q2"},
+				{ID: 3, Position: 3, Text: "Q3"},
+			},
+			breaks: []*BreakData{
+				{ID: 10, Position: 1, Text: "after Q1"},
+				{ID: 11, Position: 2, Text: "after Q2"},
+			},
+			want: []wantFlags{
+				// 10 -> down to 2 is blocked by 11; 10 -> up to 0 is free.
+				{breakID: 10, canMoveUp: true, canMoveDown: false},
+				// 11 -> up to 1 is blocked by 10; 11 -> down to 3 is free.
+				{breakID: 11, canMoveUp: false, canMoveDown: true},
+			},
+		},
+		{
+			name: "middle break can move both directions when slots are open",
+			questions: []*QuestionData{
+				{ID: 1, Position: 1, Text: "Q1"},
+				{ID: 2, Position: 2, Text: "Q2"},
+				{ID: 3, Position: 3, Text: "Q3"},
+			},
+			breaks: []*BreakData{{ID: 10, Position: 2, Text: "middle"}},
+			want:   []wantFlags{{breakID: 10, canMoveUp: true, canMoveDown: true}},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			seq := BuildSequence(tc.questions, tc.breaks)
+			got := make(map[int64]SequenceItem, len(tc.breaks))
+			for _, item := range seq {
+				if item.Kind != "break" {
+					continue
+				}
+				got[item.Break.ID] = item
+			}
+			for _, w := range tc.want {
+				item, ok := got[w.breakID]
+				if !ok {
+					t.Errorf("no break row found for id %d", w.breakID)
+
+					continue
+				}
+				if g := item.CanMoveUp; g != w.canMoveUp {
+					t.Errorf("break %d CanMoveUp = %v, want %v", w.breakID, g, w.canMoveUp)
+				}
+				if g := item.CanMoveDown; g != w.canMoveDown {
+					t.Errorf("break %d CanMoveDown = %v, want %v", w.breakID, g, w.canMoveDown)
+				}
+			}
+		})
+	}
+}
+
 // TestBuildSlotOptions pins the (Beginning)+per-question option list
 // rendered by the break form's "Insert after" dropdown (#167).
 func TestBuildSlotOptions(t *testing.T) {
