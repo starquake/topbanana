@@ -131,6 +131,15 @@ export async function answerRemainingQuestions(page: Page, fromIndex = 0): Promi
     // beat (3s, #247). The default 5s toBeVisible timeout isn't
     // enough; 10s gives headroom for slow CI runners.
     await expect(optionButton).toBeVisible({ timeout: 10_000 });
+    // toBeVisible passes during both the answer window AND the
+    // feedback pause (the buttons stay in DOM so the per-option
+    // reveal can paint correct/wrong/dim — #233). Under parallel
+    // load the click can land while a prior question's feedback is
+    // still active: `:disabled="!!feedback"` is truthy, the button
+    // carries btn-answer-dim, and the locator then detaches as the
+    // question advances (#432). Gate on toBeEnabled so the click
+    // happens within this question's answer window or fails fast.
+    await expect(optionButton).toBeEnabled({ timeout: 10_000 });
     await optionButton.click();
 
     if (wasCorrect) {
