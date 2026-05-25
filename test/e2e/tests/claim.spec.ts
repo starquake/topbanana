@@ -193,44 +193,26 @@ test('signed-in player does not see the claim-name CTA on the player client', as
   await expect(page.getByRole('button', { name: 'Change your name' })).not.toBeVisible();
 });
 
-// Test 6 — provider-agnostic sign-in escape hatch on the claim-name
-// callout. An anonymous visitor on the start screen should see a "Make
-// it yours" button that routes to /login (where every enabled provider
-// lives), so they have a path out of the anonymous flow without the
-// client having to know which auth methods are configured. The button
-// is on the callout itself rather than inside the modal so it sits
-// next to the petname it is about to attach to an account.
+// Test 6 — sign-in CTA on the claim-name callout (#431).
 test('claim-name callout includes a sign-in button that routes to /login', async ({ page }) => {
   await page.goto('/client/');
 
-  // Scope to the visible callout: two .claim-cta nodes live in the DOM
-  // at once (x-show toggles CSS, not mount state).
   const card = page.locator('.claim-cta:visible');
   await expect(card).toBeVisible();
 
-  // The sign-in button should be present (parent template gate is
-  // `!isAuthenticated() && (!gameId || finished)`, both satisfied
-  // here on the start screen as an anonymous visitor).
   const signIn = card.getByTestId('claim-cta-signin');
   await expect(signIn).toBeVisible();
   await expect(signIn).toHaveText('Make it yours');
-
-  // The accompanying line frames sign-in as the persist-across-devices
-  // path, distinct from the in-place rename the primary button does.
   await expect(card.getByText('Sign in or create an account', { exact: false })).toBeVisible();
 
-  // Click navigates to /login. Wait on the URL change because the
-  // link is plain navigation, not an Alpine event.
+  // Wait on the URL change because the link is plain navigation, not an Alpine event.
   await Promise.all([
     page.waitForURL(/\/login$/),
     signIn.click(),
   ]);
 });
 
-// Test 7 — claim modal no longer carries its own sign-in link. The
-// escape hatch moved to the callout (test above), so the modal must
-// not duplicate it — having both surfaces ship the same link risks
-// drift when one is updated and the other is forgotten.
+// Test 7 — modal does not duplicate the callout's sign-in CTA (#431).
 test('claim modal does not include a sign-in link', async ({ page }) => {
   await page.goto('/client/');
 
@@ -238,7 +220,5 @@ test('claim modal does not include a sign-in link', async ({ page }) => {
   const modal = page.locator('[role="dialog"]');
   await expect(modal).toBeVisible();
 
-  // No link to /login inside the dialog. The /login route is reached
-  // via the callout, not the modal.
   await expect(modal.locator('a[href="/login"]')).toHaveCount(0);
 });
