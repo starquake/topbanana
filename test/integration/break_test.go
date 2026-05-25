@@ -5,13 +5,18 @@ package integration_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/starquake/topbanana/internal/quiz"
+	"github.com/starquake/topbanana/internal/store"
 )
 
 // postForm is a small wrapper around client.Do that always defers a
@@ -210,10 +215,9 @@ func TestBreaks_DeleteQuizCascadesBreaks(t *testing.T) {
 		t.Fatalf("delete quiz status = %d, want %d; body=%q", got, want, body)
 	}
 
-	// Open the same DB the server is using and confirm the break row
-	// was cascaded away. The integration server's DSN already has the
-	// foreign-keys pragma; reopening with the same DSN keeps the read
-	// honest.
+	// Open the same DB the server is using and probe the break via the
+	// sqlc-backed store. ErrBreakNotFound is the cascade signal — the
+	// row is gone with the parent quiz.
 	db, err := sql.Open("sqlite", srv.DBURI)
 	if err != nil {
 		t.Fatalf("sql.Open err = %v, want nil", err)
@@ -224,14 +228,9 @@ func TestBreaks_DeleteQuizCascadesBreaks(t *testing.T) {
 		}
 	}()
 
-	var count int
-	if err := db.QueryRowContext(
-		ctx, "SELECT COUNT(*) FROM breaks WHERE id = ?", breakID,
-	).Scan(&count); err != nil {
-		t.Fatalf("count breaks err = %v", err)
-	}
-	if got, want := count, 0; got != want {
-		t.Errorf("breaks rows after quiz delete = %d, want %d", got, want)
+	stores := store.New(db, slog.Default())
+	if _, err := stores.Quizzes.GetBreak(ctx, breakID); !errors.Is(err, quiz.ErrBreakNotFound) {
+		t.Errorf("GetBreak after quiz delete err = %v, want %v", err, quiz.ErrBreakNotFound)
 	}
 }
 
