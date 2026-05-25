@@ -69,16 +69,17 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   // a correct answer is determined by the spec (correctIndices includes 0).
   let expectedSuccesses = 0;
   let prevScore = 0;
-  const figureImg = page.locator('figure.image img');
+  // Per-question image assertions were removed alongside the hidden UI
+  // in #426; restore them when the image feature work resumes.
   for (const q of QUIZ_QUESTIONS) {
     const choice = q.options[0];
     const wasCorrect = q.correctIndices.includes(0);
 
-    // Wait for the new question to be live before asserting on its image so
-    // we don't read state from the previous question's render. The timeout
-    // must span the prior question's feedback pause (up to 3s on a wrong
-    // pick, #233) plus this question's reveal-countdown (3s, #247) —
-    // 10s gives headroom for slow CI.
+    // Wait for the option button before reading the score chip so we
+    // don't sample stale state from the previous question's render. The
+    // timeout must span the prior question's feedback pause (up to 3s
+    // on a wrong pick, #233) plus this question's reveal-countdown
+    // (3s, #247) — 10s gives headroom for slow CI.
     const optionButton = page.getByRole('button', { name: choice });
     await expect(optionButton).toBeVisible({ timeout: 10_000 });
 
@@ -87,12 +88,6 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
     // catches a regression where a wrong answer or timeout
     // accidentally adds to the total.
     await expect(scoreChipValue).toHaveText(String(prevScore));
-
-    if (q.expectImageVisible === true) {
-      await expect(figureImg).toBeVisible();
-    } else if (q.expectImageVisible === false) {
-      await expect(figureImg).toBeHidden();
-    }
 
     await optionButton.click();
 

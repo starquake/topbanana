@@ -316,14 +316,10 @@
                                    2xl:text-[clamp(3rem,3.5vw,5.5rem)]"
                             x-text="question.text"></h2>
 
-                        <template x-if="question.imageUrl">
-                            <figure class="image mb-6">
-                                <img alt="" :src="question.imageUrl" :alt="question.text"
-                                     class="block max-w-full h-auto rounded-sm border border-border"
-                                     x-show="!imageError"
-                                     @error="imageError = true">
-                            </figure>
-                        </template>
+                        <!-- Image render hidden pending #426. The API
+                             still ships question.imageUrl on the wire;
+                             only the visible <img> is gone. -->
+
 
                         <!-- The inline feedback banner was removed in
                              #253 — the verdict is now carried by the

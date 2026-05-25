@@ -240,14 +240,16 @@
         @apply before:bg-cyan;
     }
 
-    /* Question rows. Two-up grid on mobile (position+thumb stacked), full
-     * five-column grid from md upward. The mockup's grid is auto/80/1fr/auto/auto;
-     * we hard-pin the position column at 48px and the thumb at 80px to match. */
+    /* Question rows. Two-up grid on mobile (position stacked above body),
+     * full four-column grid from md upward (position + body + two
+     * action stacks). Image thumbnail column is hidden pending #426;
+     * .q-thumb stays defined so the resume work only flips the grid
+     * back to five columns. */
     .q-row {
         @apply bg-surface border border-border-soft rounded-lg p-5
                grid gap-4 items-start
                grid-cols-[auto_1fr]
-               md:grid-cols-[48px_80px_1fr_auto_auto] md:items-center md:py-4 md:px-5;
+               md:grid-cols-[48px_1fr_auto_auto] md:items-center md:py-4 md:px-5;
     }
     .q-position {
         @apply font-display font-extrabold text-[1.75rem] leading-none tracking-wide
