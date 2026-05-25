@@ -103,6 +103,50 @@ type AnonymousGameMigrator interface {
 	ReattributeGames(ctx context.Context, fromPlayerID, toPlayerID int64) (int64, error)
 }
 
+// PlayerListRow is one row in the admin players list (#423). Mirrors
+// the shape of the underlying SQL more closely than auth.Player —
+// adds the derived OAuth-link state so the handler does not have to
+// re-derive it per row. FinishedCount and LastFinishedAt come from a
+// separate PlayerStats lookup so the page query stays simple.
+type PlayerListRow struct {
+	ID            int64
+	Username      string
+	Email         string
+	Role          string
+	HasPassword   bool
+	HasOAuth      bool
+	OAuthProvider string
+	CreatedAt     time.Time
+}
+
+// PlayerStats is the per-player finished-quiz aggregate the admin
+// list renders alongside each row. LastFinishedAt is nil for a
+// player who has never finished a quiz.
+type PlayerStats struct {
+	PlayerID       int64
+	FinishedCount  int64
+	LastFinishedAt *time.Time
+}
+
+// PlayerLister is the read-only persistence interface the admin
+// players page consumes (#423). Kept separate from PlayerStore so the
+// admin-facing surface does not bleed into the auth flow; the same
+// concrete store satisfies both interfaces (mirrors how PlayerStore
+// and OAuthIdentityStore share an instance).
+type PlayerLister interface {
+	// ListAllPlayers returns one page of players ordered by created_at
+	// DESC, plus a stable secondary id ordering for ties.
+	ListAllPlayers(ctx context.Context, limit, offset int64) ([]*PlayerListRow, error)
+	// CountAllPlayers returns the total number of players for
+	// pagination's page-count math.
+	CountAllPlayers(ctx context.Context) (int64, error)
+	// ListPlayerFinishStats returns the finished-quiz aggregate for the
+	// supplied player ids. A player with no finished games is absent
+	// from the result; the caller should treat missing entries as
+	// (count = 0, last = nil).
+	ListPlayerFinishStats(ctx context.Context, playerIDs []int64) ([]*PlayerStats, error)
+}
+
 // PlayerStore is the persistence interface used by the auth package.
 type PlayerStore interface {
 	// GetPlayerByUsername returns the player with the given username.

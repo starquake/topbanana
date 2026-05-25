@@ -1,0 +1,79 @@
+{{define "content"}}
+    <nav aria-label="breadcrumbs" class="mb-8">
+        <ol class="flex items-center text-xs uppercase tracking-[0.14em]">
+            <li><a href="/admin" class="pr-2 text-text-dim hover:text-text">Admin</a></li>
+            <li class="text-text-mute" aria-hidden="true">/</li>
+            <li><span class="pl-2 text-text" aria-current="page">Players</span></li>
+        </ol>
+    </nav>
+
+    <header class="flex flex-col md:flex-row md:items-start md:justify-between gap-5 mb-10">
+        <div>
+            <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight">Players</h1>
+            <p class="mt-1.5 max-w-[540px] text-text-dim text-[0.95rem]">
+                Every row in the players table. {{.TotalRows}} total.
+                {{if .Players}}
+                    Showing {{.RangeStart}}&ndash;{{.RangeEnd}}.
+                {{end}}
+            </p>
+        </div>
+    </header>
+
+    {{if .Players}}
+        <section class="overflow-x-auto border border-border-soft rounded-lg" aria-label="Players">
+            <table class="w-full text-sm">
+                <thead class="bg-surface text-text-dim text-[0.7rem] uppercase tracking-[0.14em]">
+                    <tr>
+                        <th scope="col" class="px-4 py-3 text-left">Username</th>
+                        <th scope="col" class="px-4 py-3 text-left">Account type</th>
+                        <th scope="col" class="px-4 py-3 text-left">Email</th>
+                        <th scope="col" class="px-4 py-3 text-left">Created</th>
+                        <th scope="col" class="px-4 py-3 text-right">Finished</th>
+                        <th scope="col" class="px-4 py-3 text-left">Last finished</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Players}}
+                        <tr class="border-t border-border-soft">
+                            <td class="px-4 py-3">
+                                <a href="/admin/players/{{.ID}}" class="text-text hover:text-accent">{{.Username}}</a>
+                            </td>
+                            <td class="px-4 py-3 text-text-dim">{{.AccountType}}</td>
+                            <td class="px-4 py-3 text-text-dim">{{if .Email}}{{.Email}}{{else}}&mdash;{{end}}</td>
+                            <td class="px-4 py-3 text-text-dim"><time title="{{.CreatedAt.Format "2006-01-02 15:04"}}">{{humanizeTime .CreatedAt}}</time></td>
+                            <td class="px-4 py-3 text-right text-text">{{.FinishedCount}}</td>
+                            <td class="px-4 py-3 text-text-dim">
+                                {{if .LastFinishedAt}}
+                                    <time title="{{.LastFinishedAt.Format "2006-01-02 15:04"}}">{{humanizeTime .LastFinishedAt}}</time>
+                                {{else}}
+                                    &mdash;
+                                {{end}}
+                            </td>
+                        </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </section>
+
+        {{if or .HasPrev .HasNext}}
+            <nav aria-label="Pagination" class="mt-6 flex items-center justify-between text-sm">
+                <div>
+                    {{if .HasPrev}}
+                        <a href="/admin/players?page={{.PrevPage}}" class="btn-ghost">&larr; Previous</a>
+                    {{end}}
+                </div>
+                <span class="text-text-dim">Page {{.Page}} of {{.TotalPages}}</span>
+                <div>
+                    {{if .HasNext}}
+                        <a href="/admin/players?page={{.NextPage}}" class="btn-ghost">Next &rarr;</a>
+                    {{end}}
+                </div>
+            </nav>
+        {{end}}
+    {{else}}
+        <div class="border border-dashed border-border rounded-xl p-12 text-center">
+            <h2 class="mb-2 font-display text-2xl font-bold">No players yet.</h2>
+            <p class="mb-0 text-text-dim text-[0.95rem]">Once someone visits the site, an anonymous row will appear here.</p>
+        </div>
+    {{end}}
+{{end}}

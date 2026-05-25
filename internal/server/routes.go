@@ -194,6 +194,7 @@ func addAdminRoutes(
 	}
 
 	mux.Handle("GET /admin", requireAdmin(admin.HandleIndex(logger, csrfMgr)))
+	mux.Handle("GET /admin/players", requireAdmin(admin.HandlePlayersList(logger, csrfMgr, stores.PlayerLister)))
 	mux.Handle("GET /admin/quizzes", requireAdmin(admin.HandleQuizList(logger, csrfMgr, stores.Quizzes)))
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}",

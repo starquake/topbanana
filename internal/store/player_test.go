@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -482,6 +483,142 @@ func TestPlayerStore_UpdatePlayerUsername(t *testing.T) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
 	})
+}
+
+// TestPlayerStore_ListAllPlayers_AndCount pins the read shape that
+// backs /admin/players (#423). The list orders newest-first, exposes
+// the derived has_oauth / oauth_provider flags, and counts every row
+// (including the seeded admin).
+func TestPlayerStore_ListAllPlayers_AndCount(t *testing.T) {
+	t.Parallel()
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	anon, err := ps.CreateAnonymousPlayer(t.Context(), "anon-list-1")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	pw, err := ps.CreatePlayer(t.Context(), "pw-list-1", "h", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	oauth, err := ps.CreatePlayerFromOAuth(t.Context(), "oauth-list-1", "o@example.com")
+	if err != nil {
+		t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
+	}
+	if linkErr := ps.LinkProviderIdentity(t.Context(), oauth.ID, "google", "sub-list-1"); linkErr != nil {
+		t.Fatalf("LinkProviderIdentity err = %v, want nil", linkErr)
+	}
+
+	count, err := ps.CountAllPlayers(t.Context())
+	if err != nil {
+		t.Fatalf("CountAllPlayers err = %v, want nil", err)
+	}
+	// Seeded admin + the three rows above = 4.
+	if got, want := count, int64(4); got != want {
+		t.Errorf("CountAllPlayers = %d, want %d", got, want)
+	}
+
+	rows, err := ps.ListAllPlayers(t.Context(), 100, 0)
+	if err != nil {
+		t.Fatalf("ListAllPlayers err = %v, want nil", err)
+	}
+	if got, want := len(rows), 4; got != want {
+		t.Fatalf("ListAllPlayers len = %d, want %d", got, want)
+	}
+
+	byID := make(map[int64]*auth.PlayerListRow, len(rows))
+	for _, r := range rows {
+		byID[r.ID] = r
+	}
+
+	if got, want := byID[anon.ID].HasOAuth, false; got != want {
+		t.Errorf("anon HasOAuth = %v, want %v", got, want)
+	}
+	if got, want := byID[anon.ID].HasPassword, false; got != want {
+		t.Errorf("anon HasPassword = %v, want %v", got, want)
+	}
+	if got, want := byID[pw.ID].HasPassword, true; got != want {
+		t.Errorf("pw HasPassword = %v, want %v", got, want)
+	}
+	if got, want := byID[oauth.ID].HasOAuth, true; got != want {
+		t.Errorf("oauth HasOAuth = %v, want %v", got, want)
+	}
+	if got, want := byID[oauth.ID].OAuthProvider, "google"; got != want {
+		t.Errorf("oauth OAuthProvider = %q, want %q", got, want)
+	}
+}
+
+// TestPlayerStore_ListAllPlayers_Pagination pins the LIMIT/OFFSET
+// behaviour the admin handler relies on for ?page=N traversal.
+func TestPlayerStore_ListAllPlayers_Pagination(t *testing.T) {
+	t.Parallel()
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	for i := range 5 {
+		if _, err := ps.CreateAnonymousPlayer(t.Context(), fmt.Sprintf("anon-page-%d", i)); err != nil {
+			t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+		}
+	}
+
+	first, err := ps.ListAllPlayers(t.Context(), 2, 0)
+	if err != nil {
+		t.Fatalf("ListAllPlayers err = %v, want nil", err)
+	}
+	if got, want := len(first), 2; got != want {
+		t.Fatalf("first page len = %d, want %d", got, want)
+	}
+	second, err := ps.ListAllPlayers(t.Context(), 2, 2)
+	if err != nil {
+		t.Fatalf("ListAllPlayers err = %v, want nil", err)
+	}
+	if got, want := len(second), 2; got != want {
+		t.Fatalf("second page len = %d, want %d", got, want)
+	}
+	if first[0].ID == second[0].ID {
+		t.Errorf("pages overlap: first[0]=%d, second[0]=%d", first[0].ID, second[0].ID)
+	}
+	// All five rows share a created_at because they were inserted in
+	// the same test tick, so the tiebreaker ORDER BY p.id DESC kicks
+	// in: the newest id has to land first on page 1 and page 2 has to
+	// start with a strictly smaller id than page 1's tail.
+	if first[0].ID < first[1].ID {
+		t.Errorf("page 1 not in id-DESC order: %d before %d", first[0].ID, first[1].ID)
+	}
+	if first[1].ID <= second[0].ID {
+		t.Errorf("page 2 starts at id %d, want < page 1 tail %d", second[0].ID, first[1].ID)
+	}
+}
+
+// TestPlayerStore_ListPlayerFinishStats_NoGames asserts the short-
+// circuit + zero-rows path: a brand-new player with no
+// game_participants entries is absent from the result.
+func TestPlayerStore_ListPlayerFinishStats_NoGames(t *testing.T) {
+	t.Parallel()
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	p, err := ps.CreateAnonymousPlayer(t.Context(), "anon-no-games")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	stats, err := ps.ListPlayerFinishStats(t.Context(), []int64{p.ID})
+	if err != nil {
+		t.Fatalf("ListPlayerFinishStats err = %v, want nil", err)
+	}
+	if got, want := len(stats), 0; got != want {
+		t.Errorf("stats len = %d, want %d", got, want)
+	}
+
+	empty, err := ps.ListPlayerFinishStats(t.Context(), nil)
+	if err != nil {
+		t.Fatalf("ListPlayerFinishStats(nil) err = %v, want nil", err)
+	}
+	if got, want := len(empty), 0; got != want {
+		t.Errorf("empty stats len = %d, want %d", got, want)
+	}
 }
 
 // TestPlayerStore_SetPlayerPasswordHash_AlsoMarksUsernameClaimed pins

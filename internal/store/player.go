@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
@@ -343,6 +344,90 @@ func (s *PlayerStore) SetPlayerPasswordHash(ctx context.Context, username, passw
 	}
 	if rows == 0 {
 		return auth.ErrPlayerNotFound
+	}
+
+	return nil
+}
+
+// ListAllPlayers returns a page of players for the admin players
+// list (#423). The page size and offset come straight from the
+// handler's pagination params; the SQL handles the bounds + ordering.
+func (s *PlayerStore) ListAllPlayers(ctx context.Context, limit, offset int64) ([]*auth.PlayerListRow, error) {
+	rows, err := s.q.ListAllPlayers(ctx, db.ListAllPlayersParams{
+		RowLimit:  limit,
+		RowOffset: offset,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list all players: %w", err)
+	}
+
+	out := make([]*auth.PlayerListRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, &auth.PlayerListRow{
+			ID:            r.ID,
+			Username:      r.Username,
+			Email:         r.Email.String,
+			Role:          r.Role,
+			HasPassword:   r.PasswordHash.Valid,
+			HasOAuth:      r.HasOauth,
+			OAuthProvider: r.OauthProvider,
+			CreatedAt:     r.CreatedAt,
+		})
+	}
+
+	return out, nil
+}
+
+// CountAllPlayers returns the total number of players for the admin
+// list's pagination math.
+func (s *PlayerStore) CountAllPlayers(ctx context.Context) (int64, error) {
+	count, err := s.q.CountAllPlayers(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count players: %w", err)
+	}
+
+	return count, nil
+}
+
+// ListPlayerFinishStats returns the finished-quiz aggregate for the
+// supplied player IDs. Players with zero finished games are absent
+// from the result; the caller treats a missing entry as (count = 0,
+// last = nil). The query short-circuits on an empty id slice so the
+// admin list does not issue a `WHERE id IN ()` against the DB.
+func (s *PlayerStore) ListPlayerFinishStats(ctx context.Context, playerIDs []int64) ([]*auth.PlayerStats, error) {
+	if len(playerIDs) == 0 {
+		return nil, nil
+	}
+
+	rows, err := s.q.ListPlayerFinishStats(ctx, playerIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list player finish stats: %w", err)
+	}
+
+	out := make([]*auth.PlayerStats, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, &auth.PlayerStats{
+			PlayerID:       r.PlayerID,
+			FinishedCount:  r.FinishedCount,
+			LastFinishedAt: parseSQLiteTimestamp(r.LastFinishedAt),
+		})
+	}
+
+	return out, nil
+}
+
+// parseSQLiteTimestamp accepts the two formats modernc.org/sqlite can
+// return for an aggregate over a DATETIME column ("YYYY-MM-DD
+// HH:MM:SS" if the column was written via SQLite helpers, RFC3339 if
+// written via [time.Time]). An unparseable value falls through to nil
+// so a single malformed row does not fail the whole admin list page.
+func parseSQLiteTimestamp(raw string) *time.Time {
+	const sqliteDateTime = "2006-01-02 15:04:05"
+	if t, err := time.Parse(sqliteDateTime, raw); err == nil {
+		return &t
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return &t
 	}
 
 	return nil
