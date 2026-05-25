@@ -2,6 +2,12 @@
 
 What changed in each released version of Top Banana. The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.5.8 — 2026-05-25
+
+Google sign-in is part of the standard production deployment.
+
+- The production deployment requires Google OAuth env vars to be set, matching staging. A deploy missing any of the three fails at boot instead of silently rendering `/login` without the "Sign in with Google" button.
+
 ## v2026.5.7 — 2026-05-25
 
 Google sign-in, a profile page, account-aware home and claim-name surfaces, and a new admin players list.
