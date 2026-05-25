@@ -27,7 +27,7 @@ func (s stubPlayerLister) ListAllPlayers(
 	ctx context.Context, limit, offset int64,
 ) ([]*auth.PlayerListRow, error) {
 	if s.listAllPlayers == nil {
-		return nil, nil
+		return nil, errors.New("listAllPlayers not supplied in stub")
 	}
 
 	return s.listAllPlayers(ctx, limit, offset)
@@ -35,7 +35,7 @@ func (s stubPlayerLister) ListAllPlayers(
 
 func (s stubPlayerLister) CountAllPlayers(ctx context.Context) (int64, error) {
 	if s.countAllPlayers == nil {
-		return 0, nil
+		return 0, errors.New("countAllPlayers not supplied in stub")
 	}
 
 	return s.countAllPlayers(ctx)
@@ -45,7 +45,7 @@ func (s stubPlayerLister) ListPlayerFinishStats(
 	ctx context.Context, ids []int64,
 ) ([]*auth.PlayerStats, error) {
 	if s.listPlayerFinishStats == nil {
-		return nil, nil
+		return nil, errors.New("listPlayerFinishStats not supplied in stub")
 	}
 
 	return s.listPlayerFinishStats(ctx, ids)
