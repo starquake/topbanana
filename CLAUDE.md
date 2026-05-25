@@ -63,6 +63,10 @@ gh api -X PUT repos/starquake/topbanana/branches/main/protection --input <payloa
 
 When removing a workflow job, drop its context from the required list too — leaving a stale required-context name makes every PR mergeable-blocked indefinitely.
 
+## Comments
+
+Only add a comment when the intent can't be understood from the surrounding context, the function name, or the code in the function. A well-named function whose body reads as its own explanation doesn't need a docstring. A non-obvious tradeoff, workaround, or constraint does.
+
 ## Comments that reach across files
 
 WHY comments are encouraged when the rationale isn't obvious from the code. But a WHY that explains *what the other side of the system expects* is fragile — if the other side changes, the comment silently lies. The reader trusts it, and is misled.
