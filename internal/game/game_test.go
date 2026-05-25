@@ -2229,6 +2229,129 @@ func TestService_GetNext(t *testing.T) {
 			t.Errorf("second.Question.ID = %d, want %d (resume must hand back same row)", got, want)
 		}
 	})
+
+	t.Run("break orphaned past max(question position) is surfaced at the end", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		// Two questions, then a break authored at position 9 (i.e.
+		// after a question that no longer exists - simulates the
+		// admin-deleted-the-anchor case). Without the sweep at the
+		// end of pickNextSlot this break would sit in the DB forever
+		// and the player would never see it.
+		testQuiz := newTestQuiz(t)
+		testQuiz.Questions = testQuiz.Questions[:2]
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+		orphan := &quiz.Break{QuizID: testQuiz.ID, Position: 9, Text: "orphan"}
+		if err := quizStore.CreateBreak(ctx, orphan); err != nil {
+			t.Fatalf("CreateBreak err = %v, want nil", err)
+		}
+
+		testGame := newTestGame(t, testQuiz)
+		if err := gameStore.CreateGame(ctx, testGame); err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		if err := gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("CreateParticipant err = %v, want nil", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		// Walk both questions; answer each so the iterator advances.
+		for i := range len(testQuiz.Questions) {
+			item, err := svc.GetNext(ctx, testGame.ID, 1)
+			if err != nil {
+				t.Fatalf("GetNext #%d err = %v, want nil", i, err)
+			}
+			if got, want := item.Type, ItemTypeQuestion; got != want {
+				t.Fatalf("GetNext #%d type = %q, want %q", i, got, want)
+			}
+			if _, err := svc.SubmitAnswer(
+				ctx, testGame.ID, 1, item.Question.ID, item.Question.QuizQuestion.Options[0].ID, time.Now(),
+			); err != nil {
+				t.Fatalf("SubmitAnswer #%d err = %v, want nil", i, err)
+			}
+		}
+
+		// After both questions are answered the orphan break is the
+		// only item left in the merged sequence.
+		next, err := svc.GetNext(ctx, testGame.ID, 1)
+		if err != nil {
+			t.Fatalf("GetNext (orphan) err = %v, want nil", err)
+		}
+		if got, want := next.Type, ItemTypeBreak; got != want {
+			t.Fatalf("next.Type = %q, want %q (orphan break must surface)", got, want)
+		}
+		if got, want := next.Break.ID, orphan.ID; got != want {
+			t.Errorf("next.Break.ID = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("reload mid-break returns the same break (not in flight)", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		// One question and a break before it. The player should see
+		// the break first, then re-fetching /next without acking
+		// must return the SAME break - breaks are not "in flight".
+		testQuiz := newTestQuiz(t)
+		testQuiz.Questions = testQuiz.Questions[:1]
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+		brk := &quiz.Break{QuizID: testQuiz.ID, Position: 0, Text: "intro"}
+		if err := quizStore.CreateBreak(ctx, brk); err != nil {
+			t.Fatalf("CreateBreak err = %v, want nil", err)
+		}
+
+		testGame := newTestGame(t, testQuiz)
+		if err := gameStore.CreateGame(ctx, testGame); err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		if err := gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("CreateParticipant err = %v, want nil", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		first, err := svc.GetNext(ctx, testGame.ID, 1)
+		if err != nil {
+			t.Fatalf("first GetNext err = %v, want nil", err)
+		}
+		if got, want := first.Type, ItemTypeBreak; got != want {
+			t.Fatalf("first.Type = %q, want %q", got, want)
+		}
+		// Don't ack — simulate a page reload mid-break by calling
+		// GetNext again. The break must come back unchanged.
+		second, err := svc.GetNext(ctx, testGame.ID, 1)
+		if err != nil {
+			t.Fatalf("second GetNext err = %v, want nil", err)
+		}
+		if got, want := second.Type, ItemTypeBreak; got != want {
+			t.Fatalf("second.Type = %q, want %q (reload mid-break must re-emit the break)", got, want)
+		}
+		if got, want := second.Break.ID, first.Break.ID; got != want {
+			t.Errorf("second.Break.ID = %d, want %d", got, want)
+		}
+	})
 }
 
 func TestService_MarkBreakSeen(t *testing.T) {

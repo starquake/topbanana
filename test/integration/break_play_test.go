@@ -175,7 +175,7 @@ func TestBreaks_PlayLoop(t *testing.T) {
 	}
 
 	// --- POST .../seen acknowledges the break ---
-	postBreakSeen(ctx, t, client, baseURL, gameID, brk.ID, http.StatusNoContent)
+	postBreakSeen(ctx, t, client, baseURL, gameID, brk.ID)
 
 	// --- Q2: /next returns the second question ---
 	q2ID := answerNextCorrect(ctx, t, client, baseURL, gameID, qz)
@@ -216,9 +216,9 @@ func TestBreaks_SeenIsIdempotent(t *testing.T) {
 	_ = readNextBreak(ctx, t, client, baseURL, gameID)
 
 	// First seen: 204.
-	postBreakSeen(ctx, t, client, baseURL, gameID, brk.ID, http.StatusNoContent)
+	postBreakSeen(ctx, t, client, baseURL, gameID, brk.ID)
 	// Second seen: still 204 (no side effects).
-	postBreakSeen(ctx, t, client, baseURL, gameID, brk.ID, http.StatusNoContent)
+	postBreakSeen(ctx, t, client, baseURL, gameID, brk.ID)
 
 	// /next must advance to Q2, not re-emit the break.
 	q2ID := readNextQuestionID(ctx, t, client, baseURL, gameID)
@@ -356,11 +356,13 @@ func assertNextStatus(
 }
 
 // postBreakSeen calls POST /api/games/{gameID}/breaks/{breakID}/seen
-// and asserts the expected status code. The /api/* surface gates on
+// and asserts a 204 No Content response. The /api/* surface gates on
 // the session cookie alone; no CSRF token is needed (see addAPIRoutes).
+// Both create and idempotent re-ack paths return 204, so the helper
+// pins that status rather than taking it as a parameter.
 func postBreakSeen(
 	ctx context.Context, t *testing.T, client *http.Client, baseURL, gameID string,
-	breakID int64, wantStatus int,
+	breakID int64,
 ) {
 	t.Helper()
 	target := fmt.Sprintf("%s/api/games/%s/breaks/%d/seen", baseURL, gameID, breakID)
@@ -374,7 +376,7 @@ func postBreakSeen(
 	}
 	defer closeBody(t, resp.Body)
 
-	if got, want := resp.StatusCode, wantStatus; got != want {
+	if got, want := resp.StatusCode, http.StatusNoContent; got != want {
 		t.Fatalf("POST .../seen status = %d, want %d", got, want)
 	}
 }
@@ -391,4 +393,94 @@ func readAllOrFatal(t *testing.T, resp *http.Response) []byte {
 	}
 
 	return buf
+}
+
+// TestBreaks_ResetCascadesSeenRows pins the FK cascade on
+// game_seen_breaks.game_id: when an admin resets a player's game on a
+// quiz (POST /admin/quizzes/{id}/players/{playerID}/reset, which calls
+// store.GameStore.DeleteGamesForPlayerOnQuiz), the seen-break rows for
+// that game must disappear too. Without the cascade those rows would
+// be orphans referencing a deleted game id, which a future re-play
+// could match against by accident.
+func TestBreaks_ResetCascadesSeenRows(t *testing.T) {
+	t.Parallel()
+
+	ctx, setup := setupIntegration(t)
+	stores := setup.Stores
+
+	adminPlayer := seedGameplayAdmin(ctx, t, setup.BaseURL, stores)
+	qz := breakPlayQuiz(adminPlayer.ID)
+	if err := stores.Quizzes.CreateQuiz(ctx, qz); err != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", err)
+	}
+	brk := &quiz.Break{QuizID: qz.ID, Position: 1, Text: "Halfway through!"}
+	if err := stores.Quizzes.CreateBreak(ctx, brk); err != nil {
+		t.Fatalf("CreateBreak err = %v, want nil", err)
+	}
+
+	// Drive the game through Q1 -> break ack so a game_seen_breaks
+	// row exists. The HTTP client path mirrors how a real reset
+	// would land in production - everything goes through the same
+	// handlers a player would hit.
+	client := playerClient(t)
+	gameID := createBreakPlayGame(ctx, t, client, setup.BaseURL, qz.ID)
+	answerNextCorrect(ctx, t, client, setup.BaseURL, gameID, qz)
+	readNextBreak(ctx, t, client, setup.BaseURL, gameID)
+	postBreakSeen(ctx, t, client, setup.BaseURL, gameID, brk.ID)
+
+	seenBefore, err := stores.Games.ListSeenBreakIDsByGame(ctx, gameID)
+	if err != nil {
+		t.Fatalf("ListSeenBreakIDsByGame (before) err = %v, want nil", err)
+	}
+	if got, want := len(seenBefore), 1; got != want {
+		t.Fatalf("seen rows before reset = %d, want %d", got, want)
+	}
+
+	// Look up the player id from the cookie jar - the anonymous
+	// player is whichever row the EnsurePlayer middleware just
+	// minted for the cookie. fetchSelfPlayerID is a small helper
+	// that calls GET /api/players/me with the cookie.
+	playerID := fetchSelfPlayerID(ctx, t, client, setup.BaseURL)
+
+	// Reset the player's game on the quiz. This is the same
+	// transaction the admin /reset button triggers.
+	if dErr := stores.Games.DeleteGamesForPlayerOnQuiz(ctx, playerID, qz.ID); dErr != nil {
+		t.Fatalf("DeleteGamesForPlayerOnQuiz err = %v, want nil", dErr)
+	}
+
+	seenAfter, err := stores.Games.ListSeenBreakIDsByGame(ctx, gameID)
+	if err != nil {
+		t.Fatalf("ListSeenBreakIDsByGame (after) err = %v, want nil", err)
+	}
+	if got, want := len(seenAfter), 0; got != want {
+		t.Errorf(
+			"seen rows after reset = %d, want %d (FK cascade should have swept them)",
+			got, want,
+		)
+	}
+}
+
+// fetchSelfPlayerID asks the server "who am I" via the same /me
+// endpoint the SPA uses. Returns the anonymous player id minted by
+// EnsurePlayer for the cookie jar on the supplied client.
+func fetchSelfPlayerID(ctx context.Context, t *testing.T, client *http.Client, baseURL string) int64 {
+	t.Helper()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/players/me", nil)
+	if err != nil {
+		t.Fatalf("NewRequestWithContext err = %v, want nil", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Do /api/players/me err = %v, want nil", err)
+	}
+	defer closeBody(t, resp.Body)
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("GET /api/players/me status = %d, want %d", got, want)
+	}
+	var me playerMeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&me); err != nil {
+		t.Fatalf("decode /api/players/me err = %v, want nil", err)
+	}
+
+	return me.ID
 }

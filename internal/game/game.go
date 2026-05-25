@@ -722,6 +722,15 @@ func (s *Service) GetNext(ctx context.Context, gameID string, playerID int64) (*
 //
 // Idempotent at the store layer (INSERT OR IGNORE) so a second call
 // with the same arguments is a no-op success.
+//
+// Race note: an admin can move a break to a new slot while a player
+// has it on screen. The player acknowledges the break by id, so the
+// row at the new slot is marked seen and the player skips past it on
+// the next call to [Service.GetNext]. The break's previous slot is
+// not re-shown — the seen set is by-id, not by-position. Acceptable
+// for the common case (admin pauses authoring during a live game);
+// flagged here so a future "show break again on slot change" feature
+// has a documented starting point.
 func (s *Service) MarkBreakSeen(ctx context.Context, gameID string, playerID, breakID int64) error {
 	g, err := s.store.GetGame(ctx, gameID)
 	if err != nil {
@@ -789,14 +798,35 @@ func pickNextSlot(
 			return sequenceSlot{kind: sequenceKindBreak, brk: b}
 		}
 	}
+
+	// Track which slots get visited by the main walk so we can sweep
+	// any orphaned breaks at the end. A break is orphaned when its
+	// position no longer matches a live question - for example after
+	// an admin deletes the question that used to anchor it. Without
+	// this sweep the break would sit in the DB forever, invisible to
+	// players. The sweep emits the orphan AT THE END of the sequence
+	// (after all live questions) instead of silently dropping it.
+	visited := make(map[int]bool, len(questions)+1)
+	visited[0] = true
+
 	for _, q := range questions {
 		if !asked[q.ID] {
 			return sequenceSlot{kind: sequenceKindQuestion, question: q}
 		}
+		visited[q.Position] = true
 		for _, b := range bySlot[q.Position] {
 			if !seen[b.ID] {
 				return sequenceSlot{kind: sequenceKindBreak, brk: b}
 			}
+		}
+	}
+
+	for _, b := range breaks {
+		if visited[b.Position] {
+			continue
+		}
+		if !seen[b.ID] {
+			return sequenceSlot{kind: sequenceKindBreak, brk: b}
 		}
 	}
 

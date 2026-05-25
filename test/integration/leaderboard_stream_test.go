@@ -657,9 +657,9 @@ func playSingleQuestionQuizToCompletion(
 	}
 }
 
-// playerMeResponse is the JSON shape of GET /api/players/me. Only the
-// username field is modelled here.
+// playerMeResponse is the JSON shape of GET /api/players/me.
 type playerMeResponse struct {
+	ID       int64  `json:"id"`
 	Username string `json:"username"`
 }
 
