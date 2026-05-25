@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/starquake/topbanana/internal/home"
+	. "github.com/starquake/topbanana/internal/home"
 )
 
 // stubStore feeds the handler canned rows so the render path is the
@@ -18,17 +18,17 @@ import (
 // independently; the err fields exercise the degraded-render branch
 // (the page should still render, with the failing section empty).
 type stubStore struct {
-	popular    []*home.PopularQuiz
-	active     []*home.ActivePlayer
+	popular    []*PopularQuiz
+	active     []*ActivePlayer
 	popularErr error
 	activeErr  error
 }
 
-func (s *stubStore) ListPopularQuizzes(_ context.Context) ([]*home.PopularQuiz, error) {
+func (s *stubStore) ListPopularQuizzes(_ context.Context) ([]*PopularQuiz, error) {
 	return s.popular, s.popularErr
 }
 
-func (s *stubStore) ListMostActivePlayers(_ context.Context) ([]*home.ActivePlayer, error) {
+func (s *stubStore) ListMostActivePlayers(_ context.Context) ([]*ActivePlayer, error) {
 	return s.active, s.activeErr
 }
 
@@ -36,7 +36,7 @@ func TestHandle_RendersPopularAndActiveSections(t *testing.T) {
 	t.Parallel()
 
 	store := &stubStore{
-		popular: []*home.PopularQuiz{
+		popular: []*PopularQuiz{
 			{
 				ID:          7,
 				Title:       "Bananas of the World",
@@ -46,7 +46,7 @@ func TestHandle_RendersPopularAndActiveSections(t *testing.T) {
 			},
 			{ID: 9, Title: "Capital Cities", Slug: "capital-cities", Description: "Quickfire geography.", PlayCount: 3},
 		},
-		active: []*home.ActivePlayer{
+		active: []*ActivePlayer{
 			{ID: 1, Username: "alice", FinishedCount: 4},
 			{ID: 2, Username: "bob", FinishedCount: 2},
 		},
@@ -77,10 +77,10 @@ func TestHandle_SingularPlayAndQuizPluralization(t *testing.T) {
 	t.Parallel()
 
 	store := &stubStore{
-		popular: []*home.PopularQuiz{
+		popular: []*PopularQuiz{
 			{ID: 11, Title: "Solo", Slug: "solo", PlayCount: 1},
 		},
-		active: []*home.ActivePlayer{
+		active: []*ActivePlayer{
 			{ID: 1, Username: "carol", FinishedCount: 1},
 		},
 	}
@@ -123,7 +123,7 @@ func TestHandle_StoreErrorsDegradeToEmptyState(t *testing.T) {
 		activeErr:  errors.New("boom"),
 	}
 	rec := httptest.NewRecorder()
-	handler := home.Handle(slog.New(slog.DiscardHandler), store, nil, nil)
+	handler := Handle(slog.New(slog.DiscardHandler), store, nil, nil)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	handler.ServeHTTP(rec, req)
 
@@ -144,9 +144,9 @@ func TestHandle_TruncatesToTopN(t *testing.T) {
 
 	// Feed more than the page-level cap of 6 to confirm the handler
 	// slices instead of dumping the full list into the template.
-	popular := make([]*home.PopularQuiz, 0, 10)
+	popular := make([]*PopularQuiz, 0, 10)
 	for i := range 10 {
-		popular = append(popular, &home.PopularQuiz{
+		popular = append(popular, &PopularQuiz{
 			ID:        int64(i + 1),
 			Title:     "T" + string(rune('A'+i)),
 			Slug:      "t" + string(rune('a'+i)),
@@ -170,7 +170,7 @@ func TestHandle_TruncatesToTopN(t *testing.T) {
 func serve(t *testing.T, store *stubStore) string {
 	t.Helper()
 
-	handler := home.Handle(slog.New(slog.DiscardHandler), store, nil, nil)
+	handler := Handle(slog.New(slog.DiscardHandler), store, nil, nil)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	handler.ServeHTTP(rec, req)

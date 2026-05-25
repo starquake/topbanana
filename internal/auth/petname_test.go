@@ -4,14 +4,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/starquake/topbanana/internal/auth"
+	. "github.com/starquake/topbanana/internal/auth"
 )
 
 func TestGeneratePetname_Shape(t *testing.T) {
 	t.Parallel()
 
 	for range 100 {
-		name := auth.GeneratePetname()
+		name := GeneratePetname()
 		if name == "" {
 			t.Fatal("GeneratePetname() = empty string, want non-empty")
 		}
@@ -36,7 +36,7 @@ func TestGeneratePetname_Distinct(t *testing.T) {
 
 	seen := make(map[string]struct{}, 1000)
 	for range 1000 {
-		seen[auth.GeneratePetname()] = struct{}{}
+		seen[GeneratePetname()] = struct{}{}
 	}
 	// With ~15M combinations, the birthday-problem expectation on 1000 draws
 	// is ~999 distinct outcomes. Allow generous slack to keep the test stable

@@ -1,9 +1,10 @@
-package game
+package game_test
 
 import (
 	"testing"
 	"time"
 
+	. "github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
@@ -38,7 +39,7 @@ func TestResolveAnswerWindow(t *testing.T) {
 			name: "both unset falls through to defaultExpiration",
 			q:    &quiz.Question{TimeLimitSeconds: nil},
 			qz:   &quiz.Quiz{TimeLimitSeconds: 0},
-			want: defaultExpiration,
+			want: ExportDefaultExpiration,
 		},
 		{
 			name: "zero question override is treated as unset",
@@ -50,13 +51,13 @@ func TestResolveAnswerWindow(t *testing.T) {
 			name: "nil question + nil quiz still resolves",
 			q:    nil,
 			qz:   nil,
-			want: defaultExpiration,
+			want: ExportDefaultExpiration,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got, want := resolveAnswerWindow(tc.q, tc.qz), tc.want; got != want {
+			if got, want := ExportResolveAnswerWindow(tc.q, tc.qz), tc.want; got != want {
 				t.Errorf("resolveAnswerWindow(%+v, %+v) = %v, want %v", tc.q, tc.qz, got, want)
 			}
 		})

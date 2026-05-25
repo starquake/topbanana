@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/starquake/topbanana/internal/game"
-	"github.com/starquake/topbanana/internal/health"
+	. "github.com/starquake/topbanana/internal/health"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
 )
@@ -115,7 +115,7 @@ func TestHandleHealthz(t *testing.T) {
 		}
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil)
 		w := httptest.NewRecorder()
-		health.HandleHealthz(slog.Default(), stores)(w, req)
+		HandleHealthz(slog.Default(), stores)(w, req)
 
 		if got, want := w.Code, http.StatusOK; got != want {
 			t.Errorf("status = %d, want %d", got, want)
@@ -143,7 +143,7 @@ func TestHandleHealthz(t *testing.T) {
 		}
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil)
 		w := httptest.NewRecorder()
-		health.HandleHealthz(slog.Default(), stores)(w, req)
+		HandleHealthz(slog.Default(), stores)(w, req)
 
 		if got, want := w.Code, http.StatusServiceUnavailable; got != want {
 			t.Errorf("status = %d, want %d", got, want)

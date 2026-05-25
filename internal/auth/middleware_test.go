@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/starquake/topbanana/internal/auth"
+	. "github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/session"
 )
 
@@ -28,22 +28,22 @@ func TestRequireAdmin_AllowsAdmin(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	admin, err := store.CreatePlayer(t.Context(), "alice", "h", auth.RoleAdmin)
+	admin, err := store.CreatePlayer(t.Context(), "alice", "h", RoleAdmin)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
 	called := false
-	var seenPlayer *auth.Player
+	var seenPlayer *Player
 	var seenOK bool
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
-		seenPlayer, seenOK = auth.PlayerFromContext(r.Context())
+		seenPlayer, seenOK = PlayerFromContext(r.Context())
 		w.WriteHeader(http.StatusTeapot)
 	})
 
 	sessions := session.New([]byte("k"), true)
-	mw := auth.RequireAdmin(next, store, sessions, nil, discardLogger())
+	mw := RequireAdmin(next, store, sessions, nil, discardLogger())
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, admin.ID)
@@ -77,10 +77,10 @@ func TestRequireAdmin_DeniesPlayer(t *testing.T) {
 	store := newStubPlayerStore()
 	// Pre-seed an admin so the next CreatePlayer call is not auto-promoted to admin
 	// by the "first password-bearing registrant becomes admin" rule.
-	if _, err := store.CreatePlayer(t.Context(), "admin", "h", auth.RoleAdmin); err != nil {
+	if _, err := store.CreatePlayer(t.Context(), "admin", "h", RoleAdmin); err != nil {
 		t.Fatalf("seed admin err = %v, want nil", err)
 	}
-	player, err := store.CreatePlayer(t.Context(), "bob", "h", auth.RolePlayer)
+	player, err := store.CreatePlayer(t.Context(), "bob", "h", RolePlayer)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
@@ -90,7 +90,7 @@ func TestRequireAdmin_DeniesPlayer(t *testing.T) {
 	})
 
 	sessions := session.New([]byte("k"), true)
-	mw := auth.RequireAdmin(next, store, sessions, nil, discardLogger())
+	mw := RequireAdmin(next, store, sessions, nil, discardLogger())
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, player.ID)
@@ -120,7 +120,7 @@ func TestRequireAdmin_NoCookie_RedirectsToLogin(t *testing.T) {
 		t.Error("next should not be called without cookie")
 	})
 
-	mw := auth.RequireAdmin(next, store, session.New([]byte("k"), true), nil, discardLogger())
+	mw := RequireAdmin(next, store, session.New([]byte("k"), true), nil, discardLogger())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
 	rec := httptest.NewRecorder()
@@ -143,7 +143,7 @@ func TestRequireAdmin_UnknownPlayerID_RedirectsToLogin(t *testing.T) {
 	})
 
 	sessions := session.New([]byte("k"), true)
-	mw := auth.RequireAdmin(next, store, sessions, nil, discardLogger())
+	mw := RequireAdmin(next, store, sessions, nil, discardLogger())
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, 9999)
@@ -163,7 +163,7 @@ func TestRequireAdmin_StoreError_500(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	admin, err := store.CreatePlayer(t.Context(), "alice", "h", auth.RoleAdmin)
+	admin, err := store.CreatePlayer(t.Context(), "alice", "h", RoleAdmin)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
@@ -174,7 +174,7 @@ func TestRequireAdmin_StoreError_500(t *testing.T) {
 	})
 
 	sessions := session.New([]byte("k"), true)
-	mw := auth.RequireAdmin(next, store, sessions, nil, discardLogger())
+	mw := RequireAdmin(next, store, sessions, nil, discardLogger())
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, admin.ID)
@@ -196,15 +196,15 @@ func TestEnsurePlayer_NoCookie_CreatesAnonymousAndSetsCookie(t *testing.T) {
 	store := newStubPlayerStore()
 	sessions := session.New([]byte("k"), true)
 
-	var seenPlayer *auth.Player
+	var seenPlayer *Player
 	called := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
-		seenPlayer, _ = auth.PlayerFromContext(r.Context())
+		seenPlayer, _ = PlayerFromContext(r.Context())
 		w.WriteHeader(http.StatusTeapot)
 	})
 
-	mw := auth.EnsurePlayer(next, store, sessions, discardLogger())
+	mw := EnsurePlayer(next, store, sessions, discardLogger())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
 	rec := httptest.NewRecorder()
@@ -251,12 +251,12 @@ func TestEnsurePlayer_ValidCookie_ReusesExistingRow(t *testing.T) {
 
 	sessions := session.New([]byte("k"), true)
 
-	var seenPlayer *auth.Player
+	var seenPlayer *Player
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		seenPlayer, _ = auth.PlayerFromContext(r.Context())
+		seenPlayer, _ = PlayerFromContext(r.Context())
 	})
 
-	mw := auth.EnsurePlayer(next, store, sessions, discardLogger())
+	mw := EnsurePlayer(next, store, sessions, discardLogger())
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, existing.ID)
@@ -284,12 +284,12 @@ func TestEnsurePlayer_DeletedPlayer_MintsNewAnonymous(t *testing.T) {
 	store := newStubPlayerStore()
 	sessions := session.New([]byte("k"), true)
 
-	var seenPlayer *auth.Player
+	var seenPlayer *Player
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		seenPlayer, _ = auth.PlayerFromContext(r.Context())
+		seenPlayer, _ = PlayerFromContext(r.Context())
 	})
 
-	mw := auth.EnsurePlayer(next, store, sessions, discardLogger())
+	mw := EnsurePlayer(next, store, sessions, discardLogger())
 
 	// Issue a cookie pointing at an ID that does not exist in the store.
 	rec := httptest.NewRecorder()
@@ -323,11 +323,11 @@ func TestEnsurePlayer_TwoCookielessRequests_TwoDistinctPlayers(t *testing.T) {
 
 	var seenIDs []int64
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		p, _ := auth.PlayerFromContext(r.Context())
+		p, _ := PlayerFromContext(r.Context())
 		seenIDs = append(seenIDs, p.ID)
 	})
 
-	mw := auth.EnsurePlayer(next, store, sessions, discardLogger())
+	mw := EnsurePlayer(next, store, sessions, discardLogger())
 
 	for range 2 {
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
@@ -352,12 +352,12 @@ func TestEnsurePlayer_PetnameCollision_Retries(t *testing.T) {
 	store.forceAnonCollisions = 3
 	sessions := session.New([]byte("k"), true)
 
-	var seenPlayer *auth.Player
+	var seenPlayer *Player
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		seenPlayer, _ = auth.PlayerFromContext(r.Context())
+		seenPlayer, _ = PlayerFromContext(r.Context())
 	})
 
-	mw := auth.EnsurePlayer(next, store, sessions, discardLogger())
+	mw := EnsurePlayer(next, store, sessions, discardLogger())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
 	rec := httptest.NewRecorder()
@@ -383,12 +383,12 @@ func TestEnsurePlayer_PetnameExhausted_FallsBackToXid(t *testing.T) {
 	store.forceAnonCollisions = 5
 	sessions := session.New([]byte("k"), true)
 
-	var seenPlayer *auth.Player
+	var seenPlayer *Player
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		seenPlayer, _ = auth.PlayerFromContext(r.Context())
+		seenPlayer, _ = PlayerFromContext(r.Context())
 	})
 
-	mw := auth.EnsurePlayer(next, store, sessions, discardLogger())
+	mw := EnsurePlayer(next, store, sessions, discardLogger())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
 	rec := httptest.NewRecorder()
@@ -413,7 +413,7 @@ func TestEnsurePlayer_CreateAnonymousNonCollisionError_500(t *testing.T) {
 		t.Error("next should not be called when CreateAnonymousPlayer returns a non-collision error")
 	})
 
-	mw := auth.EnsurePlayer(next, store, sessions, discardLogger())
+	mw := EnsurePlayer(next, store, sessions, discardLogger())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
 	rec := httptest.NewRecorder()
@@ -440,7 +440,7 @@ func TestEnsurePlayer_GetPlayerError_500(t *testing.T) {
 		t.Error("next should not be called on store error")
 	})
 
-	mw := auth.EnsurePlayer(next, store, sessions, discardLogger())
+	mw := EnsurePlayer(next, store, sessions, discardLogger())
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, existing.ID)

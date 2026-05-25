@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/starquake/topbanana/internal/csrf"
+	. "github.com/starquake/topbanana/internal/csrf"
 )
 
 // newGetRequest builds a GET request with the test context attached so
@@ -40,7 +40,7 @@ func newPostFormRequest(t *testing.T, values url.Values) *http.Request {
 // the response, or an empty string if no such cookie was set.
 func nonceCookieFromResponse(rec *httptest.ResponseRecorder) string {
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == csrf.CookieName {
+		if c.Name == CookieName {
 			return c.Value
 		}
 	}
@@ -51,7 +51,7 @@ func nonceCookieFromResponse(rec *httptest.ResponseRecorder) string {
 func TestToken_SetsCookieWhenAbsent(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"), true)
+	m := New([]byte("test-key"), true)
 
 	rec := httptest.NewRecorder()
 	req := newGetRequest(t, "/login")
@@ -63,7 +63,7 @@ func TestToken_SetsCookieWhenAbsent(t *testing.T) {
 
 	nonce := nonceCookieFromResponse(rec)
 	if nonce == "" {
-		t.Fatalf("expected %q cookie to be set, got none", csrf.CookieName)
+		t.Fatalf("expected %q cookie to be set, got none", CookieName)
 	}
 }
 
@@ -76,7 +76,7 @@ func TestToken_CookieFlags_RespectSecureCookies(t *testing.T) {
 
 	t.Run("production sets Secure", func(t *testing.T) {
 		t.Parallel()
-		m := csrf.New([]byte("test-key"), true)
+		m := New([]byte("test-key"), true)
 		rec := httptest.NewRecorder()
 		_ = m.Token(rec, newGetRequest(t, "/"))
 
@@ -94,7 +94,7 @@ func TestToken_CookieFlags_RespectSecureCookies(t *testing.T) {
 
 	t.Run("development drops Secure", func(t *testing.T) {
 		t.Parallel()
-		m := csrf.New([]byte("test-key"), false)
+		m := New([]byte("test-key"), false)
 		rec := httptest.NewRecorder()
 		_ = m.Token(rec, newGetRequest(t, "/"))
 
@@ -116,7 +116,7 @@ func TestToken_CookieFlags_RespectSecureCookies(t *testing.T) {
 func TestToken_ReusesExistingCookie(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"), true)
+	m := New([]byte("test-key"), true)
 
 	// Issue a nonce first so we have a stable cookie value.
 	rec1 := httptest.NewRecorder()
@@ -125,13 +125,13 @@ func TestToken_ReusesExistingCookie(t *testing.T) {
 
 	nonce := nonceCookieFromResponse(rec1)
 	if nonce == "" {
-		t.Fatalf("expected %q cookie to be set on first call", csrf.CookieName)
+		t.Fatalf("expected %q cookie to be set on first call", CookieName)
 	}
 
 	// Second request with the cookie attached should reuse it.
 	rec2 := httptest.NewRecorder()
 	req2 := newGetRequest(t, "/login")
-	req2.AddCookie(&http.Cookie{Name: csrf.CookieName, Value: nonce})
+	req2.AddCookie(&http.Cookie{Name: CookieName, Value: nonce})
 
 	tok2 := m.Token(rec2, req2)
 
@@ -146,11 +146,11 @@ func TestToken_ReusesExistingCookie(t *testing.T) {
 func TestToken_DeterministicForSameNonce(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"), true)
+	m := New([]byte("test-key"), true)
 
 	rec := httptest.NewRecorder()
 	req := newGetRequest(t, "/login")
-	req.AddCookie(&http.Cookie{Name: csrf.CookieName, Value: "fixed-nonce-value"})
+	req.AddCookie(&http.Cookie{Name: CookieName, Value: "fixed-nonce-value"})
 
 	t1 := m.Token(rec, req)
 	t2 := m.Token(rec, req)
@@ -163,10 +163,10 @@ func TestToken_DeterministicForSameNonce(t *testing.T) {
 func TestValidate_NoCookie(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"), true)
-	req := newPostFormRequest(t, url.Values{csrf.FormField: {"anything"}})
+	m := New([]byte("test-key"), true)
+	req := newPostFormRequest(t, url.Values{FormField: {"anything"}})
 
-	if got, want := m.Validate(req), csrf.ErrInvalidToken; !errors.Is(got, want) {
+	if got, want := m.Validate(req), ErrInvalidToken; !errors.Is(got, want) {
 		t.Errorf("Validate err = %v, want %v", got, want)
 	}
 }
@@ -174,11 +174,11 @@ func TestValidate_NoCookie(t *testing.T) {
 func TestValidate_NoFormField(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"), true)
+	m := New([]byte("test-key"), true)
 	req := newPostFormRequest(t, url.Values{})
-	req.AddCookie(&http.Cookie{Name: csrf.CookieName, Value: "some-nonce"})
+	req.AddCookie(&http.Cookie{Name: CookieName, Value: "some-nonce"})
 
-	if got, want := m.Validate(req), csrf.ErrInvalidToken; !errors.Is(got, want) {
+	if got, want := m.Validate(req), ErrInvalidToken; !errors.Is(got, want) {
 		t.Errorf("Validate err = %v, want %v", got, want)
 	}
 }
@@ -186,12 +186,12 @@ func TestValidate_NoFormField(t *testing.T) {
 func TestValidate_TamperedToken(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"), true)
+	m := New([]byte("test-key"), true)
 
 	// Get a valid token.
 	rec := httptest.NewRecorder()
 	req := newGetRequest(t, "/login")
-	req.AddCookie(&http.Cookie{Name: csrf.CookieName, Value: "real-nonce"})
+	req.AddCookie(&http.Cookie{Name: CookieName, Value: "real-nonce"})
 	valid := m.Token(rec, req)
 
 	// Flip the last character to produce something that is still
@@ -203,10 +203,10 @@ func TestValidate_TamperedToken(t *testing.T) {
 	}
 	tampered := valid[:len(valid)-1] + string(flipped)
 
-	postReq := newPostFormRequest(t, url.Values{csrf.FormField: {tampered}})
-	postReq.AddCookie(&http.Cookie{Name: csrf.CookieName, Value: "real-nonce"})
+	postReq := newPostFormRequest(t, url.Values{FormField: {tampered}})
+	postReq.AddCookie(&http.Cookie{Name: CookieName, Value: "real-nonce"})
 
-	if got, want := m.Validate(postReq), csrf.ErrInvalidToken; !errors.Is(got, want) {
+	if got, want := m.Validate(postReq), ErrInvalidToken; !errors.Is(got, want) {
 		t.Errorf("Validate err = %v, want %v", got, want)
 	}
 }
@@ -214,18 +214,18 @@ func TestValidate_TamperedToken(t *testing.T) {
 func TestValidate_DifferentKey(t *testing.T) {
 	t.Parallel()
 
-	managerA := csrf.New([]byte("key-a"), true)
-	managerB := csrf.New([]byte("key-b"), true)
+	managerA := New([]byte("key-a"), true)
+	managerB := New([]byte("key-b"), true)
 
 	rec := httptest.NewRecorder()
 	req := newGetRequest(t, "/login")
-	req.AddCookie(&http.Cookie{Name: csrf.CookieName, Value: "shared-nonce"})
+	req.AddCookie(&http.Cookie{Name: CookieName, Value: "shared-nonce"})
 	tokenFromA := managerA.Token(rec, req)
 
-	postReq := newPostFormRequest(t, url.Values{csrf.FormField: {tokenFromA}})
-	postReq.AddCookie(&http.Cookie{Name: csrf.CookieName, Value: "shared-nonce"})
+	postReq := newPostFormRequest(t, url.Values{FormField: {tokenFromA}})
+	postReq.AddCookie(&http.Cookie{Name: CookieName, Value: "shared-nonce"})
 
-	if got, want := managerB.Validate(postReq), csrf.ErrInvalidToken; !errors.Is(got, want) {
+	if got, want := managerB.Validate(postReq), ErrInvalidToken; !errors.Is(got, want) {
 		t.Errorf("Validate err = %v, want %v", got, want)
 	}
 }
@@ -233,15 +233,15 @@ func TestValidate_DifferentKey(t *testing.T) {
 func TestValidate_ValidToken(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"), true)
+	m := New([]byte("test-key"), true)
 
 	rec := httptest.NewRecorder()
 	req := newGetRequest(t, "/login")
-	req.AddCookie(&http.Cookie{Name: csrf.CookieName, Value: "happy-path-nonce"})
+	req.AddCookie(&http.Cookie{Name: CookieName, Value: "happy-path-nonce"})
 	tok := m.Token(rec, req)
 
-	postReq := newPostFormRequest(t, url.Values{csrf.FormField: {tok}})
-	postReq.AddCookie(&http.Cookie{Name: csrf.CookieName, Value: "happy-path-nonce"})
+	postReq := newPostFormRequest(t, url.Values{FormField: {tok}})
+	postReq.AddCookie(&http.Cookie{Name: CookieName, Value: "happy-path-nonce"})
 
 	if err := m.Validate(postReq); err != nil {
 		t.Errorf("Validate err = %v, want nil", err)
@@ -251,7 +251,7 @@ func TestValidate_ValidToken(t *testing.T) {
 func TestMiddleware_GET_PassesThrough(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"), true)
+	m := New([]byte("test-key"), true)
 
 	called := false
 	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
@@ -274,7 +274,7 @@ func TestMiddleware_GET_PassesThrough(t *testing.T) {
 func TestMiddleware_POST_NoToken_403(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"), true)
+	m := New([]byte("test-key"), true)
 
 	called := false
 	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
@@ -297,12 +297,12 @@ func TestMiddleware_POST_NoToken_403(t *testing.T) {
 func TestMiddleware_POST_ValidToken_CallsNext(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"), true)
+	m := New([]byte("test-key"), true)
 
 	// Issue a token first so we know the nonce/token pair is valid.
 	rec := httptest.NewRecorder()
 	req := newGetRequest(t, "/login")
-	req.AddCookie(&http.Cookie{Name: csrf.CookieName, Value: "post-nonce"})
+	req.AddCookie(&http.Cookie{Name: CookieName, Value: "post-nonce"})
 	tok := m.Token(rec, req)
 
 	called := false
@@ -313,8 +313,8 @@ func TestMiddleware_POST_ValidToken_CallsNext(t *testing.T) {
 	handler := m.Middleware(next)
 
 	postRec := httptest.NewRecorder()
-	postReq := newPostFormRequest(t, url.Values{csrf.FormField: {tok}})
-	postReq.AddCookie(&http.Cookie{Name: csrf.CookieName, Value: "post-nonce"})
+	postReq := newPostFormRequest(t, url.Values{FormField: {tok}})
+	postReq.AddCookie(&http.Cookie{Name: CookieName, Value: "post-nonce"})
 	handler.ServeHTTP(postRec, postReq)
 
 	if !called {
@@ -328,7 +328,7 @@ func TestMiddleware_POST_ValidToken_CallsNext(t *testing.T) {
 func TestMiddleware_UnsafeMethods_AreValidated(t *testing.T) {
 	t.Parallel()
 
-	m := csrf.New([]byte("test-key"), true)
+	m := New([]byte("test-key"), true)
 
 	tests := []struct {
 		name   string
