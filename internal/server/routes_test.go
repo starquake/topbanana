@@ -105,27 +105,27 @@ func (stubQuizStore) QuestionCountsByQuiz(_ context.Context) (map[int64]int, err
 }
 
 func (stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error {
-	return nil
+	return errRouteStub
 }
 
 func (stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error {
-	return nil
+	return errRouteStub
 }
 
 func (stubQuizStore) DeleteQuiz(_ context.Context, _ int64) error {
-	return nil
+	return errRouteStub
 }
 
 func (stubQuizStore) CreateQuestion(_ context.Context, _ *quiz.Question) error {
-	return nil
+	return errRouteStub
 }
 
 func (stubQuizStore) CreateQuestionAtNextPosition(_ context.Context, _ *quiz.Question) error {
-	return nil
+	return errRouteStub
 }
 
 func (stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error {
-	return nil
+	return errRouteStub
 }
 
 func (stubQuizStore) SwapQuestionPositions(_ context.Context, _, _ int64, _ string) error {
@@ -133,19 +133,39 @@ func (stubQuizStore) SwapQuestionPositions(_ context.Context, _, _ int64, _ stri
 }
 
 func (stubQuizStore) DeleteQuestion(_ context.Context, _ int64) error {
-	return nil
+	return errRouteStub
 }
 
 func (stubQuizStore) ListQuestions(_ context.Context, _ int64) ([]*quiz.Question, error) {
-	return nil, nil
+	return nil, errRouteStub
 }
 
 func (stubQuizStore) GetOption(_ context.Context, _ int64) (*quiz.Option, error) {
-	return &quiz.Option{}, nil
+	return nil, errRouteStub
 }
 
 func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Option, error) {
-	return nil, nil
+	return nil, errRouteStub
+}
+
+func (stubQuizStore) ListBreaksByQuiz(_ context.Context, _ int64) ([]*quiz.Break, error) {
+	return nil, errRouteStub
+}
+
+func (stubQuizStore) GetBreak(_ context.Context, _ int64) (*quiz.Break, error) {
+	return nil, errRouteStub
+}
+
+func (stubQuizStore) CreateBreakAtNextPosition(_ context.Context, _ *quiz.Break) error {
+	return errRouteStub
+}
+
+func (stubQuizStore) UpdateBreak(_ context.Context, _ *quiz.Break) error {
+	return errRouteStub
+}
+
+func (stubQuizStore) DeleteBreak(_ context.Context, _ int64) error {
+	return errRouteStub
 }
 
 type stubGameStore struct{}
@@ -174,31 +194,31 @@ func (stubGameStore) CreateAnswer(_ context.Context, _ *game.Answer) error     {
 func (stubGameStore) ListAnswersForQuizLeaderboard(
 	_ context.Context, _ int64,
 ) ([]*game.LeaderboardAnswer, error) {
-	return nil, nil
+	return nil, errRouteStub
 }
 
 func (stubGameStore) ListParticipantsForQuizLeaderboard(
 	_ context.Context, _ int64, _ time.Time,
 ) ([]*game.LeaderboardParticipant, error) {
-	return nil, nil
+	return nil, errRouteStub
 }
 
 func (stubGameStore) DeleteGamesForPlayerOnQuiz(_ context.Context, _, _ int64) error {
-	return nil
+	return errRouteStub
 }
 
 func (stubGameStore) ListQuizIDsForPlayer(_ context.Context, _ int64) ([]int64, error) {
-	return nil, nil
+	return nil, errRouteStub
 }
 
 type stubHomeStore struct{}
 
 func (stubHomeStore) ListPopularQuizzes(_ context.Context) ([]*home.PopularQuiz, error) {
-	return nil, nil
+	return nil, errRouteStub
 }
 
 func (stubHomeStore) ListMostActivePlayers(_ context.Context) ([]*home.ActivePlayer, error) {
-	return nil, nil
+	return nil, errRouteStub
 }
 
 func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {

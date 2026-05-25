@@ -36,6 +36,7 @@ const ADMIN_USERNAMES = [
   'e2e-admin-287-conflict-chromium', 'e2e-admin-287-conflict-firefox',        // api-error-handling.spec.ts 409 branch
   'e2e-admin-quizzes-chromium', 'e2e-admin-quizzes-firefox',                  // player.spec.ts #284 public list test
   'e2e-admin-resume-chromium', 'e2e-admin-resume-firefox',                    // resume.spec.ts #310
+  'e2e-admin-breaks-chromium', 'e2e-admin-breaks-firefox',                    // admin.spec.ts break CRUD (#167)
 ].join(',');
 
 const workerServer = (workerIndex: number) => {

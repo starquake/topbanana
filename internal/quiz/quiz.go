@@ -70,6 +70,24 @@ type Store interface {
 	DeleteQuiz(ctx context.Context, id int64) error
 	// DeleteQuestion deletes a question and all its options by ID.
 	DeleteQuestion(ctx context.Context, id int64) error
+	// ListBreaksByQuiz returns the breaks for a quiz in ascending
+	// position order (#167).
+	ListBreaksByQuiz(ctx context.Context, quizID int64) ([]*Break, error)
+	// GetBreak returns a break by its ID. Returns ErrBreakNotFound when
+	// the row does not exist.
+	GetBreak(ctx context.Context, id int64) (*Break, error)
+	// CreateBreakAtNextPosition reads max(position)+1 and inserts the
+	// break with that position inside a single transaction, mirroring
+	// CreateQuestionAtNextPosition (#352) so two concurrent "Add break"
+	// clicks can't both land on the same slot.
+	CreateBreakAtNextPosition(ctx context.Context, b *Break) error
+	// UpdateBreak updates an existing break's mutable fields (currently
+	// just text). Returns ErrUpdatingBreakNoRowsAffected when the id
+	// does not match a row.
+	UpdateBreak(ctx context.Context, b *Break) error
+	// DeleteBreak removes a break by ID. Returns
+	// ErrDeletingBreakNoRowsAffected when the id does not match a row.
+	DeleteBreak(ctx context.Context, id int64) error
 }
 
 var (
@@ -118,6 +136,18 @@ var (
 	// translate the collision into a 409 + inline form error instead of
 	// the generic 500 the wrapped SQLite error would produce (#293).
 	ErrSlugTaken = errors.New("quiz slug already in use")
+	// ErrBreakNotFound is returned when a break is not found (#167).
+	ErrBreakNotFound = errors.New("break not found")
+	// ErrUpdatingBreakNoRowsAffected is returned when an UPDATE breaks
+	// statement matches no rows; surfaces a stale id without the caller
+	// having to inspect a sql.Result (#167).
+	ErrUpdatingBreakNoRowsAffected = errors.New("no rows affected when updating break")
+	// ErrDeletingBreakNoRowsAffected is returned when a DELETE breaks
+	// statement matches no rows (#167).
+	ErrDeletingBreakNoRowsAffected = errors.New("no rows affected when deleting break")
+	// ErrCannotUpdateBreakWithIDZero guards UpdateBreak against a
+	// caller that forgot to set the ID (#167).
+	ErrCannotUpdateBreakWithIDZero = errors.New("cannot update break with ID 0")
 )
 
 // Reorder directions accepted by [Store.SwapQuestionPositions].
@@ -217,4 +247,18 @@ type Option struct {
 	QuestionID int64
 	Text       string
 	Correct    bool
+}
+
+// Break is an authored interlude between questions (#167). Slice 1
+// renders breaks in a separate admin section; slice 2 will interleave
+// them with questions in the play loop using the shared per-quiz
+// position space. Text is optional — an empty string is valid and the
+// player UI in slice 2 will fall back to "Continue" alone.
+type Break struct {
+	ID        int64
+	QuizID    int64
+	Position  int
+	Text      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }

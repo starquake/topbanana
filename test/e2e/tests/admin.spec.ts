@@ -38,6 +38,57 @@ test('admin quiz view hides answer options behind a per-question spoiler toggle'
   await expect(firstSummary).toContainText('Show spoilers');
 });
 
+test('admin can add, edit, and delete a break on a quiz', async ({ page, browserName }) => {
+  // #167 slice 1 — break CRUD through the admin UI. The break renders
+  // in its own section on the quiz view; slice 2 will interleave with
+  // questions in the play loop.
+  const username = `e2e-admin-breaks-${browserName}`;
+  const quizTitle = `E2E Breaks Quiz ${browserName}`;
+
+  await registerAdmin(page, username);
+
+  // Create a bare quiz — we don't need any questions for the break
+  // flow, so skip the full createQuizWithQuestions helper.
+  await page.goto('/admin/quizzes/new');
+  await page.locator('input[name=title]').fill(quizTitle);
+  await page.locator(':is(input, textarea)[name=description]').fill('E2E quiz with breaks');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+
+  // The empty-state placeholder confirms the Breaks section rendered.
+  await expect(page.getByText('This quiz has no breaks yet.')).toBeVisible();
+
+  // Add a break with some text.
+  await page.getByRole('link', { name: /add break/i }).click();
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/breaks\/new$/);
+  await page.locator(':is(input, textarea)[name=text]').fill('Halfway through!');
+  await page.getByRole('button', { name: 'Save break' }).click();
+
+  // Lands on the quiz view; the break should show up under Breaks.
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+  await expect(page.getByText('Halfway through!')).toBeVisible();
+
+  // Edit the break and check the new text takes.
+  await page.getByRole('link', { name: 'Edit break' }).click();
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/breaks\/\d+\/edit$/);
+  await page.locator(':is(input, textarea)[name=text]').fill('Take a deep breath');
+  await page.getByRole('button', { name: 'Save break' }).click();
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+  await expect(page.getByText('Take a deep breath')).toBeVisible();
+  await expect(page.getByText('Halfway through!')).toBeHidden();
+
+  // Delete the break via the per-row modal.
+  await page.getByRole('button', { name: 'Delete break' }).click();
+  // The modal's submit button is labelled "Delete" — scope to the
+  // delete-break dialog so it doesn't collide with the delete-quiz one.
+  const deleteDialog = page.locator('[id^="modal-delete-break-"]');
+  await deleteDialog.getByRole('button', { name: 'Delete' }).click();
+
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+  await expect(page.getByText('Take a deep breath')).toBeHidden();
+  await expect(page.getByText('This quiz has no breaks yet.')).toBeVisible();
+});
+
 test('register, create a quiz with varied questions, and see them on the quiz view', async ({ page, browserName }) => {
   // Each browser project runs against the same shared server, so use unique
   // names per project. ADMIN_USERNAMES (in playwright.config.ts) whitelists

@@ -823,12 +823,10 @@ func HandleQuizView(
 		LastQuestionIndex int // len(.Quiz.Questions) - 1; used by the
 		// template to disable the Down button on the last row. Sized
 		// here because html/template lacks a `sub` builtin.
+		Breaks []*BreakData // ordered by position. Rendered in a
+		// separate section below Questions in slice 1 (#167); the
+		// interleaved view lands in slice 2.
 	}
-
-	// playersLimit is the upper bound on rows in the "Played by" section.
-	// Set high enough that real-world quiz playthroughs fit; #141 covers
-	// pagination for genuinely large rosters.
-	const playersLimit = 1000
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
@@ -843,34 +841,22 @@ func HandleQuizView(
 			return
 		}
 
-		// Admin "Played by" doesn't highlight a current player — the
-		// template ignores IsCurrentPlayer — so pass 0 to flag nothing,
-		// per Service.GetQuizLeaderboard's documented sentinel. The
-		// admin view also has no concept of "viewer score" so the
-		// CurrentPlayer field of the result is irrelevant here.
-		result, err := gameService.GetQuizLeaderboard(r.Context(), id, 0, playersLimit)
-		if err != nil {
-			logger.ErrorContext(r.Context(), "error fetching players for quiz view", slog.Any("err", err))
-			render500(w, r, logger, csrfMgr)
-
+		players, ok := loadCompletedPlayers(w, r, logger, csrfMgr, gameService, id)
+		if !ok {
 			return
 		}
 
-		// Skip mid-quiz / pre-answer entries (#244/#335). The public
-		// leaderboard surfaces them so other players can see who's still
-		// in the game, but the admin "Played by" only lists finished
-		// attempts so the Reset button never pulls the rug from a live
-		// session.
-		players := make([]PlayerScoreData, 0, len(result.Entries))
-		for _, e := range result.Entries {
-			if !e.Completed {
-				continue
-			}
-			players = append(players, PlayerScoreData{
-				PlayerID: e.PlayerID,
-				Username: e.Username,
-				Score:    e.Score,
-			})
+		// Breaks render in their own admin section below Questions
+		// (#167 slice 1). A missing-breaks fetch is a 500 — the section
+		// is wired into the same admin view that already needed the
+		// quiz tree, so an opaque DB failure shouldn't leak as an empty
+		// list.
+		breaks, err := quizStore.ListBreaksByQuiz(r.Context(), id)
+		if err != nil {
+			logger.ErrorContext(r.Context(), "error listing breaks for quiz view", slog.Any("err", err))
+			render500(w, r, logger, csrfMgr)
+
+			return
 		}
 
 		quizData := quizDataFromQuiz(qz)
@@ -880,9 +866,54 @@ func HandleQuizView(
 			Quiz:              quizData,
 			Players:           players,
 			LastQuestionIndex: len(quizData.Questions) - 1,
+			Breaks:            breakDataFromBreaks(breaks),
 		}
 		render.Render(w, r, http.StatusOK, data)
 	})
+}
+
+// quizViewPlayersLimit is the upper bound on rows in the "Played by"
+// section. Set high enough that real-world quiz playthroughs fit; #141
+// covers pagination for genuinely large rosters.
+const quizViewPlayersLimit = 1000
+
+// loadCompletedPlayers pulls the leaderboard for the given quiz and
+// returns only the entries that finished. Mid-quiz / pre-answer
+// entries are skipped (#244/#335) so the admin's Reset button never
+// pulls the rug from a live session. Writes a 500 page and returns
+// ok=false on a service failure.
+func loadCompletedPlayers(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	gameService *game.Service,
+	quizID int64,
+) ([]PlayerScoreData, bool) {
+	// Admin "Played by" doesn't highlight a current player — the
+	// template ignores IsCurrentPlayer — so pass 0 to flag nothing,
+	// per Service.GetQuizLeaderboard's documented sentinel.
+	result, err := gameService.GetQuizLeaderboard(r.Context(), quizID, 0, quizViewPlayersLimit)
+	if err != nil {
+		logger.ErrorContext(r.Context(), "error fetching players for quiz view", slog.Any("err", err))
+		render500(w, r, logger, csrfMgr)
+
+		return nil, false
+	}
+
+	players := make([]PlayerScoreData, 0, len(result.Entries))
+	for _, e := range result.Entries {
+		if !e.Completed {
+			continue
+		}
+		players = append(players, PlayerScoreData{
+			PlayerID: e.PlayerID,
+			Username: e.Username,
+			Score:    e.Score,
+		})
+	}
+
+	return players, true
 }
 
 // HandleResetGameForPlayer hard-deletes the games (and dependent rows) that
@@ -1602,6 +1633,8 @@ func HandleQuestionSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 // failed and already wrote a response. Split out so
 // HandleQuestionSave's main flow stays under gocognit's threshold
 // while the participant + ownership gates remain consolidated.
+//
+//nolint:dupl // mirrored by loadBreakForSave (#167); see the note there.
 func loadQuestionForSave(
 	w http.ResponseWriter,
 	r *http.Request,

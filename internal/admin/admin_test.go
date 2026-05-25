@@ -84,7 +84,7 @@ func (s stubGameStore) ListAnswersForQuizLeaderboard(
 	ctx context.Context, quizID int64,
 ) ([]*game.LeaderboardAnswer, error) {
 	if s.listAnswersForQuizLeaderboard == nil {
-		return nil, nil
+		return nil, errors.New("listAnswersForQuizLeaderboard not supplied in stub")
 	}
 
 	return s.listAnswersForQuizLeaderboard(ctx, quizID)
@@ -98,7 +98,7 @@ func (s stubGameStore) ListParticipantsForQuizLeaderboard(
 	ctx context.Context, quizID int64, _ time.Time,
 ) ([]*game.LeaderboardParticipant, error) {
 	if s.listAnswersForQuizLeaderboard == nil {
-		return nil, nil
+		return nil, errors.New("listAnswersForQuizLeaderboard not supplied in stub")
 	}
 
 	answers, err := s.listAnswersForQuizLeaderboard(ctx, quizID)
@@ -127,7 +127,7 @@ func (s stubGameStore) DeleteGamesForPlayerOnQuiz(
 	ctx context.Context, playerID, quizID int64,
 ) error {
 	if s.deleteGamesForPlayerOnQuiz == nil {
-		return nil
+		return errors.New("deleteGamesForPlayerOnQuiz not supplied in stub")
 	}
 
 	return s.deleteGamesForPlayerOnQuiz(ctx, playerID, quizID)
@@ -135,7 +135,7 @@ func (s stubGameStore) DeleteGamesForPlayerOnQuiz(
 
 func (s stubGameStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]int64, error) {
 	if s.listQuizIDsForPlayer == nil {
-		return nil, nil
+		return nil, errors.New("listQuizIDsForPlayer not supplied in stub")
 	}
 
 	return s.listQuizIDsForPlayer(ctx, playerID)
@@ -167,6 +167,11 @@ type stubQuizStore struct {
 	deleteQuestion          func(ctx context.Context, id int64) error
 	listQuestions           func(ctx context.Context, quizID int64) ([]*quiz.Question, error)
 	swapQuestionPositions   func(ctx context.Context, quizID, questionID int64, direction string) error
+	listBreaksByQuiz        func(ctx context.Context, quizID int64) ([]*quiz.Break, error)
+	getBreakByID            func(ctx context.Context, id int64) (*quiz.Break, error)
+	createBreakAtNextPos    func(ctx context.Context, b *quiz.Break) error
+	updateBreak             func(ctx context.Context, b *quiz.Break) error
+	deleteBreak             func(ctx context.Context, id int64) error
 }
 
 func (stubQuizStore) Ping(_ context.Context) error {
@@ -297,6 +302,46 @@ func (stubQuizStore) GetOption(_ context.Context, _ int64) (*quiz.Option, error)
 
 func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Option, error) {
 	return nil, errors.New("GetOptionsByIDs not implemented in stub")
+}
+
+func (s stubQuizStore) ListBreaksByQuiz(ctx context.Context, quizID int64) ([]*quiz.Break, error) {
+	if s.listBreaksByQuiz == nil {
+		return nil, errors.New("listBreaksByQuiz not supplied in stub")
+	}
+
+	return s.listBreaksByQuiz(ctx, quizID)
+}
+
+func (s stubQuizStore) GetBreak(ctx context.Context, id int64) (*quiz.Break, error) {
+	if s.getBreakByID == nil {
+		return nil, errors.New("getBreakByID not supplied in stub")
+	}
+
+	return s.getBreakByID(ctx, id)
+}
+
+func (s stubQuizStore) CreateBreakAtNextPosition(ctx context.Context, b *quiz.Break) error {
+	if s.createBreakAtNextPos == nil {
+		return errors.New("createBreakAtNextPos not supplied in stub")
+	}
+
+	return s.createBreakAtNextPos(ctx, b)
+}
+
+func (s stubQuizStore) UpdateBreak(ctx context.Context, b *quiz.Break) error {
+	if s.updateBreak == nil {
+		return errors.New("updateBreak not supplied in stub")
+	}
+
+	return s.updateBreak(ctx, b)
+}
+
+func (s stubQuizStore) DeleteBreak(ctx context.Context, id int64) error {
+	if s.deleteBreak == nil {
+		return errors.New("deleteBreak not supplied in stub")
+	}
+
+	return s.deleteBreak(ctx, id)
 }
 
 func TestTemplateRenderer_Render_LogsError(t *testing.T) {
@@ -638,9 +683,18 @@ func TestHandleQuizView(t *testing.T) {
 			quizExists: func(_ context.Context, _ int64) (bool, error) {
 				return true, nil
 			},
+			listBreaksByQuiz: func(_ context.Context, _ int64) ([]*quiz.Break, error) {
+				return nil, nil
+			},
 		}
 
-		handler := HandleQuizView(logger, nil, quizStore, newGameService(stubGameStore{}, quizStore))
+		gameStore := stubGameStore{
+			listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*game.LeaderboardAnswer, error) {
+				return nil, nil
+			},
+		}
+
+		handler := HandleQuizView(logger, nil, quizStore, newGameService(gameStore, quizStore))
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest error: %v", err)
@@ -3153,6 +3207,9 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 			quizExists: func(_ context.Context, _ int64) (bool, error) {
 				return true, nil
 			},
+			listBreaksByQuiz: func(_ context.Context, _ int64) ([]*quiz.Break, error) {
+				return nil, nil
+			},
 		}
 		// Two leaderboard answers for two distinct players, both correct,
 		// so each player accumulates a non-zero score and shows up in the
@@ -3215,8 +3272,15 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 			quizExists: func(_ context.Context, _ int64) (bool, error) {
 				return true, nil
 			},
+			listBreaksByQuiz: func(_ context.Context, _ int64) ([]*quiz.Break, error) {
+				return nil, nil
+			},
 		}
-		gameStore := stubGameStore{} // no leaderboard rows
+		gameStore := stubGameStore{
+			listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*game.LeaderboardAnswer, error) {
+				return nil, nil
+			},
+		}
 
 		handler := HandleQuizView(logger, nil, quizStore, newGameService(gameStore, quizStore))
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)

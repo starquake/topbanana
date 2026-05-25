@@ -84,19 +84,19 @@ func (s stubQuizStore) GetOption(ctx context.Context, id int64) (*quiz.Option, e
 	return s.getOption(ctx, id)
 }
 
-func (stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error         { return nil }
-func (stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error         { return nil }
-func (stubQuizStore) DeleteQuiz(_ context.Context, _ int64) error              { return nil }
-func (stubQuizStore) CreateQuestion(_ context.Context, _ *quiz.Question) error { return nil }
+func (stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error         { return errStub }
+func (stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error         { return errStub }
+func (stubQuizStore) DeleteQuiz(_ context.Context, _ int64) error              { return errStub }
+func (stubQuizStore) CreateQuestion(_ context.Context, _ *quiz.Question) error { return errStub }
 func (stubQuizStore) CreateQuestionAtNextPosition(_ context.Context, _ *quiz.Question) error {
-	return nil
+	return errStub
 }
-func (stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error { return nil }
+func (stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error { return errStub }
 
 func (stubQuizStore) SwapQuestionPositions(_ context.Context, _, _ int64, _ string) error {
 	return errStub
 }
-func (stubQuizStore) DeleteQuestion(_ context.Context, _ int64) error { return nil }
+func (stubQuizStore) DeleteQuestion(_ context.Context, _ int64) error { return errStub }
 
 func (stubQuizStore) ListQuestions(_ context.Context, _ int64) ([]*quiz.Question, error) {
 	return nil, errStub
@@ -113,6 +113,20 @@ func (s stubQuizStore) GetQuestion(ctx context.Context, id int64) (*quiz.Questio
 func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Option, error) {
 	return nil, errStub
 }
+
+func (stubQuizStore) ListBreaksByQuiz(_ context.Context, _ int64) ([]*quiz.Break, error) {
+	return nil, errStub
+}
+
+func (stubQuizStore) GetBreak(_ context.Context, _ int64) (*quiz.Break, error) {
+	return nil, errStub
+}
+
+func (stubQuizStore) CreateBreakAtNextPosition(_ context.Context, _ *quiz.Break) error {
+	return errStub
+}
+func (stubQuizStore) UpdateBreak(_ context.Context, _ *quiz.Break) error { return errStub }
+func (stubQuizStore) DeleteBreak(_ context.Context, _ int64) error       { return errStub }
 
 type stubGameStore struct {
 	getGame                            func(ctx context.Context, id string) (*game.Game, error)
@@ -171,7 +185,7 @@ func (s stubGameStore) DeleteGamesForPlayerOnQuiz(
 
 func (s stubGameStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]int64, error) {
 	if s.listQuizIDsForPlayer == nil {
-		return nil, nil
+		return nil, errStub
 	}
 
 	return s.listQuizIDsForPlayer(ctx, playerID)
