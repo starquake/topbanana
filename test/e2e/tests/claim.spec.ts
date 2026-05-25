@@ -23,8 +23,7 @@ test('start screen shows a Playing as card with an auto-generated petname for a 
   const name = await card.getByTestId('claim-cta-name').textContent();
   expect(name).toMatch(PETNAME_PATTERN);
 
-  // Body copy and button label both default to the "no name picked yet" branch.
-  await expect(card.getByText('Pick a display name', { exact: false })).toBeVisible();
+  // Button label defaults to the "no name picked yet" branch.
   await expect(page.getByRole('button', { name: 'Set your name' })).toBeVisible();
 });
 
@@ -53,11 +52,10 @@ test('submitting a name via the start-screen modal updates the Playing as card i
   await modal.getByRole('button', { name: 'Save' }).click();
 
   // The modal closes on successful PATCH, and the card re-renders with the
-  // chosen name plus the "already claimed" branch of body copy and button label.
+  // chosen name plus the "already claimed" branch of the button label.
   await expect(modal).toBeHidden();
   await expect(card.getByTestId('claim-cta-name')).toHaveText(chosenName);
   await expect(card.getByTestId('claim-cta-name')).not.toHaveText(petname ?? '');
-  await expect(card.getByText('Not happy with it?', { exact: false })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Change your name' })).toBeVisible();
   // The "Set your name" span is also still in the DOM (gated by x-show), so
   // assert on its visibility rather than DOM count.
@@ -194,7 +192,7 @@ test('signed-in player does not see the claim-name CTA on the player client', as
 });
 
 // Test 6 — sign-in CTA on the claim-name callout (#431).
-test('claim-name callout includes a sign-in button that routes to /login', async ({ page }) => {
+test('claim-name callout includes a sign-in link that routes to /login', async ({ page }) => {
   await page.goto('/client/');
 
   const card = page.locator('.claim-cta:visible');
@@ -202,8 +200,7 @@ test('claim-name callout includes a sign-in button that routes to /login', async
 
   const signIn = card.getByTestId('claim-cta-signin');
   await expect(signIn).toBeVisible();
-  await expect(signIn).toHaveText('Make it yours');
-  await expect(card.getByText('Sign in or create an account', { exact: false })).toBeVisible();
+  await expect(card.getByText('to keep this name across devices', { exact: false })).toBeVisible();
 
   // Wait on the URL change because the link is plain navigation, not an Alpine event.
   await Promise.all([

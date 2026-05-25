@@ -83,38 +83,27 @@
                  hasCustomName() instead — see #165. -->
             <template x-if="!isAuthenticated() && (!gameId || finished)">
                 <article class="claim-cta mb-6">
-                    <p class="label-eyebrow">Playing as</p>
-                    <p data-testid="claim-cta-name" class="font-mono text-accent text-[1.05rem] mb-4 break-all" x-text="player ? player.username : ''"></p>
-                    <p class="text-text-dim mb-5 leading-relaxed" x-show="!hasCustomName()">
-                        Pick a display name and your leaderboard row will show it
-                        instead of the random one above.
-                    </p>
-                    <p class="text-text-dim mb-5 leading-relaxed" x-show="hasCustomName()">
-                        Not happy with it? Pick a different display name.
-                    </p>
-                    {{/* Right-aligned to keep the claim CTA's primary
-                         action under the right thumb on phones — same
-                         positioning rationale as the Start Game button
-                         below. The wrapper avoids changing button-level
-                         classes (.btn-primary is reused elsewhere). */}}
-                    <div class="flex justify-end">
-                        <button class="btn-primary" @click="openClaimModal()">
+                    {{/* Single-row layout: eyebrow + name on the left,
+                         primary action on the right. flex-wrap drops
+                         the button below the name on narrow viewports.
+                         The sign-in link is a low-contrast text line
+                         below; /login is provider-agnostic so the
+                         single link covers every enabled method. */}}
+                    <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+                        <div class="min-w-0">
+                            <p class="label-eyebrow">Playing as</p>
+                            <p data-testid="claim-cta-name" class="font-mono text-accent text-[1.05rem] break-all" x-text="player ? player.username : ''"></p>
+                        </div>
+                        <button class="btn-primary ml-auto" @click="openClaimModal()">
                             <span x-show="!hasCustomName()">Set your name</span>
                             <span x-show="hasCustomName()">Change your name</span>
                         </button>
                     </div>
-
-                    {{/* Sign-in escape hatch. /login is provider-agnostic,
-                         so a single link covers password + Google +
-                         future providers. One-row flex keeps the
-                         start-screen height under player.spec.ts's
-                         scrollHeight ceiling. */}}
-                    <div class="mt-4 pt-4 border-t border-border-soft flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-                        <p class="text-text-dim text-sm leading-relaxed flex-1 min-w-[14rem] mb-0">
-                            Sign in or create an account to keep this name across devices.
-                        </p>
-                        <a href="/login" class="btn-ghost" data-testid="claim-cta-signin">Make it yours</a>
-                    </div>
+                    <p class="mt-3 text-text-dim text-sm text-right">
+                        or
+                        <a href="/login" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="claim-cta-signin">sign in</a>
+                        to keep this name across devices
+                    </p>
                 </article>
             </template>
 
