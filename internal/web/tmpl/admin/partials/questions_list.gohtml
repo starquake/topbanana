@@ -21,13 +21,9 @@
     {{range $i, $q := .Quiz.Questions}}
         <article class="q-row">
             <div class="q-position">{{printf "%02d" $q.Position}}</div>
-            <div class="q-thumb">
-                {{if $q.ImageURL}}
-                    <img src="{{$q.ImageURL}}" alt="" class="w-full h-full object-cover">
-                {{else}}
-                    IMG
-                {{end}}
-            </div>
+            {{/* Image thumbnail hidden pending #426. ImageURL is still
+                 carried on the row; render is suppressed until the
+                 image feature work resumes. */}}
             <div class="q-body">
                 <p class="q-text">{{$q.Text}}</p>
                 {{/* #246 — options sit behind a per-question spoiler so an
