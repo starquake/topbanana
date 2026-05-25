@@ -22,10 +22,11 @@
                 {{end}}
             </div>
 
-            {{/* Quiz.CanEdit is resolved server-side from the session
-                 player + creator (admin.go's attachCanEdit). Pulled
-                 into a local alias for readability since the partial
-                 and a few inline conditionals all key on it. */}}
+            {{/* Pull CanEdit into a local alias so the partial below
+                 and a handful of inline conditionals all key on the
+                 same name. CanEdit is true when the requesting player
+                 owns the quiz (or is an admin); the rest of this
+                 template treats it as opaque. */}}
             {{$canEdit := .Quiz.CanEdit}}
             <h1 class="mb-3 flex items-center gap-3 font-display font-extrabold leading-[1.05] tracking-tight uppercase text-[clamp(1.85rem,5.5vw,2.5rem)]">
                 <span>{{.Quiz.Title}}</span>
@@ -139,19 +140,22 @@
             </div>
         </div>
 
-        {{/* Questions section */}}
-        <section aria-label="Questions">
+        {{/* Sequence section. Questions are shown interleaved with
+             breaks in the order they appear during play (#167). Break
+             rows are visually distinct from question rows so the admin
+             can scan the play order at a glance. */}}
+        <section aria-label="Sequence">
             <div class="section-head">
-                <h2>Questions</h2>
+                <h2>Sequence</h2>
                 {{if .Quiz.Questions}}
-                    <span class="section-count">{{len .Quiz.Questions}} question{{if ne (len .Quiz.Questions) 1}}s{{end}}</span>
+                    <span class="section-count">{{len .Quiz.Questions}} question{{if ne (len .Quiz.Questions) 1}}s{{end}}{{if .Breaks}}, {{len .Breaks}} break{{if ne (len .Breaks) 1}}s{{end}}{{end}}</span>
                 {{end}}
             </div>
 
-            {{if .Quiz.Questions}}
+            {{if or .Quiz.Questions .Breaks}}
                 {{template "questions_list" .}}
 
-                {{/* Delete-question modals — only mounted for the
+                {{/* Delete-question modals - only mounted for the
                      creator so non-owners can't open the dialog. The
                      questions_list partial gates the per-question
                      buttons on the same rule. */}}
@@ -181,6 +185,31 @@
                         </div>
                     </div>
                 {{end}}
+                {{range .Breaks}}
+                    <div id="modal-delete-break-{{.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-delete-break-{{.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
+                        <div class="absolute inset-0" onclick="closeModal('modal-delete-break-{{.ID}}')"></div>
+                        <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
+                            <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
+                                <p id="modal-delete-break-{{.ID}}-title" class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Delete break</p>
+                                <button type="button" aria-label="close"
+                                        onclick="closeModal('modal-delete-break-{{.ID}}')"
+                                        class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer">&times;</button>
+                            </header>
+                            <section class="px-6 py-5 text-[0.95rem]">
+                                Are you sure you want to delete this break? This action cannot be undone.
+                            </section>
+                            <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
+                                <button type="button"
+                                        onclick="closeModal('modal-delete-break-{{.ID}}')"
+                                        class="btn-ghost">Cancel</button>
+                                <form method="post" action="/admin/quizzes/{{.QuizID}}/breaks/{{.ID}}/delete" class="inline-flex">
+                                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                                    <button type="submit" class="btn-danger">Delete</button>
+                                </form>
+                            </footer>
+                        </div>
+                    </div>
+                {{end}}
                 {{end}}
             {{else}}
                 <div class="border border-dashed border-border rounded-xl p-10 text-center text-text-dim">
@@ -189,11 +218,16 @@
             {{end}}
 
             {{if $canEdit}}
-            <div class="mt-6">
+            <div class="mt-6 flex flex-wrap gap-2">
                 <a href="/admin/quizzes/{{.Quiz.ID}}/questions/new"
                    class="btn-primary gap-2">
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5a.5.5 0 0 1 .5.5v5.5H14a.5.5 0 0 1 0 1H8.5V14a.5.5 0 0 1-1 0V8.5H2a.5.5 0 0 1 0-1h5.5V2a.5.5 0 0 1 .5-.5z"/></svg>
                     <span>Add question</span>
+                </a>
+                <a href="/admin/quizzes/{{.Quiz.ID}}/breaks/new"
+                   class="btn-ghost gap-2">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5a.5.5 0 0 1 .5.5v5.5H14a.5.5 0 0 1 0 1H8.5V14a.5.5 0 0 1-1 0V8.5H2a.5.5 0 0 1 0-1h5.5V2a.5.5 0 0 1 .5-.5z"/></svg>
+                    <span>Add break</span>
                 </a>
             </div>
             {{end}}

@@ -247,6 +247,46 @@ func addAdminRoutes(
 		"POST /admin/quizzes/{quizID}/questions/{questionID}/move/{direction}",
 		csrfMW(requireAdmin(admin.HandleQuestionMove(logger, csrfMgr, stores.Quizzes))),
 	)
+
+	addAdminBreakRoutes(mux, logger, stores, csrfMW, requireAdmin, csrfMgr)
+}
+
+// addAdminBreakRoutes registers the break CRUD routes (#167). Split
+// out of addAdminRoutes so that function stays under revive's
+// function-length limit; the breaks block is otherwise structurally
+// identical to the questions block above.
+func addAdminBreakRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	stores *store.Stores,
+	csrfMW func(http.Handler) http.Handler,
+	requireAdmin func(http.Handler) http.Handler,
+	csrfMgr *csrf.Manager,
+) {
+	mux.Handle(
+		"GET /admin/quizzes/{quizID}/breaks/new",
+		requireAdmin(admin.HandleBreakCreate(logger, csrfMgr, stores.Quizzes)),
+	)
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/breaks",
+		csrfMW(requireAdmin(admin.HandleBreakSave(logger, csrfMgr, stores.Quizzes))),
+	)
+	mux.Handle(
+		"GET /admin/quizzes/{quizID}/breaks/{breakID}/edit",
+		requireAdmin(admin.HandleBreakEdit(logger, csrfMgr, stores.Quizzes)),
+	)
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/breaks/{breakID}",
+		csrfMW(requireAdmin(admin.HandleBreakSave(logger, csrfMgr, stores.Quizzes))),
+	)
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/breaks/{breakID}/delete",
+		csrfMW(requireAdmin(admin.HandleBreakDelete(logger, csrfMgr, stores.Quizzes))),
+	)
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/breaks/{breakID}/move/{direction}",
+		csrfMW(requireAdmin(admin.HandleBreakMove(logger, csrfMgr, stores.Quizzes))),
+	)
 }
 
 // addAPIRoutes registers the JSON API routes consumed by the game client.

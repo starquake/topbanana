@@ -816,20 +816,6 @@ func HandleQuizView(
 ) http.Handler {
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
 
-	type quizViewData struct {
-		Title             string
-		Quiz              *QuizData
-		Players           []PlayerScoreData
-		LastQuestionIndex int // len(.Quiz.Questions) - 1; used by the
-		// template to disable the Down button on the last row. Sized
-		// here because html/template lacks a `sub` builtin.
-	}
-
-	// playersLimit is the upper bound on rows in the "Played by" section.
-	// Set high enough that real-world quiz playthroughs fit; #141 covers
-	// pagination for genuinely large rosters.
-	const playersLimit = 1000
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
 
@@ -843,46 +829,236 @@ func HandleQuizView(
 			return
 		}
 
-		// Admin "Played by" doesn't highlight a current player — the
-		// template ignores IsCurrentPlayer — so pass 0 to flag nothing,
-		// per Service.GetQuizLeaderboard's documented sentinel. The
-		// admin view also has no concept of "viewer score" so the
-		// CurrentPlayer field of the result is irrelevant here.
-		result, err := gameService.GetQuizLeaderboard(r.Context(), id, 0, playersLimit)
-		if err != nil {
-			logger.ErrorContext(r.Context(), "error fetching players for quiz view", slog.Any("err", err))
-			render500(w, r, logger, csrfMgr)
-
+		players, ok := loadCompletedPlayers(w, r, logger, csrfMgr, gameService, id)
+		if !ok {
 			return
 		}
 
-		// Skip mid-quiz / pre-answer entries (#244/#335). The public
-		// leaderboard surfaces them so other players can see who's still
-		// in the game, but the admin "Played by" only lists finished
-		// attempts so the Reset button never pulls the rug from a live
-		// session.
-		players := make([]PlayerScoreData, 0, len(result.Entries))
-		for _, e := range result.Entries {
-			if !e.Completed {
-				continue
-			}
-			players = append(players, PlayerScoreData{
-				PlayerID: e.PlayerID,
-				Username: e.Username,
-				Score:    e.Score,
-			})
+		breaks, ok := loadBreaks(w, r, logger, csrfMgr, quizStore, id)
+		if !ok {
+			return
 		}
 
 		quizData := quizDataFromQuiz(qz)
 		attachCanEdit(r, quizData)
-		data := quizViewData{
-			Title:             "Admin Dashboard - View Quiz",
-			Quiz:              quizData,
-			Players:           players,
-			LastQuestionIndex: len(quizData.Questions) - 1,
-		}
+		data := newQuizViewData(quizData, players, breaks)
 		render.Render(w, r, http.StatusOK, data)
 	})
+}
+
+// QuizViewData is the data passed to the quiz view template. Sequence
+// is the merged question + break order; the template ranges over it
+// instead of the raw Questions/Breaks slices so the html stays simple
+// (#167).
+type QuizViewData struct {
+	Title   string
+	Quiz    *QuizData
+	Players []PlayerScoreData
+	// LastQuestionIndex is len(Quiz.Questions) - 1; the partial keys
+	// the move-down button's disabled state on it. Sized here because
+	// html/template lacks a sub builtin.
+	LastQuestionIndex int
+	// Sequence is the interleaved question + break play order.
+	Sequence []SequenceItem
+	// Breaks is the position-ordered break list, preserved for the
+	// delete-modal mount loop in the template (the partial only sees
+	// breaks via Sequence).
+	Breaks []*BreakData
+}
+
+// SequenceItem is one row in the interleaved question + break sequence
+// rendered by the quiz view. Exactly one of Question / Break is set;
+// the template branches on Kind so it can render the two visually
+// distinct row variants from a single range.
+type SequenceItem struct {
+	Kind     string // "question" or "break"
+	Question *QuestionData
+	Break    *BreakData
+	// QuestionIndex is the 0-based index of the question among the
+	// quiz's questions (used to size the move-up/move-down disabled
+	// state). Zero for break rows.
+	QuestionIndex int
+	// CanMoveUp and CanMoveDown drive the visibility of the per-row
+	// arrow buttons on break rows. A break can move up when the slot
+	// at position-1 exists in the play sequence (0 or one of the
+	// questions' positions) and is not already taken by another break;
+	// move down is the same check on position+1. Always false for
+	// question rows - questions use QuestionIndex / LastQuestionIndex
+	// instead.
+	CanMoveUp   bool
+	CanMoveDown bool
+}
+
+const (
+	sequenceKindQuestion = "question"
+	sequenceKindBreak    = "break"
+)
+
+// buildSequence interleaves the quiz's questions with its breaks
+// according to break.Position semantics: a break with position 0 sits
+// before the first question; a break with position N sits immediately
+// after the question whose [QuestionData.Position] equals N. Questions
+// are sorted by their own Position before the merge so the resulting
+// slice reflects the play order (#167).
+//
+// Each break row also carries CanMoveUp / CanMoveDown so the template
+// can hide the arrow buttons that would land on an invalid or
+// occupied slot. The store's MoveBreak re-validates the same check,
+// so a stale form post never corrupts the play order; the per-row
+// flags are a UX nicety, not a security boundary.
+//
+// Multiple breaks at the same slot are disallowed by the DB unique
+// index breaks_quiz_position_idx; if one ever slipped through the
+// merge still renders them in the order ListBreaksByQuiz returned them
+// (which is itself position-ordered).
+func buildSequence(questions []*QuestionData, breaks []*BreakData) []SequenceItem {
+	validSlots := make(map[int]bool, len(questions)+1)
+	validSlots[0] = true
+	for _, q := range questions {
+		validSlots[q.Position] = true
+	}
+	occupied := make(map[int]bool, len(breaks))
+	for _, b := range breaks {
+		occupied[b.Position] = true
+	}
+
+	// Map position -> breaks at that slot, so a single linear pass over
+	// the (already-sorted) questions can pick them up. The "after slot
+	// N" semantics means a break with position 0 fires before question
+	// 1, so we emit the 0-slot first and then alternate (question,
+	// then any break at that question's position).
+	bySlot := make(map[int][]*BreakData, len(breaks))
+	for _, b := range breaks {
+		bySlot[b.Position] = append(bySlot[b.Position], b)
+	}
+
+	items := make([]SequenceItem, 0, len(questions)+len(breaks))
+	for _, b := range bySlot[0] {
+		items = append(items, breakSequenceItem(b, validSlots, occupied))
+	}
+	for i, q := range questions {
+		items = append(items, SequenceItem{
+			Kind:          sequenceKindQuestion,
+			Question:      q,
+			QuestionIndex: i,
+		})
+		for _, b := range bySlot[q.Position] {
+			items = append(items, breakSequenceItem(b, validSlots, occupied))
+		}
+	}
+
+	return items
+}
+
+// breakSequenceItem builds the SequenceItem for one break, deciding
+// the per-row CanMoveUp / CanMoveDown flags off the validSlots +
+// occupied sets passed in by buildSequence. Extracted so the move
+// rules sit in one spot instead of being inlined in both branches of
+// the merge loop.
+func breakSequenceItem(b *BreakData, validSlots, occupied map[int]bool) SequenceItem {
+	return SequenceItem{
+		Kind:        sequenceKindBreak,
+		Break:       b,
+		CanMoveUp:   canMoveBreak(b.Position-1, validSlots, occupied),
+		CanMoveDown: canMoveBreak(b.Position+1, validSlots, occupied),
+	}
+}
+
+// canMoveBreak reports whether a break is allowed to settle at
+// targetPos: the slot must exist in the play sequence and must not
+// already be occupied by another break. The break being moved is not
+// part of occupied for this check - its own position is excluded by
+// the +/-1 step the caller chose.
+func canMoveBreak(targetPos int, validSlots, occupied map[int]bool) bool {
+	if targetPos < 0 {
+		return false
+	}
+	if !validSlots[targetPos] {
+		return false
+	}
+	if occupied[targetPos] {
+		return false
+	}
+
+	return true
+}
+
+// loadBreaks fetches the quiz's breaks in position order. Errors are
+// 500s because the section is part of the same admin view that already
+// loaded the quiz tree; surfacing an empty list would hide the
+// failure.
+func loadBreaks(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	quizStore quiz.Store,
+	quizID int64,
+) ([]*BreakData, bool) {
+	breaks, err := quizStore.ListBreaksByQuiz(r.Context(), quizID)
+	if err != nil {
+		logger.ErrorContext(r.Context(), "error listing breaks for quiz view", slog.Any("err", err))
+		render500(w, r, logger, csrfMgr)
+
+		return nil, false
+	}
+
+	return breakDataFromBreaks(breaks), true
+}
+
+func newQuizViewData(quizData *QuizData, players []PlayerScoreData, breaks []*BreakData) QuizViewData {
+	return QuizViewData{
+		Title:             "Admin Dashboard - View Quiz",
+		Quiz:              quizData,
+		Players:           players,
+		LastQuestionIndex: len(quizData.Questions) - 1,
+		Sequence:          buildSequence(quizData.Questions, breaks),
+		Breaks:            breaks,
+	}
+}
+
+// quizViewPlayersLimit is the upper bound on rows in the "Played by"
+// section. Set high enough that real-world quiz playthroughs fit; #141
+// covers pagination for genuinely large rosters.
+const quizViewPlayersLimit = 1000
+
+// loadCompletedPlayers pulls the leaderboard for the given quiz and
+// returns only the entries that finished. Mid-quiz / pre-answer
+// entries are skipped (#244/#335) so the admin's Reset button never
+// pulls the rug from a live session. Writes a 500 page and returns
+// ok=false on a service failure.
+func loadCompletedPlayers(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	gameService *game.Service,
+	quizID int64,
+) ([]PlayerScoreData, bool) {
+	// Admin "Played by" doesn't highlight a current player — the
+	// template ignores IsCurrentPlayer — so pass 0 to flag nothing,
+	// per Service.GetQuizLeaderboard's documented sentinel.
+	result, err := gameService.GetQuizLeaderboard(r.Context(), quizID, 0, quizViewPlayersLimit)
+	if err != nil {
+		logger.ErrorContext(r.Context(), "error fetching players for quiz view", slog.Any("err", err))
+		render500(w, r, logger, csrfMgr)
+
+		return nil, false
+	}
+
+	players := make([]PlayerScoreData, 0, len(result.Entries))
+	for _, e := range result.Entries {
+		if !e.Completed {
+			continue
+		}
+		players = append(players, PlayerScoreData{
+			PlayerID: e.PlayerID,
+			Username: e.Username,
+			Score:    e.Score,
+		})
+	}
+
+	return players, true
 }
 
 // HandleResetGameForPlayer hard-deletes the games (and dependent rows) that
@@ -1460,9 +1636,15 @@ func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 	// is in scope for ExecuteTemplate by name.
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
 
+	// partialData mirrors the subset of QuizViewData the questions_list
+	// partial actually ranges over - questions interleaved with breaks
+	// by position, plus the index sentinel for the move-down disable
+	// state. Repeated verbatim here so the partial's contract stays
+	// machine-checkable.
 	type partialData struct {
 		Quiz              *QuizData
 		LastQuestionIndex int
+		Sequence          []SequenceItem
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1500,11 +1682,16 @@ func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 			if !fetchOK {
 				return
 			}
+			breaks, breaksOK := loadBreaks(w, r, logger, csrfMgr, quizStore, quizID)
+			if !breaksOK {
+				return
+			}
 			quizData := quizDataFromQuiz(qz)
 			attachCanEdit(r, quizData)
 			render.RenderPartial(w, r, "questions_list", partialData{
 				Quiz:              quizData,
 				LastQuestionIndex: len(quizData.Questions) - 1,
+				Sequence:          buildSequence(quizData.Questions, breaks),
 			})
 
 			return
@@ -1602,6 +1789,8 @@ func HandleQuestionSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 // failed and already wrote a response. Split out so
 // HandleQuestionSave's main flow stays under gocognit's threshold
 // while the participant + ownership gates remain consolidated.
+//
+//nolint:dupl // mirrored by loadBreakForSave (#167); see the note there.
 func loadQuestionForSave(
 	w http.ResponseWriter,
 	r *http.Request,

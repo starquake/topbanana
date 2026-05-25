@@ -9,6 +9,15 @@ import (
 	"time"
 )
 
+type Break struct {
+	ID        int64
+	QuizID    int64
+	Position  int64
+	Text      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 type Game struct {
 	ID        string
 	QuizID    int64

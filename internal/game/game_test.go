@@ -117,7 +117,7 @@ func (s stubStore) DeleteGamesForPlayerOnQuiz(
 
 func (s stubStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]int64, error) {
 	if s.listQuizIDsForPlayer == nil {
-		return nil, nil
+		return nil, errStub
 	}
 
 	return s.listQuizIDsForPlayer(ctx, playerID)
@@ -132,13 +132,13 @@ type stubQuizStore struct {
 }
 
 func (stubQuizStore) Ping(_ context.Context) error                        { return nil }
-func (stubQuizStore) ListQuizzes(_ context.Context) ([]*quiz.Quiz, error) { return nil, nil }
+func (stubQuizStore) ListQuizzes(_ context.Context) ([]*quiz.Quiz, error) { return nil, errStub }
 func (stubQuizStore) ListPublicQuizzes(_ context.Context) ([]*quiz.Quiz, error) {
-	return nil, nil
+	return nil, errStub
 }
 
 func (stubQuizStore) QuestionCountsByQuiz(_ context.Context) (map[int64]int, error) {
-	return map[int64]int{}, nil
+	return nil, errStub
 }
 
 func (s stubQuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
@@ -156,21 +156,21 @@ func (s stubQuizStore) QuizExists(ctx context.Context, id int64) (bool, error) {
 
 	return s.quizExists(ctx, id)
 }
-func (stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error         { return nil }
-func (stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error         { return nil }
-func (stubQuizStore) DeleteQuiz(_ context.Context, _ int64) error              { return nil }
-func (stubQuizStore) CreateQuestion(_ context.Context, _ *quiz.Question) error { return nil }
+func (stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error         { return errStub }
+func (stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error         { return errStub }
+func (stubQuizStore) DeleteQuiz(_ context.Context, _ int64) error              { return errStub }
+func (stubQuizStore) CreateQuestion(_ context.Context, _ *quiz.Question) error { return errStub }
 func (stubQuizStore) CreateQuestionAtNextPosition(_ context.Context, _ *quiz.Question) error {
-	return nil
+	return errStub
 }
-func (stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error { return nil }
+func (stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error { return errStub }
 
 func (stubQuizStore) SwapQuestionPositions(_ context.Context, _, _ int64, _ string) error {
 	return errStub
 }
-func (stubQuizStore) DeleteQuestion(_ context.Context, _ int64) error { return nil }
+func (stubQuizStore) DeleteQuestion(_ context.Context, _ int64) error { return errStub }
 func (stubQuizStore) ListQuestions(_ context.Context, _ int64) ([]*quiz.Question, error) {
-	return nil, nil
+	return nil, errStub
 }
 
 func (stubQuizStore) GetQuestion(_ context.Context, _ int64) (*quiz.Question, error) {
@@ -182,7 +182,24 @@ func (stubQuizStore) GetOption(_ context.Context, _ int64) (*quiz.Option, error)
 }
 
 func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Option, error) {
-	return nil, nil
+	return nil, errStub
+}
+
+func (stubQuizStore) ListBreaksByQuiz(_ context.Context, _ int64) ([]*quiz.Break, error) {
+	return nil, errStub
+}
+
+func (stubQuizStore) GetBreak(_ context.Context, _ int64) (*quiz.Break, error) {
+	return nil, errStub
+}
+
+func (stubQuizStore) CreateBreak(_ context.Context, _ *quiz.Break) error {
+	return errStub
+}
+func (stubQuizStore) UpdateBreak(_ context.Context, _ *quiz.Break) error { return errStub }
+func (stubQuizStore) DeleteBreak(_ context.Context, _ int64) error       { return errStub }
+func (stubQuizStore) MoveBreak(_ context.Context, _, _ int64, _ string) error {
+	return errStub
 }
 
 // seededAdminID is the id of the admin row inserted by migration
