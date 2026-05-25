@@ -208,6 +208,53 @@ WHERE players.id = sqlc.arg('id')
   AND players.email IS NULL
 RETURNING *;
 
+-- name: ListAllPlayers :many
+-- Returns one page of players for the admin players list (#423),
+-- ordered by created_at DESC so newest sign-ups land first. The
+-- derived has_oauth / oauth_provider fields surface the OAuth-link
+-- state in the same row so the handler does not have to issue a
+-- per-row lookup. Finished-quiz aggregates come from a separate
+-- ListPlayerFinishStats call against the page's player_ids; keeping
+-- the aggregate out of this query keeps the SELECT under sqlc's
+-- type-inference comfort zone and avoids a CTE / window function.
+SELECT
+    p.*,
+    EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id) AS has_oauth,
+    CAST(COALESCE((SELECT pi.provider FROM player_identities pi WHERE pi.player_id = p.id LIMIT 1), '') AS TEXT) AS oauth_provider
+FROM players p
+ORDER BY p.created_at DESC, p.id DESC
+LIMIT sqlc.arg('row_limit') OFFSET sqlc.arg('row_offset');
+
+-- name: CountAllPlayers :one
+-- Total players row count for the admin list pagination (#423).
+SELECT COUNT(*) FROM players;
+
+-- name: ListPlayerFinishStats :many
+-- Returns (finished_count, last_finished_at) for each supplied
+-- player_id. "Finished" matches the canonical definition used by
+-- ListMostActivePlayers / ListPopularQuizzes: every question of the
+-- quiz has been issued (game_questions rows >= questions rows) and
+-- the quiz still has questions (empty-quiz games don't count). Used
+-- by the admin players list (#423) to aggregate per-page without
+-- folding the condition into ListAllPlayers' SELECT.
+-- The CAST on MAX gives sqlc's SQLite engine an explicit type hint
+-- so the generated row's LastFinishedAt lands as a string rather
+-- than interface{}. sqlc cannot infer the type through MAX over a
+-- nullable column otherwise. The store wrapper parses the timestamp
+-- back to time.Time. Empty-group case never fires because the WHERE
+-- clause drops players with no finished games entirely.
+SELECT
+    gp.player_id AS player_id,
+    COUNT(DISTINCT g.id) AS finished_count,
+    CAST(MAX(g.created_at) AS TEXT) AS last_finished_at
+FROM game_participants gp
+JOIN games g ON g.id = gp.game_id
+WHERE gp.player_id IN (sqlc.slice('player_ids'))
+  AND EXISTS (SELECT 1 FROM questions qe WHERE qe.quiz_id = g.quiz_id)
+  AND (SELECT COUNT(*) FROM game_questions gq WHERE gq.game_id = g.id) >=
+      (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)
+GROUP BY gp.player_id;
+
 -- name: UpdatePlayerUsername :one
 -- Updates the username on an anonymous player row in place. The WHERE
 -- clause refuses the update when the player has already claimed a
