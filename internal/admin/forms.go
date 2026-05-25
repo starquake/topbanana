@@ -3,7 +3,6 @@ package admin
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/starquake/topbanana/internal/quiz"
 )
@@ -19,25 +18,28 @@ import (
 // the admin handlers' existing fillQuizFromForm flow stays
 // untouched — the form is built around the same domain pointer the
 // store call already consumes, no second mapping layer required.
+//
+// Problem map keys are the lowercase form-field names the templates
+// bind to (see `{{index .FieldErrors "title"}}` and friends in
+// internal/web/tmpl/admin/pages/*.gohtml). Emitting the right shape
+// directly avoids a translation step the handlers used to run.
 type quizForm struct {
 	quiz *quiz.Quiz
 }
 
 // Valid checks every form-level rule on the wrapped quiz, its
-// questions, and its options. Returns a problems map keyed by the
-// dotted field path that the per-field renderer (#32) consumes. An
-// empty map means the form is valid.
+// questions, and its options. An empty map means the form is valid.
 func (f *quizForm) Valid(ctx context.Context) map[string]string {
 	problems := make(map[string]string)
 	q := f.quiz
 	if q.Title == "" {
-		problems["Title"] = "Title is required"
+		problems["title"] = "Title is required"
 	}
 	if q.Slug == "" {
-		problems["Slug"] = "Slug is required"
+		problems["slug"] = "Slug is required"
 	}
 	if q.Description == "" {
-		problems["Description"] = "Description is required"
+		problems["description"] = "Description is required"
 	}
 	// Only flag the time-limit range when the caller actually set a
 	// value; a zero TimeLimitSeconds means "unset" (the store layer
@@ -46,7 +48,7 @@ func (f *quizForm) Valid(ctx context.Context) map[string]string {
 	// JSON-import path both rely on.
 	if q.TimeLimitSeconds != 0 &&
 		(q.TimeLimitSeconds < quiz.MinTimeLimitSeconds || q.TimeLimitSeconds > quiz.MaxTimeLimitSeconds) {
-		problems["TimeLimitSeconds"] = fmt.Sprintf(
+		problems["timelimitseconds"] = fmt.Sprintf(
 			"Time limit must be between %d and %d seconds",
 			quiz.MinTimeLimitSeconds, quiz.MaxTimeLimitSeconds,
 		)
@@ -55,17 +57,17 @@ func (f *quizForm) Valid(ctx context.Context) map[string]string {
 	// flag genuinely unrecognised values so the admin form's selector
 	// can surface them inline.
 	if q.Visibility != "" && !quiz.IsValidVisibility(q.Visibility) {
-		problems["Visibility"] = "Visibility must be one of: public, unlisted, private"
+		problems["visibility"] = "Visibility must be one of: public, unlisted, private"
 	}
 	for qsIndex, question := range q.Questions {
 		qf := &questionForm{question: question}
 		for k, v := range qf.Valid(ctx) {
-			problems[fmt.Sprintf("Questions[%d][%s]", qsIndex, k)] = v
+			problems[fmt.Sprintf("questions[%d][%s]", qsIndex, k)] = v
 		}
 		for oIndex, option := range question.Options {
 			of := &optionForm{option: option}
 			for k, v := range of.Valid(ctx) {
-				problems[fmt.Sprintf("Questions[%d].Options[%d][%s]", qsIndex, oIndex, k)] = v
+				problems[fmt.Sprintf("questions[%d].options[%d][%s]", qsIndex, oIndex, k)] = v
 			}
 		}
 	}
@@ -80,22 +82,22 @@ type questionForm struct {
 	question *quiz.Question
 }
 
-// Valid checks the question's field-level rules. The store layer
-// is responsible for cross-row invariants (e.g. unique position per
+// Valid checks the question's field-level rules. The store layer is
+// responsible for cross-row invariants (e.g. unique position per
 // quiz); this form is purely about input shape.
 func (f *questionForm) Valid(_ context.Context) map[string]string {
 	problems := make(map[string]string)
 	q := f.question
 	if q.Text == "" {
-		problems["Text"] = "Text is required"
+		problems["text"] = "Text is required"
 	}
 	if len(q.Options) == 0 {
-		problems["Options"] = "Options are required"
+		problems["options"] = "Options are required"
 	}
 	if q.TimeLimitSeconds != nil {
 		v := *q.TimeLimitSeconds
 		if v < quiz.MinTimeLimitSeconds || v > quiz.MaxTimeLimitSeconds {
-			problems["TimeLimitSeconds"] = fmt.Sprintf(
+			problems["timelimitseconds"] = fmt.Sprintf(
 				"Time limit must be between %d and %d seconds, or blank to inherit the quiz default",
 				quiz.MinTimeLimitSeconds, quiz.MaxTimeLimitSeconds,
 			)
@@ -116,24 +118,8 @@ type optionForm struct {
 func (f *optionForm) Valid(_ context.Context) map[string]string {
 	problems := make(map[string]string)
 	if f.option.Text == "" {
-		problems["Text"] = "Text is required"
+		problems["text"] = "Text is required"
 	}
 
 	return problems
-}
-
-// lowercaseFormFieldKeys translates the form types' map keys
-// ("Title", "Text", "Options", "Description", "Visibility",
-// "TimeLimitSeconds") into the lowercased form-field names the
-// templates bind to. Pulled out so all three callers (quiz save,
-// question save, JSON-import save) format the keys identically;
-// keeps the Valid maps untouched so future non-renderer consumers
-// can read them in their original shape.
-func lowercaseFormFieldKeys(problems map[string]string) map[string]string {
-	out := make(map[string]string, len(problems))
-	for k, v := range problems {
-		out[strings.ToLower(k)] = v
-	}
-
-	return out
 }

@@ -582,7 +582,7 @@ func fillQuizFromForm(
 		qz.Visibility = quiz.VisibilityPublic
 	}
 	if problems := (&quizForm{quiz: qz}).Valid(r.Context()); len(problems) > 0 {
-		return lowercaseFormFieldKeys(problems), true
+		return problems, true
 	}
 
 	return nil, true
@@ -666,7 +666,7 @@ func fillQuestionFromForm(
 	qs.Options = newOptions
 
 	if problems := (&questionForm{question: qs}).Valid(r.Context()); len(problems) > 0 {
-		return lowercaseFormFieldKeys(problems), true
+		return problems, true
 	}
 
 	return nil, true

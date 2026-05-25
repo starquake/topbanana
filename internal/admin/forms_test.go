@@ -3,7 +3,7 @@ package admin_test
 import (
 	"testing"
 
-	"github.com/starquake/topbanana/internal/admin"
+	. "github.com/starquake/topbanana/internal/admin"
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
@@ -116,7 +116,7 @@ func TestQuizForm_Valid(t *testing.T) {
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				if problems := admin.ValidateQuizForm(t.Context(), &tc.quiz); len(problems) > 0 {
+				if problems := ValidateQuizForm(t.Context(), &tc.quiz); len(problems) > 0 {
 					t.Errorf("quiz is not valid: %v", tc.quiz)
 					for k, v := range problems {
 						t.Errorf("  %s: %s", k, v)
@@ -203,7 +203,7 @@ func TestQuizForm_Valid(t *testing.T) {
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				problems := admin.ValidateQuizForm(t.Context(), &tc.quiz)
+				problems := ValidateQuizForm(t.Context(), &tc.quiz)
 				if len(problems) == 0 {
 					t.Errorf("quiz should not be valid: %v", tc.quiz)
 				}
