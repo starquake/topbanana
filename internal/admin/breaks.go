@@ -248,18 +248,21 @@ func HandleBreakMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.
 		direction := r.PathValue("direction")
 		isHX := r.Header.Get("Hx-Request") == "true"
 
-		err := quizStore.MoveBreak(r.Context(), quizID, breakID, direction)
-		// ErrBreakMoveImpossible is a no-op outcome (the target slot
-		// went away under us) - render the unchanged state through the
-		// same partial/redirect path as a successful move. Other
-		// errors get a real HTTP status.
-		if err != nil && !errors.Is(err, quiz.ErrBreakMoveImpossible) {
+		// ErrBreakMoveImpossible means the target slot is gone,
+		// occupied, or out of range. The arrow should already have
+		// been hidden in the UI, so a request reaching here is a
+		// stale form or hand-crafted POST - render the unchanged
+		// state through the same partial/redirect path as a
+		// successful move. Other errors get a real HTTP status.
+		switch err := quizStore.MoveBreak(r.Context(), quizID, breakID, direction); {
+		case errors.Is(err, quiz.ErrBreakMoveImpossible):
+			logger.InfoContext(r.Context(), "break move skipped (target slot unavailable)", slog.Any("err", err))
+		case err != nil:
 			renderBreakMoveError(w, r, logger, csrfMgr, err)
 
 			return
-		}
-		if errors.Is(err, quiz.ErrBreakMoveImpossible) {
-			logger.InfoContext(r.Context(), "break move skipped (target slot unavailable)", slog.Any("err", err))
+		default:
+			// success - fall through to the partial / redirect path.
 		}
 
 		if isHX {
@@ -275,10 +278,9 @@ func HandleBreakMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.
 	})
 }
 
-// renderBreakMoveError translates a MoveBreak failure into the right
-// HTTP status for the three non-recoverable cases. The
-// ErrBreakMoveImpossible no-op is handled by the caller because it
-// reuses the success-path renderer.
+// renderBreakMoveError translates a MoveBreak failure into a 400 /
+// 404 / 500 response. The ErrBreakMoveImpossible no-op is handled by
+// the caller because it reuses the success-path renderer.
 func renderBreakMoveError(
 	w http.ResponseWriter,
 	r *http.Request,
