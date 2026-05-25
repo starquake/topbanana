@@ -103,6 +103,28 @@
                             <span x-show="hasCustomName()">Change your name</span>
                         </button>
                     </div>
+
+                    {{/* Provider-agnostic sign-in escape hatch on the
+                         callout. /login renders every enabled sign-in
+                         method (password, Google, future
+                         GitHub/Apple/...), so the link does not need
+                         to know which flags are on. Anonymous-only by
+                         virtue of the parent template gate
+                         `!isAuthenticated() && (!gameId || finished)`,
+                         which already hides the callout from signed-in
+                         players and mid-quiz. Styled as btn-ghost so
+                         it reads as the secondary path next to "Set
+                         your name" / "Change your name". One-row flex
+                         to keep the start-screen viewport budget
+                         intact (player.spec.ts pins scrollHeight); on
+                         narrow viewports the text wraps above the
+                         button. */}}
+                    <div class="mt-4 pt-4 border-t border-border-soft flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+                        <p class="text-text-dim text-sm leading-relaxed flex-1 min-w-[14rem] mb-0">
+                            Sign in or create an account to keep this name across devices.
+                        </p>
+                        <a href="/login" class="btn-ghost" data-testid="claim-cta-signin">Make it yours</a>
+                    </div>
                 </article>
             </template>
 
@@ -449,27 +471,6 @@
                             </div>
                             <template x-if="error">
                                 <div class="feedback-banner feedback-danger mt-4" x-text="error"></div>
-                            </template>
-
-                            {{/* Sign-in escape hatch (#407). Provider-
-                                 agnostic on purpose: the link goes to
-                                 /login, where every enabled sign-in
-                                 method (password, Google, future
-                                 GitHub/Apple/...) is rendered already.
-                                 Hidden mid-quiz (gameId && !finished)
-                                 because navigating away there resets
-                                 the in-flight question state and the
-                                 OAuth callback redirects to / not back
-                                 to the quiz — same constraint that
-                                 will eventually be lifted by a
-                                 return-to-quiz query param on the
-                                 callback. */}}
-                            <template x-if="!gameId || finished">
-                                <div class="mt-6 pt-5 border-t border-border-soft text-center text-sm text-text-dim">
-                                    Or
-                                    <a href="/login" class="text-text hover:text-accent underline-offset-2 hover:underline">sign in</a>
-                                    to keep this name across devices.
-                                </div>
                             </template>
                         </section>
                         <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
