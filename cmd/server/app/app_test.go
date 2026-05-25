@@ -10,7 +10,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/starquake/topbanana/cmd/server/app"
+	. "github.com/starquake/topbanana/cmd/server/app"
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/database"
 	"github.com/starquake/topbanana/internal/dbtest"
@@ -35,7 +35,7 @@ func TestCheck_FreshDB_Succeeds(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	if err := app.Check(t.Context(), getenv, &stdout); err != nil {
+	if err := Check(t.Context(), getenv, &stdout); err != nil {
 		t.Fatalf("Check err = %v, want nil", err)
 	}
 	if got, want := stdout.String(), "startup ok"; !strings.Contains(got, want) {
@@ -52,7 +52,7 @@ func TestCheck_BadDBURI_ReturnsError(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	err := app.Check(t.Context(), getenv, &stdout)
+	err := Check(t.Context(), getenv, &stdout)
 	if err == nil {
 		t.Fatal("Check err = nil, want non-nil for unreachable DB_URI")
 	}
@@ -145,7 +145,7 @@ func TestResetPassword_HappyPath_RotatesHash(t *testing.T) {
 
 	stdin := strings.NewReader(newPassword + "\n" + newPassword + "\n")
 	var stdout, stderr bytes.Buffer
-	if err := app.ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, username); err != nil {
+	if err := ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, username); err != nil {
 		t.Fatalf("ResetPassword err = %v, want nil", err)
 	}
 
@@ -190,7 +190,7 @@ func TestResetPassword_UsernameWhitespaceTrimmed_RotatesHash(t *testing.T) {
 
 	stdin := strings.NewReader(newPassword + "\n" + newPassword + "\n")
 	var stdout, stderr bytes.Buffer
-	if err := app.ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "  alice  "); err != nil {
+	if err := ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "  alice  "); err != nil {
 		t.Fatalf("ResetPassword err = %v, want nil", err)
 	}
 
@@ -213,11 +213,11 @@ func TestResetPassword_UnknownUsername_ReturnsError(t *testing.T) {
 
 	stdin := strings.NewReader("new-correct-battery\nnew-correct-battery\n")
 	var stdout, stderr bytes.Buffer
-	err := app.ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "ghost")
+	err := ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "ghost")
 	if err == nil {
 		t.Fatal("ResetPassword err = nil, want non-nil for unknown username")
 	}
-	if got, want := err, app.ErrResetUserNotFound; !errors.Is(got, want) {
+	if got, want := err, ErrResetUserNotFound; !errors.Is(got, want) {
 		t.Errorf("err = %v, want errors.Is(%v)", got, want)
 	}
 
@@ -237,11 +237,11 @@ func TestResetPassword_PasswordTooShort_ReturnsError(t *testing.T) {
 
 	stdin := strings.NewReader("short\n")
 	var stdout, stderr bytes.Buffer
-	err := app.ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "alice")
+	err := ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "alice")
 	if err == nil {
 		t.Fatal("ResetPassword err = nil, want non-nil for too-short password")
 	}
-	if got, want := err, app.ErrResetPasswordTooShort; !errors.Is(got, want) {
+	if got, want := err, ErrResetPasswordTooShort; !errors.Is(got, want) {
 		t.Errorf("err = %v, want errors.Is(%v)", got, want)
 	}
 
@@ -266,11 +266,11 @@ func TestResetPassword_PasswordTooLong_ReturnsError(t *testing.T) {
 	tooLong := strings.Repeat("a", auth.MaxPasswordLength+1)
 	stdin := strings.NewReader(tooLong + "\n")
 	var stdout, stderr bytes.Buffer
-	err := app.ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "alice")
+	err := ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "alice")
 	if err == nil {
 		t.Fatal("ResetPassword err = nil, want non-nil for too-long password")
 	}
-	if got, want := err, app.ErrResetPasswordTooLong; !errors.Is(got, want) {
+	if got, want := err, ErrResetPasswordTooLong; !errors.Is(got, want) {
 		t.Errorf("err = %v, want errors.Is(%v)", got, want)
 	}
 
@@ -290,11 +290,11 @@ func TestResetPassword_ConfirmationMismatch_ReturnsError(t *testing.T) {
 	// Two lines, both long enough to pass the length check, but different.
 	stdin := strings.NewReader("new-correct-battery\nnew-correct-typo-here\n")
 	var stdout, stderr bytes.Buffer
-	err := app.ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "alice")
+	err := ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "alice")
 	if err == nil {
 		t.Fatal("ResetPassword err = nil, want non-nil for mismatching confirmation")
 	}
-	if got, want := err, app.ErrResetPasswordsDontMatch; !errors.Is(got, want) {
+	if got, want := err, ErrResetPasswordsDontMatch; !errors.Is(got, want) {
 		t.Errorf("err = %v, want errors.Is(%v)", got, want)
 	}
 
@@ -316,11 +316,11 @@ func TestResetPassword_EmptyUsername_ReturnsError(t *testing.T) {
 	getenv := func(string) string { return "" }
 
 	var stdout, stderr bytes.Buffer
-	err := app.ResetPassword(t.Context(), getenv, strings.NewReader(""), &stdout, &stderr, "   ")
+	err := ResetPassword(t.Context(), getenv, strings.NewReader(""), &stdout, &stderr, "   ")
 	if err == nil {
 		t.Fatal("ResetPassword err = nil, want non-nil for whitespace-only username")
 	}
-	if got, want := err, app.ErrResetUsernameRequired; !errors.Is(got, want) {
+	if got, want := err, ErrResetUsernameRequired; !errors.Is(got, want) {
 		t.Errorf("err = %v, want errors.Is(%v)", got, want)
 	}
 	if got := stdout.String(); got != "" {
@@ -340,11 +340,11 @@ func TestResetPassword_ClosedStdin_ReturnsError(t *testing.T) {
 	seedPlayer(t, dbURI, "alice")
 
 	var stdout, stderr bytes.Buffer
-	err := app.ResetPassword(t.Context(), envFor(dbURI), strings.NewReader(""), &stdout, &stderr, "alice")
+	err := ResetPassword(t.Context(), envFor(dbURI), strings.NewReader(""), &stdout, &stderr, "alice")
 	if err == nil {
 		t.Fatal("ResetPassword err = nil, want non-nil for empty stdin")
 	}
-	if got, want := err, app.ErrResetEmptyInput; !errors.Is(got, want) {
+	if got, want := err, ErrResetEmptyInput; !errors.Is(got, want) {
 		t.Errorf("err = %v, want errors.Is(%v)", got, want)
 	}
 

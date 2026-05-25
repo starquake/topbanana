@@ -8,21 +8,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/starquake/topbanana/internal/session"
+	. "github.com/starquake/topbanana/internal/session"
 )
 
 // newManagerAt returns a Manager whose clock is fixed at the given time.
 // Used by clock-sensitive tests that need deterministic issuedAt and expiry.
-func newManagerAt(t *testing.T, when time.Time) *session.Manager {
+func newManagerAt(t *testing.T, when time.Time) *Manager {
 	t.Helper()
 
-	return session.ExportNewWithClock([]byte("k"), true, func() time.Time { return when })
+	return ExportNewWithClock([]byte("k"), true, func() time.Time { return when })
 }
 
 func TestSet_AndPlayerID_RoundTrip(t *testing.T) {
 	t.Parallel()
 
-	mgr := session.New([]byte("test-key"), true)
+	mgr := New([]byte("test-key"), true)
 	rec := httptest.NewRecorder()
 	mgr.Set(rec, 42)
 
@@ -32,7 +32,7 @@ func TestSet_AndPlayerID_RoundTrip(t *testing.T) {
 	}
 
 	c := cookies[0]
-	if got, want := c.Name, session.CookieName; got != want {
+	if got, want := c.Name, CookieName; got != want {
 		t.Errorf("cookie name = %q, want %q", got, want)
 	}
 	if !c.HttpOnly {
@@ -47,7 +47,7 @@ func TestSet_AndPlayerID_RoundTrip(t *testing.T) {
 	if got, want := c.Path, "/"; got != want {
 		t.Errorf("cookie Path = %q, want %q", got, want)
 	}
-	if got, want := c.MaxAge, session.MaxAge; got != want {
+	if got, want := c.MaxAge, MaxAge; got != want {
 		t.Errorf("cookie MaxAge = %d, want %d", got, want)
 	}
 
@@ -69,7 +69,7 @@ func TestSet_SecureFlag_DroppedInDevelopment(t *testing.T) {
 	// — see #205. The TestSet_AndPlayerID_RoundTrip test above covers
 	// the secureCookies=true path.
 
-	mgr := session.New([]byte("k"), false)
+	mgr := New([]byte("k"), false)
 	rec := httptest.NewRecorder()
 	mgr.Set(rec, 42)
 
@@ -89,7 +89,7 @@ func TestSet_SecureFlag_DroppedInDevelopment(t *testing.T) {
 func TestPlayerID_MissingCookie(t *testing.T) {
 	t.Parallel()
 
-	mgr := session.New([]byte("k"), true)
+	mgr := New([]byte("k"), true)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 
 	_, ok := mgr.PlayerID(req)
@@ -101,7 +101,7 @@ func TestPlayerID_MissingCookie(t *testing.T) {
 func TestPlayerID_TamperedSignature(t *testing.T) {
 	t.Parallel()
 
-	mgr := session.New([]byte("k"), true)
+	mgr := New([]byte("k"), true)
 	rec := httptest.NewRecorder()
 	mgr.Set(rec, 7)
 
@@ -123,7 +123,7 @@ func TestPlayerID_TamperedSignature(t *testing.T) {
 func TestPlayerID_TamperedPayload(t *testing.T) {
 	t.Parallel()
 
-	mgr := session.New([]byte("k"), true)
+	mgr := New([]byte("k"), true)
 	rec := httptest.NewRecorder()
 	mgr.Set(rec, 7)
 
@@ -147,7 +147,7 @@ func TestPlayerID_TamperedPayload(t *testing.T) {
 func TestPlayerID_TamperedTimestamp(t *testing.T) {
 	t.Parallel()
 
-	mgr := session.New([]byte("k"), true)
+	mgr := New([]byte("k"), true)
 	rec := httptest.NewRecorder()
 	mgr.Set(rec, 7)
 
@@ -172,7 +172,7 @@ func TestPlayerID_TamperedTimestamp(t *testing.T) {
 func TestPlayerID_MalformedCookie(t *testing.T) {
 	t.Parallel()
 
-	mgr := session.New([]byte("k"), true)
+	mgr := New([]byte("k"), true)
 
 	// base64url("not-an-int|123") and base64url("123|not-an-int") for the parse-error paths.
 	badPlayerID := base64.RawURLEncoding.EncodeToString([]byte("not-an-int|123"))
@@ -190,7 +190,7 @@ func TestPlayerID_MalformedCookie(t *testing.T) {
 	}
 	for _, value := range tests {
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
-		req.AddCookie(&http.Cookie{Name: session.CookieName, Value: value})
+		req.AddCookie(&http.Cookie{Name: CookieName, Value: value})
 
 		if _, ok := mgr.PlayerID(req); ok {
 			t.Errorf("PlayerID(%q) ok = true, want false", value)
@@ -201,11 +201,11 @@ func TestPlayerID_MalformedCookie(t *testing.T) {
 func TestPlayerID_DifferentKey(t *testing.T) {
 	t.Parallel()
 
-	signer := session.New([]byte("real-key"), true)
+	signer := New([]byte("real-key"), true)
 	rec := httptest.NewRecorder()
 	signer.Set(rec, 1)
 
-	verifier := session.New([]byte("other-key"), true)
+	verifier := New([]byte("other-key"), true)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	req.AddCookie(rec.Result().Cookies()[0])
 
@@ -225,7 +225,7 @@ func TestPlayerID_ExpiredCookie(t *testing.T) {
 	c := rec.Result().Cookies()[0]
 
 	// Advance past MaxAge by 1 second.
-	verifier := newManagerAt(t, issuedAt.Add(time.Duration(session.MaxAge+1)*time.Second))
+	verifier := newManagerAt(t, issuedAt.Add(time.Duration(MaxAge+1)*time.Second))
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	req.AddCookie(c)
@@ -246,7 +246,7 @@ func TestPlayerID_BoundaryAgeIsValid(t *testing.T) {
 	signer.Set(rec, 5)
 	c := rec.Result().Cookies()[0]
 
-	verifier := newManagerAt(t, issuedAt.Add(time.Duration(session.MaxAge)*time.Second))
+	verifier := newManagerAt(t, issuedAt.Add(time.Duration(MaxAge)*time.Second))
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	req.AddCookie(c)
@@ -263,7 +263,7 @@ func TestPlayerID_BoundaryAgeIsValid(t *testing.T) {
 func TestClear(t *testing.T) {
 	t.Parallel()
 
-	mgr := session.New([]byte("k"), true)
+	mgr := New([]byte("k"), true)
 	rec := httptest.NewRecorder()
 	mgr.Clear(rec)
 
@@ -273,7 +273,7 @@ func TestClear(t *testing.T) {
 	}
 
 	c := cookies[0]
-	if got, want := c.Name, session.CookieName; got != want {
+	if got, want := c.Name, CookieName; got != want {
 		t.Errorf("cookie name = %q, want %q", got, want)
 	}
 	if got, want := c.MaxAge, -1; got != want {

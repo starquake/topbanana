@@ -1,8 +1,10 @@
-package game
+package game_test
 
 import (
 	"testing"
 	"time"
+
+	. "github.com/starquake/topbanana/internal/game"
 )
 
 // TestClampTappedAt pins the #237 trust window. The recorded AnsweredAt
@@ -55,7 +57,7 @@ func TestClampTappedAt(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got, want := clampTappedAt(tc.tappedAt, startedAt, serverNow), tc.want; !got.Equal(want) {
+			if got, want := ExportClampTappedAt(tc.tappedAt, startedAt, serverNow), tc.want; !got.Equal(want) {
 				t.Errorf("clampTappedAt(%v, %v, %v) = %v, want %v", tc.tappedAt, startedAt, serverNow, got, want)
 			}
 		})

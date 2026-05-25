@@ -1,9 +1,11 @@
-package clientapi
+package clientapi_test
 
 import (
 	"fmt"
 	"slices"
 	"testing"
+
+	. "github.com/starquake/topbanana/internal/clientapi"
 )
 
 // TestShuffleByGame_Deterministic pins the contract the player client
@@ -14,12 +16,12 @@ func TestShuffleByGame_Deterministic(t *testing.T) {
 	t.Parallel()
 
 	first := []int{1, 2, 3, 4}
-	shuffleByGame("game-abc", 42, len(first), func(i, j int) {
+	ExportShuffleByGame("game-abc", 42, len(first), func(i, j int) {
 		first[i], first[j] = first[j], first[i]
 	})
 
 	second := []int{1, 2, 3, 4}
-	shuffleByGame("game-abc", 42, len(second), func(i, j int) {
+	ExportShuffleByGame("game-abc", 42, len(second), func(i, j int) {
 		second[i], second[j] = second[j], second[i]
 	})
 
@@ -34,7 +36,7 @@ func TestShuffleByGame_PreservesElements(t *testing.T) {
 	t.Parallel()
 
 	got := []int{1, 2, 3, 4, 5, 6, 7, 8}
-	shuffleByGame("any-game", 1, len(got), func(i, j int) {
+	ExportShuffleByGame("any-game", 1, len(got), func(i, j int) {
 		got[i], got[j] = got[j], got[i]
 	})
 
@@ -60,7 +62,7 @@ func TestShuffleByGame_DifferentGamesDiffer(t *testing.T) {
 	for i := range trials {
 		opts := []int{1, 2, 3, 4}
 		gameID := "game-" + string(rune('a'+i))
-		shuffleByGame(gameID, 1, len(opts), func(a, b int) {
+		ExportShuffleByGame(gameID, 1, len(opts), func(a, b int) {
 			opts[a], opts[b] = opts[b], opts[a]
 		})
 		seen[fmt.Sprintf("%v", opts)] = struct{}{}

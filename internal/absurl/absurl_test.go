@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/starquake/topbanana/internal/absurl"
+	. "github.com/starquake/topbanana/internal/absurl"
 )
 
 func TestBaseURL(t *testing.T) {
@@ -70,7 +70,7 @@ func TestBaseURL(t *testing.T) {
 			for k, v := range tc.headers {
 				req.Header.Set(k, v)
 			}
-			if got, want := absurl.BaseURL(req), tc.want; got != want {
+			if got, want := BaseURL(req), tc.want; got != want {
 				t.Errorf("BaseURL = %q, want %q", got, want)
 			}
 		})

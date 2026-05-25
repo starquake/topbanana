@@ -5,13 +5,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/starquake/topbanana/internal/leaderboard"
+	. "github.com/starquake/topbanana/internal/leaderboard"
 )
 
 func TestHub_PublishWithoutSubscribers(t *testing.T) {
 	t.Parallel()
 
-	h := leaderboard.NewHub()
+	h := NewHub()
 	// Publish must not panic or deadlock when no one is listening.
 	h.Publish(1)
 }
@@ -19,7 +19,7 @@ func TestHub_PublishWithoutSubscribers(t *testing.T) {
 func TestHub_DeliversToSubscriber(t *testing.T) {
 	t.Parallel()
 
-	h := leaderboard.NewHub()
+	h := NewHub()
 	ch, unsub := h.Subscribe(7)
 	defer unsub()
 
@@ -36,7 +36,7 @@ func TestHub_DeliversToSubscriber(t *testing.T) {
 func TestHub_ScopedByQuizID(t *testing.T) {
 	t.Parallel()
 
-	h := leaderboard.NewHub()
+	h := NewHub()
 	chA, unsubA := h.Subscribe(1)
 	defer unsubA()
 	chB, unsubB := h.Subscribe(2)
@@ -62,7 +62,7 @@ func TestHub_ScopedByQuizID(t *testing.T) {
 func TestHub_CoalescesBackPressure(t *testing.T) {
 	t.Parallel()
 
-	h := leaderboard.NewHub()
+	h := NewHub()
 	ch, unsub := h.Subscribe(3)
 	defer unsub()
 
@@ -81,7 +81,7 @@ func TestHub_CoalescesBackPressure(t *testing.T) {
 func TestHub_UnsubscribeStopsDelivery(t *testing.T) {
 	t.Parallel()
 
-	h := leaderboard.NewHub()
+	h := NewHub()
 	ch, unsub := h.Subscribe(5)
 	unsub()
 
@@ -102,7 +102,7 @@ func TestHub_UnsubscribeStopsDelivery(t *testing.T) {
 func TestHub_UnsubscribeIsIdempotent(t *testing.T) {
 	t.Parallel()
 
-	h := leaderboard.NewHub()
+	h := NewHub()
 	_, unsub := h.Subscribe(9)
 
 	unsub()
@@ -116,7 +116,7 @@ func TestHub_ConcurrentPublishAndSubscribe(t *testing.T) {
 	// Sanity check that the mutex pattern doesn't deadlock under contention.
 	// Not a strict race test (use `go test -race` for that); just a smoke
 	// for "no goroutine blocks indefinitely."
-	h := leaderboard.NewHub()
+	h := NewHub()
 	const quizID int64 = 11
 	const workers = 8
 

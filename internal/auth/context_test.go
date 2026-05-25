@@ -4,16 +4,16 @@ import (
 	"context"
 	"testing"
 
-	"github.com/starquake/topbanana/internal/auth"
+	. "github.com/starquake/topbanana/internal/auth"
 )
 
 func TestPlayerFromContext_RoundTrip(t *testing.T) {
 	t.Parallel()
 
-	want := &auth.Player{ID: 7, Username: "alice", Role: auth.RoleAdmin}
-	ctx := auth.WithPlayer(t.Context(), want)
+	want := &Player{ID: 7, Username: "alice", Role: RoleAdmin}
+	ctx := WithPlayer(t.Context(), want)
 
-	got, ok := auth.PlayerFromContext(ctx)
+	got, ok := PlayerFromContext(ctx)
 	if !ok {
 		t.Fatal("PlayerFromContext ok = false, want true")
 	}
@@ -25,7 +25,7 @@ func TestPlayerFromContext_RoundTrip(t *testing.T) {
 func TestPlayerFromContext_Missing(t *testing.T) {
 	t.Parallel()
 
-	got, ok := auth.PlayerFromContext(context.Background())
+	got, ok := PlayerFromContext(context.Background())
 	if ok {
 		t.Error("PlayerFromContext ok = true, want false")
 	}
