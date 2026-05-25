@@ -127,6 +127,9 @@
                     {{if .CanMoveUp}}
                     <form method="post"
                           action="/admin/quizzes/{{$quizID}}/breaks/{{$b.ID}}/move/up"
+                          hx-post="/admin/quizzes/{{$quizID}}/breaks/{{$b.ID}}/move/up"
+                          hx-target="#questions-list"
+                          hx-swap="outerHTML"
                           class="inline-flex">
                         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                         <button type="submit"
@@ -140,6 +143,9 @@
                     {{if .CanMoveDown}}
                     <form method="post"
                           action="/admin/quizzes/{{$quizID}}/breaks/{{$b.ID}}/move/down"
+                          hx-post="/admin/quizzes/{{$quizID}}/breaks/{{$b.ID}}/move/down"
+                          hx-target="#questions-list"
+                          hx-swap="outerHTML"
                           class="inline-flex">
                         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                         <button type="submit"
