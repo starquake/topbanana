@@ -1,0 +1,123 @@
+{{define "content"}}
+    <nav aria-label="breadcrumbs" class="mb-8">
+        <ol class="flex items-center text-xs uppercase tracking-[0.14em]">
+            <li><a href="/admin" class="pr-2 text-text-dim hover:text-text">Admin</a></li>
+            <li class="text-text-mute" aria-hidden="true">/</li>
+            <li><span class="pl-2 text-text" aria-current="page">Email</span></li>
+        </ol>
+    </nav>
+
+    <header class="flex flex-col md:flex-row md:items-start md:justify-between gap-5 mb-10">
+        <div>
+            <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight">Email diagnostics</h1>
+            <p class="mt-1.5 max-w-[560px] text-text-dim text-[0.95rem]">
+                Current SMTP wiring, a button to send a test message, and the last {{len .LogEntries}} send attempts.
+                Credentials never appear on this page.
+            </p>
+        </div>
+    </header>
+
+    {{if .Notice}}
+        <div class="mb-6 px-4 py-3 rounded-sm border border-accent-line/40 bg-accent-line/10 text-text text-[0.95rem]" role="status">
+            {{.Notice}}
+        </div>
+    {{end}}
+    {{if .Error}}
+        <div class="mb-6 px-4 py-3 rounded-sm border border-danger/40 bg-danger/10 text-danger text-[0.95rem]" role="alert">
+            {{.Error}}
+            {{if .RateLimitWait}}
+                <span class="block mt-1 text-text-dim text-sm">Try again in {{.RateLimitWait}} second{{if ne .RateLimitWait 1}}s{{end}}.</span>
+            {{end}}
+        </div>
+    {{end}}
+
+    <section class="mb-10 border border-border-soft rounded-lg p-6" aria-label="SMTP status">
+        <h2 class="font-display font-bold text-xl mb-4">Status</h2>
+        <dl class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+            <div class="flex justify-between border-b border-border-soft pb-2">
+                <dt class="text-text-dim">Configured</dt>
+                <dd class="text-text">
+                    {{if .Status.Configured}}
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-sm bg-accent-line/15 text-accent text-xs uppercase tracking-[0.12em]">enabled</span>
+                    {{else}}
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-sm bg-surface text-text-dim text-xs uppercase tracking-[0.12em]">disabled (no-op)</span>
+                    {{end}}
+                </dd>
+            </div>
+            <div class="flex justify-between border-b border-border-soft pb-2">
+                <dt class="text-text-dim">TLS</dt>
+                <dd class="text-text">{{if .Status.TLS}}STARTTLS required{{else}}plain SMTP{{end}}</dd>
+            </div>
+            <div class="flex justify-between border-b border-border-soft pb-2">
+                <dt class="text-text-dim">Host</dt>
+                <dd class="text-text font-mono">{{if .Status.Host}}{{.Status.Host}}{{else}}&mdash;{{end}}</dd>
+            </div>
+            <div class="flex justify-between border-b border-border-soft pb-2">
+                <dt class="text-text-dim">Port</dt>
+                <dd class="text-text font-mono">{{if .Status.Port}}{{.Status.Port}}{{else}}&mdash;{{end}}</dd>
+            </div>
+            <div class="flex justify-between md:col-span-2 border-b border-border-soft pb-2">
+                <dt class="text-text-dim">From</dt>
+                <dd class="text-text font-mono">{{if .Status.From}}{{.Status.From}}{{else}}&mdash;{{end}}</dd>
+            </div>
+        </dl>
+    </section>
+
+    <section class="mb-10 border border-border-soft rounded-lg p-6" aria-label="Send test email">
+        <h2 class="font-display font-bold text-xl mb-2">Send test email</h2>
+        <p class="text-text-dim text-sm mb-4">
+            Leave the field blank to send to your own account address. Per-IP rate limit: one send every 10 seconds.
+        </p>
+        <form action="/admin/email/test" method="POST" class="flex flex-col md:flex-row gap-3 md:items-end">
+            <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+            <div class="flex-1">
+                <label class="label-eyebrow" for="to">Recipient</label>
+                <input id="to" name="to" type="email" value="{{.DefaultTo}}"
+                       placeholder="ops@example.test"
+                       class="form-input w-full">
+            </div>
+            <button type="submit" class="btn-primary">Send test email</button>
+        </form>
+    </section>
+
+    <section aria-label="Recent send log">
+        <h2 class="font-display font-bold text-xl mb-4">Recent send log</h2>
+        {{if .LogEntries}}
+            <div class="overflow-x-auto border border-border-soft rounded-lg">
+                <table class="w-full text-sm">
+                    <thead class="bg-surface text-text-dim text-[0.7rem] uppercase tracking-[0.14em]">
+                        <tr>
+                            <th scope="col" class="px-4 py-3 text-left">When</th>
+                            <th scope="col" class="px-4 py-3 text-left">Kind</th>
+                            <th scope="col" class="px-4 py-3 text-left">Recipient</th>
+                            <th scope="col" class="px-4 py-3 text-left">Subject</th>
+                            <th scope="col" class="px-4 py-3 text-left">Result</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .LogEntries}}
+                            <tr class="border-t border-border-soft align-top">
+                                <td class="px-4 py-3 text-text-dim font-mono whitespace-nowrap">{{.SentAt}}</td>
+                                <td class="px-4 py-3 text-text-dim">{{.Kind}}</td>
+                                <td class="px-4 py-3 text-text">{{.To}}</td>
+                                <td class="px-4 py-3 text-text-dim">{{.Subject}}</td>
+                                <td class="px-4 py-3">
+                                    {{if .Success}}
+                                        <span class="inline-flex items-center px-2 py-0.5 rounded-sm bg-accent-line/15 text-accent text-xs uppercase tracking-[0.12em]">sent</span>
+                                    {{else}}
+                                        <span class="inline-flex items-center px-2 py-0.5 rounded-sm bg-danger/15 text-danger text-xs uppercase tracking-[0.12em]">failed</span>
+                                        <p class="mt-1 text-text-dim text-xs font-mono break-all">{{.Err}}</p>
+                                    {{end}}
+                                </td>
+                            </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+        {{else}}
+            <div class="border border-dashed border-border rounded-lg p-8 text-center text-text-dim text-sm">
+                No send attempts yet. Use the button above to send a test email.
+            </div>
+        {{end}}
+    </section>
+{{end}}

@@ -25,6 +25,7 @@ import (
 	"github.com/starquake/topbanana/internal/database"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/leaderboard"
+	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/server"
 	"github.com/starquake/topbanana/internal/store"
 )
@@ -355,7 +356,12 @@ func Run(
 	leaderboardHub := leaderboard.NewHub()
 	gameService.SetLeaderboardPublisher(leaderboardHub)
 
-	srv := server.New(logger, stores, gameService, leaderboardHub, cfg)
+	mailerTester, mailerStatus, err := buildMailer(signalCtx, cfg, logger)
+	if err != nil {
+		return err
+	}
+
+	srv := server.New(logger, stores, gameService, leaderboardHub, cfg, mailerTester, mailerStatus)
 	if ln == nil {
 		ln, err = listener(signalCtx, cfg, logger)
 		if err != nil {
@@ -416,6 +422,52 @@ func runHTTPServer(ctx, signalCtx context.Context, ln net.Listener, srv http.Han
 	}
 
 	return nil
+}
+
+// buildMailer constructs the mailer + status view the admin diagnostics
+// page consumes (#321). When SMTP is unconfigured we wrap the no-op
+// mailer in a Tester so the same ring buffer surfaces "tried to send
+// but SMTP is off" entries on the diagnostics page; when SMTP is
+// configured the Tester wraps the real go-mail-backed mailer.
+//
+// Returns an error only when the SMTPConfigured() guard passes but the
+// inner SMTP constructor refuses the cfg - that path is unreachable
+// today because config.Parse enforces the same triple, but the wrap
+// keeps a future SMTP-side validation tweak from silently booting a
+// broken mailer.
+func buildMailer(
+	ctx context.Context,
+	cfg *config.Config,
+	logger *slog.Logger,
+) (*mailer.Tester, mailer.StatusView, error) {
+	smtpCfg := mailer.SMTPConfig{
+		Host:     cfg.SMTPHost,
+		Port:     cfg.SMTPPort,
+		Username: cfg.SMTPUsername,
+		Password: cfg.SMTPPassword,
+		From:     cfg.SMTPFrom,
+		TLS:      cfg.SMTPTLS,
+	}
+	if !cfg.SMTPConfigured() {
+		logger.InfoContext(
+			ctx,
+			"mailer disabled (no SMTP_HOST/SMTP_PORT/SMTP_FROM); send attempts return ErrNotConfigured",
+		)
+
+		return mailer.NewTester(mailer.NewNoop()), mailer.NewStatusView(smtpCfg, false), nil
+	}
+
+	inner, err := mailer.NewSMTP(smtpCfg)
+	if err != nil {
+		return nil, mailer.StatusView{}, fmt.Errorf("build mailer: %w", err)
+	}
+	logger.InfoContext(ctx, "mailer configured",
+		slog.String("host", cfg.SMTPHost),
+		slog.Int("port", cfg.SMTPPort),
+		slog.Bool("tls", cfg.SMTPTLS),
+	)
+
+	return mailer.NewTester(inner), mailer.NewStatusView(smtpCfg, true), nil
 }
 
 func setupDB(signalCtx context.Context, cfg *config.Config, logger *slog.Logger) (*sql.DB, error) {

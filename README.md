@@ -63,6 +63,12 @@ docker compose up --build
 
 The compose file sets `REGISTRATION_ENABLED=true` and `ADMIN_USERNAMES=admin`, so a fresh stack lets you register the first `admin` user without further setup. The SQLite database lives in the `topbanana_data` Docker volume at `/home/nonroot/data/topbanana.sqlite`.
 
+### Local email testing
+
+The compose file ships a [Mailpit](https://github.com/axllent/mailpit) sibling service so outgoing mail does not leave the host. Bring the stack up with `docker compose up --build`, then uncomment the `SMTP_HOST` / `SMTP_PORT` / `SMTP_FROM` / `SMTP_TLS=false` block on the `app` service to point the mailer at Mailpit. The inbox is at `http://localhost:8025`; the diagnostics view at `/admin/email` shows the current SMTP wiring, sends a test message, and lists the last 20 send attempts with the verbatim SMTP error on failure.
+
+SMTP is optional. Without any `SMTP_*` env vars the server boots, the diagnostics page renders a "disabled (no-op)" status badge, and the test-send button returns a clear "email is not configured on this instance" message instead of a 500.
+
 ### Bootstrapping the first admin
 
 Registration is closed by default. Two ways to create the first admin:

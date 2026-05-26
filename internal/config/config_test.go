@@ -513,6 +513,231 @@ func TestConfig_GoogleLoginEnabled(t *testing.T) {
 	}
 }
 
+func TestParse_SMTP(t *testing.T) {
+	t.Parallel()
+
+	t.Run("unset SMTP block leaves SMTPConfigured false", func(t *testing.T) {
+		t.Parallel()
+
+		getenv := func(key string) string {
+			if key == "APP_ENV" {
+				return "development"
+			}
+
+			return ""
+		}
+		c, err := Parse(getenv)
+		if err != nil {
+			t.Fatalf("Parse() err = %v, want nil", err)
+		}
+		if got, want := c.SMTPConfigured(), false; got != want {
+			t.Errorf("SMTPConfigured() = %v, want %v", got, want)
+		}
+		if got, want := c.SMTPHost, ""; got != want {
+			t.Errorf("SMTPHost = %q, want %q", got, want)
+		}
+		if got, want := c.SMTPPort, 0; got != want {
+			t.Errorf("SMTPPort = %d, want %d", got, want)
+		}
+		// SMTP_TLS defaults to true so production deploys ship
+		// STARTTLS-on by default; dev opts out with SMTP_TLS=false.
+		if got, want := c.SMTPTLS, true; got != want {
+			t.Errorf("SMTPTLS = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("full SMTP block wires through and SMTPConfigured flips on", func(t *testing.T) {
+		t.Parallel()
+
+		envs := map[string]string{
+			"APP_ENV":       "development",
+			"SMTP_HOST":     "mailpit",
+			"SMTP_PORT":     "1025",
+			"SMTP_USERNAME": "smtpuser",
+			"SMTP_PASSWORD": "smtpsecret",
+			"SMTP_FROM":     "topbanana@localhost",
+			"SMTP_TLS":      "false",
+			"BASE_URL":      "https://quiz.example.test/",
+		}
+		getenv := func(key string) string { return envs[key] }
+		c, err := Parse(getenv)
+		if err != nil {
+			t.Fatalf("Parse() err = %v, want nil", err)
+		}
+		if got, want := c.SMTPHost, "mailpit"; got != want {
+			t.Errorf("SMTPHost = %q, want %q", got, want)
+		}
+		if got, want := c.SMTPPort, 1025; got != want {
+			t.Errorf("SMTPPort = %d, want %d", got, want)
+		}
+		if got, want := c.SMTPUsername, "smtpuser"; got != want {
+			t.Errorf("SMTPUsername = %q, want %q", got, want)
+		}
+		if got, want := c.SMTPPassword, "smtpsecret"; got != want {
+			t.Errorf("SMTPPassword = %q, want %q", got, want)
+		}
+		if got, want := c.SMTPFrom, "topbanana@localhost"; got != want {
+			t.Errorf("SMTPFrom = %q, want %q", got, want)
+		}
+		if got, want := c.SMTPTLS, false; got != want {
+			t.Errorf("SMTPTLS = %v, want %v", got, want)
+		}
+		// BaseURL trims a trailing slash so callers can blindly
+		// concatenate path components without ending up with "//".
+		if got, want := c.BaseURL, "https://quiz.example.test"; got != want {
+			t.Errorf("BaseURL = %q, want %q", got, want)
+		}
+		if got, want := c.SMTPConfigured(), true; got != want {
+			t.Errorf("SMTPConfigured() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("partial SMTP block returns ErrSMTPConfigIncomplete", func(t *testing.T) {
+		t.Parallel()
+
+		// Host + from but no port: the mailer can't dial, so refuse
+		// at startup instead of booting a half-wired mailer.
+		envs := map[string]string{
+			"APP_ENV":   "development",
+			"SMTP_HOST": "mailpit",
+			"SMTP_FROM": "topbanana@localhost",
+		}
+		getenv := func(key string) string { return envs[key] }
+		_, err := Parse(getenv)
+		if err == nil {
+			t.Fatal("Parse() err = nil, want non-nil")
+		}
+		if got, want := err, ErrSMTPConfigIncomplete; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("invalid SMTP_PORT returns ErrSMTPPortInvalid", func(t *testing.T) {
+		t.Parallel()
+
+		tests := []struct {
+			name  string
+			value string
+		}{
+			{"non-numeric", "not-a-port"},
+			{"zero", "0"},
+			{"negative", "-1"},
+			{"above 65535", "65536"},
+			{"way out of range", "99999"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+				envs := map[string]string{
+					"APP_ENV":   "development",
+					"SMTP_HOST": "mailpit",
+					"SMTP_PORT": tt.value,
+					"SMTP_FROM": "topbanana@localhost",
+				}
+				getenv := func(key string) string { return envs[key] }
+				_, err := Parse(getenv)
+				if err == nil {
+					t.Fatal("Parse() err = nil, want non-nil")
+				}
+				if got, want := err, ErrSMTPPortInvalid; !errors.Is(got, want) {
+					t.Errorf("err = %v, want %v", got, want)
+				}
+			})
+		}
+	})
+
+	t.Run("SMTP_USERNAME without SMTP_PASSWORD returns ErrSMTPAuthIncomplete", func(t *testing.T) {
+		t.Parallel()
+
+		envs := map[string]string{
+			"APP_ENV":       "development",
+			"SMTP_HOST":     "mailpit",
+			"SMTP_PORT":     "1025",
+			"SMTP_FROM":     "topbanana@localhost",
+			"SMTP_USERNAME": "smtpuser",
+		}
+		getenv := func(key string) string { return envs[key] }
+		_, err := Parse(getenv)
+		if err == nil {
+			t.Fatal("Parse() err = nil, want non-nil")
+		}
+		if got, want := err, ErrSMTPAuthIncomplete; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("SMTP_PASSWORD without SMTP_USERNAME returns ErrSMTPAuthIncomplete", func(t *testing.T) {
+		t.Parallel()
+
+		envs := map[string]string{
+			"APP_ENV":       "development",
+			"SMTP_HOST":     "mailpit",
+			"SMTP_PORT":     "1025",
+			"SMTP_FROM":     "topbanana@localhost",
+			"SMTP_PASSWORD": "smtpsecret",
+		}
+		getenv := func(key string) string { return envs[key] }
+		_, err := Parse(getenv)
+		if err == nil {
+			t.Fatal("Parse() err = nil, want non-nil")
+		}
+		if got, want := err, ErrSMTPAuthIncomplete; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("invalid SMTP_TLS returns wrapped error", func(t *testing.T) {
+		t.Parallel()
+
+		envs := map[string]string{
+			"APP_ENV":  "development",
+			"SMTP_TLS": "maybe",
+		}
+		getenv := func(key string) string { return envs[key] }
+		_, err := Parse(getenv)
+		if err == nil {
+			t.Fatal("Parse() err = nil, want non-nil")
+		}
+		if got, want := err.Error(), "invalid SMTP_TLS"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+
+	t.Run("lone SMTP_TLS returns ErrSMTPConfigIncomplete", func(t *testing.T) {
+		t.Parallel()
+
+		// SMTP_TLS set in isolation is a typo / partial-rollout signal:
+		// the operator clearly intended to wire SMTP but never finished
+		// the host/port/from triple. allEmpty must therefore treat an
+		// explicit SMTP_TLS as "populated subset" rather than slipping
+		// past as a no-op boot.
+		tests := []struct {
+			name  string
+			value string
+		}{
+			{"false", "false"},
+			{"true", "true"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+				envs := map[string]string{
+					"APP_ENV":  "development",
+					"SMTP_TLS": tt.value,
+				}
+				getenv := func(key string) string { return envs[key] }
+				_, err := Parse(getenv)
+				if err == nil {
+					t.Fatal("Parse() err = nil, want non-nil")
+				}
+				if got, want := err, ErrSMTPConfigIncomplete; !errors.Is(got, want) {
+					t.Errorf("err = %v, want %v", got, want)
+				}
+			})
+		}
+	})
+}
+
 func TestConfig_SecureCookies(t *testing.T) {
 	t.Parallel()
 	// SecureCookies decides whether session + CSRF cookies get the

@@ -38,6 +38,7 @@ const ADMIN_USERNAMES = [
   'e2e-admin-resume-chromium', 'e2e-admin-resume-firefox',                    // resume.spec.ts #310
   'e2e-admin-breaks-chromium', 'e2e-admin-breaks-firefox',                    // admin.spec.ts break CRUD (#167)
   'e2e-admin-break-play-chromium', 'e2e-admin-break-play-firefox',            // break.spec.ts break play loop (#167 slice 2)
+  'e2e-admin-email-chromium', 'e2e-admin-email-firefox',                      // email-admin.spec.ts diagnostics page (#321)
 ].join(',');
 
 const workerServer = (workerIndex: number) => {
