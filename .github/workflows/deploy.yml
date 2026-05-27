@@ -61,9 +61,11 @@ jobs:
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
           SMTP_TLS: ${{ secrets.SMTP_TLS }}
           # BASE_URL is the absolute URL prefix for verify / invite
-          # links embedded in outbound email (#290, #318). Optional
-          # today; required when those features ship.
-          BASE_URL: ${{ secrets.BASE_URL }}
+          # links embedded in outbound email (#290, #318). Read from
+          # vars not secrets: the value is a public URL, masking it in
+          # logs is noise, and the empty-secret resolution silently
+          # broke the verify-email send on staging (#489).
+          BASE_URL: ${{ vars.BASE_URL }}
           # REGISTRATION_ENABLED is an env-driven toggle so the
           # operator can flip it without a redeploy. Defaults true on
           # the compose side when unset here.
@@ -184,9 +186,11 @@ jobs:
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
           SMTP_TLS: ${{ secrets.SMTP_TLS }}
           # BASE_URL is the absolute URL prefix for verify / invite
-          # links embedded in outbound email (#290, #318). Optional
-          # today; required when those features ship.
-          BASE_URL: ${{ secrets.BASE_URL }}
+          # links embedded in outbound email (#290, #318). Read from
+          # vars not secrets: the value is a public URL, masking it in
+          # logs is noise, and the empty-secret resolution silently
+          # broke the verify-email send on staging (#489).
+          BASE_URL: ${{ vars.BASE_URL }}
           # REGISTRATION_ENABLED is an env-driven toggle so the
           # operator can flip it without a redeploy. Defaults true on
           # the compose side when unset here.
