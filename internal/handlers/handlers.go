@@ -16,6 +16,12 @@ const (
 	int64Size = 64
 )
 
+// maxJSONBodySize caps the request body for /api/* JSON endpoints. 64 KiB is
+// generous for the small request shapes the API accepts (a quiz ID, an option
+// ID, a username) and denies an unauthenticated client the ability to
+// exhaust memory by streaming a multi-megabyte body into [json.Decoder].
+const maxJSONBodySize = 64 * 1024
+
 // ErrNoSlugSeparator is returned by IDFromSlugID when the input contains no "-".
 var ErrNoSlugSeparator = errors.New("no separator found in slug")
 
@@ -102,9 +108,12 @@ func EncodeJSON[T any](w http.ResponseWriter, statusCode int, v T) error {
 	return nil
 }
 
-// DecodeJSON decodes JSON from r.
-func DecodeJSON[T any](r *http.Request) (T, error) {
+// DecodeJSON decodes JSON from r, capping the body at maxJSONBodySize.
+// Passing w lets [http.MaxBytesReader] signal the cap to the client when the
+// limit is exceeded; the returned error surfaces as a 400 in the caller.
+func DecodeJSON[T any](w http.ResponseWriter, r *http.Request) (T, error) {
 	var v T
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&v); err != nil {
 		return v, fmt.Errorf("failed to decode json: %w", err)
 	}
