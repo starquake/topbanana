@@ -27,6 +27,7 @@ type Stores struct {
 	OAuth        auth.OAuthIdentityStore
 	PlayerLister auth.PlayerLister
 	VerifyTokens auth.VerifyTokenStore
+	ResetTokens  auth.ResetTokenStore
 	Home         home.Store
 }
 
@@ -47,6 +48,7 @@ func New(conn *sql.DB, logger *slog.Logger) *Stores {
 		OAuth:        players,
 		PlayerLister: players,
 		VerifyTokens: players,
+		ResetTokens:  players,
 		Home:         NewHomeStore(conn, logger),
 	}
 }

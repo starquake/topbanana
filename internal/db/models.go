@@ -71,6 +71,14 @@ type Option struct {
 	IsCorrect  bool
 }
 
+type PasswordResetToken struct {
+	TokenHash  string
+	PlayerID   int64
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+	ConsumedAt sql.NullTime
+}
+
 type Player struct {
 	ID              int64
 	Username        string
@@ -80,6 +88,7 @@ type Player struct {
 	CreatedAt       time.Time
 	UsernameClaimed int64
 	EmailVerifiedAt sql.NullTime
+	SessionVersion  int64
 }
 
 type PlayerIdentity struct {
