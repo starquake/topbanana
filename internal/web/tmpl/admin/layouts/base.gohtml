@@ -9,6 +9,9 @@
          is intentionally out of scope. Icons in admin templates are inline
          SVGs. */}}
     <link rel="icon" type="image/svg+xml" href="/assets/banana.svg" sizes="any">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/assets/banana-192.png">
+    <meta name="theme-color" content="#ffd23f">
     {{/* Open Graph / Twitter Card metadata. Admin URLs aren't shared
          externally in normal use, but having a sensible preview when they
          are pasted in chat is cheap. Per-quiz overrides happen on
@@ -30,6 +33,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@500;600;700;800;900&display=swap">
     <link rel="stylesheet" href="/assets/css/app.css">
     <script src="/assets/js/htmx.min.js" defer></script>
+    <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
 </head>
 <body class="bg-bg text-text font-sans antialiased min-h-screen leading-relaxed">
 {{template "navbar" .}}

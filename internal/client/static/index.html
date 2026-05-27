@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}}</title>
     <link rel="icon" type="image/svg+xml" href="/assets/banana.svg" sizes="any">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/assets/banana-192.png">
+    <meta name="theme-color" content="#ffd23f">
     {{/* Open Graph / Twitter Card metadata. /client/{$} renders the
          sitewide defaults; /play/{slugID} swaps og:title and og:description
          for the quiz's own values so a shared link previews the quiz, not
@@ -35,6 +38,7 @@
     <script src="/client/js/vendor/anime.umd.min.js"></script>
     <script type="module" src="/client/js/app.js"></script>
     <script defer src="/client/js/vendor/alpine.min.js"></script>
+    <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
 </head>
 {{/* min-h-dvh (not min-h-screen / 100vh) so the body tracks the
      visible viewport on mobile browsers. With 100vh the body resolves

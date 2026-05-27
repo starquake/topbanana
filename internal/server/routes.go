@@ -61,6 +61,11 @@ func addRoutes(
 	// Admin + auth static assets (Tailwind output, embedded in the binary).
 	mux.Handle("/assets/", web.Handler(cfg))
 
+	// PWA manifest + service worker. Both live at the site root so the
+	// install prompt and the SW's default scope cover every page.
+	mux.Handle("GET /manifest.webmanifest", web.ManifestHandler(cfg))
+	mux.Handle("GET /sw.js", web.ServiceWorkerHandler(cfg))
+
 	// Health
 	mux.Handle("GET /healthz", health.HandleHealthz(logger, stores))
 

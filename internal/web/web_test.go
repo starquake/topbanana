@@ -67,3 +67,110 @@ func TestHandler_WebStaticDirServesOnDisk(t *testing.T) {
 		t.Errorf("body should contain sentinel %q (override not honoured)", want)
 	}
 }
+
+// TestServiceWorkerHandler_SubstitutesCacheVersion checks the
+// placeholder substitution: the served SW must not still contain the
+// __CACHE_VERSION__ token and must include a 12-char hex tag in its
+// place. Driven against the embedded FS so the production code path
+// is what's exercised.
+func TestServiceWorkerHandler_SubstitutesCacheVersion(t *testing.T) {
+	t.Parallel()
+
+	h := web.ServiceWorkerHandler(&config.Config{AppEnvironment: "development"})
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/sw.js", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if got, want := rr.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d", got, want)
+	}
+	if got, want := rr.Header().Get("Content-Type"), "application/javascript"; got != want {
+		t.Errorf("Content-Type = %q, want %q", got, want)
+	}
+	if got, want := rr.Header().Get("Service-Worker-Allowed"), "/"; got != want {
+		t.Errorf("Service-Worker-Allowed = %q, want %q", got, want)
+	}
+	body := rr.Body.String()
+	if got, want := body, "__CACHE_VERSION__"; strings.Contains(got, want) {
+		t.Errorf("body still contains placeholder %q (substitution missed)", want)
+	}
+	if got, want := body, "topbanana-shell-"; !strings.Contains(got, want) {
+		t.Errorf("body missing %q (cache-name template not preserved)", want)
+	}
+}
+
+// TestServiceWorkerHandler_DevModeRecomputesVersion pins the dev-loop
+// invariant: when WebStaticDir is set, the cache version must reflect
+// the on-disk asset bytes per request, so editing app.css (or any
+// other precached shell asset) yields a fresh SW immediately. The
+// production embed path is covered by the previous test.
+func TestServiceWorkerHandler_DevModeRecomputesVersion(t *testing.T) {
+	t.Parallel()
+
+	staticDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(staticDir, "css"), 0o755); err != nil {
+		t.Fatalf("MkdirAll err = %v, want nil", err)
+	}
+	swSrc := "const CACHE_VERSION = '__CACHE_VERSION__';"
+	if err := os.WriteFile(filepath.Join(staticDir, "sw.js"), []byte(swSrc), 0o600); err != nil {
+		t.Fatalf("WriteFile sw.js err = %v, want nil", err)
+	}
+	if err := os.WriteFile(filepath.Join(staticDir, "css", "app.css"), []byte("/* v1 */"), 0o600); err != nil {
+		t.Fatalf("WriteFile app.css v1 err = %v, want nil", err)
+	}
+
+	h := web.ServiceWorkerHandler(&config.Config{AppEnvironment: "development", WebStaticDir: staticDir})
+
+	first := serveAndReadBody(t, h, "/sw.js")
+	if got, want := first, "__CACHE_VERSION__"; strings.Contains(got, want) {
+		t.Fatalf("first body still contains %q", want)
+	}
+
+	if err := os.WriteFile(filepath.Join(staticDir, "css", "app.css"), []byte("/* v2 changed */"), 0o600); err != nil {
+		t.Fatalf("WriteFile app.css v2 err = %v, want nil", err)
+	}
+	second := serveAndReadBody(t, h, "/sw.js")
+	if got, want := second, first; got == want {
+		t.Errorf("dev-mode SW response did not change after asset edit; both bodies = %q", got)
+	}
+}
+
+// TestManifestHandler_ServesManifestMime pins the Content-Type and
+// the no-cache header so a redeploy that updates the manifest is not
+// stuck behind heuristic browser caching.
+func TestManifestHandler_ServesManifestMime(t *testing.T) {
+	t.Parallel()
+
+	h := web.ManifestHandler(&config.Config{AppEnvironment: "development"})
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/manifest.webmanifest", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if got, want := rr.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d", got, want)
+	}
+	if got, want := rr.Header().Get("Content-Type"), "application/manifest+json"; got != want {
+		t.Errorf("Content-Type = %q, want %q", got, want)
+	}
+	if got, want := rr.Header().Get("Cache-Control"), "no-cache"; got != want {
+		t.Errorf("Cache-Control = %q, want %q", got, want)
+	}
+	if got, want := rr.Body.String(), `"Top Banana!"`; !strings.Contains(got, want) {
+		t.Errorf("body missing %q", want)
+	}
+}
+
+func serveAndReadBody(t *testing.T, h http.Handler, target string) string {
+	t.Helper()
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, target, nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if got, want := rr.Code, http.StatusOK; got != want {
+		t.Fatalf("%s status = %d, want %d", target, got, want)
+	}
+
+	return rr.Body.String()
+}

@@ -10,6 +10,9 @@
          home/* must be picked up by `make tailwind`; the @source line
          in _tailwind.css already covers this directory. */}}
     <link rel="icon" type="image/svg+xml" href="/assets/banana.svg" sizes="any">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/assets/banana-192.png">
+    <meta name="theme-color" content="#ffd23f">
     <meta property="og:site_name" content="Top Banana!">
     <meta property="og:title" content="Be the Top Banana!">
     <meta property="og:description" content="Make a quiz, share the link, see who's the top banana.">
@@ -31,6 +34,7 @@
          openShareDialog export is available if other surfaces ever
          want to drive the dialog programmatically. */}}
     <script type="module" src="/assets/js/share.js"></script>
+    <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
 </head>
 {{/* min-h-dvh (not min-h-screen / 100vh) so the sticky-footer column
      measures the *visible* viewport rather than the layout viewport.

@@ -9,6 +9,9 @@
          classes are scanned via the second @source directive in
          tailwind-src.css so they survive tree-shaking. */}}
     <link rel="icon" type="image/svg+xml" href="/assets/banana.svg" sizes="any">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/assets/banana-192.png">
+    <meta name="theme-color" content="#ffd23f">
     {{/* Open Graph / Twitter Card metadata. Sitewide defaults — the same
          card shows on every auth page. Per-quiz overrides happen on
          /play/{slugID} in the player SPA, not here. og:image is absolute
@@ -31,6 +34,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@500;600;700;800;900&display=swap">
     <link rel="stylesheet" href="/assets/css/app.css">
+    <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
 </head>
 <body class="bg-bg text-text font-sans antialiased min-h-screen leading-relaxed">
 <section class="max-w-shell mx-auto px-5 py-10">
