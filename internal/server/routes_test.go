@@ -507,7 +507,10 @@ func TestAddRoutes_AdminRouteWithoutSession_RedirectsToLogin(t *testing.T) {
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
-	if got, want := rec.Header().Get("Location"), "/login"; got != want {
+	// #449: GET to a protected admin route carries the original URI as
+	// ?next=<encoded> so the login flow can drop the visitor back on
+	// the page they tried to reach.
+	if got, want := rec.Header().Get("Location"), "/login?next=%2Fadmin%2Fquizzes"; got != want {
 		t.Errorf("Location = %q, want %q", got, want)
 	}
 }

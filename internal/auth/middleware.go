@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 
 	"github.com/rs/xid"
 
@@ -125,9 +126,14 @@ func mintAnonymousPlayer(ctx context.Context, players PlayerStore) (*Player, err
 // RequireAdmin wraps the next handler so only admins can reach it.
 //
 // Unauthenticated requests (no cookie, invalid cookie, or unknown player ID) are
-// redirected to /login with HTTP 303. Requests from a valid non-admin session
-// receive HTTP 403 with an "Access denied" page so the user understands the
-// rejection is about role, not authentication.
+// redirected to /login with HTTP 303. The original URI is carried as a
+// ?next=<encoded> query parameter on GET/HEAD so the login flow can
+// drop the visitor back on the page they tried to reach (#449); POSTs
+// and other unsafe methods drop next because the form body is already
+// gone and re-submitting after login would be the wrong behaviour.
+// Requests from a valid non-admin session receive HTTP 403 with an
+// "Access denied" page so the user understands the rejection is about
+// role, not authentication.
 //
 // The csrfMgr is threaded through the access-denied renderer so the embedded
 // "Sign out and switch accounts" form has a working CSRF token.
@@ -143,7 +149,7 @@ func RequireAdmin(
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		playerID, ok := sessions.PlayerID(r)
 		if !ok {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			redirectToLoginWithNext(w, r)
 
 			return
 		}
@@ -151,7 +157,7 @@ func RequireAdmin(
 		player, err := players.GetPlayerByID(r.Context(), playerID)
 		if err != nil {
 			if errors.Is(err, ErrPlayerNotFound) {
-				http.Redirect(w, r, "/login", http.StatusSeeOther)
+				redirectToLoginWithNext(w, r)
 
 				return
 			}
@@ -180,9 +186,10 @@ func RequireAdmin(
 // redirected to /login with HTTP 303 — softer than RequireAdmin's
 // 403, because the page they're missing is typically reachable for
 // them after they sign in (the profile page, future personal
-// dashboards, etc.). Stashes the loaded *Player on the request
-// context via WithPlayer so downstream handlers can read it without
-// a second lookup.
+// dashboards, etc.). The original URI is carried as ?next=<encoded>
+// on GET/HEAD; see [RequireAdmin] for the rationale. Stashes the
+// loaded *Player on the request context via WithPlayer so downstream
+// handlers can read it without a second lookup.
 func RequireAuthenticated(
 	next http.Handler,
 	players PlayerStore,
@@ -192,7 +199,7 @@ func RequireAuthenticated(
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		playerID, ok := sessions.PlayerID(r)
 		if !ok {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			redirectToLoginWithNext(w, r)
 
 			return
 		}
@@ -200,7 +207,7 @@ func RequireAuthenticated(
 		player, err := players.GetPlayerByID(r.Context(), playerID)
 		if err != nil {
 			if errors.Is(err, ErrPlayerNotFound) {
-				http.Redirect(w, r, "/login", http.StatusSeeOther)
+				redirectToLoginWithNext(w, r)
 
 				return
 			}
@@ -211,11 +218,36 @@ func RequireAuthenticated(
 		}
 
 		if !player.IsAuthenticated() {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			redirectToLoginWithNext(w, r)
 
 			return
 		}
 
 		next.ServeHTTP(w, r.WithContext(WithPlayer(r.Context(), player)))
 	})
+}
+
+// redirectToLoginWithNext 303s to /login with a ?next= query carrying
+// the original URI when the request method is safe to re-issue after
+// login (GET/HEAD). POSTs and other unsafe methods drop next because
+// the form body cannot be replayed - the visitor lands on the bare
+// /login page and re-navigates to their destination by hand.
+//
+// Only paths accepted by [SafeNextPath] are forwarded; anything else
+// is dropped so the parameter cannot be abused as an open-redirect
+// vector.
+func redirectToLoginWithNext(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+
+		return
+	}
+	target := SafeNextPath(r.URL.RequestURI())
+	if target == "" {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+
+		return
+	}
+	u := url.URL{Path: "/login", RawQuery: "next=" + url.QueryEscape(target)}
+	http.Redirect(w, r, u.String(), http.StatusSeeOther)
 }

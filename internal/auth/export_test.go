@@ -1,6 +1,9 @@
 package auth
 
-import "context"
+import (
+	"context"
+	"net/http"
+)
 
 // ExportLinkOrCreateGooglePlayer is the test-only alias for the
 // unexported find-or-link decision used by HandleGoogleCallback. Lets
@@ -54,3 +57,20 @@ func ExportCreateGooglePlayer(
 ) (*Player, error) {
 	return createGooglePlayer(ctx, identities, subject, email)
 }
+
+// ExportSignNext exposes signNext so the OAuth next-cookie round-trip
+// can be asserted from string inputs (#449).
+func ExportSignNext(key []byte, path string) string {
+	return signNext(key, path)
+}
+
+// ExportReadGoogleNext exposes readGoogleNext so the OAuth next-cookie
+// round-trip can be asserted end-to-end from a built request.
+func ExportReadGoogleNext(r *http.Request, key []byte) string {
+	return readGoogleNext(r, key)
+}
+
+// GoogleNextCookieName exposes the OAuth next-cookie name so
+// integration / unit tests can assert it without re-declaring the
+// constant.
+const GoogleNextCookieName = googleNextCookieName

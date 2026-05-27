@@ -36,7 +36,9 @@ func TestEmailAdmin_UnauthenticatedRedirects(t *testing.T) {
 	if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
-	if got, want := resp.Header.Get("Location"), "/login"; got != want {
+	// #449: a GET to a protected route carries the original URI as
+	// ?next= so the login flow can drop the visitor back on the page.
+	if got, want := resp.Header.Get("Location"), "/login?next=%2Fadmin%2Femail"; got != want {
 		t.Errorf("Location = %q, want %q", got, want)
 	}
 }
