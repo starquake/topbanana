@@ -1,7 +1,7 @@
 services:
   app:
     build:
-      context: deployments/demo
+      context: .
       dockerfile: Dockerfile
     container_name: topbanana
     ports:
