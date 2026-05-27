@@ -15,7 +15,10 @@ test('admin can open the email diagnostics page and see status + log', async ({ 
   await expect(page).toHaveURL(/\/admin\/email$/);
 
   await expect(page.getByRole('heading', { name: /email diagnostics/i })).toBeVisible();
-  await expect(page.getByText(/disabled \(no-op\)/i)).toBeVisible();
+  // Two "disabled (no-op)" badges in e2e: SMTP is unwired AND BASE_URL
+  // is empty (#495). Pinning the count keeps the test honest if either
+  // becomes configurable later.
+  await expect(page.getByText(/disabled \(no-op\)/i)).toHaveCount(2);
 
   const recipient = page.locator('input[name=to]');
   await expect(recipient).toBeVisible();
