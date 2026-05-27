@@ -52,7 +52,7 @@ func TestPlayerStore_CreateAndGetPlayer(t *testing.T) {
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
-	created, err := ps.CreatePlayer(t.Context(), "alice", "hashed-secret", auth.RoleAdmin)
+	created, err := ps.CreatePlayer(t.Context(), "alice", "alice"+"@example.test", "hashed-secret", auth.RoleAdmin)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
@@ -94,7 +94,7 @@ func TestPlayerStore_CreatePlayer_FirstPasswordBearer_PromotedToAdmin(t *testing
 
 	// Even when the caller asks for "player", the first password-bearing
 	// registrant is promoted to admin atomically by the SQL CASE expression.
-	created, err := ps.CreatePlayer(t.Context(), "alice", "hash", auth.RolePlayer)
+	created, err := ps.CreatePlayer(t.Context(), "alice", "alice"+"@example.test", "hash", auth.RolePlayer)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
@@ -109,11 +109,11 @@ func TestPlayerStore_CreatePlayer_SecondPasswordBearer_StaysPlayer(t *testing.T)
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
-	if _, err := ps.CreatePlayer(t.Context(), "alice", "hash", auth.RolePlayer); err != nil {
+	if _, err := ps.CreatePlayer(t.Context(), "alice", "alice"+"@example.test", "hash", auth.RolePlayer); err != nil {
 		t.Fatalf("seed CreatePlayer err = %v, want nil", err)
 	}
 
-	created, err := ps.CreatePlayer(t.Context(), "bob", "hash", auth.RolePlayer)
+	created, err := ps.CreatePlayer(t.Context(), "bob", "bob"+"@example.test", "hash", auth.RolePlayer)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
@@ -128,11 +128,11 @@ func TestPlayerStore_CreatePlayer_ExplicitAdmin_HonouredEvenWhenNotFirst(t *test
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
-	if _, err := ps.CreatePlayer(t.Context(), "alice", "hash", auth.RolePlayer); err != nil {
+	if _, err := ps.CreatePlayer(t.Context(), "alice", "alice"+"@example.test", "hash", auth.RolePlayer); err != nil {
 		t.Fatalf("seed CreatePlayer err = %v, want nil", err)
 	}
 
-	created, err := ps.CreatePlayer(t.Context(), "carol", "hash", auth.RoleAdmin)
+	created, err := ps.CreatePlayer(t.Context(), "carol", "carol"+"@example.test", "hash", auth.RoleAdmin)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
@@ -147,7 +147,13 @@ func TestPlayerStore_TrimsWhitespaceOnCreateAndLookup(t *testing.T) {
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
-	if _, err := ps.CreatePlayer(t.Context(), "  alice  ", "hash", auth.RolePlayer); err != nil {
+	if _, err := ps.CreatePlayer(
+		t.Context(),
+		"  alice  ",
+		"  alice  "+"@example.test",
+		"hash",
+		auth.RolePlayer,
+	); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
@@ -179,13 +185,51 @@ func TestPlayerStore_CreatePlayer_DuplicateUsername(t *testing.T) {
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
-	if _, err := ps.CreatePlayer(t.Context(), "alice", "hash", auth.RolePlayer); err != nil {
+	if _, err := ps.CreatePlayer(t.Context(), "alice", "alice"+"@example.test", "hash", auth.RolePlayer); err != nil {
 		t.Fatalf("CreatePlayer first call err = %v, want nil", err)
 	}
 
-	_, err := ps.CreatePlayer(t.Context(), "alice", "other", auth.RolePlayer)
+	// Different email, same username -> ErrUsernameTaken.
+	_, err := ps.CreatePlayer(t.Context(), "alice", "alice-other@example.test", "other", auth.RolePlayer)
 	if got, want := err, auth.ErrUsernameTaken; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
+	}
+}
+
+func TestPlayerStore_CreatePlayer_DuplicateEmail(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	if _, err := ps.CreatePlayer(t.Context(), "alice", "shared@example.test", "hash", auth.RolePlayer); err != nil {
+		t.Fatalf("CreatePlayer first call err = %v, want nil", err)
+	}
+
+	_, err := ps.CreatePlayer(t.Context(), "bob", "shared@example.test", "other", auth.RolePlayer)
+	if got, want := err, auth.ErrEmailTaken; !errors.Is(got, want) {
+		t.Errorf("err = %v, want %v", got, want)
+	}
+}
+
+func TestPlayerStore_CreatePlayer_LowercasesAndTrimsEmail(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	created, err := ps.CreatePlayer(t.Context(), "alice", "  ALICE@Example.Test ", "hash", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	if got, want := created.Email, "alice@example.test"; got != want {
+		t.Errorf("stored Email = %q, want %q", got, want)
+	}
+
+	// Case-variant must still collide on the unique index.
+	_, dupErr := ps.CreatePlayer(t.Context(), "bob", "alice@EXAMPLE.test", "h", auth.RolePlayer)
+	if got, want := dupErr, auth.ErrEmailTaken; !errors.Is(got, want) {
+		t.Errorf("case-variant duplicate err = %v, want %v", got, want)
 	}
 }
 
@@ -248,7 +292,7 @@ func TestPlayerStore_CreateAnonymousPlayer_DoesNotBlockFirstAdmin(t *testing.T) 
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
 
-	created, err := ps.CreatePlayer(t.Context(), "alice", "hash", auth.RolePlayer)
+	created, err := ps.CreatePlayer(t.Context(), "alice", "alice"+"@example.test", "hash", auth.RolePlayer)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
@@ -268,7 +312,7 @@ func TestPlayerStore_ClaimPlayer_UpgradesAnonymousRow(t *testing.T) {
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
 
-	claimed, err := ps.ClaimPlayer(t.Context(), anon.ID, "alice", "hash", auth.RolePlayer)
+	claimed, err := ps.ClaimPlayer(t.Context(), anon.ID, "alice", "alice"+"@example.test", "hash", auth.RolePlayer)
 	if err != nil {
 		t.Fatalf("ClaimPlayer err = %v, want nil", err)
 	}
@@ -302,11 +346,18 @@ func TestPlayerStore_ClaimPlayer_AlreadyClaimed_ReturnsSentinel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
-	if _, claimErr := ps.ClaimPlayer(t.Context(), anon.ID, "alice", "hash", auth.RolePlayer); claimErr != nil {
+	if _, claimErr := ps.ClaimPlayer(
+		t.Context(),
+		anon.ID,
+		"alice",
+		"alice"+"@example.test",
+		"hash",
+		auth.RolePlayer,
+	); claimErr != nil {
 		t.Fatalf("first ClaimPlayer err = %v, want nil", claimErr)
 	}
 
-	_, err = ps.ClaimPlayer(t.Context(), anon.ID, "bob", "other", auth.RolePlayer)
+	_, err = ps.ClaimPlayer(t.Context(), anon.ID, "bob", "bob"+"@example.test", "other", auth.RolePlayer)
 	if got, want := err, auth.ErrPlayerAlreadyClaimed; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
@@ -327,7 +378,7 @@ func TestPlayerStore_ClaimPlayer_UnknownPlayerID_ReturnsNotFound(t *testing.T) {
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
-	_, err := ps.ClaimPlayer(t.Context(), 9999, "ghost", "hash", auth.RolePlayer)
+	_, err := ps.ClaimPlayer(t.Context(), 9999, "ghost", "ghost"+"@example.test", "hash", auth.RolePlayer)
 	if got, want := err, auth.ErrPlayerNotFound; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
@@ -339,7 +390,7 @@ func TestPlayerStore_ClaimPlayer_UsernameTaken(t *testing.T) {
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
-	if _, err := ps.CreatePlayer(t.Context(), "alice", "h", auth.RolePlayer); err != nil {
+	if _, err := ps.CreatePlayer(t.Context(), "alice", "alice"+"@example.test", "h", auth.RolePlayer); err != nil {
 		t.Fatalf("seed CreatePlayer err = %v, want nil", err)
 	}
 	anon, err := ps.CreateAnonymousPlayer(t.Context(), "anon-rival")
@@ -347,7 +398,7 @@ func TestPlayerStore_ClaimPlayer_UsernameTaken(t *testing.T) {
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
 
-	_, err = ps.ClaimPlayer(t.Context(), anon.ID, "alice", "h", auth.RolePlayer)
+	_, err = ps.ClaimPlayer(t.Context(), anon.ID, "alice", "alice"+"@example.test", "h", auth.RolePlayer)
 	if got, want := err, auth.ErrUsernameTaken; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
@@ -443,7 +494,13 @@ func TestPlayerStore_UpdatePlayerUsername(t *testing.T) {
 		db := dbtest.Open(t)
 		ps := NewPlayerStore(db, slog.Default())
 
-		if _, err := ps.CreatePlayer(t.Context(), "claimed", "h", auth.RolePlayer); err != nil {
+		if _, err := ps.CreatePlayer(
+			t.Context(),
+			"claimed",
+			"claimed"+"@example.test",
+			"h",
+			auth.RolePlayer,
+		); err != nil {
 			t.Fatalf("seed CreatePlayer err = %v, want nil", err)
 		}
 		anon, err := ps.CreateAnonymousPlayer(t.Context(), "anon-collider")
@@ -462,7 +519,13 @@ func TestPlayerStore_UpdatePlayerUsername(t *testing.T) {
 		db := dbtest.Open(t)
 		ps := NewPlayerStore(db, slog.Default())
 
-		credentialled, err := ps.CreatePlayer(t.Context(), "credentialled", "h", auth.RolePlayer)
+		credentialled, err := ps.CreatePlayer(
+			t.Context(),
+			"credentialled",
+			"credentialled"+"@example.test",
+			"h",
+			auth.RolePlayer,
+		)
 		if err != nil {
 			t.Fatalf("CreatePlayer err = %v, want nil", err)
 		}
@@ -498,7 +561,7 @@ func TestPlayerStore_ListAllPlayers_AndCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
-	pw, err := ps.CreatePlayer(t.Context(), "pw-list-1", "h", auth.RolePlayer)
+	pw, err := ps.CreatePlayer(t.Context(), "pw-list-1", "pw-list-1"+"@example.test", "h", auth.RolePlayer)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}

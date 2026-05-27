@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -469,6 +470,15 @@ func linkExistingPlayerByEmail(
 		}
 
 		return nil, fmt.Errorf("link identity to existing player: %w", linkErr)
+	}
+
+	// Google attests the address; stamp email_verified_at if not already set.
+	if err := identities.MarkPlayerEmailVerifiedIfNew(ctx, player.ID); err != nil {
+		return nil, fmt.Errorf("mark email verified after link: %w", err)
+	}
+	if player.EmailVerifiedAt == nil {
+		now := time.Now().UTC()
+		player.EmailVerifiedAt = &now
 	}
 
 	return player, nil

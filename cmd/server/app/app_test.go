@@ -89,7 +89,13 @@ func seedPlayer(t *testing.T, dbURI, username string) string {
 	}
 
 	players := store.NewPlayerStore(conn, slog.Default())
-	if _, err := players.CreatePlayer(t.Context(), username, hashed, auth.RolePlayer); err != nil {
+	if _, err := players.CreatePlayer(
+		t.Context(),
+		username,
+		username+"@example.test",
+		hashed,
+		auth.RolePlayer,
+	); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 

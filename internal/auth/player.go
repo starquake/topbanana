@@ -12,6 +12,9 @@ var ErrPlayerNotFound = errors.New("player not found")
 // ErrUsernameTaken is returned when a username is already in use.
 var ErrUsernameTaken = errors.New("username taken")
 
+// ErrEmailTaken is returned when an email is already in use.
+var ErrEmailTaken = errors.New("email taken")
+
 // ErrPlayerAlreadyClaimed is returned by ClaimPlayer when the target row
 // already has a password_hash set, so it cannot be upgraded again.
 var ErrPlayerAlreadyClaimed = errors.New("player already claimed")
@@ -36,13 +39,21 @@ var ErrIdentityAlreadyLinked = errors.New("identity already linked")
 
 // Player represents an authenticated user (admin or player).
 type Player struct {
-	ID              int64
-	Username        string
-	Email           string
+	ID       int64
+	Username string
+	Email    string
+	// EmailVerifiedAt is nil until the address is verified. OAuth-linked
+	// rows are stamped at link time because the provider attests the email.
+	EmailVerifiedAt *time.Time
 	PasswordHash    string
 	Role            string
 	CreatedAt       time.Time
 	UsernameClaimed bool
+}
+
+// IsEmailVerified reports whether the player's email has been verified.
+func (p *Player) IsEmailVerified() bool {
+	return p.EmailVerifiedAt != nil
 }
 
 // IsAnonymous reports whether the player has no credentials set yet (no
@@ -68,21 +79,10 @@ func (p *Player) HasCustomName() bool {
 	return p.UsernameClaimed
 }
 
-// IsAuthenticated reports whether the visitor is known to the system —
-// they have a password hash, an OAuth-verified email, or the seeded
-// admin role. Distinct from !IsAnonymous() because an OAuth-only
-// player has no password hash yet is still authenticated; flipping
-// the existing IsAnonymous definition would change the semantics of
-// the claim-flow code paths that depend on it. Used by surfaces that
-// gate on "is the visitor signed in?" rather than "is the row a
-// fresh claimable stub?", e.g. /login's already-signed-in redirect.
-//
-// The Email != "" branch is safe today because password registration
-// does not write an email; the only rows with email set are OAuth-
-// linked. When #111 starts capturing email on password registration,
-// revisit this predicate so an unverified password account does not
-// count as authenticated. See the footnote on #111 for the parallel
-// concern on linkExistingPlayerByEmail.
+// IsAuthenticated reports whether the visitor has signed in. True for
+// password rows, OAuth-linked rows, and the seeded admin. Distinct
+// from [Player.IsEmailVerified] - the email-verify gate is a separate
+// predicate so an unverified password row can still be session-bearing.
 func (p *Player) IsAuthenticated() bool {
 	return p.PasswordHash != "" || p.Email != "" || p.Role == RoleAdmin
 }
@@ -155,13 +155,11 @@ type PlayerStore interface {
 	// GetPlayerByID returns the player with the given ID.
 	// Returns ErrPlayerNotFound when there is no match.
 	GetPlayerByID(ctx context.Context, id int64) (*Player, error)
-	// CreatePlayer creates a new player with the given username, password hash,
-	// and requested role. The store may promote the stored role to admin when
-	// the requested role is not "admin" but there are no other password-bearing
-	// players yet — making the "first registrant becomes admin" rule atomic
-	// against concurrent registrations.
-	// Returns ErrUsernameTaken when the username is already in use.
-	CreatePlayer(ctx context.Context, username, passwordHash, requestedRole string) (*Player, error)
+	// CreatePlayer creates a player with the given credentials. The
+	// store trims + lowercases the email and atomically promotes the
+	// first password-bearing registrant to admin. Returns
+	// ErrUsernameTaken / ErrEmailTaken on UNIQUE collisions.
+	CreatePlayer(ctx context.Context, username, email, passwordHash, requestedRole string) (*Player, error)
 	// CreateAnonymousPlayer creates a row with the given username, no email,
 	// no password_hash, and role = "player". Used by EnsurePlayer to back a
 	// brand-new visitor with a real row before they can play. The caller
@@ -179,7 +177,11 @@ type PlayerStore interface {
 	// Returns ErrPlayerAlreadyClaimed when the target row already has a
 	// password_hash, ErrUsernameTaken when the requested username collides
 	// with another row, and ErrPlayerNotFound when the id does not exist.
-	ClaimPlayer(ctx context.Context, playerID int64, username, passwordHash, requestedRole string) (*Player, error)
+	ClaimPlayer(
+		ctx context.Context,
+		playerID int64,
+		username, email, passwordHash, requestedRole string,
+	) (*Player, error)
 	// SetPlayerPasswordHash overwrites the password_hash on the row identified
 	// by username. Used by the operator-only -reset-password tool to rotate a
 	// forgotten admin password. Returns ErrPlayerNotFound when no row matches.

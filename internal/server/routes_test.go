@@ -34,7 +34,7 @@ func (stubPlayerStore) GetPlayerByID(_ context.Context, _ int64) (*auth.Player, 
 	return nil, auth.ErrPlayerNotFound
 }
 
-func (stubPlayerStore) CreatePlayer(_ context.Context, _, _, _ string) (*auth.Player, error) {
+func (stubPlayerStore) CreatePlayer(_ context.Context, _, _, _, _ string) (*auth.Player, error) {
 	return nil, errRouteStub
 }
 
@@ -42,7 +42,7 @@ func (stubPlayerStore) CreateAnonymousPlayer(_ context.Context, _ string) (*auth
 	return nil, errRouteStub
 }
 
-func (stubPlayerStore) ClaimPlayer(_ context.Context, _ int64, _, _, _ string) (*auth.Player, error) {
+func (stubPlayerStore) ClaimPlayer(_ context.Context, _ int64, _, _, _, _ string) (*auth.Player, error) {
 	return nil, errRouteStub
 }
 

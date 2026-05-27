@@ -71,30 +71,24 @@ func (s *PlayerStore) GetPlayerByID(ctx context.Context, id int64) (*auth.Player
 	return playerFromRow(row), nil
 }
 
-// CreatePlayer creates a new player with the given username, password hash, and
-// requested role. The role stored may be promoted to admin by the underlying
-// query: if the requested role is "admin" it is honoured directly, and if the
-// requested role is anything else it is promoted to admin only when no other
-// password-bearing player exists yet (so the first registrant always becomes
-// admin atomically — see the SQL for why).
-//
-// Returns auth.ErrUsernameTaken if the username is already in use.
+// CreatePlayer creates a credentialled player. Email is trimmed and
+// lowercased before insert. Returns auth.ErrUsernameTaken or
+// auth.ErrEmailTaken on UNIQUE collisions; the underlying SQL
+// promotes the first password-bearing registrant to admin.
 func (s *PlayerStore) CreatePlayer(
 	ctx context.Context,
-	username, passwordHash, requestedRole string,
+	username, email, passwordHash, requestedRole string,
 ) (*auth.Player, error) {
+	cleanedUsername := strings.TrimSpace(username)
+	cleanedEmail := strings.ToLower(strings.TrimSpace(email))
 	row, err := s.q.CreatePlayerWithCredentials(ctx, db.CreatePlayerWithCredentialsParams{
-		Username:      strings.TrimSpace(username),
+		Username:      cleanedUsername,
 		PasswordHash:  sql.NullString{String: passwordHash, Valid: true},
+		Email:         sql.NullString{String: cleanedEmail, Valid: cleanedEmail != ""},
 		RequestedRole: requestedRole,
 	})
 	if err != nil {
-		var sqliteErr *sqlite.Error
-		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
-			return nil, auth.ErrUsernameTaken
-		}
-
-		return nil, fmt.Errorf("failed to create player: %w", err)
+		return nil, s.classifyCredentialConflict(ctx, cleanedUsername, cleanedEmail, err)
 	}
 
 	return playerFromRow(row), nil
@@ -131,16 +125,19 @@ func (s *PlayerStore) CreateAnonymousPlayer(ctx context.Context, username string
 func (s *PlayerStore) ClaimPlayer(
 	ctx context.Context,
 	playerID int64,
-	username, passwordHash, requestedRole string,
+	username, email, passwordHash, requestedRole string,
 ) (*auth.Player, error) {
+	cleanedUsername := strings.TrimSpace(username)
+	cleanedEmail := strings.ToLower(strings.TrimSpace(email))
 	row, err := s.q.ClaimPlayer(ctx, db.ClaimPlayerParams{
-		Username:      strings.TrimSpace(username),
+		Username:      cleanedUsername,
 		PasswordHash:  sql.NullString{String: passwordHash, Valid: true},
+		Email:         sql.NullString{String: cleanedEmail, Valid: cleanedEmail != ""},
 		RequestedRole: requestedRole,
 		ID:            playerID,
 	})
 	if err != nil {
-		return nil, s.classifyClaimErr(ctx, playerID, err)
+		return nil, s.classifyClaimErr(ctx, playerID, cleanedUsername, cleanedEmail, err)
 	}
 
 	return playerFromRow(row), nil
@@ -308,6 +305,16 @@ func (s *PlayerStore) ClaimPlayerForOAuth(
 	return playerFromRow(row), nil
 }
 
+// MarkPlayerEmailVerifiedIfNew stamps email_verified_at when it is
+// currently NULL. Idempotent.
+func (s *PlayerStore) MarkPlayerEmailVerifiedIfNew(ctx context.Context, playerID int64) error {
+	if _, err := s.q.MarkPlayerEmailVerifiedIfNew(ctx, playerID); err != nil {
+		return fmt.Errorf("failed to mark player email verified: %w", err)
+	}
+
+	return nil
+}
+
 // LinkProviderIdentity inserts a player_identities row tying the given
 // player to the (provider, subject) pair. Returns
 // auth.ErrIdentityAlreadyLinked when the UNIQUE (provider, subject)
@@ -461,10 +468,12 @@ func (s *PlayerStore) classifyUpdateUsernameErr(ctx context.Context, playerID in
 // sentinels. [sql.ErrNoRows] from the UPDATE is ambiguous (the id might
 // not exist OR the row has already been claimed), so it re-queries by id
 // to disambiguate.
-func (s *PlayerStore) classifyClaimErr(ctx context.Context, playerID int64, err error) error {
+func (s *PlayerStore) classifyClaimErr(
+	ctx context.Context, playerID int64, cleanedUsername, cleanedEmail string, err error,
+) error {
 	var sqliteErr *sqlite.Error
 	if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
-		return auth.ErrUsernameTaken
+		return s.classifyCredentialConflict(ctx, cleanedUsername, cleanedEmail, err)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("failed to claim player: %w", err)
@@ -481,6 +490,31 @@ func (s *PlayerStore) classifyClaimErr(ctx context.Context, playerID int64, err 
 	return auth.ErrPlayerAlreadyClaimed
 }
 
+// classifyCredentialConflict maps a SQLITE UNIQUE violation onto
+// ErrUsernameTaken or ErrEmailTaken by looking up which column the
+// caller already took. Any other error wraps through unchanged.
+func (s *PlayerStore) classifyCredentialConflict(
+	ctx context.Context, cleanedUsername, cleanedEmail string, err error,
+) error {
+	var sqliteErr *sqlite.Error
+	if !errors.As(err, &sqliteErr) || sqliteErr.Code() != sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+		return fmt.Errorf("failed to create player: %w", err)
+	}
+	if _, lookupErr := s.q.GetPlayerByUsername(ctx, cleanedUsername); lookupErr == nil {
+		return auth.ErrUsernameTaken
+	}
+	if cleanedEmail != "" {
+		if _, lookupErr := s.q.GetPlayerByEmail(
+			ctx,
+			sql.NullString{String: cleanedEmail, Valid: true},
+		); lookupErr == nil {
+			return auth.ErrEmailTaken
+		}
+	}
+
+	return fmt.Errorf("failed to create player: %w", err)
+}
+
 func playerFromRow(row db.Player) *auth.Player {
 	p := &auth.Player{
 		ID:              row.ID,
@@ -494,6 +528,10 @@ func playerFromRow(row db.Player) *auth.Player {
 	}
 	if row.PasswordHash.Valid {
 		p.PasswordHash = row.PasswordHash.String
+	}
+	if row.EmailVerifiedAt.Valid {
+		verified := row.EmailVerifiedAt.Time
+		p.EmailVerifiedAt = &verified
 	}
 
 	return p

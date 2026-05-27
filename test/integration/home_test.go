@@ -54,11 +54,23 @@ func TestHome_Integration(t *testing.T) {
 		t.Fatalf("CreateQuiz quiz2 err = %v, want nil", err)
 	}
 
-	alice, err := stores.Players.CreatePlayer(ctx, "alice-integration", "hash", auth.RolePlayer)
+	alice, err := stores.Players.CreatePlayer(
+		ctx,
+		"alice-integration",
+		"alice-integration"+"@example.test",
+		"hash",
+		auth.RolePlayer,
+	)
 	if err != nil {
 		t.Fatalf("CreatePlayer alice err = %v, want nil", err)
 	}
-	bob, err := stores.Players.CreatePlayer(ctx, "bob-integration", "hash", auth.RolePlayer)
+	bob, err := stores.Players.CreatePlayer(
+		ctx,
+		"bob-integration",
+		"bob-integration"+"@example.test",
+		"hash",
+		auth.RolePlayer,
+	)
 	if err != nil {
 		t.Fatalf("CreatePlayer bob err = %v, want nil", err)
 	}

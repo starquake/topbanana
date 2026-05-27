@@ -87,11 +87,11 @@ func seedHomeDB(t *testing.T) homeSeed {
 		t.Fatalf("CreateQuiz q2 err = %v, want nil", err)
 	}
 
-	alice, err := players.CreatePlayer(t.Context(), "alice", "hash", auth.RolePlayer)
+	alice, err := players.CreatePlayer(t.Context(), "alice", "alice"+"@example.test", "hash", auth.RolePlayer)
 	if err != nil {
 		t.Fatalf("CreatePlayer alice err = %v, want nil", err)
 	}
-	bob, err := players.CreatePlayer(t.Context(), "bob", "hash", auth.RolePlayer)
+	bob, err := players.CreatePlayer(t.Context(), "bob", "bob"+"@example.test", "hash", auth.RolePlayer)
 	if err != nil {
 		t.Fatalf("CreatePlayer bob err = %v, want nil", err)
 	}
@@ -248,11 +248,23 @@ func TestHomeStore_ListMostActivePlayers_AppliesThirtyDayWindow(t *testing.T) {
 		t.Fatalf("CreateQuiz err = %v, want nil", err)
 	}
 
-	stale, err := players.CreatePlayer(t.Context(), "stale-winner", "hash", auth.RolePlayer)
+	stale, err := players.CreatePlayer(
+		t.Context(),
+		"stale-winner",
+		"stale-winner"+"@example.test",
+		"hash",
+		auth.RolePlayer,
+	)
 	if err != nil {
 		t.Fatalf("CreatePlayer stale err = %v, want nil", err)
 	}
-	recent, err := players.CreatePlayer(t.Context(), "recent-winner", "hash", auth.RolePlayer)
+	recent, err := players.CreatePlayer(
+		t.Context(),
+		"recent-winner",
+		"recent-winner"+"@example.test",
+		"hash",
+		auth.RolePlayer,
+	)
 	if err != nil {
 		t.Fatalf("CreatePlayer recent err = %v, want nil", err)
 	}
@@ -314,7 +326,7 @@ func TestHomeStore_ExcludesEmptyQuizFromRankings(t *testing.T) {
 	if err := quizzes.CreateQuiz(t.Context(), emptyQuiz); err != nil {
 		t.Fatalf("CreateQuiz empty err = %v, want nil", err)
 	}
-	player, err := players.CreatePlayer(t.Context(), "lonely", "hash", auth.RolePlayer)
+	player, err := players.CreatePlayer(t.Context(), "lonely", "lonely"+"@example.test", "hash", auth.RolePlayer)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}

@@ -90,6 +90,7 @@ func TestAdmin_Integration(t *testing.T) {
 
 	registerForm := url.Values{}
 	registerForm.Add("username", "integration-admin")
+	registerForm.Add("email", "integration-admin@example.test")
 	registerForm.Add("password", "integration-pass-123")
 	registerForm.Add("csrf_token", registerToken)
 

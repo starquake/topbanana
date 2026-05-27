@@ -74,3 +74,6 @@ func ExportReadGoogleNext(r *http.Request, key []byte) string {
 // integration / unit tests can assert it without re-declaring the
 // constant.
 const GoogleNextCookieName = googleNextCookieName
+
+// LooksLikeEmail exposes looksLikeEmail for the external test package.
+var LooksLikeEmail = looksLikeEmail

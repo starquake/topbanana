@@ -41,4 +41,7 @@ type OAuthIdentityStore interface {
 	// each case the caller falls through to the create-fresh-player
 	// path. The username on the row is left untouched.
 	ClaimPlayerForOAuth(ctx context.Context, playerID int64, email string) (*Player, error)
+	// MarkPlayerEmailVerifiedIfNew stamps email_verified_at when
+	// currently NULL. Idempotent.
+	MarkPlayerEmailVerifiedIfNew(ctx context.Context, playerID int64) error
 }

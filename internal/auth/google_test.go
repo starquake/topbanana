@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	. "github.com/starquake/topbanana/internal/auth"
 )
@@ -137,6 +138,24 @@ func (s *stubOAuthStore) ClaimPlayerForOAuth(_ context.Context, playerID int64, 
 	}
 
 	return p, nil
+}
+
+// MarkPlayerEmailVerifiedIfNew mirrors the SQL by stamping
+// EmailVerifiedAt on the row when it is currently nil. Idempotent.
+func (s *stubOAuthStore) MarkPlayerEmailVerifiedIfNew(_ context.Context, playerID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	p, ok := s.players[playerID]
+	if !ok {
+		return nil
+	}
+	if p.EmailVerifiedAt == nil {
+		now := time.Now().UTC()
+		p.EmailVerifiedAt = &now
+	}
+
+	return nil
 }
 
 // seedAnonymous inserts a fully anonymous players row (no password,

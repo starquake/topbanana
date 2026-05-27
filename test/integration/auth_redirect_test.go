@@ -114,6 +114,9 @@ func submitAuthForm(
 
 	form := url.Values{}
 	form.Add("username", username)
+	// Always send email so the same helper drives both /login (which
+	// ignores the field) and /register (which requires it since #111).
+	form.Add("email", username+"@example.test")
 	form.Add("password", password)
 	form.Add("csrf_token", token)
 

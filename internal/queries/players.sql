@@ -23,10 +23,11 @@ LIMIT 1;
 -- their username at the register form. The column tracks "did the player
 -- pick this name themselves" (vs auto-generated petname), so a fresh
 -- registrant must be marked as claimed from the moment the row is written.
-INSERT INTO players (username, password_hash, role, username_claimed)
+INSERT INTO players (username, password_hash, email, role, username_claimed)
 VALUES (
     sqlc.arg('username'),
     sqlc.arg('password_hash'),
+    sqlc.arg('email'),
     CASE
         WHEN CAST(sqlc.arg('requested_role') AS TEXT) = 'admin' THEN 'admin'
         WHEN NOT EXISTS (
@@ -78,6 +79,7 @@ RETURNING *;
 UPDATE players
 SET username = sqlc.arg('username'),
     password_hash = sqlc.arg('password_hash'),
+    email = sqlc.arg('email'),
     role = CASE
         WHEN CAST(sqlc.arg('requested_role') AS TEXT) = 'admin' THEN 'admin'
         WHEN NOT EXISTS (
@@ -90,6 +92,7 @@ SET username = sqlc.arg('username'),
     username_claimed = 1
 WHERE players.id = sqlc.arg('id')
   AND players.password_hash IS NULL
+  AND players.email IS NULL
 RETURNING *;
 
 -- name: SetPlayerPasswordHash :execrows
@@ -147,10 +150,11 @@ LIMIT 1;
 -- deployments from promoting *every* sign-in to admin. Without this,
 -- the second-and-onward Google sign-ins on a fresh DB would all see
 -- count(password_hash IS NOT NULL) == 0 and become admin.
-INSERT INTO players (username, email, role, username_claimed)
+INSERT INTO players (username, email, email_verified_at, role, username_claimed)
 VALUES (
     sqlc.arg('username'),
     sqlc.arg('email'),
+    CURRENT_TIMESTAMP,
     CASE
         WHEN NOT EXISTS (
             SELECT 1 FROM players p
@@ -195,6 +199,7 @@ VALUES (?, ?, ?);
 -- petname-collision retry it uses for cookieless visitors.
 UPDATE players
 SET email = sqlc.arg('email'),
+    email_verified_at = CURRENT_TIMESTAMP,
     role = CASE
         WHEN NOT EXISTS (
             SELECT 1 FROM players p
@@ -296,3 +301,10 @@ SET username = sqlc.arg('username'),
     username_claimed = 1
 WHERE id = sqlc.arg('id')
 RETURNING *;
+
+-- name: MarkPlayerEmailVerifiedIfNew :execrows
+-- Stamps email_verified_at when currently NULL. Idempotent.
+UPDATE players
+SET email_verified_at = CURRENT_TIMESTAMP
+WHERE id = sqlc.arg('id')
+  AND email_verified_at IS NULL;
