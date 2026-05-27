@@ -177,6 +177,7 @@ test('signed-in player does not see the claim-name CTA on the player client', as
   await page.locator('input[name=username]').fill(username);
   await page.locator('input[name=email]').fill(`${username}@example.test`);
   await page.locator('input[name=password]').fill('correct-battery-13');
+  await page.locator('input[name=password_confirm]').fill('correct-battery-13');
   await page.locator('button[type=submit]').click();
   // Admin lands on /admin/quizzes; subsequent registrants land on /.
   // Either signals a successful registration + session cookie set.
