@@ -41,7 +41,7 @@ func TestEmailRateLimiter_AllowStampsAtomically(t *testing.T) {
 
 	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
 	clock := func() time.Time { return now }
-	l := NewEmailRateLimiterWithClock(10*time.Second, clock)
+	l := NewEmailRateLimiterWithClock(10*time.Second, clock, nil)
 
 	// First Allow at a fresh ip returns true and stamps the bucket
 	// in the same lock acquisition; the token echoes the stamp so the
@@ -79,7 +79,7 @@ func TestEmailRateLimiter_CancelRevertsStamp(t *testing.T) {
 
 	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
 	clock := func() time.Time { return now }
-	l := NewEmailRateLimiterWithClock(10*time.Second, clock)
+	l := NewEmailRateLimiterWithClock(10*time.Second, clock, nil)
 
 	// Allow stamps the bucket; Cancel with the matching token reverts
 	// that stamp so the immediate retry within the window is admitted.
@@ -104,7 +104,7 @@ func TestEmailRateLimiter_CancelLeavesNewerStampAlone(t *testing.T) {
 	// stamp so A's Cancel cannot clobber B's window.
 	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
 	clock := func() time.Time { return now }
-	l := NewEmailRateLimiterWithClock(10*time.Second, clock)
+	l := NewEmailRateLimiterWithClock(10*time.Second, clock, nil)
 
 	// A reserves the bucket and walks off to validate the recipient.
 	ok, _, tokenA := l.Allow("1.2.3.4")
@@ -145,7 +145,7 @@ func TestEmailRateLimiter_ConcurrentAllowAdmitsExactlyOne(t *testing.T) {
 	// Stamping the bucket inside the same lock acquisition pins it.
 	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
 	clock := func() time.Time { return now }
-	l := NewEmailRateLimiterWithClock(10*time.Second, clock)
+	l := NewEmailRateLimiterWithClock(10*time.Second, clock, nil)
 
 	const goroutines = 32
 	var admitted atomic.Int64
@@ -174,7 +174,7 @@ func TestEmailRateLimiter_PrunesStaleEntries(t *testing.T) {
 
 	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
 	clock := func() time.Time { return now }
-	l := NewEmailRateLimiterWithClock(10*time.Second, clock)
+	l := NewEmailRateLimiterWithClock(10*time.Second, clock, nil)
 
 	if ok, _, _ := l.Allow("1.2.3.4"); !ok {
 		t.Fatal("first Allow = false, want true")
@@ -194,40 +194,6 @@ func TestEmailRateLimiter_PrunesStaleEntries(t *testing.T) {
 	}
 	if got, want := EmailRateLimiterEntryCount(l), 1; got != want {
 		t.Errorf("entries after prune = %d, want %d", got, want)
-	}
-}
-
-func TestClientIP_RemoteAddrOnly(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name       string
-		xff        string
-		remoteAddr string
-		want       string
-	}{
-		// X-Forwarded-For is intentionally ignored: the server is
-		// exposed directly today and trusting XFF would let any caller
-		// forge a bucket. The header is set in the first two cases to
-		// pin the "ignored" behaviour.
-		{"xff is ignored", "203.0.113.4", "10.0.0.1:1234", "10.0.0.1"},
-		{"xff with leading comma is ignored", ",203.0.113.4", "10.0.0.1:1234", "10.0.0.1"},
-		{"falls back to RemoteAddr host", "", "10.0.0.1:1234", "10.0.0.1"},
-		{"unparseable RemoteAddr returned verbatim", "", "missing-port", "missing-port"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/email/test", nil)
-			req.RemoteAddr = tt.remoteAddr
-			if tt.xff != "" {
-				req.Header.Set("X-Forwarded-For", tt.xff)
-			}
-			if got, want := ClientIP(req), tt.want; got != want {
-				t.Errorf("ClientIP = %q, want %q", got, want)
-			}
-		})
 	}
 }
 
@@ -304,6 +270,7 @@ func TestHandleEmailTest_NotConfiguredFlashesError(t *testing.T) {
 	limiter := NewEmailRateLimiterWithClock(
 		10*time.Second,
 		func() time.Time { return time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC) },
+		nil,
 	)
 
 	rr := postEmailTest(t, recorder, limiter, "ops@example.test")
@@ -329,7 +296,7 @@ func TestHandleEmailTest_RateLimitsRepeatedSends(t *testing.T) {
 
 	recorder := &stubRecorder{}
 	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
-	limiter := NewEmailRateLimiterWithClock(10*time.Second, func() time.Time { return now })
+	limiter := NewEmailRateLimiterWithClock(10*time.Second, func() time.Time { return now }, nil)
 
 	// First click is admitted: 303 to /admin/email with a success flash.
 	rr1 := postEmailTest(t, recorder, limiter, "ops@example.test")
@@ -366,6 +333,7 @@ func TestHandleEmailTest_InvalidRecipientFlashesError(t *testing.T) {
 	limiter := NewEmailRateLimiterWithClock(
 		10*time.Second,
 		func() time.Time { return time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC) },
+		nil,
 	)
 
 	rr := postEmailTest(t, recorder, limiter, "not-an-email")
@@ -393,6 +361,7 @@ func TestHandleEmailTest_InvalidRecipientDoesNotConsumeBucket(t *testing.T) {
 	limiter := NewEmailRateLimiterWithClock(
 		10*time.Second,
 		func() time.Time { return time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC) },
+		nil,
 	)
 
 	// First POST is rejected on validation; the bucket should NOT be

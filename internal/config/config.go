@@ -6,9 +6,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/starquake/topbanana/internal/request"
 )
 
 // ErrDBURINotSetInProduction is returned when DB_URI is not set in production. We need this to prevent accidental
@@ -163,6 +166,15 @@ type Config struct {
 	// to either fall back to the request's absolute URL or refuse to
 	// render the link if BaseURL is required and absent.
 	BaseURL string
+
+	// TrustedProxyCIDRs is the parsed allow-list of upstream reverse
+	// proxies whose X-Forwarded-For header the per-IP rate limiters
+	// should honour. Empty (the default) means "no proxy in front" -
+	// XFF is ignored entirely and limiters bucket on RemoteAddr only,
+	// which is the only fail-secure default when the binary is
+	// exposed directly. Parsed from the TRUSTED_PROXY_IPS env var as
+	// a comma-separated CIDR list; see #463.
+	TrustedProxyCIDRs []*net.IPNet
 }
 
 // SMTPConfigured reports whether enough SMTP env vars are populated
@@ -253,11 +265,16 @@ func Parse(getenv func(string) string) (*Config, error) {
 	c.GoogleRedirectURL = getenv("GOOGLE_REDIRECT_URL")
 	c.GoogleIssuerURL = getenv("GOOGLE_ISSUER_URL")
 
-	if err := parseSMTPConfig(getenv, &c); err != nil {
+	if err = parseSMTPConfig(getenv, &c); err != nil {
 		return nil, err
 	}
 
 	c.BaseURL = strings.TrimRight(getenv("BASE_URL"), "/")
+
+	c.TrustedProxyCIDRs, err = request.ParseTrustedProxyCIDRs(getenv("TRUSTED_PROXY_IPS"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid TRUSTED_PROXY_IPS: %w", err)
+	}
 
 	return &c, nil
 }

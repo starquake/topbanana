@@ -804,6 +804,70 @@ func TestParse_SMTP(t *testing.T) {
 	})
 }
 
+func TestParse_TrustedProxyCIDRs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("unset returns nil slice", func(t *testing.T) {
+		t.Parallel()
+
+		getenv := func(key string) string {
+			if key == "APP_ENV" {
+				return "development"
+			}
+
+			return ""
+		}
+		c, err := Parse(getenv)
+		if err != nil {
+			t.Fatalf("Parse() err = %v, want nil", err)
+		}
+		if got := c.TrustedProxyCIDRs; got != nil {
+			t.Errorf("TrustedProxyCIDRs = %v, want nil", got)
+		}
+	})
+
+	t.Run("single CIDR parses", func(t *testing.T) {
+		t.Parallel()
+
+		getenv := func(key string) string {
+			envs := map[string]string{
+				"APP_ENV":           "development",
+				"TRUSTED_PROXY_IPS": "127.0.0.1/32",
+				"SESSION_KEY":       "k",
+			}
+
+			return envs[key]
+		}
+		c, err := Parse(getenv)
+		if err != nil {
+			t.Fatalf("Parse() err = %v, want nil", err)
+		}
+		if got, want := len(c.TrustedProxyCIDRs), 1; got != want {
+			t.Errorf("len(TrustedProxyCIDRs) = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("invalid CIDR returns wrapped error", func(t *testing.T) {
+		t.Parallel()
+
+		getenv := func(key string) string {
+			envs := map[string]string{
+				"APP_ENV":           "development",
+				"TRUSTED_PROXY_IPS": "not-a-cidr",
+			}
+
+			return envs[key]
+		}
+		_, err := Parse(getenv)
+		if err == nil {
+			t.Fatal("Parse() err = nil, want non-nil")
+		}
+		if got, want := err.Error(), "invalid TRUSTED_PROXY_IPS"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+}
+
 func TestConfig_SecureCookies(t *testing.T) {
 	t.Parallel()
 	// SecureCookies decides whether session + CSRF cookies get the
