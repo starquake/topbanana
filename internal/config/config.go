@@ -55,6 +55,11 @@ const (
 	AppEnvironmentProduction = "production"
 	// ClientDirDefault specifies the default directory for the player-client static files.
 	ClientDirDefault = ""
+	// WebStaticDirDefault is the default override for the admin/auth/home static-asset
+	// directory. Empty means "serve from the embedded FS"; a development override
+	// (e.g. WEB_STATIC_DIR=internal/web/static) makes `make tailwind` regens visible
+	// without a binary restart, mirroring CLIENT_DIR for the player-client half.
+	WebStaticDirDefault = ""
 
 	// HostDefault is the default host to listen on. Can be an IP address or hostname.
 	HostDefault = "localhost"
@@ -91,6 +96,13 @@ type Config struct {
 	DBConnMaxLifetime time.Duration
 
 	ClientDir string
+
+	// WebStaticDir overrides the on-disk path served at /assets/ for the
+	// admin/auth/home shell. Empty means "serve from the embedded FS"
+	// (the production default); set to e.g. internal/web/static in dev
+	// so a `make tailwind` regen lands without a binary restart. Honoured
+	// only when AppEnvironment == "development", matching ClientDir.
+	WebStaticDir string
 
 	SessionKey string
 
@@ -181,6 +193,7 @@ func (c *Config) SecureCookies() bool {
 func Parse(getenv func(string) string) (*Config, error) {
 	c := Config{
 		ClientDir:         ClientDirDefault,
+		WebStaticDir:      WebStaticDirDefault,
 		Host:              HostDefault,
 		Port:              PortDefault,
 		DBDriver:          DBDriverDefault,
@@ -212,6 +225,9 @@ func Parse(getenv func(string) string) (*Config, error) {
 	if c.AppEnvironment == "development" {
 		if val := getenv("CLIENT_DIR"); val != "" {
 			c.ClientDir = val
+		}
+		if val := getenv("WEB_STATIC_DIR"); val != "" {
+			c.WebStaticDir = val
 		}
 	}
 

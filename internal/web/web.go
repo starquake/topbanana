@@ -8,6 +8,7 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
+	"os"
 
 	"github.com/tdewolff/minify/v2"
 	"github.com/tdewolff/minify/v2/css"
@@ -20,16 +21,13 @@ import (
 var staticFS embed.FS
 
 // Handler returns an [http.Handler] that serves the admin/auth static assets
-// at /assets/. The Tailwind output is committed and embedded, so there is no
-// dev-directory override — regenerate via `make tailwind` (or `make
-// tailwind-watch` + rebuild the binary) during development.
+// at /assets/. Defaults to the committed [embed.FS] so production binaries
+// ship self-contained. When [config.Config.WebStaticDir] is set (development
+// only — see config.Parse), the on-disk directory is served instead so a
+// `make tailwind` regen is visible on the next request without a binary
+// restart. Mirrors the CLIENT_DIR override for the player-client half.
 func Handler(cfg *config.Config) http.Handler {
-	fsys, err := fs.Sub(staticFS, "static")
-	if err != nil {
-		panic(err)
-	}
-
-	fileServer := http.FileServer(http.FS(fsys))
+	fileServer := http.FileServer(http.FS(resolveStaticFS(cfg)))
 
 	if cfg.IsProduction() {
 		m := minify.New()
@@ -41,4 +39,22 @@ func Handler(cfg *config.Config) http.Handler {
 	}
 
 	return http.StripPrefix("/assets", fileServer)
+}
+
+// resolveStaticFS picks the static-asset filesystem: an on-disk
+// [os.DirFS] when WebStaticDir is set, otherwise the embedded tree.
+// Pulled out of Handler so the branching reads as a single line and a
+// future override (e.g. test-supplied [fs.FS]) has one place to land.
+func resolveStaticFS(cfg *config.Config) fs.FS {
+	if cfg.WebStaticDir != "" {
+		return os.DirFS(cfg.WebStaticDir)
+	}
+	fsys, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		// fs.Sub on a static //go:embed path can only fail at build time;
+		// reaching here means the embed declaration was tampered with.
+		panic(err)
+	}
+
+	return fsys
 }

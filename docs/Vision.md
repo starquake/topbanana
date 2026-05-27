@@ -55,7 +55,7 @@ Each `(player, quiz)` pair gets exactly one attempt, enforced at the DB by the `
 
 ### Self-hosting
 
-Multi-stage Dockerfile → distroless. `docker-compose.yml` mounts a volume for the SQLite file. Env vars in `internal/config/config.go`: `APP_ENV`, `HOST`, `PORT`, `DB_URI`, `CLIENT_DIR`, `SESSION_KEY`, `ADMIN_USERNAMES`, `REGISTRATION_ENABLED`, `REVEAL_DELAY`. `SESSION_KEY` is required in production and the server refuses to start with an empty or default value.
+Multi-stage Dockerfile → distroless. `docker-compose.yml` mounts a volume for the SQLite file. Env vars in `internal/config/config.go`: `APP_ENV`, `HOST`, `PORT`, `DB_URI`, `CLIENT_DIR`, `WEB_STATIC_DIR`, `SESSION_KEY`, `ADMIN_USERNAMES`, `REGISTRATION_ENABLED`, `REVEAL_DELAY`. `SESSION_KEY` is required in production and the server refuses to start with an empty or default value.
 
 ### Notable Phase 1.5 additions on top of Phase 1
 

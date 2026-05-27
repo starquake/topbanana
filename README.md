@@ -129,6 +129,7 @@ Top Banana is configured through environment variables. Sensible defaults apply 
 - **`PORT`** — TCP port. Defaults to `8080`.
 - **`DB_URI`** — modernc.org/sqlite connection string. Defaults to `file:topbanana.sqlite` in development; **required** in production.
 - **`CLIENT_DIR`** — development-only override that serves the player client from a directory on disk instead of the embedded FS, so HTML/JS edits hot-reload on page reload.
+- **`WEB_STATIC_DIR`** — development-only override that serves the admin/auth/home static assets (Tailwind output at `/assets/`) from a directory on disk instead of the embedded FS. Set to `internal/web/static` alongside `CLIENT_DIR=internal/client/static` for full live-reload coverage; a `make tailwind` regen then lands on the next request without a binary restart.
 
 ### Database tuning
 
