@@ -589,7 +589,7 @@ func TestHandleRegisterSubmit_ClaimsAnonymousSession(t *testing.T) {
 
 	// Build a request that already carries the anonymous session cookie.
 	rec := httptest.NewRecorder()
-	sessions.Set(rec, anon.ID)
+	sessions.Set(rec, anon.ID, 0)
 	cookie := rec.Result().Cookies()[0]
 
 	form := url.Values{
@@ -652,7 +652,7 @@ func TestHandleRegisterSubmit_ClaimWithTakenUsername(t *testing.T) {
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, sessions, RegisterDeps{})
 
 	rec := httptest.NewRecorder()
-	sessions.Set(rec, anon.ID)
+	sessions.Set(rec, anon.ID, 0)
 	cookie := rec.Result().Cookies()[0]
 
 	form := url.Values{
@@ -713,7 +713,7 @@ func TestHandleRegisterSubmit_ClaimAlreadyClaimed_FallsBackToCreate(t *testing.T
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, sessions, RegisterDeps{})
 
 	rec := httptest.NewRecorder()
-	sessions.Set(rec, anon.ID) // cookie still points at the now-claimed row
+	sessions.Set(rec, anon.ID, 0) // cookie still points at the now-claimed row
 	cookie := rec.Result().Cookies()[0]
 
 	form := url.Values{
@@ -848,7 +848,7 @@ func TestHandleLoginForm_AlreadySignedIn_RedirectsToLanding(t *testing.T) {
 	handler := HandleLoginForm(discardLogger(), nil, store, sessions, false, false)
 
 	rec := httptest.NewRecorder()
-	sessions.Set(rec, player.ID)
+	sessions.Set(rec, player.ID, 0)
 	cookie := rec.Result().Cookies()[0]
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login", nil)
@@ -880,7 +880,7 @@ func TestHandleLoginForm_AnonymousSession_RendersForm(t *testing.T) {
 	handler := HandleLoginForm(discardLogger(), nil, store, sessions, false, false)
 
 	rec := httptest.NewRecorder()
-	sessions.Set(rec, anon.ID)
+	sessions.Set(rec, anon.ID, 0)
 	cookie := rec.Result().Cookies()[0]
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login", nil)

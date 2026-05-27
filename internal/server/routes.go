@@ -121,6 +121,11 @@ func addEmailFlowRoutes(
 		logger, stores.Players, sessions, stores.ResetTokens, mailerTester,
 		cfg.BaseURL, forgotLimiter, forgotFlash,
 	))))
+
+	mux.Handle("GET /reset-password", auth.HandleResetForm(logger, csrfMgr, stores.ResetTokens))
+	mux.Handle("POST /reset-password", admin.MaxFormSizeMiddleware(csrfMW(
+		auth.HandleResetSubmit(logger, csrfMgr, stores.ResetTokens, sessions),
+	)))
 }
 
 // homeViewerFunc returns a closure that resolves the signed-in player

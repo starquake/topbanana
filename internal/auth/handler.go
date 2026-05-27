@@ -198,7 +198,7 @@ func HandleRegisterSubmit(
 		}
 
 		dispatchVerifyEmail(r.Context(), logger, deps, player.ID, input.CleanedEmail)
-		sessions.Set(w, player.ID)
+		sessions.Set(w, player.ID, player.SessionVersion)
 		http.Redirect(w, r, landingPathFor(player.Role), http.StatusSeeOther)
 	})
 }
@@ -455,7 +455,7 @@ func HandleLoginSubmit(
 		if id, ok := sessions.PlayerID(r); ok {
 			priorSessionPlayerID = &id
 		}
-		sessions.Set(w, player.ID)
+		sessions.Set(w, player.ID, player.SessionVersion)
 		migrateGamesAfterSignIn(r.Context(), logger, players, games, priorSessionPlayerID, player.ID)
 		redirectAfterLogin(w, r, player.Role)
 	})

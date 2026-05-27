@@ -58,7 +58,7 @@ func EnsurePlayer(next http.Handler, players PlayerStore, sessions *session.Mana
 			return
 		}
 
-		sessions.Set(w, player.ID)
+		sessions.Set(w, player.ID, player.SessionVersion)
 		next.ServeHTTP(w, r.WithContext(WithPlayer(r.Context(), player)))
 	})
 }
@@ -66,10 +66,12 @@ func EnsurePlayer(next http.Handler, players PlayerStore, sessions *session.Mana
 // loadSessionPlayer resolves the player referenced by the request's session
 // cookie. It returns (player, nil) when a usable row was found,
 // (nil, ErrPlayerNotFound) when there is no session cookie OR the cookie
-// referenced a deleted row, and (nil, otherErr) when the store returned an
-// unexpected error.
+// referenced a deleted row OR the cookie's session_version stamp does
+// not match the row's current session_version (a password reset has
+// happened since the cookie was issued, so it must be treated as
+// invalidated). Other store failures bubble up as wrapped errors.
 func loadSessionPlayer(r *http.Request, players PlayerStore, sessions *session.Manager) (*Player, error) {
-	playerID, hasSession := sessions.PlayerID(r)
+	playerID, sessionVersion, hasSession := sessions.Decode(r)
 	if !hasSession {
 		return nil, ErrPlayerNotFound
 	}
@@ -81,6 +83,11 @@ func loadSessionPlayer(r *http.Request, players PlayerStore, sessions *session.M
 		}
 
 		return nil, fmt.Errorf("load player by id: %w", err)
+	}
+	if player.SessionVersion != sessionVersion {
+		// Reset bumped session_version after this cookie was minted -
+		// surface as not-found so the caller bounces through login.
+		return nil, ErrPlayerNotFound
 	}
 
 	return player, nil
@@ -129,14 +136,7 @@ func RequireAdmin(
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/access_denied.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		playerID, ok := sessions.PlayerID(r)
-		if !ok {
-			redirectToLoginWithNext(w, r)
-
-			return
-		}
-
-		player, err := players.GetPlayerByID(r.Context(), playerID)
+		player, err := loadSessionPlayer(r, players, sessions)
 		if err != nil {
 			if errors.Is(err, ErrPlayerNotFound) {
 				redirectToLoginWithNext(w, r)
@@ -179,14 +179,7 @@ func RequireAuthenticated(
 	logger *slog.Logger,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		playerID, ok := sessions.PlayerID(r)
-		if !ok {
-			redirectToLoginWithNext(w, r)
-
-			return
-		}
-
-		player, err := players.GetPlayerByID(r.Context(), playerID)
+		player, err := loadSessionPlayer(r, players, sessions)
 		if err != nil {
 			if errors.Is(err, ErrPlayerNotFound) {
 				redirectToLoginWithNext(w, r)

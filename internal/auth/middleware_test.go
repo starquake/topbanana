@@ -46,7 +46,7 @@ func TestRequireAdmin_AllowsAdmin(t *testing.T) {
 	mw := RequireAdmin(next, store, sessions, nil, discardLogger())
 
 	rec := httptest.NewRecorder()
-	sessions.Set(rec, admin.ID)
+	sessions.Set(rec, admin.ID, 0)
 	cookie := rec.Result().Cookies()[0]
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
@@ -93,7 +93,7 @@ func TestRequireAdmin_DeniesPlayer(t *testing.T) {
 	mw := RequireAdmin(next, store, sessions, nil, discardLogger())
 
 	rec := httptest.NewRecorder()
-	sessions.Set(rec, player.ID)
+	sessions.Set(rec, player.ID, 0)
 	cookie := rec.Result().Cookies()[0]
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
@@ -175,7 +175,7 @@ func TestRequireAdmin_UnknownPlayerID_RedirectsToLogin(t *testing.T) {
 	mw := RequireAdmin(next, store, sessions, nil, discardLogger())
 
 	rec := httptest.NewRecorder()
-	sessions.Set(rec, 9999)
+	sessions.Set(rec, 9999, 0)
 	cookie := rec.Result().Cookies()[0]
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
@@ -206,7 +206,7 @@ func TestRequireAdmin_StoreError_500(t *testing.T) {
 	mw := RequireAdmin(next, store, sessions, nil, discardLogger())
 
 	rec := httptest.NewRecorder()
-	sessions.Set(rec, admin.ID)
+	sessions.Set(rec, admin.ID, 0)
 	cookie := rec.Result().Cookies()[0]
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
@@ -288,7 +288,7 @@ func TestEnsurePlayer_ValidCookie_ReusesExistingRow(t *testing.T) {
 	mw := EnsurePlayer(next, store, sessions, discardLogger())
 
 	rec := httptest.NewRecorder()
-	sessions.Set(rec, existing.ID)
+	sessions.Set(rec, existing.ID, 0)
 	cookie := rec.Result().Cookies()[0]
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
@@ -322,7 +322,7 @@ func TestEnsurePlayer_DeletedPlayer_MintsNewAnonymous(t *testing.T) {
 
 	// Issue a cookie pointing at an ID that does not exist in the store.
 	rec := httptest.NewRecorder()
-	sessions.Set(rec, 9999)
+	sessions.Set(rec, 9999, 0)
 	cookie := rec.Result().Cookies()[0]
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
@@ -472,7 +472,7 @@ func TestEnsurePlayer_GetPlayerError_500(t *testing.T) {
 	mw := EnsurePlayer(next, store, sessions, discardLogger())
 
 	rec := httptest.NewRecorder()
-	sessions.Set(rec, existing.ID)
+	sessions.Set(rec, existing.ID, 0)
 	cookie := rec.Result().Cookies()[0]
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
