@@ -807,6 +807,66 @@ func TestHandleLoginSubmit_Success(t *testing.T) {
 	}
 }
 
+// TestHandleLoginSubmit_HonoursNext pins #449: a posted `next` that
+// passes SafeNextPath becomes the success-redirect target instead of
+// the role landing.
+func TestHandleLoginSubmit_HonoursNext(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	hash, err := HashPassword("correctbattery")
+	if err != nil {
+		t.Fatalf("HashPassword err = %v, want nil", err)
+	}
+	if _, err := store.CreatePlayer(t.Context(), "alice", hash, RoleAdmin); err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+
+	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false, false)
+	rec := postForm(t, handler, "/login", url.Values{
+		"username": {"alice"},
+		"password": {"correctbattery"},
+		"next":     {"/admin/email"},
+	})
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
+	}
+	if got, want := rec.Header().Get("Location"), "/admin/email"; got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+}
+
+// TestHandleLoginSubmit_RejectsUnsafeNext pins the open-redirect
+// defence: a `next` SafeNextPath rejects falls back to the role
+// landing instead of forwarding the attacker-controlled value.
+func TestHandleLoginSubmit_RejectsUnsafeNext(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	hash, err := HashPassword("correctbattery")
+	if err != nil {
+		t.Fatalf("HashPassword err = %v, want nil", err)
+	}
+	if _, err := store.CreatePlayer(t.Context(), "alice", hash, RoleAdmin); err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+
+	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false, false)
+	rec := postForm(t, handler, "/login", url.Values{
+		"username": {"alice"},
+		"password": {"correctbattery"},
+		"next":     {"//evil.com/"},
+	})
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
+	}
+	if got, want := rec.Header().Get("Location"), "/admin/quizzes"; got != want {
+		t.Errorf("Location = %q, want %q (must fall back to role landing)", got, want)
+	}
+}
+
 // TestHandleLoginSubmit_Success_Player pins the #288 fix: a non-admin
 // must land on the public home page, not the admin dashboard (which
 // would bounce them straight through RequireAdmin to "Access denied").

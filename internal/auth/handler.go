@@ -69,6 +69,10 @@ type formData struct {
 	// GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URL
 	// env vars is unset.
 	ShowGoogle bool
+	// Next is the validated same-site return path the login flow
+	// should send the user to on success (#449). Empty string means
+	// "no return target known"; callers fall back to the role landing.
+	Next string
 }
 
 // HandleRegisterForm returns a handler for GET /register that renders the
@@ -86,7 +90,10 @@ func HandleRegisterForm(
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/register.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if redirectIfSignedIn(w, r, players, sessions) {
+		// Registration doesn't carry next today (out of scope per #449);
+		// pass empty so the helper falls back to the role landing for
+		// already-signed-in visitors.
+		if redirectIfSignedIn(w, r, players, sessions, "") {
 			return
 		}
 		render.render(w, r, http.StatusOK, formData{Title: "Register", ShowGoogle: googleEnabled})
@@ -263,21 +270,25 @@ func HandleLoginForm(
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if redirectIfSignedIn(w, r, players, sessions) {
+		next := SafeNextPath(r.URL.Query().Get("next"))
+		if redirectIfSignedIn(w, r, players, sessions, next) {
 			return
 		}
 		render.render(w, r, http.StatusOK, formData{
 			Title:        "Log in",
 			ShowRegister: registrationEnabled,
 			ShowGoogle:   googleEnabled,
+			Next:         next,
 		})
 	})
 }
 
-// redirectIfSignedIn writes a 303 to the role-appropriate landing page
-// when the request already carries a session pointing at an
-// authenticated player. Returns true if it wrote a response — the
-// caller must skip its own render in that case. Errors during the
+// redirectIfSignedIn writes a 303 when the request already carries a
+// session pointing at an authenticated player. Honours next when it is
+// a [SafeNextPath]-validated value so a deep link visitor with a live
+// session lands on their intended page; falls back to the role
+// landing otherwise. Returns true if it wrote a response - the caller
+// must skip its own render in that case. Errors during the
 // session/player lookup fall through to a normal render so a
 // transient DB hiccup doesn't lock the visitor out of the auth pages.
 func redirectIfSignedIn(
@@ -285,6 +296,7 @@ func redirectIfSignedIn(
 	r *http.Request,
 	players PlayerStore,
 	sessions *session.Manager,
+	next string,
 ) bool {
 	playerID, ok := sessions.PlayerID(r)
 	if !ok {
@@ -294,7 +306,12 @@ func redirectIfSignedIn(
 	if err != nil || !player.IsAuthenticated() {
 		return false
 	}
-	http.Redirect(w, r, landingPathFor(player.Role), http.StatusSeeOther)
+	target := next
+	if target == "" {
+		target = landingPathFor(player.Role)
+	}
+	//nolint:gosec // G710: target is either landingPathFor (constant) or a SafeNextPath-validated relative path; the validator at the call site rejects anything that could be an open redirect.
+	http.Redirect(w, r, target, http.StatusSeeOther)
 
 	return true
 }
@@ -383,8 +400,21 @@ func HandleLoginSubmit(
 		}
 		sessions.Set(w, player.ID)
 		migrateGamesAfterSignIn(r.Context(), logger, players, games, priorSessionPlayerID, player.ID)
-		http.Redirect(w, r, landingPathFor(player.Role), http.StatusSeeOther)
+		redirectAfterLogin(w, r, player.Role)
 	})
+}
+
+// redirectAfterLogin sends the user to the posted `next` path when it
+// passes [SafeNextPath], otherwise to the role-appropriate landing.
+// Pulled out of HandleLoginSubmit so the handler stays under revive's
+// function-length limit (#449).
+func redirectAfterLogin(w http.ResponseWriter, r *http.Request, role string) {
+	target := SafeNextPath(r.PostFormValue("next"))
+	if target == "" {
+		target = landingPathFor(role)
+	}
+	//nolint:gosec // G710: target is either landingPathFor (constant) or a SafeNextPath-validated relative path that rejects open-redirect shapes.
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 // HandleLogout returns a handler for POST /logout. It clears the session cookie and
@@ -434,6 +464,11 @@ func validateRegisterInput(username, password string) registerInput {
 	return registerInput{Cleaned: cleaned, OK: true}
 }
 
+// renderInvalidCredentials re-renders the login form with the generic
+// "Invalid username or password." banner. Preserves the submitted
+// username so the visitor can fix just the password, and preserves
+// the posted next so a failed attempt does not drop the visitor's
+// intended destination (#449).
 func renderInvalidCredentials(
 	render *templateRenderer,
 	w http.ResponseWriter,
@@ -447,6 +482,9 @@ func renderInvalidCredentials(
 		Message:      "Invalid username or password.",
 		ShowRegister: registrationEnabled,
 		ShowGoogle:   googleEnabled,
+		// Preserve the posted next so a failed login attempt does not
+		// drop the visitor's intended destination (#449).
+		Next: SafeNextPath(r.PostFormValue("next")),
 	})
 }
 

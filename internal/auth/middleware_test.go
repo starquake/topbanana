@@ -129,8 +129,37 @@ func TestRequireAdmin_NoCookie_RedirectsToLogin(t *testing.T) {
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
-	if got, want := rec.Header().Get("Location"), "/login"; got != want {
+	// #449: GET to a protected route carries the original URI as
+	// ?next=<encoded> so the login flow can drop the visitor back on
+	// the page they tried to reach.
+	if got, want := rec.Header().Get("Location"), "/login?next=%2Fadmin%2Fquizzes"; got != want {
 		t.Errorf("Location = %q, want %q", got, want)
+	}
+}
+
+// TestRequireAdmin_PostDropsNext pins #449's safe-method gate: a POST
+// that hits an expired session still redirects to /login but does
+// NOT carry the URI as ?next= because the form body cannot be
+// replayed after the visitor signs back in.
+func TestRequireAdmin_PostDropsNext(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Error("next should not be called without cookie")
+	})
+
+	mw := RequireAdmin(next, store, session.New([]byte("k"), true), nil, discardLogger())
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes", nil)
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := rec.Header().Get("Location"), "/login"; got != want {
+		t.Errorf("Location = %q, want %q (POST must not carry ?next=)", got, want)
 	}
 }
 

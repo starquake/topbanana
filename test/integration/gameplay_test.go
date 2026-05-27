@@ -900,7 +900,10 @@ func TestGameplay_Integration(t *testing.T) {
 		if got, want := anonResp.StatusCode, http.StatusSeeOther; got != want {
 			t.Errorf("anon /admin/quizzes status = %d, want %d", got, want)
 		}
-		if got, want := anonResp.Header.Get("Location"), "/login"; got != want {
+		// #449: a GET to a protected admin route carries the original
+		// URI as ?next= so the login flow can drop the visitor back
+		// on the page they tried to reach.
+		if got, want := anonResp.Header.Get("Location"), "/login?next=%2Fadmin%2Fquizzes"; got != want {
 			t.Errorf("anon /admin/quizzes Location = %q, want %q", got, want)
 		}
 		if cerr := anonResp.Body.Close(); cerr != nil {

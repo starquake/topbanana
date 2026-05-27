@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -26,6 +27,13 @@ import (
 // only validated on the callback, whereas the form CSRF token is
 // validated on every unsafe POST.
 const googleStateCookieName = "tb_google_state"
+
+// googleNextCookieName is the sibling cookie that carries the
+// validated post-login `next` path across the round trip to Google
+// (#449). Set by HandleGoogleLogin when the request arrived with a
+// safe ?next, cleared by HandleGoogleCallback. Value shape mirrors
+// the state cookie: <base64url-encoded-path> "." <HMAC>.
+const googleNextCookieName = "tb_google_next"
 
 // googleStateMaxAge bounds how long a freshly issued state cookie
 // stays valid. The user has to click "Sign in", complete Google's
@@ -116,6 +124,16 @@ func HandleGoogleLogin(logger *slog.Logger, authn *GoogleAuthenticator) http.Han
 
 		state := signState(authn.stateKey, nonce)
 		http.SetCookie(w, googleStateCookie(state, authn.cfg.SecureCookies, googleStateMaxAge))
+		// Always overwrite the next cookie - either with the validated
+		// new value or with a clear - so a stale cookie from an
+		// abandoned earlier flow cannot leak its destination into this
+		// login.
+		if next := SafeNextPath(r.URL.Query().Get("next")); next != "" {
+			http.SetCookie(w, googleNextCookie(
+				signNext(authn.stateKey, next), authn.cfg.SecureCookies, googleStateMaxAge))
+		} else {
+			http.SetCookie(w, googleNextCookie("", authn.cfg.SecureCookies, -1))
+		}
 
 		http.Redirect(w, r, authn.oauth2.AuthCodeURL(state, oauth2.AccessTypeOnline), http.StatusFound)
 	})
@@ -145,10 +163,13 @@ func HandleGoogleCallback(
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Clear the state cookie unconditionally on entry so a single
-		// callback URL cannot be replayed even if the rest of the
-		// handler returns early.
+		// Read the next cookie BEFORE clearing the state pair so a
+		// successful callback can use it; the clears below run
+		// unconditionally so a single callback URL cannot be replayed
+		// even if the rest of the handler returns early.
+		next := readGoogleNext(r, authn.stateKey)
 		http.SetCookie(w, googleStateCookie("", authn.cfg.SecureCookies, -1))
+		http.SetCookie(w, googleNextCookie("", authn.cfg.SecureCookies, -1))
 
 		if msg, ok := validateCallbackRequest(authn.stateKey, r); !ok {
 			renderGoogleError(render, w, r, msg, registrationEnabled)
@@ -184,7 +205,12 @@ func HandleGoogleCallback(
 
 		sessions.Set(w, player.ID)
 		migrateGamesAfterSignIn(r.Context(), logger, players, games, sessionPlayerID, player.ID)
-		http.Redirect(w, r, landingPathFor(player.Role), http.StatusSeeOther)
+		target := next
+		if target == "" {
+			target = landingPathFor(player.Role)
+		}
+		//nolint:gosec // G710: target is either landingPathFor (constant) or a SafeNextPath-validated relative path returned by readGoogleNext.
+		http.Redirect(w, r, target, http.StatusSeeOther)
 	})
 }
 
@@ -654,6 +680,66 @@ func googleStateCookie(value string, secure bool, maxAge int) *http.Cookie {
 		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	}
+}
+
+// googleNextCookie returns the sibling cookie that carries the
+// validated next path across the OAuth round trip. Same Path /
+// HttpOnly / Secure / SameSite policy as the state cookie so the two
+// have identical browser semantics.
+func googleNextCookie(value string, secure bool, maxAge int) *http.Cookie {
+	//nolint:gosec // G124: Secure follows cfg.SecureCookies() like the state cookie.
+	return &http.Cookie{
+		Name:     googleNextCookieName,
+		Value:    value,
+		Path:     "/login/google",
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+	}
+}
+
+// signNext returns the wire shape `<base64url(path)>.<HMAC>`. HMAC is
+// computed over the encoded path so a tampered cookie cannot resolve
+// to a different SafeNextPath-valid value at read time.
+func signNext(key []byte, path string) string {
+	encoded := base64.RawURLEncoding.EncodeToString([]byte(path))
+	h := hmac.New(sha256.New, key)
+	_, _ = h.Write([]byte(encoded))
+
+	return encoded + "." + base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+}
+
+// readGoogleNext extracts and validates the next path from the
+// sibling cookie. Returns "" on any failure path (missing cookie,
+// malformed value, bad MAC, or a path SafeNextPath rejects). The
+// signature check binds the cookie to this deployment's key; the
+// SafeNextPath re-check defends against a cookie that was signed
+// before the validator was tightened.
+func readGoogleNext(r *http.Request, key []byte) string {
+	cookie, err := r.Cookie(googleNextCookieName)
+	if err != nil {
+		return ""
+	}
+	encoded, mac, ok := strings.Cut(cookie.Value, ".")
+	if !ok {
+		return ""
+	}
+	gotMAC, err := base64.RawURLEncoding.DecodeString(mac)
+	if err != nil {
+		return ""
+	}
+	h := hmac.New(sha256.New, key)
+	_, _ = h.Write([]byte(encoded))
+	if !hmac.Equal(gotMAC, h.Sum(nil)) {
+		return ""
+	}
+	pathBytes, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return ""
+	}
+
+	return SafeNextPath(string(pathBytes))
 }
 
 // renderGoogleError re-renders the login template with a short
