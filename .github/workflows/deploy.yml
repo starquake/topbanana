@@ -98,20 +98,20 @@ jobs:
             cd ~/topbanana-staging
             umask 077
             cat > .env <<EOF
-            SESSION_KEY=${SESSION_KEY}
-            GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-            GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-            GOOGLE_REDIRECT_URL=${GOOGLE_REDIRECT_URL}
-            SMTP_HOST=${SMTP_HOST}
-            SMTP_PORT=${SMTP_PORT}
-            SMTP_USERNAME=${SMTP_USERNAME}
-            SMTP_PASSWORD=${SMTP_PASSWORD}
-            SMTP_FROM=${SMTP_FROM}
-            SMTP_TLS=${SMTP_TLS}
-            BASE_URL=${BASE_URL}
-            REGISTRATION_ENABLED=${REGISTRATION_ENABLED}
-            IMAGE_NAME=${IMAGE_NAME}
-            IMAGE_TAG=${IMAGE_TAG}
+            SESSION_KEY='${SESSION_KEY}'
+            GOOGLE_CLIENT_ID='${GOOGLE_CLIENT_ID}'
+            GOOGLE_CLIENT_SECRET='${GOOGLE_CLIENT_SECRET}'
+            GOOGLE_REDIRECT_URL='${GOOGLE_REDIRECT_URL}'
+            SMTP_HOST='${SMTP_HOST}'
+            SMTP_PORT='${SMTP_PORT}'
+            SMTP_USERNAME='${SMTP_USERNAME}'
+            SMTP_PASSWORD='${SMTP_PASSWORD}'
+            SMTP_FROM='${SMTP_FROM}'
+            SMTP_TLS='${SMTP_TLS}'
+            BASE_URL='${BASE_URL}'
+            REGISTRATION_ENABLED='${REGISTRATION_ENABLED}'
+            IMAGE_NAME='${IMAGE_NAME}'
+            IMAGE_TAG='${IMAGE_TAG}'
             EOF
             mv -f docker-compose.staging.yml docker-compose.yml
             echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
@@ -221,20 +221,20 @@ jobs:
             cd ~/topbanana-production
             umask 077
             cat > .env <<EOF
-            SESSION_KEY=${SESSION_KEY}
-            GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-            GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-            GOOGLE_REDIRECT_URL=${GOOGLE_REDIRECT_URL}
-            SMTP_HOST=${SMTP_HOST}
-            SMTP_PORT=${SMTP_PORT}
-            SMTP_USERNAME=${SMTP_USERNAME}
-            SMTP_PASSWORD=${SMTP_PASSWORD}
-            SMTP_FROM=${SMTP_FROM}
-            SMTP_TLS=${SMTP_TLS}
-            BASE_URL=${BASE_URL}
-            REGISTRATION_ENABLED=${REGISTRATION_ENABLED}
-            IMAGE_NAME=${IMAGE_NAME}
-            IMAGE_TAG=${IMAGE_TAG}
+            SESSION_KEY='${SESSION_KEY}'
+            GOOGLE_CLIENT_ID='${GOOGLE_CLIENT_ID}'
+            GOOGLE_CLIENT_SECRET='${GOOGLE_CLIENT_SECRET}'
+            GOOGLE_REDIRECT_URL='${GOOGLE_REDIRECT_URL}'
+            SMTP_HOST='${SMTP_HOST}'
+            SMTP_PORT='${SMTP_PORT}'
+            SMTP_USERNAME='${SMTP_USERNAME}'
+            SMTP_PASSWORD='${SMTP_PASSWORD}'
+            SMTP_FROM='${SMTP_FROM}'
+            SMTP_TLS='${SMTP_TLS}'
+            BASE_URL='${BASE_URL}'
+            REGISTRATION_ENABLED='${REGISTRATION_ENABLED}'
+            IMAGE_NAME='${IMAGE_NAME}'
+            IMAGE_TAG='${IMAGE_TAG}'
             EOF
             mv -f docker-compose.production.yml docker-compose.yml
             echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
