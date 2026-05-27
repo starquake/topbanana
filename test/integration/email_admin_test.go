@@ -94,11 +94,13 @@ func TestEmailAdmin_UnconfiguredShowsDisabled(t *testing.T) {
 	}
 }
 
-// TestEmailAdmin_TestSendOnUnconfiguredReturns503 pins the "email is
-// not configured" path: an admin clicking the test-send button on an
-// unconfigured deploy gets a clear banner + 503 rather than a 500 or
-// a silent success (#321).
-func TestEmailAdmin_TestSendOnUnconfiguredReturns503(t *testing.T) {
+// TestEmailAdmin_TestSendOnUnconfiguredRedirectsWithFlash pins the
+// "email is not configured" path: an admin clicking the test-send
+// button on an unconfigured deploy is 303-redirected to /admin/email
+// and the rendered page carries a verbatim "not configured" banner.
+// The PRG bounce is what keeps Firefox from prompting "resend this
+// form?" on refresh (#321).
+func TestEmailAdmin_TestSendOnUnconfiguredRedirectsWithFlash(t *testing.T) {
 	t.Parallel()
 
 	ctx, srv := startServer(t, map[string]string{
@@ -109,15 +111,18 @@ func TestEmailAdmin_TestSendOnUnconfiguredReturns503(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cookiejar.New err = %v, want nil", err)
 	}
-	client := &http.Client{
+	// Manual redirect handling so the test can inspect the 303 and
+	// then issue the follow-up GET itself (the GET is what pulls and
+	// clears the flash). One client + one jar throughout.
+	postClient := &http.Client{
 		Jar: jar,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
-	registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
+	registerAdminViaHTTP(ctx, t, postClient, srv.BaseURL)
 
-	csrfToken := fetchCSRFToken(ctx, t, client, srv.BaseURL+"/admin/email")
+	csrfToken := fetchCSRFToken(ctx, t, postClient, srv.BaseURL+"/admin/email")
 
 	form := url.Values{}
 	form.Add("to", "ops@example.test")
@@ -131,23 +136,69 @@ func TestEmailAdmin_TestSendOnUnconfiguredReturns503(t *testing.T) {
 	}
 	postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := client.Do(postReq)
+	resp, err := postClient.Do(postReq)
 	if err != nil {
 		t.Fatalf("client.Do err = %v, want nil", err)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("ReadAll err = %v, want nil", err)
 	}
 	if cerr := resp.Body.Close(); cerr != nil {
 		t.Errorf("Body.Close err = %v, want nil", cerr)
 	}
-
-	if got, want := resp.StatusCode, http.StatusServiceUnavailable; got != want {
-		t.Errorf("status = %d, want %d (body=%q)", got, want, body)
+	if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
+		t.Errorf("POST status = %d, want %d", got, want)
 	}
-	if got, want := string(body), "not configured"; !strings.Contains(got, want) {
-		t.Errorf("body should contain %q, got %q", want, got)
+	if got, want := resp.Header.Get("Location"), "/admin/email"; got != want {
+		t.Errorf("POST Location = %q, want %q", got, want)
+	}
+
+	getReq, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.BaseURL+"/admin/email", nil)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	getResp, err := postClient.Do(getReq)
+	if err != nil {
+		t.Fatalf("GET err = %v, want nil", err)
+	}
+	body, err := io.ReadAll(getResp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll err = %v, want nil", err)
+	}
+	if cerr := getResp.Body.Close(); cerr != nil {
+		t.Errorf("GET Body.Close err = %v, want nil", cerr)
+	}
+	if got, want := getResp.StatusCode, http.StatusOK; got != want {
+		t.Errorf("GET status = %d, want %d", got, want)
+	}
+	// Match on the banner-only phrase: the log row renders the raw
+	// sentinel ("email is not configured..."), so a substring like
+	// "not configured" cannot distinguish banner from history.
+	if got, want := string(body), `role="alert"`; !strings.Contains(got, want) {
+		t.Errorf("GET body should contain the banner role attribute %q", want)
+	}
+	if got, want := string(body), "set SMTP_HOST"; !strings.Contains(got, want) {
+		t.Errorf("GET body should contain the banner copy %q", want)
+	}
+	// The flash is one-shot: a second GET on /admin/email lands a fresh
+	// page without the banner, pinning that the cookie was cleared on
+	// the first read.
+	second, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.BaseURL+"/admin/email", nil)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	secondResp, err := postClient.Do(second)
+	if err != nil {
+		t.Fatalf("second GET err = %v, want nil", err)
+	}
+	secondBody, err := io.ReadAll(secondResp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll second GET err = %v, want nil", err)
+	}
+	if cerr := secondResp.Body.Close(); cerr != nil {
+		t.Errorf("second GET Body.Close err = %v, want nil", cerr)
+	}
+	// The banner uses role="alert"; the log row does not. Pin the
+	// flash is one-shot by checking the banner-specific copy.
+	if strings.Contains(string(secondBody), "set SMTP_HOST") {
+		t.Error("second GET still contains the banner; flash must be one-shot")
 	}
 }
 
@@ -201,9 +252,8 @@ func TestEmailAdmin_GetOnTestRouteRedirects(t *testing.T) {
 
 // TestEmailAdmin_RateLimitsRepeatedSends pins the per-IP cool-down on
 // the test-send endpoint (#321): two clicks in quick succession from
-// the same client return 429 + Retry-After on the second request,
-// even when the mailer is unconfigured (so the rate limit applies
-// before the SMTP layer would refuse).
+// the same client both 303 (PRG keeps refresh-safe), but the second
+// 303 carries a "Slow down" flash that the follow-up GET renders.
 func TestEmailAdmin_RateLimitsRepeatedSends(t *testing.T) {
 	t.Parallel()
 
@@ -251,22 +301,42 @@ func TestEmailAdmin_RateLimitsRepeatedSends(t *testing.T) {
 	if cerr := first.Body.Close(); cerr != nil {
 		t.Errorf("first Body.Close err = %v, want nil", cerr)
 	}
-	if got := first.StatusCode; got == http.StatusTooManyRequests {
-		t.Fatal("first POST already 429 - rate limit applied before any send")
+	if got, want := first.StatusCode, http.StatusSeeOther; got != want {
+		t.Errorf("first POST status = %d, want %d (PRG must redirect even on the admit path)", got, want)
 	}
 
 	second := postOnce()
-	body, err := io.ReadAll(second.Body)
-	if err != nil {
-		t.Fatalf("ReadAll err = %v, want nil", err)
+	if _, drainErr := io.Copy(io.Discard, second.Body); drainErr != nil {
+		t.Errorf("drain second body err = %v, want nil", drainErr)
 	}
 	if cerr := second.Body.Close(); cerr != nil {
 		t.Errorf("second Body.Close err = %v, want nil", cerr)
 	}
-	if got, want := second.StatusCode, http.StatusTooManyRequests; got != want {
-		t.Errorf("second POST status = %d, want %d (body=%q)", got, want, body)
+	if got, want := second.StatusCode, http.StatusSeeOther; got != want {
+		t.Errorf("second POST status = %d, want %d", got, want)
 	}
-	if got := second.Header.Get("Retry-After"); got == "" {
-		t.Errorf("Retry-After = %q, want non-empty", got)
+	if got, want := second.Header.Get("Location"), "/admin/email"; got != want {
+		t.Errorf("second POST Location = %q, want %q", got, want)
+	}
+
+	// Pull the rate-limit banner off the follow-up GET, which is where
+	// the user actually sees the message.
+	getReq, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.BaseURL+"/admin/email", nil)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	getResp, err := client.Do(getReq)
+	if err != nil {
+		t.Fatalf("GET err = %v, want nil", err)
+	}
+	body, err := io.ReadAll(getResp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll err = %v, want nil", err)
+	}
+	if cerr := getResp.Body.Close(); cerr != nil {
+		t.Errorf("GET Body.Close err = %v, want nil", cerr)
+	}
+	if got, want := string(body), "Slow down"; !strings.Contains(got, want) {
+		t.Errorf("GET body should contain rate-limit banner %q", want)
 	}
 }

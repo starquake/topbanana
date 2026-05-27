@@ -34,8 +34,14 @@ func addRoutes(
 	sessions := session.New([]byte(cfg.SessionKey), cfg.SecureCookies())
 	csrfMgr := csrf.New([]byte(cfg.SessionKey), cfg.SecureCookies())
 
+	emailDeps := adminEmailDeps{
+		tester: mailerTester,
+		status: mailerStatus,
+		flash:  admin.NewEmailFlash([]byte(cfg.SessionKey), cfg.SecureCookies()),
+	}
+
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg)
-	addAdminRoutes(mux, logger, stores, gameService, sessions, csrfMgr, mailerTester, mailerStatus)
+	addAdminRoutes(mux, logger, stores, gameService, sessions, csrfMgr, emailDeps)
 	addProfileRoutes(mux, logger, stores, sessions, csrfMgr)
 	addAPIRoutes(mux, logger, stores, gameService, leaderboardHub, sessions)
 
@@ -183,6 +189,14 @@ func addProfileRoutes(
 // route is wrapped as csrfMW(requireAdmin(handler)): the CSRF middleware runs
 // first so an unauthenticated request without a valid token is rejected with
 // 403 before any auth-state-leaking 303 to /login.
+// adminEmailDeps bundles the email-diagnostics handler deps so
+// addAdminRoutes stays inside revive's 8-argument limit.
+type adminEmailDeps struct {
+	tester *mailer.Tester
+	status mailer.StatusView
+	flash  *admin.EmailFlash
+}
+
 func addAdminRoutes(
 	mux *http.ServeMux,
 	logger *slog.Logger,
@@ -190,8 +204,7 @@ func addAdminRoutes(
 	gameService *game.Service,
 	sessions *session.Manager,
 	csrfMgr *csrf.Manager,
-	mailerTester *mailer.Tester,
-	mailerStatus mailer.StatusView,
+	email adminEmailDeps,
 ) {
 	csrfMW := csrfMgr.Middleware
 	requireAdmin := func(h http.Handler) http.Handler {
@@ -200,7 +213,7 @@ func addAdminRoutes(
 
 	mux.Handle("GET /admin", requireAdmin(admin.HandleIndex(logger, csrfMgr)))
 	mux.Handle("GET /admin/players", requireAdmin(admin.HandlePlayersList(logger, csrfMgr, stores.PlayerLister)))
-	addAdminEmailRoutes(mux, logger, csrfMgr, csrfMW, requireAdmin, mailerTester, mailerStatus)
+	addAdminEmailRoutes(mux, logger, csrfMgr, csrfMW, requireAdmin, email)
 	mux.Handle("GET /admin/quizzes", requireAdmin(admin.HandleQuizList(logger, csrfMgr, stores.Quizzes)))
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}",
@@ -274,13 +287,12 @@ func addAdminEmailRoutes(
 	csrfMgr *csrf.Manager,
 	csrfMW func(http.Handler) http.Handler,
 	requireAdmin func(http.Handler) http.Handler,
-	mailerTester *mailer.Tester,
-	mailerStatus mailer.StatusView,
+	email adminEmailDeps,
 ) {
 	emailLimiter := admin.NewEmailRateLimiter(admin.EmailTestRateLimit)
 	mux.Handle(
 		"GET /admin/email",
-		requireAdmin(admin.HandleEmailGet(logger, csrfMgr, mailerTester, mailerStatus)),
+		requireAdmin(admin.HandleEmailGet(logger, csrfMgr, email.tester, email.status, email.flash)),
 	)
 	mux.Handle(
 		"GET /admin/email/test",
@@ -289,7 +301,7 @@ func addAdminEmailRoutes(
 	mux.Handle(
 		"POST /admin/email/test",
 		admin.MaxFormSizeMiddleware(
-			csrfMW(requireAdmin(admin.HandleEmailTest(logger, csrfMgr, mailerTester, mailerStatus, emailLimiter))),
+			csrfMW(requireAdmin(admin.HandleEmailTest(logger, email.tester, emailLimiter, email.flash))),
 		),
 	)
 }

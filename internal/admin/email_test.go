@@ -297,7 +297,7 @@ func TestHandleEmailGet_NeverExposesCredentials(t *testing.T) {
 	}
 }
 
-func TestHandleEmailTest_NotConfiguredReturns503(t *testing.T) {
+func TestHandleEmailTest_NotConfiguredFlashesError(t *testing.T) {
 	t.Parallel()
 
 	recorder := &stubRecorder{sendErr: mailer.ErrNotConfigured}
@@ -306,13 +306,15 @@ func TestHandleEmailTest_NotConfiguredReturns503(t *testing.T) {
 		func() time.Time { return time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC) },
 	)
 
-	rr := postEmailTest(t, recorder, mailer.StatusView{}, limiter, "ops@example.test")
+	rr := postEmailTest(t, recorder, limiter, "ops@example.test")
 
-	if got, want := rr.Code, http.StatusServiceUnavailable; got != want {
-		t.Errorf("status = %d, want %d", got, want)
+	assertRedirectToAdminEmail(t, rr)
+	kind, msg, _ := decodeFlashFromRecorder(t, rr)
+	if got, want := kind, FlashError; got != want {
+		t.Errorf("flash kind = %q, want %q", got, want)
 	}
-	if got, want := rr.Body.String(), "Email is not configured"; !strings.Contains(got, want) {
-		t.Errorf("body should contain %q", want)
+	if got, want := msg, "Email is not configured"; !strings.Contains(got, want) {
+		t.Errorf("flash msg = %q, should contain %q", got, want)
 	}
 	if got, want := recorder.callCnt, 1; got != want {
 		t.Errorf("recorder.callCnt = %d, want %d", got, want)
@@ -329,25 +331,35 @@ func TestHandleEmailTest_RateLimitsRepeatedSends(t *testing.T) {
 	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
 	limiter := NewEmailRateLimiterWithClock(10*time.Second, func() time.Time { return now })
 
-	// First click succeeds.
-	rr1 := postEmailTest(t, recorder, mailer.StatusView{Configured: true}, limiter, "ops@example.test")
-	if got, want := rr1.Code, http.StatusOK; got != want {
-		t.Errorf("first POST status = %d, want %d", got, want)
+	// First click is admitted: 303 to /admin/email with a success flash.
+	rr1 := postEmailTest(t, recorder, limiter, "ops@example.test")
+	assertRedirectToAdminEmail(t, rr1)
+	kind1, _, _ := decodeFlashFromRecorder(t, rr1)
+	if got, want := kind1, FlashNotice; got != want {
+		t.Errorf("first POST flash kind = %q, want %q", got, want)
 	}
+
 	// Second click from the same IP at the same instant is denied.
-	rr2 := postEmailTest(t, recorder, mailer.StatusView{Configured: true}, limiter, "ops@example.test")
-	if got, want := rr2.Code, http.StatusTooManyRequests; got != want {
-		t.Errorf("second POST status = %d, want %d", got, want)
+	rr2 := postEmailTest(t, recorder, limiter, "ops@example.test")
+	assertRedirectToAdminEmail(t, rr2)
+	kind2, msg2, wait2 := decodeFlashFromRecorder(t, rr2)
+	if got, want := kind2, FlashError; got != want {
+		t.Errorf("second POST flash kind = %q, want %q", got, want)
 	}
+	if got, want := msg2, "Slow down"; !strings.Contains(got, want) {
+		t.Errorf("second POST flash msg = %q, should contain %q", got, want)
+	}
+	if wait2 <= 0 {
+		t.Errorf("second POST flash wait = %d, want > 0", wait2)
+	}
+	// Retry-After alongside the banner: scripted callers honour the
+	// header even though the response is 303, not 429.
 	if got := rr2.Header().Get("Retry-After"); got == "" {
 		t.Errorf("Retry-After = %q, want non-empty", got)
 	}
-	if got, want := rr2.Body.String(), "Slow down"; !strings.Contains(got, want) {
-		t.Errorf("body should contain rate-limit banner %q", want)
-	}
 }
 
-func TestHandleEmailTest_InvalidRecipientReturns400(t *testing.T) {
+func TestHandleEmailTest_InvalidRecipientFlashesError(t *testing.T) {
 	t.Parallel()
 
 	recorder := &stubRecorder{}
@@ -356,13 +368,15 @@ func TestHandleEmailTest_InvalidRecipientReturns400(t *testing.T) {
 		func() time.Time { return time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC) },
 	)
 
-	rr := postEmailTest(t, recorder, mailer.StatusView{}, limiter, "not-an-email")
+	rr := postEmailTest(t, recorder, limiter, "not-an-email")
 
-	if got, want := rr.Code, http.StatusBadRequest; got != want {
-		t.Errorf("status = %d, want %d", got, want)
+	assertRedirectToAdminEmail(t, rr)
+	kind, msg, _ := decodeFlashFromRecorder(t, rr)
+	if got, want := kind, FlashError; got != want {
+		t.Errorf("flash kind = %q, want %q", got, want)
 	}
-	if got, want := rr.Body.String(), "Recipient is not a valid email address"; !strings.Contains(got, want) {
-		t.Errorf("body should contain %q", want)
+	if got, want := msg, "Recipient is not a valid email address"; !strings.Contains(got, want) {
+		t.Errorf("flash msg = %q, should contain %q", got, want)
 	}
 	// The handler must NOT dispatch to the admin's own address when the
 	// form value is set-but-invalid; that would surprise the operator
@@ -383,14 +397,18 @@ func TestHandleEmailTest_InvalidRecipientDoesNotConsumeBucket(t *testing.T) {
 
 	// First POST is rejected on validation; the bucket should NOT be
 	// consumed, so the immediate retry with a good address still goes
-	// through.
-	rr1 := postEmailTest(t, recorder, mailer.StatusView{Configured: true}, limiter, "not-an-email")
-	if got, want := rr1.Code, http.StatusBadRequest; got != want {
-		t.Errorf("first POST status = %d, want %d", got, want)
+	// through (success flash, not a rate-limit flash).
+	rr1 := postEmailTest(t, recorder, limiter, "not-an-email")
+	if kind, _, _ := decodeFlashFromRecorder(t, rr1); kind != FlashError {
+		t.Errorf("first POST flash kind = %q, want %q", kind, FlashError)
 	}
-	rr2 := postEmailTest(t, recorder, mailer.StatusView{Configured: true}, limiter, "ops@example.test")
-	if got, want := rr2.Code, http.StatusOK; got != want {
-		t.Errorf("second POST status = %d, want %d (must not be 429; 400 should not burn the bucket)", got, want)
+	rr2 := postEmailTest(t, recorder, limiter, "ops@example.test")
+	kind, msg, _ := decodeFlashFromRecorder(t, rr2)
+	if got, want := kind, FlashNotice; got != want {
+		t.Errorf("second POST flash kind = %q, want %q (validation failure must not burn the bucket)", got, want)
+	}
+	if got, want := msg, "Test email sent"; !strings.Contains(got, want) {
+		t.Errorf("second POST flash msg = %q, should contain %q", got, want)
 	}
 }
 
@@ -410,6 +428,12 @@ func TestHandleEmailTestRefresh_RedirectsToAdminEmail(t *testing.T) {
 	}
 }
 
+// testFlashKey is a deterministic signing key used by every flash
+// helper the unit tests construct. The real value is irrelevant: the
+// tests only verify that the cookie they read was signed with the
+// same key the handler signed with.
+var testFlashKey = []byte("test-flash-key-32-bytes-test-key")
+
 // renderGET drives HandleEmailGet against an in-memory recorder and
 // returns the response body. Folded out so the per-assertion tests do
 // not repeat the boilerplate of constructing a logger / csrf manager /
@@ -424,7 +448,7 @@ func renderGET(t *testing.T, status mailer.StatusView, recorder *stubRecorder) s
 	HandleEmailGet(
 		slog.New(slog.DiscardHandler),
 		csrf.New([]byte("test-key-32-bytes-test-key-32byt"), false),
-		recorder, status,
+		recorder, status, NewEmailFlash(testFlashKey, false),
 	).ServeHTTP(rr, req)
 
 	if got, want := rr.Code, http.StatusOK; got != want {
@@ -442,7 +466,6 @@ func renderGET(t *testing.T, status mailer.StatusView, recorder *stubRecorder) s
 func postEmailTest(
 	t *testing.T,
 	recorder *stubRecorder,
-	status mailer.StatusView,
 	limiter *EmailRateLimiter,
 	recipient string,
 ) *httptest.ResponseRecorder {
@@ -457,9 +480,56 @@ func postEmailTest(
 
 	HandleEmailTest(
 		slog.New(slog.DiscardHandler),
-		csrf.New([]byte("test-key-32-bytes-test-key-32byt"), false),
-		recorder, status, limiter,
+		recorder, limiter, NewEmailFlash(testFlashKey, false),
 	).ServeHTTP(rr, req)
 
 	return rr
+}
+
+// assertRedirectToAdminEmail pins the PRG response shape every
+// HandleEmailTest branch produces: 303 + Location: /admin/email.
+// Inline so each test reads "post, assert redirect, decode flash".
+func assertRedirectToAdminEmail(t *testing.T, rr *httptest.ResponseRecorder) {
+	t.Helper()
+
+	if got, want := rr.Code, http.StatusSeeOther; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := rr.Header().Get("Location"), "/admin/email"; got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+}
+
+// decodeFlashFromRecorder pulls the Set-Cookie the handler wrote out
+// of the recorder, replays it into a GET /admin/email request, and
+// returns the flash payload the helper observed. Failing to round-trip
+// the cookie is a test bug, not a behaviour bug, so the helper fatals.
+func decodeFlashFromRecorder(t *testing.T, rr *httptest.ResponseRecorder) (FlashKind, string, int) {
+	t.Helper()
+
+	flash := NewEmailFlash(testFlashKey, false)
+	resp := rr.Result()
+	cookies := resp.Cookies()
+	if err := resp.Body.Close(); err != nil {
+		t.Fatalf("resp.Body.Close err = %v, want nil", err)
+	}
+	var flashCookie *http.Cookie
+	for _, c := range cookies {
+		if c.Name == "topbanana_admin_email_flash" {
+			flashCookie = c
+
+			break
+		}
+	}
+	if flashCookie == nil {
+		t.Fatal("expected a flash cookie in Set-Cookie; found none")
+	}
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/email", nil)
+	req.AddCookie(flashCookie)
+	fr := flash.Read(httptest.NewRecorder(), req)
+	if !fr.OK {
+		t.Fatalf("flash.Read did not return a value for cookie %q", flashCookie.Value)
+	}
+
+	return fr.Kind, fr.Msg, fr.Wait
 }

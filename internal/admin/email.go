@@ -56,8 +56,8 @@ const emailLogDisplayLimit = mailer.LogCapacity
 
 // emailPageData backs the email.gohtml template. Status is the safe
 // view of SMTP config; LogEntries is the newest-first ring-buffer
-// snapshot; Notice / Error surface the one-shot banners HandleEmailTest
-// renders inline after a send attempt.
+// snapshot; Notice / Error surface the one-shot banner HandleEmailGet
+// reads from the flash cookie after a PRG-redirected send attempt.
 type emailPageData struct {
 	Title         string
 	Status        mailer.StatusView
@@ -97,7 +97,7 @@ type emailLogRow struct {
 // permitted right now AND stamps the bucket atomically when it is,
 // returning the stamp it wrote as a token so two concurrent callers
 // can never both observe "allowed". Cancel reverts a specific stamp
-// (matched against the token) so a 400 recipient-validation failure
+// (matched against the token) so a recipient-validation rejection
 // does not burn the next 10-second window, which would otherwise
 // prevent the admin from immediately re-submitting the form with a
 // corrected address. Matching on the token keeps Cancel from
@@ -180,53 +180,54 @@ func (l *EmailRateLimiter) pruneLocked() {
 	}
 }
 
-// HandleEmailGet renders /admin/email. The page is a status panel +
-// recent-send-log + test-send form; nothing in here mutates state, so
-// CSRF protection lives on the matching POST route in routes.go and
-// not here. The form's hidden csrf_token field is populated by the
-// renderer's prepared {{csrfToken}} func.
+// HandleEmailGet renders /admin/email: status panel + log + send form.
+// CSRF lives on the matching POST route in routes.go. flash carries
+// the one-shot banner from POST /admin/email/test's 303 to here (#321).
 func HandleEmailGet(
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
 	mailerService EmailRecorder,
 	status mailer.StatusView,
+	flash *EmailFlash,
 ) http.Handler {
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/email.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		render.Render(w, r, http.StatusOK, buildEmailPageData(r, mailerService, status, "", ""))
+		notice, errMsg, wait := readEmailFlash(w, r, flash)
+		data := buildEmailPageData(r, mailerService, status, notice, errMsg)
+		data.RateLimitWait = wait
+		render.Render(w, r, http.StatusOK, data)
 	})
 }
 
-// HandleEmailTest handles POST /admin/email/test. The recipient input
-// is optional; an empty value falls back to the admin's own email
-// address (or surfaces a "set a recipient" hint if the admin has no
-// email on file). The response is a full page render with an inline
-// banner; we deliberately do not 303-redirect so the verbatim SMTP
-// error (the #321 design decision) cannot be lost in a query-string
-// truncation.
-//
-// Per-IP rate limit keeps the button from being abused: a too-soon
-// retry surfaces a 429 with the standard Retry-After hint and an
-// inline banner. Allow stamps the bucket atomically so two concurrent
-// clicks cannot both pass; a recipient-validation failure rolls the
-// stamp back via [EmailRateLimiter.Cancel] so a typo'd address does
-// not burn the next window.
-//
-// The form is parsed by [MaxFormSizeMiddleware] before this handler
-// runs, so r.PostFormValue is already populated.
+// readEmailFlash returns the banner fields; flash.Read clears the cookie.
+func readEmailFlash(w http.ResponseWriter, r *http.Request, flash *EmailFlash) (notice, errMsg string, wait int) {
+	fr := flash.Read(w, r)
+	if !fr.OK {
+		return "", "", 0
+	}
+	if fr.Kind == FlashNotice {
+		return fr.Msg, "", 0
+	}
+
+	return "", fr.Msg, fr.Wait
+}
+
+// HandleEmailTest handles POST /admin/email/test. Empty recipient
+// falls back to the signed-in admin's email. Every response 303s to
+// /admin/email with a one-shot flash; PRG keeps Firefox from
+// prompting on refresh (#321). Recipient-validation failures roll the
+// rate-limit stamp back via Cancel so a typo doesn't burn the window.
+// The form is parsed by csrfMW before this handler runs.
 func HandleEmailTest(
 	logger *slog.Logger,
-	csrfMgr *csrf.Manager,
 	mailerService EmailRecorder,
-	status mailer.StatusView,
 	limiter *EmailRateLimiter,
+	flash *EmailFlash,
 ) http.Handler {
-	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/email.gohtml")
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r)
-		token, blocked := rateLimited(w, r, limiter, ip, render, mailerService, status)
+		token, blocked := rateLimited(w, r, limiter, ip, flash)
 		if blocked {
 			return
 		}
@@ -239,133 +240,105 @@ func HandleEmailTest(
 			// matches on token so a second concurrent caller's newer
 			// stamp is not clobbered here.
 			limiter.Cancel(ip, token)
-			data := buildEmailPageData(
-				r, mailerService, status, "",
-				"Recipient is not a valid email address.",
-			)
-			render.Render(w, r, http.StatusBadRequest, data)
+			flash.SetError(w, "Recipient is not a valid email address.", 0)
+			http.Redirect(w, r, "/admin/email", http.StatusSeeOther)
 
 			return
 		}
 		if !ok {
 			limiter.Cancel(ip, token)
-			data := buildEmailPageData(
-				r, mailerService, status, "",
-				"Enter a recipient email address - your account has no email on file.",
-			)
-			render.Render(w, r, http.StatusBadRequest, data)
+			flash.SetError(w, "Enter a recipient email address - your account has no email on file.", 0)
+			http.Redirect(w, r, "/admin/email", http.StatusSeeOther)
 
 			return
 		}
 
 		// Recipient validated; keep the Allow stamp so subsequent
 		// clicks within the window get rate-limited as intended.
-		renderTestSendResult(w, r, logger, render, mailerService, status, to)
+		sendTestAndRedirect(w, r, logger, mailerService, flash, to)
 	})
 }
 
-// HandleEmailTestRefresh handles GET /admin/email/test. Browsers land
-// here when an admin refreshes the page after a test-send POST (the
-// form action is /admin/email/test), and Go's ServeMux returns 405 for
-// a method-mismatched route by default. Redirecting to /admin/email is
-// the gentlest landing - the inline banner is lost on refresh, which
-// is acceptable; the alternative (carrying the verbatim SMTP error
-// through a query string) was rejected in the #321 design comment
-// because the truncation rules vary across user agents.
+// HandleEmailTestRefresh handles direct GETs to /admin/email/test
+// (stale bookmark, manual URL entry). Without it Go's ServeMux would
+// return 405 for the method mismatch; the 303 keeps the URL
+// recoverable. The PRG flow already redirects POSTs to /admin/email,
+// so this is a defensive fallback rather than the primary path.
 func HandleEmailTestRefresh() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/email", http.StatusSeeOther)
 	})
 }
 
-// rateLimited applies the per-IP rate limiter; on a hit it renders the
-// page at 429 with a Retry-After header and reports blocked=true so
-// the caller can early-return. Allow stamps the bucket atomically on
-// the permitted path so two concurrent clicks cannot both pass; the
-// returned token is the stamp Allow wrote and must be passed back to
-// [EmailRateLimiter.Cancel] if the caller bails out before dispatching
-// a send. On the blocked path the token is the zero time.
+// rateLimited applies the limiter and stashes a "Slow down" flash +
+// Retry-After on a hit. Returned token is the Allow stamp; pass to
+// Cancel if the caller bails out before dispatching. blocked=true
+// means a 303 was already written.
 func rateLimited(
 	w http.ResponseWriter,
 	r *http.Request,
 	limiter *EmailRateLimiter,
 	ip string,
-	render *TemplateRenderer,
-	mailerService EmailRecorder,
-	status mailer.StatusView,
+	flash *EmailFlash,
 ) (time.Time, bool) {
 	ok, wait, token := limiter.Allow(ip)
 	if ok {
 		return token, false
 	}
 	seconds := max(int(wait.Round(time.Second).Seconds()), 1)
+	flash.SetError(w, "Slow down: wait a moment before sending another test email.", seconds)
+	// Retry-After alongside the human-readable banner: humans see the
+	// flash on the follow-up GET; scripted callers honour the header.
 	w.Header().Set("Retry-After", strconv.Itoa(seconds))
-	data := buildEmailPageData(
-		r, mailerService, status, "",
-		"Slow down: wait a moment before sending another test email.",
-	)
-	data.RateLimitWait = seconds
-	render.Render(w, r, http.StatusTooManyRequests, data)
+	http.Redirect(w, r, "/admin/email", http.StatusSeeOther)
 
 	return time.Time{}, true
 }
 
-// renderTestSendResult dispatches the test send and renders the right
-// banner + HTTP status. Pulled out of HandleEmailTest so the handler
-// stays under revive's function-length limit and the three branches
-// (success / not-configured / verbatim SMTP error) read flat.
-func renderTestSendResult(
+// sendTestAndRedirect dispatches the send, stashes the banner, and
+// 303s. PRG keeps refresh safe (#321).
+func sendTestAndRedirect(
 	w http.ResponseWriter,
 	r *http.Request,
 	logger *slog.Logger,
-	render *TemplateRenderer,
 	mailerService EmailRecorder,
-	status mailer.StatusView,
+	flash *EmailFlash,
 	to string,
 ) {
 	err := mailer.SendTest(r.Context(), mailerService, to)
 	switch {
 	case err == nil:
-		data := buildEmailPageData(r, mailerService, status, "Test email sent to "+to+".", "")
-		render.Render(w, r, http.StatusOK, data)
+		flash.SetNotice(w, "Test email sent to "+to+".")
 	case errors.Is(err, mailer.ErrNotConfigured):
-		// Surface the sentinel as a 503 banner rather than a 500.
-		// The admin needs to know SMTP is unwired; the diagnostics
-		// page is exactly where to tell them.
-		data := buildEmailPageData(
-			r, mailerService, status, "",
+		flash.SetError(
+			w,
 			"Email is not configured on this instance - set SMTP_HOST, SMTP_PORT, and SMTP_FROM to enable sending.",
+			0,
 		)
-		render.Render(w, r, http.StatusServiceUnavailable, data)
 	default:
-		// Verbatim SMTP error so the operator can debug "550 mailbox
-		// unavailable" or "TLS handshake failed" directly (#321).
+		// Verbatim SMTP error so the operator can debug "550 mailbox unavailable" etc. directly (#321).
 		logger.InfoContext(r.Context(), "test email send failed", slog.Any("err", err))
-		data := buildEmailPageData(r, mailerService, status, "", "Send failed: "+err.Error())
-		render.Render(w, r, http.StatusOK, data)
+		flash.SetError(w, "Send failed: "+err.Error(), 0)
 	}
+	http.Redirect(w, r, "/admin/email", http.StatusSeeOther)
 }
 
 // resolveTestRecipient picks the email address the test send targets
 // and reports whether the request looks usable. The three return
-// values pin the cases the handler renders separately:
+// values pin the cases the handler flashes separately:
 //
 //   - ("addr", true,  true)  - explicit form value parsed cleanly, or
 //     blank form fell back to the signed-in admin's email.
 //   - ("",     false, true)  - blank form and the admin has no email
-//     on file; the handler renders a "set a recipient" hint at 400.
+//     on file; the handler flashes a "set a recipient" hint and 303s.
 //   - ("",     false, false) - explicit form value but [mail.ParseAddress]
-//     rejected it; the handler renders a "not a valid email" hint at
-//     400. We deliberately do NOT silently fall back to the admin's
+//     rejected it; the handler flashes a "not a valid email" hint and
+//     303s. We deliberately do NOT silently fall back to the admin's
 //     own address in this case - the admin clearly meant the form
 //     value, dispatching elsewhere would be a surprise.
 //
-// The form is parsed by [MaxFormSizeMiddleware] before the handler
-// runs, so r.PostFormValue is already populated.
-//
-// to read with names than with a comment above the return statement.
-//
-//nolint:nonamedreturns // three booleans next to a string are easier
+// The form is parsed by csrfMW before this handler runs (csrf.Validate
+// calls ParseForm), so r.PostFormValue is already populated.
 func resolveTestRecipient(r *http.Request) (addr string, ok, valid bool) {
 	raw := strings.TrimSpace(r.PostFormValue("to"))
 	if raw != "" {
