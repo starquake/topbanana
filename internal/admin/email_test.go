@@ -439,6 +439,28 @@ func TestHandleEmailTest_DetachesRequestContext(t *testing.T) {
 	}
 }
 
+// TestHandleEmailTest_FlashEchoesTypedRecipient pins the input-echo
+// behaviour: a typed "to" survives the PRG bounce so the admin sees
+// their entry preserved instead of overwritten by the signed-in
+// account's email.
+func TestHandleEmailTest_FlashEchoesTypedRecipient(t *testing.T) {
+	t.Parallel()
+
+	recorder := &stubRecorder{sendErr: mailer.ErrNotConfigured}
+	limiter := NewEmailRateLimiterWithClock(
+		10*time.Second,
+		func() time.Time { return time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC) },
+		nil,
+	)
+
+	rr := postEmailTest(t, recorder, limiter, "ops@example.test")
+
+	fr := decodeFullFlashFromRecorder(t, rr)
+	if got, want := fr.EchoTo, "ops@example.test"; got != want {
+		t.Errorf("flash EchoTo = %q, want %q", got, want)
+	}
+}
+
 func TestHandleEmailTestRefresh_RedirectsToAdminEmail(t *testing.T) {
 	t.Parallel()
 
@@ -534,6 +556,17 @@ func assertRedirectToAdminEmail(t *testing.T, rr *httptest.ResponseRecorder) {
 func decodeFlashFromRecorder(t *testing.T, rr *httptest.ResponseRecorder) (FlashKind, string, int) {
 	t.Helper()
 
+	fr := decodeFullFlashFromRecorder(t, rr)
+
+	return fr.Kind, fr.Msg, fr.Wait
+}
+
+// decodeFullFlashFromRecorder is the [FlashRead]-typed variant used by
+// the echo-recipient tests; the slim three-value form above stays for
+// the existing assertions that do not care about EchoTo.
+func decodeFullFlashFromRecorder(t *testing.T, rr *httptest.ResponseRecorder) FlashRead {
+	t.Helper()
+
 	flash := NewEmailFlash(testFlashKey, false)
 	resp := rr.Result()
 	cookies := resp.Cookies()
@@ -558,5 +591,5 @@ func decodeFlashFromRecorder(t *testing.T, rr *httptest.ResponseRecorder) (Flash
 		t.Fatalf("flash.Read did not return a value for cookie %q", flashCookie.Value)
 	}
 
-	return fr.Kind, fr.Msg, fr.Wait
+	return fr
 }
