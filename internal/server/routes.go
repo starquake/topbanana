@@ -151,6 +151,16 @@ func addAuthRoutes(
 		logger, csrfMgr, stores.VerifyTokens, stores.Players, sessions,
 	))
 
+	verifyFlash := auth.NewVerifyFlash([]byte(cfg.SessionKey), cfg.SecureCookies())
+	resendLimiter := auth.NewVerifyResendLimiter(auth.VerifyResendCooldown())
+	mux.Handle("GET /verify-email/pending", auth.HandleVerifyPending(
+		logger, csrfMgr, stores.Players, sessions, verifyFlash,
+	))
+	mux.Handle("POST /verify-email/resend", csrfMW(auth.HandleVerifyResend(
+		logger, stores.Players, sessions, stores.VerifyTokens, mailerTester,
+		cfg.BaseURL, resendLimiter, verifyFlash,
+	)))
+
 	if googleEnabled {
 		googleAuth := auth.NewGoogleAuthenticator(auth.GoogleConfig{
 			ClientID:      cfg.GoogleClientID,
@@ -187,7 +197,7 @@ func addProfileRoutes(
 ) {
 	csrfMW := csrfMgr.Middleware
 	requireAuthn := func(h http.Handler) http.Handler {
-		return auth.RequireAuthenticated(h, stores.Players, sessions, logger)
+		return auth.RequireAuthenticated(auth.RequireVerifiedEmail(h), stores.Players, sessions, logger)
 	}
 
 	mux.Handle("GET /profile", requireAuthn(profile.HandleProfile(logger, csrfMgr)))
@@ -220,7 +230,7 @@ func addAdminRoutes(
 ) {
 	csrfMW := csrfMgr.Middleware
 	requireAdmin := func(h http.Handler) http.Handler {
-		return auth.RequireAdmin(h, stores.Players, sessions, csrfMgr, logger)
+		return auth.RequireAdmin(auth.RequireVerifiedEmail(h), stores.Players, sessions, csrfMgr, logger)
 	}
 
 	mux.Handle("GET /admin", requireAdmin(admin.HandleIndex(logger, csrfMgr)))

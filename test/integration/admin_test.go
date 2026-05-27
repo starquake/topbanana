@@ -115,6 +115,8 @@ func TestAdmin_Integration(t *testing.T) {
 		t.Errorf("failed to close register body: %v", cerr)
 	}
 
+	verifyPlayerEmail(ctx, t, srv.DBURI, "integration-admin")
+
 	// Visit the quiz-create form GET so we can pull a fresh CSRF token tied
 	// to the now-authenticated session jar.
 	quizCreateToken := fetchCSRFToken(ctx, t, client, baseURL+"/admin/quizzes/new")

@@ -1,5 +1,8 @@
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
+
 import type { Page } from './fixtures';
-import { expect } from './fixtures';
+import { test, expect } from './fixtures';
 
 export const PASSWORD = 'correctbatterystaple';
 
@@ -25,7 +28,25 @@ export async function registerAdmin(page: Page, username: string): Promise<void>
   await page.locator('input[name=email]').fill(`${username}@example.test`);
   await page.locator('input[name=password]').fill(PASSWORD);
   await page.locator('button[type=submit]').click();
+  // Post-register the gate (#111 PR3) bounces unverified admins to
+  // /verify-email/pending. SMTP isn't wired in e2e so we cannot
+  // complete the user-facing verify flow; shell out to sqlite3 to
+  // stamp email_verified_at directly (same trick home.spec.ts uses
+  // to wipe games), then drive the browser to the admin dashboard.
+  await expect(page).toHaveURL(/\/verify-email\/pending$/);
+  markEmailVerified(username);
+  await page.goto('/admin/quizzes');
   await expect(page).toHaveURL(/\/admin\/quizzes$/);
+}
+
+function markEmailVerified(username: string): void {
+  const dataDir = process.env.TOPBANANA_E2E_DATA_DIR;
+  if (!dataDir) return;
+  const dbFile = join(dataDir, `e2e-${test.info().parallelIndex}.db`);
+  execFileSync('sqlite3', [
+    dbFile,
+    `UPDATE players SET email_verified_at = CURRENT_TIMESTAMP WHERE username = '${username}';`,
+  ]);
 }
 
 export async function createQuizWithQuestions(

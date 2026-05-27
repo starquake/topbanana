@@ -61,6 +61,7 @@ func TestAdminPlayersList_RendersForAdmin(t *testing.T) {
 	); got != "/admin/quizzes" {
 		t.Fatalf("first registration did not promote to admin: Location = %q", got)
 	}
+	verifyPlayerEmail(ctx, t, srv.DBURI, "players-admin")
 	playerClient := authClient(t)
 	if got := registerForRedirect(
 		ctx, t, playerClient, srv.BaseURL,
@@ -105,6 +106,7 @@ func TestAdminPlayersList_PaginationParam(t *testing.T) {
 	); got != "/admin/quizzes" {
 		t.Fatalf("registration did not promote to admin: Location = %q", got)
 	}
+	verifyPlayerEmail(ctx, t, srv.DBURI, "page-admin")
 
 	// A wildly out-of-range page parameter must clamp to the last
 	// page (here, the only page) rather than 404 or 500. We assert

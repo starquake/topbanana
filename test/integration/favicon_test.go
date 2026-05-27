@@ -88,6 +88,7 @@ func TestFavicon_Integration(t *testing.T) {
 			},
 		}
 		registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
+		verifyPlayerEmail(ctx, t, srv.DBURI, "htmx-admin")
 		assertFaviconLink(ctx, t, client, srv.BaseURL+"/admin")
 	})
 }

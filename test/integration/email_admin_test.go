@@ -65,6 +65,7 @@ func TestEmailAdmin_UnconfiguredShowsDisabled(t *testing.T) {
 		},
 	}
 	registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
+	verifyPlayerEmail(ctx, t, srv.DBURI, "htmx-admin")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.BaseURL+"/admin/email", nil)
 	if err != nil {
@@ -123,6 +124,7 @@ func TestEmailAdmin_TestSendOnUnconfiguredRedirectsWithFlash(t *testing.T) {
 		},
 	}
 	registerAdminViaHTTP(ctx, t, postClient, srv.BaseURL)
+	verifyPlayerEmail(ctx, t, srv.DBURI, "htmx-admin")
 
 	csrfToken := fetchCSRFToken(ctx, t, postClient, srv.BaseURL+"/admin/email")
 
@@ -227,6 +229,7 @@ func TestEmailAdmin_GetOnTestRouteRedirects(t *testing.T) {
 		},
 	}
 	registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
+	verifyPlayerEmail(ctx, t, srv.DBURI, "htmx-admin")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.BaseURL+"/admin/email/test", nil)
 	if err != nil {
@@ -274,6 +277,7 @@ func TestEmailAdmin_RateLimitsRepeatedSends(t *testing.T) {
 		},
 	}
 	registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
+	verifyPlayerEmail(ctx, t, srv.DBURI, "htmx-admin")
 
 	postOnce := func() *http.Response {
 		t.Helper()

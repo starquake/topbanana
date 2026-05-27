@@ -32,8 +32,8 @@ func TestQuizOwnership_Integration(t *testing.T) {
 	})
 	baseURL := srv.BaseURL
 
-	adminA := registerAdminClient(ctx, t, baseURL, "ownership-admin-a")
-	adminB := registerAdminClient(ctx, t, baseURL, "ownership-admin-b")
+	adminA := registerAdminClient(ctx, t, baseURL, srv.DBURI, "ownership-admin-a")
+	adminB := registerAdminClient(ctx, t, baseURL, srv.DBURI, "ownership-admin-b")
 
 	// Admin A creates a quiz; we capture its ID for the cross-admin
 	// probes. The create endpoint redirects to /admin/quizzes/{id};
@@ -133,10 +133,12 @@ func TestQuizOwnership_Integration(t *testing.T) {
 // registerAdminClient builds a cookie-jar HTTP client, registers the
 // supplied username through the public /register form (which promotes
 // to admin via ADMIN_USERNAMES), and returns the client carrying the
-// resulting session cookie. Mirrors the helper pattern in
-// TestAdmin_Integration but pulled out so the cross-admin test can
-// spin up two distinct sessions cheaply.
-func registerAdminClient(ctx context.Context, t *testing.T, baseURL, username string) *http.Client {
+// resulting session cookie. dbURI is the test server's DB URI; the
+// helper stamps email_verified_at on the new row so follow-up admin
+// requests pass the #111 PR3 verified-email gate. Mirrors the helper
+// pattern in TestAdmin_Integration but pulled out so the cross-admin
+// test can spin up two distinct sessions cheaply.
+func registerAdminClient(ctx context.Context, t *testing.T, baseURL, dbURI, username string) *http.Client {
 	t.Helper()
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -165,6 +167,8 @@ func registerAdminClient(ctx context.Context, t *testing.T, baseURL, username st
 	if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
 		t.Fatalf("register %q status = %d, want %d", username, got, want)
 	}
+
+	verifyPlayerEmail(ctx, t, dbURI, username)
 
 	return client
 }

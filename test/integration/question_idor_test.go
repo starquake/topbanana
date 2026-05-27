@@ -34,8 +34,8 @@ func TestQuestionIDOR_Integration(t *testing.T) {
 	})
 	baseURL := srv.BaseURL
 
-	adminA := registerAdminClient(ctx, t, baseURL, "idor-admin-a")
-	adminB := registerAdminClient(ctx, t, baseURL, "idor-admin-b")
+	adminA := registerAdminClient(ctx, t, baseURL, srv.DBURI, "idor-admin-a")
+	adminB := registerAdminClient(ctx, t, baseURL, srv.DBURI, "idor-admin-b")
 
 	db, err := sql.Open("sqlite", srv.DBURI)
 	if err != nil {

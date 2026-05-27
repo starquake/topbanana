@@ -64,6 +64,7 @@ func TestAdminHTMX_QuestionReorder(t *testing.T) {
 		},
 	}
 	registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
+	verifyPlayerEmail(ctx, t, srv.DBURI, "htmx-admin")
 
 	adminPlayer, err := stores.Players.GetPlayerByUsername(ctx, "htmx-admin")
 	if err != nil {
@@ -247,6 +248,7 @@ func TestAdminHTMX_BreakMove(t *testing.T) {
 		},
 	}
 	registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
+	verifyPlayerEmail(ctx, t, srv.DBURI, "htmx-admin")
 
 	adminPlayer, err := stores.Players.GetPlayerByUsername(ctx, "htmx-admin")
 	if err != nil {
@@ -424,7 +426,9 @@ func postHXBreakMove(
 
 // registerAdminViaHTTP posts /register through the supplied client so
 // the response sets the session cookie on its jar. The first registered
-// user becomes the admin per the existing auth flow.
+// user becomes the admin per the existing auth flow. Tests that hit
+// /admin/* afterwards should also call verifyPlayerEmail to satisfy
+// the #111 PR3 verified-email gate.
 func registerAdminViaHTTP(ctx context.Context, t *testing.T, client *http.Client, baseURL string) {
 	t.Helper()
 
@@ -453,5 +457,24 @@ func registerAdminViaHTTP(ctx context.Context, t *testing.T, client *http.Client
 	}
 	if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
 		t.Fatalf("register status = %d, want %d", got, want)
+	}
+}
+
+// verifyPlayerEmail stamps email_verified_at on the named player so
+// follow-up requests can pass the #111 PR3 verified-email gate. Used
+// by integration tests that drive /admin/* after registering through
+// the HTTP register flow.
+func verifyPlayerEmail(ctx context.Context, t *testing.T, dbURI, username string) {
+	t.Helper()
+
+	dbConn, stores := openStores(t, dbURI)
+	defer dbConn.Close() //nolint:errcheck // cleanup.
+
+	player, err := stores.Players.GetPlayerByUsername(ctx, username)
+	if err != nil {
+		t.Fatalf("verifyPlayerEmail GetPlayerByUsername err = %v, want nil", err)
+	}
+	if err := stores.OAuth.MarkPlayerEmailVerifiedIfNew(ctx, player.ID); err != nil {
+		t.Fatalf("verifyPlayerEmail MarkPlayerEmailVerifiedIfNew err = %v, want nil", err)
 	}
 }

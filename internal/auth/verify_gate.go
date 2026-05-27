@@ -1,0 +1,243 @@
+package auth
+
+import (
+	"log/slog"
+	"net"
+	"net/http"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/session"
+)
+
+// verifyPendingPath is the interstitial route shown to authenticated
+// players whose email_verified_at is still NULL. Constant so the
+// middleware redirect, the gate exemption list, and the route
+// registration share one string.
+const verifyPendingPath = "/verify-email/pending"
+
+// verifyResendCooldown is the per-IP gap between consecutive resend
+// requests. Short enough that a user who didn't see the mail can try
+// again within a minute, long enough that a stuck reload loop cannot
+// dispatch hundreds of mails.
+const verifyResendCooldown = 60 * time.Second
+
+// VerifyResendCooldown exposes the per-IP cool-down so the wiring
+// layer can build a [VerifyResendLimiter] with the same window the
+// handler logs against.
+func VerifyResendCooldown() time.Duration { return verifyResendCooldown }
+
+// verifyPendingData backs the verify-email/pending template.
+type verifyPendingData struct {
+	Title             string
+	Email             string
+	Notice            string
+	Error             string
+	ResendDisabled    bool
+	ResendWaitSeconds int
+}
+
+// RequireVerifiedEmail wraps the next handler so a signed-in player
+// without a stamped email_verified_at is bounced to the interstitial
+// instead of reaching the protected page. Anonymous-session visitors
+// pass through unchanged - they have no password to verify against;
+// the visitor's outer auth middleware (RequireAdmin, RequireAuthenticated)
+// is what enforces the "must be signed in" precondition for whatever
+// route this wraps.
+//
+// The middleware reads the player off [PlayerFromContext] so it must
+// be mounted INSIDE RequireAdmin / RequireAuthenticated. Mounting it
+// at the top would short-circuit anonymous visitors who should still
+// reach login / register / public play paths.
+func RequireVerifiedEmail(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := PlayerFromContext(r.Context())
+		if !ok || p.IsEmailVerified() || p.Email == "" {
+			next.ServeHTTP(w, r)
+
+			return
+		}
+		http.Redirect(w, r, verifyPendingPath, http.StatusSeeOther)
+	})
+}
+
+// HandleVerifyPending renders the interstitial. The handler reads the
+// session player itself rather than relying on PlayerFromContext: the
+// route is not wrapped by the standard auth middleware (which would
+// itself bounce here for unverified players, looping). Unauthenticated
+// visitors are 303'd to /login. Already-verified visitors are 303'd to
+// their role landing so an old bookmark does not strand them on the
+// interstitial.
+func HandleVerifyPending(
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	players PlayerStore,
+	sessions *session.Manager,
+	flash *VerifyFlash,
+) http.Handler {
+	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/verify_email_pending.gohtml")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := loadAuthenticatedPlayer(r, players, sessions)
+		if !ok {
+			redirectToLoginWithNext(w, r)
+
+			return
+		}
+		if p.IsEmailVerified() {
+			http.Redirect(w, r, landingPathFor(p.Role), http.StatusSeeOther)
+
+			return
+		}
+
+		data := verifyPendingData{Title: "Verify email", Email: p.Email}
+		if fr := flash.Read(w, r); fr.OK {
+			data.Notice = fr.Notice
+			data.Error = fr.Err
+			data.ResendWaitSeconds = fr.WaitSeconds
+			data.ResendDisabled = fr.WaitSeconds > 0
+		}
+		render.render(w, r, http.StatusOK, data)
+	})
+}
+
+// HandleVerifyResend issues a fresh verification email for the
+// signed-in player. Uses PRG (303-then-GET) so a refresh does not
+// re-send. The per-IP rate limiter is the abuse cap; the per-session
+// guard (must be signed-in + unverified) is the authorisation gate.
+// Errors all flow back through a flash banner on the interstitial so
+// the user always sees one page after the form post.
+func HandleVerifyResend(
+	logger *slog.Logger,
+	players PlayerStore,
+	sessions *session.Manager,
+	tokens VerifyTokenStore,
+	sender VerifyEmailSender,
+	baseURL string,
+	limiter *VerifyResendLimiter,
+	flash *VerifyFlash,
+) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := loadAuthenticatedPlayer(r, players, sessions)
+		if !ok {
+			redirectToLoginWithNext(w, r)
+
+			return
+		}
+		if p.IsEmailVerified() {
+			http.Redirect(w, r, landingPathFor(p.Role), http.StatusSeeOther)
+
+			return
+		}
+		if p.Email == "" {
+			// Should not happen for password registrants since #111 PR1,
+			// but guard so an OAuth-stub row without an email cannot
+			// trigger a panic in SendVerifyEmail.
+			flash.SetError(w, "No email on file. Sign out and register again.", 0)
+			http.Redirect(w, r, verifyPendingPath, http.StatusSeeOther)
+
+			return
+		}
+
+		if wait, allowed := limiter.Allow(clientIPForResend(r)); !allowed {
+			flash.SetError(w, "Slow down: wait a moment before requesting another email.", int(wait.Seconds()))
+			w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())))
+			http.Redirect(w, r, verifyPendingPath, http.StatusSeeOther)
+
+			return
+		}
+
+		if err := SendVerifyEmail(r.Context(), tokens, sender, baseURL,
+			p.Email, p.ID, time.Now().UTC()); err != nil {
+			logger.WarnContext(r.Context(), "verify resend dispatch failed",
+				slog.Int64("player_id", p.ID), slog.Any("err", err))
+			flash.SetError(w, "Could not send the email right now. Try again in a moment.", 0)
+			http.Redirect(w, r, verifyPendingPath, http.StatusSeeOther)
+
+			return
+		}
+
+		flash.SetNotice(w, "Verification email sent. Check your inbox.")
+		http.Redirect(w, r, verifyPendingPath, http.StatusSeeOther)
+	})
+}
+
+// loadAuthenticatedPlayer pulls the session player and reports false
+// when the cookie is missing, invalid, points at a deleted row, or
+// resolves to an anonymous-only row. Centralised so the interstitial
+// and resend handlers agree on what "signed in" means without
+// re-implementing the lookup. Distinct from middleware.go's
+// loadSessionPlayer (which returns the sentinel ErrPlayerNotFound) so
+// callers that only need a bool stay simple.
+func loadAuthenticatedPlayer(r *http.Request, players PlayerStore, sessions *session.Manager) (*Player, bool) {
+	id, ok := sessions.PlayerID(r)
+	if !ok {
+		return nil, false
+	}
+	p, err := players.GetPlayerByID(r.Context(), id)
+	if err != nil || !p.IsAuthenticated() {
+		return nil, false
+	}
+
+	return p, true
+}
+
+// clientIPForResend strips the port off RemoteAddr. Mirrors the
+// admin/email diagnostics page's clientIP - XFF is deliberately not
+// consulted because the deployment exposes the server directly today;
+// when a trusted proxy is added the two helpers can converge.
+func clientIPForResend(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+
+	return host
+}
+
+// VerifyResendLimiter is a per-IP cool-down. Concurrency-safe; the map
+// is pruned of stale entries every Allow call so memory stays
+// proportional to the live caller set rather than the lifetime set.
+type VerifyResendLimiter struct {
+	mu     sync.Mutex
+	last   map[string]time.Time
+	window time.Duration
+	now    func() time.Time
+}
+
+// NewVerifyResendLimiter returns a limiter using the supplied window
+// and [time.Now] as the clock. The clock is injectable via the
+// export_test seam so tests can fast-forward without sleeping.
+func NewVerifyResendLimiter(window time.Duration) *VerifyResendLimiter {
+	return &VerifyResendLimiter{
+		last:   map[string]time.Time{},
+		window: window,
+		now:    time.Now,
+	}
+}
+
+// Allow reports whether ip may resend right now. On admit, stamps the
+// bucket so the next call within the window is blocked. On block,
+// returns the remaining wait so the caller can render it.
+func (l *VerifyResendLimiter) Allow(ip string) (time.Duration, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := l.now()
+	cutoff := now.Add(-2 * l.window)
+	for k, ts := range l.last {
+		if ts.Before(cutoff) {
+			delete(l.last, k)
+		}
+	}
+	if prev, ok := l.last[ip]; ok {
+		if remaining := l.window - now.Sub(prev); remaining > 0 {
+			return remaining, false
+		}
+	}
+	l.last[ip] = now
+
+	return 0, true
+}
