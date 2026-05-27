@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{.Title}} - Admin</title>
+    <title>{{envTitleTag}}{{.Title}} - Admin</title>
     {{/* Tailwind-only baseline. Bulma + Font Awesome removed in #213. The
          player client (/client/) still uses Bulma directly — that surface
          is intentionally out of scope. Icons in admin templates are inline

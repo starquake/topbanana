@@ -19,6 +19,7 @@ import (
 	"github.com/tdewolff/minify/v2/js"
 
 	"github.com/starquake/topbanana/internal/config"
+	"github.com/starquake/topbanana/internal/envtag"
 )
 
 //go:embed static/*
@@ -60,9 +61,14 @@ func ManifestHandler(cfg *config.Config) http.Handler {
 
 			return
 		}
+		// __ENV_TITLE_TAG__ lets non-production deploys surface their
+		// environment in the installed-app name without needing a
+		// separate manifest file per env. Production leaves it empty
+		// so the install prompt and home-screen icon read cleanly.
+		out := strings.ReplaceAll(string(body), "__ENV_TITLE_TAG__", envtag.Get())
 		w.Header().Set("Content-Type", "application/manifest+json")
 		w.Header().Set("Cache-Control", "no-cache")
-		_, _ = w.Write(body)
+		_, _ = io.WriteString(w, out)
 	})
 }
 

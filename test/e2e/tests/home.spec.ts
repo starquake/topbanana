@@ -65,7 +65,9 @@ test('start page renders the popular + active sections and a discreet admin link
   await page.goto('/');
 
   // Title + brand wordmark.
-  await expect(page).toHaveTitle('Top Banana!');
+  // Non-production deploys prefix the title with their env label
+  // (e.g. "[development] Top Banana!"); CI runs with APP_ENV=development.
+  await expect(page).toHaveTitle(/Top Banana!$/);
   await expect(page.getByRole('heading', { level: 1 })).toContainText(/Top\s*Banana!?/i);
 
   // Both section labels are <h2> for screen readers.

@@ -899,3 +899,31 @@ func TestConfig_SecureCookies(t *testing.T) {
 		})
 	}
 }
+
+func TestConfig_EnvTitleTag(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		env  string
+		want string
+	}{
+		{name: "production renders empty", env: "production", want: ""},
+		{name: "staging is bracketed", env: "staging", want: "[staging] "},
+		{name: "development is bracketed", env: "development", want: "[development] "},
+		{name: "demo is bracketed", env: "demo", want: "[demo] "},
+		// Empty / unset is fail-secure: surfaces as "[unknown] " so a
+		// bare-binary boot doesn't look like a production tab.
+		{name: "unset renders unknown", env: "", want: "[unknown] "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			c := &Config{AppEnvironment: tt.env}
+			if got, want := c.EnvTitleTag(), tt.want; got != want {
+				t.Errorf("EnvTitleTag() = %q, want %q (AppEnvironment=%q)", got, want, tt.env)
+			}
+		})
+	}
+}

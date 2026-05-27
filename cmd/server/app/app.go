@@ -23,6 +23,7 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/database"
+	"github.com/starquake/topbanana/internal/envtag"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/leaderboard"
 	"github.com/starquake/topbanana/internal/mailer"
@@ -330,6 +331,8 @@ func Run(
 			logger.ErrorContext(signalCtx, "error closing database connection", slog.Any("err", conErr))
 		}
 	}()
+
+	envtag.Set(cfg.EnvTitleTag())
 
 	stores := store.New(conn, logger)
 	if sweepErr := stores.VerifyTokens.DeleteExpiredVerifyTokens(signalCtx); sweepErr != nil {

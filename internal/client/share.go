@@ -11,6 +11,7 @@ import (
 
 	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/config"
+	"github.com/starquake/topbanana/internal/envtag"
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/quiz"
 )
@@ -91,7 +92,8 @@ func (s *ShellHandlers) Play(w http.ResponseWriter, r *http.Request) {
 // extra allocation is in the noise.
 func (s *ShellHandlers) render(w http.ResponseWriter, r *http.Request, data shellData) {
 	funcs := template.FuncMap{
-		"ogImage": func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
+		"ogImage":     func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
+		"envTitleTag": envtag.Get,
 	}
 	t, err := template.New("index.html").Funcs(funcs).ParseFS(s.fsys(), "index.html")
 	if err != nil {

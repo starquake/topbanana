@@ -88,7 +88,10 @@ func TestHome_Integration(t *testing.T) {
 		body := getBody(ctx, t, baseURL+"/")
 
 		for _, want := range []string{
-			"<title>Top Banana!</title>",
+			// Non-production deploys prefix the title with their env
+			// label (e.g. "[development] Top Banana!"); the suffix
+			// "Top Banana!</title>" stays stable in both.
+			"Top Banana!</title>",
 			"Popular quizzes",
 			"Most active players",
 			"Bananas of the World",
@@ -210,7 +213,7 @@ func TestHome_Integration(t *testing.T) {
 		body := getBody(ctx, t, baseURL+"/quizzes")
 
 		for _, want := range []string{
-			`<title>All quizzes - Top Banana!</title>`,
+			`All quizzes - Top Banana!</title>`,
 			"Bananas of the World",
 			"Capital Cities",
 			// The never-played quiz must appear — the home page would
