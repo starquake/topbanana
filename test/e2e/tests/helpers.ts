@@ -41,12 +41,23 @@ export async function registerAdmin(page: Page, username: string): Promise<void>
 
 function markEmailVerified(username: string): void {
   const dataDir = process.env.TOPBANANA_E2E_DATA_DIR;
-  if (!dataDir) return;
+  if (!dataDir) {
+    throw new Error('TOPBANANA_E2E_DATA_DIR is not set; helpers cannot stamp email_verified_at');
+  }
   const dbFile = join(dataDir, `e2e-${test.info().parallelIndex}.db`);
-  execFileSync('sqlite3', [
+  // The sqlite3 CLI's `.parameter set` evaluates its value as SQL, so it
+  // doesn't actually neutralise an injection payload on its own. Escape
+  // the single quote here instead -- standard SQL literal escaping, one
+  // line, no extra round-trip through the CLI's parameter parser.
+  const escapedUsername = username.replace(/'/g, "''");
+  const output = execFileSync('sqlite3', [
     dbFile,
-    `UPDATE players SET email_verified_at = CURRENT_TIMESTAMP WHERE username = '${username}';`,
-  ]);
+    `UPDATE players SET email_verified_at = CURRENT_TIMESTAMP WHERE username = '${escapedUsername}'; SELECT changes();`,
+  ], { encoding: 'utf8' });
+  const changed = Number.parseInt(output.trim(), 10);
+  if (changed !== 1) {
+    throw new Error(`markEmailVerified(${username}): expected 1 row updated, got ${changed}`);
+  }
 }
 
 export async function createQuizWithQuestions(
