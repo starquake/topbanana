@@ -84,7 +84,7 @@ func TestBreaks_CRUD(t *testing.T) {
 	})
 	baseURL := srv.BaseURL
 
-	client := registerAdminClient(ctx, t, baseURL, "break-admin")
+	client := registerAdminClient(ctx, t, baseURL, srv.DBURI, "break-admin")
 	quizID := createQuizAs(ctx, t, client, baseURL, "Quiz With Breaks")
 
 	// The break form's "Insert after" dropdown lists each question's
@@ -196,7 +196,7 @@ func TestBreaks_Move(t *testing.T) {
 	})
 	baseURL := srv.BaseURL
 
-	client := registerAdminClient(ctx, t, baseURL, "break-move-admin")
+	client := registerAdminClient(ctx, t, baseURL, srv.DBURI, "break-move-admin")
 	quizID := createQuizAs(ctx, t, client, baseURL, "Quiz With Break Moves")
 
 	addQuestion(ctx, t, client, baseURL, quizID, "Q1 - first")
@@ -296,7 +296,7 @@ func TestBreaks_PositionCollision(t *testing.T) {
 	})
 	baseURL := srv.BaseURL
 
-	client := registerAdminClient(ctx, t, baseURL, "break-collision-admin")
+	client := registerAdminClient(ctx, t, baseURL, srv.DBURI, "break-collision-admin")
 	quizID := createQuizAs(ctx, t, client, baseURL, "Quiz Collision")
 	addQuestion(ctx, t, client, baseURL, quizID, "Sole question")
 
@@ -352,8 +352,8 @@ func TestBreaks_NonOwnerForbidden(t *testing.T) {
 	})
 	baseURL := srv.BaseURL
 
-	adminA := registerAdminClient(ctx, t, baseURL, "breaks-owner-a")
-	adminB := registerAdminClient(ctx, t, baseURL, "breaks-owner-b")
+	adminA := registerAdminClient(ctx, t, baseURL, srv.DBURI, "breaks-owner-a")
+	adminB := registerAdminClient(ctx, t, baseURL, srv.DBURI, "breaks-owner-b")
 	quizID := createQuizAs(ctx, t, adminA, baseURL, "Owned Quiz With Breaks")
 
 	t.Run("non-owner GET new break form returns 403", func(t *testing.T) {
@@ -393,7 +393,7 @@ func TestBreaks_DeleteQuizCascadesBreaks(t *testing.T) {
 	})
 	baseURL := srv.BaseURL
 
-	client := registerAdminClient(ctx, t, baseURL, "break-cascade-admin")
+	client := registerAdminClient(ctx, t, baseURL, srv.DBURI, "break-cascade-admin")
 	quizID := createQuizAs(ctx, t, client, baseURL, "Quiz To Delete With Breaks")
 
 	createToken := fetchCSRFToken(

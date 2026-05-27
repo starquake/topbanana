@@ -74,6 +74,7 @@ func TestOGMetadata_Integration(t *testing.T) {
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
 		}
 		registerAdminViaHTTP(ctx, t, client, baseURL)
+		verifyPlayerEmail(ctx, t, setup.DBURI, "htmx-admin")
 
 		resp := httpGet(ctx, t, client, baseURL+"/admin/quizzes")
 		defer closeBody(t, resp.Body)

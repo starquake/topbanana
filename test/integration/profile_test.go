@@ -53,6 +53,7 @@ func TestProfile_Integration(t *testing.T) {
 	// authenticated session to drive against.
 	authn := authClient(t)
 	registerForRedirect(ctx, t, authn, srv.BaseURL, "profile-admin", "correct-battery-13")
+	verifyPlayerEmail(ctx, t, srv.DBURI, "profile-admin")
 
 	t.Run("GET /profile renders form with the current username", func(t *testing.T) {
 		snap := profileGET(ctx, t, authn, srv.BaseURL)

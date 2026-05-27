@@ -35,6 +35,7 @@ func TestAdminImport_Integration(t *testing.T) {
 		},
 	}
 	registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
+	verifyPlayerEmail(ctx, t, srv.DBURI, "htmx-admin")
 
 	// Fetching the import form should both seed the CSRF nonce on the jar
 	// AND render the example JSON block — without the example the page is

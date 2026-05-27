@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { registerAdmin } from './helpers';
 
 const password = 'correctbatterystaple';
 
@@ -8,16 +9,10 @@ test('register, log out, log back in, and reach the admin dashboard', async ({ p
   // to promote every project's registrant to admin.
   const username = `e2e-admin-${browserName}`;
 
-  await page.goto('/register');
-  await page.locator('input[name=username]').fill(username);
-  await page.locator('input[name=email]').fill(`${username}@example.test`);
-  await page.locator('input[name=password]').fill(password);
-  await page.locator('button[type=submit]').click();
-
-  // Successful registration redirects to /admin/quizzes. Match the page
-  // heading by role rather than by class — admin + auth are both Tailwind
-  // now, so role-based locators survive future reskin tweaks.
-  await expect(page).toHaveURL(/\/admin\/quizzes$/);
+  // registerAdmin handles the register POST, satisfies the #111 PR3
+  // verified-email gate by stamping email_verified_at via sqlite3, and
+  // leaves the browser at /admin/quizzes ready for the assertions.
+  await registerAdmin(page, username);
   await expect(page.getByRole('heading', { name: 'Quizzes', level: 1 })).toBeVisible();
 
   // Log out via the navbar button. The form posts to /logout, the server
@@ -51,13 +46,9 @@ test('deep link while logged out lands at the deep link after login', async ({ p
   const username = `e2e-admin-next-${browserName}`;
   const password = 'correctbatterystaple';
 
-  // Register fresh and log out so the session is empty for the deep-link click.
-  await page.goto('/register');
-  await page.locator('input[name=username]').fill(username);
-  await page.locator('input[name=email]').fill(`${username}@example.test`);
-  await page.locator('input[name=password]').fill(password);
-  await page.locator('button[type=submit]').click();
-  await expect(page).toHaveURL(/\/admin\/quizzes$/);
+  // Register fresh (and clear the verified-email gate) so the session
+  // is set up for the logout + deep-link flow.
+  await registerAdmin(page, username);
 
   await page.getByRole('button', { name: 'Log out' }).click();
   await expect(page).toHaveURL(/\/login$/);
