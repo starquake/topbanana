@@ -30,6 +30,10 @@ func (stubPlayerStore) GetPlayerByUsername(_ context.Context, _ string) (*auth.P
 	return nil, auth.ErrPlayerNotFound
 }
 
+func (stubPlayerStore) GetPlayerByEmail(_ context.Context, _ string) (*auth.Player, error) {
+	return nil, auth.ErrPlayerNotFound
+}
+
 func (stubPlayerStore) GetPlayerByID(_ context.Context, _ int64) (*auth.Player, error) {
 	return nil, auth.ErrPlayerNotFound
 }
