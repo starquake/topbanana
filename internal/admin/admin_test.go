@@ -32,7 +32,7 @@ import (
 const testAdminID int64 = 1
 
 // withTestAdmin returns r with an auth.Player on its context. Drop-in
-// substitute for tests that previously skipped the auth middleware —
+// substitute for tests that previously skipped the auth middleware -
 // the owner gate added in #281 needs the player to know who's asking.
 func withTestAdmin(r *http.Request) *http.Request {
 	signedIn := &auth.Player{ID: testAdminID, Username: "admin", Role: auth.RoleAdmin}
@@ -310,12 +310,12 @@ func (stubQuizStore) GetOption(_ context.Context, _ int64) (*quiz.Option, error)
 }
 
 func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Option, error) {
-	return nil, errors.New("GetOptionsByIDs not implemented in stub")
+	return nil, errors.ErrUnsupported
 }
 
 func (s stubQuizStore) ListBreaksByQuiz(ctx context.Context, quizID int64) ([]*quiz.Break, error) {
 	if s.listBreaksByQuiz == nil {
-		return nil, errors.New("listBreaksByQuiz not supplied in stub")
+		return nil, errors.ErrUnsupported
 	}
 
 	return s.listBreaksByQuiz(ctx, quizID)
@@ -442,7 +442,7 @@ func TestHandleQuizList(t *testing.T) {
 			t.Fatalf("got: %q, should contain: %q", got, want)
 		}
 		// Quiz One: 2 hr ago. Quiz Two: just now. Rendered inside the
-		// card's <time> element by humanizeTime — see quizlist.gohtml.
+		// card's <time> element by humanizeTime - see quizlist.gohtml.
 		if got, want := body, "2 hr ago"; !strings.Contains(got, want) {
 			t.Errorf("body should contain relative time %q, got: %q", want, got)
 		}
@@ -498,7 +498,7 @@ func TestHandleQuizList(t *testing.T) {
 			t.Errorf("body got %q, should contain question-count strong %q", got, want)
 		}
 		if got, want := body, `>0</strong>`; !strings.Contains(got, want) {
-			t.Errorf("body got %q, should contain zero-count strong %q (missing key → 0)", got, want)
+			t.Errorf("body got %q, should contain zero-count strong %q (missing key -> 0)", got, want)
 		}
 	})
 
@@ -554,7 +554,7 @@ func TestHandleQuizList(t *testing.T) {
 		if got, want := body, "No quizzes found."; !strings.Contains(got, want) {
 			t.Fatalf("got: %q, should contain: %q", got, want)
 		}
-		// Pin the dashed-border empty-state container — its border-dashed
+		// Pin the dashed-border empty-state container - its border-dashed
 		// utility is unique to the Tailwind reskin.
 		if got, want := body, `border-dashed`; !strings.Contains(got, want) {
 			t.Errorf("body got %q, should contain Tailwind empty-state class %q", got, want)
@@ -1708,8 +1708,8 @@ func TestHandleQuestionEdit(t *testing.T) {
 // the save handler, and assert that every option's ID survives unchanged.
 //
 // This catches the class of bug where a form field name in the template
-// drifts away from what the handler reads — e.g. "option[2]id" without the
-// dot — because the round-trip silently drops those values and the save
+// drifts away from what the handler reads - e.g. "option[2]id" without the
+// dot - because the round-trip silently drops those values and the save
 // handler then sees option C as an unsaved (ID=0) option.
 func TestQuestionEditSave_OptionIDsRoundTrip(t *testing.T) {
 	t.Parallel()
@@ -1821,7 +1821,7 @@ func TestQuestionEditSave_OptionIDsRoundTrip(t *testing.T) {
 //
 // Limitation: every <input type="submit"> is included. A real browser only
 // sends the submit button that was actually clicked, so callers must ensure
-// the rendered form has at most one submit input — otherwise the resulting
+// the rendered form has at most one submit input - otherwise the resulting
 // POST will include both and the handler may not behave like production.
 var (
 	inputElementRe    = regexp.MustCompile(`<input\b([^>]*)>`)
@@ -1864,7 +1864,7 @@ func scrapeFormFields(t *testing.T, body string) url.Values {
 		values.Add(name, value)
 	}
 
-	// Textareas — browsers submit their inner text as the field value.
+	// Textareas - browsers submit their inner text as the field value.
 	for _, match := range textareaElementRe.FindAllStringSubmatch(body, -1) {
 		attrs := match[1]
 		if disabledAttrRe.MatchString(attrs) {

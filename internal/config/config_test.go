@@ -82,7 +82,7 @@ func TestParse(t *testing.T) {
 		}{
 			{
 				// APP_ENV unset must NOT silently fall back to
-				// "development" — that would make Secure cookies and
+				// "development" - that would make Secure cookies and
 				// the SESSION_KEY requirement opt-in rather than the
 				// fail-secure default. Parse leaves AppEnvironment as
 				// the empty string instead; the Makefile defaults
@@ -871,7 +871,7 @@ func TestParse_TrustedProxyCIDRs(t *testing.T) {
 func TestConfig_SecureCookies(t *testing.T) {
 	t.Parallel()
 	// SecureCookies decides whether session + CSRF cookies get the
-	// Secure attribute. Production must, development must not — see
+	// Secure attribute. Production must, development must not - see
 	// #205 for why dev drops the flag.
 
 	tests := []struct {

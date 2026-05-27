@@ -7,7 +7,7 @@
 // the initial cut.
 //
 // Authorisation lives entirely in auth.RequireAuthenticated upstream
-// of the handler — both routes are mounted behind it so the handler
+// of the handler - both routes are mounted behind it so the handler
 // can assume a *Player is on the request context.
 package profile
 
@@ -51,7 +51,7 @@ func HandleProfile(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
 		player, ok := auth.PlayerFromContext(r.Context())
 		if !ok {
 			// Defence in depth: the middleware should have written a
-			// player to the context. If it did not, 500 — the
+			// player to the context. If it did not, 500 - the
 			// alternative is a blank form that cannot save.
 			logger.ErrorContext(r.Context(), "profile handler reached without a player in context")
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -149,7 +149,7 @@ func renderRenameError(
 }
 
 // templateRenderer mirrors the auth package's helper of the same
-// name — parses the auth layout + the page template once and re-
+// name - parses the auth layout + the page template once and re-
 // clones per request so html/template's context-aware escaping
 // applies cleanly. csrfToken is bound per-render so the form's
 // hidden input always carries a token paired with the response's

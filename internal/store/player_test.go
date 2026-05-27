@@ -366,7 +366,7 @@ func TestPlayerStore_ClaimPlayer_UpgradesAnonymousRow(t *testing.T) {
 	if got, want := claimed.PasswordHash, "hash"; got != want {
 		t.Errorf("claimed.PasswordHash = %q, want %q", got, want)
 	}
-	// First password-bearing registrant — even via the claim path — becomes admin.
+	// First password-bearing registrant - even via the claim path - becomes admin.
 	if got, want := claimed.Role, auth.RoleAdmin; got != want {
 		t.Errorf("claimed.Role = %q, want %q", got, want)
 	}
@@ -458,7 +458,7 @@ func TestPlayerStore_UpdatePlayerUsername(t *testing.T) {
 			t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 		}
 		// Sanity-check the precondition: a fresh anonymous row has not
-		// claimed its username yet — that is what makes this scenario
+		// claimed its username yet - that is what makes this scenario
 		// meaningful.
 		if got, want := anon.HasCustomName(), false; got != want {
 			t.Fatalf("precondition anon.HasCustomName() = %v, want %v", got, want)
@@ -729,7 +729,7 @@ func TestPlayerStore_ListPlayerFinishStats_NoGames(t *testing.T) {
 // the #289 fix: the operator's -reset-password CLI eventually calls
 // this store method to give the seed admin a password. Before the
 // fix the SQL only updated password_hash, leaving username_claimed=0
-// on a row whose `password_hash IS NOT NULL` — which dragged the
+// on a row whose `password_hash IS NOT NULL` - which dragged the
 // player client into the "claim your name" modal for a logged-in
 // admin. The combined update now keeps the two columns in lockstep.
 func TestPlayerStore_SetPlayerPasswordHash_AlsoMarksUsernameClaimed(t *testing.T) {
@@ -738,7 +738,7 @@ func TestPlayerStore_SetPlayerPasswordHash_AlsoMarksUsernameClaimed(t *testing.T
 	ps := NewPlayerStore(db, slog.Default())
 
 	// CreateAnonymousPlayer inserts with password_hash=NULL and
-	// username_claimed=0 — the same starting state the seed admin
+	// username_claimed=0 - the same starting state the seed admin
 	// is in after migration 20260111110308 but before the operator
 	// has run -reset-password.
 	anon, err := ps.CreateAnonymousPlayer(t.Context(), "anon-claim-after-pw")

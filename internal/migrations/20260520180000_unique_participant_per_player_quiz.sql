@@ -12,7 +12,7 @@
 --
 -- Done as a table rebuild rather than ALTER TABLE ADD COLUMN so the
 -- ID-typed columns sit together in the schema (id, game_id, player_id,
--- quiz_id, joined_at) — easier to read at a glance than an appended
+-- quiz_id, joined_at) - easier to read at a glance than an appended
 -- quiz_id trailing joined_at.
 --
 -- The INSERT carries the dedup that bug-era dev / staging DBs need:

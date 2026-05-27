@@ -83,7 +83,7 @@ type formData struct {
 // HandleRegisterForm returns a handler for GET /register that renders the
 // registration form. googleEnabled controls whether the template shows
 // the "Sign up with Google" button. An already-authenticated visitor is
-// redirected to the role-appropriate landing page instead — the
+// redirected to the role-appropriate landing page instead - the
 // register form is a no-op for someone who already has an account.
 func HandleRegisterForm(
 	logger *slog.Logger,
@@ -380,7 +380,7 @@ func redirectIfSignedIn(
 // games is the post-login migration hook (#406): when the request
 // arrives with a session pointing at an anonymous row, that row's
 // game history is carried onto the signed-in account. Nil disables
-// the migration — accepted by callers (tests) that don't care about
+// the migration - accepted by callers (tests) that don't care about
 // the migration path.
 func HandleLoginSubmit(
 	logger *slog.Logger,
@@ -597,14 +597,14 @@ type templateRenderer struct {
 
 func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string) *templateRenderer {
 	// passwordHelp keeps the form's static help text bound to the
-	// MinPasswordLength/MaxPasswordLength constants — drift between the
+	// MinPasswordLength/MaxPasswordLength constants - drift between the
 	// form, the validator, and the bcrypt cap stays impossible without
 	// touching the constants directly.
 	funcs := template.FuncMap{
 		"csrfToken": func() string { return "" },
 		"ogImage":   func() string { return "" },
 		"passwordHelp": func() string {
-			return fmt.Sprintf("Must be %d–%d characters.", MinPasswordLength, MaxPasswordLength)
+			return fmt.Sprintf("Must be %d-%d characters.", MinPasswordLength, MaxPasswordLength)
 		},
 	}
 	layouts := template.Must(

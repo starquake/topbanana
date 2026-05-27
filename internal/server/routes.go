@@ -424,7 +424,7 @@ func addAdminBreakRoutes(
 // upgraded to an anonymous players row before the handler runs. This means
 // HandleCreateGame and HandleAnswerPost can safely read the player off the
 // request context. The static /client/* assets are intentionally not wrapped
-// — loading the SPA shell should not create a row; the first /api/ call
+// - loading the SPA shell should not create a row; the first /api/ call
 // does.
 func addAPIRoutes(
 	mux *http.ServeMux,

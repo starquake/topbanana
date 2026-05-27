@@ -59,7 +59,7 @@ type Manager struct {
 }
 
 // New returns a Manager that signs cookies with the given key. secureCookies
-// controls the Secure attribute on issued cookies — see Config.SecureCookies
+// controls the Secure attribute on issued cookies - see Config.SecureCookies
 // in internal/config for the dev-versus-production policy and #205 for why
 // this is gated.
 func New(key []byte, secureCookies bool) *Manager {
@@ -115,7 +115,7 @@ func (m *Manager) Decode(r *http.Request) (playerID, sessionVersion int64, ok bo
 
 // newCookie returns the session cookie with the safe defaults always applied:
 // HttpOnly and SameSite=Lax. The Secure attribute follows the Manager's
-// secureCookies field — see [New]'s doc comment for the rationale.
+// secureCookies field - see [New]'s doc comment for the rationale.
 //
 // SameSite=Lax is load-bearing: it is the only CSRF defence for the /api/*
 // routes (see addAPIRoutes in internal/server/routes.go), which authenticate

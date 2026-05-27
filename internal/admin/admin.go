@@ -52,7 +52,7 @@ func NewTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, templatePat
 
 // Render renders the full base layout with the supplied data. It does not
 // return an error because the headers have already been written by the
-// time ExecuteTemplate runs — an error page is no longer an option, so
+// time ExecuteTemplate runs - an error page is no longer an option, so
 // failures are logged.
 //
 // The clone-and-override dance behind prepare lets the navbar template
@@ -98,7 +98,7 @@ func (tr *TemplateRenderer) RenderPartial(w http.ResponseWriter, r *http.Request
 // Error and returns false so the caller can early-return.
 //
 // The csrf.Token call must run before any WriteHeader because setting the
-// nonce cookie is a header write — callers must defer their own header
+// nonce cookie is a header write - callers must defer their own header
 // writes until after prepare returns.
 func (tr *TemplateRenderer) prepare(w http.ResponseWriter, r *http.Request) (*template.Template, bool) {
 	t, err := tr.t.Clone()
@@ -130,7 +130,7 @@ func (tr *TemplateRenderer) prepare(w http.ResponseWriter, r *http.Request) (*te
 // quizzes when available. CanEdit is the resolved
 // "current-session-admin == creator" decision so the templates and
 // the questions_list partial do not have to recompute the rule (#281)
-// — handlers populate it via [attachCanEdit] before rendering, and a
+// - handlers populate it via [attachCanEdit] before rendering, and a
 // rule change lives entirely in Go.
 type QuizData struct {
 	ID                int64
@@ -144,7 +144,7 @@ type QuizData struct {
 	CanEdit           bool
 	TimeLimitSeconds  int
 	Visibility        string
-	// VisibilityOptions feeds the admin form's selector — pulled
+	// VisibilityOptions feeds the admin form's selector - pulled
 	// straight from the domain constants so a future level addition
 	// only touches one place.
 	VisibilityOptions []string
@@ -153,7 +153,7 @@ type QuizData struct {
 
 // QuestionData is the data for a question. TimeLimitSecondsValue is the
 // pre-formatted value bound to the optional per-question time-limit
-// input — empty when the question inherits the quiz default (#99), so
+// input - empty when the question inherits the quiz default (#99), so
 // the form's <input type="number"> stays blank rather than rendering 0.
 type QuestionData struct {
 	ID                    int64
@@ -183,7 +183,7 @@ const (
 // rule (#281): the session player must be present and must match the
 // quiz's CreatedByPlayerID. Both [attachCanEdit] (read paths) and
 // [requireQuizOwner] (mutating paths) call this so the policy lives
-// in one place — a future change (additional roles, transferred
+// in one place - a future change (additional roles, transferred
 // ownership, etc.) only touches this function.
 func canEditQuiz(r *http.Request, createdByPlayerID int64) bool {
 	p, ok := auth.PlayerFromContext(r.Context())
@@ -298,7 +298,7 @@ func optionDataFromOptions(options []*quiz.Option) []*OptionData {
 // context and CSRF manager, respectively.
 //
 // "humanizeTime" is a pure function of its argument, so it's registered with
-// its real implementation here — no per-request override needed.
+// its real implementation here - no per-request override needed.
 func parseTemplate(path string) *template.Template {
 	funcs := template.FuncMap{
 		"currentUser":  func() string { return "" },
@@ -358,7 +358,7 @@ func humanizeTime(t time.Time) string {
 // Error pages embed the navbar (which contains the logout form), so they need
 // a CSRF manager to render a working {{csrfToken}}. We accept it as a
 // parameter rather than re-derive it because error renderers are spawned ad
-// hoc deep in the call stack — passing it explicitly keeps the rendering path
+// hoc deep in the call stack - passing it explicitly keeps the rendering path
 // honest about its dependencies.
 func render400(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrfMgr *csrf.Manager, msg string) {
 	render := &TemplateRenderer{logger: logger, csrf: csrfMgr, t: parseTemplate("admin/errors/400.gohtml")}
@@ -452,7 +452,7 @@ func quizByID(
 	q, err := quizStore.GetQuiz(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, quiz.ErrQuizNotFound) || errors.Is(err, quiz.ErrQuestionNotFound) {
-			// User-supplied bad ID (or stale link after delete) — Info,
+			// User-supplied bad ID (or stale link after delete) - Info,
 			// not Error (#369).
 			logger.InfoContext(r.Context(), "quiz not found", slog.Any("err", err))
 			render404(w, r, logger, csrfMgr)
@@ -471,7 +471,7 @@ func quizByID(
 // questionByID loads the question with the given ID and verifies it
 // belongs to the supplied quizID. A mismatch renders as 404 (not 403)
 // so the route never leaks "this question exists on another quiz"
-// — the IDOR fix for #339 lives here: every mutating question route
+// - the IDOR fix for #339 lives here: every mutating question route
 // is quiz-scoped in the URL, so loading by questionID alone would let
 // an admin who owns quizA edit a question on quizB by mounting it as
 // /admin/quizzes/A/questions/B-question. SwapQuestionPositions does
@@ -577,8 +577,8 @@ func fillQuizFromForm(
 }
 
 // parseOptionalTimeLimit interprets the optional per-question
-// time_limit_seconds input. Blank → nil (inherit the quiz default).
-// Garbage → a non-nil pointer to 0, which Question.Valid catches and
+// time_limit_seconds input. Blank -> nil (inherit the quiz default).
+// Garbage -> a non-nil pointer to 0, which Question.Valid catches and
 // surfaces as an inline range error.
 func parseOptionalTimeLimit(raw string) *int {
 	raw = strings.TrimSpace(raw)
@@ -620,7 +620,7 @@ func fillQuestionFromForm(
 	qs.Text = r.PostFormValue("text")
 	qs.ImageURL = r.PostFormValue("image_url")
 	// Optional per-question override (#99). Blank input clears any
-	// previous override (NULL → inherit the quiz default); a parse
+	// previous override (NULL -> inherit the quiz default); a parse
 	// failure lands a zero, which Question.Valid rejects with an
 	// inline range error rather than silently saving a bad value.
 	qs.TimeLimitSeconds = parseOptionalTimeLimit(r.PostFormValue("time_limit_seconds"))
@@ -662,7 +662,7 @@ func fillQuestionFromForm(
 
 // storeQuiz persists qz via the appropriate Create/Update path. It does
 // no rendering; callers branch on the returned error so they can pick
-// the right user-facing response — in particular [quiz.ErrSlugTaken],
+// the right user-facing response - in particular [quiz.ErrSlugTaken],
 // which both HandleQuizSave and HandleQuizImportSave translate into a
 // 409 + form re-render with an inline message (#293) rather than the
 // generic 500 the wrapped SQL error used to produce.
@@ -758,7 +758,7 @@ func HandleQuizList(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 		// questions is absent from the map; the lookup yields 0.
 		// A question added or deleted between this call and ListQuizzes
 		// above can produce a count that's off by one for a single render
-		// — acceptable for a read view; eventual consistency is fine.
+		// - acceptable for a read view; eventual consistency is fine.
 		counts, err := quizStore.QuestionCountsByQuiz(r.Context())
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error retrieving question counts from store", slog.Any("err", err))
@@ -797,7 +797,7 @@ type PlayerScoreData struct {
 // HandleQuizView returns the quiz view page. It also fetches the per-quiz
 // leaderboard so the admin can see who has played and reset their attempt
 // from the same screen. We reuse the leaderboard service with a high limit
-// rather than spinning up a dedicated "list participants" service method —
+// rather than spinning up a dedicated "list participants" service method -
 // see #145 for the rationale (and #141 for the performance ceilings).
 func HandleQuizView(
 	logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store, gameService *game.Service,
@@ -1051,8 +1051,8 @@ func loadCompletedPlayers(
 	gameService *game.Service,
 	quizID int64,
 ) ([]PlayerScoreData, bool) {
-	// Admin "Played by" doesn't highlight a current player — the
-	// template ignores IsCurrentPlayer — so pass 0 to flag nothing,
+	// Admin "Played by" doesn't highlight a current player - the
+	// template ignores IsCurrentPlayer - so pass 0 to flag nothing,
 	// per Service.GetQuizLeaderboard's documented sentinel.
 	result, err := gameService.GetQuizLeaderboard(r.Context(), quizID, 0, quizViewPlayersLimit)
 	if err != nil {
@@ -1117,7 +1117,7 @@ func HandleResetGameForPlayer(
 		}
 
 		// quizID came from ParseIDFromPath, which only returns an int64
-		// once the path value parses cleanly — formatting it back via
+		// once the path value parses cleanly - formatting it back via
 		// strconv.FormatInt avoids gosec's open-redirect taint heuristic
 		// for fmt.Sprintf with a path argument.
 		http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(quizID, 10), http.StatusSeeOther)
@@ -1171,14 +1171,14 @@ func HandleQuizEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 
 // quizImportPayload mirrors the JSON shape an admin pastes into the import
 // textarea. Decoupled from quiz.Quiz so the wire shape stays small and
-// LLM-friendly (no IDs, timestamps, position fields, or slugs — the slug
+// LLM-friendly (no IDs, timestamps, position fields, or slugs - the slug
 // is derived server-side from the title). The handler translates this
 // into the full domain model before validation.
 type quizImportPayload struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	// TimeLimitSeconds is the per-quiz default answer window (#99).
-	// Optional in the payload — omitted maps to
+	// Optional in the payload - omitted maps to
 	// [quiz.DefaultTimeLimitSeconds], matching the admin form's
 	// new-quiz default.
 	TimeLimitSeconds *int                        `json:"timeLimitSeconds,omitempty"`
@@ -1194,7 +1194,7 @@ type quizImportQuestionPayload struct {
 	Text     string `json:"text"`
 	ImageURL string `json:"imageUrl,omitempty"`
 	// TimeLimitSeconds overrides the quiz default for this question
-	// (#99). Optional — omitted means "inherit the quiz value at
+	// (#99). Optional - omitted means "inherit the quiz value at
 	// game time", same as leaving the admin form's field blank.
 	TimeLimitSeconds *int                      `json:"timeLimitSeconds,omitempty"`
 	Options          []quizImportOptionPayload `json:"options"`
@@ -1322,7 +1322,7 @@ func HandleQuizImportSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 				// admin can rename and resubmit without re-pasting.
 				renderStatus(
 					w, r, http.StatusConflict, parsed.JSONText,
-					"A quiz with this title already exists — change the title in the JSON and resubmit.",
+					"A quiz with this title already exists - change the title in the JSON and resubmit.",
 				)
 
 				return
@@ -1456,7 +1456,7 @@ func validateImportBreaks(ctx context.Context, qz *quiz.Quiz, breaks []*quiz.Bre
 }
 
 // quizFromImportPayload converts the wire-shape payload into the
-// domain model. The slug is always derived from the title — the
+// domain model. The slug is always derived from the title - the
 // payload doesn't carry one because LLMs are bad at picking a stable
 // slug and the admin form does the same derivation. Question
 // positions are assigned 1..N in the order questions appear in the
@@ -1486,7 +1486,7 @@ func quizFromImportPayload(p quizImportPayload) (*quiz.Quiz, []*quiz.Break) {
 			Text:     qIn.Text,
 			ImageURL: qIn.ImageURL,
 			Position: i + 1,
-			// nil → "inherit the quiz default", the same semantics
+			// nil -> "inherit the quiz default", the same semantics
 			// the admin form's blank input carries (#99).
 			TimeLimitSeconds: qIn.TimeLimitSeconds,
 		}
@@ -1590,7 +1590,7 @@ func HandleQuizSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 // HandleQuizSave. Split out so HandleQuizSave's main flow keeps a single
 // happy-path return. [quiz.ErrSlugTaken] re-renders the form at 409
 // with the submitted Title/Description preserved (#293); anything else
-// is treated as a genuine 500. pageTitle is the rendered <title> — the
+// is treated as a genuine 500. pageTitle is the rendered <title> - the
 // caller picks it from quizFormCreateTitle / quizFormEditTitle based on
 // whether the POST landed on create or edit.
 func renderQuizSaveError(
@@ -1603,7 +1603,7 @@ func renderQuizSaveError(
 		formRenderer.Render(w, r, http.StatusConflict, quizFormData{
 			Title: pageTitle,
 			Quiz:  quizDataFromQuiz(qz),
-			Error: "A quiz with this title already exists — pick a different title (or rename the existing quiz).",
+			Error: "A quiz with this title already exists - pick a different title (or rename the existing quiz).",
 		})
 
 		return
@@ -1615,7 +1615,7 @@ func renderQuizSaveError(
 // Page <title> strings for the quiz create/edit form. Exposed as
 // package-level constants so the GET (HandleQuizCreate / HandleQuizEdit)
 // and the slug-conflict re-render path (HandleQuizSave) share one
-// source of truth — a rename has to touch both renders together (#293).
+// source of truth - a rename has to touch both renders together (#293).
 const (
 	quizFormCreateTitle = "Admin Dashboard - Create Quiz"
 	quizFormEditTitle   = "Admin Dashboard - Edit Quiz"
@@ -1858,7 +1858,7 @@ func HandleQuestionDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 	})
 }
 
-// questionSaveCtx is the artefact set loadQuestionForSave returns —
+// questionSaveCtx is the artefact set loadQuestionForSave returns -
 // bundled into a struct so HandleQuestionSave's signature stays under
 // revive's function-result-limit and the call site stays readable.
 type questionSaveCtx struct {
@@ -1897,7 +1897,7 @@ func HandleQuestionSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 		}
 
 		// strconv.FormatInt dodges gosec G710's open-redirect heuristic
-		// — the qz.ID came from a request parameter through
+		// - the qz.ID came from a request parameter through
 		// requireQuizOwner so gosec flags fmt.Sprintf's %d as tainted.
 		http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(qctx.Quiz.ID, 10), http.StatusSeeOther)
 	})

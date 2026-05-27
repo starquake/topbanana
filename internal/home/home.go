@@ -37,7 +37,7 @@ type PopularQuiz struct {
 }
 
 // Viewer is the slice of the signed-in player the home layout needs to
-// render the "Signed in as X · Log out" footer affordance. Nil when
+// render the "Signed in as X | Log out" footer affordance. Nil when
 // the request is anonymous (no session, or a session pointing at an
 // EnsurePlayer auto-petname row).
 type Viewer struct {
@@ -139,7 +139,7 @@ type QuizLister interface {
 }
 
 // AllQuizRow is one row in the /quizzes list. Strictly a presentation
-// type — no behaviour beyond [AllQuizRow.PlayURL] — so the template
+// type - no behaviour beyond [AllQuizRow.PlayURL] - so the template
 // doesn't need to know anything about quiz.Quiz internals.
 type AllQuizRow struct {
 	ID                int64
@@ -158,7 +158,7 @@ func (a AllQuizRow) PlayURL() string {
 }
 
 // allQuizzesData backs all-quizzes.gohtml. The slice can be empty when
-// no quizzes exist yet — the template renders an empty-state message
+// no quizzes exist yet - the template renders an empty-state message
 // rather than a bare page. Viewer wires the same footer affordance as
 // the home page (see [pageData.Viewer]).
 type allQuizzesData struct {
@@ -173,7 +173,7 @@ type allQuizzesData struct {
 // quizzes are excluded by the visibility gate (#103). Question counts
 // come from a single QuestionCountsByQuiz call to avoid the N+1 a per-row
 // lookup would produce. A failure in either underlying query renders the
-// page with the empty list rather than 500-ing — the admin link in the
+// page with the empty list rather than 500-ing - the admin link in the
 // footer stays reachable.
 func HandleAllQuizzes(
 	logger *slog.Logger,
@@ -184,7 +184,7 @@ func HandleAllQuizzes(
 	t := parseTemplate("home/pages/all-quizzes.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data := allQuizzesData{Title: "All quizzes — Top Banana!"}
+		data := allQuizzesData{Title: "All quizzes - Top Banana!"}
 		if viewer != nil {
 			data.Viewer = viewer(r)
 		}
@@ -257,7 +257,7 @@ func truncate[T any](rows []T) []T {
 // parseTemplate loads the home layout plus one page template from the
 // embedded tmpl.FS. Each page declares its own `content` block, so
 // parsing the layout + a single page keeps the block definitions
-// unambiguous — a glob across pages would clobber `content` to whatever
+// unambiguous - a glob across pages would clobber `content` to whatever
 // file came last (#284 added the second page).
 //
 // The {{add}} func renders a 1-based rank next to each entry in the

@@ -78,7 +78,7 @@ type Store interface {
 	GetBreak(ctx context.Context, id int64) (*Break, error)
 	// CreateBreak inserts a break at the caller-supplied position. The
 	// position semantics are "the question position this break appears
-	// AFTER in the play sequence" — 0 means before the first question,
+	// AFTER in the play sequence" - 0 means before the first question,
 	// N means after the question at position N. Returns
 	// ErrBreakPositionTaken when the (quiz_id, position) slot is
 	// already in use; the admin form maps that to an inline error.
@@ -199,10 +199,10 @@ const (
 // the same set; keeping them here as typed constants means handlers and
 // templates don't sprinkle stringly-typed values across the codebase.
 //
-//   - VisibilityPublic — listed everywhere and playable by anyone.
-//   - VisibilityUnlisted — not on any list; reachable only by sharing
+//   - VisibilityPublic - listed everywhere and playable by anyone.
+//   - VisibilityUnlisted - not on any list; reachable only by sharing
 //     the /play/<slug>-<id> link.
-//   - VisibilityPrivate — reachable only by logged-in players.
+//   - VisibilityPrivate - reachable only by logged-in players.
 //     Anonymous visitors get a 404 from every read and write surface.
 const (
 	VisibilityPublic   = "public"
@@ -242,7 +242,7 @@ type Quiz struct {
 	CreatedByUsername string
 	// TimeLimitSeconds is the default per-question answer window in
 	// seconds. The game service resolves the priority chain
-	// (Question.TimeLimitSeconds → Quiz.TimeLimitSeconds → defaultExpiration)
+	// (Question.TimeLimitSeconds -> Quiz.TimeLimitSeconds -> defaultExpiration)
 	// when issuing a question (#99). The DB default is 10 so existing
 	// rows match the historical hard-coded window.
 	TimeLimitSeconds int
@@ -258,7 +258,7 @@ type Quiz struct {
 // Question represents a question in a quiz.
 //
 // TimeLimitSeconds is the per-question override. Nil means "inherit the
-// quiz default" — the game service applies the priority chain at
+// quiz default" - the game service applies the priority chain at
 // question-issue time (#99).
 type Question struct {
 	ID               int64
@@ -288,7 +288,7 @@ type Option struct {
 // question reorder via [Store.SwapQuestionPositions] does NOT move the
 // breaks attached to either side. The unique index
 // breaks_quiz_position_idx enforces at most one break per (quiz_id,
-// position) slot. Text is optional — an empty string is valid and the
+// position) slot. Text is optional - an empty string is valid and the
 // player UI in slice 2 will fall back to "Continue" alone.
 type Break struct {
 	ID        int64

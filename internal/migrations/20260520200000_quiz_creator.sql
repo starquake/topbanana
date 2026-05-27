@@ -5,7 +5,7 @@
 -- adds the column that the creator-only-edit rule keys on AND makes
 -- it NOT NULL so the rule has no "legacy bypass" loophole.
 --
--- Existing rows are backfilled to the lowest-id admin player — in a
+-- Existing rows are backfilled to the lowest-id admin player - in a
 -- fresh deployment that's the seeded admin from migration
 -- 20260111110308_add_admin_player.sql (id = 1). The seed migration
 -- guarantees at least one admin exists by the time this migration

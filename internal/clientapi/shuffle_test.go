@@ -26,7 +26,7 @@ func TestShuffleByGame_Deterministic(t *testing.T) {
 	})
 
 	if !slices.Equal(first, second) {
-		t.Errorf("shuffleByGame(\"game-abc\", 42) produced %v then %v — want stable order", first, second)
+		t.Errorf("shuffleByGame(\"game-abc\", 42) produced %v then %v - want stable order", first, second)
 	}
 }
 

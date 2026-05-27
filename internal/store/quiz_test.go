@@ -190,7 +190,7 @@ func existingTestQuizzes() []*quiz.Quiz {
 func newTestQuestions() []*quiz.Question {
 	// Position 30 avoids colliding with the 10 / 20 positions
 	// newTestQuizzes already uses when these questions get attached to
-	// existing quizzes — the new UNIQUE(quiz_id, position) index from
+	// existing quizzes - the new UNIQUE(quiz_id, position) index from
 	// #352 would otherwise reject the insert.
 	return []*quiz.Question{
 		{
@@ -264,7 +264,7 @@ func TestQuizStore_ListQuizzes(t *testing.T) {
 		t.Fatalf("failed to list quizzes: %v", err)
 	}
 
-	// ListQuizzes returns summaries — no questions or options loaded.
+	// ListQuizzes returns summaries - no questions or options loaded.
 	summaries := make([]*quiz.Quiz, 0, len(testQuizzes))
 	for _, qz := range testQuizzes {
 		summaries = append(summaries, &quiz.Quiz{
@@ -772,7 +772,7 @@ func TestQuizStore_CreateQuiz_ErrorHandling(t *testing.T) {
 		clash := &quiz.Quiz{
 			Title:             "Capitals of Europe",
 			Slug:              "capitals-of-europe",
-			Description:       "Second insert with the same slug — must surface ErrSlugTaken (#293).",
+			Description:       "Second insert with the same slug - must surface ErrSlugTaken (#293).",
 			CreatedByPlayerID: seededAdminID,
 		}
 		err := quizStore.CreateQuiz(t.Context(), clash)
@@ -1677,7 +1677,7 @@ func TestQuizStore_DeleteQuestion(t *testing.T) {
 		// Stand up a played game in which BOTH questions have been issued
 		// and answered. Deleting question[0] must wipe its game_questions
 		// and game_answers rows, but the rows tied to question[1] in the
-		// same game must remain — that is the difference from the quiz
+		// same game must remain - that is the difference from the quiz
 		// delete cascade. Without the FK cascade fix, the question delete
 		// would fail with FOREIGN KEY constraint failed because
 		// game_questions.question_id and game_answers.option_id both
@@ -1770,7 +1770,7 @@ func TestQuizStore_DeleteQuestion(t *testing.T) {
 			`SELECT COUNT(*) FROM game_answers WHERE game_question_id = ?`, gq1.ID, 1,
 		)
 
-		// The game itself and its participant survive — only the
+		// The game itself and its participant survive - only the
 		// per-question rows for the deleted question were dropped.
 		assertCount("games", `SELECT COUNT(*) FROM games WHERE id = ?`, g.ID, 1)
 		assertCount("game_participants", `SELECT COUNT(*) FROM game_participants WHERE game_id = ?`, g.ID, 1)
@@ -1892,7 +1892,7 @@ func TestQuizStore_DeleteOption_BumpsParentQuizUpdatedAt(t *testing.T) {
 	before := parent.UpdatedAt
 	time.Sleep(updatedAtBumpDelay)
 
-	// Drop one option from the first question and update — this routes
+	// Drop one option from the first question and update - this routes
 	// through UpdateQuestion, which deletes orphaned options and so should
 	// fire the option-delete trigger that bumps the parent quiz.
 	question := parent.Questions[0]

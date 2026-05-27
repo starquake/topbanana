@@ -140,7 +140,7 @@ func ResetPassword(
 // and returns the password if the two reads match and the value falls within
 // the [auth.MinPasswordLength] / [auth.MaxPasswordLength] range. Length is
 // validated *before* the second prompt so a too-short or too-long password
-// fails fast with a single typed line — same UX as `passwd(1)`.
+// fails fast with a single typed line - same UX as `passwd(1)`.
 func readNewPassword(stdin io.Reader, stdout io.Writer) (string, error) {
 	readPassword := newPasswordReader(stdin, stdout)
 
@@ -190,7 +190,7 @@ func newPasswordReader(stdin io.Reader, stdout io.Writer) func(prompt string) (s
 			}
 			// Best-effort newline so the next prompt or log line starts on
 			// a fresh row; a write failure here only mis-positions the
-			// terminal cursor — the password has already been captured, so
+			// terminal cursor - the password has already been captured, so
 			// returning an error would discard valid input.
 			_, _ = fmt.Fprintln(stdout)
 
@@ -538,7 +538,7 @@ func setupDB(signalCtx context.Context, cfg *config.Config, logger *slog.Logger)
 // logConfigSummary emits the operator-relevant config knobs at startup so
 // debugging "the cookie was/wasn't Secure" or "I thought I'd disabled
 // Google sign-in" doesn't require a fresh read of the env file. APP_ENV
-// is logged raw so an unset value shows as the empty string — that is
+// is logged raw so an unset value shows as the empty string - that is
 // itself a meaningful signal (fail-secure defaults kick in).
 func logConfigSummary(ctx context.Context, logger *slog.Logger, cfg *config.Config) {
 	logger.InfoContext(ctx, "config parsed",

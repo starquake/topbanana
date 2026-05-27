@@ -264,15 +264,15 @@ func (s *GameStore) CreateQuestion(ctx context.Context, gq *game.Question) error
 }
 
 // CreateAnswer saves a new answer in the database and updates the provided Answer object with generated values.
-// The caller supplies a.AnsweredAt — the service clamps the client's tappedAt
+// The caller supplies a.AnsweredAt - the service clamps the client's tappedAt
 // to [question.StartedAt, [time.Now]] before invoking the store (#237) so the
 // recorded value is always a Go-passed parameter rather than SQLite's
 // CURRENT_TIMESTAMP, which would otherwise reflect commit time rather than
 // when the player actually tapped.
 //
 // Returns [game.ErrAnswerAlreadyRecorded] when the UNIQUE(game_id,
-// player_id, game_question_id) constraint trips — a double-tap or
-// network retry — so the handler can serve an idempotent response
+// player_id, game_question_id) constraint trips - a double-tap or
+// network retry - so the handler can serve an idempotent response
 // instead of a 500 (#353).
 func (s *GameStore) CreateAnswer(ctx context.Context, a *game.Answer) error {
 	row, err := s.q.CreateAnswer(ctx, db.CreateAnswerParams{
@@ -444,7 +444,7 @@ func (s *GameStore) ReattributeGames(ctx context.Context, fromPlayerID, toPlayer
 	var movedParticipants int64
 	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
 		// Move answers first while the participant rows on
-		// fromPlayerID still exist — the answers query joins through
+		// fromPlayerID still exist - the answers query joins through
 		// game_participants to scope which games are eligible.
 		if _, aErr := q.ReattributeGameAnswers(ctx, db.ReattributeGameAnswersParams{
 			ToPlayerID:   toPlayerID,
@@ -555,7 +555,7 @@ func (s *GameStore) listParticipants(ctx context.Context, gameID string) ([]*gam
 	participants := make([]*game.Participant, 0, len(rows))
 	for _, r := range rows {
 		// quiz_id became NOT NULL in 20260524200000 (#357), so the
-		// generated row carries it as int64 — no more Valid-guard.
+		// generated row carries it as int64 - no more Valid-guard.
 		participants = append(participants, &game.Participant{
 			ID:       r.ID,
 			GameID:   r.GameID,

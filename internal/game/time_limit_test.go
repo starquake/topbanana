@@ -10,7 +10,7 @@ import (
 
 // TestResolveAnswerWindow pins the #99 priority chain: question
 // override > quiz default > defaultExpiration. The branches are
-// independent — each one needs its own subtest to prove the others
+// independent - each one needs its own subtest to prove the others
 // don't accidentally short-circuit it.
 func TestResolveAnswerWindow(t *testing.T) {
 	t.Parallel()

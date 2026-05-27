@@ -1,7 +1,7 @@
 // Package leaderboard provides a process-local pub/sub for quiz-leaderboard
 // changes. game.Service.SubmitAnswer publishes a tick whenever an answer
 // commits; SSE handlers subscribe and re-render the leaderboard on each
-// tick. Coalescing is intentional — the channel buffer is 1, so a slow
+// tick. Coalescing is intentional - the channel buffer is 1, so a slow
 // subscriber drops intermediate events and just sees "leaderboard moved"
 // on the next receive. Subscribers should treat each event as a "fetch
 // the latest" signal, not a per-answer delta.
@@ -25,13 +25,13 @@ func NewHub() *Hub {
 // Subscribe registers a receiver for the given quiz and returns a
 // receive-only channel that fires once on every Publish. The caller MUST
 // invoke the returned unsubscribe func when done (typically via defer)
-// — failing to do so leaks a map entry and pins memory on long-lived
+// - failing to do so leaks a map entry and pins memory on long-lived
 // quizzes.
 //
 // The channel is buffered (capacity 1). If a Publish lands while the
 // previous event is still unread, the new one is dropped. Subscribers
 // re-fetch the current state on every receive, so dropped events are
-// not lost data — just a coalesced repaint.
+// not lost data - just a coalesced repaint.
 func (h *Hub) Subscribe(quizID int64) (<-chan struct{}, func()) {
 	ch := make(chan struct{}, 1)
 	h.mu.Lock()
@@ -70,7 +70,7 @@ func (h *Hub) Subscribe(quizID int64) (<-chan struct{}, func()) {
 // The whole operation runs under the hub mutex so close-channel (in
 // unsubscribe) and chan-send never overlap. Sends are non-blocking
 // (buffer = 1, select default), so the worst case is O(subscribers)
-// CAS attempts — fine for the small per-quiz subscriber set we expect.
+// CAS attempts - fine for the small per-quiz subscriber set we expect.
 func (h *Hub) Publish(quizID int64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

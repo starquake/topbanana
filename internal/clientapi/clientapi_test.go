@@ -634,7 +634,7 @@ func TestHandleCreateGame(t *testing.T) {
 		})
 		handler := HandleCreateGame(logger, svc)
 
-		// No player on the context — handler should refuse rather than
+		// No player on the context - handler should refuse rather than
 		// silently fall back to a hardcoded ID.
 		req := httptest.NewRequestWithContext(
 			t.Context(), http.MethodPost, "/api/games",
@@ -1202,7 +1202,7 @@ func TestHandleAnswerPost(t *testing.T) {
 			stubQuizStore{
 				getQuestion: func(_ context.Context, id int64) (*quiz.Question, error) {
 					// Return a question whose option set does not include
-					// option 200 — SubmitAnswer must surface
+					// option 200 - SubmitAnswer must surface
 					// ErrOptionNotInQuestion, which the handler maps to 400.
 					return &quiz.Question{
 						ID:      id,
@@ -1520,7 +1520,7 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 
 		handler := HandleQuizLeaderboard(logger, newService(stubGameStore{}, stubQuizStore{}))
 
-		// No withPlayer wrapper — simulate a misconfigured route that
+		// No withPlayer wrapper - simulate a misconfigured route that
 		// forgot to wrap the handler in EnsurePlayer.
 		req := httptest.NewRequestWithContext(
 			t.Context(), http.MethodGet, "/api/quizzes/quiz-1/leaderboard", nil,

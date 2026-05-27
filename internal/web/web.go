@@ -27,7 +27,7 @@ var staticFS embed.FS
 // Handler returns an [http.Handler] that serves the admin/auth static assets
 // at /assets/. Defaults to the committed [embed.FS] so production binaries
 // ship self-contained. When [config.Config.WebStaticDir] is set (development
-// only — see config.Parse), the on-disk directory is served instead so a
+// only - see config.Parse), the on-disk directory is served instead so a
 // `make tailwind` regen is visible on the next request without a binary
 // restart. Mirrors the CLIENT_DIR override for the player-client half.
 func Handler(cfg *config.Config) http.Handler {

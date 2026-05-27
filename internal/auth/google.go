@@ -375,8 +375,8 @@ func linkOrCreateGooglePlayer(
 }
 
 // claimAnonymousSessionPlayer upgrades the row identified by
-// sessionPlayerID in place — attaching the OAuth-verified email and
-// linking the (provider, subject) identity onto it — so the visitor's
+// sessionPlayerID in place - attaching the OAuth-verified email and
+// linking the (provider, subject) identity onto it - so the visitor's
 // existing player_id carries forward. Returns ErrPlayerNotFound when
 // the row is missing, already credentialled, or already carries an
 // email; the caller falls through to createGooglePlayer on that
@@ -672,7 +672,7 @@ type stateParts struct {
 // allows the cookie on /login/google/callback because the cookie-path
 // is a proper prefix and the next character of the request-path is
 // "/". Renaming the route to anything that doesn't share this prefix
-// would silently break the OAuth flow — keep the cookie path and the
+// would silently break the OAuth flow - keep the cookie path and the
 // route prefix in lockstep.
 func googleStateCookie(value string, secure bool, maxAge int) *http.Cookie {
 	//nolint:gosec // G124: Secure is intentionally policy-driven (production

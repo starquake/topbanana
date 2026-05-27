@@ -323,7 +323,7 @@ func TestAddRoutes_RegisterDisabled_Returns404(t *testing.T) {
 	}
 	gameSvc := game.NewService(stubGameStore{}, stubQuizStore{}, logger)
 	mux := http.NewServeMux()
-	// Default-false RegistrationEnabled — /register routes should not be registered.
+	// Default-false RegistrationEnabled - /register routes should not be registered.
 	ExportAddRoutes(
 		mux, logger, stores, gameSvc, leaderboard.NewHub(), &config.Config{},
 		mailer.NewTester(mailer.NewNoop()), mailer.StatusView{},
@@ -391,7 +391,7 @@ var csrfFormPattern = regexp.MustCompile(`name="csrf_token" value="([^"]+)"`)
 // TestAddRoutes_LoginPOST_RejectsMissingCSRF verifies the CSRF middleware
 // short-circuits an unsafe request that does not carry a token, and accepts
 // the same request once the token is provided. /login is convenient here
-// because it does not require an admin session — only the CSRF middleware
+// because it does not require an admin session - only the CSRF middleware
 // stands between the request and the handler.
 func TestAddRoutes_LoginPOST_RejectsMissingCSRF(t *testing.T) {
 	t.Parallel()
@@ -465,7 +465,7 @@ func TestAddRoutes_LoginPOST_RejectsMissingCSRF(t *testing.T) {
 
 		// Step 2: POST /login with the token in the form and the cookie on
 		// the request. The POST should pass CSRF validation and reach the
-		// handler, which in turn returns 401 for the unknown user — that's
+		// handler, which in turn returns 401 for the unknown user - that's
 		// fine, the assertion here is "not 403".
 		body := url.Values{
 			"username":   {"ghost"},

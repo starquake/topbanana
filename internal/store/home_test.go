@@ -16,7 +16,7 @@ import (
 // finishGame seeds one game_question row per quiz question for the given
 // (game, quiz) pair so the home queries treat the game as finished. The
 // home queries' finisher condition is COUNT(game_questions) >=
-// COUNT(questions); issuing all questions is enough — actual answers
+// COUNT(questions); issuing all questions is enough - actual answers
 // are not required.
 func finishGame(t *testing.T, gs *GameStore, g *game.Game, q *quiz.Quiz) {
 	t.Helper()
@@ -49,10 +49,10 @@ type homeSeed struct {
 // drive the home page ranking. The one-attempt-per-(player, quiz) rule
 // (#273) means each player plays a quiz at most once, so distinct play
 // counts come from distinct players:
-//   - quiz1 has 3 finished games (alice + bob + ghost) — popular #1
-//   - quiz2 has 1 finished game (alice) — popular #2
-//   - alice finishes 2 games (quiz1 + quiz2) — active #1
-//   - bob finishes 1 game (quiz1) — active #2
+//   - quiz1 has 3 finished games (alice + bob + ghost) - popular #1
+//   - quiz2 has 1 finished game (alice) - popular #2
+//   - alice finishes 2 games (quiz1 + quiz2) - active #1
+//   - bob finishes 1 game (quiz1) - active #2
 //   - an anonymous (unclaimed) player finishes 1 game and must NOT
 //     appear in the active list
 //   - an in-progress game (no game_questions) for an unrelated player
@@ -95,7 +95,7 @@ func seedHomeDB(t *testing.T) homeSeed {
 	if err != nil {
 		t.Fatalf("CreatePlayer bob err = %v, want nil", err)
 	}
-	// Anonymous player — must not surface in the active list because the
+	// Anonymous player - must not surface in the active list because the
 	// query filters on username_claimed = 1.
 	ghost, err := players.CreateAnonymousPlayer(t.Context(), "ghost-petname")
 	if err != nil {
@@ -138,7 +138,7 @@ func seedHomeDB(t *testing.T) homeSeed {
 // game + participant + one game_question per quiz question. The
 // explicit quizID argument is denormalised onto game_participants per
 // the #273 migration so the UNIQUE INDEX on (player_id, quiz_id) can
-// fire if a test accidentally calls this twice for the same pair —
+// fire if a test accidentally calls this twice for the same pair -
 // the failure now surfaces as ErrGameAlreadyExists.
 func finishGameFor(t *testing.T, games *GameStore, playerID int64, q *quiz.Quiz, quizID int64) {
 	t.Helper()
