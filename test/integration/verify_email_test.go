@@ -171,6 +171,76 @@ func TestVerifyEmail_ExpiredToken(t *testing.T) {
 	}
 }
 
+// TestVerifyEmail_MismatchedSessionClears pins the #472 shared-device
+// fix: when the session cookie belongs to a different player than the
+// token owner, GET /verify-email must clear the session and render a
+// neutral landing target rather than send the operator to someone
+// else's role landing.
+func TestVerifyEmail_MismatchedSessionClears(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+	})
+
+	// Register user A and hold their session cookie.
+	clientA := authClient(t)
+	registerForRedirect(ctx, t, clientA, srv.BaseURL, "verify-session-a", "session-a-pass-123")
+	verifyPlayerEmail(ctx, t, srv.DBURI, "verify-session-a")
+
+	dbConn, stores := openStores(t, srv.DBURI)
+	defer dbConn.Close() //nolint:errcheck // cleanup.
+
+	// Mint a token for user B (a different row).
+	userB, err := stores.Players.CreatePlayer(
+		ctx, "verify-token-b", "verify-token-b@example.test", "h", "player",
+	)
+	if err != nil {
+		t.Fatalf("CreatePlayer userB err = %v, want nil", err)
+	}
+	raw, hash, err := auth.GenerateVerifyToken()
+	if err != nil {
+		t.Fatalf("GenerateVerifyToken err = %v, want nil", err)
+	}
+	if cerr := stores.VerifyTokens.CreateVerifyToken(ctx, hash, userB.ID, time.Now().Add(time.Hour)); cerr != nil {
+		t.Fatalf("CreateVerifyToken err = %v, want nil", cerr)
+	}
+
+	// Hit /verify-email with userA's session cookie attached.
+	target := srv.BaseURL + "/verify-email?" + url.Values{"token": {raw}}.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	resp, err := clientA.Do(req)
+	if err != nil {
+		t.Fatalf("client.Do err = %v, want nil", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // cleanup.
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll err = %v, want nil", err)
+	}
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := string(body), `href="/"`; !strings.Contains(got, want) {
+		t.Errorf("body should render neutral landing %q, got %q", want, got)
+	}
+
+	cleared := false
+	for _, c := range resp.Cookies() {
+		if c.Name == "topbanana_session" && c.MaxAge < 0 {
+			cleared = true
+
+			break
+		}
+	}
+	if !cleared {
+		t.Errorf("expected session cookie to be cleared on mismatch; cookies = %v", resp.Cookies())
+	}
+}
+
 // TestSendVerifyEmail_RoundtripStoresAndSends covers SendVerifyEmail
 // against the real store + the diagnostics Tester wrapper. The
 // recorded send log must show one entry for the verify-email kind so

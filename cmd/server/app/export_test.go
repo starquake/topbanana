@@ -19,3 +19,16 @@ var (
 	// ErrResetPasswordsDontMatch re-exports errResetPasswordsDontMatch for tests.
 	ErrResetPasswordsDontMatch = errResetPasswordsDontMatch
 )
+
+// RunTokenSweep exposes the unexported background-sweep loop so the
+// external app_test package can pin its tick-and-cancel behaviour
+// without standing up the full server (#472).
+var RunTokenSweep = runTokenSweep
+
+// TokenSweeper / ResetTokenSweeper re-export the narrow interfaces
+// the sweep depends on so tests can build stubs against the same
+// shape the production wiring uses.
+type (
+	TokenSweeper      = tokenSweeper
+	ResetTokenSweeper = resetTokenSweeper
+)

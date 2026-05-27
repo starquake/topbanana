@@ -300,7 +300,10 @@ func rateLimited(
 }
 
 // sendTestAndRedirect dispatches the send, stashes the banner, and
-// 303s. PRG keeps refresh safe (#321).
+// 303s. PRG keeps refresh safe (#321). The send runs against a context
+// detached from r.Context() with a bounded timeout so an operator
+// closing the tab mid-SMTP does not cancel the dispatch and surface
+// "context canceled" in the diagnostics ring buffer (#472).
 func sendTestAndRedirect(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -309,7 +312,9 @@ func sendTestAndRedirect(
 	flash *EmailFlash,
 	to string,
 ) {
-	err := mailer.SendTest(r.Context(), mailerService, to)
+	sendCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), mailer.SendTimeout)
+	defer cancel()
+	err := mailer.SendTest(sendCtx, mailerService, to)
 	switch {
 	case err == nil:
 		flash.SetNotice(w, "Test email sent to "+to+".")

@@ -164,6 +164,10 @@ func (*recordingResetTokenStore) ConsumeResetToken(_ context.Context, _, _ strin
 	return 0, errors.ErrUnsupported
 }
 
+func (*recordingResetTokenStore) LookupResetToken(_ context.Context, _ string) (int64, bool, error) {
+	return 0, false, errors.ErrUnsupported
+}
+
 func (*recordingResetTokenStore) DeleteExpiredResetTokens(_ context.Context) error {
 	return nil
 }

@@ -34,6 +34,15 @@ type ResetTokenStore interface {
 	// token. The raw token is never stored - a DB leak should not be
 	// replayable.
 	CreateResetToken(ctx context.Context, tokenHash string, playerID int64, expiresAt time.Time) error
+	// LookupResetToken peeks at the row without consuming it. Returns
+	// the owning player id and a bool that is true iff the row exists,
+	// is unconsumed, and is unexpired. Used by the GET handler to
+	// short-circuit the form render for already-dead tokens so the
+	// user is not asked to type a password the POST will reject. Never
+	// a security boundary: the atomic consume on POST is what enforces
+	// single-use; this peek only gates the render path. Returns no
+	// error when the row is simply missing (live = false, player id 0).
+	LookupResetToken(ctx context.Context, tokenHash string) (playerID int64, live bool, err error)
 	// ConsumeResetToken atomically marks the row consumed, rotates the
 	// player's password_hash, and bumps session_version in the same
 	// transaction. Returns the player id on success and
