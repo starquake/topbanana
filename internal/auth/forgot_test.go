@@ -37,7 +37,7 @@ func TestHandleForgotForm_SignedInRedirectsToLanding(t *testing.T) {
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/forgot-password", nil)
 	rec := httptest.NewRecorder()
-	sessions.Set(rec, p.ID)
+	sessions.Set(rec, p.ID, p.SessionVersion)
 	req.AddCookie(extractSessionCookie(rec))
 	rec = httptest.NewRecorder()
 

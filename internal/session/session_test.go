@@ -24,7 +24,7 @@ func TestSet_AndPlayerID_RoundTrip(t *testing.T) {
 
 	mgr := New([]byte("test-key"), true)
 	rec := httptest.NewRecorder()
-	mgr.Set(rec, 42)
+	mgr.Set(rec, 42, 0)
 
 	cookies := rec.Result().Cookies()
 	if got, want := len(cookies), 1; got != want {
@@ -71,7 +71,7 @@ func TestSet_SecureFlag_DroppedInDevelopment(t *testing.T) {
 
 	mgr := New([]byte("k"), false)
 	rec := httptest.NewRecorder()
-	mgr.Set(rec, 42)
+	mgr.Set(rec, 42, 0)
 
 	c := rec.Result().Cookies()[0]
 	if c.Secure {
@@ -103,7 +103,7 @@ func TestPlayerID_TamperedSignature(t *testing.T) {
 
 	mgr := New([]byte("k"), true)
 	rec := httptest.NewRecorder()
-	mgr.Set(rec, 7)
+	mgr.Set(rec, 7, 0)
 
 	c := rec.Result().Cookies()[0]
 	parts := strings.SplitN(c.Value, ".", 2)
@@ -125,7 +125,7 @@ func TestPlayerID_TamperedPayload(t *testing.T) {
 
 	mgr := New([]byte("k"), true)
 	rec := httptest.NewRecorder()
-	mgr.Set(rec, 7)
+	mgr.Set(rec, 7, 0)
 
 	c := rec.Result().Cookies()[0]
 	parts := strings.SplitN(c.Value, ".", 2)
@@ -149,7 +149,7 @@ func TestPlayerID_TamperedTimestamp(t *testing.T) {
 
 	mgr := New([]byte("k"), true)
 	rec := httptest.NewRecorder()
-	mgr.Set(rec, 7)
+	mgr.Set(rec, 7, 0)
 
 	c := rec.Result().Cookies()[0]
 	parts := strings.SplitN(c.Value, ".", 2)
@@ -203,7 +203,7 @@ func TestPlayerID_DifferentKey(t *testing.T) {
 
 	signer := New([]byte("real-key"), true)
 	rec := httptest.NewRecorder()
-	signer.Set(rec, 1)
+	signer.Set(rec, 1, 0)
 
 	verifier := New([]byte("other-key"), true)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
@@ -221,7 +221,7 @@ func TestPlayerID_ExpiredCookie(t *testing.T) {
 
 	signer := newManagerAt(t, issuedAt)
 	rec := httptest.NewRecorder()
-	signer.Set(rec, 5)
+	signer.Set(rec, 5, 0)
 	c := rec.Result().Cookies()[0]
 
 	// Advance past MaxAge by 1 second.
@@ -243,7 +243,7 @@ func TestPlayerID_BoundaryAgeIsValid(t *testing.T) {
 
 	signer := newManagerAt(t, issuedAt)
 	rec := httptest.NewRecorder()
-	signer.Set(rec, 5)
+	signer.Set(rec, 5, 0)
 	c := rec.Result().Cookies()[0]
 
 	verifier := newManagerAt(t, issuedAt.Add(time.Duration(MaxAge)*time.Second))
@@ -281,5 +281,54 @@ func TestClear(t *testing.T) {
 	}
 	if got, want := c.Value, ""; got != want {
 		t.Errorf("cookie Value = %q, want %q", got, want)
+	}
+}
+
+func TestDecode_RoundtripsVersion(t *testing.T) {
+	t.Parallel()
+
+	mgr := New([]byte("k"), true)
+	rec := httptest.NewRecorder()
+	mgr.Set(rec, 42, 7)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+	for _, c := range rec.Result().Cookies() {
+		req.AddCookie(c)
+	}
+	id, version, ok := mgr.Decode(req)
+	if !ok {
+		t.Fatal("Decode ok = false, want true")
+	}
+	if got, want := id, int64(42); got != want {
+		t.Errorf("Decode playerID = %d, want %d", got, want)
+	}
+	if got, want := version, int64(7); got != want {
+		t.Errorf("Decode sessionVersion = %d, want %d", got, want)
+	}
+}
+
+func TestDecode_LegacyTwoFieldCookieDecodesAsVersionZero(t *testing.T) {
+	t.Parallel()
+
+	// Mint a legacy-format payload (playerID|issuedAt) signed with the
+	// same key. The deploy-time invariant is that pre-#112-PR3 cookies
+	// stay valid, decoded with implicit sessionVersion=0. Without this
+	// every live session would log out on the deploy.
+	key := []byte("k")
+	mgr := newManagerAt(t, time.Unix(1_000_000_000, 0))
+
+	legacy := ExportEncodeLegacy(42, 1_000_000_000, key)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: CookieName, Value: legacy})
+
+	id, version, ok := mgr.Decode(req)
+	if !ok {
+		t.Fatal("Decode ok = false, want true (legacy cookie must decode)")
+	}
+	if got, want := id, int64(42); got != want {
+		t.Errorf("Decode playerID = %d, want %d", got, want)
+	}
+	if got, want := version, int64(0); got != want {
+		t.Errorf("Decode sessionVersion = %d, want %d (legacy implicit zero)", got, want)
 	}
 }

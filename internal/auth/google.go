@@ -204,7 +204,7 @@ func HandleGoogleCallback(
 			return
 		}
 
-		sessions.Set(w, player.ID)
+		sessions.Set(w, player.ID, player.SessionVersion)
 		migrateGamesAfterSignIn(r.Context(), logger, players, games, sessionPlayerID, player.ID)
 		target := next
 		if target == "" {
