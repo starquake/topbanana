@@ -197,24 +197,41 @@ func HandleEmailGet(
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/email.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		notice, errMsg, wait := readEmailFlash(w, r, flash)
-		data := buildEmailPageData(r, mailerService, status, notice, errMsg)
-		data.RateLimitWait = wait
+		banner := readEmailFlash(w, r, flash)
+		data := buildEmailPageData(r, mailerService, status, banner.Notice, banner.Error)
+		data.RateLimitWait = banner.Wait
+		// A typed recipient that survived the PRG wins over the
+		// signed-in admin's email; the admin clearly chose something
+		// different, so preserving it across the bounce avoids
+		// rewriting on every send.
+		if banner.EchoTo != "" {
+			data.DefaultTo = banner.EchoTo
+		}
 		render.Render(w, r, http.StatusOK, data)
 	})
 }
 
+// emailFlashBanner is the projection of [FlashRead] the GET handler
+// consumes; Notice and Error are mutually exclusive (one is "" while
+// the other carries the banner copy).
+type emailFlashBanner struct {
+	Notice string
+	Error  string
+	Wait   int
+	EchoTo string
+}
+
 // readEmailFlash returns the banner fields; flash.Read clears the cookie.
-func readEmailFlash(w http.ResponseWriter, r *http.Request, flash *EmailFlash) (notice, errMsg string, wait int) {
+func readEmailFlash(w http.ResponseWriter, r *http.Request, flash *EmailFlash) emailFlashBanner {
 	fr := flash.Read(w, r)
 	if !fr.OK {
-		return "", "", 0
+		return emailFlashBanner{}
 	}
 	if fr.Kind == FlashNotice {
-		return fr.Msg, "", 0
+		return emailFlashBanner{Notice: fr.Msg, EchoTo: fr.EchoTo}
 	}
 
-	return "", fr.Msg, fr.Wait
+	return emailFlashBanner{Error: fr.Msg, Wait: fr.Wait, EchoTo: fr.EchoTo}
 }
 
 // HandleEmailTest handles POST /admin/email/test. Empty recipient
@@ -230,8 +247,12 @@ func HandleEmailTest(
 	flash *EmailFlash,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// typedTo is the raw recipient the admin entered. Threaded
+		// into every flash so the PRG bounce preserves the input
+		// instead of resetting it to the signed-in admin's address.
+		typedTo := strings.TrimSpace(r.PostFormValue("to"))
 		ip := limiter.ClientIP(r)
-		token, blocked := rateLimited(w, r, limiter, ip, flash)
+		token, blocked := rateLimited(w, r, limiter, ip, flash, typedTo)
 		if blocked {
 			return
 		}
@@ -244,14 +265,14 @@ func HandleEmailTest(
 			// matches on token so a second concurrent caller's newer
 			// stamp is not clobbered here.
 			limiter.Cancel(ip, token)
-			flash.SetError(w, "Recipient is not a valid email address.", 0)
+			flash.SetError(w, "Recipient is not a valid email address.", 0, typedTo)
 			http.Redirect(w, r, "/admin/email", http.StatusSeeOther)
 
 			return
 		}
 		if !ok {
 			limiter.Cancel(ip, token)
-			flash.SetError(w, "Enter a recipient email address - your account has no email on file.", 0)
+			flash.SetError(w, "Enter a recipient email address - your account has no email on file.", 0, typedTo)
 			http.Redirect(w, r, "/admin/email", http.StatusSeeOther)
 
 			return
@@ -259,7 +280,7 @@ func HandleEmailTest(
 
 		// Recipient validated; keep the Allow stamp so subsequent
 		// clicks within the window get rate-limited as intended.
-		sendTestAndRedirect(w, r, logger, mailerService, flash, to)
+		sendTestAndRedirect(w, r, logger, mailerService, flash, to, typedTo)
 	})
 }
 
@@ -284,13 +305,14 @@ func rateLimited(
 	limiter *EmailRateLimiter,
 	ip string,
 	flash *EmailFlash,
+	echoTo string,
 ) (time.Time, bool) {
 	ok, wait, token := limiter.Allow(ip)
 	if ok {
 		return token, false
 	}
 	seconds := max(int(wait.Round(time.Second).Seconds()), 1)
-	flash.SetError(w, "Slow down: wait a moment before sending another test email.", seconds)
+	flash.SetError(w, "Slow down: wait a moment before sending another test email.", seconds, echoTo)
 	// Retry-After alongside the human-readable banner: humans see the
 	// flash on the follow-up GET; scripted callers honour the header.
 	w.Header().Set("Retry-After", strconv.Itoa(seconds))
@@ -310,24 +332,25 @@ func sendTestAndRedirect(
 	logger *slog.Logger,
 	mailerService EmailRecorder,
 	flash *EmailFlash,
-	to string,
+	to, echoTo string,
 ) {
 	sendCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), mailer.SendTimeout)
 	defer cancel()
 	err := mailer.SendTest(sendCtx, mailerService, to)
 	switch {
 	case err == nil:
-		flash.SetNotice(w, "Test email sent to "+to+".")
+		flash.SetNotice(w, "Test email sent to "+to+".", echoTo)
 	case errors.Is(err, mailer.ErrNotConfigured):
 		flash.SetError(
 			w,
 			"Email is not configured on this instance - set SMTP_HOST, SMTP_PORT, and SMTP_FROM to enable sending.",
 			0,
+			echoTo,
 		)
 	default:
 		// Verbatim SMTP error so the operator can debug "550 mailbox unavailable" etc. directly (#321).
 		logger.InfoContext(r.Context(), "test email send failed", slog.Any("err", err))
-		flash.SetError(w, "Send failed: "+err.Error(), 0)
+		flash.SetError(w, "Send failed: "+err.Error(), 0, echoTo)
 	}
 	http.Redirect(w, r, "/admin/email", http.StatusSeeOther)
 }

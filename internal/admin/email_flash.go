@@ -48,23 +48,27 @@ func NewEmailFlash(key []byte, secureCookies bool) *EmailFlash {
 }
 
 // SetNotice stashes a success banner for the next GET /admin/email.
-func (f *EmailFlash) SetNotice(w http.ResponseWriter, msg string) {
-	f.set(w, FlashNotice, msg, 0)
+// echoTo is the recipient the admin typed; the GET re-renders it into
+// the form's "to" input so a successful send does not blank the field.
+func (f *EmailFlash) SetNotice(w http.ResponseWriter, msg, echoTo string) {
+	f.set(w, FlashNotice, msg, 0, echoTo)
 }
 
 // SetError stashes an error banner; wait is the rate-limit hint in
-// seconds (0 for non-rate-limited errors).
-func (f *EmailFlash) SetError(w http.ResponseWriter, msg string, wait int) {
-	f.set(w, FlashError, msg, wait)
+// seconds (0 for non-rate-limited errors). echoTo follows SetNotice
+// so a validation failure preserves the typed recipient.
+func (f *EmailFlash) SetError(w http.ResponseWriter, msg string, wait int, echoTo string) {
+	f.set(w, FlashError, msg, wait, echoTo)
 }
 
 // FlashRead is the result of Read. OK=false leaves the other fields
 // zero.
 type FlashRead struct {
-	Kind FlashKind
-	Msg  string
-	Wait int
-	OK   bool
+	Kind   FlashKind
+	Msg    string
+	Wait   int
+	EchoTo string
+	OK     bool
 }
 
 // Read returns the stashed banner and clears the cookie. OK=false
@@ -96,8 +100,8 @@ func (f *EmailFlash) Read(w http.ResponseWriter, r *http.Request) FlashRead {
 	return decodeFlash(payload)
 }
 
-func (f *EmailFlash) set(w http.ResponseWriter, kind FlashKind, msg string, wait int) {
-	payload := encodeFlash(kind, msg, wait)
+func (f *EmailFlash) set(w http.ResponseWriter, kind FlashKind, msg string, wait int, echoTo string) {
+	payload := encodeFlash(kind, msg, wait, echoTo)
 	value := base64.RawURLEncoding.EncodeToString(payload) + "." +
 		base64.RawURLEncoding.EncodeToString(f.sign(payload))
 	http.SetCookie(w, f.cookie(value, flashMaxAge))
@@ -125,13 +129,18 @@ func (f *EmailFlash) sign(payload []byte) []byte {
 }
 
 // encodeFlash returns the payload as kind-byte + optional
-// wait-seconds + flashWaitSep + message.
-func encodeFlash(kind FlashKind, msg string, wait int) []byte {
+// wait-seconds + sep + echoTo + sep + message. Two separators carry
+// the echoed recipient between Set and Read; an empty echoTo encodes
+// as "" so the wire shape stays uniform regardless of whether the
+// caller supplied one.
+func encodeFlash(kind FlashKind, msg string, wait int, echoTo string) []byte {
 	var sb strings.Builder
 	sb.WriteByte(byte(kind))
 	if kind == FlashError && wait > 0 {
 		sb.WriteString(strconv.Itoa(wait))
 	}
+	sb.WriteString(flashWaitSep)
+	sb.WriteString(echoTo)
 	sb.WriteString(flashWaitSep)
 	sb.WriteString(msg)
 
@@ -147,7 +156,11 @@ func decodeFlash(payload []byte) FlashRead {
 		return FlashRead{}
 	}
 	rest := string(payload[1:])
-	waitPart, msg, sep := strings.Cut(rest, flashWaitSep)
+	waitPart, after, sep := strings.Cut(rest, flashWaitSep)
+	if !sep {
+		return FlashRead{}
+	}
+	echoTo, msg, sep := strings.Cut(after, flashWaitSep)
 	if !sep {
 		return FlashRead{}
 	}
@@ -160,5 +173,5 @@ func decodeFlash(payload []byte) FlashRead {
 		wait = parsed
 	}
 
-	return FlashRead{Kind: kind, Msg: msg, Wait: wait, OK: true}
+	return FlashRead{Kind: kind, Msg: msg, Wait: wait, EchoTo: echoTo, OK: true}
 }
