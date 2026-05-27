@@ -60,6 +60,16 @@ func RequireVerifiedEmail(next http.Handler) http.Handler {
 
 			return
 		}
+		// HTMX swaps the response body into the triggering element, so a
+		// 303 here would inject the pending page into whatever partial
+		// target fired the request. HX-Redirect tells htmx to do a
+		// top-level navigation instead.
+		if r.Header.Get("Hx-Request") == "true" {
+			w.Header().Set("Hx-Redirect", verifyPendingPath)
+			w.WriteHeader(http.StatusNoContent)
+
+			return
+		}
 		http.Redirect(w, r, verifyPendingPath, http.StatusSeeOther)
 	})
 }
