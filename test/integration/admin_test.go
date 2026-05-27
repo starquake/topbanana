@@ -92,6 +92,7 @@ func TestAdmin_Integration(t *testing.T) {
 	registerForm.Add("username", "integration-admin")
 	registerForm.Add("email", "integration-admin@example.test")
 	registerForm.Add("password", "integration-pass-123")
+	registerForm.Add("password_confirm", "integration-pass-123")
 	registerForm.Add("csrf_token", registerToken)
 
 	registerReq, err := http.NewRequestWithContext(

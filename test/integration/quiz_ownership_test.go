@@ -153,10 +153,11 @@ func registerAdminClient(ctx context.Context, t *testing.T, baseURL, dbURI, user
 
 	token := fetchCSRFToken(ctx, t, client, baseURL+"/register")
 	form := url.Values{
-		"username":   {username},
-		"email":      {username + "@example.test"},
-		"password":   {"integration-pass-123"},
-		"csrf_token": {token},
+		"username":         {username},
+		"email":            {username + "@example.test"},
+		"password":         {"integration-pass-123"},
+		"password_confirm": {"integration-pass-123"},
+		"csrf_token":       {token},
 	}
 	req := newFormReq(ctx, t, baseURL+"/register", form)
 	resp, err := client.Do(req)

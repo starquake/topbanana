@@ -438,6 +438,7 @@ func registerAdminViaHTTP(ctx context.Context, t *testing.T, client *http.Client
 	form.Add("username", "htmx-admin")
 	form.Add("email", "htmx-admin@example.test")
 	form.Add("password", "htmx-admin-pass-123")
+	form.Add("password_confirm", "htmx-admin-pass-123")
 	form.Add("csrf_token", registerToken)
 
 	req, err := http.NewRequestWithContext(
