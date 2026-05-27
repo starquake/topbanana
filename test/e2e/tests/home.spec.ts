@@ -73,10 +73,11 @@ test('start page renders the popular + active sections and a discreet admin link
   await expect(page.getByRole('heading', { name: 'Most active players', level: 2 })).toBeVisible();
 
   // Discreet admin link sits in the footer. Logged-out visitors get
-  // redirected to /login by the admin middleware; we don't need to
-  // assert anything beyond the link existing and being clickable here.
+  // redirected to /login by the admin middleware, which since #449
+  // also carries the original URI as ?next=<encoded> so the visitor
+  // can return to /admin after signing in.
   const adminLink = page.getByRole('link', { name: 'Manage quizzes' });
   await expect(adminLink).toBeVisible();
   await adminLink.click();
-  await expect(page).toHaveURL(/\/login$/);
+  await expect(page).toHaveURL(/\/login\?next=%2Fadmin$/);
 });
