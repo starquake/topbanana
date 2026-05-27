@@ -7,7 +7,11 @@ services:
       - HOST=0.0.0.0
       - PORT=8080
       - DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)
-      - REGISTRATION_ENABLED=true
+      # REGISTRATION_ENABLED is now env-driven so the operator can
+      # flip it via a GitHub Actions variable (vars.REGISTRATION_ENABLED)
+      # without a redeploy. Defaults true when unset so a fresh stack
+      # behaves the way the previously-hardcoded value did.
+      - REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-true}
       - ADMIN_USERNAMES=admin
       - SESSION_KEY=${SESSION_KEY:?SESSION_KEY must be set in .env or environment}
       # Google sign-in is part of the standard staging deployment.
@@ -27,6 +31,34 @@ services:
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:?GOOGLE_CLIENT_ID must be set in .env or environment}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:?GOOGLE_CLIENT_SECRET must be set in .env or environment}
       - GOOGLE_REDIRECT_URL=${GOOGLE_REDIRECT_URL:?GOOGLE_REDIRECT_URL must be set in .env or environment}
+      # SMTP_* are optional. If the staging environment doesn't define
+      # any of them, the app falls back to the no-op mailer and the
+      # /admin/email diagnostics page renders the "disabled (no-op)"
+      # badge - no boot failure. Partial wiring (host without port,
+      # etc.) is rejected by the Go config layer with a clear error.
+      # Same three-place-edit rule as the GOOGLE_* block above applies
+      # in deploy.yml.
+      #
+      # SMTP_PORT and SMTP_TLS must be paired by the operator; nothing
+      # auto-picks the port. The supported pairings:
+      #   - SMTP_PORT=587 + SMTP_TLS=true  -> STARTTLS, the standard
+      #     "TLS on" path (most providers).
+      #   - SMTP_PORT=25  + SMTP_TLS=false -> plain SMTP (usually
+      #     only for internal relays).
+      #   - SMTP_PORT=1025 + SMTP_TLS=false -> local Mailpit dev.
+      # Port 465 (implicit TLS / SMTPS) is NOT supported: go-mail's
+      # TLS path issues STARTTLS, which fails on a port the server
+      # expects to be TLS-wrapped from byte zero.
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - SMTP_TLS=${SMTP_TLS:-}
+      # BASE_URL is the absolute URL prefix for verify / invite links
+      # in outbound email. Optional until #111 PR2 ships; the mailer
+      # falls back to an empty prefix when unset.
+      - BASE_URL=${BASE_URL:-}
     volumes:
       - topbanana_staging_data:/home/nonroot/data
     networks:

@@ -50,6 +50,24 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GOOGLE_REDIRECT_URL: ${{ secrets.GOOGLE_REDIRECT_URL }}
+          # SMTP_* are optional: if none are set, the no-op mailer in
+          # the app stays in place and the /admin/email diagnostics
+          # page renders "disabled (no-op)". The Go config layer
+          # enforces consistency (partial SMTP errors at boot).
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_TLS: ${{ secrets.SMTP_TLS }}
+          # BASE_URL is the absolute URL prefix for verify / invite
+          # links embedded in outbound email (#290, #318). Optional
+          # today; required when those features ship.
+          BASE_URL: ${{ secrets.BASE_URL }}
+          # REGISTRATION_ENABLED is an env-driven toggle so the
+          # operator can flip it without a redeploy. Defaults true on
+          # the compose side when unset here.
+          REGISTRATION_ENABLED: ${{ vars.REGISTRATION_ENABLED }}
           IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           IMAGE_TAG: edge
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -63,7 +81,7 @@ jobs:
           # bakes in a blank, which the compose ${VAR:?…} guard then
           # rejects on boot. Keep this list in lockstep with the env block
           # above and the .env heredoc below.
-          envs: SESSION_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URL,IMAGE_NAME,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR
+          envs: SESSION_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URL,SMTP_HOST,SMTP_PORT,SMTP_USERNAME,SMTP_PASSWORD,SMTP_FROM,SMTP_TLS,BASE_URL,REGISTRATION_ENABLED,IMAGE_NAME,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR
           script: |
             set -e
             if [ -z "$SESSION_KEY" ]; then
@@ -84,6 +102,14 @@ jobs:
             GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
             GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
             GOOGLE_REDIRECT_URL=${GOOGLE_REDIRECT_URL}
+            SMTP_HOST=${SMTP_HOST}
+            SMTP_PORT=${SMTP_PORT}
+            SMTP_USERNAME=${SMTP_USERNAME}
+            SMTP_PASSWORD=${SMTP_PASSWORD}
+            SMTP_FROM=${SMTP_FROM}
+            SMTP_TLS=${SMTP_TLS}
+            BASE_URL=${BASE_URL}
+            REGISTRATION_ENABLED=${REGISTRATION_ENABLED}
             IMAGE_NAME=${IMAGE_NAME}
             IMAGE_TAG=${IMAGE_TAG}
             EOF
@@ -147,6 +173,24 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GOOGLE_REDIRECT_URL: ${{ secrets.GOOGLE_REDIRECT_URL }}
+          # SMTP_* are optional: if none are set, the no-op mailer in
+          # the app stays in place and the /admin/email diagnostics
+          # page renders "disabled (no-op)". The Go config layer
+          # enforces consistency (partial SMTP errors at boot).
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_TLS: ${{ secrets.SMTP_TLS }}
+          # BASE_URL is the absolute URL prefix for verify / invite
+          # links embedded in outbound email (#290, #318). Optional
+          # today; required when those features ship.
+          BASE_URL: ${{ secrets.BASE_URL }}
+          # REGISTRATION_ENABLED is an env-driven toggle so the
+          # operator can flip it without a redeploy. Defaults true on
+          # the compose side when unset here.
+          REGISTRATION_ENABLED: ${{ vars.REGISTRATION_ENABLED }}
           IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           IMAGE_TAG: ${{ steps.tag.outputs.tag }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -160,7 +204,7 @@ jobs:
           # bakes in a blank, which the compose ${VAR:?…} guard then
           # rejects on boot. Keep this list in lockstep with the env block
           # above and the .env heredoc below.
-          envs: SESSION_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URL,IMAGE_NAME,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR
+          envs: SESSION_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URL,SMTP_HOST,SMTP_PORT,SMTP_USERNAME,SMTP_PASSWORD,SMTP_FROM,SMTP_TLS,BASE_URL,REGISTRATION_ENABLED,IMAGE_NAME,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR
           script: |
             set -e
             if [ -z "$SESSION_KEY" ]; then
@@ -181,6 +225,14 @@ jobs:
             GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
             GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
             GOOGLE_REDIRECT_URL=${GOOGLE_REDIRECT_URL}
+            SMTP_HOST=${SMTP_HOST}
+            SMTP_PORT=${SMTP_PORT}
+            SMTP_USERNAME=${SMTP_USERNAME}
+            SMTP_PASSWORD=${SMTP_PASSWORD}
+            SMTP_FROM=${SMTP_FROM}
+            SMTP_TLS=${SMTP_TLS}
+            BASE_URL=${BASE_URL}
+            REGISTRATION_ENABLED=${REGISTRATION_ENABLED}
             IMAGE_NAME=${IMAGE_NAME}
             IMAGE_TAG=${IMAGE_TAG}
             EOF
