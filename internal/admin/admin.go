@@ -1207,6 +1207,11 @@ type quizImportPayload struct {
 	// new-quiz default.
 	TimeLimitSeconds *int                        `json:"timeLimitSeconds,omitempty"`
 	Questions        []quizImportQuestionPayload `json:"questions"`
+	// Breaks are optional interludes (#167). Position semantics mirror
+	// [quiz.Break]: 0 means before question 1, N (> 0) means after
+	// the question whose Position is N. Omitted or empty array is a
+	// valid quiz with no breaks.
+	Breaks []quizImportBreakPayload `json:"breaks,omitempty"`
 }
 
 type quizImportQuestionPayload struct {
@@ -1224,6 +1229,15 @@ type quizImportOptionPayload struct {
 	Correct bool   `json:"correct"`
 }
 
+// quizImportBreakPayload mirrors the [quiz.Break] wire shape on the
+// import path. Text is optional; an empty string is allowed and is
+// stored as-is, matching what the admin form path persists when the
+// host submits the break-form with a blank Text field.
+type quizImportBreakPayload struct {
+	Position int    `json:"position"`
+	Text     string `json:"text,omitempty"`
+}
+
 // quizImportExample is the JSON block rendered on the import page so the
 // admin can copy it into a chat with Claude (or any LLM), have it generate
 // a quiz, and paste the result back. Kept here as a const string rather
@@ -1231,17 +1245,39 @@ type quizImportOptionPayload struct {
 // what the handler will actually accept.
 const quizImportExample = `{
   "title": "European Capitals",
-  "description": "Twelve quick-fire questions covering EU capitals.",
+  "description": "A quick tour of EU capitals.",
   "timeLimitSeconds": 10,
+  "breaks": [
+    { "position": 0, "text": "Welcome! Each question has a 10-second clock unless noted." },
+    { "position": 2, "text": "Halfway there. The next question gives you a bit more time." }
+  ],
   "questions": [
     {
       "text": "Which city sits on the river Vltava?",
-      "timeLimitSeconds": 15,
       "options": [
         { "text": "Bratislava", "correct": false },
-        { "text": "Budapest",  "correct": false },
-        { "text": "Prague",    "correct": true  },
-        { "text": "Warsaw",    "correct": false }
+        { "text": "Budapest",   "correct": false },
+        { "text": "Prague",     "correct": true  },
+        { "text": "Warsaw",     "correct": false }
+      ]
+    },
+    {
+      "text": "Which two of these are capitals?",
+      "options": [
+        { "text": "Lisbon",   "correct": true  },
+        { "text": "Porto",    "correct": false },
+        { "text": "Helsinki", "correct": true  },
+        { "text": "Tampere",  "correct": false }
+      ]
+    },
+    {
+      "text": "Which capital is furthest north?",
+      "timeLimitSeconds": 20,
+      "options": [
+        { "text": "Reykjavik",  "correct": true  },
+        { "text": "Oslo",       "correct": false },
+        { "text": "Stockholm",  "correct": false },
+        { "text": "Copenhagen", "correct": false }
       ]
     }
   ]
@@ -1292,50 +1328,24 @@ func HandleQuizImportSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, maxFormSize)
-		if err := r.ParseForm(); err != nil {
-			logger.ErrorContext(r.Context(), "error parsing import form", slog.Any("err", err))
-			renderErr(w, r, "", "request body too large or malformed")
-
-			return
-		}
-
-		jsonText := r.PostFormValue("json")
-		if jsonText == "" {
-			renderErr(w, r, "", "json field is required")
-
-			return
-		}
-
-		var payload quizImportPayload
-		dec := json.NewDecoder(strings.NewReader(jsonText))
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(&payload); err != nil {
-			renderErr(w, r, jsonText, fmt.Sprintf("invalid JSON: %v", err))
-
-			return
-		}
-
-		qz := quizFromImportPayload(payload)
-		if problems := (&quizForm{quiz: qz}).Valid(r.Context()); len(problems) > 0 {
-			renderErr(w, r, jsonText, fmt.Sprintf("validation errors: %v", problems))
-
+		parsed, ok := parseImportPayload(w, r, logger, renderErr)
+		if !ok {
 			return
 		}
 
 		// Stamp the session admin as the creator so the downstream
 		// owner-gated mutating routes can match (#281).
 		if p, present := auth.PlayerFromContext(r.Context()); present {
-			qz.CreatedByPlayerID = p.ID
+			parsed.Quiz.CreatedByPlayerID = p.ID
 		}
 
-		if err := storeQuiz(r.Context(), quizStore, qz); err != nil {
+		if err := storeQuiz(r.Context(), quizStore, parsed.Quiz); err != nil {
 			if errors.Is(err, quiz.ErrSlugTaken) {
 				// Same slug-derivation rule applies on the import path
 				// (#293): re-render at 409 with the JSON intact so the
 				// admin can rename and resubmit without re-pasting.
 				renderStatus(
-					w, r, http.StatusConflict, jsonText,
+					w, r, http.StatusConflict, parsed.JSONText,
 					"A quiz with this title already exists — change the title in the JSON and resubmit.",
 				)
 
@@ -1347,16 +1357,139 @@ func HandleQuizImportSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 			return
 		}
 
-		http.Redirect(w, r, fmt.Sprintf("/admin/quizzes/%d", qz.ID), http.StatusSeeOther)
+		if err := storeImportedBreaks(r.Context(), quizStore, parsed.Quiz.ID, parsed.Breaks); err != nil {
+			logger.ErrorContext(r.Context(), "error storing imported break", slog.Any("err", err))
+			render500(w, r, logger, csrfMgr)
+
+			return
+		}
+
+		http.Redirect(w, r, fmt.Sprintf("/admin/quizzes/%d", parsed.Quiz.ID), http.StatusSeeOther)
 	})
 }
 
-// quizFromImportPayload converts the wire-shape payload into the domain
-// model. The slug is always derived from the title — the payload doesn't
-// carry one because LLMs are bad at picking a stable slug and the
-// admin form does the same derivation. Positions are assigned 1..N in
-// the order questions appear in the JSON.
-func quizFromImportPayload(p quizImportPayload) *quiz.Quiz {
+// parsedImport holds the decoded + validated payload [parseImportPayload]
+// returns to [HandleQuizImportSave]. Bundled so the parser can return a
+// single struct (plus an ok flag) and stay under revive's
+// function-result-limit while still surfacing the JSON text (for
+// re-render on later failures), the quiz, and the breaks separately.
+type parsedImport struct {
+	JSONText string
+	Quiz     *quiz.Quiz
+	Breaks   []*quiz.Break
+}
+
+// parseImportPayload reads + decodes + validates the request body for
+// [HandleQuizImportSave]. On any failure it writes the form-rendered
+// error response via renderErr and returns ok=false; the caller
+// early-returns. Split out so [HandleQuizImportSave] stays under
+// revive's function-length and gocognit limits.
+func parseImportPayload(
+	w http.ResponseWriter, r *http.Request, logger *slog.Logger,
+	renderErr func(http.ResponseWriter, *http.Request, string, string),
+) (parsedImport, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormSize)
+	if err := r.ParseForm(); err != nil {
+		logger.ErrorContext(r.Context(), "error parsing import form", slog.Any("err", err))
+		renderErr(w, r, "", "request body too large or malformed")
+
+		return parsedImport{}, false
+	}
+
+	jsonText := r.PostFormValue("json")
+	if jsonText == "" {
+		renderErr(w, r, "", "json field is required")
+
+		return parsedImport{}, false
+	}
+
+	var payload quizImportPayload
+	dec := json.NewDecoder(strings.NewReader(jsonText))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&payload); err != nil {
+		renderErr(w, r, jsonText, fmt.Sprintf("invalid JSON: %v", err))
+
+		return parsedImport{}, false
+	}
+
+	qz, breaks := quizFromImportPayload(payload)
+	if problems := (&quizForm{quiz: qz}).Valid(r.Context()); len(problems) > 0 {
+		renderErr(w, r, jsonText, fmt.Sprintf("validation errors: %v", problems))
+
+		return parsedImport{}, false
+	}
+	if msg := validateImportBreaks(r.Context(), qz, breaks); msg != "" {
+		renderErr(w, r, jsonText, msg)
+
+		return parsedImport{}, false
+	}
+
+	return parsedImport{JSONText: jsonText, Quiz: qz, Breaks: breaks}, true
+}
+
+// storeImportedBreaks persists the breaks parsed off the import
+// payload. Each break's QuizID is set from the just-inserted quiz
+// before the store call. Pre-validation ruled out the predictable
+// cases (unknown position, duplicate-in-payload); a failure here is
+// unexpected, so the caller logs + 500s. The quiz row is already
+// persisted - re-importing would collide on the slug, so the admin's
+// recovery path is to open the quiz and add the missing breaks via
+// the regular UI.
+func storeImportedBreaks(ctx context.Context, quizStore quiz.Store, quizID int64, breaks []*quiz.Break) error {
+	for _, b := range breaks {
+		b.QuizID = quizID
+		if err := quizStore.CreateBreak(ctx, b); err != nil {
+			return fmt.Errorf("create break at position %d: %w", b.Position, err)
+		}
+	}
+
+	return nil
+}
+
+// validateImportBreaks pins the same per-break rules the admin form
+// path enforces, plus a payload-side duplicate-position check the form
+// path leaves to the DB unique index. Returns an empty string when the
+// payload is acceptable. The handler renders the joined message as the
+// form banner. Collects every failing break in one pass so an
+// LLM-generated payload with multiple mistakes gets all of them
+// reported on a single round-trip.
+func validateImportBreaks(ctx context.Context, qz *quiz.Quiz, breaks []*quiz.Break) string {
+	var problems []string
+	seen := make(map[int]bool, len(breaks))
+	for _, b := range breaks {
+		if formProblems := (&breakForm{quiz: qz, brk: b}).Valid(ctx); len(formProblems) > 0 {
+			// Pull positionFieldKey out by name rather than printing the
+			// map: Go map iteration order is non-deterministic, so a
+			// future Valid that returns >1 key would otherwise produce
+			// run-to-run variation in the banner copy.
+			problems = append(problems, fmt.Sprintf(
+				"break at position %d: %s", b.Position, formProblems[positionFieldKey]))
+
+			continue
+		}
+		if seen[b.Position] {
+			problems = append(problems, fmt.Sprintf(
+				"break position %d appears twice; each slot accepts at most one break", b.Position))
+
+			continue
+		}
+		seen[b.Position] = true
+	}
+
+	return strings.Join(problems, "; ")
+}
+
+// quizFromImportPayload converts the wire-shape payload into the
+// domain model. The slug is always derived from the title — the
+// payload doesn't carry one because LLMs are bad at picking a stable
+// slug and the admin form does the same derivation. Question
+// positions are assigned 1..N in the order questions appear in the
+// JSON. Breaks are returned alongside the quiz with QuizID left zero;
+// the caller sets it after the quiz row is persisted and the ID is
+// known. Returning a separate slice keeps [quiz.Quiz] free of
+// break-shaped fields, mirroring how the form-driven path treats
+// breaks as a sibling collection.
+func quizFromImportPayload(p quizImportPayload) (*quiz.Quiz, []*quiz.Break) {
 	// #99: honour the payload's per-quiz default when present; fall
 	// back to the project value so authors who don't care can omit
 	// the field entirely and still pass Quiz.Valid's range check.
@@ -1391,7 +1524,15 @@ func quizFromImportPayload(p quizImportPayload) *quiz.Quiz {
 		qz.Questions = append(qz.Questions, qs)
 	}
 
-	return qz
+	breaks := make([]*quiz.Break, 0, len(p.Breaks))
+	for _, bIn := range p.Breaks {
+		breaks = append(breaks, &quiz.Break{
+			Position: bIn.Position,
+			Text:     bIn.Text,
+		})
+	}
+
+	return qz, breaks
 }
 
 // quizFormData backs the quizform.gohtml template. Error is non-empty

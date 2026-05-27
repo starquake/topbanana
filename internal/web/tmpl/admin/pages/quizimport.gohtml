@@ -12,9 +12,12 @@
         <div>
             <h1 class="m-0 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(2rem,6vw,2.75rem)]">{{.Title}}</h1>
             <p class="mt-2 max-w-[60ch] text-text-dim text-[0.95rem]">
-                Paste a JSON document into the textarea to create a quiz in one shot. The shape below is what an LLM should produce —
-                copy the example into a chat, ask it to generate a quiz in the same shape, paste the response back here and submit.
+                Paste a JSON document into the textarea to create a quiz in one shot. Two steps:
             </p>
+            <ol class="mt-3 max-w-[60ch] list-decimal pl-5 text-text-dim text-[0.95rem] space-y-1">
+                <li>Copy the prompt + example below into an LLM chat. Edit the prompt to describe the quiz you want.</li>
+                <li>Paste the chat's JSON reply into the textarea below and submit.</li>
+            </ol>
         </div>
     </header>
 
@@ -43,12 +46,42 @@
         </div>
     </form>
 
-    <section aria-label="Example JSON" class="form-shell mt-12">
-        <h2 class="label-eyebrow mb-3 text-text">Example shape</h2>
+    <section aria-label="LLM prompt" class="form-shell mt-12">
+        <h2 class="label-eyebrow mb-3 text-text">Prompt to paste</h2>
         <p class="mb-3 text-text-dim text-[0.9rem]">
-            Copy this into your chat verbatim so the model knows the expected fields. Positions are auto-assigned in array order;
-            <code class="font-mono text-[0.8rem]">slug</code> is optional and defaults to a slugified <code class="font-mono text-[0.8rem]">title</code> when omitted.
+            Copy the block below into a chat. Replace the topic sentence at the bottom with the quiz you want.
         </p>
-        <pre class="overflow-auto p-4 rounded-sm bg-surface border border-border-soft font-mono text-[0.78rem] leading-[1.5] text-text-dim"><code>{{.Example}}</code></pre>
+        <pre class="overflow-auto p-4 rounded-sm bg-surface border border-border-soft font-mono text-[0.78rem] leading-[1.5] text-text-dim"><code>Generate a quiz as a single JSON document matching this exact shape. Output only the JSON - no commentary, no code fences, no comments. Unknown fields are rejected.
+
+Fields:
+- title (string, required)
+- description (string, required)
+- timeLimitSeconds (integer, optional) - default answer window in seconds; per-question override below wins
+- questions (array, in play order, required) - each has:
+    - text (string, required)
+    - options (array of {text, correct}, required)
+    - timeLimitSeconds (integer, optional) - overrides the quiz default for this question
+- breaks (array, optional) - interludes between questions, each has:
+    - position (integer) - 0 means before question 1; N (> 0) means after the Nth question (the Nth entry in the questions array)
+    - text (string, optional) - shown to the player on the break screen
+
+Example shape:
+
+{{.Example}}
+
+Generate a quiz about: [REPLACE WITH YOUR TOPIC]</code></pre>
+    </section>
+
+    <section aria-label="Field reference" class="form-shell mt-12">
+        <h2 class="label-eyebrow mb-3 text-text">Field reference</h2>
+        <ul class="text-text-dim text-[0.9rem] space-y-1 list-disc pl-5">
+            <li><code class="font-mono text-[0.8rem]">title</code> - string, required. Slug is derived server-side.</li>
+            <li><code class="font-mono text-[0.8rem]">description</code> - string, required.</li>
+            <li><code class="font-mono text-[0.8rem]">timeLimitSeconds</code> - integer, optional. Quiz-wide default answer window.</li>
+            <li><code class="font-mono text-[0.8rem]">questions[].text</code> - string, required.</li>
+            <li><code class="font-mono text-[0.8rem]">questions[].timeLimitSeconds</code> - integer, optional. Overrides the quiz default.</li>
+            <li><code class="font-mono text-[0.8rem]">questions[].options[]</code> - array of <code class="font-mono text-[0.8rem]">{text, correct}</code>. At least one option must be correct.</li>
+            <li><code class="font-mono text-[0.8rem]">breaks[]</code> - optional array. Position 0 = before question 1; N = after the Nth question. Each slot accepts at most one break.</li>
+        </ul>
     </section>
 {{end}}
