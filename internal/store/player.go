@@ -530,6 +530,27 @@ func (s *PlayerStore) LinkProviderIdentity(ctx context.Context, playerID int64, 
 	return nil
 }
 
+// ChangePlayerPassword atomically rotates password_hash and bumps
+// session_version on the row identified by id. Shares the
+// ResetPlayerPassword query with the forgot-password flow: both paths
+// want the same "new hash + invalidate other cookies" semantics, only
+// the auth proof differs (token vs current password verified by the
+// caller). Returns auth.ErrPlayerNotFound when no row matches the id.
+func (s *PlayerStore) ChangePlayerPassword(ctx context.Context, playerID int64, passwordHash string) error {
+	rows, err := s.q.ResetPlayerPassword(ctx, db.ResetPlayerPasswordParams{
+		ID:           playerID,
+		PasswordHash: sql.NullString{String: passwordHash, Valid: true},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to change player password: %w", err)
+	}
+	if rows == 0 {
+		return auth.ErrPlayerNotFound
+	}
+
+	return nil
+}
+
 // SetPlayerPasswordHash overwrites the password_hash on the row identified
 // by username. Returns auth.ErrPlayerNotFound when no row matches; intended
 // for the cmd/server -reset-password operator tool, not the public auth flow.

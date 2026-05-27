@@ -259,6 +259,20 @@ func (s *stubPlayerStore) SetPlayerPasswordHash(_ context.Context, username, pas
 	return nil
 }
 
+func (s *stubPlayerStore) ChangePlayerPassword(_ context.Context, playerID int64, passwordHash string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	p, ok := s.byID[playerID]
+	if !ok {
+		return ErrPlayerNotFound
+	}
+	p.PasswordHash = passwordHash
+	p.SessionVersion++
+
+	return nil
+}
+
 // resolveRoleLocked applies the same "first password-bearing registrant
 // becomes admin" rule as the production SQL. Caller must hold s.mu.
 func (s *stubPlayerStore) resolveRoleLocked(requestedRole string) string {

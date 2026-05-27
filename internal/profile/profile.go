@@ -13,6 +13,7 @@ package profile
 
 import (
 	"errors"
+	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -166,6 +167,9 @@ func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string
 		"csrfToken":   func() string { return "" },
 		"ogImage":     func() string { return "" },
 		"envTitleTag": envtag.Get,
+		"passwordHelp": func() string {
+			return fmt.Sprintf("Must be %d-%d characters.", auth.MinPasswordLength, auth.MaxPasswordLength)
+		},
 	}
 	layouts := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "auth/layouts/*.gohtml"),
@@ -179,6 +183,14 @@ func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string
 }
 
 func (tr *templateRenderer) render(w http.ResponseWriter, r *http.Request, status int, data pageData) {
+	tr.renderAny(w, r, status, data)
+}
+
+// renderAny is the underlying render entry point shared by every page
+// in this package. Kept distinct from render so the typed wrapper
+// (above) stays the default call site and a stray any-typed payload
+// at a typed call site fails the compiler.
+func (tr *templateRenderer) renderAny(w http.ResponseWriter, r *http.Request, status int, data any) {
 	t, err := tr.t.Clone()
 	if err != nil {
 		tr.logger.ErrorContext(r.Context(), "error cloning template", slog.Any("err", err))
