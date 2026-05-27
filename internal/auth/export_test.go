@@ -89,3 +89,8 @@ var (
 	ErrVerifyBaseURLEmpty   = errVerifyBaseURLEmpty
 	ErrVerifyBaseURLInvalid = errVerifyBaseURLInvalid
 )
+
+// NewLoginRateLimiterWithClock exposes the internal clock-injected
+// rate-limiter constructor so the external auth_test package can pin
+// the per-IP cool-down without sleeping (#494).
+var NewLoginRateLimiterWithClock = newLoginRateLimiterWithClock

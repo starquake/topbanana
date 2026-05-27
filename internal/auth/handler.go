@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -389,10 +390,15 @@ func HandleLoginSubmit(
 	players PlayerStore,
 	sessions *session.Manager,
 	games AnonymousGameMigrator,
+	limiter *LoginRateLimiter,
 	registrationEnabled, googleEnabled bool,
 ) http.Handler {
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
-
+	formCfg := loginFormCfg{
+		render:              render,
+		registrationEnabled: registrationEnabled,
+		googleEnabled:       googleEnabled,
+	}
 	// dummyHash computes a bcrypt hash once on first use. The handler runs
 	// CheckPassword against it when the username does not exist so the
 	// response time matches the valid-username path, preventing username
@@ -421,34 +427,18 @@ func HandleLoginSubmit(
 		username := strings.TrimSpace(r.PostFormValue("username"))
 		password := r.PostFormValue("password")
 
-		player, err := players.GetPlayerByUsername(r.Context(), username)
-		if err != nil {
-			if errors.Is(err, ErrPlayerNotFound) {
-				// Equalise timing with the valid-username path so an attacker
-				// cannot enumerate usernames by response time.
-				_ = CheckPassword(dummyHash(), password)
-				renderInvalidCredentials(render, w, r, username, registrationEnabled, googleEnabled)
-
-				return
-			}
-			logger.ErrorContext(r.Context(), "error looking up player", slog.Any("err", err))
-			http.Error(w, "internal error", http.StatusInternalServerError)
+		// Check the limiter BEFORE the credential lookup so a hot bucket
+		// blocks the bcrypt compare too, and so the limiter fires whether
+		// or not the submitted username exists - same shape the dummy-hash
+		// timing equalisation already gives the credential-check path.
+		if wait, allowed := limiter.Allow(limiter.ClientIP(r)); !allowed {
+			renderLoginRateLimited(formCfg, w, r, username, wait)
 
 			return
 		}
 
-		if player.PasswordHash == "" {
-			// Player has no password set (e.g. legacy seed admin). Run the
-			// dummy compare to keep timing consistent.
-			_ = CheckPassword(dummyHash(), password)
-			renderInvalidCredentials(render, w, r, username, registrationEnabled, googleEnabled)
-
-			return
-		}
-
-		if err := CheckPassword(player.PasswordHash, password); err != nil {
-			renderInvalidCredentials(render, w, r, username, registrationEnabled, googleEnabled)
-
+		player, ok := authenticateLogin(logger, formCfg, w, r, players, dummyHash, username, password)
+		if !ok {
 			return
 		}
 
@@ -459,6 +449,91 @@ func HandleLoginSubmit(
 		sessions.Set(w, player.ID, player.SessionVersion)
 		migrateGamesAfterSignIn(r.Context(), logger, players, games, priorSessionPlayerID, player.ID)
 		redirectAfterLogin(w, r, player.Role)
+	})
+}
+
+// loginFormCfg bundles the per-handler login form render config so
+// the inner helpers (authenticateLogin, renderInvalidCredentials,
+// renderLoginRateLimited) stay under revive's argument-limit.
+type loginFormCfg struct {
+	render              *templateRenderer
+	registrationEnabled bool
+	googleEnabled       bool
+}
+
+// authenticateLogin runs the lookup-then-bcrypt half of the login
+// flow. Returns (player, true) on a valid match; writes the response
+// itself and returns (nil, false) on every miss/error path so the
+// caller can early-return. Extracted from HandleLoginSubmit so that
+// handler stays under revive's function-length limit once the rate
+// limiter check is wired in front of it (#494).
+func authenticateLogin(
+	logger *slog.Logger,
+	cfg loginFormCfg,
+	w http.ResponseWriter,
+	r *http.Request,
+	players PlayerStore,
+	dummyHash func() string,
+	username, password string,
+) (*Player, bool) {
+	player, err := players.GetPlayerByUsername(r.Context(), username)
+	if err != nil {
+		if errors.Is(err, ErrPlayerNotFound) {
+			// Equalise timing with the valid-username path so an attacker
+			// cannot enumerate usernames by response time.
+			_ = CheckPassword(dummyHash(), password)
+			renderInvalidCredentials(cfg, w, r, username)
+
+			return nil, false
+		}
+		logger.ErrorContext(r.Context(), "error looking up player", slog.Any("err", err))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+
+		return nil, false
+	}
+
+	if player.PasswordHash == "" {
+		// Legacy seed admin with no hash on file. Run the dummy compare
+		// to keep timing consistent.
+		_ = CheckPassword(dummyHash(), password)
+		renderInvalidCredentials(cfg, w, r, username)
+
+		return nil, false
+	}
+
+	if err := CheckPassword(player.PasswordHash, password); err != nil {
+		renderInvalidCredentials(cfg, w, r, username)
+
+		return nil, false
+	}
+
+	return player, true
+}
+
+// renderLoginRateLimited re-renders the login form with the
+// rate-limit banner and a Retry-After header, status 429. The banner
+// is account-existence-opaque: it doesn't say "wrong password" or
+// "no such user", so a probe cannot tell from the rate-limited
+// response whether the submitted username exists.
+func renderLoginRateLimited(
+	cfg loginFormCfg,
+	w http.ResponseWriter,
+	r *http.Request,
+	username string,
+	wait time.Duration,
+) {
+	// Round sub-second remainders up so a 0.4s wait still reports as
+	// 1s; Retry-After: 0 would let a scripted client retry-loop the
+	// limiter.
+	seconds := int((wait + time.Second - 1) / time.Second)
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
+	cfg.render.render(w, r, http.StatusTooManyRequests, formData{
+		Title:        "Log in",
+		Username:     username,
+		Message:      "Too many attempts. Try again in a moment.",
+		ShowRegister: cfg.registrationEnabled,
+		ShowGoogle:   cfg.googleEnabled,
+		Next:         SafeNextPath(r.PostFormValue("next")),
 	})
 }
 
@@ -565,18 +640,17 @@ func looksLikeEmail(s string) bool {
 // the posted next so a failed attempt does not drop the visitor's
 // intended destination (#449).
 func renderInvalidCredentials(
-	render *templateRenderer,
+	cfg loginFormCfg,
 	w http.ResponseWriter,
 	r *http.Request,
 	username string,
-	registrationEnabled, googleEnabled bool,
 ) {
-	render.render(w, r, http.StatusUnauthorized, formData{
+	cfg.render.render(w, r, http.StatusUnauthorized, formData{
 		Title:        "Log in",
 		Username:     username,
 		Message:      "Invalid username or password.",
-		ShowRegister: registrationEnabled,
-		ShowGoogle:   googleEnabled,
+		ShowRegister: cfg.registrationEnabled,
+		ShowGoogle:   cfg.googleEnabled,
 		// Preserve the posted next so a failed login attempt does not
 		// drop the visitor's intended destination (#449).
 		Next: SafeNextPath(r.PostFormValue("next")),

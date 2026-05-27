@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	. "github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/session"
@@ -908,7 +909,8 @@ func TestHandleLoginSubmit_Success(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false, false)
+	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil,
+		NewLoginRateLimiter(time.Minute, nil), false, false)
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"alice"},
 		"email":    {"alice@example.test"},
@@ -938,7 +940,8 @@ func TestHandleLoginSubmit_HonoursNext(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false, false)
+	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil,
+		NewLoginRateLimiter(time.Minute, nil), false, false)
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"alice"},
 		"email":    {"alice@example.test"},
@@ -969,7 +972,8 @@ func TestHandleLoginSubmit_RejectsUnsafeNext(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false, false)
+	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil,
+		NewLoginRateLimiter(time.Minute, nil), false, false)
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"alice"},
 		"email":    {"alice@example.test"},
@@ -1011,7 +1015,8 @@ func TestHandleLoginSubmit_Success_Player(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false, false)
+	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil,
+		NewLoginRateLimiter(time.Minute, nil), false, false)
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"bob"},
 		"email":    {"bob@example.test"},
@@ -1030,7 +1035,8 @@ func TestHandleLoginSubmit_BadCredentials_UnknownUser(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false, false)
+	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil,
+		NewLoginRateLimiter(time.Minute, nil), false, false)
 
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"ghost"},
@@ -1058,7 +1064,8 @@ func TestHandleLoginSubmit_BadCredentials_WrongPassword(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false, false)
+	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil,
+		NewLoginRateLimiter(time.Minute, nil), false, false)
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"alice"},
 		"email":    {"alice@example.test"},
@@ -1082,7 +1089,8 @@ func TestHandleLoginSubmit_RejectsEmptyHash(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false, false)
+	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil,
+		NewLoginRateLimiter(time.Minute, nil), false, false)
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"legacy"},
 		"email":    {"legacy@example.test"},

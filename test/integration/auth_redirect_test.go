@@ -9,6 +9,9 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/starquake/topbanana/internal/auth"
 )
 
 // TestAuthRedirect_PerRole pins the #288 fix end-to-end: register and
@@ -55,6 +58,11 @@ func TestAuthRedirect_PerRole(t *testing.T) {
 			t.Errorf("admin login Location = %q, want %q", got, want)
 		}
 	})
+
+	// Sleep past the per-IP login cool-down (#494) so the next subtest's
+	// POST is not 429'd. The two login subtests come from the same
+	// localhost peer and so share the limiter bucket.
+	time.Sleep(auth.LoginCooldown() + 100*time.Millisecond)
 
 	t.Run("player login lands on /", func(t *testing.T) {
 		client := authClient(t)

@@ -193,6 +193,7 @@ func addAuthRoutes(
 			)),
 		)
 	}
+	loginLimiter := auth.NewLoginRateLimiter(auth.LoginCooldown(), cfg.TrustedProxyCIDRs)
 	mux.Handle(
 		"GET /login",
 		auth.HandleLoginForm(logger, csrfMgr, stores.Players, sessions, cfg.RegistrationEnabled, googleEnabled),
@@ -200,7 +201,7 @@ func addAuthRoutes(
 	mux.Handle(
 		"POST /login",
 		csrfMW(auth.HandleLoginSubmit(
-			logger, csrfMgr, stores.Players, sessions, stores.GameMigrator,
+			logger, csrfMgr, stores.Players, sessions, stores.GameMigrator, loginLimiter,
 			cfg.RegistrationEnabled, googleEnabled,
 		)),
 	)
