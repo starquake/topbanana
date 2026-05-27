@@ -26,6 +26,26 @@ var ErrSessionKeyRequired = errors.New("SESSION_KEY must be set")
 // negative value would silently break the gameplay timing contract.
 var ErrRevealDelayNegative = errors.New("REVEAL_DELAY must not be negative")
 
+// ErrSMTPConfigIncomplete is returned when SMTP env vars are partially
+// populated. SMTP is opt-in (an unconfigured instance still boots and
+// the no-op mailer kicks in), but a partial configuration is almost
+// always an operator typo - failing fast at startup keeps a half-wired
+// mailer from silently swallowing every send.
+var ErrSMTPConfigIncomplete = errors.New("SMTP configuration is incomplete")
+
+// ErrSMTPPortInvalid is returned when SMTP_PORT is set but does not
+// parse as a TCP port in the range 1..65535. Same fail-fast rationale
+// as ErrSMTPConfigIncomplete.
+var ErrSMTPPortInvalid = errors.New("SMTP_PORT must be an integer in 1..65535")
+
+// ErrSMTPAuthIncomplete is returned when one of SMTP_USERNAME /
+// SMTP_PASSWORD is set without the other. The go-mail PLAIN auth
+// negotiation needs both; setting just one is always an operator typo,
+// so fail-fast at startup rather than dialing with an empty
+// password (or worse, an empty username paired with a real password
+// leaking into the logs).
+var ErrSMTPAuthIncomplete = errors.New("SMTP_USERNAME and SMTP_PASSWORD must both be set or both empty")
+
 const (
 	// AppEnvironmentDefault is the default application environment.
 	AppEnvironmentDefault = "development"
@@ -104,6 +124,42 @@ type Config struct {
 	// production; the handler falls back to Google's documented
 	// issuer ("https://accounts.google.com") when this is unset.
 	GoogleIssuerURL string
+
+	// SMTPHost / SMTPPort / SMTPUsername / SMTPPassword / SMTPFrom /
+	// SMTPTLS are the mailer connection knobs (#321). SMTP is optional:
+	// a deployment with none of these vars set still boots and the
+	// no-op mailer satisfies the mailer.Mailer interface so consumer
+	// endpoints surface a clear "email not configured" instead of a
+	// 500. A partial config (host + from but no port, for example) is
+	// rejected at startup by [Parse] - half-wired SMTP is almost
+	// always an operator typo and silently swallowing every send is
+	// worse than a fail-fast boot.
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUsername string
+	SMTPPassword string
+	SMTPFrom     string
+	// SMTPTLS reports whether the mailer should require STARTTLS on
+	// the SMTP connection. Defaults to true so a production deploy
+	// gets encryption-in-transit by default; the local Mailpit dev
+	// setup flips this off via SMTP_TLS=false.
+	SMTPTLS bool
+
+	// BaseURL is the absolute URL prefix used when an outgoing email
+	// has to embed a link back into the app (#290 verify, #318 invite,
+	// etc). Empty when unset - the mailer-using consumer is expected
+	// to either fall back to the request's absolute URL or refuse to
+	// render the link if BaseURL is required and absent.
+	BaseURL string
+}
+
+// SMTPConfigured reports whether enough SMTP env vars are populated
+// for the real mailer to dial out. Used by [cmd/server/app.app] to
+// pick between the go-mail-backed mailer and the no-op stub. Mirrors
+// the GoogleLoginEnabled boolean so a deployment opts into SMTP by
+// setting credentials rather than flipping a separate switch.
+func (c *Config) SMTPConfigured() bool {
+	return c.SMTPHost != "" && c.SMTPPort > 0 && c.SMTPFrom != ""
 }
 
 // SecureCookies reports whether session and CSRF cookies should be issued
@@ -181,6 +237,12 @@ func Parse(getenv func(string) string) (*Config, error) {
 	c.GoogleRedirectURL = getenv("GOOGLE_REDIRECT_URL")
 	c.GoogleIssuerURL = getenv("GOOGLE_ISSUER_URL")
 
+	if err := parseSMTPConfig(getenv, &c); err != nil {
+		return nil, err
+	}
+
+	c.BaseURL = strings.TrimRight(getenv("BASE_URL"), "/")
+
 	return &c, nil
 }
 
@@ -237,6 +299,71 @@ func parseTypedEnvVars(getenv func(string) string, c *Config) error {
 			return fmt.Errorf("%w: %q", ErrRevealDelayNegative, val)
 		}
 		c.RevealDelay = d
+	}
+
+	return nil
+}
+
+// parseSMTPConfig reads the SMTP_* env vars into c. SMTP defaults to
+// "off" so an empty env block boots; a partially populated block (e.g.
+// SMTP_HOST set but SMTP_FROM empty) is rejected with
+// ErrSMTPConfigIncomplete so half-wired mailers never silently drop
+// mail. SMTPTLS defaults to true; the dev Mailpit setup flips it off
+// via SMTP_TLS=false.
+func parseSMTPConfig(getenv func(string) string, c *Config) error {
+	c.SMTPHost = getenv("SMTP_HOST")
+	c.SMTPUsername = getenv("SMTP_USERNAME")
+	c.SMTPPassword = getenv("SMTP_PASSWORD")
+	c.SMTPFrom = getenv("SMTP_FROM")
+
+	c.SMTPTLS = true
+	// tlsExplicit pins whether the operator actually wrote SMTP_TLS.
+	// We feed this into the "populated subset" check below so a lone
+	// SMTP_TLS=false (a typo'd partial rollout) trips
+	// ErrSMTPConfigIncomplete instead of silently booting the no-op
+	// mailer. Empty string is treated as unset to match the rest of
+	// the SMTP block, which keeps the parser's contract uniform.
+	tlsExplicit := false
+	if val := getenv("SMTP_TLS"); val != "" {
+		b, err := strconv.ParseBool(val)
+		if err != nil {
+			return fmt.Errorf("invalid SMTP_TLS: %q, err: %w", val, err)
+		}
+		c.SMTPTLS = b
+		tlsExplicit = true
+	}
+
+	if val := getenv("SMTP_PORT"); val != "" {
+		const maxTCPPort = 65535
+		n, err := strconv.Atoi(val)
+		if err != nil || n < 1 || n > maxTCPPort {
+			return fmt.Errorf("%w: %q", ErrSMTPPortInvalid, val)
+		}
+		c.SMTPPort = n
+	}
+
+	// Treat the SMTP block as "off" only when every var is empty; any
+	// populated subset (including a lone SMTP_TLS) must complete the
+	// host/port/from triple, which is the minimum a real mailer needs
+	// to dial out.
+	allEmpty := c.SMTPHost == "" && c.SMTPPort == 0 && c.SMTPFrom == "" &&
+		c.SMTPUsername == "" && c.SMTPPassword == "" && !tlsExplicit
+	if allEmpty {
+		return nil
+	}
+	if c.SMTPHost == "" || c.SMTPPort == 0 || c.SMTPFrom == "" {
+		return fmt.Errorf(
+			"%w: set SMTP_HOST, SMTP_PORT, and SMTP_FROM (got host=%q port=%d from=%q)",
+			ErrSMTPConfigIncomplete, c.SMTPHost, c.SMTPPort, c.SMTPFrom,
+		)
+	}
+	// PLAIN auth needs both halves; one without the other is always
+	// an operator typo.
+	if (c.SMTPUsername == "") != (c.SMTPPassword == "") {
+		return fmt.Errorf(
+			"%w (got username=%q, password set=%v)",
+			ErrSMTPAuthIncomplete, c.SMTPUsername, c.SMTPPassword != "",
+		)
 	}
 
 	return nil

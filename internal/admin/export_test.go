@@ -56,3 +56,22 @@ var BuildSlotOptions = buildSlotOptions
 // helper so the external admin_test package can pin the
 // last-question-vs-empty-quiz fork (#167).
 var DefaultCreateSlot = defaultCreateSlot
+
+// NewEmailRateLimiterWithClock exposes the internal clock-injected
+// rate-limiter constructor so the external admin_test package can pin
+// the per-IP cool-down without sleeping (#321).
+var NewEmailRateLimiterWithClock = newEmailRateLimiterWithClock
+
+// ClientIP exposes the unexported RemoteAddr-only client-IP helper so
+// the external admin_test package can pin its parsing rules.
+var ClientIP = clientIP
+
+// EmailRateLimiterEntryCount returns how many IPs the limiter is
+// tracking right now. Lets the unit test pin the prune-stale-entries
+// behaviour without exporting the internal map.
+func EmailRateLimiterEntryCount(l *EmailRateLimiter) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return len(l.last)
+}

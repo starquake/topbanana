@@ -785,8 +785,8 @@ type streamTestQuestionResponse struct {
 }
 
 // pickedOption is the typed return for [decodeQuestionAndPickCorrect].
-// Returning a struct (instead of (int64, int64)) keeps both
-// nonamedreturns and confusing-results lint rules happy.
+// Returning a struct (instead of (int64, int64)) keeps the
+// confusing-results lint rule happy.
 type pickedOption struct {
 	QuestionID int64
 	OptionID   int64

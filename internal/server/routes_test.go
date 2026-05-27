@@ -18,6 +18,7 @@ import (
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/home"
 	"github.com/starquake/topbanana/internal/leaderboard"
+	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/quiz"
 	. "github.com/starquake/topbanana/internal/server"
 	"github.com/starquake/topbanana/internal/store"
@@ -244,7 +245,11 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 	}
 	gameSvc := game.NewService(stubGameStore{}, stubQuizStore{}, logger)
 	mux := http.NewServeMux()
-	ExportAddRoutes(mux, logger, stores, gameSvc, leaderboard.NewHub(), &config.Config{RegistrationEnabled: true})
+	ExportAddRoutes(
+		mux, logger, stores, gameSvc, leaderboard.NewHub(),
+		&config.Config{RegistrationEnabled: true},
+		mailer.NewTester(mailer.NewNoop()), mailer.StatusView{},
+	)
 
 	tests := []struct {
 		name   string
@@ -315,7 +320,10 @@ func TestAddRoutes_RegisterDisabled_Returns404(t *testing.T) {
 	gameSvc := game.NewService(stubGameStore{}, stubQuizStore{}, logger)
 	mux := http.NewServeMux()
 	// Default-false RegistrationEnabled — /register routes should not be registered.
-	ExportAddRoutes(mux, logger, stores, gameSvc, leaderboard.NewHub(), &config.Config{})
+	ExportAddRoutes(
+		mux, logger, stores, gameSvc, leaderboard.NewHub(), &config.Config{},
+		mailer.NewTester(mailer.NewNoop()), mailer.StatusView{},
+	)
 
 	tests := []struct {
 		name   string
@@ -359,6 +367,7 @@ func TestAddRoutes_UnknownRouteReturns404(t *testing.T) {
 		game.NewService(stubGameStore{}, stubQuizStore{}, logger),
 		leaderboard.NewHub(),
 		&config.Config{},
+		mailer.NewTester(mailer.NewNoop()), mailer.StatusView{},
 	)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/unknown/path", nil)
@@ -398,6 +407,7 @@ func TestAddRoutes_LoginPOST_RejectsMissingCSRF(t *testing.T) {
 		game.NewService(stubGameStore{}, stubQuizStore{}, logger),
 		leaderboard.NewHub(),
 		cfg,
+		mailer.NewTester(mailer.NewNoop()), mailer.StatusView{},
 	)
 
 	t.Run("missing token returns 403", func(t *testing.T) {
@@ -487,6 +497,7 @@ func TestAddRoutes_AdminRouteWithoutSession_RedirectsToLogin(t *testing.T) {
 		game.NewService(stubGameStore{}, stubQuizStore{}, logger),
 		leaderboard.NewHub(),
 		&config.Config{},
+		mailer.NewTester(mailer.NewNoop()), mailer.StatusView{},
 	)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
@@ -524,6 +535,7 @@ func TestAddRoutes_AdminPOSTWithoutCSRF_Returns403_NotAuthRedirect(t *testing.T)
 		game.NewService(stubGameStore{}, stubQuizStore{}, logger),
 		leaderboard.NewHub(),
 		cfg,
+		mailer.NewTester(mailer.NewNoop()), mailer.StatusView{},
 	)
 
 	body := strings.NewReader(url.Values{}.Encode())

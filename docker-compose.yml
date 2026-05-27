@@ -1,7 +1,7 @@
 services:
   app:
     build:
-      context: deployments/demo
+      context: .
       dockerfile: Dockerfile
     container_name: topbanana
     ports:
@@ -13,8 +13,32 @@ services:
       - DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)
       - REGISTRATION_ENABLED=true
       - ADMIN_USERNAMES=admin
+      # Uncomment to wire the app to the mailpit sibling service for
+      # local email testing. SMTP_TLS=false keeps the dev mailer talking
+      # plain SMTP (mailpit does not accept STARTTLS on 1025); flip back
+      # to true in production deployments.
+      # - SMTP_HOST=mailpit
+      # - SMTP_PORT=1025
+      # - SMTP_FROM=topbanana@localhost
+      # - SMTP_TLS=false
     volumes:
       - topbanana_data:/home/nonroot/data
+    restart: unless-stopped
+
+  # Mailpit is a local SMTP catch-all + web UI. Outgoing mail from the
+  # app lands in the mailpit inbox at http://localhost:8025 instead of
+  # leaving the host, so the diagnostics view and any future verify /
+  # invite flow can be exercised end-to-end without a real provider.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: topbanana-mailpit
+    # Bind to loopback only so the dev SMTP catch-all and inbox UI are
+    # not reachable from the LAN. The app container reaches mailpit on
+    # the docker-compose network (host=mailpit), which is unaffected by
+    # the host port binding.
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
     restart: unless-stopped
 
 volumes:

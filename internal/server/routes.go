@@ -14,6 +14,7 @@ import (
 	"github.com/starquake/topbanana/internal/health"
 	"github.com/starquake/topbanana/internal/home"
 	"github.com/starquake/topbanana/internal/leaderboard"
+	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/profile"
 	"github.com/starquake/topbanana/internal/session"
 	"github.com/starquake/topbanana/internal/store"
@@ -27,12 +28,20 @@ func addRoutes(
 	gameService *game.Service,
 	leaderboardHub *leaderboard.Hub,
 	cfg *config.Config,
+	mailerTester *mailer.Tester,
+	mailerStatus mailer.StatusView,
 ) {
 	sessions := session.New([]byte(cfg.SessionKey), cfg.SecureCookies())
 	csrfMgr := csrf.New([]byte(cfg.SessionKey), cfg.SecureCookies())
 
+	emailDeps := adminEmailDeps{
+		tester: mailerTester,
+		status: mailerStatus,
+		flash:  admin.NewEmailFlash([]byte(cfg.SessionKey), cfg.SecureCookies()),
+	}
+
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg)
-	addAdminRoutes(mux, logger, stores, gameService, sessions, csrfMgr)
+	addAdminRoutes(mux, logger, stores, gameService, sessions, csrfMgr, emailDeps)
 	addProfileRoutes(mux, logger, stores, sessions, csrfMgr)
 	addAPIRoutes(mux, logger, stores, gameService, leaderboardHub, sessions)
 
@@ -180,6 +189,14 @@ func addProfileRoutes(
 // route is wrapped as csrfMW(requireAdmin(handler)): the CSRF middleware runs
 // first so an unauthenticated request without a valid token is rejected with
 // 403 before any auth-state-leaking 303 to /login.
+// adminEmailDeps bundles the email-diagnostics handler deps so
+// addAdminRoutes stays inside revive's 8-argument limit.
+type adminEmailDeps struct {
+	tester *mailer.Tester
+	status mailer.StatusView
+	flash  *admin.EmailFlash
+}
+
 func addAdminRoutes(
 	mux *http.ServeMux,
 	logger *slog.Logger,
@@ -187,6 +204,7 @@ func addAdminRoutes(
 	gameService *game.Service,
 	sessions *session.Manager,
 	csrfMgr *csrf.Manager,
+	email adminEmailDeps,
 ) {
 	csrfMW := csrfMgr.Middleware
 	requireAdmin := func(h http.Handler) http.Handler {
@@ -195,6 +213,7 @@ func addAdminRoutes(
 
 	mux.Handle("GET /admin", requireAdmin(admin.HandleIndex(logger, csrfMgr)))
 	mux.Handle("GET /admin/players", requireAdmin(admin.HandlePlayersList(logger, csrfMgr, stores.PlayerLister)))
+	addAdminEmailRoutes(mux, logger, csrfMgr, csrfMW, requireAdmin, email)
 	mux.Handle("GET /admin/quizzes", requireAdmin(admin.HandleQuizList(logger, csrfMgr, stores.Quizzes)))
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}",
@@ -249,6 +268,42 @@ func addAdminRoutes(
 	)
 
 	addAdminBreakRoutes(mux, logger, stores, csrfMW, requireAdmin, csrfMgr)
+}
+
+// addAdminEmailRoutes registers the email diagnostics endpoints (#321).
+// One handler per (method, path) pair: GET renders status + ring buffer;
+// POST sends a test message; GET on the POST path redirects to
+// /admin/email so a browser refresh after a send does not 405. The
+// limiter is created once so the per-IP cool-down is process-wide,
+// not per-request.
+//
+// MaxFormSizeMiddleware wraps the POST in front of csrfMW so the CSRF
+// validator's ParseForm sees a bounded body - the CSRF layer would
+// otherwise read an unbounded request into memory before the handler
+// could intervene.
+func addAdminEmailRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	csrfMW func(http.Handler) http.Handler,
+	requireAdmin func(http.Handler) http.Handler,
+	email adminEmailDeps,
+) {
+	emailLimiter := admin.NewEmailRateLimiter(admin.EmailTestRateLimit)
+	mux.Handle(
+		"GET /admin/email",
+		requireAdmin(admin.HandleEmailGet(logger, csrfMgr, email.tester, email.status, email.flash)),
+	)
+	mux.Handle(
+		"GET /admin/email/test",
+		requireAdmin(admin.HandleEmailTestRefresh()),
+	)
+	mux.Handle(
+		"POST /admin/email/test",
+		admin.MaxFormSizeMiddleware(
+			csrfMW(requireAdmin(admin.HandleEmailTest(logger, email.tester, emailLimiter, email.flash))),
+		),
+	)
 }
 
 // addAdminBreakRoutes registers the break CRUD routes (#167). Split
