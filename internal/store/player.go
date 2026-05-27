@@ -208,9 +208,13 @@ func (s *PlayerStore) RenamePlayer(
 // GetPlayerByEmail returns the player whose email matches. Returns
 // auth.ErrPlayerNotFound when no row matches. The email is wrapped in a
 // [sql.NullString] with Valid=true so a literal NULL row never matches a
-// caller-supplied empty string.
+// caller-supplied empty string. The argument is lowercased + trimmed to
+// match how CreatePlayer / ClaimPlayer / CreatePlayerFromOAuth store it,
+// so a mixed-case OIDC email finds the existing row instead of creating
+// a duplicate (#471).
 func (s *PlayerStore) GetPlayerByEmail(ctx context.Context, email string) (*auth.Player, error) {
-	row, err := s.q.GetPlayerByEmail(ctx, sql.NullString{String: email, Valid: true})
+	cleaned := strings.ToLower(strings.TrimSpace(email))
+	row, err := s.q.GetPlayerByEmail(ctx, sql.NullString{String: cleaned, Valid: true})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, auth.ErrPlayerNotFound

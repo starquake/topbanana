@@ -330,6 +330,21 @@ func linkOrCreateGooglePlayer(
 ) (*Player, error) {
 	existing, err := identities.GetPlayerByProviderSubject(ctx, ProviderGoogle, subject)
 	if err == nil {
+		// Self-heal a partial commit from an earlier link path: if the
+		// row was linked but a transient failure prevented the
+		// email_verified_at stamp, every subsequent login otherwise
+		// short-circuits here and the player is stranded on the
+		// verify-email gate. Google attests the address on every
+		// callback that reaches us, so stamping here is safe and
+		// idempotent. See #471.
+		if email != "" && existing.EmailVerifiedAt == nil {
+			if markErr := identities.MarkPlayerEmailVerifiedIfNew(ctx, existing.ID); markErr != nil {
+				return nil, fmt.Errorf("mark email verified on existing identity: %w", markErr)
+			}
+			now := time.Now().UTC()
+			existing.EmailVerifiedAt = &now
+		}
+
 		return existing, nil
 	}
 	if !errors.Is(err, ErrPlayerNotFound) {

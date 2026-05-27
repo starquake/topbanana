@@ -237,6 +237,69 @@ func TestLinkOrCreateGooglePlayer_NewPlayer(t *testing.T) {
 	}
 }
 
+// TestLinkOrCreateGooglePlayer_ExistingIdentity_StampsVerifiedEmail
+// pins the self-heal at the existing-identity short-circuit: when an
+// earlier link path linked the identity row but a transient failure
+// prevented the email_verified_at stamp, every subsequent Google login
+// otherwise short-circuits via GetPlayerByProviderSubject without
+// retrying the stamp, stranding the player on /verify-email/pending.
+// The handler now stamps idempotently on this branch when the row's
+// email_verified_at is still nil. See #471.
+func TestLinkOrCreateGooglePlayer_ExistingIdentity_StampsVerifiedEmail(t *testing.T) {
+	t.Parallel()
+
+	store := newStubOAuthStore()
+	stranded := store.seed("stranded@example.test", "stranded")
+	if err := store.LinkProviderIdentity(
+		t.Context(), stranded.ID, ProviderGoogle, "google-sub-heal",
+	); err != nil {
+		t.Fatalf("seed LinkProviderIdentity err = %v, want nil", err)
+	}
+	if stranded.EmailVerifiedAt != nil {
+		t.Fatal("seed must leave EmailVerifiedAt nil to exercise the heal branch")
+	}
+
+	healed, err := ExportLinkOrCreateGooglePlayer(
+		t.Context(), store, "google-sub-heal", "stranded@example.test", nil,
+	)
+	if err != nil {
+		t.Fatalf("ExportLinkOrCreateGooglePlayer err = %v, want nil", err)
+	}
+	if got, want := healed.ID, stranded.ID; got != want {
+		t.Errorf("player.ID = %d, want %d (same row, not a new one)", got, want)
+	}
+	if healed.EmailVerifiedAt == nil {
+		t.Error("EmailVerifiedAt = nil, want non-nil (stamp should fire on heal)")
+	}
+}
+
+// TestLinkOrCreateGooglePlayer_ExistingIdentity_AlreadyVerifiedNoop
+// pins the no-op path: a row that is already verified must not be
+// re-stamped or otherwise mutated by the heal branch.
+func TestLinkOrCreateGooglePlayer_ExistingIdentity_AlreadyVerifiedNoop(t *testing.T) {
+	t.Parallel()
+
+	store := newStubOAuthStore()
+	verified := store.seed("verified@example.test", "verified")
+	verifiedAt := time.Now().UTC().Add(-time.Hour)
+	verified.EmailVerifiedAt = &verifiedAt
+	if err := store.LinkProviderIdentity(
+		t.Context(), verified.ID, ProviderGoogle, "google-sub-verified",
+	); err != nil {
+		t.Fatalf("seed LinkProviderIdentity err = %v, want nil", err)
+	}
+
+	got, err := ExportLinkOrCreateGooglePlayer(
+		t.Context(), store, "google-sub-verified", "verified@example.test", nil,
+	)
+	if err != nil {
+		t.Fatalf("ExportLinkOrCreateGooglePlayer err = %v, want nil", err)
+	}
+	if got.EmailVerifiedAt == nil || !got.EmailVerifiedAt.Equal(verifiedAt) {
+		t.Errorf("EmailVerifiedAt = %v, want preserved %v", got.EmailVerifiedAt, verifiedAt)
+	}
+}
+
 // TestLinkOrCreateGooglePlayer_LinkExistingEmail pins the silent
 // account-linking rule: a Google sign-in whose verified email matches
 // an existing players.email attaches the identity to that row and

@@ -233,6 +233,47 @@ func TestPlayerStore_CreatePlayer_LowercasesAndTrimsEmail(t *testing.T) {
 	}
 }
 
+// TestPlayerStore_GetPlayerByEmail_LowercasesAndTrims pins the
+// normalisation rule on the read path: CreatePlayer / ClaimPlayer /
+// CreatePlayerFromOAuth all store the email lowercased and trimmed, so
+// the lookup must apply the same transform or a mixed-case OIDC email
+// would miss the link-by-email path and produce a duplicate row. See
+// #471.
+func TestPlayerStore_GetPlayerByEmail_LowercasesAndTrims(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	created, err := ps.CreatePlayer(t.Context(), "alice", "alice@example.test", "hash", auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{"uppercase local part", "ALICE@example.test"},
+		{"uppercase host", "alice@EXAMPLE.TEST"},
+		{"mixed case", "Alice@Example.Test"},
+		{"surrounding whitespace", "  alice@example.test  "},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := ps.GetPlayerByEmail(t.Context(), tc.input)
+			if err != nil {
+				t.Fatalf("GetPlayerByEmail(%q) err = %v, want nil", tc.input, err)
+			}
+			if gotID, want := got.ID, created.ID; gotID != want {
+				t.Errorf("GetPlayerByEmail(%q) ID = %d, want %d", tc.input, gotID, want)
+			}
+		})
+	}
+}
+
 func TestPlayerStore_CreateAnonymousPlayer(t *testing.T) {
 	t.Parallel()
 
