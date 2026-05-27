@@ -5,23 +5,9 @@ import (
 	"math/big"
 )
 
-// GeneratePetname returns a memorable three-segment identifier of the form
-// "Adjective-Adjective-Noun" (e.g. "Steamy-Farty-Bear"). The format follows
-// the Heroku/Docker petname tradition: short, easy to read aloud, and
-// distinctive enough that a glance at the players table tells real
-// registrations apart from never-claimed visitors.
-//
-// The names are NOT guaranteed unique on their own — the combined pool of
-// len(petnameAdjectives)^2 * len(petnameNouns) is large enough that random
-// collisions are vanishingly rare, but the caller (EnsurePlayer) handles
-// the unique-constraint case explicitly with a small retry loop. Pool size
-// is sized for ≥ 2 million combinations so per-request collision probability
-// stays well under 0.0001% for the foreseeable user count.
-//
-// Randomness comes from crypto/rand. This isn't a security-critical value,
-// but using crypto/rand removes the predictability that the math/rand
-// package-level seed historically had, and matches the Google Go style
-// preference of "crypto/rand by default for user-facing randoms".
+// GeneratePetname returns an "Adjective-Adjective-Noun" identifier
+// (e.g. "Steamy-Farty-Bear"). Not guaranteed unique - callers handle
+// the UNIQUE collision with a retry loop.
 func GeneratePetname() string {
 	a1 := pickRandom(petnameAdjectives)
 	a2 := pickRandom(petnameAdjectives)
@@ -30,10 +16,9 @@ func GeneratePetname() string {
 	return a1 + "-" + a2 + "-" + n
 }
 
-// pickRandom returns a uniformly-random element from words. On the
-// (effectively impossible) failure of crypto/rand it falls back to the first
-// element rather than panicking — losing some variety is preferable to
-// taking down the request path.
+// pickRandom returns a uniformly-random element from words. Falls
+// back to words[0] on the (effectively impossible) crypto/rand error
+// rather than taking down the request path.
 func pickRandom(words []string) string {
 	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(words))))
 	if err != nil {
@@ -43,10 +28,7 @@ func pickRandom(words []string) string {
 	return words[n.Int64()]
 }
 
-// petnameAdjectives is a curated list of family-friendly playful adjectives.
-// Title-cased so the joined output reads as a proper noun. Mildly cheeky
-// entries (e.g. "Farty", "Stinky") are included by request — they stay on
-// the cartoon-silly side and never veer into anything genuinely offensive.
+// petnameAdjectives is the title-cased dictionary used by GeneratePetname.
 //
 //nolint:gochecknoglobals // dictionary table; values never mutate.
 var petnameAdjectives = []string{

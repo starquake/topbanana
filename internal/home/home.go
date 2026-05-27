@@ -93,19 +93,10 @@ type pageData struct {
 	Viewer         *Viewer
 }
 
-// Handle returns the [http.Handler] for GET /. The template tree is
-// parsed once per call to Handle (at server start) and re-cloned per
-// request so html/template's context-aware escaping applies cleanly to
-// each render. Errors fetching either list degrade gracefully: the page
-// renders an empty state for the failing section so the admin link
-// stays reachable even if the database is having a bad day.
-//
-// viewer and csrfToken are nullable: when both are nil the footer
-// renders the "Log in" link instead of the signed-in affordance, and
-// the log-out form's CSRF field stays blank (the form would fail the
-// middleware check on submit, but it is not rendered in that branch
-// anyway). Tests that don't care about the auth state pass nil for
-// both.
+// Handle returns the GET / handler. List-fetch errors degrade
+// gracefully to an empty state so the admin link stays reachable.
+// When viewer and csrfToken are both nil the footer renders "Log in"
+// instead of the signed-in affordance.
 func Handle(
 	logger *slog.Logger,
 	store Store,
@@ -224,16 +215,9 @@ func HandleAllQuizzes(
 	})
 }
 
-// executeTemplate clones t, binds the per-request `ogImage` and
-// `csrfToken` funcs, and runs base.gohtml. Pulled out so [Handle] and
-// [HandleAllQuizzes] share the clone-and-Funcs dance — without the
-// clone, concurrent renders race on the shared template tree (#294).
-//
-// csrfToken may be nil — the no-op shim registered in [parseTemplate]
-// stays in place, and any {{csrfToken}} call in the template emits
-// the empty string. The footer's log-out form is only rendered when
-// .Viewer is non-nil, so a nil csrfToken paired with a nil viewer
-// resolver is a coherent "no auth wiring" state for tests.
+// executeTemplate clones t, binds the per-request funcs, and runs
+// base.gohtml. The clone is mandatory: concurrent renders race on the
+// shared template tree without it (#294).
 func executeTemplate(
 	w http.ResponseWriter, r *http.Request, logger *slog.Logger,
 	t *template.Template, csrfToken CSRFTokenFunc, errMsg string, data any,

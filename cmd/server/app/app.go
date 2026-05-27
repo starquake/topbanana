@@ -62,25 +62,11 @@ var (
 const resetWrap = "reset password: %w"
 
 // ResetPassword reads a new password from stdin and overwrites the
-// password_hash for the row identified by username. Operator-only tool for
-// cases where an admin password is lost and the only alternative would be
-// dropping the database volume.
-//
-// stdout carries interactive prompts only ("New password: ", "Confirm
-// password: "); stderr carries structured slog output. Splitting them lets
-// scripts redirect logs without capturing prompt noise (e.g. piping the new
-// password in and discarding 2>/dev/null).
-//
-// stdin echo is disabled when stdin is a terminal; otherwise the password
-// is read up to the first newline (so scripts can pipe). The supplied
-// password must satisfy [auth.MinPasswordLength] and [auth.MaxPasswordLength].
-//
-// Order of operations is deliberately: parse config → open DB → look up
-// username → THEN prompt. The lookup-before-prompt avoids making the
-// operator type the password twice only to find out the username was a
-// typo. There is a small TOCTOU window between the lookup and the UPDATE,
-// which is acceptable for an operator-only tool that should not run while
-// the server is live.
+// password_hash for the row identified by username. Operator-only tool
+// for the lost-admin-password case. stdin echo is disabled when stdin
+// is a terminal; otherwise the password is read up to the first
+// newline so scripts can pipe. Lookup happens before the prompt so a
+// typo'd username does not waste two password entries.
 func ResetPassword(
 	ctx context.Context,
 	getenv func(string) string,
@@ -179,19 +165,11 @@ func readNewPassword(stdin io.Reader, stdout io.Writer) (string, error) {
 	return password, nil
 }
 
-// newPasswordReader returns a closure that reads a password from stdin once
-// per call. State (the [bufio.Scanner] for non-TTY input) is captured in the
-// closure so successive reads advance through the same input stream — needed
-// for the "New password: ... Confirm password: ..." sequence in
-// ResetPassword. A fresh Scanner per call would buffer-ahead on the first
-// call and leave the second with an empty reader.
-//
-// TTY path uses [term.ReadPassword] directly with the *[os.File] so echo is
-// disabled; non-TTY path reads one scanner line per call. Both branches
-// write the prompt to stdout so scripts piping a password in can still see
-// (or 2>/dev/null discard) prompt text uniformly. TTY detection only works
-// when stdin is a *[os.File]; wrapped readers always take the scanner path
-// (today's only caller is cmd/server/main.go which passes [os.Stdin]).
+// newPasswordReader returns a per-call password reader sharing one
+// scanner across the New/Confirm prompts (a fresh Scanner per call
+// would buffer-ahead and leave the second read empty). On a TTY it
+// uses [term.ReadPassword] so echo is disabled; otherwise it reads
+// one scanner line per call.
 func newPasswordReader(stdin io.Reader, stdout io.Writer) func(prompt string) (string, error) {
 	if f, ok := stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
 		return func(prompt string) (string, error) {

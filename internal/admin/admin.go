@@ -402,21 +402,9 @@ func render500(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrf
 	render.Render(w, r, http.StatusInternalServerError, nil)
 }
 
-// requireQuizOwner loads the quiz with the given ID and gates the
-// request on the session player being the creator. Returns the loaded
-// quiz (saving the caller a second fetch) and true on success; writes
-// a 403 page and returns false when the session player is not the
-// creator.
-//
-// CreatedByPlayerID is NOT NULL at the DB level (#281, migration
-// 20260520200000) and existing rows were backfilled to the lowest-id
-// admin, so there is no "legacy quiz" bypass — every quiz has a real
-// owner.
-//
-// Render-style errors (quiz missing, store failure, session missing)
-// surface as 404 / 500 via the existing render helpers; this helper
-// reads as the single mutating-route gate so individual handlers stay
-// short.
+// requireQuizOwner loads the quiz and gates the request on the session
+// player being its creator. Returns the loaded quiz on success;
+// renders 403 / 404 / 500 on the failure paths.
 func requireQuizOwner(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -894,23 +882,11 @@ const (
 	sequenceKindBreak    = "break"
 )
 
-// buildSequence interleaves the quiz's questions with its breaks
-// according to break.Position semantics: a break with position 0 sits
-// before the first question; a break with position N sits immediately
-// after the question whose [QuestionData.Position] equals N. Questions
-// are sorted by their own Position before the merge so the resulting
-// slice reflects the play order (#167).
-//
-// Each break row also carries CanMoveUp / CanMoveDown so the template
-// can hide the arrow buttons that would land on an invalid or
-// occupied slot. The store's MoveBreak re-validates the same check,
-// so a stale form post never corrupts the play order; the per-row
-// flags are a UX nicety, not a security boundary.
-//
-// Multiple breaks at the same slot are disallowed by the DB unique
-// index breaks_quiz_position_idx; if one ever slipped through the
-// merge still renders them in the order ListBreaksByQuiz returned them
-// (which is itself position-ordered).
+// buildSequence interleaves questions and breaks by play order. A
+// break with position 0 sits before the first question; a break with
+// position N sits immediately after the question whose Position == N.
+// CanMoveUp/CanMoveDown drive arrow-button visibility - the store's
+// MoveBreak re-validates so the flags are UX-only, not security.
 func buildSequence(questions []*QuestionData, breaks []*BreakData) []SequenceItem {
 	validSlots := make(map[int]bool, len(questions)+1)
 	validSlots[0] = true
@@ -1758,18 +1734,9 @@ func HandleQuizDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz
 }
 
 // renderQuestionMoveError translates a SwapQuestionPositions failure
-// into the right HTTP response. Pulled out of HandleQuestionMove so the
-// cognitive complexity of the handler stays under the revive limit
-// after the owner gate was added in #281.
-//
-// htmxResponder is true when the caller is an HX-Request fragment swap
-// — boundary errors return 204 in that mode so the existing DOM stays
-// in place. Classic form posts redirect back to the quiz view; the
-// rerendered page reflects the (unchanged) order from the database.
-//
-// Uses [strconv.FormatInt] for the redirect path to dodge gosec's
-// open-redirect taint heuristic (G710) — same dance as
-// HandleQuestionSave.
+// into the right HTTP response. In HX-Request mode, boundary errors
+// return 204 so the existing DOM stays in place; classic form posts
+// redirect back to the quiz view.
 //
 //nolint:revive // htmxResponder is a wire-format selector, not a flag-as-mode toggle; splitting the function in two would duplicate the switch rather than clarify it.
 func renderQuestionMoveError(

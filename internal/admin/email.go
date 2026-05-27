@@ -81,28 +81,11 @@ type emailLogRow struct {
 	Err     string
 }
 
-// EmailRateLimiter tracks the last successful test-send per source IP
-// so HandleEmailTest can reject too-frequent clicks without standing
-// up an out-of-process limiter. The map grows by one entry per
-// distinct admin IP; cardinality stays small in practice because the
-// /admin/email route is admin-gated. Concurrent admins coordinating
-// from the same NAT share a bucket; the mutex keeps the read/write
-// pair atomic.
-//
-// Safe for concurrent use: every public method takes l.mu so callers
-// can drive Allow / Cancel from multiple goroutines (the integration
-// test exercises exactly this) without external synchronisation.
-//
-// The limiter exposes two operations: Allow reports whether a send is
-// permitted right now AND stamps the bucket atomically when it is,
-// returning the stamp it wrote as a token so two concurrent callers
-// can never both observe "allowed". Cancel reverts a specific stamp
-// (matched against the token) so a recipient-validation rejection
-// does not burn the next 10-second window, which would otherwise
-// prevent the admin from immediately re-submitting the form with a
-// corrected address. Matching on the token keeps Cancel from
-// clobbering a newer stamp written by a second concurrent caller in
-// between this caller's Allow and Cancel.
+// EmailRateLimiter is a per-IP cool-down for the test-send button.
+// Safe for concurrent use. Allow atomically reports + stamps so two
+// concurrent callers cannot both observe "allowed"; Cancel reverts a
+// specific stamp (matched against the token Allow returned) so a
+// recipient-validation rejection does not burn the next window.
 type EmailRateLimiter struct {
 	mu      sync.Mutex
 	last    map[string]time.Time
@@ -323,22 +306,12 @@ func sendTestAndRedirect(
 	http.Redirect(w, r, "/admin/email", http.StatusSeeOther)
 }
 
-// resolveTestRecipient picks the email address the test send targets
-// and reports whether the request looks usable. The three return
-// values pin the cases the handler flashes separately:
-//
-//   - ("addr", true,  true)  - explicit form value parsed cleanly, or
-//     blank form fell back to the signed-in admin's email.
-//   - ("",     false, true)  - blank form and the admin has no email
-//     on file; the handler flashes a "set a recipient" hint and 303s.
-//   - ("",     false, false) - explicit form value but [mail.ParseAddress]
-//     rejected it; the handler flashes a "not a valid email" hint and
-//     303s. We deliberately do NOT silently fall back to the admin's
-//     own address in this case - the admin clearly meant the form
-//     value, dispatching elsewhere would be a surprise.
-//
-// The form is parsed by csrfMW before this handler runs (csrf.Validate
-// calls ParseForm), so r.PostFormValue is already populated.
+// resolveTestRecipient picks the recipient for the test send.
+// (addr, true, true): explicit value parsed, or blank fell back to the
+// admin's email. ("", false, true): blank with no admin email on file.
+// ("", false, false): explicit value but ParseAddress rejected it - we
+// never silently fall back to the admin's address in this case so a
+// typo does not silently dispatch elsewhere.
 func resolveTestRecipient(r *http.Request) (addr string, ok, valid bool) {
 	raw := strings.TrimSpace(r.PostFormValue("to"))
 	if raw != "" {

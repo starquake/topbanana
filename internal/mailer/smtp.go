@@ -9,23 +9,11 @@ import (
 	"github.com/wneessen/go-mail"
 )
 
-// SendTimeout caps how long a single SMTP dispatch can block before the
-// inner DialAndSendWithContext gets cancelled. The HTTP request that
-// drove the diagnostics test send already has its own timeout, but a
-// background-context caller (the future verify / invite paths) needs a
-// floor regardless of how it got here so an unresponsive SMTP server
-// cannot pin the calling goroutine indefinitely. 30 s is generous for
-// a healthy dial+auth+data exchange but tight enough that an admin
-// staring at the diagnostics page gets a verbatim error before they
-// give up and refresh.
+// SendTimeout caps a single SMTP dispatch so an unresponsive server
+// cannot pin the calling goroutine. var (not const) so tests can shrink
+// it without waiting out the production duration.
 //
-// SendTimeout is a var rather than a const so unit tests can shrink it
-// to a few milliseconds and assert the timeout actually fires without
-// blocking the suite for the production duration. Production callers
-// should never write to it - the value is mutated at most once at
-// process start by the test entrypoint.
-//
-//nolint:gochecknoglobals // intentional test-mutable knob; see doc above.
+//nolint:gochecknoglobals // test-mutable knob, see doc above.
 var SendTimeout = 30 * time.Second
 
 // errSMTPMailerMissingHostPortFrom is the sentinel [NewSMTP] returns
