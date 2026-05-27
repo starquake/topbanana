@@ -23,7 +23,10 @@ test('home page exposes the manifest and registers the service worker', async ({
 
   await page.goto('/');
 
-  await expect(page).toHaveTitle('Top Banana!');
+  // Non-production deploys prefix title + manifest name with the env
+  // label (e.g. "[development] Top Banana!"); CI runs with
+  // APP_ENV=development.
+  await expect(page).toHaveTitle(/Top Banana!$/);
 
   const manifestHref = await page.locator('link[rel="manifest"]').getAttribute('href');
   expect(manifestHref).toBe('/manifest.webmanifest');
@@ -31,7 +34,7 @@ test('home page exposes the manifest and registers the service worker', async ({
   const manifestResp = await page.request.get('/manifest.webmanifest');
   expect(manifestResp.status()).toBe(200);
   const manifest = await manifestResp.json();
-  expect(manifest.name).toBe('Top Banana!');
+  expect(manifest.name).toMatch(/Top Banana!$/);
   expect(manifest.start_url).toBe('/');
   expect(manifest.display).toBe('standalone');
   expect(Array.isArray(manifest.icons)).toBeTruthy();
