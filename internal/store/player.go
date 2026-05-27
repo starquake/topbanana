@@ -143,22 +143,11 @@ func (s *PlayerStore) ClaimPlayer(
 	return playerFromRow(row), nil
 }
 
-// UpdatePlayerUsername renames an anonymous (password_hash IS NULL) row in
-// place so an anonymous visitor can pick their own display name without
-// going through the full claim flow. The session cookie continues to point
-// at the same row, so the player stays "signed in" as the same player and
-// remains anonymous after the rename.
-//
-// The username is trimmed before storage to mirror CreatePlayer's
-// normalisation; lookups in GetPlayerByUsername perform the same trim so
-// "alice" and " alice " cannot become distinct identities.
-//
-// Returns auth.ErrUsernameTaken when the requested username collides with
-// another row, and auth.ErrPlayerNotAnonymous when the target row exists
-// but already has a password_hash (the WHERE guard filters it out and the
-// UPDATE returns no rows). An unknown player ID also yields no rows; the
-// wrapper re-queries by id to disambiguate, returning ErrPlayerNotFound
-// when the row genuinely does not exist.
+// UpdatePlayerUsername renames an anonymous (password_hash IS NULL)
+// row in place. Returns ErrUsernameTaken on collision,
+// ErrPlayerNotAnonymous when the row already has a password_hash
+// (filtered out by the WHERE guard), and ErrPlayerNotFound when the
+// row genuinely does not exist (disambiguated by a follow-up query).
 func (s *PlayerStore) UpdatePlayerUsername(
 	ctx context.Context,
 	playerID int64,

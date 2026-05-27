@@ -180,18 +180,12 @@ type Results struct {
 	PlayerScores map[int64]int
 }
 
-// LeaderboardAnswer is a flat row used to compute a global per-quiz
-// leaderboard. It carries every field [Service.CalculateScore] needs (the
-// option's correctness, the question's start/expiry timestamps, and the
-// answer's submission time) plus the player's username and ID for the
-// leaderboard row. The store returns rows for both finished and
-// in-progress games (#244).
-//
-// IsCompleted is no longer read by [Service.GetQuizLeaderboard] (#335
-// moved the per-player Completed flag onto [LeaderboardParticipant]
-// since the participants list is now the canonical entry source); the
-// column stays on the wire so the store-level test can pin the
-// per-game completion predicate without an end-to-end fixture.
+// LeaderboardAnswer is a flat row for the per-quiz leaderboard. It
+// carries every field [Service.CalculateScore] needs plus the player's
+// username and ID, for both finished and in-progress games.
+// IsCompleted is kept on the wire even though GetQuizLeaderboard no
+// longer reads it - the store-level test pins the completion
+// predicate on it.
 type LeaderboardAnswer struct {
 	PlayerID          int64
 	Username          string
@@ -451,18 +445,10 @@ func (g *Game) HasOpenQuestion() bool {
 	return len(latest.Answers) == 0 && time.Now().Before(latest.ExpiredAt)
 }
 
-// CreateGame creates a new game with the specified quiz and player, linking
-// the player and starting the game immediately. Returns the newly created
-// game or an error if the operation fails.
-//
-// Returns [ErrGameAlreadyExists] when the player already has a game for the
-// quiz. The fast-path check via GetGameByPlayerAndQuiz keeps the error
-// friendly for sequential callers; the authoritative enforcement lives on
-// the UNIQUE INDEX on game_participants (player_id, quiz_id) introduced by
-// the 20260520180000 migration (#273). A second concurrent call that races
-// past the check surfaces as a UNIQUE constraint failure on
-// CreateParticipant, which the store translates back into
-// ErrGameAlreadyExists — same return shape from either path.
+// CreateGame creates a game for the given quiz and player. Returns
+// [ErrGameAlreadyExists] when the player already has one - enforced
+// both by the fast-path check and the UNIQUE INDEX on
+// game_participants, so a concurrent race surfaces the same error.
 func (s *Service) CreateGame(ctx context.Context, quizID, playerID int64) (*Game, error) {
 	qz, err := s.quizStore.GetQuiz(ctx, quizID)
 	if err != nil {
@@ -555,20 +541,11 @@ func (s *Service) ResetGamesForPlayerOnQuiz(ctx context.Context, playerID, quizI
 	return nil
 }
 
-// GetNextQuestion retrieves the next unanswered question for the specified
-// game or returns nil if all are answered. Requires playerID to identify
-// the caller — the participant gate (#272) makes the method 404 for any
-// player who is not a `game_participants` row on the supplied gameID, so
-// the gameID alone is no longer a capability.
-//
-// Idempotent while the answer window is still open: if the most-recently
-// issued question has no answer and ExpiredAt is still in the future,
-// the same question is returned without inserting a new game_questions
-// row. A reload (e.g. mobile pull-to-refresh) resumes on the same
-// question with the original StartedAt/ExpiredAt anchor, so the timer
-// keeps ticking from where it left off. Once ExpiredAt passes the
-// advance path runs as usual, so a client-side timeout call still
-// moves the game forward.
+// GetNextQuestion returns the next unanswered question for the game,
+// or nil if all are answered. Idempotent while the answer window is
+// open: an unanswered question whose ExpiredAt is still in the future
+// is returned with its original StartedAt/ExpiredAt anchor, so a
+// reload resumes on the same question without restarting the timer.
 func (s *Service) GetNextQuestion(ctx context.Context, gameID string, playerID int64) (*Question, error) {
 	// Get the game
 	g, err := s.store.GetGame(ctx, gameID)
@@ -644,21 +621,11 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string, playerID i
 	return gq, nil
 }
 
-// GetNext returns the next item the player should see in the game's
-// play sequence (#167 slice 2). It walks the quiz's questions and
-// breaks together, ordered by their position, and emits the first one
-// the player has not yet been issued (questions) or acknowledged
-// (breaks).
-//
-// Returns [ErrNoMoreQuestions] when nothing is left so the handler can
-// keep mapping the exhausted state to 404 - the sentinel name is
-// historical from when only questions existed, and we keep using it
-// rather than introducing a duplicate "ErrNoMoreItems".
-//
-// Like [Service.GetNextQuestion], the resume path short-circuits: when
-// the most recently issued question is unanswered and the answer
-// window is still open, hand back the same question row so a reload
-// doesn't skip ahead.
+// GetNext returns the next item in the play sequence. The resume path
+// short-circuits: an unanswered question still inside its answer
+// window is handed back unchanged so a reload does not skip ahead.
+// Returns [ErrNoMoreQuestions] when nothing is left (kept for legacy
+// reasons; it covers items, not just questions).
 func (s *Service) GetNext(ctx context.Context, gameID string, playerID int64) (*Item, error) {
 	g, qz, err := s.loadGameForPlayer(ctx, gameID, playerID)
 	if err != nil {
@@ -712,25 +679,10 @@ func (s *Service) GetNext(ctx context.Context, gameID string, playerID int64) (*
 	}
 }
 
-// MarkBreakSeen records that the player has acknowledged the given
-// break in the given game (#167 slice 2). Mirrors the participant +
-// belongs-to gates that [Service.SubmitAnswer] applies to questions:
-//   - [ErrGameNotFound] when the game does not exist or the caller is
-//     not on the participant list.
-//   - [quiz.ErrBreakNotFound] when the break id does not exist or does
-//     not belong to the game's quiz.
-//
-// Idempotent at the store layer (INSERT OR IGNORE) so a second call
-// with the same arguments is a no-op success.
-//
-// Race note: an admin can move a break to a new slot while a player
-// has it on screen. The player acknowledges the break by id, so the
-// row at the new slot is marked seen and the player skips past it on
-// the next call to [Service.GetNext]. The break's previous slot is
-// not re-shown — the seen set is by-id, not by-position. Acceptable
-// for the common case (admin pauses authoring during a live game);
-// flagged here so a future "show break again on slot change" feature
-// has a documented starting point.
+// MarkBreakSeen records that the player has acknowledged a break.
+// Idempotent at the store layer. Tracks the break by id, not by slot,
+// so an admin who moves a break to a new position while a player has
+// it on screen will not re-show the break at its old slot.
 func (s *Service) MarkBreakSeen(ctx context.Context, gameID string, playerID, breakID int64) error {
 	g, err := s.store.GetGame(ctx, gameID)
 	if err != nil {
@@ -874,19 +826,11 @@ func findQuizQuestion(qz *quiz.Quiz, questionID int64) *quiz.Question {
 	return nil
 }
 
-// SubmitAnswer records an answer from a player for a specific question in a game.
-// It validates that the game exists and the question belongs to the game before saving the answer.
-// Returns the saved answer or nil if the question was not found in the game.
-// Returns an error if the operation fails.
-//
-// tappedAt is what the player's client claims as the moment of the tap.
-// We clamp it to [question.StartedAt, serverNow] so an honest player on
-// a slow link gets the network latency refunded (their tappedAt pulls
-// the recorded AnsweredAt earlier than the receive time), while a
-// dishonest or clock-skewed client can't claim a moment outside the
-// window: anything before StartedAt or after serverNow falls back to
-// serverNow. The asymmetry is intentional — claims can only ever make
-// the recorded time earlier, never later (#237).
+// SubmitAnswer records a player's answer. tappedAt is clamped to
+// [question.StartedAt, serverNow] so an honest player on a slow link
+// gets their network latency refunded while a clock-skewed client
+// cannot claim a moment outside the answer window. The clamp is
+// one-sided: claims can only pull the recorded time earlier (#237).
 func (s *Service) SubmitAnswer(
 	ctx context.Context,
 	gameID string,
@@ -1026,29 +970,12 @@ func (s *Service) GetResults(ctx context.Context, gameID string, playerID int64)
 	return &Results{GameID: g.ID, Winner: winner, PlayerScores: plsMap}, nil
 }
 
-// GetQuizLeaderboard returns the top scoring players for the given quiz.
-// Scoring reuses [Service.CalculateScore] so values stay consistent with
-// [Service.GetResults].
-//
-// Every player who has joined a game for the quiz appears on the
-// leaderboard, including those still mid-quiz (running partial score,
-// [LeaderboardEntry.Completed] = false) and those who have clicked
-// Start but not yet submitted their first answer (score 0,
-// [LeaderboardEntry.Completed] = false). The
-// one-attempt-per-(player, quiz) constraint enforced by
-// [Service.CreateGame] and the admin reset flow keeps each player to
-// at most one row.
-//
-// Ordering: descending by score; ties are broken by ascending username for
-// determinism so a tied scoreboard is stable across requests.
-//
-// currentPlayerID flags the entry that belongs to the requesting player so
-// the client can highlight it; pass 0 to flag nothing. The same id drives
-// the returned CurrentPlayer standing so a player who landed outside the
-// truncated top-N can still see their own score and rank — see #181.
-//
-// If limit <= 0 it defaults to 10. The quiz must exist; missing quizzes
-// surface as [quiz.ErrQuizNotFound].
+// GetQuizLeaderboard returns the top scoring players for a quiz.
+// Mid-quiz players appear with their running partial score so the live
+// view shows everyone who has joined. Ties are broken by username so
+// the ordering is stable across requests. currentPlayerID flags the
+// requester's entry (and drives CurrentPlayer when they fall outside
+// top-N, #181); pass 0 to flag nothing. limit defaults to 10.
 func (s *Service) GetQuizLeaderboard(
 	ctx context.Context, quizID, currentPlayerID int64, limit int,
 ) (*LeaderboardResult, error) {

@@ -7,22 +7,9 @@ import (
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
-// quizForm wraps a parsed [quiz.Quiz] for admin-form validation
-// (#36). The form-level rules used to live on the domain struct as
-// quiz.Quiz.Valid; moving them here keeps the player-API surface
-// (which never receives untrusted input shaped like a quiz) free of
-// admin form concerns, and pulls the rules next to the markup that
-// renders them.
-//
-// The form wraps a *quiz.Quiz rather than redeclaring every field so
-// the admin handlers' existing fillQuizFromForm flow stays
-// untouched — the form is built around the same domain pointer the
-// store call already consumes, no second mapping layer required.
-//
-// Problem map keys are the lowercase form-field names the templates
-// bind to (see `{{index .FieldErrors "title"}}` and friends in
-// internal/web/tmpl/admin/pages/*.gohtml). Emitting the right shape
-// directly avoids a translation step the handlers used to run.
+// quizForm wraps a parsed [quiz.Quiz] for admin-form validation.
+// Problem-map keys match the lowercase form-field names the templates
+// bind to so the handlers do not need a translation step.
 type quizForm struct {
 	quiz *quiz.Quiz
 }

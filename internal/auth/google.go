@@ -318,28 +318,10 @@ func (a *GoogleAuthenticator) exchangeAndVerify(r *http.Request, logger *slog.Lo
 	return callbackResult{Subject: idToken.Subject, Email: claims.Email}
 }
 
-// linkOrCreateGooglePlayer is the database-side decision for a
-// verified Google sign-in. The order of operations is:
-//
-//  1. Identity already linked? Return the existing player.
-//  2. A players row with the same email exists? Link the new
-//     identity onto it (silent account linking on verified-email
-//     match).
-//  3. The request has a session pointing at a fully anonymous row
-//     (no password, no email)? Upgrade that row in place so the
-//     visitor's pre-sign-in player_id, game history, and any custom
-//     username carry onto the Google identity.
-//  4. Otherwise create a fresh players row with an auto-petname and
-//     link the identity onto it.
-//
-// Silent linking (step 2) is gated by email_verified=true at the
-// handler because that is the security boundary that lets us trust
-// the email claim. Without that guard step 2 would let a malicious
-// Google account take over an arbitrary player.
-//
-// Petname collisions in step 4 are retried a bounded number of times
-// because the petname pool is large but not infinite; an unlucky
-// string of collisions is exponentially unlikely.
+// linkOrCreateGooglePlayer resolves a verified Google sign-in to a
+// player: existing identity > link-by-email > claim-session-row >
+// create-fresh. The silent link-by-email branch is only safe because
+// the caller has already verified email_verified=true on the id-token.
 func linkOrCreateGooglePlayer(
 	ctx context.Context,
 	identities OAuthIdentityStore,

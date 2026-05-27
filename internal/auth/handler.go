@@ -103,23 +103,12 @@ func HandleRegisterForm(
 	})
 }
 
-// HandleRegisterSubmit returns a handler for POST /register. It validates the
-// request, creates the player, signs them in, and redirects to the admin
-// landing page.
-//
-// Registrants whose username appears in `adminUsernames` (case-sensitive) are
-// promoted to admin. Otherwise the role passed to the store is RolePlayer and
-// the store atomically promotes the very first password-bearing registrant to
-// admin — see CreatePlayer for the SQL that makes this concurrency-safe.
-//
-// Score-claiming flow: when the request already carries a valid session for
-// an anonymous player (a row created by EnsurePlayer with no password_hash),
-// the handler upgrades that existing row in place via ClaimPlayer instead of
-// inserting a new one. This means a visitor who plays a few games without an
-// account and then registers keeps their player_id, so their game history
-// follows them. If the anonymous row was concurrently claimed by another
-// request the handler falls back to CreatePlayer; the visitor ends up with a
-// fresh row but the registration still succeeds.
+// HandleRegisterSubmit handles POST /register. When the caller already
+// has an anonymous session row, the handler upgrades that row via
+// ClaimPlayer so the visitor's game history follows them; if the row
+// was concurrently claimed it falls back to CreatePlayer. Usernames in
+// adminUsernames are promoted to admin; the first password-bearing
+// registrant is atomically promoted by the store (see CreatePlayer).
 func HandleRegisterSubmit(
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
@@ -209,20 +198,10 @@ func registerCollisionMessage(err error) (string, bool) {
 	return "", false
 }
 
-// claimOrCreatePlayer is the storage-side branch of HandleRegisterSubmit. If
-// the request already has a session pointing at an anonymous (no
-// password_hash) row, it upgrades that row via ClaimPlayer so the visitor
-// keeps their player_id. Otherwise — no session, deleted row, or
-// already-claimed row — it falls back to CreatePlayer.
-//
-// The "already claimed" fallback handles a concurrent registration race
-// gracefully: by the time we call ClaimPlayer the row may have been claimed
-// by a different request that shared the same cookie. Falling back to
-// CreatePlayer means the user still completes registration, just without
-// their pre-claim history attached.
-//
-// Wrapped errors keep the underlying ErrUsernameTaken / ErrPlayerAlreadyClaimed
-// sentinel intact for [errors.Is] checks while satisfying wrapcheck.
+// claimOrCreatePlayer upgrades an anonymous session row via ClaimPlayer
+// when possible, falling back to CreatePlayer if no session exists or
+// the row was claimed by a concurrent registration sharing the same
+// cookie.
 func claimOrCreatePlayer(
 	r *http.Request,
 	players PlayerStore,

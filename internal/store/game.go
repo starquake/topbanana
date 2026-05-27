@@ -435,22 +435,11 @@ func (s *GameStore) ListSeenBreakIDsByGame(ctx context.Context, gameID string) (
 	return ids, nil
 }
 
-// ReattributeGames moves every game_answers + game_participants row
-// from fromPlayerID onto toPlayerID, skipping quizzes the destination
-// player has already played (the UNIQUE (player_id, quiz_id) index on
-// game_participants would otherwise reject the move). The two
-// statements run in a single transaction so a crash in the middle
-// cannot leave answers attributed to a player who has no participant
-// row for the same game.
-//
-// Returns the participant-row count that moved. Zero is a valid
-// "nothing to do" outcome — callers can short-circuit any post-move
-// work (SSE refresh, orphan cleanup) on it.
-//
-// Used by the post-login migration (#406) when a visitor's session
-// flipped from an anonymous row to a different signed-in account; the
-// anonymous row's game history is carried onto the signed-in account
-// so a leaderboard entry the visitor just earned does not disappear.
+// ReattributeGames moves game_answers + game_participants from
+// fromPlayerID to toPlayerID atomically, skipping quizzes the
+// destination has already played (the UNIQUE (player_id, quiz_id)
+// index would reject them). Returns the participant-row count; zero
+// is a valid "nothing to do" result.
 func (s *GameStore) ReattributeGames(ctx context.Context, fromPlayerID, toPlayerID int64) (int64, error) {
 	var movedParticipants int64
 	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {

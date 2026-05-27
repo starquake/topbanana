@@ -350,19 +350,9 @@ func (s *QuizStore) CreateQuestionAtNextPosition(ctx context.Context, qs *quiz.Q
 	)
 }
 
-// SwapQuestionPositions swaps the questionID's position with its
-// neighbour on the given side within the same quiz, atomically. The
-// implementation reads the full ordered list once and finds the
-// adjacent row in Go rather than via SQL — quizzes hold a handful of
-// questions in practice, so the simpler code beats a second LIMIT/
-// ORDER query. Both position updates run inside a single transaction
-// so a concurrent read never observes a half-swapped state.
-//
-// Returns [quiz.ErrInvalidDirection] when direction is neither "up"
-// nor "down", [quiz.ErrQuestionNotFound] when the question does not
-// belong to the quiz, and [quiz.ErrQuestionAtTop] /
-// [quiz.ErrQuestionAtBottom] when the question is already at the
-// requested boundary.
+// SwapQuestionPositions atomically swaps the question's position with
+// its neighbour on the given side. The pair runs in one transaction
+// so a concurrent read never sees a half-swapped state.
 func (s *QuizStore) SwapQuestionPositions(
 	ctx context.Context, quizID, questionID int64, direction string,
 ) error {

@@ -456,23 +456,10 @@ func (s *leaderboardStreamer) writeHeartbeat() bool {
 // 10s tick.
 const leaderboardHeartbeatInterval = 25 * time.Second
 
-// HandleQuizLeaderboardStream pushes the leaderboard down a long-lived
-// Server-Sent Events connection. Every time game.Service.SubmitAnswer
-// commits an answer for this quiz, the hub fires a tick and this handler
-// re-fetches the leaderboard and writes one `data:` event. Subscribers
-// see the initial snapshot on connect; per-event payloads are the same
-// JSON shape HandleQuizLeaderboard returns, so the client can reuse one
-// parser path.
-//
-// Lifecycle:
-//   - Connect: subscribe to hub, emit initial snapshot, then loop.
-//   - On every tick from the hub: re-fetch + emit one SSE event.
-//   - On client disconnect (r.Context().Done()): unsubscribe and return.
-//
-// Coalescing: the hub buffer is 1 per subscriber, so if answers commit
-// faster than the client drains, the client sees a single repaint that
-// reflects the latest state. No event is "lost data" — we always send
-// the current full snapshot, not a delta.
+// HandleQuizLeaderboardStream pushes leaderboard snapshots over SSE.
+// On every hub tick the handler re-fetches and emits one full snapshot,
+// not a delta - so a slow client coalesces multiple commits into one
+// repaint via the per-subscriber buffer of 1.
 func HandleQuizLeaderboardStream(
 	logger *slog.Logger, service *game.Service, hub *leaderboard.Hub,
 ) http.Handler {
@@ -661,22 +648,11 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 	})
 }
 
-// HandleGameForQuiz returns the requesting player's game for the given quiz,
-// if any. Intended as a resume probe: callers can decide whether to start a
-// fresh game (POST /api/games) or continue an existing one.
-//
-// Returns 200 with {"gameId":..., "completed":...} when a game exists.
-// `completed` is true only when the game is truly done from the player's
-// perspective: every quiz question issued AND no question still in its
-// answer window. A reload on the final question (every question issued,
-// last one not yet answered) returns completed=false so the client
-// resumes on the open question instead of showing the post-game
-// leaderboard — see #310.
-//
-// Returns 404 when the player has no game for the quiz, or when the quiz
-// itself does not exist (consistent with other ErrQuizNotFound mappings).
-// Returns 500 when EnsurePlayer hasn't populated the player on the context
-// (a wiring bug rather than a user-facing condition).
+// HandleGameForQuiz is the resume probe: callers POST /api/games or
+// continue an existing game based on the response. `completed` is true
+// only when every question has been issued AND none is in its answer
+// window, so a reload on the final question resumes there instead of
+// jumping to the post-game leaderboard (#310).
 func HandleGameForQuiz(logger *slog.Logger, service *game.Service) http.Handler {
 	type gameForQuizResponse struct {
 		GameID    string `json:"gameId"`
@@ -801,22 +777,11 @@ type nextBreakResponse struct {
 	Total     int       `json:"total"`
 }
 
-// HandleQuestionNext returns the next item in the play sequence. The
-// response is a tagged union (`type: "question"` | `"break"`) so the
-// player client can render the right surface without polling a second
-// endpoint (#167 slice 2). Breaks carry the running score so the
-// player sees their total on the break screen; questions carry the
-// usual timing and shuffled options.
-//
-// Wire-shape notes:
-//   - Type discriminates the variant. Question and break never share a
-//     payload - clients branch on Type before reading any other field.
-//   - Total is question-anchored: it counts quiz questions, NOT items.
-//     A break does NOT bump position; the HUD chip stays stable across
-//     breaks. Both variants carry total so the chip keeps rendering
-//     during the break.
-//   - StartedAt/ExpiredAt are omitted on the break variant - breaks
-//     have no countdown. Score is omitted on the question variant.
+// HandleQuestionNext returns the next item in the play sequence as a
+// tagged union (`type: "question"` | `"break"`). Total counts quiz
+// questions, not items, so a break does not bump the HUD position
+// chip. StartedAt/ExpiredAt are omitted on breaks; Score is omitted on
+// questions.
 func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gameID, playerID, ok := gameRequest(w, r, logger)
@@ -909,18 +874,10 @@ func writeQuestionItem(
 	}
 }
 
-// HandleBreakSeen records that the player has acknowledged the break
-// at the given path id. Idempotent (#167 slice 2): a second call with
-// the same arguments is a no-op 204 because the store's INSERT runs
-// ON CONFLICT DO NOTHING.
-//
-// Returns:
-//   - 204 on success (including idempotent retries).
-//   - 404 when the game does not exist, the requester is not a
-//     participant, or the break does not belong to the game's quiz.
-//     Treating all three as 404 keeps the gameID and breakID opaque to
-//     outsiders, matching the gating policy on the answer-post route.
-//   - 500 on unexpected store errors.
+// HandleBreakSeen records a break acknowledgement. Idempotent: second
+// call returns 204 because the store INSERTs ON CONFLICT DO NOTHING.
+// Game-not-found, not-a-participant, and break-not-in-quiz all return
+// 404 to keep ids opaque to outsiders.
 func HandleBreakSeen(logger *slog.Logger, service *game.Service) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gameID, playerID, ok := gameRequest(w, r, logger)
@@ -1054,18 +1011,11 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 	})
 }
 
-// playerResponse is the JSON shape returned by both GET and PATCH
-// /api/players/me. Shared so the two handlers cannot drift out of sync
-// when a field is added; any caller decoding either endpoint sees the
-// same shape.
-//
+// playerResponse is the JSON shape for GET and PATCH /api/players/me.
 // isAuthenticated is distinct from !isAnonymous: an OAuth-only player
-// has no password_hash (so isAnonymous == true) yet IS known to the
-// system through their linked identity (so isAuthenticated == true).
-// The player-client gates the claim-name modal on isAuthenticated so
-// a signed-in player never sees the "Set your name" affordance,
-// without having to teach the client about the
-// password-vs-OAuth-vs-admin nuance.
+// has no password_hash (isAnonymous == true) but IS known via their
+// linked identity (isAuthenticated == true). The client gates the
+// claim-name modal on isAuthenticated.
 type playerResponse struct {
 	ID              int64  `json:"id"`
 	Username        string `json:"username"`
@@ -1113,23 +1063,11 @@ func HandlePlayerGetMe(logger *slog.Logger) http.Handler {
 	})
 }
 
-// HandlePlayerClaimName returns a handler for PATCH /api/players/me that
-// renames the calling player's row in place. It targets the score-claim flow
-// for anonymous visitors who want to pick a friendlier display name without
-// going through the full register form: the player keeps the same row (and
-// session cookie) and stays anonymous afterwards.
-//
-// Behaviour:
-//   - 200 with the updated player JSON on success.
-//   - 400 when the request body is malformed or the username is empty.
-//   - 401 when EnsurePlayer has not populated a player on the context.
-//     This is a wiring bug rather than a user-facing condition, but the
-//     401 keeps the contract honest if the route is reused elsewhere.
-//   - 409 when the username is already in use by another row, OR when the
-//     player has already claimed a non-anonymous identity (password_hash
-//     is set). Both are conflict states; the distinct error messages let
-//     the client distinguish them.
-//   - 500 on any other error.
+// HandlePlayerClaimName is the score-claim rename for anonymous
+// visitors: the player keeps the same row and session cookie and stays
+// anonymous after picking a display name. 409 covers both
+// username-taken and already-claimed-via-register; the distinct
+// messages let the client tell them apart.
 func HandlePlayerClaimName(
 	logger *slog.Logger, players auth.PlayerStore, gameService *game.Service,
 ) http.Handler {

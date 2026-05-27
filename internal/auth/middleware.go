@@ -28,20 +28,11 @@ const anonymousUsernamePrefix = "anon-"
 // upper bound that still keeps the request latency bounded.
 const petnameMaxAttempts = 5
 
-// EnsurePlayer guarantees the request carries a session that points at an
-// existing players row. If the request has no session, an invalid one, or a
-// session whose player has been deleted, the middleware creates a fresh
-// anonymous players row, writes a session cookie for it, and stashes the
-// loaded *Player on the request context so downstream handlers can read it
-// via PlayerFromContext.
-//
-// Wrap every /api/* route that needs to attribute work to a player (creating
-// games, submitting answers). Static client assets are deliberately not
-// wrapped so loading index.html and JS bundles does not create a row — the
-// row is only created on the first /api/ call.
-//
-// On failure to create a row the request is rejected with 500: proceeding
-// without a session would leave the handler unable to attribute writes.
+// EnsurePlayer guarantees the request carries a session pointing at
+// an existing players row, creating a fresh anonymous row when
+// necessary. Wrap /api/* routes that attribute work to a player;
+// static client assets are deliberately not wrapped so loading
+// index.html does not create a row.
 func EnsurePlayer(next http.Handler, players PlayerStore, sessions *session.Manager, logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		player, err := loadSessionPlayer(r, players, sessions)
@@ -123,20 +114,11 @@ func mintAnonymousPlayer(ctx context.Context, players PlayerStore) (*Player, err
 	return player, nil
 }
 
-// RequireAdmin wraps the next handler so only admins can reach it.
-//
-// Unauthenticated requests (no cookie, invalid cookie, or unknown player ID) are
-// redirected to /login with HTTP 303. The original URI is carried as a
-// ?next=<encoded> query parameter on GET/HEAD so the login flow can
-// drop the visitor back on the page they tried to reach (#449); POSTs
-// and other unsafe methods drop next because the form body is already
-// gone and re-submitting after login would be the wrong behaviour.
-// Requests from a valid non-admin session receive HTTP 403 with an
-// "Access denied" page so the user understands the rejection is about
-// role, not authentication.
-//
-// The csrfMgr is threaded through the access-denied renderer so the embedded
-// "Sign out and switch accounts" form has a working CSRF token.
+// RequireAdmin gates the handler to admins only. Unauthenticated
+// requests 303 to /login; GET/HEAD carry the original URI as
+// ?next=<encoded> so the login flow can drop the visitor back where
+// they were heading, but unsafe methods drop next (the form body is
+// gone). Non-admin sessions get a 403 "Access denied" page.
 func RequireAdmin(
 	next http.Handler,
 	players PlayerStore,

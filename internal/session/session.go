@@ -1,19 +1,13 @@
-// Package session provides signed-cookie session helpers for storing the authenticated player ID.
+// Package session provides signed-cookie session helpers for storing
+// the authenticated player ID.
 //
-// The cookie value is the player ID and the issued-at unix timestamp joined by "|", followed by
-// an HMAC-SHA256 signature, all base64url encoded:
+// The cookie value is:
 //
 //	base64url(playerID|issuedAt) + "." + base64url(hmac_sha256(key, playerID|issuedAt))
 //
-// The cookie is always HttpOnly and SameSite=Lax. The Secure attribute is
-// controlled per Manager via [New]'s secureCookies argument: production
-// callers pass true; development callers pass false so the dev server is
-// reachable over plain HTTP from any LAN hostname (see #205).
-//
-// MaxAge serves double duty: it is both the browser cookie lifetime
-// (Max-Age attribute) and the server-side accept window. A cookie whose
-// issuedAt is older than MaxAge seconds is rejected even if the signature
-// is still valid, so a copied cookie cannot be replayed indefinitely.
+// MaxAge is both the Max-Age cookie attribute and the server-side
+// accept window; a cookie older than MaxAge is rejected even with a
+// valid signature so a copied cookie cannot be replayed indefinitely.
 package session
 
 import (

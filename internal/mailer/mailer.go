@@ -1,19 +1,7 @@
-// Package mailer wraps the SMTP plumbing used by Top Banana so the rest of
-// the codebase has a single, small surface for sending email regardless of
-// whether SMTP is actually configured on this deployment.
-//
-// The package exposes a [Mailer] interface with a [Mailer.Send] method that
-// takes a [Kind] tag (one of [KindVerify], [KindReset], [KindInvite],
-// [KindTest]). Downstream features (#290 verify + reset, #318 invites, #319
-// super-admin notifications) all flow through that single method - the [Kind]
-// tag is what the diagnostics ring buffer (#321) uses to label entries in the
-// "Recent send log" view so the operator can tell different email categories
-// apart.
-//
-// SMTP is opt-in: when the operator has not set SMTP_HOST / SMTP_PORT /
-// SMTP_FROM, the server constructs a no-op mailer whose [Mailer.Send]
-// returns [ErrNotConfigured]. Consumer endpoints surface that as a clear
-// "email is not configured on this instance" message rather than a 500.
+// Package mailer wraps SMTP for the rest of the codebase. When SMTP is
+// not configured the server constructs a no-op mailer that returns
+// [ErrNotConfigured], so consumer endpoints can surface a clear "email
+// is not configured" message rather than a 500.
 package mailer
 
 import (

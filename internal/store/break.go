@@ -140,22 +140,9 @@ func (s *QuizStore) DeleteBreak(ctx context.Context, id int64) error {
 	return nil
 }
 
-// MoveBreak shifts a break by one slot in the given direction within
-// its owning quiz. "up" decrements the position, "down" increments it.
-// The target slot must be a valid play-sequence slot - either 0 (the
-// before-first-question slot) or the position of one of the quiz's
-// questions - and must not already be occupied by another break.
-//
-// Returns:
-//   - [quiz.ErrInvalidDirection] when direction is neither "up" nor
-//     "down".
-//   - [quiz.ErrBreakNotFound] when breakID does not belong to quizID.
-//   - [quiz.ErrBreakMoveImpossible] when the resulting slot is out of
-//     range or already occupied.
-//
-// The eligibility check and the position update happen against the
-// same snapshot via [database.ExecTx] so a concurrent break create
-// cannot squeeze into the target slot between the check and the move.
+// MoveBreak shifts a break by one slot within its quiz. The
+// eligibility check and the UPDATE share a transaction so a concurrent
+// break create cannot squeeze into the target slot between them.
 func (s *QuizStore) MoveBreak(ctx context.Context, quizID, breakID int64, direction string) error {
 	if direction != quiz.DirectionUp && direction != quiz.DirectionDown {
 		return quiz.ErrInvalidDirection
