@@ -38,6 +38,17 @@ services:
       # without port, etc.) is rejected by the Go config layer with
       # a clear error. Same three-place-edit rule as the GOOGLE_*
       # block above applies in deploy.yml.
+      #
+      # SMTP_PORT and SMTP_TLS must be paired by the operator; nothing
+      # auto-picks the port. The supported pairings:
+      #   - SMTP_PORT=587 + SMTP_TLS=true  -> STARTTLS, the standard
+      #     "TLS on" path (most providers).
+      #   - SMTP_PORT=25  + SMTP_TLS=false -> plain SMTP (usually
+      #     only for internal relays).
+      #   - SMTP_PORT=1025 + SMTP_TLS=false -> local Mailpit dev.
+      # Port 465 (implicit TLS / SMTPS) is NOT supported: go-mail's
+      # TLS path issues STARTTLS, which fails on a port the server
+      # expects to be TLS-wrapped from byte zero.
       - SMTP_HOST=${SMTP_HOST:-}
       - SMTP_PORT=${SMTP_PORT:-}
       - SMTP_USERNAME=${SMTP_USERNAME:-}
