@@ -8,13 +8,20 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 )
 
 // TestLogin_RateLimited pins #494: two POSTs to /login from the same
-// IP in quick succession get the second served as 429 with a
+// IP in quick succession get exactly one served as 429 with a
 // Retry-After header. Drives the real handler chain so the route
 // wiring + CSRF + limiter all participate.
+//
+// Fires the POSTs concurrently rather than sequentially because the
+// dummy-hash bcrypt path on a slow CI runner can exceed the 3s
+// cooldown window between two sequential requests, letting the
+// "second" POST out from under the limiter. Concurrent fire-and-race
+// keeps the test independent of bcrypt cost.
 func TestLogin_RateLimited(t *testing.T) {
 	t.Parallel()
 
@@ -22,22 +29,50 @@ func TestLogin_RateLimited(t *testing.T) {
 		"REGISTRATION_ENABLED": "true",
 	})
 
-	client := authClient(t)
-	first := postLogin(ctx, t, client, srv.BaseURL, "ghost", "whatever-password")
-	first.Body.Close() //nolint:errcheck // cleanup.
-	if got, want := first.StatusCode, http.StatusUnauthorized; got != want {
-		t.Fatalf("first status = %d, want %d", got, want)
-	}
+	client1 := authClient(t)
+	client2 := authClient(t)
+	csrf1 := fetchCSRFToken(ctx, t, client1, srv.BaseURL+"/login")
+	csrf2 := fetchCSRFToken(ctx, t, client2, srv.BaseURL+"/login")
 
-	second := postLogin(ctx, t, client, srv.BaseURL, "ghost", "whatever-password")
-	defer second.Body.Close() //nolint:errcheck // cleanup.
-	if got, want := second.StatusCode, http.StatusTooManyRequests; got != want {
-		t.Errorf("second status = %d, want %d", got, want)
+	var wg sync.WaitGroup
+	resps := make([]*http.Response, 2)
+	pairs := []struct {
+		client *http.Client
+		csrf   string
+	}{{client1, csrf1}, {client2, csrf2}}
+	for i, pair := range pairs {
+		wg.Go(func() {
+			//nolint:bodyclose // closed below after the rate-limited / normal split is settled.
+			resps[i] = postLoginWithToken(ctx, t, pair.client, srv.BaseURL, pair.csrf, "ghost", "whatever-password")
+		})
 	}
-	if got := second.Header.Get("Retry-After"); got == "" {
-		t.Error("Retry-After header empty on rate-limited second POST")
+	wg.Wait()
+
+	var limited, normal *http.Response
+	for _, r := range resps {
+		switch r.StatusCode {
+		case http.StatusTooManyRequests:
+			limited = r
+		case http.StatusUnauthorized:
+			normal = r
+		default:
+			// Unexpected; the assertion below surfaces it with both codes in the message.
+		}
 	}
-	body, err := io.ReadAll(second.Body)
+	if normal == nil || limited == nil {
+		for _, r := range resps {
+			r.Body.Close() //nolint:errcheck // cleanup.
+		}
+		t.Fatalf("expected one 401 + one 429, got %d and %d",
+			resps[0].StatusCode, resps[1].StatusCode)
+	}
+	defer normal.Body.Close()  //nolint:errcheck // cleanup.
+	defer limited.Body.Close() //nolint:errcheck // cleanup.
+
+	if got := limited.Header.Get("Retry-After"); got == "" {
+		t.Error("Retry-After header empty on rate-limited POST")
+	}
+	body, err := io.ReadAll(limited.Body)
 	if err != nil {
 		t.Fatalf("ReadAll err = %v, want nil", err)
 	}
@@ -46,14 +81,15 @@ func TestLogin_RateLimited(t *testing.T) {
 	}
 }
 
-// postLogin fetches the CSRF token from /login then POSTs the form
-// with the supplied credentials. Returns the raw response so the
-// caller can assert status + headers + body.
-func postLogin(
-	ctx context.Context, t *testing.T, client *http.Client, baseURL, username, password string,
+// postLoginWithToken POSTs /login with the supplied credentials and a
+// pre-fetched CSRF token, returning the raw response. The token is
+// passed in (rather than fetched here) so two concurrent POSTs can
+// share their /login GET round-trips and reach the limiter at nearly
+// the same time.
+func postLoginWithToken(
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, csrfToken, username, password string,
 ) *http.Response {
 	t.Helper()
-	csrfToken := fetchCSRFToken(ctx, t, client, baseURL+"/login")
 
 	form := url.Values{}
 	form.Add("username", username)
