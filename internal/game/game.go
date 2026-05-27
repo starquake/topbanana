@@ -19,9 +19,9 @@ const (
 	// defaultRevealDelay is the wall-clock gap between issuing a
 	// question and revealing the answer options. The player sees the
 	// question text immediately and gets the delay "for free" to read
-	// it before the per-question countdown starts — see #247. The
+	// it before the per-question countdown starts - see #247. The
 	// server shifts StartedAt into the future by this amount so the
-	// answer window (StartedAt → ExpiredAt) starts AFTER the reveal,
+	// answer window (StartedAt -> ExpiredAt) starts AFTER the reveal,
 	// not from the moment the question was issued.
 	defaultRevealDelay      = 3 * time.Second
 	maxPoints               = 1000
@@ -52,7 +52,7 @@ var (
 	// ErrAnswerAlreadyRecorded is returned by [GameStore.CreateAnswer]
 	// when a second answer for the same (game, player, game_question)
 	// trips the UNIQUE constraint. Handlers treat this as an idempotent
-	// retry rather than a 500 — see [Service.SubmitAnswer] and
+	// retry rather than a 500 - see [Service.SubmitAnswer] and
 	// HandleAnswerPost for the recovery path (#353).
 	ErrAnswerAlreadyRecorded = errors.New("answer already recorded for this question")
 
@@ -69,7 +69,7 @@ var (
 	ErrOptionNotInQuestion = errors.New("option does not belong to question")
 
 	// ErrStartingGameNoRowsAffected is returned by [GameStore.StartGame]
-	// when the UPDATE matched no rows — i.e. the game does not exist.
+	// when the UPDATE matched no rows - i.e. the game does not exist.
 	ErrStartingGameNoRowsAffected = errors.New("no rows affected when starting game")
 )
 
@@ -355,7 +355,7 @@ func (s *Service) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 }
 
 // SetRevealDelay overrides the per-question reveal beat (#247). The default
-// is 3 s — long enough to read the prompt before the option buttons appear.
+// is 3 s - long enough to read the prompt before the option buttons appear.
 // E2E and load-test deployments shrink this to a few hundred ms to speed up
 // runs without losing the visual reveal phase.
 //
@@ -367,7 +367,7 @@ func (s *Service) SetRevealDelay(d time.Duration) {
 
 // SetLeaderboardPublisher wires a publisher invoked on every successful
 // SubmitAnswer so SSE subscribers (or any other listener) learn about
-// score changes. Optional — Service works fine without one.
+// score changes. Optional - Service works fine without one.
 //
 // Not safe for concurrent use: must be called during startup wiring,
 // before the service is handed to any HTTP handler that may invoke
@@ -483,7 +483,7 @@ func (s *Service) CreateGame(ctx context.Context, quizID, playerID int64) (*Game
 	// this fire, existing subscribers (hosts watching the start screen,
 	// other players on the same quiz) would only see the row once the
 	// player committed their first answer. Nil-guarded to match
-	// PublishLeaderboardForPlayer / SubmitAnswer — tests can construct
+	// PublishLeaderboardForPlayer / SubmitAnswer - tests can construct
 	// a Service without wiring a publisher.
 	if s.leaderboardPublisher != nil {
 		s.leaderboardPublisher.Publish(qz.ID)
@@ -555,7 +555,7 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string, playerID i
 
 	// Participant gate (#272): non-participants get ErrGameNotFound so
 	// the error path is indistinguishable from a genuinely missing
-	// game — the gameID stays opaque to outsiders.
+	// game - the gameID stays opaque to outsiders.
 	if !hasParticipant(g, playerID) {
 		return nil, ErrGameNotFound
 	}
@@ -596,8 +596,8 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string, playerID i
 	}
 
 	// Register the chosen quiz question as a GameQuestion. The answer
-	// window (StartedAt → ExpiredAt) is anchored at now + revealDelay,
-	// not "now" — the reveal delay gives the player a brief beat to
+	// window (StartedAt -> ExpiredAt) is anchored at now + revealDelay,
+	// not "now" - the reveal delay gives the player a brief beat to
 	// read the question before the option buttons appear (#247).
 	// Submissions before StartedAt are scored as if they arrived AT
 	// StartedAt (see CalculateScore's clamp).
@@ -788,7 +788,7 @@ func pickNextSlot(
 // resumeCandidate returns the most recently issued game_question for
 // the game when it can be handed back as-is (unanswered, answer window
 // still open, quiz question still on the quiz). Returns nil when the
-// caller should advance to the next question instead — including the
+// caller should advance to the next question instead - including the
 // defensive case where the latest row points at a quiz question that
 // no longer exists (admin edited the quiz mid-game), in which case
 // the advance branch will issue the next valid question.
@@ -867,7 +867,7 @@ func (s *Service) SubmitAnswer(
 
 	if err = s.store.CreateAnswer(ctx, a); err != nil {
 		// Pass ErrAnswerAlreadyRecorded through unwrapped so the
-		// handler can map it to 409 instead of 500 — a double-tap is
+		// handler can map it to 409 instead of 500 - a double-tap is
 		// a retry, not a server fault (#353).
 		if errors.Is(err, ErrAnswerAlreadyRecorded) {
 			return nil, ErrAnswerAlreadyRecorded
@@ -905,7 +905,7 @@ func resolveAnswerWindow(q *quiz.Question, qz *quiz.Quiz) time.Duration {
 // clampTappedAt applies the #237 trust window: the recorded answer time
 // is the client-supplied tappedAt when it falls inside [startedAt,
 // serverNow], otherwise it's serverNow. The fallback is intentionally
-// the upper bound — an out-of-range claim should never give the player
+// the upper bound - an out-of-range claim should never give the player
 // a faster score than they earned in real time.
 func clampTappedAt(tappedAt, startedAt, serverNow time.Time) time.Time {
 	if tappedAt.IsZero() || tappedAt.Before(startedAt) || tappedAt.After(serverNow) {
@@ -984,7 +984,7 @@ func (s *Service) GetQuizLeaderboard(
 	}
 
 	// Verify the quiz exists so callers can map ErrQuizNotFound to a 404.
-	// Cheap existence check — leaderboard rendering does not need the
+	// Cheap existence check - leaderboard rendering does not need the
 	// quiz's questions or options.
 	exists, err := s.quizStore.QuizExists(ctx, quizID)
 	if err != nil {
@@ -1055,7 +1055,7 @@ func (s *Service) GetQuizLeaderboard(
 // the visible top-N still gets a Rank that matches their global position),
 // and then truncates entries to the requested limit. Split out of
 // GetQuizLeaderboard to keep that function under the project's per-function
-// length budget; the steps need to run in this order — ranks must be stamped
+// length budget; the steps need to run in this order - ranks must be stamped
 // before the CurrentPlayer copy or it gets a zero rank, and the truncation
 // must come after both or the off-leaderboard player vanishes.
 //
@@ -1103,7 +1103,7 @@ func (s *Service) CalculateScore(ctx context.Context, a *Answer) int {
 	duration := max(
 		// Defensive clamp: a hand-crafted client could POST an answer
 		// before StartedAt (which sits in the future due to the reveal
-		// delay — #247). Without clamping, a negative duration would
+		// delay - #247). Without clamping, a negative duration would
 		// score above maxPoints. Treat early arrivals as if they landed
 		// at StartedAt.
 		a.AnsweredAt.Sub(a.Question.StartedAt), 0)

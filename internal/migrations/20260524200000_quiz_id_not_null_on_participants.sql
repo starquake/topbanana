@@ -18,7 +18,7 @@
 -- for any rebuild that crosses FK references (per CLAUDE.md
 -- guidance). Goose wraps the whole migration in a transaction so a
 -- NULL quiz_id in any pre-existing row would fail the INSERT below
--- with a NOT NULL constraint violation and roll the rebuild back —
+-- with a NOT NULL constraint violation and roll the rebuild back -
 -- the explicit RAISE pre-flight isn't available outside a trigger.
 PRAGMA defer_foreign_keys = ON;
 

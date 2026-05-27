@@ -16,7 +16,7 @@ import (
 
 // migrateMu serialises Migrate calls. goose's package-level state (the
 // migration registry built lazily from BaseFS) is not safe under concurrent
-// goose.Up calls — even when each call holds its own [sql.DB]. The integration
+// goose.Up calls - even when each call holds its own [sql.DB]. The integration
 // test suite exposes this by spinning up several test servers in parallel,
 // each calling Migrate against its own per-test SQLite file. Serialising the
 // migration step is negligible in practice (one call per process boot in

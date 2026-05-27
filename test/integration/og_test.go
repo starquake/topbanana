@@ -97,7 +97,7 @@ func TestOGMetadata_Integration(t *testing.T) {
 		t.Parallel()
 		body := getBody(ctx, t, fmt.Sprintf("%s/play/%s-%d", baseURL, qz.Slug, qz.ID))
 
-		wantTitle := fmt.Sprintf(`<meta property="og:title" content="%s — Top Banana!">`, qz.Title)
+		wantTitle := fmt.Sprintf(`<meta property="og:title" content="%s - Top Banana!">`, qz.Title)
 		if got := body; !strings.Contains(got, wantTitle) {
 			t.Errorf("body missing per-quiz og:title %q", wantTitle)
 		}
@@ -107,7 +107,7 @@ func TestOGMetadata_Integration(t *testing.T) {
 		}
 		// Twitter cards mirror the og:* values so X/Twitter previews also
 		// reflect the quiz, not the sitewide defaults.
-		wantTwitter := fmt.Sprintf(`<meta name="twitter:title" content="%s — Top Banana!">`, qz.Title)
+		wantTwitter := fmt.Sprintf(`<meta name="twitter:title" content="%s - Top Banana!">`, qz.Title)
 		if got := body; !strings.Contains(got, wantTwitter) {
 			t.Errorf("body missing per-quiz twitter:title %q", wantTwitter)
 		}

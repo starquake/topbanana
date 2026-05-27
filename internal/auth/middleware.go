@@ -165,7 +165,7 @@ func RequireAdmin(
 // RequireAuthenticated wraps the next handler so only credentialled
 // players (password, OAuth identity, or the seeded admin role) can
 // reach it. Anonymous-session visitors and cookieless requests are
-// redirected to /login with HTTP 303 — softer than RequireAdmin's
+// redirected to /login with HTTP 303 - softer than RequireAdmin's
 // 403, because the page they're missing is typically reachable for
 // them after they sign in (the profile page, future personal
 // dashboards, etc.). The original URI is carried as ?next=<encoded>

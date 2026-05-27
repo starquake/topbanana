@@ -66,7 +66,7 @@ func TestSet_SecureFlag_DroppedInDevelopment(t *testing.T) {
 	t.Parallel()
 	// In dev (secureCookies=false) the Secure attribute is dropped so
 	// browsers accept the cookie over plain HTTP from any LAN hostname
-	// — see #205. The TestSet_AndPlayerID_RoundTrip test above covers
+	// - see #205. The TestSet_AndPlayerID_RoundTrip test above covers
 	// the secureCookies=true path.
 
 	mgr := New([]byte("k"), false)

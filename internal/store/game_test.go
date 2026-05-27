@@ -519,7 +519,7 @@ func TestGameStore_ListAnswersForQuizLeaderboard(t *testing.T) {
 
 		// Issue every quiz question for the game so it counts as
 		// complete; the leaderboard query now filters out partial
-		// games. Only the first question gets an answer — the
+		// games. Only the first question gets an answer - the
 		// second is "issued but timed out".
 		now := time.Now().UTC().Truncate(time.Second)
 		gameQuestions := make([]*game.Question, len(testQuiz.Questions))
@@ -593,7 +593,7 @@ func TestGameStore_ListAnswersForQuizLeaderboard(t *testing.T) {
 			t.Fatalf("failed to create participant: %v", err)
 		}
 
-		// Issue only the first of two questions — game is incomplete.
+		// Issue only the first of two questions - game is incomplete.
 		now := time.Now().UTC().Truncate(time.Second)
 		gq := &game.Question{
 			GameID:     g.ID,
@@ -813,7 +813,7 @@ func TestGameStore_ListParticipantsForQuizLeaderboard(t *testing.T) {
 	t.Run("returns participant with IsCompleted=false on a zero-question quiz", func(t *testing.T) {
 		t.Parallel()
 
-		// #335: prevents the CASE from evaluating 0>=0 → true and
+		// #335: prevents the CASE from evaluating 0>=0 -> true and
 		// marking a freshly-joined participant on an empty quiz as
 		// Completed when there is literally no question to answer.
 		db := dbtest.Open(t)
@@ -972,7 +972,7 @@ func TestGameStore_ListQuizIDsForPlayer_IncludesJoinedButUnanswered(t *testing.T
 	}); err != nil {
 		t.Fatalf("CreateParticipant err = %v, want nil", err)
 	}
-	// No CreateAnswer — that's the whole point.
+	// No CreateAnswer - that's the whole point.
 
 	ids, err := games.ListQuizIDsForPlayer(t.Context(), player.ID)
 	if err != nil {
@@ -992,7 +992,7 @@ func TestGameStore_ListAnswersForQuizLeaderboard_UsesQuizIDIndex(t *testing.T) {
 	// The leaderboard query joins game_answers to games and filters games by
 	// quiz_id; without the index, the planner has to scan one of the tables.
 	// EXPLAIN this minimal mirror of that join shape and assert the planner
-	// picks games_quiz_id_idx — the assertion is about the join access path,
+	// picks games_quiz_id_idx - the assertion is about the join access path,
 	// not the full leaderboard SQL.
 	db := dbtest.Open(t)
 	rows, err := db.QueryContext(t.Context(),

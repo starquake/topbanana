@@ -108,7 +108,7 @@ type AnonymousGameMigrator interface {
 }
 
 // PlayerListRow is one row in the admin players list (#423). Mirrors
-// the shape of the underlying SQL more closely than auth.Player —
+// the shape of the underlying SQL more closely than auth.Player -
 // adds the derived OAuth-link state so the handler does not have to
 // re-derive it per row. FinishedCount and LastFinishedAt come from a
 // separate PlayerStats lookup so the page query stays simple.

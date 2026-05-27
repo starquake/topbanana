@@ -315,7 +315,7 @@ func TestHandleRegisterForm_GET_RendersForm(t *testing.T) {
 	// MinPasswordLength/MaxPasswordLength constants. Asserting the
 	// rendered output keeps the func bound to the constants and the
 	// validator-side error messages.
-	helpWant := fmt.Sprintf("Must be %d–%d characters.", MinPasswordLength, MaxPasswordLength)
+	helpWant := fmt.Sprintf("Must be %d-%d characters.", MinPasswordLength, MaxPasswordLength)
 	if !strings.Contains(body, helpWant) {
 		t.Errorf("body = %q, want password-help substring %q", body, helpWant)
 	}
@@ -609,7 +609,7 @@ func TestHandleRegisterSubmit_ClaimsAnonymousSession(t *testing.T) {
 		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
 	}
 
-	// The same row was upgraded — no new row should appear, and the
+	// The same row was upgraded - no new row should appear, and the
 	// anonymous username should be gone.
 	upgraded, err := store.GetPlayerByUsername(t.Context(), "alice")
 	if err != nil {

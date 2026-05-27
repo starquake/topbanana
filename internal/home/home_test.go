@@ -86,8 +86,8 @@ func TestHandle_SingularPlayAndQuizPluralization(t *testing.T) {
 	}
 	body := serve(t, store)
 
-	// Body contains "1 play" but never "1 plays" or "1 quizzes" — proves
-	// the {{if eq .PlayCount 1}}…{{else}}…{{end}} branch fired.
+	// Body contains "1 play" but never "1 plays" or "1 quizzes" - proves
+	// the {{if eq .PlayCount 1}}...{{else}}...{{end}} branch fired.
 	if !strings.Contains(body, "1 play") {
 		t.Errorf("body missing singular play form %q", "1 play")
 	}

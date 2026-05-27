@@ -387,7 +387,7 @@ func TestGameplay_Integration(t *testing.T) {
 		// The shell handler injects the quiz's title into both <title> and
 		// og:title (issue #258). Asserting on the quiz title proves the
 		// shell was served AND the per-quiz OG override ran.
-		wantTitle := fmt.Sprintf(`<title>%s — Top Banana!</title>`, qz.Title)
+		wantTitle := fmt.Sprintf(`<title>%s - Top Banana!</title>`, qz.Title)
 		if got := string(deepLinkBody); !strings.Contains(got, wantTitle) {
 			t.Errorf(
 				"deep-link body should contain %q (proves per-quiz OG override ran), got body of length %d",

@@ -178,7 +178,7 @@ func (s *stubOAuthStore) seedAnonymous(username string) *Player {
 
 // seed inserts a player row directly so the linking test has an
 // existing target without going through CreatePlayerFromOAuth. Always
-// inserts as a plain "player" — the OAuth race-recovery tests don't
+// inserts as a plain "player" - the OAuth race-recovery tests don't
 // exercise admin-promotion paths, so the role is fixed.
 func (s *stubOAuthStore) seed(email, username string) *Player {
 	s.mu.Lock()
@@ -533,7 +533,7 @@ func TestCreateGooglePlayer_RecoversFromConcurrentLink(t *testing.T) {
 	}
 	// The orphan row that createGooglePlayer's CreatePlayerFromOAuth
 	// inserted before the link failure is observable but harmless
-	// (nothing links to it). The test does not assert its absence —
+	// (nothing links to it). The test does not assert its absence -
 	// future cleanup is the operator's call.
 }
 

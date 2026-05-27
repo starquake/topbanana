@@ -571,7 +571,7 @@ func TestService_ResetGamesForPlayerOnQuiz(t *testing.T) {
 		}
 	})
 
-	t.Run("idempotent — calling reset twice is fine", func(t *testing.T) {
+	t.Run("idempotent - calling reset twice is fine", func(t *testing.T) {
 		t.Parallel()
 
 		ctx := t.Context()
@@ -959,7 +959,7 @@ func TestService_GetNextQuestion(t *testing.T) {
 		}
 
 		// StartedAt must be at least 2 seconds in the future relative
-		// to issuedAt — the 3s reveal delay (#247) gives the player
+		// to issuedAt - the 3s reveal delay (#247) gives the player
 		// time to read the question before the answer window opens.
 		// 2s lower bound is forgiving of clock granularity on the
 		// test machine; the production constant is 3s.
@@ -1009,7 +1009,7 @@ func TestService_GetNextQuestion(t *testing.T) {
 		}
 
 		// Second call without submitting an answer must return the same
-		// game_questions row — same ID, same timing anchors — so a
+		// game_questions row - same ID, same timing anchors - so a
 		// mid-question reload doesn't skip the question.
 		second, err := service.GetNextQuestion(ctx, testGame.ID, 1)
 		if err != nil {
@@ -1064,7 +1064,7 @@ func TestService_GetNextQuestion(t *testing.T) {
 		}
 
 		// Seed an unanswered game_question whose answer window has
-		// already closed — the timeout path leaves rows like this.
+		// already closed - the timeout path leaves rows like this.
 		// The advance branch must move past it instead of pinning the
 		// player on the expired question.
 		past := time.Now().Add(-1 * time.Minute)
@@ -1137,7 +1137,7 @@ func TestService_CalculateScore_EarlyAnswerClamps(t *testing.T) {
 	t.Parallel()
 
 	// Hand-crafted client could POST an answer before StartedAt (which
-	// sits in the future during the reveal delay — #247). The clamp
+	// sits in the future during the reveal delay - #247). The clamp
 	// in CalculateScore must treat the answer as arriving AT
 	// StartedAt rather than producing a score above maxPoints from a
 	// negative duration.
@@ -1279,7 +1279,7 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 		// #335: alice has clicked Start but not submitted an answer
 		// yet; bob has answered two correct questions. Both must
 		// appear, bob ranked first with 2000 and alice ranked second
-		// with 0 — and alice's entry must carry Completed=false so
+		// with 0 - and alice's entry must carry Completed=false so
 		// the client renders the in-progress dot.
 		svc := NewService(
 			stubStore{
@@ -1588,7 +1588,7 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 
 		// Five players, strictly decreasing scores (5000, 4000, 3000,
 		// 2000, 1000). Limit to top-3. Player 5 (lowest score) is the
-		// requesting player — they should NOT appear in Entries but
+		// requesting player - they should NOT appear in Entries but
 		// SHOULD appear in CurrentPlayer with Rank=5. This is the
 		// scenario from #181.
 		svc := NewService(
@@ -2339,7 +2339,7 @@ func TestService_GetNext(t *testing.T) {
 		if got, want := first.Type, ItemTypeBreak; got != want {
 			t.Fatalf("first.Type = %q, want %q", got, want)
 		}
-		// Don't ack — simulate a page reload mid-break by calling
+		// Don't ack - simulate a page reload mid-break by calling
 		// GetNext again. The break must come back unchanged.
 		second, err := svc.GetNext(ctx, testGame.ID, 1)
 		if err != nil {

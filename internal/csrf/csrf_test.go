@@ -71,7 +71,7 @@ func TestToken_CookieFlags_RespectSecureCookies(t *testing.T) {
 	t.Parallel()
 	// secureCookies=true (production) must set the Secure attribute;
 	// secureCookies=false (development) must drop it so browsers accept
-	// the cookie over plain HTTP from LAN hostnames — see #205. The
+	// the cookie over plain HTTP from LAN hostnames - see #205. The
 	// HttpOnly + SameSite=Lax flags stay on regardless of mode.
 
 	t.Run("production sets Secure", func(t *testing.T) {
@@ -102,7 +102,7 @@ func TestToken_CookieFlags_RespectSecureCookies(t *testing.T) {
 		if c.Secure {
 			t.Error("cookie Secure = true, want false in dev")
 		}
-		// HttpOnly and SameSite must still be set even in dev — only
+		// HttpOnly and SameSite must still be set even in dev - only
 		// the Secure attribute is environment-gated.
 		if !c.HttpOnly {
 			t.Error("cookie HttpOnly = false, want true even in dev")

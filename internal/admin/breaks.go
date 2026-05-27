@@ -61,7 +61,7 @@ type BreakSlotOption struct {
 // breakFormData backs breakform.gohtml. FieldErrors is set when
 // HandleBreakSave re-renders the form after a validation failure
 // (mirrors questionFormData's contract). FormError carries a
-// banner-level message — used for slot-collision (#167), which is a
+// banner-level message - used for slot-collision (#167), which is a
 // form-wide condition rather than a per-field issue.
 type breakFormData struct {
 	Title       string
@@ -85,7 +85,7 @@ const breakSlotMaxTextLen = 60
 //
 // The truncation keeps the option list scannable on long-text quizzes.
 // Position 0 is intentionally a sibling of the question slots, not a
-// hidden default — the admin should be able to add a break before the
+// hidden default - the admin should be able to add a break before the
 // first question without scrolling. Truncation counts runes, not
 // bytes, so a multi-byte UTF-8 character cannot be sliced in half.
 func buildSlotOptions(questions []*quiz.Question) []BreakSlotOption {

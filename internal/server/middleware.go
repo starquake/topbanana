@@ -28,7 +28,7 @@ func (rw *responseWriter) Unwrap() http.ResponseWriter {
 // the request's context plus a generic 500 to the client, instead of
 // the stdlib's default-logger stderr dump that loses every request
 // field (#346). Mount as the outermost wrapper so it covers
-// logRequests too — otherwise the panic kills the response writer
+// logRequests too - otherwise the panic kills the response writer
 // before logRequests can record the status.
 func recoverPanic(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +39,7 @@ func recoverPanic(logger *slog.Logger, next http.Handler) http.Handler {
 			}
 			// http.ErrAbortHandler is the documented sentinel for
 			// "I'm aborting this response on purpose"; net/http treats
-			// it as silent — log at Warn but skip the stack dump and
+			// it as silent - log at Warn but skip the stack dump and
 			// the 500. Anything else is a real bug. recover() returns
 			// `any`, so type-assert to error before errors.Is.
 			if recErr, ok := rec.(error); ok && errors.Is(recErr, http.ErrAbortHandler) {

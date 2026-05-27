@@ -62,7 +62,7 @@ func writeClaimNameError(
 // gameRequest extracts the gameID path parameter and the session player
 // off the request. Every /api/games/{gameID}/* handler runs this gate
 // once at the top of its closure so the participant check (#272) and
-// the gameID validation stay in lockstep — the service refuses calls
+// the gameID validation stay in lockstep - the service refuses calls
 // from a non-participant by returning ErrGameNotFound, which the
 // handler maps to 404 alongside the genuine missing-game case.
 //
@@ -71,7 +71,7 @@ func writeClaimNameError(
 func gameRequest(w http.ResponseWriter, r *http.Request, logger *slog.Logger) (string, int64, bool) {
 	gameID := r.PathValue("gameID")
 	if gameID == "" {
-		// User-supplied 4xx — log at Info so the response carries the
+		// User-supplied 4xx - log at Info so the response carries the
 		// signal, not an alert-triggering ERROR (#369).
 		logger.InfoContext(r.Context(), "missing gameID in request path")
 		http.Error(w, "missing gameID", http.StatusBadRequest)
@@ -91,7 +91,7 @@ func gameRequest(w http.ResponseWriter, r *http.Request, logger *slog.Logger) (s
 }
 
 // HandleQuizList returns a list of quizzes. Only visibility=public rows
-// surface — unlisted is link-only and private is gated per-request at
+// surface - unlisted is link-only and private is gated per-request at
 // the GetQuiz path, neither of which fits a list (#103).
 func HandleQuizList(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 	type quizResponse struct {
@@ -257,8 +257,8 @@ func HandleQuizGet(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 }
 
 // leaderboardLimit caps the number of rows the REST + SSE leaderboards
-// return. The current player's standing — if they're outside the top
-// N — is carried separately on currentPlayer below (#181).
+// return. The current player's standing - if they're outside the top
+// N - is carried separately on currentPlayer below (#181).
 const leaderboardLimit = 10
 
 // quizLeaderboardEntryResponse is one row of the leaderboard wire shape.
@@ -330,7 +330,7 @@ func fetchQuizLeaderboard(
 
 // writeQuizLeaderboardError translates a fetchQuizLeaderboard error into
 // the right HTTP error response. Only safe to call before any response
-// body has been written — the SSE handler uses this for the initial
+// body has been written - the SSE handler uses this for the initial
 // snapshot only, and just exits the stream on subsequent errors.
 func writeQuizLeaderboardError(
 	w http.ResponseWriter,
@@ -354,7 +354,7 @@ func writeQuizLeaderboardError(
 //
 // The response also carries a currentPlayer field with the requesting
 // player's rank and score, populated even when the player landed outside
-// the truncated top-N — so callers can show an off-leaderboard standing
+// the truncated top-N - so callers can show an off-leaderboard standing
 // without a second round-trip. See #181.
 func HandleQuizLeaderboard(logger *slog.Logger, service *game.Service) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -428,7 +428,7 @@ func (s *leaderboardStreamer) writeEvent(ctx context.Context, res quizLeaderboar
 }
 
 // writeHeartbeat writes a single SSE comment frame and flushes. The
-// frame is `:\n\n` — comment lines start with a colon and the spec
+// frame is `:\n\n` - comment lines start with a colon and the spec
 // requires EventSource implementations to ignore them, so this never
 // fires a client-side `onmessage`. Its only job is to keep the TCP
 // connection warm so Firefox / intermediate proxies don't tear down
@@ -450,7 +450,7 @@ func (s *leaderboardStreamer) writeHeartbeat() bool {
 // quiet. The HTTP server's WriteTimeout no longer kills the response
 // (the handler clears its own write deadline), so this only exists as
 // insurance against intermediate proxy / NAT / mobile-carrier idle
-// timeouts that aren't visible during local-dev testing — nginx
+// timeouts that aren't visible during local-dev testing - nginx
 // defaults to 60s, HAProxy ~50s, mobile NATs sometimes 30s. 25s lands
 // comfortably inside all of those without the keep-alive cost of a
 // 10s tick.
@@ -492,7 +492,7 @@ func HandleQuizLeaderboardStream(
 		// store hiccup) can still be surfaced as a proper HTTP status.
 		// Subsequent fetch errors inside the loop happen after the response
 		// is committed as text/event-stream, so they cannot be reported as
-		// HTTP status codes — we log and end the stream there.
+		// HTTP status codes - we log and end the stream there.
 		res, err := fetchQuizLeaderboard(ctx, service, quizID, player.ID)
 		if err != nil {
 			writeQuizLeaderboardError(w, r, logger, err)
@@ -510,7 +510,7 @@ func HandleQuizLeaderboardStream(
 		rc := http.NewResponseController(w)
 		// The HTTP server's WriteTimeout (10s) would otherwise kill
 		// this long-lived response on the first write past the deadline
-		// — every heartbeat after 10s fails and the loop exits, which
+		// - every heartbeat after 10s fails and the loop exits, which
 		// shows up as a 10.003s stream that EventSource has to
 		// reconnect. Zero disables the per-request deadline. The
 		// underlying TCP connection stays governed by OS keepalives
@@ -540,7 +540,7 @@ func HandleQuizLeaderboardStream(
 // the client disconnects or the channel closes. Refresh errors after
 // the initial snapshot cannot be reported as HTTP status (the response
 // is already committed as text/event-stream), so the loop logs and
-// exits — the client will reconnect via EventSource and re-run the
+// exits - the client will reconnect via EventSource and re-run the
 // initial-snapshot path, which can surface the error cleanly.
 //
 // The heartbeat ticker emits a no-op SSE comment frame every
@@ -704,7 +704,7 @@ func HandleGameForQuiz(logger *slog.Logger, service *game.Service) http.Handler 
 // shuffleOptionsSeed derives a deterministic uint64 seed from a game ID
 // and question ID. The shuffle of the option buttons (#297) is stable
 // per (game, question) so a player who reloads mid-question sees the
-// same order they did before — preventing both confusion and a
+// same order they did before - preventing both confusion and a
 // deliberate "re-roll the layout" by refreshing. Different games on
 // the same question see different orders because the gameID dominates
 // the hash, so position-memorisation across players doesn't help
@@ -731,7 +731,7 @@ func shuffleOptionsSeed(gameID string, questionID int64) uint64 {
 // concern. swap mirrors the signature [rand.Rand.Shuffle] expects.
 func shuffleByGame(gameID string, questionID int64, n int, swap func(i, j int)) {
 	seed := shuffleOptionsSeed(gameID, questionID)
-	// G404: deterministic-by-design — we need the same (gameID,
+	// G404: deterministic-by-design - we need the same (gameID,
 	// questionID) to always yield the same permutation across reloads
 	// and process restarts. crypto/rand cannot do that because it
 	// doesn't accept a seed. No secret protection is at stake; the
@@ -908,7 +908,7 @@ func HandleBreakSeen(logger *slog.Logger, service *game.Service) http.Handler {
 // correctOptionIDsFromAnswer extracts the IDs of every option flagged
 // correct on the question the player just answered. SubmitAnswer
 // populates Answer.Question.QuizQuestion with the full option set so
-// this read is local — no extra store round-trip. Returns nil when the
+// this read is local - no extra store round-trip. Returns nil when the
 // quiz question was not populated (defensive; shouldn't happen in the
 // production code path).
 func correctOptionIDsFromAnswer(a *game.Answer) []int64 {
@@ -929,10 +929,10 @@ func correctOptionIDsFromAnswer(a *game.Answer) []int64 {
 // [game.Service.SubmitAnswer] to the right HTTP status. Pulled out of
 // HandleAnswerPost so the handler stays under revive's
 // function-length limit.
-//   - ErrGameNotFound / ErrQuestionNotInGame → 404
-//   - ErrOptionNotInQuestion → 400
-//   - ErrAnswerAlreadyRecorded → 409 (double-tap / retry; #353)
-//   - anything else → 500 via writeInternalError
+//   - ErrGameNotFound / ErrQuestionNotInGame -> 404
+//   - ErrOptionNotInQuestion -> 400
+//   - ErrAnswerAlreadyRecorded -> 409 (double-tap / retry; #353)
+//   - anything else -> 500 via writeInternalError
 func writeSubmitAnswerError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err error) {
 	switch {
 	case errors.Is(err, game.ErrGameNotFound), errors.Is(err, game.ErrQuestionNotInGame):
@@ -1040,7 +1040,7 @@ func newPlayerResponse(p *auth.Player) playerResponse {
 // (no password_hash set), and whether they have explicitly picked a
 // display name. hasCustomName and isAnonymous are deliberately
 // independent concepts: a registered user with a password is never
-// anonymous, but a claimed-but-passwordless visitor still is — callers
+// anonymous, but a claimed-but-passwordless visitor still is - callers
 // that care about "did this player choose this name" should look at
 // hasCustomName, not isAnonymous. The username is shown verbatim so a
 // fresh petname can be displayed as-is until the player renames.
@@ -1107,7 +1107,7 @@ func HandlePlayerClaimName(
 			case errors.Is(err, auth.ErrPlayerNotAnonymous):
 				// #289: distinct code so the JS can tell "name in use
 				// by someone else" from "this account already has a
-				// claimed name". The latter is a state-drift signal —
+				// claimed name". The latter is a state-drift signal -
 				// the client should re-fetch /me and dismiss the
 				// modal, not show "name is taken".
 				writeClaimNameError(w, r, logger,
@@ -1126,7 +1126,7 @@ func HandlePlayerClaimName(
 		// appears on so other clients' SSE streams pick up the new
 		// display name without waiting for the next answer-submit
 		// publish. Best-effort: a failure here logs but does not fail
-		// the HTTP response — the rename itself already succeeded.
+		// the HTTP response - the rename itself already succeeded.
 		if perr := gameService.PublishLeaderboardForPlayer(ctx, current.ID); perr != nil {
 			logger.ErrorContext(ctx, "error publishing leaderboard for renamed player",
 				slog.Int64("playerId", current.ID), slog.Any("err", perr))
@@ -1163,7 +1163,7 @@ func HandleGameResults(logger *slog.Logger, service *game.Service) http.Handler 
 		results, err := service.GetResults(r.Context(), gameID, playerID)
 		if err != nil {
 			if errors.Is(err, game.ErrGameNotFound) {
-				// User-supplied bad ID — Info, not Error (#369).
+				// User-supplied bad ID - Info, not Error (#369).
 				logger.InfoContext(r.Context(), "game not found", slog.Any("err", err))
 				http.NotFound(w, r)
 

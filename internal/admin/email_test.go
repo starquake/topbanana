@@ -408,6 +408,7 @@ func TestHandleEmailTest_DetachesRequestContext(t *testing.T) {
 	limiter := NewEmailRateLimiterWithClock(
 		10*time.Second,
 		func() time.Time { return time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC) },
+		nil,
 	)
 
 	form := "to=ops@example.test"

@@ -66,7 +66,7 @@ type Manager struct {
 // New returns a Manager whose signing key is derived from the given session
 // key using HMAC-SHA256. Passing the same SESSION_KEY produces the same CSRF
 // key so the manager survives process restarts without invalidating tokens.
-// secureCookies controls the Secure attribute on issued nonce cookies — see
+// secureCookies controls the Secure attribute on issued nonce cookies - see
 // Config.SecureCookies in internal/config for the policy and #205 for why
 // it is gated.
 func New(sessionKey []byte, secureCookies bool) *Manager {
@@ -84,7 +84,7 @@ func New(sessionKey []byte, secureCookies bool) *Manager {
 // longer matches the form rendered from the first call.
 //
 // Callers that already wrote a response status should still call Token before
-// flushing the body — [http.SetCookie] writes a header, which only takes effect
+// flushing the body - [http.SetCookie] writes a header, which only takes effect
 // before WriteHeader.
 func (m *Manager) Token(w http.ResponseWriter, r *http.Request) string {
 	if c, err := r.Cookie(CookieName); err == nil && c.Value != "" {
@@ -187,7 +187,7 @@ func newNonce() string {
 
 // newCookie returns a fresh CSRF nonce cookie. HttpOnly and SameSite=Lax
 // are always set; the Secure attribute follows the Manager's
-// secureCookies field — see [New]'s doc comment for the rationale.
+// secureCookies field - see [New]'s doc comment for the rationale.
 func (m *Manager) newCookie(value string) *http.Cookie {
 	//nolint:gosec // G124: Secure is intentionally policy-driven (production
 	// passes true via cfg.SecureCookies(); dev passes false so plain-HTTP

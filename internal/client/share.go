@@ -18,7 +18,7 @@ import (
 const (
 	defaultOGTitle       = "Be the Top Banana!"
 	defaultOGDescription = "Make a quiz, share the link, see who's the top banana."
-	pageTitleSuffix      = " — Top Banana!"
+	pageTitleSuffix      = " - Top Banana!"
 )
 
 // QuizLookup is the subset of the quiz store the per-quiz share handler uses.
@@ -29,7 +29,7 @@ type QuizLookup interface {
 // ShellHandlers serves the SPA shell with Open Graph metadata injected per
 // request. /client/{$} renders sitewide defaults; /play/{slugID} overrides
 // og:title and og:description with the named quiz's own values so chat-app
-// link previews (WhatsApp, Slack, Discord, …) surface the quiz a host is
+// link previews (WhatsApp, Slack, Discord, ...) surface the quiz a host is
 // sharing instead of generic site copy.
 type ShellHandlers struct {
 	cfg       *config.Config
@@ -43,14 +43,14 @@ func NewShellHandlers(cfg *config.Config, quizStore QuizLookup, logger *slog.Log
 }
 
 // shellData feeds the index.html template. One title value drives both
-// <title> and og:title — html/template applies the right escaping per
+// <title> and og:title - html/template applies the right escaping per
 // context, so a single string is enough.
 type shellData struct {
 	Title       string
 	Description string
 }
 
-// Index handles GET /client/{$} — the SPA root with no quiz context. Uses
+// Index handles GET /client/{$} - the SPA root with no quiz context. Uses
 // the sitewide default Open Graph card.
 func (s *ShellHandlers) Index(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, shellData{
@@ -61,7 +61,7 @@ func (s *ShellHandlers) Index(w http.ResponseWriter, r *http.Request) {
 
 // Play handles GET /play/{slugID}. Looks the quiz up by slug-id and injects
 // its title and description into the Open Graph card. A missing or
-// unparseable slug falls back to sitewide defaults — the SPA itself surfaces
+// unparseable slug falls back to sitewide defaults - the SPA itself surfaces
 // the missing-quiz state via its own API call, so a degraded preview is
 // preferable to a 404 on the share link.
 func (s *ShellHandlers) Play(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +85,7 @@ func (s *ShellHandlers) Play(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, data)
 }
 
-// render parses index.html on each request: cheap (~50µs for a ~100-line
+// render parses index.html on each request: cheap (~50us for a ~100-line
 // file) and keeps the ClientDir dev path picking up live edits without a
 // rebuild. Page loads are infrequent compared to /api/* traffic, so the
 // extra allocation is in the noise.
@@ -102,7 +102,7 @@ func (s *ShellHandlers) render(w http.ResponseWriter, r *http.Request, data shel
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := t.Execute(w, data); err != nil {
-		// Headers are already flushed — log and let the client see a
+		// Headers are already flushed - log and let the client see a
 		// truncated response rather than a stray 500.
 		s.logger.ErrorContext(r.Context(), "render index template", slog.Any("err", err))
 	}

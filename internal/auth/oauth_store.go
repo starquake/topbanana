@@ -37,7 +37,7 @@ type OAuthIdentityStore interface {
 	// existing anonymous (no password_hash, no email) players row, so
 	// a visitor's pre-sign-in identity carries onto their first OAuth
 	// login. Returns ErrPlayerNotFound when the row is missing, has
-	// already been credentialled, or already carries an email — in
+	// already been credentialled, or already carries an email - in
 	// each case the caller falls through to the create-fresh-player
 	// path. The username on the row is left untouched.
 	ClaimPlayerForOAuth(ctx context.Context, playerID int64, email string) (*Player, error)

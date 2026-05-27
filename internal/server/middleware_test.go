@@ -78,7 +78,7 @@ func TestRecoverPanic_LogsAndReturns500(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 
 	handler := ExportRecoverPanic(logger, http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
-		panic("kaboom — synthetic test panic")
+		panic("kaboom - synthetic test panic")
 	}))
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/boom", nil)
@@ -104,7 +104,7 @@ func TestRecoverPanic_IgnoresErrAbortHandler(t *testing.T) {
 
 	// http.ErrAbortHandler is the documented sentinel for an
 	// intentional abort. recoverPanic must NOT promote it to a 500
-	// or log at Error — that would turn a feature into noise.
+	// or log at Error - that would turn a feature into noise.
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 

@@ -9,7 +9,7 @@ import (
 
 // TestClampTappedAt pins the #237 trust window. The recorded AnsweredAt
 // must equal the client's tappedAt only when it lands inside
-// [startedAt, serverNow] — anything else falls back to serverNow, never
+// [startedAt, serverNow] - anything else falls back to serverNow, never
 // to tappedAt. The asymmetry matters: a clamp that returned the closer
 // edge of the window would let a forward-skewed client get a faster
 // score than they actually earned.

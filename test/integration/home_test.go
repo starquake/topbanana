@@ -210,7 +210,7 @@ func TestHome_Integration(t *testing.T) {
 		body := getBody(ctx, t, baseURL+"/quizzes")
 
 		for _, want := range []string{
-			`<title>All quizzes — Top Banana!</title>`,
+			`<title>All quizzes - Top Banana!</title>`,
 			"Bananas of the World",
 			"Capital Cities",
 			// The never-played quiz must appear — the home page would

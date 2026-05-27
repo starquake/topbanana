@@ -15,7 +15,7 @@ var HumanizeTime = humanizeTime
 var AccountTypeLabel = accountTypeLabel
 
 // ParsePageParam exposes the unexported ?page= parser so the test can
-// pin the clamping rules (blank / negative / non-numeric → 1).
+// pin the clamping rules (blank / negative / non-numeric -> 1).
 var ParsePageParam = parsePageParam
 
 // TotalPagesFor exposes the unexported ceiling-division helper used by

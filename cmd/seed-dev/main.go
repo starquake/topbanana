@@ -1,6 +1,6 @@
 // seed-dev populates the local dev database with a fixture-driven set
 // of quizzes plus a handful of finished games. Intended purely for
-// hand-eyeballing the player/admin UI on a populated DB — the fixture
+// hand-eyeballing the player/admin UI on a populated DB - the fixture
 // file lives in dev/fixtures and is not embedded into the production
 // binary. Idempotent on quizzes (a duplicate slug is treated as
 // already-present and skipped, surfaced via [quiz.ErrSlugTaken]) so
@@ -56,7 +56,7 @@ const (
 
 // PCG seed words for [seedPlays]. Arbitrary values picked so the
 // deterministic seed has named symbols the magic-number linter can
-// accept. No security relevance — the shuffle is observable.
+// accept. No security relevance - the shuffle is observable.
 const (
 	rngSeed1 uint64 = 0xfeed
 	rngSeed2 uint64 = 0xc0ffee
@@ -170,7 +170,7 @@ func loadFixtures(path string) ([]quizFixture, error) {
 
 // seedQuizzes calls CreateQuiz for each fixture. Slug collisions
 // (re-running the seeder) are treated as "already present" and logged
-// at info level rather than failing the whole run — the operator
+// at info level rather than failing the whole run - the operator
 // usually wants idempotent behaviour for a dev-time seed.
 func seedQuizzes(
 	ctx context.Context, logger *slog.Logger,
@@ -222,11 +222,11 @@ func quizFromFixture(f *quizFixture) *quiz.Quiz {
 // seedPlays creates playerCount anonymous players and finishes
 // playsPerPlayer random quizzes for each. Returns the total number of
 // finished games written. A finished game in this schema is one with
-// every quiz question registered as a game_questions row — the home
+// every quiz question registered as a game_questions row - the home
 // page's popular list counts these as "plays" (#166).
 //
 // The deterministic-but-arbitrary PCG seed makes the per-run mix
-// reproducible — re-running on the same fixture yields the same
+// reproducible - re-running on the same fixture yields the same
 // (player, quiz) pairings, so the popular list visibly differs by
 // fixture set, not by run-to-run noise.
 func seedPlays(
@@ -252,7 +252,7 @@ func seedPlays(
 	total := 0
 	for _, p := range players {
 		// Sample without replacement so a single player doesn't get
-		// counted twice on the same quiz — the (player, quiz) unique
+		// counted twice on the same quiz - the (player, quiz) unique
 		// index would reject the second insert anyway, but failing
 		// loudly on a foreseeable collision is worse than just picking
 		// distinct quizzes up front.
@@ -279,7 +279,7 @@ func seedPlays(
 
 // finishGame creates a game + participant + one game_question per
 // quiz question so the row counts as finished by both the leaderboard
-// SQL and the popular-quiz SQL. Answers aren't written — the home
+// SQL and the popular-quiz SQL. Answers aren't written - the home
 // page and the per-quiz leaderboard both gate on questions-issued,
 // not answers-submitted.
 func finishGame(ctx context.Context, games game.Store, playerID int64, q *quiz.Quiz) error {

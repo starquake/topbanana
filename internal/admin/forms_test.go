@@ -10,7 +10,7 @@ import (
 // TestQuizForm_Valid pins the form-level rules the admin quiz save
 // surface depends on. Moved from internal/quiz/quiz_test.go in #36
 // when the validation was lifted off the domain struct onto the
-// admin form type — the rules and the cases that pin them are now
+// admin form type - the rules and the cases that pin them are now
 // colocated with the markup that renders them.
 func TestQuizForm_Valid(t *testing.T) {
 	t.Parallel()
@@ -56,7 +56,7 @@ func TestQuizForm_Valid(t *testing.T) {
 			},
 			{
 				// Multi-correct, no-correct, and all-correct are all
-				// allowed configurations — the admin UI offers a checkbox
+				// allowed configurations - the admin UI offers a checkbox
 				// per option and the player flow handles each.
 				name: "valid quiz with multiple correct options on a question",
 				quiz: quiz.Quiz{

@@ -5,7 +5,7 @@
 -- migration kept the lowest game_participants.id per (player, quiz)
 -- but explicitly left the dropped duplicates' parent games and their
 -- dependent rows in place ("nothing player-keyed queries them after
--- the dedup. A future cleanup migration can sweep them.") — this is
+-- the dedup. A future cleanup migration can sweep them.") - this is
 -- that migration.
 --
 -- The orphans matter because ListPopularQuizzes joins on `games`
@@ -13,7 +13,7 @@
 -- inflating popularity. They also bloat scan time and confuse any
 -- analytics query reading the raw tables.
 --
--- Delete in dependency order: answers → questions → games. The
+-- Delete in dependency order: answers -> questions -> games. The
 -- subselect identifies orphan game IDs once; doing it inline three
 -- times would re-scan each delete.
 

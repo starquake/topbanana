@@ -38,7 +38,7 @@ func (s *QuizStore) Ping(ctx context.Context) error {
 }
 
 // ListQuizzes returns a summary list of quizzes without questions or options.
-// Includes rows of every visibility — use [QuizStore.ListPublicQuizzes] from
+// Includes rows of every visibility - use [QuizStore.ListPublicQuizzes] from
 // public-facing handlers.
 func (s *QuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 	rows, err := s.q.ListQuizzes(ctx)
@@ -69,7 +69,7 @@ func (s *QuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 }
 
 // ListPublicQuizzes returns the visibility=public subset of
-// [QuizStore.ListQuizzes] (#103). Same shape, same ordering — just the
+// [QuizStore.ListQuizzes] (#103). Same shape, same ordering - just the
 // rows safe to surface to anonymous traffic.
 func (s *QuizStore) ListPublicQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 	rows, err := s.q.ListPublicQuizzes(ctx)
@@ -413,8 +413,8 @@ func (s *QuizStore) SwapQuestionPositions(
 // stays under revive's function-length limit. SQLite checks
 // UNIQUE(quiz_id, position) per statement (no deferred uniqueness),
 // so a naive two-step swap trips the constraint on the first UPDATE.
-// Park the current row at -current.ID — guaranteed unique because IDs
-// are positive — move the neighbour into the current row's slot,
+// Park the current row at -current.ID - guaranteed unique because IDs
+// are positive - move the neighbour into the current row's slot,
 // then settle the current row into the neighbour's old slot.
 func execSwapQuestionPositions(
 	ctx context.Context, q *db.Queries, currentID, currentPos, neighbourID, neighbourPos int64,
@@ -487,7 +487,7 @@ func (s *QuizStore) GetOptionsByIDs(ctx context.Context, ids []int64) ([]*quiz.O
 // onto [quiz.ErrSlugTaken] when the underlying SQLite failure is a
 // UNIQUE-constraint violation. `slug` is the only UNIQUE column on the
 // quizzes table (see migration 20251201084529 / 20260520200000), so a
-// SQLITE_CONSTRAINT_UNIQUE on this path can only mean a slug collision —
+// SQLITE_CONSTRAINT_UNIQUE on this path can only mean a slug collision -
 // the classifier doesn't need to inspect the error message to
 // disambiguate. The wrapped err is still returned via %w so callers
 // using [errors.Is] can still recover the original sqlite.Error if
@@ -884,7 +884,7 @@ func (*QuizStore) deleteOption(ctx context.Context, q *db.Queries, id int64) err
 }
 
 // nullableTimeLimit packs a *int into the [sql.NullInt64] the sqlc-generated
-// params expect for questions.time_limit_seconds. nil → NULL, which the
+// params expect for questions.time_limit_seconds. nil -> NULL, which the
 // game service treats as "inherit the quiz default" (#99).
 func nullableTimeLimit(v *int) sql.NullInt64 {
 	if v == nil {

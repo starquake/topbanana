@@ -20,7 +20,7 @@ import (
 	"github.com/starquake/topbanana/internal/store"
 )
 
-// TestMain wires goose's global state up once for the package — calling
+// TestMain wires goose's global state up once for the package - calling
 // SetupGoose from parallel tests races on the goose package-level fields.
 func TestMain(m *testing.M) {
 	database.SetupGoose()
@@ -163,10 +163,10 @@ func TestResetPassword_HappyPath_RotatesHash(t *testing.T) {
 		t.Errorf("PasswordHash after ResetPassword = %q, want a value different from %q", got, want)
 	}
 	if err := auth.CheckPassword(p.PasswordHash, newPassword); err != nil {
-		t.Errorf("CheckPassword(newPassword) err = %v, want nil — new hash should validate", err)
+		t.Errorf("CheckPassword(newPassword) err = %v, want nil - new hash should validate", err)
 	}
 
-	// Prompts must land on stdout, slog output must land on stderr —
+	// Prompts must land on stdout, slog output must land on stderr -
 	// scripts piping the password in rely on `2>/dev/null` discarding logs
 	// without eating prompt text.
 	stdoutStr := stdout.String()
@@ -231,7 +231,7 @@ func TestResetPassword_UnknownUsername_ReturnsError(t *testing.T) {
 	}
 
 	// The user-not-found check fires before any prompt, so stdout should
-	// remain empty — no point asking for a password we will never use.
+	// remain empty - no point asking for a password we will never use.
 	if got := stdout.String(); got != "" {
 		t.Errorf("stdout = %q, want empty (unknown username should fail before prompting)", got)
 	}
@@ -263,7 +263,7 @@ func TestResetPassword_PasswordTooShort_ReturnsError(t *testing.T) {
 // TestResetPassword_PasswordTooLong_ReturnsError covers the bcrypt 72-byte
 // cap. Without an upfront check, [bcrypt.GenerateFromPassword] either
 // truncates silently or returns ErrPasswordTooLong depending on lib version
-// — surfacing it as a typed sentinel keeps the operator-facing message
+// - surfacing it as a typed sentinel keeps the operator-facing message
 // stable across upgrades.
 func TestResetPassword_PasswordTooLong_ReturnsError(t *testing.T) {
 	t.Parallel()

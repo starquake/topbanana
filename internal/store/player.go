@@ -43,7 +43,7 @@ func (s *PlayerStore) Ping(ctx context.Context) error {
 //
 // Whitespace around the username is trimmed before lookup so callers cannot
 // accidentally treat "alice" and " alice " as different users. The matching
-// trim happens in CreatePlayer too — defense in depth at the storage layer.
+// trim happens in CreatePlayer too - defense in depth at the storage layer.
 func (s *PlayerStore) GetPlayerByUsername(ctx context.Context, username string) (*auth.Player, error) {
 	row, err := s.q.GetPlayerByUsername(ctx, strings.TrimSpace(username))
 	if err != nil {
@@ -275,7 +275,7 @@ func (s *PlayerStore) CreatePlayerFromOAuth(
 // ClaimPlayerForOAuth attaches an OAuth-verified email to an existing
 // anonymous (no password_hash, no email) players row. Returns
 // auth.ErrPlayerNotFound when the row does not match the
-// anonymous-only guards in the SQL — the OAuth handler treats that
+// anonymous-only guards in the SQL - the OAuth handler treats that
 // sentinel as "fall through to create a new row" so a session
 // pointing at a deleted, credentialled, or already-OAuth-linked row
 // degrades gracefully.
