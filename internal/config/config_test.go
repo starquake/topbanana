@@ -207,6 +207,72 @@ func TestParse(t *testing.T) {
 		}
 	})
 
+	t.Run("web static dir default empty", func(t *testing.T) {
+		t.Parallel()
+
+		getenv := func(key string) string {
+			envs := map[string]string{
+				"APP_ENV":     "development",
+				"SESSION_KEY": "test-session-key",
+			}
+
+			return envs[key]
+		}
+
+		c, err := Parse(getenv)
+		if err != nil {
+			t.Fatalf("error parsing config: %v", err)
+		}
+		if got, want := c.WebStaticDir, ""; got != want {
+			t.Errorf("WebStaticDir = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("web static dir read from env in development", func(t *testing.T) {
+		t.Parallel()
+
+		getenv := func(key string) string {
+			envs := map[string]string{
+				"APP_ENV":        "development",
+				"WEB_STATIC_DIR": "internal/web/static",
+				"SESSION_KEY":    "test-session-key",
+			}
+
+			return envs[key]
+		}
+
+		c, err := Parse(getenv)
+		if err != nil {
+			t.Fatalf("error parsing config: %v", err)
+		}
+		if got, want := c.WebStaticDir, "internal/web/static"; got != want {
+			t.Errorf("WebStaticDir = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("web static dir ignored in production", func(t *testing.T) {
+		t.Parallel()
+
+		getenv := func(key string) string {
+			envs := map[string]string{
+				"APP_ENV":        "production",
+				"WEB_STATIC_DIR": "should/be/overridden",
+				"DB_URI":         "file:test.sqlite",
+				"SESSION_KEY":    "test-session-key",
+			}
+
+			return envs[key]
+		}
+
+		c, err := Parse(getenv)
+		if err != nil {
+			t.Fatalf("error parsing config: %v", err)
+		}
+		if got, want := c.WebStaticDir, ""; got != want {
+			t.Errorf("WebStaticDir = %q, want %q (production must ignore the env var)", got, want)
+		}
+	})
+
 	t.Run("empty SESSION_KEY in production", func(t *testing.T) {
 		t.Parallel()
 
