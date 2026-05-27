@@ -12,13 +12,17 @@ make smoke            # validate startup against the existing dev DB (no HTTP li
 
 ## Commits and PRs
 
-Workflow:
+Per-change order of operations:
 
-1. After the change passes `make lint-fix`, `make check`, `make test-e2e`, and `make smoke`, stage the files explicitly (`git add <paths>` — never `-A` or `.`), commit, push the branch, and open a draft PR so the user can review the diff on GitHub. PR body follows "Linking a PR to a ticket" below.
-2. Use plain language commit messages — avoid jargon. Prefer simple verbs like "change", "update", "fix", "add", "remove". Start the message with a capital letter. Keep them to a single short subject line; do not add a body, Summary, or rationale paragraphs.
-3. Ask explicitly: "Did the review look OK?" or equivalent. Wait for their explicit go-ahead — silence is not consent. Do not merge before sign-off; do not merge while the PR is still a Draft.
+1. Implement the change.
+2. Run the full local check suite: `make lint-fix`, `make check`, `make smoke`, `make test-e2e`. Fix anything they surface.
+3. Run the `/review` + `/go-style-review` loop. Fix every actionable finding; re-run until both return clean. The diff that ships to GitHub must already be review-clean — findings landing as follow-up commits are friction we don't want. Hold the line on this step order even if asked "isn't the review supposed to be after push?": it is not.
+4. Stage the files explicitly (`git add <paths>` — never `-A` or `.`), so secrets and binaries don't sneak in.
+5. Commit with a plain-language subject line. Avoid jargon; prefer simple verbs ("change", "update", "fix", "add", "remove"); start with a capital letter; single short subject line, no body or rationale paragraphs.
+6. Push the branch and open a draft PR. PR body follows "Linking a PR to a ticket" below.
+7. Ask explicitly: "Did the review look OK?" or equivalent. Wait for the user's explicit go-ahead — silence is not consent. Do not merge before sign-off; do not merge while the PR is still a Draft.
 
-If you make further changes after the sign-off (e.g. fixing a lint issue, addressing a comment), commit and push them, then ask for sign-off on the new lines too.
+**Sign-off does not carry.** A "looks good" covers only the diff that was on GitHub at that moment. If you make any further change after sign-off — fixing a lint issue, addressing a comment, anything — commit and push it, then ask for sign-off again on the new lines.
 
 ### Linking a PR to a ticket
 
@@ -29,7 +33,8 @@ If you make further changes after the sign-off (e.g. fixing a lint issue, addres
 
 ## Testing
 
-Every change or new feature must have tests. Run `make lint-fix`, `make check`, `make test-e2e`, and `make smoke` before marking work done.
+Every change or new feature must have tests. The command sequence to run before marking work done is the per-change workflow at the top of this file; this section is only about *what* to test and *where* to put the test.
+
 `make check` only exercises a fresh DB, so migration or startup issues that only surface against populated data otherwise slip through. `make smoke` runs `go run ./cmd/server/ -check` to parse config, open the dev DB, run migrations, and exit — no port juggling, no leftover process.
 
 **Write a test instead of an ad-hoc check script.** When you need to verify something works — a new endpoint, a flow, a config side effect, an asset getting served — express it as a test, not as a one-off `curl`, `wget`, scripted Playwright session, or bash probe. A scripted check verifies behaviour once at implementation time and gets thrown away; a test catches regressions forever.
@@ -62,6 +67,19 @@ gh api -X PUT repos/starquake/topbanana/branches/main/protection --input <payloa
 ```
 
 When removing a workflow job, drop its context from the required list too — leaving a stale required-context name makes every PR mergeable-blocked indefinitely.
+
+## Comments
+
+Default to writing **no** comments. Code with well-named identifiers, small functions, and clear control flow explains *what* it does — that's not the comment's job. A comment earns its place only when the *why* is non-obvious: a hidden constraint, a subtle invariant, a workaround for a specific bug, behaviour that would surprise a reader.
+
+If removing the comment wouldn't confuse a future reader, don't write it.
+
+- Don't restate the code (`// increment i`, `// open the file`, `// the X package` above a `package x` declaration).
+- Don't reference the current task, fix, or caller (`// used by X`, `// added for Y`, `// handles the case from issue #123`) — those belong in the PR description and rot as the codebase evolves.
+- Don't write multi-paragraph rationale or step-by-step narration. One short line per real `why` is usually enough.
+- Issue links are fine when they're load-bearing: `// see #165` stays accurate because issues don't move.
+
+When in doubt, leave the comment out. A reviewer who finds the code unclear will ask, and that's a better signal of what actually needs a comment.
 
 ## Comments that reach across files
 
