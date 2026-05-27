@@ -75,3 +75,26 @@ func EmailRateLimiterEntryCount(l *EmailRateLimiter) int {
 
 	return len(l.last)
 }
+
+// QuizImportPayload exposes the unexported import wire-shape to the
+// external admin_test package so the per-branch translation tests can
+// build payloads without exporting the struct.
+type QuizImportPayload = quizImportPayload
+
+// QuizImportQuestionPayload is the question half of [QuizImportPayload].
+type QuizImportQuestionPayload = quizImportQuestionPayload
+
+// QuizImportOptionPayload is the option half of [QuizImportPayload].
+type QuizImportOptionPayload = quizImportOptionPayload
+
+// QuizImportBreakPayload is the break half of [QuizImportPayload].
+type QuizImportBreakPayload = quizImportBreakPayload
+
+// QuizFromImportPayload exposes the unexported import-translation
+// helper so the test package can pin the payload-to-domain mapping
+// without spinning the full HTTP handler.
+var QuizFromImportPayload = quizFromImportPayload
+
+// ValidateImportBreaks exposes the import-side break validator so the
+// test package can pin the duplicate-position and slot-mismatch rules.
+var ValidateImportBreaks = validateImportBreaks

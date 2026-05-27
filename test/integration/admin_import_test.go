@@ -277,6 +277,153 @@ func TestAdminImport_Integration(t *testing.T) {
 		}
 	})
 
+	t.Run("imports breaks and renders them on the quiz view", func(t *testing.T) {
+		t.Parallel()
+		// #443: the import wire format now accepts a `breaks` array.
+		// A successful import should persist each break against the
+		// new quiz row and the resulting quiz view must list them
+		// alongside the questions, matching what the admin would see
+		// for a quiz built via the regular CRUD forms.
+		csrf := fetchCSRFToken(ctx, t, client, importURL)
+		const breaksJSON = `{
+  "title": "Import With Breaks",
+  "description": "Round-trip breaks through the import path.",
+  "breaks": [
+    { "position": 0, "text": "Welcome to the round-trip quiz!" },
+    { "position": 1, "text": "Halfway interlude after Q1." }
+  ],
+  "questions": [
+    {
+      "text": "First question?",
+      "options": [
+        { "text": "Yes", "correct": true  },
+        { "text": "No",  "correct": false }
+      ]
+    },
+    {
+      "text": "Second question?",
+      "options": [
+        { "text": "A", "correct": true  },
+        { "text": "B", "correct": false }
+      ]
+    }
+  ]
+}`
+		form := url.Values{}
+		form.Add("json", breaksJSON)
+		form.Add("csrf_token", csrf)
+		req, err := http.NewRequestWithContext(
+			ctx, http.MethodPost, importURL, strings.NewReader(form.Encode()),
+		)
+		if err != nil {
+			t.Fatalf("NewRequest err = %v, want nil", err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("POST import client.Do err = %v, want nil", err)
+		}
+		if cerr := resp.Body.Close(); cerr != nil {
+			t.Errorf("Body.Close err = %v, want nil", cerr)
+		}
+		if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
+			t.Fatalf("POST import status = %d, want %d", got, want)
+		}
+		quizPath := resp.Header.Get("Location")
+		if got, want := quizPath, "/admin/quizzes/"; !strings.HasPrefix(got, want) {
+			t.Fatalf("Location = %q, want prefix %q", got, want)
+		}
+
+		viewReq, err := http.NewRequestWithContext(
+			ctx, http.MethodGet, srv.BaseURL+quizPath, nil,
+		)
+		if err != nil {
+			t.Fatalf("NewRequest err = %v, want nil", err)
+		}
+		viewResp, err := client.Do(viewReq)
+		if err != nil {
+			t.Fatalf("GET quiz view client.Do err = %v, want nil", err)
+		}
+		viewBytes, err := io.ReadAll(viewResp.Body)
+		if err != nil {
+			t.Fatalf("ReadAll err = %v, want nil", err)
+		}
+		if cerr := viewResp.Body.Close(); cerr != nil {
+			t.Errorf("Body.Close err = %v, want nil", cerr)
+		}
+		if got, want := viewResp.StatusCode, http.StatusOK; got != want {
+			t.Fatalf("GET quiz view status = %d, want %d", got, want)
+		}
+		body := string(viewBytes)
+		for _, want := range []string{
+			"Welcome to the round-trip quiz!",
+			"Halfway interlude after Q1.",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("quiz view body should contain break text %q", want)
+			}
+		}
+	})
+
+	t.Run("rejects duplicate break positions", func(t *testing.T) {
+		t.Parallel()
+		// Two breaks at the same slot is rejected at the form layer
+		// (the payload-side duplicate-position check fires before any
+		// DB call), so the response is 400 with the form re-rendered
+		// and the offending position called out.
+		const dupBreaksJSON = `{
+  "title": "Dup Break Positions",
+  "description": "Two breaks at position 0.",
+  "breaks": [
+    { "position": 0, "text": "first" },
+    { "position": 0, "text": "second" }
+  ],
+  "questions": [
+    {
+      "text": "Q",
+      "options": [
+        { "text": "A", "correct": true  },
+        { "text": "B", "correct": false }
+      ]
+    }
+  ]
+}`
+		postImportRejection(
+			ctx, t, client, importURL, dupBreaksJSON,
+			http.StatusBadRequest,
+			[]string{"break position 0", "at most one"},
+		)
+	})
+
+	t.Run("rejects break at unknown question position", func(t *testing.T) {
+		t.Parallel()
+		// Position 5 has no matching question, so breakForm.Valid
+		// rejects it via the import-side validator. Pin the failure
+		// path so a future loosening of breakForm doesn't quietly let
+		// a phantom-slot break slip through.
+		const badPosJSON = `{
+  "title": "Bad Position Break",
+  "description": "Break at position 5 but only one question exists.",
+  "breaks": [
+    { "position": 5, "text": "huh?" }
+  ],
+  "questions": [
+    {
+      "text": "Q",
+      "options": [
+        { "text": "A", "correct": true  },
+        { "text": "B", "correct": false }
+      ]
+    }
+  ]
+}`
+		postImportRejection(
+			ctx, t, client, importURL, badPosJSON,
+			http.StatusBadRequest,
+			[]string{"break at position 5"},
+		)
+	})
+
 	t.Run("duplicate title returns 409", func(t *testing.T) {
 		t.Parallel()
 		// The first import above succeeded with title "Import Round-Trip"
