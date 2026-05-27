@@ -308,3 +308,43 @@ UPDATE players
 SET email_verified_at = CURRENT_TIMESTAMP
 WHERE id = sqlc.arg('id')
   AND email_verified_at IS NULL;
+
+-- name: CreateEmailVerifyToken :exec
+-- Stores the sha256 hash of a freshly minted verify-email token. The raw
+-- token only exists on the way out the door in the email; a DB leak should
+-- not be replayable against GET /verify-email.
+INSERT INTO email_verify_tokens (token_hash, player_id, expires_at)
+VALUES (sqlc.arg('token_hash'), sqlc.arg('player_id'), sqlc.arg('expires_at'));
+
+-- name: GetEmailVerifyToken :one
+-- Look up by token hash. Caller checks expires_at vs the wall clock and
+-- consumed_at IS NULL before treating it as live.
+SELECT *
+FROM email_verify_tokens
+WHERE token_hash = sqlc.arg('token_hash')
+LIMIT 1;
+
+-- name: ConsumeEmailVerifyToken :one
+-- Atomic consume: succeeds only when the row is still unconsumed and not
+-- expired. Returns the player_id so the caller can stamp email_verified_at
+-- in the same transaction. The caller passes the wall clock as 'now' so
+-- both sides of the expires_at comparison use the same RFC3339 encoding
+-- the modernc/sqlite driver writes - mixing time.Time with
+-- CURRENT_TIMESTAMP produces strings of different lengths and the
+-- lexicographic comparison silently lies. sql.ErrNoRows means the token
+-- was consumed, expired, or never existed; the caller maps that to a
+-- single user-facing "this link is no longer valid" response.
+UPDATE email_verify_tokens
+SET consumed_at = sqlc.arg('consumed_at')
+WHERE token_hash = sqlc.arg('token_hash')
+  AND consumed_at IS NULL
+  AND expires_at > sqlc.arg('now')
+RETURNING player_id;
+
+-- name: DeleteExpiredEmailVerifyTokens :exec
+-- Housekeeping for the startup sweep. Drops every row whose link has
+-- expired so the table does not grow without bound. The caller passes
+-- 'now' so the comparison runs in the same encoding the driver writes
+-- (see the ConsumeEmailVerifyToken note above).
+DELETE FROM email_verify_tokens
+WHERE expires_at <= sqlc.arg('now');

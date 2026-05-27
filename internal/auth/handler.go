@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"html/template"
@@ -9,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/csrf"
@@ -103,19 +105,35 @@ func HandleRegisterForm(
 	})
 }
 
+// RegisterDeps is the bundle of optional dependencies the register
+// handler needs to dispatch the email verification link. Bundled into
+// a struct so the handler signature stays under revive's
+// argument-limit cap as the dep set grows (#111). Mailer / Tokens /
+// BaseURL together cover the verify-email side; leave them as their
+// zero values and SendVerifyEmailBestEffort logs a warning instead of
+// sending, which is the right behaviour for unit tests.
+type RegisterDeps struct {
+	AdminUsernames []string
+	GoogleEnabled  bool
+	Mailer         VerifyEmailSender
+	Tokens         VerifyTokenStore
+	BaseURL        string
+}
+
 // HandleRegisterSubmit handles POST /register. When the caller already
 // has an anonymous session row, the handler upgrades that row via
 // ClaimPlayer so the visitor's game history follows them; if the row
 // was concurrently claimed it falls back to CreatePlayer. Usernames in
 // adminUsernames are promoted to admin; the first password-bearing
 // registrant is atomically promoted by the store (see CreatePlayer).
+// On success the handler dispatches a verification email best-effort
+// so an SMTP outage does not block the signup.
 func HandleRegisterSubmit(
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
 	players PlayerStore,
 	sessions *session.Manager,
-	adminUsernames []string,
-	googleEnabled bool,
+	deps RegisterDeps,
 ) http.Handler {
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/register.gohtml")
 
@@ -139,14 +157,14 @@ func HandleRegisterSubmit(
 				Username:   input.CleanedUsername,
 				Email:      input.CleanedEmail,
 				Message:    input.ErrMsg,
-				ShowGoogle: googleEnabled,
+				ShowGoogle: deps.GoogleEnabled,
 			})
 
 			return
 		}
 
 		role := RolePlayer
-		if slices.Contains(adminUsernames, input.CleanedUsername) {
+		if slices.Contains(deps.AdminUsernames, input.CleanedUsername) {
 			role = RoleAdmin
 		}
 
@@ -168,7 +186,7 @@ func HandleRegisterSubmit(
 					Username:   input.CleanedUsername,
 					Email:      input.CleanedEmail,
 					Message:    msg,
-					ShowGoogle: googleEnabled,
+					ShowGoogle: deps.GoogleEnabled,
 				})
 
 				return
@@ -179,9 +197,47 @@ func HandleRegisterSubmit(
 			return
 		}
 
+		dispatchVerifyEmail(r.Context(), logger, deps, player.ID, input.CleanedEmail)
 		sessions.Set(w, player.ID)
 		http.Redirect(w, r, landingPathFor(player.Role), http.StatusSeeOther)
 	})
+}
+
+// verifyEmailDispatchTimeout caps the detached SMTP attempt spawned by
+// dispatchVerifyEmail. Set above mailer.SendTimeout so the inner dial
+// gets its own 30 s budget before this outer timeout fires; the extra
+// margin covers GenerateVerifyToken + CreateVerifyToken.
+const verifyEmailDispatchTimeout = 45 * time.Second
+
+// dispatchVerifyEmail fires the verify-email send on a background
+// goroutine so the register response is not held open while SMTP dials.
+// The spawned context is detached from r.Context() so a closed browser
+// tab does not cancel the send. The deps fields are nil/empty in unit
+// tests that do not exercise the mail path; a partial-but-nonzero deps
+// (Mailer/Tokens set, BaseURL missing) is treated as a misconfiguration
+// and warned about so an operator notices.
+func dispatchVerifyEmail(
+	ctx context.Context,
+	logger *slog.Logger,
+	deps RegisterDeps,
+	playerID int64,
+	recipient string,
+) {
+	if deps.Mailer == nil || deps.Tokens == nil {
+		return
+	}
+	if deps.BaseURL == "" {
+		logger.WarnContext(ctx, "verify email dispatch skipped: BASE_URL is empty",
+			slog.Int64("player_id", playerID))
+
+		return
+	}
+	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), verifyEmailDispatchTimeout)
+	go func() {
+		defer cancel()
+		SendVerifyEmailBestEffort(bg, logger, deps.Tokens, deps.Mailer,
+			deps.BaseURL, recipient, playerID, time.Now().UTC())
+	}()
 }
 
 // registerCollisionMessage maps the register-time conflict sentinels
