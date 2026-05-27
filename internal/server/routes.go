@@ -40,7 +40,7 @@ func addRoutes(
 		flash:  admin.NewEmailFlash([]byte(cfg.SessionKey), cfg.SecureCookies()),
 	}
 
-	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg)
+	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mailerTester)
 	addAdminRoutes(mux, logger, stores, gameService, sessions, csrfMgr, emailDeps)
 	addProfileRoutes(mux, logger, stores, sessions, csrfMgr)
 	addAPIRoutes(mux, logger, stores, gameService, leaderboardHub, sessions)
@@ -113,6 +113,7 @@ func addAuthRoutes(
 	sessions *session.Manager,
 	csrfMgr *csrf.Manager,
 	cfg *config.Config,
+	mailerTester *mailer.Tester,
 ) {
 	csrfMW := csrfMgr.Middleware
 	googleEnabled := cfg.GoogleLoginEnabled()
@@ -122,7 +123,14 @@ func addAuthRoutes(
 		mux.Handle(
 			"POST /register",
 			csrfMW(auth.HandleRegisterSubmit(
-				logger, csrfMgr, stores.Players, sessions, cfg.AdminUsernames, googleEnabled,
+				logger, csrfMgr, stores.Players, sessions,
+				auth.RegisterDeps{
+					AdminUsernames: cfg.AdminUsernames,
+					GoogleEnabled:  googleEnabled,
+					Mailer:         mailerTester,
+					Tokens:         stores.VerifyTokens,
+					BaseURL:        cfg.BaseURL,
+				},
 			)),
 		)
 	}
@@ -138,6 +146,10 @@ func addAuthRoutes(
 		)),
 	)
 	mux.Handle("POST /logout", csrfMW(auth.HandleLogout(sessions)))
+
+	mux.Handle("GET /verify-email", auth.HandleVerifyEmail(
+		logger, csrfMgr, stores.VerifyTokens, stores.Players, sessions,
+	))
 
 	if googleEnabled {
 		googleAuth := auth.NewGoogleAuthenticator(auth.GoogleConfig{

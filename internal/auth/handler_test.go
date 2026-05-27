@@ -312,7 +312,7 @@ func TestHandleRegisterSubmit_FirstUser_BecomesAdmin(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
+	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"alice"},
@@ -357,7 +357,7 @@ func TestHandleRegisterSubmit_SecondUser_DefaultsToPlayer(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
+	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"bob"},
 		"email":    {"bob@example.test"},
@@ -396,8 +396,7 @@ func TestHandleRegisterSubmit_AdminUsernamesEnv_PromotesToAdmin(t *testing.T) {
 		nil,
 		store,
 		session.New([]byte("k"), true),
-		[]string{"alice", "carol"},
-		false,
+		RegisterDeps{AdminUsernames: []string{"alice", "carol"}},
 	)
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"carol"},
@@ -422,7 +421,7 @@ func TestHandleRegisterSubmit_PasswordTooShort(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
+	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"alice"},
@@ -450,7 +449,7 @@ func TestHandleRegisterSubmit_PasswordTooLong(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
+	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"alice"},
@@ -478,7 +477,7 @@ func TestHandleRegisterSubmit_DuplicateUsername(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
+	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"alice"},
 		"email":    {"alice@example.test"},
@@ -501,7 +500,7 @@ func TestHandleRegisterSubmit_DuplicateEmail(t *testing.T) {
 		t.Fatalf("seed CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
+	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"bob"},
 		"email":    {"shared@example.test"},
@@ -520,7 +519,7 @@ func TestHandleRegisterSubmit_RejectsInvalidEmail(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
+	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"alice"},
 		"email":    {"not-an-email"},
@@ -539,7 +538,7 @@ func TestHandleRegisterSubmit_LowercasesAndTrimsEmail(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
+	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"alice"},
 		"email":    {"  ALICE@Example.Test "},
@@ -573,7 +572,7 @@ func TestHandleRegisterSubmit_ClaimsAnonymousSession(t *testing.T) {
 	}
 
 	sessions := session.New([]byte("k"), true)
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, sessions, nil, false)
+	handler := HandleRegisterSubmit(discardLogger(), nil, store, sessions, RegisterDeps{})
 
 	// Build a request that already carries the anonymous session cookie.
 	rec := httptest.NewRecorder()
@@ -637,7 +636,7 @@ func TestHandleRegisterSubmit_ClaimWithTakenUsername(t *testing.T) {
 	}
 
 	sessions := session.New([]byte("k"), true)
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, sessions, nil, false)
+	handler := HandleRegisterSubmit(discardLogger(), nil, store, sessions, RegisterDeps{})
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, anon.ID)
@@ -698,7 +697,7 @@ func TestHandleRegisterSubmit_ClaimAlreadyClaimed_FallsBackToCreate(t *testing.T
 	}
 
 	sessions := session.New([]byte("k"), true)
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, sessions, nil, false)
+	handler := HandleRegisterSubmit(discardLogger(), nil, store, sessions, RegisterDeps{})
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, anon.ID) // cookie still points at the now-claimed row
@@ -1086,7 +1085,7 @@ func TestHandleRegisterSubmit_WhitespaceOnlyUsername(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
+	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"   "},
@@ -1110,7 +1109,7 @@ func TestHandleRegisterSubmit_PasswordExactlyMinLength(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
+	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 
 	password := strings.Repeat("a", MinPasswordLength) // exactly 13 characters
 	rec := postForm(t, handler, "/register", url.Values{

@@ -142,6 +142,37 @@ func (q *Queries) ClaimPlayerForOAuth(ctx context.Context, arg ClaimPlayerForOAu
 	return i, err
 }
 
+const consumeEmailVerifyToken = `-- name: ConsumeEmailVerifyToken :one
+UPDATE email_verify_tokens
+SET consumed_at = ?1
+WHERE token_hash = ?2
+  AND consumed_at IS NULL
+  AND expires_at > ?3
+RETURNING player_id
+`
+
+type ConsumeEmailVerifyTokenParams struct {
+	ConsumedAt sql.NullTime
+	TokenHash  string
+	Now        time.Time
+}
+
+// Atomic consume: succeeds only when the row is still unconsumed and not
+// expired. Returns the player_id so the caller can stamp email_verified_at
+// in the same transaction. The caller passes the wall clock as 'now' so
+// both sides of the expires_at comparison use the same RFC3339 encoding
+// the modernc/sqlite driver writes - mixing time.Time with
+// CURRENT_TIMESTAMP produces strings of different lengths and the
+// lexicographic comparison silently lies. sql.ErrNoRows means the token
+// was consumed, expired, or never existed; the caller maps that to a
+// single user-facing "this link is no longer valid" response.
+func (q *Queries) ConsumeEmailVerifyToken(ctx context.Context, arg ConsumeEmailVerifyTokenParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, consumeEmailVerifyToken, arg.ConsumedAt, arg.TokenHash, arg.Now)
+	var player_id int64
+	err := row.Scan(&player_id)
+	return player_id, err
+}
+
 const countAllPlayers = `-- name: CountAllPlayers :one
 SELECT COUNT(*) FROM players
 `
@@ -183,6 +214,25 @@ func (q *Queries) CreateAnonymousPlayer(ctx context.Context, username string) (P
 		&i.EmailVerifiedAt,
 	)
 	return i, err
+}
+
+const createEmailVerifyToken = `-- name: CreateEmailVerifyToken :exec
+INSERT INTO email_verify_tokens (token_hash, player_id, expires_at)
+VALUES (?1, ?2, ?3)
+`
+
+type CreateEmailVerifyTokenParams struct {
+	TokenHash string
+	PlayerID  int64
+	ExpiresAt time.Time
+}
+
+// Stores the sha256 hash of a freshly minted verify-email token. The raw
+// token only exists on the way out the door in the email; a DB leak should
+// not be replayable against GET /verify-email.
+func (q *Queries) CreateEmailVerifyToken(ctx context.Context, arg CreateEmailVerifyTokenParams) error {
+	_, err := q.db.ExecContext(ctx, createEmailVerifyToken, arg.TokenHash, arg.PlayerID, arg.ExpiresAt)
+	return err
 }
 
 const createPlayerFromOAuth = `-- name: CreatePlayerFromOAuth :one
@@ -285,10 +335,6 @@ type CreatePlayerWithCredentialsParams struct {
 // their username at the register form. The column tracks "did the player
 // pick this name themselves" (vs auto-generated petname), so a fresh
 // registrant must be marked as claimed from the moment the row is written.
-//
-// email is required at register time (#111). email_verified_at stays NULL
-// until the player consumes their verify token; the auth gate denies
-// routes for password-bearing rows in that state.
 func (q *Queries) CreatePlayerWithCredentials(ctx context.Context, arg CreatePlayerWithCredentialsParams) (Player, error) {
 	row := q.db.QueryRowContext(ctx, createPlayerWithCredentials,
 		arg.Username,
@@ -306,6 +352,42 @@ func (q *Queries) CreatePlayerWithCredentials(ctx context.Context, arg CreatePla
 		&i.CreatedAt,
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
+	)
+	return i, err
+}
+
+const deleteExpiredEmailVerifyTokens = `-- name: DeleteExpiredEmailVerifyTokens :exec
+DELETE FROM email_verify_tokens
+WHERE expires_at <= ?1
+`
+
+// Housekeeping for the startup sweep. Drops every row whose link has
+// expired so the table does not grow without bound. The caller passes
+// 'now' so the comparison runs in the same encoding the driver writes
+// (see the ConsumeEmailVerifyToken note above).
+func (q *Queries) DeleteExpiredEmailVerifyTokens(ctx context.Context, now time.Time) error {
+	_, err := q.db.ExecContext(ctx, deleteExpiredEmailVerifyTokens, now)
+	return err
+}
+
+const getEmailVerifyToken = `-- name: GetEmailVerifyToken :one
+SELECT token_hash, player_id, created_at, expires_at, consumed_at
+FROM email_verify_tokens
+WHERE token_hash = ?1
+LIMIT 1
+`
+
+// Look up by token hash. Caller checks expires_at vs the wall clock and
+// consumed_at IS NULL before treating it as live.
+func (q *Queries) GetEmailVerifyToken(ctx context.Context, tokenHash string) (EmailVerifyToken, error) {
+	row := q.db.QueryRowContext(ctx, getEmailVerifyToken, tokenHash)
+	var i EmailVerifyToken
+	err := row.Scan(
+		&i.TokenHash,
+		&i.PlayerID,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
 	)
 	return i, err
 }
@@ -561,13 +643,7 @@ WHERE id = ?1
   AND email_verified_at IS NULL
 `
 
-// Stamps email_verified_at = now() on the row when it is currently
-// NULL. Idempotent: a second call against an already-verified row is
-// a no-op (rows-affected stays 0). Called by the OAuth link-by-email
-// path so a password-registered row that later signs in with the same
-// Google address gets the "verified" flag flipped, otherwise PR3's
-// gate would keep blocking the user even though Google has now
-// attested the address (#111 PR1 review finding).
+// Stamps email_verified_at when currently NULL. Idempotent.
 func (q *Queries) MarkPlayerEmailVerifiedIfNew(ctx context.Context, id int64) (int64, error) {
 	result, err := q.db.ExecContext(ctx, markPlayerEmailVerifiedIfNew, id)
 	if err != nil {

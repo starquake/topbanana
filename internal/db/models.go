@@ -18,6 +18,14 @@ type Break struct {
 	UpdatedAt time.Time
 }
 
+type EmailVerifyToken struct {
+	TokenHash  string
+	PlayerID   int64
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+	ConsumedAt sql.NullTime
+}
+
 type Game struct {
 	ID        string
 	QuizID    int64

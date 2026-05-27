@@ -13,6 +13,7 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/database"
 	"github.com/starquake/topbanana/internal/db"
 )
 
@@ -299,6 +300,95 @@ func (s *PlayerStore) ClaimPlayerForOAuth(
 func (s *PlayerStore) MarkPlayerEmailVerifiedIfNew(ctx context.Context, playerID int64) error {
 	if _, err := s.q.MarkPlayerEmailVerifiedIfNew(ctx, playerID); err != nil {
 		return fmt.Errorf("failed to mark player email verified: %w", err)
+	}
+
+	return nil
+}
+
+// CreateVerifyToken inserts a row in email_verify_tokens with the given
+// hash, player id, and absolute expiry. expiresAt is normalised to UTC
+// so the driver's RFC3339 encoding lines up lexicographically with the
+// UTC clock the consume/sweep paths read - mixing offsets between
+// insert and read silently breaks the string comparison.
+func (s *PlayerStore) CreateVerifyToken(
+	ctx context.Context, tokenHash string, playerID int64, expiresAt time.Time,
+) error {
+	if err := s.q.CreateEmailVerifyToken(ctx, db.CreateEmailVerifyTokenParams{
+		TokenHash: tokenHash,
+		PlayerID:  playerID,
+		ExpiresAt: expiresAt.UTC(),
+	}); err != nil {
+		return fmt.Errorf("failed to create verify token: %w", err)
+	}
+
+	return nil
+}
+
+// ConsumeVerifyToken atomically marks the token row consumed and stamps
+// email_verified_at on the owning player. Returns the player id on
+// success, auth.ErrVerifyTokenAlreadyUsed if the row exists but was
+// already consumed (duplicate click on a stale link), and
+// auth.ErrVerifyTokenInvalid when no row matches (never existed, or
+// expired). Both branches keep the row in place; expired-but-consumed
+// cleanup happens via the sweep query at startup.
+func (s *PlayerStore) ConsumeVerifyToken(ctx context.Context, tokenHash string) (int64, error) {
+	var playerID int64
+	now := time.Now().UTC()
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		id, err := q.ConsumeEmailVerifyToken(ctx, db.ConsumeEmailVerifyTokenParams{
+			TokenHash:  tokenHash,
+			Now:        now,
+			ConsumedAt: sql.NullTime{Time: now, Valid: true},
+		})
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return classifyVerifyTokenMiss(ctx, q, tokenHash)
+			}
+
+			return fmt.Errorf("failed to consume verify token: %w", err)
+		}
+		if _, err := q.MarkPlayerEmailVerifiedIfNew(ctx, id); err != nil {
+			return fmt.Errorf("failed to stamp email_verified_at: %w", err)
+		}
+		playerID = id
+
+		return nil
+	})
+	if err != nil {
+		return 0, fmt.Errorf("consume verify token: %w", err)
+	}
+
+	return playerID, nil
+}
+
+// classifyVerifyTokenMiss disambiguates the UPDATE-no-rows case. The
+// row may exist with consumed_at set (legitimate duplicate click) or
+// not exist at all / be expired (invalid). A second SELECT inside the
+// same transaction is cheap and avoids leaking "expired vs consumed
+// vs never-existed" via response codes.
+func classifyVerifyTokenMiss(ctx context.Context, q *db.Queries, tokenHash string) error {
+	row, err := q.GetEmailVerifyToken(ctx, tokenHash)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return auth.ErrVerifyTokenInvalid
+		}
+
+		return fmt.Errorf("failed to look up verify token: %w", err)
+	}
+	if row.ConsumedAt.Valid {
+		return auth.ErrVerifyTokenAlreadyUsed
+	}
+
+	return auth.ErrVerifyTokenInvalid
+}
+
+// DeleteExpiredVerifyTokens drops expired rows from email_verify_tokens.
+// UTC across all sites that read or write expires_at so the driver's
+// RFC3339 encoding stays lexicographically comparable regardless of the
+// host time zone.
+func (s *PlayerStore) DeleteExpiredVerifyTokens(ctx context.Context) error {
+	if err := s.q.DeleteExpiredEmailVerifyTokens(ctx, time.Now().UTC()); err != nil {
+		return fmt.Errorf("failed to delete expired verify tokens: %w", err)
 	}
 
 	return nil

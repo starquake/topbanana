@@ -324,6 +324,10 @@ func Run(
 	}()
 
 	stores := store.New(conn, logger)
+	if sweepErr := stores.VerifyTokens.DeleteExpiredVerifyTokens(signalCtx); sweepErr != nil {
+		logger.WarnContext(signalCtx, "verify-token sweep at startup failed",
+			slog.Any("err", sweepErr))
+	}
 	gameService := game.NewService(stores.Games, stores.Quizzes, logger)
 	if cfg.RevealDelay > 0 {
 		gameService.SetRevealDelay(cfg.RevealDelay)
