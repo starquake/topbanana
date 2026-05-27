@@ -1,11 +1,17 @@
 // Package absurl computes the absolute base URL for an HTTP request.
 //
 // Used by template renderers that emit absolute URLs into the page
-// (og:image, og:url, twitter:image — see #294) and intended to back the
-// email-link rendering that lands in #290 too. Honors the de-facto
+// (og:image, og:url, twitter:image - see #294). Honors the de-facto
 // X-Forwarded-Proto / X-Forwarded-Host headers when set by an upstream
 // reverse proxy so a TLS-terminating proxy in front of a plain
 // [http.ListenAndServe] still emits https://... links.
+//
+// Email-link callsites in internal/auth/ MUST use cfg.BaseURL instead
+// of [BaseURL]: the trusted-proxy allow-list that would make XFF safe
+// to read here lands in #463, and until then a forged X-Forwarded-Host
+// would let an attacker mint verify / reset links pointing at a host
+// they control. The og:image use is bounded enough to ride out #463
+// in place; verify-email and password-reset paths are not. See #471.
 package absurl
 
 import (
