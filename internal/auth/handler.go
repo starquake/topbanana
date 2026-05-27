@@ -14,6 +14,7 @@ import (
 
 	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/envtag"
 	"github.com/starquake/topbanana/internal/session"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
@@ -601,8 +602,9 @@ func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string
 	// form, the validator, and the bcrypt cap stays impossible without
 	// touching the constants directly.
 	funcs := template.FuncMap{
-		"csrfToken": func() string { return "" },
-		"ogImage":   func() string { return "" },
+		"csrfToken":   func() string { return "" },
+		"ogImage":     func() string { return "" },
+		"envTitleTag": envtag.Get,
 		"passwordHelp": func() string {
 			return fmt.Sprintf("Must be %d-%d characters.", MinPasswordLength, MaxPasswordLength)
 		},

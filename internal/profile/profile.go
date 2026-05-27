@@ -21,6 +21,7 @@ import (
 	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/envtag"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
 
@@ -162,8 +163,9 @@ type templateRenderer struct {
 
 func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string) *templateRenderer {
 	funcs := template.FuncMap{
-		"csrfToken": func() string { return "" },
-		"ogImage":   func() string { return "" },
+		"csrfToken":   func() string { return "" },
+		"ogImage":     func() string { return "" },
+		"envTitleTag": envtag.Get,
 	}
 	layouts := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "auth/layouts/*.gohtml"),

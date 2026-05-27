@@ -38,7 +38,10 @@ func TestPWA_Integration(t *testing.T) {
 		body := readAllString(t, resp.Body)
 		for _, want := range []string{
 			`"name"`,
-			`"Top Banana!"`,
+			// Non-production deploys prefix the name with their env
+			// label (e.g. "[development] Top Banana!"). Match the
+			// stable suffix so the assertion stays valid in both.
+			`Top Banana!"`,
 			`"short_name"`,
 			`"start_url"`,
 			`"display"`,

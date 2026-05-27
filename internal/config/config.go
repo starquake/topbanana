@@ -201,6 +201,23 @@ func (c *Config) SecureCookies() bool {
 	return c.AppEnvironment != AppEnvironmentDefault
 }
 
+// EnvTitleTag returns a bracketed environment label for page titles,
+// or the empty string on production. Renders as e.g. "[staging] " so a
+// templated title can prefix it unconditionally and the production case
+// disappears. An empty AppEnvironment (fail-secure boot with APP_ENV
+// unset) renders as "[unknown] " so an operator never confuses an
+// accidentally-bare deploy with production.
+func (c *Config) EnvTitleTag() string {
+	switch c.AppEnvironment {
+	case AppEnvironmentProduction:
+		return ""
+	case "":
+		return "[unknown] "
+	default:
+		return "[" + c.AppEnvironment + "] "
+	}
+}
+
 // Parse parses environment variables into the config.
 func Parse(getenv func(string) string) (*Config, error) {
 	c := Config{

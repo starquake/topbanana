@@ -19,6 +19,7 @@ import (
 	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/envtag"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/quiz"
@@ -304,6 +305,7 @@ func parseTemplate(path string) *template.Template {
 		"currentUser":  func() string { return "" },
 		"csrfToken":    func() string { return "" },
 		"ogImage":      func() string { return "" },
+		"envTitleTag":  envtag.Get,
 		"humanizeTime": humanizeTime,
 	}
 	base := template.Must(

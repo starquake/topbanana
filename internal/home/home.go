@@ -14,6 +14,7 @@ import (
 	"net/http"
 
 	"github.com/starquake/topbanana/internal/absurl"
+	"github.com/starquake/topbanana/internal/envtag"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
@@ -265,9 +266,10 @@ func truncate[T any](rows []T) []T {
 // is registered here.
 func parseTemplate(page string) *template.Template {
 	funcs := template.FuncMap{
-		"add":       func(a, b int) int { return a + b },
-		"ogImage":   func() string { return "" },
-		"csrfToken": func() string { return "" },
+		"add":         func(a, b int) int { return a + b },
+		"ogImage":     func() string { return "" },
+		"csrfToken":   func() string { return "" },
+		"envTitleTag": envtag.Get,
 	}
 	base := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmplFS(), "home/layouts/*.gohtml"),

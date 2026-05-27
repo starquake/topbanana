@@ -1,6 +1,6 @@
 {
-  "name": "Top Banana!",
-  "short_name": "Top Banana",
+  "name": "__ENV_TITLE_TAG__Top Banana!",
+  "short_name": "__ENV_TITLE_TAG__Top Banana",
   "description": "Make a quiz, share the link, see who's the top banana.",
   "start_url": "/",
   "scope": "/",

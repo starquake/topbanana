@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/starquake/topbanana/internal/config"
+	"github.com/starquake/topbanana/internal/envtag"
 	"github.com/starquake/topbanana/internal/web"
 )
 
@@ -158,6 +159,33 @@ func TestManifestHandler_ServesManifestMime(t *testing.T) {
 		t.Errorf("Cache-Control = %q, want %q", got, want)
 	}
 	if got, want := rr.Body.String(), `"Top Banana!"`; !strings.Contains(got, want) {
+		t.Errorf("body missing %q", want)
+	}
+	// __ENV_TITLE_TAG__ must be substituted (or stripped) - leaking the
+	// placeholder into the served JSON would corrupt the install prompt.
+	if got, want := rr.Body.String(), "__ENV_TITLE_TAG__"; strings.Contains(got, want) {
+		t.Errorf("body still contains placeholder %q", want)
+	}
+}
+
+// TestManifestHandler_InjectsEnvTag pins the non-production tagging:
+// when envtag.Set has stamped a value, the manifest's name and
+// short_name prefix it so the install prompt shows the env at a
+// glance instead of looking like production.
+func TestManifestHandler_InjectsEnvTag(t *testing.T) {
+	// Sets a process-wide global, so do not parallelise alongside other
+	// manifest tests.
+
+	envtag.Set("[staging] ")
+	t.Cleanup(func() { envtag.Set("") })
+
+	h := web.ManifestHandler(&config.Config{AppEnvironment: "staging"})
+	body := serveAndReadBody(t, h, "/manifest.webmanifest")
+
+	if got, want := body, `"[staging] Top Banana!"`; !strings.Contains(got, want) {
+		t.Errorf("body missing %q", want)
+	}
+	if got, want := body, `"[staging] Top Banana"`; !strings.Contains(got, want) {
 		t.Errorf("body missing %q", want)
 	}
 }

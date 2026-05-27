@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{.Title}}</title>
+    <title>{{envTitleTag}}{{.Title}}</title>
     {{/* Home page is the sitewide front door. It shares the admin/auth
          Tailwind theme so brand chrome (font stack, palette tokens,
          banana icon) stays consistent. New utility classes used in
