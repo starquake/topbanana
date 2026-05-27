@@ -47,27 +47,30 @@ func TestLogin_RateLimited(t *testing.T) {
 		})
 	}
 	wg.Wait()
+	defer func() {
+		for _, r := range resps {
+			if r != nil {
+				r.Body.Close() //nolint:errcheck // cleanup.
+			}
+		}
+	}()
 
-	var limited, normal *http.Response
-	for _, r := range resps {
+	limitedIdx, normalIdx := -1, -1
+	for i, r := range resps {
 		switch r.StatusCode {
 		case http.StatusTooManyRequests:
-			limited = r
+			limitedIdx = i
 		case http.StatusUnauthorized:
-			normal = r
+			normalIdx = i
 		default:
-			// Unexpected; the assertion below surfaces it with both codes in the message.
+			// Unexpected; the assertion below surfaces it.
 		}
 	}
-	if normal == nil || limited == nil {
-		for _, r := range resps {
-			r.Body.Close() //nolint:errcheck // cleanup.
-		}
+	if normalIdx < 0 || limitedIdx < 0 {
 		t.Fatalf("expected one 401 + one 429, got %d and %d",
 			resps[0].StatusCode, resps[1].StatusCode)
 	}
-	defer normal.Body.Close()  //nolint:errcheck // cleanup.
-	defer limited.Body.Close() //nolint:errcheck // cleanup.
+	limited := resps[limitedIdx]
 
 	if got := limited.Header.Get("Retry-After"); got == "" {
 		t.Error("Retry-After header empty on rate-limited POST")
