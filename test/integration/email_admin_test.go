@@ -97,6 +97,114 @@ func TestEmailAdmin_UnconfiguredShowsDisabled(t *testing.T) {
 	}
 }
 
+// TestEmailAdmin_RendersBaseURLWhenSet pins that a deploy with
+// BASE_URL wired surfaces the link prefix on the diagnostics page
+// (#495). The dispatchers silently no-op when BASE_URL is empty;
+// surfacing it next to the SMTP wiring is how the operator
+// confirms email-link rendering is live.
+func TestEmailAdmin_RendersBaseURLWhenSet(t *testing.T) {
+	t.Parallel()
+
+	const baseURL = "https://quiz.example.test"
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+		"BASE_URL":             baseURL,
+	})
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New err = %v, want nil", err)
+	}
+	client := &http.Client{
+		Jar: jar,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
+	verifyPlayerEmail(ctx, t, srv.DBURI, "htmx-admin")
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.BaseURL+"/admin/email", nil)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("client.Do err = %v, want nil", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll err = %v, want nil", err)
+	}
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("Body.Close err = %v, want nil", cerr)
+	}
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := string(body), "Base URL"; !strings.Contains(got, want) {
+		t.Errorf("body should contain row label %q", want)
+	}
+	if got, want := string(body), baseURL; !strings.Contains(got, want) {
+		t.Errorf("body should contain BASE_URL value %q", want)
+	}
+}
+
+// TestEmailAdmin_RendersBaseURLDisabledWhenEmpty pins the no-op
+// signal: a deploy that left BASE_URL unset renders the same
+// "disabled (no-op)" badge the SMTP-not-configured row uses, so the
+// operator can tell at a glance that no email links will be sent
+// (#495). Renders regardless of whether SMTP is configured.
+func TestEmailAdmin_RendersBaseURLDisabledWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+	})
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New err = %v, want nil", err)
+	}
+	client := &http.Client{
+		Jar: jar,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
+	verifyPlayerEmail(ctx, t, srv.DBURI, "htmx-admin")
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.BaseURL+"/admin/email", nil)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("client.Do err = %v, want nil", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll err = %v, want nil", err)
+	}
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("Body.Close err = %v, want nil", cerr)
+	}
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	// The "Base URL" row label confirms the row rendered; the
+	// disabled badge text is shared with the SMTP-unconfigured
+	// status so it would match either way - the label is the
+	// load-bearing assertion.
+	if got, want := string(body), "Base URL"; !strings.Contains(got, want) {
+		t.Errorf("body should contain row label %q", want)
+	}
+	if got, want := string(body), "disabled (no-op)"; !strings.Contains(got, want) {
+		t.Errorf("body should contain disabled badge %q", want)
+	}
+}
+
 // TestEmailAdmin_TestSendOnUnconfiguredRedirectsWithFlash pins the
 // "email is not configured" path: an admin clicking the test-send
 // button on an unconfigured deploy is 303-redirected to /admin/email

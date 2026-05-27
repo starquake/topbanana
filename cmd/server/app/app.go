@@ -497,7 +497,7 @@ func buildMailer(
 			"mailer disabled (no SMTP_HOST/SMTP_PORT/SMTP_FROM); send attempts return ErrNotConfigured",
 		)
 
-		return mailer.NewTester(mailer.NewNoop()), mailer.NewStatusView(smtpCfg, false), nil
+		return mailer.NewTester(mailer.NewNoop()), mailer.NewStatusView(smtpCfg, false, cfg.BaseURL), nil
 	}
 
 	inner, err := mailer.NewSMTP(smtpCfg)
@@ -509,8 +509,11 @@ func buildMailer(
 		slog.Int("port", cfg.SMTPPort),
 		slog.Bool("tls", cfg.SMTPTLS),
 	)
+	if cfg.BaseURL == "" {
+		logger.WarnContext(ctx, "email links disabled: BASE_URL is unset while SMTP is configured")
+	}
 
-	return mailer.NewTester(inner), mailer.NewStatusView(smtpCfg, true), nil
+	return mailer.NewTester(inner), mailer.NewStatusView(smtpCfg, true, cfg.BaseURL), nil
 }
 
 func setupDB(signalCtx context.Context, cfg *config.Config, logger *slog.Logger) (*sql.DB, error) {

@@ -60,6 +60,16 @@
                 <dt class="text-text-dim">From</dt>
                 <dd class="text-text font-mono">{{if .Status.From}}{{.Status.From}}{{else}}&mdash;{{end}}</dd>
             </div>
+            <div class="flex justify-between md:col-span-2 border-b border-border-soft pb-2">
+                <dt class="text-text-dim">Base URL</dt>
+                <dd class="text-text">
+                    {{if .Status.BaseURL}}
+                        <span class="font-mono">{{.Status.BaseURL}}</span>
+                    {{else}}
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-sm bg-surface text-text-dim text-xs uppercase tracking-[0.12em]">disabled (no-op)</span>
+                    {{end}}
+                </dd>
+            </div>
         </dl>
     </section>
 
