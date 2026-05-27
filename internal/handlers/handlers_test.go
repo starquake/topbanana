@@ -282,7 +282,8 @@ func TestDecodeJSON(t *testing.T) {
 			Name string `json:"name"`
 		}
 		r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(`{"name":"test"}`))
-		req, err := DecodeJSON[request](r)
+		w := httptest.NewRecorder()
+		req, err := DecodeJSON[request](w, r)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -297,12 +298,36 @@ func TestDecodeJSON(t *testing.T) {
 			Name string `json:"name"`
 		}
 		r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(`not json`))
-		_, err := DecodeJSON[request](r)
+		w := httptest.NewRecorder()
+		_, err := DecodeJSON[request](w, r)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
 		if got, want := err.Error(), "failed to decode json"; !strings.Contains(got, want) {
 			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+
+	t.Run("body larger than the cap surfaces a 400 via the caller", func(t *testing.T) {
+		t.Parallel()
+		type request struct {
+			Name string `json:"name"`
+		}
+		body := `{"name":"` + strings.Repeat("a", 64*1024+1) + `"}`
+		mux := http.NewServeMux()
+		mux.HandleFunc("POST /things", func(w http.ResponseWriter, r *http.Request) {
+			if _, err := DecodeJSON[request](w, r); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		})
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/things", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if got, want := w.Code, http.StatusBadRequest; got != want {
+			t.Errorf("status = %d, want %d", got, want)
 		}
 	})
 }
