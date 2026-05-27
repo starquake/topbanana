@@ -30,7 +30,7 @@ SET username = ?1,
 WHERE players.id = ?5
   AND players.password_hash IS NULL
   AND players.email IS NULL
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version
 `
 
 type ClaimPlayerParams struct {
@@ -79,6 +79,7 @@ func (q *Queries) ClaimPlayer(ctx context.Context, arg ClaimPlayerParams) (Playe
 		&i.CreatedAt,
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
+		&i.SessionVersion,
 	)
 	return i, err
 }
@@ -98,7 +99,7 @@ SET email = ?1,
 WHERE players.id = ?2
   AND players.password_hash IS NULL
   AND players.email IS NULL
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version
 `
 
 type ClaimPlayerForOAuthParams struct {
@@ -138,6 +139,7 @@ func (q *Queries) ClaimPlayerForOAuth(ctx context.Context, arg ClaimPlayerForOAu
 		&i.CreatedAt,
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
+		&i.SessionVersion,
 	)
 	return i, err
 }
@@ -173,6 +175,35 @@ func (q *Queries) ConsumeEmailVerifyToken(ctx context.Context, arg ConsumeEmailV
 	return player_id, err
 }
 
+const consumePasswordResetToken = `-- name: ConsumePasswordResetToken :one
+UPDATE password_reset_tokens
+SET consumed_at = ?1
+WHERE token_hash = ?2
+  AND consumed_at IS NULL
+  AND expires_at > ?3
+RETURNING player_id
+`
+
+type ConsumePasswordResetTokenParams struct {
+	ConsumedAt sql.NullTime
+	TokenHash  string
+	Now        time.Time
+}
+
+// Atomic consume: succeeds only when the row is still unconsumed and
+// not expired. Returns the player_id so the caller can stamp the new
+// password_hash + bump session_version in the same transaction. The
+// caller passes 'now' on both sides so the comparison runs in the
+// driver's RFC3339 encoding (same gotcha email_verify_tokens dodged).
+// sql.ErrNoRows means consumed, expired, or never existed; the caller
+// maps that to a single user-facing "link is no longer valid" response.
+func (q *Queries) ConsumePasswordResetToken(ctx context.Context, arg ConsumePasswordResetTokenParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, consumePasswordResetToken, arg.ConsumedAt, arg.TokenHash, arg.Now)
+	var player_id int64
+	err := row.Scan(&player_id)
+	return player_id, err
+}
+
 const countAllPlayers = `-- name: CountAllPlayers :one
 SELECT COUNT(*) FROM players
 `
@@ -188,7 +219,7 @@ func (q *Queries) CountAllPlayers(ctx context.Context) (int64, error) {
 const createAnonymousPlayer = `-- name: CreateAnonymousPlayer :one
 INSERT INTO players (username, role)
 VALUES (?1, 'player')
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version
 `
 
 // Used by the EnsurePlayer middleware to back a fresh visitor with a real
@@ -212,6 +243,7 @@ func (q *Queries) CreateAnonymousPlayer(ctx context.Context, username string) (P
 		&i.CreatedAt,
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
+		&i.SessionVersion,
 	)
 	return i, err
 }
@@ -235,6 +267,25 @@ func (q *Queries) CreateEmailVerifyToken(ctx context.Context, arg CreateEmailVer
 	return err
 }
 
+const createPasswordResetToken = `-- name: CreatePasswordResetToken :exec
+INSERT INTO password_reset_tokens (token_hash, player_id, expires_at)
+VALUES (?1, ?2, ?3)
+`
+
+type CreatePasswordResetTokenParams struct {
+	TokenHash string
+	PlayerID  int64
+	ExpiresAt time.Time
+}
+
+// Stores the sha256 hash of a freshly minted reset-password token. The
+// raw token only exists on the way out the door in the email; a DB leak
+// should not be replayable against POST /reset-password.
+func (q *Queries) CreatePasswordResetToken(ctx context.Context, arg CreatePasswordResetTokenParams) error {
+	_, err := q.db.ExecContext(ctx, createPasswordResetToken, arg.TokenHash, arg.PlayerID, arg.ExpiresAt)
+	return err
+}
+
 const createPlayerFromOAuth = `-- name: CreatePlayerFromOAuth :one
 INSERT INTO players (username, email, email_verified_at, role, username_claimed)
 VALUES (
@@ -251,7 +302,7 @@ VALUES (
     END,
     1
 )
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version
 `
 
 type CreatePlayerFromOAuthParams struct {
@@ -286,6 +337,7 @@ func (q *Queries) CreatePlayerFromOAuth(ctx context.Context, arg CreatePlayerFro
 		&i.CreatedAt,
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
+		&i.SessionVersion,
 	)
 	return i, err
 }
@@ -307,7 +359,7 @@ VALUES (
     END,
     1
 )
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version
 `
 
 type CreatePlayerWithCredentialsParams struct {
@@ -352,6 +404,7 @@ func (q *Queries) CreatePlayerWithCredentials(ctx context.Context, arg CreatePla
 		&i.CreatedAt,
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
+		&i.SessionVersion,
 	)
 	return i, err
 }
@@ -367,6 +420,19 @@ WHERE expires_at <= ?1
 // (see the ConsumeEmailVerifyToken note above).
 func (q *Queries) DeleteExpiredEmailVerifyTokens(ctx context.Context, now time.Time) error {
 	_, err := q.db.ExecContext(ctx, deleteExpiredEmailVerifyTokens, now)
+	return err
+}
+
+const deleteExpiredPasswordResetTokens = `-- name: DeleteExpiredPasswordResetTokens :exec
+DELETE FROM password_reset_tokens
+WHERE expires_at <= ?1
+`
+
+// Housekeeping for the startup sweep. UTC across the wire so the
+// comparison stays lexicographically sane regardless of the host
+// timezone.
+func (q *Queries) DeleteExpiredPasswordResetTokens(ctx context.Context, now time.Time) error {
+	_, err := q.db.ExecContext(ctx, deleteExpiredPasswordResetTokens, now)
 	return err
 }
 
@@ -392,8 +458,30 @@ func (q *Queries) GetEmailVerifyToken(ctx context.Context, tokenHash string) (Em
 	return i, err
 }
 
+const getPasswordResetToken = `-- name: GetPasswordResetToken :one
+SELECT token_hash, player_id, created_at, expires_at, consumed_at
+FROM password_reset_tokens
+WHERE token_hash = ?1
+LIMIT 1
+`
+
+// Look up a reset row by hash. Returned regardless of consumed_at /
+// expires_at - the caller decides whether to treat it as live.
+func (q *Queries) GetPasswordResetToken(ctx context.Context, tokenHash string) (PasswordResetToken, error) {
+	row := q.db.QueryRowContext(ctx, getPasswordResetToken, tokenHash)
+	var i PasswordResetToken
+	err := row.Scan(
+		&i.TokenHash,
+		&i.PlayerID,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+	)
+	return i, err
+}
+
 const getPlayerByEmail = `-- name: GetPlayerByEmail :one
-SELECT id, username, email, password_hash, role, created_at, username_claimed, email_verified_at
+SELECT id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version
 FROM players
 WHERE email = ?
 LIMIT 1
@@ -415,12 +503,13 @@ func (q *Queries) GetPlayerByEmail(ctx context.Context, email sql.NullString) (P
 		&i.CreatedAt,
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
+		&i.SessionVersion,
 	)
 	return i, err
 }
 
 const getPlayerByProviderSubject = `-- name: GetPlayerByProviderSubject :one
-SELECT p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed, p.email_verified_at
+SELECT p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed, p.email_verified_at, p.session_version
 FROM players p
 JOIN player_identities pi ON pi.player_id = p.id
 WHERE pi.provider = ? AND pi.subject = ?
@@ -448,12 +537,13 @@ func (q *Queries) GetPlayerByProviderSubject(ctx context.Context, arg GetPlayerB
 		&i.CreatedAt,
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
+		&i.SessionVersion,
 	)
 	return i, err
 }
 
 const getPlayerByUsername = `-- name: GetPlayerByUsername :one
-SELECT id, username, email, password_hash, role, created_at, username_claimed, email_verified_at
+SELECT id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version
 FROM players
 WHERE username = ?
 LIMIT 1
@@ -471,6 +561,7 @@ func (q *Queries) GetPlayerByUsername(ctx context.Context, username string) (Pla
 		&i.CreatedAt,
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
+		&i.SessionVersion,
 	)
 	return i, err
 }
@@ -498,7 +589,7 @@ func (q *Queries) LinkProviderIdentity(ctx context.Context, arg LinkProviderIden
 
 const listAllPlayers = `-- name: ListAllPlayers :many
 SELECT
-    p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed, p.email_verified_at,
+    p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed, p.email_verified_at, p.session_version,
     EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id) AS has_oauth,
     CAST(COALESCE((SELECT pi.provider FROM player_identities pi WHERE pi.player_id = p.id ORDER BY pi.provider LIMIT 1), '') AS TEXT) AS oauth_provider
 FROM players p
@@ -520,6 +611,7 @@ type ListAllPlayersRow struct {
 	CreatedAt       time.Time
 	UsernameClaimed int64
 	EmailVerifiedAt sql.NullTime
+	SessionVersion  int64
 	HasOauth        bool
 	OauthProvider   string
 }
@@ -554,6 +646,7 @@ func (q *Queries) ListAllPlayers(ctx context.Context, arg ListAllPlayersParams) 
 			&i.CreatedAt,
 			&i.UsernameClaimed,
 			&i.EmailVerifiedAt,
+			&i.SessionVersion,
 			&i.HasOauth,
 			&i.OauthProvider,
 		); err != nil {
@@ -657,7 +750,7 @@ UPDATE players
 SET username = ?1,
     username_claimed = 1
 WHERE id = ?2
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version
 `
 
 type RenamePlayerParams struct {
@@ -689,8 +782,35 @@ func (q *Queries) RenamePlayer(ctx context.Context, arg RenamePlayerParams) (Pla
 		&i.CreatedAt,
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
+		&i.SessionVersion,
 	)
 	return i, err
+}
+
+const resetPlayerPassword = `-- name: ResetPlayerPassword :execrows
+UPDATE players
+SET password_hash = ?1,
+    session_version = session_version + 1
+WHERE id = ?2
+`
+
+type ResetPlayerPasswordParams struct {
+	PasswordHash sql.NullString
+	ID           int64
+}
+
+// Atomically rotates password_hash and bumps session_version on the
+// given row. The session_version increment is the security-critical
+// part: every in-flight cookie carries the version it was issued at,
+// so a bump invalidates every other session the moment this commits.
+// Returns the number of affected rows; the caller checks for >0 to
+// distinguish a successful reset from a player_id pointing nowhere.
+func (q *Queries) ResetPlayerPassword(ctx context.Context, arg ResetPlayerPasswordParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, resetPlayerPassword, arg.PasswordHash, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const setPlayerPasswordHash = `-- name: SetPlayerPasswordHash :execrows
@@ -730,7 +850,7 @@ UPDATE players
 SET username = ?1,
     username_claimed = 1
 WHERE id = ?2 AND password_hash IS NULL
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version
 `
 
 type UpdatePlayerUsernameParams struct {
@@ -762,6 +882,7 @@ func (q *Queries) UpdatePlayerUsername(ctx context.Context, arg UpdatePlayerUser
 		&i.CreatedAt,
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
+		&i.SessionVersion,
 	)
 	return i, err
 }

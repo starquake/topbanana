@@ -348,3 +348,52 @@ RETURNING player_id;
 -- (see the ConsumeEmailVerifyToken note above).
 DELETE FROM email_verify_tokens
 WHERE expires_at <= sqlc.arg('now');
+
+-- name: CreatePasswordResetToken :exec
+-- Stores the sha256 hash of a freshly minted reset-password token. The
+-- raw token only exists on the way out the door in the email; a DB leak
+-- should not be replayable against POST /reset-password.
+INSERT INTO password_reset_tokens (token_hash, player_id, expires_at)
+VALUES (sqlc.arg('token_hash'), sqlc.arg('player_id'), sqlc.arg('expires_at'));
+
+-- name: GetPasswordResetToken :one
+-- Look up a reset row by hash. Returned regardless of consumed_at /
+-- expires_at - the caller decides whether to treat it as live.
+SELECT *
+FROM password_reset_tokens
+WHERE token_hash = sqlc.arg('token_hash')
+LIMIT 1;
+
+-- name: ConsumePasswordResetToken :one
+-- Atomic consume: succeeds only when the row is still unconsumed and
+-- not expired. Returns the player_id so the caller can stamp the new
+-- password_hash + bump session_version in the same transaction. The
+-- caller passes 'now' on both sides so the comparison runs in the
+-- driver's RFC3339 encoding (same gotcha email_verify_tokens dodged).
+-- sql.ErrNoRows means consumed, expired, or never existed; the caller
+-- maps that to a single user-facing "link is no longer valid" response.
+UPDATE password_reset_tokens
+SET consumed_at = sqlc.arg('consumed_at')
+WHERE token_hash = sqlc.arg('token_hash')
+  AND consumed_at IS NULL
+  AND expires_at > sqlc.arg('now')
+RETURNING player_id;
+
+-- name: DeleteExpiredPasswordResetTokens :exec
+-- Housekeeping for the startup sweep. UTC across the wire so the
+-- comparison stays lexicographically sane regardless of the host
+-- timezone.
+DELETE FROM password_reset_tokens
+WHERE expires_at <= sqlc.arg('now');
+
+-- name: ResetPlayerPassword :execrows
+-- Atomically rotates password_hash and bumps session_version on the
+-- given row. The session_version increment is the security-critical
+-- part: every in-flight cookie carries the version it was issued at,
+-- so a bump invalidates every other session the moment this commits.
+-- Returns the number of affected rows; the caller checks for >0 to
+-- distinguish a successful reset from a player_id pointing nowhere.
+UPDATE players
+SET password_hash = sqlc.arg('password_hash'),
+    session_version = session_version + 1
+WHERE id = sqlc.arg('id');

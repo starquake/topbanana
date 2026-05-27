@@ -49,6 +49,10 @@ type Player struct {
 	Role            string
 	CreatedAt       time.Time
 	UsernameClaimed bool
+	// SessionVersion is bumped on password reset so every in-flight
+	// cookie (which carries the version it was issued at) becomes
+	// invalid the moment the reset commits (#112).
+	SessionVersion int64
 }
 
 // IsEmailVerified reports whether the player's email has been verified.

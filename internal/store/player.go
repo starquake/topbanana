@@ -394,6 +394,81 @@ func (s *PlayerStore) DeleteExpiredVerifyTokens(ctx context.Context) error {
 	return nil
 }
 
+// CreateResetToken inserts a row in password_reset_tokens with the
+// given hash, player id, and absolute expiry. expiresAt is normalised
+// to UTC so the driver's RFC3339 encoding lines up lexicographically
+// with the UTC clock the consume/sweep paths read - mixing offsets
+// between insert and read silently breaks the string comparison.
+func (s *PlayerStore) CreateResetToken(
+	ctx context.Context, tokenHash string, playerID int64, expiresAt time.Time,
+) error {
+	if err := s.q.CreatePasswordResetToken(ctx, db.CreatePasswordResetTokenParams{
+		TokenHash: tokenHash,
+		PlayerID:  playerID,
+		ExpiresAt: expiresAt.UTC(),
+	}); err != nil {
+		return fmt.Errorf("failed to create reset token: %w", err)
+	}
+
+	return nil
+}
+
+// ConsumeResetToken atomically marks the reset row consumed, rotates
+// password_hash, and bumps session_version - all in one transaction
+// so a crash mid-flow cannot leave a player with a consumed token but
+// an old password, nor a new password with old sessions still live.
+// Returns the player id on success, auth.ErrResetTokenInvalid when no
+// live row matches (never existed, expired, or already consumed).
+func (s *PlayerStore) ConsumeResetToken(
+	ctx context.Context, tokenHash, newPasswordHash string,
+) (int64, error) {
+	var playerID int64
+	now := time.Now().UTC()
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		id, err := q.ConsumePasswordResetToken(ctx, db.ConsumePasswordResetTokenParams{
+			TokenHash:  tokenHash,
+			Now:        now,
+			ConsumedAt: sql.NullTime{Time: now, Valid: true},
+		})
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return auth.ErrResetTokenInvalid
+			}
+
+			return fmt.Errorf("failed to consume reset token: %w", err)
+		}
+		rows, err := q.ResetPlayerPassword(ctx, db.ResetPlayerPasswordParams{
+			ID:           id,
+			PasswordHash: sql.NullString{String: newPasswordHash, Valid: true},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to rotate password: %w", err)
+		}
+		if rows == 0 {
+			return auth.ErrResetTokenInvalid
+		}
+		playerID = id
+
+		return nil
+	})
+	if err != nil {
+		return 0, fmt.Errorf("consume reset token: %w", err)
+	}
+
+	return playerID, nil
+}
+
+// DeleteExpiredResetTokens drops expired rows from password_reset_tokens.
+// UTC mirrors the email-verify sweep so the lexicographic comparison
+// stays consistent across the host timezone.
+func (s *PlayerStore) DeleteExpiredResetTokens(ctx context.Context) error {
+	if err := s.q.DeleteExpiredPasswordResetTokens(ctx, time.Now().UTC()); err != nil {
+		return fmt.Errorf("failed to delete expired reset tokens: %w", err)
+	}
+
+	return nil
+}
+
 // LinkProviderIdentity inserts a player_identities row tying the given
 // player to the (provider, subject) pair. Returns
 // auth.ErrIdentityAlreadyLinked when the UNIQUE (provider, subject)
@@ -601,6 +676,7 @@ func playerFromRow(row db.Player) *auth.Player {
 		Role:            row.Role,
 		CreatedAt:       row.CreatedAt,
 		UsernameClaimed: row.UsernameClaimed != 0,
+		SessionVersion:  row.SessionVersion,
 	}
 	if row.Email.Valid {
 		p.Email = row.Email.String
