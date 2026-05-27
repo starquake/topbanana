@@ -66,6 +66,35 @@ func TestRequireVerifiedEmail_UnverifiedBouncesToPending(t *testing.T) {
 	}
 }
 
+func TestRequireVerifiedEmail_UnverifiedHXRedirects(t *testing.T) {
+	t.Parallel()
+
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Error("next handler was called; unverified HTMX request must be bounced")
+	})
+
+	gate := RequireVerifiedEmail(next)
+	rec := httptest.NewRecorder()
+	p := &Player{ID: 1, Email: "alice@example.test", EmailVerifiedAt: nil}
+	req := httptest.NewRequestWithContext(WithPlayer(t.Context(), p),
+		http.MethodPost, "/admin/quizzes/1/questions/2/move/up", nil)
+	req.Header.Set("Hx-Request", "true")
+	gate.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusNoContent; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := rec.Header().Get("Hx-Redirect"), "/verify-email/pending"; got != want {
+		t.Errorf("Hx-Redirect = %q, want %q", got, want)
+	}
+	if got := rec.Header().Get("Location"); got != "" {
+		t.Errorf("Location = %q, want empty", got)
+	}
+	if got := rec.Body.Len(); got != 0 {
+		t.Errorf("body length = %d, want 0", got)
+	}
+}
+
 func TestRequireVerifiedEmail_NoEmailPassesThrough(t *testing.T) {
 	t.Parallel()
 
