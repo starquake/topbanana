@@ -35,7 +35,7 @@ func HandleResetForm(
 		// might leak (Google Fonts on base.gohtml is the notable case).
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		raw := r.URL.Query().Get("token")
-		if !resetTokenLivePreflight(r, tokens, raw) {
+		if !resetTokenLivePreflight(r, logger, tokens, raw) {
 			invalid.render(w, r, http.StatusGone, resetPageData{Title: "Reset link"})
 
 			return
@@ -49,17 +49,23 @@ func HandleResetForm(
 // links without burning the single-use semantic. Returns true when
 // the token row exists, is unconsumed, and is not expired. The full
 // atomic consume happens on POST so a GET cannot accidentally
-// validate; this peek only gates the render path.
-func resetTokenLivePreflight(_ *http.Request, _ ResetTokenStore, raw string) bool {
-	// We don't have a lookup-by-hash API on the consumer interface
-	// (the store keeps consume atomic and refuses to expose a stand-
-	// alone read for the same reason). The GET handler therefore
-	// optimistically renders the form when the token query parameter
-	// is non-empty; the POST handler is where the real validation
-	// runs. Empty token short-circuits to the "invalid link" page so
-	// a bookmarked /reset-password URL without ?token= does not show
-	// a form the user cannot meaningfully submit.
-	return raw != ""
+// validate; this peek only gates the render path. A lookup error
+// (DB hiccup) is treated as "render the form": the POST handler is
+// the security boundary, so falling open here only costs the user a
+// second click - falling closed would lock everyone out on a transient
+// store glitch.
+func resetTokenLivePreflight(r *http.Request, logger *slog.Logger, tokens ResetTokenStore, raw string) bool {
+	if raw == "" {
+		return false
+	}
+	_, live, err := tokens.LookupResetToken(r.Context(), HashResetToken(raw))
+	if err != nil {
+		logger.WarnContext(r.Context(), "reset token preflight lookup failed", slog.Any("err", err))
+
+		return true
+	}
+
+	return live
 }
 
 // HandleResetSubmit handles POST /reset-password. Validates the token,

@@ -171,8 +171,106 @@ func TestResetPassword_PasswordTooShort(t *testing.T) {
 	}
 }
 
+// TestResetForm_DeadTokenRendersInvalid pins the #472 GET preflight:
+// a consumed or expired token must short-circuit to the "link is no
+// longer valid" page so the user is not asked to type a password the
+// POST would reject.
+func TestResetForm_DeadTokenRendersInvalid(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, nil)
+	dbConn, stores := openStores(t, srv.DBURI)
+	defer dbConn.Close() //nolint:errcheck // cleanup.
+
+	player, err := stores.Players.CreatePlayer(
+		ctx, "reset-dead", "reset-dead@example.test", "h", "player",
+	)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	raw, hash, err := auth.GenerateResetToken()
+	if err != nil {
+		t.Fatalf("GenerateResetToken err = %v, want nil", err)
+	}
+	// expires_at in the past: the preflight must read this as not-live.
+	if cerr := stores.ResetTokens.CreateResetToken(ctx, hash, player.ID, time.Now().Add(-time.Hour)); cerr != nil {
+		t.Fatalf("CreateResetToken err = %v, want nil", cerr)
+	}
+
+	target := srv.BaseURL + "/reset-password?" + url.Values{"token": {raw}}.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	resp, err := authClient(t).Do(req)
+	if err != nil {
+		t.Fatalf("client.Do err = %v, want nil", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // cleanup.
+
+	if got, want := resp.StatusCode, http.StatusGone; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll err = %v, want nil", err)
+	}
+	if got, want := string(body), "Link is no longer valid"; !strings.Contains(got, want) {
+		t.Errorf("body should contain %q", want)
+	}
+}
+
+// TestResetForm_LiveTokenRendersForm pins the live-token branch of
+// the preflight: the GET handler hands the form to the user when the
+// row is unconsumed and unexpired.
+func TestResetForm_LiveTokenRendersForm(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, nil)
+	dbConn, stores := openStores(t, srv.DBURI)
+	defer dbConn.Close() //nolint:errcheck // cleanup.
+
+	player, err := stores.Players.CreatePlayer(
+		ctx, "reset-live", "reset-live@example.test", "h", "player",
+	)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	raw, hash, err := auth.GenerateResetToken()
+	if err != nil {
+		t.Fatalf("GenerateResetToken err = %v, want nil", err)
+	}
+	if cerr := stores.ResetTokens.CreateResetToken(ctx, hash, player.ID, time.Now().Add(time.Hour)); cerr != nil {
+		t.Fatalf("CreateResetToken err = %v, want nil", cerr)
+	}
+
+	target := srv.BaseURL + "/reset-password?" + url.Values{"token": {raw}}.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	resp, err := authClient(t).Do(req)
+	if err != nil {
+		t.Fatalf("client.Do err = %v, want nil", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // cleanup.
+
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll err = %v, want nil", err)
+	}
+	if got, want := string(body), `name="token"`; !strings.Contains(got, want) {
+		t.Errorf("body should render form token field %q", want)
+	}
+}
+
 // postReset issues POST /reset-password with a freshly-fetched CSRF
-// token on the supplied client and returns the raw response.
+// token on the supplied client and returns the raw response. The CSRF
+// token is fetched from /login so the helper works regardless of the
+// reset-password GET preflight short-circuiting on a dead token (#472).
 func postReset(
 	ctx context.Context,
 	t *testing.T,
@@ -181,8 +279,7 @@ func postReset(
 ) *http.Response {
 	t.Helper()
 
-	getURL := baseURL + "/reset-password?" + url.Values{"token": {rawToken}}.Encode()
-	csrfToken := fetchCSRFToken(ctx, t, client, getURL)
+	csrfToken := fetchCSRFToken(ctx, t, client, baseURL+"/login")
 
 	form := url.Values{}
 	form.Add("csrf_token", csrfToken)

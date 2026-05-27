@@ -342,7 +342,10 @@ func (s *PlayerStore) ConsumeVerifyToken(ctx context.Context, tokenHash string) 
 		})
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return classifyVerifyTokenMiss(ctx, q, tokenHash)
+				ownerID, classifyErr := classifyVerifyTokenMiss(ctx, q, tokenHash)
+				playerID = ownerID
+
+				return classifyErr
 			}
 
 			return fmt.Errorf("failed to consume verify token: %w", err)
@@ -355,7 +358,14 @@ func (s *PlayerStore) ConsumeVerifyToken(ctx context.Context, tokenHash string) 
 		return nil
 	})
 	if err != nil {
-		return 0, fmt.Errorf("consume verify token: %w", err)
+		switch {
+		case errors.Is(err, auth.ErrVerifyTokenAlreadyUsed):
+			return playerID, auth.ErrVerifyTokenAlreadyUsed
+		case errors.Is(err, auth.ErrVerifyTokenInvalid):
+			return 0, auth.ErrVerifyTokenInvalid
+		default:
+			return 0, fmt.Errorf("consume verify token: %w", err)
+		}
 	}
 
 	return playerID, nil
@@ -365,21 +375,24 @@ func (s *PlayerStore) ConsumeVerifyToken(ctx context.Context, tokenHash string) 
 // row may exist with consumed_at set (legitimate duplicate click) or
 // not exist at all / be expired (invalid). A second SELECT inside the
 // same transaction is cheap and avoids leaking "expired vs consumed
-// vs never-existed" via response codes.
-func classifyVerifyTokenMiss(ctx context.Context, q *db.Queries, tokenHash string) error {
+// vs never-existed" via response codes. Returns the row's player_id on
+// the already-used branch so the handler can detect a session that
+// belongs to a different player than the one the token verifies; an
+// invalid / missing row returns 0.
+func classifyVerifyTokenMiss(ctx context.Context, q *db.Queries, tokenHash string) (int64, error) {
 	row, err := q.GetEmailVerifyToken(ctx, tokenHash)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return auth.ErrVerifyTokenInvalid
+			return 0, auth.ErrVerifyTokenInvalid
 		}
 
-		return fmt.Errorf("failed to look up verify token: %w", err)
+		return 0, fmt.Errorf("failed to look up verify token: %w", err)
 	}
 	if row.ConsumedAt.Valid {
-		return auth.ErrVerifyTokenAlreadyUsed
+		return row.PlayerID, auth.ErrVerifyTokenAlreadyUsed
 	}
 
-	return auth.ErrVerifyTokenInvalid
+	return 0, auth.ErrVerifyTokenInvalid
 }
 
 // DeleteExpiredVerifyTokens drops expired rows from email_verify_tokens.
@@ -411,6 +424,27 @@ func (s *PlayerStore) CreateResetToken(
 	}
 
 	return nil
+}
+
+// LookupResetToken returns the owning player id and a liveness flag
+// for the supplied token hash. live = true iff the row exists, is
+// unconsumed, and is unexpired. Used by the GET /reset-password
+// handler to short-circuit form render for dead tokens so the user
+// is not asked to type a password the POST will reject. A missing row
+// is not an error: the handler treats (0, false, nil) the same as an
+// expired or consumed row.
+func (s *PlayerStore) LookupResetToken(ctx context.Context, tokenHash string) (int64, bool, error) {
+	row, err := s.q.GetPasswordResetToken(ctx, tokenHash)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, false, nil
+		}
+
+		return 0, false, fmt.Errorf("failed to look up reset token: %w", err)
+	}
+	live := !row.ConsumedAt.Valid && row.ExpiresAt.After(time.Now().UTC())
+
+	return row.PlayerID, live, nil
 }
 
 // ConsumeResetToken atomically marks the reset row consumed, rotates

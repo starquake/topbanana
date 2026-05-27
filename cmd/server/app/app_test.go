@@ -2,11 +2,14 @@ package app_test
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -358,4 +361,119 @@ func TestResetPassword_ClosedStdin_ReturnsError(t *testing.T) {
 	if err := auth.CheckPassword(p.PasswordHash, seedOldPassword); err != nil {
 		t.Errorf("original password should still validate after empty stdin, err = %v", err)
 	}
+}
+
+// stubVerifySweep records how many DeleteExpiredVerifyTokens calls
+// landed and optionally returns an error on each call. Concurrent-safe
+// because the sweep goroutine and the test assert on the counter from
+// different goroutines.
+type stubVerifySweep struct {
+	mu    sync.Mutex
+	calls int
+	err   error
+}
+
+func (s *stubVerifySweep) DeleteExpiredVerifyTokens(_ context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.calls++
+
+	return s.err
+}
+
+func (s *stubVerifySweep) Calls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.calls
+}
+
+// stubResetSweep mirrors stubVerifySweep for the reset side.
+type stubResetSweep struct {
+	mu    sync.Mutex
+	calls int
+	err   error
+}
+
+func (s *stubResetSweep) DeleteExpiredResetTokens(_ context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.calls++
+
+	return s.err
+}
+
+func (s *stubResetSweep) Calls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.calls
+}
+
+// TestRunTokenSweep_TicksUntilCancel pins the loop's two contracts:
+// each tick calls both DeleteExpired* methods, and a context cancel
+// returns the goroutine promptly. A short interval keeps the test
+// fast; the production wiring uses an hour.
+func TestRunTokenSweep_TicksUntilCancel(t *testing.T) {
+	t.Parallel()
+
+	verify := &stubVerifySweep{}
+	reset := &stubResetSweep{}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		RunTokenSweep(ctx, slog.New(slog.DiscardHandler), verify, reset, time.Millisecond)
+		close(done)
+	}()
+
+	// Wait until at least one tick lands on each store before cancelling.
+	deadline := time.After(time.Second)
+	for verify.Calls() <= 0 || reset.Calls() <= 0 {
+		select {
+		case <-deadline:
+			t.Fatalf("sweep did not tick; verify=%d reset=%d", verify.Calls(), reset.Calls())
+		case <-time.After(time.Millisecond):
+		}
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("sweep did not return after cancel")
+	}
+}
+
+// TestRunTokenSweep_ContinuesAfterError pins that a single sweep
+// failure does not silence the loop: the warn-and-continue path keeps
+// the next tick alive so a transient DB error does not stop expiry
+// cleanup until the next deploy.
+func TestRunTokenSweep_ContinuesAfterError(t *testing.T) {
+	t.Parallel()
+
+	verify := &stubVerifySweep{err: errors.New("verify sweep failed")}
+	reset := &stubResetSweep{err: errors.New("reset sweep failed")}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		RunTokenSweep(ctx, slog.New(slog.DiscardHandler), verify, reset, time.Millisecond)
+		close(done)
+	}()
+
+	// Wait for at least two ticks per store so the "continue past error"
+	// invariant is observable.
+	deadline := time.After(time.Second)
+	for verify.Calls() < 2 || reset.Calls() < 2 {
+		select {
+		case <-deadline:
+			t.Fatalf("sweep did not tick twice; verify=%d reset=%d", verify.Calls(), reset.Calls())
+		case <-time.After(time.Millisecond):
+		}
+	}
+	cancel()
+	<-done
 }

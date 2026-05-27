@@ -59,8 +59,10 @@ type VerifyTokenStore interface {
 	// ConsumeVerifyToken atomically marks the row consumed and stamps
 	// email_verified_at on the player in the same transaction. Returns
 	// the player id on success, ErrVerifyTokenAlreadyUsed when the row
-	// exists but is already consumed, and ErrVerifyTokenInvalid when no
-	// live row matches (never existed, or expired).
+	// exists but is already consumed (player id is still returned so the
+	// handler can detect a session belonging to a different player), and
+	// ErrVerifyTokenInvalid when no live row matches (never existed, or
+	// expired; player id is 0 in this case).
 	ConsumeVerifyToken(ctx context.Context, tokenHash string) (int64, error)
 	// DeleteExpiredVerifyTokens removes rows whose expires_at has
 	// passed. Called from the startup sweep so the table cannot grow

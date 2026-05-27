@@ -20,16 +20,23 @@ import (
 // stubRecorder satisfies admin.EmailRecorder for handler tests. The
 // recorded fields let each test assert what the handler dispatched
 // (recipient, kind) without standing up the real Tester or SMTP path.
+// observeCtx is invoked from inside Send so the detached-context test
+// can read the context's live state before the handler's deferred
+// cancel fires.
 type stubRecorder struct {
-	sendErr error
-	lastMsg mailer.Message
-	callCnt int
-	entries []mailer.LogEntry
+	sendErr    error
+	lastMsg    mailer.Message
+	observeCtx func(context.Context)
+	callCnt    int
+	entries    []mailer.LogEntry
 }
 
-func (s *stubRecorder) Send(_ context.Context, msg mailer.Message) error {
+func (s *stubRecorder) Send(ctx context.Context, msg mailer.Message) error {
 	s.lastMsg = msg
 	s.callCnt++
+	if s.observeCtx != nil {
+		s.observeCtx(ctx)
+	}
 
 	return s.sendErr
 }
@@ -409,6 +416,56 @@ func TestHandleEmailTest_InvalidRecipientDoesNotConsumeBucket(t *testing.T) {
 	}
 	if got, want := msg, "Test email sent"; !strings.Contains(got, want) {
 		t.Errorf("second POST flash msg = %q, should contain %q", got, want)
+	}
+}
+
+// TestHandleEmailTest_DetachesRequestContext pins the #472 fix: the
+// send must run against a context detached from r.Context() so a
+// closed-tab cancellation does not surface as "context canceled" in
+// the diagnostics ring buffer. The observer reads ctx.Err() inside
+// Send so the assertion runs before the handler's deferred cancel
+// fires on the detached context.
+func TestHandleEmailTest_DetachesRequestContext(t *testing.T) {
+	t.Parallel()
+
+	var observedErr error
+	var observedHasDeadline bool
+	recorder := &stubRecorder{
+		observeCtx: func(ctx context.Context) {
+			observedErr = ctx.Err()
+			_, observedHasDeadline = ctx.Deadline()
+		},
+	}
+	limiter := NewEmailRateLimiterWithClock(
+		10*time.Second,
+		func() time.Time { return time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC) },
+	)
+
+	form := "to=ops@example.test"
+	ctx, cancel := context.WithCancel(t.Context())
+	ctx = auth.WithPlayer(ctx, &auth.Player{ID: 1, Username: "admin", Email: "admin@example.test"})
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/admin/email/test", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.RemoteAddr = "1.2.3.4:5555"
+	rr := httptest.NewRecorder()
+
+	// Cancel before serving so the handler sees an already-cancelled
+	// request context; the send should still observe a fresh detached
+	// context whose ctx.Err() is nil.
+	cancel()
+	HandleEmailTest(
+		slog.New(slog.DiscardHandler),
+		recorder, limiter, NewEmailFlash(testFlashKey, false),
+	).ServeHTTP(rr, req)
+
+	if got, want := recorder.callCnt, 1; got != want {
+		t.Fatalf("recorder.callCnt = %d, want %d (cancellation must not skip the dispatch)", got, want)
+	}
+	if observedErr != nil {
+		t.Errorf("observed ctx.Err = %v, want nil (detached from r.Context cancel)", observedErr)
+	}
+	if !observedHasDeadline {
+		t.Error("observed ctx has no deadline; bounded timeout must apply")
 	}
 }
 

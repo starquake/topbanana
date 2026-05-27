@@ -41,6 +41,14 @@ const (
 	// reclaim sockets from stale clients.
 	idleTimeout     = 120 * time.Second
 	shutdownTimeout = 5 * time.Second
+	// tokenSweepInterval is the wall-clock gap between background
+	// sweeps of the verify and reset token tables. The startup sweep
+	// already runs once on boot; this keeps a long-running deploy from
+	// accumulating orphans between restarts (#472). One hour is
+	// frequent enough that an SMTP-orphan row never lingers more than
+	// a tick past its TTL, infrequent enough that the DELETE shows up
+	// once an hour in the slow-query log.
+	tokenSweepInterval = time.Hour
 )
 
 // Sentinel errors for ResetPassword; defined at package level so err113 stays
@@ -332,6 +340,11 @@ func Run(
 		logger.WarnContext(signalCtx, "reset-token sweep at startup failed",
 			slog.Any("err", sweepErr))
 	}
+	// The startup sweep only fires once. Tokens minted in the hours
+	// between deploys (and their flaky-SMTP orphan rows) need a
+	// periodic broom too; the hourly tick keeps both tables bounded on
+	// long-running deploys without burning a goroutine per row (#472).
+	go runTokenSweep(signalCtx, logger, stores.VerifyTokens, stores.ResetTokens, tokenSweepInterval)
 	gameService := game.NewService(stores.Games, stores.Quizzes, logger)
 	if cfg.RevealDelay > 0 {
 		gameService.SetRevealDelay(cfg.RevealDelay)
@@ -358,6 +371,47 @@ func Run(
 	}
 
 	return runHTTPServer(ctx, signalCtx, ln, srv, logger)
+}
+
+// tokenSweeper is the slice of the verify / reset stores the periodic
+// sweep calls. Narrow interface so the unit test can drive the loop
+// without standing up the real DB.
+type tokenSweeper interface {
+	DeleteExpiredVerifyTokens(ctx context.Context) error
+}
+
+type resetTokenSweeper interface {
+	DeleteExpiredResetTokens(ctx context.Context) error
+}
+
+// runTokenSweep ticks at interval and calls both DeleteExpired*
+// methods on each iteration. Returns when ctx is cancelled (which is
+// the signal-driven shutdown context, so a graceful shutdown stops
+// the sweep before the DB is closed). A sweep failure is logged at
+// warn and the loop continues; one bad tick should not silence the
+// next hour's pass.
+func runTokenSweep(
+	ctx context.Context,
+	logger *slog.Logger,
+	verify tokenSweeper,
+	reset resetTokenSweeper,
+	interval time.Duration,
+) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := verify.DeleteExpiredVerifyTokens(ctx); err != nil {
+				logger.WarnContext(ctx, "verify-token periodic sweep failed", slog.Any("err", err))
+			}
+			if err := reset.DeleteExpiredResetTokens(ctx); err != nil {
+				logger.WarnContext(ctx, "reset-token periodic sweep failed", slog.Any("err", err))
+			}
+		}
+	}
 }
 
 func runHTTPServer(ctx, signalCtx context.Context, ln net.Listener, srv http.Handler, logger *slog.Logger) error {

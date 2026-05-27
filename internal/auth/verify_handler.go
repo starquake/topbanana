@@ -54,8 +54,8 @@ func HandleVerifyEmail(
 			return
 		}
 
-		_, err := tokens.ConsumeVerifyToken(r.Context(), HashVerifyToken(raw))
-		landing := postVerifyLanding(r, players, sessions)
+		ownerID, err := tokens.ConsumeVerifyToken(r.Context(), HashVerifyToken(raw))
+		landing := postVerifyLanding(w, r, players, sessions, ownerID)
 		switch {
 		case err == nil:
 			render.render(w, r, http.StatusOK, verifyEmailPageData{
@@ -90,12 +90,28 @@ func HandleVerifyEmail(
 }
 
 // postVerifyLanding picks the Continue link target. Prefers the
-// session player's role landing when the request carries a live
-// session; falls back to the home page when the verifying user is on
-// a different device than the one that signed up.
-func postVerifyLanding(r *http.Request, players PlayerStore, sessions *session.Manager) string {
+// session player's role landing when the session belongs to the token
+// owner; falls back to the neutral home page when the session is
+// missing, unreadable, or belongs to a different player than the one
+// the token verified. The session is cleared in the mismatch case so
+// the success page does not leave the operator signed in as someone
+// else after clicking another user's link on a shared device. A zero
+// ownerID (consume failed) skips the mismatch check so the invalid /
+// expired branch still respects an existing session.
+func postVerifyLanding(
+	w http.ResponseWriter,
+	r *http.Request,
+	players PlayerStore,
+	sessions *session.Manager,
+	ownerID int64,
+) string {
 	id, ok := sessions.PlayerID(r)
 	if !ok {
+		return playerLandingPath
+	}
+	if ownerID != 0 && ownerID != id {
+		sessions.Clear(w)
+
 		return playerLandingPath
 	}
 	p, err := players.GetPlayerByID(r.Context(), id)
