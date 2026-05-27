@@ -156,10 +156,10 @@ func addAuthRoutes(
 	mux.Handle("GET /verify-email/pending", auth.HandleVerifyPending(
 		logger, csrfMgr, stores.Players, sessions, verifyFlash,
 	))
-	mux.Handle("POST /verify-email/resend", csrfMW(auth.HandleVerifyResend(
+	mux.Handle("POST /verify-email/resend", admin.MaxFormSizeMiddleware(csrfMW(auth.HandleVerifyResend(
 		logger, stores.Players, sessions, stores.VerifyTokens, mailerTester,
 		cfg.BaseURL, resendLimiter, verifyFlash,
-	)))
+	))))
 
 	if googleEnabled {
 		googleAuth := auth.NewGoogleAuthenticator(auth.GoogleConfig{

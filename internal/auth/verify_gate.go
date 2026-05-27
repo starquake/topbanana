@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"log/slog"
 	"net"
 	"net/http"
@@ -86,7 +87,13 @@ func HandleVerifyPending(
 
 			return
 		}
-		if p.IsEmailVerified() {
+		if p.IsEmailVerified() || p.Email == "" {
+			// Drain any in-flight flash cookie before bouncing so the
+			// one-shot banner does not survive past its intended page.
+			// p.Email == "" cannot complete the resend flow either, so
+			// the interstitial would be a dead end - send them to the
+			// landing instead.
+			flash.Read(w, r)
 			http.Redirect(w, r, landingPathFor(p.Role), http.StatusSeeOther)
 
 			return
@@ -142,14 +149,26 @@ func HandleVerifyResend(
 		}
 
 		if wait, allowed := limiter.Allow(clientIPForResend(r)); !allowed {
-			flash.SetError(w, "Slow down: wait a moment before requesting another email.", int(wait.Seconds()))
-			w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())))
+			// Round sub-second remainders up so a 0.4s wait still
+			// reports as 1s rather than "now"; otherwise Retry-After:
+			// 0 (and ResendDisabled=false) lets a scripted client
+			// retry-loop the rate limiter.
+			seconds := int((wait + time.Second - 1) / time.Second)
+			flash.SetError(w, "Slow down: wait a moment before requesting another email.", seconds)
+			w.Header().Set("Retry-After", strconv.Itoa(seconds))
 			http.Redirect(w, r, verifyPendingPath, http.StatusSeeOther)
 
 			return
 		}
 
-		if err := SendVerifyEmail(r.Context(), tokens, sender, baseURL,
+		// Detach from r.Context() so a client disconnect mid-SMTP does
+		// not cancel the send: the limiter already stamped this IP, so
+		// a cancelled attempt would burn the next 60-second window
+		// without ever delivering. The bounded timeout keeps a stuck
+		// SMTP server from pinning the goroutine indefinitely.
+		sendCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), verifyEmailDispatchTimeout)
+		defer cancel()
+		if err := SendVerifyEmail(sendCtx, tokens, sender, baseURL,
 			p.Email, p.ID, time.Now().UTC()); err != nil {
 			logger.WarnContext(r.Context(), "verify resend dispatch failed",
 				slog.Int64("player_id", p.ID), slog.Any("err", err))

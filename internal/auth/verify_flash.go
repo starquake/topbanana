@@ -120,6 +120,7 @@ func (f *VerifyFlash) cookie(value string, maxAge int) *http.Cookie {
 
 func (f *VerifyFlash) sign(payload []byte) []byte {
 	h := hmac.New(sha256.New, f.key)
+	// hash.Hash.Write never returns an error.
 	_, _ = h.Write(payload)
 
 	return h.Sum(nil)
