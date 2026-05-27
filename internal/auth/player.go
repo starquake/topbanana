@@ -156,6 +156,11 @@ type PlayerStore interface {
 	// GetPlayerByUsername returns the player with the given username.
 	// Returns ErrPlayerNotFound when there is no match.
 	GetPlayerByUsername(ctx context.Context, username string) (*Player, error)
+	// GetPlayerByEmail returns the player with the given email.
+	// Returns ErrPlayerNotFound when there is no match. Used by the
+	// forgot-password flow's username-or-email lookup and the Google
+	// OAuth link-by-email path.
+	GetPlayerByEmail(ctx context.Context, email string) (*Player, error)
 	// GetPlayerByID returns the player with the given ID.
 	// Returns ErrPlayerNotFound when there is no match.
 	GetPlayerByID(ctx context.Context, id int64) (*Player, error)

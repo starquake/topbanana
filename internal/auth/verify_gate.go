@@ -76,7 +76,7 @@ func HandleVerifyPending(
 	csrfMgr *csrf.Manager,
 	players PlayerStore,
 	sessions *session.Manager,
-	flash *VerifyFlash,
+	flash *SignedFlash,
 ) http.Handler {
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/verify_email_pending.gohtml")
 
@@ -124,7 +124,7 @@ func HandleVerifyResend(
 	sender VerifyEmailSender,
 	baseURL string,
 	limiter *VerifyResendLimiter,
-	flash *VerifyFlash,
+	flash *SignedFlash,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := loadAuthenticatedPlayer(r, players, sessions)

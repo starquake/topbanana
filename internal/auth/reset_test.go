@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -120,6 +121,7 @@ func TestBuildResetLink_HappyPath(t *testing.T) {
 }
 
 type recordingResetTokenStore struct {
+	mu        sync.Mutex
 	created   []createResetTokenCall
 	createErr error
 }
@@ -133,6 +135,9 @@ type createResetTokenCall struct {
 func (s *recordingResetTokenStore) CreateResetToken(
 	_ context.Context, tokenHash string, playerID int64, expiresAt time.Time,
 ) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if s.createErr != nil {
 		return s.createErr
 	}
@@ -143,6 +148,16 @@ func (s *recordingResetTokenStore) CreateResetToken(
 	})
 
 	return nil
+}
+
+func (s *recordingResetTokenStore) Created() []createResetTokenCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := make([]createResetTokenCall, len(s.created))
+	copy(out, s.created)
+
+	return out
 }
 
 func (*recordingResetTokenStore) ConsumeResetToken(_ context.Context, _, _ string) (int64, error) {

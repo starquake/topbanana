@@ -76,6 +76,53 @@ func addRoutes(
 	mux.Handle("GET /quizzes", home.HandleAllQuizzes(logger, stores.Quizzes, viewerFunc, csrfTokenFunc))
 }
 
+// addEmailFlowRoutes registers the verify-email and forgot-password
+// routes. Extracted from addAuthRoutes so each function stays under
+// the revive function-length cap; the two flows share the same
+// limiter type and the same MaxFormSizeMiddleware wrapper pattern,
+// so they live together.
+func addEmailFlowRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	stores *store.Stores,
+	sessions *session.Manager,
+	csrfMgr *csrf.Manager,
+	cfg *config.Config,
+	mailerTester *mailer.Tester,
+) {
+	csrfMW := csrfMgr.Middleware
+
+	mux.Handle("GET /verify-email", auth.HandleVerifyEmail(
+		logger, csrfMgr, stores.VerifyTokens, stores.Players, sessions,
+	))
+
+	verifyFlash := auth.NewSignedFlash(
+		[]byte(cfg.SessionKey), cfg.SecureCookies(),
+		auth.VerifyFlashCookieName, auth.VerifyFlashCookiePath,
+	)
+	resendLimiter := auth.NewVerifyResendLimiter(auth.VerifyResendCooldown())
+	mux.Handle("GET /verify-email/pending", auth.HandleVerifyPending(
+		logger, csrfMgr, stores.Players, sessions, verifyFlash,
+	))
+	mux.Handle("POST /verify-email/resend", admin.MaxFormSizeMiddleware(csrfMW(auth.HandleVerifyResend(
+		logger, stores.Players, sessions, stores.VerifyTokens, mailerTester,
+		cfg.BaseURL, resendLimiter, verifyFlash,
+	))))
+
+	forgotFlash := auth.NewSignedFlash(
+		[]byte(cfg.SessionKey), cfg.SecureCookies(),
+		auth.ForgotFlashCookieName, auth.ForgotFlashCookiePath,
+	)
+	forgotLimiter := auth.NewVerifyResendLimiter(auth.ForgotPasswordCooldown())
+	mux.Handle("GET /forgot-password", auth.HandleForgotForm(
+		logger, csrfMgr, stores.Players, sessions, forgotFlash,
+	))
+	mux.Handle("POST /forgot-password", admin.MaxFormSizeMiddleware(csrfMW(auth.HandleForgotSubmit(
+		logger, stores.Players, sessions, stores.ResetTokens, mailerTester,
+		cfg.BaseURL, forgotLimiter, forgotFlash,
+	))))
+}
+
 // homeViewerFunc returns a closure that resolves the signed-in player
 // for the home-page footer affordance. Returns nil for anonymous
 // sessions (or any lookup error) so the template falls back to the
@@ -147,19 +194,7 @@ func addAuthRoutes(
 	)
 	mux.Handle("POST /logout", csrfMW(auth.HandleLogout(sessions)))
 
-	mux.Handle("GET /verify-email", auth.HandleVerifyEmail(
-		logger, csrfMgr, stores.VerifyTokens, stores.Players, sessions,
-	))
-
-	verifyFlash := auth.NewVerifyFlash([]byte(cfg.SessionKey), cfg.SecureCookies())
-	resendLimiter := auth.NewVerifyResendLimiter(auth.VerifyResendCooldown())
-	mux.Handle("GET /verify-email/pending", auth.HandleVerifyPending(
-		logger, csrfMgr, stores.Players, sessions, verifyFlash,
-	))
-	mux.Handle("POST /verify-email/resend", admin.MaxFormSizeMiddleware(csrfMW(auth.HandleVerifyResend(
-		logger, stores.Players, sessions, stores.VerifyTokens, mailerTester,
-		cfg.BaseURL, resendLimiter, verifyFlash,
-	))))
+	addEmailFlowRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mailerTester)
 
 	if googleEnabled {
 		googleAuth := auth.NewGoogleAuthenticator(auth.GoogleConfig{

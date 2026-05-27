@@ -59,6 +59,19 @@ func (s *stubPlayerStore) GetPlayerByUsername(_ context.Context, username string
 	return p, nil
 }
 
+func (s *stubPlayerStore) GetPlayerByEmail(_ context.Context, email string) (*Player, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, p := range s.byID {
+		if p.Email == email {
+			return p, nil
+		}
+	}
+
+	return nil, ErrPlayerNotFound
+}
+
 func (s *stubPlayerStore) GetPlayerByID(_ context.Context, id int64) (*Player, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

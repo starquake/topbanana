@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -180,6 +181,7 @@ func TestSendVerifyEmailBestEffort_SwallowsError(t *testing.T) {
 }
 
 type recordingVerifyTokenStore struct {
+	mu        sync.Mutex
 	created   []createVerifyTokenCall
 	createErr error
 }
@@ -193,6 +195,9 @@ type createVerifyTokenCall struct {
 func (s *recordingVerifyTokenStore) CreateVerifyToken(
 	_ context.Context, tokenHash string, playerID int64, expiresAt time.Time,
 ) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if s.createErr != nil {
 		return s.createErr
 	}
@@ -205,6 +210,16 @@ func (s *recordingVerifyTokenStore) CreateVerifyToken(
 	return nil
 }
 
+func (s *recordingVerifyTokenStore) Created() []createVerifyTokenCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := make([]createVerifyTokenCall, len(s.created))
+	copy(out, s.created)
+
+	return out
+}
+
 func (*recordingVerifyTokenStore) ConsumeVerifyToken(_ context.Context, _ string) (int64, error) {
 	return 0, errors.ErrUnsupported
 }
@@ -214,15 +229,29 @@ func (*recordingVerifyTokenStore) DeleteExpiredVerifyTokens(_ context.Context) e
 }
 
 type recordingSender struct {
+	mu      sync.Mutex
 	sent    []mailer.Message
 	sendErr error
 }
 
 func (s *recordingSender) Send(_ context.Context, msg mailer.Message) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if s.sendErr != nil {
 		return s.sendErr
 	}
 	s.sent = append(s.sent, msg)
 
 	return nil
+}
+
+func (s *recordingSender) Sent() []mailer.Message {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := make([]mailer.Message, len(s.sent))
+	copy(out, s.sent)
+
+	return out
 }
