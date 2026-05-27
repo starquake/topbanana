@@ -178,12 +178,20 @@ func decodeSignedFlash(payload []byte) SignedFlashRead {
 }
 
 // VerifyFlashCookieName / VerifyFlashCookiePath / ForgotFlashCookieName /
-// ForgotFlashCookiePath are the per-flow constants the wiring layer
-// uses to build a [SignedFlash]. Exported so a router test can match
-// the cookie set on a response without re-declaring the string.
+// ForgotFlashCookiePath / VerifyRequestFlashCookieName /
+// VerifyRequestFlashCookiePath are the per-flow constants the wiring
+// layer uses to build a [SignedFlash]. Exported so a router test can
+// match the cookie set on a response without re-declaring the string.
+//
+// The verify-request path scopes its cookie to /verify-email/request so
+// the public self-service form's banner does not surface on the
+// in-session /verify-email/pending interstitial (whose cookie path is
+// /verify-email and would otherwise overlap).
 const (
-	VerifyFlashCookieName = "topbanana_verify_flash"
-	VerifyFlashCookiePath = "/verify-email"
-	ForgotFlashCookieName = "topbanana_forgot_flash"
-	ForgotFlashCookiePath = "/forgot-password"
+	VerifyFlashCookieName        = "topbanana_verify_flash"
+	VerifyFlashCookiePath        = "/verify-email"
+	ForgotFlashCookieName        = "topbanana_forgot_flash"
+	ForgotFlashCookiePath        = "/forgot-password"
+	VerifyRequestFlashCookieName = "topbanana_verify_request_flash"
+	VerifyRequestFlashCookiePath = "/verify-email/request"
 )

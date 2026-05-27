@@ -107,6 +107,9 @@ func addEmailFlowRoutes(
 		[]byte(cfg.SessionKey), cfg.SecureCookies(),
 		auth.VerifyFlashCookieName, auth.VerifyFlashCookiePath,
 	)
+	// Two VerifyResendLimiter instances on purpose: a stampede on the
+	// in-session resend must not throttle the public self-service form,
+	// and vice versa. Both share the same window via VerifyResendCooldown.
 	resendLimiter := auth.NewVerifyResendLimiter(auth.VerifyResendCooldown(), cfg.TrustedProxyCIDRs)
 	mux.Handle("GET /verify-email/pending", auth.HandleVerifyPending(
 		logger, csrfMgr, stores.Players, sessions, verifyFlash,
@@ -115,6 +118,21 @@ func addEmailFlowRoutes(
 		logger, stores.Players, sessions, stores.VerifyTokens, mailerTester,
 		cfg.BaseURL, resendLimiter, verifyFlash,
 	))))
+
+	verifyRequestFlash := auth.NewSignedFlash(
+		[]byte(cfg.SessionKey), cfg.SecureCookies(),
+		auth.VerifyRequestFlashCookieName, auth.VerifyRequestFlashCookiePath,
+	)
+	verifyRequestLimiter := auth.NewVerifyResendLimiter(auth.VerifyResendCooldown(), cfg.TrustedProxyCIDRs)
+	mux.Handle("GET /verify-email/request", auth.HandleVerifyEmailRequestForm(
+		logger, csrfMgr, stores.Players, sessions, verifyRequestFlash,
+	))
+	mux.Handle("POST /verify-email/request", admin.MaxFormSizeMiddleware(
+		csrfMW(auth.HandleVerifyEmailRequestSubmit(
+			logger, stores.Players, sessions, stores.VerifyTokens, mailerTester,
+			cfg.BaseURL, verifyRequestLimiter, verifyRequestFlash,
+		)),
+	))
 
 	forgotFlash := auth.NewSignedFlash(
 		[]byte(cfg.SessionKey), cfg.SecureCookies(),
