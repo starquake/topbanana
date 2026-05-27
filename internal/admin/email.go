@@ -15,6 +15,7 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/mailer"
+	"github.com/starquake/topbanana/internal/request"
 )
 
 // EmailRecorder is the subset of the mailer the admin email
@@ -86,27 +87,47 @@ type emailLogRow struct {
 // concurrent callers cannot both observe "allowed"; Cancel reverts a
 // specific stamp (matched against the token Allow returned) so a
 // recipient-validation rejection does not burn the next window.
+//
+// trustedProxyCIDRs is the allow-list of upstream proxies whose
+// X-Forwarded-For header [EmailRateLimiter.ClientIP] honours when
+// bucketing; nil means "trust nothing" so XFF is ignored and the
+// bucket key is the request peer's address. See [request.ClientIP]
+// for the walk semantics and #463 for the rationale.
 type EmailRateLimiter struct {
-	mu      sync.Mutex
-	last    map[string]time.Time
-	window  time.Duration
-	nowFunc func() time.Time
+	mu                sync.Mutex
+	last              map[string]time.Time
+	window            time.Duration
+	nowFunc           func() time.Time
+	trustedProxyCIDRs []*net.IPNet
 }
 
 // NewEmailRateLimiter returns a limiter that allows one POST per
 // window per source IP. The clock defaults to [time.Now] in
 // production; tests inject a deterministic clock via the export_test
-// helper.
-func NewEmailRateLimiter(window time.Duration) *EmailRateLimiter {
-	return newEmailRateLimiterWithClock(window, time.Now)
+// helper. trustedProxyCIDRs is the upstream-proxy allow-list passed
+// to [request.ClientIP] when [EmailRateLimiter.ClientIP] resolves
+// the bucket key; nil disables the XFF walk.
+func NewEmailRateLimiter(window time.Duration, trustedProxyCIDRs []*net.IPNet) *EmailRateLimiter {
+	return newEmailRateLimiterWithClock(window, time.Now, trustedProxyCIDRs)
 }
 
-func newEmailRateLimiterWithClock(window time.Duration, now func() time.Time) *EmailRateLimiter {
+func newEmailRateLimiterWithClock(
+	window time.Duration, now func() time.Time, trustedProxyCIDRs []*net.IPNet,
+) *EmailRateLimiter {
 	return &EmailRateLimiter{
-		last:    make(map[string]time.Time),
-		window:  window,
-		nowFunc: now,
+		last:              make(map[string]time.Time),
+		window:            window,
+		nowFunc:           now,
+		trustedProxyCIDRs: trustedProxyCIDRs,
 	}
+}
+
+// ClientIP resolves the per-IP bucket key from r using the
+// trustedProxyCIDRs allow-list passed at construction. Exposed so the
+// HTTP handler can stamp + cancel using the same key without
+// resolving the IP twice in two distinct call sites.
+func (l *EmailRateLimiter) ClientIP(r *http.Request) string {
+	return request.ClientIP(r, l.trustedProxyCIDRs)
 }
 
 // Allow reports whether ip is permitted to send right now and stamps
@@ -209,7 +230,7 @@ func HandleEmailTest(
 	flash *EmailFlash,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := clientIP(r)
+		ip := limiter.ClientIP(r)
 		token, blocked := rateLimited(w, r, limiter, ip, flash)
 		if blocked {
 			return
@@ -329,23 +350,6 @@ func resolveTestRecipient(r *http.Request) (addr string, ok, valid bool) {
 	}
 
 	return "", false, true
-}
-
-// clientIP extracts the source IP the rate limiter buckets on. Strips
-// the port from RemoteAddr so "1.2.3.4:5678" and "1.2.3.4:9999" share
-// a bucket. X-Forwarded-For is intentionally NOT consulted: the
-// deployment exposes the server directly today, and a forged XFF
-// header would let an attacker pick any bucket and burn / bypass it.
-// When a future deployment puts a trusted reverse proxy in front, the
-// signed-XFF allow-list can be added behind a TRUSTED_PROXY_IPS config
-// knob - until then RemoteAddr is the only IP we can attribute.
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-
-	return host
 }
 
 // buildEmailPageData is the common page-data assembly. The handler

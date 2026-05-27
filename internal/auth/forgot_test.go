@@ -70,7 +70,7 @@ func TestHandleForgotSubmit_AlwaysFlashesGenericSuccess(t *testing.T) {
 			}
 
 			rec := runForgotPOST(t, store, &recordingResetTokenStore{}, &recordingSender{},
-				NewVerifyResendLimiter(time.Minute), tc.identifier)
+				NewVerifyResendLimiter(time.Minute, nil), tc.identifier)
 
 			if got, want := rec.Code, http.StatusSeeOther; got != want {
 				t.Errorf("status = %d, want %d", got, want)
@@ -93,7 +93,7 @@ func TestHandleForgotSubmit_RealMatchDispatchesEmail(t *testing.T) {
 	sender := &recordingSender{}
 
 	rec := runForgotPOST(t, store, tokens, sender,
-		NewVerifyResendLimiter(time.Minute), "alice")
+		NewVerifyResendLimiter(time.Minute, nil), "alice")
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
 	}
@@ -120,7 +120,7 @@ func TestHandleForgotSubmit_UnknownAccountSendsNoMail(t *testing.T) {
 	sender := &recordingSender{}
 
 	runForgotPOST(t, store, tokens, sender,
-		NewVerifyResendLimiter(time.Minute), "ghost")
+		NewVerifyResendLimiter(time.Minute, nil), "ghost")
 
 	// Wait long enough that an async dispatch would have landed.
 	time.Sleep(50 * time.Millisecond)
@@ -138,7 +138,7 @@ func TestHandleForgotSubmit_RateLimitedBlocksDispatch(t *testing.T) {
 	}
 	tokens := &recordingResetTokenStore{}
 	sender := &recordingSender{}
-	limiter := NewVerifyResendLimiter(time.Minute)
+	limiter := NewVerifyResendLimiter(time.Minute, nil)
 
 	first := runForgotPOST(t, store, tokens, sender, limiter, "alice")
 	if got, want := first.Code, http.StatusSeeOther; got != want {

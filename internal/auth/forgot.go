@@ -102,7 +102,7 @@ func HandleForgotSubmit(
 			return
 		}
 
-		if wait, allowed := limiter.Allow(clientIPForResend(r)); !allowed {
+		if wait, allowed := limiter.Allow(limiter.ClientIP(r)); !allowed {
 			seconds := int((wait + time.Second - 1) / time.Second)
 			flash.SetError(w, "Slow down: wait a moment before submitting again.", seconds)
 			w.Header().Set("Retry-After", strconv.Itoa(seconds))

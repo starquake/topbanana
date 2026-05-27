@@ -90,7 +90,7 @@ func TestRequireVerifiedEmail_NoEmailPassesThrough(t *testing.T) {
 func TestVerifyResendLimiter_AllowsFirstThenBlocks(t *testing.T) {
 	t.Parallel()
 
-	limiter := NewVerifyResendLimiter(time.Minute)
+	limiter := NewVerifyResendLimiter(time.Minute, nil)
 	wait, ok := limiter.Allow("1.2.3.4")
 	if !ok {
 		t.Fatalf("Allow first = (%v, %v), want (0, true)", wait, ok)
@@ -107,7 +107,7 @@ func TestVerifyResendLimiter_AllowsFirstThenBlocks(t *testing.T) {
 func TestVerifyResendLimiter_PerIP(t *testing.T) {
 	t.Parallel()
 
-	limiter := NewVerifyResendLimiter(time.Minute)
+	limiter := NewVerifyResendLimiter(time.Minute, nil)
 	if _, ok := limiter.Allow("1.2.3.4"); !ok {
 		t.Fatal("first IP allow = false, want true")
 	}

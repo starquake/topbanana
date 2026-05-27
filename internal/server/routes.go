@@ -2,6 +2,7 @@ package server
 
 import (
 	"log/slog"
+	"net"
 	"net/http"
 
 	"github.com/starquake/topbanana/internal/admin"
@@ -35,9 +36,10 @@ func addRoutes(
 	csrfMgr := csrf.New([]byte(cfg.SessionKey), cfg.SecureCookies())
 
 	emailDeps := adminEmailDeps{
-		tester: mailerTester,
-		status: mailerStatus,
-		flash:  admin.NewEmailFlash([]byte(cfg.SessionKey), cfg.SecureCookies()),
+		tester:            mailerTester,
+		status:            mailerStatus,
+		flash:             admin.NewEmailFlash([]byte(cfg.SessionKey), cfg.SecureCookies()),
+		trustedProxyCIDRs: cfg.TrustedProxyCIDRs,
 	}
 
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mailerTester)
@@ -100,7 +102,7 @@ func addEmailFlowRoutes(
 		[]byte(cfg.SessionKey), cfg.SecureCookies(),
 		auth.VerifyFlashCookieName, auth.VerifyFlashCookiePath,
 	)
-	resendLimiter := auth.NewVerifyResendLimiter(auth.VerifyResendCooldown())
+	resendLimiter := auth.NewVerifyResendLimiter(auth.VerifyResendCooldown(), cfg.TrustedProxyCIDRs)
 	mux.Handle("GET /verify-email/pending", auth.HandleVerifyPending(
 		logger, csrfMgr, stores.Players, sessions, verifyFlash,
 	))
@@ -113,7 +115,7 @@ func addEmailFlowRoutes(
 		[]byte(cfg.SessionKey), cfg.SecureCookies(),
 		auth.ForgotFlashCookieName, auth.ForgotFlashCookiePath,
 	)
-	forgotLimiter := auth.NewVerifyResendLimiter(auth.ForgotPasswordCooldown())
+	forgotLimiter := auth.NewVerifyResendLimiter(auth.ForgotPasswordCooldown(), cfg.TrustedProxyCIDRs)
 	mux.Handle("GET /forgot-password", auth.HandleForgotForm(
 		logger, csrfMgr, stores.Players, sessions, forgotFlash,
 	))
@@ -254,9 +256,10 @@ func addProfileRoutes(
 // adminEmailDeps bundles the email-diagnostics handler deps so
 // addAdminRoutes stays inside revive's 8-argument limit.
 type adminEmailDeps struct {
-	tester *mailer.Tester
-	status mailer.StatusView
-	flash  *admin.EmailFlash
+	tester            *mailer.Tester
+	status            mailer.StatusView
+	flash             *admin.EmailFlash
+	trustedProxyCIDRs []*net.IPNet
 }
 
 func addAdminRoutes(
@@ -351,7 +354,7 @@ func addAdminEmailRoutes(
 	requireAdmin func(http.Handler) http.Handler,
 	email adminEmailDeps,
 ) {
-	emailLimiter := admin.NewEmailRateLimiter(admin.EmailTestRateLimit)
+	emailLimiter := admin.NewEmailRateLimiter(admin.EmailTestRateLimit, email.trustedProxyCIDRs)
 	mux.Handle(
 		"GET /admin/email",
 		requireAdmin(admin.HandleEmailGet(logger, csrfMgr, email.tester, email.status, email.flash)),

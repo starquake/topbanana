@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/request"
 	"github.com/starquake/topbanana/internal/session"
 )
 
@@ -148,7 +149,7 @@ func HandleVerifyResend(
 			return
 		}
 
-		if wait, allowed := limiter.Allow(clientIPForResend(r)); !allowed {
+		if wait, allowed := limiter.Allow(limiter.ClientIP(r)); !allowed {
 			// Round sub-second remainders up so a 0.4s wait still
 			// reports as 1s rather than "now"; otherwise Retry-After:
 			// 0 (and ResendDisabled=false) lets a scripted client
@@ -203,38 +204,43 @@ func loadAuthenticatedPlayer(r *http.Request, players PlayerStore, sessions *ses
 	return p, true
 }
 
-// clientIPForResend strips the port off RemoteAddr. Mirrors the
-// admin/email diagnostics page's clientIP - XFF is deliberately not
-// consulted because the deployment exposes the server directly today;
-// when a trusted proxy is added the two helpers can converge.
-func clientIPForResend(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-
-	return host
-}
-
 // VerifyResendLimiter is a per-IP cool-down. Concurrency-safe; the map
 // is pruned of stale entries every Allow call so memory stays
 // proportional to the live caller set rather than the lifetime set.
+//
+// trustedProxyCIDRs is the allow-list of upstream proxies whose
+// X-Forwarded-For header [VerifyResendLimiter.ClientIP] honours when
+// bucketing; nil means "trust nothing" so XFF is ignored and the
+// bucket key is the request peer's address. See [request.ClientIP]
+// for the walk semantics and #463 for the rationale.
 type VerifyResendLimiter struct {
-	mu     sync.Mutex
-	last   map[string]time.Time
-	window time.Duration
-	now    func() time.Time
+	mu                sync.Mutex
+	last              map[string]time.Time
+	window            time.Duration
+	now               func() time.Time
+	trustedProxyCIDRs []*net.IPNet
 }
 
-// NewVerifyResendLimiter returns a limiter using the supplied window
-// and [time.Now] as the clock. The clock is injectable via the
-// export_test seam so tests can fast-forward without sleeping.
-func NewVerifyResendLimiter(window time.Duration) *VerifyResendLimiter {
+// NewVerifyResendLimiter returns a limiter using the supplied window,
+// [time.Now] as the clock, and trustedProxyCIDRs as the per-IP bucket
+// override list. nil/empty CIDR slice disables the XFF walk; see
+// [VerifyResendLimiter] for the policy. The clock is injectable via
+// the export_test seam so tests can fast-forward without sleeping.
+func NewVerifyResendLimiter(window time.Duration, trustedProxyCIDRs []*net.IPNet) *VerifyResendLimiter {
 	return &VerifyResendLimiter{
-		last:   map[string]time.Time{},
-		window: window,
-		now:    time.Now,
+		last:              map[string]time.Time{},
+		window:            window,
+		now:               time.Now,
+		trustedProxyCIDRs: trustedProxyCIDRs,
 	}
+}
+
+// ClientIP resolves the per-IP bucket key from r using the
+// trustedProxyCIDRs allow-list passed at construction. HTTP handlers
+// pass the result to [VerifyResendLimiter.Allow]; the unit tests that
+// pin Allow itself keep using Allow + a synthetic IP.
+func (l *VerifyResendLimiter) ClientIP(r *http.Request) string {
+	return request.ClientIP(r, l.trustedProxyCIDRs)
 }
 
 // Allow reports whether ip may resend right now. On admit, stamps the
