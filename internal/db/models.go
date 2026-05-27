@@ -71,6 +71,7 @@ type Player struct {
 	Role            string
 	CreatedAt       time.Time
 	UsernameClaimed int64
+	EmailVerifiedAt sql.NullTime
 }
 
 type PlayerIdentity struct {

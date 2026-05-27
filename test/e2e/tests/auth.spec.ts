@@ -10,6 +10,7 @@ test('register, log out, log back in, and reach the admin dashboard', async ({ p
 
   await page.goto('/register');
   await page.locator('input[name=username]').fill(username);
+  await page.locator('input[name=email]').fill(`${username}@example.test`);
   await page.locator('input[name=password]').fill(password);
   await page.locator('button[type=submit]').click();
 
@@ -53,6 +54,7 @@ test('deep link while logged out lands at the deep link after login', async ({ p
   // Register fresh and log out so the session is empty for the deep-link click.
   await page.goto('/register');
   await page.locator('input[name=username]').fill(username);
+  await page.locator('input[name=email]').fill(`${username}@example.test`);
   await page.locator('input[name=password]').fill(password);
   await page.locator('button[type=submit]').click();
   await expect(page).toHaveURL(/\/admin\/quizzes$/);

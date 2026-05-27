@@ -16,8 +16,9 @@ const claimPlayer = `-- name: ClaimPlayer :one
 UPDATE players
 SET username = ?1,
     password_hash = ?2,
+    email = ?3,
     role = CASE
-        WHEN CAST(?3 AS TEXT) = 'admin' THEN 'admin'
+        WHEN CAST(?4 AS TEXT) = 'admin' THEN 'admin'
         WHEN NOT EXISTS (
             SELECT 1 FROM players p
             WHERE p.password_hash IS NOT NULL
@@ -26,14 +27,16 @@ SET username = ?1,
         ELSE 'player'
     END,
     username_claimed = 1
-WHERE players.id = ?4
+WHERE players.id = ?5
   AND players.password_hash IS NULL
-RETURNING id, username, email, password_hash, role, created_at, username_claimed
+  AND players.email IS NULL
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at
 `
 
 type ClaimPlayerParams struct {
 	Username      string
 	PasswordHash  sql.NullString
+	Email         sql.NullString
 	RequestedRole string
 	ID            int64
 }
@@ -62,6 +65,7 @@ func (q *Queries) ClaimPlayer(ctx context.Context, arg ClaimPlayerParams) (Playe
 	row := q.db.QueryRowContext(ctx, claimPlayer,
 		arg.Username,
 		arg.PasswordHash,
+		arg.Email,
 		arg.RequestedRole,
 		arg.ID,
 	)
@@ -74,6 +78,7 @@ func (q *Queries) ClaimPlayer(ctx context.Context, arg ClaimPlayerParams) (Playe
 		&i.Role,
 		&i.CreatedAt,
 		&i.UsernameClaimed,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
@@ -81,6 +86,7 @@ func (q *Queries) ClaimPlayer(ctx context.Context, arg ClaimPlayerParams) (Playe
 const claimPlayerForOAuth = `-- name: ClaimPlayerForOAuth :one
 UPDATE players
 SET email = ?1,
+    email_verified_at = CURRENT_TIMESTAMP,
     role = CASE
         WHEN NOT EXISTS (
             SELECT 1 FROM players p
@@ -92,7 +98,7 @@ SET email = ?1,
 WHERE players.id = ?2
   AND players.password_hash IS NULL
   AND players.email IS NULL
-RETURNING id, username, email, password_hash, role, created_at, username_claimed
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at
 `
 
 type ClaimPlayerForOAuthParams struct {
@@ -131,6 +137,7 @@ func (q *Queries) ClaimPlayerForOAuth(ctx context.Context, arg ClaimPlayerForOAu
 		&i.Role,
 		&i.CreatedAt,
 		&i.UsernameClaimed,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
@@ -150,7 +157,7 @@ func (q *Queries) CountAllPlayers(ctx context.Context) (int64, error) {
 const createAnonymousPlayer = `-- name: CreateAnonymousPlayer :one
 INSERT INTO players (username, role)
 VALUES (?1, 'player')
-RETURNING id, username, email, password_hash, role, created_at, username_claimed
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at
 `
 
 // Used by the EnsurePlayer middleware to back a fresh visitor with a real
@@ -173,15 +180,17 @@ func (q *Queries) CreateAnonymousPlayer(ctx context.Context, username string) (P
 		&i.Role,
 		&i.CreatedAt,
 		&i.UsernameClaimed,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
 
 const createPlayerFromOAuth = `-- name: CreatePlayerFromOAuth :one
-INSERT INTO players (username, email, role, username_claimed)
+INSERT INTO players (username, email, email_verified_at, role, username_claimed)
 VALUES (
     ?1,
     ?2,
+    CURRENT_TIMESTAMP,
     CASE
         WHEN NOT EXISTS (
             SELECT 1 FROM players p
@@ -192,7 +201,7 @@ VALUES (
     END,
     1
 )
-RETURNING id, username, email, password_hash, role, created_at, username_claimed
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at
 `
 
 type CreatePlayerFromOAuthParams struct {
@@ -226,17 +235,19 @@ func (q *Queries) CreatePlayerFromOAuth(ctx context.Context, arg CreatePlayerFro
 		&i.Role,
 		&i.CreatedAt,
 		&i.UsernameClaimed,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
 
 const createPlayerWithCredentials = `-- name: CreatePlayerWithCredentials :one
-INSERT INTO players (username, password_hash, role, username_claimed)
+INSERT INTO players (username, password_hash, email, role, username_claimed)
 VALUES (
     ?1,
     ?2,
+    ?3,
     CASE
-        WHEN CAST(?3 AS TEXT) = 'admin' THEN 'admin'
+        WHEN CAST(?4 AS TEXT) = 'admin' THEN 'admin'
         WHEN NOT EXISTS (
             SELECT 1 FROM players p
             WHERE p.password_hash IS NOT NULL
@@ -246,12 +257,13 @@ VALUES (
     END,
     1
 )
-RETURNING id, username, email, password_hash, role, created_at, username_claimed
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at
 `
 
 type CreatePlayerWithCredentialsParams struct {
 	Username      string
 	PasswordHash  sql.NullString
+	Email         sql.NullString
 	RequestedRole string
 }
 
@@ -273,8 +285,17 @@ type CreatePlayerWithCredentialsParams struct {
 // their username at the register form. The column tracks "did the player
 // pick this name themselves" (vs auto-generated petname), so a fresh
 // registrant must be marked as claimed from the moment the row is written.
+//
+// email is required at register time (#111). email_verified_at stays NULL
+// until the player consumes their verify token; the auth gate denies
+// routes for password-bearing rows in that state.
 func (q *Queries) CreatePlayerWithCredentials(ctx context.Context, arg CreatePlayerWithCredentialsParams) (Player, error) {
-	row := q.db.QueryRowContext(ctx, createPlayerWithCredentials, arg.Username, arg.PasswordHash, arg.RequestedRole)
+	row := q.db.QueryRowContext(ctx, createPlayerWithCredentials,
+		arg.Username,
+		arg.PasswordHash,
+		arg.Email,
+		arg.RequestedRole,
+	)
 	var i Player
 	err := row.Scan(
 		&i.ID,
@@ -284,12 +305,13 @@ func (q *Queries) CreatePlayerWithCredentials(ctx context.Context, arg CreatePla
 		&i.Role,
 		&i.CreatedAt,
 		&i.UsernameClaimed,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
 
 const getPlayerByEmail = `-- name: GetPlayerByEmail :one
-SELECT id, username, email, password_hash, role, created_at, username_claimed
+SELECT id, username, email, password_hash, role, created_at, username_claimed, email_verified_at
 FROM players
 WHERE email = ?
 LIMIT 1
@@ -310,12 +332,13 @@ func (q *Queries) GetPlayerByEmail(ctx context.Context, email sql.NullString) (P
 		&i.Role,
 		&i.CreatedAt,
 		&i.UsernameClaimed,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
 
 const getPlayerByProviderSubject = `-- name: GetPlayerByProviderSubject :one
-SELECT p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed
+SELECT p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed, p.email_verified_at
 FROM players p
 JOIN player_identities pi ON pi.player_id = p.id
 WHERE pi.provider = ? AND pi.subject = ?
@@ -342,12 +365,13 @@ func (q *Queries) GetPlayerByProviderSubject(ctx context.Context, arg GetPlayerB
 		&i.Role,
 		&i.CreatedAt,
 		&i.UsernameClaimed,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
 
 const getPlayerByUsername = `-- name: GetPlayerByUsername :one
-SELECT id, username, email, password_hash, role, created_at, username_claimed
+SELECT id, username, email, password_hash, role, created_at, username_claimed, email_verified_at
 FROM players
 WHERE username = ?
 LIMIT 1
@@ -364,6 +388,7 @@ func (q *Queries) GetPlayerByUsername(ctx context.Context, username string) (Pla
 		&i.Role,
 		&i.CreatedAt,
 		&i.UsernameClaimed,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
@@ -391,7 +416,7 @@ func (q *Queries) LinkProviderIdentity(ctx context.Context, arg LinkProviderIden
 
 const listAllPlayers = `-- name: ListAllPlayers :many
 SELECT
-    p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed,
+    p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed, p.email_verified_at,
     EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id) AS has_oauth,
     CAST(COALESCE((SELECT pi.provider FROM player_identities pi WHERE pi.player_id = p.id ORDER BY pi.provider LIMIT 1), '') AS TEXT) AS oauth_provider
 FROM players p
@@ -412,6 +437,7 @@ type ListAllPlayersRow struct {
 	Role            string
 	CreatedAt       time.Time
 	UsernameClaimed int64
+	EmailVerifiedAt sql.NullTime
 	HasOauth        bool
 	OauthProvider   string
 }
@@ -445,6 +471,7 @@ func (q *Queries) ListAllPlayers(ctx context.Context, arg ListAllPlayersParams) 
 			&i.Role,
 			&i.CreatedAt,
 			&i.UsernameClaimed,
+			&i.EmailVerifiedAt,
 			&i.HasOauth,
 			&i.OauthProvider,
 		); err != nil {
@@ -527,12 +554,34 @@ func (q *Queries) ListPlayerFinishStats(ctx context.Context, playerIds []int64) 
 	return items, nil
 }
 
+const markPlayerEmailVerifiedIfNew = `-- name: MarkPlayerEmailVerifiedIfNew :execrows
+UPDATE players
+SET email_verified_at = CURRENT_TIMESTAMP
+WHERE id = ?1
+  AND email_verified_at IS NULL
+`
+
+// Stamps email_verified_at = now() on the row when it is currently
+// NULL. Idempotent: a second call against an already-verified row is
+// a no-op (rows-affected stays 0). Called by the OAuth link-by-email
+// path so a password-registered row that later signs in with the same
+// Google address gets the "verified" flag flipped, otherwise PR3's
+// gate would keep blocking the user even though Google has now
+// attested the address (#111 PR1 review finding).
+func (q *Queries) MarkPlayerEmailVerifiedIfNew(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markPlayerEmailVerifiedIfNew, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const renamePlayer = `-- name: RenamePlayer :one
 UPDATE players
 SET username = ?1,
     username_claimed = 1
 WHERE id = ?2
-RETURNING id, username, email, password_hash, role, created_at, username_claimed
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at
 `
 
 type RenamePlayerParams struct {
@@ -563,6 +612,7 @@ func (q *Queries) RenamePlayer(ctx context.Context, arg RenamePlayerParams) (Pla
 		&i.Role,
 		&i.CreatedAt,
 		&i.UsernameClaimed,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
@@ -604,7 +654,7 @@ UPDATE players
 SET username = ?1,
     username_claimed = 1
 WHERE id = ?2 AND password_hash IS NULL
-RETURNING id, username, email, password_hash, role, created_at, username_claimed
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at
 `
 
 type UpdatePlayerUsernameParams struct {
@@ -635,6 +685,7 @@ func (q *Queries) UpdatePlayerUsername(ctx context.Context, arg UpdatePlayerUser
 		&i.Role,
 		&i.CreatedAt,
 		&i.UsernameClaimed,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }

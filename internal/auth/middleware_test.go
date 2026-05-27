@@ -28,7 +28,7 @@ func TestRequireAdmin_AllowsAdmin(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	admin, err := store.CreatePlayer(t.Context(), "alice", "h", RoleAdmin)
+	admin, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", "h", RoleAdmin)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
@@ -77,10 +77,10 @@ func TestRequireAdmin_DeniesPlayer(t *testing.T) {
 	store := newStubPlayerStore()
 	// Pre-seed an admin so the next CreatePlayer call is not auto-promoted to admin
 	// by the "first password-bearing registrant becomes admin" rule.
-	if _, err := store.CreatePlayer(t.Context(), "admin", "h", RoleAdmin); err != nil {
+	if _, err := store.CreatePlayer(t.Context(), "admin", "admin@example.test", "h", RoleAdmin); err != nil {
 		t.Fatalf("seed admin err = %v, want nil", err)
 	}
-	player, err := store.CreatePlayer(t.Context(), "bob", "h", RolePlayer)
+	player, err := store.CreatePlayer(t.Context(), "bob", "bob@example.test", "h", RolePlayer)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
@@ -192,7 +192,7 @@ func TestRequireAdmin_StoreError_500(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	admin, err := store.CreatePlayer(t.Context(), "alice", "h", RoleAdmin)
+	admin, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", "h", RoleAdmin)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}

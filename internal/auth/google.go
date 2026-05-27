@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -469,6 +470,19 @@ func linkExistingPlayerByEmail(
 		}
 
 		return nil, fmt.Errorf("link identity to existing player: %w", linkErr)
+	}
+
+	// Google has just attested the player's ownership of this email
+	// address. Stamp email_verified_at if it was still NULL (a
+	// password-registered row from #111 PR1 starts unverified) so the
+	// gate landing in PR3 does not keep bouncing a linked account to
+	// the resend page.
+	if err := identities.MarkPlayerEmailVerifiedIfNew(ctx, player.ID); err != nil {
+		return nil, fmt.Errorf("mark email verified after link: %w", err)
+	}
+	if player.EmailVerifiedAt == nil {
+		now := time.Now().UTC()
+		player.EmailVerifiedAt = &now
 	}
 
 	return player, nil

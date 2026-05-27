@@ -80,7 +80,7 @@ func (s *stubPlayerStore) GetPlayerByID(_ context.Context, id int64) (*Player, e
 // rule is observed atomically.
 func (s *stubPlayerStore) CreatePlayer(
 	_ context.Context,
-	username, passwordHash, requestedRole string,
+	username, email, passwordHash, requestedRole string,
 ) (*Player, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -88,12 +88,20 @@ func (s *stubPlayerStore) CreatePlayer(
 	if _, exists := s.byName[username]; exists {
 		return nil, ErrUsernameTaken
 	}
+	if email != "" {
+		for _, p := range s.byID {
+			if p.Email == email {
+				return nil, ErrEmailTaken
+			}
+		}
+	}
 
 	role := s.resolveRoleLocked(requestedRole)
 
 	p := &Player{
 		ID:           s.nextID,
 		Username:     username,
+		Email:        email,
 		PasswordHash: passwordHash,
 		Role:         role,
 	}
@@ -144,7 +152,7 @@ func (s *stubPlayerStore) CreateAnonymousPlayer(_ context.Context, username stri
 func (s *stubPlayerStore) ClaimPlayer(
 	_ context.Context,
 	playerID int64,
-	username, passwordHash, requestedRole string,
+	username, email, passwordHash, requestedRole string,
 ) (*Player, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -159,8 +167,16 @@ func (s *stubPlayerStore) ClaimPlayer(
 	if other, exists := s.byName[username]; exists && other.ID != playerID {
 		return nil, ErrUsernameTaken
 	}
+	if email != "" {
+		for _, p := range s.byID {
+			if p.ID != playerID && p.Email == email {
+				return nil, ErrEmailTaken
+			}
+		}
+	}
 
 	delete(s.byName, existing.Username)
+	existing.Email = email
 	existing.Username = username
 	existing.PasswordHash = passwordHash
 	existing.Role = s.resolveRoleLocked(requestedRole)
@@ -300,6 +316,7 @@ func TestHandleRegisterSubmit_FirstUser_BecomesAdmin(t *testing.T) {
 
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"alice"},
+		"email":    {"alice@example.test"},
 		"password": {"correctbattery"},
 	})
 
@@ -336,13 +353,14 @@ func TestHandleRegisterSubmit_SecondUser_DefaultsToPlayer(t *testing.T) {
 
 	store := newStubPlayerStore()
 	// Pre-seed first admin.
-	if _, err := store.CreatePlayer(t.Context(), "admin", "hash", RoleAdmin); err != nil {
+	if _, err := store.CreatePlayer(t.Context(), "admin", "admin@example.test", "hash", RoleAdmin); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"bob"},
+		"email":    {"bob@example.test"},
 		"password": {"correctbattery"},
 	})
 
@@ -369,7 +387,7 @@ func TestHandleRegisterSubmit_AdminUsernamesEnv_PromotesToAdmin(t *testing.T) {
 
 	store := newStubPlayerStore()
 	// Pre-seed first user so the count > 0 and the env var path is exercised.
-	if _, err := store.CreatePlayer(t.Context(), "first", "h", RolePlayer); err != nil {
+	if _, err := store.CreatePlayer(t.Context(), "first", "first@example.test", "h", RolePlayer); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
@@ -383,6 +401,7 @@ func TestHandleRegisterSubmit_AdminUsernamesEnv_PromotesToAdmin(t *testing.T) {
 	)
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"carol"},
+		"email":    {"carol@example.test"},
 		"password": {"correctbattery"},
 	})
 
@@ -407,6 +426,7 @@ func TestHandleRegisterSubmit_PasswordTooShort(t *testing.T) {
 
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"alice"},
+		"email":    {"alice@example.test"},
 		"password": {"short"},
 	})
 
@@ -434,6 +454,7 @@ func TestHandleRegisterSubmit_PasswordTooLong(t *testing.T) {
 
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"alice"},
+		"email":    {"alice@example.test"},
 		"password": {strings.Repeat("a", MaxPasswordLength+1)},
 	})
 
@@ -453,13 +474,14 @@ func TestHandleRegisterSubmit_DuplicateUsername(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	if _, err := store.CreatePlayer(t.Context(), "alice", "h", RolePlayer); err != nil {
+	if _, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", "h", RolePlayer); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"alice"},
+		"email":    {"alice@example.test"},
 		"password": {"correctbattery"},
 	})
 
@@ -468,6 +490,81 @@ func TestHandleRegisterSubmit_DuplicateUsername(t *testing.T) {
 	}
 	if got, want := rec.Body.String(), "already taken"; !strings.Contains(got, want) {
 		t.Errorf("body did not mention duplicate, got %q", got)
+	}
+}
+
+// TestHandleRegisterSubmit_DuplicateEmail pins #111 PR1: a second
+// register with the same email as an existing row gets a 409 with the
+// "already registered" banner instead of the generic 500.
+func TestHandleRegisterSubmit_DuplicateEmail(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	if _, err := store.CreatePlayer(t.Context(), "alice", "shared@example.test", "h", RolePlayer); err != nil {
+		t.Fatalf("seed CreatePlayer err = %v, want nil", err)
+	}
+
+	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
+	rec := postForm(t, handler, "/register", url.Values{
+		"username": {"bob"},
+		"email":    {"shared@example.test"},
+		"password": {"correctbattery"},
+	})
+
+	if got, want := rec.Code, http.StatusConflict; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := rec.Body.String(), "already registered"; !strings.Contains(got, want) {
+		t.Errorf("body did not mention duplicate email, got %q", got)
+	}
+}
+
+// TestHandleRegisterSubmit_RejectsInvalidEmail pins the form-level
+// validator: a malformed email surfaces as a 400 with the "Enter a
+// valid email address" banner, without hitting the store at all.
+func TestHandleRegisterSubmit_RejectsInvalidEmail(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
+	rec := postForm(t, handler, "/register", url.Values{
+		"username": {"alice"},
+		"email":    {"not-an-email"},
+		"password": {"correctbattery"},
+	})
+
+	if got, want := rec.Code, http.StatusBadRequest; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := rec.Body.String(), "Enter a valid email address"; !strings.Contains(got, want) {
+		t.Errorf("body did not surface the email validator banner, got %q", got)
+	}
+}
+
+// TestHandleRegisterSubmit_LowercasesAndTrimsEmail pins the
+// normalisation rule: "  ALICE@Example.Test " round-trips as
+// "alice@example.test" on the stored row so case/whitespace variants
+// cannot create duplicate accounts.
+func TestHandleRegisterSubmit_LowercasesAndTrimsEmail(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false)
+	rec := postForm(t, handler, "/register", url.Values{
+		"username": {"alice"},
+		"email":    {"  ALICE@Example.Test "},
+		"password": {"correctbattery"},
+	})
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
+	}
+	p, err := store.GetPlayerByUsername(t.Context(), "alice")
+	if err != nil {
+		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+	}
+	if got, want := p.Email, "alice@example.test"; got != want {
+		t.Errorf("stored email = %q, want %q", got, want)
 	}
 }
 
@@ -495,6 +592,7 @@ func TestHandleRegisterSubmit_ClaimsAnonymousSession(t *testing.T) {
 
 	form := url.Values{
 		"username": {"alice"},
+		"email":    {"alice@example.test"},
 		"password": {"correctbattery"},
 	}
 	req := httptest.NewRequestWithContext(
@@ -534,7 +632,13 @@ func TestHandleRegisterSubmit_ClaimWithTakenUsername(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	if _, err := store.CreatePlayer(t.Context(), "alice", "previousHash", RolePlayer); err != nil {
+	if _, err := store.CreatePlayer(
+		t.Context(),
+		"alice",
+		"alice@example.test",
+		"previousHash",
+		RolePlayer,
+	); err != nil {
 		t.Fatalf("seed CreatePlayer err = %v, want nil", err)
 	}
 	anon, err := store.CreateAnonymousPlayer(t.Context(), "anon-claimer")
@@ -551,6 +655,7 @@ func TestHandleRegisterSubmit_ClaimWithTakenUsername(t *testing.T) {
 
 	form := url.Values{
 		"username": {"alice"}, // already taken by the seeded credentialled row
+		"email":    {"new-alice@example.test"},
 		"password": {"correctbattery"},
 	}
 	req := httptest.NewRequestWithContext(
@@ -595,6 +700,7 @@ func TestHandleRegisterSubmit_ClaimAlreadyClaimed_FallsBackToCreate(t *testing.T
 		t.Context(),
 		anon.ID,
 		"winner",
+		"winner@example.test",
 		"winnerHash",
 		RolePlayer,
 	); claimErr != nil {
@@ -610,6 +716,7 @@ func TestHandleRegisterSubmit_ClaimAlreadyClaimed_FallsBackToCreate(t *testing.T
 
 	form := url.Values{
 		"username": {"latecomer"},
+		"email":    {"latecomer@example.test"},
 		"password": {"correctbattery"},
 	}
 	req := httptest.NewRequestWithContext(
@@ -721,10 +828,16 @@ func TestHandleLoginForm_AlreadySignedIn_RedirectsToLanding(t *testing.T) {
 	// registrant becomes admin" rule (mirroring the production SQL)
 	// promotes that row, not carol. Carol then stays as a plain
 	// player and the redirect lands on / instead of /admin/quizzes.
-	if _, seedErr := store.CreatePlayer(t.Context(), "first-admin", hash, RoleAdmin); seedErr != nil {
+	if _, seedErr := store.CreatePlayer(
+		t.Context(),
+		"first-admin",
+		"first-admin@example.test",
+		hash,
+		RoleAdmin,
+	); seedErr != nil {
 		t.Fatalf("seed admin err = %v, want nil", seedErr)
 	}
-	player, err := store.CreatePlayer(t.Context(), "carol", hash, RolePlayer)
+	player, err := store.CreatePlayer(t.Context(), "carol", "carol@example.test", hash, RolePlayer)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
@@ -789,13 +902,14 @@ func TestHandleLoginSubmit_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HashPassword err = %v, want nil", err)
 	}
-	if _, err := store.CreatePlayer(t.Context(), "alice", hash, RoleAdmin); err != nil {
+	if _, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RoleAdmin); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
 	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false, false)
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"alice"},
+		"email":    {"alice@example.test"},
 		"password": {"correctbattery"},
 	})
 
@@ -818,13 +932,14 @@ func TestHandleLoginSubmit_HonoursNext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HashPassword err = %v, want nil", err)
 	}
-	if _, err := store.CreatePlayer(t.Context(), "alice", hash, RoleAdmin); err != nil {
+	if _, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RoleAdmin); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
 	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false, false)
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"alice"},
+		"email":    {"alice@example.test"},
 		"password": {"correctbattery"},
 		"next":     {"/admin/email"},
 	})
@@ -848,13 +963,14 @@ func TestHandleLoginSubmit_RejectsUnsafeNext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HashPassword err = %v, want nil", err)
 	}
-	if _, err := store.CreatePlayer(t.Context(), "alice", hash, RoleAdmin); err != nil {
+	if _, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RoleAdmin); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
 	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false, false)
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"alice"},
+		"email":    {"alice@example.test"},
 		"password": {"correctbattery"},
 		"next":     {"//evil.com/"},
 	})
@@ -876,20 +992,27 @@ func TestHandleLoginSubmit_Success_Player(t *testing.T) {
 	store := newStubPlayerStore()
 	// Pre-seed an admin so the "first password-bearing registrant
 	// becomes admin" rule doesn't accidentally promote bob.
-	if _, err := store.CreatePlayer(t.Context(), "first-admin", "h", RoleAdmin); err != nil {
+	if _, err := store.CreatePlayer(
+		t.Context(),
+		"first-admin",
+		"first-admin@example.test",
+		"h",
+		RoleAdmin,
+	); err != nil {
 		t.Fatalf("seed CreatePlayer err = %v, want nil", err)
 	}
 	hash, err := HashPassword("correctbattery")
 	if err != nil {
 		t.Fatalf("HashPassword err = %v, want nil", err)
 	}
-	if _, err := store.CreatePlayer(t.Context(), "bob", hash, RolePlayer); err != nil {
+	if _, err := store.CreatePlayer(t.Context(), "bob", "bob@example.test", hash, RolePlayer); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
 	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false, false)
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"bob"},
+		"email":    {"bob@example.test"},
 		"password": {"correctbattery"},
 	})
 
@@ -909,6 +1032,7 @@ func TestHandleLoginSubmit_BadCredentials_UnknownUser(t *testing.T) {
 
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"ghost"},
+		"email":    {"ghost@example.test"},
 		"password": {"correctbattery"},
 	})
 
@@ -928,13 +1052,14 @@ func TestHandleLoginSubmit_BadCredentials_WrongPassword(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HashPassword err = %v, want nil", err)
 	}
-	if _, err := store.CreatePlayer(t.Context(), "alice", hash, RolePlayer); err != nil {
+	if _, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RolePlayer); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
 	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false, false)
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"alice"},
+		"email":    {"alice@example.test"},
 		"password": {"wrong-password-no"},
 	})
 
@@ -951,13 +1076,14 @@ func TestHandleLoginSubmit_RejectsEmptyHash(t *testing.T) {
 
 	// Seed a player with no password hash (legacy admin from migration).
 	store := newStubPlayerStore()
-	if _, err := store.CreatePlayer(t.Context(), "legacy", "", RoleAdmin); err != nil {
+	if _, err := store.CreatePlayer(t.Context(), "legacy", "legacy@example.test", "", RoleAdmin); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
 	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil, false, false)
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"legacy"},
+		"email":    {"legacy@example.test"},
 		"password": {"anything-goes-here-13"},
 	})
 
@@ -974,6 +1100,7 @@ func TestHandleRegisterSubmit_WhitespaceOnlyUsername(t *testing.T) {
 
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"   "},
+		"email":    {"   @example.test"},
 		"password": {"correctbattery"},
 	})
 
@@ -998,6 +1125,7 @@ func TestHandleRegisterSubmit_PasswordExactlyMinLength(t *testing.T) {
 	password := strings.Repeat("a", MinPasswordLength) // exactly 13 characters
 	rec := postForm(t, handler, "/register", url.Values{
 		"username": {"alice"},
+		"email":    {"alice@example.test"},
 		"password": {password},
 	})
 

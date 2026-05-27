@@ -74,3 +74,8 @@ func ExportReadGoogleNext(r *http.Request, key []byte) string {
 // integration / unit tests can assert it without re-declaring the
 // constant.
 const GoogleNextCookieName = googleNextCookieName
+
+// LooksLikeEmail exposes the unexported register-form email validator
+// so the external auth_test package can pin its branch table without
+// going through the full register handler (#111 PR1).
+var LooksLikeEmail = looksLikeEmail

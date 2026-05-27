@@ -60,7 +60,11 @@ const maxFormBodySize = 64 * 1024
 type formData struct {
 	Title    string
 	Username string
-	Message  string
+	// Email is the trimmed+lowercased value the registrant submitted.
+	// Preserved across form re-renders so a failed validation does not
+	// drop the email the visitor typed (#111 PR1).
+	Email   string
+	Message string
 	// ShowRegister controls whether the login template renders the
 	// "No account? Register" link. False when REGISTRATION_ENABLED is unset/false.
 	ShowRegister bool
@@ -137,13 +141,15 @@ func HandleRegisterSubmit(
 		}
 
 		rawUsername := r.PostFormValue("username")
+		rawEmail := r.PostFormValue("email")
 		password := r.PostFormValue("password")
 
-		input := validateRegisterInput(rawUsername, password)
+		input := validateRegisterInput(rawUsername, rawEmail, password)
 		if !input.OK {
 			render.render(w, r, http.StatusBadRequest, formData{
 				Title:      "Register",
 				Username:   input.Cleaned,
+				Email:      input.CleanedEmail,
 				Message:    input.ErrMsg,
 				ShowGoogle: googleEnabled,
 			})
@@ -164,13 +170,25 @@ func HandleRegisterSubmit(
 			return
 		}
 
-		player, err := claimOrCreatePlayer(r, players, sessions, input.Cleaned, hashed, role)
+		player, err := claimOrCreatePlayer(r, players, sessions, input.Cleaned, input.CleanedEmail, hashed, role)
 		if err != nil {
 			if errors.Is(err, ErrUsernameTaken) {
 				render.render(w, r, http.StatusConflict, formData{
 					Title:      "Register",
 					Username:   input.Cleaned,
+					Email:      input.CleanedEmail,
 					Message:    "Username is already taken.",
+					ShowGoogle: googleEnabled,
+				})
+
+				return
+			}
+			if errors.Is(err, ErrEmailTaken) {
+				render.render(w, r, http.StatusConflict, formData{
+					Title:      "Register",
+					Username:   input.Cleaned,
+					Email:      input.CleanedEmail,
+					Message:    "Email is already registered. Try logging in.",
 					ShowGoogle: googleEnabled,
 				})
 
@@ -205,17 +223,17 @@ func claimOrCreatePlayer(
 	r *http.Request,
 	players PlayerStore,
 	sessions *session.Manager,
-	username, passwordHash, requestedRole string,
+	username, email, passwordHash, requestedRole string,
 ) (*Player, error) {
 	playerID, ok := sessions.PlayerID(r)
 	if !ok {
-		return createPlayerWrapped(r, players, username, passwordHash, requestedRole)
+		return createPlayerWrapped(r, players, username, email, passwordHash, requestedRole)
 	}
 
 	existing, err := players.GetPlayerByID(r.Context(), playerID)
 	if err != nil {
 		if errors.Is(err, ErrPlayerNotFound) {
-			return createPlayerWrapped(r, players, username, passwordHash, requestedRole)
+			return createPlayerWrapped(r, players, username, email, passwordHash, requestedRole)
 		}
 
 		return nil, fmt.Errorf("get player by id for claim: %w", err)
@@ -224,13 +242,13 @@ func claimOrCreatePlayer(
 		// Session already belongs to a credentialled account. Treat this as a
 		// fresh registration so the new account is created independently;
 		// the existing session is replaced when the caller resets the cookie.
-		return createPlayerWrapped(r, players, username, passwordHash, requestedRole)
+		return createPlayerWrapped(r, players, username, email, passwordHash, requestedRole)
 	}
 
-	claimed, err := players.ClaimPlayer(r.Context(), playerID, username, passwordHash, requestedRole)
+	claimed, err := players.ClaimPlayer(r.Context(), playerID, username, email, passwordHash, requestedRole)
 	if err != nil {
 		if errors.Is(err, ErrPlayerAlreadyClaimed) || errors.Is(err, ErrPlayerNotFound) {
-			return createPlayerWrapped(r, players, username, passwordHash, requestedRole)
+			return createPlayerWrapped(r, players, username, email, passwordHash, requestedRole)
 		}
 
 		return nil, fmt.Errorf("claim player: %w", err)
@@ -244,9 +262,9 @@ func claimOrCreatePlayer(
 func createPlayerWrapped(
 	r *http.Request,
 	players PlayerStore,
-	username, passwordHash, requestedRole string,
+	username, email, passwordHash, requestedRole string,
 ) (*Player, error) {
-	p, err := players.CreatePlayer(r.Context(), username, passwordHash, requestedRole)
+	p, err := players.CreatePlayer(r.Context(), username, email, passwordHash, requestedRole)
 	if err != nil {
 		return nil, fmt.Errorf("create player: %w", err)
 	}
@@ -431,23 +449,38 @@ type registerInput struct {
 	// Cleaned is the username with surrounding whitespace removed. Callers use it for
 	// both storage and lookup so `" alice "` and `"alice"` cannot be treated as different users.
 	Cleaned string
+	// CleanedEmail is the email with surrounding whitespace removed and
+	// the entire value lowercased so case variants do not produce
+	// duplicate accounts (#111 PR1).
+	CleanedEmail string
 	// ErrMsg is a user-facing error message, populated only when OK is false.
 	ErrMsg string
 	// OK reports whether the inputs are valid.
 	OK bool
 }
 
-// validateRegisterInput trims the username and validates the inputs.
-func validateRegisterInput(username, password string) registerInput {
+// validateRegisterInput trims the username and email, lowercases the
+// email, and validates the inputs.
+func validateRegisterInput(username, email, password string) registerInput {
 	cleaned := strings.TrimSpace(username)
+	cleanedEmail := strings.ToLower(strings.TrimSpace(email))
 	if cleaned == "" {
-		return registerInput{Cleaned: cleaned, ErrMsg: "Username is required.", OK: false}
+		return registerInput{
+			Cleaned: cleaned, CleanedEmail: cleanedEmail,
+			ErrMsg: "Username is required.", OK: false,
+		}
+	}
+	if !looksLikeEmail(cleanedEmail) {
+		return registerInput{
+			Cleaned: cleaned, CleanedEmail: cleanedEmail,
+			ErrMsg: "Enter a valid email address.", OK: false,
+		}
 	}
 	if len(password) < MinPasswordLength {
 		return registerInput{
-			Cleaned: cleaned,
-			ErrMsg:  fmt.Sprintf("Password must be at least %d characters.", MinPasswordLength),
-			OK:      false,
+			Cleaned: cleaned, CleanedEmail: cleanedEmail,
+			ErrMsg: fmt.Sprintf("Password must be at least %d characters.", MinPasswordLength),
+			OK:     false,
 		}
 	}
 	if len(password) > MaxPasswordLength {
@@ -455,13 +488,40 @@ func validateRegisterInput(username, password string) registerInput {
 		// turns a wrapped 500 into a normal form-validation error with a
 		// user-friendly message.
 		return registerInput{
-			Cleaned: cleaned,
-			ErrMsg:  fmt.Sprintf("Password must be at most %d characters.", MaxPasswordLength),
-			OK:      false,
+			Cleaned: cleaned, CleanedEmail: cleanedEmail,
+			ErrMsg: fmt.Sprintf("Password must be at most %d characters.", MaxPasswordLength),
+			OK:     false,
 		}
 	}
 
-	return registerInput{Cleaned: cleaned, OK: true}
+	return registerInput{Cleaned: cleaned, CleanedEmail: cleanedEmail, OK: true}
+}
+
+// looksLikeEmail is a deliberately loose check: exactly one '@', a
+// non-empty local part, a host that contains a dot but does not start
+// or end with one. Tight validation belongs at the SMTP / DNS layer;
+// this exists only to reject obvious typos at the form so the
+// duplicate-email path remains the rare exception rather than the
+// common error (#111 PR1).
+func looksLikeEmail(s string) bool {
+	if s == "" {
+		return false
+	}
+	local, host, ok := strings.Cut(s, "@")
+	if !ok || local == "" || host == "" {
+		return false
+	}
+	if strings.Count(s, "@") > 1 {
+		return false
+	}
+	if strings.HasPrefix(host, ".") || strings.HasSuffix(host, ".") {
+		return false
+	}
+	if !strings.Contains(host, ".") {
+		return false
+	}
+
+	return true
 }
 
 // renderInvalidCredentials re-renders the login form with the generic
