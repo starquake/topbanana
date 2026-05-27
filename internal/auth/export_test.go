@@ -75,9 +75,6 @@ func ExportReadGoogleNext(r *http.Request, key []byte) string {
 // constant.
 const GoogleNextCookieName = googleNextCookieName
 
-// LooksLikeEmail exposes looksLikeEmail for the external test package.
-var LooksLikeEmail = looksLikeEmail
-
 // BuildVerifyLink exposes buildVerifyLink so the URL-shape tests can
 // assert the link path + query encoding from the external test package.
 var BuildVerifyLink = buildVerifyLink

@@ -44,7 +44,7 @@ func addRoutes(
 
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mailerTester)
 	addAdminRoutes(mux, logger, stores, gameService, sessions, csrfMgr, emailDeps)
-	addProfileRoutes(mux, logger, stores, sessions, csrfMgr)
+	addProfileRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mailerTester)
 	addAPIRoutes(mux, logger, stores, gameService, leaderboardHub, sessions)
 
 	// Client
@@ -250,16 +250,24 @@ func addAuthRoutes(
 	}
 }
 
-// addProfileRoutes registers the per-player profile page (#410). The
-// GET and POST routes are both wrapped in RequireAuthenticated so an
-// anonymous-session visitor is redirected to /login before reaching
-// the handler. The POST is additionally CSRF-protected via csrfMW.
+// addProfileRoutes registers the per-player profile page (#410) and
+// its sibling controls (#497 email change). Every route is wrapped
+// in RequireAuthenticated + RequireVerifiedEmail so an anonymous or
+// unverified session is bounced before the handler runs; POST routes
+// additionally pass through csrfMW.
+//
+// MaxFormSizeMiddleware fronts the email-change POST in front of
+// csrfMW so the CSRF validator's ParseForm sees a bounded body. The
+// rest of the profile POSTs already cap the body in-handler via
+// [http.MaxBytesReader].
 func addProfileRoutes(
 	mux *http.ServeMux,
 	logger *slog.Logger,
 	stores *store.Stores,
 	sessions *session.Manager,
 	csrfMgr *csrf.Manager,
+	cfg *config.Config,
+	sender auth.VerifyEmailSender,
 ) {
 	csrfMW := csrfMgr.Middleware
 	requireAuthn := func(h http.Handler) http.Handler {
@@ -275,6 +283,27 @@ func addProfileRoutes(
 	mux.Handle(
 		"POST /profile/password",
 		csrfMW(requireAuthn(profile.HandleProfilePasswordChange(logger, csrfMgr, stores.Players, sessions))),
+	)
+
+	emailFlash := auth.NewSignedFlash(
+		[]byte(cfg.SessionKey), cfg.SecureCookies(),
+		profile.EmailChangeFlashCookieName, profile.EmailChangeFlashCookiePath,
+	)
+	mux.Handle(
+		"GET /profile/email",
+		requireAuthn(profile.HandleProfileEmail(logger, csrfMgr, emailFlash)),
+	)
+	mux.Handle(
+		"POST /profile/email",
+		admin.MaxFormSizeMiddleware(
+			csrfMW(requireAuthn(profile.HandleProfileEmailChange(logger, profile.EmailChangeDeps{
+				Players: stores.Players,
+				Tokens:  stores.VerifyTokens,
+				Sender:  sender,
+				Flash:   emailFlash,
+				BaseURL: cfg.BaseURL,
+			}))),
+		),
 	)
 }
 

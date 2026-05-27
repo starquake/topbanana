@@ -159,7 +159,7 @@ type stubVerifyTokens struct {
 }
 
 func (*stubVerifyTokens) CreateVerifyToken(
-	_ context.Context, _ string, _ int64, _ time.Time,
+	_ context.Context, _ string, _ int64, _ time.Time, _ string,
 ) error {
 	return nil
 }

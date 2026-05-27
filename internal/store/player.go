@@ -314,13 +314,24 @@ func (s *PlayerStore) MarkPlayerEmailVerifiedIfNew(ctx context.Context, playerID
 // so the driver's RFC3339 encoding lines up lexicographically with the
 // UTC clock the consume/sweep paths read - mixing offsets between
 // insert and read silently breaks the string comparison.
+//
+// pendingEmail carries the new address an in-session email-change
+// request (#497) wants to switch to; "" mints a register/resend row
+// whose consume side just stamps email_verified_at. The column is
+// nullable in the schema so an empty string maps to NULL via
+// [sql.NullString] with Valid=false.
 func (s *PlayerStore) CreateVerifyToken(
-	ctx context.Context, tokenHash string, playerID int64, expiresAt time.Time,
+	ctx context.Context, tokenHash string, playerID int64, expiresAt time.Time, pendingEmail string,
 ) error {
+	pending := sql.NullString{}
+	if pendingEmail != "" {
+		pending = sql.NullString{String: pendingEmail, Valid: true}
+	}
 	if err := s.q.CreateEmailVerifyToken(ctx, db.CreateEmailVerifyTokenParams{
-		TokenHash: tokenHash,
-		PlayerID:  playerID,
-		ExpiresAt: expiresAt.UTC(),
+		TokenHash:    tokenHash,
+		PlayerID:     playerID,
+		ExpiresAt:    expiresAt.UTC(),
+		PendingEmail: pending,
 	}); err != nil {
 		return fmt.Errorf("failed to create verify token: %w", err)
 	}
@@ -328,18 +339,25 @@ func (s *PlayerStore) CreateVerifyToken(
 	return nil
 }
 
-// ConsumeVerifyToken atomically marks the token row consumed and stamps
-// email_verified_at on the owning player. Returns the player id on
-// success, auth.ErrVerifyTokenAlreadyUsed if the row exists but was
-// already consumed (duplicate click on a stale link), and
-// auth.ErrVerifyTokenInvalid when no row matches (never existed, or
-// expired). Both branches keep the row in place; expired-but-consumed
+// ConsumeVerifyToken atomically marks the token row consumed and
+// applies the verified-email side effect in the same transaction. The
+// side effect depends on the token's pending_email column: NULL rows
+// (register / resend variant) stamp email_verified_at when currently
+// NULL; non-NULL rows (in-session email-change variant, #497) swap
+// players.email to pending_email, re-stamp email_verified_at, and
+// bump session_version so a stolen link cannot ride an existing
+// cookie. Returns the player id on success,
+// auth.ErrVerifyTokenAlreadyUsed if the row exists but was already
+// consumed (duplicate click on a stale link), auth.ErrEmailTaken when
+// the email-change branch hits the UNIQUE players.email constraint,
+// and auth.ErrVerifyTokenInvalid when no row matches. The token row
+// is consumed regardless of which branch runs; expired-but-consumed
 // cleanup happens via the sweep query at startup.
 func (s *PlayerStore) ConsumeVerifyToken(ctx context.Context, tokenHash string) (int64, error) {
 	var playerID int64
 	now := time.Now().UTC()
 	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
-		id, err := q.ConsumeEmailVerifyToken(ctx, db.ConsumeEmailVerifyTokenParams{
+		row, err := q.ConsumeEmailVerifyToken(ctx, db.ConsumeEmailVerifyTokenParams{
 			TokenHash:  tokenHash,
 			Now:        now,
 			ConsumedAt: sql.NullTime{Time: now, Valid: true},
@@ -354,12 +372,9 @@ func (s *PlayerStore) ConsumeVerifyToken(ctx context.Context, tokenHash string) 
 
 			return fmt.Errorf("failed to consume verify token: %w", err)
 		}
-		if _, err := q.MarkPlayerEmailVerifiedIfNew(ctx, id); err != nil {
-			return fmt.Errorf("failed to stamp email_verified_at: %w", err)
-		}
-		playerID = id
+		playerID = row.PlayerID
 
-		return nil
+		return applyVerifyTokenSideEffect(ctx, q, row)
 	})
 	if err != nil {
 		switch {
@@ -367,12 +382,52 @@ func (s *PlayerStore) ConsumeVerifyToken(ctx context.Context, tokenHash string) 
 			return playerID, auth.ErrVerifyTokenAlreadyUsed
 		case errors.Is(err, auth.ErrVerifyTokenInvalid):
 			return 0, auth.ErrVerifyTokenInvalid
+		case errors.Is(err, auth.ErrEmailTaken):
+			return playerID, auth.ErrEmailTaken
+		case errors.Is(err, auth.ErrPlayerNotFound):
+			return playerID, auth.ErrPlayerNotFound
 		default:
 			return 0, fmt.Errorf("consume verify token: %w", err)
 		}
 	}
 
 	return playerID, nil
+}
+
+// applyVerifyTokenSideEffect runs the per-variant follow-up after a
+// successful consume. Register/resend rows stamp email_verified_at
+// when still NULL; email-change rows (pending_email non-empty) swap
+// players.email, re-stamp email_verified_at, and bump session_version
+// in a single UPDATE. Split out of ConsumeVerifyToken so the
+// transaction body stays under revive's function-length cap.
+func applyVerifyTokenSideEffect(
+	ctx context.Context, q *db.Queries, row db.ConsumeEmailVerifyTokenRow,
+) error {
+	if !row.PendingEmail.Valid || row.PendingEmail.String == "" {
+		if _, err := q.MarkPlayerEmailVerifiedIfNew(ctx, row.PlayerID); err != nil {
+			return fmt.Errorf("failed to stamp email_verified_at: %w", err)
+		}
+
+		return nil
+	}
+	pending := sql.NullString{String: row.PendingEmail.String, Valid: true}
+	rows, err := q.SwapPlayerEmail(ctx, db.SwapPlayerEmailParams{
+		Email: pending,
+		ID:    row.PlayerID,
+	})
+	if err != nil {
+		var sqliteErr *sqlite.Error
+		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+			return auth.ErrEmailTaken
+		}
+
+		return fmt.Errorf("failed to swap email: %w", err)
+	}
+	if rows == 0 {
+		return auth.ErrPlayerNotFound
+	}
+
+	return nil
 }
 
 // classifyVerifyTokenMiss disambiguates the UPDATE-no-rows case. The

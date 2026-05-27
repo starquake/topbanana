@@ -584,7 +584,7 @@ func validateRegisterInput(username, email, password, passwordConfirm string) re
 			ErrMsg: "Username is required.", OK: false,
 		}
 	}
-	if !looksLikeEmail(cleanedEmail) {
+	if !LooksLikeEmail(cleanedEmail) {
 		return registerInput{
 			CleanedUsername: cleanedUsername, CleanedEmail: cleanedEmail,
 			ErrMsg: "Enter a valid email address.", OK: false,
@@ -617,10 +617,12 @@ func validateRegisterInput(username, email, password, passwordConfirm string) re
 	return registerInput{CleanedUsername: cleanedUsername, CleanedEmail: cleanedEmail, OK: true}
 }
 
-// looksLikeEmail is a deliberately loose check: one '@', non-empty
-// local part, host with a dot that does not start or end with one.
-// Tight validation belongs at the SMTP / DNS layer.
-func looksLikeEmail(s string) bool {
+// LooksLikeEmail is the shared shape check used by the register flow,
+// the verify-resend gate, and the in-session email-change flow (#497).
+// Deliberately loose: one '@', non-empty local part, host with a dot
+// that does not start or end with one. Tight validation belongs at the
+// SMTP / DNS layer, not in the form handler.
+func LooksLikeEmail(s string) bool {
 	if s == "" {
 		return false
 	}

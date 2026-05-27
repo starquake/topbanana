@@ -19,11 +19,12 @@ type Break struct {
 }
 
 type EmailVerifyToken struct {
-	TokenHash  string
-	PlayerID   int64
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
-	ConsumedAt sql.NullTime
+	TokenHash    string
+	PlayerID     int64
+	CreatedAt    time.Time
+	ExpiresAt    time.Time
+	ConsumedAt   sql.NullTime
+	PendingEmail sql.NullString
 }
 
 type Game struct {

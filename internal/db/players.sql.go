@@ -150,7 +150,7 @@ SET consumed_at = ?1
 WHERE token_hash = ?2
   AND consumed_at IS NULL
   AND expires_at > ?3
-RETURNING player_id
+RETURNING player_id, pending_email
 `
 
 type ConsumeEmailVerifyTokenParams struct {
@@ -159,20 +159,27 @@ type ConsumeEmailVerifyTokenParams struct {
 	Now        time.Time
 }
 
+type ConsumeEmailVerifyTokenRow struct {
+	PlayerID     int64
+	PendingEmail sql.NullString
+}
+
 // Atomic consume: succeeds only when the row is still unconsumed and not
 // expired. Returns the player_id so the caller can stamp email_verified_at
-// in the same transaction. The caller passes the wall clock as 'now' so
-// both sides of the expires_at comparison use the same RFC3339 encoding
-// the modernc/sqlite driver writes - mixing time.Time with
-// CURRENT_TIMESTAMP produces strings of different lengths and the
-// lexicographic comparison silently lies. sql.ErrNoRows means the token
-// was consumed, expired, or never existed; the caller maps that to a
-// single user-facing "this link is no longer valid" response.
-func (q *Queries) ConsumeEmailVerifyToken(ctx context.Context, arg ConsumeEmailVerifyTokenParams) (int64, error) {
+// in the same transaction, plus pending_email so the caller can branch on
+// the in-session email-change variant (#497) without a second round trip.
+// The caller passes the wall clock as 'now' so both sides of the
+// expires_at comparison use the same RFC3339 encoding the modernc/sqlite
+// driver writes - mixing time.Time with CURRENT_TIMESTAMP produces strings
+// of different lengths and the lexicographic comparison silently lies.
+// sql.ErrNoRows means the token was consumed, expired, or never existed;
+// the caller maps that to a single user-facing "this link is no longer
+// valid" response.
+func (q *Queries) ConsumeEmailVerifyToken(ctx context.Context, arg ConsumeEmailVerifyTokenParams) (ConsumeEmailVerifyTokenRow, error) {
 	row := q.db.QueryRowContext(ctx, consumeEmailVerifyToken, arg.ConsumedAt, arg.TokenHash, arg.Now)
-	var player_id int64
-	err := row.Scan(&player_id)
-	return player_id, err
+	var i ConsumeEmailVerifyTokenRow
+	err := row.Scan(&i.PlayerID, &i.PendingEmail)
+	return i, err
 }
 
 const consumePasswordResetToken = `-- name: ConsumePasswordResetToken :one
@@ -249,21 +256,34 @@ func (q *Queries) CreateAnonymousPlayer(ctx context.Context, username string) (P
 }
 
 const createEmailVerifyToken = `-- name: CreateEmailVerifyToken :exec
-INSERT INTO email_verify_tokens (token_hash, player_id, expires_at)
-VALUES (?1, ?2, ?3)
+INSERT INTO email_verify_tokens (token_hash, player_id, expires_at, pending_email)
+VALUES (?1, ?2, ?3, ?4)
 `
 
 type CreateEmailVerifyTokenParams struct {
-	TokenHash string
-	PlayerID  int64
-	ExpiresAt time.Time
+	TokenHash    string
+	PlayerID     int64
+	ExpiresAt    time.Time
+	PendingEmail sql.NullString
 }
 
 // Stores the sha256 hash of a freshly minted verify-email token. The raw
 // token only exists on the way out the door in the email; a DB leak should
 // not be replayable against GET /verify-email.
+//
+// pending_email is NULL for the register-time path and the resend variant;
+// the in-session email-change path (#497) sets it to the new address the
+// visitor wants to switch to so the consume side can swap players.email
+// atomically when the link is clicked. Holding the new address here rather
+// than on the players row keeps the current verified email live until the
+// visitor actually proves they control the new mailbox.
 func (q *Queries) CreateEmailVerifyToken(ctx context.Context, arg CreateEmailVerifyTokenParams) error {
-	_, err := q.db.ExecContext(ctx, createEmailVerifyToken, arg.TokenHash, arg.PlayerID, arg.ExpiresAt)
+	_, err := q.db.ExecContext(ctx, createEmailVerifyToken,
+		arg.TokenHash,
+		arg.PlayerID,
+		arg.ExpiresAt,
+		arg.PendingEmail,
+	)
 	return err
 }
 
@@ -437,7 +457,7 @@ func (q *Queries) DeleteExpiredPasswordResetTokens(ctx context.Context, now time
 }
 
 const getEmailVerifyToken = `-- name: GetEmailVerifyToken :one
-SELECT token_hash, player_id, created_at, expires_at, consumed_at
+SELECT token_hash, player_id, created_at, expires_at, consumed_at, pending_email
 FROM email_verify_tokens
 WHERE token_hash = ?1
 LIMIT 1
@@ -454,6 +474,7 @@ func (q *Queries) GetEmailVerifyToken(ctx context.Context, tokenHash string) (Em
 		&i.CreatedAt,
 		&i.ExpiresAt,
 		&i.ConsumedAt,
+		&i.PendingEmail,
 	)
 	return i, err
 }
@@ -839,6 +860,38 @@ type SetPlayerPasswordHashParams struct {
 // admin (id=1) keep popping the claim-name modal in the player client.
 func (q *Queries) SetPlayerPasswordHash(ctx context.Context, arg SetPlayerPasswordHashParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setPlayerPasswordHash, arg.PasswordHash, arg.Username)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const swapPlayerEmail = `-- name: SwapPlayerEmail :execrows
+UPDATE players
+SET email = ?1,
+    email_verified_at = CURRENT_TIMESTAMP,
+    session_version = session_version + 1
+WHERE id = ?2
+`
+
+type SwapPlayerEmailParams struct {
+	Email sql.NullString
+	ID    int64
+}
+
+// Atomically replaces players.email with the supplied address and stamps
+// email_verified_at (re-stamped because the new address has just been
+// proven via the verify link). The session_version bump invalidates every
+// other live cookie for this account so a stolen verify link cannot ride
+// an existing session on a different device.
+//
+// Used only by the in-session email-change consume path (#497); the
+// register-time consumer keeps calling MarkPlayerEmailVerifiedIfNew. A
+// UNIQUE collision on players.email surfaces as the driver's constraint
+// error - the store wrapper maps it onto ErrEmailTaken so the consumer
+// can render a "that address is no longer free" page instead of 500ing.
+func (q *Queries) SwapPlayerEmail(ctx context.Context, arg SwapPlayerEmailParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, swapPlayerEmail, arg.Email, arg.ID)
 	if err != nil {
 		return 0, err
 	}
