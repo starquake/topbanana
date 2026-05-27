@@ -66,15 +66,7 @@ func TestGoogleLogin_RedirectSetsStateCookie(t *testing.T) {
 		t.Errorf("Location = %q, want prefix %q", got, want)
 	}
 
-	var stateCookie *http.Cookie
-	for _, c := range resp.Cookies {
-		if c.Name == googleStateCookieName {
-			stateCookie = c
-		}
-	}
-	if stateCookie == nil {
-		t.Fatal("state cookie missing from response")
-	}
+	stateCookie := mustFindStateCookie(t, resp.Cookies)
 	if stateCookie.Value == "" {
 		t.Error("state cookie value is empty")
 	}
@@ -258,15 +250,7 @@ func TestGoogleLogin_CallbackRejectsStateMismatch(t *testing.T) {
 
 	// Walk the initial redirect to get a real state cookie...
 	startResp := doGet(ctx, t, client, srv.BaseURL+"/login/google")
-	var stateCookie *http.Cookie
-	for _, c := range startResp.Cookies {
-		if c.Name == googleStateCookieName {
-			stateCookie = c
-		}
-	}
-	if stateCookie == nil {
-		t.Fatal("state cookie missing on initial redirect")
-	}
+	_ = mustFindStateCookie(t, startResp.Cookies)
 
 	// ...then call the callback with the cookie present but a
 	// different `state` query value.
@@ -732,6 +716,25 @@ func writeJSON(w http.ResponseWriter, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		panic(fmt.Sprintf("encode response: %v", err))
 	}
+}
+
+// mustFindStateCookie returns the Google state cookie from a Cookies
+// slice or fatals the test. Folded out of the per-test loops so the
+// downstream dereference of stateCookie.Value has an obviously
+// non-nil pointer at the assignment site — the loop-then-nil-check
+// pattern can confuse some staticcheck builds even though t.Fatal
+// halts the goroutine.
+func mustFindStateCookie(t *testing.T, cookies []*http.Cookie) *http.Cookie {
+	t.Helper()
+
+	for _, c := range cookies {
+		if c.Name == googleStateCookieName {
+			return c
+		}
+	}
+	t.Fatal("state cookie missing from response")
+
+	return nil
 }
 
 // bigIntBytesForExponent returns the big-endian byte representation
