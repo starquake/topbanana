@@ -10,9 +10,9 @@ package envtag
 
 import "sync/atomic"
 
-// label holds the current tag. atomic.Pointer keeps Get cheap on the
-// hot path (every template render) and lets Set be called once at
-// boot without locking.
+// label holds the current tag. [atomic.Pointer] keeps Get cheap on
+// the hot path (every template render) and lets Set be called once
+// at boot without locking.
 //
 //nolint:gochecknoglobals // intentional process-wide tag; mutated only at boot.
 var label atomic.Pointer[string]
