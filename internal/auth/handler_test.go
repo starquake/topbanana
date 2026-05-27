@@ -493,9 +493,6 @@ func TestHandleRegisterSubmit_DuplicateUsername(t *testing.T) {
 	}
 }
 
-// TestHandleRegisterSubmit_DuplicateEmail pins #111 PR1: a second
-// register with the same email as an existing row gets a 409 with the
-// "already registered" banner instead of the generic 500.
 func TestHandleRegisterSubmit_DuplicateEmail(t *testing.T) {
 	t.Parallel()
 
@@ -519,9 +516,6 @@ func TestHandleRegisterSubmit_DuplicateEmail(t *testing.T) {
 	}
 }
 
-// TestHandleRegisterSubmit_RejectsInvalidEmail pins the form-level
-// validator: a malformed email surfaces as a 400 with the "Enter a
-// valid email address" banner, without hitting the store at all.
 func TestHandleRegisterSubmit_RejectsInvalidEmail(t *testing.T) {
 	t.Parallel()
 
@@ -541,10 +535,6 @@ func TestHandleRegisterSubmit_RejectsInvalidEmail(t *testing.T) {
 	}
 }
 
-// TestHandleRegisterSubmit_LowercasesAndTrimsEmail pins the
-// normalisation rule: "  ALICE@Example.Test " round-trips as
-// "alice@example.test" on the stored row so case/whitespace variants
-// cannot create duplicate accounts.
 func TestHandleRegisterSubmit_LowercasesAndTrimsEmail(t *testing.T) {
 	t.Parallel()
 

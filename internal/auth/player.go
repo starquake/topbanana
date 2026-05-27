@@ -12,10 +12,7 @@ var ErrPlayerNotFound = errors.New("player not found")
 // ErrUsernameTaken is returned when a username is already in use.
 var ErrUsernameTaken = errors.New("username taken")
 
-// ErrEmailTaken is returned when an email is already in use by another
-// player. The register handler maps it to a 409 + form re-render with
-// the email-field error so a registrant whose chosen email collides
-// can fix it without re-typing the rest of the form (#111 PR1).
+// ErrEmailTaken is returned when an email is already in use.
 var ErrEmailTaken = errors.New("email taken")
 
 // ErrPlayerAlreadyClaimed is returned by ClaimPlayer when the target row
@@ -45,10 +42,8 @@ type Player struct {
 	ID       int64
 	Username string
 	Email    string
-	// EmailVerifiedAt is nil until the player consumes a verify token
-	// (#111). OAuth-linked rows are stamped at link time because Google
-	// attests the email. The gate added in #111 PR3 refuses routes for
-	// password-bearing rows with EmailVerifiedAt == nil.
+	// EmailVerifiedAt is nil until the address is verified. OAuth-linked
+	// rows are stamped at link time because the provider attests the email.
 	EmailVerifiedAt *time.Time
 	PasswordHash    string
 	Role            string
@@ -56,10 +51,7 @@ type Player struct {
 	UsernameClaimed bool
 }
 
-// IsEmailVerified reports whether the player has cleared the verify
-// gate. True for OAuth-linked rows (stamped at link time) and password
-// rows that consumed a verify token. False for the pre-#111 legacy
-// state of password rows with no email.
+// IsEmailVerified reports whether the player's email has been verified.
 func (p *Player) IsEmailVerified() bool {
 	return p.EmailVerifiedAt != nil
 }
@@ -87,21 +79,10 @@ func (p *Player) HasCustomName() bool {
 	return p.UsernameClaimed
 }
 
-// IsAuthenticated reports whether the visitor is known to the system -
-// they have a password hash, a linked OAuth identity (carrying an
-// email), or the seeded admin role. Distinct from !IsAnonymous()
-// because an OAuth-only player has no password hash yet is still
-// authenticated; flipping the existing IsAnonymous definition would
-// change the semantics of the claim-flow code paths that depend on
-// it. Used by surfaces that gate on "is the visitor signed in?"
-// rather than "is the row a fresh claimable stub?", e.g. /login's
-// already-signed-in redirect.
-//
-// "Authenticated" intentionally does NOT mean "email-verified". The
-// gate landing in #111 PR3 checks [Player.IsEmailVerified] as a
-// separate predicate so an unverified password row can still be
-// session-bearing (the post-login interstitial / resend page needs to
-// run as that user) without being granted the protected routes.
+// IsAuthenticated reports whether the visitor has signed in. True for
+// password rows, OAuth-linked rows, and the seeded admin. Distinct
+// from [Player.IsEmailVerified] - the email-verify gate is a separate
+// predicate so an unverified password row can still be session-bearing.
 func (p *Player) IsAuthenticated() bool {
 	return p.PasswordHash != "" || p.Email != "" || p.Role == RoleAdmin
 }
@@ -174,15 +155,10 @@ type PlayerStore interface {
 	// GetPlayerByID returns the player with the given ID.
 	// Returns ErrPlayerNotFound when there is no match.
 	GetPlayerByID(ctx context.Context, id int64) (*Player, error)
-	// CreatePlayer creates a new player with the given username, email,
-	// password hash, and requested role. The store may promote the stored
-	// role to admin when the requested role is not "admin" but there are
-	// no other password-bearing players yet - making the "first
-	// registrant becomes admin" rule atomic against concurrent
-	// registrations.
-	// email is required (#111 PR1); the store trims + lowercases it
-	// before insert. Returns ErrUsernameTaken when the username is
-	// already in use and ErrEmailTaken when the email is already in use.
+	// CreatePlayer creates a player with the given credentials. The
+	// store trims + lowercases the email and atomically promotes the
+	// first password-bearing registrant to admin. Returns
+	// ErrUsernameTaken / ErrEmailTaken on UNIQUE collisions.
 	CreatePlayer(ctx context.Context, username, email, passwordHash, requestedRole string) (*Player, error)
 	// CreateAnonymousPlayer creates a row with the given username, no email,
 	// no password_hash, and role = "player". Used by EnsurePlayer to back a

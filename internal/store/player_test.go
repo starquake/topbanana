@@ -189,20 +189,13 @@ func TestPlayerStore_CreatePlayer_DuplicateUsername(t *testing.T) {
 		t.Fatalf("CreatePlayer first call err = %v, want nil", err)
 	}
 
-	// Different email, same username: must classify as ErrUsernameTaken
-	// rather than the generic SQLITE wrap. classifyCredentialConflict
-	// looks up by username first and returns the sentinel that maps to
-	// the user-facing "username is already taken" banner (#111 PR1).
+	// Different email, same username -> ErrUsernameTaken.
 	_, err := ps.CreatePlayer(t.Context(), "alice", "alice-other@example.test", "other", auth.RolePlayer)
 	if got, want := err, auth.ErrUsernameTaken; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
 }
 
-// TestPlayerStore_CreatePlayer_DuplicateEmail pins the email-side of
-// classifyCredentialConflict (#111 PR1): a second create with the
-// same email but a different username surfaces ErrEmailTaken, not the
-// generic SQLITE wrap.
 func TestPlayerStore_CreatePlayer_DuplicateEmail(t *testing.T) {
 	t.Parallel()
 
@@ -219,10 +212,6 @@ func TestPlayerStore_CreatePlayer_DuplicateEmail(t *testing.T) {
 	}
 }
 
-// TestPlayerStore_CreatePlayer_LowercasesAndTrimsEmail pins the
-// store-layer normalisation rule so "  ALICE@Example.Test " round-
-// trips as "alice@example.test" on the persisted row, blocking
-// case/whitespace variants from creating duplicate accounts (#111 PR1).
 func TestPlayerStore_CreatePlayer_LowercasesAndTrimsEmail(t *testing.T) {
 	t.Parallel()
 
@@ -237,8 +226,7 @@ func TestPlayerStore_CreatePlayer_LowercasesAndTrimsEmail(t *testing.T) {
 		t.Errorf("stored Email = %q, want %q", got, want)
 	}
 
-	// A second create with a case/whitespace variant must still trip
-	// the email-unique guard so users cannot end-run case-folding.
+	// Case-variant must still collide on the unique index.
 	_, dupErr := ps.CreatePlayer(t.Context(), "bob", "alice@EXAMPLE.test", "h", auth.RolePlayer)
 	if got, want := dupErr, auth.ErrEmailTaken; !errors.Is(got, want) {
 		t.Errorf("case-variant duplicate err = %v, want %v", got, want)

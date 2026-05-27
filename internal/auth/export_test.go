@@ -75,7 +75,5 @@ func ExportReadGoogleNext(r *http.Request, key []byte) string {
 // constant.
 const GoogleNextCookieName = googleNextCookieName
 
-// LooksLikeEmail exposes the unexported register-form email validator
-// so the external auth_test package can pin its branch table without
-// going through the full register handler (#111 PR1).
+// LooksLikeEmail exposes looksLikeEmail for the external test package.
 var LooksLikeEmail = looksLikeEmail

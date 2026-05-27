@@ -23,10 +23,6 @@ LIMIT 1;
 -- their username at the register form. The column tracks "did the player
 -- pick this name themselves" (vs auto-generated petname), so a fresh
 -- registrant must be marked as claimed from the moment the row is written.
---
--- email is required at register time (#111). email_verified_at stays NULL
--- until the player consumes their verify token; the auth gate denies
--- routes for password-bearing rows in that state.
 INSERT INTO players (username, password_hash, email, role, username_claimed)
 VALUES (
     sqlc.arg('username'),
@@ -307,13 +303,7 @@ WHERE id = sqlc.arg('id')
 RETURNING *;
 
 -- name: MarkPlayerEmailVerifiedIfNew :execrows
--- Stamps email_verified_at = now() on the row when it is currently
--- NULL. Idempotent: a second call against an already-verified row is
--- a no-op (rows-affected stays 0). Called by the OAuth link-by-email
--- path so a password-registered row that later signs in with the same
--- Google address gets the "verified" flag flipped, otherwise PR3's
--- gate would keep blocking the user even though Google has now
--- attested the address (#111 PR1 review finding).
+-- Stamps email_verified_at when currently NULL. Idempotent.
 UPDATE players
 SET email_verified_at = CURRENT_TIMESTAMP
 WHERE id = sqlc.arg('id')

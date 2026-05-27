@@ -41,10 +41,7 @@ type OAuthIdentityStore interface {
 	// each case the caller falls through to the create-fresh-player
 	// path. The username on the row is left untouched.
 	ClaimPlayerForOAuth(ctx context.Context, playerID int64, email string) (*Player, error)
-	// MarkPlayerEmailVerifiedIfNew flips email_verified_at to now() on
-	// the row when it is currently NULL. Idempotent. Called by the
-	// link-by-email path so a password-registered row that later signs
-	// in with the same Google address picks up the verified flag the
-	// gate (#111 PR3) will check.
+	// MarkPlayerEmailVerifiedIfNew stamps email_verified_at when
+	// currently NULL. Idempotent.
 	MarkPlayerEmailVerifiedIfNew(ctx context.Context, playerID int64) error
 }

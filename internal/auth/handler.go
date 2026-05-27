@@ -60,9 +60,8 @@ const maxFormBodySize = 64 * 1024
 type formData struct {
 	Title    string
 	Username string
-	// Email is the trimmed+lowercased value the registrant submitted.
-	// Preserved across form re-renders so a failed validation does not
-	// drop the email the visitor typed (#111 PR1).
+	// Email is the trimmed+lowercased value; preserved across form
+	// re-renders so a failed validation doesn't drop it.
 	Email   string
 	Message string
 	// ShowRegister controls whether the login template renders the
@@ -171,32 +170,15 @@ func HandleRegisterSubmit(
 		}
 
 		player, err := claimOrCreatePlayer(
-			r,
-			players,
-			sessions,
-			input.CleanedUsername,
-			input.CleanedEmail,
-			hashed,
-			role,
+			r, players, sessions, input.CleanedUsername, input.CleanedEmail, hashed, role,
 		)
 		if err != nil {
-			if errors.Is(err, ErrUsernameTaken) {
+			if msg, ok := registerCollisionMessage(err); ok {
 				render.render(w, r, http.StatusConflict, formData{
 					Title:      "Register",
 					Username:   input.CleanedUsername,
 					Email:      input.CleanedEmail,
-					Message:    "Username is already taken.",
-					ShowGoogle: googleEnabled,
-				})
-
-				return
-			}
-			if errors.Is(err, ErrEmailTaken) {
-				render.render(w, r, http.StatusConflict, formData{
-					Title:      "Register",
-					Username:   input.CleanedUsername,
-					Email:      input.CleanedEmail,
-					Message:    "Email is already registered. Try logging in.",
+					Message:    msg,
 					ShowGoogle: googleEnabled,
 				})
 
@@ -211,6 +193,20 @@ func HandleRegisterSubmit(
 		sessions.Set(w, player.ID)
 		http.Redirect(w, r, landingPathFor(player.Role), http.StatusSeeOther)
 	})
+}
+
+// registerCollisionMessage maps the register-time conflict sentinels
+// onto the user-facing banner. ok=false when err is something else
+// and the caller should treat it as a 500.
+func registerCollisionMessage(err error) (string, bool) {
+	switch {
+	case errors.Is(err, ErrUsernameTaken):
+		return "Username is already taken.", true
+	case errors.Is(err, ErrEmailTaken):
+		return "Email is already registered. Try logging in.", true
+	}
+
+	return "", false
 }
 
 // claimOrCreatePlayer is the storage-side branch of HandleRegisterSubmit. If
@@ -454,12 +450,10 @@ func HandleLogout(sessions *session.Manager) http.Handler {
 
 // registerInput is the result of validateRegisterInput.
 type registerInput struct {
-	// CleanedUsername is the username with surrounding whitespace removed. Callers use it for
-	// both storage and lookup so `" alice "` and `"alice"` cannot be treated as different users.
+	// CleanedUsername is the username, whitespace-trimmed.
 	CleanedUsername string
-	// CleanedEmail is the email with surrounding whitespace removed and
-	// the entire value lowercased so case variants do not produce
-	// duplicate accounts (#111 PR1).
+	// CleanedEmail is the email, whitespace-trimmed and lowercased so
+	// case variants cannot create duplicate accounts.
 	CleanedEmail string
 	// ErrMsg is a user-facing error message, populated only when OK is false.
 	ErrMsg string
@@ -505,12 +499,9 @@ func validateRegisterInput(username, email, password string) registerInput {
 	return registerInput{CleanedUsername: cleanedUsername, CleanedEmail: cleanedEmail, OK: true}
 }
 
-// looksLikeEmail is a deliberately loose check: exactly one '@', a
-// non-empty local part, a host that contains a dot but does not start
-// or end with one. Tight validation belongs at the SMTP / DNS layer;
-// this exists only to reject obvious typos at the form so the
-// duplicate-email path remains the rare exception rather than the
-// common error (#111 PR1).
+// looksLikeEmail is a deliberately loose check: one '@', non-empty
+// local part, host with a dot that does not start or end with one.
+// Tight validation belongs at the SMTP / DNS layer.
 func looksLikeEmail(s string) bool {
 	if s == "" {
 		return false

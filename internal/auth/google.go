@@ -472,11 +472,7 @@ func linkExistingPlayerByEmail(
 		return nil, fmt.Errorf("link identity to existing player: %w", linkErr)
 	}
 
-	// Google has just attested the player's ownership of this email
-	// address. Stamp email_verified_at if it was still NULL (a
-	// password-registered row from #111 PR1 starts unverified) so the
-	// gate landing in PR3 does not keep bouncing a linked account to
-	// the resend page.
+	// Google attests the address; stamp email_verified_at if not already set.
 	if err := identities.MarkPlayerEmailVerifiedIfNew(ctx, player.ID); err != nil {
 		return nil, fmt.Errorf("mark email verified after link: %w", err)
 	}

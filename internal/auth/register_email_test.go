@@ -6,10 +6,6 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 )
 
-// TestLooksLikeEmail pins the validator the register form runs before
-// hitting the store (#111 PR1). Loose by design - tight validation
-// belongs at the SMTP / DNS layer - but tight enough to catch the
-// obvious typos.
 func TestLooksLikeEmail(t *testing.T) {
 	t.Parallel()
 
