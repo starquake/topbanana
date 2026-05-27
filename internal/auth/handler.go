@@ -148,7 +148,7 @@ func HandleRegisterSubmit(
 		if !input.OK {
 			render.render(w, r, http.StatusBadRequest, formData{
 				Title:      "Register",
-				Username:   input.Cleaned,
+				Username:   input.CleanedUsername,
 				Email:      input.CleanedEmail,
 				Message:    input.ErrMsg,
 				ShowGoogle: googleEnabled,
@@ -158,7 +158,7 @@ func HandleRegisterSubmit(
 		}
 
 		role := RolePlayer
-		if slices.Contains(adminUsernames, input.Cleaned) {
+		if slices.Contains(adminUsernames, input.CleanedUsername) {
 			role = RoleAdmin
 		}
 
@@ -170,12 +170,20 @@ func HandleRegisterSubmit(
 			return
 		}
 
-		player, err := claimOrCreatePlayer(r, players, sessions, input.Cleaned, input.CleanedEmail, hashed, role)
+		player, err := claimOrCreatePlayer(
+			r,
+			players,
+			sessions,
+			input.CleanedUsername,
+			input.CleanedEmail,
+			hashed,
+			role,
+		)
 		if err != nil {
 			if errors.Is(err, ErrUsernameTaken) {
 				render.render(w, r, http.StatusConflict, formData{
 					Title:      "Register",
-					Username:   input.Cleaned,
+					Username:   input.CleanedUsername,
 					Email:      input.CleanedEmail,
 					Message:    "Username is already taken.",
 					ShowGoogle: googleEnabled,
@@ -186,7 +194,7 @@ func HandleRegisterSubmit(
 			if errors.Is(err, ErrEmailTaken) {
 				render.render(w, r, http.StatusConflict, formData{
 					Title:      "Register",
-					Username:   input.Cleaned,
+					Username:   input.CleanedUsername,
 					Email:      input.CleanedEmail,
 					Message:    "Email is already registered. Try logging in.",
 					ShowGoogle: googleEnabled,
@@ -446,9 +454,9 @@ func HandleLogout(sessions *session.Manager) http.Handler {
 
 // registerInput is the result of validateRegisterInput.
 type registerInput struct {
-	// Cleaned is the username with surrounding whitespace removed. Callers use it for
+	// CleanedUsername is the username with surrounding whitespace removed. Callers use it for
 	// both storage and lookup so `" alice "` and `"alice"` cannot be treated as different users.
-	Cleaned string
+	CleanedUsername string
 	// CleanedEmail is the email with surrounding whitespace removed and
 	// the entire value lowercased so case variants do not produce
 	// duplicate accounts (#111 PR1).
@@ -462,23 +470,23 @@ type registerInput struct {
 // validateRegisterInput trims the username and email, lowercases the
 // email, and validates the inputs.
 func validateRegisterInput(username, email, password string) registerInput {
-	cleaned := strings.TrimSpace(username)
+	cleanedUsername := strings.TrimSpace(username)
 	cleanedEmail := strings.ToLower(strings.TrimSpace(email))
-	if cleaned == "" {
+	if cleanedUsername == "" {
 		return registerInput{
-			Cleaned: cleaned, CleanedEmail: cleanedEmail,
+			CleanedUsername: cleanedUsername, CleanedEmail: cleanedEmail,
 			ErrMsg: "Username is required.", OK: false,
 		}
 	}
 	if !looksLikeEmail(cleanedEmail) {
 		return registerInput{
-			Cleaned: cleaned, CleanedEmail: cleanedEmail,
+			CleanedUsername: cleanedUsername, CleanedEmail: cleanedEmail,
 			ErrMsg: "Enter a valid email address.", OK: false,
 		}
 	}
 	if len(password) < MinPasswordLength {
 		return registerInput{
-			Cleaned: cleaned, CleanedEmail: cleanedEmail,
+			CleanedUsername: cleanedUsername, CleanedEmail: cleanedEmail,
 			ErrMsg: fmt.Sprintf("Password must be at least %d characters.", MinPasswordLength),
 			OK:     false,
 		}
@@ -488,13 +496,13 @@ func validateRegisterInput(username, email, password string) registerInput {
 		// turns a wrapped 500 into a normal form-validation error with a
 		// user-friendly message.
 		return registerInput{
-			Cleaned: cleaned, CleanedEmail: cleanedEmail,
+			CleanedUsername: cleanedUsername, CleanedEmail: cleanedEmail,
 			ErrMsg: fmt.Sprintf("Password must be at most %d characters.", MaxPasswordLength),
 			OK:     false,
 		}
 	}
 
-	return registerInput{Cleaned: cleaned, CleanedEmail: cleanedEmail, OK: true}
+	return registerInput{CleanedUsername: cleanedUsername, CleanedEmail: cleanedEmail, OK: true}
 }
 
 // looksLikeEmail is a deliberately loose check: exactly one '@', a
