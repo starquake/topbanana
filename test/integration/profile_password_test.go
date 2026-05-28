@@ -10,6 +10,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/starquake/topbanana/internal/auth"
 )
 
 // TestProfilePassword_Integration drives the full /profile/password
@@ -126,6 +129,10 @@ func TestProfilePassword_Integration(t *testing.T) {
 		// BEFORE we rotate. Its cookie carries the pre-rotation
 		// session_version stamp; the rotation must invalidate it.
 		other := authClient(t)
+		// Earlier subtests left the localhost-peer login-limiter
+		// bucket hot; let the 3s cooldown (#494) elapse before the
+		// next /login POST or this one gets served as 429.
+		time.Sleep(auth.LoginCooldown() + 100*time.Millisecond)
 		loc := loginForRedirect(ctx, t, other, srv.BaseURL, username, originalPassword)
 		if got, want := loc, "/admin/quizzes"; got != want {
 			t.Fatalf("second client pre-rotation login Location = %q, want %q", got, want)
@@ -167,6 +174,8 @@ func TestProfilePassword_Integration(t *testing.T) {
 		}
 
 		// Old password must no longer work.
+		// Wait out the login-limiter cooldown again before the next /login.
+		time.Sleep(auth.LoginCooldown() + 100*time.Millisecond)
 		probeOld := authClient(t)
 		token := fetchCSRFToken(ctx, t, probeOld, srv.BaseURL+"/login")
 		oldStatus := postLoginRaw(ctx, t, probeOld, srv.BaseURL, username, originalPassword, token)
@@ -175,6 +184,7 @@ func TestProfilePassword_Integration(t *testing.T) {
 		}
 
 		// New password must work.
+		time.Sleep(auth.LoginCooldown() + 100*time.Millisecond)
 		probeNew := authClient(t)
 		loc = loginForRedirect(ctx, t, probeNew, srv.BaseURL, username, updatedPassword)
 		if got, want := loc, "/admin/quizzes"; got != want {
