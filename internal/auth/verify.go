@@ -55,14 +55,27 @@ const verifyTokenBytes = 32
 type VerifyTokenStore interface {
 	// CreateVerifyToken records the sha256 hex of a freshly minted token.
 	// The raw token is never stored - a DB leak should not be replayable.
-	CreateVerifyToken(ctx context.Context, tokenHash string, playerID int64, expiresAt time.Time) error
-	// ConsumeVerifyToken atomically marks the row consumed and stamps
-	// email_verified_at on the player in the same transaction. Returns
-	// the player id on success, ErrVerifyTokenAlreadyUsed when the row
-	// exists but is already consumed (player id is still returned so the
-	// handler can detect a session belonging to a different player), and
-	// ErrVerifyTokenInvalid when no live row matches (never existed, or
-	// expired; player id is 0 in this case).
+	// pendingEmail carries the new address an in-session email-change
+	// request (#497) wants to switch to; "" for register-time and
+	// resend rows, in which case the consume path keeps the existing
+	// behaviour and only stamps email_verified_at.
+	CreateVerifyToken(ctx context.Context, tokenHash string, playerID int64,
+		expiresAt time.Time, pendingEmail string) error
+	// ConsumeVerifyToken atomically marks the row consumed and applies
+	// the verified-email side effect in the same transaction. For
+	// register/resend rows (pendingEmail empty at create time) that
+	// means stamping email_verified_at when currently NULL. For
+	// email-change rows (pendingEmail non-empty) it instead swaps
+	// players.email to the pending address, re-stamps email_verified_at,
+	// and bumps session_version so every other live cookie for this
+	// account is invalidated by the swap. Returns the player id on
+	// success, ErrVerifyTokenAlreadyUsed when the row exists but was
+	// already consumed (player id is still returned so the handler can
+	// detect a session belonging to a different player),
+	// ErrEmailTaken when the email-change branch hits the UNIQUE
+	// constraint on players.email (someone else claimed it between
+	// send and click), and ErrVerifyTokenInvalid when no live row
+	// matches (never existed, or expired; player id is 0 in this case).
 	ConsumeVerifyToken(ctx context.Context, tokenHash string) (int64, error)
 	// DeleteExpiredVerifyTokens removes rows whose expires_at has
 	// passed. Called from the startup sweep so the table cannot grow
@@ -115,6 +128,25 @@ func SendVerifyEmail(
 	playerID int64,
 	now time.Time,
 ) error {
+	return SendVerifyEmailWithPending(ctx, tokens, sender, baseURL, recipient, "", playerID, now)
+}
+
+// SendVerifyEmailWithPending is the extended variant used by the
+// in-session email-change flow (#497). pendingEmail is the new address
+// the player wants to switch to; the consume path picks it up off the
+// token row and atomically swaps players.email. recipient is the
+// address the verify link is mailed to and is intentionally separate
+// from pendingEmail so a future "notify old address" flow can reuse
+// the same plumbing. An empty pendingEmail mints a register-time row
+// that behaves identically to today's flow.
+func SendVerifyEmailWithPending(
+	ctx context.Context,
+	tokens VerifyTokenStore,
+	sender VerifyEmailSender,
+	baseURL, recipient, pendingEmail string,
+	playerID int64,
+	now time.Time,
+) error {
 	raw, hash, err := GenerateVerifyToken()
 	if err != nil {
 		return err
@@ -124,13 +156,13 @@ func SendVerifyEmail(
 		return err
 	}
 	expiresAt := now.Add(VerifyTokenTTL)
-	if storeErr := tokens.CreateVerifyToken(ctx, hash, playerID, expiresAt); storeErr != nil {
+	if storeErr := tokens.CreateVerifyToken(ctx, hash, playerID, expiresAt, pendingEmail); storeErr != nil {
 		return fmt.Errorf("verify token: store: %w", storeErr)
 	}
 	msg := mailer.Message{
 		To:      recipient,
-		Subject: "Confirm your Top Banana email",
-		Body:    verifyEmailBody(link),
+		Subject: verifyEmailSubject(pendingEmail),
+		Body:    verifyEmailBody(link, pendingEmail),
 		Kind:    mailer.KindVerify,
 	}
 	if sendErr := sender.Send(ctx, msg); sendErr != nil {
@@ -184,14 +216,38 @@ func buildVerifyLink(baseURL, rawToken string) (string, error) {
 	return u.String(), nil
 }
 
+// verifyEmailSubject returns the subject line. The register-time
+// wording stays unchanged so existing inbox filters keep matching;
+// the email-change variant ships its own subject so a recipient who
+// did not initiate the change spots it before opening the message.
+func verifyEmailSubject(pendingEmail string) string {
+	if pendingEmail == "" {
+		return "Confirm your Top Banana email"
+	}
+
+	return "Confirm your new Top Banana email"
+}
+
 // verifyEmailBody is the plain-text body of the verification email.
 // Plain text only - HTML alternative is out of scope for #321/#111;
 // the link is on its own line so any mail client renders it as
-// clickable.
-func verifyEmailBody(link string) string {
-	return "Welcome to Top Banana!\n\n" +
-		"Click the link below to confirm your email address:\n\n" +
+// clickable. When pendingEmail is set, the body explains that
+// clicking the link switches the account's address to that value, so
+// a recipient who did not request the change can stop and ignore the
+// message instead of being surprised on their next sign-in.
+func verifyEmailBody(link, pendingEmail string) string {
+	if pendingEmail == "" {
+		return "Welcome to Top Banana!\n\n" +
+			"Click the link below to confirm your email address:\n\n" +
+			link + "\n\n" +
+			"This link is valid for 24 hours. If you did not sign up, you can\n" +
+			"ignore this email.\n"
+	}
+
+	return "Someone (hopefully you) asked to change a Top Banana account email\n" +
+		"to " + pendingEmail + ".\n\n" +
+		"Click the link below to confirm the change:\n\n" +
 		link + "\n\n" +
-		"This link is valid for 24 hours. If you did not sign up, you can\n" +
-		"ignore this email.\n"
+		"This link is valid for 24 hours. If you did not request the change,\n" +
+		"you can ignore this email and the account email will stay as it is.\n"
 }

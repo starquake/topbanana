@@ -119,7 +119,7 @@ func TestVerifyGate_AfterVerifyAdminReachesDashboard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateVerifyToken err = %v, want nil", err)
 	}
-	if err := stores.VerifyTokens.CreateVerifyToken(ctx, hash, player.ID, futureHour()); err != nil {
+	if err := stores.VerifyTokens.CreateVerifyToken(ctx, hash, player.ID, futureHour(), ""); err != nil {
 		t.Fatalf("CreateVerifyToken err = %v, want nil", err)
 	}
 

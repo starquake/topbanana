@@ -50,7 +50,7 @@ func TestVerifyEmail_RoundtripHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateVerifyToken err = %v, want nil", err)
 	}
-	if cerr := stores.VerifyTokens.CreateVerifyToken(ctx, hash, player.ID, time.Now().Add(time.Hour)); cerr != nil {
+	if cerr := stores.VerifyTokens.CreateVerifyToken(ctx, hash, player.ID, time.Now().Add(time.Hour), ""); cerr != nil {
 		t.Fatalf("CreateVerifyToken err = %v, want nil", cerr)
 	}
 
@@ -91,7 +91,7 @@ func TestVerifyEmail_DuplicateClickReadsAsAlreadyUsed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateVerifyToken err = %v, want nil", err)
 	}
-	if cerr := stores.VerifyTokens.CreateVerifyToken(ctx, hash, player.ID, time.Now().Add(time.Hour)); cerr != nil {
+	if cerr := stores.VerifyTokens.CreateVerifyToken(ctx, hash, player.ID, time.Now().Add(time.Hour), ""); cerr != nil {
 		t.Fatalf("CreateVerifyToken err = %v, want nil", cerr)
 	}
 
@@ -152,7 +152,13 @@ func TestVerifyEmail_ExpiredToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateVerifyToken err = %v, want nil", err)
 	}
-	if cerr := stores.VerifyTokens.CreateVerifyToken(ctx, hash, player.ID, time.Now().Add(-time.Hour)); cerr != nil {
+	if cerr := stores.VerifyTokens.CreateVerifyToken(
+		ctx,
+		hash,
+		player.ID,
+		time.Now().Add(-time.Hour),
+		"",
+	); cerr != nil {
 		t.Fatalf("CreateVerifyToken err = %v, want nil", cerr)
 	}
 
@@ -202,7 +208,7 @@ func TestVerifyEmail_MismatchedSessionClears(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateVerifyToken err = %v, want nil", err)
 	}
-	if cerr := stores.VerifyTokens.CreateVerifyToken(ctx, hash, userB.ID, time.Now().Add(time.Hour)); cerr != nil {
+	if cerr := stores.VerifyTokens.CreateVerifyToken(ctx, hash, userB.ID, time.Now().Add(time.Hour), ""); cerr != nil {
 		t.Fatalf("CreateVerifyToken err = %v, want nil", cerr)
 	}
 

@@ -309,12 +309,37 @@ SET email_verified_at = CURRENT_TIMESTAMP
 WHERE id = sqlc.arg('id')
   AND email_verified_at IS NULL;
 
+-- name: SwapPlayerEmail :execrows
+-- Atomically replaces players.email with the supplied address and stamps
+-- email_verified_at (re-stamped because the new address has just been
+-- proven via the verify link). The session_version bump invalidates every
+-- other live cookie for this account so a stolen verify link cannot ride
+-- an existing session on a different device.
+--
+-- Used only by the in-session email-change consume path (#497); the
+-- register-time consumer keeps calling MarkPlayerEmailVerifiedIfNew. A
+-- UNIQUE collision on players.email surfaces as the driver's constraint
+-- error - the store wrapper maps it onto ErrEmailTaken so the consumer
+-- can render a "that address is no longer free" page instead of 500ing.
+UPDATE players
+SET email = sqlc.arg('email'),
+    email_verified_at = CURRENT_TIMESTAMP,
+    session_version = session_version + 1
+WHERE id = sqlc.arg('id');
+
 -- name: CreateEmailVerifyToken :exec
 -- Stores the sha256 hash of a freshly minted verify-email token. The raw
 -- token only exists on the way out the door in the email; a DB leak should
 -- not be replayable against GET /verify-email.
-INSERT INTO email_verify_tokens (token_hash, player_id, expires_at)
-VALUES (sqlc.arg('token_hash'), sqlc.arg('player_id'), sqlc.arg('expires_at'));
+--
+-- pending_email is NULL for the register-time path and the resend variant;
+-- the in-session email-change path (#497) sets it to the new address the
+-- visitor wants to switch to so the consume side can swap players.email
+-- atomically when the link is clicked. Holding the new address here rather
+-- than on the players row keeps the current verified email live until the
+-- visitor actually proves they control the new mailbox.
+INSERT INTO email_verify_tokens (token_hash, player_id, expires_at, pending_email)
+VALUES (sqlc.arg('token_hash'), sqlc.arg('player_id'), sqlc.arg('expires_at'), sqlc.arg('pending_email'));
 
 -- name: GetEmailVerifyToken :one
 -- Look up by token hash. Caller checks expires_at vs the wall clock and
@@ -327,19 +352,21 @@ LIMIT 1;
 -- name: ConsumeEmailVerifyToken :one
 -- Atomic consume: succeeds only when the row is still unconsumed and not
 -- expired. Returns the player_id so the caller can stamp email_verified_at
--- in the same transaction. The caller passes the wall clock as 'now' so
--- both sides of the expires_at comparison use the same RFC3339 encoding
--- the modernc/sqlite driver writes - mixing time.Time with
--- CURRENT_TIMESTAMP produces strings of different lengths and the
--- lexicographic comparison silently lies. sql.ErrNoRows means the token
--- was consumed, expired, or never existed; the caller maps that to a
--- single user-facing "this link is no longer valid" response.
+-- in the same transaction, plus pending_email so the caller can branch on
+-- the in-session email-change variant (#497) without a second round trip.
+-- The caller passes the wall clock as 'now' so both sides of the
+-- expires_at comparison use the same RFC3339 encoding the modernc/sqlite
+-- driver writes - mixing time.Time with CURRENT_TIMESTAMP produces strings
+-- of different lengths and the lexicographic comparison silently lies.
+-- sql.ErrNoRows means the token was consumed, expired, or never existed;
+-- the caller maps that to a single user-facing "this link is no longer
+-- valid" response.
 UPDATE email_verify_tokens
 SET consumed_at = sqlc.arg('consumed_at')
 WHERE token_hash = sqlc.arg('token_hash')
   AND consumed_at IS NULL
   AND expires_at > sqlc.arg('now')
-RETURNING player_id;
+RETURNING player_id, pending_email;
 
 -- name: DeleteExpiredEmailVerifyTokens :exec
 -- Housekeeping for the startup sweep. Drops every row whose link has

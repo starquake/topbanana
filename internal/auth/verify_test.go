@@ -187,13 +187,14 @@ type recordingVerifyTokenStore struct {
 }
 
 type createVerifyTokenCall struct {
-	tokenHash string
-	playerID  int64
-	expiresAt time.Time
+	tokenHash    string
+	playerID     int64
+	expiresAt    time.Time
+	pendingEmail string
 }
 
 func (s *recordingVerifyTokenStore) CreateVerifyToken(
-	_ context.Context, tokenHash string, playerID int64, expiresAt time.Time,
+	_ context.Context, tokenHash string, playerID int64, expiresAt time.Time, pendingEmail string,
 ) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -202,9 +203,10 @@ func (s *recordingVerifyTokenStore) CreateVerifyToken(
 		return s.createErr
 	}
 	s.created = append(s.created, createVerifyTokenCall{
-		tokenHash: tokenHash,
-		playerID:  playerID,
-		expiresAt: expiresAt,
+		tokenHash:    tokenHash,
+		playerID:     playerID,
+		expiresAt:    expiresAt,
+		pendingEmail: pendingEmail,
 	})
 
 	return nil
