@@ -627,44 +627,72 @@ func (s *PlayerStore) SetPlayerPasswordHash(ctx context.Context, email, password
 	return nil
 }
 
-// ListAllPlayers returns a page of players for the admin players
-// list (#423). The page size and offset come straight from the
-// handler's pagination params; the SQL handles the bounds + ordering.
-func (s *PlayerStore) ListAllPlayers(ctx context.Context, limit, offset int64) ([]*auth.PlayerListRow, error) {
-	rows, err := s.q.ListAllPlayers(ctx, db.ListAllPlayersParams{
+// ListPlayersByOnboardingState returns a page of players for the admin
+// list (#450), filtered to the supplied onboarding-state bucket. Pass
+// [auth.OnboardingStateAll] to disable the filter.
+func (s *PlayerStore) ListPlayersByOnboardingState(
+	ctx context.Context, state string, limit, offset int64,
+) ([]*auth.PlayerListRow, error) {
+	rows, err := s.q.ListPlayersByOnboardingState(ctx, db.ListPlayersByOnboardingStateParams{
+		State:     state,
 		RowLimit:  limit,
 		RowOffset: offset,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to list all players: %w", err)
+		return nil, fmt.Errorf("failed to list players by onboarding state: %w", err)
 	}
 
 	out := make([]*auth.PlayerListRow, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, &auth.PlayerListRow{
-			ID:            r.ID,
-			Username:      r.Username,
-			Email:         r.Email.String,
-			Role:          r.Role,
-			HasPassword:   r.PasswordHash.Valid,
-			HasOAuth:      r.HasOauth,
-			OAuthProvider: r.OauthProvider,
-			CreatedAt:     r.CreatedAt,
-		})
+		row := &auth.PlayerListRow{
+			ID:              r.ID,
+			Username:        r.Username,
+			Email:           r.Email.String,
+			Role:            r.Role,
+			HasPassword:     r.PasswordHash.Valid,
+			HasOAuth:        r.HasOauth,
+			OAuthProvider:   r.OauthProvider,
+			CreatedAt:       r.CreatedAt,
+			OnboardingState: r.OnboardingState,
+		}
+		if r.EmailVerifiedAt.Valid {
+			verified := r.EmailVerifiedAt.Time
+			row.EmailVerifiedAt = &verified
+		}
+		out = append(out, row)
 	}
 
 	return out, nil
 }
 
-// CountAllPlayers returns the total number of players for the admin
-// list's pagination math.
-func (s *PlayerStore) CountAllPlayers(ctx context.Context) (int64, error) {
-	count, err := s.q.CountAllPlayers(ctx)
+// CountPlayersInOnboardingState returns the number of rows matching
+// the supplied state bucket. Pass [auth.OnboardingStateAll] to count
+// every row (matches the historical CountAllPlayers behaviour).
+func (s *PlayerStore) CountPlayersInOnboardingState(ctx context.Context, state string) (int64, error) {
+	count, err := s.q.CountPlayersInOnboardingState(ctx, state)
 	if err != nil {
-		return 0, fmt.Errorf("failed to count players: %w", err)
+		return 0, fmt.Errorf("failed to count players in onboarding state: %w", err)
 	}
 
 	return count, nil
+}
+
+// CountPlayersByOnboardingState returns a (state -> count) map across
+// every bucket in a single round-trip. Backs the tab-strip counts on
+// the admin players list (#450). Buckets with zero rows are absent
+// from the map; the caller treats a missing key as zero.
+func (s *PlayerStore) CountPlayersByOnboardingState(ctx context.Context) (map[string]int64, error) {
+	rows, err := s.q.CountPlayersByOnboardingState(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count players by onboarding state: %w", err)
+	}
+
+	out := make(map[string]int64, len(rows))
+	for _, r := range rows {
+		out[r.State] = r.PlayerCount
+	}
+
+	return out, nil
 }
 
 // ListPlayerFinishStats returns the finished-quiz aggregate for the
@@ -688,6 +716,180 @@ func (s *PlayerStore) ListPlayerFinishStats(ctx context.Context, playerIDs []int
 			PlayerID:       r.PlayerID,
 			FinishedCount:  r.FinishedCount,
 			LastFinishedAt: parseSQLiteTimestamp(r.LastFinishedAt),
+		})
+	}
+
+	return out, nil
+}
+
+// GetPlayerDetail returns the per-player detail-view payload for the
+// admin page (#450). Returns auth.ErrPlayerNotFound when the id does
+// not match a row.
+func (s *PlayerStore) GetPlayerDetail(ctx context.Context, id int64) (*auth.PlayerDetail, error) {
+	row, err := s.q.GetPlayerWithOnboardingState(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, auth.ErrPlayerNotFound
+		}
+
+		return nil, fmt.Errorf("failed to get player detail: %w", err)
+	}
+
+	detail := &auth.PlayerDetail{
+		ID:              row.ID,
+		Username:        row.Username,
+		Email:           row.Email.String,
+		Role:            row.Role,
+		HasPassword:     row.PasswordHash.Valid,
+		HasOAuth:        row.HasOauth,
+		OAuthProvider:   row.OauthProvider,
+		CreatedAt:       row.CreatedAt,
+		OnboardingState: row.OnboardingState,
+	}
+	if row.EmailVerifiedAt.Valid {
+		verified := row.EmailVerifiedAt.Time
+		detail.EmailVerifiedAt = &verified
+	}
+
+	return detail, nil
+}
+
+// ListRecentFinishedGamesForPlayer returns at most limit finished-game
+// rows for the supplied player, newest-first. Empty slice when the
+// player has never finished a quiz; the admin per-player detail view
+// (#450) renders an empty-state row in that case.
+func (s *PlayerStore) ListRecentFinishedGamesForPlayer(
+	ctx context.Context, playerID, limit int64,
+) ([]*auth.RecentFinishedGame, error) {
+	rows, err := s.q.ListRecentFinishedGamesForPlayer(ctx, db.ListRecentFinishedGamesForPlayerParams{
+		PlayerID: playerID,
+		RowLimit: limit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list recent finished games for player: %w", err)
+	}
+
+	out := make([]*auth.RecentFinishedGame, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, &auth.RecentFinishedGame{
+			GameID:    r.GameID,
+			QuizID:    r.QuizID,
+			QuizTitle: r.QuizTitle,
+			CreatedAt: r.CreatedAt,
+		})
+	}
+
+	return out, nil
+}
+
+// SetPlayerEmailVerifiedNow stamps email_verified_at to CURRENT_TIMESTAMP
+// even when the row is already verified. Used by the admin "Mark
+// verified" action (#450). Returns auth.ErrPlayerNotFound when the id
+// matches no row.
+func (s *PlayerStore) SetPlayerEmailVerifiedNow(ctx context.Context, playerID int64) error {
+	rows, err := s.q.SetPlayerEmailVerifiedNow(ctx, playerID)
+	if err != nil {
+		return fmt.Errorf("failed to set email verified now: %w", err)
+	}
+	if rows == 0 {
+		return auth.ErrPlayerNotFound
+	}
+
+	return nil
+}
+
+// SetPlayerEmail rewrites players.email on the row identified by id
+// without touching email_verified_at. Used by the admin "Set / overwrite
+// email" action (#450); the admin separately flips email_verified_at if
+// the new address should be treated as proven. Returns auth.ErrEmailTaken
+// on a UNIQUE collision and auth.ErrPlayerNotFound when no row matches.
+func (s *PlayerStore) SetPlayerEmail(ctx context.Context, playerID int64, email string) error {
+	cleaned := strings.ToLower(strings.TrimSpace(email))
+	rows, err := s.q.SetPlayerEmail(ctx, db.SetPlayerEmailParams{
+		Email: sql.NullString{String: cleaned, Valid: cleaned != ""},
+		ID:    playerID,
+	})
+	if err != nil {
+		var sqliteErr *sqlite.Error
+		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+			return auth.ErrEmailTaken
+		}
+
+		return fmt.Errorf("failed to set player email: %w", err)
+	}
+	if rows == 0 {
+		return auth.ErrPlayerNotFound
+	}
+
+	return nil
+}
+
+// CreatePlayerByAdmin inserts a fresh credentialled row with
+// email_verified_at stamped (#450). Email is trimmed + lowercased;
+// passwordHash must be non-empty (the handler enforces it before
+// reaching the store). Returns auth.ErrUsernameTaken / auth.ErrEmailTaken
+// on UNIQUE collisions.
+func (s *PlayerStore) CreatePlayerByAdmin(
+	ctx context.Context, username, email, passwordHash string,
+) (*auth.Player, error) {
+	cleanedUsername := strings.TrimSpace(username)
+	cleanedEmail := strings.ToLower(strings.TrimSpace(email))
+	row, err := s.q.CreatePlayerByAdmin(ctx, db.CreatePlayerByAdminParams{
+		Username:     cleanedUsername,
+		Email:        sql.NullString{String: cleanedEmail, Valid: cleanedEmail != ""},
+		PasswordHash: sql.NullString{String: passwordHash, Valid: passwordHash != ""},
+	})
+	if err != nil {
+		return nil, s.classifyCredentialConflict(ctx, cleanedUsername, cleanedEmail, err)
+	}
+
+	return playerFromRow(row), nil
+}
+
+// InsertAdminAudit records one admin action against a target player
+// (#450). payload is a pre-serialised JSON blob; the writer is
+// responsible for the schema. Errors wrap through so the handler can
+// log them without obscuring the SQL error.
+func (s *PlayerStore) InsertAdminAudit(
+	ctx context.Context, actorPlayerID, targetPlayerID int64, action, payload string,
+) error {
+	if err := s.q.InsertAdminAudit(ctx, db.InsertAdminAuditParams{
+		ActorPlayerID:  actorPlayerID,
+		TargetPlayerID: targetPlayerID,
+		Action:         action,
+		Payload:        payload,
+	}); err != nil {
+		return fmt.Errorf("failed to insert admin audit: %w", err)
+	}
+
+	return nil
+}
+
+// ListAdminAuditForTarget returns the most-recent admin actions taken
+// against the supplied target player, newest-first. Empty slice when
+// no audit rows exist; the detail view renders an empty-state line in
+// that case.
+func (s *PlayerStore) ListAdminAuditForTarget(
+	ctx context.Context, targetPlayerID, limit int64,
+) ([]*auth.AdminAuditEntry, error) {
+	rows, err := s.q.ListAdminAuditForTarget(ctx, db.ListAdminAuditForTargetParams{
+		TargetPlayerID: targetPlayerID,
+		RowLimit:       limit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list admin audit for target: %w", err)
+	}
+
+	out := make([]*auth.AdminAuditEntry, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, &auth.AdminAuditEntry{
+			ID:             r.ID,
+			ActorPlayerID:  r.ActorPlayerID,
+			ActorUsername:  r.ActorUsername,
+			TargetPlayerID: r.TargetPlayerID,
+			Action:         r.Action,
+			Payload:        r.Payload,
+			CreatedAt:      r.CreatedAt,
 		})
 	}
 

@@ -107,20 +107,68 @@ type AnonymousGameMigrator interface {
 	ReattributeGames(ctx context.Context, fromPlayerID, toPlayerID int64) (int64, error)
 }
 
-// PlayerListRow is one row in the admin players list (#423). Mirrors
-// the shape of the underlying SQL more closely than auth.Player -
-// adds the derived OAuth-link state so the handler does not have to
-// re-derive it per row. FinishedCount and LastFinishedAt come from a
-// separate PlayerStats lookup so the page query stays simple.
+// PlayerListRow is one row in the admin players list (#423/#450).
+// Mirrors the shape of the underlying SQL more closely than auth.Player
+// - adds the derived OAuth-link state and the onboarding-state bucket
+// so the handler does not have to re-derive them per row. FinishedCount
+// and LastFinishedAt come from a separate PlayerStats lookup so the
+// page query stays simple.
 type PlayerListRow struct {
-	ID            int64
-	Username      string
-	Email         string
-	Role          string
-	HasPassword   bool
-	HasOAuth      bool
-	OAuthProvider string
-	CreatedAt     time.Time
+	ID              int64
+	Username        string
+	Email           string
+	Role            string
+	HasPassword     bool
+	HasOAuth        bool
+	OAuthProvider   string
+	CreatedAt       time.Time
+	EmailVerifiedAt *time.Time
+	// OnboardingState is the SQL-derived bucket label (#450). One of
+	// [OnboardingStateAnonymous], [OnboardingStateUnverified],
+	// [OnboardingStateOAuth], [OnboardingStateVerified]. The branch
+	// order in the underlying CASE makes each row land in exactly one
+	// bucket; admin status is orthogonal and exposed separately via
+	// [Player.Role].
+	OnboardingState string
+}
+
+// OnboardingState label constants. Kept in lockstep with the CASE
+// expressions in internal/queries/admin.sql; if a new bucket is added
+// there, add it here and update the admin handler's tab strip too.
+const (
+	// OnboardingStateAnonymous is a petname-only row with no
+	// password_hash and no linked identity. The visitor has played
+	// games but never claimed an account.
+	OnboardingStateAnonymous = "anonymous"
+	// OnboardingStateUnverified is a credentialled row (password set)
+	// whose email_verified_at is still NULL. The post-#492 verify gate
+	// will refuse this row at sign-in until an admin marks-verified or
+	// the player clicks the resend link.
+	OnboardingStateUnverified = "unverified"
+	// OnboardingStateOAuth is any row with a player_identities link.
+	// Treated as verified because the provider attests the email; the
+	// label is distinct so the admin can spot OAuth-only accounts at
+	// a glance.
+	OnboardingStateOAuth = "oauth"
+	// OnboardingStateVerified is a password-bearing row whose
+	// email_verified_at is set. The admin's "stable, signed-in account"
+	// bucket.
+	OnboardingStateVerified = "verified"
+	// OnboardingStateAll is the no-op filter value; pass it to the
+	// list/count queries to disable the WHERE predicate.
+	OnboardingStateAll = "all"
+)
+
+// OnboardingStateValues returns the user-facing filter buckets in the
+// order the admin tab strip renders them. "all" is excluded - it lives
+// in the template as the default tab rather than a derived state.
+func OnboardingStateValues() []string {
+	return []string{
+		OnboardingStateAnonymous,
+		OnboardingStateUnverified,
+		OnboardingStateOAuth,
+		OnboardingStateVerified,
+	}
 }
 
 // PlayerStats is the per-player finished-quiz aggregate the admin
@@ -133,22 +181,126 @@ type PlayerStats struct {
 }
 
 // PlayerLister is the read-only persistence interface the admin
-// players page consumes (#423). Kept separate from PlayerStore so the
-// admin-facing surface does not bleed into the auth flow; the same
+// players page consumes (#423/#450). Kept separate from PlayerStore so
+// the admin-facing surface does not bleed into the auth flow; the same
 // concrete store satisfies both interfaces (mirrors how PlayerStore
 // and OAuthIdentityStore share an instance).
 type PlayerLister interface {
-	// ListAllPlayers returns one page of players ordered by created_at
-	// DESC, plus a stable secondary id ordering for ties.
-	ListAllPlayers(ctx context.Context, limit, offset int64) ([]*PlayerListRow, error)
-	// CountAllPlayers returns the total number of players for
-	// pagination's page-count math.
-	CountAllPlayers(ctx context.Context) (int64, error)
+	// ListPlayersByOnboardingState returns one page of players ordered
+	// by created_at DESC, filtered to rows whose derived onboarding
+	// state matches state. Pass [OnboardingStateAll] to disable the
+	// filter. The returned rows carry the SQL-derived OnboardingState
+	// label so the handler does not have to compute it.
+	ListPlayersByOnboardingState(
+		ctx context.Context, state string, limit, offset int64,
+	) ([]*PlayerListRow, error)
+	// CountPlayersInOnboardingState returns the total number of rows
+	// matching state for the pagination math. Pass
+	// [OnboardingStateAll] to count every row.
+	CountPlayersInOnboardingState(ctx context.Context, state string) (int64, error)
+	// CountPlayersByOnboardingState returns a (state -> count) map
+	// across every bucket in one round-trip. Powers the tab-strip
+	// labels on the admin players list (#450).
+	CountPlayersByOnboardingState(ctx context.Context) (map[string]int64, error)
 	// ListPlayerFinishStats returns the finished-quiz aggregate for the
 	// supplied player ids. A player with no finished games is absent
 	// from the result; the caller should treat missing entries as
 	// (count = 0, last = nil).
 	ListPlayerFinishStats(ctx context.Context, playerIDs []int64) ([]*PlayerStats, error)
+}
+
+// PlayerDetail backs the admin per-player detail view (#450). Carries
+// every column the list shows plus email_verified_at and a recent-game
+// excerpt. Distinct from [PlayerListRow] so the list query can stay
+// narrow.
+type PlayerDetail struct {
+	ID              int64
+	Username        string
+	Email           string
+	Role            string
+	HasPassword     bool
+	HasOAuth        bool
+	OAuthProvider   string
+	CreatedAt       time.Time
+	EmailVerifiedAt *time.Time
+	OnboardingState string
+}
+
+// RecentFinishedGame is one row in the "Last 5 finished games" section
+// of the admin per-player detail view (#450).
+type RecentFinishedGame struct {
+	GameID    string
+	QuizID    int64
+	QuizTitle string
+	CreatedAt time.Time
+}
+
+// AdminAuditEntry is one row in the admin_audit table, rendered on the
+// per-player detail view's "Recent admin actions" section (#450). The
+// raw Payload JSON is passed through as a string; the template decodes
+// the few well-known actions on the way out.
+type AdminAuditEntry struct {
+	ID             int64
+	ActorPlayerID  int64
+	ActorUsername  string
+	TargetPlayerID int64
+	Action         string
+	Payload        string
+	CreatedAt      time.Time
+}
+
+// Admin action labels written to admin_audit.action. Match the spec in
+// the #450 ticket; new actions belong here so the writers and the
+// detail-view renderer share one set of constants.
+const (
+	AdminActionVerify             = "verify"
+	AdminActionEmailSet           = "email_set"
+	AdminActionPasswordSet        = "password_set"
+	AdminActionCreated            = "created"
+	AdminActionResendVerification = "resend_verification"
+)
+
+// AdminPlayerStore is the read+write persistence interface the admin
+// per-player detail view + actions consume (#450). Lives in auth so
+// the admin handlers can import this package without pulling in
+// internal/store; the concrete PlayerStore satisfies it alongside the
+// existing PlayerStore / PlayerLister / OAuthIdentityStore slots.
+type AdminPlayerStore interface {
+	// GetPlayerDetail returns the per-player view payload for the
+	// admin detail page. Returns ErrPlayerNotFound when no row matches.
+	GetPlayerDetail(ctx context.Context, id int64) (*PlayerDetail, error)
+	// ListRecentFinishedGamesForPlayer returns at most limit
+	// finished-game rows owned by player, newest-first. Empty slice
+	// when the player has never finished a quiz.
+	ListRecentFinishedGamesForPlayer(
+		ctx context.Context, playerID, limit int64,
+	) ([]*RecentFinishedGame, error)
+	// SetPlayerEmailVerifiedNow stamps email_verified_at to the
+	// current wall-clock time. Idempotent against an already-verified
+	// row (the timestamp is refreshed). Returns ErrPlayerNotFound when
+	// the id matches no row.
+	SetPlayerEmailVerifiedNow(ctx context.Context, playerID int64) error
+	// SetPlayerEmail rewrites players.email without touching
+	// email_verified_at. Returns ErrEmailTaken on a UNIQUE collision,
+	// ErrPlayerNotFound when the id matches no row.
+	SetPlayerEmail(ctx context.Context, playerID int64, email string) error
+	// CreatePlayerByAdmin inserts a fresh credentialled row with
+	// email_verified_at stamped. role is fixed to 'player'. Returns
+	// ErrUsernameTaken / ErrEmailTaken on UNIQUE collisions.
+	CreatePlayerByAdmin(
+		ctx context.Context, username, email, passwordHash string,
+	) (*Player, error)
+	// InsertAdminAudit records one admin action. payload is a
+	// pre-serialised JSON blob (use "{}" when there is nothing to
+	// record).
+	InsertAdminAudit(
+		ctx context.Context, actorPlayerID, targetPlayerID int64, action, payload string,
+	) error
+	// ListAdminAuditForTarget returns the most-recent audit entries
+	// targeting the given player, newest first.
+	ListAdminAuditForTarget(
+		ctx context.Context, targetPlayerID, limit int64,
+	) ([]*AdminAuditEntry, error)
 }
 
 // PlayerStore is the persistence interface used by the auth package.

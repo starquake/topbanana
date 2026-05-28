@@ -20,21 +20,38 @@ const playersPerPage = 100
 
 // playerRow is one row in the admin players list template. Mirrors
 // the shape of auth.PlayerListRow + auth.PlayerStats merged with the
-// AccountType label pre-derived so the template stays declarative.
+// AccountType + onboarding-state labels pre-derived so the template
+// stays declarative.
 type playerRow struct {
-	ID             int64
-	Username       string
-	Email          string
-	AccountType    string
-	CreatedAt      time.Time
-	FinishedCount  int64
-	LastFinishedAt *time.Time
+	ID              int64
+	Username        string
+	Email           string
+	AccountType     string
+	OnboardingState string
+	IsAdmin         bool
+	CreatedAt       time.Time
+	FinishedCount   int64
+	LastFinishedAt  *time.Time
+}
+
+// playersStateTab is one entry in the filter tab strip rendered above
+// the table (#450). Count is the number of players in the bucket;
+// IsActive flags the tab matching the current ?state= filter so the
+// template can highlight it.
+type playersStateTab struct {
+	Label    string
+	State    string
+	Count    int64
+	IsActive bool
+	URL      string
 }
 
 // playersPageData backs the playerslist.gohtml template.
 type playersPageData struct {
 	Title      string
 	Players    []*playerRow
+	Tabs       []playersStateTab
+	State      string
 	Page       int
 	TotalPages int
 	TotalRows  int64
@@ -42,15 +59,17 @@ type playersPageData struct {
 	HasNext    bool
 	PrevPage   int
 	NextPage   int
+	PrevURL    string
+	NextURL    string
 	RangeStart int64
 	RangeEnd   int64
 }
 
-// HandlePlayersList renders /admin/players (#423). One row per player
-// with the derived account-type label, finished-quiz count, and a link
-// to the (future) per-player detail view. Pagination is a simple
-// ?page=N query param; page sizes above [playersPerPage] are not
-// negotiable from the URL.
+// HandlePlayersList renders /admin/players (#423/#450). One row per
+// player with the derived account-type label, finished-quiz count, a
+// link to the per-player detail view, and a tab strip filtering by
+// onboarding state. Pagination is a simple ?page=N query param; page
+// sizes above [playersPerPage] are not negotiable from the URL.
 func HandlePlayersList(logger *slog.Logger, csrfMgr *csrf.Manager, lister auth.PlayerLister) http.Handler {
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/playerslist.gohtml")
 
@@ -76,9 +95,18 @@ func loadPlayersPage(
 	lister auth.PlayerLister,
 ) (playersPageData, bool) {
 	ctx := r.Context()
+	state := parseStateParam(r.URL.Query().Get("state"))
 	page := parsePageParam(r.URL.Query().Get("page"))
 
-	total, err := lister.CountAllPlayers(ctx)
+	stateCounts, err := lister.CountPlayersByOnboardingState(ctx)
+	if err != nil {
+		logger.ErrorContext(ctx, "error counting players by state", slog.Any("err", err))
+		render500(w, r, logger, csrfMgr)
+
+		return playersPageData{}, false
+	}
+
+	total, err := lister.CountPlayersInOnboardingState(ctx, state)
 	if err != nil {
 		logger.ErrorContext(ctx, "error counting players", slog.Any("err", err))
 		render500(w, r, logger, csrfMgr)
@@ -95,7 +123,7 @@ func loadPlayersPage(
 	}
 
 	offset := int64(page-1) * playersPerPage
-	rows, err := lister.ListAllPlayers(ctx, playersPerPage, offset)
+	rows, err := lister.ListPlayersByOnboardingState(ctx, state, playersPerPage, offset)
 	if err != nil {
 		logger.ErrorContext(ctx, "error listing players", slog.Any("err", err))
 		render500(w, r, logger, csrfMgr)
@@ -119,6 +147,8 @@ func loadPlayersPage(
 	return playersPageData{
 		Title:      "Admin Dashboard - Players",
 		Players:    players,
+		Tabs:       buildStateTabs(state, stateCounts),
+		State:      state,
 		Page:       page,
 		TotalPages: totalPages,
 		TotalRows:  total,
@@ -126,6 +156,8 @@ func loadPlayersPage(
 		HasNext:    page < totalPages,
 		PrevPage:   page - 1,
 		NextPage:   page + 1,
+		PrevURL:    playersPageURL(state, page-1),
+		NextURL:    playersPageURL(state, page+1),
 		RangeStart: rangeStart,
 		RangeEnd:   offset + int64(len(players)),
 	}, true
@@ -156,11 +188,13 @@ func buildPlayerRows(
 	out := make([]*playerRow, 0, len(rows))
 	for _, p := range rows {
 		pr := &playerRow{
-			ID:          p.ID,
-			Username:    p.Username,
-			Email:       p.Email,
-			AccountType: accountTypeLabel(p),
-			CreatedAt:   p.CreatedAt,
+			ID:              p.ID,
+			Username:        p.Username,
+			Email:           p.Email,
+			AccountType:     accountTypeLabel(p),
+			OnboardingState: p.OnboardingState,
+			IsAdmin:         p.Role == auth.RoleAdmin,
+			CreatedAt:       p.CreatedAt,
 		}
 		if s, ok := statsByID[p.ID]; ok {
 			pr.FinishedCount = s.FinishedCount
@@ -170,6 +204,22 @@ func buildPlayerRows(
 	}
 
 	return out, nil
+}
+
+// parseStateParam clamps the ?state= query value to one of the known
+// onboarding-state buckets. Anything else (blank, unknown, mixed case)
+// falls back to [auth.OnboardingStateAll] so a hand-edited URL never
+// produces an empty result page.
+func parseStateParam(raw string) string {
+	switch raw {
+	case auth.OnboardingStateAnonymous,
+		auth.OnboardingStateUnverified,
+		auth.OnboardingStateOAuth,
+		auth.OnboardingStateVerified:
+		return raw
+	default:
+		return auth.OnboardingStateAll
+	}
 }
 
 // parsePageParam clamps the ?page= query value to a sensible positive
@@ -196,6 +246,81 @@ func totalPagesFor(total, perPage int64) int {
 	}
 
 	return int((total + perPage - 1) / perPage)
+}
+
+// playersPageURL composes a /admin/players URL preserving the state
+// filter for the supplied page number. Used by the template to build
+// pagination + tab links without inlining the encoding rule. The state
+// is omitted when it is the default ("all") so a fresh-from-bookmark URL
+// stays clean.
+func playersPageURL(state string, page int) string {
+	q := ""
+	if state != auth.OnboardingStateAll {
+		q = "?state=" + state
+	}
+	if page >= 1 {
+		if q == "" {
+			q = "?page="
+		} else {
+			q += "&page="
+		}
+		q += strconv.Itoa(page)
+	}
+
+	return "/admin/players" + q
+}
+
+// buildStateTabs constructs the tab-strip data: "All" first, then one
+// tab per onboarding state in [auth.OnboardingStateValues] order. Counts
+// come from a single GROUP BY round-trip (passed in as stateCounts);
+// "All" is the sum across every known bucket so the value matches the
+// caller's expectation even when a future bucket is missing from the
+// map.
+func buildStateTabs(activeState string, stateCounts map[string]int64) []playersStateTab {
+	tabs := make([]playersStateTab, 0, 1+len(auth.OnboardingStateValues()))
+
+	total := int64(0)
+	for _, s := range auth.OnboardingStateValues() {
+		total += stateCounts[s]
+	}
+
+	tabs = append(tabs, playersStateTab{
+		Label:    "All",
+		State:    auth.OnboardingStateAll,
+		Count:    total,
+		IsActive: activeState == auth.OnboardingStateAll,
+		URL:      playersPageURL(auth.OnboardingStateAll, 0),
+	})
+	for _, s := range auth.OnboardingStateValues() {
+		tabs = append(tabs, playersStateTab{
+			Label:    stateLabel(s),
+			State:    s,
+			Count:    stateCounts[s],
+			IsActive: activeState == s,
+			URL:      playersPageURL(s, 0),
+		})
+	}
+
+	return tabs
+}
+
+// stateLabel maps a [auth.OnboardingState*] constant to the
+// title-cased label rendered on the tab strip. Kept here (not in the
+// template) so a future relabel ("Unverified" -> "Awaiting verification")
+// touches one Go function instead of every template file.
+func stateLabel(state string) string {
+	switch state {
+	case auth.OnboardingStateAnonymous:
+		return "Anonymous"
+	case auth.OnboardingStateUnverified:
+		return "Unverified"
+	case auth.OnboardingStateOAuth:
+		return "OAuth"
+	case auth.OnboardingStateVerified:
+		return "Verified"
+	default:
+		return state
+	}
 }
 
 // accountTypeLabel maps a player row's role + credential + OAuth state

@@ -214,31 +214,6 @@ WHERE players.id = sqlc.arg('id')
   AND players.email IS NULL
 RETURNING *;
 
--- name: ListAllPlayers :many
--- Returns one page of players for the admin players list (#423),
--- ordered by created_at DESC so newest sign-ups land first. The
--- derived has_oauth / oauth_provider fields surface the OAuth-link
--- state in the same row so the handler does not have to issue a
--- per-row lookup. Finished-quiz aggregates come from a separate
--- ListPlayerFinishStats call against the page's player_ids; keeping
--- the aggregate out of this query keeps the SELECT under sqlc's
--- type-inference comfort zone and avoids a CTE / window function.
--- The oauth_provider subquery uses ORDER BY pi.provider so a player
--- with multiple linked identities (future multi-provider support)
--- always surfaces the same alphabetically-first one rather than a
--- nondeterministic pick.
-SELECT
-    p.*,
-    EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id) AS has_oauth,
-    CAST(COALESCE((SELECT pi.provider FROM player_identities pi WHERE pi.player_id = p.id ORDER BY pi.provider LIMIT 1), '') AS TEXT) AS oauth_provider
-FROM players p
-ORDER BY p.created_at DESC, p.id DESC
-LIMIT sqlc.arg('row_limit') OFFSET sqlc.arg('row_offset');
-
--- name: CountAllPlayers :one
--- Total players row count for the admin list pagination (#423).
-SELECT COUNT(*) FROM players;
-
 -- name: ListPlayerFinishStats :many
 -- Returns (finished_count, last_finished_at) for each supplied
 -- player_id. A game counts as finished when every question of its

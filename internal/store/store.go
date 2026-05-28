@@ -18,7 +18,8 @@ import (
 // post-sign-in migration uses); both slots point at the same concrete
 // instance so consumers only see the methods relevant to their flow.
 // The same pattern applies to PlayerStore, which satisfies
-// auth.PlayerStore, auth.OAuthIdentityStore, and auth.PlayerLister.
+// auth.PlayerStore, auth.OAuthIdentityStore, auth.PlayerLister, and
+// auth.AdminPlayerStore.
 type Stores struct {
 	Quizzes      quiz.Store
 	Games        game.Store
@@ -26,6 +27,7 @@ type Stores struct {
 	Players      auth.PlayerStore
 	OAuth        auth.OAuthIdentityStore
 	PlayerLister auth.PlayerLister
+	AdminPlayers auth.AdminPlayerStore
 	VerifyTokens auth.VerifyTokenStore
 	ResetTokens  auth.ResetTokenStore
 	Home         home.Store
@@ -33,9 +35,10 @@ type Stores struct {
 
 // New initializes a new Stores instance with the provided database connection.
 //
-// PlayerStore satisfies auth.PlayerStore, auth.OAuthIdentityStore, and
-// auth.PlayerLister; callers receive the same concrete instance through
-// three interface slots so they only see the methods relevant to their flow.
+// PlayerStore satisfies auth.PlayerStore, auth.OAuthIdentityStore,
+// auth.PlayerLister, and auth.AdminPlayerStore; callers receive the same
+// concrete instance through every interface slot so they only see the
+// methods relevant to their flow.
 func New(conn *sql.DB, logger *slog.Logger) *Stores {
 	players := NewPlayerStore(conn, logger)
 	games := NewGameStore(conn, logger)
@@ -47,6 +50,7 @@ func New(conn *sql.DB, logger *slog.Logger) *Stores {
 		Players:      players,
 		OAuth:        players,
 		PlayerLister: players,
+		AdminPlayers: players,
 		VerifyTokens: players,
 		ResetTokens:  players,
 		Home:         NewHomeStore(conn, logger),

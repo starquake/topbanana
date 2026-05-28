@@ -9,6 +9,15 @@ import (
 	"time"
 )
 
+type AdminAudit struct {
+	ID             int64
+	ActorPlayerID  int64
+	TargetPlayerID int64
+	Action         string
+	Payload        string
+	CreatedAt      time.Time
+}
+
 type Break struct {
 	ID        int64
 	QuizID    int64
