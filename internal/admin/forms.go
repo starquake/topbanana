@@ -84,17 +84,9 @@ func (f *questionForm) Valid(_ context.Context) map[string]string {
 	case len(q.Options) > maxOptions:
 		problems["options"] = fmt.Sprintf("A question may have at most %d options", maxOptions)
 	default:
-		hasCorrect := false
-		for _, o := range q.Options {
-			if o.Correct {
-				hasCorrect = true
-
-				break
-			}
-		}
-		if !hasCorrect {
-			problems["options"] = "At least one option must be correct"
-		}
+		// Option count is in range. Deliberately no correct-option
+		// check: a question where the player is meant to pick none is a
+		// supported shape.
 	}
 	if q.TimeLimitSeconds != nil {
 		v := *q.TimeLimitSeconds
