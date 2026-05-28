@@ -2,6 +2,6 @@
 image=fedora-toolbox:44
 replace=true
 pull=true
-additional_packages="git golang nodejs npm gtk3 cairo-gobject gdk-pixbuf2 dbus-glib pango libXt libXcomposite libXdamage libXrandr libXcursor mesa-libgbm"
+additional_packages="git golang nodejs npm sqlite gtk3 cairo-gobject gdk-pixbuf2 dbus-glib pango libXt libXcomposite libXdamage libXrandr libXcursor mesa-libgbm"
 # Needed for Goland (uncomment if needed)
 #additional_packages="libXrender libXtst libXi libXext libXcomposite libXcursor libXdamage libXfixes libXrandr mesa-libGL mesa-libEGL freetype fontconfig dejavu-fonts-all libwayland-client libwayland-cursor libwayland-egl adwaita-cursor-theme gsettings-desktop-schemas nss at-spi2-atk atk cairo pango cups-libs alsa-lib libxkbcommon"
