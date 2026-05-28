@@ -15,6 +15,7 @@ import (
 
 	. "github.com/starquake/topbanana/cmd/server/app"
 	"github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/database"
 	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/store"
@@ -476,4 +477,99 @@ func TestRunTokenSweep_ContinuesAfterError(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+// TestBuildMailer_WarnsWhenSMTPConfiguredAndBaseURLEmpty pins the
+// boot-time WARN log that surfaces the silent-no-op trap: when SMTP
+// is wired but BASE_URL is empty, every email dispatcher silently
+// drops its send. The diagnostics page also surfaces this, but the
+// log line catches it in the boot transcript so a deploy that goes
+// straight to "running" without a human visiting /admin/email still
+// gets a visible signal (#495).
+func TestBuildMailer_WarnsWhenSMTPConfiguredAndBaseURLEmpty(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	cfg := &config.Config{
+		SMTPHost: "mailpit",
+		SMTPPort: 1025,
+		SMTPFrom: "topbanana@localhost",
+		SMTPTLS:  false,
+		BaseURL:  "",
+	}
+
+	_, status, err := BuildMailer(t.Context(), cfg, logger)
+	if err != nil {
+		t.Fatalf("BuildMailer err = %v, want nil", err)
+	}
+	if got, want := status.Configured, true; got != want {
+		t.Errorf("status.Configured = %v, want %v", got, want)
+	}
+	if got, want := buf.String(), "email links disabled: BASE_URL is unset while SMTP is configured"; !strings.Contains(
+		got,
+		want,
+	) {
+		t.Errorf("log output = %q, should contain %q", got, want)
+	}
+	if got, want := buf.String(), "level=WARN"; !strings.Contains(got, want) {
+		t.Errorf("log output = %q, should contain %q (WARN, not INFO)", got, want)
+	}
+}
+
+// TestBuildMailer_NoWarnWhenSMTPConfiguredAndBaseURLSet pins the
+// quiet path: a deploy that wires both SMTP and BASE_URL should not
+// emit the email-links-disabled warning, otherwise the boot log
+// would cry wolf on every healthy production restart.
+func TestBuildMailer_NoWarnWhenSMTPConfiguredAndBaseURLSet(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	cfg := &config.Config{
+		SMTPHost: "mailpit",
+		SMTPPort: 1025,
+		SMTPFrom: "topbanana@localhost",
+		BaseURL:  "https://quiz.example.test",
+	}
+
+	_, status, err := BuildMailer(t.Context(), cfg, logger)
+	if err != nil {
+		t.Fatalf("BuildMailer err = %v, want nil", err)
+	}
+	if got, want := status.BaseURL, "https://quiz.example.test"; got != want {
+		t.Errorf("status.BaseURL = %q, want %q", got, want)
+	}
+	if strings.Contains(buf.String(), "email links disabled") {
+		t.Errorf("log output = %q, should not contain email-links-disabled warning when BaseURL is set", buf.String())
+	}
+}
+
+// TestBuildMailer_NoWarnWhenSMTPUnconfigured pins the unconfigured
+// path: a deploy with no SMTP at all shouldn't be lectured about
+// BASE_URL too. The unconfigured info line already explains why no
+// email leaves the box; piling another warning on top would be noise.
+func TestBuildMailer_NoWarnWhenSMTPUnconfigured(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	cfg := &config.Config{BaseURL: ""}
+
+	_, status, err := BuildMailer(t.Context(), cfg, logger)
+	if err != nil {
+		t.Fatalf("BuildMailer err = %v, want nil", err)
+	}
+	if got, want := status.Configured, false; got != want {
+		t.Errorf("status.Configured = %v, want %v", got, want)
+	}
+	if strings.Contains(buf.String(), "email links disabled") {
+		t.Errorf(
+			"log output = %q, should not contain email-links-disabled warning when SMTP is unconfigured",
+			buf.String(),
+		)
+	}
 }

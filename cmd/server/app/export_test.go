@@ -25,6 +25,11 @@ var (
 // without standing up the full server (#472).
 var RunTokenSweep = runTokenSweep
 
+// BuildMailer exposes the unexported mailer-construction helper so
+// the external app_test package can pin the WARN-when-BASE_URL-is-
+// missing log behaviour (#495) without standing up the full server.
+var BuildMailer = buildMailer
+
 // TokenSweeper / ResetTokenSweeper re-export the narrow interfaces
 // the sweep depends on so tests can build stubs against the same
 // shape the production wiring uses.

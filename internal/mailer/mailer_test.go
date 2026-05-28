@@ -149,7 +149,7 @@ func TestNewStatusView_UnconfiguredBlanksConnectionFields(t *testing.T) {
 		From: "should-be-blanked@example.test",
 		TLS:  true,
 	}
-	view := NewStatusView(cfg, false)
+	view := NewStatusView(cfg, false, "")
 	if got, want := view.Configured, false; got != want {
 		t.Errorf("Configured = %v, want %v", got, want)
 	}
@@ -183,10 +183,10 @@ func TestNewStatusView_OmitsCredentials(t *testing.T) {
 		From:     "topbanana@localhost",
 		TLS:      true,
 	}
-	view := NewStatusView(cfg, true)
-	// The status view fields cover host/port/from/tls/configured and
-	// nothing else. Two layers of defence: the type only carries the
-	// safe subset (compile-time), and the value-level checks below
+	view := NewStatusView(cfg, true, "")
+	// The status view fields cover host/port/from/tls/configured/baseurl
+	// and nothing else. Two layers of defence: the type only carries
+	// the safe subset (compile-time), and the value-level checks below
 	// confirm we did not silently widen the struct in the future.
 	if got, want := view.Configured, true; got != want {
 		t.Errorf("Configured = %v, want %v", got, want)
@@ -202,6 +202,35 @@ func TestNewStatusView_OmitsCredentials(t *testing.T) {
 	}
 	if got, want := view.TLS, true; got != want {
 		t.Errorf("TLS = %v, want %v", got, want)
+	}
+}
+
+// TestNewStatusView_BaseURLPopulatedRegardlessOfConfigured pins that
+// BaseURL ships on the returned view even when configured is false.
+// The dispatchers silently no-op when BASE_URL is empty, so the
+// operator must see the link prefix on the diagnostics page whether
+// or not SMTP itself is wired.
+func TestNewStatusView_BaseURLPopulatedRegardlessOfConfigured(t *testing.T) {
+	t.Parallel()
+
+	const baseURL = "https://quiz.example.test"
+	cfg := SMTPConfig{Host: "mailpit", Port: 1025, From: "topbanana@localhost"}
+
+	tests := []struct {
+		name       string
+		configured bool
+	}{
+		{name: "unconfigured", configured: false},
+		{name: "configured", configured: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			view := NewStatusView(cfg, tt.configured, baseURL)
+			if got, want := view.BaseURL, baseURL; got != want {
+				t.Errorf("BaseURL = %q, want %q", got, want)
+			}
+		})
 	}
 }
 
