@@ -43,12 +43,14 @@ test('admin marks an unverified player verified via the detail view', async ({ p
   await page.goto('/admin/players');
   await expect(page).toHaveURL('/admin/players');
   await expect(page.getByRole('heading', { name: 'Players' })).toBeVisible();
-  await expect(page.getByText(targetUsername)).toBeVisible();
+  // Match the target's link in the row rather than getByText, which
+  // would also match the substring inside the email cell.
+  await expect(page.getByRole('link', { name: targetUsername })).toBeVisible();
 
   // Filter to the unverified tab. The target appears; the admin row does not.
   await page.getByRole('link', { name: /^Unverified/i }).click();
   await expect(page).toHaveURL(/\/admin\/players\?state=unverified/);
-  await expect(page.getByText(targetUsername)).toBeVisible();
+  await expect(page.getByRole('link', { name: targetUsername })).toBeVisible();
 
   // Open the target's detail view.
   await page.getByRole('link', { name: targetUsername }).click();
@@ -69,5 +71,5 @@ test('admin marks an unverified player verified via the detail view', async ({ p
 
   // Walk back to the unverified tab and confirm the target row is gone.
   await page.goto('/admin/players?state=unverified');
-  await expect(page.getByText(targetUsername)).toHaveCount(0);
+  await expect(page.getByRole('link', { name: targetUsername })).toHaveCount(0);
 });
