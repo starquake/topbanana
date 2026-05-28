@@ -37,6 +37,14 @@ jobs:
     - name: Tailwind drift check
       run: make tailwind-check
 
+    # Catch drift between internal/queries/ and the generated
+    # internal/db/ layer. `sqlc vet` (in the lint workflow) only lints
+    # the queries; it does not re-run generate, so a query edited or
+    # deleted without regenerating leaves stale code in internal/db/
+    # that ships unnoticed. Regenerate here and fail on any diff.
+    - name: sqlc drift check
+      run: make sqlc-check
+
     # `make test-coverage` runs the full suite with -tags=integration,
     # so a separate integration step would just duplicate the work.
     # Dropped here as part of #202.
