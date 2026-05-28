@@ -27,6 +27,10 @@
             </button>
         </form>
 
+        <p class="mb-6 text-sm text-text-dim">
+            <a href="/verify-email/request" class="underline">Didn't get the link?</a>
+        </p>
+
         <form action="/logout" method="POST" class="inline-flex">
             <input type="hidden" name="csrf_token" value="{{csrfToken}}">
             <button type="submit" class="text-text-dim text-sm underline">Sign out</button>
