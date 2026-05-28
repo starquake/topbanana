@@ -7,7 +7,7 @@
         <div>
             <h1 class="m-0 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(2rem,6vw,2.75rem)]">{{.Title}}</h1>
             <p class="mt-2 max-w-[50ch] text-text-dim text-[0.95rem]">
-                Author, share, and review quizzes. Pick where to go next.
+                Pick a section to manage quizzes, players, or email.
             </p>
         </div>
     </header>
@@ -16,24 +16,20 @@
         <a href="/admin/quizzes"
            class="group relative flex flex-col gap-3 p-6 bg-surface border border-border-soft rounded-lg transition-colors hover:border-accent-line">
             <span class="text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.16em]">Manage</span>
-            <h2 class="m-0 font-display text-lg font-semibold uppercase tracking-tight group-hover:text-accent transition-colors">List quizzes</h2>
-            <p class="m-0 text-text-dim text-sm">Browse every quiz, see question counts, and jump in to edit or share.</p>
+            <h2 class="m-0 font-display text-lg font-semibold uppercase tracking-tight group-hover:text-accent transition-colors">Quizzes</h2>
+            <p class="m-0 text-text-dim text-sm">Browse every quiz, create or import one, and edit questions, breaks, and sharing.</p>
         </a>
-        <a href="/admin/quizzes/new"
+        <a href="/admin/players"
            class="group relative flex flex-col gap-3 p-6 bg-surface border border-border-soft rounded-lg transition-colors hover:border-accent-line">
-            <span class="text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.16em]">Create</span>
-            <h2 class="m-0 font-display text-lg font-semibold uppercase tracking-tight group-hover:text-accent transition-colors">New quiz</h2>
-            <p class="m-0 text-text-dim text-sm">Start a fresh quiz: title, description, and questions on the next screen.</p>
+            <span class="text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.16em]">Manage</span>
+            <h2 class="m-0 font-display text-lg font-semibold uppercase tracking-tight group-hover:text-accent transition-colors">Players</h2>
+            <p class="m-0 text-text-dim text-sm">Review registered players, add one, and manage verification and email.</p>
         </a>
-        <a href="/admin/quizzes/import"
+        <a href="/admin/email"
            class="group relative flex flex-col gap-3 p-6 bg-surface border border-border-soft rounded-lg transition-colors hover:border-accent-line">
-            <span class="text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.16em]">Import</span>
-            <h2 class="m-0 font-display text-lg font-semibold uppercase tracking-tight group-hover:text-accent transition-colors">Import quiz</h2>
-            <p class="m-0 text-text-dim text-sm">Paste a quiz JSON payload and save it as a new quiz in one step.</p>
+            <span class="text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.16em]">Diagnose</span>
+            <h2 class="m-0 font-display text-lg font-semibold uppercase tracking-tight group-hover:text-accent transition-colors">Email</h2>
+            <p class="m-0 text-text-dim text-sm">Check delivery configuration and send a test email.</p>
         </a>
     </div>
-
-    <footer class="mt-10 pt-6 border-t border-border-soft text-text-dim text-sm">
-        <a href="/admin/players" class="hover:text-text">Players</a>
-    </footer>
 {{end}}
