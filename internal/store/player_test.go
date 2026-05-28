@@ -854,3 +854,90 @@ func TestPlayerStore_SetPlayerPasswordHash_AlsoMarksUsernameClaimed(t *testing.T
 		t.Errorf("HasCustomName() = %v, want %v (SetPlayerPasswordHash must also flip username_claimed)", got, want)
 	}
 }
+
+func TestPlayerStore_SetPlayerEmail_ClearsVerification(t *testing.T) {
+	t.Parallel()
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	// CreatePlayerByAdmin stamps email_verified_at, so the row starts
+	// in the verified bucket.
+	created, err := ps.CreatePlayerByAdmin(
+		t.Context(), "verified-then-changed", "before@example.test", "hashed-secret",
+	)
+	if err != nil {
+		t.Fatalf("CreatePlayerByAdmin err = %v, want nil", err)
+	}
+	before, err := ps.GetPlayerDetail(t.Context(), created.ID)
+	if err != nil {
+		t.Fatalf("GetPlayerDetail err = %v, want nil", err)
+	}
+	if got, want := before.OnboardingState, auth.OnboardingStateVerified; got != want {
+		t.Fatalf("OnboardingState before = %q, want %q", got, want)
+	}
+
+	if setErr := ps.SetPlayerEmail(t.Context(), created.ID, "after@example.test"); setErr != nil {
+		t.Fatalf("SetPlayerEmail err = %v, want nil", setErr)
+	}
+
+	after, err := ps.GetPlayerDetail(t.Context(), created.ID)
+	if err != nil {
+		t.Fatalf("GetPlayerDetail err = %v, want nil", err)
+	}
+	if got, want := after.Email, "after@example.test"; got != want {
+		t.Errorf("Email = %q, want %q", got, want)
+	}
+	if after.EmailVerifiedAt != nil {
+		t.Errorf("EmailVerifiedAt = %v, want nil (changing the email must clear verification)", after.EmailVerifiedAt)
+	}
+	if got, want := after.OnboardingState, auth.OnboardingStateUnverified; got != want {
+		t.Errorf("OnboardingState after = %q, want %q", got, want)
+	}
+}
+
+func TestPlayerStore_ListAdminAuditForTarget_SurvivesActorDeletion(t *testing.T) {
+	t.Parallel()
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	actor, err := ps.CreatePlayerByAdmin(t.Context(), "audit-actor", "actor@example.test", "h")
+	if err != nil {
+		t.Fatalf("CreatePlayerByAdmin actor err = %v, want nil", err)
+	}
+	target, err := ps.CreatePlayerByAdmin(t.Context(), "audit-target", "target@example.test", "h")
+	if err != nil {
+		t.Fatalf("CreatePlayerByAdmin target err = %v, want nil", err)
+	}
+
+	if auditErr := ps.InsertAdminAudit(
+		t.Context(), actor.ID, target.ID, auth.AdminActionVerify, "{}",
+	); auditErr != nil {
+		t.Fatalf("InsertAdminAudit err = %v, want nil", auditErr)
+	}
+
+	// Deleting the actor must leave the target's audit row in place
+	// (actor FK is ON DELETE SET NULL, not CASCADE) so the "who did
+	// what" history outlives the admin account.
+	if _, execErr := db.ExecContext(
+		t.Context(), "DELETE FROM players WHERE id = ?", actor.ID,
+	); execErr != nil {
+		t.Fatalf("delete actor err = %v, want nil", execErr)
+	}
+
+	entries, err := ps.ListAdminAuditForTarget(t.Context(), target.ID, 20)
+	if err != nil {
+		t.Fatalf("ListAdminAuditForTarget err = %v, want nil", err)
+	}
+	if got, want := len(entries), 1; got != want {
+		t.Fatalf("audit entry count = %d, want %d (row must survive actor deletion)", got, want)
+	}
+	if got, want := entries[0].ActorUsername, ""; got != want {
+		t.Errorf("ActorUsername = %q, want %q (deleted actor renders blank)", got, want)
+	}
+	if got, want := entries[0].ActorPlayerID, int64(0); got != want {
+		t.Errorf("ActorPlayerID = %d, want %d (NULL actor maps to zero)", got, want)
+	}
+	if got, want := entries[0].TargetPlayerID, target.ID; got != want {
+		t.Errorf("TargetPlayerID = %d, want %d", got, want)
+	}
+}

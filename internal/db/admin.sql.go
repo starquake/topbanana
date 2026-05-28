@@ -193,7 +193,7 @@ VALUES (
 `
 
 type InsertAdminAuditParams struct {
-	ActorPlayerID  int64
+	ActorPlayerID  sql.NullInt64
 	TargetPlayerID int64
 	Action         string
 	Payload        string
@@ -237,7 +237,7 @@ type ListAdminAuditForTargetParams struct {
 
 type ListAdminAuditForTargetRow struct {
 	ID             int64
-	ActorPlayerID  int64
+	ActorPlayerID  sql.NullInt64
 	ActorUsername  string
 	TargetPlayerID int64
 	Action         string
@@ -441,7 +441,8 @@ func (q *Queries) ListRecentFinishedGamesForPlayer(ctx context.Context, arg List
 
 const setPlayerEmail = `-- name: SetPlayerEmail :execrows
 UPDATE players
-SET email = ?1
+SET email = ?1,
+    email_verified_at = NULL
 WHERE id = ?2
 `
 
@@ -450,12 +451,15 @@ type SetPlayerEmailParams struct {
 	ID    int64
 }
 
-// Updates players.email without touching email_verified_at. Used by the
-// admin "Set / overwrite email" action; the admin separately marks the
-// account verified (or triggers a resend) if the new address should be
-// treated as proven. A UNIQUE collision on players.email surfaces as the
-// driver's constraint error which the store wrapper maps to
-// auth.ErrEmailTaken so the handler can render a clean banner.
+// Updates players.email and clears email_verified_at so a changed address
+// must be re-proven. Used by the admin "Set / overwrite email" action;
+// the admin then marks the account verified (or triggers a resend) once
+// the new address should be treated as proven. Clearing verification keeps
+// the onboarding bucket honest: a freshly-set address starts unverified
+// rather than inheriting the old address's verified state. A UNIQUE
+// collision on players.email surfaces as the driver's constraint error
+// which the store wrapper maps to auth.ErrEmailTaken so the handler can
+// render a clean banner.
 func (q *Queries) SetPlayerEmail(ctx context.Context, arg SetPlayerEmailParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setPlayerEmail, arg.Email, arg.ID)
 	if err != nil {

@@ -798,11 +798,12 @@ func (s *PlayerStore) SetPlayerEmailVerifiedNow(ctx context.Context, playerID in
 	return nil
 }
 
-// SetPlayerEmail rewrites players.email on the row identified by id
-// without touching email_verified_at. Used by the admin "Set / overwrite
-// email" action (#450); the admin separately flips email_verified_at if
-// the new address should be treated as proven. Returns auth.ErrEmailTaken
-// on a UNIQUE collision and auth.ErrPlayerNotFound when no row matches.
+// SetPlayerEmail rewrites players.email on the row identified by id and
+// clears email_verified_at so the changed address must be re-proven. Used
+// by the admin "Set / overwrite email" action (#450); the admin then marks
+// the account verified or triggers a resend if the new address should be
+// treated as proven. Returns auth.ErrEmailTaken on a UNIQUE collision and
+// auth.ErrPlayerNotFound when no row matches.
 func (s *PlayerStore) SetPlayerEmail(ctx context.Context, playerID int64, email string) error {
 	cleaned := strings.ToLower(strings.TrimSpace(email))
 	rows, err := s.q.SetPlayerEmail(ctx, db.SetPlayerEmailParams{
@@ -854,7 +855,7 @@ func (s *PlayerStore) InsertAdminAudit(
 	ctx context.Context, actorPlayerID, targetPlayerID int64, action, payload string,
 ) error {
 	if err := s.q.InsertAdminAudit(ctx, db.InsertAdminAuditParams{
-		ActorPlayerID:  actorPlayerID,
+		ActorPlayerID:  sql.NullInt64{Int64: actorPlayerID, Valid: true},
 		TargetPlayerID: targetPlayerID,
 		Action:         action,
 		Payload:        payload,
@@ -884,7 +885,7 @@ func (s *PlayerStore) ListAdminAuditForTarget(
 	for _, r := range rows {
 		out = append(out, &auth.AdminAuditEntry{
 			ID:             r.ID,
-			ActorPlayerID:  r.ActorPlayerID,
+			ActorPlayerID:  r.ActorPlayerID.Int64,
 			ActorUsername:  r.ActorUsername,
 			TargetPlayerID: r.TargetPlayerID,
 			Action:         r.Action,
