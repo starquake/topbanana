@@ -18,27 +18,38 @@ import (
 // tests. Each function field is set per-test so failures are localised
 // to the case under exercise; unset fields return harmless zero values.
 type stubPlayerLister struct {
-	listAllPlayers        func(ctx context.Context, limit, offset int64) ([]*auth.PlayerListRow, error)
-	countAllPlayers       func(ctx context.Context) (int64, error)
-	listPlayerFinishStats func(ctx context.Context, ids []int64) ([]*auth.PlayerStats, error)
+	listPlayersByOnboardingState func(
+		ctx context.Context, state string, limit, offset int64,
+	) ([]*auth.PlayerListRow, error)
+	countPlayersInOnboardingState func(ctx context.Context, state string) (int64, error)
+	countPlayersByOnboardingState func(ctx context.Context) (map[string]int64, error)
+	listPlayerFinishStats         func(ctx context.Context, ids []int64) ([]*auth.PlayerStats, error)
 }
 
-func (s stubPlayerLister) ListAllPlayers(
-	ctx context.Context, limit, offset int64,
+func (s stubPlayerLister) ListPlayersByOnboardingState(
+	ctx context.Context, state string, limit, offset int64,
 ) ([]*auth.PlayerListRow, error) {
-	if s.listAllPlayers == nil {
-		return nil, errors.New("listAllPlayers not supplied in stub")
+	if s.listPlayersByOnboardingState == nil {
+		return nil, errors.New("listPlayersByOnboardingState not supplied in stub")
 	}
 
-	return s.listAllPlayers(ctx, limit, offset)
+	return s.listPlayersByOnboardingState(ctx, state, limit, offset)
 }
 
-func (s stubPlayerLister) CountAllPlayers(ctx context.Context) (int64, error) {
-	if s.countAllPlayers == nil {
-		return 0, errors.New("countAllPlayers not supplied in stub")
+func (s stubPlayerLister) CountPlayersInOnboardingState(ctx context.Context, state string) (int64, error) {
+	if s.countPlayersInOnboardingState == nil {
+		return 0, errors.New("countPlayersInOnboardingState not supplied in stub")
 	}
 
-	return s.countAllPlayers(ctx)
+	return s.countPlayersInOnboardingState(ctx, state)
+}
+
+func (s stubPlayerLister) CountPlayersByOnboardingState(ctx context.Context) (map[string]int64, error) {
+	if s.countPlayersByOnboardingState == nil {
+		return nil, errors.New("countPlayersByOnboardingState not supplied in stub")
+	}
+
+	return s.countPlayersByOnboardingState(ctx)
 }
 
 func (s stubPlayerLister) ListPlayerFinishStats(
@@ -146,6 +157,18 @@ func TestTotalPagesFor(t *testing.T) {
 	}
 }
 
+// emptyStateCounts returns a state-count map with every known bucket
+// at zero. Test helpers use it as the baseline so adding a bucket only
+// touches this helper.
+func emptyStateCounts() map[string]int64 {
+	return map[string]int64{
+		auth.OnboardingStateAnonymous:  0,
+		auth.OnboardingStateUnverified: 0,
+		auth.OnboardingStateOAuth:      0,
+		auth.OnboardingStateVerified:   0,
+	}
+}
+
 func TestHandlePlayersList_RendersRows(t *testing.T) {
 	t.Parallel()
 
@@ -154,18 +177,20 @@ func TestHandlePlayersList_RendersRows(t *testing.T) {
 	rows := []*auth.PlayerListRow{
 		{
 			ID: 1, Username: "admin", Email: "a@example.com", Role: auth.RoleAdmin,
-			HasPassword: true, CreatedAt: createdAt,
+			HasPassword: true, CreatedAt: createdAt, OnboardingState: auth.OnboardingStateVerified,
 		},
 		{
 			ID: 2, Username: "alice", Email: "alice@example.com", Role: auth.RolePlayer,
 			HasOAuth: true, OAuthProvider: "google", CreatedAt: createdAt,
+			OnboardingState: auth.OnboardingStateOAuth,
 		},
 		{
 			ID: 3, Username: "bob", Email: "bob@example.com", Role: auth.RolePlayer,
-			HasPassword: true, CreatedAt: createdAt,
+			HasPassword: true, CreatedAt: createdAt, OnboardingState: auth.OnboardingStateUnverified,
 		},
 		{
 			ID: 4, Username: "anon-xyz", Role: auth.RolePlayer, CreatedAt: createdAt,
+			OnboardingState: auth.OnboardingStateAnonymous,
 		},
 	}
 	stats := []*auth.PlayerStats{
@@ -173,8 +198,21 @@ func TestHandlePlayersList_RendersRows(t *testing.T) {
 	}
 
 	lister := stubPlayerLister{
-		countAllPlayers: func(_ context.Context) (int64, error) { return int64(len(rows)), nil },
-		listAllPlayers: func(_ context.Context, _, _ int64) ([]*auth.PlayerListRow, error) {
+		countPlayersInOnboardingState: func(_ context.Context, _ string) (int64, error) {
+			return int64(len(rows)), nil
+		},
+		countPlayersByOnboardingState: func(_ context.Context) (map[string]int64, error) {
+			counts := emptyStateCounts()
+			counts[auth.OnboardingStateVerified] = 1
+			counts[auth.OnboardingStateOAuth] = 1
+			counts[auth.OnboardingStateUnverified] = 1
+			counts[auth.OnboardingStateAnonymous] = 1
+
+			return counts, nil
+		},
+		listPlayersByOnboardingState: func(
+			_ context.Context, _ string, _, _ int64,
+		) ([]*auth.PlayerListRow, error) {
 			return rows, nil
 		},
 		listPlayerFinishStats: func(_ context.Context, _ []int64) ([]*auth.PlayerStats, error) {
@@ -201,8 +239,15 @@ func TestHandlePlayersList_EmptyList(t *testing.T) {
 	t.Parallel()
 
 	lister := stubPlayerLister{
-		countAllPlayers: func(_ context.Context) (int64, error) { return 0, nil },
-		listAllPlayers: func(_ context.Context, _, _ int64) ([]*auth.PlayerListRow, error) {
+		countPlayersInOnboardingState: func(_ context.Context, _ string) (int64, error) {
+			return 0, nil
+		},
+		countPlayersByOnboardingState: func(_ context.Context) (map[string]int64, error) {
+			return emptyStateCounts(), nil
+		},
+		listPlayersByOnboardingState: func(
+			_ context.Context, _ string, _, _ int64,
+		) ([]*auth.PlayerListRow, error) {
 			return nil, nil
 		},
 	}
@@ -214,7 +259,7 @@ func TestHandlePlayersList_EmptyList(t *testing.T) {
 	if got, want := w.Code, http.StatusOK; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
 	}
-	if got, want := w.Body.String(), "No players yet."; !strings.Contains(got, want) {
+	if got, want := w.Body.String(), "No players match this filter."; !strings.Contains(got, want) {
 		t.Errorf("body should contain empty-state %q; body=%q", want, got)
 	}
 }
@@ -223,8 +268,8 @@ func TestHandlePlayersList_StoreErrorRenders500(t *testing.T) {
 	t.Parallel()
 
 	lister := stubPlayerLister{
-		countAllPlayers: func(_ context.Context) (int64, error) {
-			return 0, errors.New("boom")
+		countPlayersByOnboardingState: func(_ context.Context) (map[string]int64, error) {
+			return nil, errors.New("boom")
 		},
 	}
 
@@ -242,10 +287,15 @@ func TestHandlePlayersList_RequestsCorrectOffset(t *testing.T) {
 
 	var gotLimit, gotOffset int64
 	lister := stubPlayerLister{
-		countAllPlayers: func(_ context.Context) (int64, error) {
+		countPlayersInOnboardingState: func(_ context.Context, _ string) (int64, error) {
 			return int64(PlayersPerPage*3) + 5, nil
 		},
-		listAllPlayers: func(_ context.Context, limit, offset int64) ([]*auth.PlayerListRow, error) {
+		countPlayersByOnboardingState: func(_ context.Context) (map[string]int64, error) {
+			return emptyStateCounts(), nil
+		},
+		listPlayersByOnboardingState: func(
+			_ context.Context, _ string, limit, offset int64,
+		) ([]*auth.PlayerListRow, error) {
 			gotLimit, gotOffset = limit, offset
 
 			return nil, nil
@@ -261,5 +311,72 @@ func TestHandlePlayersList_RequestsCorrectOffset(t *testing.T) {
 	}
 	if got, want := gotOffset, int64(PlayersPerPage); got != want {
 		t.Errorf("offset = %d, want %d", got, want)
+	}
+}
+
+func TestHandlePlayersList_FilterStatePassedToStore(t *testing.T) {
+	t.Parallel()
+
+	var gotCountState, gotListState string
+	lister := stubPlayerLister{
+		countPlayersInOnboardingState: func(_ context.Context, state string) (int64, error) {
+			gotCountState = state
+
+			return 0, nil
+		},
+		countPlayersByOnboardingState: func(_ context.Context) (map[string]int64, error) {
+			return emptyStateCounts(), nil
+		},
+		listPlayersByOnboardingState: func(
+			_ context.Context, state string, _, _ int64,
+		) ([]*auth.PlayerListRow, error) {
+			gotListState = state
+
+			return nil, nil
+		},
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, "/admin/players?state=unverified", nil,
+	)
+	HandlePlayersList(slog.New(slog.DiscardHandler), nil, lister).ServeHTTP(w, req)
+
+	if got, want := gotCountState, auth.OnboardingStateUnverified; got != want {
+		t.Errorf("count state = %q, want %q", got, want)
+	}
+	if got, want := gotListState, auth.OnboardingStateUnverified; got != want {
+		t.Errorf("list state = %q, want %q", got, want)
+	}
+}
+
+func TestHandlePlayersList_UnknownStateFallsBackToAll(t *testing.T) {
+	t.Parallel()
+
+	var gotState string
+	lister := stubPlayerLister{
+		countPlayersInOnboardingState: func(_ context.Context, state string) (int64, error) {
+			gotState = state
+
+			return 0, nil
+		},
+		countPlayersByOnboardingState: func(_ context.Context) (map[string]int64, error) {
+			return emptyStateCounts(), nil
+		},
+		listPlayersByOnboardingState: func(
+			_ context.Context, _ string, _, _ int64,
+		) ([]*auth.PlayerListRow, error) {
+			return nil, nil
+		},
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, "/admin/players?state=bogus", nil,
+	)
+	HandlePlayersList(slog.New(slog.DiscardHandler), nil, lister).ServeHTTP(w, req)
+
+	if got, want := gotState, auth.OnboardingStateAll; got != want {
+		t.Errorf("state = %q, want %q", got, want)
 	}
 }

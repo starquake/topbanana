@@ -41,9 +41,18 @@ func addRoutes(
 		flash:             admin.NewEmailFlash([]byte(cfg.SessionKey), cfg.SecureCookies()),
 		trustedProxyCIDRs: cfg.TrustedProxyCIDRs,
 	}
+	playerDeps := adminPlayerDeps{
+		tokens: stores.VerifyTokens,
+		sender: mailerTester,
+		flash: auth.NewSignedFlash(
+			[]byte(cfg.SessionKey), cfg.SecureCookies(),
+			admin.PlayerDetailFlashCookieName, admin.PlayerDetailFlashCookiePath,
+		),
+		baseURL: cfg.BaseURL,
+	}
 
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mailerTester)
-	addAdminRoutes(mux, logger, stores, gameService, sessions, csrfMgr, emailDeps)
+	addAdminRoutes(mux, logger, stores, gameService, sessions, csrfMgr, emailDeps, playerDeps)
 	addProfileRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mailerTester)
 	addAPIRoutes(mux, logger, stores, gameService, leaderboardHub, sessions)
 
@@ -336,6 +345,17 @@ type adminEmailDeps struct {
 	trustedProxyCIDRs []*net.IPNet
 }
 
+// adminPlayerDeps bundles the admin player-management deps (#450).
+// Same packaging reason as adminEmailDeps: the management routes share
+// a flash, a token store, a mailer, and a base URL, and bundling them
+// keeps addAdminRoutes under revive's argument cap.
+type adminPlayerDeps struct {
+	tokens  auth.VerifyTokenStore
+	sender  auth.VerifyEmailSender
+	flash   *auth.SignedFlash
+	baseURL string
+}
+
 func addAdminRoutes(
 	mux *http.ServeMux,
 	logger *slog.Logger,
@@ -344,6 +364,7 @@ func addAdminRoutes(
 	sessions *session.Manager,
 	csrfMgr *csrf.Manager,
 	email adminEmailDeps,
+	playerDeps adminPlayerDeps,
 ) {
 	csrfMW := csrfMgr.Middleware
 	requireAdmin := func(h http.Handler) http.Handler {
@@ -352,6 +373,7 @@ func addAdminRoutes(
 
 	mux.Handle("GET /admin", requireAdmin(admin.HandleIndex(logger, csrfMgr)))
 	mux.Handle("GET /admin/players", requireAdmin(admin.HandlePlayersList(logger, csrfMgr, stores.PlayerLister)))
+	addAdminPlayerRoutes(mux, logger, csrfMgr, csrfMW, requireAdmin, stores, playerDeps)
 	addAdminEmailRoutes(mux, logger, csrfMgr, csrfMW, requireAdmin, email)
 	mux.Handle("GET /admin/quizzes", requireAdmin(admin.HandleQuizList(logger, csrfMgr, stores.Quizzes)))
 	mux.Handle(
@@ -407,6 +429,61 @@ func addAdminRoutes(
 	)
 
 	addAdminBreakRoutes(mux, logger, stores, csrfMW, requireAdmin, csrfMgr)
+}
+
+// addAdminPlayerRoutes registers the admin player-management routes
+// (#450): per-player detail view, four mutating actions, and the
+// create-without-verification GET+POST pair. MaxFormSizeMiddleware
+// fronts every POST in front of csrfMW so the CSRF validator's
+// ParseForm sees a bounded body; csrfMW fronts requireAdmin so an
+// unauthenticated request without a valid token is rejected with 403
+// before any auth-state-leaking 303 to /login.
+func addAdminPlayerRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	csrfMW func(http.Handler) http.Handler,
+	requireAdmin func(http.Handler) http.Handler,
+	stores *store.Stores,
+	deps adminPlayerDeps,
+) {
+	resendLimiter := admin.NewPerTargetLimiter(admin.AdminResendVerificationCooldown)
+
+	mux.Handle(
+		"GET /admin/players/new",
+		requireAdmin(admin.HandlePlayerCreateForm(logger, csrfMgr)),
+	)
+	mux.Handle(
+		"POST /admin/players",
+		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
+			admin.HandlePlayerCreateSubmit(logger, csrfMgr, stores.AdminPlayers, deps.flash),
+		))),
+	)
+	mux.Handle(
+		"GET /admin/players/{playerID}",
+		requireAdmin(admin.HandlePlayerDetail(logger, csrfMgr, stores.AdminPlayers, deps.flash)),
+	)
+	mux.Handle(
+		"POST /admin/players/{playerID}/verify",
+		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
+			admin.HandlePlayerMarkVerified(logger, stores.AdminPlayers, deps.flash),
+		))),
+	)
+	mux.Handle(
+		"POST /admin/players/{playerID}/resend-verification",
+		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
+			admin.HandlePlayerResendVerification(
+				logger, stores.AdminPlayers, deps.tokens, deps.sender,
+				deps.baseURL, resendLimiter, deps.flash,
+			),
+		))),
+	)
+	mux.Handle(
+		"POST /admin/players/{playerID}/email",
+		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
+			admin.HandlePlayerSetEmail(logger, stores.AdminPlayers, deps.flash),
+		))),
+	)
 }
 
 // addAdminEmailRoutes registers the email diagnostics endpoints (#321).

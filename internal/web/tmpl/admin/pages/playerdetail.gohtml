@@ -1,0 +1,119 @@
+{{define "content"}}
+    <nav aria-label="breadcrumbs" class="mb-8">
+        <ol class="flex items-center text-xs uppercase tracking-[0.14em]">
+            <li><a href="/admin" class="pr-2 text-text-dim hover:text-text">Admin</a></li>
+            <li class="text-text-mute" aria-hidden="true">/</li>
+            <li><a href="/admin/players" class="px-2 text-text-dim hover:text-text">Players</a></li>
+            <li class="text-text-mute" aria-hidden="true">/</li>
+            <li><span class="pl-2 text-text" aria-current="page">{{.Player.Username}}</span></li>
+        </ol>
+    </nav>
+
+    <header class="mb-8 flex flex-col md:flex-row md:items-start md:justify-between gap-5">
+        <div>
+            <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight">
+                {{.Player.Username}}
+                {{if .Player.IsAdmin}}<span class="ml-2 inline-flex items-center rounded-sm border border-accent bg-accent/10 px-2 py-1 align-middle text-sm text-text">admin</span>{{end}}
+            </h1>
+            <p class="mt-1.5 text-text-dim text-[0.95rem]">State: <span class="text-text">{{.Player.OnboardingState}}</span></p>
+        </div>
+    </header>
+
+    {{if .Notice}}
+        <div class="mb-6 rounded-md border border-green-500/40 bg-green-500/10 p-3 text-sm text-text" role="status">{{.Notice}}</div>
+    {{end}}
+    {{if .Error}}
+        <div class="mb-6 rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm text-text" role="alert">{{.Error}}</div>
+    {{end}}
+
+    <section class="mb-10 grid gap-4 md:grid-cols-2" aria-label="Player attributes">
+        <dl class="rounded-lg border border-border-soft p-4 text-sm">
+            <div class="flex justify-between gap-4 py-1">
+                <dt class="text-text-dim">ID</dt><dd class="text-text">{{.Player.ID}}</dd>
+            </div>
+            <div class="flex justify-between gap-4 py-1">
+                <dt class="text-text-dim">Email</dt>
+                <dd class="text-text">{{if .Player.Email}}{{.Player.Email}}{{else}}&mdash;{{end}}</dd>
+            </div>
+            <div class="flex justify-between gap-4 py-1">
+                <dt class="text-text-dim">Email verified</dt>
+                <dd class="text-text">{{.Player.EmailVerifiedText}}</dd>
+            </div>
+            <div class="flex justify-between gap-4 py-1">
+                <dt class="text-text-dim">Role</dt><dd class="text-text">{{.Player.Role}}</dd>
+            </div>
+            <div class="flex justify-between gap-4 py-1">
+                <dt class="text-text-dim">Has password</dt><dd class="text-text">{{if .Player.HasPassword}}yes{{else}}no{{end}}</dd>
+            </div>
+            <div class="flex justify-between gap-4 py-1">
+                <dt class="text-text-dim">OAuth</dt>
+                <dd class="text-text">{{if .Player.HasOAuth}}{{if .Player.OAuthProvider}}{{.Player.OAuthProvider}}{{else}}yes{{end}}{{else}}none{{end}}</dd>
+            </div>
+            <div class="flex justify-between gap-4 py-1">
+                <dt class="text-text-dim">Created</dt>
+                <dd class="text-text" title="{{.Player.CreatedAt.Format "2006-01-02 15:04"}}">{{humanizeTime .Player.CreatedAt}}</dd>
+            </div>
+        </dl>
+
+        <div class="rounded-lg border border-border-soft p-4 text-sm">
+            <h2 class="mb-3 font-display text-sm uppercase tracking-[0.14em] text-text-dim">Actions</h2>
+            <div class="flex flex-col gap-3">
+                {{if .CanVerify}}
+                    <form method="POST" action="/admin/players/{{.Player.ID}}/verify"
+                          onsubmit="return confirm('Mark this account verified? This bypasses the email loop.');">
+                        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                        <button type="submit" class="btn-primary w-full">Mark verified</button>
+                    </form>
+                {{end}}
+                {{if .CanResend}}
+                    <form method="POST" action="/admin/players/{{.Player.ID}}/resend-verification">
+                        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                        <button type="submit" class="btn-ghost w-full">Resend verification email</button>
+                    </form>
+                {{end}}
+                <form method="POST" action="/admin/players/{{.Player.ID}}/email" class="flex flex-col gap-2">
+                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                    <label for="email-input" class="text-text-dim text-xs uppercase tracking-[0.14em]">Set / overwrite email</label>
+                    <input id="email-input" type="email" name="email" required value="{{.EmailFormValue}}"
+                           class="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text" placeholder="player@example.com">
+                    <button type="submit" class="btn-ghost">Save email</button>
+                </form>
+            </div>
+        </div>
+    </section>
+
+    <section class="mb-10" aria-label="Recent finished games">
+        <h2 class="mb-3 font-display text-lg">Recent finished games</h2>
+        {{if .RecentGames}}
+            <ul class="rounded-lg border border-border-soft divide-y divide-border-soft">
+                {{range .RecentGames}}
+                    <li class="flex items-center justify-between px-4 py-3 text-sm">
+                        <a href="/admin/quizzes/{{.QuizID}}" class="text-text hover:text-accent">{{.QuizTitle}}</a>
+                        <time class="text-text-dim" title="{{.CreatedAt.Format "2006-01-02 15:04"}}">{{humanizeTime .CreatedAt}}</time>
+                    </li>
+                {{end}}
+            </ul>
+        {{else}}
+            <p class="text-text-dim text-sm">No finished games yet.</p>
+        {{end}}
+    </section>
+
+    <section aria-label="Recent admin actions">
+        <h2 class="mb-3 font-display text-lg">Recent admin actions</h2>
+        {{if .AuditEntries}}
+            <ul class="rounded-lg border border-border-soft divide-y divide-border-soft">
+                {{range .AuditEntries}}
+                    <li class="px-4 py-3 text-sm">
+                        <div class="flex items-center justify-between gap-3">
+                            <span class="text-text">{{.ActionLabel}}{{if .Detail}}: <span class="text-text-dim">{{.Detail}}</span>{{end}}</span>
+                            <time class="text-text-dim" title="{{.CreatedAt.Format "2006-01-02 15:04"}}">{{humanizeTime .CreatedAt}}</time>
+                        </div>
+                        <div class="mt-1 text-xs text-text-dim">by {{if .ActorUsername}}{{.ActorUsername}}{{else}}(deleted){{end}}</div>
+                    </li>
+                {{end}}
+            </ul>
+        {{else}}
+            <p class="text-text-dim text-sm">No admin actions recorded.</p>
+        {{end}}
+    </section>
+{{end}}

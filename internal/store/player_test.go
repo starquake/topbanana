@@ -589,11 +589,12 @@ func TestPlayerStore_UpdatePlayerUsername(t *testing.T) {
 	})
 }
 
-// TestPlayerStore_ListAllPlayers_AndCount pins the read shape that
-// backs /admin/players (#423). The list orders newest-first, exposes
-// the derived has_oauth / oauth_provider flags, and counts every row
-// (including the seeded admin).
-func TestPlayerStore_ListAllPlayers_AndCount(t *testing.T) {
+// TestPlayerStore_ListPlayersByOnboardingState_AndCount pins the read
+// shape that backs /admin/players (#423/#450). The list orders
+// newest-first, exposes the derived has_oauth / oauth_provider flags
+// + the SQL-derived onboarding_state label, and counts every row
+// (including the seeded admin) when the filter is "all".
+func TestPlayerStore_ListPlayersByOnboardingState_AndCount(t *testing.T) {
 	t.Parallel()
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
@@ -614,21 +615,21 @@ func TestPlayerStore_ListAllPlayers_AndCount(t *testing.T) {
 		t.Fatalf("LinkProviderIdentity err = %v, want nil", linkErr)
 	}
 
-	count, err := ps.CountAllPlayers(t.Context())
+	count, err := ps.CountPlayersInOnboardingState(t.Context(), auth.OnboardingStateAll)
 	if err != nil {
-		t.Fatalf("CountAllPlayers err = %v, want nil", err)
+		t.Fatalf("CountPlayersInOnboardingState err = %v, want nil", err)
 	}
 	// Seeded admin + the three rows above = 4.
 	if got, want := count, int64(4); got != want {
-		t.Errorf("CountAllPlayers = %d, want %d", got, want)
+		t.Errorf("CountPlayersInOnboardingState = %d, want %d", got, want)
 	}
 
-	rows, err := ps.ListAllPlayers(t.Context(), 100, 0)
+	rows, err := ps.ListPlayersByOnboardingState(t.Context(), auth.OnboardingStateAll, 100, 0)
 	if err != nil {
-		t.Fatalf("ListAllPlayers err = %v, want nil", err)
+		t.Fatalf("ListPlayersByOnboardingState err = %v, want nil", err)
 	}
 	if got, want := len(rows), 4; got != want {
-		t.Fatalf("ListAllPlayers len = %d, want %d", got, want)
+		t.Fatalf("ListPlayersByOnboardingState len = %d, want %d", got, want)
 	}
 
 	byID := make(map[int64]*auth.PlayerListRow, len(rows))
@@ -642,8 +643,14 @@ func TestPlayerStore_ListAllPlayers_AndCount(t *testing.T) {
 	if got, want := byID[anon.ID].HasPassword, false; got != want {
 		t.Errorf("anon HasPassword = %v, want %v", got, want)
 	}
+	if got, want := byID[anon.ID].OnboardingState, auth.OnboardingStateAnonymous; got != want {
+		t.Errorf("anon OnboardingState = %q, want %q", got, want)
+	}
 	if got, want := byID[pw.ID].HasPassword, true; got != want {
 		t.Errorf("pw HasPassword = %v, want %v", got, want)
+	}
+	if got, want := byID[pw.ID].OnboardingState, auth.OnboardingStateUnverified; got != want {
+		t.Errorf("pw OnboardingState = %q, want %q", got, want)
 	}
 	if got, want := byID[oauth.ID].HasOAuth, true; got != want {
 		t.Errorf("oauth HasOAuth = %v, want %v", got, want)
@@ -651,11 +658,81 @@ func TestPlayerStore_ListAllPlayers_AndCount(t *testing.T) {
 	if got, want := byID[oauth.ID].OAuthProvider, "google"; got != want {
 		t.Errorf("oauth OAuthProvider = %q, want %q", got, want)
 	}
+	if got, want := byID[oauth.ID].OnboardingState, auth.OnboardingStateOAuth; got != want {
+		t.Errorf("oauth OnboardingState = %q, want %q", got, want)
+	}
 }
 
-// TestPlayerStore_ListAllPlayers_Pagination pins the LIMIT/OFFSET
-// behaviour the admin handler relies on for ?page=N traversal.
-func TestPlayerStore_ListAllPlayers_Pagination(t *testing.T) {
+// TestPlayerStore_ListPlayersByOnboardingState_FilterAndCounts pins
+// the WHERE-by-state path and the GROUP BY tab counts side by side.
+func TestPlayerStore_ListPlayersByOnboardingState_FilterAndCounts(t *testing.T) {
+	t.Parallel()
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	if _, err := ps.CreateAnonymousPlayer(t.Context(), "anon-bucket-a"); err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	if _, err := ps.CreatePlayer(
+		t.Context(),
+		"pw-bucket-a",
+		"pw-bucket-a@example.test",
+		"h",
+		auth.RolePlayer,
+	); err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	o, err := ps.CreatePlayerFromOAuth(t.Context(), "oauth-bucket-a", "ob@example.test")
+	if err != nil {
+		t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
+	}
+	if linkErr := ps.LinkProviderIdentity(t.Context(), o.ID, "google", "sub-bucket-a"); linkErr != nil {
+		t.Fatalf("LinkProviderIdentity err = %v, want nil", linkErr)
+	}
+
+	unverifiedCount, err := ps.CountPlayersInOnboardingState(t.Context(), auth.OnboardingStateUnverified)
+	if err != nil {
+		t.Fatalf("CountPlayersInOnboardingState err = %v, want nil", err)
+	}
+	if got, want := unverifiedCount, int64(1); got != want {
+		t.Errorf("unverified count = %d, want %d", got, want)
+	}
+
+	rows, err := ps.ListPlayersByOnboardingState(t.Context(), auth.OnboardingStateUnverified, 100, 0)
+	if err != nil {
+		t.Fatalf("ListPlayersByOnboardingState err = %v, want nil", err)
+	}
+	if got, want := len(rows), 1; got != want {
+		t.Fatalf("unverified rows len = %d, want %d", got, want)
+	}
+	if got, want := rows[0].OnboardingState, auth.OnboardingStateUnverified; got != want {
+		t.Errorf("row OnboardingState = %q, want %q", got, want)
+	}
+
+	counts, err := ps.CountPlayersByOnboardingState(t.Context())
+	if err != nil {
+		t.Fatalf("CountPlayersByOnboardingState err = %v, want nil", err)
+	}
+	if got, want := counts[auth.OnboardingStateAnonymous], int64(1); got != want {
+		t.Errorf("anonymous bucket = %d, want %d", got, want)
+	}
+	if got, want := counts[auth.OnboardingStateUnverified], int64(1); got != want {
+		t.Errorf("unverified bucket = %d, want %d", got, want)
+	}
+	if got, want := counts[auth.OnboardingStateOAuth], int64(1); got != want {
+		t.Errorf("oauth bucket = %d, want %d", got, want)
+	}
+	// The seeded admin (id=1) has email_verified_at backfilled by an
+	// earlier migration, so it lands in the verified bucket.
+	if got, want := counts[auth.OnboardingStateVerified], int64(1); got != want {
+		t.Errorf("verified bucket = %d, want %d", got, want)
+	}
+}
+
+// TestPlayerStore_ListPlayersByOnboardingState_Pagination pins the
+// LIMIT/OFFSET behaviour the admin handler relies on for ?page=N
+// traversal across the "all" bucket.
+func TestPlayerStore_ListPlayersByOnboardingState_Pagination(t *testing.T) {
 	t.Parallel()
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
@@ -666,16 +743,16 @@ func TestPlayerStore_ListAllPlayers_Pagination(t *testing.T) {
 		}
 	}
 
-	first, err := ps.ListAllPlayers(t.Context(), 2, 0)
+	first, err := ps.ListPlayersByOnboardingState(t.Context(), auth.OnboardingStateAll, 2, 0)
 	if err != nil {
-		t.Fatalf("ListAllPlayers err = %v, want nil", err)
+		t.Fatalf("ListPlayersByOnboardingState err = %v, want nil", err)
 	}
 	if got, want := len(first), 2; got != want {
 		t.Fatalf("first page len = %d, want %d", got, want)
 	}
-	second, err := ps.ListAllPlayers(t.Context(), 2, 2)
+	second, err := ps.ListPlayersByOnboardingState(t.Context(), auth.OnboardingStateAll, 2, 2)
 	if err != nil {
-		t.Fatalf("ListAllPlayers err = %v, want nil", err)
+		t.Fatalf("ListPlayersByOnboardingState err = %v, want nil", err)
 	}
 	if got, want := len(second), 2; got != want {
 		t.Fatalf("second page len = %d, want %d", got, want)

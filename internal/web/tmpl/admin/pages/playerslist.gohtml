@@ -7,7 +7,7 @@
         </ol>
     </nav>
 
-    <header class="flex flex-col md:flex-row md:items-start md:justify-between gap-5 mb-10">
+    <header class="flex flex-col md:flex-row md:items-start md:justify-between gap-5 mb-6">
         <div>
             <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight">Players</h1>
             <p class="mt-1.5 max-w-[540px] text-text-dim text-[0.95rem]">
@@ -17,7 +17,24 @@
                 {{end}}
             </p>
         </div>
+        <div>
+            <a href="/admin/players/new" class="btn-primary">Add player</a>
+        </div>
     </header>
+
+    <nav aria-label="Filter by onboarding state" class="mb-6 flex flex-wrap gap-2 text-sm">
+        {{range .Tabs}}
+            {{if .IsActive}}
+                <span class="inline-flex items-center gap-2 rounded-md border border-accent bg-accent/10 px-3 py-1.5 text-text" aria-current="page">
+                    {{.Label}} <span class="text-text-dim">({{.Count}})</span>
+                </span>
+            {{else}}
+                <a href="{{.URL}}" class="inline-flex items-center gap-2 rounded-md border border-border-soft px-3 py-1.5 text-text-dim hover:text-text hover:border-border">
+                    {{.Label}} <span>({{.Count}})</span>
+                </a>
+            {{end}}
+        {{end}}
+    </nav>
 
     {{if .Players}}
         <section class="overflow-x-auto border border-border-soft rounded-lg" aria-label="Players">
@@ -25,6 +42,7 @@
                 <thead class="bg-surface text-text-dim text-[0.7rem] uppercase tracking-[0.14em]">
                     <tr>
                         <th scope="col" class="px-4 py-3 text-left">Username</th>
+                        <th scope="col" class="px-4 py-3 text-left">State</th>
                         <th scope="col" class="px-4 py-3 text-left">Account type</th>
                         <th scope="col" class="px-4 py-3 text-left">Email</th>
                         <th scope="col" class="px-4 py-3 text-left">Created</th>
@@ -34,10 +52,12 @@
                 </thead>
                 <tbody>
                     {{range .Players}}
-                        <tr class="border-t border-border-soft">
+                        <tr class="border-t border-border-soft" data-state="{{.OnboardingState}}">
                             <td class="px-4 py-3">
                                 <a href="/admin/players/{{.ID}}" class="text-text hover:text-accent">{{.Username}}</a>
+                                {{if .IsAdmin}}<span class="ml-2 inline-flex items-center rounded-sm border border-accent bg-accent/10 px-1.5 py-0.5 text-xs text-text">admin</span>{{end}}
                             </td>
+                            <td class="px-4 py-3 text-text-dim">{{.OnboardingState}}</td>
                             <td class="px-4 py-3 text-text-dim">{{.AccountType}}</td>
                             <td class="px-4 py-3 text-text-dim">{{if .Email}}{{.Email}}{{else}}&mdash;{{end}}</td>
                             <td class="px-4 py-3 text-text-dim"><time title="{{.CreatedAt.Format "2006-01-02 15:04"}}">{{humanizeTime .CreatedAt}}</time></td>
@@ -59,21 +79,21 @@
             <nav aria-label="Pagination" class="mt-6 flex items-center justify-between text-sm">
                 <div>
                     {{if .HasPrev}}
-                        <a href="/admin/players?page={{.PrevPage}}" class="btn-ghost">&larr; Previous</a>
+                        <a href="{{.PrevURL}}" class="btn-ghost">&larr; Previous</a>
                     {{end}}
                 </div>
                 <span class="text-text-dim">Page {{.Page}} of {{.TotalPages}}</span>
                 <div>
                     {{if .HasNext}}
-                        <a href="/admin/players?page={{.NextPage}}" class="btn-ghost">Next &rarr;</a>
+                        <a href="{{.NextURL}}" class="btn-ghost">Next &rarr;</a>
                     {{end}}
                 </div>
             </nav>
         {{end}}
     {{else}}
         <div class="border border-dashed border-border rounded-xl p-12 text-center">
-            <h2 class="mb-2 font-display text-2xl font-bold">No players yet.</h2>
-            <p class="mb-0 text-text-dim text-[0.95rem]">Once someone visits the site, an anonymous row will appear here.</p>
+            <h2 class="mb-2 font-display text-2xl font-bold">No players match this filter.</h2>
+            <p class="mb-0 text-text-dim text-[0.95rem]">Try a different tab above, or create one via the Add player button.</p>
         </div>
     {{end}}
 {{end}}
