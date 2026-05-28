@@ -67,7 +67,11 @@ test('admin marks an unverified player verified via the detail view', async ({ p
   // and the new audit-trail entry confirm the action ran.
   await expect(page).toHaveURL(/\/admin\/players\/\d+$/);
   await expect(page.getByText('Player marked verified.')).toBeVisible();
-  await expect(page.getByText('Marked verified')).toBeVisible();
+  // Scope the audit-row assertion to the "Recent admin actions"
+  // section; the success banner above also contains "marked verified"
+  // as a case-insensitive substring.
+  const audit = page.getByRole('region', { name: 'Recent admin actions' });
+  await expect(audit.getByText('Marked verified')).toBeVisible();
 
   // Walk back to the unverified tab and confirm the target row is gone.
   await page.goto('/admin/players?state=unverified');
