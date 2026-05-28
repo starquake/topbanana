@@ -122,10 +122,12 @@ No need to ask the user for the version — derive it.
 
    gh release create vYYYY.M.N \
      --title "vYYYY.M.N — <short factual title from the lead sentence>" \
-     --notes-file <(awk '/^## vYYYY.M.N/{flag=1; next} /^## v/{flag=0} flag' RELEASE_NOTES.md)
+     --notes-file <(awk '/^## vYYYY.M.N/{flag=1; next} /^## v/{flag=0} flag' RELEASE_NOTES.md) \
+     --generate-notes \
+     --notes-start-tag <previous-tag>
    ```
 
-   The `--notes-file` extract pulls just the new release's section out of `RELEASE_NOTES.md`, so the GitHub release body matches the file body byte-for-byte. Use a process substitution (or a temp file) — `gh release create` reads from a file path.
+   The `--notes-file` extract pulls just the new release's section out of `RELEASE_NOTES.md`. `--generate-notes` is **mandatory**: gh prepends the curated `--notes-file` body and appends GitHub's auto-generated "What's Changed" PR list plus the Full Changelog link, so the release body reads `curated notes` then `## What's Changed`. `--notes-start-tag <previous-tag>` (the same previous tag from step 2) scopes that PR list to this release's range. Every release must carry the PR list — it is the per-PR engineering history `RELEASE_NOTES.md` points readers to; omitting `--generate-notes` is the drift that left several releases without it. Use a process substitution (or a temp file) — `gh release create` reads `--notes-file` from a file path.
 
 8. Confirm the release page renders the notes correctly: `gh release view vYYYY.M.N`.
 
