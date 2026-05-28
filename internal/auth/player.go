@@ -240,7 +240,7 @@ type RecentFinishedGame struct {
 // raw Payload JSON is passed through as a string; the template decodes
 // the few well-known actions on the way out. ActorPlayerID is 0 and
 // ActorUsername is "" when the actor row has since been deleted (the
-// actor FK is ON DELETE SET NULL); the view renders "(deleted)".
+// actor FK is ON DELETE SET NULL, so the audit row outlives its actor).
 type AdminAuditEntry struct {
 	ID             int64
 	ActorPlayerID  int64
@@ -282,9 +282,9 @@ type AdminPlayerStore interface {
 	// row (the timestamp is refreshed). Returns ErrPlayerNotFound when
 	// the id matches no row.
 	SetPlayerEmailVerifiedNow(ctx context.Context, playerID int64) error
-	// SetPlayerEmail rewrites players.email without touching
-	// email_verified_at. Returns ErrEmailTaken on a UNIQUE collision,
-	// ErrPlayerNotFound when the id matches no row.
+	// SetPlayerEmail rewrites players.email and clears email_verified_at
+	// so the changed address must be re-proven. Returns ErrEmailTaken on
+	// a UNIQUE collision, ErrPlayerNotFound when the id matches no row.
 	SetPlayerEmail(ctx context.Context, playerID int64, email string) error
 	// CreatePlayerByAdmin inserts a fresh credentialled row with
 	// email_verified_at stamped. role is fixed to 'player'. Returns

@@ -278,9 +278,14 @@ func TestAdminPlayerMgmt_SetEmailClearsVerification(t *testing.T) {
 	verifyPlayerEmail(ctx, t, srv.DBURI, "reverify-target")
 
 	target := lookupPlayerID(ctx, t, srv.DBURI, "reverify-target")
+	// Match on the role-scoped detail link rather than an email/username
+	// substring so a flash/banner echoing the value elsewhere on the page
+	// cannot satisfy the assertion (same hazard documented in
+	// TestAdminPlayerMgmt_FilterTabsAndCounts).
+	targetLinkRE := regexp.MustCompile(`href=["']/admin/players/` + intToString(target) + `["']`)
 	verified := getOK(ctx, t, adminClient, srv.BaseURL+"/admin/players?state=verified")
-	if got, want := verified, "reverify-target"; !strings.Contains(got, want) {
-		t.Fatalf("verified-tab body should contain target before email change; body=%q", verified)
+	if !targetLinkRE.MatchString(verified) {
+		t.Fatalf("verified-tab body should contain target link before email change; body=%q", verified)
 	}
 
 	emailURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/email"
@@ -290,11 +295,7 @@ func TestAdminPlayerMgmt_SetEmailClearsVerification(t *testing.T) {
 	)
 
 	// After the change the target is in the unverified bucket, not the
-	// verified one. Match on the role-scoped detail link rather than an
-	// email substring so a flash/banner echoing the address elsewhere on
-	// the page cannot satisfy the assertion (same hazard documented in
-	// TestAdminPlayerMgmt_FilterTabsAndCounts).
-	targetLinkRE := regexp.MustCompile(`href=["']/admin/players/` + intToString(target) + `["']`)
+	// verified one.
 	unverified := getOK(ctx, t, adminClient, srv.BaseURL+"/admin/players?state=unverified")
 	if !targetLinkRE.MatchString(unverified) {
 		t.Errorf("unverified-tab body should contain target link after email change; body=%q", unverified)
