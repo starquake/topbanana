@@ -202,11 +202,11 @@ func addAuthRoutes(
 			csrfMW(auth.HandleRegisterSubmit(
 				logger, csrfMgr, stores.Players, sessions,
 				auth.RegisterDeps{
-					AdminUsernames: cfg.AdminUsernames,
-					GoogleEnabled:  googleEnabled,
-					Mailer:         mailerTester,
-					Tokens:         stores.VerifyTokens,
-					BaseURL:        cfg.BaseURL,
+					AdminEmails:   cfg.AdminEmails,
+					GoogleEnabled: googleEnabled,
+					Mailer:        mailerTester,
+					Tokens:        stores.VerifyTokens,
+					BaseURL:       cfg.BaseURL,
 				},
 			)),
 		)

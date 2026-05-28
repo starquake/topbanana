@@ -149,13 +149,14 @@ func TestResetPassword_HappyPath_RotatesHash(t *testing.T) {
 
 	const (
 		username    = "alice"
+		email       = "alice@example.test"
 		newPassword = "new-correct-battery"
 	)
 	originalHash := seedPlayer(t, dbURI, username)
 
 	stdin := strings.NewReader(newPassword + "\n" + newPassword + "\n")
 	var stdout, stderr bytes.Buffer
-	if err := ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, username); err != nil {
+	if err := ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, email); err != nil {
 		t.Fatalf("ResetPassword err = %v, want nil", err)
 	}
 
@@ -185,11 +186,12 @@ func TestResetPassword_HappyPath_RotatesHash(t *testing.T) {
 	}
 }
 
-// TestResetPassword_UsernameWhitespaceTrimmed_RotatesHash exercises the
-// strings.TrimSpace defense in ResetPassword so callers cannot accidentally
-// treat "alice" and " alice " as different rows. The store layer trims too,
-// but covering it at the ResetPassword boundary locks in the contract.
-func TestResetPassword_UsernameWhitespaceTrimmed_RotatesHash(t *testing.T) {
+// TestResetPassword_EmailWhitespaceAndCaseNormalized_RotatesHash exercises
+// the strings.TrimSpace + ToLower normalisation in ResetPassword so callers
+// cannot accidentally treat "alice@example.test" and " ALICE@example.test "
+// as different rows. The store layer normalises too, but covering it at the
+// ResetPassword boundary locks in the contract.
+func TestResetPassword_EmailWhitespaceAndCaseNormalized_RotatesHash(t *testing.T) {
 	t.Parallel()
 
 	dbURI, cleanup := dbtest.SetupTestDB(t)
@@ -200,7 +202,9 @@ func TestResetPassword_UsernameWhitespaceTrimmed_RotatesHash(t *testing.T) {
 
 	stdin := strings.NewReader(newPassword + "\n" + newPassword + "\n")
 	var stdout, stderr bytes.Buffer
-	if err := ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "  alice  "); err != nil {
+	if err := ResetPassword(
+		t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "  ALICE@Example.test  ",
+	); err != nil {
 		t.Fatalf("ResetPassword err = %v, want nil", err)
 	}
 
@@ -213,7 +217,7 @@ func TestResetPassword_UsernameWhitespaceTrimmed_RotatesHash(t *testing.T) {
 	}
 }
 
-func TestResetPassword_UnknownUsername_ReturnsError(t *testing.T) {
+func TestResetPassword_UnknownEmail_ReturnsError(t *testing.T) {
 	t.Parallel()
 
 	dbURI, cleanup := dbtest.SetupTestDB(t)
@@ -223,9 +227,9 @@ func TestResetPassword_UnknownUsername_ReturnsError(t *testing.T) {
 
 	stdin := strings.NewReader("new-correct-battery\nnew-correct-battery\n")
 	var stdout, stderr bytes.Buffer
-	err := ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "ghost")
+	err := ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "ghost@example.test")
 	if err == nil {
-		t.Fatal("ResetPassword err = nil, want non-nil for unknown username")
+		t.Fatal("ResetPassword err = nil, want non-nil for unknown email")
 	}
 	if got, want := err, ErrResetUserNotFound; !errors.Is(got, want) {
 		t.Errorf("err = %v, want errors.Is(%v)", got, want)
@@ -234,7 +238,7 @@ func TestResetPassword_UnknownUsername_ReturnsError(t *testing.T) {
 	// The user-not-found check fires before any prompt, so stdout should
 	// remain empty - no point asking for a password we will never use.
 	if got := stdout.String(); got != "" {
-		t.Errorf("stdout = %q, want empty (unknown username should fail before prompting)", got)
+		t.Errorf("stdout = %q, want empty (unknown email should fail before prompting)", got)
 	}
 }
 
@@ -247,7 +251,7 @@ func TestResetPassword_PasswordTooShort_ReturnsError(t *testing.T) {
 
 	stdin := strings.NewReader("short\n")
 	var stdout, stderr bytes.Buffer
-	err := ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "alice")
+	err := ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "alice@example.test")
 	if err == nil {
 		t.Fatal("ResetPassword err = nil, want non-nil for too-short password")
 	}
@@ -276,7 +280,7 @@ func TestResetPassword_PasswordTooLong_ReturnsError(t *testing.T) {
 	tooLong := strings.Repeat("a", auth.MaxPasswordLength+1)
 	stdin := strings.NewReader(tooLong + "\n")
 	var stdout, stderr bytes.Buffer
-	err := ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "alice")
+	err := ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "alice@example.test")
 	if err == nil {
 		t.Fatal("ResetPassword err = nil, want non-nil for too-long password")
 	}
@@ -300,7 +304,7 @@ func TestResetPassword_ConfirmationMismatch_ReturnsError(t *testing.T) {
 	// Two lines, both long enough to pass the length check, but different.
 	stdin := strings.NewReader("new-correct-battery\nnew-correct-typo-here\n")
 	var stdout, stderr bytes.Buffer
-	err := ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "alice")
+	err := ResetPassword(t.Context(), envFor(dbURI), stdin, &stdout, &stderr, "alice@example.test")
 	if err == nil {
 		t.Fatal("ResetPassword err = nil, want non-nil for mismatching confirmation")
 	}
@@ -314,23 +318,23 @@ func TestResetPassword_ConfirmationMismatch_ReturnsError(t *testing.T) {
 	}
 }
 
-// TestResetPassword_EmptyUsername_ReturnsError covers the up-front guard:
-// an empty (or whitespace-only) username should fail before any config
+// TestResetPassword_EmptyEmail_ReturnsError covers the up-front guard:
+// an empty (or whitespace-only) email should fail before any config
 // parse or DB open, so the test passes a getenv that would itself error
 // to confirm the guard fires first.
-func TestResetPassword_EmptyUsername_ReturnsError(t *testing.T) {
+func TestResetPassword_EmptyEmail_ReturnsError(t *testing.T) {
 	t.Parallel()
 
-	// Intentionally bogus env: if the empty-username guard didn't fire
+	// Intentionally bogus env: if the empty-email guard didn't fire
 	// first, config.Parse would hit this and we'd see a different error.
 	getenv := func(string) string { return "" }
 
 	var stdout, stderr bytes.Buffer
 	err := ResetPassword(t.Context(), getenv, strings.NewReader(""), &stdout, &stderr, "   ")
 	if err == nil {
-		t.Fatal("ResetPassword err = nil, want non-nil for whitespace-only username")
+		t.Fatal("ResetPassword err = nil, want non-nil for whitespace-only email")
 	}
-	if got, want := err, ErrResetUsernameRequired; !errors.Is(got, want) {
+	if got, want := err, ErrResetEmailRequired; !errors.Is(got, want) {
 		t.Errorf("err = %v, want errors.Is(%v)", got, want)
 	}
 	if got := stdout.String(); got != "" {
@@ -350,7 +354,7 @@ func TestResetPassword_ClosedStdin_ReturnsError(t *testing.T) {
 	seedPlayer(t, dbURI, "alice")
 
 	var stdout, stderr bytes.Buffer
-	err := ResetPassword(t.Context(), envFor(dbURI), strings.NewReader(""), &stdout, &stderr, "alice")
+	err := ResetPassword(t.Context(), envFor(dbURI), strings.NewReader(""), &stdout, &stderr, "alice@example.test")
 	if err == nil {
 		t.Fatal("ResetPassword err = nil, want non-nil for empty stdin")
 	}

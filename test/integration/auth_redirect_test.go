@@ -120,6 +120,11 @@ func loginForRedirect(
 // submitAuthForm shares the GET-CSRF + POST-form dance between the
 // register and login probes. Asserts the response is 303 (anything
 // else means the auth flow itself failed, not the redirect rule).
+//
+// Username + password_confirm are always populated so the same helper
+// drives both /login (which ignores those fields after #446 - the
+// credential is email) and /register (which uses username as an
+// optional display name and requires the confirm to match).
 func submitAuthForm(
 	ctx context.Context, t *testing.T, client *http.Client, baseURL, path, username, password string,
 ) string {
@@ -129,9 +134,6 @@ func submitAuthForm(
 
 	form := url.Values{}
 	form.Add("username", username)
-	// Always send email and password_confirm so the same helper drives
-	// both /login (which ignores those fields) and /register (which
-	// requires email since #111 and a matching password_confirm).
 	form.Add("email", username+"@example.test")
 	form.Add("password", password)
 	form.Add("password_confirm", password)

@@ -6,8 +6,8 @@ package app
 // Production callers go through CLI exit codes and messages and do not
 // need these in the public API.
 var (
-	// ErrResetUsernameRequired re-exports errResetUsernameRequired for tests.
-	ErrResetUsernameRequired = errResetUsernameRequired
+	// ErrResetEmailRequired re-exports errResetEmailRequired for tests.
+	ErrResetEmailRequired = errResetEmailRequired
 	// ErrResetPasswordTooShort re-exports errResetPasswordTooShort for tests.
 	ErrResetPasswordTooShort = errResetPasswordTooShort
 	// ErrResetPasswordTooLong re-exports errResetPasswordTooLong for tests.

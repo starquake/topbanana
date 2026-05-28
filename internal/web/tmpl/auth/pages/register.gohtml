@@ -12,7 +12,7 @@
 
         <header class="mb-8 text-center">
             <h1 class="m-0 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(1.85rem,5.5vw,2.25rem)]">Register</h1>
-            <p class="mt-2 text-text-dim text-[0.95rem]">Pick a username and a password to get started.</p>
+            <p class="mt-2 text-text-dim text-[0.95rem]">Sign up with your email and a password to get started.</p>
         </header>
 
         {{if .Message}}
@@ -23,18 +23,19 @@
             <input type="hidden" name="csrf_token" value="{{csrfToken}}">
 
             <div class="form-field">
-                <label for="username" class="label-eyebrow">Username</label>
-                <input id="username" name="username" type="text" required
-                       autocomplete="username"
-                       value="{{.Username}}" class="form-input">
-            </div>
-
-            <div class="form-field">
                 <label for="email" class="label-eyebrow">Email</label>
                 <input id="email" name="email" type="email" required
                        autocomplete="email"
                        value="{{.Email}}" class="form-input">
                 <p class="mt-2 text-xs text-text-mute"><a href="/verify-email/request" class="underline">Didn't get the verification email?</a></p>
+            </div>
+
+            <div class="form-field">
+                <label for="username" class="label-eyebrow">Display name</label>
+                <input id="username" name="username" type="text"
+                       autocomplete="nickname"
+                       value="{{.Username}}" class="form-input">
+                <p class="mt-2 text-xs text-text-mute">Leave blank to use a generated name.</p>
             </div>
 
             <div class="form-field">

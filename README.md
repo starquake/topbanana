@@ -61,7 +61,7 @@ The repo's [`docker-compose.yml`](docker-compose.yml) builds the image from the 
 docker compose up --build
 ```
 
-The compose file sets `REGISTRATION_ENABLED=true` and `ADMIN_USERNAMES=admin`, so a fresh stack lets you register the first `admin` user without further setup. The SQLite database lives in the `topbanana_data` Docker volume at `/home/nonroot/data/topbanana.sqlite`.
+The compose file sets `REGISTRATION_ENABLED=true` and `ADMIN_EMAILS=admin@example.test`, so a fresh stack lets you register the first admin without further setup. The SQLite database lives in the `topbanana_data` Docker volume at `/home/nonroot/data/topbanana.sqlite`.
 
 ### Local email testing
 
@@ -74,7 +74,7 @@ SMTP is optional. Without any `SMTP_*` env vars the server boots, the diagnostic
 Registration is closed by default. Two ways to create the first admin:
 
 1. **Open registration briefly.** Start the server with `REGISTRATION_ENABLED=true`, visit `/register`, sign up — the first password-bearing registrant is auto-promoted to admin — then restart with the variable unset.
-2. **Whitelist a username.** Set `ADMIN_USERNAMES=alice` (comma-separated), keep registration open, and any user that registers with one of those usernames is promoted on signup. Useful for self-hosted deployments where you control the username up front.
+2. **Whitelist an email.** Set `ADMIN_EMAILS=alice@example.test` (comma-separated), keep registration open, and any user that registers with one of those emails is promoted on signup. Useful for self-hosted deployments where you control the email up front.
 
 ## Project Structure
 
@@ -140,7 +140,7 @@ Top Banana is configured through environment variables. Sensible defaults apply 
 ### Auth and access
 
 - **`SESSION_KEY`** — secret used to HMAC-sign session cookies. Defaults to a random ephemeral key in development; **required** in production. Treat as a credential — rotating it invalidates every active session.
-- **`ADMIN_USERNAMES`** — comma-separated list of usernames. A registrant whose trimmed username matches an entry is promoted to `admin` on registration. The very first password-bearing registrant becomes admin regardless of this list. Defaults to empty.
+- **`ADMIN_EMAILS`** — comma-separated list of email addresses. A registrant whose trimmed + lowercased email matches an entry is promoted to `admin` on registration. The very first password-bearing registrant becomes admin regardless of this list. Defaults to empty.
 - **`REGISTRATION_ENABLED`** — when `false` (the default), `GET/POST /register` return `404` and the "No account? Register" link is hidden on `/login`. Set to `true` to allow new sign-ups — typically just long enough to bootstrap your first admin, then unset to lock the instance down.
 
 ### Gameplay

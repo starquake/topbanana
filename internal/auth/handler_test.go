@@ -413,7 +413,7 @@ func TestHandleRegisterSubmit_SecondUser_DefaultsToPlayer(t *testing.T) {
 	}
 }
 
-func TestHandleRegisterSubmit_AdminUsernamesEnv_PromotesToAdmin(t *testing.T) {
+func TestHandleRegisterSubmit_AdminEmailsEnv_PromotesToAdmin(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
@@ -427,7 +427,7 @@ func TestHandleRegisterSubmit_AdminUsernamesEnv_PromotesToAdmin(t *testing.T) {
 		nil,
 		store,
 		session.New([]byte("k"), true),
-		RegisterDeps{AdminUsernames: []string{"alice", "carol"}},
+		RegisterDeps{AdminEmails: []string{"alice@example.test", "carol@example.test"}},
 	)
 	rec := postForm(t, handler, "/register", url.Values{
 		"username":         {"carol"},
@@ -1036,7 +1036,6 @@ func TestHandleLoginSubmit_Success(t *testing.T) {
 	handler := HandleLoginSubmit(discardLogger(), nil,
 		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 	rec := postForm(t, handler, "/login", url.Values{
-		"username": {"alice"},
 		"email":    {"alice@example.test"},
 		"password": {"correctbattery"},
 	})
@@ -1068,7 +1067,6 @@ func TestHandleLoginSubmit_HonoursNext(t *testing.T) {
 	handler := HandleLoginSubmit(discardLogger(), nil,
 		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 	rec := postForm(t, handler, "/login", url.Values{
-		"username": {"alice"},
 		"email":    {"alice@example.test"},
 		"password": {"correctbattery"},
 		"next":     {"/admin/email"},
@@ -1101,7 +1099,6 @@ func TestHandleLoginSubmit_RejectsUnsafeNext(t *testing.T) {
 	handler := HandleLoginSubmit(discardLogger(), nil,
 		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 	rec := postForm(t, handler, "/login", url.Values{
-		"username": {"alice"},
 		"email":    {"alice@example.test"},
 		"password": {"correctbattery"},
 		"next":     {"//evil.com/"},
@@ -1145,7 +1142,6 @@ func TestHandleLoginSubmit_Success_Player(t *testing.T) {
 	handler := HandleLoginSubmit(discardLogger(), nil,
 		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 	rec := postForm(t, handler, "/login", url.Values{
-		"username": {"bob"},
 		"email":    {"bob@example.test"},
 		"password": {"correctbattery"},
 	})
@@ -1166,7 +1162,6 @@ func TestHandleLoginSubmit_BadCredentials_UnknownUser(t *testing.T) {
 		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 
 	rec := postForm(t, handler, "/login", url.Values{
-		"username": {"ghost"},
 		"email":    {"ghost@example.test"},
 		"password": {"correctbattery"},
 	})
@@ -1174,7 +1169,7 @@ func TestHandleLoginSubmit_BadCredentials_UnknownUser(t *testing.T) {
 	if got, want := rec.Code, http.StatusUnauthorized; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
-	if got, want := rec.Body.String(), "Invalid username or password"; !strings.Contains(got, want) {
+	if got, want := rec.Body.String(), "Invalid email or password"; !strings.Contains(got, want) {
 		t.Errorf("body should mention invalid credentials, got %q", got)
 	}
 }
@@ -1195,7 +1190,6 @@ func TestHandleLoginSubmit_BadCredentials_WrongPassword(t *testing.T) {
 	handler := HandleLoginSubmit(discardLogger(), nil,
 		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 	rec := postForm(t, handler, "/login", url.Values{
-		"username": {"alice"},
 		"email":    {"alice@example.test"},
 		"password": {"wrong-password-no"},
 	})
@@ -1203,7 +1197,7 @@ func TestHandleLoginSubmit_BadCredentials_WrongPassword(t *testing.T) {
 	if got, want := rec.Code, http.StatusUnauthorized; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
-	if got, want := rec.Body.String(), "Invalid username or password"; !strings.Contains(got, want) {
+	if got, want := rec.Body.String(), "Invalid email or password"; !strings.Contains(got, want) {
 		t.Errorf("body should mention invalid credentials, got %q", got)
 	}
 }
@@ -1220,7 +1214,6 @@ func TestHandleLoginSubmit_RejectsEmptyHash(t *testing.T) {
 	handler := HandleLoginSubmit(discardLogger(), nil,
 		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 	rec := postForm(t, handler, "/login", url.Values{
-		"username": {"legacy"},
 		"email":    {"legacy@example.test"},
 		"password": {"anything-goes-here-13"},
 	})
@@ -1230,7 +1223,43 @@ func TestHandleLoginSubmit_RejectsEmptyHash(t *testing.T) {
 	}
 }
 
-func TestHandleRegisterSubmit_WhitespaceOnlyUsername(t *testing.T) {
+// TestHandleLoginSubmit_EmailMixedCaseAndWhitespace pins the trim +
+// ToLower normalisation in HandleLoginSubmit so a registrant who
+// signed up with "alice@example.test" can still log in by typing
+// " ALICE@Example.Test " (#446).
+func TestHandleLoginSubmit_EmailMixedCaseAndWhitespace(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	hash, err := HashPassword("correctbattery")
+	if err != nil {
+		t.Fatalf("HashPassword err = %v, want nil", err)
+	}
+	if _, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RoleAdmin); err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	markVerified(t, store, "alice")
+
+	handler := HandleLoginSubmit(discardLogger(), nil,
+		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
+	rec := postForm(t, handler, "/login", url.Values{
+		"email":    {"  ALICE@Example.Test "},
+		"password": {"correctbattery"},
+	})
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
+	}
+	if got, want := rec.Header().Get("Location"), "/admin/quizzes"; got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+}
+
+// TestHandleRegisterSubmit_BlankUsername_GeneratesPetname pins the post-
+// #446 contract: a blank display name on the register form falls back to
+// GeneratePetname so register-with-just-email is a valid signup. Pre-446
+// this branch was a 400 "Username is required.".
+func TestHandleRegisterSubmit_BlankUsername_GeneratesPetname(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
@@ -1238,20 +1267,23 @@ func TestHandleRegisterSubmit_WhitespaceOnlyUsername(t *testing.T) {
 
 	rec := postForm(t, handler, "/register", url.Values{
 		"username":         {"   "},
-		"email":            {"   @example.test"},
+		"email":            {"petname@example.test"},
 		"password":         {"correctbattery"},
 		"password_confirm": {"correctbattery"},
 	})
 
-	if got, want := rec.Code, http.StatusBadRequest; got != want {
-		t.Errorf("status = %d, want %d", got, want)
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
 	}
-	if got, want := rec.Body.String(), "Username is required"; !strings.Contains(got, want) {
-		t.Errorf("body did not mention required username, got %q", got)
+	// The whitespace-only username path falls into GeneratePetname, so
+	// no row should be created under the empty key. The row exists under
+	// the petname; we look it up by email instead.
+	p, err := store.GetPlayerByEmail(t.Context(), "petname@example.test")
+	if err != nil {
+		t.Fatalf("GetPlayerByEmail err = %v, want nil", err)
 	}
-	// Whitespace-trimmed name should not have been created.
-	if _, err := store.GetPlayerByUsername(t.Context(), ""); !errors.Is(err, ErrPlayerNotFound) {
-		t.Errorf("empty player should not exist, err = %v", err)
+	if p.Username == "" {
+		t.Error("created Username is empty, want a non-empty petname")
 	}
 }
 
@@ -1354,7 +1386,7 @@ func TestHandleLoginSubmit_UnverifiedEmail_RefusesAndResends(t *testing.T) {
 	})
 
 	rec := postForm(t, handler, "/login", url.Values{
-		"username": {"unv"},
+		"email":    {"unv@example.test"},
 		"password": {"correctbattery"},
 	})
 
@@ -1429,7 +1461,7 @@ func TestHandleLoginSubmit_VerifiedEmail_SignsIn(t *testing.T) {
 	})
 
 	rec := postForm(t, handler, "/login", url.Values{
-		"username": {"ver"},
+		"email":    {"ver@example.test"},
 		"password": {"correctbattery"},
 	})
 

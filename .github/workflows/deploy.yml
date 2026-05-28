@@ -70,6 +70,13 @@ jobs:
           # operator can flip it without a redeploy. Defaults true on
           # the compose side when unset here.
           REGISTRATION_ENABLED: ${{ vars.REGISTRATION_ENABLED }}
+          # ADMIN_EMAILS is the comma-separated allowlist of emails
+          # promoted to admin at registration time (#446). Sourced
+          # from vars not secrets - emails are not sensitive, masking
+          # them in logs is noise, and an unset vars.ADMIN_EMAILS
+          # resolves to an empty string that the compose default
+          # backfills.
+          ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
           IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           IMAGE_TAG: edge
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -83,7 +90,7 @@ jobs:
           # bakes in a blank, which the compose ${VAR:?…} guard then
           # rejects on boot. Keep this list in lockstep with the env block
           # above and the .env heredoc below.
-          envs: SESSION_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URL,SMTP_HOST,SMTP_PORT,SMTP_USERNAME,SMTP_PASSWORD,SMTP_FROM,SMTP_TLS,BASE_URL,REGISTRATION_ENABLED,IMAGE_NAME,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR
+          envs: SESSION_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URL,SMTP_HOST,SMTP_PORT,SMTP_USERNAME,SMTP_PASSWORD,SMTP_FROM,SMTP_TLS,BASE_URL,REGISTRATION_ENABLED,ADMIN_EMAILS,IMAGE_NAME,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR
           script: |
             set -e
             if [ -z "$SESSION_KEY" ]; then
@@ -112,6 +119,7 @@ jobs:
             SMTP_TLS='${SMTP_TLS}'
             BASE_URL='${BASE_URL}'
             REGISTRATION_ENABLED='${REGISTRATION_ENABLED}'
+            ADMIN_EMAILS='${ADMIN_EMAILS}'
             IMAGE_NAME='${IMAGE_NAME}'
             IMAGE_TAG='${IMAGE_TAG}'
             EOF
@@ -195,6 +203,13 @@ jobs:
           # operator can flip it without a redeploy. Defaults true on
           # the compose side when unset here.
           REGISTRATION_ENABLED: ${{ vars.REGISTRATION_ENABLED }}
+          # ADMIN_EMAILS is the comma-separated allowlist of emails
+          # promoted to admin at registration time (#446). Sourced
+          # from vars not secrets - emails are not sensitive, masking
+          # them in logs is noise, and an unset vars.ADMIN_EMAILS
+          # resolves to an empty string that the compose default
+          # backfills.
+          ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
           IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           IMAGE_TAG: ${{ steps.tag.outputs.tag }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -208,7 +223,7 @@ jobs:
           # bakes in a blank, which the compose ${VAR:?…} guard then
           # rejects on boot. Keep this list in lockstep with the env block
           # above and the .env heredoc below.
-          envs: SESSION_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URL,SMTP_HOST,SMTP_PORT,SMTP_USERNAME,SMTP_PASSWORD,SMTP_FROM,SMTP_TLS,BASE_URL,REGISTRATION_ENABLED,IMAGE_NAME,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR
+          envs: SESSION_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URL,SMTP_HOST,SMTP_PORT,SMTP_USERNAME,SMTP_PASSWORD,SMTP_FROM,SMTP_TLS,BASE_URL,REGISTRATION_ENABLED,ADMIN_EMAILS,IMAGE_NAME,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR
           script: |
             set -e
             if [ -z "$SESSION_KEY" ]; then
@@ -237,6 +252,7 @@ jobs:
             SMTP_TLS='${SMTP_TLS}'
             BASE_URL='${BASE_URL}'
             REGISTRATION_ENABLED='${REGISTRATION_ENABLED}'
+            ADMIN_EMAILS='${ADMIN_EMAILS}'
             IMAGE_NAME='${IMAGE_NAME}'
             IMAGE_TAG='${IMAGE_TAG}'
             EOF

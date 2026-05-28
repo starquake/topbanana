@@ -57,10 +57,10 @@ const (
 // in the external app_test package match on these via [errors.Is]; see
 // export_test.go for the re-exports.
 var (
-	errResetUsernameRequired   = errors.New("username is required")
+	errResetEmailRequired      = errors.New("email is required")
 	errResetPasswordTooShort   = errors.New("password too short")
 	errResetPasswordTooLong    = errors.New("password too long")
-	errResetUserNotFound       = errors.New("username not found")
+	errResetUserNotFound       = errors.New("email not found")
 	errResetEmptyInput         = errors.New("empty password input")
 	errResetPasswordsDontMatch = errors.New("passwords do not match")
 )
@@ -71,23 +71,25 @@ var (
 const resetWrap = "reset password: %w"
 
 // ResetPassword reads a new password from stdin and overwrites the
-// password_hash for the row identified by username. Operator-only tool
+// password_hash for the row identified by email. Operator-only tool
 // for the lost-admin-password case. stdin echo is disabled when stdin
 // is a terminal; otherwise the password is read up to the first
 // newline so scripts can pipe. Lookup happens before the prompt so a
-// typo'd username does not waste two password entries.
+// typo'd email does not waste two password entries. Matching by email
+// lines the operator's reset target up with the post-#446 login
+// credential the player types into /login.
 func ResetPassword(
 	ctx context.Context,
 	getenv func(string) string,
 	stdin io.Reader,
 	stdout, stderr io.Writer,
-	username string,
+	email string,
 ) error {
 	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	username = strings.TrimSpace(username)
-	if username == "" {
-		return fmt.Errorf(resetWrap, errResetUsernameRequired)
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return fmt.Errorf(resetWrap, errResetEmailRequired)
 	}
 
 	cfg, err := config.Parse(getenv)
@@ -106,9 +108,9 @@ func ResetPassword(
 	}()
 
 	players := store.NewPlayerStore(conn, logger)
-	if _, lookupErr := players.GetPlayerByUsername(ctx, username); lookupErr != nil {
+	if _, lookupErr := players.GetPlayerByEmail(ctx, email); lookupErr != nil {
 		if errors.Is(lookupErr, auth.ErrPlayerNotFound) {
-			return fmt.Errorf("reset password: %w (%q)", errResetUserNotFound, username)
+			return fmt.Errorf("reset password: %w (%q)", errResetUserNotFound, email)
 		}
 
 		return fmt.Errorf(resetWrap, lookupErr)
@@ -124,15 +126,15 @@ func ResetPassword(
 		return fmt.Errorf("reset password: hash password: %w", err)
 	}
 
-	if err := players.SetPlayerPasswordHash(ctx, username, hashed); err != nil {
+	if err := players.SetPlayerPasswordHash(ctx, email, hashed); err != nil {
 		if errors.Is(err, auth.ErrPlayerNotFound) {
-			return fmt.Errorf("reset password: %w (%q)", errResetUserNotFound, username)
+			return fmt.Errorf("reset password: %w (%q)", errResetUserNotFound, email)
 		}
 
 		return fmt.Errorf(resetWrap, err)
 	}
 
-	logger.InfoContext(ctx, "password reset", slog.String("username", username))
+	logger.InfoContext(ctx, "password reset", slog.String("email", email))
 
 	return nil
 }

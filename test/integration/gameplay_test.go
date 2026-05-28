@@ -149,7 +149,7 @@ func loginAdminAndResetPlayer(
 	loginToken := fetchCSRFToken(ctx, t, client, baseURL+"/login")
 
 	loginForm := url.Values{}
-	loginForm.Add("username", gameplayAdminUsername)
+	loginForm.Add("email", gameplayAdminUsername+"@example.test")
 	loginForm.Add("password", gameplayAdminPassword)
 	loginForm.Add("csrf_token", loginToken)
 

@@ -80,7 +80,7 @@ func TestBreaks_CRUD(t *testing.T) {
 
 	ctx, srv := startServer(t, map[string]string{
 		"REGISTRATION_ENABLED": "true",
-		"ADMIN_USERNAMES":      "break-admin",
+		"ADMIN_EMAILS":         "break-admin@example.test",
 	})
 	baseURL := srv.BaseURL
 
@@ -192,7 +192,7 @@ func TestBreaks_Move(t *testing.T) {
 
 	ctx, srv := startServer(t, map[string]string{
 		"REGISTRATION_ENABLED": "true",
-		"ADMIN_USERNAMES":      "break-move-admin",
+		"ADMIN_EMAILS":         "break-move-admin@example.test",
 	})
 	baseURL := srv.BaseURL
 
@@ -292,7 +292,7 @@ func TestBreaks_PositionCollision(t *testing.T) {
 
 	ctx, srv := startServer(t, map[string]string{
 		"REGISTRATION_ENABLED": "true",
-		"ADMIN_USERNAMES":      "break-collision-admin",
+		"ADMIN_EMAILS":         "break-collision-admin@example.test",
 	})
 	baseURL := srv.BaseURL
 
@@ -348,7 +348,7 @@ func TestBreaks_NonOwnerForbidden(t *testing.T) {
 
 	ctx, srv := startServer(t, map[string]string{
 		"REGISTRATION_ENABLED": "true",
-		"ADMIN_USERNAMES":      "breaks-owner-a,breaks-owner-b",
+		"ADMIN_EMAILS":         "breaks-owner-a@example.test,breaks-owner-b@example.test",
 	})
 	baseURL := srv.BaseURL
 
@@ -389,7 +389,7 @@ func TestBreaks_DeleteQuizCascadesBreaks(t *testing.T) {
 
 	ctx, srv := startServer(t, map[string]string{
 		"REGISTRATION_ENABLED": "true",
-		"ADMIN_USERNAMES":      "break-cascade-admin",
+		"ADMIN_EMAILS":         "break-cascade-admin@example.test",
 	})
 	baseURL := srv.BaseURL
 

@@ -15,11 +15,14 @@ const dataDir = process.env.TOPBANANA_E2E_DATA_DIR ?? mkdtempSync(join(tmpdir(),
 process.env.TOPBANANA_E2E_DATA_DIR = dataDir;
 
 // Same allowlist for every per-worker server: any worker may register
-// any of the per-browser admin usernames the specs use, regardless of
+// any of the per-browser admin emails the specs use, regardless of
 // which server it lands on. Bootstrap-admin (first registrant gets the
 // admin role) only fires once per fresh DB, so the allowlist is what
-// promotes subsequent registrants on the same DB.
-const ADMIN_USERNAMES = [
+// promotes subsequent registrants on the same DB. The suite's
+// registerAdmin helper auto-builds "<username>@example.test" from the
+// per-browser usernames, so the email list mirrors those usernames with
+// the same suffix.
+const adminUsernames = [
   'e2e-admin-chromium', 'e2e-admin-firefox',                          // auth.spec.ts
   'e2e-admin-create-chromium', 'e2e-admin-create-firefox',            // admin.spec.ts
   'e2e-admin-player-chromium', 'e2e-admin-player-firefox',            // player.spec.ts
@@ -40,7 +43,8 @@ const ADMIN_USERNAMES = [
   'e2e-admin-break-play-chromium', 'e2e-admin-break-play-firefox',            // break.spec.ts break play loop (#167 slice 2)
   'e2e-admin-email-chromium', 'e2e-admin-email-firefox',                      // email-admin.spec.ts diagnostics page (#321)
   'e2e-admin-next-chromium', 'e2e-admin-next-firefox',                        // auth.spec.ts deep-link return (#449)
-].join(',');
+];
+const ADMIN_EMAILS = adminUsernames.map(u => `${u}@example.test`).join(',');
 
 const workerServer = (workerIndex: number) => {
   const port = BASE_PORT + workerIndex;
@@ -61,7 +65,7 @@ const workerServer = (workerIndex: number) => {
       // still leaves the .progress-reveal phase observable for the
       // visibility assertion in player.spec.ts.
       REVEAL_DELAY: '500ms',
-      ADMIN_USERNAMES,
+      ADMIN_EMAILS,
     },
     reuseExistingServer: false,
     timeout: 120_000,

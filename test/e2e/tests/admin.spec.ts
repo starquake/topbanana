@@ -116,8 +116,8 @@ test('admin can add, edit, and delete a break on a quiz', async ({ page, browser
 
 test('register, create a quiz with varied questions, and see them on the quiz view', async ({ page, browserName }) => {
   // Each browser project runs against the same shared server, so use unique
-  // names per project. ADMIN_USERNAMES (in playwright.config.ts) whitelists
-  // these usernames so registration promotes them to admin.
+  // names per project. ADMIN_EMAILS (in playwright.config.ts) whitelists
+  // these emails so registration promotes them to admin.
   const username = `e2e-admin-create-${browserName}`;
   const quizTitle = `E2E Admin Quiz ${browserName}`;
 

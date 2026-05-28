@@ -30,7 +30,7 @@ func TestQuestionIDOR_Integration(t *testing.T) {
 
 	ctx, srv := startServer(t, map[string]string{
 		"REGISTRATION_ENABLED": "true",
-		"ADMIN_USERNAMES":      "idor-admin-a,idor-admin-b",
+		"ADMIN_EMAILS":         "idor-admin-a@example.test,idor-admin-b@example.test",
 	})
 	baseURL := srv.BaseURL
 

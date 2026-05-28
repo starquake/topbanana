@@ -137,7 +137,7 @@ func renderRenameError(
 		render.render(w, r, http.StatusBadRequest, pageData{
 			Title:    "Profile",
 			Username: currentUsername,
-			Message:  "Username is required.",
+			Message:  "Display name is required.",
 		})
 	case errors.Is(err, auth.ErrUsernameTaken):
 		render.render(w, r, http.StatusConflict, pageData{
