@@ -74,9 +74,8 @@ func TestHandleLoginSubmit_RateLimited(t *testing.T) {
 	store := newStubPlayerStore()
 	limiter := NewLoginRateLimiter(time.Minute, nil)
 	handler := HandleLoginSubmit(
-		discardLogger(),
-		nil, store, session.New([]byte("k"), true),
-		nil, limiter, false, false,
+		discardLogger(), nil,
+		loginDeps(store, session.New([]byte("k"), true), limiter),
 	)
 
 	first := postLogin(t, handler, "alice", "wrong-password")
@@ -106,9 +105,8 @@ func TestHandleLoginSubmit_RateLimitedFiresOnUnknownUser(t *testing.T) {
 	store := newStubPlayerStore()
 	limiter := NewLoginRateLimiter(time.Minute, nil)
 	handler := HandleLoginSubmit(
-		discardLogger(),
-		nil, store, session.New([]byte("k"), true),
-		nil, limiter, false, false,
+		discardLogger(), nil,
+		loginDeps(store, session.New([]byte("k"), true), limiter),
 	)
 
 	first := postLogin(t, handler, "ghost", "whatever-password")
@@ -138,12 +136,12 @@ func TestHandleLoginSubmit_RateLimitedRefusesCorrectCredentials(t *testing.T) {
 	if _, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RoleAdmin); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
+	markVerified(t, store, "alice")
 
 	limiter := NewLoginRateLimiter(time.Minute, nil)
 	handler := HandleLoginSubmit(
-		discardLogger(),
-		nil, store, session.New([]byte("k"), true),
-		nil, limiter, false, false,
+		discardLogger(), nil,
+		loginDeps(store, session.New([]byte("k"), true), limiter),
 	)
 
 	first := postLogin(t, handler, "alice", "wrong-password")
