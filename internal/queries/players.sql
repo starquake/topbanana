@@ -220,8 +220,8 @@ RETURNING *;
 -- quiz has been issued (game_questions row count >= questions row
 -- count) and the quiz still has at least one question (an empty
 -- quiz can't be finished). Used by the admin players list (#423)
--- to aggregate per-page without folding the condition into
--- ListAllPlayers' SELECT.
+-- to aggregate per-page without folding the condition into the
+-- player-listing query's SELECT.
 -- The CAST on MAX gives sqlc's SQLite engine an explicit type hint
 -- so the generated row's LastFinishedAt lands as a string rather
 -- than interface{}. sqlc cannot infer the type through MAX over a

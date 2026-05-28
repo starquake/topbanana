@@ -211,18 +211,6 @@ func (q *Queries) ConsumePasswordResetToken(ctx context.Context, arg ConsumePass
 	return player_id, err
 }
 
-const countAllPlayers = `-- name: CountAllPlayers :one
-SELECT COUNT(*) FROM players
-`
-
-// Total players row count for the admin list pagination (#423).
-func (q *Queries) CountAllPlayers(ctx context.Context) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countAllPlayers)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createAnonymousPlayer = `-- name: CreateAnonymousPlayer :one
 INSERT INTO players (username, role)
 VALUES (?1, 'player')
@@ -608,82 +596,6 @@ func (q *Queries) LinkProviderIdentity(ctx context.Context, arg LinkProviderIden
 	return err
 }
 
-const listAllPlayers = `-- name: ListAllPlayers :many
-SELECT
-    p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed, p.email_verified_at, p.session_version,
-    EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id) AS has_oauth,
-    CAST(COALESCE((SELECT pi.provider FROM player_identities pi WHERE pi.player_id = p.id ORDER BY pi.provider LIMIT 1), '') AS TEXT) AS oauth_provider
-FROM players p
-ORDER BY p.created_at DESC, p.id DESC
-LIMIT ?2 OFFSET ?1
-`
-
-type ListAllPlayersParams struct {
-	RowOffset int64
-	RowLimit  int64
-}
-
-type ListAllPlayersRow struct {
-	ID              int64
-	Username        string
-	Email           sql.NullString
-	PasswordHash    sql.NullString
-	Role            string
-	CreatedAt       time.Time
-	UsernameClaimed int64
-	EmailVerifiedAt sql.NullTime
-	SessionVersion  int64
-	HasOauth        bool
-	OauthProvider   string
-}
-
-// Returns one page of players for the admin players list (#423),
-// ordered by created_at DESC so newest sign-ups land first. The
-// derived has_oauth / oauth_provider fields surface the OAuth-link
-// state in the same row so the handler does not have to issue a
-// per-row lookup. Finished-quiz aggregates come from a separate
-// ListPlayerFinishStats call against the page's player_ids; keeping
-// the aggregate out of this query keeps the SELECT under sqlc's
-// type-inference comfort zone and avoids a CTE / window function.
-// The oauth_provider subquery uses ORDER BY pi.provider so a player
-// with multiple linked identities (future multi-provider support)
-// always surfaces the same alphabetically-first one rather than a
-// nondeterministic pick.
-func (q *Queries) ListAllPlayers(ctx context.Context, arg ListAllPlayersParams) ([]ListAllPlayersRow, error) {
-	rows, err := q.db.QueryContext(ctx, listAllPlayers, arg.RowOffset, arg.RowLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListAllPlayersRow
-	for rows.Next() {
-		var i ListAllPlayersRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Username,
-			&i.Email,
-			&i.PasswordHash,
-			&i.Role,
-			&i.CreatedAt,
-			&i.UsernameClaimed,
-			&i.EmailVerifiedAt,
-			&i.SessionVersion,
-			&i.HasOauth,
-			&i.OauthProvider,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listPlayerFinishStats = `-- name: ListPlayerFinishStats :many
 SELECT
     gp.player_id AS player_id,
@@ -709,8 +621,8 @@ type ListPlayerFinishStatsRow struct {
 // quiz has been issued (game_questions row count >= questions row
 // count) and the quiz still has at least one question (an empty
 // quiz can't be finished). Used by the admin players list (#423)
-// to aggregate per-page without folding the condition into
-// ListAllPlayers' SELECT.
+// to aggregate per-page without folding the condition into the
+// player-listing query's SELECT.
 // The CAST on MAX gives sqlc's SQLite engine an explicit type hint
 // so the generated row's LastFinishedAt lands as a string rather
 // than interface{}. sqlc cannot infer the type through MAX over a

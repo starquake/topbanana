@@ -667,7 +667,7 @@ func (s *PlayerStore) ListPlayersByOnboardingState(
 
 // CountPlayersInOnboardingState returns the number of rows matching
 // the supplied state bucket. Pass [auth.OnboardingStateAll] to count
-// every row (matches the historical CountAllPlayers behaviour).
+// every row regardless of onboarding state.
 func (s *PlayerStore) CountPlayersInOnboardingState(ctx context.Context, state string) (int64, error) {
 	count, err := s.q.CountPlayersInOnboardingState(ctx, state)
 	if err != nil {
