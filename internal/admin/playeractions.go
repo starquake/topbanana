@@ -114,9 +114,9 @@ func HandlePlayerResendVerification(
 
 // HandlePlayerSetEmail handles POST /admin/players/{playerID}/email.
 // Validates with auth.LooksLikeEmail, rejects collisions with the
-// existing ErrEmailTaken sentinel, and does NOT touch
-// email_verified_at - the operator either marks-verified separately or
-// triggers a resend (per #450 spec).
+// existing ErrEmailTaken sentinel, and clears email_verified_at so the
+// changed address starts unverified - the operator then marks-verified
+// separately or triggers a resend (per #450 spec).
 func HandlePlayerSetEmail(
 	logger *slog.Logger,
 	store auth.AdminPlayerStore,

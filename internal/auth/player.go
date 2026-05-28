@@ -238,7 +238,9 @@ type RecentFinishedGame struct {
 // AdminAuditEntry is one row in the admin_audit table, rendered on the
 // per-player detail view's "Recent admin actions" section (#450). The
 // raw Payload JSON is passed through as a string; the template decodes
-// the few well-known actions on the way out.
+// the few well-known actions on the way out. ActorPlayerID is 0 and
+// ActorUsername is "" when the actor row has since been deleted (the
+// actor FK is ON DELETE SET NULL); the view renders "(deleted)".
 type AdminAuditEntry struct {
 	ID             int64
 	ActorPlayerID  int64

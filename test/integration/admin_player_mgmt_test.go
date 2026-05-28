@@ -247,6 +247,65 @@ func TestAdminPlayerMgmt_SetEmailValidates(t *testing.T) {
 	}
 }
 
+// TestAdminPlayerMgmt_SetEmailClearsVerification pins fix #450 follow-up:
+// changing the email of an already-verified player clears verification so
+// the new, unproven address must be re-verified. The target moves out of
+// the verified bucket into unverified.
+func TestAdminPlayerMgmt_SetEmailClearsVerification(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+	})
+
+	adminClient := newAdminMgmtClient(t)
+	if got := registerForRedirect(
+		ctx, t, adminClient, srv.BaseURL,
+		"reverify-admin", "reverify-admin-pass-123",
+	); got != "/admin/quizzes" {
+		t.Fatalf("first registration did not promote to admin: Location = %q", got)
+	}
+	verifyPlayerEmail(ctx, t, srv.DBURI, "reverify-admin")
+
+	playerClient := newAdminMgmtClient(t)
+	if got := registerForRedirect(
+		ctx, t, playerClient, srv.BaseURL,
+		"reverify-target", "reverify-target-pass-123",
+	); got != "/" {
+		t.Fatalf("second registration did not land on /: Location = %q", got)
+	}
+	// Verify the target so it starts in the verified bucket.
+	verifyPlayerEmail(ctx, t, srv.DBURI, "reverify-target")
+
+	target := lookupPlayerID(ctx, t, srv.DBURI, "reverify-target")
+	verified := getOK(ctx, t, adminClient, srv.BaseURL+"/admin/players?state=verified")
+	if got, want := verified, "reverify-target"; !strings.Contains(got, want) {
+		t.Fatalf("verified-tab body should contain target before email change; body=%q", verified)
+	}
+
+	emailURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/email"
+	postAdminAction(
+		ctx, t, adminClient, srv.BaseURL, emailURL,
+		url.Values{"email": {"reverify-new@example.test"}},
+	)
+
+	// After the change the target is in the unverified bucket, not the
+	// verified one. Match on the role-scoped detail link rather than an
+	// email substring so a flash/banner echoing the address elsewhere on
+	// the page cannot satisfy the assertion (same hazard documented in
+	// TestAdminPlayerMgmt_FilterTabsAndCounts).
+	targetLinkRE := regexp.MustCompile(`href=["']/admin/players/` + intToString(target) + `["']`)
+	unverified := getOK(ctx, t, adminClient, srv.BaseURL+"/admin/players?state=unverified")
+	if !targetLinkRE.MatchString(unverified) {
+		t.Errorf("unverified-tab body should contain target link after email change; body=%q", unverified)
+	}
+
+	verifiedAfter := getOK(ctx, t, adminClient, srv.BaseURL+"/admin/players?state=verified")
+	if targetLinkRE.MatchString(verifiedAfter) {
+		t.Errorf("verified-tab should not contain target link after email change; body=%q", verifiedAfter)
+	}
+}
+
 // TestAdminPlayerMgmt_CreatePlayer pins the "create without
 // verification" flow: an admin POSTs to /admin/players, the resulting
 // row is verified, and the new player can log in immediately.

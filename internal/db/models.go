@@ -11,7 +11,7 @@ import (
 
 type AdminAudit struct {
 	ID             int64
-	ActorPlayerID  int64
+	ActorPlayerID  sql.NullInt64
 	TargetPlayerID int64
 	Action         string
 	Payload        string
