@@ -41,7 +41,7 @@ SQLC_BIN     := $(BIN_DIR)/sqlc
 # migration-against-existing-data class of bug — which test-coverage's
 # fresh DB can't catch — fails locally before CI does.
 .PHONY: check
-check: lint sql-lint tailwind-check build test-coverage smoke
+check: lint sql-lint sqlc-check tailwind-check build test-coverage smoke
 
 .PHONY: lint
 lint: $(GOLANGCI_BIN)
@@ -54,6 +54,29 @@ lint-fix: $(GOLANGCI_BIN)
 .PHONY: sql-lint
 sql-lint: $(SQLC_BIN)
 	$(SQLC_BIN) vet
+
+# Regenerate the sqlc layer (internal/db/) from internal/queries/.
+# Hand-editing internal/db/ is a hard rule violation; run this after any
+# query change and commit the result.
+.PHONY: sqlc-generate
+sqlc-generate: $(SQLC_BIN)
+	$(SQLC_BIN) generate
+
+# Fail when internal/db/ is out of sync with internal/queries/. `sqlc
+# vet` only lints the queries; it does not catch a query that was edited
+# or deleted without re-running generate, so stale generated code can
+# ship (it did once - the deleted ListAllPlayers/CountAllPlayers funcs
+# lingered in internal/db/players.sql.go). Mirrors the tailwind-check
+# gap-filler for the CSS layer.
+.PHONY: sqlc-check
+sqlc-check: $(SQLC_BIN)
+	@$(SQLC_BIN) generate
+	@if ! git diff --quiet -- internal/db; then \
+	    echo "ERROR: internal/db is out of date - run \`make sqlc-generate\` and commit the result."; \
+	    git diff -- internal/db; \
+	    exit 1; \
+	fi; \
+	echo "internal/db is up to date."
 
 # Advisory grep for cross-file rationale in comments (#177). Server-side
 # comments that explain what the frontend does with a value rot silently
