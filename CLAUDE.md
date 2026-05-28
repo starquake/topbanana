@@ -68,6 +68,23 @@ gh api -X PUT repos/starquake/topbanana/branches/main/protection --input <payloa
 
 When removing a workflow job, drop its context from the required list too — leaving a stale required-context name makes every PR mergeable-blocked indefinitely.
 
+## Deploys
+
+There are two environments — **staging** and **production** — and they are **independent pipelines**, not a soak-and-promote chain. A change can be live in staging for weeks without ever reaching production; production never auto-promotes from staging.
+
+What triggers what (`.github/workflows/deploy.yml`):
+
+- **Staging deploys on every merge to `main`.** The `Docker` workflow builds an image tagged `edge` (from `main`) plus the commit SHA, and a successful Docker run on the `main` branch fires the `deploy-staging` job. The staging compose pulls `edge`; goose runs any pending migrations on container boot; a 12×5s health-check loop gates the deploy as successful.
+- **Production deploys when a `v*.*.*` git tag is pushed.** The Docker workflow builds an image tagged `{version}` (e.g. `2026.5.8`) plus `{major}.{minor}`; a successful Docker run on a `v*` tag fires the `deploy-production` job, which pulls that exact version tag. There is no "promote whatever is in staging" button — production is whatever the `v*.*.*` tag points at.
+- **Manual trigger** is also available via `workflow_dispatch` with an `environment` input (`staging` or `production`) — used to redeploy without a new code change.
+
+Practical consequences for work in flight:
+
+- A PR merge means staging gets the change within minutes. Production stays on the last tag until a new one is cut.
+- A schema migration on `main` runs on staging the next time the container boots. The same migration runs on production the next time a tag is released and deployed. **Do not assume "merged to main" means "live in production"** — only "live in staging".
+- A risky change can sit on staging across multiple `main` merges before it ships. The risk window is when the tag is cut; all changes since the previous tag deploy together.
+- Both jobs build a fresh `.env` on the server from GitHub secrets + variables. **Secrets** are values that should be masked in logs (`SESSION_KEY`, `GOOGLE_CLIENT_SECRET`, `SMTP_PASSWORD`, ...). **Variables** are not (`BASE_URL`, `REGISTRATION_ENABLED`, `ADMIN_EMAILS`). Both kinds are scoped per-environment in GitHub Actions — the staging job sees the `staging` environment's secrets+vars, the production job sees `production`'s. A value set on `staging` is not visible to `production` and vice versa.
+
 ## Comments
 
 Default to writing **no** comments. Code with well-named identifiers, small functions, and clear control flow explains *what* it does — that's not the comment's job. A comment earns its place only when the *why* is non-obvious: a hidden constraint, a subtle invariant, a workaround for a specific bug, behaviour that would surprise a reader.
