@@ -2,6 +2,36 @@
 
 What changed in each released version of Top Banana. The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.5.9 — 2026-05-28
+
+Email is the login credential. Email verification is required to sign in, and new self-service pages cover password change, email change, and verify-link request. Quiz breaks ship to players.
+
+### Players
+- The login form takes email instead of username. The register form takes email as the credential; the display name field is optional and falls back to a generated name when blank.
+- Register has a confirm-password field.
+- Email verification is required at sign-in. A registrant who tries to log in before clicking the verify link sees a banner asking them to verify, and the link is resent.
+- A new "Didn't get the link?" affordance on `/login`, `/register`, and `/verify-email/pending` opens a public form at `/verify-email/request` that accepts an email address and sends a fresh verify link. Works without signing in.
+- A `/profile/password` page accepts a password change. Existing sessions on other devices are signed out; the current tab stays signed in.
+- A `/profile/email` page accepts an email change. The new address takes effect after the verify link is clicked.
+- A `/forgot-password` page sends a reset link to the address on the account.
+- Repeated wrong login attempts get a "too many attempts" message and a short cooldown before another try is accepted.
+- Non-production page titles carry the environment as a prefix (`[staging]`, `[development]`).
+- The site is installable as a Progressive Web App from supported browsers.
+- Quiz breaks added by the host appear between questions during play.
+
+### Hosts
+- A new `/admin/email` diagnostics page shows SMTP configuration, the configured `BASE_URL`, and a running send log. A test-send button delivers a probe email and records the attempt.
+- A new `/admin/players` page lists every player with account type, email, created date, finished-quiz count, and last-finished-at. The list is paginated.
+- Quiz breaks have a full admin CRUD. Breaks slot between questions and reorder via the same arrow controls as questions.
+- Quiz import accepts breaks alongside questions.
+
+### Behind the scenes
+- A schema migration deletes any credentialled rows that pre-date email capture, then a CHECK constraint enforces "credentialled rows must have an email" going forward.
+- `ADMIN_USERNAMES` is renamed to `ADMIN_EMAILS`; the allowlist matches against the verified email at register.
+- Per-IP rate limiters on `/login`, the verify-resend endpoint, the forgot-password endpoint, and the admin email tester honour `X-Forwarded-For` from trusted proxies.
+- JSON request bodies are capped at 64 KiB.
+- `BASE_URL` and `ADMIN_EMAILS` are read from GitHub Actions variables, not secrets — both are non-sensitive and gain nothing from log masking.
+
 ## v2026.5.8 — 2026-05-25
 
 Google sign-in is part of the standard production deployment.
