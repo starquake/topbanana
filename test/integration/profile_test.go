@@ -75,8 +75,8 @@ func TestProfile_Integration(t *testing.T) {
 		if got, want := snap.status, http.StatusBadRequest; got != want {
 			t.Errorf("status = %d, want %d", got, want)
 		}
-		if !strings.Contains(snap.body, "Username is required.") {
-			t.Error("body missing empty-username error message")
+		if !strings.Contains(snap.body, "Display name is required.") {
+			t.Error("body missing empty-display-name error message")
 		}
 	})
 
@@ -104,7 +104,7 @@ func TestProfile_Integration(t *testing.T) {
 		if got, want := snap.status, http.StatusOK; got != want {
 			t.Fatalf("status = %d, want %d (body=%q)", got, want, snap.body)
 		}
-		if !strings.Contains(snap.body, "Username updated.") {
+		if !strings.Contains(snap.body, "Display name updated.") {
 			t.Error("body missing success banner")
 		}
 		if !strings.Contains(snap.body, `value="renamed-admin"`) {

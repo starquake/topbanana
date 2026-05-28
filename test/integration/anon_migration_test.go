@@ -119,7 +119,10 @@ func lookupAnonPlayer(ctx context.Context, t *testing.T, players auth.PlayerStor
 
 // loginAnonAsDest POSTs the credentials with the anonymous client's
 // jar carrying the EnsurePlayer session cookie, so the login handler
-// sees a prior anonymous session and triggers the migration.
+// sees a prior anonymous session and triggers the migration. The
+// username argument is converted to "<username>@example.test" - the
+// integration suite's convention for the email auto-assigned during
+// registerForRedirect, and the post-#446 login credential.
 func loginAnonAsDest(ctx context.Context, t *testing.T, client *http.Client, baseURL, username, password string) {
 	t.Helper()
 
@@ -127,7 +130,7 @@ func loginAnonAsDest(ctx context.Context, t *testing.T, client *http.Client, bas
 
 	form := url.Values{
 		"csrf_token": {csrfToken},
-		"username":   {username},
+		"email":      {username + "@example.test"},
 		"password":   {password},
 	}
 	req, err := http.NewRequestWithContext(

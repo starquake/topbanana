@@ -473,7 +473,7 @@ func TestParse_RevealDelay(t *testing.T) {
 	})
 }
 
-func TestParse_AdminUsernames(t *testing.T) {
+func TestParse_AdminEmails(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -482,10 +482,22 @@ func TestParse_AdminUsernames(t *testing.T) {
 		want  []string
 	}{
 		{"unset defaults to nil", "", nil},
-		{"single username", "alice", []string{"alice"}},
-		{"comma separated", "alice,bob,carol", []string{"alice", "bob", "carol"}},
-		{"trims whitespace", "  alice ,bob  , carol", []string{"alice", "bob", "carol"}},
-		{"drops empty entries", "alice,,bob, ,carol", []string{"alice", "bob", "carol"}},
+		{"single email", "alice@example.test", []string{"alice@example.test"}},
+		{
+			"comma separated",
+			"alice@example.test,bob@example.test,carol@example.test",
+			[]string{"alice@example.test", "bob@example.test", "carol@example.test"},
+		},
+		{
+			"trims whitespace and lowercases",
+			"  Alice@Example.test ,BOB@example.test  , carol@example.test",
+			[]string{"alice@example.test", "bob@example.test", "carol@example.test"},
+		},
+		{
+			"drops empty entries",
+			"alice@example.test,,bob@example.test, ,carol@example.test",
+			[]string{"alice@example.test", "bob@example.test", "carol@example.test"},
+		},
 		{"only commas yields nil", ", ,", nil},
 	}
 	for _, tt := range tests {
@@ -493,7 +505,7 @@ func TestParse_AdminUsernames(t *testing.T) {
 			t.Parallel()
 
 			getenv := func(key string) string {
-				if key == "ADMIN_USERNAMES" {
+				if key == "ADMIN_EMAILS" {
 					return tt.value
 				}
 				if key == "APP_ENV" {
@@ -507,8 +519,8 @@ func TestParse_AdminUsernames(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Parse() err = %v, want nil", err)
 			}
-			if got, want := c.AdminUsernames, tt.want; !slices.Equal(got, want) {
-				t.Errorf("AdminUsernames = %v, want %v", got, want)
+			if got, want := c.AdminEmails, tt.want; !slices.Equal(got, want) {
+				t.Errorf("AdminEmails = %v, want %v", got, want)
 			}
 		})
 	}

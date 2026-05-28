@@ -607,12 +607,15 @@ func (s *PlayerStore) ChangePlayerPassword(ctx context.Context, playerID int64, 
 }
 
 // SetPlayerPasswordHash overwrites the password_hash on the row identified
-// by username. Returns auth.ErrPlayerNotFound when no row matches; intended
+// by email. Returns auth.ErrPlayerNotFound when no row matches; intended
 // for the cmd/server -reset-password operator tool, not the public auth flow.
-func (s *PlayerStore) SetPlayerPasswordHash(ctx context.Context, username, passwordHash string) error {
+// The lookup matches how the post-#446 login flow finds the row, so the
+// reset target equals what the player types into /login.
+func (s *PlayerStore) SetPlayerPasswordHash(ctx context.Context, email, passwordHash string) error {
+	cleaned := strings.ToLower(strings.TrimSpace(email))
 	rows, err := s.q.SetPlayerPasswordHash(ctx, db.SetPlayerPasswordHashParams{
 		PasswordHash: sql.NullString{String: passwordHash, Valid: true},
-		Username:     strings.TrimSpace(username),
+		Email:        sql.NullString{String: cleaned, Valid: cleaned != ""},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to set password hash: %w", err)

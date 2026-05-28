@@ -43,7 +43,9 @@ func TestLogin_RateLimited(t *testing.T) {
 	for i, pair := range pairs {
 		wg.Go(func() {
 			//nolint:bodyclose // closed below after the rate-limited / normal split is settled.
-			resps[i] = postLoginWithToken(ctx, t, pair.client, srv.BaseURL, pair.csrf, "ghost", "whatever-password")
+			resps[i] = postLoginWithToken(
+				ctx, t, pair.client, srv.BaseURL, pair.csrf, "ghost@example.test", "whatever-password",
+			)
 		})
 	}
 	wg.Wait()
@@ -90,12 +92,12 @@ func TestLogin_RateLimited(t *testing.T) {
 // share their /login GET round-trips and reach the limiter at nearly
 // the same time.
 func postLoginWithToken(
-	ctx context.Context, t *testing.T, client *http.Client, baseURL, csrfToken, username, password string,
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, csrfToken, email, password string,
 ) *http.Response {
 	t.Helper()
 
 	form := url.Values{}
-	form.Add("username", username)
+	form.Add("email", email)
 	form.Add("password", password)
 	form.Add("csrf_token", csrfToken)
 

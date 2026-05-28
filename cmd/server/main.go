@@ -22,7 +22,7 @@ func main() {
 	resetPasswordFor := flag.String(
 		"reset-password",
 		"",
-		"reset the password for the given username; reads the new password from stdin and exits."+
+		"reset the password for the given email; reads the new password from stdin and exits."+
 			" The server should not be running concurrently against the same database."+
 			" Takes precedence over -check when both are supplied",
 	)

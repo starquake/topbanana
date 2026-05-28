@@ -192,9 +192,11 @@ type PlayerStore interface {
 		username, email, passwordHash, requestedRole string,
 	) (*Player, error)
 	// SetPlayerPasswordHash overwrites the password_hash on the row identified
-	// by username. Used by the operator-only -reset-password tool to rotate a
-	// forgotten admin password. Returns ErrPlayerNotFound when no row matches.
-	SetPlayerPasswordHash(ctx context.Context, username, passwordHash string) error
+	// by email. Used by the operator-only -reset-password tool to rotate a
+	// forgotten admin password; matching by email lines the operator's reset
+	// target up with the post-#446 login credential. Returns ErrPlayerNotFound
+	// when no row matches.
+	SetPlayerPasswordHash(ctx context.Context, email, passwordHash string) error
 	// ChangePlayerPassword atomically rotates password_hash and bumps
 	// session_version on the row identified by id. The session_version
 	// bump invalidates every other live cookie for the same account the

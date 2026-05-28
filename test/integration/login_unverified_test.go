@@ -72,7 +72,7 @@ func TestLogin_UnverifiedEmail_BlocksAndResends(t *testing.T) {
 	// cookie is unambiguous.
 	loginClient := authClient(t)
 	loginCSRF := fetchCSRFToken(ctx, t, loginClient, srv.BaseURL+"/login")
-	resp := postLoginFormFull(ctx, t, loginClient, srv.BaseURL, loginCSRF, username, password)
+	resp := postLoginFormFull(ctx, t, loginClient, srv.BaseURL, loginCSRF, username+"@example.test", password)
 	defer resp.Body.Close() //nolint:errcheck // cleanup.
 
 	if got, want := resp.StatusCode, http.StatusOK; got != want {
@@ -153,12 +153,12 @@ func postRegister(
 // file can keep its helpers self-contained without one importing the
 // other.
 func postLoginFormFull(
-	ctx context.Context, t *testing.T, client *http.Client, baseURL, csrfToken, username, password string,
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, csrfToken, email, password string,
 ) *http.Response {
 	t.Helper()
 
 	form := url.Values{}
-	form.Add("username", username)
+	form.Add("email", email)
 	form.Add("password", password)
 	form.Add("csrf_token", csrfToken)
 

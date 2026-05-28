@@ -55,7 +55,7 @@ Each `(player, quiz)` pair gets exactly one attempt, enforced at the DB by the `
 
 ### Self-hosting
 
-Multi-stage Dockerfile → distroless. `docker-compose.yml` mounts a volume for the SQLite file. Env vars in `internal/config/config.go`: `APP_ENV`, `HOST`, `PORT`, `DB_URI`, `CLIENT_DIR`, `WEB_STATIC_DIR`, `SESSION_KEY`, `ADMIN_USERNAMES`, `REGISTRATION_ENABLED`, `REVEAL_DELAY`. `SESSION_KEY` is required in production and the server refuses to start with an empty or default value.
+Multi-stage Dockerfile → distroless. `docker-compose.yml` mounts a volume for the SQLite file. Env vars in `internal/config/config.go`: `APP_ENV`, `HOST`, `PORT`, `DB_URI`, `CLIENT_DIR`, `WEB_STATIC_DIR`, `SESSION_KEY`, `ADMIN_EMAILS`, `REGISTRATION_ENABLED`, `REVEAL_DELAY`. `SESSION_KEY` is required in production and the server refuses to start with an empty or default value.
 
 ### Notable Phase 1.5 additions on top of Phase 1
 
@@ -149,7 +149,7 @@ SSE shipped in v2026.5.3 (`/api/quizzes/{slugID}/leaderboard/stream`). The fanou
 
 ### 9. Admin role — first registrant + env override — **IMPLEMENTED**
 
-First user with a `password_hash` is promoted to admin atomically in SQL. `ADMIN_USERNAMES=alice,bob` env var pre-seeds additional admin promotions. No finer-grained permissions.
+First user with a `password_hash` is promoted to admin atomically in SQL. `ADMIN_EMAILS=alice@example.test,bob@example.test` env var pre-seeds additional admin promotions. No finer-grained permissions.
 
 ### 10. Deployment model — single instance, multiple admins, creator-only edits — **PARTIALLY IMPLEMENTED**
 

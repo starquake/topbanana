@@ -54,7 +54,7 @@ When a test fails the `playwright-report/` directory contains the trace, screens
 - point `DB_URI` at the temp SQLite file (so each run is isolated),
 - set `REGISTRATION_ENABLED=true` (so `/register` is reachable),
 - pin a fixed `SESSION_KEY` (so cookies are deterministic across the run),
-- whitelist the per-browser usernames the suite registers via `ADMIN_USERNAMES` (every browser project's registrant becomes admin even though only the first registration triggers the bootstrap-admin rule).
+- whitelist the per-browser emails the suite registers via `ADMIN_EMAILS` (every browser project's registrant becomes admin even though only the first registration triggers the bootstrap-admin rule).
 
 `goose` migrates the empty SQLite file on boot, so no separate migration step is needed.
 

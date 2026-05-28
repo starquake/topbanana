@@ -12,7 +12,7 @@ services:
       - PORT=8080
       - DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)
       - REGISTRATION_ENABLED=true
-      - ADMIN_USERNAMES=admin
+      - ADMIN_EMAILS=admin@example.test
       # Uncomment to wire the app to the mailpit sibling service for
       # local email testing. SMTP_TLS=false keeps the dev mailer talking
       # plain SMTP (mailpit does not accept STARTTLS on 1025); flip back

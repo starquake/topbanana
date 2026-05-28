@@ -16,7 +16,7 @@ import (
 // TestQuizOwnership_Integration covers #281: only the admin who
 // created a quiz may edit or delete it. Before the fix, every admin
 // could mutate every quiz. The test boots two browser-shaped clients,
-// promotes both their registrants to admin via ADMIN_USERNAMES, has
+// promotes both their registrants to admin via ADMIN_EMAILS, has
 // adminA create a quiz, and then probes adminB against every mutating
 // admin endpoint scoped to that quiz. Each probe must come back 403
 // from the requireQuizOwner gate.
@@ -27,8 +27,8 @@ func TestQuizOwnership_Integration(t *testing.T) {
 		"REGISTRATION_ENABLED": "true",
 		// Pre-seed both registrants as admins so first-registrant-
 		// becomes-admin doesn't matter for ordering. The store
-		// promotes any username in this list to admin on register.
-		"ADMIN_USERNAMES": "ownership-admin-a,ownership-admin-b",
+		// promotes any email in this list to admin on register.
+		"ADMIN_EMAILS": "ownership-admin-a@example.test,ownership-admin-b@example.test",
 	})
 	baseURL := srv.BaseURL
 
@@ -132,7 +132,7 @@ func TestQuizOwnership_Integration(t *testing.T) {
 
 // registerAdminClient builds a cookie-jar HTTP client, registers the
 // supplied username through the public /register form (which promotes
-// to admin via ADMIN_USERNAMES), and returns the client carrying the
+// to admin via ADMIN_EMAILS), and returns the client carrying the
 // resulting session cookie. dbURI is the test server's DB URI; the
 // helper stamps email_verified_at on the new row so follow-up admin
 // requests pass the #111 PR3 verified-email gate. Mirrors the helper

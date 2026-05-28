@@ -24,8 +24,11 @@ export const QUIZ_QUESTIONS: readonly QuestionSpec[] = [
 
 export async function registerAdmin(page: Page, username: string): Promise<void> {
   await page.goto('/register');
-  await page.locator('input[name=username]').fill(username);
+  // Email is the credential after #446; username is the optional
+  // display name. Filling both keeps tests deterministic about which
+  // row is created.
   await page.locator('input[name=email]').fill(`${username}@example.test`);
+  await page.locator('input[name=username]').fill(username);
   await page.locator('input[name=password]').fill(PASSWORD);
   await page.locator('input[name=password_confirm]').fill(PASSWORD);
   await page.locator('button[type=submit]').click();

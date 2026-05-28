@@ -727,35 +727,48 @@ func TestPlayerStore_ListPlayerFinishStats_NoGames(t *testing.T) {
 
 // TestPlayerStore_SetPlayerPasswordHash_AlsoMarksUsernameClaimed pins
 // the #289 fix: the operator's -reset-password CLI eventually calls
-// this store method to give the seed admin a password. Before the
-// fix the SQL only updated password_hash, leaving username_claimed=0
-// on a row whose `password_hash IS NOT NULL` - which dragged the
-// player client into the "claim your name" modal for a logged-in
-// admin. The combined update now keeps the two columns in lockstep.
+// this store method to give a player a password. Before the fix the
+// SQL only updated password_hash, leaving username_claimed=0 on a
+// row whose `password_hash IS NOT NULL` - which dragged the player
+// client into the "claim your name" modal for a logged-in admin. The
+// combined update now keeps the two columns in lockstep.
+//
+// After #446 SetPlayerPasswordHash matches by email (the post-446
+// login credential) and the CHECK constraint on players forbids
+// setting password_hash on a row whose email is NULL, so the seed
+// row created below carries an email from the start.
 func TestPlayerStore_SetPlayerPasswordHash_AlsoMarksUsernameClaimed(t *testing.T) {
 	t.Parallel()
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
-	// CreateAnonymousPlayer inserts with password_hash=NULL and
-	// username_claimed=0 - the same starting state the seed admin
-	// is in after migration 20260111110308 but before the operator
-	// has run -reset-password.
-	anon, err := ps.CreateAnonymousPlayer(t.Context(), "anon-claim-after-pw")
+	// CreatePlayer-without-password is not exposed, so seed via the
+	// OAuth helper: it inserts a row with email but no password_hash
+	// and username_claimed=1 already. To exercise the
+	// username_claimed=0 -> 1 flip we then rename to keep the row in
+	// the "needs claim" state, then run SetPlayerPasswordHash.
+	const email = "set-hash-test@example.test"
+	row, err := ps.CreatePlayerFromOAuth(t.Context(), "anon-claim-after-pw", email)
 	if err != nil {
-		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+		t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
 	}
-	if got, want := anon.HasCustomName(), false; got != want {
-		t.Fatalf("seed HasCustomName() = %v, want %v", got, want)
+	// CreatePlayerFromOAuth sets username_claimed=1; this test wants
+	// the username_claimed=0 starting state, so reset it via a raw
+	// UPDATE. Production code never does this; the test is exercising
+	// the SetPlayerPasswordHash side effect, not the typical lifecycle.
+	if _, execErr := db.ExecContext(
+		t.Context(), "UPDATE players SET username_claimed = 0 WHERE id = ?", row.ID,
+	); execErr != nil {
+		t.Fatalf("seed UPDATE err = %v, want nil", execErr)
 	}
 
-	if setErr := ps.SetPlayerPasswordHash(t.Context(), anon.Username, "h"); setErr != nil {
+	if setErr := ps.SetPlayerPasswordHash(t.Context(), email, "h"); setErr != nil {
 		t.Fatalf("SetPlayerPasswordHash err = %v, want nil", setErr)
 	}
 
-	got, err := ps.GetPlayerByUsername(t.Context(), anon.Username)
+	got, err := ps.GetPlayerByEmail(t.Context(), email)
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByEmail err = %v, want nil", err)
 	}
 	if got.PasswordHash == "" {
 		t.Error("PasswordHash empty after reset, want a non-empty hash")

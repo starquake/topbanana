@@ -55,7 +55,7 @@ func landingPathFor(role string) string {
 }
 
 // maxFormBodySize caps the request body for login/register form posts.
-// 64 KiB is comfortable for username + password + csrf_token while denying
+// 64 KiB is comfortable for email + password + csrf_token while denying
 // an attacker the ability to exhaust memory by streaming a multi-megabyte
 // body into r.ParseForm. Wraps r.Body before any form-parsing call.
 const maxFormBodySize = 64 * 1024
@@ -115,18 +115,18 @@ func HandleRegisterForm(
 // zero values and SendVerifyEmailBestEffort logs a warning instead of
 // sending, which is the right behaviour for unit tests.
 type RegisterDeps struct {
-	AdminUsernames []string
-	GoogleEnabled  bool
-	Mailer         VerifyEmailSender
-	Tokens         VerifyTokenStore
-	BaseURL        string
+	AdminEmails   []string
+	GoogleEnabled bool
+	Mailer        VerifyEmailSender
+	Tokens        VerifyTokenStore
+	BaseURL       string
 }
 
 // HandleRegisterSubmit handles POST /register. When the caller already
 // has an anonymous session row, the handler upgrades that row via
 // ClaimPlayer so the visitor's game history follows them; if the row
-// was concurrently claimed it falls back to CreatePlayer. Usernames in
-// adminUsernames are promoted to admin; the first password-bearing
+// was concurrently claimed it falls back to CreatePlayer. Emails in
+// deps.AdminEmails are promoted to admin; the first password-bearing
 // registrant is atomically promoted by the store (see CreatePlayer).
 // On success the handler dispatches a verification email best-effort
 // so an SMTP outage does not block the signup.
@@ -167,7 +167,7 @@ func HandleRegisterSubmit(
 		}
 
 		role := RolePlayer
-		if slices.Contains(deps.AdminUsernames, input.CleanedUsername) {
+		if slices.Contains(deps.AdminEmails, input.CleanedEmail) {
 			role = RoleAdmin
 		}
 
@@ -249,7 +249,7 @@ func dispatchVerifyEmail(
 func registerCollisionMessage(err error) (string, bool) {
 	switch {
 	case errors.Is(err, ErrUsernameTaken):
-		return "Username is already taken.", true
+		return "That display name is already taken.", true
 	case errors.Is(err, ErrEmailTaken):
 		return "Email is already registered. Try logging in.", true
 	}
@@ -425,8 +425,8 @@ func HandleLoginSubmit(
 		googleEnabled:       deps.GoogleEnabled,
 	}
 	// dummyHash computes a bcrypt hash once on first use. The handler runs
-	// CheckPassword against it when the username does not exist so the
-	// response time matches the valid-username path, preventing username
+	// CheckPassword against it when the email does not exist so the
+	// response time matches the valid-email path, preventing email
 	// enumeration by response timing.
 	dummyHash := sync.OnceValue(func() string {
 		h, err := HashPassword("timing-oracle-dummy-do-not-use")
@@ -446,23 +446,24 @@ func HandleLoginSubmit(
 			return
 		}
 
-		// Trim the username so a registrant who entered "alice" can still log in
-		// after typing "alice " (trailing space). The store also trims as
-		// defense in depth.
-		username := strings.TrimSpace(r.PostFormValue("username"))
+		// Trim + lowercase the email so a registrant who entered
+		// "Alice@example.test" can still log in after typing
+		// "alice@example.test " (trailing space, mixed case). The
+		// store also normalises as defense in depth.
+		email := strings.ToLower(strings.TrimSpace(r.PostFormValue("email")))
 		password := r.PostFormValue("password")
 
 		// Check the limiter BEFORE the credential lookup so a hot bucket
 		// blocks the bcrypt compare too, and so the limiter fires whether
-		// or not the submitted username exists - same shape the dummy-hash
+		// or not the submitted email exists - same shape the dummy-hash
 		// timing equalisation already gives the credential-check path.
 		if wait, allowed := deps.Limiter.Allow(deps.Limiter.ClientIP(r)); !allowed {
-			renderLoginRateLimited(formCfg, w, r, username, wait)
+			renderLoginRateLimited(formCfg, w, r, email, wait)
 
 			return
 		}
 
-		player, ok := authenticateLogin(logger, formCfg, w, r, deps.Players, dummyHash, username, password)
+		player, ok := authenticateLogin(logger, formCfg, w, r, deps.Players, dummyHash, email, password)
 		if !ok {
 			return
 		}
@@ -511,15 +512,15 @@ func authenticateLogin(
 	r *http.Request,
 	players PlayerStore,
 	dummyHash func() string,
-	username, password string,
+	email, password string,
 ) (*Player, bool) {
-	player, err := players.GetPlayerByUsername(r.Context(), username)
+	player, err := players.GetPlayerByEmail(r.Context(), email)
 	if err != nil {
 		if errors.Is(err, ErrPlayerNotFound) {
-			// Equalise timing with the valid-username path so an attacker
-			// cannot enumerate usernames by response time.
+			// Equalise timing with the valid-email path so an attacker
+			// cannot enumerate emails by response time.
 			_ = CheckPassword(dummyHash(), password)
-			renderInvalidCredentials(cfg, w, r, username)
+			renderInvalidCredentials(cfg, w, r, email)
 
 			return nil, false
 		}
@@ -533,13 +534,13 @@ func authenticateLogin(
 		// Legacy seed admin with no hash on file. Run the dummy compare
 		// to keep timing consistent.
 		_ = CheckPassword(dummyHash(), password)
-		renderInvalidCredentials(cfg, w, r, username)
+		renderInvalidCredentials(cfg, w, r, email)
 
 		return nil, false
 	}
 
 	if err := CheckPassword(player.PasswordHash, password); err != nil {
-		renderInvalidCredentials(cfg, w, r, username)
+		renderInvalidCredentials(cfg, w, r, email)
 
 		return nil, false
 	}
@@ -556,7 +557,7 @@ func authenticateLogin(
 //
 // Telling the visitor "we resent the link to <email>" leaks that the
 // credentials were correct - an enumeration oracle. Accepted as the
-// UX cost: a generic "invalid username or password" here would make
+// UX cost: a generic "invalid email or password" here would make
 // unverified-but-correct logins feel like wrong-password to a real
 // user. Decided in #492.
 func renderUnverifiedLogin(
@@ -570,7 +571,7 @@ func renderUnverifiedLogin(
 	dispatchVerifyResend(r, logger, deps, player)
 	cfg.render.render(w, r, http.StatusOK, formData{
 		Title:        "Log in",
-		Username:     player.Username,
+		Email:        player.Email,
 		Message:      "Please verify your email - we just resent the link to " + player.Email + ".",
 		ShowRegister: cfg.registrationEnabled,
 		ShowGoogle:   cfg.googleEnabled,
@@ -615,12 +616,12 @@ func dispatchVerifyResend(
 // rate-limit banner and a Retry-After header, status 429. The banner
 // is account-existence-opaque: it doesn't say "wrong password" or
 // "no such user", so a probe cannot tell from the rate-limited
-// response whether the submitted username exists.
+// response whether the submitted email exists.
 func renderLoginRateLimited(
 	cfg loginFormCfg,
 	w http.ResponseWriter,
 	r *http.Request,
-	username string,
+	email string,
 	wait time.Duration,
 ) {
 	// Round sub-second remainders up so a 0.4s wait still reports as
@@ -630,7 +631,7 @@ func renderLoginRateLimited(
 	w.Header().Set("Retry-After", strconv.Itoa(seconds))
 	cfg.render.render(w, r, http.StatusTooManyRequests, formData{
 		Title:        "Log in",
-		Username:     username,
+		Email:        email,
 		Message:      "Too many attempts. Try again in a moment.",
 		ShowRegister: cfg.registrationEnabled,
 		ShowGoogle:   cfg.googleEnabled,
@@ -662,7 +663,10 @@ func HandleLogout(sessions *session.Manager) http.Handler {
 
 // registerInput is the result of validateRegisterInput.
 type registerInput struct {
-	// CleanedUsername is the username, whitespace-trimmed.
+	// CleanedUsername is the username, whitespace-trimmed. Falls back to
+	// a [GeneratePetname] result when the input trims to "" so the post-
+	// #446 register flow accepts a blank display name and still produces
+	// a non-empty username for the schema's NOT NULL guard.
 	CleanedUsername string
 	// CleanedEmail is the email, whitespace-trimmed and lowercased so
 	// case variants cannot create duplicate accounts.
@@ -674,16 +678,15 @@ type registerInput struct {
 }
 
 // validateRegisterInput trims the username and email, lowercases the
-// email, and validates the inputs.
+// email, and validates the inputs. A blank username falls back to
+// [GeneratePetname] so register-with-just-email works after #446 made
+// the display name optional; email is the credential identifier.
 func validateRegisterInput(username, email, password, passwordConfirm string) registerInput {
 	cleanedUsername := strings.TrimSpace(username)
-	cleanedEmail := strings.ToLower(strings.TrimSpace(email))
 	if cleanedUsername == "" {
-		return registerInput{
-			CleanedUsername: cleanedUsername, CleanedEmail: cleanedEmail,
-			ErrMsg: "Username is required.", OK: false,
-		}
+		cleanedUsername = GeneratePetname()
 	}
+	cleanedEmail := strings.ToLower(strings.TrimSpace(email))
 	if !LooksLikeEmail(cleanedEmail) {
 		return registerInput{
 			CleanedUsername: cleanedUsername, CleanedEmail: cleanedEmail,
@@ -744,20 +747,20 @@ func LooksLikeEmail(s string) bool {
 }
 
 // renderInvalidCredentials re-renders the login form with the generic
-// "Invalid username or password." banner. Preserves the submitted
-// username so the visitor can fix just the password, and preserves
+// "Invalid email or password." banner. Preserves the submitted
+// email so the visitor can fix just the password, and preserves
 // the posted next so a failed attempt does not drop the visitor's
 // intended destination (#449).
 func renderInvalidCredentials(
 	cfg loginFormCfg,
 	w http.ResponseWriter,
 	r *http.Request,
-	username string,
+	email string,
 ) {
 	cfg.render.render(w, r, http.StatusUnauthorized, formData{
 		Title:        "Log in",
-		Username:     username,
-		Message:      "Invalid username or password.",
+		Email:        email,
+		Message:      "Invalid email or password.",
 		ShowRegister: cfg.registrationEnabled,
 		ShowGoogle:   cfg.googleEnabled,
 		// Preserve the posted next so a failed login attempt does not

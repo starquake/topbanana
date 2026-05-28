@@ -5,7 +5,7 @@ const password = 'correctbatterystaple';
 
 test('register, log out, log back in, and reach the admin dashboard', async ({ page, browserName }) => {
   // Each browser project runs against the same shared server, so use a unique
-  // username per project and rely on ADMIN_USERNAMES (set in playwright.config.ts)
+  // username per project and rely on ADMIN_EMAILS (set in playwright.config.ts)
   // to promote every project's registrant to admin.
   const username = `e2e-admin-${browserName}`;
 
@@ -28,8 +28,8 @@ test('register, log out, log back in, and reach the admin dashboard', async ({ p
   await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Fquizzes$/);
   await expect(page.getByRole('heading', { name: 'Log in', level: 1 })).toBeVisible();
 
-  // Log back in with the same credentials.
-  await page.locator('input[name=username]').fill(username);
+  // Log back in with the same credentials. Email is the credential after #446.
+  await page.locator('input[name=email]').fill(`${username}@example.test`);
   await page.locator('input[name=password]').fill(password);
   await page.locator('button[type=submit]').click();
 
@@ -57,7 +57,7 @@ test('deep link while logged out lands at the deep link after login', async ({ p
   await page.goto('/admin/email');
   await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Femail$/);
 
-  await page.locator('input[name=username]').fill(username);
+  await page.locator('input[name=email]').fill(`${username}@example.test`);
   await page.locator('input[name=password]').fill(password);
   await page.locator('button[type=submit]').click();
 

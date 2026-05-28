@@ -109,9 +109,11 @@ type Config struct {
 
 	SessionKey string
 
-	// AdminUsernames is the list of usernames that are promoted to admin on registration.
-	// Parsed from the comma-separated ADMIN_USERNAMES env var.
-	AdminUsernames []string
+	// AdminEmails is the list of email addresses that are promoted to admin on registration.
+	// Parsed from the comma-separated ADMIN_EMAILS env var. Match against the verified
+	// email keeps admin status pinned to the identity we already authenticate, not the
+	// display name a player can change.
+	AdminEmails []string
 
 	// RegistrationEnabled gates the /register routes. Defaults to false so registration is
 	// opt-in per deployment. Parsed from the REGISTRATION_ENABLED env var via strconv.ParseBool.
@@ -275,7 +277,7 @@ func Parse(getenv func(string) string) (*Config, error) {
 	}
 	c.SessionKey = key
 
-	c.AdminUsernames = parseAdminUsernames(getenv("ADMIN_USERNAMES"))
+	c.AdminEmails = parseAdminEmails(getenv("ADMIN_EMAILS"))
 
 	c.GoogleClientID = getenv("GOOGLE_CLIENT_ID")
 	c.GoogleClientSecret = getenv("GOOGLE_CLIENT_SECRET")
@@ -419,8 +421,12 @@ func parseSMTPConfig(getenv func(string) string, c *Config) error {
 	return nil
 }
 
-// parseAdminUsernames splits a comma-separated list, trims whitespace, and drops empty entries.
-func parseAdminUsernames(raw string) []string {
+// parseAdminEmails splits a comma-separated list, trims whitespace,
+// lowercases each entry, and drops empty entries. Lowercasing matches
+// how the register handler normalises the form value before comparing,
+// so an operator-typed mixed-case allowlist entry still matches the
+// registrant's verified email.
+func parseAdminEmails(raw string) []string {
 	if raw == "" {
 		return nil
 	}
@@ -428,7 +434,7 @@ func parseAdminUsernames(raw string) []string {
 	parts := strings.Split(raw, ",")
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
-		trimmed := strings.TrimSpace(p)
+		trimmed := strings.ToLower(strings.TrimSpace(p))
 		if trimmed != "" {
 			out = append(out, trimmed)
 		}
