@@ -218,6 +218,7 @@ func registerGameplayAdmin(ctx context.Context, t *testing.T, client *http.Clien
 	registerForm.Add("username", gameplayAdminUsername)
 	registerForm.Add("email", gameplayAdminUsername+"@example.test")
 	registerForm.Add("password", gameplayAdminPassword)
+	registerForm.Add("password_confirm", gameplayAdminPassword)
 	registerForm.Add("csrf_token", registerToken)
 
 	registerReq, err := http.NewRequestWithContext(

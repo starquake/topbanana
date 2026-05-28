@@ -328,9 +328,10 @@ func TestHandleRegisterSubmit_FirstUser_BecomesAdmin(t *testing.T) {
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 
 	rec := postForm(t, handler, "/register", url.Values{
-		"username": {"alice"},
-		"email":    {"alice@example.test"},
-		"password": {"correctbattery"},
+		"username":         {"alice"},
+		"email":            {"alice@example.test"},
+		"password":         {"correctbattery"},
+		"password_confirm": {"correctbattery"},
 	})
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
@@ -372,9 +373,10 @@ func TestHandleRegisterSubmit_SecondUser_DefaultsToPlayer(t *testing.T) {
 
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 	rec := postForm(t, handler, "/register", url.Values{
-		"username": {"bob"},
-		"email":    {"bob@example.test"},
-		"password": {"correctbattery"},
+		"username":         {"bob"},
+		"email":            {"bob@example.test"},
+		"password":         {"correctbattery"},
+		"password_confirm": {"correctbattery"},
 	})
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
@@ -412,9 +414,10 @@ func TestHandleRegisterSubmit_AdminUsernamesEnv_PromotesToAdmin(t *testing.T) {
 		RegisterDeps{AdminUsernames: []string{"alice", "carol"}},
 	)
 	rec := postForm(t, handler, "/register", url.Values{
-		"username": {"carol"},
-		"email":    {"carol@example.test"},
-		"password": {"correctbattery"},
+		"username":         {"carol"},
+		"email":            {"carol@example.test"},
+		"password":         {"correctbattery"},
+		"password_confirm": {"correctbattery"},
 	})
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
@@ -437,9 +440,10 @@ func TestHandleRegisterSubmit_PasswordTooShort(t *testing.T) {
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 
 	rec := postForm(t, handler, "/register", url.Values{
-		"username": {"alice"},
-		"email":    {"alice@example.test"},
-		"password": {"short"},
+		"username":         {"alice"},
+		"email":            {"alice@example.test"},
+		"password":         {"short"},
+		"password_confirm": {"short"},
 	})
 
 	if got, want := rec.Code, http.StatusBadRequest; got != want {
@@ -464,10 +468,12 @@ func TestHandleRegisterSubmit_PasswordTooLong(t *testing.T) {
 	store := newStubPlayerStore()
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 
+	longPassword := strings.Repeat("a", MaxPasswordLength+1)
 	rec := postForm(t, handler, "/register", url.Values{
-		"username": {"alice"},
-		"email":    {"alice@example.test"},
-		"password": {strings.Repeat("a", MaxPasswordLength+1)},
+		"username":         {"alice"},
+		"email":            {"alice@example.test"},
+		"password":         {longPassword},
+		"password_confirm": {longPassword},
 	})
 
 	if got, want := rec.Code, http.StatusBadRequest; got != want {
@@ -492,9 +498,10 @@ func TestHandleRegisterSubmit_DuplicateUsername(t *testing.T) {
 
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 	rec := postForm(t, handler, "/register", url.Values{
-		"username": {"alice"},
-		"email":    {"alice@example.test"},
-		"password": {"correctbattery"},
+		"username":         {"alice"},
+		"email":            {"alice@example.test"},
+		"password":         {"correctbattery"},
+		"password_confirm": {"correctbattery"},
 	})
 
 	if got, want := rec.Code, http.StatusConflict; got != want {
@@ -515,9 +522,10 @@ func TestHandleRegisterSubmit_DuplicateEmail(t *testing.T) {
 
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 	rec := postForm(t, handler, "/register", url.Values{
-		"username": {"bob"},
-		"email":    {"shared@example.test"},
-		"password": {"correctbattery"},
+		"username":         {"bob"},
+		"email":            {"shared@example.test"},
+		"password":         {"correctbattery"},
+		"password_confirm": {"correctbattery"},
 	})
 
 	if got, want := rec.Code, http.StatusConflict; got != want {
@@ -534,9 +542,10 @@ func TestHandleRegisterSubmit_RejectsInvalidEmail(t *testing.T) {
 	store := newStubPlayerStore()
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 	rec := postForm(t, handler, "/register", url.Values{
-		"username": {"alice"},
-		"email":    {"not-an-email"},
-		"password": {"correctbattery"},
+		"username":         {"alice"},
+		"email":            {"not-an-email"},
+		"password":         {"correctbattery"},
+		"password_confirm": {"correctbattery"},
 	})
 
 	if got, want := rec.Code, http.StatusBadRequest; got != want {
@@ -547,15 +556,78 @@ func TestHandleRegisterSubmit_RejectsInvalidEmail(t *testing.T) {
 	}
 }
 
+func TestHandleRegisterSubmit_MatchingPasswords_CreatesPlayer(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
+
+	rec := postForm(t, handler, "/register", url.Values{
+		"username":         {"alice"},
+		"email":            {"alice@example.test"},
+		"password":         {"correctbattery"},
+		"password_confirm": {"correctbattery"},
+	})
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
+	}
+	if _, err := store.GetPlayerByUsername(t.Context(), "alice"); err != nil {
+		t.Errorf("player should have been created, err = %v", err)
+	}
+}
+
+func TestHandleRegisterSubmit_MismatchedPasswords_Rejects(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
+
+	password := "correctbattery"
+	rec := postForm(t, handler, "/register", url.Values{
+		"username":         {"alice"},
+		"email":            {"alice@example.test"},
+		"password":         {password},
+		"password_confirm": {"correctbatterydifferent"},
+	})
+
+	if got, want := rec.Code, http.StatusBadRequest; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	body := rec.Body.String()
+	if got, want := body, "Passwords do not match."; !strings.Contains(got, want) {
+		t.Errorf("body did not surface mismatch banner, got %q", got)
+	}
+	if got, want := body, `value="alice"`; !strings.Contains(got, want) {
+		t.Errorf("body = %q, should contain %q", got, want)
+	}
+	if got, want := body, `value="alice@example.test"`; !strings.Contains(got, want) {
+		t.Errorf("body = %q, should contain %q", got, want)
+	}
+	// Security: the failed-validation re-render must not echo either
+	// password back into the response so a shoulder-surfer or cached
+	// page can't recover the typed value.
+	if strings.Contains(body, password) {
+		t.Errorf("body must not leak the submitted password, got %q", body)
+	}
+	if strings.Contains(body, "correctbatterydifferent") {
+		t.Errorf("body must not leak the submitted password_confirm, got %q", body)
+	}
+	if _, err := store.GetPlayerByUsername(t.Context(), "alice"); !errors.Is(err, ErrPlayerNotFound) {
+		t.Errorf("player should not have been created, err = %v", err)
+	}
+}
+
 func TestHandleRegisterSubmit_LowercasesAndTrimsEmail(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 	rec := postForm(t, handler, "/register", url.Values{
-		"username": {"alice"},
-		"email":    {"  ALICE@Example.Test "},
-		"password": {"correctbattery"},
+		"username":         {"alice"},
+		"email":            {"  ALICE@Example.Test "},
+		"password":         {"correctbattery"},
+		"password_confirm": {"correctbattery"},
 	})
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
@@ -593,9 +665,10 @@ func TestHandleRegisterSubmit_ClaimsAnonymousSession(t *testing.T) {
 	cookie := rec.Result().Cookies()[0]
 
 	form := url.Values{
-		"username": {"alice"},
-		"email":    {"alice@example.test"},
-		"password": {"correctbattery"},
+		"username":         {"alice"},
+		"email":            {"alice@example.test"},
+		"password":         {"correctbattery"},
+		"password_confirm": {"correctbattery"},
 	}
 	req := httptest.NewRequestWithContext(
 		t.Context(), http.MethodPost, "/register", strings.NewReader(form.Encode()),
@@ -656,9 +729,10 @@ func TestHandleRegisterSubmit_ClaimWithTakenUsername(t *testing.T) {
 	cookie := rec.Result().Cookies()[0]
 
 	form := url.Values{
-		"username": {"alice"}, // already taken by the seeded credentialled row
-		"email":    {"new-alice@example.test"},
-		"password": {"correctbattery"},
+		"username":         {"alice"}, // already taken by the seeded credentialled row
+		"email":            {"new-alice@example.test"},
+		"password":         {"correctbattery"},
+		"password_confirm": {"correctbattery"},
 	}
 	req := httptest.NewRequestWithContext(
 		t.Context(), http.MethodPost, "/register", strings.NewReader(form.Encode()),
@@ -717,9 +791,10 @@ func TestHandleRegisterSubmit_ClaimAlreadyClaimed_FallsBackToCreate(t *testing.T
 	cookie := rec.Result().Cookies()[0]
 
 	form := url.Values{
-		"username": {"latecomer"},
-		"email":    {"latecomer@example.test"},
-		"password": {"correctbattery"},
+		"username":         {"latecomer"},
+		"email":            {"latecomer@example.test"},
+		"password":         {"correctbattery"},
+		"password_confirm": {"correctbattery"},
 	}
 	req := httptest.NewRequestWithContext(
 		t.Context(), http.MethodPost, "/register", strings.NewReader(form.Encode()),
@@ -1101,9 +1176,10 @@ func TestHandleRegisterSubmit_WhitespaceOnlyUsername(t *testing.T) {
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 
 	rec := postForm(t, handler, "/register", url.Values{
-		"username": {"   "},
-		"email":    {"   @example.test"},
-		"password": {"correctbattery"},
+		"username":         {"   "},
+		"email":            {"   @example.test"},
+		"password":         {"correctbattery"},
+		"password_confirm": {"correctbattery"},
 	})
 
 	if got, want := rec.Code, http.StatusBadRequest; got != want {
@@ -1126,9 +1202,10 @@ func TestHandleRegisterSubmit_PasswordExactlyMinLength(t *testing.T) {
 
 	password := strings.Repeat("a", MinPasswordLength) // exactly 13 characters
 	rec := postForm(t, handler, "/register", url.Values{
-		"username": {"alice"},
-		"email":    {"alice@example.test"},
-		"password": {password},
+		"username":         {"alice"},
+		"email":            {"alice@example.test"},
+		"password":         {password},
+		"password_confirm": {password},
 	})
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {

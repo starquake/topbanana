@@ -150,8 +150,9 @@ func HandleRegisterSubmit(
 		rawUsername := r.PostFormValue("username")
 		rawEmail := r.PostFormValue("email")
 		password := r.PostFormValue("password")
+		passwordConfirm := r.PostFormValue("password_confirm")
 
-		input := validateRegisterInput(rawUsername, rawEmail, password)
+		input := validateRegisterInput(rawUsername, rawEmail, password, passwordConfirm)
 		if !input.OK {
 			render.render(w, r, http.StatusBadRequest, formData{
 				Title:      "Register",
@@ -499,7 +500,7 @@ type registerInput struct {
 
 // validateRegisterInput trims the username and email, lowercases the
 // email, and validates the inputs.
-func validateRegisterInput(username, email, password string) registerInput {
+func validateRegisterInput(username, email, password, passwordConfirm string) registerInput {
 	cleanedUsername := strings.TrimSpace(username)
 	cleanedEmail := strings.ToLower(strings.TrimSpace(email))
 	if cleanedUsername == "" {
@@ -529,6 +530,12 @@ func validateRegisterInput(username, email, password string) registerInput {
 			CleanedUsername: cleanedUsername, CleanedEmail: cleanedEmail,
 			ErrMsg: fmt.Sprintf("Password must be at most %d characters.", MaxPasswordLength),
 			OK:     false,
+		}
+	}
+	if password != passwordConfirm {
+		return registerInput{
+			CleanedUsername: cleanedUsername, CleanedEmail: cleanedEmail,
+			ErrMsg: "Passwords do not match.", OK: false,
 		}
 	}
 

@@ -44,6 +44,13 @@
                 <p class="mt-2 text-xs text-text-mute">{{passwordHelp}}</p>
             </div>
 
+            <div class="form-field">
+                <label for="password_confirm" class="label-eyebrow">Confirm password</label>
+                <input id="password_confirm" name="password_confirm" type="password" required
+                       autocomplete="new-password"
+                       class="form-input">
+            </div>
+
             {{/* flex-row-reverse pushes "Register" to the right (thumb-
                  friendly on phones) while keeping its source position
                  first so keyboard Tab focuses the primary CTA before

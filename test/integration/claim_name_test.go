@@ -79,6 +79,7 @@ func registerPlayer(
 	form.Add("username", username)
 	form.Add("email", username+"@example.test")
 	form.Add("password", password)
+	form.Add("password_confirm", password)
 	form.Add("csrf_token", token)
 
 	req, err := http.NewRequestWithContext(

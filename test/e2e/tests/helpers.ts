@@ -27,6 +27,7 @@ export async function registerAdmin(page: Page, username: string): Promise<void>
   await page.locator('input[name=username]').fill(username);
   await page.locator('input[name=email]').fill(`${username}@example.test`);
   await page.locator('input[name=password]').fill(PASSWORD);
+  await page.locator('input[name=password_confirm]').fill(PASSWORD);
   await page.locator('button[type=submit]').click();
   // Post-register the gate (#111 PR3) bounces unverified admins to
   // /verify-email/pending. SMTP isn't wired in e2e so we cannot
