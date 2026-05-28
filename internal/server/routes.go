@@ -271,6 +271,11 @@ func addProfileRoutes(
 		"POST /profile/username",
 		csrfMW(requireAuthn(profile.HandleProfileUsername(logger, csrfMgr, stores.Players))),
 	)
+	mux.Handle("GET /profile/password", requireAuthn(profile.HandleProfilePassword(logger, csrfMgr)))
+	mux.Handle(
+		"POST /profile/password",
+		csrfMW(requireAuthn(profile.HandleProfilePasswordChange(logger, csrfMgr, stores.Players, sessions))),
+	)
 }
 
 // addAdminRoutes registers every /admin/* route. Each unsafe (POST/PUT/...)

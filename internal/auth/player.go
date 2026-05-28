@@ -195,6 +195,15 @@ type PlayerStore interface {
 	// by username. Used by the operator-only -reset-password tool to rotate a
 	// forgotten admin password. Returns ErrPlayerNotFound when no row matches.
 	SetPlayerPasswordHash(ctx context.Context, username, passwordHash string) error
+	// ChangePlayerPassword atomically rotates password_hash and bumps
+	// session_version on the row identified by id. The session_version
+	// bump invalidates every other live cookie for the same account the
+	// moment the transaction commits, mirroring the forgot-password
+	// flow. Used by the signed-in /profile/password rotation; the
+	// forgot-password flow still goes through ConsumeResetToken because
+	// that path also marks the reset row consumed in the same
+	// transaction. Returns ErrPlayerNotFound when no row matches.
+	ChangePlayerPassword(ctx context.Context, playerID int64, passwordHash string) error
 	// UpdatePlayerUsername renames an anonymous (password_hash IS NULL) row
 	// in place. The session cookie keeps pointing at the same row, so the
 	// caller stays "logged in" as the same player; the player remains

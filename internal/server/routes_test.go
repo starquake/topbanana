@@ -54,6 +54,10 @@ func (stubPlayerStore) SetPlayerPasswordHash(_ context.Context, _, _ string) err
 	return errRouteStub
 }
 
+func (stubPlayerStore) ChangePlayerPassword(_ context.Context, _ int64, _ string) error {
+	return errRouteStub
+}
+
 func (stubPlayerStore) UpdatePlayerUsername(_ context.Context, _ int64, _ string) (*auth.Player, error) {
 	return nil, errRouteStub
 }
