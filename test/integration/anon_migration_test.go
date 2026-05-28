@@ -53,6 +53,10 @@ func TestAnonMigration_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lookup destination player err = %v, want nil", err)
 	}
+	// Stamp email_verified_at so the post-#492 verify-gate at /login
+	// lets the destination account through; the migration this test
+	// pins is downstream of a successful sign-in.
+	verifyPlayerEmail(ctx, t, setup.DBURI, "migration-dest")
 
 	// Anonymous play. A fresh client gets an EnsurePlayer petname row
 	// the first time it hits the API.

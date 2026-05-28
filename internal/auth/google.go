@@ -204,6 +204,23 @@ func HandleGoogleCallback(
 			return
 		}
 
+		// Defence-in-depth mirror of HandleLoginSubmit's verify gate
+		// (#492). createGooglePlayer / claimAnonymousSessionPlayer /
+		// linkExistingPlayerByEmail all stamp email_verified_at because
+		// Google attests the address on every callback, so this branch
+		// should not fire in production - it exists so a future OAuth
+		// store regression cannot silently mint a session for a row
+		// whose email_verified_at column is still NULL.
+		if !player.IsEmailVerified() {
+			logger.WarnContext(r.Context(), "google sign-in blocked: email_verified_at not stamped",
+				slog.Int64("player_id", player.ID))
+			renderGoogleError(render, w, r,
+				"Sign-in blocked: your email is not verified. Try requesting a verification link.",
+				registrationEnabled)
+
+			return
+		}
+
 		sessions.Set(w, player.ID, player.SessionVersion)
 		migrateGamesAfterSignIn(r.Context(), logger, players, games, sessionPlayerID, player.ID)
 		target := next

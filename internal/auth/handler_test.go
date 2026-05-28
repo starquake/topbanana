@@ -14,6 +14,7 @@ import (
 	"time"
 
 	. "github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/session"
 )
 
@@ -986,6 +987,39 @@ func TestHandleLoginForm_AnonymousSession_RendersForm(t *testing.T) {
 	}
 }
 
+// loginDeps returns a LoginDeps with the supplied store + session
+// manager + limiter and the rest of the fields zero-valued. Mailer /
+// Tokens / ResendLimiter staying nil keeps the verify-resend branch
+// dormant for tests that don't exercise it; the verified-email
+// helper [markVerified] is what flips the gate off for happy-path
+// tests.
+func loginDeps(
+	store PlayerStore, sessions *session.Manager, limiter *LoginRateLimiter,
+) LoginDeps {
+	return LoginDeps{
+		Players:  store,
+		Sessions: sessions,
+		Limiter:  limiter,
+	}
+}
+
+// markVerified stamps email_verified_at on the named stub player so
+// the post-#492 login gate lets them through. Production rows get
+// stamped via SendVerifyEmail's ConsumeVerifyToken path; in tests we
+// just toggle the column directly because the verify dance is not
+// what these cases pin.
+func markVerified(t *testing.T, store *stubPlayerStore, username string) {
+	t.Helper()
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	p, ok := store.byName[username]
+	if !ok {
+		t.Fatalf("markVerified: no stub player named %q", username)
+	}
+	now := time.Now().UTC()
+	p.EmailVerifiedAt = &now
+}
+
 func TestHandleLoginSubmit_Success(t *testing.T) {
 	t.Parallel()
 
@@ -997,9 +1031,10 @@ func TestHandleLoginSubmit_Success(t *testing.T) {
 	if _, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RoleAdmin); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
+	markVerified(t, store, "alice")
 
-	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil,
-		NewLoginRateLimiter(time.Minute, nil), false, false)
+	handler := HandleLoginSubmit(discardLogger(), nil,
+		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"alice"},
 		"email":    {"alice@example.test"},
@@ -1028,9 +1063,10 @@ func TestHandleLoginSubmit_HonoursNext(t *testing.T) {
 	if _, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RoleAdmin); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
+	markVerified(t, store, "alice")
 
-	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil,
-		NewLoginRateLimiter(time.Minute, nil), false, false)
+	handler := HandleLoginSubmit(discardLogger(), nil,
+		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"alice"},
 		"email":    {"alice@example.test"},
@@ -1060,9 +1096,10 @@ func TestHandleLoginSubmit_RejectsUnsafeNext(t *testing.T) {
 	if _, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RoleAdmin); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
+	markVerified(t, store, "alice")
 
-	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil,
-		NewLoginRateLimiter(time.Minute, nil), false, false)
+	handler := HandleLoginSubmit(discardLogger(), nil,
+		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"alice"},
 		"email":    {"alice@example.test"},
@@ -1103,9 +1140,10 @@ func TestHandleLoginSubmit_Success_Player(t *testing.T) {
 	if _, err := store.CreatePlayer(t.Context(), "bob", "bob@example.test", hash, RolePlayer); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
+	markVerified(t, store, "bob")
 
-	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil,
-		NewLoginRateLimiter(time.Minute, nil), false, false)
+	handler := HandleLoginSubmit(discardLogger(), nil,
+		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"bob"},
 		"email":    {"bob@example.test"},
@@ -1124,8 +1162,8 @@ func TestHandleLoginSubmit_BadCredentials_UnknownUser(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
-	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil,
-		NewLoginRateLimiter(time.Minute, nil), false, false)
+	handler := HandleLoginSubmit(discardLogger(), nil,
+		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"ghost"},
@@ -1152,9 +1190,10 @@ func TestHandleLoginSubmit_BadCredentials_WrongPassword(t *testing.T) {
 	if _, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RolePlayer); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
+	markVerified(t, store, "alice")
 
-	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil,
-		NewLoginRateLimiter(time.Minute, nil), false, false)
+	handler := HandleLoginSubmit(discardLogger(), nil,
+		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"alice"},
 		"email":    {"alice@example.test"},
@@ -1178,8 +1217,8 @@ func TestHandleLoginSubmit_RejectsEmptyHash(t *testing.T) {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := HandleLoginSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), nil,
-		NewLoginRateLimiter(time.Minute, nil), false, false)
+	handler := HandleLoginSubmit(discardLogger(), nil,
+		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 	rec := postForm(t, handler, "/login", url.Values{
 		"username": {"legacy"},
 		"email":    {"legacy@example.test"},
@@ -1282,5 +1321,127 @@ func TestHandleLogout_ClearsCookieAndRedirects(t *testing.T) {
 	}
 	if got, want := c.MaxAge, -1; got != want {
 		t.Errorf("cookie MaxAge = %d, want %d", got, want)
+	}
+}
+
+// TestHandleLoginSubmit_UnverifiedEmail_RefusesAndResends pins #492:
+// valid credentials against a row whose email_verified_at is NULL must
+// re-render the login form (no 303 to landing, no session cookie set)
+// and trigger a fresh verify-email send through the wired-in mailer.
+func TestHandleLoginSubmit_UnverifiedEmail_RefusesAndResends(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	hash, err := HashPassword("correctbattery")
+	if err != nil {
+		t.Fatalf("HashPassword err = %v, want nil", err)
+	}
+	if _, err := store.CreatePlayer(t.Context(), "unv", "unv@example.test", hash, RolePlayer); err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+
+	tokens := &recordingVerifyTokenStore{}
+	sender := &recordingSender{}
+	sessions := session.New([]byte("k"), true)
+	handler := HandleLoginSubmit(discardLogger(), nil, LoginDeps{
+		Players:       store,
+		Sessions:      sessions,
+		Limiter:       NewLoginRateLimiter(time.Minute, nil),
+		Mailer:        sender,
+		Tokens:        tokens,
+		ResendLimiter: NewVerifyResendLimiter(time.Minute, nil),
+		BaseURL:       "https://topbanana.example",
+	})
+
+	rec := postForm(t, handler, "/login", url.Values{
+		"username": {"unv"},
+		"password": {"correctbattery"},
+	})
+
+	if got, want := rec.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if want := "verify your email"; !strings.Contains(body, want) {
+		t.Errorf("body missing verify-email banner; body=%.300q", body)
+	}
+	if want := "unv@example.test"; !strings.Contains(body, want) {
+		t.Errorf("body missing recipient address; body=%.300q", body)
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == session.CookieName && c.Value != "" {
+			t.Errorf("session cookie set on unverified login: %+v", c)
+		}
+	}
+
+	// The resend goroutine fires off the request goroutine; give it
+	// up to a second to land before asserting. The mailer is the
+	// in-process recordingSender so the wait is just goroutine
+	// scheduling, not network.
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if len(sender.Sent()) > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	sent := sender.Sent()
+	if got, want := len(sent), 1; got != want {
+		t.Fatalf("sender.Sent() len = %d, want %d", got, want)
+	}
+	if got, want := sent[0].Kind, mailer.KindVerify; got != want {
+		t.Errorf("sent[0].Kind = %q, want %q", got, want)
+	}
+	if got, want := sent[0].To, "unv@example.test"; got != want {
+		t.Errorf("sent[0].To = %q, want %q", got, want)
+	}
+	if got, want := len(tokens.Created()), 1; got != want {
+		t.Errorf("tokens.Created() len = %d, want %d", got, want)
+	}
+}
+
+// TestHandleLoginSubmit_VerifiedEmail_SignsIn pins the verified-row
+// happy path: a stamped email_verified_at lets the handler set the
+// session cookie and redirect, with no resend leaking out.
+func TestHandleLoginSubmit_VerifiedEmail_SignsIn(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	hash, err := HashPassword("correctbattery")
+	if err != nil {
+		t.Fatalf("HashPassword err = %v, want nil", err)
+	}
+	if _, err := store.CreatePlayer(t.Context(), "ver", "ver@example.test", hash, RoleAdmin); err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	markVerified(t, store, "ver")
+
+	tokens := &recordingVerifyTokenStore{}
+	sender := &recordingSender{}
+	handler := HandleLoginSubmit(discardLogger(), nil, LoginDeps{
+		Players:       store,
+		Sessions:      session.New([]byte("k"), true),
+		Limiter:       NewLoginRateLimiter(time.Minute, nil),
+		Mailer:        sender,
+		Tokens:        tokens,
+		ResendLimiter: NewVerifyResendLimiter(time.Minute, nil),
+		BaseURL:       "https://topbanana.example",
+	})
+
+	rec := postForm(t, handler, "/login", url.Values{
+		"username": {"ver"},
+		"password": {"correctbattery"},
+	})
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
+	}
+	// Wait briefly to catch any rogue async send before asserting.
+	time.Sleep(20 * time.Millisecond)
+	if got, want := len(sender.Sent()), 0; got != want {
+		t.Errorf("sender.Sent() len = %d, want %d (verified login should not resend)", got, want)
+	}
+	if got, want := len(tokens.Created()), 0; got != want {
+		t.Errorf("tokens.Created() len = %d, want %d", got, want)
 	}
 }

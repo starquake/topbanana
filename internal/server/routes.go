@@ -212,6 +212,12 @@ func addAuthRoutes(
 		)
 	}
 	loginLimiter := auth.NewLoginRateLimiter(auth.LoginCooldown(), cfg.TrustedProxyCIDRs)
+	// loginResendLimiter is a dedicated per-IP cooldown for the
+	// verify-email send the login handler issues on an unverified-but-
+	// correct credential attempt (#492). Separate from the resend
+	// limiter on the verify-email/pending form so a stampede on one
+	// path cannot starve the other.
+	loginResendLimiter := auth.NewVerifyResendLimiter(auth.VerifyResendCooldown(), cfg.TrustedProxyCIDRs)
 	mux.Handle(
 		"GET /login",
 		auth.HandleLoginForm(logger, csrfMgr, stores.Players, sessions, cfg.RegistrationEnabled, googleEnabled),
@@ -219,8 +225,18 @@ func addAuthRoutes(
 	mux.Handle(
 		"POST /login",
 		csrfMW(auth.HandleLoginSubmit(
-			logger, csrfMgr, stores.Players, sessions, stores.GameMigrator, loginLimiter,
-			cfg.RegistrationEnabled, googleEnabled,
+			logger, csrfMgr, auth.LoginDeps{
+				Players:             stores.Players,
+				Sessions:            sessions,
+				Games:               stores.GameMigrator,
+				Limiter:             loginLimiter,
+				Mailer:              mailerTester,
+				Tokens:              stores.VerifyTokens,
+				ResendLimiter:       loginResendLimiter,
+				BaseURL:             cfg.BaseURL,
+				RegistrationEnabled: cfg.RegistrationEnabled,
+				GoogleEnabled:       googleEnabled,
+			},
 		)),
 	)
 	mux.Handle("POST /logout", csrfMW(auth.HandleLogout(sessions)))

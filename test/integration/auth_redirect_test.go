@@ -51,6 +51,13 @@ func TestAuthRedirect_PerRole(t *testing.T) {
 		}
 	})
 
+	// Stamp email_verified_at on both registered rows so the post-#492
+	// verify-gate at /login (HandleLoginSubmit) lets them through.
+	// Pre-#492 these subtests ran against a gate-free /login; now they
+	// pin the post-verify happy path.
+	verifyPlayerEmail(ctx, t, srv.DBURI, "redirect-admin")
+	verifyPlayerEmail(ctx, t, srv.DBURI, "redirect-player")
+
 	t.Run("admin login lands on /admin/quizzes", func(t *testing.T) {
 		client := authClient(t)
 		location := loginForRedirect(ctx, t, client, baseURL, "redirect-admin", "redirect-admin-pass-123")

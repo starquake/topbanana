@@ -376,29 +376,53 @@ func redirectIfSignedIn(
 	return true
 }
 
+// LoginDeps bundles the dependencies HandleLoginSubmit needs to
+// resend a verification email when a credentialled but unverified
+// player attempts to log in (#492). Mailer / Tokens / BaseURL together
+// cover the verify-email side; ResendLimiter is the per-IP cooldown
+// shared with the public resend form, so a hot bucket on the login
+// branch cannot starve the user-driven resend and vice versa. The
+// bundle exists so HandleLoginSubmit stays under revive's argument
+// limit as the dep set grows.
+type LoginDeps struct {
+	Players             PlayerStore
+	Sessions            *session.Manager
+	Games               AnonymousGameMigrator
+	Limiter             *LoginRateLimiter
+	Mailer              VerifyEmailSender
+	Tokens              VerifyTokenStore
+	ResendLimiter       *VerifyResendLimiter
+	BaseURL             string
+	RegistrationEnabled bool
+	GoogleEnabled       bool
+}
+
 // HandleLoginSubmit returns a handler for POST /login. It verifies the
 // credentials, signs the player in, and redirects to the admin landing page.
-// registrationEnabled controls whether error renders show the "No account? Register" link.
-// googleEnabled controls whether error renders show the "Sign in with Google" button.
-// games is the post-login migration hook (#406): when the request
+// deps.RegistrationEnabled controls whether error renders show the "No account? Register" link.
+// deps.GoogleEnabled controls whether error renders show the "Sign in with Google" button.
+// deps.Games is the post-login migration hook (#406): when the request
 // arrives with a session pointing at an anonymous row, that row's
 // game history is carried onto the signed-in account. Nil disables
 // the migration - accepted by callers (tests) that don't care about
 // the migration path.
+//
+// When credentials check out but the player's email is unverified
+// (#492), the handler re-renders the login form with a banner naming
+// the address and dispatches a fresh verification email best-effort
+// via deps.Mailer / deps.Tokens. The session is NOT set, so the
+// visitor stays signed-out; deps.Mailer / deps.Tokens may be nil in
+// unit tests, in which case the dispatch is skipped silently.
 func HandleLoginSubmit(
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
-	players PlayerStore,
-	sessions *session.Manager,
-	games AnonymousGameMigrator,
-	limiter *LoginRateLimiter,
-	registrationEnabled, googleEnabled bool,
+	deps LoginDeps,
 ) http.Handler {
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
 	formCfg := loginFormCfg{
 		render:              render,
-		registrationEnabled: registrationEnabled,
-		googleEnabled:       googleEnabled,
+		registrationEnabled: deps.RegistrationEnabled,
+		googleEnabled:       deps.GoogleEnabled,
 	}
 	// dummyHash computes a bcrypt hash once on first use. The handler runs
 	// CheckPassword against it when the username does not exist so the
@@ -432,23 +456,35 @@ func HandleLoginSubmit(
 		// blocks the bcrypt compare too, and so the limiter fires whether
 		// or not the submitted username exists - same shape the dummy-hash
 		// timing equalisation already gives the credential-check path.
-		if wait, allowed := limiter.Allow(limiter.ClientIP(r)); !allowed {
+		if wait, allowed := deps.Limiter.Allow(deps.Limiter.ClientIP(r)); !allowed {
 			renderLoginRateLimited(formCfg, w, r, username, wait)
 
 			return
 		}
 
-		player, ok := authenticateLogin(logger, formCfg, w, r, players, dummyHash, username, password)
+		player, ok := authenticateLogin(logger, formCfg, w, r, deps.Players, dummyHash, username, password)
 		if !ok {
 			return
 		}
 
+		// Credentials are correct but the account email is unverified
+		// (#492): refuse the sign-in, re-render the login form with a
+		// banner that names the address, and dispatch a fresh verify
+		// link best-effort. The login limiter was already stamped above,
+		// so this branch counts toward the per-IP cap just like a
+		// wrong-password attempt.
+		if !player.IsEmailVerified() {
+			renderUnverifiedLogin(logger, formCfg, deps, w, r, player)
+
+			return
+		}
+
 		var priorSessionPlayerID *int64
-		if id, ok := sessions.PlayerID(r); ok {
+		if id, ok := deps.Sessions.PlayerID(r); ok {
 			priorSessionPlayerID = &id
 		}
-		sessions.Set(w, player.ID, player.SessionVersion)
-		migrateGamesAfterSignIn(r.Context(), logger, players, games, priorSessionPlayerID, player.ID)
+		deps.Sessions.Set(w, player.ID, player.SessionVersion)
+		migrateGamesAfterSignIn(r.Context(), logger, deps.Players, deps.Games, priorSessionPlayerID, player.ID)
 		redirectAfterLogin(w, r, player.Role)
 	})
 }
@@ -509,6 +545,70 @@ func authenticateLogin(
 	}
 
 	return player, true
+}
+
+// renderUnverifiedLogin re-renders the login form with the
+// "please verify your email" banner naming the resolved address, and
+// fires a fresh verify-email send through the per-IP resend limiter.
+// Status stays 200 OK so an unverified visitor who reloads sees the
+// form again without the browser flagging a 4xx (the response shape
+// mirrors the verify-email/request flow's success render).
+//
+// Telling the visitor "we resent the link to <email>" leaks that the
+// credentials were correct - an enumeration oracle. Accepted as the
+// UX cost: a generic "invalid username or password" here would make
+// unverified-but-correct logins feel like wrong-password to a real
+// user. Decided in #492.
+func renderUnverifiedLogin(
+	logger *slog.Logger,
+	cfg loginFormCfg,
+	deps LoginDeps,
+	w http.ResponseWriter,
+	r *http.Request,
+	player *Player,
+) {
+	dispatchVerifyResend(r, logger, deps, player)
+	cfg.render.render(w, r, http.StatusOK, formData{
+		Title:        "Log in",
+		Username:     player.Username,
+		Message:      "Please verify your email - we just resent the link to " + player.Email + ".",
+		ShowRegister: cfg.registrationEnabled,
+		ShowGoogle:   cfg.googleEnabled,
+		Next:         SafeNextPath(r.PostFormValue("next")),
+	})
+}
+
+// dispatchVerifyResend mirrors dispatchVerifyEmail but routes through
+// deps.ResendLimiter so a stampede on the login form cannot burn an
+// unbounded number of SMTP attempts for the same address. A blocked
+// limiter is treated as success-from-the-visitor's-perspective: the
+// banner still claims a resend so the response shape stays uniform
+// (the previous send is, by definition, recent). Detached context +
+// bounded timeout match dispatchVerifyEmail's pattern.
+func dispatchVerifyResend(
+	r *http.Request,
+	logger *slog.Logger,
+	deps LoginDeps,
+	player *Player,
+) {
+	if deps.Mailer == nil || deps.Tokens == nil || deps.ResendLimiter == nil {
+		return
+	}
+	if deps.BaseURL == "" {
+		logger.WarnContext(r.Context(), "verify email resend skipped: BASE_URL is empty",
+			slog.Int64("player_id", player.ID))
+
+		return
+	}
+	if _, allowed := deps.ResendLimiter.Allow(deps.ResendLimiter.ClientIP(r)); !allowed {
+		return
+	}
+	bg, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), verifyEmailDispatchTimeout)
+	go func() {
+		defer cancel()
+		SendVerifyEmailBestEffort(bg, logger, deps.Tokens, deps.Mailer,
+			deps.BaseURL, player.Email, player.ID, time.Now().UTC())
+	}()
 }
 
 // renderLoginRateLimited re-renders the login form with the
