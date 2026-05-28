@@ -440,7 +440,7 @@ func runHTTPServer(ctx, signalCtx context.Context, ln net.Listener, srv http.Han
 			msg := "error listening and serving"
 			logger.ErrorContext(signalCtx, msg, slog.Any("err", httpErr))
 
-			return fmt.Errorf("%v: %w", msg, httpErr)
+			return fmt.Errorf("%s: %w", msg, httpErr)
 		}
 
 		return nil

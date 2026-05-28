@@ -132,7 +132,6 @@ func (s *QuizStore) QuizExists(ctx context.Context, id int64) (bool, error) {
 
 // GetQuiz returns a quiz by its ID.
 func (s *QuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
-	var err error
 	row, err := s.q.GetQuiz(ctx, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -191,7 +190,6 @@ func (s *QuizStore) UpdateQuiz(ctx context.Context, qz *quiz.Quiz) error {
 
 // ListQuestions retrieves a list of questions for the specified quiz ID, including their options, from the data store.
 func (s *QuizStore) ListQuestions(ctx context.Context, quizID int64) ([]*quiz.Question, error) {
-	var err error
 	rows, err := s.q.ListQuestionsByQuizID(ctx, quizID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list questions for quiz %d: %w", quizID, err)
@@ -222,7 +220,6 @@ func (s *QuizStore) ListQuestions(ctx context.Context, quizID int64) ([]*quiz.Qu
 
 // GetQuestion retrieves a question by its ID, including its options, from the data store or returns an appropriate error.
 func (s *QuizStore) GetQuestion(ctx context.Context, id int64) (*quiz.Question, error) {
-	var err error
 	row, err := s.q.GetQuestion(ctx, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -443,7 +440,6 @@ func execSwapQuestionPositions(
 
 // GetOption retrieves an option by its ID from the data store and returns it. Returns ErrOptionNotFound if no option is found.
 func (s *QuizStore) GetOption(ctx context.Context, optionID int64) (*quiz.Option, error) {
-	var err error
 	row, err := s.q.GetOption(ctx, optionID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -869,9 +865,7 @@ func (s *QuizStore) deleteOptions(ctx context.Context, q *db.Queries, ids []int6
 }
 
 func (*QuizStore) deleteOption(ctx context.Context, q *db.Queries, id int64) error {
-	var res sql.Result
-	var err error
-	res, err = q.DeleteOption(ctx, id)
+	res, err := q.DeleteOption(ctx, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete option %d: %w", id, err)
 	}

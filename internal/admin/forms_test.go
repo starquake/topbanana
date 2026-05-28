@@ -40,14 +40,14 @@ func TestQuizForm_Valid(t *testing.T) {
 						{
 							Text: "Question 1",
 							Options: []*quiz.Option{
-								{Text: "Option 1"},
+								{Text: "Option 1", Correct: true},
 								{Text: "Option 2"},
 							},
 						},
 						{
 							Text: "Question 2",
 							Options: []*quiz.Option{
-								{Text: "Option 3"},
+								{Text: "Option 3", Correct: true},
 								{Text: "Option 4"},
 							},
 						},
@@ -55,9 +55,10 @@ func TestQuizForm_Valid(t *testing.T) {
 				},
 			},
 			{
-				// Multi-correct, no-correct, and all-correct are all
-				// allowed configurations - the admin UI offers a checkbox
-				// per option and the player flow handles each.
+				// Multi-correct and all-correct are allowed - the admin UI
+				// offers a checkbox per option and the player flow handles
+				// each. A question with no correct option is rejected
+				// (unscorable); that case lives in the invalid set below.
 				name: "valid quiz with multiple correct options on a question",
 				quiz: quiz.Quiz{
 					Title:       "Quiz multi-correct",
@@ -89,23 +90,6 @@ func TestQuizForm_Valid(t *testing.T) {
 								{Text: "red", Correct: true},
 								{Text: "blue", Correct: true},
 								{Text: "green", Correct: true},
-							},
-						},
-					},
-				},
-			},
-			{
-				name: "valid quiz with no correct options on a question",
-				quiz: quiz.Quiz{
-					Title:       "Quiz no-correct",
-					Slug:        "quiz-no-correct",
-					Description: "Quiz description",
-					Questions: []*quiz.Question{
-						{
-							Text: "Trick question",
-							Options: []*quiz.Option{
-								{Text: "wrong"},
-								{Text: "also wrong"},
 							},
 						},
 					},
@@ -194,7 +178,44 @@ func TestQuizForm_Valid(t *testing.T) {
 					Slug:        "quiz-6",
 					Description: "Quiz 6 Description",
 					Questions: []*quiz.Question{
-						{Text: "Question 1", Options: []*quiz.Option{{Text: ""}}},
+						{Text: "Question 1", Options: []*quiz.Option{{Text: "", Correct: true}}},
+					},
+				},
+			},
+			{
+				name: "quiz with question with no correct option",
+				quiz: quiz.Quiz{
+					Title:       "Quiz no-correct",
+					Slug:        "quiz-no-correct",
+					Description: "Quiz description",
+					Questions: []*quiz.Question{
+						{
+							Text: "Trick question",
+							Options: []*quiz.Option{
+								{Text: "wrong"},
+								{Text: "also wrong"},
+							},
+						},
+					},
+				},
+			},
+			{
+				name: "quiz with question with too many options",
+				quiz: quiz.Quiz{
+					Title:       "Quiz too-many",
+					Slug:        "quiz-too-many",
+					Description: "Quiz description",
+					Questions: []*quiz.Question{
+						{
+							Text: "Pick one",
+							Options: []*quiz.Option{
+								{Text: "a", Correct: true},
+								{Text: "b"},
+								{Text: "c"},
+								{Text: "d"},
+								{Text: "e"},
+							},
+						},
 					},
 				},
 			},
@@ -211,4 +232,59 @@ func TestQuizForm_Valid(t *testing.T) {
 			})
 		}
 	})
+}
+
+// TestQuestionForm_Valid_OptionRules pins the per-question option rules
+// directly: a question needs 1..MaxOptions options and at least one
+// correct. Mirrors the import-path validator so both surfaces agree.
+func TestQuestionForm_Valid_OptionRules(t *testing.T) {
+	t.Parallel()
+
+	tooMany := make([]*quiz.Option, 0, MaxOptions+1)
+	tooMany = append(tooMany, &quiz.Option{Text: "a", Correct: true})
+	for range MaxOptions {
+		tooMany = append(tooMany, &quiz.Option{Text: "x"})
+	}
+
+	tests := []struct {
+		name      string
+		question  quiz.Question
+		wantValid bool
+	}{
+		{
+			name:      "no options",
+			question:  quiz.Question{Text: "Q", Options: nil},
+			wantValid: false,
+		},
+		{
+			name: "no correct option",
+			question: quiz.Question{Text: "Q", Options: []*quiz.Option{
+				{Text: "a"}, {Text: "b"},
+			}},
+			wantValid: false,
+		},
+		{
+			name:      "too many options",
+			question:  quiz.Question{Text: "Q", Options: tooMany},
+			wantValid: false,
+		},
+		{
+			name: "one correct within cap",
+			question: quiz.Question{Text: "Q", Options: []*quiz.Option{
+				{Text: "a", Correct: true}, {Text: "b"},
+			}},
+			wantValid: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			problems := ValidateQuestionForm(t.Context(), &tc.question)
+			_, hasOptionProblem := problems["options"]
+			if got, want := !hasOptionProblem, tc.wantValid; got != want {
+				t.Errorf("options problem absent = %v, want %v (problems=%v)", got, want, problems)
+			}
+		})
+	}
 }

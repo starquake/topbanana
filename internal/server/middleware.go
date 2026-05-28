@@ -27,9 +27,11 @@ func (rw *responseWriter) Unwrap() http.ResponseWriter {
 // handler becomes an Error-level slog entry (with the stack trace) on
 // the request's context plus a generic 500 to the client, instead of
 // the stdlib's default-logger stderr dump that loses every request
-// field (#346). Mount as the outermost wrapper so it covers
-// logRequests too - otherwise the panic kills the response writer
-// before logRequests can record the status.
+// field (#346). A panic unwinds straight past logRequests without its
+// post-call log line firing, so this recover is the only entry that
+// records the request when a handler panics; mount it as the outermost
+// wrapper so the recover happens before the stdlib server sees the
+// panic.
 func recoverPanic(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {

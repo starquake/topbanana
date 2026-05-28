@@ -49,6 +49,13 @@ var ErrSMTPPortInvalid = errors.New("SMTP_PORT must be an integer in 1..65535")
 // leaking into the logs).
 var ErrSMTPAuthIncomplete = errors.New("SMTP_USERNAME and SMTP_PASSWORD must both be set or both empty")
 
+// ErrSMTPAuthOverCleartext is returned when SMTP credentials are
+// configured but SMTP_TLS is false, which would send the username and
+// password as PLAIN auth over an unencrypted connection. The local
+// Mailpit setup (SMTP_TLS=false with no credentials) stays allowed.
+var ErrSMTPAuthOverCleartext = errors.New(
+	"smtp_username and smtp_password require smtp_tls=true; refusing to send credentials over cleartext")
+
 const (
 	// AppEnvironmentDefault is the default application environment.
 	AppEnvironmentDefault = "development"
@@ -416,6 +423,11 @@ func parseSMTPConfig(getenv func(string) string, c *Config) error {
 			"%w (got username=%q, password set=%v)",
 			ErrSMTPAuthIncomplete, c.SMTPUsername, c.SMTPPassword != "",
 		)
+	}
+	// PLAIN auth over a cleartext connection leaks the credentials on
+	// the wire. Refuse the combination rather than dialing insecurely.
+	if c.SMTPUsername != "" && !c.SMTPTLS {
+		return ErrSMTPAuthOverCleartext
 	}
 
 	return nil

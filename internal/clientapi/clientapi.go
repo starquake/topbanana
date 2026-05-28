@@ -114,7 +114,7 @@ func HandleQuizList(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 			return
 		}
 
-		var res quizzesResponse = make([]quizResponse, 0, len(quizzes))
+		res := make(quizzesResponse, 0, len(quizzes))
 		for _, qz := range quizzes {
 			qzr := quizResponse{
 				ID:          qz.ID,
@@ -641,7 +641,7 @@ func HandleCreateGame(logger *slog.Logger, service *game.Service) http.Handler {
 		w.Header().Set("Location", fmt.Sprintf("/play/game/%v", g.ID))
 		err = handlers.EncodeJSON(w, http.StatusCreated, res)
 		if err != nil {
-			logger.ErrorContext(r.Context(), "error encoding quizzesResponse", slog.Any("err", err))
+			logger.ErrorContext(r.Context(), "error encoding createGameResponse", slog.Any("err", err))
 
 			return
 		}
@@ -1193,7 +1193,7 @@ func HandleGameResults(logger *slog.Logger, service *game.Service) http.Handler 
 
 		err = handlers.EncodeJSON(w, http.StatusOK, res)
 		if err != nil {
-			logger.ErrorContext(r.Context(), "error encoding questionResponse", slog.Any("err", err))
+			logger.ErrorContext(r.Context(), "error encoding resultsResponse", slog.Any("err", err))
 
 			return
 		}

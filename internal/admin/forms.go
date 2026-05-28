@@ -78,8 +78,23 @@ func (f *questionForm) Valid(_ context.Context) map[string]string {
 	if q.Text == "" {
 		problems["text"] = "Text is required"
 	}
-	if len(q.Options) == 0 {
+	switch {
+	case len(q.Options) == 0:
 		problems["options"] = "Options are required"
+	case len(q.Options) > maxOptions:
+		problems["options"] = fmt.Sprintf("A question may have at most %d options", maxOptions)
+	default:
+		hasCorrect := false
+		for _, o := range q.Options {
+			if o.Correct {
+				hasCorrect = true
+
+				break
+			}
+		}
+		if !hasCorrect {
+			problems["options"] = "At least one option must be correct"
+		}
 	}
 	if q.TimeLimitSeconds != nil {
 		v := *q.TimeLimitSeconds

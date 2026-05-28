@@ -629,23 +629,25 @@ func TestParse_SMTP(t *testing.T) {
 
 		envs := map[string]string{
 			"APP_ENV":       "development",
-			"SMTP_HOST":     "mailpit",
-			"SMTP_PORT":     "1025",
+			"SMTP_HOST":     "smtp.example.test",
+			"SMTP_PORT":     "587",
 			"SMTP_USERNAME": "smtpuser",
 			"SMTP_PASSWORD": "smtpsecret",
 			"SMTP_FROM":     "topbanana@localhost",
-			"SMTP_TLS":      "false",
-			"BASE_URL":      "https://quiz.example.test/",
+			// Credentials require TLS; PLAIN auth over cleartext is
+			// refused at parse (see the cleartext-auth case below).
+			"SMTP_TLS": "true",
+			"BASE_URL": "https://quiz.example.test/",
 		}
 		getenv := func(key string) string { return envs[key] }
 		c, err := Parse(getenv)
 		if err != nil {
 			t.Fatalf("Parse() err = %v, want nil", err)
 		}
-		if got, want := c.SMTPHost, "mailpit"; got != want {
+		if got, want := c.SMTPHost, "smtp.example.test"; got != want {
 			t.Errorf("SMTPHost = %q, want %q", got, want)
 		}
-		if got, want := c.SMTPPort, 1025; got != want {
+		if got, want := c.SMTPPort, 587; got != want {
 			t.Errorf("SMTPPort = %d, want %d", got, want)
 		}
 		if got, want := c.SMTPUsername, "smtpuser"; got != want {
@@ -657,7 +659,7 @@ func TestParse_SMTP(t *testing.T) {
 		if got, want := c.SMTPFrom, "topbanana@localhost"; got != want {
 			t.Errorf("SMTPFrom = %q, want %q", got, want)
 		}
-		if got, want := c.SMTPTLS, false; got != want {
+		if got, want := c.SMTPTLS, true; got != want {
 			t.Errorf("SMTPTLS = %v, want %v", got, want)
 		}
 		// BaseURL trims a trailing slash so callers can blindly
@@ -761,6 +763,51 @@ func TestParse_SMTP(t *testing.T) {
 		}
 		if got, want := err, ErrSMTPAuthIncomplete; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("SMTP credentials with SMTP_TLS=false returns ErrSMTPAuthOverCleartext", func(t *testing.T) {
+		t.Parallel()
+
+		envs := map[string]string{
+			"APP_ENV":       "development",
+			"SMTP_HOST":     "smtp.example.test",
+			"SMTP_PORT":     "587",
+			"SMTP_FROM":     "topbanana@localhost",
+			"SMTP_USERNAME": "smtpuser",
+			"SMTP_PASSWORD": "smtpsecret",
+			"SMTP_TLS":      "false",
+		}
+		getenv := func(key string) string { return envs[key] }
+		_, err := Parse(getenv)
+		if err == nil {
+			t.Fatal("Parse() err = nil, want non-nil")
+		}
+		if got, want := err, ErrSMTPAuthOverCleartext; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("Mailpit local block (SMTP_TLS=false, no auth) is allowed", func(t *testing.T) {
+		t.Parallel()
+
+		envs := map[string]string{
+			"APP_ENV":   "development",
+			"SMTP_HOST": "mailpit",
+			"SMTP_PORT": "1025",
+			"SMTP_FROM": "topbanana@localhost",
+			"SMTP_TLS":  "false",
+		}
+		getenv := func(key string) string { return envs[key] }
+		c, err := Parse(getenv)
+		if err != nil {
+			t.Fatalf("Parse() err = %v, want nil", err)
+		}
+		if got, want := c.SMTPTLS, false; got != want {
+			t.Errorf("SMTPTLS = %v, want %v", got, want)
+		}
+		if got, want := c.SMTPConfigured(), true; got != want {
+			t.Errorf("SMTPConfigured() = %v, want %v", got, want)
 		}
 	})
 

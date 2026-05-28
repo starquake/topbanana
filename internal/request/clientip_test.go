@@ -164,11 +164,11 @@ func TestClientIP(t *testing.T) {
 			want:       "1.2.3.4",
 		},
 		{
-			name:       "all-trusted XFF falls back to leftmost entry",
+			name:       "all-trusted XFF falls back to the trusted RemoteAddr hop",
 			trusted:    "10.0.0.0/8,127.0.0.1/32",
 			remoteAddr: "127.0.0.1:55555",
 			xff:        "10.0.0.5, 10.0.0.6",
-			want:       "10.0.0.5",
+			want:       "127.0.0.1",
 		},
 		{
 			name:       "unparseable RemoteAddr is returned verbatim with no trust",

@@ -26,6 +26,7 @@ var errStub = errors.New("stub error")
 // getGameByPlayerAndQuiz field defaults to "not found" rather than errStub
 // so the existing CreateGame happy-path tests do not have to opt in.
 type stubStore struct {
+	getGame                            func(ctx context.Context, gameID string) (*Game, error)
 	listAnswersForQuizLeaderboard      func(ctx context.Context, quizID int64) ([]*LeaderboardAnswer, error)
 	listParticipantsForQuizLeaderboard func(ctx context.Context, quizID int64, staleBefore time.Time) ([]*LeaderboardParticipant, error)
 	getGameByPlayerAndQuiz             func(ctx context.Context, playerID, quizID int64) (*Game, error)
@@ -37,8 +38,12 @@ type stubStore struct {
 
 func (stubStore) Ping(_ context.Context) error { return nil }
 
-func (stubStore) GetGame(_ context.Context, _ string) (*Game, error) {
-	return nil, errStub
+func (s stubStore) GetGame(ctx context.Context, gameID string) (*Game, error) {
+	if s.getGame == nil {
+		return nil, errStub
+	}
+
+	return s.getGame(ctx, gameID)
 }
 
 func (s stubStore) GetGameByPlayerAndQuiz(
@@ -148,8 +153,9 @@ func (s stubStore) ListSeenBreakIDsByGame(ctx context.Context, gameID string) ([
 // and QuizExists are overridable since the leaderboard/reset paths never
 // reach the other methods.
 type stubQuizStore struct {
-	getQuiz    func(ctx context.Context, id int64) (*quiz.Quiz, error)
-	quizExists func(ctx context.Context, id int64) (bool, error)
+	getQuiz         func(ctx context.Context, id int64) (*quiz.Quiz, error)
+	quizExists      func(ctx context.Context, id int64) (bool, error)
+	getOptionsByIDs func(ctx context.Context, ids []int64) ([]*quiz.Option, error)
 }
 
 func (stubQuizStore) Ping(_ context.Context) error                        { return nil }
@@ -202,8 +208,12 @@ func (stubQuizStore) GetOption(_ context.Context, _ int64) (*quiz.Option, error)
 	return nil, errStub
 }
 
-func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Option, error) {
-	return nil, errStub
+func (s stubQuizStore) GetOptionsByIDs(ctx context.Context, ids []int64) ([]*quiz.Option, error) {
+	if s.getOptionsByIDs == nil {
+		return nil, errStub
+	}
+
+	return s.getOptionsByIDs(ctx, ids)
 }
 
 // ListBreaksByQuiz defaults to "no breaks" so GetNext-style tests that
@@ -810,6 +820,50 @@ func TestService_GetResults(t *testing.T) {
 
 		if got, want := results.Winner, int64(0); got != want {
 			t.Errorf("Winner = %v, want %v (expected no winner on tie)", got, want)
+		}
+	})
+
+	t.Run("skips answers whose option was deleted without panicking", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+
+		// A finished game with one answer that references option 99,
+		// which GetOptionsByIDs no longer returns (the option row was
+		// deleted out from under the answer). The score loop must skip
+		// it rather than dereference a nil Option.
+		gameWithDanglingAnswer := &Game{
+			ID:           "game-deleted-opt",
+			Participants: []*Participant{{PlayerID: 1}},
+			Questions: []*Question{
+				{
+					ID: 1,
+					Answers: []*Answer{
+						{PlayerID: 1, OptionID: 99, AnsweredAt: time.Now()},
+					},
+				},
+			},
+		}
+
+		gs := stubStore{
+			getGame: func(_ context.Context, _ string) (*Game, error) {
+				return gameWithDanglingAnswer, nil
+			},
+		}
+		qs := stubQuizStore{
+			getOptionsByIDs: func(_ context.Context, _ []int64) ([]*quiz.Option, error) {
+				return nil, nil
+			},
+		}
+
+		svc := NewService(gs, qs, slog.Default())
+
+		results, err := svc.GetResults(ctx, "game-deleted-opt", 1)
+		if err != nil {
+			t.Fatalf("GetResults err = %v, want nil", err)
+		}
+		if got, want := results.PlayerScores[1], 0; got != want {
+			t.Errorf("PlayerScores[1] = %d, want %d", got, want)
 		}
 	})
 }

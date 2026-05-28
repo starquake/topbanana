@@ -258,7 +258,7 @@ func (s *PlayerStore) CreatePlayerFromOAuth(
 ) (*auth.Player, error) {
 	row, err := s.q.CreatePlayerFromOAuth(ctx, db.CreatePlayerFromOAuthParams{
 		Username: strings.TrimSpace(username),
-		Email:    sql.NullString{String: email, Valid: true},
+		Email:    sql.NullString{String: strings.ToLower(strings.TrimSpace(email)), Valid: true},
 	})
 	if err != nil {
 		var sqliteErr *sqlite.Error
@@ -286,7 +286,7 @@ func (s *PlayerStore) ClaimPlayerForOAuth(
 ) (*auth.Player, error) {
 	row, err := s.q.ClaimPlayerForOAuth(ctx, db.ClaimPlayerForOAuthParams{
 		ID:    playerID,
-		Email: sql.NullString{String: email, Valid: true},
+		Email: sql.NullString{String: strings.ToLower(strings.TrimSpace(email)), Valid: true},
 	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -370,7 +370,7 @@ func (s *PlayerStore) ConsumeVerifyToken(ctx context.Context, tokenHash string) 
 				return classifyErr
 			}
 
-			return fmt.Errorf("failed to consume verify token: %w", err)
+			return fmt.Errorf("query: %w", err)
 		}
 		playerID = row.PlayerID
 
@@ -528,14 +528,14 @@ func (s *PlayerStore) ConsumeResetToken(
 				return auth.ErrResetTokenInvalid
 			}
 
-			return fmt.Errorf("failed to consume reset token: %w", err)
+			return fmt.Errorf("query: %w", err)
 		}
 		rows, err := q.ResetPlayerPassword(ctx, db.ResetPlayerPasswordParams{
 			ID:           id,
 			PasswordHash: sql.NullString{String: newPasswordHash, Valid: true},
 		})
 		if err != nil {
-			return fmt.Errorf("failed to rotate password: %w", err)
+			return fmt.Errorf("rotate password: %w", err)
 		}
 		if rows == 0 {
 			return auth.ErrResetTokenInvalid
@@ -545,6 +545,10 @@ func (s *PlayerStore) ConsumeResetToken(
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, auth.ErrResetTokenInvalid) {
+			return 0, auth.ErrResetTokenInvalid
+		}
+
 		return 0, fmt.Errorf("consume reset token: %w", err)
 	}
 

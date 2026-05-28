@@ -19,6 +19,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -192,6 +193,74 @@ func TestGoogleLogin_CallbackRejectsUnverifiedEmail(t *testing.T) {
 	}
 
 	// No players row created for the unverified email.
+	requireDBRowCounts(t, srv.DBURI, mock.email, 0, 0)
+}
+
+// TestGoogleLogin_CallbackRegistrationDisabled_RefusesNewAccount pins
+// the registration gate on OAuth: with REGISTRATION_ENABLED off, a
+// brand-new Google user (no existing identity, no session) is refused
+// and no row is created.
+func TestGoogleLogin_CallbackRegistrationDisabled_RefusesNewAccount(t *testing.T) {
+	t.Parallel()
+
+	mock := newGoogleMock(t)
+	mock.email = "newcomer-disabled@example.test"
+	mock.emailVerified = true
+
+	ctx, srv := startGoogleServerEnv(t, mock, map[string]string{"REGISTRATION_ENABLED": "false"})
+
+	client := authClient(t)
+	finalResp := driveGoogleFlow(ctx, t, client, srv.BaseURL, mock)
+
+	if got, want := finalResp.StatusCode, http.StatusUnauthorized; got != want {
+		t.Fatalf("callback status = %d, want %d (location=%q)", got, want, finalResp.Location)
+	}
+	requireDBRowCounts(t, srv.DBURI, mock.email, 0, 0)
+}
+
+// TestGoogleLogin_CallbackRegistrationDisabled_ExistingIdentityLogsIn
+// pins that registration off only gates the create-fresh branch: a
+// Google sign-in for an already-linked identity still succeeds.
+func TestGoogleLogin_CallbackRegistrationDisabled_ExistingIdentityLogsIn(t *testing.T) {
+	t.Parallel()
+
+	mock := newGoogleMock(t)
+	mock.email = "existing-disabled@example.test"
+	mock.emailVerified = true
+
+	ctx, srv := startGoogleServerEnv(t, mock, map[string]string{"REGISTRATION_ENABLED": "false"})
+	seedPlayerWithEmail(t, srv.DBURI, "existing-disabled", mock.email)
+
+	client := authClient(t)
+	finalResp := driveGoogleFlow(ctx, t, client, srv.BaseURL, mock)
+
+	if got, want := finalResp.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("callback status = %d, want %d (location=%q)", got, want, finalResp.Location)
+	}
+	// Linked onto the existing row by email; no duplicate created.
+	requireDBRowCounts(t, srv.DBURI, mock.email, 1, 1)
+}
+
+// TestGoogleLogin_CallbackRejectsEmptySubject pins the defensive guard
+// in exchangeAndVerify: a verified id_token with an empty `sub` claim
+// is refused rather than linking every such sign-in to one empty
+// identity key.
+func TestGoogleLogin_CallbackRejectsEmptySubject(t *testing.T) {
+	t.Parallel()
+
+	mock := newGoogleMock(t)
+	mock.email = "empty-subject@example.test"
+	mock.emailVerified = true
+	mock.subject = ""
+
+	ctx, srv := startGoogleServer(t, mock)
+
+	client := authClient(t)
+	finalResp := driveGoogleFlow(ctx, t, client, srv.BaseURL, mock)
+
+	if got, want := finalResp.StatusCode, http.StatusUnauthorized; got != want {
+		t.Fatalf("callback status = %d, want %d", got, want)
+	}
 	requireDBRowCounts(t, srv.DBURI, mock.email, 0, 0)
 }
 
@@ -468,8 +537,19 @@ func seedPlayerWithEmail(t *testing.T, dbURI, username, email string) {
 }
 
 // startGoogleServer boots the app server with Google OAuth env vars
-// pointed at the mock's discovery endpoint.
+// pointed at the mock's discovery endpoint and registration enabled, so
+// the create-fresh path is exercised by default. Tests that need
+// registration off use startGoogleServerEnv with
+// REGISTRATION_ENABLED=false.
 func startGoogleServer(t *testing.T, mock *googleMock) (context.Context, testServer) {
+	t.Helper()
+
+	return startGoogleServerEnv(t, mock, map[string]string{"REGISTRATION_ENABLED": "true"})
+}
+
+// startGoogleServerEnv is startGoogleServer with caller-supplied extra
+// env merged on top of the Google OAuth defaults.
+func startGoogleServerEnv(t *testing.T, mock *googleMock, extra map[string]string) (context.Context, testServer) {
 	t.Helper()
 
 	// The mock's URL is also the redirect host as far as the mock
@@ -477,7 +557,7 @@ func startGoogleServer(t *testing.T, mock *googleMock) (context.Context, testSer
 	// exchange). The real server uses its own base URL for the
 	// callback; we hard-code the path because the host varies with
 	// the ephemeral listen port.
-	return startServer(t, map[string]string{
+	env := map[string]string{
 		"GOOGLE_CLIENT_ID":     testGoogleClientID,
 		"GOOGLE_CLIENT_SECRET": testGoogleClientSecret,
 		// The redirect URL the app sends to Google must match what
@@ -488,7 +568,10 @@ func startGoogleServer(t *testing.T, mock *googleMock) (context.Context, testSer
 		// and validates the discovery doc's `issuer` field equals
 		// this URL.
 		"GOOGLE_ISSUER_URL": mock.URL,
-	})
+	}
+	maps.Copy(env, extra)
+
+	return startServer(t, env)
 }
 
 // googleMock is an httptest.Server speaking the slice of OIDC that
