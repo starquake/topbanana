@@ -53,6 +53,21 @@ type Player struct {
 	// cookie (which carries the version it was issued at) becomes
 	// invalid the moment the reset commits (#112).
 	SessionVersion int64
+	// IsSuperAdmin marks a player who holds elevated powers on top of the
+	// admin role (#319). Super admin is a strict superset of admin: a
+	// super admin always has admin powers via [Player.IsAdmin] even if
+	// the role column drifted, and is allowed to edit / delete / reset
+	// scores on any quiz regardless of creator.
+	IsSuperAdmin bool
+}
+
+// IsAdmin reports whether the player has admin powers. Super admin is a
+// strict superset of admin, so a super admin is always an admin even if
+// the role column drifted away from "admin". Use this rather than a raw
+// Role == RoleAdmin comparison so the superset relationship holds in one
+// place.
+func (p *Player) IsAdmin() bool {
+	return p.Role == RoleAdmin || p.IsSuperAdmin
 }
 
 // IsEmailVerified reports whether the player's email has been verified.
@@ -251,6 +266,15 @@ type AdminAuditEntry struct {
 	CreatedAt      time.Time
 }
 
+// SuperAdminEntry is one row in the super-admin list rendered on the
+// admin settings page (#320). Email is empty when the row has no address
+// on file.
+type SuperAdminEntry struct {
+	ID       int64
+	Username string
+	Email    string
+}
+
 // Admin action labels written to admin_audit.action. Match the spec in
 // the #450 ticket; new actions belong here so the writers and the
 // detail-view renderer share one set of constants.
@@ -260,6 +284,8 @@ const (
 	AdminActionPasswordSet        = "password_set"
 	AdminActionCreated            = "created"
 	AdminActionResendVerification = "resend_verification"
+	AdminActionPromoteSuper       = "promote_super"
+	AdminActionDemoteSuper        = "demote_super"
 )
 
 // AdminPlayerStore is the read+write persistence interface the admin
@@ -292,6 +318,12 @@ type AdminPlayerStore interface {
 	CreatePlayerByAdmin(
 		ctx context.Context, username, email, passwordHash string,
 	) (*Player, error)
+	// SetPlayerSuperAdmin flips is_super_admin on the row identified by
+	// id (#319). Promoting (super = true) also forces role to 'admin'
+	// because super admin is a strict superset of admin; demoting
+	// (super = false) leaves the admin role intact. Returns
+	// ErrPlayerNotFound when no row matches.
+	SetPlayerSuperAdmin(ctx context.Context, playerID int64, super bool) error
 	// InsertAdminAudit records one admin action. payload is a
 	// pre-serialised JSON blob (use "{}" when there is nothing to
 	// record).
@@ -303,6 +335,24 @@ type AdminPlayerStore interface {
 	ListAdminAuditForTarget(
 		ctx context.Context, targetPlayerID, limit int64,
 	) ([]*AdminAuditEntry, error)
+}
+
+// SuperAdminStore is the persistence interface the super-admin settings
+// page (#320) consumes. It embeds AdminPlayerStore for the shared
+// SetPlayerSuperAdmin + InsertAdminAudit writers and adds the two reads
+// the settings page needs on top: listing the current super admins and
+// resolving the username typed into the "Promote a player" form. The
+// concrete PlayerStore satisfies it alongside the other interface slots.
+type SuperAdminStore interface {
+	AdminPlayerStore
+	// ListSuperAdmins returns every current super admin ordered by
+	// username. Empty slice when none exist yet.
+	ListSuperAdmins(ctx context.Context) ([]*SuperAdminEntry, error)
+	// GetPlayerByUsername returns the player with the given username.
+	// Returns ErrPlayerNotFound when there is no match. Used by the
+	// settings page's promote-by-username form, which mirrors the CLI
+	// bootstrap lookup.
+	GetPlayerByUsername(ctx context.Context, username string) (*Player, error)
 }
 
 // PlayerStore is the persistence interface used by the auth package.

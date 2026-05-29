@@ -139,6 +139,72 @@ func ResetPassword(
 	return nil
 }
 
+// errPromoteUsernameRequired is wrapped by [PromoteSuper] when the
+// supplied username trims to empty; defined at package scope so callers
+// and tests can match it via [errors.Is].
+var errPromoteUsernameRequired = errors.New("username is required")
+
+// errPromoteUserNotFound is wrapped by [PromoteSuper] when no player row
+// matches the supplied username.
+var errPromoteUserNotFound = errors.New("username not found")
+
+// PromoteSuper looks up a player by username and flips them to super
+// admin (is_super_admin = 1, role = 'admin'). Operator-only bootstrap
+// tool for the first super admin (#319); from there they can promote
+// others via the admin UI. The lookup is by username because that is the
+// stable identifier an operator knows at bootstrap, before any email is
+// necessarily on file. The server should not be running concurrently
+// against the same database.
+func PromoteSuper(
+	ctx context.Context,
+	getenv func(string) string,
+	stdout, stderr io.Writer,
+	username string,
+) error {
+	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return fmt.Errorf("promote super: %w", errPromoteUsernameRequired)
+	}
+
+	cfg, err := config.Parse(getenv)
+	if err != nil {
+		return fmt.Errorf("promote super: parse config: %w", err)
+	}
+
+	conn, err := setupDB(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := conn.Close(); cerr != nil {
+			logger.ErrorContext(ctx, "error closing database connection", slog.Any("err", cerr))
+		}
+	}()
+
+	players := store.NewPlayerStore(conn, logger)
+	player, err := players.GetPlayerByUsername(ctx, username)
+	if err != nil {
+		if errors.Is(err, auth.ErrPlayerNotFound) {
+			return fmt.Errorf("promote super: %w (%q)", errPromoteUserNotFound, username)
+		}
+
+		return fmt.Errorf("promote super: %w", err)
+	}
+
+	if err := players.SetPlayerSuperAdmin(ctx, player.ID, true); err != nil {
+		return fmt.Errorf("promote super: %w", err)
+	}
+
+	if _, err := fmt.Fprintf(stdout, "Promoted %q to super admin.\n", username); err != nil {
+		return fmt.Errorf("promote super: write confirmation: %w", err)
+	}
+	logger.InfoContext(ctx, "promoted to super admin", slog.String("username", username))
+
+	return nil
+}
+
 // readNewPassword prompts for a new password twice (input + confirmation)
 // and returns the password if the two reads match and the value falls within
 // the [auth.MinPasswordLength] / [auth.MaxPasswordLength] range. Length is

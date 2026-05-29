@@ -370,10 +370,18 @@ func addAdminRoutes(
 	requireAdmin := func(h http.Handler) http.Handler {
 		return auth.RequireAdmin(auth.RequireVerifiedEmail(h), stores.Players, sessions, csrfMgr, logger)
 	}
+	// requireSuperAdmin gates the super-admin-only routes (#319). A
+	// signed-in non-super-admin gets a 404 from RequireSuperAdmin so the
+	// route's existence stays hidden (#320); the verified-email gate sits
+	// inside it for parity with requireAdmin.
+	requireSuperAdmin := func(h http.Handler) http.Handler {
+		return auth.RequireSuperAdmin(auth.RequireVerifiedEmail(h), stores.Players, sessions, logger)
+	}
 
 	mux.Handle("GET /admin", requireAdmin(admin.HandleIndex(logger, csrfMgr)))
+	addAdminSettingsRoutes(mux, logger, csrfMgr, csrfMW, requireSuperAdmin, stores, playerDeps)
 	mux.Handle("GET /admin/players", requireAdmin(admin.HandlePlayersList(logger, csrfMgr, stores.PlayerLister)))
-	addAdminPlayerRoutes(mux, logger, csrfMgr, csrfMW, requireAdmin, stores, playerDeps)
+	addAdminPlayerRoutes(mux, logger, csrfMgr, csrfMW, requireAdmin, requireSuperAdmin, stores, playerDeps)
 	addAdminEmailRoutes(mux, logger, csrfMgr, csrfMW, requireAdmin, email)
 	mux.Handle("GET /admin/quizzes", requireAdmin(admin.HandleQuizList(logger, csrfMgr, stores.Quizzes)))
 	mux.Handle(
@@ -431,6 +439,32 @@ func addAdminRoutes(
 	addAdminBreakRoutes(mux, logger, stores, csrfMW, requireAdmin, csrfMgr)
 }
 
+// addAdminSettingsRoutes registers the super-admin settings page (#320):
+// the GET render plus the username-based promote POST. Both are gated by
+// requireSuperAdmin so a signed-in non-super-admin gets a 404 (the route
+// stays hidden). MaxFormSizeMiddleware fronts the POST so the CSRF
+// validator's ParseForm sees a bounded body.
+func addAdminSettingsRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	csrfMW func(http.Handler) http.Handler,
+	requireSuperAdmin func(http.Handler) http.Handler,
+	stores *store.Stores,
+	deps adminPlayerDeps,
+) {
+	mux.Handle(
+		"GET /admin/settings",
+		requireSuperAdmin(admin.HandleSettings(logger, csrfMgr, stores.SuperAdmins, deps.flash)),
+	)
+	mux.Handle(
+		"POST /admin/settings/promote",
+		admin.MaxFormSizeMiddleware(csrfMW(requireSuperAdmin(
+			admin.HandleSettingsPromoteSuper(logger, stores.SuperAdmins, deps.flash),
+		))),
+	)
+}
+
 // addAdminPlayerRoutes registers the admin player-management routes
 // (#450): per-player detail view, four mutating actions, and the
 // create-without-verification GET+POST pair. MaxFormSizeMiddleware
@@ -444,6 +478,7 @@ func addAdminPlayerRoutes(
 	csrfMgr *csrf.Manager,
 	csrfMW func(http.Handler) http.Handler,
 	requireAdmin func(http.Handler) http.Handler,
+	requireSuperAdmin func(http.Handler) http.Handler,
 	stores *store.Stores,
 	deps adminPlayerDeps,
 ) {
@@ -482,6 +517,18 @@ func addAdminPlayerRoutes(
 		"POST /admin/players/{playerID}/email",
 		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
 			admin.HandlePlayerSetEmail(logger, stores.AdminPlayers, deps.flash),
+		))),
+	)
+	mux.Handle(
+		"POST /admin/players/{playerID}/promote-super",
+		admin.MaxFormSizeMiddleware(csrfMW(requireSuperAdmin(
+			admin.HandlePlayerPromoteSuper(logger, stores.AdminPlayers, deps.flash),
+		))),
+	)
+	mux.Handle(
+		"POST /admin/players/{playerID}/demote-super",
+		admin.MaxFormSizeMiddleware(csrfMW(requireSuperAdmin(
+			admin.HandlePlayerDemoteSuper(logger, stores.AdminPlayers, deps.flash),
 		))),
 	)
 }

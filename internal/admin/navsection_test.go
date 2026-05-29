@@ -24,6 +24,8 @@ func TestNavSection(t *testing.T) {
 		{name: "player detail", path: "/admin/players/7", want: "players"},
 		{name: "email", path: "/admin/email", want: "email"},
 		{name: "email test", path: "/admin/email/test", want: "email"},
+		{name: "settings", path: "/admin/settings", want: "settings"},
+		{name: "settings promote", path: "/admin/settings/promote", want: "settings"},
 		{name: "unknown section", path: "/admin/other", want: ""},
 	}
 

@@ -870,6 +870,56 @@ func (s *PlayerStore) InsertAdminAudit(
 	return nil
 }
 
+// SetPlayerSuperAdmin flips is_super_admin on the row identified by id
+// (#319). Promoting (super = true) also forces role to 'admin' because
+// super admin is a strict superset of admin; demoting (super = false)
+// leaves the admin role intact so the player keeps the plain admin
+// powers. Returns auth.ErrPlayerNotFound when no row matches.
+//
+//nolint:revive // super is the value being persisted, not a mode toggle.
+func (s *PlayerStore) SetPlayerSuperAdmin(ctx context.Context, playerID int64, super bool) error {
+	flag := int64(0)
+	if super {
+		flag = 1
+	}
+	// Promote forces role to 'admin' (super admin is a strict superset of
+	// admin); demote re-asserts the same role so the demoted player keeps
+	// the plain admin powers.
+	rows, err := s.q.SetPlayerSuperAdmin(ctx, db.SetPlayerSuperAdminParams{
+		IsSuperAdmin: flag,
+		Role:         auth.RoleAdmin,
+		ID:           playerID,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to set super admin: %w", err)
+	}
+	if rows == 0 {
+		return auth.ErrPlayerNotFound
+	}
+
+	return nil
+}
+
+// ListSuperAdmins returns every current super admin ordered by username
+// (#319/#320). Empty slice when no super admin exists yet.
+func (s *PlayerStore) ListSuperAdmins(ctx context.Context) ([]*auth.SuperAdminEntry, error) {
+	rows, err := s.q.ListSuperAdmins(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list super admins: %w", err)
+	}
+
+	out := make([]*auth.SuperAdminEntry, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, &auth.SuperAdminEntry{
+			ID:       r.ID,
+			Username: r.Username,
+			Email:    r.Email.String,
+		})
+	}
+
+	return out, nil
+}
+
 // ListAdminAuditForTarget returns the most-recent admin actions taken
 // against the supplied target player, newest-first. Empty slice when
 // no audit rows exist; the detail view renders an empty-state line in
@@ -1001,6 +1051,7 @@ func playerFromRow(row db.Player) *auth.Player {
 		CreatedAt:       row.CreatedAt,
 		UsernameClaimed: row.UsernameClaimed != 0,
 		SessionVersion:  row.SessionVersion,
+		IsSuperAdmin:    row.IsSuperAdmin != 0,
 	}
 	if row.Email.Valid {
 		p.Email = row.Email.String

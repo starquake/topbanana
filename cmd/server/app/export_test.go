@@ -18,6 +18,10 @@ var (
 	ErrResetEmptyInput = errResetEmptyInput
 	// ErrResetPasswordsDontMatch re-exports errResetPasswordsDontMatch for tests.
 	ErrResetPasswordsDontMatch = errResetPasswordsDontMatch
+	// ErrPromoteUsernameRequired re-exports errPromoteUsernameRequired for tests.
+	ErrPromoteUsernameRequired = errPromoteUsernameRequired
+	// ErrPromoteUserNotFound re-exports errPromoteUserNotFound for tests.
+	ErrPromoteUserNotFound = errPromoteUserNotFound
 )
 
 // RunTokenSweep exposes the unexported background-sweep loop so the

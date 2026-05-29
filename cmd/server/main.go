@@ -26,6 +26,13 @@ func main() {
 			" The server should not be running concurrently against the same database."+
 			" Takes precedence over -check when both are supplied",
 	)
+	promoteSuperFor := flag.String(
+		"promote-super",
+		"",
+		"promote the player with the given username to super admin (sets is_super_admin and role=admin)"+
+			" and exits. Use this to bootstrap the first super admin; they can promote others from the"+
+			" admin UI afterwards. The server should not be running concurrently against the same database",
+	)
 	healthcheckOnly := flag.Bool(
 		"healthcheck",
 		false,
@@ -43,6 +50,8 @@ func main() {
 	switch {
 	case *resetPasswordFor != "":
 		err = app.ResetPassword(ctx, os.Getenv, os.Stdin, os.Stdout, os.Stderr, *resetPasswordFor)
+	case *promoteSuperFor != "":
+		err = app.PromoteSuper(ctx, os.Getenv, os.Stdout, os.Stderr, *promoteSuperFor)
 	case *checkOnly:
 		err = app.Check(ctx, os.Getenv, os.Stdout)
 	case *healthcheckOnly:

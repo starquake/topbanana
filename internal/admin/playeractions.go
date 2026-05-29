@@ -165,6 +165,91 @@ func HandlePlayerSetEmail(
 	})
 }
 
+// superAdminAction bundles the per-direction values that differ between
+// the promote and demote handlers: the flag persisted on the row, the
+// audit action label, and the success flash. Threading a struct rather
+// than a bare bool keeps the shared handler free of mode-toggle control
+// coupling.
+type superAdminAction struct {
+	super  bool
+	action string
+	notice string
+}
+
+// HandlePlayerPromoteSuper handles
+// POST /admin/players/{playerID}/promote-super (#319). Super-admin only
+// (gated by RequireSuperAdmin at the route). Sets is_super_admin=1 and
+// forces role='admin'; writes an admin_audit row. Idempotent: re-promoting
+// an already-super-admin row succeeds and re-stamps the audit trail.
+func HandlePlayerPromoteSuper(
+	logger *slog.Logger,
+	store auth.AdminPlayerStore,
+	flash *auth.SignedFlash,
+) http.Handler {
+	return handlePlayerSuperAdmin(logger, store, flash, superAdminAction{
+		super:  true,
+		action: auth.AdminActionPromoteSuper,
+		notice: "Player promoted to super admin.",
+	})
+}
+
+// HandlePlayerDemoteSuper handles
+// POST /admin/players/{playerID}/demote-super (#319). Super-admin only.
+// Sets is_super_admin=0 but leaves role='admin' so the demoted player
+// keeps the plain admin powers; writes an admin_audit row.
+func HandlePlayerDemoteSuper(
+	logger *slog.Logger,
+	store auth.AdminPlayerStore,
+	flash *auth.SignedFlash,
+) http.Handler {
+	return handlePlayerSuperAdmin(logger, store, flash, superAdminAction{
+		super:  false,
+		action: auth.AdminActionDemoteSuper,
+		notice: "Super admin removed.",
+	})
+}
+
+// handlePlayerSuperAdmin is the shared body for the promote/demote
+// super-admin actions; op carries the direction-specific values.
+func handlePlayerSuperAdmin(
+	logger *slog.Logger,
+	store auth.AdminPlayerStore,
+	flash *auth.SignedFlash,
+	op superAdminAction,
+) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		playerID, ok := handlers.ParseIDFromPath(w, r, logger, "playerID")
+		if !ok {
+			return
+		}
+		actor, ok := requireAdminActor(w, r)
+		if !ok {
+			return
+		}
+
+		if _, ok := loadActionTarget(w, r, logger, store, playerID); !ok {
+			return
+		}
+
+		if err := store.SetPlayerSuperAdmin(r.Context(), playerID, op.super); err != nil {
+			if errors.Is(err, auth.ErrPlayerNotFound) {
+				http.NotFound(w, r)
+
+				return
+			}
+			logger.ErrorContext(r.Context(), "error setting super admin", slog.Any("err", err))
+			flash.SetError(w, "Could not update super admin. Try again.", 0)
+			redirectToPlayerDetail(w, r, playerID)
+
+			return
+		}
+
+		writeAudit(r.Context(), logger, store, actor.ID, playerID, op.action, nil)
+		flash.SetNotice(w, op.notice)
+		redirectToPlayerDetail(w, r, playerID)
+	})
+}
+
 // playerCreatePageData backs the playernew.gohtml template.
 type playerCreatePageData struct {
 	Title    string
