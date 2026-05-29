@@ -78,6 +78,8 @@ func HandleProfilePasswordChange(
 		confirm := r.PostFormValue("new_password_confirm")
 
 		if msg, ok := validatePasswordChangeInput(newPassword, confirm); !ok {
+			logger.InfoContext(r.Context(), "profile password change rejected: invalid input",
+				slog.Int64("player_id", player.ID))
 			render.renderAny(w, r, http.StatusBadRequest, passwordPageData{
 				Title: "Change password", Message: msg,
 			})
@@ -86,6 +88,8 @@ func HandleProfilePasswordChange(
 		}
 
 		if player.PasswordHash == "" || auth.CheckPassword(player.PasswordHash, current) != nil {
+			logger.InfoContext(r.Context(), "profile password change rejected: current password incorrect",
+				slog.Int64("player_id", player.ID))
 			render.renderAny(w, r, http.StatusUnauthorized, passwordPageData{
 				Title: "Change password", Message: "Current password is incorrect.",
 			})

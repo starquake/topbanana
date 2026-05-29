@@ -107,7 +107,7 @@ func HandleProfileUsername(
 
 		updated, err := players.RenamePlayer(r.Context(), player.ID, cleaned)
 		if err != nil {
-			renderRenameError(render, w, r, player.Username, raw, err)
+			renderRenameError(render, logger, w, r, player.ID, player.Username, raw, err)
 
 			return
 		}
@@ -125,27 +125,41 @@ func HandleProfileUsername(
 // attempted value (so they can fix a typo without retyping). Falls
 // through to a plain 500 for unexpected errors so the operator's
 // log gets the full stack instead of a misleading form banner.
+//
+// Each branch logs: the two expected user errors at Info (a rejected
+// rename otherwise leaves no server-side trace, so "why couldn't I
+// change my name?" is undiagnosable), the unexpected branch at Error
+// with the cause. The attempted name is logged for the taken case so
+// the collision target is visible.
 func renderRenameError(
 	render *templateRenderer,
+	logger *slog.Logger,
 	w http.ResponseWriter,
 	r *http.Request,
+	playerID int64,
 	currentUsername, attempted string,
 	err error,
 ) {
 	switch {
 	case errors.Is(err, auth.ErrUsernameEmpty):
+		logger.InfoContext(r.Context(), "profile rename rejected: empty name",
+			slog.Int64("player_id", playerID))
 		render.render(w, r, http.StatusBadRequest, pageData{
 			Title:    "Profile",
 			Username: currentUsername,
 			Message:  "Display name is required.",
 		})
 	case errors.Is(err, auth.ErrUsernameTaken):
+		logger.InfoContext(r.Context(), "profile rename rejected: name taken",
+			slog.Int64("player_id", playerID), slog.String("attempted", attempted))
 		render.render(w, r, http.StatusConflict, pageData{
 			Title:    "Profile",
 			Username: attempted,
 			Message:  "That name is already taken. Pick a different one.",
 		})
 	default:
+		logger.ErrorContext(r.Context(), "profile rename failed",
+			slog.Int64("player_id", playerID), slog.Any("err", err))
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}
 }
