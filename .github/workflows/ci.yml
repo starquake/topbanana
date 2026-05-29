@@ -45,6 +45,15 @@ jobs:
     - name: sqlc drift check
       run: make sqlc-check
 
+    # ASCII gate (#483). The required `lint` job's golangci-lint
+    # asciicheck only catches non-ASCII in identifiers; comments and
+    # string literals (where em dashes break sqlc v1.31.1) slip past it.
+    # `make lint-ascii` greps for them and now exits non-zero, so this
+    # step blocks a regression. Lives here rather than the lint workflow
+    # because that job runs the golangci-lint action directly, not `make`.
+    - name: ASCII source check
+      run: make lint-ascii
+
     # `make test-coverage` runs the full suite with -tags=integration,
     # so a separate integration step would just duplicate the work.
     # Dropped here as part of #202.

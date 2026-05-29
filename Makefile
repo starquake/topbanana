@@ -41,7 +41,7 @@ SQLC_BIN     := $(BIN_DIR)/sqlc
 # migration-against-existing-data class of bug — which test-coverage's
 # fresh DB can't catch — fails locally before CI does.
 .PHONY: check
-check: lint sql-lint sqlc-check tailwind-check build test-coverage smoke
+check: lint lint-ascii sql-lint sqlc-check tailwind-check build test-coverage smoke
 
 .PHONY: lint
 lint: $(GOLANGCI_BIN)
@@ -111,9 +111,11 @@ lint-migrations:
 	    echo "lint-migrations: no offending migrations."; \
 	fi
 
-# Advisory: flags non-ASCII bytes in Go/SQL sources (sqlc v1.31.1
-# breaks downstream queries on em-dashed SQL comments). Never fails
-# the build.
+# Fails the build on non-ASCII bytes in Go/SQL sources (sqlc v1.31.1
+# breaks downstream queries on em-dashed SQL comments; CLAUDE.md hard
+# rule). golangci-lint's asciicheck only covers identifiers, so this
+# grep is the gate for comments and string literals. Wired into `check`
+# and the CI build job (#483).
 .PHONY: lint-ascii
 lint-ascii:
 	@hits=$$(LC_ALL=C grep -rnP '[^\x00-\x7f]' \
@@ -123,6 +125,7 @@ lint-ascii:
 	if [ -n "$$hits" ]; then \
 	    echo "lint-ascii: non-ASCII bytes in source (em dashes break sqlc; see CLAUDE.md):"; \
 	    echo "$$hits" | sed 's/^/  /'; \
+	    exit 1; \
 	else \
 	    echo "lint-ascii: no non-ASCII bytes in Go or SQL sources."; \
 	fi
