@@ -379,7 +379,7 @@ func addAdminRoutes(
 	}
 
 	mux.Handle("GET /admin", requireAdmin(admin.HandleIndex(logger, csrfMgr)))
-	addAdminSettingsRoutes(mux, logger, csrfMgr, csrfMW, requireSuperAdmin, stores, playerDeps)
+	addAdminSettingsRoutes(mux, logger, csrfMgr, requireSuperAdmin, stores, playerDeps)
 	mux.Handle("GET /admin/players", requireAdmin(admin.HandlePlayersList(logger, csrfMgr, stores.PlayerLister)))
 	addAdminPlayerRoutes(mux, logger, csrfMgr, csrfMW, requireAdmin, requireSuperAdmin, stores, playerDeps)
 	addAdminEmailRoutes(mux, logger, csrfMgr, csrfMW, requireAdmin, email)
@@ -440,15 +440,14 @@ func addAdminRoutes(
 }
 
 // addAdminSettingsRoutes registers the super-admin settings page (#320):
-// the GET render plus the username-based promote POST. Both are gated by
-// requireSuperAdmin so a signed-in non-super-admin gets a 404 (the route
-// stays hidden). MaxFormSizeMiddleware fronts the POST so the CSRF
-// validator's ParseForm sees a bounded body.
+// the GET render of the current super-admin list. The page's demote
+// buttons post to the id-based role endpoint under /admin/players (#527),
+// so there is no settings-scoped POST here. Gated by requireSuperAdmin so
+// a signed-in non-super-admin gets a 404 (the route stays hidden).
 func addAdminSettingsRoutes(
 	mux *http.ServeMux,
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
-	csrfMW func(http.Handler) http.Handler,
 	requireSuperAdmin func(http.Handler) http.Handler,
 	stores *store.Stores,
 	deps adminPlayerDeps,
@@ -457,19 +456,13 @@ func addAdminSettingsRoutes(
 		"GET /admin/settings",
 		requireSuperAdmin(admin.HandleSettings(logger, csrfMgr, stores.SuperAdmins, deps.flash)),
 	)
-	mux.Handle(
-		"POST /admin/settings/promote",
-		admin.MaxFormSizeMiddleware(csrfMW(requireSuperAdmin(
-			admin.HandleSettingsPromoteSuper(logger, stores.SuperAdmins, deps.flash),
-		))),
-	)
 }
 
 // addAdminPlayerRoutes registers the admin player-management routes
-// (#450): per-player detail view, four mutating actions, and the
+// (#450): per-player detail view, the mutating actions, and the
 // create-without-verification GET+POST pair. The detail view and the
 // verify/resend/email actions are admin-wide; the create pair and the
-// promote/demote-super actions are super-admin only. MaxFormSizeMiddleware
+// id-based role endpoint (#527) are super-admin only. MaxFormSizeMiddleware
 // fronts every POST in front of csrfMW so the CSRF validator's
 // ParseForm sees a bounded body; csrfMW fronts the auth wrapper so an
 // unauthenticated request without a valid token is rejected with 403
@@ -522,15 +515,9 @@ func addAdminPlayerRoutes(
 		))),
 	)
 	mux.Handle(
-		"POST /admin/players/{playerID}/promote-super",
+		"POST /admin/players/{playerID}/role",
 		admin.MaxFormSizeMiddleware(csrfMW(requireSuperAdmin(
-			admin.HandlePlayerPromoteSuper(logger, stores.AdminPlayers, deps.flash),
-		))),
-	)
-	mux.Handle(
-		"POST /admin/players/{playerID}/demote-super",
-		admin.MaxFormSizeMiddleware(csrfMW(requireSuperAdmin(
-			admin.HandlePlayerDemoteSuper(logger, stores.AdminPlayers, deps.flash),
+			admin.HandlePlayerSetRole(logger, stores.AdminPlayers, deps.flash),
 		))),
 	)
 }

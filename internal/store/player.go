@@ -749,6 +749,7 @@ func (s *PlayerStore) GetPlayerDetail(ctx context.Context, id int64) (*auth.Play
 		OAuthProvider:   row.OauthProvider,
 		CreatedAt:       row.CreatedAt,
 		OnboardingState: row.OnboardingState,
+		IsSuperAdmin:    row.IsSuperAdmin != 0,
 	}
 	if row.EmailVerifiedAt.Valid {
 		verified := row.EmailVerifiedAt.Time
@@ -892,6 +893,36 @@ func (s *PlayerStore) SetPlayerSuperAdmin(ctx context.Context, playerID int64, s
 	})
 	if err != nil {
 		return fmt.Errorf("failed to set super admin: %w", err)
+	}
+	if rows == 0 {
+		return auth.ErrPlayerNotFound
+	}
+
+	return nil
+}
+
+// SetPlayerRoleAndSuperAdmin sets both role and is_super_admin on the row
+// identified by id in one statement (#527). The caller resolves the target
+// privilege level to the (role, super) pair: player -> ("player", false),
+// admin -> ("admin", false), super admin -> ("admin", true).
+// super_admin_since is stamped when super is true and cleared otherwise.
+// Returns auth.ErrPlayerNotFound when no row matches.
+//
+//nolint:revive // super is the value being persisted, not a mode toggle.
+func (s *PlayerStore) SetPlayerRoleAndSuperAdmin(
+	ctx context.Context, playerID int64, role string, super bool,
+) error {
+	flag := int64(0)
+	if super {
+		flag = 1
+	}
+	rows, err := s.q.SetPlayerRoleAndSuperAdmin(ctx, db.SetPlayerRoleAndSuperAdminParams{
+		Role:         role,
+		IsSuperAdmin: flag,
+		ID:           playerID,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to set role and super admin: %w", err)
 	}
 	if rows == 0 {
 		return auth.ErrPlayerNotFound

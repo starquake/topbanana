@@ -407,6 +407,23 @@ SET is_super_admin = sqlc.arg('is_super_admin'),
     END
 WHERE id = sqlc.arg('id');
 
+-- name: SetPlayerRoleAndSuperAdmin :execrows
+-- Sets role AND is_super_admin on the row identified by id, both from the
+-- caller, so one statement moves a player to any privilege level. The three
+-- levels map to (role, is_super_admin): player -> (player, 0),
+-- admin -> (admin, 0), super_admin -> (admin, 1). super_admin_since is
+-- stamped to CURRENT_TIMESTAMP when promoting to super and cleared to NULL
+-- otherwise, mirroring SetPlayerSuperAdmin above. Returns the number of
+-- affected rows so the wrapper can map "no rows" to ErrPlayerNotFound.
+UPDATE players
+SET role = sqlc.arg('role'),
+    is_super_admin = sqlc.arg('is_super_admin'),
+    super_admin_since = CASE
+        WHEN sqlc.arg('is_super_admin') = 1 THEN CURRENT_TIMESTAMP
+        ELSE NULL
+    END
+WHERE id = sqlc.arg('id');
+
 -- name: CountSuperAdmins :one
 -- Number of current super admins. Used by the demote guard to refuse a
 -- demote that would leave zero super admins.

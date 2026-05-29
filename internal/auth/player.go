@@ -239,6 +239,10 @@ type PlayerDetail struct {
 	CreatedAt       time.Time
 	EmailVerifiedAt *time.Time
 	OnboardingState string
+	// IsSuperAdmin marks a player holding super-admin powers (#319/#527).
+	// Surfaced on the detail view so the role selector can preselect the
+	// current privilege level (player / admin / super admin).
+	IsSuperAdmin bool
 }
 
 // RecentFinishedGame is one row in the "Last 5 finished games" section
@@ -289,6 +293,8 @@ const (
 	AdminActionResendVerification = "resend_verification"
 	AdminActionPromoteSuper       = "promote_super"
 	AdminActionDemoteSuper        = "demote_super"
+	AdminActionPromoteAdmin       = "promote_admin"
+	AdminActionDemoteAdmin        = "demote_admin"
 )
 
 // AdminPlayerStore is the read+write persistence interface the admin
@@ -327,6 +333,14 @@ type AdminPlayerStore interface {
 	// (super = false) leaves the admin role intact. Returns
 	// ErrPlayerNotFound when no row matches.
 	SetPlayerSuperAdmin(ctx context.Context, playerID int64, super bool) error
+	// SetPlayerRoleAndSuperAdmin sets both role and is_super_admin on the
+	// row identified by id in one statement (#527), so the id-based role
+	// selector can move a player to any privilege level. The caller passes
+	// the resolved (role, super) pair: player -> ("player", false),
+	// admin -> ("admin", false), super admin -> ("admin", true).
+	// super_admin_since is stamped when super is true and cleared
+	// otherwise. Returns ErrPlayerNotFound when no row matches.
+	SetPlayerRoleAndSuperAdmin(ctx context.Context, playerID int64, role string, super bool) error
 	// CountSuperAdmins returns the number of current super admins. The
 	// demote handler uses it to refuse a demote that would leave zero
 	// super admins.
@@ -345,21 +359,15 @@ type AdminPlayerStore interface {
 }
 
 // SuperAdminStore is the persistence interface the super-admin settings
-// page (#320) consumes. It embeds AdminPlayerStore for the shared
-// SetPlayerSuperAdmin + InsertAdminAudit writers and adds the two reads
-// the settings page needs on top: listing the current super admins and
-// resolving the username typed into the "Promote a player" form. The
-// concrete PlayerStore satisfies it alongside the other interface slots.
+// page (#320) consumes. It embeds AdminPlayerStore for the shared role
+// writers + InsertAdminAudit and adds the one read the settings page
+// needs on top: listing the current super admins. The concrete
+// PlayerStore satisfies it alongside the other interface slots.
 type SuperAdminStore interface {
 	AdminPlayerStore
 	// ListSuperAdmins returns every current super admin ordered by
 	// username. Empty slice when none exist yet.
 	ListSuperAdmins(ctx context.Context) ([]*SuperAdminEntry, error)
-	// GetPlayerByUsername returns the player with the given username.
-	// Returns ErrPlayerNotFound when there is no match. Used by the
-	// settings page's promote-by-username form, which mirrors the CLI
-	// bootstrap lookup.
-	GetPlayerByUsername(ctx context.Context, username string) (*Player, error)
 }
 
 // PlayerStore is the persistence interface used by the auth package.

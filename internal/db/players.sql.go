@@ -858,6 +858,38 @@ func (q *Queries) SetPlayerPasswordHash(ctx context.Context, arg SetPlayerPasswo
 	return result.RowsAffected()
 }
 
+const setPlayerRoleAndSuperAdmin = `-- name: SetPlayerRoleAndSuperAdmin :execrows
+UPDATE players
+SET role = ?1,
+    is_super_admin = ?2,
+    super_admin_since = CASE
+        WHEN ?2 = 1 THEN CURRENT_TIMESTAMP
+        ELSE NULL
+    END
+WHERE id = ?3
+`
+
+type SetPlayerRoleAndSuperAdminParams struct {
+	Role         string
+	IsSuperAdmin int64
+	ID           int64
+}
+
+// Sets role AND is_super_admin on the row identified by id, both from the
+// caller, so one statement moves a player to any privilege level. The three
+// levels map to (role, is_super_admin): player -> (player, 0),
+// admin -> (admin, 0), super_admin -> (admin, 1). super_admin_since is
+// stamped to CURRENT_TIMESTAMP when promoting to super and cleared to NULL
+// otherwise, mirroring SetPlayerSuperAdmin above. Returns the number of
+// affected rows so the wrapper can map "no rows" to ErrPlayerNotFound.
+func (q *Queries) SetPlayerRoleAndSuperAdmin(ctx context.Context, arg SetPlayerRoleAndSuperAdminParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setPlayerRoleAndSuperAdmin, arg.Role, arg.IsSuperAdmin, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setPlayerSuperAdmin = `-- name: SetPlayerSuperAdmin :execrows
 UPDATE players
 SET is_super_admin = ?1,
