@@ -149,11 +149,47 @@ func RequireAdmin(
 			return
 		}
 
-		if player.Role != RoleAdmin {
+		if !player.IsAdmin() {
 			render.render(w, r, http.StatusForbidden, formData{
 				Title:    "Access denied",
 				Username: player.Username,
 			})
+
+			return
+		}
+
+		next.ServeHTTP(w, r.WithContext(WithPlayer(r.Context(), player)))
+	})
+}
+
+// RequireSuperAdmin gates the handler to super admins only (#319).
+// Unauthenticated requests are handled exactly like [RequireAdmin] (303
+// to /login, carrying ?next= on safe methods). A signed-in player who is
+// not a super admin gets a plain 404 rather than a 403: the super-admin
+// surface is hidden from regular admins, so its routes must not betray
+// their existence (#320).
+func RequireSuperAdmin(
+	next http.Handler,
+	players PlayerStore,
+	sessions *session.Manager,
+	logger *slog.Logger,
+) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		player, err := loadSessionPlayer(r, players, sessions)
+		if err != nil {
+			if errors.Is(err, ErrPlayerNotFound) {
+				redirectToLoginWithNext(w, r)
+
+				return
+			}
+			logger.ErrorContext(r.Context(), "error loading player for super admin check", slog.Any("err", err))
+			http.Error(w, "internal error", http.StatusInternalServerError)
+
+			return
+		}
+
+		if !player.IsSuperAdmin {
+			http.NotFound(w, r)
 
 			return
 		}

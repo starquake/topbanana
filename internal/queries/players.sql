@@ -389,6 +389,41 @@ RETURNING player_id;
 DELETE FROM password_reset_tokens
 WHERE expires_at <= sqlc.arg('now');
 
+-- name: SetPlayerSuperAdmin :execrows
+-- Sets is_super_admin AND role on the row identified by id, both from the
+-- caller. Super admin is a strict superset of admin, and the Go wrapper
+-- passes role='admin' in both directions: promoting (is_super_admin = 1)
+-- sets role='admin', and demoting (is_super_admin = 0) re-asserts
+-- role='admin' so the demoted player keeps the plain admin powers. The
+-- statement always writes the passed role - it never preserves the
+-- existing one. Returns the number of affected rows so the wrapper can map
+-- "no rows" to ErrPlayerNotFound.
+UPDATE players
+SET is_super_admin = sqlc.arg('is_super_admin'),
+    role = sqlc.arg('role'),
+    super_admin_since = CASE
+        WHEN sqlc.arg('is_super_admin') = 1 THEN CURRENT_TIMESTAMP
+        ELSE NULL
+    END
+WHERE id = sqlc.arg('id');
+
+-- name: CountSuperAdmins :one
+-- Number of current super admins. Used by the demote guard to refuse a
+-- demote that would leave zero super admins.
+SELECT COUNT(*)
+FROM players
+WHERE is_super_admin = 1;
+
+-- name: ListSuperAdmins :many
+-- Every current super admin, ordered by username so the admin settings
+-- page (#320) renders a stable list. Only the columns the list needs are
+-- selected. super_admin_since is when the player was promoted (NULL for
+-- rows promoted before the column existed).
+SELECT id, username, email, super_admin_since
+FROM players
+WHERE is_super_admin = 1
+ORDER BY username, id;
+
 -- name: ResetPlayerPassword :execrows
 -- Atomically rotates password_hash and bumps session_version on the
 -- given row. The session_version increment is the security-critical

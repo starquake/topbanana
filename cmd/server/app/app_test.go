@@ -217,6 +217,58 @@ func TestResetPassword_EmailWhitespaceAndCaseNormalized_RotatesHash(t *testing.T
 	}
 }
 
+func TestPromoteSuper_HappyPath_SetsSuperAdminAndRole(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+
+	const username = "alice"
+	seedPlayer(t, dbURI, username)
+
+	var stdout, stderr bytes.Buffer
+	if err := PromoteSuper(t.Context(), envFor(dbURI), &stdout, &stderr, username); err != nil {
+		t.Fatalf("PromoteSuper err = %v, want nil", err)
+	}
+
+	p := fetchSeededPlayer(t, dbURI)
+	if got, want := p.IsSuperAdmin, true; got != want {
+		t.Errorf("IsSuperAdmin after PromoteSuper = %v, want %v", got, want)
+	}
+	if got, want := p.Role, auth.RoleAdmin; got != want {
+		t.Errorf("Role after PromoteSuper = %q, want %q", got, want)
+	}
+	if got, want := stdout.String(), "Promoted"; !strings.Contains(got, want) {
+		t.Errorf("stdout = %q, want substring %q", got, want)
+	}
+}
+
+func TestPromoteSuper_UnknownUsername_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+
+	var stdout, stderr bytes.Buffer
+	err := PromoteSuper(t.Context(), envFor(dbURI), &stdout, &stderr, "nobody")
+	if got, want := err, ErrPromoteUserNotFound; !errors.Is(got, want) {
+		t.Errorf("err = %v, want %v", got, want)
+	}
+}
+
+func TestPromoteSuper_BlankUsername_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+
+	var stdout, stderr bytes.Buffer
+	err := PromoteSuper(t.Context(), envFor(dbURI), &stdout, &stderr, "   ")
+	if got, want := err, ErrPromoteUsernameRequired; !errors.Is(got, want) {
+		t.Errorf("err = %v, want %v", got, want)
+	}
+}
+
 func TestResetPassword_UnknownEmail_ReturnsError(t *testing.T) {
 	t.Parallel()
 

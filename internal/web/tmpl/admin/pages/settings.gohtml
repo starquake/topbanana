@@ -1,0 +1,116 @@
+{{define "content"}}
+    <nav aria-label="breadcrumbs" class="mb-8">
+        <ol class="flex items-center text-xs uppercase tracking-[0.14em]">
+            <li><a href="/admin" class="pr-2 text-text-dim hover:text-text">Admin</a></li>
+            <li class="text-text-mute" aria-hidden="true">/</li>
+            <li><span class="pl-2 text-text" aria-current="page">Settings</span></li>
+        </ol>
+    </nav>
+
+    <header class="mb-8">
+        <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight">Settings</h1>
+        <p class="mt-1.5 max-w-[540px] text-text-dim text-[0.95rem]">
+            Super-admin controls: manage who holds the super-admin role, create accounts
+            directly, and reach quiz administration.
+        </p>
+    </header>
+
+    {{if .Notice}}
+        <div class="mb-6 rounded-md border border-green-500/40 bg-green-500/10 p-3 text-sm text-text" role="status">{{.Notice}}</div>
+    {{end}}
+    {{if .Error}}
+        <div class="mb-6 rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm text-text" role="alert">{{.Error}}</div>
+    {{end}}
+
+    <section class="mb-10" aria-label="Super admins">
+        <h2 class="font-display text-xl font-semibold tracking-tight mb-3">Super admins</h2>
+        {{if .SuperAdmins}}
+            <div class="overflow-x-auto border border-border-soft rounded-lg">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-text-dim uppercase text-xs tracking-[0.14em] border-b border-border-soft">
+                            <th class="px-4 py-3 font-semibold">Username</th>
+                            <th class="px-4 py-3 font-semibold">Email</th>
+                            <th class="px-4 py-3 font-semibold">Promoted</th>
+                            <th class="px-4 py-3 font-semibold text-right">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .SuperAdmins}}
+                            <tr class="border-b border-border-soft last:border-0">
+                                <td class="px-4 py-3 text-text">{{.Username}}</td>
+                                <td class="px-4 py-3 text-text-dim">{{if .Email}}{{.Email}}{{else}}&mdash;{{end}}</td>
+                                <td class="px-4 py-3 text-text-dim">
+                                    {{if .PromotedAt}}
+                                        <time title="{{.PromotedAt.Format "2006-01-02 15:04"}}">Promoted {{humanizeTime .PromotedAt}}</time>
+                                    {{else}}
+                                        &mdash;
+                                    {{end}}
+                                </td>
+                                <td class="px-4 py-3 text-right">
+                                    <form method="POST" action="/admin/players/{{.ID}}/demote-super" class="inline-flex"
+                                          onsubmit="return confirm('Remove super-admin from {{.Username}}?');">
+                                        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                                        <button type="submit" class="btn-ghost">Demote</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+        {{else}}
+            <p class="text-text-dim text-sm">No super admins yet.</p>
+        {{end}}
+
+        <form method="POST" action="/admin/settings/promote" class="mt-5 flex flex-col gap-3 max-w-md">
+            <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+            <label class="flex flex-col gap-1 text-sm">
+                <span class="text-text-dim text-xs uppercase tracking-[0.14em]">Promote a player</span>
+                <input type="text" name="username" required autocomplete="off"
+                       class="rounded-md border border-border bg-surface px-3 py-2 text-text" placeholder="Username to promote">
+            </label>
+            <div>
+                <button type="submit" class="btn-primary">Promote</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="mb-10" aria-label="Create account directly">
+        <h2 class="font-display text-xl font-semibold tracking-tight mb-3">Create account directly</h2>
+        <p class="mb-4 max-w-[540px] text-text-dim text-sm">
+            The account is created with its email pre-verified, so it can sign in right away.
+            No welcome email is sent; hand the password over out-of-band.
+        </p>
+        <form method="POST" action="/admin/players" class="flex flex-col gap-4 max-w-md">
+            <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+            <label class="flex flex-col gap-1 text-sm">
+                <span class="text-text-dim text-xs uppercase tracking-[0.14em]">Display name (optional)</span>
+                <input type="text" name="username" autocomplete="off"
+                       class="rounded-md border border-border bg-surface px-3 py-2 text-text" placeholder="Auto-generated if left blank">
+            </label>
+            <label class="flex flex-col gap-1 text-sm">
+                <span class="text-text-dim text-xs uppercase tracking-[0.14em]">Email</span>
+                <input type="email" name="email" required
+                       class="rounded-md border border-border bg-surface px-3 py-2 text-text" placeholder="player@example.com">
+            </label>
+            <label class="flex flex-col gap-1 text-sm">
+                <span class="text-text-dim text-xs uppercase tracking-[0.14em]">One-time password</span>
+                <input type="text" name="password" required autocomplete="new-password"
+                       class="rounded-md border border-border bg-surface px-3 py-2 text-text" placeholder="Pick something the recipient can change later">
+            </label>
+            <div>
+                <button type="submit" class="btn-primary">Create account</button>
+            </div>
+        </form>
+    </section>
+
+    <section aria-label="Quiz administration">
+        <h2 class="font-display text-xl font-semibold tracking-tight mb-3">Quiz administration</h2>
+        <p class="max-w-[540px] text-text-dim text-sm">
+            Super admins can reset scores or delete any quiz from the
+            <a href="/admin/quizzes" class="text-accent hover:underline">quiz list</a>;
+            the per-row actions are available there.
+        </p>
+    </section>
+{{end}}

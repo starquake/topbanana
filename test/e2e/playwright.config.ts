@@ -92,6 +92,8 @@ const adminUsernames = [
   'e2e-admin-nav-chromium', 'e2e-admin-nav-firefox',                          // admin-nav.spec.ts reachability (#517)
   'e2e-admin-nav-active-chromium', 'e2e-admin-nav-active-firefox',            // admin-nav.spec.ts active-section (#517)
   'e2e-admin-pregame-nav-chromium', 'e2e-admin-pregame-nav-firefox',          // pregame-nav.spec.ts deep-link browse link
+  'e2e-super-boss-chromium', 'e2e-super-boss-firefox',                        // admin-settings.spec.ts super-admin promote (#320)
+  'e2e-super-plain-chromium', 'e2e-super-plain-firefox',                      // admin-settings.spec.ts regular-admin 404 (#320)
 ];
 const ADMIN_EMAILS = adminUsernames.map(u => `${u}@example.test`).join(',');
 

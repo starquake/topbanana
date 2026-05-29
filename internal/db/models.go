@@ -99,6 +99,8 @@ type Player struct {
 	UsernameClaimed int64
 	EmailVerifiedAt sql.NullTime
 	SessionVersion  int64
+	IsSuperAdmin    int64
+	SuperAdminSince sql.NullTime
 }
 
 type PlayerIdentity struct {

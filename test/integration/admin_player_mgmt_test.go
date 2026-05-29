@@ -325,6 +325,7 @@ func TestAdminPlayerMgmt_CreatePlayer(t *testing.T) {
 		t.Fatalf("first registration did not promote to admin: Location = %q", got)
 	}
 	verifyPlayerEmail(ctx, t, srv.DBURI, "create-admin")
+	makeSuperAdmin(ctx, t, srv.DBURI, "create-admin")
 
 	postAdminAction(
 		ctx, t, adminClient, srv.BaseURL,
@@ -354,6 +355,54 @@ func TestAdminPlayerMgmt_CreatePlayer(t *testing.T) {
 	)
 	if got, want := detail, "Created"; !strings.Contains(got, want) {
 		t.Errorf("audit trail should record create; body=%q", detail)
+	}
+}
+
+// TestAdminPlayerMgmt_CreateRequiresSuperAdmin pins that direct account
+// creation is super-admin only (#319): a regular admin gets a 404 (not a
+// 403) on both the GET form and the POST submit, so the route's existence
+// stays hidden. The POST carries a valid CSRF token scraped off the
+// Path=/ cookie via /admin so the 404 comes from the super-admin gate,
+// not the CSRF middleware.
+func TestAdminPlayerMgmt_CreateRequiresSuperAdmin(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+	})
+
+	adminClient := newAdminMgmtClient(t)
+	if got := registerForRedirect(
+		ctx, t, adminClient, srv.BaseURL,
+		"create-plain-admin", "create-plain-admin-pass-123",
+	); got != "/admin/quizzes" {
+		t.Fatalf("first registration did not promote to admin: Location = %q", got)
+	}
+	verifyPlayerEmail(ctx, t, srv.DBURI, "create-plain-admin")
+
+	req, err := http.NewRequestWithContext(
+		ctx, http.MethodGet, srv.BaseURL+"/admin/players/new", nil,
+	)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	resp, err := adminClient.Do(req)
+	if err != nil {
+		t.Fatalf("client.Do err = %v, want nil", err)
+	}
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			t.Errorf("Body.Close err = %v, want nil", cerr)
+		}
+	}()
+	if got, want := resp.StatusCode, http.StatusNotFound; got != want {
+		t.Errorf("GET /admin/players/new status = %d, want %d", got, want)
+	}
+
+	if got, want := postCSRFForm(
+		ctx, t, adminClient, srv.BaseURL+"/admin/players",
+	), http.StatusNotFound; got != want {
+		t.Errorf("POST /admin/players status = %d, want %d", got, want)
 	}
 }
 

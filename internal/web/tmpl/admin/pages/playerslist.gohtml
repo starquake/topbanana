@@ -17,9 +17,11 @@
                 {{end}}
             </p>
         </div>
-        <div>
-            <a href="/admin/players/new" class="btn-primary">Add player</a>
-        </div>
+        {{if isSuperAdmin}}
+            <div>
+                <a href="/admin/players/new" class="btn-primary">Add player</a>
+            </div>
+        {{end}}
     </header>
 
     <nav aria-label="Filter by onboarding state" class="mb-6 flex flex-wrap gap-2 text-sm">

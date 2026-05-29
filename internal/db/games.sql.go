@@ -317,7 +317,7 @@ func (q *Queries) GetGameByPlayerAndQuiz(ctx context.Context, arg GetGameByPlaye
 }
 
 const getPlayer = `-- name: GetPlayer :one
-SELECT id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version
+SELECT id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin, super_admin_since
 FROM players
 WHERE id = ?
 `
@@ -335,6 +335,8 @@ func (q *Queries) GetPlayer(ctx context.Context, id int64) (Player, error) {
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
+		&i.IsSuperAdmin,
+		&i.SuperAdminSince,
 	)
 	return i, err
 }

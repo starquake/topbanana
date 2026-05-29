@@ -111,8 +111,10 @@ func (tr *TemplateRenderer) prepare(w http.ResponseWriter, r *http.Request) (*te
 	}
 
 	username := ""
+	superAdmin := false
 	if p, ok := auth.PlayerFromContext(r.Context()); ok {
 		username = p.Username
+		superAdmin = p.IsSuperAdmin
 	}
 
 	csrfToken := ""
@@ -123,10 +125,11 @@ func (tr *TemplateRenderer) prepare(w http.ResponseWriter, r *http.Request) (*te
 	section := navSection(r.URL.Path)
 
 	return t.Funcs(template.FuncMap{
-		"currentUser": func() string { return username },
-		"csrfToken":   func() string { return csrfToken },
-		"ogImage":     func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
-		"navSection":  func() string { return section },
+		"currentUser":  func() string { return username },
+		"csrfToken":    func() string { return csrfToken },
+		"ogImage":      func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
+		"navSection":   func() string { return section },
+		"isSuperAdmin": func() bool { return superAdmin },
 	}), true
 }
 
@@ -141,6 +144,8 @@ func navSection(path string) string {
 		return "players"
 	case strings.HasPrefix(path, "/admin/email"):
 		return "email"
+	case strings.HasPrefix(path, "/admin/settings"):
+		return "settings"
 	default:
 		return ""
 	}
@@ -199,16 +204,20 @@ const (
 	maxFormSize = 1 << 20 // 1 MB
 )
 
-// canEditQuiz is the single source of truth for the creator-only-edit
-// rule (#281): the session player must be present and must match the
-// quiz's CreatedByPlayerID. Both [attachCanEdit] (read paths) and
-// [requireQuizOwner] (mutating paths) call this so the policy lives
-// in one place - a future change (additional roles, transferred
-// ownership, etc.) only touches this function.
+// canEditQuiz is the single source of truth for the creator-or-super-admin
+// edit rule (#281/#319): the session player must be present and must
+// either be the quiz's creator OR a super admin (who may edit, delete, and
+// reset scores on any quiz). Both [attachCanEdit] (read paths) and
+// [requireQuizOwner] (mutating paths) call this so the policy lives in one
+// place - a future change (additional roles, transferred ownership, etc.)
+// only touches this function.
 func canEditQuiz(r *http.Request, createdByPlayerID int64) bool {
 	p, ok := auth.PlayerFromContext(r.Context())
+	if !ok {
+		return false
+	}
 
-	return ok && p.ID == createdByPlayerID
+	return p.IsSuperAdmin || p.ID == createdByPlayerID
 }
 
 // attachCanEdit stamps qzd.CanEdit from the session player so templates
@@ -326,6 +335,7 @@ func parseTemplate(path string) *template.Template {
 		"csrfToken":    func() string { return "" },
 		"ogImage":      func() string { return "" },
 		"navSection":   func() string { return "" },
+		"isSuperAdmin": func() bool { return false },
 		"envTitleTag":  envtag.Get,
 		"humanizeTime": humanizeTime,
 	}
