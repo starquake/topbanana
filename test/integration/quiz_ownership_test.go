@@ -13,31 +13,33 @@ import (
 	"testing"
 )
 
-// TestQuizOwnership_Integration covers #281: only the admin who
-// created a quiz may edit or delete it. Before the fix, every admin
-// could mutate every quiz. The test boots two browser-shaped clients,
-// promotes both their registrants to admin via ADMIN_EMAILS, has
-// adminA create a quiz, and then probes adminB against every mutating
-// admin endpoint scoped to that quiz. Each probe must come back 403
-// from the requireQuizOwner gate.
+// TestQuizOwnership_Integration covers #281/#538: a Host may edit or delete
+// only the quizzes they created, never another Host's. The test boots two
+// browser-shaped clients, makes both Hosts, has hostA create a quiz, and then
+// probes hostB against every mutating admin endpoint scoped to that quiz. Each
+// probe must come back 403 from the requireQuizOwner gate (an Admin would pass
+// it - that path is covered in TestRoles_HostGating).
 func TestQuizOwnership_Integration(t *testing.T) {
 	t.Parallel()
 
 	ctx, srv := startServer(t, map[string]string{
 		"REGISTRATION_ENABLED": "true",
-		// Pre-seed both registrants as admins so first-registrant-
-		// becomes-admin doesn't matter for ordering. The store
-		// promotes any email in this list to admin on register.
-		"ADMIN_EMAILS": "ownership-admin-a@example.test,ownership-admin-b@example.test",
+		// A throwaway first registrant consumes the first-registrant Admin
+		// promotion so both hosts under test are plain registrants we can
+		// demote to Host.
+		"ADMIN_EMAILS": "ownership-boss@example.test",
 	})
 	baseURL := srv.BaseURL
 
+	registerAdminClient(ctx, t, baseURL, srv.DBURI, "ownership-boss")
 	adminA := registerAdminClient(ctx, t, baseURL, srv.DBURI, "ownership-admin-a")
 	adminB := registerAdminClient(ctx, t, baseURL, srv.DBURI, "ownership-admin-b")
+	makeHost(ctx, t, srv.DBURI, "ownership-admin-a")
+	makeHost(ctx, t, srv.DBURI, "ownership-admin-b")
 
-	// Admin A creates a quiz; we capture its ID for the cross-admin
-	// probes. The create endpoint redirects to /admin/quizzes/{id};
-	// the Location header carries the id.
+	// Host A creates a quiz; we capture its ID for the cross-host probes.
+	// The create endpoint redirects to /admin/quizzes/{id}; the Location
+	// header carries the id.
 	quizID := createQuizAs(ctx, t, adminA, baseURL, "Ownership Quiz")
 
 	t.Run("non-owner POST update returns 403", func(t *testing.T) {

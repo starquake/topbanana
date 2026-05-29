@@ -53,21 +53,20 @@ type Player struct {
 	// cookie (which carries the version it was issued at) becomes
 	// invalid the moment the reset commits (#112).
 	SessionVersion int64
-	// IsSuperAdmin marks a player who holds elevated powers on top of the
-	// admin role (#319). Super admin is a strict superset of admin: a
-	// super admin always has admin powers via [Player.IsAdmin] even if
-	// the role column drifted, and is allowed to edit / delete / reset
-	// scores on any quiz regardless of creator.
-	IsSuperAdmin bool
 }
 
-// IsAdmin reports whether the player has admin powers. Super admin is a
-// strict superset of admin, so a super admin is always an admin even if
-// the role column drifted away from "admin". Use this rather than a raw
-// Role == RoleAdmin comparison so the superset relationship holds in one
-// place.
+// IsAdmin reports whether the player holds the top (Admin) tier: full access
+// to player management, role changes, account creation, email diagnostics,
+// settings, and edit/delete/reset on any quiz regardless of creator (#538).
 func (p *Player) IsAdmin() bool {
-	return p.Role == RoleAdmin || p.IsSuperAdmin
+	return p.Role == RoleAdmin
+}
+
+// CanHost reports whether the player may reach the dashboard and create /
+// manage games. True for Host and Admin (Admin is a superset of Host); own-game
+// ownership is still checked separately via the quiz's created_by_player_id.
+func (p *Player) CanHost() bool {
+	return p.Role == RoleHost || p.Role == RoleAdmin
 }
 
 // IsEmailVerified reports whether the player's email has been verified.
@@ -76,15 +75,15 @@ func (p *Player) IsEmailVerified() bool {
 }
 
 // IsAnonymous reports whether the player has no credentials set yet (no
-// password_hash) AND is not an admin. Anonymous rows are created by
-// EnsurePlayer for visitors who arrive without a session and may later be
+// password_hash) AND holds the default Player tier. Anonymous rows are created
+// by EnsurePlayer for visitors who arrive without a session and may later be
 // upgraded by ClaimPlayer.
 //
-// The admin-role exclusion guards the seeded admin row (id=1), which also
-// has a NULL password_hash but must never be treated as a claimable
-// anonymous row by HandleRegisterSubmit's claim path.
+// The non-player exclusion guards the seeded admin row (id=1), which has a NULL
+// password_hash but holds the Host tier after the #538 remap; it must never be
+// treated as a claimable anonymous row by HandleRegisterSubmit's claim path.
 func (p *Player) IsAnonymous() bool {
-	return p.PasswordHash == "" && p.Role != RoleAdmin
+	return p.PasswordHash == "" && p.Role == RolePlayer
 }
 
 // HasCustomName reports whether the player has explicitly picked their
@@ -99,11 +98,12 @@ func (p *Player) HasCustomName() bool {
 }
 
 // IsAuthenticated reports whether the visitor has signed in. True for
-// password rows, OAuth-linked rows, and the seeded admin. Distinct
-// from [Player.IsEmailVerified] - the email-verify gate is a separate
-// predicate so an unverified password row can still be session-bearing.
+// password rows, OAuth-linked rows, and any non-Player tier (so the seeded
+// admin, which is Host after the #538 remap, still counts). Distinct from
+// [Player.IsEmailVerified] - the email-verify gate is a separate predicate so
+// an unverified password row can still be session-bearing.
 func (p *Player) IsAuthenticated() bool {
-	return p.PasswordHash != "" || p.Email != "" || p.Role == RoleAdmin
+	return p.PasswordHash != "" || p.Email != "" || p.Role != RolePlayer
 }
 
 // AnonymousGameMigrator carries an anonymous visitor's game data onto
@@ -239,10 +239,6 @@ type PlayerDetail struct {
 	CreatedAt       time.Time
 	EmailVerifiedAt *time.Time
 	OnboardingState string
-	// IsSuperAdmin marks a player holding super-admin powers (#319/#527).
-	// Surfaced on the detail view so the role selector can preselect the
-	// current privilege level (player / admin / super admin).
-	IsSuperAdmin bool
 }
 
 // RecentFinishedGame is one row in the "Last 5 finished games" section
@@ -270,21 +266,25 @@ type AdminAuditEntry struct {
 	CreatedAt      time.Time
 }
 
-// SuperAdminEntry is one row in the super-admin list rendered on the
-// admin settings page (#320). Email is empty when the row has no address
-// on file.
-type SuperAdminEntry struct {
+// AdminEntry is one row in the Admins list rendered on the admin settings
+// page (#320/#538). Email is empty when the row has no address on file.
+type AdminEntry struct {
 	ID       int64
 	Username string
 	Email    string
-	// PromotedAt is when the player was promoted to super admin. Nil for
-	// rows promoted before the super_admin_since column existed.
-	PromotedAt *time.Time
+	// RoleChangedAt is when the player's role last changed (the promotion to
+	// Admin, in practice). Nil for rows whose role predates the column.
+	RoleChangedAt *time.Time
 }
 
 // Admin action labels written to admin_audit.action. Match the spec in
 // the #450 ticket; new actions belong here so the writers and the
 // detail-view renderer share one set of constants.
+//
+// AdminActionRoleChanged is the single role-change action new writes use
+// (#538); its payload carries {"from":<role>,"to":<role>}. The four legacy
+// promote/demote constants are kept ONLY so the detail view can still render
+// historical audit rows - no new write emits them.
 const (
 	AdminActionVerify             = "verify"
 	AdminActionEmailSet           = "email_set"
@@ -292,6 +292,7 @@ const (
 	AdminActionPasswordSet        = "password_set"
 	AdminActionCreated            = "created"
 	AdminActionResendVerification = "resend_verification"
+	AdminActionRoleChanged        = "role_changed"
 	AdminActionPromoteSuper       = "promote_super"
 	AdminActionDemoteSuper        = "demote_super"
 	AdminActionPromoteAdmin       = "promote_admin"
@@ -328,24 +329,15 @@ type AdminPlayerStore interface {
 	CreatePlayerByAdmin(
 		ctx context.Context, username, email, passwordHash string,
 	) (*Player, error)
-	// SetPlayerSuperAdmin flips is_super_admin on the row identified by
-	// id (#319). Promoting (super = true) also forces role to 'admin'
-	// because super admin is a strict superset of admin; demoting
-	// (super = false) leaves the admin role intact. Returns
-	// ErrPlayerNotFound when no row matches.
-	SetPlayerSuperAdmin(ctx context.Context, playerID int64, super bool) error
-	// SetPlayerRoleAndSuperAdmin sets both role and is_super_admin on the
-	// row identified by id in one statement (#527), so the id-based role
-	// selector can move a player to any privilege level. The caller passes
-	// the resolved (role, super) pair: player -> ("player", false),
-	// admin -> ("admin", false), super admin -> ("admin", true).
-	// super_admin_since is stamped when super is true and cleared
-	// otherwise. Returns ErrPlayerNotFound when no row matches.
-	SetPlayerRoleAndSuperAdmin(ctx context.Context, playerID int64, role string, super bool) error
-	// CountSuperAdmins returns the number of current super admins. The
-	// demote handler uses it to refuse a demote that would leave zero
-	// super admins.
-	CountSuperAdmins(ctx context.Context) (int64, error)
+	// SetPlayerRole sets the role on the row identified by id (#538), so the
+	// id-based role selector can move a player to any tier. role is one of
+	// RolePlayer / RoleHost / RoleAdmin; role_changed_at is stamped to the
+	// current time. Returns ErrPlayerNotFound when no row matches.
+	SetPlayerRole(ctx context.Context, playerID int64, role string) error
+	// CountAdmins returns the number of current Admins (top tier). The
+	// role-change handler uses it to refuse a change that would leave zero
+	// Admins.
+	CountAdmins(ctx context.Context) (int64, error)
 	// InsertAdminAudit records one admin action. payload is a
 	// pre-serialised JSON blob (use "{}" when there is nothing to
 	// record).
@@ -370,16 +362,16 @@ type AdminPlayerStore interface {
 	ChangePlayerPassword(ctx context.Context, playerID int64, passwordHash string) error
 }
 
-// SuperAdminStore is the persistence interface the super-admin settings
-// page (#320) consumes. It embeds AdminPlayerStore for the shared role
-// writers + InsertAdminAudit and adds the one read the settings page
-// needs on top: listing the current super admins. The concrete
-// PlayerStore satisfies it alongside the other interface slots.
-type SuperAdminStore interface {
+// AdminListStore is the persistence interface the admin settings page
+// (#320/#538) consumes. It embeds AdminPlayerStore for the shared role writers
+// + InsertAdminAudit and adds the one read the settings page needs on top:
+// listing the current Admins. The concrete PlayerStore satisfies it alongside
+// the other interface slots.
+type AdminListStore interface {
 	AdminPlayerStore
-	// ListSuperAdmins returns every current super admin ordered by
-	// username. Empty slice when none exist yet.
-	ListSuperAdmins(ctx context.Context) ([]*SuperAdminEntry, error)
+	// ListAdmins returns every current Admin ordered by username. Empty
+	// slice when none exist yet.
+	ListAdmins(ctx context.Context) ([]*AdminEntry, error)
 }
 
 // PlayerStore is the persistence interface used by the auth package.

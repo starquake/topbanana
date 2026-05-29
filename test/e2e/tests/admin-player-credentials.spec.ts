@@ -1,7 +1,7 @@
 import type { BrowserContext } from '@playwright/test';
 
 import { test, expect } from './fixtures';
-import { registerAdmin, markSuperAdmin, PASSWORD } from './helpers';
+import { registerAdmin, markAdmin, PASSWORD } from './helpers';
 
 // Registers a fresh plain player in an isolated browser context so the
 // admin session on the main page is left untouched.
@@ -25,17 +25,17 @@ async function registerPlayer(
   }
 }
 
-// #535 — a super admin can rename a player and set a new password from
-// the player detail page. Both forms live inside the super-admin gate in
-// the Actions card.
-test('super admin sets a player display name and password from the detail page', async ({ page, context, browserName }) => {
+// #535 — an Admin can rename a player and set a new password from the
+// player detail page. Both forms live inside the Admin gate in the
+// Actions card.
+test('admin sets a player display name and password from the detail page', async ({ page, context, browserName }) => {
   const adminUsername = `e2e-cred-boss-${browserName}`;
   const targetUsername = `e2e-cred-target-${browserName}`;
   const renamedUsername = `e2e-cred-renamed-${browserName}`;
   const newPassword = 'freshpassword13plus';
 
   await registerAdmin(page, adminUsername);
-  markSuperAdmin(adminUsername);
+  markAdmin(adminUsername);
   await registerPlayer(context, targetUsername);
 
   // Open the target's detail view from the players list.

@@ -24,7 +24,7 @@ func findCookie(rec *httptest.ResponseRecorder, name string) (*http.Cookie, bool
 	return nil, false
 }
 
-func TestRequireAdmin_AllowsAdmin(t *testing.T) {
+func TestRequireGameHost_AllowsAdmin(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
@@ -43,7 +43,7 @@ func TestRequireAdmin_AllowsAdmin(t *testing.T) {
 	})
 
 	sessions := session.New([]byte("k"), true)
-	mw := RequireAdmin(next, store, sessions, nil, discardLogger())
+	mw := RequireGameHost(next, store, sessions, nil, discardLogger())
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, admin.ID, 0)
@@ -71,7 +71,7 @@ func TestRequireAdmin_AllowsAdmin(t *testing.T) {
 	}
 }
 
-func TestRequireAdmin_DeniesPlayer(t *testing.T) {
+func TestRequireGameHost_DeniesPlayer(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
@@ -90,7 +90,7 @@ func TestRequireAdmin_DeniesPlayer(t *testing.T) {
 	})
 
 	sessions := session.New([]byte("k"), true)
-	mw := RequireAdmin(next, store, sessions, nil, discardLogger())
+	mw := RequireGameHost(next, store, sessions, nil, discardLogger())
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, player.ID, 0)
@@ -112,7 +112,7 @@ func TestRequireAdmin_DeniesPlayer(t *testing.T) {
 	}
 }
 
-func TestRequireAdmin_NoCookie_RedirectsToLogin(t *testing.T) {
+func TestRequireGameHost_NoCookie_RedirectsToLogin(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
@@ -120,7 +120,7 @@ func TestRequireAdmin_NoCookie_RedirectsToLogin(t *testing.T) {
 		t.Error("next should not be called without cookie")
 	})
 
-	mw := RequireAdmin(next, store, session.New([]byte("k"), true), nil, discardLogger())
+	mw := RequireGameHost(next, store, session.New([]byte("k"), true), nil, discardLogger())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
 	rec := httptest.NewRecorder()
@@ -137,11 +137,11 @@ func TestRequireAdmin_NoCookie_RedirectsToLogin(t *testing.T) {
 	}
 }
 
-// TestRequireAdmin_PostDropsNext pins #449's safe-method gate: a POST
+// TestRequireGameHost_PostDropsNext pins #449's safe-method gate: a POST
 // that hits an expired session still redirects to /login but does
 // NOT carry the URI as ?next= because the form body cannot be
 // replayed after the visitor signs back in.
-func TestRequireAdmin_PostDropsNext(t *testing.T) {
+func TestRequireGameHost_PostDropsNext(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
@@ -149,7 +149,7 @@ func TestRequireAdmin_PostDropsNext(t *testing.T) {
 		t.Error("next should not be called without cookie")
 	})
 
-	mw := RequireAdmin(next, store, session.New([]byte("k"), true), nil, discardLogger())
+	mw := RequireGameHost(next, store, session.New([]byte("k"), true), nil, discardLogger())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes", nil)
 	rec := httptest.NewRecorder()
@@ -163,7 +163,7 @@ func TestRequireAdmin_PostDropsNext(t *testing.T) {
 	}
 }
 
-func TestRequireAdmin_UnknownPlayerID_RedirectsToLogin(t *testing.T) {
+func TestRequireGameHost_UnknownPlayerID_RedirectsToLogin(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
@@ -172,7 +172,7 @@ func TestRequireAdmin_UnknownPlayerID_RedirectsToLogin(t *testing.T) {
 	})
 
 	sessions := session.New([]byte("k"), true)
-	mw := RequireAdmin(next, store, sessions, nil, discardLogger())
+	mw := RequireGameHost(next, store, sessions, nil, discardLogger())
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, 9999, 0)
@@ -188,7 +188,7 @@ func TestRequireAdmin_UnknownPlayerID_RedirectsToLogin(t *testing.T) {
 	}
 }
 
-func TestRequireAdmin_StoreError_500(t *testing.T) {
+func TestRequireGameHost_StoreError_500(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
@@ -203,7 +203,7 @@ func TestRequireAdmin_StoreError_500(t *testing.T) {
 	})
 
 	sessions := session.New([]byte("k"), true)
-	mw := RequireAdmin(next, store, sessions, nil, discardLogger())
+	mw := RequireGameHost(next, store, sessions, nil, discardLogger())
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, admin.ID, 0)
@@ -215,6 +215,122 @@ func TestRequireAdmin_StoreError_500(t *testing.T) {
 	mw.ServeHTTP(rec, req)
 
 	if got, want := rec.Code, http.StatusInternalServerError; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+}
+
+// TestRequireGameHost_AllowsHost pins that a Host (middle tier) reaches the
+// dashboard routes (#538). A pre-seeded admin keeps the new row off the
+// first-registrant promotion; the row is then bumped to Host directly.
+func TestRequireGameHost_AllowsHost(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	if _, err := store.CreatePlayer(t.Context(), "admin", "admin@example.test", "h", RoleAdmin); err != nil {
+		t.Fatalf("seed admin err = %v, want nil", err)
+	}
+	host, err := store.CreatePlayer(t.Context(), "hank", "hank@example.test", "h", RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	host.Role = RoleHost
+
+	called := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusTeapot)
+	})
+
+	sessions := session.New([]byte("k"), true)
+	mw := RequireGameHost(next, store, sessions, nil, discardLogger())
+
+	rec := httptest.NewRecorder()
+	sessions.Set(rec, host.ID, 0)
+	cookie := rec.Result().Cookies()[0]
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+
+	if !called {
+		t.Error("next handler was not called for host")
+	}
+	if got, want := rec.Code, http.StatusTeapot; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+}
+
+// TestRequireAdmin_AllowsAdmin pins that an Admin (top tier) reaches the
+// admin-only routes (#538).
+func TestRequireAdmin_AllowsAdmin(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	admin, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", "h", RoleAdmin)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+
+	called := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusTeapot)
+	})
+
+	sessions := session.New([]byte("k"), true)
+	mw := RequireAdmin(next, store, sessions, discardLogger())
+
+	rec := httptest.NewRecorder()
+	sessions.Set(rec, admin.ID, 0)
+	cookie := rec.Result().Cookies()[0]
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/players", nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+
+	if !called {
+		t.Error("next handler was not called for admin")
+	}
+	if got, want := rec.Code, http.StatusTeapot; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+}
+
+// TestRequireAdmin_DeniesHostWith404 pins that a Host hitting an Admin-only
+// route gets a plain 404 - the admin surface's existence stays hidden from
+// Hosts (#320/#538), so next must not run and no access-denied page leaks.
+func TestRequireAdmin_DeniesHostWith404(t *testing.T) {
+	t.Parallel()
+
+	store := newStubPlayerStore()
+	if _, err := store.CreatePlayer(t.Context(), "admin", "admin@example.test", "h", RoleAdmin); err != nil {
+		t.Fatalf("seed admin err = %v, want nil", err)
+	}
+	host, err := store.CreatePlayer(t.Context(), "hank", "hank@example.test", "h", RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	host.Role = RoleHost
+
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Error("next should not be called for a host on an admin-only route")
+	})
+
+	sessions := session.New([]byte("k"), true)
+	mw := RequireAdmin(next, store, sessions, discardLogger())
+
+	rec := httptest.NewRecorder()
+	sessions.Set(rec, host.ID, 0)
+	cookie := rec.Result().Cookies()[0]
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/players", nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusNotFound; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
 }

@@ -59,13 +59,12 @@ type playerDetailRow struct {
 	Username          string
 	Email             string
 	Role              string
-	RoleLevel         string
 	OnboardingState   string
 	OAuthProvider     string
 	HasOAuth          bool
 	HasPassword       bool
 	IsAdmin           bool
-	IsSuperAdmin      bool
+	IsHost            bool
 	CreatedAt         time.Time
 	EmailVerifiedAt   *time.Time
 	EmailVerifiedText string
@@ -183,8 +182,7 @@ func buildPlayerDetailData(
 		HasOAuth:        detail.HasOAuth,
 		HasPassword:     detail.HasPassword,
 		IsAdmin:         detail.Role == auth.RoleAdmin,
-		IsSuperAdmin:    detail.IsSuperAdmin,
-		RoleLevel:       roleLevelFromDetail(detail),
+		IsHost:          detail.Role == auth.RoleHost,
 		CreatedAt:       detail.CreatedAt,
 		EmailVerifiedAt: detail.EmailVerifiedAt,
 	}
@@ -242,14 +240,16 @@ func adminActionLabel(action string) string {
 		return "Created"
 	case auth.AdminActionResendVerification:
 		return "Verification email resent"
+	case auth.AdminActionRoleChanged:
+		return "Role changed"
 	case auth.AdminActionPromoteSuper:
-		return "Promoted to super admin"
-	case auth.AdminActionDemoteSuper:
-		return "Super admin removed"
-	case auth.AdminActionPromoteAdmin:
 		return "Promoted to admin"
-	case auth.AdminActionDemoteAdmin:
+	case auth.AdminActionDemoteSuper:
 		return "Admin removed"
+	case auth.AdminActionPromoteAdmin:
+		return "Promoted to host"
+	case auth.AdminActionDemoteAdmin:
+		return "Host removed"
 	default:
 		return action
 	}
@@ -273,7 +273,8 @@ func decodeAuditDetail(action, payload string) string {
 		return fields["new_email"]
 	case auth.AdminActionUsernameSet:
 		return fields["new_username"]
-	case auth.AdminActionPromoteSuper, auth.AdminActionDemoteSuper,
+	case auth.AdminActionRoleChanged,
+		auth.AdminActionPromoteSuper, auth.AdminActionDemoteSuper,
 		auth.AdminActionPromoteAdmin, auth.AdminActionDemoteAdmin:
 		from, to := fields["from"], fields["to"]
 		if from == "" || to == "" {

@@ -13,7 +13,7 @@
         <div>
             <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight">
                 {{.Player.Username}}
-                {{if .Player.IsAdmin}}<span class="ml-2 inline-flex items-center rounded-sm border border-accent bg-accent/10 px-2 py-1 align-middle text-sm text-text">admin</span>{{end}}
+                {{if .Player.IsAdmin}}<span class="ml-2 inline-flex items-center rounded-sm border border-accent bg-accent/10 px-2 py-1 align-middle text-sm text-text">admin</span>{{else if .Player.IsHost}}<span class="ml-2 inline-flex items-center rounded-sm border border-accent bg-accent/10 px-2 py-1 align-middle text-sm text-text">host</span>{{end}}
             </h1>
             <p class="mt-1.5 text-text-dim text-[0.95rem]">State: <span class="text-text">{{.Player.OnboardingState}}</span></p>
         </div>
@@ -78,16 +78,16 @@
                            class="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text" placeholder="player@example.com">
                     <button type="submit" class="btn-ghost">Save email</button>
                 </form>
-                {{if isSuperAdmin}}
+                {{if isAdmin}}
                     <form method="POST" action="/admin/players/{{.Player.ID}}/role" class="flex flex-col gap-2"
                           onsubmit="return confirm('Change this player&#39;s role?');">
                         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                         <label for="role-select" class="text-text-dim text-xs uppercase tracking-[0.14em]">Role</label>
                         <select id="role-select" name="role"
                                 class="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text">
-                            <option value="player" {{if eq .Player.RoleLevel "player"}}selected{{end}}>Player</option>
-                            <option value="admin" {{if eq .Player.RoleLevel "admin"}}selected{{end}}>Admin</option>
-                            <option value="super_admin" {{if eq .Player.RoleLevel "super_admin"}}selected{{end}}>Super admin</option>
+                            <option value="player" {{if eq .Player.Role "player"}}selected{{end}}>Player</option>
+                            <option value="host" {{if eq .Player.Role "host"}}selected{{end}}>Host</option>
+                            <option value="admin" {{if eq .Player.Role "admin"}}selected{{end}}>Admin</option>
                         </select>
                         <button type="submit" class="btn-primary">Save role</button>
                     </form>

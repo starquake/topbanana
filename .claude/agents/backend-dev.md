@@ -108,6 +108,24 @@ Hand-written Store and Service methods that read from the database use the `Get*
 8. **Route** — register the handler in `internal/server/routes.go`.
 9. **Tests** — unit tests alongside the source file; integration tests under `test/integration/`.
 
+## Migrations: table rebuilds and foreign keys
+
+SQLite cannot drop a column, change a constraint, or `ALTER COLUMN` in place — those need a **table rebuild** (create `*_new`, copy rows preserving ids, drop old, rename). When you rebuild a table, watch the foreign keys:
+
+- **Default** is `PRAGMA defer_foreign_keys = ON` (see CLAUDE.md and the canonical `20260520180000_unique_participant_per_player_quiz.sql`).
+- **But a *parent*-table rebuild** (e.g. `players`, which other tables FK-reference) trips `defer_foreign_keys` at COMMIT with `modernc.org/sqlite` **even for a faithful, id-preserving rebuild** (the `DROP TABLE` implicit-delete registers violations the deferred check won't clear). Verified empirically. For those, use the grandfathered pattern: `-- +goose NO TRANSACTION`, then `PRAGMA foreign_keys = OFF`, explicit `BEGIN TRANSACTION` ... `COMMIT`, then `PRAGMA foreign_keys = ON`, and add the file to the `make lint-migrations` allowlist. Precedent: `20260506000000`, `20260528100000`, `20260529160000`.
+- **`PRAGMA foreign_key_check` is NOT a guard.** It only *returns* violation rows; goose discards the result set, so a broken rebuild commits silently. To actually abort the migration on a dangling reference, use a CHECK-constraint guard before `COMMIT` (verified working in `20260529160000`):
+
+  ```sql
+  CREATE TEMP TABLE _fk_guard (ok INTEGER CHECK (ok = 1));
+  INSERT INTO _fk_guard (ok)
+  SELECT CASE WHEN (SELECT count(*) FROM pragma_foreign_key_check) = 0 THEN 1 ELSE 0 END;
+  DROP TABLE _fk_guard;
+  ```
+
+  Any violation makes the CASE yield `0`, the CHECK fails, and the transaction (and migration) aborts.
+- Copy ids exactly, re-declare inline `UNIQUE` / `CHECK` constraints on the new table, and recreate any named indexes the old table had. Always add a migration test that runs the rebuild against seeded rows and asserts the result.
+
 ## Review loop
 
 After every code change, run `/review` followed by `/go-style-review` on the current branch. Fix every actionable finding. Re-run both reviews and repeat until they each report no issues to fix. Only then is the change ready to be shown to the user for sign-off.

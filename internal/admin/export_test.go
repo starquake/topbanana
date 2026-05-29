@@ -9,9 +9,9 @@ import (
 // HumanizeTime exposes the unexported humanizeTime helper for tests.
 var HumanizeTime = humanizeTime
 
-// CanEditQuiz exposes the unexported creator-or-super-admin edit
+// CanEditQuiz exposes the unexported creator-or-admin edit
 // predicate (#281/#319) so the external admin_test package can pin the
-// creator / super-admin / unrelated-admin matrix without driving the
+// creator / admin / unrelated-host matrix without driving the
 // full HTTP handler stack.
 var CanEditQuiz = canEditQuiz
 

@@ -139,24 +139,23 @@ func ResetPassword(
 	return nil
 }
 
-// errPromoteEmailRequired is wrapped by [PromoteSuper] when the
+// errPromoteEmailRequired is wrapped by [PromoteAdmin] when the
 // supplied email trims to empty; defined at package scope so callers
 // and tests can match it via [errors.Is].
 var errPromoteEmailRequired = errors.New("email is required")
 
-// errPromoteEmailNotFound is wrapped by [PromoteSuper] when no player row
+// errPromoteEmailNotFound is wrapped by [PromoteAdmin] when no player row
 // matches the supplied email.
 var errPromoteEmailNotFound = errors.New("email not found")
 
-// PromoteSuper looks up a player by email and flips them to super admin
-// (is_super_admin = 1, role = 'admin'). This is a break-glass recovery
-// tool: the first super admin now comes from the first credentialled
-// registration, so this exists only for when every super admin is locked
-// out (lost passwords, deleted accounts) and someone has to mint a new one
-// out-of-band. The lookup is by email to line up with the post-#446 login
-// credential. The server should not be running concurrently against the
-// same database.
-func PromoteSuper(
+// PromoteAdmin looks up a player by email and sets them to the top tier
+// (role = 'admin') (#538). This is a break-glass recovery tool: the first
+// Admin normally comes from the first credentialled registration, so this
+// exists only for when every Admin is locked out (lost passwords, deleted
+// accounts) and someone has to mint a new one out-of-band. The lookup is by
+// email to line up with the post-#446 login credential. The server should not
+// be running concurrently against the same database.
+func PromoteAdmin(
 	ctx context.Context,
 	getenv func(string) string,
 	stdout, stderr io.Writer,
@@ -166,12 +165,12 @@ func PromoteSuper(
 
 	email = strings.ToLower(strings.TrimSpace(email))
 	if email == "" {
-		return fmt.Errorf("promote super: %w", errPromoteEmailRequired)
+		return fmt.Errorf("promote admin: %w", errPromoteEmailRequired)
 	}
 
 	cfg, err := config.Parse(getenv)
 	if err != nil {
-		return fmt.Errorf("promote super: parse config: %w", err)
+		return fmt.Errorf("promote admin: parse config: %w", err)
 	}
 
 	conn, err := setupDB(ctx, cfg, logger)
@@ -188,20 +187,20 @@ func PromoteSuper(
 	player, err := players.GetPlayerByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, auth.ErrPlayerNotFound) {
-			return fmt.Errorf("promote super: %w (%q)", errPromoteEmailNotFound, email)
+			return fmt.Errorf("promote admin: %w (%q)", errPromoteEmailNotFound, email)
 		}
 
-		return fmt.Errorf("promote super: %w", err)
+		return fmt.Errorf("promote admin: %w", err)
 	}
 
-	if err := players.SetPlayerSuperAdmin(ctx, player.ID, true); err != nil {
-		return fmt.Errorf("promote super: %w", err)
+	if err := players.SetPlayerRole(ctx, player.ID, auth.RoleAdmin); err != nil {
+		return fmt.Errorf("promote admin: %w", err)
 	}
 
-	if _, err := fmt.Fprintf(stdout, "Promoted %q to super admin.\n", email); err != nil {
-		return fmt.Errorf("promote super: write confirmation: %w", err)
+	if _, err := fmt.Fprintf(stdout, "Promoted %q to admin.\n", email); err != nil {
+		return fmt.Errorf("promote admin: write confirmation: %w", err)
 	}
-	logger.InfoContext(ctx, "promoted to super admin", slog.String("email", email))
+	logger.InfoContext(ctx, "promoted to admin", slog.String("email", email))
 
 	return nil
 }

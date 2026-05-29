@@ -18,11 +18,11 @@
                 <div class="hidden sm:flex items-center gap-1 text-sm">
                     <a href="/admin/quizzes" {{if eq $s "quizzes"}}aria-current="page"{{end}}
                        class="px-3 py-2 rounded-sm transition-colors {{if eq $s "quizzes"}}text-text border-b-2 border-accent{{else}}text-text-dim hover:text-text{{end}}">Quizzes</a>
+                    {{if isAdmin}}
                     <a href="/admin/players" {{if eq $s "players"}}aria-current="page"{{end}}
                        class="px-3 py-2 rounded-sm transition-colors {{if eq $s "players"}}text-text border-b-2 border-accent{{else}}text-text-dim hover:text-text{{end}}">Players</a>
                     <a href="/admin/email" {{if eq $s "email"}}aria-current="page"{{end}}
                        class="px-3 py-2 rounded-sm transition-colors {{if eq $s "email"}}text-text border-b-2 border-accent{{else}}text-text-dim hover:text-text{{end}}">Email</a>
-                    {{if isSuperAdmin}}
                     <a href="/admin/settings" {{if eq $s "settings"}}aria-current="page"{{end}}
                        class="px-3 py-2 rounded-sm transition-colors {{if eq $s "settings"}}text-text border-b-2 border-accent{{else}}text-text-dim hover:text-text{{end}}">Settings</a>
                     {{end}}
@@ -47,11 +47,11 @@
         <div class="sm:hidden border-t border-border-soft px-5 py-2 flex gap-1 text-sm">
             <a href="/admin/quizzes" {{if eq $s "quizzes"}}aria-current="page"{{end}}
                class="px-3 py-2 rounded-sm transition-colors {{if eq $s "quizzes"}}text-text border-b-2 border-accent{{else}}text-text-dim hover:text-text{{end}}">Quizzes</a>
+            {{if isAdmin}}
             <a href="/admin/players" {{if eq $s "players"}}aria-current="page"{{end}}
                class="px-3 py-2 rounded-sm transition-colors {{if eq $s "players"}}text-text border-b-2 border-accent{{else}}text-text-dim hover:text-text{{end}}">Players</a>
             <a href="/admin/email" {{if eq $s "email"}}aria-current="page"{{end}}
                class="px-3 py-2 rounded-sm transition-colors {{if eq $s "email"}}text-text border-b-2 border-accent{{else}}text-text-dim hover:text-text{{end}}">Email</a>
-            {{if isSuperAdmin}}
             <a href="/admin/settings" {{if eq $s "settings"}}aria-current="page"{{end}}
                class="px-3 py-2 rounded-sm transition-colors {{if eq $s "settings"}}text-text border-b-2 border-accent{{else}}text-text-dim hover:text-text{{end}}">Settings</a>
             {{end}}

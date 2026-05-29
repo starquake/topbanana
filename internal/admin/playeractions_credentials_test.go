@@ -84,15 +84,11 @@ func (*credStubStore) CreatePlayerByAdmin(
 	return nil, errors.ErrUnsupported
 }
 
-func (*credStubStore) SetPlayerSuperAdmin(_ context.Context, _ int64, _ bool) error {
+func (*credStubStore) SetPlayerRole(_ context.Context, _ int64, _ string) error {
 	return errors.ErrUnsupported
 }
 
-func (*credStubStore) SetPlayerRoleAndSuperAdmin(_ context.Context, _ int64, _ string, _ bool) error {
-	return errors.ErrUnsupported
-}
-
-func (*credStubStore) CountSuperAdmins(_ context.Context) (int64, error) {
+func (*credStubStore) CountAdmins(_ context.Context) (int64, error) {
 	return 0, errors.ErrUnsupported
 }
 

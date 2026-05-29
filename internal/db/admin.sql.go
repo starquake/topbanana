@@ -90,7 +90,7 @@ VALUES (
     'player',
     1
 )
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin, super_admin_since
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
 `
 
 type CreatePlayerByAdminParams struct {
@@ -118,15 +118,14 @@ func (q *Queries) CreatePlayerByAdmin(ctx context.Context, arg CreatePlayerByAdm
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
-		&i.IsSuperAdmin,
-		&i.SuperAdminSince,
+		&i.RoleChangedAt,
 	)
 	return i, err
 }
 
 const getPlayerWithOnboardingState = `-- name: GetPlayerWithOnboardingState :one
 SELECT
-    p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed, p.email_verified_at, p.session_version, p.is_super_admin, p.super_admin_since,
+    p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed, p.email_verified_at, p.session_version, p.role_changed_at,
     EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id) AS has_oauth,
     CAST(COALESCE(
         (SELECT pi.provider FROM player_identities pi WHERE pi.player_id = p.id ORDER BY pi.provider LIMIT 1),
@@ -155,8 +154,7 @@ type GetPlayerWithOnboardingStateRow struct {
 	UsernameClaimed int64
 	EmailVerifiedAt sql.NullTime
 	SessionVersion  int64
-	IsSuperAdmin    int64
-	SuperAdminSince sql.NullTime
+	RoleChangedAt   sql.NullTime
 	HasOauth        bool
 	OauthProvider   string
 	OnboardingState string
@@ -179,8 +177,7 @@ func (q *Queries) GetPlayerWithOnboardingState(ctx context.Context, id int64) (G
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
-		&i.IsSuperAdmin,
-		&i.SuperAdminSince,
+		&i.RoleChangedAt,
 		&i.HasOauth,
 		&i.OauthProvider,
 		&i.OnboardingState,
@@ -289,7 +286,7 @@ func (q *Queries) ListAdminAuditForTarget(ctx context.Context, arg ListAdminAudi
 
 const listPlayersByOnboardingState = `-- name: ListPlayersByOnboardingState :many
 SELECT
-    p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed, p.email_verified_at, p.session_version, p.is_super_admin, p.super_admin_since,
+    p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed, p.email_verified_at, p.session_version, p.role_changed_at,
     EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id) AS has_oauth,
     CAST(COALESCE(
         (SELECT pi.provider FROM player_identities pi WHERE pi.player_id = p.id ORDER BY pi.provider LIMIT 1),
@@ -334,8 +331,7 @@ type ListPlayersByOnboardingStateRow struct {
 	UsernameClaimed int64
 	EmailVerifiedAt sql.NullTime
 	SessionVersion  int64
-	IsSuperAdmin    int64
-	SuperAdminSince sql.NullTime
+	RoleChangedAt   sql.NullTime
 	HasOauth        bool
 	OauthProvider   string
 	OnboardingState string
@@ -367,8 +363,7 @@ func (q *Queries) ListPlayersByOnboardingState(ctx context.Context, arg ListPlay
 			&i.UsernameClaimed,
 			&i.EmailVerifiedAt,
 			&i.SessionVersion,
-			&i.IsSuperAdmin,
-			&i.SuperAdminSince,
+			&i.RoleChangedAt,
 			&i.HasOauth,
 			&i.OauthProvider,
 			&i.OnboardingState,

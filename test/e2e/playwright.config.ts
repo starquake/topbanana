@@ -92,9 +92,11 @@ const adminUsernames = [
   'e2e-admin-nav-chromium', 'e2e-admin-nav-firefox',                          // admin-nav.spec.ts reachability (#517)
   'e2e-admin-nav-active-chromium', 'e2e-admin-nav-active-firefox',            // admin-nav.spec.ts active-section (#517)
   'e2e-admin-pregame-nav-chromium', 'e2e-admin-pregame-nav-firefox',          // pregame-nav.spec.ts deep-link browse link
-  'e2e-super-boss-chromium', 'e2e-super-boss-firefox',                        // admin-settings.spec.ts super-admin promote (#320)
-  'e2e-super-plain-chromium', 'e2e-super-plain-firefox',                      // admin-settings.spec.ts regular-admin 404 (#320)
-  'e2e-demote-boss-chromium', 'e2e-demote-boss-firefox',                      // admin-settings.spec.ts super-admin demote (#527)
+  'e2e-admin-boss-chromium', 'e2e-admin-boss-firefox',                        // admin-settings.spec.ts admin promote (#538)
+  'e2e-host-boss-chromium', 'e2e-host-boss-firefox',                          // admin-settings.spec.ts set-host (#538)
+  'e2e-host-plain-chromium', 'e2e-host-plain-firefox',                        // admin-settings.spec.ts host 404 on settings (#538)
+  'e2e-host-gating-chromium', 'e2e-host-gating-firefox',                      // admin-settings.spec.ts host nav gating (#538)
+  'e2e-demote-boss-chromium', 'e2e-demote-boss-firefox',                      // admin-settings.spec.ts admin demote (#538)
   'e2e-cred-boss-chromium', 'e2e-cred-boss-firefox',                  // admin-player-credentials.spec.ts name/password (#535)
 ];
 const ADMIN_EMAILS = adminUsernames.map(u => `${u}@example.test`).join(',');

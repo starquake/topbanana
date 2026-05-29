@@ -9,10 +9,10 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 )
 
-// TestCanEditQuiz pins the creator-or-super-admin edit predicate
-// (#281/#319): the quiz creator may edit, any super admin may edit any
-// quiz, and an unrelated regular admin may not edit a quiz they did not
-// create.
+// TestCanEditQuiz pins the creator-or-Admin edit predicate (#281/#538): the
+// quiz creator may edit their own quiz regardless of tier, any Admin may edit
+// any quiz, and an unrelated Host may not edit a quiz they did not create
+// (Host is own-games-only).
 func TestCanEditQuiz(t *testing.T) {
 	t.Parallel()
 
@@ -25,20 +25,20 @@ func TestCanEditQuiz(t *testing.T) {
 		want    bool
 	}{
 		{
-			name:    "creator allowed",
-			player:  &auth.Player{ID: creatorID, Role: auth.RoleAdmin},
+			name:    "creator host allowed on own quiz",
+			player:  &auth.Player{ID: creatorID, Role: auth.RoleHost},
 			present: true,
 			want:    true,
 		},
 		{
-			name:    "super admin allowed on another admin quiz",
-			player:  &auth.Player{ID: 7, Role: auth.RoleAdmin, IsSuperAdmin: true},
-			present: true,
-			want:    true,
-		},
-		{
-			name:    "unrelated regular admin denied",
+			name:    "admin allowed on another host's quiz",
 			player:  &auth.Player{ID: 7, Role: auth.RoleAdmin},
+			present: true,
+			want:    true,
+		},
+		{
+			name:    "unrelated host denied",
+			player:  &auth.Player{ID: 7, Role: auth.RoleHost},
 			present: true,
 			want:    false,
 		},

@@ -217,7 +217,7 @@ func TestResetPassword_EmailWhitespaceAndCaseNormalized_RotatesHash(t *testing.T
 	}
 }
 
-func TestPromoteSuper_HappyPath_SetsSuperAdminAndRole(t *testing.T) {
+func TestPromoteAdmin_HappyPath_SetsAdminRole(t *testing.T) {
 	t.Parallel()
 
 	dbURI, cleanup := dbtest.SetupTestDB(t)
@@ -227,48 +227,73 @@ func TestPromoteSuper_HappyPath_SetsSuperAdminAndRole(t *testing.T) {
 		username = "alice"
 		email    = "alice@example.test"
 	)
+	// Seed two players: the first credentialled registrant becomes Admin
+	// automatically, so the SECOND ("bob", a Player) is the meaningful
+	// promote target. We still promote alice's row by username via the
+	// fixed-"alice" fetch helper; demote it to Host first so the promote is
+	// a real transition rather than a no-op.
 	seedPlayer(t, dbURI, username)
+	demoteToHost(t, dbURI, username)
 
 	var stdout, stderr bytes.Buffer
-	if err := PromoteSuper(t.Context(), envFor(dbURI), &stdout, &stderr, email); err != nil {
-		t.Fatalf("PromoteSuper err = %v, want nil", err)
+	if err := PromoteAdmin(t.Context(), envFor(dbURI), &stdout, &stderr, email); err != nil {
+		t.Fatalf("PromoteAdmin err = %v, want nil", err)
 	}
 
 	p := fetchSeededPlayer(t, dbURI)
-	if got, want := p.IsSuperAdmin, true; got != want {
-		t.Errorf("IsSuperAdmin after PromoteSuper = %v, want %v", got, want)
-	}
 	if got, want := p.Role, auth.RoleAdmin; got != want {
-		t.Errorf("Role after PromoteSuper = %q, want %q", got, want)
+		t.Errorf("Role after PromoteAdmin = %q, want %q", got, want)
 	}
 	if got, want := stdout.String(), "Promoted"; !strings.Contains(got, want) {
 		t.Errorf("stdout = %q, want substring %q", got, want)
 	}
 }
 
-func TestPromoteSuper_UnknownEmail_ReturnsError(t *testing.T) {
+func TestPromoteAdmin_UnknownEmail_ReturnsError(t *testing.T) {
 	t.Parallel()
 
 	dbURI, cleanup := dbtest.SetupTestDB(t)
 	t.Cleanup(cleanup)
 
 	var stdout, stderr bytes.Buffer
-	err := PromoteSuper(t.Context(), envFor(dbURI), &stdout, &stderr, "nobody@example.test")
+	err := PromoteAdmin(t.Context(), envFor(dbURI), &stdout, &stderr, "nobody@example.test")
 	if got, want := err, ErrPromoteEmailNotFound; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
 }
 
-func TestPromoteSuper_BlankEmail_ReturnsError(t *testing.T) {
+func TestPromoteAdmin_BlankEmail_ReturnsError(t *testing.T) {
 	t.Parallel()
 
 	dbURI, cleanup := dbtest.SetupTestDB(t)
 	t.Cleanup(cleanup)
 
 	var stdout, stderr bytes.Buffer
-	err := PromoteSuper(t.Context(), envFor(dbURI), &stdout, &stderr, "   ")
+	err := PromoteAdmin(t.Context(), envFor(dbURI), &stdout, &stderr, "   ")
 	if got, want := err, ErrPromoteEmailRequired; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
+	}
+}
+
+// demoteToHost flips the seeded player's role to Host so a subsequent
+// PromoteAdmin is a real transition rather than a no-op against the
+// first-registrant Admin promotion.
+func demoteToHost(t *testing.T, dbURI, username string) {
+	t.Helper()
+
+	conn, err := sql.Open("sqlite", dbURI)
+	if err != nil {
+		t.Fatalf("sql.Open err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := conn.Close(); cerr != nil {
+			t.Errorf("conn.Close err = %v, want nil", cerr)
+		}
+	})
+	if _, err := conn.ExecContext(
+		t.Context(), "UPDATE players SET role = ? WHERE username = ?", auth.RoleHost, username,
+	); err != nil {
+		t.Fatalf("demote update err = %v, want nil", err)
 	}
 }
 

@@ -87,16 +87,16 @@ func TestPlayerStore_CreateAndGetPlayer(t *testing.T) {
 	}
 }
 
-func TestPlayerStore_CreatePlayer_FirstPasswordBearer_PromotedToSuperAdmin(t *testing.T) {
+func TestPlayerStore_CreatePlayer_FirstPasswordBearer_PromotedToAdmin(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
 	// Even when the caller asks for "player", the first credentialled
-	// registrant is promoted to admin AND super admin atomically by the SQL
-	// CASE expressions, so a fresh install can reach /admin/settings without
-	// the break-glass CLI.
+	// registrant is promoted to the top tier (admin) atomically by the SQL
+	// CASE, so a fresh install can reach /admin/settings without the
+	// break-glass CLI (#538). role_changed_at is stamped.
 	created, err := ps.CreatePlayer(t.Context(), "alice", "alice"+"@example.test", "hash", auth.RolePlayer)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
@@ -104,10 +104,7 @@ func TestPlayerStore_CreatePlayer_FirstPasswordBearer_PromotedToSuperAdmin(t *te
 	if got, want := created.Role, auth.RoleAdmin; got != want {
 		t.Errorf("Role = %q, want %q", got, want)
 	}
-	if got, want := created.IsSuperAdmin, true; got != want {
-		t.Errorf("IsSuperAdmin = %v, want %v", got, want)
-	}
-	assertRoleState(t, db, created.ID, auth.RoleAdmin, true, true)
+	assertRoleState(t, db, created.ID, auth.RoleAdmin, true)
 }
 
 func TestPlayerStore_CreatePlayer_SecondPasswordBearer_StaysPlayer(t *testing.T) {
@@ -127,10 +124,7 @@ func TestPlayerStore_CreatePlayer_SecondPasswordBearer_StaysPlayer(t *testing.T)
 	if got, want := created.Role, auth.RolePlayer; got != want {
 		t.Errorf("Role = %q, want %q", got, want)
 	}
-	if got, want := created.IsSuperAdmin, false; got != want {
-		t.Errorf("IsSuperAdmin = %v, want %v", got, want)
-	}
-	assertRoleState(t, db, created.ID, auth.RolePlayer, false, false)
+	assertRoleState(t, db, created.ID, auth.RolePlayer, false)
 }
 
 func TestPlayerStore_CreatePlayer_ExplicitAdmin_HonouredEvenWhenNotFirst(t *testing.T) {
@@ -144,9 +138,8 @@ func TestPlayerStore_CreatePlayer_ExplicitAdmin_HonouredEvenWhenNotFirst(t *test
 	}
 
 	// An ADMIN_EMAILS-style requested_role=admin call on a DB that already has
-	// a credentialled account becomes admin but never super: the super flag is
-	// tied to the "first credentialled registrant" condition, not to the
-	// requested-admin branch.
+	// a credentialled account becomes the top tier admin (#538). role_changed_at
+	// is stamped for the requested-admin branch too.
 	created, err := ps.CreatePlayer(t.Context(), "carol", "carol"+"@example.test", "hash", auth.RoleAdmin)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
@@ -154,10 +147,7 @@ func TestPlayerStore_CreatePlayer_ExplicitAdmin_HonouredEvenWhenNotFirst(t *test
 	if got, want := created.Role, auth.RoleAdmin; got != want {
 		t.Errorf("Role = %q, want %q", got, want)
 	}
-	if got, want := created.IsSuperAdmin, false; got != want {
-		t.Errorf("IsSuperAdmin = %v, want %v", got, want)
-	}
-	assertRoleState(t, db, created.ID, auth.RoleAdmin, false, false)
+	assertRoleState(t, db, created.ID, auth.RoleAdmin, true)
 }
 
 func TestPlayerStore_TrimsWhitespaceOnCreateAndLookup(t *testing.T) {
@@ -443,15 +433,12 @@ func TestPlayerStore_ClaimPlayer_UpgradesAnonymousRow(t *testing.T) {
 	if got, want := claimed.PasswordHash, "hash"; got != want {
 		t.Errorf("claimed.PasswordHash = %q, want %q", got, want)
 	}
-	// First credentialled registrant - even via the claim path - becomes admin
-	// and super admin.
+	// First credentialled registrant - even via the claim path - becomes the
+	// top tier admin (#538).
 	if got, want := claimed.Role, auth.RoleAdmin; got != want {
 		t.Errorf("claimed.Role = %q, want %q", got, want)
 	}
-	if got, want := claimed.IsSuperAdmin, true; got != want {
-		t.Errorf("claimed.IsSuperAdmin = %v, want %v", got, want)
-	}
-	assertRoleState(t, db, claimed.ID, auth.RoleAdmin, true, true)
+	assertRoleState(t, db, claimed.ID, auth.RoleAdmin, true)
 	// The claim flow is an explicit username choice: the player typed it
 	// into the register form, so the flag must flip alongside the password.
 	if got, want := claimed.HasCustomName(), true; got != want {
@@ -977,69 +964,55 @@ func TestPlayerStore_SetPlayerEmail_ClearsVerification(t *testing.T) {
 	}
 }
 
-// TestPlayerStore_SetPlayerRoleAndSuperAdmin walks a single row through
-// every privilege transition (#527) - player -> admin -> super admin ->
-// player - and pins both columns plus super_admin_since at each step: the
-// timestamp is stamped only while the row is super and cleared otherwise.
-func TestPlayerStore_SetPlayerRoleAndSuperAdmin(t *testing.T) {
+// TestPlayerStore_SetPlayerRole walks a single row through every tier
+// transition (#538) - player -> host -> admin -> player - and pins the role
+// and role_changed_at at each step: the timestamp is stamped on every change.
+func TestPlayerStore_SetPlayerRole(t *testing.T) {
 	t.Parallel()
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
-	// Seed an anonymous (role=player, not super) row.
+	// Seed an anonymous (role=player) row.
 	created, err := ps.CreateAnonymousPlayer(t.Context(), "role-target")
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
 
-	// player -> admin: role flips, still not super, since stays NULL.
-	if setErr := ps.SetPlayerRoleAndSuperAdmin(
-		t.Context(), created.ID, auth.RoleAdmin, false,
-	); setErr != nil {
-		t.Fatalf("set admin err = %v, want nil", setErr)
-	}
-	assertRoleState(t, db, created.ID, auth.RoleAdmin, false, false)
+	for _, role := range []string{auth.RoleHost, auth.RoleAdmin, auth.RolePlayer} {
+		if setErr := ps.SetPlayerRole(t.Context(), created.ID, role); setErr != nil {
+			t.Fatalf("set role %q err = %v, want nil", role, setErr)
+		}
+		assertRoleState(t, db, created.ID, role, true)
 
-	// admin -> super admin: role stays admin, super flips, since stamped.
-	if setErr := ps.SetPlayerRoleAndSuperAdmin(
-		t.Context(), created.ID, auth.RoleAdmin, true,
-	); setErr != nil {
-		t.Fatalf("set super err = %v, want nil", setErr)
+		got, getErr := ps.GetPlayerByID(t.Context(), created.ID)
+		if getErr != nil {
+			t.Fatalf("GetPlayerByID err = %v, want nil", getErr)
+		}
+		if got.Role != role {
+			t.Errorf("Role after set = %q, want %q", got.Role, role)
+		}
 	}
-	assertRoleState(t, db, created.ID, auth.RoleAdmin, true, true)
-	if got, want := superAdminFlag(t, ps, created.ID), true; got != want {
-		t.Errorf("IsSuperAdmin = %v, want %v", got, want)
-	}
-
-	// super admin -> player: role flips back, super cleared, since cleared.
-	if setErr := ps.SetPlayerRoleAndSuperAdmin(
-		t.Context(), created.ID, auth.RolePlayer, false,
-	); setErr != nil {
-		t.Fatalf("set player err = %v, want nil", setErr)
-	}
-	assertRoleState(t, db, created.ID, auth.RolePlayer, false, false)
 }
 
-func TestPlayerStore_SetPlayerRoleAndSuperAdmin_NotFound(t *testing.T) {
+func TestPlayerStore_SetPlayerRole_NotFound(t *testing.T) {
 	t.Parallel()
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
-	err := ps.SetPlayerRoleAndSuperAdmin(t.Context(), 99999, auth.RoleAdmin, false)
+	err := ps.SetPlayerRole(t.Context(), 99999, auth.RoleAdmin)
 	if got, want := err, auth.ErrPlayerNotFound; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
 }
 
-// TestPlayerStore_GetPlayerDetail_ExposesSuperAdmin pins that the detail
-// read surfaces is_super_admin so the #527 role selector can preselect
-// the current level.
-func TestPlayerStore_GetPlayerDetail_ExposesSuperAdmin(t *testing.T) {
+// TestPlayerStore_GetPlayerDetail_ExposesRole pins that the detail read
+// surfaces the role so the #538 role selector can preselect the current tier.
+func TestPlayerStore_GetPlayerDetail_ExposesRole(t *testing.T) {
 	t.Parallel()
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
-	created, err := ps.CreatePlayerByAdmin(t.Context(), "detail-super", "detail-super@example.test", "h")
+	created, err := ps.CreatePlayerByAdmin(t.Context(), "detail-role", "detail-role@example.test", "h")
 	if err != nil {
 		t.Fatalf("CreatePlayerByAdmin err = %v, want nil", err)
 	}
@@ -1048,60 +1021,42 @@ func TestPlayerStore_GetPlayerDetail_ExposesSuperAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPlayerDetail err = %v, want nil", err)
 	}
-	if got, want := before.IsSuperAdmin, false; got != want {
-		t.Errorf("IsSuperAdmin before = %v, want %v", got, want)
+	if got, want := before.Role, auth.RolePlayer; got != want {
+		t.Errorf("Role before = %q, want %q", got, want)
 	}
 
-	if setErr := ps.SetPlayerRoleAndSuperAdmin(
-		t.Context(), created.ID, auth.RoleAdmin, true,
-	); setErr != nil {
-		t.Fatalf("set super err = %v, want nil", setErr)
+	if setErr := ps.SetPlayerRole(t.Context(), created.ID, auth.RoleHost); setErr != nil {
+		t.Fatalf("set host err = %v, want nil", setErr)
 	}
 
 	after, err := ps.GetPlayerDetail(t.Context(), created.ID)
 	if err != nil {
 		t.Fatalf("GetPlayerDetail err = %v, want nil", err)
 	}
-	if got, want := after.IsSuperAdmin, true; got != want {
-		t.Errorf("IsSuperAdmin after = %v, want %v", got, want)
+	if got, want := after.Role, auth.RoleHost; got != want {
+		t.Errorf("Role after = %q, want %q", got, want)
 	}
 }
 
-// assertRoleState reads the row by id and asserts role, the
-// is_super_admin flag, and whether super_admin_since is non-NULL.
-func assertRoleState(t *testing.T, db *sql.DB, id int64, wantRole string, wantSuper, wantSinceSet bool) {
+// assertRoleState reads the row by id and asserts role and whether
+// role_changed_at is non-NULL (#538).
+func assertRoleState(t *testing.T, db *sql.DB, id int64, wantRole string, wantChangedSet bool) {
 	t.Helper()
 	var (
-		role  string
-		super int64
-		since sql.NullTime
+		role    string
+		changed sql.NullTime
 	)
 	row := db.QueryRowContext(t.Context(),
-		"SELECT role, is_super_admin, super_admin_since FROM players WHERE id = ?", id)
-	if err := row.Scan(&role, &super, &since); err != nil {
+		"SELECT role, role_changed_at FROM players WHERE id = ?", id)
+	if err := row.Scan(&role, &changed); err != nil {
 		t.Fatalf("scan role state err = %v, want nil", err)
 	}
 	if got := role; got != wantRole {
 		t.Errorf("role = %q, want %q", got, wantRole)
 	}
-	if got, want := super != 0, wantSuper; got != want {
-		t.Errorf("is_super_admin = %v, want %v", got, want)
+	if got, want := changed.Valid, wantChangedSet; got != want {
+		t.Errorf("role_changed_at set = %v, want %v", got, want)
 	}
-	if got, want := since.Valid, wantSinceSet; got != want {
-		t.Errorf("super_admin_since set = %v, want %v", got, want)
-	}
-}
-
-// superAdminFlag reads the player via GetPlayerByID so the assertion
-// exercises the auth.Player mapping rather than the raw column.
-func superAdminFlag(t *testing.T, ps *PlayerStore, id int64) bool {
-	t.Helper()
-	p, err := ps.GetPlayerByID(t.Context(), id)
-	if err != nil {
-		t.Fatalf("GetPlayerByID err = %v, want nil", err)
-	}
-
-	return p.IsSuperAdmin
 }
 
 func TestPlayerStore_ListAdminAuditForTarget_SurvivesActorDeletion(t *testing.T) {

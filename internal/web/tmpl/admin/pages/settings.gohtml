@@ -10,7 +10,7 @@
     <header class="mb-8">
         <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight">Settings</h1>
         <p class="mt-1.5 max-w-[540px] text-text-dim text-[0.95rem]">
-            Super-admin controls: manage who holds the super-admin role, create accounts
+            Admin controls: manage who holds the Admin role, create accounts
             directly, and reach quiz administration.
         </p>
     </header>
@@ -22,9 +22,9 @@
         <div class="mb-6 rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm text-text" role="alert">{{.Error}}</div>
     {{end}}
 
-    <section class="mb-10" aria-label="Super admins">
-        <h2 class="font-display text-xl font-semibold tracking-tight mb-3">Super admins</h2>
-        {{if .SuperAdmins}}
+    <section class="mb-10" aria-label="Admins">
+        <h2 class="font-display text-xl font-semibold tracking-tight mb-3">Admins</h2>
+        {{if .Admins}}
             <div class="overflow-x-auto border border-border-soft rounded-lg">
                 <table class="w-full text-sm">
                     <thead>
@@ -36,7 +36,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        {{range .SuperAdmins}}
+                        {{range .Admins}}
                             <tr class="border-b border-border-soft last:border-0">
                                 <td class="px-4 py-3 text-text">{{.Username}}</td>
                                 <td class="px-4 py-3 text-text-dim">{{if .Email}}{{.Email}}{{else}}&mdash;{{end}}</td>
@@ -49,9 +49,9 @@
                                 </td>
                                 <td class="px-4 py-3 text-right">
                                     <form method="POST" action="/admin/players/{{.ID}}/role" class="inline-flex"
-                                          onsubmit="return confirm('Remove super-admin from {{.Username}}?');">
+                                          onsubmit="return confirm('Remove Admin from {{.Username}}?');">
                                         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                                        <input type="hidden" name="role" value="admin">
+                                        <input type="hidden" name="role" value="host">
                                         <button type="submit" class="btn-ghost">Demote</button>
                                     </form>
                                 </td>
@@ -61,7 +61,7 @@
                 </table>
             </div>
         {{else}}
-            <p class="text-text-dim text-sm">No super admins yet.</p>
+            <p class="text-text-dim text-sm">No admins yet.</p>
         {{end}}
 
         <p class="mt-5 text-text-dim text-sm">
@@ -102,7 +102,7 @@
     <section aria-label="Quiz administration">
         <h2 class="font-display text-xl font-semibold tracking-tight mb-3">Quiz administration</h2>
         <p class="max-w-[540px] text-text-dim text-sm">
-            Super admins can reset scores or delete any quiz from the
+            Admins can reset scores or delete any quiz from the
             <a href="/admin/quizzes" class="text-accent hover:underline">quiz list</a>;
             the per-row actions are available there.
         </p>

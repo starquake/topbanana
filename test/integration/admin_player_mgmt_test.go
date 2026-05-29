@@ -325,7 +325,6 @@ func TestAdminPlayerMgmt_CreatePlayer(t *testing.T) {
 		t.Fatalf("first registration did not promote to admin: Location = %q", got)
 	}
 	verifyPlayerEmail(ctx, t, srv.DBURI, "create-admin")
-	makeSuperAdmin(ctx, t, srv.DBURI, "create-admin")
 
 	postAdminAction(
 		ctx, t, adminClient, srv.BaseURL,
@@ -358,43 +357,39 @@ func TestAdminPlayerMgmt_CreatePlayer(t *testing.T) {
 	}
 }
 
-// TestAdminPlayerMgmt_CreateRequiresSuperAdmin pins that direct account
-// creation is super-admin only (#319): a regular admin gets a 404 (not a
-// 403) on both the GET form and the POST submit, so the route's existence
-// stays hidden. The POST carries a valid CSRF token scraped off the
-// Path=/ cookie via /admin so the 404 comes from the super-admin gate,
-// not the CSRF middleware.
+// TestAdminPlayerMgmt_CreateRequiresAdmin pins that direct account creation is
+// Admin-only (#538): a Host gets a 404 (not a 403) on both the GET form and the
+// POST submit, so the route's existence stays hidden. The POST carries a valid
+// CSRF token scraped off the Path=/ cookie via /admin so the 404 comes from the
+// admin gate, not the CSRF middleware.
 //
-// The first credentialled registrant is now auto-promoted to super admin
-// (#528), so the plain admin under test must be a *later* registrant. The
-// first account is registered to consume the super-admin promotion, then an
-// ADMIN_EMAILS-matched second account registers as a plain admin (admin but
-// not super) and drives the assertions.
-func TestAdminPlayerMgmt_CreateRequiresSuperAdmin(t *testing.T) {
+// The first credentialled registrant is auto-promoted to Admin, so the Host
+// under test is a *later* registrant demoted off that promotion to Host.
+func TestAdminPlayerMgmt_CreateRequiresAdmin(t *testing.T) {
 	t.Parallel()
 
 	ctx, srv := startServer(t, map[string]string{
 		"REGISTRATION_ENABLED": "true",
-		"ADMIN_EMAILS":         "create-plain-admin@example.test",
 	})
-
-	superClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, superClient, srv.BaseURL,
-		"create-super-admin", "create-super-admin-pass-123",
-	); got != "/admin/quizzes" {
-		t.Fatalf("first registration did not promote to admin: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "create-super-admin")
 
 	adminClient := newAdminMgmtClient(t)
 	if got := registerForRedirect(
 		ctx, t, adminClient, srv.BaseURL,
-		"create-plain-admin", "create-plain-admin-pass-123",
+		"create-admin-boss", "create-admin-boss-pass-123",
 	); got != "/admin/quizzes" {
-		t.Fatalf("ADMIN_EMAILS registration did not promote to admin: Location = %q", got)
+		t.Fatalf("first registration did not promote to admin: Location = %q", got)
 	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "create-plain-admin")
+	verifyPlayerEmail(ctx, t, srv.DBURI, "create-admin-boss")
+
+	hostClient := newAdminMgmtClient(t)
+	if got := registerForRedirect(
+		ctx, t, hostClient, srv.BaseURL,
+		"create-host", "create-host-pass-123",
+	); got != "/" {
+		t.Fatalf("second registration did not land on /: Location = %q", got)
+	}
+	verifyPlayerEmail(ctx, t, srv.DBURI, "create-host")
+	makeHost(ctx, t, srv.DBURI, "create-host")
 
 	req, err := http.NewRequestWithContext(
 		ctx, http.MethodGet, srv.BaseURL+"/admin/players/new", nil,
@@ -402,7 +397,7 @@ func TestAdminPlayerMgmt_CreateRequiresSuperAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRequest err = %v, want nil", err)
 	}
-	resp, err := adminClient.Do(req)
+	resp, err := hostClient.Do(req)
 	if err != nil {
 		t.Fatalf("client.Do err = %v, want nil", err)
 	}
@@ -416,7 +411,7 @@ func TestAdminPlayerMgmt_CreateRequiresSuperAdmin(t *testing.T) {
 	}
 
 	if got, want := postCSRFForm(
-		ctx, t, adminClient, srv.BaseURL+"/admin/players",
+		ctx, t, hostClient, srv.BaseURL+"/admin/players",
 	), http.StatusNotFound; got != want {
 		t.Errorf("POST /admin/players status = %d, want %d", got, want)
 	}
@@ -465,9 +460,9 @@ func TestAdminPlayerMgmt_RequiresCSRF(t *testing.T) {
 	}
 }
 
-// TestAdminPlayerMgmt_NonAdminBlocked pins the requireAdmin gate on
-// the new routes: a logged-in non-admin lands on a 303 to /login (or
-// a 403, depending on the middleware) and never reaches the page.
+// TestAdminPlayerMgmt_NonAdminBlocked pins the requireAdmin gate on the
+// player-management routes: a signed-in non-Admin gets a plain 404 (the
+// route's existence stays hidden, #538) and never reaches the page.
 func TestAdminPlayerMgmt_NonAdminBlocked(t *testing.T) {
 	t.Parallel()
 
@@ -510,18 +505,19 @@ func TestAdminPlayerMgmt_NonAdminBlocked(t *testing.T) {
 			t.Errorf("Body.Close err = %v", cerr)
 		}
 	}()
-	// RequireAdmin (auth/middleware.go) either 303s to /login (anonymous)
-	// or 403s a signed-in non-admin so the route never leaks "this player
-	// exists" via a different status code; either is acceptable here.
-	if got := resp.StatusCode; got != http.StatusSeeOther && got != http.StatusForbidden {
-		t.Errorf("non-admin GET status = %d, want 303 or 403", got)
+	// RequireAdmin (auth/middleware.go) 303s an anonymous request to /login
+	// and returns a plain 404 for a signed-in non-Admin so the route's
+	// existence stays hidden (#538). The probe is a signed-in Player, so it
+	// is the 404 path.
+	if got, want := resp.StatusCode, http.StatusNotFound; got != want {
+		t.Errorf("non-admin GET status = %d, want %d", got, want)
 	}
 }
 
-// TestAdminPlayerMgmt_SetRolePromotesToAdmin drives the #527 id-based
-// role endpoint from a super admin: a plain player is promoted to admin,
-// the row reflects the new role, and the audit trail records the
-// promote_admin action on the detail page.
+// TestAdminPlayerMgmt_SetRolePromotesToAdmin drives the #538 id-based
+// role endpoint from an Admin: a plain player is promoted to admin, the row
+// reflects the new role, and the audit trail records the role_changed action
+// on the detail page.
 func TestAdminPlayerMgmt_SetRolePromotesToAdmin(t *testing.T) {
 	t.Parallel()
 
@@ -537,7 +533,6 @@ func TestAdminPlayerMgmt_SetRolePromotesToAdmin(t *testing.T) {
 		t.Fatalf("first registration did not promote to admin: Location = %q", got)
 	}
 	verifyPlayerEmail(ctx, t, srv.DBURI, "role-admin")
-	makeSuperAdmin(ctx, t, srv.DBURI, "role-admin")
 
 	playerClient := newAdminMgmtClient(t)
 	if got := registerForRedirect(
@@ -559,8 +554,8 @@ func TestAdminPlayerMgmt_SetRolePromotesToAdmin(t *testing.T) {
 		ctx, t, adminClient,
 		srv.BaseURL+"/admin/players/"+intToString(target),
 	)
-	if got, want := detail, "Promoted to admin"; !strings.Contains(got, want) {
-		t.Errorf("audit trail should record the promotion; body=%q", detail)
+	if got, want := detail, "Role changed"; !strings.Contains(got, want) {
+		t.Errorf("audit trail should record the role change; body=%q", detail)
 	}
 }
 
@@ -582,7 +577,6 @@ func TestAdminPlayerMgmt_SetUsername(t *testing.T) {
 		t.Fatalf("first registration did not promote to admin: Location = %q", got)
 	}
 	verifyPlayerEmail(ctx, t, srv.DBURI, "setname-admin")
-	makeSuperAdmin(ctx, t, srv.DBURI, "setname-admin")
 
 	playerClient := newAdminMgmtClient(t)
 	if got := registerForRedirect(
@@ -631,7 +625,6 @@ func TestAdminPlayerMgmt_SetPassword(t *testing.T) {
 		t.Fatalf("first registration did not promote to admin: Location = %q", got)
 	}
 	verifyPlayerEmail(ctx, t, srv.DBURI, "setpass-admin")
-	makeSuperAdmin(ctx, t, srv.DBURI, "setpass-admin")
 
 	playerClient := newAdminMgmtClient(t)
 	if got := registerForRedirect(
@@ -671,48 +664,48 @@ func TestAdminPlayerMgmt_SetPassword(t *testing.T) {
 	}
 }
 
-// TestAdminPlayerMgmt_SetCredentialsRequireSuperAdmin pins that the #535
-// username + password endpoints are super-admin only: a plain admin gets a
-// 404 (not a 403) on both POSTs so the routes' existence stays hidden. The
-// first registrant is auto-promoted to super admin (#528), so the plain admin
-// under test is an ADMIN_EMAILS-matched later registrant.
-func TestAdminPlayerMgmt_SetCredentialsRequireSuperAdmin(t *testing.T) {
+// TestAdminPlayerMgmt_SetCredentialsRequireAdmin pins that the #535 username +
+// password endpoints are Admin-only (#538): a Host gets a 404 (not a 403) on
+// both POSTs so the routes' existence stays hidden. The first registrant is
+// auto-promoted to Admin, so the Host under test is a later registrant demoted
+// off that promotion.
+func TestAdminPlayerMgmt_SetCredentialsRequireAdmin(t *testing.T) {
 	t.Parallel()
 
 	ctx, srv := startServer(t, map[string]string{
 		"REGISTRATION_ENABLED": "true",
-		"ADMIN_EMAILS":         "creds-plain-admin@example.test",
 	})
-
-	superClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, superClient, srv.BaseURL,
-		"creds-super-admin", "creds-super-admin-pass-123",
-	); got != "/admin/quizzes" {
-		t.Fatalf("first registration did not promote to admin: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "creds-super-admin")
 
 	adminClient := newAdminMgmtClient(t)
 	if got := registerForRedirect(
 		ctx, t, adminClient, srv.BaseURL,
-		"creds-plain-admin", "creds-plain-admin-pass-123",
+		"creds-admin-boss", "creds-admin-boss-pass-123",
 	); got != "/admin/quizzes" {
-		t.Fatalf("ADMIN_EMAILS registration did not promote to admin: Location = %q", got)
+		t.Fatalf("first registration did not promote to admin: Location = %q", got)
 	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "creds-plain-admin")
+	verifyPlayerEmail(ctx, t, srv.DBURI, "creds-admin-boss")
 
-	target := lookupPlayerID(ctx, t, srv.DBURI, "creds-super-admin")
+	hostClient := newAdminMgmtClient(t)
+	if got := registerForRedirect(
+		ctx, t, hostClient, srv.BaseURL,
+		"creds-host", "creds-host-pass-123",
+	); got != "/" {
+		t.Fatalf("second registration did not land on /: Location = %q", got)
+	}
+	verifyPlayerEmail(ctx, t, srv.DBURI, "creds-host")
+	makeHost(ctx, t, srv.DBURI, "creds-host")
+
+	target := lookupPlayerID(ctx, t, srv.DBURI, "creds-admin-boss")
 	usernameURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/username"
 	passwordURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/password"
 
 	if got, want := postCSRFForm(
-		ctx, t, adminClient, usernameURL,
+		ctx, t, hostClient, usernameURL,
 	), http.StatusNotFound; got != want {
 		t.Errorf("POST /username status = %d, want %d", got, want)
 	}
 	if got, want := postCSRFForm(
-		ctx, t, adminClient, passwordURL,
+		ctx, t, hostClient, passwordURL,
 	), http.StatusNotFound; got != want {
 		t.Errorf("POST /password status = %d, want %d", got, want)
 	}

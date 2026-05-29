@@ -64,24 +64,33 @@ export function markEmailVerified(username: string): void {
   }
 }
 
-// markSuperAdmin flips is_super_admin (and forces role='admin') for the
-// named player by shelling out to the sqlite3 CLI, mirroring how the
-// production promote path mutates the row. The e2e suite has no super
-// admin out of the box, so this is the bootstrap the settings spec uses.
-export function markSuperAdmin(username: string): void {
+// markAdmin sets role='admin' (the top tier) for the named player by
+// shelling out to the sqlite3 CLI, mirroring how the production promote
+// path mutates the row. The e2e suite has no Admin out of the box, so
+// this is the bootstrap the settings/role specs use.
+export function markAdmin(username: string): void {
+  setRole(username, 'admin');
+}
+
+// markHost sets role='host' (the middle tier) for the named player.
+export function markHost(username: string): void {
+  setRole(username, 'host');
+}
+
+function setRole(username: string, role: 'player' | 'host' | 'admin'): void {
   const dataDir = process.env.TOPBANANA_E2E_DATA_DIR;
   if (!dataDir) {
-    throw new Error('TOPBANANA_E2E_DATA_DIR is not set; helpers cannot stamp is_super_admin');
+    throw new Error('TOPBANANA_E2E_DATA_DIR is not set; helpers cannot stamp role');
   }
   const dbFile = join(dataDir, `e2e-${test.info().parallelIndex}.db`);
   const escapedUsername = username.replace(/'/g, "''");
   const output = execFileSync('sqlite3', [
     dbFile,
-    `UPDATE players SET is_super_admin = 1, role = 'admin' WHERE username = '${escapedUsername}'; SELECT changes();`,
+    `UPDATE players SET role = '${role}' WHERE username = '${escapedUsername}'; SELECT changes();`,
   ], { encoding: 'utf8' });
   const changed = Number.parseInt(output.trim(), 10);
   if (changed !== 1) {
-    throw new Error(`markSuperAdmin(${username}): expected 1 row updated, got ${changed}`);
+    throw new Error(`setRole(${username}, ${role}): expected 1 row updated, got ${changed}`);
   }
 }
 

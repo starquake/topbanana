@@ -348,12 +348,18 @@ func TestBreaks_NonOwnerForbidden(t *testing.T) {
 
 	ctx, srv := startServer(t, map[string]string{
 		"REGISTRATION_ENABLED": "true",
-		"ADMIN_EMAILS":         "breaks-owner-a@example.test,breaks-owner-b@example.test",
+		// A throwaway first registrant consumes the first-registrant Admin
+		// promotion so both owners under test are Hosts (own-games-only),
+		// which is the tier the requireQuizOwner gate now distinguishes.
+		"ADMIN_EMAILS": "breaks-boss@example.test",
 	})
 	baseURL := srv.BaseURL
 
+	registerAdminClient(ctx, t, baseURL, srv.DBURI, "breaks-boss")
 	adminA := registerAdminClient(ctx, t, baseURL, srv.DBURI, "breaks-owner-a")
 	adminB := registerAdminClient(ctx, t, baseURL, srv.DBURI, "breaks-owner-b")
+	makeHost(ctx, t, srv.DBURI, "breaks-owner-a")
+	makeHost(ctx, t, srv.DBURI, "breaks-owner-b")
 	quizID := createQuizAs(ctx, t, adminA, baseURL, "Owned Quiz With Breaks")
 
 	t.Run("non-owner GET new break form returns 403", func(t *testing.T) {
