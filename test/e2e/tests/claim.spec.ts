@@ -193,16 +193,22 @@ test('signed-in player does not see the claim-name CTA on the player client', as
   await expect(page.getByRole('button', { name: 'Change your name' })).not.toBeVisible();
 });
 
-// Test 6 — sign-in CTA on the claim-name callout (#431).
-test('claim-name callout includes a sign-in link that routes to /login', async ({ page }) => {
+// Test 6 — sign-in CTA on the claim-name callout (#431). With registration
+// enabled (set in playwright.config.ts) the callout offers both a Register
+// link (/register) and a log-in link (/login).
+test('claim-name callout includes Register and log-in links', async ({ page }) => {
   await page.goto('/client/');
 
   const card = page.locator('.claim-cta:visible');
   await expect(card).toBeVisible();
 
+  const register = card.getByTestId('claim-cta-register');
+  await expect(register).toBeVisible();
+  await expect(register).toHaveAttribute('href', '/register');
+
   const signIn = card.getByTestId('claim-cta-signin');
   await expect(signIn).toBeVisible();
-  await expect(card.getByText('to keep this name across devices', { exact: false })).toBeVisible();
+  await expect(signIn).toHaveAttribute('href', '/login');
 
   // Wait on the URL change because the link is plain navigation, not an Alpine event.
   await Promise.all([

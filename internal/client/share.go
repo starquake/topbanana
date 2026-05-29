@@ -47,16 +47,18 @@ func NewShellHandlers(cfg *config.Config, quizStore QuizLookup, logger *slog.Log
 // <title> and og:title - html/template applies the right escaping per
 // context, so a single string is enough.
 type shellData struct {
-	Title       string
-	Description string
+	Title               string
+	Description         string
+	RegistrationEnabled bool
 }
 
 // Index handles GET /client/{$} - the SPA root with no quiz context. Uses
 // the sitewide default Open Graph card.
 func (s *ShellHandlers) Index(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, shellData{
-		Title:       defaultOGTitle,
-		Description: defaultOGDescription,
+		Title:               defaultOGTitle,
+		Description:         defaultOGDescription,
+		RegistrationEnabled: s.cfg.RegistrationEnabled,
 	})
 }
 
@@ -67,8 +69,9 @@ func (s *ShellHandlers) Index(w http.ResponseWriter, r *http.Request) {
 // preferable to a 404 on the share link.
 func (s *ShellHandlers) Play(w http.ResponseWriter, r *http.Request) {
 	data := shellData{
-		Title:       defaultOGTitle,
-		Description: defaultOGDescription,
+		Title:               defaultOGTitle,
+		Description:         defaultOGDescription,
+		RegistrationEnabled: s.cfg.RegistrationEnabled,
 	}
 
 	id, err := handlers.IDFromSlugID(r.PathValue("slugID"))
