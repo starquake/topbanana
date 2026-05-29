@@ -26,15 +26,8 @@ SET username = ?1,
         ) THEN 'admin'
         ELSE 'player'
     END,
-    is_super_admin = CASE
-        WHEN NOT EXISTS (
-            SELECT 1 FROM players p
-            WHERE p.password_hash IS NOT NULL
-               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
-        ) THEN 1
-        ELSE 0
-    END,
-    super_admin_since = CASE
+    role_changed_at = CASE
+        WHEN CAST(?4 AS TEXT) = 'admin' THEN CURRENT_TIMESTAMP
         WHEN NOT EXISTS (
             SELECT 1 FROM players p
             WHERE p.password_hash IS NOT NULL
@@ -46,7 +39,7 @@ SET username = ?1,
 WHERE players.id = ?5
   AND players.password_hash IS NULL
   AND players.email IS NULL
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin, super_admin_since
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
 `
 
 type ClaimPlayerParams struct {
@@ -70,12 +63,11 @@ type ClaimPlayerParams struct {
 // password and OAuth identity so a deployment that bootstrapped its admin
 // via Google doesn't auto-promote later password claimers.
 //
-// The genuine first credentialled registrant also becomes super admin, so a
-// fresh install can reach /admin/settings without running the break-glass CLI.
-// is_super_admin / super_admin_since are tied to the same NOT EXISTS condition
-// (zero credentialled players yet), NOT to the requested_role = 'admin' branch,
-// so a later admin (ADMIN_EMAILS match on a populated DB, or a password claim
-// after a Google-only bootstrap) gets plain admin and never super.
+// Both the ADMIN_EMAILS branch (requested_role = 'admin') and the
+// first-credentialled-registrant branch resolve to the top tier 'admin'
+// (#538), matching CreatePlayerWithCredentials, so a first sign-up through the
+// claim path lands on Admin. Host is never granted at registration.
+// role_changed_at is stamped when the row becomes admin.
 //
 // username_claimed is set to 1 because the visitor is explicitly choosing
 // their username via the register form. This is the register-after-playing
@@ -101,8 +93,7 @@ func (q *Queries) ClaimPlayer(ctx context.Context, arg ClaimPlayerParams) (Playe
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
-		&i.IsSuperAdmin,
-		&i.SuperAdminSince,
+		&i.RoleChangedAt,
 	)
 	return i, err
 }
@@ -118,11 +109,19 @@ SET email = ?1,
                OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
         ) THEN 'admin'
         ELSE 'player'
+    END,
+    role_changed_at = CASE
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN CURRENT_TIMESTAMP
+        ELSE NULL
     END
 WHERE players.id = ?2
   AND players.password_hash IS NULL
   AND players.email IS NULL
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin, super_admin_since
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
 `
 
 type ClaimPlayerForOAuthParams struct {
@@ -163,8 +162,7 @@ func (q *Queries) ClaimPlayerForOAuth(ctx context.Context, arg ClaimPlayerForOAu
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
-		&i.IsSuperAdmin,
-		&i.SuperAdminSince,
+		&i.RoleChangedAt,
 	)
 	return i, err
 }
@@ -236,16 +234,16 @@ func (q *Queries) ConsumePasswordResetToken(ctx context.Context, arg ConsumePass
 	return player_id, err
 }
 
-const countSuperAdmins = `-- name: CountSuperAdmins :one
+const countAdmins = `-- name: CountAdmins :one
 SELECT COUNT(*)
 FROM players
-WHERE is_super_admin = 1
+WHERE role = 'admin'
 `
 
-// Number of current super admins. Used by the demote guard to refuse a
-// demote that would leave zero super admins.
-func (q *Queries) CountSuperAdmins(ctx context.Context) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countSuperAdmins)
+// Number of current Admins (top tier). Used by the role-change guard to refuse
+// a change that would leave zero Admins.
+func (q *Queries) CountAdmins(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAdmins)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -254,7 +252,7 @@ func (q *Queries) CountSuperAdmins(ctx context.Context) (int64, error) {
 const createAnonymousPlayer = `-- name: CreateAnonymousPlayer :one
 INSERT INTO players (username, role)
 VALUES (?1, 'player')
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin, super_admin_since
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
 `
 
 // Used by the EnsurePlayer middleware to back a fresh visitor with a real
@@ -279,8 +277,7 @@ func (q *Queries) CreateAnonymousPlayer(ctx context.Context, username string) (P
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
-		&i.IsSuperAdmin,
-		&i.SuperAdminSince,
+		&i.RoleChangedAt,
 	)
 	return i, err
 }
@@ -337,7 +334,7 @@ func (q *Queries) CreatePasswordResetToken(ctx context.Context, arg CreatePasswo
 }
 
 const createPlayerFromOAuth = `-- name: CreatePlayerFromOAuth :one
-INSERT INTO players (username, email, email_verified_at, role, username_claimed)
+INSERT INTO players (username, email, email_verified_at, role, role_changed_at, username_claimed)
 VALUES (
     ?1,
     ?2,
@@ -350,9 +347,17 @@ VALUES (
         ) THEN 'admin'
         ELSE 'player'
     END,
+    CASE
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN CURRENT_TIMESTAMP
+        ELSE NULL
+    END,
     1
 )
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin, super_admin_since
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
 `
 
 type CreatePlayerFromOAuthParams struct {
@@ -388,14 +393,13 @@ func (q *Queries) CreatePlayerFromOAuth(ctx context.Context, arg CreatePlayerFro
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
-		&i.IsSuperAdmin,
-		&i.SuperAdminSince,
+		&i.RoleChangedAt,
 	)
 	return i, err
 }
 
 const createPlayerWithCredentials = `-- name: CreatePlayerWithCredentials :one
-INSERT INTO players (username, password_hash, email, role, is_super_admin, super_admin_since, username_claimed)
+INSERT INTO players (username, password_hash, email, role, role_changed_at, username_claimed)
 VALUES (
     ?1,
     ?2,
@@ -410,14 +414,7 @@ VALUES (
         ELSE 'player'
     END,
     CASE
-        WHEN NOT EXISTS (
-            SELECT 1 FROM players p
-            WHERE p.password_hash IS NOT NULL
-               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
-        ) THEN 1
-        ELSE 0
-    END,
-    CASE
+        WHEN CAST(?4 AS TEXT) = 'admin' THEN CURRENT_TIMESTAMP
         WHEN NOT EXISTS (
             SELECT 1 FROM players p
             WHERE p.password_hash IS NOT NULL
@@ -427,7 +424,7 @@ VALUES (
     END,
     1
 )
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin, super_admin_since
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
 `
 
 type CreatePlayerWithCredentialsParams struct {
@@ -451,13 +448,13 @@ type CreatePlayerWithCredentialsParams struct {
 // and is intentionally ignored so the operator's first real registration
 // replaces it as admin.
 //
-// The genuine first credentialled registrant also becomes super admin, so a
-// fresh install can reach /admin/settings without running the break-glass CLI.
-// is_super_admin / super_admin_since are tied to the same NOT EXISTS condition
-// (zero credentialled players yet), NOT to the requested_role = 'admin' branch:
-// so an ADMIN_EMAILS match on an already-populated DB, or a password registrant
-// after a Google-only bootstrap, gets plain admin and never super. Because
-// "first credentialled" implies "zero super admins", no extra guard is needed.
+// Both the ADMIN_EMAILS branch (requested_role = 'admin') and the
+// first-credentialled-registrant branch resolve to the top tier 'admin'
+// (#538), so a fresh install can reach /admin/settings without the break-glass
+// CLI and an ADMIN_EMAILS match lands on Admin (not Host). Host is never
+// granted at registration - it is in-app-assignment-only. role_changed_at is
+// stamped only when the row is written as admin, so the settings list can show
+// a "promoted" timestamp.
 //
 // username_claimed is set to 1 because a registering user explicitly chose
 // their username at the register form. The column tracks "did the player
@@ -481,8 +478,7 @@ func (q *Queries) CreatePlayerWithCredentials(ctx context.Context, arg CreatePla
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
-		&i.IsSuperAdmin,
-		&i.SuperAdminSince,
+		&i.RoleChangedAt,
 	)
 	return i, err
 }
@@ -560,7 +556,7 @@ func (q *Queries) GetPasswordResetToken(ctx context.Context, tokenHash string) (
 }
 
 const getPlayerByEmail = `-- name: GetPlayerByEmail :one
-SELECT id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin, super_admin_since
+SELECT id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
 FROM players
 WHERE email = ?
 LIMIT 1
@@ -583,14 +579,13 @@ func (q *Queries) GetPlayerByEmail(ctx context.Context, email sql.NullString) (P
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
-		&i.IsSuperAdmin,
-		&i.SuperAdminSince,
+		&i.RoleChangedAt,
 	)
 	return i, err
 }
 
 const getPlayerByProviderSubject = `-- name: GetPlayerByProviderSubject :one
-SELECT p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed, p.email_verified_at, p.session_version, p.is_super_admin, p.super_admin_since
+SELECT p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed, p.email_verified_at, p.session_version, p.role_changed_at
 FROM players p
 JOIN player_identities pi ON pi.player_id = p.id
 WHERE pi.provider = ? AND pi.subject = ?
@@ -619,14 +614,13 @@ func (q *Queries) GetPlayerByProviderSubject(ctx context.Context, arg GetPlayerB
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
-		&i.IsSuperAdmin,
-		&i.SuperAdminSince,
+		&i.RoleChangedAt,
 	)
 	return i, err
 }
 
 const getPlayerByUsername = `-- name: GetPlayerByUsername :one
-SELECT id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin, super_admin_since
+SELECT id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
 FROM players
 WHERE username = ?
 LIMIT 1
@@ -645,8 +639,7 @@ func (q *Queries) GetPlayerByUsername(ctx context.Context, username string) (Pla
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
-		&i.IsSuperAdmin,
-		&i.SuperAdminSince,
+		&i.RoleChangedAt,
 	)
 	return i, err
 }
@@ -670,6 +663,52 @@ type LinkProviderIdentityParams struct {
 func (q *Queries) LinkProviderIdentity(ctx context.Context, arg LinkProviderIdentityParams) error {
 	_, err := q.db.ExecContext(ctx, linkProviderIdentity, arg.PlayerID, arg.Provider, arg.Subject)
 	return err
+}
+
+const listAdmins = `-- name: ListAdmins :many
+SELECT id, username, email, role_changed_at
+FROM players
+WHERE role = 'admin'
+ORDER BY username, id
+`
+
+type ListAdminsRow struct {
+	ID            int64
+	Username      string
+	Email         sql.NullString
+	RoleChangedAt sql.NullTime
+}
+
+// Every current Admin, ordered by username so the admin settings page
+// (#320/#538) renders a stable list. Only the columns the list needs are
+// selected. role_changed_at is when the role last changed (NULL for rows whose
+// role predates the column).
+func (q *Queries) ListAdmins(ctx context.Context) ([]ListAdminsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAdmins)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAdminsRow
+	for rows.Next() {
+		var i ListAdminsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.Email,
+			&i.RoleChangedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listPlayerFinishStats = `-- name: ListPlayerFinishStats :many
@@ -738,52 +777,6 @@ func (q *Queries) ListPlayerFinishStats(ctx context.Context, playerIds []int64) 
 	return items, nil
 }
 
-const listSuperAdmins = `-- name: ListSuperAdmins :many
-SELECT id, username, email, super_admin_since
-FROM players
-WHERE is_super_admin = 1
-ORDER BY username, id
-`
-
-type ListSuperAdminsRow struct {
-	ID              int64
-	Username        string
-	Email           sql.NullString
-	SuperAdminSince sql.NullTime
-}
-
-// Every current super admin, ordered by username so the admin settings
-// page (#320) renders a stable list. Only the columns the list needs are
-// selected. super_admin_since is when the player was promoted (NULL for
-// rows promoted before the column existed).
-func (q *Queries) ListSuperAdmins(ctx context.Context) ([]ListSuperAdminsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listSuperAdmins)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListSuperAdminsRow
-	for rows.Next() {
-		var i ListSuperAdminsRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Username,
-			&i.Email,
-			&i.SuperAdminSince,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const markPlayerEmailVerifiedIfNew = `-- name: MarkPlayerEmailVerifiedIfNew :execrows
 UPDATE players
 SET email_verified_at = CURRENT_TIMESTAMP
@@ -805,7 +798,7 @@ UPDATE players
 SET username = ?1,
     username_claimed = 1
 WHERE id = ?2
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin, super_admin_since
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
 `
 
 type RenamePlayerParams struct {
@@ -838,8 +831,7 @@ func (q *Queries) RenamePlayer(ctx context.Context, arg RenamePlayerParams) (Pla
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
-		&i.IsSuperAdmin,
-		&i.SuperAdminSince,
+		&i.RoleChangedAt,
 	)
 	return i, err
 }
@@ -903,65 +895,25 @@ func (q *Queries) SetPlayerPasswordHash(ctx context.Context, arg SetPlayerPasswo
 	return result.RowsAffected()
 }
 
-const setPlayerRoleAndSuperAdmin = `-- name: SetPlayerRoleAndSuperAdmin :execrows
+const setPlayerRole = `-- name: SetPlayerRole :execrows
 UPDATE players
 SET role = ?1,
-    is_super_admin = ?2,
-    super_admin_since = CASE
-        WHEN ?2 = 1 THEN CURRENT_TIMESTAMP
-        ELSE NULL
-    END
-WHERE id = ?3
+    role_changed_at = CURRENT_TIMESTAMP
+WHERE id = ?2
 `
 
-type SetPlayerRoleAndSuperAdminParams struct {
-	Role         string
-	IsSuperAdmin int64
-	ID           int64
+type SetPlayerRoleParams struct {
+	Role string
+	ID   int64
 }
 
-// Sets role AND is_super_admin on the row identified by id, both from the
-// caller, so one statement moves a player to any privilege level. The three
-// levels map to (role, is_super_admin): player -> (player, 0),
-// admin -> (admin, 0), super_admin -> (admin, 1). super_admin_since is
-// stamped to CURRENT_TIMESTAMP when promoting to super and cleared to NULL
-// otherwise, mirroring SetPlayerSuperAdmin above. Returns the number of
-// affected rows so the wrapper can map "no rows" to ErrPlayerNotFound.
-func (q *Queries) SetPlayerRoleAndSuperAdmin(ctx context.Context, arg SetPlayerRoleAndSuperAdminParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, setPlayerRoleAndSuperAdmin, arg.Role, arg.IsSuperAdmin, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
-const setPlayerSuperAdmin = `-- name: SetPlayerSuperAdmin :execrows
-UPDATE players
-SET is_super_admin = ?1,
-    role = ?2,
-    super_admin_since = CASE
-        WHEN ?1 = 1 THEN CURRENT_TIMESTAMP
-        ELSE NULL
-    END
-WHERE id = ?3
-`
-
-type SetPlayerSuperAdminParams struct {
-	IsSuperAdmin int64
-	Role         string
-	ID           int64
-}
-
-// Sets is_super_admin AND role on the row identified by id, both from the
-// caller. Super admin is a strict superset of admin, and the Go wrapper
-// passes role='admin' in both directions: promoting (is_super_admin = 1)
-// sets role='admin', and demoting (is_super_admin = 0) re-asserts
-// role='admin' so the demoted player keeps the plain admin powers. The
-// statement always writes the passed role - it never preserves the
-// existing one. Returns the number of affected rows so the wrapper can map
-// "no rows" to ErrPlayerNotFound.
-func (q *Queries) SetPlayerSuperAdmin(ctx context.Context, arg SetPlayerSuperAdminParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, setPlayerSuperAdmin, arg.IsSuperAdmin, arg.Role, arg.ID)
+// Sets the role on the row identified by id, from the caller (#538), so one
+// statement moves a player to any tier (player / host / admin). role_changed_at
+// is stamped to CURRENT_TIMESTAMP on every change so the settings list can show
+// a "promoted" timestamp. Returns the number of affected rows so the wrapper
+// can map "no rows" to ErrPlayerNotFound.
+func (q *Queries) SetPlayerRole(ctx context.Context, arg SetPlayerRoleParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setPlayerRole, arg.Role, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -1005,7 +957,7 @@ UPDATE players
 SET username = ?1,
     username_claimed = 1
 WHERE id = ?2 AND password_hash IS NULL
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin, super_admin_since
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
 `
 
 type UpdatePlayerUsernameParams struct {
@@ -1038,8 +990,7 @@ func (q *Queries) UpdatePlayerUsername(ctx context.Context, arg UpdatePlayerUser
 		&i.UsernameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
-		&i.IsSuperAdmin,
-		&i.SuperAdminSince,
+		&i.RoleChangedAt,
 	)
 	return i, err
 }

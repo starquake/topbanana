@@ -749,7 +749,6 @@ func (s *PlayerStore) GetPlayerDetail(ctx context.Context, id int64) (*auth.Play
 		OAuthProvider:   row.OauthProvider,
 		CreatedAt:       row.CreatedAt,
 		OnboardingState: row.OnboardingState,
-		IsSuperAdmin:    row.IsSuperAdmin != 0,
 	}
 	if row.EmailVerifiedAt.Valid {
 		verified := row.EmailVerifiedAt.Time
@@ -871,28 +870,17 @@ func (s *PlayerStore) InsertAdminAudit(
 	return nil
 }
 
-// SetPlayerSuperAdmin flips is_super_admin on the row identified by id
-// (#319). Promoting (super = true) also forces role to 'admin' because
-// super admin is a strict superset of admin; demoting (super = false)
-// leaves the admin role intact so the player keeps the plain admin
-// powers. Returns auth.ErrPlayerNotFound when no row matches.
-//
-//nolint:revive // super is the value being persisted, not a mode toggle.
-func (s *PlayerStore) SetPlayerSuperAdmin(ctx context.Context, playerID int64, super bool) error {
-	flag := int64(0)
-	if super {
-		flag = 1
-	}
-	// Promote forces role to 'admin' (super admin is a strict superset of
-	// admin); demote re-asserts the same role so the demoted player keeps
-	// the plain admin powers.
-	rows, err := s.q.SetPlayerSuperAdmin(ctx, db.SetPlayerSuperAdminParams{
-		IsSuperAdmin: flag,
-		Role:         auth.RoleAdmin,
-		ID:           playerID,
+// SetPlayerRole sets the role on the row identified by id (#538). role is one
+// of auth.RolePlayer / auth.RoleHost / auth.RoleAdmin; role_changed_at is
+// stamped to the current time. Returns auth.ErrPlayerNotFound when no row
+// matches.
+func (s *PlayerStore) SetPlayerRole(ctx context.Context, playerID int64, role string) error {
+	rows, err := s.q.SetPlayerRole(ctx, db.SetPlayerRoleParams{
+		Role: role,
+		ID:   playerID,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to set super admin: %w", err)
+		return fmt.Errorf("failed to set role: %w", err)
 	}
 	if rows == 0 {
 		return auth.ErrPlayerNotFound
@@ -901,54 +889,24 @@ func (s *PlayerStore) SetPlayerSuperAdmin(ctx context.Context, playerID int64, s
 	return nil
 }
 
-// SetPlayerRoleAndSuperAdmin sets both role and is_super_admin on the row
-// identified by id in one statement (#527). The caller resolves the target
-// privilege level to the (role, super) pair: player -> ("player", false),
-// admin -> ("admin", false), super admin -> ("admin", true).
-// super_admin_since is stamped when super is true and cleared otherwise.
-// Returns auth.ErrPlayerNotFound when no row matches.
-//
-//nolint:revive // super is the value being persisted, not a mode toggle.
-func (s *PlayerStore) SetPlayerRoleAndSuperAdmin(
-	ctx context.Context, playerID int64, role string, super bool,
-) error {
-	flag := int64(0)
-	if super {
-		flag = 1
-	}
-	rows, err := s.q.SetPlayerRoleAndSuperAdmin(ctx, db.SetPlayerRoleAndSuperAdminParams{
-		Role:         role,
-		IsSuperAdmin: flag,
-		ID:           playerID,
-	})
+// ListAdmins returns every current Admin ordered by username (#320/#538).
+// Empty slice when no Admin exists yet.
+func (s *PlayerStore) ListAdmins(ctx context.Context) ([]*auth.AdminEntry, error) {
+	rows, err := s.q.ListAdmins(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to set role and super admin: %w", err)
-	}
-	if rows == 0 {
-		return auth.ErrPlayerNotFound
+		return nil, fmt.Errorf("failed to list admins: %w", err)
 	}
 
-	return nil
-}
-
-// ListSuperAdmins returns every current super admin ordered by username
-// (#319/#320). Empty slice when no super admin exists yet.
-func (s *PlayerStore) ListSuperAdmins(ctx context.Context) ([]*auth.SuperAdminEntry, error) {
-	rows, err := s.q.ListSuperAdmins(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list super admins: %w", err)
-	}
-
-	out := make([]*auth.SuperAdminEntry, 0, len(rows))
+	out := make([]*auth.AdminEntry, 0, len(rows))
 	for _, r := range rows {
-		entry := &auth.SuperAdminEntry{
+		entry := &auth.AdminEntry{
 			ID:       r.ID,
 			Username: r.Username,
 			Email:    r.Email.String,
 		}
-		if r.SuperAdminSince.Valid {
-			promoted := r.SuperAdminSince.Time
-			entry.PromotedAt = &promoted
+		if r.RoleChangedAt.Valid {
+			changed := r.RoleChangedAt.Time
+			entry.RoleChangedAt = &changed
 		}
 		out = append(out, entry)
 	}
@@ -956,13 +914,12 @@ func (s *PlayerStore) ListSuperAdmins(ctx context.Context) ([]*auth.SuperAdminEn
 	return out, nil
 }
 
-// CountSuperAdmins returns the number of current super admins
-// (#319/#320). The demote handler uses it to refuse a demote that would
-// leave zero super admins.
-func (s *PlayerStore) CountSuperAdmins(ctx context.Context) (int64, error) {
-	count, err := s.q.CountSuperAdmins(ctx)
+// CountAdmins returns the number of current Admins (top tier) (#320/#538). The
+// role-change handler uses it to refuse a change that would leave zero Admins.
+func (s *PlayerStore) CountAdmins(ctx context.Context) (int64, error) {
+	count, err := s.q.CountAdmins(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("failed to count super admins: %w", err)
+		return 0, fmt.Errorf("failed to count admins: %w", err)
 	}
 
 	return count, nil
@@ -1099,7 +1056,6 @@ func playerFromRow(row db.Player) *auth.Player {
 		CreatedAt:       row.CreatedAt,
 		UsernameClaimed: row.UsernameClaimed != 0,
 		SessionVersion:  row.SessionVersion,
-		IsSuperAdmin:    row.IsSuperAdmin != 0,
 	}
 	if row.Email.Valid {
 		p.Email = row.Email.String

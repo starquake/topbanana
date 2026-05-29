@@ -19,10 +19,9 @@ import (
 // return a sentinel so an accidental call is loud.
 type roleStubStore struct {
 	detail     *auth.PlayerDetail
-	superCount int64
+	adminCount int64
 
 	setRole   string
-	setSuper  bool
 	setCalled bool
 
 	auditAction  string
@@ -38,14 +37,13 @@ func (s *roleStubStore) GetPlayerDetail(_ context.Context, _ int64) (*auth.Playe
 	return s.detail, nil
 }
 
-func (s *roleStubStore) CountSuperAdmins(_ context.Context) (int64, error) {
-	return s.superCount, nil
+func (s *roleStubStore) CountAdmins(_ context.Context) (int64, error) {
+	return s.adminCount, nil
 }
 
-func (s *roleStubStore) SetPlayerRoleAndSuperAdmin(_ context.Context, _ int64, role string, super bool) error {
+func (s *roleStubStore) SetPlayerRole(_ context.Context, _ int64, role string) error {
 	s.setCalled = true
 	s.setRole = role
-	s.setSuper = super
 
 	return nil
 }
@@ -78,10 +76,6 @@ func (*roleStubStore) CreatePlayerByAdmin(
 	_ context.Context, _, _, _ string,
 ) (*auth.Player, error) {
 	return nil, errors.ErrUnsupported
-}
-
-func (*roleStubStore) SetPlayerSuperAdmin(_ context.Context, _ int64, _ bool) error {
-	return errors.ErrUnsupported
 }
 
 func (*roleStubStore) ListAdminAuditForTarget(
@@ -127,7 +121,7 @@ func TestHandlePlayerSetRole_UnknownRoleRejected(t *testing.T) {
 
 	store := &roleStubStore{
 		detail:     &auth.PlayerDetail{ID: 7, Role: auth.RolePlayer},
-		superCount: 1,
+		adminCount: 1,
 	}
 
 	rec := postRole(t, store, "wizard")
@@ -136,28 +130,28 @@ func TestHandlePlayerSetRole_UnknownRoleRejected(t *testing.T) {
 		t.Errorf("status = %d, want %d", got, want)
 	}
 	if store.setCalled {
-		t.Error("SetPlayerRoleAndSuperAdmin called, want no mutation on unknown role")
+		t.Error("SetPlayerRole called, want no mutation on unknown role")
 	}
 	if store.auditCalled {
 		t.Error("audit written, want none on unknown role")
 	}
 }
 
-func TestHandlePlayerSetRole_LastSuperAdminGuard(t *testing.T) {
+func TestHandlePlayerSetRole_LastAdminGuard(t *testing.T) {
 	t.Parallel()
 
 	store := &roleStubStore{
-		detail:     &auth.PlayerDetail{ID: 7, Role: auth.RoleAdmin, IsSuperAdmin: true},
-		superCount: 1,
+		detail:     &auth.PlayerDetail{ID: 7, Role: auth.RoleAdmin},
+		adminCount: 1,
 	}
 
-	rec := postRole(t, store, "admin")
+	rec := postRole(t, store, "host")
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
 	if store.setCalled {
-		t.Error("SetPlayerRoleAndSuperAdmin called, want refusal when demoting the last super admin")
+		t.Error("SetPlayerRole called, want refusal when demoting the last admin")
 	}
 	if store.auditCalled {
 		t.Error("audit written, want none when the guard fires")
@@ -169,7 +163,7 @@ func TestHandlePlayerSetRole_NoOpWhenUnchanged(t *testing.T) {
 
 	store := &roleStubStore{
 		detail:     &auth.PlayerDetail{ID: 7, Role: auth.RoleAdmin},
-		superCount: 1,
+		adminCount: 2,
 	}
 
 	rec := postRole(t, store, "admin")
@@ -178,65 +172,55 @@ func TestHandlePlayerSetRole_NoOpWhenUnchanged(t *testing.T) {
 		t.Errorf("status = %d, want %d", got, want)
 	}
 	if store.setCalled {
-		t.Error("SetPlayerRoleAndSuperAdmin called, want no mutation when level is unchanged")
+		t.Error("SetPlayerRole called, want no mutation when the role is unchanged")
 	}
 	if store.auditCalled {
 		t.Error("audit written, want none on a no-op")
 	}
 }
 
-func TestHandlePlayerSetRole_TransitionsWriteCorrectAudit(t *testing.T) {
+func TestHandlePlayerSetRole_TransitionsWriteRoleChangedAudit(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
 		name       string
 		from       *auth.PlayerDetail
-		superCount int64
+		adminCount int64
 		desired    string
 		wantRole   string
-		wantSuper  bool
-		wantAction string
 		wantDetail string
 	}{
 		{
-			name:       "player to admin",
+			name:       "player to host",
 			from:       &auth.PlayerDetail{ID: 7, Role: auth.RolePlayer},
-			superCount: 1,
-			desired:    "admin",
-			wantRole:   auth.RoleAdmin,
-			wantSuper:  false,
-			wantAction: auth.AdminActionPromoteAdmin,
-			wantDetail: `"from":"player","to":"admin"`,
+			adminCount: 1,
+			desired:    auth.RoleHost,
+			wantRole:   auth.RoleHost,
+			wantDetail: `"from":"player","to":"host"`,
 		},
 		{
-			name:       "admin to super admin",
+			name:       "host to admin",
+			from:       &auth.PlayerDetail{ID: 7, Role: auth.RoleHost},
+			adminCount: 1,
+			desired:    auth.RoleAdmin,
+			wantRole:   auth.RoleAdmin,
+			wantDetail: `"from":"host","to":"admin"`,
+		},
+		{
+			name:       "admin to host with another admin present",
 			from:       &auth.PlayerDetail{ID: 7, Role: auth.RoleAdmin},
-			superCount: 1,
-			desired:    "super_admin",
-			wantRole:   auth.RoleAdmin,
-			wantSuper:  true,
-			wantAction: auth.AdminActionPromoteSuper,
-			wantDetail: `"from":"admin","to":"super_admin"`,
+			adminCount: 2,
+			desired:    auth.RoleHost,
+			wantRole:   auth.RoleHost,
+			wantDetail: `"from":"admin","to":"host"`,
 		},
 		{
-			name:       "super admin to admin",
-			from:       &auth.PlayerDetail{ID: 7, Role: auth.RoleAdmin, IsSuperAdmin: true},
-			superCount: 2,
-			desired:    "admin",
-			wantRole:   auth.RoleAdmin,
-			wantSuper:  false,
-			wantAction: auth.AdminActionDemoteSuper,
-			wantDetail: `"from":"super_admin","to":"admin"`,
-		},
-		{
-			name:       "admin to player",
-			from:       &auth.PlayerDetail{ID: 7, Role: auth.RoleAdmin},
-			superCount: 1,
-			desired:    "player",
+			name:       "host to player",
+			from:       &auth.PlayerDetail{ID: 7, Role: auth.RoleHost},
+			adminCount: 1,
+			desired:    auth.RolePlayer,
 			wantRole:   auth.RolePlayer,
-			wantSuper:  false,
-			wantAction: auth.AdminActionDemoteAdmin,
-			wantDetail: `"from":"admin","to":"player"`,
+			wantDetail: `"from":"host","to":"player"`,
 		},
 	}
 
@@ -244,7 +228,7 @@ func TestHandlePlayerSetRole_TransitionsWriteCorrectAudit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			store := &roleStubStore{detail: tc.from, superCount: tc.superCount}
+			store := &roleStubStore{detail: tc.from, adminCount: tc.adminCount}
 
 			rec := postRole(t, store, tc.desired)
 
@@ -252,15 +236,12 @@ func TestHandlePlayerSetRole_TransitionsWriteCorrectAudit(t *testing.T) {
 				t.Errorf("status = %d, want %d", got, want)
 			}
 			if !store.setCalled {
-				t.Fatal("SetPlayerRoleAndSuperAdmin not called, want the transition applied")
+				t.Fatal("SetPlayerRole not called, want the transition applied")
 			}
 			if got, want := store.setRole, tc.wantRole; got != want {
 				t.Errorf("set role = %q, want %q", got, want)
 			}
-			if got, want := store.setSuper, tc.wantSuper; got != want {
-				t.Errorf("set super = %v, want %v", got, want)
-			}
-			if got, want := store.auditAction, tc.wantAction; got != want {
+			if got, want := store.auditAction, auth.AdminActionRoleChanged; got != want {
 				t.Errorf("audit action = %q, want %q", got, want)
 			}
 			if got, want := store.auditPayload, tc.wantDetail; !strings.Contains(got, want) {

@@ -7,9 +7,12 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// Role values stored in the players.role column.
+// Role values stored in the players.role column. Three tiers: Player
+// (default), Host (manage own games), Admin (everything). "Host" is the
+// middle tier; the top tier is "Admin" (the former "super admin" is retired).
 const (
 	RolePlayer = "player"
+	RoleHost   = "host"
 	RoleAdmin  = "admin"
 )
 

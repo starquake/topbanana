@@ -121,12 +121,13 @@ func mintAnonymousPlayer(ctx context.Context, players PlayerStore) (*Player, err
 	return player, nil
 }
 
-// RequireAdmin gates the handler to admins only. Unauthenticated
-// requests 303 to /login; GET/HEAD carry the original URI as
-// ?next=<encoded> so the login flow can drop the visitor back where
-// they were heading, but unsafe methods drop next (the form body is
-// gone). Non-admin sessions get a 403 "Access denied" page.
-func RequireAdmin(
+// RequireGameHost gates the handler to Hosts and Admins - the dashboard +
+// own-game routes (#538). Unauthenticated requests 303 to /login; GET/HEAD
+// carry the original URI as ?next=<encoded> so the login flow can drop the
+// visitor back where they were heading, but unsafe methods drop next (the form
+// body is gone). A signed-in Player (no host rights) gets a 403 "Access
+// denied" page, because the dashboard's existence is not a secret.
+func RequireGameHost(
 	next http.Handler,
 	players PlayerStore,
 	sessions *session.Manager,
@@ -143,13 +144,13 @@ func RequireAdmin(
 
 				return
 			}
-			logger.ErrorContext(r.Context(), "error loading player for admin check", slog.Any("err", err))
+			logger.ErrorContext(r.Context(), "error loading player for host check", slog.Any("err", err))
 			http.Error(w, "internal error", http.StatusInternalServerError)
 
 			return
 		}
 
-		if !player.IsAdmin() {
+		if !player.CanHost() {
 			render.render(w, r, http.StatusForbidden, formData{
 				Title:    "Access denied",
 				Username: player.Username,
@@ -162,13 +163,14 @@ func RequireAdmin(
 	})
 }
 
-// RequireSuperAdmin gates the handler to super admins only (#319).
-// Unauthenticated requests are handled exactly like [RequireAdmin] (303
-// to /login, carrying ?next= on safe methods). A signed-in player who is
-// not a super admin gets a plain 404 rather than a 403: the super-admin
-// surface is hidden from regular admins, so its routes must not betray
-// their existence (#320).
-func RequireSuperAdmin(
+// RequireAdmin gates the handler to Admins only - the top tier (#538):
+// player management, role changes, account creation, email diagnostics, and
+// the settings console. Unauthenticated requests are handled like
+// [RequireGameHost] (303 to /login, carrying ?next= on safe methods). A
+// signed-in non-Admin (Player or Host) gets a plain 404 rather than a 403: the
+// admin surface is hidden from Hosts, so its routes must not betray their
+// existence (#320/#538).
+func RequireAdmin(
 	next http.Handler,
 	players PlayerStore,
 	sessions *session.Manager,
@@ -182,13 +184,13 @@ func RequireSuperAdmin(
 
 				return
 			}
-			logger.ErrorContext(r.Context(), "error loading player for super admin check", slog.Any("err", err))
+			logger.ErrorContext(r.Context(), "error loading player for admin check", slog.Any("err", err))
 			http.Error(w, "internal error", http.StatusInternalServerError)
 
 			return
 		}
 
-		if !player.IsSuperAdmin {
+		if !player.IsAdmin() {
 			http.NotFound(w, r)
 
 			return

@@ -19,19 +19,19 @@ LIMIT 1;
 -- and is intentionally ignored so the operator's first real registration
 -- replaces it as admin.
 --
--- The genuine first credentialled registrant also becomes super admin, so a
--- fresh install can reach /admin/settings without running the break-glass CLI.
--- is_super_admin / super_admin_since are tied to the same NOT EXISTS condition
--- (zero credentialled players yet), NOT to the requested_role = 'admin' branch:
--- so an ADMIN_EMAILS match on an already-populated DB, or a password registrant
--- after a Google-only bootstrap, gets plain admin and never super. Because
--- "first credentialled" implies "zero super admins", no extra guard is needed.
+-- Both the ADMIN_EMAILS branch (requested_role = 'admin') and the
+-- first-credentialled-registrant branch resolve to the top tier 'admin'
+-- (#538), so a fresh install can reach /admin/settings without the break-glass
+-- CLI and an ADMIN_EMAILS match lands on Admin (not Host). Host is never
+-- granted at registration - it is in-app-assignment-only. role_changed_at is
+-- stamped only when the row is written as admin, so the settings list can show
+-- a "promoted" timestamp.
 --
 -- username_claimed is set to 1 because a registering user explicitly chose
 -- their username at the register form. The column tracks "did the player
 -- pick this name themselves" (vs auto-generated petname), so a fresh
 -- registrant must be marked as claimed from the moment the row is written.
-INSERT INTO players (username, password_hash, email, role, is_super_admin, super_admin_since, username_claimed)
+INSERT INTO players (username, password_hash, email, role, role_changed_at, username_claimed)
 VALUES (
     sqlc.arg('username'),
     sqlc.arg('password_hash'),
@@ -46,14 +46,7 @@ VALUES (
         ELSE 'player'
     END,
     CASE
-        WHEN NOT EXISTS (
-            SELECT 1 FROM players p
-            WHERE p.password_hash IS NOT NULL
-               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
-        ) THEN 1
-        ELSE 0
-    END,
-    CASE
+        WHEN CAST(sqlc.arg('requested_role') AS TEXT) = 'admin' THEN CURRENT_TIMESTAMP
         WHEN NOT EXISTS (
             SELECT 1 FROM players p
             WHERE p.password_hash IS NOT NULL
@@ -93,12 +86,11 @@ RETURNING *;
 -- password and OAuth identity so a deployment that bootstrapped its admin
 -- via Google doesn't auto-promote later password claimers.
 --
--- The genuine first credentialled registrant also becomes super admin, so a
--- fresh install can reach /admin/settings without running the break-glass CLI.
--- is_super_admin / super_admin_since are tied to the same NOT EXISTS condition
--- (zero credentialled players yet), NOT to the requested_role = 'admin' branch,
--- so a later admin (ADMIN_EMAILS match on a populated DB, or a password claim
--- after a Google-only bootstrap) gets plain admin and never super.
+-- Both the ADMIN_EMAILS branch (requested_role = 'admin') and the
+-- first-credentialled-registrant branch resolve to the top tier 'admin'
+-- (#538), matching CreatePlayerWithCredentials, so a first sign-up through the
+-- claim path lands on Admin. Host is never granted at registration.
+-- role_changed_at is stamped when the row becomes admin.
 --
 -- username_claimed is set to 1 because the visitor is explicitly choosing
 -- their username via the register form. This is the register-after-playing
@@ -118,15 +110,8 @@ SET username = sqlc.arg('username'),
         ) THEN 'admin'
         ELSE 'player'
     END,
-    is_super_admin = CASE
-        WHEN NOT EXISTS (
-            SELECT 1 FROM players p
-            WHERE p.password_hash IS NOT NULL
-               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
-        ) THEN 1
-        ELSE 0
-    END,
-    super_admin_since = CASE
+    role_changed_at = CASE
+        WHEN CAST(sqlc.arg('requested_role') AS TEXT) = 'admin' THEN CURRENT_TIMESTAMP
         WHEN NOT EXISTS (
             SELECT 1 FROM players p
             WHERE p.password_hash IS NOT NULL
@@ -196,7 +181,7 @@ LIMIT 1;
 -- deployments from promoting *every* sign-in to admin. Without this,
 -- the second-and-onward Google sign-ins on a fresh DB would all see
 -- count(password_hash IS NOT NULL) == 0 and become admin.
-INSERT INTO players (username, email, email_verified_at, role, username_claimed)
+INSERT INTO players (username, email, email_verified_at, role, role_changed_at, username_claimed)
 VALUES (
     sqlc.arg('username'),
     sqlc.arg('email'),
@@ -208,6 +193,14 @@ VALUES (
                OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
         ) THEN 'admin'
         ELSE 'player'
+    END,
+    CASE
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN CURRENT_TIMESTAMP
+        ELSE NULL
     END,
     1
 )
@@ -253,6 +246,14 @@ SET email = sqlc.arg('email'),
                OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
         ) THEN 'admin'
         ELSE 'player'
+    END,
+    role_changed_at = CASE
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN CURRENT_TIMESTAMP
+        ELSE NULL
     END
 WHERE players.id = sqlc.arg('id')
   AND players.password_hash IS NULL
@@ -434,56 +435,32 @@ RETURNING player_id;
 DELETE FROM password_reset_tokens
 WHERE expires_at <= sqlc.arg('now');
 
--- name: SetPlayerSuperAdmin :execrows
--- Sets is_super_admin AND role on the row identified by id, both from the
--- caller. Super admin is a strict superset of admin, and the Go wrapper
--- passes role='admin' in both directions: promoting (is_super_admin = 1)
--- sets role='admin', and demoting (is_super_admin = 0) re-asserts
--- role='admin' so the demoted player keeps the plain admin powers. The
--- statement always writes the passed role - it never preserves the
--- existing one. Returns the number of affected rows so the wrapper can map
--- "no rows" to ErrPlayerNotFound.
-UPDATE players
-SET is_super_admin = sqlc.arg('is_super_admin'),
-    role = sqlc.arg('role'),
-    super_admin_since = CASE
-        WHEN sqlc.arg('is_super_admin') = 1 THEN CURRENT_TIMESTAMP
-        ELSE NULL
-    END
-WHERE id = sqlc.arg('id');
-
--- name: SetPlayerRoleAndSuperAdmin :execrows
--- Sets role AND is_super_admin on the row identified by id, both from the
--- caller, so one statement moves a player to any privilege level. The three
--- levels map to (role, is_super_admin): player -> (player, 0),
--- admin -> (admin, 0), super_admin -> (admin, 1). super_admin_since is
--- stamped to CURRENT_TIMESTAMP when promoting to super and cleared to NULL
--- otherwise, mirroring SetPlayerSuperAdmin above. Returns the number of
--- affected rows so the wrapper can map "no rows" to ErrPlayerNotFound.
+-- name: SetPlayerRole :execrows
+-- Sets the role on the row identified by id, from the caller (#538), so one
+-- statement moves a player to any tier (player / host / admin). role_changed_at
+-- is stamped to CURRENT_TIMESTAMP on every change so the settings list can show
+-- a "promoted" timestamp. Returns the number of affected rows so the wrapper
+-- can map "no rows" to ErrPlayerNotFound.
 UPDATE players
 SET role = sqlc.arg('role'),
-    is_super_admin = sqlc.arg('is_super_admin'),
-    super_admin_since = CASE
-        WHEN sqlc.arg('is_super_admin') = 1 THEN CURRENT_TIMESTAMP
-        ELSE NULL
-    END
+    role_changed_at = CURRENT_TIMESTAMP
 WHERE id = sqlc.arg('id');
 
--- name: CountSuperAdmins :one
--- Number of current super admins. Used by the demote guard to refuse a
--- demote that would leave zero super admins.
+-- name: CountAdmins :one
+-- Number of current Admins (top tier). Used by the role-change guard to refuse
+-- a change that would leave zero Admins.
 SELECT COUNT(*)
 FROM players
-WHERE is_super_admin = 1;
+WHERE role = 'admin';
 
--- name: ListSuperAdmins :many
--- Every current super admin, ordered by username so the admin settings
--- page (#320) renders a stable list. Only the columns the list needs are
--- selected. super_admin_since is when the player was promoted (NULL for
--- rows promoted before the column existed).
-SELECT id, username, email, super_admin_since
+-- name: ListAdmins :many
+-- Every current Admin, ordered by username so the admin settings page
+-- (#320/#538) renders a stable list. Only the columns the list needs are
+-- selected. role_changed_at is when the role last changed (NULL for rows whose
+-- role predates the column).
+SELECT id, username, email, role_changed_at
 FROM players
-WHERE is_super_admin = 1
+WHERE role = 'admin'
 ORDER BY username, id;
 
 -- name: ResetPlayerPassword :execrows

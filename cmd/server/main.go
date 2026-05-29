@@ -26,12 +26,12 @@ func main() {
 			" The server should not be running concurrently against the same database."+
 			" Takes precedence over -check when both are supplied",
 	)
-	promoteSuperFor := flag.String(
-		"promote-super",
+	promoteAdminFor := flag.String(
+		"promote-admin",
 		"",
-		"promote the player with the given email to super admin (sets is_super_admin and role=admin)"+
-			" and exits. Break-glass recovery tool for when every super admin is locked out; the first"+
-			" super admin normally comes from the first registration. The server should not be running"+
+		"promote the player with the given email to admin (sets role=admin) and exits."+
+			" Break-glass recovery tool for when every admin is locked out; the first admin"+
+			" normally comes from the first registration. The server should not be running"+
 			" concurrently against the same database",
 	)
 	healthcheckOnly := flag.Bool(
@@ -51,8 +51,8 @@ func main() {
 	switch {
 	case *resetPasswordFor != "":
 		err = app.ResetPassword(ctx, os.Getenv, os.Stdin, os.Stdout, os.Stderr, *resetPasswordFor)
-	case *promoteSuperFor != "":
-		err = app.PromoteSuper(ctx, os.Getenv, os.Stdout, os.Stderr, *promoteSuperFor)
+	case *promoteAdminFor != "":
+		err = app.PromoteAdmin(ctx, os.Getenv, os.Stdout, os.Stderr, *promoteAdminFor)
 	case *checkOnly:
 		err = app.Check(ctx, os.Getenv, os.Stdout)
 	case *healthcheckOnly:

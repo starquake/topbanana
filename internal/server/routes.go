@@ -367,114 +367,116 @@ func addAdminRoutes(
 	playerDeps adminPlayerDeps,
 ) {
 	csrfMW := csrfMgr.Middleware
-	requireAdmin := func(h http.Handler) http.Handler {
-		return auth.RequireAdmin(auth.RequireVerifiedEmail(h), stores.Players, sessions, csrfMgr, logger)
+	// requireGameHost gates the dashboard + quiz/break routes to Hosts and
+	// Admins (#538). A signed-in Player gets a 403 access-denied page (the
+	// dashboard's existence is not secret).
+	requireGameHost := func(h http.Handler) http.Handler {
+		return auth.RequireGameHost(auth.RequireVerifiedEmail(h), stores.Players, sessions, csrfMgr, logger)
 	}
-	// requireSuperAdmin gates the super-admin-only routes (#319). A
-	// signed-in non-super-admin gets a 404 from RequireSuperAdmin so the
-	// route's existence stays hidden (#320); the verified-email gate sits
-	// inside it for parity with requireAdmin.
-	requireSuperAdmin := func(h http.Handler) http.Handler {
-		return auth.RequireSuperAdmin(auth.RequireVerifiedEmail(h), stores.Players, sessions, logger)
+	// requireAdmin gates the top-tier-only routes (#538): player management,
+	// role changes, account creation, email diagnostics, and settings. A
+	// signed-in non-Admin (Player or Host) gets a 404 from RequireAdmin so the
+	// route's existence stays hidden (#320/#538); the verified-email gate sits
+	// inside it for parity with requireGameHost.
+	requireAdmin := func(h http.Handler) http.Handler {
+		return auth.RequireAdmin(auth.RequireVerifiedEmail(h), stores.Players, sessions, logger)
 	}
 
-	mux.Handle("GET /admin", requireAdmin(admin.HandleIndex(logger, csrfMgr)))
-	addAdminSettingsRoutes(mux, logger, csrfMgr, requireSuperAdmin, stores, playerDeps)
+	mux.Handle("GET /admin", requireGameHost(admin.HandleIndex(logger, csrfMgr)))
+	addAdminSettingsRoutes(mux, logger, csrfMgr, requireAdmin, stores, playerDeps)
 	mux.Handle("GET /admin/players", requireAdmin(admin.HandlePlayersList(logger, csrfMgr, stores.PlayerLister)))
-	addAdminPlayerRoutes(mux, logger, csrfMgr, csrfMW, requireAdmin, requireSuperAdmin, stores, playerDeps)
+	addAdminPlayerRoutes(mux, logger, csrfMgr, csrfMW, requireAdmin, stores, playerDeps)
 	addAdminEmailRoutes(mux, logger, csrfMgr, csrfMW, requireAdmin, email)
-	mux.Handle("GET /admin/quizzes", requireAdmin(admin.HandleQuizList(logger, csrfMgr, stores.Quizzes)))
+	mux.Handle("GET /admin/quizzes", requireGameHost(admin.HandleQuizList(logger, csrfMgr, stores.Quizzes)))
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}",
-		requireAdmin(admin.HandleQuizView(logger, csrfMgr, stores.Quizzes, gameService)),
+		requireGameHost(admin.HandleQuizView(logger, csrfMgr, stores.Quizzes, gameService)),
 	)
-	mux.Handle("GET /admin/quizzes/new", requireAdmin(admin.HandleQuizCreate(logger, csrfMgr)))
-	mux.Handle("POST /admin/quizzes", csrfMW(requireAdmin(admin.HandleQuizSave(logger, csrfMgr, stores.Quizzes))))
-	mux.Handle("GET /admin/quizzes/import", requireAdmin(admin.HandleQuizImportForm(logger, csrfMgr)))
+	mux.Handle("GET /admin/quizzes/new", requireGameHost(admin.HandleQuizCreate(logger, csrfMgr)))
+	mux.Handle("POST /admin/quizzes", csrfMW(requireGameHost(admin.HandleQuizSave(logger, csrfMgr, stores.Quizzes))))
+	mux.Handle("GET /admin/quizzes/import", requireGameHost(admin.HandleQuizImportForm(logger, csrfMgr)))
 	mux.Handle(
 		"POST /admin/quizzes/import",
-		csrfMW(requireAdmin(admin.HandleQuizImportSave(logger, csrfMgr, stores.Quizzes))),
+		csrfMW(requireGameHost(admin.HandleQuizImportSave(logger, csrfMgr, stores.Quizzes))),
 	)
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}/edit",
-		requireAdmin(admin.HandleQuizEdit(logger, csrfMgr, stores.Quizzes)),
+		requireGameHost(admin.HandleQuizEdit(logger, csrfMgr, stores.Quizzes)),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}",
-		csrfMW(requireAdmin(admin.HandleQuizSave(logger, csrfMgr, stores.Quizzes))),
+		csrfMW(requireGameHost(admin.HandleQuizSave(logger, csrfMgr, stores.Quizzes))),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/delete",
-		csrfMW(requireAdmin(admin.HandleQuizDelete(logger, csrfMgr, stores.Quizzes))),
+		csrfMW(requireGameHost(admin.HandleQuizDelete(logger, csrfMgr, stores.Quizzes))),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/players/{playerID}/reset",
-		csrfMW(requireAdmin(admin.HandleResetGameForPlayer(logger, csrfMgr, stores.Quizzes, gameService))),
+		csrfMW(requireGameHost(admin.HandleResetGameForPlayer(logger, csrfMgr, stores.Quizzes, gameService))),
 	)
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}/questions/new",
-		requireAdmin(admin.HandleQuestionCreate(logger, csrfMgr, stores.Quizzes)),
+		requireGameHost(admin.HandleQuestionCreate(logger, csrfMgr, stores.Quizzes)),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/questions",
-		csrfMW(requireAdmin(admin.HandleQuestionSave(logger, csrfMgr, stores.Quizzes))),
+		csrfMW(requireGameHost(admin.HandleQuestionSave(logger, csrfMgr, stores.Quizzes))),
 	)
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}/questions/{questionID}/edit",
-		requireAdmin(admin.HandleQuestionEdit(logger, csrfMgr, stores.Quizzes)),
+		requireGameHost(admin.HandleQuestionEdit(logger, csrfMgr, stores.Quizzes)),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/questions/{questionID}",
-		csrfMW(requireAdmin(admin.HandleQuestionSave(logger, csrfMgr, stores.Quizzes))),
+		csrfMW(requireGameHost(admin.HandleQuestionSave(logger, csrfMgr, stores.Quizzes))),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/questions/{questionID}/delete",
-		csrfMW(requireAdmin(admin.HandleQuestionDelete(logger, csrfMgr, stores.Quizzes))),
+		csrfMW(requireGameHost(admin.HandleQuestionDelete(logger, csrfMgr, stores.Quizzes))),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/questions/{questionID}/move/{direction}",
-		csrfMW(requireAdmin(admin.HandleQuestionMove(logger, csrfMgr, stores.Quizzes))),
+		csrfMW(requireGameHost(admin.HandleQuestionMove(logger, csrfMgr, stores.Quizzes))),
 	)
 
-	addAdminBreakRoutes(mux, logger, stores, csrfMW, requireAdmin, csrfMgr)
+	addAdminBreakRoutes(mux, logger, stores, csrfMW, requireGameHost, csrfMgr)
 }
 
-// addAdminSettingsRoutes registers the super-admin settings page (#320):
-// the GET render of the current super-admin list. The page's demote
-// buttons post to the id-based role endpoint under /admin/players (#527),
-// so there is no settings-scoped POST here. Gated by requireSuperAdmin so
-// a signed-in non-super-admin gets a 404 (the route stays hidden).
+// addAdminSettingsRoutes registers the Admin settings page (#320/#538): the
+// GET render of the current Admins list. The page's demote buttons post to the
+// id-based role endpoint under /admin/players (#538), so there is no
+// settings-scoped POST here. Gated by requireAdmin so a signed-in non-Admin
+// gets a 404 (the route stays hidden).
 func addAdminSettingsRoutes(
 	mux *http.ServeMux,
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
-	requireSuperAdmin func(http.Handler) http.Handler,
+	requireAdmin func(http.Handler) http.Handler,
 	stores *store.Stores,
 	deps adminPlayerDeps,
 ) {
 	mux.Handle(
 		"GET /admin/settings",
-		requireSuperAdmin(admin.HandleSettings(logger, csrfMgr, stores.SuperAdmins, deps.flash)),
+		requireAdmin(admin.HandleSettings(logger, csrfMgr, stores.AdminList, deps.flash)),
 	)
 }
 
-// addAdminPlayerRoutes registers the admin player-management routes
-// (#450): per-player detail view, the mutating actions, and the
-// create-without-verification GET+POST pair. The detail view and the
-// verify/resend/email actions are admin-wide; the create pair, the
-// id-based role endpoint (#527), and the username + password actions
-// (#535) are super-admin only. MaxFormSizeMiddleware
-// fronts every POST in front of csrfMW so the CSRF validator's
-// ParseForm sees a bounded body; csrfMW fronts the auth wrapper so an
-// unauthenticated request without a valid token is rejected with 403
-// before any auth-state-leaking 303 to /login.
+// addAdminPlayerRoutes registers the admin player-management routes (#450).
+// Every route - the per-player detail view, the verify/resend/email actions,
+// the create-without-verification pair, the id-based role endpoint (#538), and
+// the username + password actions (#535) - is Admin-only (#538): player
+// management moved from the old admin-wide gate up to the top tier.
+// MaxFormSizeMiddleware fronts every POST in front of csrfMW so the CSRF
+// validator's ParseForm sees a bounded body; csrfMW fronts the auth wrapper so
+// an unauthenticated request without a valid token is rejected with 403 before
+// any auth-state-leaking 303 to /login.
 func addAdminPlayerRoutes(
 	mux *http.ServeMux,
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
 	csrfMW func(http.Handler) http.Handler,
 	requireAdmin func(http.Handler) http.Handler,
-	requireSuperAdmin func(http.Handler) http.Handler,
 	stores *store.Stores,
 	deps adminPlayerDeps,
 ) {
@@ -482,11 +484,11 @@ func addAdminPlayerRoutes(
 
 	mux.Handle(
 		"GET /admin/players/new",
-		requireSuperAdmin(admin.HandlePlayerCreateForm(logger, csrfMgr)),
+		requireAdmin(admin.HandlePlayerCreateForm(logger, csrfMgr)),
 	)
 	mux.Handle(
 		"POST /admin/players",
-		admin.MaxFormSizeMiddleware(csrfMW(requireSuperAdmin(
+		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
 			admin.HandlePlayerCreateSubmit(logger, csrfMgr, stores.AdminPlayers, deps.flash),
 		))),
 	)
@@ -517,19 +519,19 @@ func addAdminPlayerRoutes(
 	)
 	mux.Handle(
 		"POST /admin/players/{playerID}/role",
-		admin.MaxFormSizeMiddleware(csrfMW(requireSuperAdmin(
+		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
 			admin.HandlePlayerSetRole(logger, stores.AdminPlayers, deps.flash),
 		))),
 	)
 	mux.Handle(
 		"POST /admin/players/{playerID}/username",
-		admin.MaxFormSizeMiddleware(csrfMW(requireSuperAdmin(
+		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
 			admin.HandlePlayerSetUsername(logger, stores.AdminPlayers, deps.flash),
 		))),
 	)
 	mux.Handle(
 		"POST /admin/players/{playerID}/password",
-		admin.MaxFormSizeMiddleware(csrfMW(requireSuperAdmin(
+		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
 			admin.HandlePlayerSetPassword(logger, stores.AdminPlayers, deps.flash),
 		))),
 	)
@@ -580,32 +582,32 @@ func addAdminBreakRoutes(
 	logger *slog.Logger,
 	stores *store.Stores,
 	csrfMW func(http.Handler) http.Handler,
-	requireAdmin func(http.Handler) http.Handler,
+	requireGameHost func(http.Handler) http.Handler,
 	csrfMgr *csrf.Manager,
 ) {
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}/breaks/new",
-		requireAdmin(admin.HandleBreakCreate(logger, csrfMgr, stores.Quizzes)),
+		requireGameHost(admin.HandleBreakCreate(logger, csrfMgr, stores.Quizzes)),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/breaks",
-		csrfMW(requireAdmin(admin.HandleBreakSave(logger, csrfMgr, stores.Quizzes))),
+		csrfMW(requireGameHost(admin.HandleBreakSave(logger, csrfMgr, stores.Quizzes))),
 	)
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}/breaks/{breakID}/edit",
-		requireAdmin(admin.HandleBreakEdit(logger, csrfMgr, stores.Quizzes)),
+		requireGameHost(admin.HandleBreakEdit(logger, csrfMgr, stores.Quizzes)),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/breaks/{breakID}",
-		csrfMW(requireAdmin(admin.HandleBreakSave(logger, csrfMgr, stores.Quizzes))),
+		csrfMW(requireGameHost(admin.HandleBreakSave(logger, csrfMgr, stores.Quizzes))),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/breaks/{breakID}/delete",
-		csrfMW(requireAdmin(admin.HandleBreakDelete(logger, csrfMgr, stores.Quizzes))),
+		csrfMW(requireGameHost(admin.HandleBreakDelete(logger, csrfMgr, stores.Quizzes))),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/breaks/{breakID}/move/{direction}",
-		csrfMW(requireAdmin(admin.HandleBreakMove(logger, csrfMgr, stores.Quizzes))),
+		csrfMW(requireGameHost(admin.HandleBreakMove(logger, csrfMgr, stores.Quizzes))),
 	)
 }
 

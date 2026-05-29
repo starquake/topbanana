@@ -25,7 +25,15 @@ func TestPlayer_IsAnonymous(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "seeded admin row (empty hash but admin role) is not anonymous",
+			// After the #538 remap the seed admin (id=1) holds the Host
+			// tier with a NULL password_hash; it must NOT read as a
+			// claimable anonymous row.
+			name: "seeded host row (empty hash but host role) is not anonymous",
+			p:    Player{PasswordHash: "", Role: RoleHost},
+			want: false,
+		},
+		{
+			name: "admin row (empty hash but admin role) is not anonymous",
 			p:    Player{PasswordHash: "", Role: RoleAdmin},
 			want: false,
 		},
@@ -41,6 +49,52 @@ func TestPlayer_IsAnonymous(t *testing.T) {
 			t.Parallel()
 			if got, want := tc.p.IsAnonymous(), tc.want; got != want {
 				t.Errorf("IsAnonymous() = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestPlayer_IsAdmin(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		role string
+		want bool
+	}{
+		{"player", RolePlayer, false},
+		{"host", RoleHost, false},
+		{"admin", RoleAdmin, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p := Player{Role: tc.role}
+			if got, want := p.IsAdmin(), tc.want; got != want {
+				t.Errorf("IsAdmin() = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestPlayer_CanHost(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		role string
+		want bool
+	}{
+		{"player", RolePlayer, false},
+		{"host", RoleHost, true},
+		{"admin", RoleAdmin, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p := Player{Role: tc.role}
+			if got, want := p.CanHost(), tc.want; got != want {
+				t.Errorf("CanHost() = %v, want %v", got, want)
 			}
 		})
 	}
