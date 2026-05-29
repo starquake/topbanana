@@ -95,6 +95,7 @@ const adminUsernames = [
   'e2e-super-boss-chromium', 'e2e-super-boss-firefox',                        // admin-settings.spec.ts super-admin promote (#320)
   'e2e-super-plain-chromium', 'e2e-super-plain-firefox',                      // admin-settings.spec.ts regular-admin 404 (#320)
   'e2e-demote-boss-chromium', 'e2e-demote-boss-firefox',                      // admin-settings.spec.ts super-admin demote (#527)
+  'e2e-cred-boss-chromium', 'e2e-cred-boss-firefox',                  // admin-player-credentials.spec.ts name/password (#535)
 ];
 const ADMIN_EMAILS = adminUsernames.map(u => `${u}@example.test`).join(',');
 

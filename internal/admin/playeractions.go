@@ -165,6 +165,105 @@ func HandlePlayerSetEmail(
 	})
 }
 
+// HandlePlayerSetUsername handles POST /admin/players/{playerID}/username.
+// Super-admin only (gated by RequireSuperAdmin at the route). Renames the
+// target row to the supplied display name; the store enforces the empty /
+// taken sentinels so the handler only maps them to flashes.
+func HandlePlayerSetUsername(
+	logger *slog.Logger,
+	store auth.AdminPlayerStore,
+	flash *auth.SignedFlash,
+) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		playerID, ok := handlers.ParseIDFromPath(w, r, logger, "playerID")
+		if !ok {
+			return
+		}
+		actor, ok := requireAdminActor(w, r)
+		if !ok {
+			return
+		}
+
+		name := strings.TrimSpace(r.PostFormValue("username"))
+
+		_, err := store.RenamePlayer(r.Context(), playerID, name)
+		switch {
+		case err == nil:
+			writeAudit(r.Context(), logger, store, actor.ID, playerID,
+				auth.AdminActionUsernameSet, map[string]string{"new_username": name})
+			flash.SetNotice(w, "Display name updated.")
+		case errors.Is(err, auth.ErrUsernameEmpty):
+			flash.SetError(w, "Enter a display name.", 0)
+		case errors.Is(err, auth.ErrUsernameTaken):
+			flash.SetError(w, "That display name is already taken.", 0)
+		case errors.Is(err, auth.ErrPlayerNotFound):
+			flash.SetError(w, "Player not found.", 0)
+		default:
+			logger.ErrorContext(r.Context(), "error setting player username", slog.Any("err", err))
+			flash.SetError(w, "Could not update display name. Try again.", 0)
+		}
+		redirectToPlayerDetail(w, r, playerID)
+	})
+}
+
+// HandlePlayerSetPassword handles POST /admin/players/{playerID}/password.
+// Super-admin only (gated by RequireSuperAdmin at the route). Rotates the
+// target's password and bumps session_version, signing the target out of
+// their other sessions. The raw password is never logged or echoed.
+func HandlePlayerSetPassword(
+	logger *slog.Logger,
+	store auth.AdminPlayerStore,
+	flash *auth.SignedFlash,
+) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		playerID, ok := handlers.ParseIDFromPath(w, r, logger, "playerID")
+		if !ok {
+			return
+		}
+		actor, ok := requireAdminActor(w, r)
+		if !ok {
+			return
+		}
+
+		password := r.PostFormValue("password")
+		if len(password) < auth.MinPasswordLength {
+			flash.SetError(w, fmt.Sprintf("Password must be at least %d characters.", auth.MinPasswordLength), 0)
+			redirectToPlayerDetail(w, r, playerID)
+
+			return
+		}
+		if len(password) > auth.MaxPasswordLength {
+			flash.SetError(w, fmt.Sprintf("Password must be at most %d characters.", auth.MaxPasswordLength), 0)
+			redirectToPlayerDetail(w, r, playerID)
+
+			return
+		}
+
+		hash, err := auth.HashPassword(password)
+		if err != nil {
+			logger.ErrorContext(r.Context(), "error hashing player password", slog.Any("err", err))
+			flash.SetError(w, "Could not set password. Try again.", 0)
+			redirectToPlayerDetail(w, r, playerID)
+
+			return
+		}
+
+		err = store.ChangePlayerPassword(r.Context(), playerID, hash)
+		switch {
+		case err == nil:
+			writeAudit(r.Context(), logger, store, actor.ID, playerID, auth.AdminActionPasswordSet, nil)
+			flash.SetNotice(w,
+				"Password set. The player's other sessions were signed out; hand the new password over out-of-band.")
+		case errors.Is(err, auth.ErrPlayerNotFound):
+			flash.SetError(w, "Player not found.", 0)
+		default:
+			logger.ErrorContext(r.Context(), "error setting player password", slog.Any("err", err))
+			flash.SetError(w, "Could not set password. Try again.", 0)
+		}
+		redirectToPlayerDetail(w, r, playerID)
+	})
+}
+
 // Role-level values accepted by HandlePlayerSetRole's "role" form field
 // (#527). Each maps to a (role, is_super_admin) pair on the players row:
 // player -> ("player", 0), admin -> ("admin", 0), super_admin ->

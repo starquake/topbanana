@@ -288,6 +288,7 @@ type SuperAdminEntry struct {
 const (
 	AdminActionVerify             = "verify"
 	AdminActionEmailSet           = "email_set"
+	AdminActionUsernameSet        = "username_set"
 	AdminActionPasswordSet        = "password_set"
 	AdminActionCreated            = "created"
 	AdminActionResendVerification = "resend_verification"
@@ -356,6 +357,17 @@ type AdminPlayerStore interface {
 	ListAdminAuditForTarget(
 		ctx context.Context, targetPlayerID, limit int64,
 	) ([]*AdminAuditEntry, error)
+	// RenamePlayer changes the display name on the row identified by id,
+	// regardless of password_hash / email / role. Returns ErrUsernameEmpty
+	// for whitespace-only input, ErrUsernameTaken on a UNIQUE collision, and
+	// ErrPlayerNotFound when the id does not exist.
+	RenamePlayer(ctx context.Context, playerID int64, username string) (*Player, error)
+	// ChangePlayerPassword atomically rotates password_hash and bumps
+	// session_version on the row identified by id. The session_version bump
+	// invalidates every other live cookie for the same account the moment
+	// the transaction commits, so an admin-driven reset signs the target out
+	// of their other sessions. Returns ErrPlayerNotFound when no row matches.
+	ChangePlayerPassword(ctx context.Context, playerID int64, passwordHash string) error
 }
 
 // SuperAdminStore is the persistence interface the super-admin settings
