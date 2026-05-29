@@ -26,6 +26,22 @@ SET username = ?1,
         ) THEN 'admin'
         ELSE 'player'
     END,
+    is_super_admin = CASE
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN 1
+        ELSE 0
+    END,
+    super_admin_since = CASE
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN CURRENT_TIMESTAMP
+        ELSE NULL
+    END,
     username_claimed = 1
 WHERE players.id = ?5
   AND players.password_hash IS NULL
@@ -50,11 +66,16 @@ type ClaimPlayerParams struct {
 // The role CASE mirrors CreatePlayerWithCredentials so the "first
 // credentialled registrant becomes admin" rule still triggers when the
 // very first sign-up happens through the claim path (i.e. the registrant
-// played anonymously first). The subquery aliases the players table as pp
-// so the column reference in the WHERE is unambiguous against the row
-// being updated. The credentialled-player check covers both password and
-// OAuth identity so a deployment that bootstrapped its admin via Google
-// doesn't auto-promote later password claimers.
+// played anonymously first). The credentialled-player check covers both
+// password and OAuth identity so a deployment that bootstrapped its admin
+// via Google doesn't auto-promote later password claimers.
+//
+// The genuine first credentialled registrant also becomes super admin, so a
+// fresh install can reach /admin/settings without running the break-glass CLI.
+// is_super_admin / super_admin_since are tied to the same NOT EXISTS condition
+// (zero credentialled players yet), NOT to the requested_role = 'admin' branch,
+// so a later admin (ADMIN_EMAILS match on a populated DB, or a password claim
+// after a Google-only bootstrap) gets plain admin and never super.
 //
 // username_claimed is set to 1 because the visitor is explicitly choosing
 // their username via the register form. This is the register-after-playing
@@ -374,7 +395,7 @@ func (q *Queries) CreatePlayerFromOAuth(ctx context.Context, arg CreatePlayerFro
 }
 
 const createPlayerWithCredentials = `-- name: CreatePlayerWithCredentials :one
-INSERT INTO players (username, password_hash, email, role, username_claimed)
+INSERT INTO players (username, password_hash, email, role, is_super_admin, super_admin_since, username_claimed)
 VALUES (
     ?1,
     ?2,
@@ -387,6 +408,22 @@ VALUES (
                OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
         ) THEN 'admin'
         ELSE 'player'
+    END,
+    CASE
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN 1
+        ELSE 0
+    END,
+    CASE
+        WHEN NOT EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.password_hash IS NOT NULL
+               OR EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id)
+        ) THEN CURRENT_TIMESTAMP
+        ELSE NULL
     END,
     1
 )
@@ -413,6 +450,14 @@ type CreatePlayerWithCredentialsParams struct {
 // identity (player_identities row). The seeded admin (id=1) has neither
 // and is intentionally ignored so the operator's first real registration
 // replaces it as admin.
+//
+// The genuine first credentialled registrant also becomes super admin, so a
+// fresh install can reach /admin/settings without running the break-glass CLI.
+// is_super_admin / super_admin_since are tied to the same NOT EXISTS condition
+// (zero credentialled players yet), NOT to the requested_role = 'admin' branch:
+// so an ADMIN_EMAILS match on an already-populated DB, or a password registrant
+// after a Google-only bootstrap, gets plain admin and never super. Because
+// "first credentialled" implies "zero super admins", no extra guard is needed.
 //
 // username_claimed is set to 1 because a registering user explicitly chose
 // their username at the register form. The column tracks "did the player

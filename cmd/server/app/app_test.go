@@ -223,11 +223,14 @@ func TestPromoteSuper_HappyPath_SetsSuperAdminAndRole(t *testing.T) {
 	dbURI, cleanup := dbtest.SetupTestDB(t)
 	t.Cleanup(cleanup)
 
-	const username = "alice"
+	const (
+		username = "alice"
+		email    = "alice@example.test"
+	)
 	seedPlayer(t, dbURI, username)
 
 	var stdout, stderr bytes.Buffer
-	if err := PromoteSuper(t.Context(), envFor(dbURI), &stdout, &stderr, username); err != nil {
+	if err := PromoteSuper(t.Context(), envFor(dbURI), &stdout, &stderr, email); err != nil {
 		t.Fatalf("PromoteSuper err = %v, want nil", err)
 	}
 
@@ -243,20 +246,20 @@ func TestPromoteSuper_HappyPath_SetsSuperAdminAndRole(t *testing.T) {
 	}
 }
 
-func TestPromoteSuper_UnknownUsername_ReturnsError(t *testing.T) {
+func TestPromoteSuper_UnknownEmail_ReturnsError(t *testing.T) {
 	t.Parallel()
 
 	dbURI, cleanup := dbtest.SetupTestDB(t)
 	t.Cleanup(cleanup)
 
 	var stdout, stderr bytes.Buffer
-	err := PromoteSuper(t.Context(), envFor(dbURI), &stdout, &stderr, "nobody")
-	if got, want := err, ErrPromoteUserNotFound; !errors.Is(got, want) {
+	err := PromoteSuper(t.Context(), envFor(dbURI), &stdout, &stderr, "nobody@example.test")
+	if got, want := err, ErrPromoteEmailNotFound; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
 }
 
-func TestPromoteSuper_BlankUsername_ReturnsError(t *testing.T) {
+func TestPromoteSuper_BlankEmail_ReturnsError(t *testing.T) {
 	t.Parallel()
 
 	dbURI, cleanup := dbtest.SetupTestDB(t)
@@ -264,7 +267,7 @@ func TestPromoteSuper_BlankUsername_ReturnsError(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	err := PromoteSuper(t.Context(), envFor(dbURI), &stdout, &stderr, "   ")
-	if got, want := err, ErrPromoteUsernameRequired; !errors.Is(got, want) {
+	if got, want := err, ErrPromoteEmailRequired; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
 }

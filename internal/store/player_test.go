@@ -87,14 +87,16 @@ func TestPlayerStore_CreateAndGetPlayer(t *testing.T) {
 	}
 }
 
-func TestPlayerStore_CreatePlayer_FirstPasswordBearer_PromotedToAdmin(t *testing.T) {
+func TestPlayerStore_CreatePlayer_FirstPasswordBearer_PromotedToSuperAdmin(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
-	// Even when the caller asks for "player", the first password-bearing
-	// registrant is promoted to admin atomically by the SQL CASE expression.
+	// Even when the caller asks for "player", the first credentialled
+	// registrant is promoted to admin AND super admin atomically by the SQL
+	// CASE expressions, so a fresh install can reach /admin/settings without
+	// the break-glass CLI.
 	created, err := ps.CreatePlayer(t.Context(), "alice", "alice"+"@example.test", "hash", auth.RolePlayer)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
@@ -102,6 +104,10 @@ func TestPlayerStore_CreatePlayer_FirstPasswordBearer_PromotedToAdmin(t *testing
 	if got, want := created.Role, auth.RoleAdmin; got != want {
 		t.Errorf("Role = %q, want %q", got, want)
 	}
+	if got, want := created.IsSuperAdmin, true; got != want {
+		t.Errorf("IsSuperAdmin = %v, want %v", got, want)
+	}
+	assertRoleState(t, db, created.ID, auth.RoleAdmin, true, true)
 }
 
 func TestPlayerStore_CreatePlayer_SecondPasswordBearer_StaysPlayer(t *testing.T) {
@@ -121,6 +127,10 @@ func TestPlayerStore_CreatePlayer_SecondPasswordBearer_StaysPlayer(t *testing.T)
 	if got, want := created.Role, auth.RolePlayer; got != want {
 		t.Errorf("Role = %q, want %q", got, want)
 	}
+	if got, want := created.IsSuperAdmin, false; got != want {
+		t.Errorf("IsSuperAdmin = %v, want %v", got, want)
+	}
+	assertRoleState(t, db, created.ID, auth.RolePlayer, false, false)
 }
 
 func TestPlayerStore_CreatePlayer_ExplicitAdmin_HonouredEvenWhenNotFirst(t *testing.T) {
@@ -133,6 +143,10 @@ func TestPlayerStore_CreatePlayer_ExplicitAdmin_HonouredEvenWhenNotFirst(t *test
 		t.Fatalf("seed CreatePlayer err = %v, want nil", err)
 	}
 
+	// An ADMIN_EMAILS-style requested_role=admin call on a DB that already has
+	// a credentialled account becomes admin but never super: the super flag is
+	// tied to the "first credentialled registrant" condition, not to the
+	// requested-admin branch.
 	created, err := ps.CreatePlayer(t.Context(), "carol", "carol"+"@example.test", "hash", auth.RoleAdmin)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
@@ -140,6 +154,10 @@ func TestPlayerStore_CreatePlayer_ExplicitAdmin_HonouredEvenWhenNotFirst(t *test
 	if got, want := created.Role, auth.RoleAdmin; got != want {
 		t.Errorf("Role = %q, want %q", got, want)
 	}
+	if got, want := created.IsSuperAdmin, false; got != want {
+		t.Errorf("IsSuperAdmin = %v, want %v", got, want)
+	}
+	assertRoleState(t, db, created.ID, auth.RoleAdmin, false, false)
 }
 
 func TestPlayerStore_TrimsWhitespaceOnCreateAndLookup(t *testing.T) {
@@ -425,10 +443,15 @@ func TestPlayerStore_ClaimPlayer_UpgradesAnonymousRow(t *testing.T) {
 	if got, want := claimed.PasswordHash, "hash"; got != want {
 		t.Errorf("claimed.PasswordHash = %q, want %q", got, want)
 	}
-	// First password-bearing registrant - even via the claim path - becomes admin.
+	// First credentialled registrant - even via the claim path - becomes admin
+	// and super admin.
 	if got, want := claimed.Role, auth.RoleAdmin; got != want {
 		t.Errorf("claimed.Role = %q, want %q", got, want)
 	}
+	if got, want := claimed.IsSuperAdmin, true; got != want {
+		t.Errorf("claimed.IsSuperAdmin = %v, want %v", got, want)
+	}
+	assertRoleState(t, db, claimed.ID, auth.RoleAdmin, true, true)
 	// The claim flow is an explicit username choice: the player typed it
 	// into the register form, so the flag must flip alongside the password.
 	if got, want := claimed.HasCustomName(), true; got != want {
