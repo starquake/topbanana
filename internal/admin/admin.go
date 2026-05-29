@@ -120,11 +120,30 @@ func (tr *TemplateRenderer) prepare(w http.ResponseWriter, r *http.Request) (*te
 		csrfToken = tr.csrf.Token(w, r)
 	}
 
+	section := navSection(r.URL.Path)
+
 	return t.Funcs(template.FuncMap{
 		"currentUser": func() string { return username },
 		"csrfToken":   func() string { return csrfToken },
 		"ogImage":     func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
+		"navSection":  func() string { return section },
 	}), true
+}
+
+// navSection maps a request path to the admin nav section it belongs to,
+// so the navbar can mark the active section. The empty string means the
+// overview at /admin (no inline link is active).
+func navSection(path string) string {
+	switch {
+	case strings.HasPrefix(path, "/admin/quizzes"):
+		return "quizzes"
+	case strings.HasPrefix(path, "/admin/players"):
+		return "players"
+	case strings.HasPrefix(path, "/admin/email"):
+		return "email"
+	default:
+		return ""
+	}
 }
 
 // QuizData is the data for the quiz list page, it shows multiple
@@ -292,11 +311,12 @@ func optionDataFromOptions(options []*quiz.Option) []*OptionData {
 
 // parseTemplate parses a template from the given path with layouts.
 //
-// Placeholder "currentUser" and "csrfToken" funcs are registered before parse
-// so the navbar's {{currentUser}} call and any form's {{csrfToken}} call
-// resolve at parse time. TemplateRenderer.Render clones the parsed tree and
-// replaces these placeholders with implementations that read the request
-// context and CSRF manager, respectively.
+// Placeholder "currentUser", "csrfToken", and "navSection" funcs are
+// registered before parse so the navbar's {{currentUser}}/{{navSection}}
+// calls and any form's {{csrfToken}} call resolve at parse time.
+// TemplateRenderer.Render clones the parsed tree and replaces these
+// placeholders with implementations that read the request context, CSRF
+// manager, and request path, respectively.
 //
 // "humanizeTime" is a pure function of its argument, so it's registered with
 // its real implementation here - no per-request override needed.
@@ -305,6 +325,7 @@ func parseTemplate(path string) *template.Template {
 		"currentUser":  func() string { return "" },
 		"csrfToken":    func() string { return "" },
 		"ogImage":      func() string { return "" },
+		"navSection":   func() string { return "" },
 		"envTitleTag":  envtag.Get,
 		"humanizeTime": humanizeTime,
 	}

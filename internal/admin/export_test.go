@@ -9,6 +9,11 @@ import (
 // HumanizeTime exposes the unexported humanizeTime helper for tests.
 var HumanizeTime = humanizeTime
 
+// NavSection exposes the unexported path-to-nav-section helper so the
+// external admin_test package can pin the prefix mapping without
+// exporting it from the package (#517).
+var NavSection = navSection
+
 // AccountTypeLabel exposes the unexported account-type derivation used
 // by the admin players list so the per-branch table tests can pin the
 // mapping without exporting the helper from the package.
