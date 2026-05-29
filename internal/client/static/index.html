@@ -123,11 +123,20 @@
                             <span x-show="hasCustomName()">Change your name</span>
                         </button>
                     </div>
+                    {{if .RegistrationEnabled}}
                     <p class="mt-3 text-text-dim text-sm text-right">
-                        or
-                        <a href="/login" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="claim-cta-signin">sign in</a>
-                        to keep this name across devices
+                        Want this name on your other devices?
+                        <a href="/register" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="claim-cta-register">Register</a>
+                        to save it, or
+                        <a href="/login" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="claim-cta-signin">log in</a>
+                        to an existing account.
                     </p>
+                    {{else}}
+                    <p class="mt-3 text-text-dim text-sm text-right">
+                        Already have an account?
+                        <a href="/login" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="claim-cta-signin">Log in</a>.
+                    </p>
+                    {{end}}
                 </article>
             </template>
 

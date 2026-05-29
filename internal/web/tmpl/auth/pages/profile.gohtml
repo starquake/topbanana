@@ -31,7 +31,7 @@
                        autocomplete="username"
                        value="{{.Username}}" class="form-input">
                 <p class="mt-2 text-xs text-text-mute">
-                    This is the name your leaderboard rows are shown under. Future account controls (email, password, linked accounts) will land on this page too.
+                    This is the name your leaderboard rows are shown under.
                 </p>
             </div>
 
@@ -43,5 +43,13 @@
                 <a href="/" class="text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">Back to home</a>
             </div>
         </form>
+
+        <div class="mt-6 bg-surface border border-border-soft rounded-lg p-6">
+            <p class="label-eyebrow">Account</p>
+            <ul class="mt-3 flex flex-col gap-2 text-sm">
+                <li><a href="/profile/email" class="text-text-dim hover:text-text underline-offset-2 hover:underline">Change email</a></li>
+                <li><a href="/profile/password" class="text-text-dim hover:text-text underline-offset-2 hover:underline">Change password</a></li>
+            </ul>
+        </div>
     </div>
 {{end}}
