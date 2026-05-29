@@ -78,6 +78,20 @@
                            class="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text" placeholder="player@example.com">
                     <button type="submit" class="btn-ghost">Save email</button>
                 </form>
+                {{if isSuperAdmin}}
+                    <form method="POST" action="/admin/players/{{.Player.ID}}/role" class="flex flex-col gap-2"
+                          onsubmit="return confirm('Change this player&#39;s role?');">
+                        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                        <label for="role-select" class="text-text-dim text-xs uppercase tracking-[0.14em]">Role</label>
+                        <select id="role-select" name="role"
+                                class="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text">
+                            <option value="player" {{if eq .Player.RoleLevel "player"}}selected{{end}}>Player</option>
+                            <option value="admin" {{if eq .Player.RoleLevel "admin"}}selected{{end}}>Admin</option>
+                            <option value="super_admin" {{if eq .Player.RoleLevel "super_admin"}}selected{{end}}>Super admin</option>
+                        </select>
+                        <button type="submit" class="btn-primary">Save role</button>
+                    </form>
+                {{end}}
             </div>
         </div>
     </section>

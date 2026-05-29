@@ -165,57 +165,27 @@ func HandlePlayerSetEmail(
 	})
 }
 
-// superAdminAction bundles the per-direction values that differ between
-// the promote and demote handlers: the flag persisted on the row, the
-// audit action label, and the success flash. Threading a struct rather
-// than a bare bool keeps the shared handler free of mode-toggle control
-// coupling.
-type superAdminAction struct {
-	super  bool
-	action string
-	notice string
-}
+// Role-level values accepted by HandlePlayerSetRole's "role" form field
+// (#527). Each maps to a (role, is_super_admin) pair on the players row:
+// player -> ("player", 0), admin -> ("admin", 0), super_admin ->
+// ("admin", 1).
+const (
+	roleLevelPlayer     = "player"
+	roleLevelAdmin      = "admin"
+	roleLevelSuperAdmin = "super_admin"
+)
 
-// HandlePlayerPromoteSuper handles
-// POST /admin/players/{playerID}/promote-super (#319). Super-admin only
-// (gated by RequireSuperAdmin at the route). Sets is_super_admin=1 and
-// forces role='admin'; writes an admin_audit row. Idempotent: re-promoting
-// an already-super-admin row succeeds and re-stamps the audit trail.
-func HandlePlayerPromoteSuper(
+// HandlePlayerSetRole handles POST /admin/players/{playerID}/role (#527).
+// Super-admin only (gated by RequireSuperAdmin at the route). Reads the
+// desired privilege level from the "role" form field, diffs it against the
+// target's current level, and applies the change in one statement. The
+// last-super-admin guard refuses a transition that would remove the only
+// remaining super admin. One admin_audit row is written per real change,
+// with the action derived from the transition direction.
+func HandlePlayerSetRole(
 	logger *slog.Logger,
 	store auth.AdminPlayerStore,
 	flash *auth.SignedFlash,
-) http.Handler {
-	return handlePlayerSuperAdmin(logger, store, flash, superAdminAction{
-		super:  true,
-		action: auth.AdminActionPromoteSuper,
-		notice: "Player promoted to super admin.",
-	})
-}
-
-// HandlePlayerDemoteSuper handles
-// POST /admin/players/{playerID}/demote-super (#319). Super-admin only.
-// Sets is_super_admin=0 but leaves role='admin' so the demoted player
-// keeps the plain admin powers; writes an admin_audit row.
-func HandlePlayerDemoteSuper(
-	logger *slog.Logger,
-	store auth.AdminPlayerStore,
-	flash *auth.SignedFlash,
-) http.Handler {
-	return handlePlayerSuperAdmin(logger, store, flash, superAdminAction{
-		super:  false,
-		action: auth.AdminActionDemoteSuper,
-		notice: "Super admin removed.",
-	})
-}
-
-// handlePlayerSuperAdmin is the shared body for the promote/demote
-// super-admin actions; op carries the direction-specific values.
-func handlePlayerSuperAdmin(
-	logger *slog.Logger,
-	store auth.AdminPlayerStore,
-	flash *auth.SignedFlash,
-	op superAdminAction,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		playerID, ok := handlers.ParseIDFromPath(w, r, logger, "playerID")
@@ -227,44 +197,136 @@ func handlePlayerSuperAdmin(
 			return
 		}
 
-		if _, ok := loadActionTarget(w, r, logger, store, playerID); !ok {
-			return
-		}
-
-		if !op.super {
-			count, err := store.CountSuperAdmins(r.Context())
-			if err != nil {
-				logger.ErrorContext(r.Context(), "error counting super admins", slog.Any("err", err))
-				flash.SetError(w, "Could not update super admin. Try again.", 0)
-				redirectToPlayerDetail(w, r, playerID)
-
-				return
-			}
-			if count <= 1 {
-				flash.SetError(w, "Cannot remove the last super admin - promote another first.", 0)
-				redirectToPlayerDetail(w, r, playerID)
-
-				return
-			}
-		}
-
-		if err := store.SetPlayerSuperAdmin(r.Context(), playerID, op.super); err != nil {
-			if errors.Is(err, auth.ErrPlayerNotFound) {
-				http.NotFound(w, r)
-
-				return
-			}
-			logger.ErrorContext(r.Context(), "error setting super admin", slog.Any("err", err))
-			flash.SetError(w, "Could not update super admin. Try again.", 0)
+		desired := r.PostFormValue("role")
+		role, super, valid := roleLevelToColumns(desired)
+		if !valid {
+			flash.SetError(w, "Choose a role of player, admin, or super admin.", 0)
 			redirectToPlayerDetail(w, r, playerID)
 
 			return
 		}
 
-		writeAudit(r.Context(), logger, store, actor.ID, playerID, op.action, nil)
-		flash.SetNotice(w, op.notice)
+		detail, ok := loadActionTarget(w, r, logger, store, playerID)
+		if !ok {
+			return
+		}
+
+		from := roleLevelFromDetail(detail)
+		if from == desired {
+			flash.SetNotice(w, "Role unchanged.")
+			redirectToPlayerDetail(w, r, playerID)
+
+			return
+		}
+
+		removingSuper := detail.IsSuperAdmin && !super
+		if removingSuper && !guardLastSuperAdmin(w, r, logger, store, flash, playerID) {
+			return
+		}
+
+		if err := store.SetPlayerRoleAndSuperAdmin(r.Context(), playerID, role, super); err != nil {
+			if errors.Is(err, auth.ErrPlayerNotFound) {
+				http.NotFound(w, r)
+
+				return
+			}
+			logger.ErrorContext(r.Context(), "error setting player role", slog.Any("err", err))
+			flash.SetError(w, "Could not update role. Try again.", 0)
+			redirectToPlayerDetail(w, r, playerID)
+
+			return
+		}
+
+		action := roleTransitionAction(detail.IsSuperAdmin, super, from, desired)
+		writeAudit(r.Context(), logger, store, actor.ID, playerID, action,
+			map[string]string{"from": from, "to": desired})
+		flash.SetNotice(w, roleChangeNotice(desired))
 		redirectToPlayerDetail(w, r, playerID)
 	})
+}
+
+// roleLevelToColumns resolves a "role" form value to the (role,
+// is_super_admin) pair the store persists. valid is false for any value
+// outside the accepted set so the handler can reject it.
+func roleLevelToColumns(level string) (role string, super, valid bool) {
+	switch level {
+	case roleLevelPlayer:
+		return auth.RolePlayer, false, true
+	case roleLevelAdmin:
+		return auth.RoleAdmin, false, true
+	case roleLevelSuperAdmin:
+		return auth.RoleAdmin, true, true
+	default:
+		return "", false, false
+	}
+}
+
+// roleLevelFromDetail maps a player's persisted columns onto the level
+// label the form uses. Super admin wins over the role column because it
+// is a strict superset of admin.
+func roleLevelFromDetail(detail *auth.PlayerDetail) string {
+	switch {
+	case detail.IsSuperAdmin:
+		return roleLevelSuperAdmin
+	case detail.Role == auth.RoleAdmin:
+		return roleLevelAdmin
+	default:
+		return roleLevelPlayer
+	}
+}
+
+// guardLastSuperAdmin refuses a transition that strips super-admin from
+// the only remaining super admin. Called only when the change actually
+// removes super; returns false (after flashing + 303) when the change must
+// be blocked, true when it may proceed.
+func guardLastSuperAdmin(
+	w http.ResponseWriter, r *http.Request, logger *slog.Logger,
+	store auth.AdminPlayerStore, flash *auth.SignedFlash, playerID int64,
+) bool {
+	count, err := store.CountSuperAdmins(r.Context())
+	if err != nil {
+		logger.ErrorContext(r.Context(), "error counting super admins", slog.Any("err", err))
+		flash.SetError(w, "Could not update role. Try again.", 0)
+		redirectToPlayerDetail(w, r, playerID)
+
+		return false
+	}
+	if count <= 1 {
+		flash.SetError(w, "Cannot remove the last super admin - promote another first.", 0)
+		redirectToPlayerDetail(w, r, playerID)
+
+		return false
+	}
+
+	return true
+}
+
+// roleTransitionAction picks the admin_audit action for a role change
+// based on the super-admin delta first, then the admin delta. Gaining or
+// losing super takes precedence because super is the higher privilege.
+func roleTransitionAction(fromSuper, toSuper bool, from, to string) string {
+	switch {
+	case !fromSuper && toSuper:
+		return auth.AdminActionPromoteSuper
+	case fromSuper && !toSuper:
+		return auth.AdminActionDemoteSuper
+	case from == roleLevelPlayer && to == roleLevelAdmin:
+		return auth.AdminActionPromoteAdmin
+	default:
+		return auth.AdminActionDemoteAdmin
+	}
+}
+
+// roleChangeNotice is the success flash naming the new privilege level.
+func roleChangeNotice(level string) string {
+	switch level {
+	case roleLevelSuperAdmin:
+		return "Player promoted to super admin."
+	case roleLevelAdmin:
+		return "Player role set to admin."
+	default:
+		return "Player role set to player."
+	}
 }
 
 // playerCreatePageData backs the playernew.gohtml template.

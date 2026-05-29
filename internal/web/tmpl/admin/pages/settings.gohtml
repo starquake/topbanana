@@ -48,9 +48,10 @@
                                     {{end}}
                                 </td>
                                 <td class="px-4 py-3 text-right">
-                                    <form method="POST" action="/admin/players/{{.ID}}/demote-super" class="inline-flex"
+                                    <form method="POST" action="/admin/players/{{.ID}}/role" class="inline-flex"
                                           onsubmit="return confirm('Remove super-admin from {{.Username}}?');">
                                         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                                        <input type="hidden" name="role" value="admin">
                                         <button type="submit" class="btn-ghost">Demote</button>
                                     </form>
                                 </td>
@@ -63,17 +64,10 @@
             <p class="text-text-dim text-sm">No super admins yet.</p>
         {{end}}
 
-        <form method="POST" action="/admin/settings/promote" class="mt-5 flex flex-col gap-3 max-w-md">
-            <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-            <label class="flex flex-col gap-1 text-sm">
-                <span class="text-text-dim text-xs uppercase tracking-[0.14em]">Promote a player</span>
-                <input type="text" name="username" required autocomplete="off"
-                       class="rounded-md border border-border bg-surface px-3 py-2 text-text" placeholder="Username to promote">
-            </label>
-            <div>
-                <button type="submit" class="btn-primary">Promote</button>
-            </div>
-        </form>
+        <p class="mt-5 text-text-dim text-sm">
+            Role changes and promotions are made from a
+            <a href="/admin/players" class="text-accent hover:underline">player's detail page</a>.
+        </p>
     </section>
 
     <section class="mb-10" aria-label="Create account directly">

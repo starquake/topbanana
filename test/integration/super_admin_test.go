@@ -12,7 +12,7 @@ import (
 
 // TestSuperAdmin_Integration covers the #319 super-admin backend: a
 // regular admin cannot delete or reset scores on another admin's quiz and
-// cannot reach the promote-super endpoint (it 404s to hide the route),
+// cannot reach the id-based role endpoint (it 404s to hide the route),
 // while a super admin can delete and reset any quiz and can promote /
 // demote other players. Demoting a super admin removes the elevated quiz
 // powers immediately.
@@ -55,11 +55,11 @@ func TestSuperAdmin_Integration(t *testing.T) {
 		}
 	})
 
-	t.Run("regular admin hitting promote-super gets 404", func(t *testing.T) {
+	t.Run("regular admin hitting role endpoint gets 404", func(t *testing.T) {
 		t.Parallel()
-		target := baseURL + fmt.Sprintf("/admin/players/%d/promote-super", plainID)
-		if got, want := postCSRFForm(ctx, t, plain, target), http.StatusNotFound; got != want {
-			t.Errorf("promote-super status = %d, want %d", got, want)
+		target := baseURL + fmt.Sprintf("/admin/players/%d/role", plainID)
+		if got, want := postCSRFRoleForm(ctx, t, plain, target, "super_admin"), http.StatusNotFound; got != want {
+			t.Errorf("role status = %d, want %d", got, want)
 		}
 	})
 
@@ -105,8 +105,8 @@ func TestSuperAdmin_PromoteDemote_Integration(t *testing.T) {
 	demoteeID := playerIDByUsername(ctx, t, srv.DBURI, "promote-demotee")
 
 	// boss promotes demotee to super admin.
-	if got, want := postCSRFForm(ctx, t, boss,
-		baseURL+fmt.Sprintf("/admin/players/%d/promote-super", demoteeID),
+	if got, want := postCSRFRoleForm(ctx, t, boss,
+		baseURL+fmt.Sprintf("/admin/players/%d/role", demoteeID), "super_admin",
 	), http.StatusSeeOther; got != want {
 		t.Fatalf("promote status = %d, want %d", got, want)
 	}
@@ -123,9 +123,9 @@ func TestSuperAdmin_PromoteDemote_Integration(t *testing.T) {
 		t.Fatalf("demotee super delete status = %d, want %d", got, want)
 	}
 
-	// boss demotes demotee.
-	if got, want := postCSRFForm(ctx, t, boss,
-		baseURL+fmt.Sprintf("/admin/players/%d/demote-super", demoteeID),
+	// boss demotes demotee back to plain admin.
+	if got, want := postCSRFRoleForm(ctx, t, boss,
+		baseURL+fmt.Sprintf("/admin/players/%d/role", demoteeID), "admin",
 	), http.StatusSeeOther; got != want {
 		t.Fatalf("demote status = %d, want %d", got, want)
 	}
@@ -167,8 +167,8 @@ func TestSuperAdmin_LastSuperAdminGuard(t *testing.T) {
 
 	// The sole super admin cannot demote themselves: the demote is refused
 	// (redirect back with a flash) and the row stays super.
-	if got, want := postCSRFForm(ctx, t, solo,
-		baseURL+fmt.Sprintf("/admin/players/%d/demote-super", soloID),
+	if got, want := postCSRFRoleForm(ctx, t, solo,
+		baseURL+fmt.Sprintf("/admin/players/%d/role", soloID), "admin",
 	), http.StatusSeeOther; got != want {
 		t.Fatalf("self-demote status = %d, want %d", got, want)
 	}
@@ -177,16 +177,16 @@ func TestSuperAdmin_LastSuperAdminGuard(t *testing.T) {
 	}
 
 	// With a second super admin in place, a demote is allowed again.
-	if got, want := postCSRFForm(ctx, t, solo,
-		baseURL+fmt.Sprintf("/admin/players/%d/promote-super", secondID),
+	if got, want := postCSRFRoleForm(ctx, t, solo,
+		baseURL+fmt.Sprintf("/admin/players/%d/role", secondID), "super_admin",
 	), http.StatusSeeOther; got != want {
 		t.Fatalf("promote second status = %d, want %d", got, want)
 	}
 	if got, want := isSuperAdmin(ctx, t, srv.DBURI, "guard-second"), true; got != want {
 		t.Fatalf("after promote second is_super_admin = %v, want %v", got, want)
 	}
-	if got, want := postCSRFForm(ctx, t, solo,
-		baseURL+fmt.Sprintf("/admin/players/%d/demote-super", secondID),
+	if got, want := postCSRFRoleForm(ctx, t, solo,
+		baseURL+fmt.Sprintf("/admin/players/%d/role", secondID), "admin",
 	), http.StatusSeeOther; got != want {
 		t.Fatalf("demote second status = %d, want %d", got, want)
 	}
@@ -272,6 +272,22 @@ func postCSRFForm(ctx context.Context, t *testing.T, client *http.Client, target
 	t.Helper()
 	token := fetchCSRFToken(ctx, t, client, srvBaseURL(t, target)+"/admin")
 	status, _, _ := postForm(ctx, t, client, target, url.Values{"csrf_token": {token}})
+
+	return status
+}
+
+// postCSRFRoleForm posts the id-based role endpoint (#527) with the given
+// role level and a fresh CSRF token, returning the status code. Mirrors
+// postCSRFForm but carries the "role" field the handler diffs against.
+func postCSRFRoleForm(
+	ctx context.Context, t *testing.T, client *http.Client, target, role string,
+) int {
+	t.Helper()
+	token := fetchCSRFToken(ctx, t, client, srvBaseURL(t, target)+"/admin")
+	status, _, _ := postForm(ctx, t, client, target, url.Values{
+		"csrf_token": {token},
+		"role":       {role},
+	})
 
 	return status
 }

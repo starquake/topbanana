@@ -502,6 +502,52 @@ func TestAdminPlayerMgmt_NonAdminBlocked(t *testing.T) {
 	}
 }
 
+// TestAdminPlayerMgmt_SetRolePromotesToAdmin drives the #527 id-based
+// role endpoint from a super admin: a plain player is promoted to admin,
+// the row reflects the new role, and the audit trail records the
+// promote_admin action on the detail page.
+func TestAdminPlayerMgmt_SetRolePromotesToAdmin(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+	})
+
+	adminClient := newAdminMgmtClient(t)
+	if got := registerForRedirect(
+		ctx, t, adminClient, srv.BaseURL,
+		"role-admin", "role-admin-pass-123",
+	); got != "/admin/quizzes" {
+		t.Fatalf("first registration did not promote to admin: Location = %q", got)
+	}
+	verifyPlayerEmail(ctx, t, srv.DBURI, "role-admin")
+	makeSuperAdmin(ctx, t, srv.DBURI, "role-admin")
+
+	playerClient := newAdminMgmtClient(t)
+	if got := registerForRedirect(
+		ctx, t, playerClient, srv.BaseURL,
+		"role-target", "role-target-pass-123",
+	); got != "/" {
+		t.Fatalf("second registration did not land on /: Location = %q", got)
+	}
+
+	target := lookupPlayerID(ctx, t, srv.DBURI, "role-target")
+	roleURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/role"
+
+	res := postAdminAction(ctx, t, adminClient, srv.BaseURL, roleURL, url.Values{"role": {"admin"}})
+	if got, want := res.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("set-role status = %d, want %d", got, want)
+	}
+
+	detail := getOK(
+		ctx, t, adminClient,
+		srv.BaseURL+"/admin/players/"+intToString(target),
+	)
+	if got, want := detail, "Promoted to admin"; !strings.Contains(got, want) {
+		t.Errorf("audit trail should record the promotion; body=%q", detail)
+	}
+}
+
 // newAdminMgmtClient is the per-test client builder used by every
 // /admin/players/* probe in this file. Wraps authClient with the
 // same don't-follow-redirects policy so the test can assert on the
@@ -596,7 +642,7 @@ func csrfPageForPostURL(baseURL, postURL string) string {
 	if strings.HasSuffix(postURL, "/admin/players") {
 		return baseURL + "/admin/players/new"
 	}
-	for _, suffix := range []string{"/verify", "/resend-verification", "/email"} {
+	for _, suffix := range []string{"/verify", "/resend-verification", "/email", "/role"} {
 		if before, ok := strings.CutSuffix(postURL, suffix); ok {
 			return before
 		}

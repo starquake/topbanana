@@ -7,15 +7,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"testing"
 )
 
-// TestAdminSettings_Integration covers the #320 super-admin settings page:
-// a regular admin gets a 404 (the route stays hidden), a super admin gets
-// 200 and sees the super-admin list, promoting a player by username makes
-// them appear on reload, and demoting them removes them again.
+// TestAdminSettings_Integration covers the #320 super-admin settings page
+// after the #527 rework: a regular admin gets a 404 (the route stays
+// hidden), a super admin gets 200 and sees the super-admin list, promoting
+// a player via the id-based role endpoint makes them appear on reload, and
+// demoting them through the same endpoint removes them again.
 func TestAdminSettings_Integration(t *testing.T) {
 	t.Parallel()
 
@@ -53,15 +53,12 @@ func TestAdminSettings_Integration(t *testing.T) {
 			t.Fatalf("target appears as super admin before promotion; body=%q", body)
 		}
 
-		// Promote the target by username via the settings form.
-		token := fetchCSRFToken(ctx, t, boss, baseURL+"/admin/settings")
-		status, loc, _ := postForm(ctx, t, boss, baseURL+"/admin/settings/promote",
-			url.Values{"csrf_token": {token}, "username": {"settings-target"}})
-		if got, want := status, http.StatusSeeOther; got != want {
+		// Promote the target to super admin via the id-based role endpoint.
+		targetID := playerIDByUsername(ctx, t, srv.DBURI, "settings-target")
+		if got, want := postCSRFRoleForm(ctx, t, boss,
+			baseURL+fmt.Sprintf("/admin/players/%d/role", targetID), "super_admin",
+		), http.StatusSeeOther; got != want {
 			t.Fatalf("promote status = %d, want %d", got, want)
-		}
-		if got, want := loc, "/admin/settings"; got != want {
-			t.Errorf("promote redirect = %q, want %q", got, want)
 		}
 		if got, want := isSuperAdmin(ctx, t, srv.DBURI, "settings-target"), true; got != want {
 			t.Fatalf("after promote is_super_admin = %v, want %v", got, want)
@@ -72,28 +69,15 @@ func TestAdminSettings_Integration(t *testing.T) {
 			t.Fatalf("target missing from list after promote; body=%q", body)
 		}
 
-		// Demote via the id-based row button endpoint, mirroring the
-		// template's demote form.
-		targetID := playerIDByUsername(ctx, t, srv.DBURI, "settings-target")
-		token = fetchCSRFToken(ctx, t, boss, baseURL+"/admin/settings")
-		status, _, _ = postForm(ctx, t, boss,
-			baseURL+fmt.Sprintf("/admin/players/%d/demote-super", targetID),
-			url.Values{"csrf_token": {token}})
-		if got, want := status, http.StatusSeeOther; got != want {
+		// Demote back to plain admin via the same endpoint, mirroring the
+		// settings page's demote button.
+		if got, want := postCSRFRoleForm(ctx, t, boss,
+			baseURL+fmt.Sprintf("/admin/players/%d/role", targetID), "admin",
+		), http.StatusSeeOther; got != want {
 			t.Fatalf("demote status = %d, want %d", got, want)
 		}
 		if got, want := isSuperAdmin(ctx, t, srv.DBURI, "settings-target"), false; got != want {
 			t.Fatalf("after demote is_super_admin = %v, want %v", got, want)
-		}
-	})
-
-	t.Run("promote with unknown username flashes not-found", func(t *testing.T) {
-		t.Parallel()
-		token := fetchCSRFToken(ctx, t, boss, baseURL+"/admin/settings")
-		status, _, _ := postForm(ctx, t, boss, baseURL+"/admin/settings/promote",
-			url.Values{"csrf_token": {token}, "username": {"no-such-player"}})
-		if got, want := status, http.StatusSeeOther; got != want {
-			t.Fatalf("promote-unknown status = %d, want %d", got, want)
 		}
 	})
 }
