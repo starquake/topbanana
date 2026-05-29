@@ -73,6 +73,26 @@
                 </a>
             </h1>
 
+            <!-- Signed-in account control (#520). The SPA shell
+                 carries no CSRF token, so logout can't live here; instead
+                 we link to /profile (a GET page that already has logout +
+                 account management). Visible only for authenticated
+                 players AND only outside active gameplay — mirrors the
+                 brand's `!(gameId && !finished)` gate so the question
+                 keeps the full canvas during a live game (#253), while
+                 the start screen and finished leaderboard expose the
+                 account link. Complements the anonymous-only claim CTA
+                 below; the two never show together (this gates on
+                 isAuthenticated(), the CTA on its negation). The link
+                 text deliberately differs from the claim CTA's "sign in"
+                 so claim.spec.ts's unique sign-in assertion still holds. -->
+            <template x-if="isAuthenticated() && !(gameId && !finished)">
+                <p class="mb-6 text-sm text-text-dim text-right">
+                    Signed in as
+                    <a href="/profile" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="account-profile-link" x-text="player ? player.username : ''"></a>
+                </p>
+            </template>
+
             <!-- Single claim-name CTA, lifted out of the start-screen
                  and finished-leaderboard views so the leaderboard
                  always sits in the same position on the page —
@@ -191,6 +211,23 @@
                         <span>Share</span>
                     </button>
                 </div>
+
+                {{/* Catalog escape hatch on a deep link. The
+                     non-deep-link block above already offers "Browse all
+                     quizzes" as its primary affordance, but a /play/{slug}
+                     visitor only sees the quiz title + Start cluster, with
+                     no way to reach /quizzes short of going home first.
+                     Surface a secondary text link here, source-ordered
+                     AFTER the Start/Share cluster so keyboard Tab still
+                     lands on Start Game first. Gated to the deep-link
+                     start screen (not the already-played revisit, which
+                     drops the Start button entirely). */}}
+                <template x-if="deepLinkedQuiz && !finished">
+                    <p class="mt-4 text-sm text-text-dim">
+                        or
+                        <a href="/quizzes" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="browse-quizzes-link">browse all quizzes</a>
+                    </p>
+                </template>
 
             </div>
 

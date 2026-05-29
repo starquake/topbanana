@@ -46,6 +46,7 @@ const adminUsernames = [
   'e2e-mgmt-admin-chromium', 'e2e-mgmt-admin-firefox',                        // admin-players.spec.ts player management (#450)
   'e2e-admin-nav-chromium', 'e2e-admin-nav-firefox',                          // admin-nav.spec.ts reachability (#517)
   'e2e-admin-nav-active-chromium', 'e2e-admin-nav-active-firefox',            // admin-nav.spec.ts active-section (#517)
+  'e2e-admin-pregame-nav-chromium', 'e2e-admin-pregame-nav-firefox',          // pregame-nav.spec.ts deep-link browse link
 ];
 const ADMIN_EMAILS = adminUsernames.map(u => `${u}@example.test`).join(',');
 

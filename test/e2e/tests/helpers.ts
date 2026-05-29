@@ -43,7 +43,7 @@ export async function registerAdmin(page: Page, username: string): Promise<void>
   await expect(page).toHaveURL(/\/admin\/quizzes$/);
 }
 
-function markEmailVerified(username: string): void {
+export function markEmailVerified(username: string): void {
   const dataDir = process.env.TOPBANANA_E2E_DATA_DIR;
   if (!dataDir) {
     throw new Error('TOPBANANA_E2E_DATA_DIR is not set; helpers cannot stamp email_verified_at');
