@@ -21,10 +21,11 @@ type Kind string
 // diagnostics page filters on Kind, so a missing constant goes
 // unreported in the log instead of failing loudly.
 const (
-	KindVerify Kind = "verify"
-	KindReset  Kind = "reset"
-	KindInvite Kind = "invite"
-	KindTest   Kind = "test"
+	KindVerify            Kind = "verify"
+	KindReset             Kind = "reset"
+	KindInvite            Kind = "invite"
+	KindTest              Kind = "test"
+	KindEmailChangeNotice Kind = "email_change_notice"
 )
 
 // ErrNotConfigured is the sentinel returned by the no-op mailer's Send

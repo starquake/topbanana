@@ -44,6 +44,22 @@
                 </p>
             </div>
 
+            {{if .HasPassword}}
+                <div class="form-field mt-4">
+                    <label for="current_password" class="label-eyebrow">Current password</label>
+                    <input id="current_password" name="current_password" type="password" required
+                           autocomplete="current-password"
+                           class="form-input">
+                    <p class="mt-2 text-xs text-text-mute">
+                        Confirm your current password to start an email change.
+                    </p>
+                </div>
+            {{else}}
+                <p class="mt-4 text-xs text-text-mute">
+                    Re-authentication for accounts without a password is coming via Google sign-in.
+                </p>
+            {{end}}
+
             <div class="flex flex-row-reverse flex-wrap items-center justify-between gap-4 pt-2">
                 <button type="submit" class="btn-primary">Send verification link</button>
                 <a href="/profile" class="text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">Back to profile</a>

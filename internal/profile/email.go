@@ -10,6 +10,7 @@ import (
 
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/mailer"
 )
 
 // EmailChangeFlashCookieName / EmailChangeFlashCookiePath are the
@@ -36,6 +37,11 @@ type emailPageData struct {
 	CurrentEmail string
 	Notice       string
 	Message      string
+	// HasPassword gates the current-password field in the form: a
+	// password account must re-authenticate to start a change, while
+	// an OAuth-only account (no password) keeps the no-reauth path
+	// until Slice 2 (#534) adds Google step-up.
+	HasPassword bool
 }
 
 // HandleProfileEmail returns the [http.Handler] for GET
@@ -58,7 +64,11 @@ func HandleProfileEmail(
 			return
 		}
 
-		data := emailPageData{Title: "Change email", CurrentEmail: player.Email}
+		data := emailPageData{
+			Title:        "Change email",
+			CurrentEmail: player.Email,
+			HasPassword:  player.PasswordHash != "",
+		}
 		if fr := flash.Read(w, r); fr.OK {
 			data.Notice = fr.Notice
 			data.Message = fr.Err
@@ -116,7 +126,21 @@ func HandleProfileEmailChange(logger *slog.Logger, deps EmailChangeDeps) http.Ha
 			return
 		}
 
-		dispatchEmailChangeIfFree(r.Context(), logger, deps, player.ID, newEmail)
+		if player.PasswordHash != "" {
+			current := r.PostFormValue("current_password")
+			if auth.CheckPassword(player.PasswordHash, current) != nil {
+				logger.InfoContext(r.Context(), "profile email change rejected: current password incorrect",
+					slog.Int64("player_id", player.ID))
+				deps.Flash.SetError(w, "Current password is incorrect.", 0)
+				http.Redirect(w, r, "/profile/email", http.StatusSeeOther)
+
+				return
+			}
+		}
+		// An OAuth-only account (no password) keeps the no-reauth path.
+		// Slice 2 (#534) replaces this with a Google sign-in step-up.
+
+		dispatchEmailChangeIfFree(r.Context(), logger, deps, player.ID, player.Email, newEmail)
 
 		// Always flash the same notice regardless of whether the
 		// address was free. The user knows what they typed, so the
@@ -157,7 +181,7 @@ func dispatchEmailChangeIfFree(
 	logger *slog.Logger,
 	deps EmailChangeDeps,
 	playerID int64,
-	newEmail string,
+	oldEmail, newEmail string,
 ) {
 	existing, err := deps.Players.GetPlayerByEmail(ctx, newEmail)
 	switch {
@@ -189,5 +213,33 @@ func dispatchEmailChangeIfFree(
 			logger.WarnContext(sendCtx, "profile email change dispatch failed",
 				slog.Int64("player_id", playerID), slog.Any("err", sendErr))
 		}
+		notifyOldAddressOfChange(sendCtx, logger, deps.Sender, playerID, oldEmail, newEmail)
 	}()
+}
+
+// notifyOldAddressOfChange sends a best-effort notice to the account's
+// current (old) address that a change to newEmail was requested, so a
+// hijacked-session change is visible to the legitimate owner. The
+// notice goes to the authenticated user's own mailbox, so naming the
+// new address is safe. A send failure is logged at Warn and never
+// blocks the response.
+func notifyOldAddressOfChange(
+	ctx context.Context,
+	logger *slog.Logger,
+	sender auth.VerifyEmailSender,
+	playerID int64,
+	oldEmail, newEmail string,
+) {
+	msg := mailer.Message{
+		To:      oldEmail,
+		Subject: "Email change requested for your Top Banana account",
+		Body: "Someone requested to change the email on your Top Banana account to " + newEmail + ".\n\n" +
+			"Your account email has not changed yet; it only changes when the verification link sent to the new address is clicked.\n\n" +
+			"If this was you, no action is needed. If it was not you, change your password now to secure your account.\n",
+		Kind: mailer.KindEmailChangeNotice,
+	}
+	if err := sender.Send(ctx, msg); err != nil {
+		logger.WarnContext(ctx, "profile email change notice to old address failed",
+			slog.Int64("player_id", playerID), slog.Any("err", err))
+	}
 }
