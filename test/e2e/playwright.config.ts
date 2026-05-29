@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { execFileSync } from 'child_process';
 import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -8,7 +9,51 @@ import { join } from 'path';
 // authoritative knob; the webServer array and the per-test baseURL
 // fixture both derive from it.
 const WORKER_COUNT = 4;
-const BASE_PORT = Number(process.env.TOPBANANA_E2E_PORT ?? 8181);
+
+// Port assignment (#476). By default each worker server listens on an
+// OS-assigned free port, so concurrent `make test-e2e` runs - different
+// worktrees, a stale leftover server, CI matrix steps - never collide
+// on a fixed range (the old 8181-8184 base needed `pkill` recovery).
+//
+// The ports are discovered ONCE in the main config load and shared with
+// the re-loaded worker configs and the fixtures (tests/fixtures.ts) via
+// TOPBANANA_E2E_PORTS - the same cross-process env-var handoff dataDir
+// uses below. TOPBANANA_E2E_PORT (singular) stays as an explicit
+// override for debugging a single worker on a known port: when set,
+// worker i listens on TOPBANANA_E2E_PORT + i (the old fixed-base
+// behaviour). It is no longer the default.
+const WORKER_PORTS = resolveWorkerPorts(WORKER_COUNT);
+
+function resolveWorkerPorts(count: number): number[] {
+  const cached = process.env.TOPBANANA_E2E_PORTS;
+  if (cached) {
+    return cached.split(',').map(Number);
+  }
+  const override = process.env.TOPBANANA_E2E_PORT;
+  const ports = override
+    ? Array.from({ length: count }, (_, i) => Number(override) + i)
+    : discoverFreePorts(count);
+  process.env.TOPBANANA_E2E_PORTS = ports.join(',');
+  return ports;
+}
+
+// Open `count` ephemeral listeners on :0 in a short-lived Node
+// subprocess, read back the OS-assigned ports, and close them.
+// Synchronous on purpose: the webServer array below needs the ports at
+// config-load time, before Playwright forks workers or runs
+// globalSetup, so an async helper or top-level await won't fit (and the
+// config is CommonJS). Simultaneous listeners are guaranteed distinct
+// ports; the close->rebind window is microscopic in practice - the
+// documented trade-off for option 1 in #476.
+function discoverFreePorts(count: number): number[] {
+  const script =
+    'const net=require("net");const n=+process.argv[1];const s=[];const p=[];let left=n;' +
+    'for(let i=0;i<n;i++){const srv=net.createServer();s.push(srv);' +
+    'srv.listen(0,"127.0.0.1",()=>{p[i]=srv.address().port;' +
+    'if(--left===0){process.stdout.write(p.join(","));for(const x of s)x.close();}});}';
+  const out = execFileSync(process.execPath, ['-e', script, String(count)], { encoding: 'utf8' });
+  return out.trim().split(',').map(Number);
+}
 // Playwright re-loads this config in worker processes, so guard the temp dir
 // behind the env var to avoid creating one per worker.
 const dataDir = process.env.TOPBANANA_E2E_DATA_DIR ?? mkdtempSync(join(tmpdir(), 'topbanana-e2e-'));
@@ -51,7 +96,7 @@ const adminUsernames = [
 const ADMIN_EMAILS = adminUsernames.map(u => `${u}@example.test`).join(',');
 
 const workerServer = (workerIndex: number) => {
-  const port = BASE_PORT + workerIndex;
+  const port = WORKER_PORTS[workerIndex];
   const dbPath = join(dataDir, `e2e-${workerIndex}.db`);
   return {
     command: 'go run ./cmd/server',
@@ -102,7 +147,7 @@ export default defineConfig({
     // Per-test baseURL is set by the fixture in tests/fixtures.ts, which
     // routes each worker to its own server. This fallback only matters
     // for tests that use the raw @playwright/test entrypoint.
-    baseURL: `http://127.0.0.1:${BASE_PORT}`,
+    baseURL: `http://127.0.0.1:${WORKER_PORTS[0]}`,
     trace: 'retain-on-failure',
     video: 'retain-on-failure',
   },
