@@ -275,6 +275,51 @@ func TestProfileEmail_OldSessionInvalidatedAfterSwap(t *testing.T) {
 	}
 }
 
+// TestProfileEmail_WrongPasswordRejected pins the Slice-1 re-auth gate
+// (#534): a password account that submits the wrong current password is
+// rejected with a banner and no email change is started.
+func TestProfileEmail_WrongPasswordRejected(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{"REGISTRATION_ENABLED": "true"})
+
+	client := authClient(t)
+	registerForRedirect(ctx, t, client, srv.BaseURL, "email-wrongpw", "correct-battery-13")
+	verifyPlayerEmail(ctx, t, srv.DBURI, "email-wrongpw")
+
+	flash := profileEmailPOSTWithPassword(ctx, t, client, srv.BaseURL, "fresh@example.test", "not-the-password")
+	if got, want := flash.status, http.StatusSeeOther; got != want {
+		t.Fatalf("POST status = %d, want %d", got, want)
+	}
+
+	body := profileEmailFollowFlash(ctx, t, client, srv.BaseURL)
+	if !strings.Contains(body, "Current password is incorrect") {
+		t.Errorf("body missing wrong-password error banner, got %q", body)
+	}
+}
+
+// TestProfileEmail_EmptyPasswordRejected pins that an empty current
+// password is rejected for a password account, same as a wrong one.
+func TestProfileEmail_EmptyPasswordRejected(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{"REGISTRATION_ENABLED": "true"})
+
+	client := authClient(t)
+	registerForRedirect(ctx, t, client, srv.BaseURL, "email-emptypw", "correct-battery-13")
+	verifyPlayerEmail(ctx, t, srv.DBURI, "email-emptypw")
+
+	flash := profileEmailPOSTWithPassword(ctx, t, client, srv.BaseURL, "fresh@example.test", "")
+	if got, want := flash.status, http.StatusSeeOther; got != want {
+		t.Fatalf("POST status = %d, want %d", got, want)
+	}
+
+	body := profileEmailFollowFlash(ctx, t, client, srv.BaseURL)
+	if !strings.Contains(body, "Current password is incorrect") {
+		t.Errorf("body missing wrong-password error banner, got %q", body)
+	}
+}
+
 // profileEmailSnapshot mirrors profilePageSnapshot from profile_test.go
 // for the email flow.
 type profileEmailSnapshot struct {
@@ -311,18 +356,31 @@ func profileEmailGET(ctx context.Context, t *testing.T, client *http.Client, bas
 	}
 }
 
-// profileEmailPOST submits the email-change form and returns the
-// raw response snapshot. Always re-primes the CSRF token first so
-// the helper composes cleanly with itself.
+// profileEmailPOST submits the email-change form with the correct
+// current password and returns the raw response snapshot. Always
+// re-primes the CSRF token first so the helper composes cleanly with
+// itself.
 func profileEmailPOST(
 	ctx context.Context, t *testing.T, client *http.Client, baseURL, newEmail string,
 ) profileEmailSnapshot {
 	t.Helper()
 
+	return profileEmailPOSTWithPassword(ctx, t, client, baseURL, newEmail, "correct-battery-13")
+}
+
+// profileEmailPOSTWithPassword submits the email-change form with an
+// explicit current password so tests can drive the wrong/empty
+// password rejection branches.
+func profileEmailPOSTWithPassword(
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, newEmail, currentPassword string,
+) profileEmailSnapshot {
+	t.Helper()
+
 	priming := profileEmailGET(ctx, t, client, baseURL)
 	form := url.Values{
-		"csrf_token": {priming.csrf},
-		"new_email":  {newEmail},
+		"csrf_token":       {priming.csrf},
+		"new_email":        {newEmail},
+		"current_password": {currentPassword},
 	}
 	req, err := http.NewRequestWithContext(
 		ctx, http.MethodPost, baseURL+"/profile/email", strings.NewReader(form.Encode()),
