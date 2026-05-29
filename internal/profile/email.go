@@ -37,10 +37,12 @@ type emailPageData struct {
 	CurrentEmail string
 	Notice       string
 	Message      string
-	// HasPassword gates the current-password field in the form: a
-	// password account must re-authenticate to start a change, while
-	// an OAuth-only account (no password) keeps the no-reauth path
-	// until Slice 2 (#534) adds Google step-up.
+	// HasPassword gates the change form: a password account must
+	// re-authenticate with its current password to start a change. An
+	// OAuth-only account (no password) cannot self-change its email here
+	// at all (#534) - its address is attested by the sign-in provider -
+	// so the template shows a "managed by your sign-in provider" notice
+	// instead of the form.
 	HasPassword bool
 }
 
@@ -118,22 +120,23 @@ func HandleProfileEmailChange(logger *slog.Logger, deps EmailChangeDeps) http.Ha
 			return
 		}
 
-		newEmail := strings.ToLower(strings.TrimSpace(r.PostFormValue("new_email")))
-		if msg, ok := validateEmailChange(newEmail, player.Email); !ok {
-			deps.Flash.SetError(w, msg, 0)
+		// An account with no password signs in through a provider, which
+		// attests the address, so the email is not self-editable here
+		// (#534). Refuse on account type before touching the input - what
+		// was typed is irrelevant - which keeps the session-hijack takeover
+		// surface closed without an OAuth re-auth step-up.
+		if player.PasswordHash == "" {
+			logger.InfoContext(r.Context(), "profile email change blocked: account has no password",
+				slog.Int64("player_id", player.ID))
+			deps.Flash.SetError(w, "Your email is managed by your sign-in provider and can't be changed here.", 0)
 			http.Redirect(w, r, "/profile/email", http.StatusSeeOther)
 
 			return
 		}
 
-		// An account with no password signs in through a provider, which
-		// attests the address, so the email is not self-editable here
-		// (#534). Blocking keeps the session-hijack takeover surface closed
-		// without an OAuth re-auth step-up.
-		if player.PasswordHash == "" {
-			logger.InfoContext(r.Context(), "profile email change blocked: account has no password",
-				slog.Int64("player_id", player.ID))
-			deps.Flash.SetError(w, "Your email is managed by your sign-in provider and can't be changed here.", 0)
+		newEmail := strings.ToLower(strings.TrimSpace(r.PostFormValue("new_email")))
+		if msg, ok := validateEmailChange(newEmail, player.Email); !ok {
+			deps.Flash.SetError(w, msg, 0)
 			http.Redirect(w, r, "/profile/email", http.StatusSeeOther)
 
 			return
