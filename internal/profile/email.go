@@ -126,19 +126,28 @@ func HandleProfileEmailChange(logger *slog.Logger, deps EmailChangeDeps) http.Ha
 			return
 		}
 
-		if player.PasswordHash != "" {
-			current := r.PostFormValue("current_password")
-			if auth.CheckPassword(player.PasswordHash, current) != nil {
-				logger.InfoContext(r.Context(), "profile email change rejected: current password incorrect",
-					slog.Int64("player_id", player.ID))
-				deps.Flash.SetError(w, "Current password is incorrect.", 0)
-				http.Redirect(w, r, "/profile/email", http.StatusSeeOther)
+		// An account with no password signs in through a provider, which
+		// attests the address, so the email is not self-editable here
+		// (#534). Blocking keeps the session-hijack takeover surface closed
+		// without an OAuth re-auth step-up.
+		if player.PasswordHash == "" {
+			logger.InfoContext(r.Context(), "profile email change blocked: account has no password",
+				slog.Int64("player_id", player.ID))
+			deps.Flash.SetError(w, "Your email is managed by your sign-in provider and can't be changed here.", 0)
+			http.Redirect(w, r, "/profile/email", http.StatusSeeOther)
 
-				return
-			}
+			return
 		}
-		// An OAuth-only account (no password) keeps the no-reauth path.
-		// Slice 2 (#534) replaces this with a Google sign-in step-up.
+
+		current := r.PostFormValue("current_password")
+		if auth.CheckPassword(player.PasswordHash, current) != nil {
+			logger.InfoContext(r.Context(), "profile email change rejected: current password incorrect",
+				slog.Int64("player_id", player.ID))
+			deps.Flash.SetError(w, "Current password is incorrect.", 0)
+			http.Redirect(w, r, "/profile/email", http.StatusSeeOther)
+
+			return
+		}
 
 		dispatchEmailChangeIfFree(r.Context(), logger, deps, player.ID, player.Email, newEmail)
 

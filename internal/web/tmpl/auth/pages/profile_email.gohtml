@@ -21,30 +21,30 @@
             <div class="mb-6 px-4 py-3 rounded-sm bg-danger/10 border border-danger/40 text-danger text-sm" role="alert">{{.Message}}</div>
         {{end}}
 
-        <form action="/profile/email" method="POST" class="bg-surface border border-border-soft rounded-lg p-6">
-            <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+        {{if .HasPassword}}
+            <form action="/profile/email" method="POST" class="bg-surface border border-border-soft rounded-lg p-6">
+                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
 
-            <div class="form-field mb-4">
-                <span class="label-eyebrow">Current email</span>
-                <p class="mt-2 text-sm">{{.CurrentEmail}}</p>
-            </div>
+                <div class="form-field mb-4">
+                    <span class="label-eyebrow">Current email</span>
+                    <p class="mt-2 text-sm">{{.CurrentEmail}}</p>
+                </div>
 
-            <div class="form-field">
-                <label for="new_email" class="label-eyebrow">New email</label>
-                <input id="new_email" name="new_email" type="email" required
-                       autocomplete="email"
-                       class="form-input">
-                {{/* WHY: the verify link gets sent to the new address
-                     and the account's email only flips after the user
-                     clicks it. A typo in this field cannot lock you
-                     out of the account; the current address stays
-                     verified until the new one is proven. */}}
-                <p class="mt-2 text-xs text-text-mute">
-                    We'll send a verification link to the new address. Your account email switches when you click that link, not before.
-                </p>
-            </div>
+                <div class="form-field">
+                    <label for="new_email" class="label-eyebrow">New email</label>
+                    <input id="new_email" name="new_email" type="email" required
+                           autocomplete="email"
+                           class="form-input">
+                    {{/* WHY: the verify link gets sent to the new address
+                         and the account's email only flips after the user
+                         clicks it. A typo in this field cannot lock you
+                         out of the account; the current address stays
+                         verified until the new one is proven. */}}
+                    <p class="mt-2 text-xs text-text-mute">
+                        We'll send a verification link to the new address. Your account email switches when you click that link, not before.
+                    </p>
+                </div>
 
-            {{if .HasPassword}}
                 <div class="form-field mt-4">
                     <label for="current_password" class="label-eyebrow">Current password</label>
                     <input id="current_password" name="current_password" type="password" required
@@ -54,16 +54,28 @@
                         Confirm your current password to start an email change.
                     </p>
                 </div>
-            {{else}}
-                <p class="mt-4 text-xs text-text-mute">
-                    Re-authentication for accounts without a password is coming via Google sign-in.
-                </p>
-            {{end}}
 
-            <div class="flex flex-row-reverse flex-wrap items-center justify-between gap-4 pt-2">
-                <button type="submit" class="btn-primary">Send verification link</button>
-                <a href="/profile" class="text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">Back to profile</a>
+                <div class="flex flex-row-reverse flex-wrap items-center justify-between gap-4 pt-2">
+                    <button type="submit" class="btn-primary">Send verification link</button>
+                    <a href="/profile" class="text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">Back to profile</a>
+                </div>
+            </form>
+        {{else}}
+            {{/* An account with no password signs in through a provider
+                 (Google), which attests the address, so the email is not
+                 self-editable here. */}}
+            <div class="bg-surface border border-border-soft rounded-lg p-6">
+                <div class="form-field mb-4">
+                    <span class="label-eyebrow">Current email</span>
+                    <p class="mt-2 text-sm">{{.CurrentEmail}}</p>
+                </div>
+                <p class="text-text-dim text-sm">
+                    Your email is managed by your sign-in provider and can't be changed here.
+                </p>
+                <div class="pt-4">
+                    <a href="/profile" class="text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">Back to profile</a>
+                </div>
             </div>
-        </form>
+        {{end}}
     </div>
 {{end}}

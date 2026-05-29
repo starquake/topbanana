@@ -284,7 +284,7 @@ func TestHandleProfileEmailChange_CorrectPasswordDispatchesAndNotifiesOldAddress
 	}
 }
 
-func TestHandleProfileEmailChange_OAuthOnlyDispatchesWithoutPassword(t *testing.T) {
+func TestHandleProfileEmailChange_OAuthOnlyBlocked(t *testing.T) {
 	t.Parallel()
 
 	player := &auth.Player{ID: 7, Email: "old@example.test", PasswordHash: ""}
@@ -293,10 +293,13 @@ func TestHandleProfileEmailChange_OAuthOnlyDispatchesWithoutPassword(t *testing.
 	if got, want := res.rec.Code, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
-
-	res.sender.waitForSends(t, 2)
-
-	if got, want := res.tokens.created, 1; got != want {
-		t.Errorf("tokens created = %d, want %d (OAuth-only path must still dispatch)", got, want)
+	if got, want := res.tokens.created, 0; got != want {
+		t.Errorf("tokens created = %d, want %d (OAuth-only account cannot self-change email)", got, want)
+	}
+	if got, want := len(res.sender.snapshot()), 0; got != want {
+		t.Errorf("sends = %d, want %d (blocked change must not send mail)", got, want)
+	}
+	if got, want := res.logs, "profile email change blocked: account has no password"; !strings.Contains(got, want) {
+		t.Errorf("log = %q, should contain %q", got, want)
 	}
 }
