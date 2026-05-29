@@ -364,19 +364,35 @@ func TestAdminPlayerMgmt_CreatePlayer(t *testing.T) {
 // stays hidden. The POST carries a valid CSRF token scraped off the
 // Path=/ cookie via /admin so the 404 comes from the super-admin gate,
 // not the CSRF middleware.
+//
+// The first credentialled registrant is now auto-promoted to super admin
+// (#528), so the plain admin under test must be a *later* registrant. The
+// first account is registered to consume the super-admin promotion, then an
+// ADMIN_EMAILS-matched second account registers as a plain admin (admin but
+// not super) and drives the assertions.
 func TestAdminPlayerMgmt_CreateRequiresSuperAdmin(t *testing.T) {
 	t.Parallel()
 
 	ctx, srv := startServer(t, map[string]string{
 		"REGISTRATION_ENABLED": "true",
+		"ADMIN_EMAILS":         "create-plain-admin@example.test",
 	})
+
+	superClient := newAdminMgmtClient(t)
+	if got := registerForRedirect(
+		ctx, t, superClient, srv.BaseURL,
+		"create-super-admin", "create-super-admin-pass-123",
+	); got != "/admin/quizzes" {
+		t.Fatalf("first registration did not promote to admin: Location = %q", got)
+	}
+	verifyPlayerEmail(ctx, t, srv.DBURI, "create-super-admin")
 
 	adminClient := newAdminMgmtClient(t)
 	if got := registerForRedirect(
 		ctx, t, adminClient, srv.BaseURL,
 		"create-plain-admin", "create-plain-admin-pass-123",
 	); got != "/admin/quizzes" {
-		t.Fatalf("first registration did not promote to admin: Location = %q", got)
+		t.Fatalf("ADMIN_EMAILS registration did not promote to admin: Location = %q", got)
 	}
 	verifyPlayerEmail(ctx, t, srv.DBURI, "create-plain-admin")
 

@@ -29,9 +29,10 @@ func main() {
 	promoteSuperFor := flag.String(
 		"promote-super",
 		"",
-		"promote the player with the given username to super admin (sets is_super_admin and role=admin)"+
-			" and exits. Use this to bootstrap the first super admin; they can promote others from the"+
-			" admin UI afterwards. The server should not be running concurrently against the same database",
+		"promote the player with the given email to super admin (sets is_super_admin and role=admin)"+
+			" and exits. Break-glass recovery tool for when every super admin is locked out; the first"+
+			" super admin normally comes from the first registration. The server should not be running"+
+			" concurrently against the same database",
 	)
 	healthcheckOnly := flag.Bool(
 		"healthcheck",
