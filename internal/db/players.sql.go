@@ -30,7 +30,7 @@ SET username = ?1,
 WHERE players.id = ?5
   AND players.password_hash IS NULL
   AND players.email IS NULL
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin, super_admin_since
 `
 
 type ClaimPlayerParams struct {
@@ -81,6 +81,7 @@ func (q *Queries) ClaimPlayer(ctx context.Context, arg ClaimPlayerParams) (Playe
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.IsSuperAdmin,
+		&i.SuperAdminSince,
 	)
 	return i, err
 }
@@ -100,7 +101,7 @@ SET email = ?1,
 WHERE players.id = ?2
   AND players.password_hash IS NULL
   AND players.email IS NULL
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin, super_admin_since
 `
 
 type ClaimPlayerForOAuthParams struct {
@@ -142,6 +143,7 @@ func (q *Queries) ClaimPlayerForOAuth(ctx context.Context, arg ClaimPlayerForOAu
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.IsSuperAdmin,
+		&i.SuperAdminSince,
 	)
 	return i, err
 }
@@ -213,10 +215,25 @@ func (q *Queries) ConsumePasswordResetToken(ctx context.Context, arg ConsumePass
 	return player_id, err
 }
 
+const countSuperAdmins = `-- name: CountSuperAdmins :one
+SELECT COUNT(*)
+FROM players
+WHERE is_super_admin = 1
+`
+
+// Number of current super admins. Used by the demote guard to refuse a
+// demote that would leave zero super admins.
+func (q *Queries) CountSuperAdmins(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countSuperAdmins)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAnonymousPlayer = `-- name: CreateAnonymousPlayer :one
 INSERT INTO players (username, role)
 VALUES (?1, 'player')
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin, super_admin_since
 `
 
 // Used by the EnsurePlayer middleware to back a fresh visitor with a real
@@ -242,6 +259,7 @@ func (q *Queries) CreateAnonymousPlayer(ctx context.Context, username string) (P
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.IsSuperAdmin,
+		&i.SuperAdminSince,
 	)
 	return i, err
 }
@@ -313,7 +331,7 @@ VALUES (
     END,
     1
 )
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin, super_admin_since
 `
 
 type CreatePlayerFromOAuthParams struct {
@@ -350,6 +368,7 @@ func (q *Queries) CreatePlayerFromOAuth(ctx context.Context, arg CreatePlayerFro
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.IsSuperAdmin,
+		&i.SuperAdminSince,
 	)
 	return i, err
 }
@@ -371,7 +390,7 @@ VALUES (
     END,
     1
 )
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin, super_admin_since
 `
 
 type CreatePlayerWithCredentialsParams struct {
@@ -418,6 +437,7 @@ func (q *Queries) CreatePlayerWithCredentials(ctx context.Context, arg CreatePla
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.IsSuperAdmin,
+		&i.SuperAdminSince,
 	)
 	return i, err
 }
@@ -495,7 +515,7 @@ func (q *Queries) GetPasswordResetToken(ctx context.Context, tokenHash string) (
 }
 
 const getPlayerByEmail = `-- name: GetPlayerByEmail :one
-SELECT id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin
+SELECT id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin, super_admin_since
 FROM players
 WHERE email = ?
 LIMIT 1
@@ -519,12 +539,13 @@ func (q *Queries) GetPlayerByEmail(ctx context.Context, email sql.NullString) (P
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.IsSuperAdmin,
+		&i.SuperAdminSince,
 	)
 	return i, err
 }
 
 const getPlayerByProviderSubject = `-- name: GetPlayerByProviderSubject :one
-SELECT p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed, p.email_verified_at, p.session_version, p.is_super_admin
+SELECT p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed, p.email_verified_at, p.session_version, p.is_super_admin, p.super_admin_since
 FROM players p
 JOIN player_identities pi ON pi.player_id = p.id
 WHERE pi.provider = ? AND pi.subject = ?
@@ -554,12 +575,13 @@ func (q *Queries) GetPlayerByProviderSubject(ctx context.Context, arg GetPlayerB
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.IsSuperAdmin,
+		&i.SuperAdminSince,
 	)
 	return i, err
 }
 
 const getPlayerByUsername = `-- name: GetPlayerByUsername :one
-SELECT id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin
+SELECT id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin, super_admin_since
 FROM players
 WHERE username = ?
 LIMIT 1
@@ -579,6 +601,7 @@ func (q *Queries) GetPlayerByUsername(ctx context.Context, username string) (Pla
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.IsSuperAdmin,
+		&i.SuperAdminSince,
 	)
 	return i, err
 }
@@ -671,21 +694,23 @@ func (q *Queries) ListPlayerFinishStats(ctx context.Context, playerIds []int64) 
 }
 
 const listSuperAdmins = `-- name: ListSuperAdmins :many
-SELECT id, username, email
+SELECT id, username, email, super_admin_since
 FROM players
 WHERE is_super_admin = 1
 ORDER BY username, id
 `
 
 type ListSuperAdminsRow struct {
-	ID       int64
-	Username string
-	Email    sql.NullString
+	ID              int64
+	Username        string
+	Email           sql.NullString
+	SuperAdminSince sql.NullTime
 }
 
 // Every current super admin, ordered by username so the admin settings
 // page (#320) renders a stable list. Only the columns the list needs are
-// selected.
+// selected. super_admin_since is when the player was promoted (NULL for
+// rows promoted before the column existed).
 func (q *Queries) ListSuperAdmins(ctx context.Context) ([]ListSuperAdminsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listSuperAdmins)
 	if err != nil {
@@ -695,7 +720,12 @@ func (q *Queries) ListSuperAdmins(ctx context.Context) ([]ListSuperAdminsRow, er
 	var items []ListSuperAdminsRow
 	for rows.Next() {
 		var i ListSuperAdminsRow
-		if err := rows.Scan(&i.ID, &i.Username, &i.Email); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.Email,
+			&i.SuperAdminSince,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -730,7 +760,7 @@ UPDATE players
 SET username = ?1,
     username_claimed = 1
 WHERE id = ?2
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin, super_admin_since
 `
 
 type RenamePlayerParams struct {
@@ -764,6 +794,7 @@ func (q *Queries) RenamePlayer(ctx context.Context, arg RenamePlayerParams) (Pla
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.IsSuperAdmin,
+		&i.SuperAdminSince,
 	)
 	return i, err
 }
@@ -830,7 +861,11 @@ func (q *Queries) SetPlayerPasswordHash(ctx context.Context, arg SetPlayerPasswo
 const setPlayerSuperAdmin = `-- name: SetPlayerSuperAdmin :execrows
 UPDATE players
 SET is_super_admin = ?1,
-    role = ?2
+    role = ?2,
+    super_admin_since = CASE
+        WHEN ?1 = 1 THEN CURRENT_TIMESTAMP
+        ELSE NULL
+    END
 WHERE id = ?3
 `
 
@@ -893,7 +928,7 @@ UPDATE players
 SET username = ?1,
     username_claimed = 1
 WHERE id = ?2 AND password_hash IS NULL
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin
+RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, is_super_admin, super_admin_since
 `
 
 type UpdatePlayerUsernameParams struct {
@@ -927,6 +962,7 @@ func (q *Queries) UpdatePlayerUsername(ctx context.Context, arg UpdatePlayerUser
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.IsSuperAdmin,
+		&i.SuperAdminSince,
 	)
 	return i, err
 }

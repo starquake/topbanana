@@ -273,6 +273,9 @@ type SuperAdminEntry struct {
 	ID       int64
 	Username string
 	Email    string
+	// PromotedAt is when the player was promoted to super admin. Nil for
+	// rows promoted before the super_admin_since column existed.
+	PromotedAt *time.Time
 }
 
 // Admin action labels written to admin_audit.action. Match the spec in
@@ -324,6 +327,10 @@ type AdminPlayerStore interface {
 	// (super = false) leaves the admin role intact. Returns
 	// ErrPlayerNotFound when no row matches.
 	SetPlayerSuperAdmin(ctx context.Context, playerID int64, super bool) error
+	// CountSuperAdmins returns the number of current super admins. The
+	// demote handler uses it to refuse a demote that would leave zero
+	// super admins.
+	CountSuperAdmins(ctx context.Context) (int64, error)
 	// InsertAdminAudit records one admin action. payload is a
 	// pre-serialised JSON blob (use "{}" when there is nothing to
 	// record).

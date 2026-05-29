@@ -101,6 +101,7 @@ func TestSuperAdmin_PromoteDemote_Integration(t *testing.T) {
 	demotee := registerAdminClient(ctx, t, baseURL, srv.DBURI, "promote-demotee")
 
 	makeSuperAdmin(ctx, t, srv.DBURI, "promote-boss")
+	bossID := playerIDByUsername(ctx, t, srv.DBURI, "promote-boss")
 	demoteeID := playerIDByUsername(ctx, t, srv.DBURI, "promote-demotee")
 
 	// boss promotes demotee to super admin.
@@ -112,6 +113,7 @@ func TestSuperAdmin_PromoteDemote_Integration(t *testing.T) {
 	if got, want := isSuperAdmin(ctx, t, srv.DBURI, "promote-demotee"), true; got != want {
 		t.Fatalf("after promote is_super_admin = %v, want %v", got, want)
 	}
+	assertAuditRow(ctx, t, srv.DBURI, demoteeID, bossID, "promote_super")
 
 	// As a super admin, demotee can now delete the owner's quiz.
 	superQuizID := createQuizAs(ctx, t, owner, baseURL, "Owner Quiz Demotee Probe")
@@ -130,6 +132,7 @@ func TestSuperAdmin_PromoteDemote_Integration(t *testing.T) {
 	if got, want := isSuperAdmin(ctx, t, srv.DBURI, "promote-demotee"), false; got != want {
 		t.Fatalf("after demote is_super_admin = %v, want %v", got, want)
 	}
+	assertAuditRow(ctx, t, srv.DBURI, demoteeID, bossID, "demote_super")
 
 	// Powers are gone immediately: deleting another admin's quiz now 403s.
 	probeQuizID := createQuizAs(ctx, t, owner, baseURL, "Owner Quiz Post-Demote Probe")
@@ -138,6 +141,80 @@ func TestSuperAdmin_PromoteDemote_Integration(t *testing.T) {
 	), http.StatusForbidden; got != want {
 		t.Errorf("post-demote delete status = %d, want %d", got, want)
 	}
+}
+
+// TestSuperAdmin_LastSuperAdminGuard pins the demote guard (#319
+// follow-up): the sole super admin cannot demote themselves (the demote
+// is refused and the row stays super), but once a second super admin
+// exists either can be demoted. The id-based demote button is the path
+// under test; the settings-page demote posts to the same endpoint, so
+// this covers both.
+func TestSuperAdmin_LastSuperAdminGuard(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+		"ADMIN_EMAILS":         "guard-solo@example.test,guard-second@example.test",
+	})
+	baseURL := srv.BaseURL
+
+	solo := registerAdminClient(ctx, t, baseURL, srv.DBURI, "guard-solo")
+	registerAdminClient(ctx, t, baseURL, srv.DBURI, "guard-second")
+
+	makeSuperAdmin(ctx, t, srv.DBURI, "guard-solo")
+	soloID := playerIDByUsername(ctx, t, srv.DBURI, "guard-solo")
+	secondID := playerIDByUsername(ctx, t, srv.DBURI, "guard-second")
+
+	// The sole super admin cannot demote themselves: the demote is refused
+	// (redirect back with a flash) and the row stays super.
+	if got, want := postCSRFForm(ctx, t, solo,
+		baseURL+fmt.Sprintf("/admin/players/%d/demote-super", soloID),
+	), http.StatusSeeOther; got != want {
+		t.Fatalf("self-demote status = %d, want %d", got, want)
+	}
+	if got, want := isSuperAdmin(ctx, t, srv.DBURI, "guard-solo"), true; got != want {
+		t.Fatalf("after refused self-demote is_super_admin = %v, want %v", got, want)
+	}
+
+	// With a second super admin in place, a demote is allowed again.
+	if got, want := postCSRFForm(ctx, t, solo,
+		baseURL+fmt.Sprintf("/admin/players/%d/promote-super", secondID),
+	), http.StatusSeeOther; got != want {
+		t.Fatalf("promote second status = %d, want %d", got, want)
+	}
+	if got, want := isSuperAdmin(ctx, t, srv.DBURI, "guard-second"), true; got != want {
+		t.Fatalf("after promote second is_super_admin = %v, want %v", got, want)
+	}
+	if got, want := postCSRFForm(ctx, t, solo,
+		baseURL+fmt.Sprintf("/admin/players/%d/demote-super", secondID),
+	), http.StatusSeeOther; got != want {
+		t.Fatalf("demote second status = %d, want %d", got, want)
+	}
+	if got, want := isSuperAdmin(ctx, t, srv.DBURI, "guard-second"), false; got != want {
+		t.Errorf("after demote second is_super_admin = %v, want %v", got, want)
+	}
+}
+
+// assertAuditRow fails the test unless an admin_audit row targeting
+// target with the given action and acting actor exists. Reads through
+// the same store path the #450 detail view uses.
+func assertAuditRow(ctx context.Context, t *testing.T, dbURI string, target, actor int64, action string) {
+	t.Helper()
+	dbConn, stores := openStores(t, dbURI)
+	defer dbConn.Close() //nolint:errcheck // cleanup.
+
+	const auditLimit = 50
+	entries, err := stores.AdminPlayers.ListAdminAuditForTarget(ctx, target, auditLimit)
+	if err != nil {
+		t.Fatalf("ListAdminAuditForTarget err = %v, want nil", err)
+	}
+	for _, e := range entries {
+		if e.Action == action && e.ActorPlayerID == actor {
+			return
+		}
+	}
+	t.Errorf("no admin_audit row with action %q and actor %d found for target %d; entries=%+v",
+		action, actor, target, entries)
 }
 
 // makeSuperAdmin promotes the named player to super admin via the store,

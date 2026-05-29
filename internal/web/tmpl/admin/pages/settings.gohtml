@@ -31,6 +31,7 @@
                         <tr class="text-left text-text-dim uppercase text-xs tracking-[0.14em] border-b border-border-soft">
                             <th class="px-4 py-3 font-semibold">Username</th>
                             <th class="px-4 py-3 font-semibold">Email</th>
+                            <th class="px-4 py-3 font-semibold">Promoted</th>
                             <th class="px-4 py-3 font-semibold text-right">Action</th>
                         </tr>
                     </thead>
@@ -39,6 +40,13 @@
                             <tr class="border-b border-border-soft last:border-0">
                                 <td class="px-4 py-3 text-text">{{.Username}}</td>
                                 <td class="px-4 py-3 text-text-dim">{{if .Email}}{{.Email}}{{else}}&mdash;{{end}}</td>
+                                <td class="px-4 py-3 text-text-dim">
+                                    {{if .PromotedAt}}
+                                        <time title="{{.PromotedAt.Format "2006-01-02 15:04"}}">Promoted {{humanizeTime .PromotedAt}}</time>
+                                    {{else}}
+                                        &mdash;
+                                    {{end}}
+                                </td>
                                 <td class="px-4 py-3 text-right">
                                     <form method="POST" action="/admin/players/{{.ID}}/demote-super" class="inline-flex"
                                           onsubmit="return confirm('Remove super-admin from {{.Username}}?');">

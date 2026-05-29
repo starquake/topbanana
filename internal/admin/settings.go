@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
@@ -15,13 +16,14 @@ import (
 const settingsRedirectURL = "/admin/settings"
 
 // superAdminRow is one entry in the super-admin list rendered on the
-// settings page. Mirrors auth.SuperAdminEntry; the schema carries no
-// promoted-on timestamp (the row is a flat boolean) so the list shows
-// username + email only.
+// settings page. Mirrors auth.SuperAdminEntry. PromotedAt is nil for rows
+// promoted before the super_admin_since column existed; the template
+// renders an em dash in that case.
 type superAdminRow struct {
-	ID       int64
-	Username string
-	Email    string
+	ID         int64
+	Username   string
+	Email      string
+	PromotedAt *time.Time
 }
 
 // settingsPageData backs settings.gohtml.
@@ -57,7 +59,12 @@ func HandleSettings(
 
 		rows := make([]superAdminRow, 0, len(entries))
 		for _, e := range entries {
-			rows = append(rows, superAdminRow{ID: e.ID, Username: e.Username, Email: e.Email})
+			rows = append(rows, superAdminRow{
+				ID:         e.ID,
+				Username:   e.Username,
+				Email:      e.Email,
+				PromotedAt: e.PromotedAt,
+			})
 		}
 
 		data := settingsPageData{

@@ -910,14 +910,31 @@ func (s *PlayerStore) ListSuperAdmins(ctx context.Context) ([]*auth.SuperAdminEn
 
 	out := make([]*auth.SuperAdminEntry, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, &auth.SuperAdminEntry{
+		entry := &auth.SuperAdminEntry{
 			ID:       r.ID,
 			Username: r.Username,
 			Email:    r.Email.String,
-		})
+		}
+		if r.SuperAdminSince.Valid {
+			promoted := r.SuperAdminSince.Time
+			entry.PromotedAt = &promoted
+		}
+		out = append(out, entry)
 	}
 
 	return out, nil
+}
+
+// CountSuperAdmins returns the number of current super admins
+// (#319/#320). The demote handler uses it to refuse a demote that would
+// leave zero super admins.
+func (s *PlayerStore) CountSuperAdmins(ctx context.Context) (int64, error) {
+	count, err := s.q.CountSuperAdmins(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count super admins: %w", err)
+	}
+
+	return count, nil
 }
 
 // ListAdminAuditForTarget returns the most-recent admin actions taken

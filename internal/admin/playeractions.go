@@ -231,6 +231,23 @@ func handlePlayerSuperAdmin(
 			return
 		}
 
+		if !op.super {
+			count, err := store.CountSuperAdmins(r.Context())
+			if err != nil {
+				logger.ErrorContext(r.Context(), "error counting super admins", slog.Any("err", err))
+				flash.SetError(w, "Could not update super admin. Try again.", 0)
+				redirectToPlayerDetail(w, r, playerID)
+
+				return
+			}
+			if count <= 1 {
+				flash.SetError(w, "Cannot remove the last super admin - promote another first.", 0)
+				redirectToPlayerDetail(w, r, playerID)
+
+				return
+			}
+		}
+
 		if err := store.SetPlayerSuperAdmin(r.Context(), playerID, op.super); err != nil {
 			if errors.Is(err, auth.ErrPlayerNotFound) {
 				http.NotFound(w, r)
