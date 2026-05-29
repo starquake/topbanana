@@ -564,6 +564,160 @@ func TestAdminPlayerMgmt_SetRolePromotesToAdmin(t *testing.T) {
 	}
 }
 
+// TestAdminPlayerMgmt_SetUsername drives the #535 username endpoint from a
+// super admin: the target's display name is rewritten, the new name shows on
+// the detail page, and the audit trail records the "Display name set" action.
+func TestAdminPlayerMgmt_SetUsername(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+	})
+
+	adminClient := newAdminMgmtClient(t)
+	if got := registerForRedirect(
+		ctx, t, adminClient, srv.BaseURL,
+		"setname-admin", "setname-admin-pass-123",
+	); got != "/admin/quizzes" {
+		t.Fatalf("first registration did not promote to admin: Location = %q", got)
+	}
+	verifyPlayerEmail(ctx, t, srv.DBURI, "setname-admin")
+	makeSuperAdmin(ctx, t, srv.DBURI, "setname-admin")
+
+	playerClient := newAdminMgmtClient(t)
+	if got := registerForRedirect(
+		ctx, t, playerClient, srv.BaseURL,
+		"setname-target", "setname-target-pass-123",
+	); got != "/" {
+		t.Fatalf("second registration did not land on /: Location = %q", got)
+	}
+
+	target := lookupPlayerID(ctx, t, srv.DBURI, "setname-target")
+	usernameURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/username"
+
+	res := postAdminAction(ctx, t, adminClient, srv.BaseURL, usernameURL, url.Values{"username": {"renamed-target"}})
+	if got, want := res.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("set-username status = %d, want %d", got, want)
+	}
+
+	detail := getOK(
+		ctx, t, adminClient,
+		srv.BaseURL+"/admin/players/"+intToString(target),
+	)
+	if got, want := detail, "renamed-target"; !strings.Contains(got, want) {
+		t.Errorf("detail body should contain the new name; body=%q", detail)
+	}
+	if got, want := detail, "Display name set"; !strings.Contains(got, want) {
+		t.Errorf("audit trail should record the rename; body=%q", detail)
+	}
+}
+
+// TestAdminPlayerMgmt_SetPassword drives the #535 password endpoint from a
+// super admin: the reset 303s back to the detail page, the audit trail
+// records "Password set", and the target can then log in with the new
+// password.
+func TestAdminPlayerMgmt_SetPassword(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+	})
+
+	adminClient := newAdminMgmtClient(t)
+	if got := registerForRedirect(
+		ctx, t, adminClient, srv.BaseURL,
+		"setpass-admin", "setpass-admin-pass-123",
+	); got != "/admin/quizzes" {
+		t.Fatalf("first registration did not promote to admin: Location = %q", got)
+	}
+	verifyPlayerEmail(ctx, t, srv.DBURI, "setpass-admin")
+	makeSuperAdmin(ctx, t, srv.DBURI, "setpass-admin")
+
+	playerClient := newAdminMgmtClient(t)
+	if got := registerForRedirect(
+		ctx, t, playerClient, srv.BaseURL,
+		"setpass-target", "setpass-target-pass-123",
+	); got != "/" {
+		t.Fatalf("second registration did not land on /: Location = %q", got)
+	}
+	verifyPlayerEmail(ctx, t, srv.DBURI, "setpass-target")
+
+	target := lookupPlayerID(ctx, t, srv.DBURI, "setpass-target")
+	passwordURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/password"
+
+	res := postAdminAction(
+		ctx, t, adminClient, srv.BaseURL, passwordURL,
+		url.Values{"password": {"setpass-new-pass-123"}},
+	)
+	if got, want := res.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("set-password status = %d, want %d", got, want)
+	}
+
+	detail := getOK(
+		ctx, t, adminClient,
+		srv.BaseURL+"/admin/players/"+intToString(target),
+	)
+	if got, want := detail, "Password set"; !strings.Contains(got, want) {
+		t.Errorf("audit trail should record the password reset; body=%q", detail)
+	}
+
+	// The target can log in with the new password.
+	newClient := newAdminMgmtClient(t)
+	if got := loginForRedirect(
+		ctx, t, newClient, srv.BaseURL,
+		"setpass-target", "setpass-new-pass-123",
+	); got != "/" {
+		t.Errorf("login with new password redirect = %q, want %q", got, "/")
+	}
+}
+
+// TestAdminPlayerMgmt_SetCredentialsRequireSuperAdmin pins that the #535
+// username + password endpoints are super-admin only: a plain admin gets a
+// 404 (not a 403) on both POSTs so the routes' existence stays hidden. The
+// first registrant is auto-promoted to super admin (#528), so the plain admin
+// under test is an ADMIN_EMAILS-matched later registrant.
+func TestAdminPlayerMgmt_SetCredentialsRequireSuperAdmin(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+		"ADMIN_EMAILS":         "creds-plain-admin@example.test",
+	})
+
+	superClient := newAdminMgmtClient(t)
+	if got := registerForRedirect(
+		ctx, t, superClient, srv.BaseURL,
+		"creds-super-admin", "creds-super-admin-pass-123",
+	); got != "/admin/quizzes" {
+		t.Fatalf("first registration did not promote to admin: Location = %q", got)
+	}
+	verifyPlayerEmail(ctx, t, srv.DBURI, "creds-super-admin")
+
+	adminClient := newAdminMgmtClient(t)
+	if got := registerForRedirect(
+		ctx, t, adminClient, srv.BaseURL,
+		"creds-plain-admin", "creds-plain-admin-pass-123",
+	); got != "/admin/quizzes" {
+		t.Fatalf("ADMIN_EMAILS registration did not promote to admin: Location = %q", got)
+	}
+	verifyPlayerEmail(ctx, t, srv.DBURI, "creds-plain-admin")
+
+	target := lookupPlayerID(ctx, t, srv.DBURI, "creds-super-admin")
+	usernameURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/username"
+	passwordURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/password"
+
+	if got, want := postCSRFForm(
+		ctx, t, adminClient, usernameURL,
+	), http.StatusNotFound; got != want {
+		t.Errorf("POST /username status = %d, want %d", got, want)
+	}
+	if got, want := postCSRFForm(
+		ctx, t, adminClient, passwordURL,
+	), http.StatusNotFound; got != want {
+		t.Errorf("POST /password status = %d, want %d", got, want)
+	}
+}
+
 // newAdminMgmtClient is the per-test client builder used by every
 // /admin/players/* probe in this file. Wraps authClient with the
 // same don't-follow-redirects policy so the test can assert on the
@@ -658,7 +812,9 @@ func csrfPageForPostURL(baseURL, postURL string) string {
 	if strings.HasSuffix(postURL, "/admin/players") {
 		return baseURL + "/admin/players/new"
 	}
-	for _, suffix := range []string{"/verify", "/resend-verification", "/email", "/role"} {
+	for _, suffix := range []string{
+		"/verify", "/resend-verification", "/email", "/role", "/username", "/password",
+	} {
 		if before, ok := strings.CutSuffix(postURL, suffix); ok {
 			return before
 		}

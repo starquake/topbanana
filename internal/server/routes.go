@@ -461,8 +461,9 @@ func addAdminSettingsRoutes(
 // addAdminPlayerRoutes registers the admin player-management routes
 // (#450): per-player detail view, the mutating actions, and the
 // create-without-verification GET+POST pair. The detail view and the
-// verify/resend/email actions are admin-wide; the create pair and the
-// id-based role endpoint (#527) are super-admin only. MaxFormSizeMiddleware
+// verify/resend/email actions are admin-wide; the create pair, the
+// id-based role endpoint (#527), and the username + password actions
+// (#535) are super-admin only. MaxFormSizeMiddleware
 // fronts every POST in front of csrfMW so the CSRF validator's
 // ParseForm sees a bounded body; csrfMW fronts the auth wrapper so an
 // unauthenticated request without a valid token is rejected with 403
@@ -518,6 +519,18 @@ func addAdminPlayerRoutes(
 		"POST /admin/players/{playerID}/role",
 		admin.MaxFormSizeMiddleware(csrfMW(requireSuperAdmin(
 			admin.HandlePlayerSetRole(logger, stores.AdminPlayers, deps.flash),
+		))),
+	)
+	mux.Handle(
+		"POST /admin/players/{playerID}/username",
+		admin.MaxFormSizeMiddleware(csrfMW(requireSuperAdmin(
+			admin.HandlePlayerSetUsername(logger, stores.AdminPlayers, deps.flash),
+		))),
+	)
+	mux.Handle(
+		"POST /admin/players/{playerID}/password",
+		admin.MaxFormSizeMiddleware(csrfMW(requireSuperAdmin(
+			admin.HandlePlayerSetPassword(logger, stores.AdminPlayers, deps.flash),
 		))),
 	)
 }

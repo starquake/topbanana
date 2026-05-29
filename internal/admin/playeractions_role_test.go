@@ -90,6 +90,14 @@ func (*roleStubStore) ListAdminAuditForTarget(
 	return nil, errors.ErrUnsupported
 }
 
+func (*roleStubStore) RenamePlayer(_ context.Context, _ int64, _ string) (*auth.Player, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (*roleStubStore) ChangePlayerPassword(_ context.Context, _ int64, _ string) error {
+	return errors.ErrUnsupported
+}
+
 // postRole drives HandlePlayerSetRole with the given current detail and
 // desired role, returning the recorded stub state plus the response.
 func postRole(
