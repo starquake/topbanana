@@ -54,9 +54,10 @@ func ParseTrustedProxyCIDRs(raw string) ([]*net.IPNet, error) {
 // CIDRs, X-Forwarded-For is walked right-to-left and the first entry that
 // is NOT in trustedCIDRs is returned - that is the original client IP
 // the trusted hop chain forwarded for. If every XFF entry is trusted
-// (a chain of internal hops with no public IP at the head) the leftmost
-// XFF entry is used as a best-effort fallback. If XFF is absent or
-// empty the RemoteAddr host is returned.
+// (a chain of internal hops with no public IP at the head) the
+// RemoteAddr host - the directly-connected trusted hop - is returned,
+// since any XFF entry would be spoofable. If XFF is absent or empty the
+// RemoteAddr host is returned.
 //
 // When trustedCIDRs is non-empty but r.RemoteAddr does not match any
 // CIDR, XFF is ignored entirely - the request came from an untrusted
@@ -91,7 +92,11 @@ func ClientIP(r *http.Request, trustedCIDRs []*net.IPNet) string {
 		}
 	}
 
-	return entries[0]
+	// Every XFF entry is trusted (a chain of internal hops with no
+	// public IP at the head). Falling back to the leftmost XFF entry
+	// would trust a value the immediate peer could spoof, so return the
+	// directly-connected trusted hop instead.
+	return host
 }
 
 // ipInCIDRs reports whether ip parses as an IP literal and is contained

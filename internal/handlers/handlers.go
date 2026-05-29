@@ -76,9 +76,12 @@ func ParseIDFromSlugPath(w http.ResponseWriter, r *http.Request, logger *slog.Lo
 }
 
 // ParseIDFromPath parses an int64 ID from the given path value.
-// It returns the parsed ID and true if the parsing was successful.
-// It returns 0 and true if the path value is empty.
-// It renders a 400 error page if the path value cannot be parsed.
+// An empty path value returns (0, true) so handlers shared between a
+// create route (no ID segment) and an edit route (with one) can treat
+// the zero result as "create". A present path value must parse to a
+// positive integer; a non-numeric or non-positive value renders a 400
+// and returns (0, false) so callers never act on a zero or negative ID
+// that was actually supplied (e.g. "/0" or "/-1").
 func ParseIDFromPath(w http.ResponseWriter, r *http.Request, logger *slog.Logger, s string) (int64, bool) {
 	pathValue := r.PathValue(s)
 	if pathValue == "" {
@@ -86,9 +89,9 @@ func ParseIDFromPath(w http.ResponseWriter, r *http.Request, logger *slog.Logger
 	}
 
 	id, err := IDFromString(pathValue)
-	if err != nil {
+	if err != nil || id <= 0 {
 		msg := "error parsing " + s
-		logger.ErrorContext(r.Context(), msg, slog.Any("err", err))
+		logger.ErrorContext(r.Context(), msg, slog.String("value", pathValue), slog.Any("err", err))
 		http.Error(w, msg, http.StatusBadRequest)
 
 		return 0, false

@@ -78,8 +78,15 @@ func (f *questionForm) Valid(_ context.Context) map[string]string {
 	if q.Text == "" {
 		problems["text"] = "Text is required"
 	}
-	if len(q.Options) == 0 {
+	switch {
+	case len(q.Options) == 0:
 		problems["options"] = "Options are required"
+	case len(q.Options) > maxOptions:
+		problems["options"] = fmt.Sprintf("A question may have at most %d options", maxOptions)
+	default:
+		// Option count is in range. Deliberately no correct-option
+		// check: a question where the player is meant to pick none is a
+		// supported shape.
 	}
 	if q.TimeLimitSeconds != nil {
 		v := *q.TimeLimitSeconds

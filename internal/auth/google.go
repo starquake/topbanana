@@ -63,6 +63,13 @@ const googleDefaultIssuer = "https://accounts.google.com"
 // or a tampered redirect.
 var ErrGoogleStateMismatch = errors.New("google state mismatch")
 
+// ErrRegistrationDisabled is returned by linkOrCreateGooglePlayer when
+// a verified Google sign-in resolves to no existing account and no
+// claimable session row, but REGISTRATION_ENABLED is off. Only the
+// create-fresh branch is gated; existing-identity, link-by-email, and
+// claim-session sign-ins still succeed.
+var ErrRegistrationDisabled = errors.New("registration disabled")
+
 // GoogleConfig groups the runtime knobs needed by HandleGoogleLogin
 // and HandleGoogleCallback. Lets the route wiring stay readable
 // instead of threading half-a-dozen parameters through each handler.
@@ -195,11 +202,13 @@ func HandleGoogleCallback(
 			sessionPlayerID = &id
 		}
 		player, err := linkOrCreateGooglePlayer(
-			r.Context(), identities, result.Subject, result.Email, sessionPlayerID,
+			r.Context(), identities, result.Subject, result.Email, sessionPlayerID, registrationEnabled,
 		)
 		if err != nil {
-			logger.ErrorContext(r.Context(), "error linking google player", slog.Any("err", err))
-			renderGoogleError(render, w, r, "Sign-in failed. Please try again.", registrationEnabled)
+			if !errors.Is(err, ErrRegistrationDisabled) {
+				logger.ErrorContext(r.Context(), "error linking google player", slog.Any("err", err))
+			}
+			renderGoogleError(render, w, r, googleLinkErrorMessage(err), registrationEnabled)
 
 			return
 		}
@@ -332,6 +341,15 @@ func (a *GoogleAuthenticator) exchangeAndVerify(r *http.Request, logger *slog.Lo
 		}
 	}
 
+	// A verified id_token without a subject should never happen, but an
+	// empty subject would link every such sign-in to the same identity
+	// row; refuse rather than proceed with the spoofable empty key.
+	if idToken.Subject == "" {
+		logger.ErrorContext(r.Context(), "id token has empty subject")
+
+		return callbackResult{UserMessage: "Could not verify your Google sign-in."}
+	}
+
 	return callbackResult{Subject: idToken.Subject, Email: claims.Email}
 }
 
@@ -339,11 +357,14 @@ func (a *GoogleAuthenticator) exchangeAndVerify(r *http.Request, logger *slog.Lo
 // player: existing identity > link-by-email > claim-session-row >
 // create-fresh. The silent link-by-email branch is only safe because
 // the caller has already verified email_verified=true on the id-token.
+//
+//nolint:revive // registrationEnabled gates only the final create-fresh branch (#492-adjacent); threading the policy in is clearer than splitting the branch table across two functions.
 func linkOrCreateGooglePlayer(
 	ctx context.Context,
 	identities OAuthIdentityStore,
 	subject, email string,
 	sessionPlayerID *int64,
+	registrationEnabled bool,
 ) (*Player, error) {
 	existing, err := identities.GetPlayerByProviderSubject(ctx, ProviderGoogle, subject)
 	if err == nil {
@@ -386,6 +407,10 @@ func linkOrCreateGooglePlayer(
 		if !errors.Is(claimErr, ErrPlayerNotFound) {
 			return nil, claimErr
 		}
+	}
+
+	if !registrationEnabled {
+		return nil, ErrRegistrationDisabled
 	}
 
 	return createGooglePlayer(ctx, identities, subject, email)
@@ -764,6 +789,17 @@ func readGoogleNext(r *http.Request, key []byte) string {
 	}
 
 	return SafeNextPath(string(pathBytes))
+}
+
+// googleLinkErrorMessage maps a linkOrCreateGooglePlayer failure to the
+// user-facing banner. A refused registration gets its own message; any
+// other failure gets the generic retry copy.
+func googleLinkErrorMessage(err error) string {
+	if errors.Is(err, ErrRegistrationDisabled) {
+		return "Registration is currently disabled. Ask an administrator for an account."
+	}
+
+	return "Sign-in failed. Please try again."
 }
 
 // renderGoogleError re-renders the login template with a short

@@ -207,7 +207,7 @@ func TestLinkOrCreateGooglePlayer_NewPlayer(t *testing.T) {
 
 	store := newStubOAuthStore()
 	player, err := ExportLinkOrCreateGooglePlayer(
-		t.Context(), store, "google-sub-1", "fresh@example.test", nil,
+		t.Context(), store, "google-sub-1", "fresh@example.test", nil, true,
 	)
 	if err != nil {
 		t.Fatalf("ExportLinkOrCreateGooglePlayer err = %v, want nil", err)
@@ -227,7 +227,7 @@ func TestLinkOrCreateGooglePlayer_NewPlayer(t *testing.T) {
 	// A second call with the same subject reads the existing identity
 	// row and returns the same player.
 	again, err := ExportLinkOrCreateGooglePlayer(
-		t.Context(), store, "google-sub-1", "fresh@example.test", nil,
+		t.Context(), store, "google-sub-1", "fresh@example.test", nil, true,
 	)
 	if err != nil {
 		t.Fatalf("second ExportLinkOrCreateGooglePlayer err = %v, want nil", err)
@@ -260,7 +260,7 @@ func TestLinkOrCreateGooglePlayer_ExistingIdentity_StampsVerifiedEmail(t *testin
 	}
 
 	healed, err := ExportLinkOrCreateGooglePlayer(
-		t.Context(), store, "google-sub-heal", "stranded@example.test", nil,
+		t.Context(), store, "google-sub-heal", "stranded@example.test", nil, true,
 	)
 	if err != nil {
 		t.Fatalf("ExportLinkOrCreateGooglePlayer err = %v, want nil", err)
@@ -290,7 +290,7 @@ func TestLinkOrCreateGooglePlayer_ExistingIdentity_AlreadyVerifiedNoop(t *testin
 	}
 
 	got, err := ExportLinkOrCreateGooglePlayer(
-		t.Context(), store, "google-sub-verified", "verified@example.test", nil,
+		t.Context(), store, "google-sub-verified", "verified@example.test", nil, true,
 	)
 	if err != nil {
 		t.Fatalf("ExportLinkOrCreateGooglePlayer err = %v, want nil", err)
@@ -311,7 +311,7 @@ func TestLinkOrCreateGooglePlayer_LinkExistingEmail(t *testing.T) {
 	existing := store.seed("alice@example.test", "alice")
 
 	player, err := ExportLinkOrCreateGooglePlayer(
-		t.Context(), store, "google-sub-2", "alice@example.test", nil,
+		t.Context(), store, "google-sub-2", "alice@example.test", nil, true,
 	)
 	if err != nil {
 		t.Fatalf("ExportLinkOrCreateGooglePlayer err = %v, want nil", err)
@@ -344,7 +344,7 @@ func TestLinkOrCreateGooglePlayer_RetriesPetnameCollision(t *testing.T) {
 	store.createColl = 2
 
 	player, err := ExportLinkOrCreateGooglePlayer(
-		t.Context(), store, "google-sub-retry", "retry@example.test", nil,
+		t.Context(), store, "google-sub-retry", "retry@example.test", nil, true,
 	)
 	if err != nil {
 		t.Fatalf("ExportLinkOrCreateGooglePlayer err = %v, want nil", err)
@@ -367,7 +367,7 @@ func TestLinkOrCreateGooglePlayer_ExhaustsRetries(t *testing.T) {
 	store.createColl = 100 // far more than the loop allows
 
 	_, err := ExportLinkOrCreateGooglePlayer(
-		t.Context(), store, "google-sub-exhaust", "exhaust@example.test", nil,
+		t.Context(), store, "google-sub-exhaust", "exhaust@example.test", nil, true,
 	)
 	if err == nil {
 		t.Fatal("ExportLinkOrCreateGooglePlayer err = nil, want non-nil after exhausting retries")
@@ -389,7 +389,7 @@ func TestLinkOrCreateGooglePlayer_ClaimsAnonymousSession(t *testing.T) {
 	anon := store.seedAnonymous("happy-banana")
 
 	player, err := ExportLinkOrCreateGooglePlayer(
-		t.Context(), store, "google-sub-claim", "claim@example.test", &anon.ID,
+		t.Context(), store, "google-sub-claim", "claim@example.test", &anon.ID, true,
 	)
 	if err != nil {
 		t.Fatalf("ExportLinkOrCreateGooglePlayer err = %v, want nil", err)
@@ -427,7 +427,7 @@ func TestLinkOrCreateGooglePlayer_SessionWithNonAnonymousRowFallsThrough(t *test
 	credentialled := store.seed("settled@example.test", "settled")
 
 	player, err := ExportLinkOrCreateGooglePlayer(
-		t.Context(), store, "google-sub-fallthrough", "newcomer@example.test", &credentialled.ID,
+		t.Context(), store, "google-sub-fallthrough", "newcomer@example.test", &credentialled.ID, true,
 	)
 	if err != nil {
 		t.Fatalf("ExportLinkOrCreateGooglePlayer err = %v, want nil", err)
@@ -437,6 +437,49 @@ func TestLinkOrCreateGooglePlayer_SessionWithNonAnonymousRowFallsThrough(t *test
 	}
 	if got, want := player.Email, "newcomer@example.test"; got != want {
 		t.Errorf("player.Email = %q, want %q", got, want)
+	}
+}
+
+// TestLinkOrCreateGooglePlayer_RegistrationDisabled_RefusesNewAccount
+// pins the registration gate: with registration off, a brand-new
+// Google user (no existing identity, no session) is refused with
+// ErrRegistrationDisabled rather than minting a fresh account.
+func TestLinkOrCreateGooglePlayer_RegistrationDisabled_RefusesNewAccount(t *testing.T) {
+	t.Parallel()
+
+	store := newStubOAuthStore()
+	_, err := ExportLinkOrCreateGooglePlayer(
+		t.Context(), store, "google-sub-newcomer", "newcomer@example.test", nil, false,
+	)
+	if got, want := err, ErrRegistrationDisabled; !errors.Is(got, want) {
+		t.Errorf("err = %v, want %v", got, want)
+	}
+}
+
+// TestLinkOrCreateGooglePlayer_RegistrationDisabled_ExistingIdentityLogsIn
+// pins that an existing-identity sign-in still succeeds with
+// registration off - only the create-fresh branch is gated.
+func TestLinkOrCreateGooglePlayer_RegistrationDisabled_ExistingIdentityLogsIn(t *testing.T) {
+	t.Parallel()
+
+	store := newStubOAuthStore()
+	existing := store.seed("existing@example.test", "existing")
+	verifiedAt := time.Now().UTC().Add(-time.Hour)
+	existing.EmailVerifiedAt = &verifiedAt
+	if err := store.LinkProviderIdentity(
+		t.Context(), existing.ID, ProviderGoogle, "google-sub-existing",
+	); err != nil {
+		t.Fatalf("seed LinkProviderIdentity err = %v, want nil", err)
+	}
+
+	got, err := ExportLinkOrCreateGooglePlayer(
+		t.Context(), store, "google-sub-existing", "existing@example.test", nil, false,
+	)
+	if err != nil {
+		t.Fatalf("ExportLinkOrCreateGooglePlayer err = %v, want nil", err)
+	}
+	if got, want := got.ID, existing.ID; got != want {
+		t.Errorf("player.ID = %d, want %d (existing row)", got, want)
 	}
 }
 

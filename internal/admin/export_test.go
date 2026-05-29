@@ -72,6 +72,12 @@ func EmailRateLimiterEntryCount(l *EmailRateLimiter) int {
 	return len(l.last)
 }
 
+// DispatchAdminResendVerification exposes the unexported resend-email
+// dispatcher so the test package can pin its "did I actually dispatch"
+// boolean contract: false (and no audit row) when email is not
+// configured, true when it spawns the send.
+var DispatchAdminResendVerification = dispatchAdminResendVerification
+
 // QuizImportPayload exposes the unexported import wire-shape to the
 // external admin_test package so the per-branch translation tests can
 // build payloads without exporting the struct.
@@ -94,3 +100,14 @@ var QuizFromImportPayload = quizFromImportPayload
 // ValidateImportBreaks exposes the import-side break validator so the
 // test package can pin the duplicate-position and slot-mismatch rules.
 var ValidateImportBreaks = validateImportBreaks
+
+// ValidateQuestionForm exposes the unexported questionForm.Valid
+// behaviour so the option-count and at-least-one-correct rules can be
+// tested directly without constructing a full quiz.
+func ValidateQuestionForm(ctx context.Context, q *quiz.Question) map[string]string {
+	return (&questionForm{question: q}).Valid(ctx)
+}
+
+// MaxOptions exposes the per-question option cap so tests can build a
+// payload one over the limit without hard-coding the value.
+const MaxOptions = maxOptions

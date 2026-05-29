@@ -952,6 +952,11 @@ func (s *Service) GetResults(ctx context.Context, gameID string, playerID int64)
 		for _, ga := range gqs.Answers {
 			ga.Question = gqs
 			ga.Option = optionsByID[ga.OptionID]
+			// A deleted option leaves a dangling answer; skip it so
+			// CalculateScore never dereferences a nil Option.
+			if ga.Option == nil {
+				continue
+			}
 			plsMap[ga.PlayerID] += s.CalculateScore(ctx, ga)
 		}
 	}

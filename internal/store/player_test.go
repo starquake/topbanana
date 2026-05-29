@@ -274,6 +274,64 @@ func TestPlayerStore_GetPlayerByEmail_LowercasesAndTrims(t *testing.T) {
 	}
 }
 
+// TestPlayerStore_CreatePlayerFromOAuth_LowercasesEmail pins that the
+// OAuth-create path stores the email normalised, so a mixed-case OIDC
+// email is found by GetPlayerByEmail instead of producing a duplicate
+// row on the next sign-in. See #471.
+func TestPlayerStore_CreatePlayerFromOAuth_LowercasesEmail(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	created, err := ps.CreatePlayerFromOAuth(t.Context(), "oauthuser", "  OAuth@Example.Test ")
+	if err != nil {
+		t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
+	}
+	if got, want := created.Email, "oauth@example.test"; got != want {
+		t.Errorf("stored Email = %q, want %q", got, want)
+	}
+
+	found, err := ps.GetPlayerByEmail(t.Context(), "OAuth@Example.Test")
+	if err != nil {
+		t.Fatalf("GetPlayerByEmail err = %v, want nil", err)
+	}
+	if got, want := found.ID, created.ID; got != want {
+		t.Errorf("GetPlayerByEmail ID = %d, want %d", got, want)
+	}
+}
+
+// TestPlayerStore_ClaimPlayerForOAuth_LowercasesEmail pins the same
+// normalisation rule on the claim-anonymous-row path so a mixed-case
+// OIDC email attached to an existing row is still found on lookup.
+func TestPlayerStore_ClaimPlayerForOAuth_LowercasesEmail(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	anon, err := ps.CreateAnonymousPlayer(t.Context(), "anon-oauth")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	claimed, err := ps.ClaimPlayerForOAuth(t.Context(), anon.ID, "  Claim@Example.Test ")
+	if err != nil {
+		t.Fatalf("ClaimPlayerForOAuth err = %v, want nil", err)
+	}
+	if got, want := claimed.Email, "claim@example.test"; got != want {
+		t.Errorf("stored Email = %q, want %q", got, want)
+	}
+
+	found, err := ps.GetPlayerByEmail(t.Context(), "Claim@Example.Test")
+	if err != nil {
+		t.Fatalf("GetPlayerByEmail err = %v, want nil", err)
+	}
+	if got, want := found.ID, claimed.ID; got != want {
+		t.Errorf("GetPlayerByEmail ID = %d, want %d", got, want)
+	}
+}
+
 func TestPlayerStore_CreateAnonymousPlayer(t *testing.T) {
 	t.Parallel()
 

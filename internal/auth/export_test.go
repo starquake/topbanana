@@ -14,8 +14,9 @@ func ExportLinkOrCreateGooglePlayer(
 	store OAuthIdentityStore,
 	subject, email string,
 	sessionPlayerID *int64,
+	registrationEnabled bool,
 ) (*Player, error) {
-	return linkOrCreateGooglePlayer(ctx, store, subject, email, sessionPlayerID)
+	return linkOrCreateGooglePlayer(ctx, store, subject, email, sessionPlayerID, registrationEnabled)
 }
 
 // ExportSignState exposes signState so tests can assert the cookie

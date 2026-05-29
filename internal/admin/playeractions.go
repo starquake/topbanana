@@ -105,7 +105,14 @@ func HandlePlayerResendVerification(
 			return
 		}
 
-		dispatchAdminResendVerification(r.Context(), logger, tokens, sender, baseURL, detail.Email, playerID)
+		if !dispatchAdminResendVerification(
+			r.Context(), logger, tokens, sender, baseURL, detail.Email, playerID,
+		) {
+			flash.SetError(w, "Email sending is not configured; no verification email was sent.", 0)
+			redirectToPlayerDetail(w, r, playerID)
+
+			return
+		}
 		writeAudit(r.Context(), logger, store, actor.ID, playerID, auth.AdminActionResendVerification, nil)
 		flash.SetNotice(w, "Verification email dispatched.")
 		redirectToPlayerDetail(w, r, playerID)
@@ -350,7 +357,9 @@ func loadActionTarget(
 // dispatchAdminResendVerification mints + dispatches the verification
 // email on a detached goroutine. Mirrors auth.dispatchVerifyEmail so a
 // closed browser tab does not cancel the send and SMTP latency is not
-// observable from the redirect timing.
+// observable from the redirect timing. Returns false without dispatching
+// when email is not configured (nil tokens/sender or empty baseURL) so
+// the caller can skip the audit row and the success notice.
 func dispatchAdminResendVerification(
 	ctx context.Context,
 	logger *slog.Logger,
@@ -358,15 +367,15 @@ func dispatchAdminResendVerification(
 	sender auth.VerifyEmailSender,
 	baseURL, recipient string,
 	playerID int64,
-) {
+) bool {
 	if tokens == nil || sender == nil {
-		return
+		return false
 	}
 	if baseURL == "" {
 		logger.WarnContext(ctx, "admin resend verification skipped: BASE_URL is empty",
 			slog.Int64("player_id", playerID))
 
-		return
+		return false
 	}
 	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), mailer.SendTimeout+15*time.Second)
 	go func() {
@@ -374,6 +383,8 @@ func dispatchAdminResendVerification(
 		auth.SendVerifyEmailBestEffort(bg, logger, tokens, sender,
 			baseURL, recipient, playerID, time.Now().UTC())
 	}()
+
+	return true
 }
 
 // PerTargetLimiter is a per-player-id cool-down for admin actions that

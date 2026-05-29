@@ -116,6 +116,29 @@ func TestParseIDFromPath(t *testing.T) {
 			t.Errorf("status = %d, want %d", got, want)
 		}
 	})
+
+	t.Run("non-positive supplied id returns false and 400", func(t *testing.T) {
+		t.Parallel()
+		for _, path := range []string{"/items/0", "/items/-1"} {
+			t.Run(path, func(t *testing.T) {
+				t.Parallel()
+				var gotOK bool
+				mux := http.NewServeMux()
+				mux.HandleFunc("GET /items/{id}", func(w http.ResponseWriter, r *http.Request) {
+					_, gotOK = ParseIDFromPath(w, r, slog.Default(), "id")
+				})
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+				w := httptest.NewRecorder()
+				mux.ServeHTTP(w, req)
+				if got, want := gotOK, false; got != want {
+					t.Errorf("ok = %v, want %v", got, want)
+				}
+				if got, want := w.Code, http.StatusBadRequest; got != want {
+					t.Errorf("status = %d, want %d", got, want)
+				}
+			})
+		}
+	})
 }
 
 func TestIDFromSlugID(t *testing.T) {
