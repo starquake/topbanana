@@ -219,7 +219,7 @@ export class GameApp {
                 console.error('resume on init failed', err);
                 this.gameId = null;
                 this.question = null;
-                this.breakItem = null;
+                this.roundItem = null;
             }
         }
     }

@@ -58,26 +58,32 @@ test('admin can add, edit, and delete a round on a quiz', async ({ page, browser
   await page.getByRole('button', { name: 'Save round' }).click();
 
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
-  await expect(page.getByText('Picture Round')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Picture Round' })).toBeVisible();
   await expect(page.getByText('Welcome, take a breath')).toBeVisible();
 
   // Edit the round - rename it and change the summary.
-  const pictureSection = page.locator('.round-section', { hasText: 'Picture Round' });
+  const pictureSection = page.locator('.round-section')
+    .filter({ has: page.getByRole('heading', { name: 'Picture Round' }) });
   await pictureSection.getByRole('link', { name: 'Edit round' }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/rounds\/\d+\/edit$/);
   await page.locator('input[name=title]').fill('Music Round');
   await page.locator('textarea[name=summary]').fill('Take a deep breath');
   await page.getByRole('button', { name: 'Save round' }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
-  await expect(page.getByText('Music Round')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Music Round' })).toBeVisible();
   await expect(page.getByText('Take a deep breath')).toBeVisible();
-  await expect(page.getByText('Picture Round')).toBeHidden();
+  await expect(page.getByRole('heading', { name: 'Picture Round' })).toBeHidden();
 
   // Delete the round via its per-section modal.
-  const musicSection = page.locator('.round-section', { hasText: 'Music Round' });
+  const musicSection = page.locator('.round-section')
+    .filter({ has: page.getByRole('heading', { name: 'Music Round' }) });
   await musicSection.getByRole('button', { name: 'Delete round' }).click();
-  await page.getByRole('button', { name: 'Delete', exact: true }).click();
-  await expect(page.getByText('Music Round')).toBeHidden();
+  // The page also carries a top-level "Delete" quiz button, so scope the
+  // confirm click to the open delete-round dialog.
+  const deleteRoundDialog = page.getByRole('dialog', { name: 'Delete round' })
+    .filter({ visible: true });
+  await deleteRoundDialog.getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Music Round' })).toBeHidden();
 });
 
 test('register, create a quiz with varied questions, and see them on the quiz view', async ({ page, browserName }) => {
