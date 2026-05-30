@@ -38,80 +38,46 @@ test('admin quiz view hides answer options behind a per-question spoiler toggle'
   await expect(firstSummary).toContainText('Show spoilers');
 });
 
-test('admin can add, edit, and delete a break on a quiz', async ({ page, browserName }) => {
-  // #167 — break CRUD through the admin UI. The break is placed into
-  // a slot in the play sequence via the "Insert after" dropdown, and
-  // the quiz view renders questions and breaks interleaved.
-  const username = `e2e-admin-breaks-${browserName}`;
-  const quizTitle = `E2E Breaks Quiz ${browserName}`;
+test('admin can add, edit, and delete a round on a quiz', async ({ page, browserName }) => {
+  // #444 — round CRUD through the admin UI. Questions are grouped into
+  // rounds; every quiz starts with a default 'Round 1', so the created
+  // round is a second section. Selectors scope to its .round-section to
+  // stay unambiguous against the default round.
+  const username = `e2e-admin-rounds-${browserName}`;
+  const quizTitle = `E2E Rounds Quiz ${browserName}`;
 
   await registerAdmin(page, username);
   await createQuizWithQuestions(page, quizTitle);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  // Add a break at the very beginning (position=0).
-  await page.getByRole('link', { name: /add break/i }).click();
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/breaks\/new$/);
-  await page.locator(':is(input, textarea)[name=text]').fill('Welcome, take a breath');
-  await page.locator('select[name=position]').selectOption({ label: '(Beginning)' });
-  await page.getByRole('button', { name: 'Save break' }).click();
+  // Add a round with a name and a summary.
+  await page.getByRole('link', { name: /add round/i }).click();
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/rounds\/new$/);
+  await page.locator('input[name=title]').fill('Picture Round');
+  await page.locator('textarea[name=summary]').fill('Welcome, take a breath');
+  await page.getByRole('button', { name: 'Save round' }).click();
 
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+  await expect(page.getByText('Picture Round')).toBeVisible();
   await expect(page.getByText('Welcome, take a breath')).toBeVisible();
 
-  // The break sits BEFORE the first question in the interleaved
-  // sequence. q-row carries .q-row-break for break rows; ranging the
-  // sequence we expect the first row to be the break, then the first
-  // question.
-  const firstRow = page.locator('article.q-row').nth(0);
-  await expect(firstRow).toHaveClass(/q-row-break/);
-  await expect(firstRow).toContainText('Welcome, take a breath');
-  const secondRow = page.locator('article.q-row').nth(1);
-  await expect(secondRow).not.toHaveClass(/q-row-break/);
-  await expect(secondRow).toContainText('What is 2+2?');
-
-  // Edit the break - move it to "after Q1" and change the text.
-  await page.getByRole('link', { name: 'Edit break' }).click();
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/breaks\/\d+\/edit$/);
-  await page.locator(':is(input, textarea)[name=text]').fill('Take a deep breath');
-  await page.locator('select[name=position]').selectOption({ label: 'Question 1: What is 2+2?' });
-  await page.getByRole('button', { name: 'Save break' }).click();
+  // Edit the round - rename it and change the summary.
+  const pictureSection = page.locator('.round-section', { hasText: 'Picture Round' });
+  await pictureSection.getByRole('link', { name: 'Edit round' }).click();
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/rounds\/\d+\/edit$/);
+  await page.locator('input[name=title]').fill('Music Round');
+  await page.locator('textarea[name=summary]').fill('Take a deep breath');
+  await page.getByRole('button', { name: 'Save round' }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+  await expect(page.getByText('Music Round')).toBeVisible();
   await expect(page.getByText('Take a deep breath')).toBeVisible();
-  await expect(page.getByText('Welcome, take a breath')).toBeHidden();
+  await expect(page.getByText('Picture Round')).toBeHidden();
 
-  // After the edit, the break should sit between Q1 and Q2 in the
-  // interleaved sequence (Q1 at idx 0, break at idx 1, Q2 at idx 2).
-  await expect(page.locator('article.q-row').nth(0)).toContainText('What is 2+2?');
-  await expect(page.locator('article.q-row').nth(1)).toHaveClass(/q-row-break/);
-  await expect(page.locator('article.q-row').nth(1)).toContainText('Take a deep breath');
-  await expect(page.locator('article.q-row').nth(2)).toContainText('Which animals are mammals?');
-
-  // #167 - click the break's "Move break down" arrow. The break is at
-  // position 1 (after Q1) and the quiz has multiple questions, so the
-  // down arrow is rendered (not suppressed). After the click, the
-  // break should shift one slot - now between Q2 and Q3.
-  const breakRow = page.locator('article.q-row-break');
-  await breakRow.getByRole('button', { name: 'Move break down' }).click();
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
-  await expect(page.locator('article.q-row').nth(0)).toContainText('What is 2+2?');
-  await expect(page.locator('article.q-row').nth(1)).toContainText('Which animals are mammals?');
-  await expect(page.locator('article.q-row').nth(2)).toHaveClass(/q-row-break/);
-  await expect(page.locator('article.q-row').nth(2)).toContainText('Take a deep breath');
-
-  // Delete the break via the per-row modal.
-  await page.getByRole('button', { name: 'Delete break' }).click();
-  // Scope to the visible delete-break dialog: every break renders its
-  // own modal-delete-break-{id} node, all hidden until opened, so a
-  // multi-break fixture would make a prefix-only selector ambiguous.
-  // :visible narrows to the one the click opened.
-  const deleteDialog = page.locator('[id^="modal-delete-break-"]:visible');
-  await deleteDialog.getByRole('button', { name: 'Delete' }).click();
-
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
-  await expect(page.getByText('Take a deep breath')).toBeHidden();
-  // After deletion the sequence is back to questions only.
-  await expect(page.locator('article.q-row-break')).toHaveCount(0);
+  // Delete the round via its per-section modal.
+  const musicSection = page.locator('.round-section', { hasText: 'Music Round' });
+  await musicSection.getByRole('button', { name: 'Delete round' }).click();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(page.getByText('Music Round')).toBeHidden();
 });
 
 test('register, create a quiz with varied questions, and see them on the quiz view', async ({ page, browserName }) => {

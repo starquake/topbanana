@@ -2030,7 +2030,7 @@ func TestService_GetNext(t *testing.T) {
 		if got, want := item.Round.ID, round1; got != want {
 			t.Errorf("second boundary round = %d, want %d", got, want)
 		}
-		if err := svc.MarkRoundSeen(ctx, testGame.ID, 1, round1); err != nil {
+		if err = svc.MarkRoundSeen(ctx, testGame.ID, 1, round1); err != nil {
 			t.Fatalf("MarkRoundSeen (round1) err = %v, want nil", err)
 		}
 
@@ -2058,7 +2058,7 @@ func TestService_GetNext(t *testing.T) {
 		if got, want := item.Round.ID, round2.ID; got != want {
 			t.Errorf("fourth boundary round = %d, want %d", got, want)
 		}
-		if err := svc.MarkRoundSeen(ctx, testGame.ID, 1, round2.ID); err != nil {
+		if err = svc.MarkRoundSeen(ctx, testGame.ID, 1, round2.ID); err != nil {
 			t.Fatalf("MarkRoundSeen (round2) err = %v, want nil", err)
 		}
 

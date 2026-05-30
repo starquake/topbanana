@@ -339,7 +339,7 @@
                  during gameplay (#253) so we don't subtract for it
                  here. -->
             <div x-show="gameId && !finished">
-                <template x-if="question && !breakItem">
+                <template x-if="question && !roundItem">
                     <div class="flex flex-col min-h-[calc(100svh-5rem)] sm:min-h-[calc(100svh-8rem)]">
                         <!-- HUD chips: Q n/total + running score (#253). -->
                         <div class="flex justify-end gap-2 mb-4">
@@ -498,7 +498,7 @@
                         </button>
                     </div>
                 </template>
-                <template x-if="!question && !breakItem">
+                <template x-if="!question && !roundItem">
                     <p class="text-text-dim">Loading question...</p>
                 </template>
             </div>
