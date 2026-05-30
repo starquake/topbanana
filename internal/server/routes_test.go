@@ -181,6 +181,24 @@ func (stubQuizStore) MoveBreak(_ context.Context, _, _ int64, _ string) error {
 	return errRouteStub
 }
 
+func (stubQuizStore) ListGroupsByQuiz(_ context.Context, _ int64) ([]*quiz.Group, error) {
+	return nil, errRouteStub
+}
+
+func (stubQuizStore) GetGroup(_ context.Context, _ int64) (*quiz.Group, error) {
+	return nil, errRouteStub
+}
+
+func (stubQuizStore) GetDefaultGroup(_ context.Context, _ int64) (*quiz.Group, error) {
+	return nil, errRouteStub
+}
+func (stubQuizStore) CreateGroup(_ context.Context, _ *quiz.Group) error { return errRouteStub }
+func (stubQuizStore) UpdateGroup(_ context.Context, _ *quiz.Group) error { return errRouteStub }
+func (stubQuizStore) DeleteGroup(_ context.Context, _ int64) error       { return errRouteStub }
+func (stubQuizStore) MoveGroup(_ context.Context, _, _ int64, _ string) error {
+	return errRouteStub
+}
+
 type stubGameStore struct{}
 
 func (stubGameStore) Ping(_ context.Context) error { return nil }

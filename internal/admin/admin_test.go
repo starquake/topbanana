@@ -141,11 +141,11 @@ func (s stubGameStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64)
 	return s.listQuizIDsForPlayer(ctx, playerID)
 }
 
-func (stubGameStore) MarkBreakSeen(_ context.Context, _ string, _ int64) error {
+func (stubGameStore) MarkRoundSeen(_ context.Context, _ string, _ int64) error {
 	return errors.ErrUnsupported
 }
 
-func (stubGameStore) ListSeenBreakIDsByGame(_ context.Context, _ string) ([]int64, error) {
+func (stubGameStore) ListSeenRoundIDsByGame(_ context.Context, _ string) ([]int64, error) {
 	return nil, errors.ErrUnsupported
 }
 
@@ -175,12 +175,14 @@ type stubQuizStore struct {
 	deleteQuestion          func(ctx context.Context, id int64) error
 	listQuestions           func(ctx context.Context, quizID int64) ([]*quiz.Question, error)
 	swapQuestionPositions   func(ctx context.Context, quizID, questionID int64, direction string) error
-	listBreaksByQuiz        func(ctx context.Context, quizID int64) ([]*quiz.Break, error)
-	getBreakByID            func(ctx context.Context, id int64) (*quiz.Break, error)
-	createBreak             func(ctx context.Context, b *quiz.Break) error
-	updateBreak             func(ctx context.Context, b *quiz.Break) error
-	deleteBreak             func(ctx context.Context, id int64) error
-	moveBreak               func(ctx context.Context, quizID, breakID int64, direction string) error
+	listRoundsByQuiz        func(ctx context.Context, quizID int64) ([]*quiz.Round, error)
+	getRoundByID            func(ctx context.Context, id int64) (*quiz.Round, error)
+	getDefaultRound         func(ctx context.Context, quizID int64) (*quiz.Round, error)
+	createRound             func(ctx context.Context, g *quiz.Round) error
+	updateRound             func(ctx context.Context, g *quiz.Round) error
+	deleteRound             func(ctx context.Context, id int64) error
+	moveRound               func(ctx context.Context, quizID, roundID int64, direction string) error
+	moveQuestionToRound     func(ctx context.Context, quizID, questionID, roundID int64) error
 }
 
 func (stubQuizStore) Ping(_ context.Context) error {
@@ -313,52 +315,68 @@ func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Opti
 	return nil, errors.ErrUnsupported
 }
 
-func (s stubQuizStore) ListBreaksByQuiz(ctx context.Context, quizID int64) ([]*quiz.Break, error) {
-	if s.listBreaksByQuiz == nil {
-		return nil, errors.ErrUnsupported
+func (s stubQuizStore) ListRoundsByQuiz(ctx context.Context, quizID int64) ([]*quiz.Round, error) {
+	if s.listRoundsByQuiz == nil {
+		return nil, errors.New("listRoundsByQuiz not supplied in stub")
 	}
 
-	return s.listBreaksByQuiz(ctx, quizID)
+	return s.listRoundsByQuiz(ctx, quizID)
 }
 
-func (s stubQuizStore) GetBreak(ctx context.Context, id int64) (*quiz.Break, error) {
-	if s.getBreakByID == nil {
-		return nil, errors.New("getBreakByID not supplied in stub")
+func (s stubQuizStore) GetRound(ctx context.Context, id int64) (*quiz.Round, error) {
+	if s.getRoundByID == nil {
+		return nil, errors.New("getRoundByID not supplied in stub")
 	}
 
-	return s.getBreakByID(ctx, id)
+	return s.getRoundByID(ctx, id)
 }
 
-func (s stubQuizStore) CreateBreak(ctx context.Context, b *quiz.Break) error {
-	if s.createBreak == nil {
-		return errors.New("createBreak not supplied in stub")
+func (s stubQuizStore) GetDefaultRound(ctx context.Context, quizID int64) (*quiz.Round, error) {
+	if s.getDefaultRound == nil {
+		return nil, errors.New("getDefaultRound not supplied in stub")
 	}
 
-	return s.createBreak(ctx, b)
+	return s.getDefaultRound(ctx, quizID)
 }
 
-func (s stubQuizStore) UpdateBreak(ctx context.Context, b *quiz.Break) error {
-	if s.updateBreak == nil {
-		return errors.New("updateBreak not supplied in stub")
+func (s stubQuizStore) CreateRound(ctx context.Context, g *quiz.Round) error {
+	if s.createRound == nil {
+		return errors.New("createRound not supplied in stub")
 	}
 
-	return s.updateBreak(ctx, b)
+	return s.createRound(ctx, g)
 }
 
-func (s stubQuizStore) DeleteBreak(ctx context.Context, id int64) error {
-	if s.deleteBreak == nil {
-		return errors.New("deleteBreak not supplied in stub")
+func (s stubQuizStore) UpdateRound(ctx context.Context, g *quiz.Round) error {
+	if s.updateRound == nil {
+		return errors.New("updateRound not supplied in stub")
 	}
 
-	return s.deleteBreak(ctx, id)
+	return s.updateRound(ctx, g)
 }
 
-func (s stubQuizStore) MoveBreak(ctx context.Context, quizID, breakID int64, direction string) error {
-	if s.moveBreak == nil {
-		return errors.New("moveBreak not supplied in stub")
+func (s stubQuizStore) DeleteRound(ctx context.Context, id int64) error {
+	if s.deleteRound == nil {
+		return errors.New("deleteRound not supplied in stub")
 	}
 
-	return s.moveBreak(ctx, quizID, breakID, direction)
+	return s.deleteRound(ctx, id)
+}
+
+func (s stubQuizStore) MoveRound(ctx context.Context, quizID, roundID int64, direction string) error {
+	if s.moveRound == nil {
+		return errors.New("moveRound not supplied in stub")
+	}
+
+	return s.moveRound(ctx, quizID, roundID, direction)
+}
+
+func (s stubQuizStore) MoveQuestionToRound(ctx context.Context, quizID, questionID, roundID int64) error {
+	if s.moveQuestionToRound == nil {
+		return errors.New("moveQuestionToRound not supplied in stub")
+	}
+
+	return s.moveQuestionToRound(ctx, quizID, questionID, roundID)
 }
 
 func TestTemplateRenderer_Render_LogsError(t *testing.T) {
@@ -700,7 +718,7 @@ func TestHandleQuizView(t *testing.T) {
 			quizExists: func(_ context.Context, _ int64) (bool, error) {
 				return true, nil
 			},
-			listBreaksByQuiz: func(_ context.Context, _ int64) ([]*quiz.Break, error) {
+			listRoundsByQuiz: func(_ context.Context, _ int64) ([]*quiz.Round, error) {
 				return nil, nil
 			},
 		}
@@ -2998,165 +3016,6 @@ func TestHandleQuestionMove(t *testing.T) {
 	})
 }
 
-func TestHandleBreakMove(t *testing.T) {
-	t.Parallel()
-
-	t.Run("move succeeds and redirects to quiz view", func(t *testing.T) {
-		t.Parallel()
-
-		buf := bytes.Buffer{}
-		logger := slog.New(slog.NewTextHandler(&buf, nil))
-
-		var seen struct {
-			quizID, breakID int64
-			direction       string
-		}
-		store := stubQuizStore{
-			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{ID: id, Title: "Q", CreatedByPlayerID: testAdminID}, nil
-			},
-			moveBreak: func(_ context.Context, quizID, breakID int64, direction string) error {
-				seen.quizID, seen.breakID, seen.direction = quizID, breakID, direction
-
-				return nil
-			},
-		}
-
-		handler := HandleBreakMove(logger, nil, store)
-		req, err := http.NewRequestWithContext(
-			t.Context(), http.MethodPost,
-			"/admin/quizzes/7/breaks/9/move/up", nil,
-		)
-		if err != nil {
-			t.Fatalf("NewRequest err = %v, want nil", err)
-		}
-		req.SetPathValue("quizID", "7")
-		req.SetPathValue("breakID", "9")
-		req.SetPathValue("direction", "up")
-		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, withTestAdmin(req))
-
-		if got, want := rr.Code, http.StatusSeeOther; got != want {
-			t.Fatalf("status = %d, want %d, log:\n%v", got, want, buf.String())
-		}
-		if got, want := rr.Header().Get("Location"), "/admin/quizzes/7"; got != want {
-			t.Errorf("Location = %q, want %q", got, want)
-		}
-		if got, want := seen.quizID, int64(7); got != want {
-			t.Errorf("seen.quizID = %d, want %d", got, want)
-		}
-		if got, want := seen.breakID, int64(9); got != want {
-			t.Errorf("seen.breakID = %d, want %d", got, want)
-		}
-		if got, want := seen.direction, "up"; got != want {
-			t.Errorf("seen.direction = %q, want %q", got, want)
-		}
-	})
-
-	t.Run("impossible move redirects without surfacing the failure", func(t *testing.T) {
-		t.Parallel()
-		// The arrow is hidden in the UI when the move is impossible, so
-		// a request reaching the handler is a stale form post. Redirect
-		// back to the quiz view; the re-rendered page reflects the
-		// (unchanged) state.
-
-		buf := bytes.Buffer{}
-		logger := slog.New(slog.NewTextHandler(&buf, nil))
-		store := stubQuizStore{
-			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{ID: id, Title: "Q", CreatedByPlayerID: testAdminID}, nil
-			},
-			moveBreak: func(_ context.Context, _, _ int64, _ string) error {
-				return quiz.ErrBreakMoveImpossible
-			},
-		}
-
-		handler := HandleBreakMove(logger, nil, store)
-		req, err := http.NewRequestWithContext(
-			t.Context(), http.MethodPost,
-			"/admin/quizzes/7/breaks/9/move/down", nil,
-		)
-		if err != nil {
-			t.Fatalf("NewRequest err = %v, want nil", err)
-		}
-		req.SetPathValue("quizID", "7")
-		req.SetPathValue("breakID", "9")
-		req.SetPathValue("direction", "down")
-		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, withTestAdmin(req))
-
-		if got, want := rr.Code, http.StatusSeeOther; got != want {
-			t.Fatalf("status = %d, want %d, log:\n%v", got, want, buf.String())
-		}
-	})
-
-	t.Run("invalid direction renders 400", func(t *testing.T) {
-		t.Parallel()
-
-		buf := bytes.Buffer{}
-		logger := slog.New(slog.NewTextHandler(&buf, nil))
-		store := stubQuizStore{
-			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{ID: id, Title: "Q", CreatedByPlayerID: testAdminID}, nil
-			},
-			moveBreak: func(_ context.Context, _, _ int64, _ string) error {
-				return quiz.ErrInvalidDirection
-			},
-		}
-
-		handler := HandleBreakMove(logger, nil, store)
-		req, err := http.NewRequestWithContext(
-			t.Context(), http.MethodPost,
-			"/admin/quizzes/7/breaks/9/move/sideways", nil,
-		)
-		if err != nil {
-			t.Fatalf("NewRequest err = %v, want nil", err)
-		}
-		req.SetPathValue("quizID", "7")
-		req.SetPathValue("breakID", "9")
-		req.SetPathValue("direction", "sideways")
-		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, withTestAdmin(req))
-
-		if got, want := rr.Code, http.StatusBadRequest; got != want {
-			t.Errorf("status = %d, want %d, log:\n%v", got, want, buf.String())
-		}
-	})
-
-	t.Run("missing break renders 404", func(t *testing.T) {
-		t.Parallel()
-
-		buf := bytes.Buffer{}
-		logger := slog.New(slog.NewTextHandler(&buf, nil))
-		store := stubQuizStore{
-			getQuizByID: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{ID: id, Title: "Q", CreatedByPlayerID: testAdminID}, nil
-			},
-			moveBreak: func(_ context.Context, _, _ int64, _ string) error {
-				return quiz.ErrBreakNotFound
-			},
-		}
-
-		handler := HandleBreakMove(logger, nil, store)
-		req, err := http.NewRequestWithContext(
-			t.Context(), http.MethodPost,
-			"/admin/quizzes/7/breaks/9/move/up", nil,
-		)
-		if err != nil {
-			t.Fatalf("NewRequest err = %v, want nil", err)
-		}
-		req.SetPathValue("quizID", "7")
-		req.SetPathValue("breakID", "9")
-		req.SetPathValue("direction", "up")
-		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, withTestAdmin(req))
-
-		if got, want := rr.Code, http.StatusNotFound; got != want {
-			t.Errorf("status = %d, want %d, log:\n%v", got, want, buf.String())
-		}
-	})
-}
-
 func TestHandleQuestionDelete(t *testing.T) {
 	t.Parallel()
 
@@ -3383,7 +3242,7 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 			quizExists: func(_ context.Context, _ int64) (bool, error) {
 				return true, nil
 			},
-			listBreaksByQuiz: func(_ context.Context, _ int64) ([]*quiz.Break, error) {
+			listRoundsByQuiz: func(_ context.Context, _ int64) ([]*quiz.Round, error) {
 				return nil, nil
 			},
 		}
@@ -3448,7 +3307,7 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 			quizExists: func(_ context.Context, _ int64) (bool, error) {
 				return true, nil
 			},
-			listBreaksByQuiz: func(_ context.Context, _ int64) ([]*quiz.Break, error) {
+			listRoundsByQuiz: func(_ context.Context, _ int64) ([]*quiz.Round, error) {
 				return nil, nil
 			},
 		}

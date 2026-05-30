@@ -70,38 +70,42 @@ type Store interface {
 	DeleteQuiz(ctx context.Context, id int64) error
 	// DeleteQuestion deletes a question and all its options by ID.
 	DeleteQuestion(ctx context.Context, id int64) error
-	// ListBreaksByQuiz returns the breaks for a quiz in ascending
-	// position order (#167).
-	ListBreaksByQuiz(ctx context.Context, quizID int64) ([]*Break, error)
-	// GetBreak returns a break by its ID. Returns ErrBreakNotFound when
-	// the row does not exist.
-	GetBreak(ctx context.Context, id int64) (*Break, error)
-	// CreateBreak inserts a break at the caller-supplied position. The
-	// position semantics are "the question position this break appears
-	// AFTER in the play sequence" - 0 means before the first question,
-	// N means after the question at position N. Returns
-	// ErrBreakPositionTaken when the (quiz_id, position) slot is
-	// already in use; the admin form maps that to an inline error.
-	CreateBreak(ctx context.Context, b *Break) error
-	// UpdateBreak updates an existing break's mutable fields (text and
-	// position). Returns ErrUpdatingBreakNoRowsAffected when the id
-	// does not match a row, and ErrBreakPositionTaken when the new
-	// position collides with another break on the same quiz.
-	UpdateBreak(ctx context.Context, b *Break) error
-	// DeleteBreak removes a break by ID. Returns
-	// ErrDeletingBreakNoRowsAffected when the id does not match a row.
-	DeleteBreak(ctx context.Context, id int64) error
-	// MoveBreak shifts a break by one slot in the given direction
+	// ListRoundsByQuiz returns the rounds for a quiz
+	// in ascending position order (#444).
+	ListRoundsByQuiz(ctx context.Context, quizID int64) ([]*Round, error)
+	// GetRound returns a round by its ID. Returns
+	// ErrRoundNotFound when the row does not exist.
+	GetRound(ctx context.Context, id int64) (*Round, error)
+	// GetDefaultRound returns the lowest-position round for a quiz.
+	// Every quiz has at least one round (the default created by
+	// migration 20260530000000), so question-insert paths resolve the
+	// round to attach a new question to via this method. Returns
+	// ErrRoundNotFound when the quiz has no rounds.
+	GetDefaultRound(ctx context.Context, quizID int64) (*Round, error)
+	// CreateRound inserts a round at the caller-supplied
+	// position. Returns ErrRoundPositionTaken when the (quiz_id,
+	// position) slot is already in use.
+	CreateRound(ctx context.Context, g *Round) error
+	// UpdateRound updates a round's mutable fields (title, round summary,
+	// and position). Returns ErrUpdatingRoundNoRowsAffected when the id
+	// does not match a row, and ErrRoundPositionTaken when the new
+	// position collides with another round on the same quiz.
+	UpdateRound(ctx context.Context, g *Round) error
+	// DeleteRound removes a round by ID. Returns
+	// ErrDeletingRoundNoRowsAffected when the id does not match a row.
+	DeleteRound(ctx context.Context, id int64) error
+	// MoveRound shifts a round by one slot in the given direction
 	// ("up" = decrement position, "down" = increment position) within
-	// the same quiz. Returns ErrBreakNotFound when the break id does
+	// the same quiz. Returns ErrRoundNotFound when the round id does
 	// not belong to the quiz, ErrInvalidDirection when direction is
-	// neither "up" nor "down", and ErrBreakMoveImpossible when the
-	// target slot is out of range (e.g. would go below 0 or past the
-	// last question) or already occupied by another break. The store
-	// is the source of truth for slot eligibility; the admin template
-	// hides the arrow in advance via CanMoveUp/CanMoveDown but the
-	// store re-checks defensively.
-	MoveBreak(ctx context.Context, quizID, breakID int64, direction string) error
+	// neither "up" nor "down", and ErrRoundMoveImpossible when the
+	// target slot is out of range or already occupied by another round.
+	MoveRound(ctx context.Context, quizID, groupID int64, direction string) error
+	// MoveQuestionToRound reassigns the question with questionID to the
+	// round with groupID. Both must belong to quizID; a mismatch returns
+	// ErrQuestionNotFound (question not on quiz) or ErrRoundNotFound
+	// (round not on quiz). The question keeps its quiz-wide position.
+	MoveQuestionToRound(ctx context.Context, quizID, questionID, groupID int64) error
 }
 
 var (
@@ -150,33 +154,27 @@ var (
 	// translate the collision into a 409 + inline form error instead of
 	// the generic 500 the wrapped SQLite error would produce (#293).
 	ErrSlugTaken = errors.New("quiz slug already in use")
-	// ErrBreakNotFound is returned when a break is not found (#167).
-	ErrBreakNotFound = errors.New("break not found")
-	// ErrBreakPositionTaken is returned by CreateBreak / UpdateBreak when the
-	// requested (quiz_id, position) slot is already occupied. The unique
-	// index breaks_quiz_position_idx surfaces this as a SQLite
-	// SQLITE_CONSTRAINT_UNIQUE; mapping it to a sentinel lets the admin
-	// handler render an inline form error instead of the generic 500 the
-	// wrapped driver error would produce (#167).
-	ErrBreakPositionTaken = errors.New("break position already taken")
-	// ErrUpdatingBreakNoRowsAffected is returned when an UPDATE breaks
-	// statement matches no rows; surfaces a stale id without the caller
-	// having to inspect a sql.Result (#167).
-	ErrUpdatingBreakNoRowsAffected = errors.New("no rows affected when updating break")
-	// ErrDeletingBreakNoRowsAffected is returned when a DELETE breaks
-	// statement matches no rows (#167).
-	ErrDeletingBreakNoRowsAffected = errors.New("no rows affected when deleting break")
-	// ErrCannotUpdateBreakWithIDZero guards UpdateBreak against a
-	// caller that forgot to set the ID (#167).
-	ErrCannotUpdateBreakWithIDZero = errors.New("cannot update break with ID 0")
-	// ErrBreakMoveImpossible is returned by MoveBreak when the
-	// requested direction has no valid target slot - either the
-	// resulting position is out of range (below 0, or beyond the last
-	// question's position) or another break already occupies it. The
-	// admin handler maps this to a redirect rather than a 500: the
-	// arrow should never have been clickable; surfacing it as a
-	// no-op preserves UX symmetry with the question move (#167).
-	ErrBreakMoveImpossible = errors.New("break cannot move in that direction")
+	// ErrRoundNotFound is returned when a round is not found (#444).
+	ErrRoundNotFound = errors.New("round not found")
+	// ErrRoundPositionTaken is returned by CreateRound / UpdateRound when
+	// the requested (quiz_id, position) slot is already occupied. The
+	// unique index rounds_quiz_position_idx surfaces this as a
+	// SQLite SQLITE_CONSTRAINT_UNIQUE (#444).
+	ErrRoundPositionTaken = errors.New("round position already taken")
+	// ErrUpdatingRoundNoRowsAffected is returned when an UPDATE
+	// rounds statement matches no rows; surfaces a stale id
+	// without the caller having to inspect a sql.Result (#444).
+	ErrUpdatingRoundNoRowsAffected = errors.New("no rows affected when updating round")
+	// ErrDeletingRoundNoRowsAffected is returned when a DELETE
+	// rounds statement matches no rows (#444).
+	ErrDeletingRoundNoRowsAffected = errors.New("no rows affected when deleting round")
+	// ErrCannotUpdateRoundWithIDZero guards UpdateRound against a caller
+	// that forgot to set the ID (#444).
+	ErrCannotUpdateRoundWithIDZero = errors.New("cannot update round with ID 0")
+	// ErrRoundMoveImpossible is returned by MoveRound when the requested
+	// direction has no valid target slot - either the resulting position
+	// is out of range or another round already occupies it (#444).
+	ErrRoundMoveImpossible = errors.New("round cannot move in that direction")
 )
 
 // Reorder directions accepted by [Store.SwapQuestionPositions].
@@ -261,8 +259,13 @@ type Quiz struct {
 // quiz default" - the game service applies the priority chain at
 // question-issue time (#99).
 type Question struct {
-	ID               int64
-	QuizID           int64
+	ID     int64
+	QuizID int64
+	// RoundID is the round (round) this question belongs to
+	// (#444). NOT NULL at the DB level since migration 20260530000000;
+	// the store resolves it to the quiz's default round on create when
+	// the caller leaves it zero.
+	RoundID          int64
 	Text             string
 	ImageURL         string
 	Position         int
@@ -278,23 +281,21 @@ type Option struct {
 	Correct    bool
 }
 
-// Break is an authored interlude between questions (#167). Position
-// names the slot the break sits in within the play sequence:
-//   - 0 means the break appears before the first question.
-//   - N (> 0) means the break appears after the question whose
-//     [Question.Position] equals N.
-//
-// Breaks are anchored to slots, not to a specific question, so a
-// question reorder via [Store.SwapQuestionPositions] does NOT move the
-// breaks attached to either side. The unique index
-// breaks_quiz_position_idx enforces at most one break per (quiz_id,
-// position) slot. Text is optional - an empty string is valid and the
-// player UI in slice 2 will fall back to "Continue" alone.
-type Break struct {
+// Round is a named section within a quiz (#444). Every question belongs
+// to exactly one round (questions.round_id is NOT NULL).
+// Position orders rounds within a quiz; the unique index
+// rounds_quiz_position_idx enforces at most one round per
+// (quiz_id, position) slot. Summary is the round summary authored later
+// via the admin UI; an empty string is valid. Questions is populated by
+// callers that need the round's questions; it is not loaded by the basic
+// round reads.
+type Round struct {
 	ID        int64
 	QuizID    int64
 	Position  int
-	Text      string
+	Title     string
+	Summary   string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	Questions []*Question
 }

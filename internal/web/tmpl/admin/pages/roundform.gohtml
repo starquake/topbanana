@@ -1,0 +1,78 @@
+{{define "content"}}
+    {{/* Breadcrumb */}}
+    <nav aria-label="breadcrumbs" class="crumb">
+        <a href="/admin">Admin</a>
+        <span class="crumb-sep" aria-hidden="true">/</span>
+        <a href="/admin/quizzes">Quizzes</a>
+        <span class="crumb-sep" aria-hidden="true">/</span>
+        <a href="/admin/quizzes/{{.Quiz.ID}}">{{.Quiz.Title}}</a>
+        <span class="crumb-sep" aria-hidden="true">/</span>
+        <span class="text-text" aria-current="page">{{if .Round.ID}}Edit round{{else}}New round{{end}}</span>
+    </nav>
+
+    <header class="flex flex-col md:flex-row md:items-end md:justify-between gap-6 mb-10 pb-6 border-b border-border-soft">
+        <div>
+            <h1 class="m-0 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(2rem,6vw,2.75rem)]">{{.Title}}</h1>
+            <p class="mt-2 max-w-[50ch] text-text-dim text-[0.95rem]">
+                {{if .Round.ID}}
+                    Edit the round in &ldquo;{{.Quiz.Title}}&rdquo;.
+                {{else}}
+                    Add a new round to &ldquo;{{.Quiz.Title}}&rdquo;. Give it a name and an optional summary shown when the round ends.
+                {{end}}
+            </p>
+        </div>
+    </header>
+
+    {{if .FormError}}
+        <div class="mb-6 px-4 py-3 rounded-sm border border-danger/40 bg-danger/10 text-danger text-[0.95rem]" role="alert">
+            {{.FormError}}
+        </div>
+    {{end}}
+
+    <form class="form-shell"
+            {{if .Round.ID}}
+                action="/admin/quizzes/{{.Round.QuizID}}/rounds/{{.Round.ID}}"
+            {{else}}
+                action="/admin/quizzes/{{.Quiz.ID}}/rounds"
+            {{end}}
+            method="POST">
+        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+        <input type="hidden" name="id" value="{{.Round.ID}}">
+
+        {{$titleErr := index .FieldErrors "title"}}
+        <div class="form-field">
+            <label class="label-eyebrow" for="title">
+                Round name
+                <span class="label-hint">Shown to hosts; not visible to players mid-game.</span>
+            </label>
+            <input type="text" id="title" name="title"
+                   value="{{.Round.Title}}"
+                   class="form-input{{if $titleErr}} form-input-error{{end}}"
+                   {{if $titleErr}}aria-invalid="true" aria-describedby="title-error"{{end}}>
+            {{if $titleErr}}
+                <p id="title-error" class="form-help-error" role="alert">{{$titleErr}}</p>
+            {{end}}
+        </div>
+
+        {{$textErr := index .FieldErrors "summary"}}
+        <div class="form-field">
+            <label class="label-eyebrow" for="summary">
+                Round summary
+                <span class="label-hint">Optional. Shown when this round ends, before the next round starts.</span>
+            </label>
+            <textarea id="summary" name="summary" rows="3"
+                      class="form-input min-h-[100px] resize-y{{if $textErr}} form-input-error{{end}}"
+                      {{if $textErr}}aria-invalid="true" aria-describedby="summary-error"{{end}}>{{.Round.Summary}}</textarea>
+            {{if $textErr}}
+                <p id="summary-error" class="form-help-error" role="alert">{{$textErr}}</p>
+            {{end}}
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" name="action" value="Save" class="btn-primary">
+                Save round
+            </button>
+            <a href="/admin/quizzes/{{.Quiz.ID}}" class="btn-ghost">Cancel</a>
+        </div>
+    </form>
+{{end}}

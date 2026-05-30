@@ -12,8 +12,6 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"modernc.org/sqlite"
-	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/game"
@@ -856,7 +854,12 @@ func TestQuizStore_UpdateQuiz(t *testing.T) {
 	if diff := cmp.Diff(qz, updatedQuiz,
 		cmpopts.SortSlices(lessQuestions),
 		cmpopts.SortSlices(lessOptions),
-		cmpopts.EquateApproxTime(3*time.Second)); diff != "" {
+		cmpopts.EquateApproxTime(3*time.Second),
+		// UpdateQuiz assigns each question to the quiz's default group
+		// (#444); the expected literal builds fresh questions and cannot
+		// predict that id, so ignore RoundID here. The dedicated group
+		// tests pin the assignment.
+		cmpopts.IgnoreFields(quiz.Question{}, "RoundID")); diff != "" {
 		t.Errorf("quizzes diff (-got +want):\n%s", diff)
 	}
 }
@@ -1072,22 +1075,17 @@ func TestQuizStore_CreateQuestion_ErrorHandling(t *testing.T) {
 
 		testQuestion := newTestQuestions()[0]
 
+		// A question for a quiz that does not exist has no default group
+		// to land in (#444): execCreateQuestion resolves the group before
+		// the insert, so the failure surfaces there rather than as the
+		// quiz_id FK violation it was before group_id existed.
 		err := quizStore.CreateQuestion(t.Context(), testQuestion)
-		if err == nil {
-			t.Fatal("got nil, want error")
-		}
-		sqliteErr := &sqlite.Error{}
-		if errors.As(err, &sqliteErr) {
-			code := sqliteErr.Code()
-			if got, want := code, sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY; got != want {
-				t.Fatalf("got error code %d, want %d", code, sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY)
-			}
-		} else {
-			t.Fatalf("got error %v, want sqlite.Error", err)
+		if got, want := err, quiz.ErrRoundNotFound; !errors.Is(got, want) {
+			t.Fatalf("err = %v, want %v", got, want)
 		}
 	})
 
-	t.Run("fail creating option with nonexisting questionID", func(t *testing.T) {
+	t.Run("fail creating question on nonexisting quiz with a supplied ID", func(t *testing.T) {
 		t.Parallel()
 
 		db := dbtest.Open(t)
@@ -1099,18 +1097,11 @@ func TestQuizStore_CreateQuestion_ErrorHandling(t *testing.T) {
 		testQuestion := newTestQuestions()[0]
 		testQuestion.ID = suppliedQuestionID
 
+		// Same as above: the quiz does not exist, so default-group
+		// resolution fails before any insert.
 		err := quizStore.CreateQuestion(t.Context(), testQuestion)
-		if err == nil {
-			t.Fatal("got nil, want error")
-		}
-		sqliteErr := &sqlite.Error{}
-		if errors.As(err, &sqliteErr) {
-			code := sqliteErr.Code()
-			if got, want := code, sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY; got != want {
-				t.Fatalf("got error code %d, want %d", code, sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY)
-			}
-		} else {
-			t.Fatalf("got error %v, want sqlite error", err)
+		if got, want := err, quiz.ErrRoundNotFound; !errors.Is(got, want) {
+			t.Fatalf("err = %v, want %v", got, want)
 		}
 	})
 }
@@ -1134,7 +1125,11 @@ func TestQuizStore_UpdateQuestion(t *testing.T) {
 	updatedQuestion := &quiz.Question{
 		ID:     originalQuiz.Questions[0].ID,
 		QuizID: originalQuiz.ID,
-		Text:   originalQuiz.Questions[0].Text + " Updated",
+		// UpdateQuestion does not move a question between groups (#444),
+		// so the round it was created in (the quiz's default group) is
+		// the value GetQuestion reads back.
+		RoundID: originalQuiz.Questions[0].RoundID,
+		Text:    originalQuiz.Questions[0].Text + " Updated",
 		Options: []*quiz.Option{
 			{
 				ID:      originalQuiz.Questions[0].Options[1].ID,

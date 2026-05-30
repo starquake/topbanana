@@ -123,8 +123,8 @@ WHERE quiz_id = ?
 ORDER BY position;
 
 -- name: CreateQuestion :one
-INSERT INTO questions (quiz_id, text, position, image_url, time_limit_seconds)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO questions (quiz_id, group_id, text, position, image_url, time_limit_seconds)
+VALUES (?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: UpdateQuestion :execresult

@@ -103,6 +103,34 @@ func (*stubQuizStore) MoveBreak(_ context.Context, _, _ int64, _ string) error {
 	return errors.ErrUnsupported
 }
 
+func (*stubQuizStore) ListGroupsByQuiz(_ context.Context, _ int64) ([]*quiz.Group, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (*stubQuizStore) GetGroup(_ context.Context, _ int64) (*quiz.Group, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (*stubQuizStore) GetDefaultGroup(_ context.Context, _ int64) (*quiz.Group, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (*stubQuizStore) CreateGroup(_ context.Context, _ *quiz.Group) error {
+	return errors.ErrUnsupported
+}
+
+func (*stubQuizStore) UpdateGroup(_ context.Context, _ *quiz.Group) error {
+	return errors.ErrUnsupported
+}
+
+func (*stubQuizStore) DeleteGroup(_ context.Context, _ int64) error {
+	return errors.ErrUnsupported
+}
+
+func (*stubQuizStore) MoveGroup(_ context.Context, _, _ int64, _ string) error {
+	return errors.ErrUnsupported
+}
+
 // stubGameStore satisfies game.Store for the /healthz handler tests.
 // Only Ping is exercised by the handler, so every other method returns
 // errors.ErrUnsupported to surface accidental use.

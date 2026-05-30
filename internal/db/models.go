@@ -18,15 +18,6 @@ type AdminAudit struct {
 	CreatedAt      time.Time
 }
 
-type Break struct {
-	ID        int64
-	QuizID    int64
-	Position  int64
-	Text      string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
-
 type EmailVerifyToken struct {
 	TokenHash    string
 	PlayerID     int64
@@ -68,9 +59,9 @@ type GameQuestion struct {
 	ExpiredAt  time.Time
 }
 
-type GameSeenBreak struct {
+type GameSeenRound struct {
 	GameID  string
-	BreakID int64
+	RoundID int64
 	SeenAt  time.Time
 }
 
@@ -113,6 +104,7 @@ type PlayerIdentity struct {
 type Question struct {
 	ID               int64
 	QuizID           int64
+	RoundID          int64
 	Text             string
 	Position         int64
 	ImageUrl         string
@@ -129,4 +121,14 @@ type Quiz struct {
 	CreatedByPlayerID int64
 	TimeLimitSeconds  int64
 	Visibility        string
+}
+
+type Round struct {
+	ID        int64
+	QuizID    int64
+	Position  int64
+	Title     string
+	Summary   string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"testing"
 	"time"
 
@@ -32,8 +31,8 @@ type stubStore struct {
 	getGameByPlayerAndQuiz             func(ctx context.Context, playerID, quizID int64) (*Game, error)
 	deleteGamesForPlayerOnQuiz         func(ctx context.Context, playerID, quizID int64) error
 	listQuizIDsForPlayer               func(ctx context.Context, playerID int64) ([]int64, error)
-	markBreakSeen                      func(ctx context.Context, gameID string, breakID int64) error
-	listSeenBreakIDsByGame             func(ctx context.Context, gameID string) ([]int64, error)
+	markGroupSeen                      func(ctx context.Context, gameID string, roundID int64) error
+	listSeenRoundIDsByGame             func(ctx context.Context, gameID string) ([]int64, error)
 }
 
 func (stubStore) Ping(_ context.Context) error { return nil }
@@ -130,23 +129,24 @@ func (s stubStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]
 	return s.listQuizIDsForPlayer(ctx, playerID)
 }
 
-func (s stubStore) MarkBreakSeen(ctx context.Context, gameID string, breakID int64) error {
-	if s.markBreakSeen == nil {
+func (s stubStore) MarkRoundSeen(ctx context.Context, gameID string, roundID int64) error {
+	if s.markGroupSeen == nil {
 		return errStub
 	}
 
-	return s.markBreakSeen(ctx, gameID, breakID)
+	return s.markGroupSeen(ctx, gameID, roundID)
 }
 
-// ListSeenBreakIDsByGame defaults to "no seen breaks" so tests that
-// don't care about breaks don't have to wire a stub. The merged
-// iterator in [Service.GetNext] calls this on every request.
-func (s stubStore) ListSeenBreakIDsByGame(ctx context.Context, gameID string) ([]int64, error) {
-	if s.listSeenBreakIDsByGame == nil {
+// ListSeenRoundIDsByGame defaults to "no seen rounds" so tests that
+// don't care about round boundaries don't have to wire a stub. The
+// round-walking iterator in [Service.GetNext] calls this on every
+// request.
+func (s stubStore) ListSeenRoundIDsByGame(ctx context.Context, gameID string) ([]int64, error) {
+	if s.listSeenRoundIDsByGame == nil {
 		return nil, nil
 	}
 
-	return s.listSeenBreakIDsByGame(ctx, gameID)
+	return s.listSeenRoundIDsByGame(ctx, gameID)
 }
 
 // stubQuizStore satisfies quiz.Store for service-level tests. Only GetQuiz
@@ -216,23 +216,29 @@ func (s stubQuizStore) GetOptionsByIDs(ctx context.Context, ids []int64) ([]*qui
 	return s.getOptionsByIDs(ctx, ids)
 }
 
-// ListBreaksByQuiz defaults to "no breaks" so GetNext-style tests that
-// don't care about breaks don't have to wire a stub. The merged
-// iterator in game.Service.GetNext calls this on every request.
-func (stubQuizStore) ListBreaksByQuiz(_ context.Context, _ int64) ([]*quiz.Break, error) {
-	return nil, nil
-}
-
-func (stubQuizStore) GetBreak(_ context.Context, _ int64) (*quiz.Break, error) {
+// ListRoundsByQuiz defaults to "no rounds" so GetNext-style tests that
+// don't care about round boundaries don't have to wire a stub. The
+// round-walking iterator in game.Service.GetNext calls this on every
+// request.
+func (stubQuizStore) ListRoundsByQuiz(_ context.Context, _ int64) ([]*quiz.Round, error) {
 	return nil, errStub
 }
 
-func (stubQuizStore) CreateBreak(_ context.Context, _ *quiz.Break) error {
+func (stubQuizStore) GetRound(_ context.Context, _ int64) (*quiz.Round, error) {
+	return nil, errStub
+}
+
+func (stubQuizStore) GetDefaultRound(_ context.Context, _ int64) (*quiz.Round, error) {
+	return nil, errStub
+}
+func (stubQuizStore) CreateRound(_ context.Context, _ *quiz.Round) error { return errStub }
+func (stubQuizStore) UpdateRound(_ context.Context, _ *quiz.Round) error { return errStub }
+func (stubQuizStore) DeleteRound(_ context.Context, _ int64) error       { return errStub }
+func (stubQuizStore) MoveRound(_ context.Context, _, _ int64, _ string) error {
 	return errStub
 }
-func (stubQuizStore) UpdateBreak(_ context.Context, _ *quiz.Break) error { return errStub }
-func (stubQuizStore) DeleteBreak(_ context.Context, _ int64) error       { return errStub }
-func (stubQuizStore) MoveBreak(_ context.Context, _, _ int64, _ string) error {
+
+func (stubQuizStore) MoveQuestionToRound(_ context.Context, _, _, _ int64) error {
 	return errStub
 }
 
@@ -1792,10 +1798,25 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 	})
 }
 
+// firstRoundID returns the id of the only round a freshly created quiz
+// has - the default "Round 1" the store stamps on CreateQuiz (#444).
+func firstRoundID(t *testing.T, qz *quiz.Quiz, quizStore *store.QuizStore) int64 {
+	t.Helper()
+	rounds, err := quizStore.ListRoundsByQuiz(t.Context(), qz.ID)
+	if err != nil {
+		t.Fatalf("ListRoundsByQuiz err = %v, want nil", err)
+	}
+	if len(rounds) == 0 {
+		t.Fatal("quiz has no rounds, want at least the default")
+	}
+
+	return rounds[0].ID
+}
+
 func TestService_GetNext(t *testing.T) {
 	t.Parallel()
 
-	t.Run("no breaks: behaves like GetNextQuestion (first question)", func(t *testing.T) {
+	t.Run("returns the first question of the first round", func(t *testing.T) {
 		t.Parallel()
 
 		ctx := t.Context()
@@ -1826,21 +1847,14 @@ func TestService_GetNext(t *testing.T) {
 			t.Fatalf("GetNext err = %v, want nil", err)
 		}
 		if got, want := item.Type, ItemTypeQuestion; got != want {
-			t.Fatalf("item.Type = %q, want %q", got, want)
+			t.Errorf("item.Type = %q, want %q", got, want)
 		}
 		if got, want := item.Question.QuizQuestion.ID, testQuiz.Questions[0].ID; got != want {
 			t.Errorf("item.Question.QuizQuestion.ID = %d, want %d", got, want)
 		}
-		// Position chip is question-anchored.
-		if got, want := item.Question.Position, 1; got != want {
-			t.Errorf("item.Question.Position = %d, want %d", got, want)
-		}
-		if got, want := item.Question.Total, len(testQuiz.Questions); got != want {
-			t.Errorf("item.Question.Total = %d, want %d", got, want)
-		}
 	})
 
-	t.Run("break at position 0 is returned before any question", func(t *testing.T) {
+	t.Run("emits the round boundary after every question in the round is issued", func(t *testing.T) {
 		t.Parallel()
 
 		ctx := t.Context()
@@ -1853,10 +1867,7 @@ func TestService_GetNext(t *testing.T) {
 		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
 			t.Fatalf("CreateQuiz err = %v, want nil", err)
 		}
-		brk := &quiz.Break{QuizID: testQuiz.ID, Position: 0, Text: "Hello"}
-		if err := quizStore.CreateBreak(ctx, brk); err != nil {
-			t.Fatalf("CreateBreak err = %v, want nil", err)
-		}
+		roundID := firstRoundID(t, testQuiz, quizStore)
 
 		testGame := newTestGame(t, testQuiz)
 		if err := gameStore.CreateGame(ctx, testGame); err != nil {
@@ -1869,23 +1880,33 @@ func TestService_GetNext(t *testing.T) {
 			t.Fatalf("CreateParticipant err = %v, want nil", err)
 		}
 
+		// Issue every question so the only remaining item is the single
+		// round's boundary round summary.
+		for _, q := range testQuiz.Questions {
+			if err := gameStore.CreateQuestion(
+				ctx, &Question{GameID: testGame.ID, QuestionID: q.ID},
+			); err != nil {
+				t.Fatalf("CreateQuestion err = %v, want nil", err)
+			}
+		}
+
 		svc := NewService(gameStore, quizStore, slog.Default())
 		item, err := svc.GetNext(ctx, testGame.ID, 1)
 		if err != nil {
 			t.Fatalf("GetNext err = %v, want nil", err)
 		}
-		if got, want := item.Type, ItemTypeBreak; got != want {
-			t.Fatalf("item.Type = %q, want %q", got, want)
+		if got, want := item.Type, ItemTypeRoundBoundary; got != want {
+			t.Errorf("item.Type = %q, want %q", got, want)
 		}
-		if got, want := item.Break.ID, brk.ID; got != want {
-			t.Errorf("item.Break.ID = %d, want %d", got, want)
+		if got, want := item.Round.ID, roundID; got != want {
+			t.Errorf("item.Round.ID = %d, want %d", got, want)
 		}
 		if got, want := item.Total, len(testQuiz.Questions); got != want {
-			t.Errorf("item.Total = %d, want %d (question count carries through breaks)", got, want)
+			t.Errorf("item.Total = %d, want %d", got, want)
 		}
 	})
 
-	t.Run("break sandwiched between two questions fires after the first", func(t *testing.T) {
+	t.Run("skips a round boundary the player has already seen", func(t *testing.T) {
 		t.Parallel()
 
 		ctx := t.Context()
@@ -1898,11 +1919,7 @@ func TestService_GetNext(t *testing.T) {
 		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
 			t.Fatalf("CreateQuiz err = %v, want nil", err)
 		}
-		// Break after Q1 (Q1.Position == 10 in newTestQuiz).
-		brk := &quiz.Break{QuizID: testQuiz.ID, Position: 10, Text: "Halfway"}
-		if err := quizStore.CreateBreak(ctx, brk); err != nil {
-			t.Fatalf("CreateBreak err = %v, want nil", err)
-		}
+		roundID := firstRoundID(t, testQuiz, quizStore)
 
 		testGame := newTestGame(t, testQuiz)
 		if err := gameStore.CreateGame(ctx, testGame); err != nil {
@@ -1914,241 +1931,25 @@ func TestService_GetNext(t *testing.T) {
 		); err != nil {
 			t.Fatalf("CreateParticipant err = %v, want nil", err)
 		}
-
-		// Seed Q1 as already issued + answered so the merged iterator
-		// must advance past it to the break that lives at the same
-		// slot.
-		past := time.Now().Add(-1 * time.Minute)
-		issuedQ1 := &Question{
-			GameID:     testGame.ID,
-			QuestionID: testQuiz.Questions[0].ID,
-			StartedAt:  past,
-			ExpiredAt:  past.Add(10 * time.Second),
-		}
-		if err := gameStore.CreateQuestion(ctx, issuedQ1); err != nil {
-			t.Fatalf("CreateQuestion err = %v, want nil", err)
-		}
-		// Insert an answer so HasOpenQuestion is false and the resume
-		// path doesn't short-circuit.
-		correct := testQuiz.Questions[0].Options[0]
-		if err := gameStore.CreateAnswer(ctx, &Answer{
-			GameID:     testGame.ID,
-			PlayerID:   1,
-			QuestionID: issuedQ1.ID,
-			OptionID:   correct.ID,
-			AnsweredAt: past,
-		}); err != nil {
-			t.Fatalf("CreateAnswer err = %v, want nil", err)
-		}
-
-		svc := NewService(gameStore, quizStore, slog.Default())
-		item, err := svc.GetNext(ctx, testGame.ID, 1)
-		if err != nil {
-			t.Fatalf("GetNext err = %v, want nil", err)
-		}
-		if got, want := item.Type, ItemTypeBreak; got != want {
-			t.Fatalf("item.Type = %q, want %q (break must fire after Q1)", got, want)
-		}
-		if got, want := item.Break.ID, brk.ID; got != want {
-			t.Errorf("item.Break.ID = %d, want %d", got, want)
-		}
-	})
-
-	t.Run("acknowledged break is skipped: next call returns Q2", func(t *testing.T) {
-		t.Parallel()
-
-		ctx := t.Context()
-		db := dbtest.Open(t)
-
-		quizStore := store.NewQuizStore(db, slog.Default())
-		gameStore := store.NewGameStore(db, slog.Default())
-
-		testQuiz := newTestQuiz(t)
-		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
-			t.Fatalf("CreateQuiz err = %v, want nil", err)
-		}
-		brk := &quiz.Break{QuizID: testQuiz.ID, Position: 10}
-		if err := quizStore.CreateBreak(ctx, brk); err != nil {
-			t.Fatalf("CreateBreak err = %v, want nil", err)
-		}
-
-		testGame := newTestGame(t, testQuiz)
-		if err := gameStore.CreateGame(ctx, testGame); err != nil {
-			t.Fatalf("CreateGame err = %v, want nil", err)
-		}
-		if err := gameStore.CreateParticipant(
-			ctx,
-			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
-		); err != nil {
-			t.Fatalf("CreateParticipant err = %v, want nil", err)
-		}
-
-		// Seed Q1 as issued + answered, plus the break as seen.
-		past := time.Now().Add(-1 * time.Minute)
-		issuedQ1 := &Question{
-			GameID:     testGame.ID,
-			QuestionID: testQuiz.Questions[0].ID,
-			StartedAt:  past,
-			ExpiredAt:  past.Add(10 * time.Second),
-		}
-		if err := gameStore.CreateQuestion(ctx, issuedQ1); err != nil {
-			t.Fatalf("CreateQuestion err = %v, want nil", err)
-		}
-		correct := testQuiz.Questions[0].Options[0]
-		if err := gameStore.CreateAnswer(ctx, &Answer{
-			GameID:     testGame.ID,
-			PlayerID:   1,
-			QuestionID: issuedQ1.ID,
-			OptionID:   correct.ID,
-			AnsweredAt: past,
-		}); err != nil {
-			t.Fatalf("CreateAnswer err = %v, want nil", err)
-		}
-		if err := gameStore.MarkBreakSeen(ctx, testGame.ID, brk.ID); err != nil {
-			t.Fatalf("MarkBreakSeen err = %v, want nil", err)
-		}
-
-		svc := NewService(gameStore, quizStore, slog.Default())
-		item, err := svc.GetNext(ctx, testGame.ID, 1)
-		if err != nil {
-			t.Fatalf("GetNext err = %v, want nil", err)
-		}
-		if got, want := item.Type, ItemTypeQuestion; got != want {
-			t.Fatalf("item.Type = %q, want %q (acknowledged break must not refire)", got, want)
-		}
-		if got, want := item.Question.QuizQuestion.ID, testQuiz.Questions[1].ID; got != want {
-			t.Errorf("item.Question.QuizQuestion.ID = %d, want %d", got, want)
-		}
-	})
-
-	t.Run("exhausted questions + unseen tail break returns the break", func(t *testing.T) {
-		t.Parallel()
-
-		ctx := t.Context()
-		db := dbtest.Open(t)
-
-		quizStore := store.NewQuizStore(db, slog.Default())
-		gameStore := store.NewGameStore(db, slog.Default())
-
-		testQuiz := newTestQuiz(t)
-		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
-			t.Fatalf("CreateQuiz err = %v, want nil", err)
-		}
-		// Break after the LAST question (Q3.Position == 30).
-		brk := &quiz.Break{QuizID: testQuiz.ID, Position: 30, Text: "All done"}
-		if err := quizStore.CreateBreak(ctx, brk); err != nil {
-			t.Fatalf("CreateBreak err = %v, want nil", err)
-		}
-
-		testGame := newTestGame(t, testQuiz)
-		if err := gameStore.CreateGame(ctx, testGame); err != nil {
-			t.Fatalf("CreateGame err = %v, want nil", err)
-		}
-		if err := gameStore.CreateParticipant(
-			ctx,
-			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
-		); err != nil {
-			t.Fatalf("CreateParticipant err = %v, want nil", err)
-		}
-
-		// Seed all three questions as issued + answered.
-		past := time.Now().Add(-1 * time.Minute)
 		for _, q := range testQuiz.Questions {
-			gq := &Question{
-				GameID:     testGame.ID,
-				QuestionID: q.ID,
-				StartedAt:  past,
-				ExpiredAt:  past.Add(10 * time.Second),
-			}
-			if err := gameStore.CreateQuestion(ctx, gq); err != nil {
+			if err := gameStore.CreateQuestion(
+				ctx, &Question{GameID: testGame.ID, QuestionID: q.ID},
+			); err != nil {
 				t.Fatalf("CreateQuestion err = %v, want nil", err)
 			}
-			if err := gameStore.CreateAnswer(ctx, &Answer{
-				GameID:     testGame.ID,
-				PlayerID:   1,
-				QuestionID: gq.ID,
-				OptionID:   q.Options[0].ID,
-				AnsweredAt: past,
-			}); err != nil {
-				t.Fatalf("CreateAnswer err = %v, want nil", err)
-			}
 		}
-
-		svc := NewService(gameStore, quizStore, slog.Default())
-		item, err := svc.GetNext(ctx, testGame.ID, 1)
-		if err != nil {
-			t.Fatalf("GetNext err = %v, want nil", err)
-		}
-		if got, want := item.Type, ItemTypeBreak; got != want {
-			t.Fatalf("item.Type = %q, want %q (tail break must fire after all questions)", got, want)
-		}
-		if got, want := item.Break.ID, brk.ID; got != want {
-			t.Errorf("item.Break.ID = %d, want %d", got, want)
-		}
-	})
-
-	t.Run("everything exhausted returns ErrNoMoreQuestions", func(t *testing.T) {
-		t.Parallel()
-
-		ctx := t.Context()
-		db := dbtest.Open(t)
-
-		quizStore := store.NewQuizStore(db, slog.Default())
-		gameStore := store.NewGameStore(db, slog.Default())
-
-		testQuiz := newTestQuiz(t)
-		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
-			t.Fatalf("CreateQuiz err = %v, want nil", err)
-		}
-		brk := &quiz.Break{QuizID: testQuiz.ID, Position: 30}
-		if err := quizStore.CreateBreak(ctx, brk); err != nil {
-			t.Fatalf("CreateBreak err = %v, want nil", err)
-		}
-
-		testGame := newTestGame(t, testQuiz)
-		if err := gameStore.CreateGame(ctx, testGame); err != nil {
-			t.Fatalf("CreateGame err = %v, want nil", err)
-		}
-		if err := gameStore.CreateParticipant(
-			ctx,
-			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
-		); err != nil {
-			t.Fatalf("CreateParticipant err = %v, want nil", err)
-		}
-
-		past := time.Now().Add(-1 * time.Minute)
-		for _, q := range testQuiz.Questions {
-			gq := &Question{
-				GameID:     testGame.ID,
-				QuestionID: q.ID,
-				StartedAt:  past,
-				ExpiredAt:  past.Add(10 * time.Second),
-			}
-			if err := gameStore.CreateQuestion(ctx, gq); err != nil {
-				t.Fatalf("CreateQuestion err = %v, want nil", err)
-			}
-			if err := gameStore.CreateAnswer(ctx, &Answer{
-				GameID:     testGame.ID,
-				PlayerID:   1,
-				QuestionID: gq.ID,
-				OptionID:   q.Options[0].ID,
-				AnsweredAt: past,
-			}); err != nil {
-				t.Fatalf("CreateAnswer err = %v, want nil", err)
-			}
-		}
-		if err := gameStore.MarkBreakSeen(ctx, testGame.ID, brk.ID); err != nil {
-			t.Fatalf("MarkBreakSeen err = %v, want nil", err)
+		if err := gameStore.MarkRoundSeen(ctx, testGame.ID, roundID); err != nil {
+			t.Fatalf("MarkRoundSeen err = %v, want nil", err)
 		}
 
 		svc := NewService(gameStore, quizStore, slog.Default())
 		_, err := svc.GetNext(ctx, testGame.ID, 1)
 		if got, want := err, ErrNoMoreQuestions; !errors.Is(got, want) {
-			t.Errorf("err = %v, want %v", got, want)
+			t.Errorf("GetNext err = %v, want %v (all questions issued, boundary seen)", got, want)
 		}
 	})
 
-	t.Run("break Score carries running total of player's correct answers", func(t *testing.T) {
+	t.Run("walks rounds in position order issuing each round's questions then its boundary", func(t *testing.T) {
 		t.Parallel()
 
 		ctx := t.Context()
@@ -2157,13 +1958,29 @@ func TestService_GetNext(t *testing.T) {
 		quizStore := store.NewQuizStore(db, slog.Default())
 		gameStore := store.NewGameStore(db, slog.Default())
 
-		testQuiz := newTestQuiz(t)
+		// Two rounds: round 1 holds Q1, round 2 holds Q2. The walk
+		// should be Q1, boundary(round1), Q2, boundary(round2). Each
+		// question is answered before advancing so the resume path does
+		// not hand the same in-flight question back.
+		testQuiz := &quiz.Quiz{
+			Title:             "Two rounds",
+			Slug:              "two-rounds",
+			CreatedByPlayerID: seededAdminID,
+			Questions: []*quiz.Question{
+				{Text: "Q1", Position: 10, Options: []*quiz.Option{{Text: "a", Correct: true}, {Text: "b"}}},
+				{Text: "Q2", Position: 20, Options: []*quiz.Option{{Text: "c", Correct: true}, {Text: "d"}}},
+			},
+		}
 		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
 			t.Fatalf("CreateQuiz err = %v, want nil", err)
 		}
-		brk := &quiz.Break{QuizID: testQuiz.ID, Position: 20, Text: "Score check"}
-		if err := quizStore.CreateBreak(ctx, brk); err != nil {
-			t.Fatalf("CreateBreak err = %v, want nil", err)
+		round1 := firstRoundID(t, testQuiz, quizStore)
+		round2 := &quiz.Round{QuizID: testQuiz.ID, Position: 1, Title: "Round 2"}
+		if err := quizStore.CreateRound(ctx, round2); err != nil {
+			t.Fatalf("CreateRound err = %v, want nil", err)
+		}
+		if err := quizStore.MoveQuestionToRound(ctx, testQuiz.ID, testQuiz.Questions[1].ID, round2.ID); err != nil {
+			t.Fatalf("MoveQuestionToRound err = %v, want nil", err)
 		}
 
 		testGame := newTestGame(t, testQuiz)
@@ -2177,53 +1994,82 @@ func TestService_GetNext(t *testing.T) {
 			t.Fatalf("CreateParticipant err = %v, want nil", err)
 		}
 
-		// Q1 answered correctly at the answer-window start (maxPoints =
-		// 1000); Q2 answered wrongly (0). Running total at the break:
-		// 1000.
-		past := time.Now().Add(-1 * time.Minute)
-		for i, q := range testQuiz.Questions[:2] {
-			gq := &Question{
-				GameID:     testGame.ID,
-				QuestionID: q.ID,
-				StartedAt:  past,
-				ExpiredAt:  past.Add(10 * time.Second),
-			}
-			if err := gameStore.CreateQuestion(ctx, gq); err != nil {
-				t.Fatalf("CreateQuestion err = %v, want nil", err)
-			}
-			var optID int64
-			switch i {
-			case 0:
-				optID = q.Options[0].ID // correct
-			default:
-				optID = q.Options[1].ID // wrong
-			}
-			if err := gameStore.CreateAnswer(ctx, &Answer{
-				GameID:     testGame.ID,
-				PlayerID:   1,
-				QuestionID: gq.ID,
-				OptionID:   optID,
-				AnsweredAt: past,
-			}); err != nil {
-				t.Fatalf("CreateAnswer err = %v, want nil", err)
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		answer := func(item *Item) {
+			t.Helper()
+			optID := item.Question.QuizQuestion.Options[0].ID
+			if _, err := svc.SubmitAnswer(
+				ctx, testGame.ID, 1, item.Question.QuizQuestion.ID, optID, time.Now(),
+			); err != nil {
+				t.Fatalf("SubmitAnswer err = %v, want nil", err)
 			}
 		}
 
-		svc := NewService(gameStore, quizStore, slog.Default())
+		// Q1
 		item, err := svc.GetNext(ctx, testGame.ID, 1)
 		if err != nil {
-			t.Fatalf("GetNext err = %v, want nil", err)
+			t.Fatalf("GetNext (Q1) err = %v, want nil", err)
 		}
-		if got, want := item.Type, ItemTypeBreak; got != want {
-			t.Fatalf("item.Type = %q, want %q", got, want)
+		if got, want := item.Type, ItemTypeQuestion; got != want {
+			t.Fatalf("first item.Type = %q, want %q", got, want)
 		}
-		// One correct (1000) + one wrong (0) = 1000.
-		if got, want := item.Score, 1000; got != want {
-			t.Errorf("item.Score = %d, want %d (one correct + one wrong)", got, want)
+		if got, want := item.Question.QuizQuestion.ID, testQuiz.Questions[0].ID; got != want {
+			t.Errorf("first question = %d, want %d", got, want)
+		}
+		answer(item)
+
+		// boundary(round1)
+		item, err = svc.GetNext(ctx, testGame.ID, 1)
+		if err != nil {
+			t.Fatalf("GetNext (boundary 1) err = %v, want nil", err)
+		}
+		if got, want := item.Type, ItemTypeRoundBoundary; got != want {
+			t.Fatalf("second item.Type = %q, want %q", got, want)
+		}
+		if got, want := item.Round.ID, round1; got != want {
+			t.Errorf("second boundary round = %d, want %d", got, want)
+		}
+		if err := svc.MarkRoundSeen(ctx, testGame.ID, 1, round1); err != nil {
+			t.Fatalf("MarkRoundSeen (round1) err = %v, want nil", err)
+		}
+
+		// Q2
+		item, err = svc.GetNext(ctx, testGame.ID, 1)
+		if err != nil {
+			t.Fatalf("GetNext (Q2) err = %v, want nil", err)
+		}
+		if got, want := item.Type, ItemTypeQuestion; got != want {
+			t.Fatalf("third item.Type = %q, want %q", got, want)
+		}
+		if got, want := item.Question.QuizQuestion.ID, testQuiz.Questions[1].ID; got != want {
+			t.Errorf("third question = %d, want %d", got, want)
+		}
+		answer(item)
+
+		// boundary(round2)
+		item, err = svc.GetNext(ctx, testGame.ID, 1)
+		if err != nil {
+			t.Fatalf("GetNext (boundary 2) err = %v, want nil", err)
+		}
+		if got, want := item.Type, ItemTypeRoundBoundary; got != want {
+			t.Fatalf("fourth item.Type = %q, want %q", got, want)
+		}
+		if got, want := item.Round.ID, round2.ID; got != want {
+			t.Errorf("fourth boundary round = %d, want %d", got, want)
+		}
+		if err := svc.MarkRoundSeen(ctx, testGame.ID, 1, round2.ID); err != nil {
+			t.Fatalf("MarkRoundSeen (round2) err = %v, want nil", err)
+		}
+
+		// exhausted
+		_, err = svc.GetNext(ctx, testGame.ID, 1)
+		if got, want := err, ErrNoMoreQuestions; !errors.Is(got, want) {
+			t.Errorf("final GetNext err = %v, want %v", got, want)
 		}
 	})
 
-	t.Run("resume path: open question short-circuits before the iterator", func(t *testing.T) {
+	t.Run("resume returns the in-flight question unchanged", func(t *testing.T) {
 		t.Parallel()
 
 		ctx := t.Context()
@@ -2235,11 +2081,6 @@ func TestService_GetNext(t *testing.T) {
 		testQuiz := newTestQuiz(t)
 		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
 			t.Fatalf("CreateQuiz err = %v, want nil", err)
-		}
-		// Break in slot 0 that would normally come first.
-		brk := &quiz.Break{QuizID: testQuiz.ID, Position: 0}
-		if err := quizStore.CreateBreak(ctx, brk); err != nil {
-			t.Fatalf("CreateBreak err = %v, want nil", err)
 		}
 
 		testGame := newTestGame(t, testQuiz)
@@ -2254,164 +2095,28 @@ func TestService_GetNext(t *testing.T) {
 		}
 
 		svc := NewService(gameStore, quizStore, slog.Default())
-		// First call should return the break (slot 0 wins). Don't ack
-		// the break; instead simulate a state where the player has
-		// somehow received Q1 with the answer window open (e.g. the
-		// break was acked then the iterator advanced).
-		if err := gameStore.MarkBreakSeen(ctx, testGame.ID, brk.ID); err != nil {
-			t.Fatalf("MarkBreakSeen err = %v, want nil", err)
-		}
+
 		first, err := svc.GetNext(ctx, testGame.ID, 1)
 		if err != nil {
 			t.Fatalf("first GetNext err = %v, want nil", err)
 		}
-		if got, want := first.Type, ItemTypeQuestion; got != want {
-			t.Fatalf("first.Type = %q, want %q", got, want)
-		}
-		firstID := first.Question.ID
-
-		// Second call without answering returns the SAME row through
-		// the resume path, NOT the break (which is acked anyway).
 		second, err := svc.GetNext(ctx, testGame.ID, 1)
 		if err != nil {
 			t.Fatalf("second GetNext err = %v, want nil", err)
 		}
 		if got, want := second.Type, ItemTypeQuestion; got != want {
-			t.Fatalf("second.Type = %q, want %q (resume must keep returning the question)", got, want)
+			t.Fatalf("second.Type = %q, want %q", got, want)
 		}
-		if got, want := second.Question.ID, firstID; got != want {
-			t.Errorf("second.Question.ID = %d, want %d (resume must hand back same row)", got, want)
-		}
-	})
-
-	t.Run("break orphaned past max(question position) is surfaced at the end", func(t *testing.T) {
-		t.Parallel()
-
-		ctx := t.Context()
-		db := dbtest.Open(t)
-
-		quizStore := store.NewQuizStore(db, slog.Default())
-		gameStore := store.NewGameStore(db, slog.Default())
-
-		// Two questions, then a break authored at position 9 (i.e.
-		// after a question that no longer exists - simulates the
-		// admin-deleted-the-anchor case). Without the sweep at the
-		// end of pickNextSlot this break would sit in the DB forever
-		// and the player would never see it.
-		testQuiz := newTestQuiz(t)
-		testQuiz.Questions = testQuiz.Questions[:2]
-		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
-			t.Fatalf("CreateQuiz err = %v, want nil", err)
-		}
-		orphan := &quiz.Break{QuizID: testQuiz.ID, Position: 9, Text: "orphan"}
-		if err := quizStore.CreateBreak(ctx, orphan); err != nil {
-			t.Fatalf("CreateBreak err = %v, want nil", err)
-		}
-
-		testGame := newTestGame(t, testQuiz)
-		if err := gameStore.CreateGame(ctx, testGame); err != nil {
-			t.Fatalf("CreateGame err = %v, want nil", err)
-		}
-		if err := gameStore.CreateParticipant(
-			ctx,
-			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
-		); err != nil {
-			t.Fatalf("CreateParticipant err = %v, want nil", err)
-		}
-
-		svc := NewService(gameStore, quizStore, slog.Default())
-
-		// Walk both questions; answer each so the iterator advances.
-		for i := range len(testQuiz.Questions) {
-			item, err := svc.GetNext(ctx, testGame.ID, 1)
-			if err != nil {
-				t.Fatalf("GetNext #%d err = %v, want nil", i, err)
-			}
-			if got, want := item.Type, ItemTypeQuestion; got != want {
-				t.Fatalf("GetNext #%d type = %q, want %q", i, got, want)
-			}
-			if _, err := svc.SubmitAnswer(
-				ctx, testGame.ID, 1, item.Question.ID, item.Question.QuizQuestion.Options[0].ID, time.Now(),
-			); err != nil {
-				t.Fatalf("SubmitAnswer #%d err = %v, want nil", i, err)
-			}
-		}
-
-		// After both questions are answered the orphan break is the
-		// only item left in the merged sequence.
-		next, err := svc.GetNext(ctx, testGame.ID, 1)
-		if err != nil {
-			t.Fatalf("GetNext (orphan) err = %v, want nil", err)
-		}
-		if got, want := next.Type, ItemTypeBreak; got != want {
-			t.Fatalf("next.Type = %q, want %q (orphan break must surface)", got, want)
-		}
-		if got, want := next.Break.ID, orphan.ID; got != want {
-			t.Errorf("next.Break.ID = %d, want %d", got, want)
-		}
-	})
-
-	t.Run("reload mid-break returns the same break (not in flight)", func(t *testing.T) {
-		t.Parallel()
-
-		ctx := t.Context()
-		db := dbtest.Open(t)
-
-		quizStore := store.NewQuizStore(db, slog.Default())
-		gameStore := store.NewGameStore(db, slog.Default())
-
-		// One question and a break before it. The player should see
-		// the break first, then re-fetching /next without acking
-		// must return the SAME break - breaks are not "in flight".
-		testQuiz := newTestQuiz(t)
-		testQuiz.Questions = testQuiz.Questions[:1]
-		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
-			t.Fatalf("CreateQuiz err = %v, want nil", err)
-		}
-		brk := &quiz.Break{QuizID: testQuiz.ID, Position: 0, Text: "intro"}
-		if err := quizStore.CreateBreak(ctx, brk); err != nil {
-			t.Fatalf("CreateBreak err = %v, want nil", err)
-		}
-
-		testGame := newTestGame(t, testQuiz)
-		if err := gameStore.CreateGame(ctx, testGame); err != nil {
-			t.Fatalf("CreateGame err = %v, want nil", err)
-		}
-		if err := gameStore.CreateParticipant(
-			ctx,
-			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
-		); err != nil {
-			t.Fatalf("CreateParticipant err = %v, want nil", err)
-		}
-
-		svc := NewService(gameStore, quizStore, slog.Default())
-
-		first, err := svc.GetNext(ctx, testGame.ID, 1)
-		if err != nil {
-			t.Fatalf("first GetNext err = %v, want nil", err)
-		}
-		if got, want := first.Type, ItemTypeBreak; got != want {
-			t.Fatalf("first.Type = %q, want %q", got, want)
-		}
-		// Don't ack - simulate a page reload mid-break by calling
-		// GetNext again. The break must come back unchanged.
-		second, err := svc.GetNext(ctx, testGame.ID, 1)
-		if err != nil {
-			t.Fatalf("second GetNext err = %v, want nil", err)
-		}
-		if got, want := second.Type, ItemTypeBreak; got != want {
-			t.Fatalf("second.Type = %q, want %q (reload mid-break must re-emit the break)", got, want)
-		}
-		if got, want := second.Break.ID, first.Break.ID; got != want {
-			t.Errorf("second.Break.ID = %d, want %d", got, want)
+		if got, want := second.Question.QuestionID, first.Question.QuestionID; got != want {
+			t.Errorf("resume question = %d, want %d (must hand back the same in-flight question)", got, want)
 		}
 	})
 }
 
-func TestService_MarkBreakSeen(t *testing.T) {
+func TestService_MarkRoundSeen(t *testing.T) {
 	t.Parallel()
 
-	t.Run("happy path: idempotent across two calls", func(t *testing.T) {
+	t.Run("idempotent", func(t *testing.T) {
 		t.Parallel()
 
 		ctx := t.Context()
@@ -2424,10 +2129,7 @@ func TestService_MarkBreakSeen(t *testing.T) {
 		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
 			t.Fatalf("CreateQuiz err = %v, want nil", err)
 		}
-		brk := &quiz.Break{QuizID: testQuiz.ID, Position: 0}
-		if err := quizStore.CreateBreak(ctx, brk); err != nil {
-			t.Fatalf("CreateBreak err = %v, want nil", err)
-		}
+		roundID := firstRoundID(t, testQuiz, quizStore)
 
 		testGame := newTestGame(t, testQuiz)
 		if err := gameStore.CreateGame(ctx, testGame); err != nil {
@@ -2441,15 +2143,15 @@ func TestService_MarkBreakSeen(t *testing.T) {
 		}
 
 		svc := NewService(gameStore, quizStore, slog.Default())
-		if err := svc.MarkBreakSeen(ctx, testGame.ID, 1, brk.ID); err != nil {
-			t.Errorf("first MarkBreakSeen err = %v, want nil", err)
+		if err := svc.MarkRoundSeen(ctx, testGame.ID, 1, roundID); err != nil {
+			t.Errorf("first MarkRoundSeen err = %v, want nil", err)
 		}
-		if err := svc.MarkBreakSeen(ctx, testGame.ID, 1, brk.ID); err != nil {
-			t.Errorf("second MarkBreakSeen err = %v, want nil (idempotent)", err)
+		if err := svc.MarkRoundSeen(ctx, testGame.ID, 1, roundID); err != nil {
+			t.Errorf("second MarkRoundSeen err = %v, want nil (idempotent)", err)
 		}
 	})
 
-	t.Run("non-participant gets ErrGameNotFound", func(t *testing.T) {
+	t.Run("non-participant returns ErrGameNotFound", func(t *testing.T) {
 		t.Parallel()
 
 		ctx := t.Context()
@@ -2462,10 +2164,7 @@ func TestService_MarkBreakSeen(t *testing.T) {
 		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
 			t.Fatalf("CreateQuiz err = %v, want nil", err)
 		}
-		brk := &quiz.Break{QuizID: testQuiz.ID, Position: 0}
-		if err := quizStore.CreateBreak(ctx, brk); err != nil {
-			t.Fatalf("CreateBreak err = %v, want nil", err)
-		}
+		roundID := firstRoundID(t, testQuiz, quizStore)
 
 		testGame := newTestGame(t, testQuiz)
 		if err := gameStore.CreateGame(ctx, testGame); err != nil {
@@ -2479,13 +2178,13 @@ func TestService_MarkBreakSeen(t *testing.T) {
 		}
 
 		svc := NewService(gameStore, quizStore, slog.Default())
-		err := svc.MarkBreakSeen(ctx, testGame.ID, 999, brk.ID)
+		err := svc.MarkRoundSeen(ctx, testGame.ID, 999, roundID)
 		if got, want := err, ErrGameNotFound; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
 	})
 
-	t.Run("break from a different quiz returns ErrBreakNotFound", func(t *testing.T) {
+	t.Run("round from a different quiz returns ErrRoundNotFound", func(t *testing.T) {
 		t.Parallel()
 
 		ctx := t.Context()
@@ -2494,132 +2193,32 @@ func TestService_MarkBreakSeen(t *testing.T) {
 		quizStore := store.NewQuizStore(db, slog.Default())
 		gameStore := store.NewGameStore(db, slog.Default())
 
-		// Two quizzes; break belongs to the second. The game is on the
-		// first, so the break does not belong to the game's quiz.
-		quizA := newTestQuiz(t)
-		if err := quizStore.CreateQuiz(ctx, quizA); err != nil {
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
 			t.Fatalf("CreateQuiz err = %v, want nil", err)
-		}
-		quizB := newTestQuiz(t)
-		quizB.Slug = "other-quiz"
-		quizB.Title = "Other"
-		if err := quizStore.CreateQuiz(ctx, quizB); err != nil {
-			t.Fatalf("CreateQuiz err = %v, want nil", err)
-		}
-		brkOnB := &quiz.Break{QuizID: quizB.ID, Position: 0}
-		if err := quizStore.CreateBreak(ctx, brkOnB); err != nil {
-			t.Fatalf("CreateBreak err = %v, want nil", err)
 		}
 
-		testGame := newTestGame(t, quizA)
+		quizB := &quiz.Quiz{Title: "Other", Slug: "other", CreatedByPlayerID: seededAdminID}
+		if err := quizStore.CreateQuiz(ctx, quizB); err != nil {
+			t.Fatalf("CreateQuiz B err = %v, want nil", err)
+		}
+		groupOnB := firstRoundID(t, quizB, quizStore)
+
+		testGame := newTestGame(t, testQuiz)
 		if err := gameStore.CreateGame(ctx, testGame); err != nil {
 			t.Fatalf("CreateGame err = %v, want nil", err)
 		}
 		if err := gameStore.CreateParticipant(
 			ctx,
-			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: quizA.ID},
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
 		); err != nil {
 			t.Fatalf("CreateParticipant err = %v, want nil", err)
 		}
 
 		svc := NewService(gameStore, quizStore, slog.Default())
-		err := svc.MarkBreakSeen(ctx, testGame.ID, 1, brkOnB.ID)
-		if got, want := err, quiz.ErrBreakNotFound; !errors.Is(got, want) {
+		err := svc.MarkRoundSeen(ctx, testGame.ID, 1, groupOnB)
+		if got, want := err, quiz.ErrRoundNotFound; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
-		}
-	})
-}
-
-// recordingPublisher captures every Publish call so a test can assert
-// the exact set of quiz IDs that were notified.
-type recordingPublisher struct {
-	published []int64
-}
-
-// Publish records the quiz ID in the order the call was made so the
-// test can assert which leaderboards the fan-out ticked.
-func (p *recordingPublisher) Publish(quizID int64) {
-	p.published = append(p.published, quizID)
-}
-
-func TestService_PublishLeaderboardForPlayer(t *testing.T) {
-	t.Parallel()
-
-	t.Run("publishes once per quiz the player has answered on", func(t *testing.T) {
-		t.Parallel()
-
-		pub := &recordingPublisher{}
-		svc := NewService(
-			stubStore{
-				listQuizIDsForPlayer: func(_ context.Context, playerID int64) ([]int64, error) {
-					if got, want := playerID, int64(42); got != want {
-						t.Errorf("ListQuizIDsForPlayer playerID = %d, want %d", got, want)
-					}
-
-					return []int64{7, 11, 13}, nil
-				},
-			},
-			stubQuizStore{},
-			slog.New(slog.DiscardHandler),
-		)
-		svc.SetLeaderboardPublisher(pub)
-
-		if err := svc.PublishLeaderboardForPlayer(t.Context(), 42); err != nil {
-			t.Fatalf("PublishLeaderboardForPlayer err = %v, want nil", err)
-		}
-
-		want := []int64{7, 11, 13}
-		if got := pub.published; !slices.Equal(got, want) {
-			t.Errorf("PublishLeaderboardForPlayer recorded %v, want %v", got, want)
-		}
-	})
-
-	t.Run("no publisher wired is a no-op", func(t *testing.T) {
-		t.Parallel()
-
-		svc := NewService(
-			stubStore{
-				listQuizIDsForPlayer: func(_ context.Context, _ int64) ([]int64, error) {
-					t.Error("ListQuizIDsForPlayer must not be called when no publisher is wired")
-
-					return nil, nil
-				},
-			},
-			stubQuizStore{},
-			slog.New(slog.DiscardHandler),
-		)
-
-		if err := svc.PublishLeaderboardForPlayer(t.Context(), 1); err != nil {
-			t.Errorf("PublishLeaderboardForPlayer err = %v, want nil", err)
-		}
-	})
-
-	t.Run("store error is wrapped and surfaced", func(t *testing.T) {
-		t.Parallel()
-
-		pub := &recordingPublisher{}
-		boom := errors.New("boom")
-		svc := NewService(
-			stubStore{
-				listQuizIDsForPlayer: func(_ context.Context, _ int64) ([]int64, error) {
-					return nil, boom
-				},
-			},
-			stubQuizStore{},
-			slog.New(slog.DiscardHandler),
-		)
-		svc.SetLeaderboardPublisher(pub)
-
-		err := svc.PublishLeaderboardForPlayer(t.Context(), 1)
-		if got, want := err, boom; !errors.Is(got, want) {
-			t.Errorf("PublishLeaderboardForPlayer err = %v, want wrap of %v", got, want)
-		}
-		if got, want := len(pub.published), 0; got != want {
-			t.Errorf(
-				"PublishLeaderboardForPlayer recorded %d calls, want %d (listing failed before any publish)",
-				got,
-				want,
-			)
 		}
 	})
 }

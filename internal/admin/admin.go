@@ -183,11 +183,33 @@ type QuizData struct {
 type QuestionData struct {
 	ID                    int64
 	QuizID                int64
+	RoundID               int64
 	Text                  string
 	ImageURL              string
 	Position              int
 	TimeLimitSecondsValue string
 	Options               []*OptionData
+}
+
+// RoundData backs the round sections on the quiz view and the round
+// form. Mirrors the QuestionData/QuizData shape so the templates stay
+// symmetric with their question equivalents (#444).
+type RoundData struct {
+	ID       int64
+	QuizID   int64
+	Title    string
+	Summary  string
+	Position int
+}
+
+func roundDataFromRound(r *quiz.Round) *RoundData {
+	return &RoundData{
+		ID:       r.ID,
+		QuizID:   r.QuizID,
+		Title:    r.Title,
+		Summary:  r.Summary,
+		Position: r.Position,
+	}
 }
 
 // OptionData is the data for an option.
@@ -273,6 +295,7 @@ func questionDataFromQuestion(q *quiz.Question) *QuestionData {
 	return &QuestionData{
 		ID:                    q.ID,
 		QuizID:                q.QuizID,
+		RoundID:               q.RoundID,
 		Text:                  q.Text,
 		ImageURL:              q.ImageURL,
 		Position:              q.Position,
@@ -855,192 +878,148 @@ func HandleQuizView(
 			return
 		}
 
-		breaks, ok := loadBreaks(w, r, logger, csrfMgr, quizStore, id)
+		rounds, ok := loadRounds(w, r, logger, csrfMgr, quizStore, id)
 		if !ok {
 			return
 		}
 
 		quizData := quizDataFromQuiz(qz)
 		attachCanEdit(r, quizData)
-		data := newQuizViewData(quizData, players, breaks)
+		data := newQuizViewData(quizData, players, rounds)
 		render.Render(w, r, http.StatusOK, data)
 	})
 }
 
-// QuizViewData is the data passed to the quiz view template. Sequence
-// is the merged question + break order; the template ranges over it
-// instead of the raw Questions/Breaks slices so the html stays simple
-// (#167).
+// QuizViewData is the data passed to the quiz view template. Questions
+// are grouped into rounds in play order; the template ranges over
+// Rounds instead of a flat question list (#444).
 type QuizViewData struct {
 	Title   string
 	Quiz    *QuizData
 	Players []PlayerScoreData
-	// LastQuestionIndex is len(Quiz.Questions) - 1; the partial keys
-	// the move-down button's disabled state on it. Sized here because
-	// html/template lacks a sub builtin.
-	LastQuestionIndex int
-	// Sequence is the interleaved question + break play order.
-	Sequence []SequenceItem
-	// Breaks is the position-ordered break list, preserved for the
-	// delete-modal mount loop in the template (the partial only sees
-	// breaks via Sequence).
-	Breaks []*BreakData
+	// LastQuestionPosition is the highest question position in the quiz;
+	// the partial keys the move-down button's disabled state on it.
+	LastQuestionPosition int
+	// Rounds is the position-ordered round list, each carrying its own
+	// questions, for the grouped quiz view.
+	Rounds []RoundViewData
+	// MoveTargets lists every round as a move-question-into-round option;
+	// the per-question dropdown only renders when more than one exists.
+	MoveTargets []RoundMoveTarget
 }
 
-// SequenceItem is one row in the interleaved question + break sequence
-// rendered by the quiz view. Exactly one of Question / Break is set;
-// the template branches on Kind so it can render the two visually
-// distinct row variants from a single range.
-type SequenceItem struct {
-	Kind     string // "question" or "break"
-	Question *QuestionData
-	Break    *BreakData
-	// QuestionIndex is the 0-based index of the question among the
-	// quiz's questions (used to size the move-up/move-down disabled
-	// state). Zero for break rows.
-	QuestionIndex int
-	// CanMoveUp and CanMoveDown drive the visibility of the per-row
-	// arrow buttons on break rows. A break can move up when the slot
-	// at position-1 exists in the play sequence (0 or one of the
-	// questions' positions) and is not already taken by another break;
-	// move down is the same check on position+1. Always false for
-	// question rows - questions use QuestionIndex / LastQuestionIndex
-	// instead.
+// RoundViewData is one round section on the quiz view: the round itself,
+// its questions in quiz-wide position order, and the per-round reorder
+// flags. CanMoveUp/CanMoveDown drive arrow-button visibility - the
+// store's MoveRound re-validates so the flags are UX-only, not security.
+type RoundViewData struct {
+	Round       *RoundData
+	Questions   []*QuestionData
 	CanMoveUp   bool
 	CanMoveDown bool
 }
 
-const (
-	sequenceKindQuestion = "question"
-	sequenceKindBreak    = "break"
-)
+// RoundMoveTarget is one entry in the move-question-into-round dropdown.
+type RoundMoveTarget struct {
+	ID    int64
+	Title string
+}
 
-// buildSequence interleaves questions and breaks by play order. A
-// break with position 0 sits before the first question; a break with
-// position N sits immediately after the question whose Position == N.
-// CanMoveUp/CanMoveDown drive arrow-button visibility - the store's
-// MoveBreak re-validates so the flags are UX-only, not security.
-func buildSequence(questions []*QuestionData, breaks []*BreakData) []SequenceItem {
-	validSlots := make(map[int]bool, len(questions)+1)
-	validSlots[0] = true
+// buildRoundView groups the quiz's questions under their rounds in
+// position order. Questions keep their quiz-wide position order within a
+// round; a round with no questions still renders its section. Questions
+// whose round_id matches no round (a defensive case) are dropped from
+// the grouped view rather than duplicated.
+func buildRoundView(rounds []*quiz.Round, questions []*QuestionData) []RoundViewData {
+	byRound := make(map[int64][]*QuestionData, len(rounds))
 	for _, q := range questions {
-		validSlots[q.Position] = true
-	}
-	occupied := make(map[int]bool, len(breaks))
-	for _, b := range breaks {
-		occupied[b.Position] = true
+		byRound[q.RoundID] = append(byRound[q.RoundID], q)
 	}
 
-	// Map position -> breaks at that slot, so a single linear pass over
-	// the (already-sorted) questions can pick them up. The "after slot
-	// N" semantics means a break with position 0 fires before question
-	// 1, so we emit the 0-slot first and then alternate (question,
-	// then any break at that question's position).
-	bySlot := make(map[int][]*BreakData, len(breaks))
-	for _, b := range breaks {
-		bySlot[b.Position] = append(bySlot[b.Position], b)
-	}
-
-	items := make([]SequenceItem, 0, len(questions)+len(breaks))
-	for _, b := range bySlot[0] {
-		items = append(items, breakSequenceItem(b, validSlots, occupied))
-	}
-	for i, q := range questions {
-		items = append(items, SequenceItem{
-			Kind:          sequenceKindQuestion,
-			Question:      q,
-			QuestionIndex: i,
+	views := make([]RoundViewData, 0, len(rounds))
+	for i, rnd := range rounds {
+		views = append(views, RoundViewData{
+			Round:       roundDataFromRound(rnd),
+			Questions:   byRound[rnd.ID],
+			CanMoveUp:   i > 0,
+			CanMoveDown: i < len(rounds)-1,
 		})
-		for _, b := range bySlot[q.Position] {
-			items = append(items, breakSequenceItem(b, validSlots, occupied))
-		}
 	}
 
-	return items
+	return views
 }
 
-// breakSequenceItem builds the SequenceItem for one break, deciding
-// the per-row CanMoveUp / CanMoveDown flags off the validSlots +
-// occupied sets passed in by buildSequence. Extracted so the move
-// rules sit in one spot instead of being inlined in both branches of
-// the merge loop.
-func breakSequenceItem(b *BreakData, validSlots, occupied map[int]bool) SequenceItem {
-	return SequenceItem{
-		Kind:        sequenceKindBreak,
-		Break:       b,
-		CanMoveUp:   canMoveBreak(b.Position-1, validSlots, occupied),
-		CanMoveDown: canMoveBreak(b.Position+1, validSlots, occupied),
+// roundMoveTargets maps the quiz's rounds to dropdown entries.
+func roundMoveTargets(rounds []*quiz.Round) []RoundMoveTarget {
+	targets := make([]RoundMoveTarget, 0, len(rounds))
+	for _, rnd := range rounds {
+		targets = append(targets, RoundMoveTarget{ID: rnd.ID, Title: rnd.Title})
 	}
+
+	return targets
 }
 
-// canMoveBreak reports whether a break is allowed to settle at
-// targetPos: the slot must exist in the play sequence and must not
-// already be occupied by another break. The break being moved is not
-// part of occupied for this check - its own position is excluded by
-// the +/-1 step the caller chose.
-func canMoveBreak(targetPos int, validSlots, occupied map[int]bool) bool {
-	if targetPos < 0 {
-		return false
-	}
-	if !validSlots[targetPos] {
-		return false
-	}
-	if occupied[targetPos] {
-		return false
+// lastQuestionPosition returns the highest position among the quiz's
+// questions, or 0 when the quiz has none. Questions are stored in
+// ascending position order, so the last entry carries the max.
+func lastQuestionPosition(questions []*QuestionData) int {
+	if len(questions) == 0 {
+		return 0
 	}
 
-	return true
+	return questions[len(questions)-1].Position
 }
 
-// loadBreaks fetches the quiz's breaks in position order. Errors are
+// loadRounds fetches the quiz's rounds in position order. Errors are
 // 500s because the section is part of the same admin view that already
 // loaded the quiz tree; surfacing an empty list would hide the
 // failure.
-func loadBreaks(
+func loadRounds(
 	w http.ResponseWriter,
 	r *http.Request,
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
 	quizStore quiz.Store,
 	quizID int64,
-) ([]*BreakData, bool) {
-	breaks, err := quizStore.ListBreaksByQuiz(r.Context(), quizID)
+) ([]*quiz.Round, bool) {
+	rounds, err := quizStore.ListRoundsByQuiz(r.Context(), quizID)
 	if err != nil {
-		logger.ErrorContext(r.Context(), "error listing breaks for quiz view", slog.Any("err", err))
+		logger.ErrorContext(r.Context(), "error listing rounds for quiz view", slog.Any("err", err))
 		render500(w, r, logger, csrfMgr)
 
 		return nil, false
 	}
 
-	return breakDataFromBreaks(breaks), true
+	return rounds, true
 }
 
-func newQuizViewData(quizData *QuizData, players []PlayerScoreData, breaks []*BreakData) QuizViewData {
+func newQuizViewData(quizData *QuizData, players []PlayerScoreData, rounds []*quiz.Round) QuizViewData {
 	return QuizViewData{
-		Title:             "Admin Dashboard - View Quiz",
-		Quiz:              quizData,
-		Players:           players,
-		LastQuestionIndex: len(quizData.Questions) - 1,
-		Sequence:          buildSequence(quizData.Questions, breaks),
-		Breaks:            breaks,
+		Title:                "Admin Dashboard - View Quiz",
+		Quiz:                 quizData,
+		Players:              players,
+		LastQuestionPosition: lastQuestionPosition(quizData.Questions),
+		Rounds:               buildRoundView(rounds, quizData.Questions),
+		MoveTargets:          roundMoveTargets(rounds),
 	}
 }
 
-// sequencePartialData mirrors the subset of QuizViewData the
+// roundsPartialData mirrors the subset of QuizViewData the
 // questions_list partial actually ranges over. Shared by the question
-// and break move handlers so an HTMX swap keeps the page's scroll
+// and round move handlers so an HTMX swap keeps the page's scroll
 // position instead of bouncing through a 303.
-type sequencePartialData struct {
-	Quiz              *QuizData
-	LastQuestionIndex int
-	Sequence          []SequenceItem
+type roundsPartialData struct {
+	Quiz                 *QuizData
+	LastQuestionPosition int
+	Rounds               []RoundViewData
+	MoveTargets          []RoundMoveTarget
 }
 
-// renderSequencePartial refetches the quiz tree and emits the
+// renderRoundsPartial refetches the quiz tree and emits the
 // questions_list partial. Used by the HTMX paths of HandleQuestionMove
-// and HandleBreakMove so a successful (or knowingly-impossible) move
-// updates only the sequence block instead of a full page reload.
-func renderSequencePartial(
+// and HandleRoundMove so a successful (or knowingly-impossible) move
+// updates only the grouped block instead of a full page reload.
+func renderRoundsPartial(
 	w http.ResponseWriter,
 	r *http.Request,
 	logger *slog.Logger,
@@ -1053,16 +1032,17 @@ func renderSequencePartial(
 	if !ok {
 		return
 	}
-	breaks, ok := loadBreaks(w, r, logger, csrfMgr, quizStore, quizID)
+	rounds, ok := loadRounds(w, r, logger, csrfMgr, quizStore, quizID)
 	if !ok {
 		return
 	}
 	quizData := quizDataFromQuiz(qz)
 	attachCanEdit(r, quizData)
-	render.RenderPartial(w, r, "questions_list", sequencePartialData{
-		Quiz:              quizData,
-		LastQuestionIndex: len(quizData.Questions) - 1,
-		Sequence:          buildSequence(quizData.Questions, breaks),
+	render.RenderPartial(w, r, "questions_list", roundsPartialData{
+		Quiz:                 quizData,
+		LastQuestionPosition: lastQuestionPosition(quizData.Questions),
+		Rounds:               buildRoundView(rounds, quizData.Questions),
+		MoveTargets:          roundMoveTargets(rounds),
 	})
 }
 
@@ -1216,11 +1196,6 @@ type quizImportPayload struct {
 	// new-quiz default.
 	TimeLimitSeconds *int                        `json:"timeLimitSeconds,omitempty"`
 	Questions        []quizImportQuestionPayload `json:"questions"`
-	// Breaks are optional interludes (#167). Position semantics mirror
-	// [quiz.Break]: 0 means before question 1, N (> 0) means after
-	// the question whose Position is N. Omitted or empty array is a
-	// valid quiz with no breaks.
-	Breaks []quizImportBreakPayload `json:"breaks,omitempty"`
 }
 
 type quizImportQuestionPayload struct {
@@ -1236,15 +1211,6 @@ type quizImportQuestionPayload struct {
 type quizImportOptionPayload struct {
 	Text    string `json:"text"`
 	Correct bool   `json:"correct"`
-}
-
-// quizImportBreakPayload mirrors the [quiz.Break] wire shape on the
-// import path. Text is optional; an empty string is allowed and is
-// stored as-is, matching what the admin form path persists when the
-// host submits the break-form with a blank Text field.
-type quizImportBreakPayload struct {
-	Position int    `json:"position"`
-	Text     string `json:"text,omitempty"`
 }
 
 // quizImportExample is the JSON block rendered on the import page so the
@@ -1366,13 +1332,6 @@ func HandleQuizImportSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 			return
 		}
 
-		if err := storeImportedBreaks(r.Context(), quizStore, parsed.Quiz.ID, parsed.Breaks); err != nil {
-			logger.ErrorContext(r.Context(), "error storing imported break", slog.Any("err", err))
-			render500(w, r, logger, csrfMgr)
-
-			return
-		}
-
 		http.Redirect(w, r, fmt.Sprintf("/admin/quizzes/%d", parsed.Quiz.ID), http.StatusSeeOther)
 	})
 }
@@ -1381,11 +1340,10 @@ func HandleQuizImportSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 // returns to [HandleQuizImportSave]. Bundled so the parser can return a
 // single struct (plus an ok flag) and stay under revive's
 // function-result-limit while still surfacing the JSON text (for
-// re-render on later failures), the quiz, and the breaks separately.
+// re-render on later failures) alongside the parsed quiz.
 type parsedImport struct {
 	JSONText string
 	Quiz     *quiz.Quiz
-	Breaks   []*quiz.Break
 }
 
 // parseImportPayload reads + decodes + validates the request body for
@@ -1421,71 +1379,14 @@ func parseImportPayload(
 		return parsedImport{}, false
 	}
 
-	qz, breaks := quizFromImportPayload(payload)
+	qz := quizFromImportPayload(payload)
 	if problems := (&quizForm{quiz: qz}).Valid(r.Context()); len(problems) > 0 {
 		renderErr(w, r, jsonText, fmt.Sprintf("validation errors: %v", problems))
 
 		return parsedImport{}, false
 	}
-	if msg := validateImportBreaks(r.Context(), qz, breaks); msg != "" {
-		renderErr(w, r, jsonText, msg)
 
-		return parsedImport{}, false
-	}
-
-	return parsedImport{JSONText: jsonText, Quiz: qz, Breaks: breaks}, true
-}
-
-// storeImportedBreaks persists the breaks parsed off the import
-// payload. Each break's QuizID is set from the just-inserted quiz
-// before the store call. Pre-validation ruled out the predictable
-// cases (unknown position, duplicate-in-payload); a failure here is
-// unexpected, so the caller logs + 500s. The quiz row is already
-// persisted - re-importing would collide on the slug, so the admin's
-// recovery path is to open the quiz and add the missing breaks via
-// the regular UI.
-func storeImportedBreaks(ctx context.Context, quizStore quiz.Store, quizID int64, breaks []*quiz.Break) error {
-	for _, b := range breaks {
-		b.QuizID = quizID
-		if err := quizStore.CreateBreak(ctx, b); err != nil {
-			return fmt.Errorf("create break at position %d: %w", b.Position, err)
-		}
-	}
-
-	return nil
-}
-
-// validateImportBreaks pins the same per-break rules the admin form
-// path enforces, plus a payload-side duplicate-position check the form
-// path leaves to the DB unique index. Returns an empty string when the
-// payload is acceptable. The handler renders the joined message as the
-// form banner. Collects every failing break in one pass so an
-// LLM-generated payload with multiple mistakes gets all of them
-// reported on a single round-trip.
-func validateImportBreaks(ctx context.Context, qz *quiz.Quiz, breaks []*quiz.Break) string {
-	var problems []string
-	seen := make(map[int]bool, len(breaks))
-	for _, b := range breaks {
-		if formProblems := (&breakForm{quiz: qz, brk: b}).Valid(ctx); len(formProblems) > 0 {
-			// Pull positionFieldKey out by name rather than printing the
-			// map: Go map iteration order is non-deterministic, so a
-			// future Valid that returns >1 key would otherwise produce
-			// run-to-run variation in the banner copy.
-			problems = append(problems, fmt.Sprintf(
-				"break at position %d: %s", b.Position, formProblems[positionFieldKey]))
-
-			continue
-		}
-		if seen[b.Position] {
-			problems = append(problems, fmt.Sprintf(
-				"break position %d appears twice; each slot accepts at most one break", b.Position))
-
-			continue
-		}
-		seen[b.Position] = true
-	}
-
-	return strings.Join(problems, "; ")
+	return parsedImport{JSONText: jsonText, Quiz: qz}, true
 }
 
 // quizFromImportPayload converts the wire-shape payload into the
@@ -1493,12 +1394,10 @@ func validateImportBreaks(ctx context.Context, qz *quiz.Quiz, breaks []*quiz.Bre
 // payload doesn't carry one because LLMs are bad at picking a stable
 // slug and the admin form does the same derivation. Question
 // positions are assigned 1..N in the order questions appear in the
-// JSON. Breaks are returned alongside the quiz with QuizID left zero;
-// the caller sets it after the quiz row is persisted and the ID is
-// known. Returning a separate slice keeps [quiz.Quiz] free of
-// break-shaped fields, mirroring how the form-driven path treats
-// breaks as a sibling collection.
-func quizFromImportPayload(p quizImportPayload) (*quiz.Quiz, []*quiz.Break) {
+// JSON. The default round every quiz starts with (migration
+// 20260530000000) holds the imported questions; the store assigns each
+// new question to it (#444).
+func quizFromImportPayload(p quizImportPayload) *quiz.Quiz {
 	// #99: honour the payload's per-quiz default when present; fall
 	// back to the project value so authors who don't care can omit
 	// the field entirely and still pass Quiz.Valid's range check.
@@ -1533,15 +1432,7 @@ func quizFromImportPayload(p quizImportPayload) (*quiz.Quiz, []*quiz.Break) {
 		qz.Questions = append(qz.Questions, qs)
 	}
 
-	breaks := make([]*quiz.Break, 0, len(p.Breaks))
-	for _, bIn := range p.Breaks {
-		breaks = append(breaks, &quiz.Break{
-			Position: bIn.Position,
-			Text:     bIn.Text,
-		})
-	}
-
-	return qz, breaks
+	return qz
 }
 
 // quizFormData backs the quizform.gohtml template. Error is non-empty
@@ -1845,7 +1736,7 @@ func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 		}
 
 		if isHX {
-			renderSequencePartial(w, r, logger, csrfMgr, render, quizStore, quizID)
+			renderRoundsPartial(w, r, logger, csrfMgr, render, quizStore, quizID)
 
 			return
 		}
@@ -1943,7 +1834,7 @@ func HandleQuestionSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 // HandleQuestionSave's main flow stays under gocognit's threshold
 // while the participant + ownership gates remain consolidated.
 //
-//nolint:dupl // mirrored by loadBreakForSave (#167); see the note there.
+
 func loadQuestionForSave(
 	w http.ResponseWriter,
 	r *http.Request,
