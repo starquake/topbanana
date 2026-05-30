@@ -367,7 +367,7 @@ func addAdminRoutes(
 	playerDeps adminPlayerDeps,
 ) {
 	csrfMW := csrfMgr.Middleware
-	// requireGameHost gates the dashboard + quiz/break routes to Hosts and
+	// requireGameHost gates the dashboard + quiz/round routes to Hosts and
 	// Admins (#538). A signed-in Player gets a 403 access-denied page (the
 	// dashboard's existence is not secret).
 	requireGameHost := func(h http.Handler) http.Handler {
@@ -440,7 +440,7 @@ func addAdminRoutes(
 		csrfMW(requireGameHost(admin.HandleQuestionMove(logger, csrfMgr, stores.Quizzes))),
 	)
 
-	addAdminBreakRoutes(mux, logger, stores, csrfMW, requireGameHost, csrfMgr)
+	addAdminRoundRoutes(mux, logger, stores, csrfMW, requireGameHost, csrfMgr)
 }
 
 // addAdminSettingsRoutes registers the Admin settings page (#320/#538): the
@@ -573,11 +573,13 @@ func addAdminEmailRoutes(
 	)
 }
 
-// addAdminBreakRoutes registers the break CRUD routes (#167). Split
-// out of addAdminRoutes so that function stays under revive's
-// function-length limit; the breaks block is otherwise structurally
-// identical to the questions block above.
-func addAdminBreakRoutes(
+// addAdminRoundRoutes registers the round CRUD routes
+// (#444). Split out of addAdminRoutes so that function stays under
+// revive's function-length limit; the rounds block is otherwise
+// structurally identical to the questions block above. The
+// move-question-into-round route lets a host reassign a question to a
+// different round.
+func addAdminRoundRoutes(
 	mux *http.ServeMux,
 	logger *slog.Logger,
 	stores *store.Stores,
@@ -586,28 +588,32 @@ func addAdminBreakRoutes(
 	csrfMgr *csrf.Manager,
 ) {
 	mux.Handle(
-		"GET /admin/quizzes/{quizID}/breaks/new",
-		requireGameHost(admin.HandleBreakCreate(logger, csrfMgr, stores.Quizzes)),
+		"GET /admin/quizzes/{quizID}/rounds/new",
+		requireGameHost(admin.HandleRoundCreate(logger, csrfMgr, stores.Quizzes)),
 	)
 	mux.Handle(
-		"POST /admin/quizzes/{quizID}/breaks",
-		csrfMW(requireGameHost(admin.HandleBreakSave(logger, csrfMgr, stores.Quizzes))),
+		"POST /admin/quizzes/{quizID}/rounds",
+		csrfMW(requireGameHost(admin.HandleRoundSave(logger, csrfMgr, stores.Quizzes))),
 	)
 	mux.Handle(
-		"GET /admin/quizzes/{quizID}/breaks/{breakID}/edit",
-		requireGameHost(admin.HandleBreakEdit(logger, csrfMgr, stores.Quizzes)),
+		"GET /admin/quizzes/{quizID}/rounds/{roundID}/edit",
+		requireGameHost(admin.HandleRoundEdit(logger, csrfMgr, stores.Quizzes)),
 	)
 	mux.Handle(
-		"POST /admin/quizzes/{quizID}/breaks/{breakID}",
-		csrfMW(requireGameHost(admin.HandleBreakSave(logger, csrfMgr, stores.Quizzes))),
+		"POST /admin/quizzes/{quizID}/rounds/{roundID}",
+		csrfMW(requireGameHost(admin.HandleRoundSave(logger, csrfMgr, stores.Quizzes))),
 	)
 	mux.Handle(
-		"POST /admin/quizzes/{quizID}/breaks/{breakID}/delete",
-		csrfMW(requireGameHost(admin.HandleBreakDelete(logger, csrfMgr, stores.Quizzes))),
+		"POST /admin/quizzes/{quizID}/rounds/{roundID}/delete",
+		csrfMW(requireGameHost(admin.HandleRoundDelete(logger, csrfMgr, stores.Quizzes))),
 	)
 	mux.Handle(
-		"POST /admin/quizzes/{quizID}/breaks/{breakID}/move/{direction}",
-		csrfMW(requireGameHost(admin.HandleBreakMove(logger, csrfMgr, stores.Quizzes))),
+		"POST /admin/quizzes/{quizID}/rounds/{roundID}/move/{direction}",
+		csrfMW(requireGameHost(admin.HandleRoundMove(logger, csrfMgr, stores.Quizzes))),
+	)
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/questions/{questionID}/round",
+		csrfMW(requireGameHost(admin.HandleQuestionMoveToRound(logger, csrfMgr, stores.Quizzes))),
 	)
 }
 
@@ -664,8 +670,8 @@ func addAPIRoutes(
 		ensurePlayer(clientapi.HandleAnswerPost(logger, gameService)),
 	)
 	mux.Handle(
-		"POST /api/games/{gameID}/breaks/{breakID}/seen",
-		ensurePlayer(clientapi.HandleBreakSeen(logger, gameService)),
+		"POST /api/games/{gameID}/rounds/{roundID}/seen",
+		ensurePlayer(clientapi.HandleRoundSeen(logger, gameService)),
 	)
 	mux.Handle("GET /api/games/{gameID}/results", ensurePlayer(clientapi.HandleGameResults(logger, gameService)))
 }

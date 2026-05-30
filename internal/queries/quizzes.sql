@@ -123,7 +123,7 @@ WHERE quiz_id = ?
 ORDER BY position;
 
 -- name: CreateQuestion :one
-INSERT INTO questions (quiz_id, group_id, text, position, image_url, time_limit_seconds)
+INSERT INTO questions (quiz_id, round_id, text, position, image_url, time_limit_seconds)
 VALUES (?, ?, ?, ?, ?, ?)
 RETURNING *;
 
@@ -133,6 +133,14 @@ SET text               = ?,
     position           = ?,
     image_url          = ?,
     time_limit_seconds = ?
+WHERE id = ?;
+
+-- name: MoveQuestionToRound :execresult
+-- Reassigns a question to a different round within the same quiz (#444).
+-- Position is unchanged - questions stay in quiz-wide position order, so
+-- a round change is a single column rewrite.
+UPDATE questions
+SET round_id = ?
 WHERE id = ?;
 
 -- name: UpdateQuestionPosition :execresult

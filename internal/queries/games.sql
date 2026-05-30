@@ -236,21 +236,22 @@ DELETE
 FROM games
 WHERE id IN (sqlc.slice('ids'));
 
--- name: MarkBreakSeen :exec
--- Records that the player has acknowledged the given break in the
--- given game (#167 slice 2). ON CONFLICT DO NOTHING makes the
--- POST /breaks/{id}/seen endpoint idempotent: a second call returns
--- 204 without bumping seen_at or inserting a duplicate row.
-INSERT INTO game_seen_breaks (game_id, break_id)
+-- name: MarkRoundSeen :exec
+-- Records that the player has acknowledged the round summary at the
+-- given round boundary in the given game (#444). ON CONFLICT DO NOTHING
+-- makes the POST /rounds/{id}/seen endpoint idempotent: a second call
+-- returns 204 without bumping seen_at or inserting a duplicate row.
+INSERT INTO game_seen_rounds (game_id, round_id)
 VALUES (?, ?)
-ON CONFLICT (game_id, break_id) DO NOTHING;
+ON CONFLICT (game_id, round_id) DO NOTHING;
 
--- name: ListSeenBreakIDsByGame :many
--- Lists the break IDs the player has already passed through in the
--- given game. The merged-by-position iterator in game.Service.GetNext
--- uses the result set to skip past acknowledged breaks.
-SELECT break_id
-FROM game_seen_breaks
+-- name: ListSeenRoundIDsByGame :many
+-- Lists the round IDs whose round summary the player has already passed
+-- through in the given game. The round-walking iterator in
+-- game.Service.GetNext uses the result set to skip past acknowledged
+-- round boundaries.
+SELECT round_id
+FROM game_seen_rounds
 WHERE game_id = ?;
 
 -- name: ReattributeGameAnswers :execrows

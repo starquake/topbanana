@@ -1,5 +1,5 @@
 -- NO TRANSACTION required: this migration rebuilds the questions table
--- to add a NOT NULL group_id. questions is a PARENT table (options,
+-- to add a NOT NULL round_id. questions is a PARENT table (options,
 -- game_questions FK-reference it), and PRAGMA defer_foreign_keys is not
 -- enough on a parent rebuild: the DROP TABLE on the parent invalidates
 -- the child rows' references in a way the deferred check at COMMIT still
@@ -10,11 +10,11 @@
 -- +goose NO TRANSACTION
 
 -- +goose Up
--- Introduce question_groups (rounds): every question belongs to exactly
--- one group. This slice is additive - breaks stay untouched. Existing
--- breaks are NOT migrated into groups; each quiz simply gets one default
--- group ('Round 1' at position 0) holding all its questions. Later
--- slices build real round selection and the play loop on top.
+-- Introduce rounds: every question belongs to exactly one round. This
+-- slice is additive - breaks stay untouched. Existing breaks are NOT
+-- migrated into rounds; each quiz simply gets one default round ('Round
+-- 1' at position 0) holding all its questions. Later slices build real
+-- round selection and the play loop on top.
 -- +goose StatementBegin
 PRAGMA foreign_keys = OFF;
 -- +goose StatementEnd
@@ -35,37 +35,37 @@ BEGIN TRANSACTION;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
--- question_groups mirrors the index style of breaks_quiz_position_idx /
--- questions_quiz_position_idx: UNIQUE(quiz_id, position) so two groups
--- cannot share a slot on the same quiz. break_text is the round summary
+-- rounds mirrors the index style of breaks_quiz_position_idx /
+-- questions_quiz_position_idx: UNIQUE(quiz_id, position) so two rounds
+-- cannot share a slot on the same quiz. summary is the round summary
 -- authored later via the admin UI; default '' so callers can create a
--- group without supplying it. title default '' for the same reason; the
--- backfill below stamps 'Round 1' on the default group.
-CREATE TABLE question_groups
+-- round without supplying it. title default '' for the same reason; the
+-- backfill below stamps 'Round 1' on the default round.
+CREATE TABLE rounds
 (
     id         INTEGER PRIMARY KEY,
     quiz_id    INTEGER  NOT NULL REFERENCES quizzes (id) ON DELETE CASCADE,
     position   INTEGER  NOT NULL,
     title      TEXT     NOT NULL DEFAULT '',
-    break_text TEXT     NOT NULL DEFAULT '',
+    summary    TEXT     NOT NULL DEFAULT '',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 -- +goose StatementEnd
 
 -- +goose StatementBegin
-CREATE UNIQUE INDEX question_groups_quiz_position_idx ON question_groups(quiz_id, position);
+CREATE UNIQUE INDEX rounds_quiz_position_idx ON rounds(quiz_id, position);
 -- +goose StatementEnd
 
 -- +goose StatementBegin
--- One default group per quiz, at position 0, titled 'Round 1'.
-INSERT INTO question_groups (quiz_id, position, title)
+-- One default round per quiz, at position 0, titled 'Round 1'.
+INSERT INTO rounds (quiz_id, position, title)
 SELECT id, 0, 'Round 1'
 FROM quizzes;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
--- Rebuild questions to add a NOT NULL group_id. Re-declare every existing
+-- Rebuild questions to add a NOT NULL round_id. Re-declare every existing
 -- column and constraint: the quiz_id FK (ON DELETE CASCADE), the
 -- time_limit_seconds CHECK, image_url, and the
 -- questions_quiz_position_idx unique index recreated after the rename.
@@ -73,7 +73,7 @@ CREATE TABLE questions_new
 (
     id                 INTEGER PRIMARY KEY,
     quiz_id            INTEGER NOT NULL REFERENCES quizzes (id) ON DELETE CASCADE,
-    group_id           INTEGER NOT NULL REFERENCES question_groups (id) ON DELETE CASCADE,
+    round_id           INTEGER NOT NULL REFERENCES rounds (id) ON DELETE CASCADE,
     text               TEXT    NOT NULL DEFAULT '',
     position           INTEGER NOT NULL,
     image_url          TEXT    NOT NULL DEFAULT '',
@@ -82,12 +82,12 @@ CREATE TABLE questions_new
 -- +goose StatementEnd
 
 -- +goose StatementBegin
--- Copy ids exactly and resolve each question's group_id to its quiz's
--- default (position 0) group.
-INSERT INTO questions_new (id, quiz_id, group_id, text, position, image_url, time_limit_seconds)
+-- Copy ids exactly and resolve each question's round_id to its quiz's
+-- default (position 0) round.
+INSERT INTO questions_new (id, quiz_id, round_id, text, position, image_url, time_limit_seconds)
 SELECT q.id,
        q.quiz_id,
-       (SELECT g.id FROM question_groups g WHERE g.quiz_id = q.quiz_id AND g.position = 0),
+       (SELECT r.id FROM rounds r WHERE r.quiz_id = q.quiz_id AND r.position = 0),
        q.text,
        q.position,
        q.image_url,
@@ -154,7 +154,7 @@ BEGIN TRANSACTION;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
--- Rebuild questions without group_id, preserving every other column and
+-- Rebuild questions without round_id, preserving every other column and
 -- constraint. ids are copied exactly.
 CREATE TABLE questions_old
 (
@@ -186,11 +186,11 @@ CREATE UNIQUE INDEX questions_quiz_position_idx ON questions(quiz_id, position);
 -- +goose StatementEnd
 
 -- +goose StatementBegin
-DROP INDEX question_groups_quiz_position_idx;
+DROP INDEX rounds_quiz_position_idx;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
-DROP TABLE question_groups;
+DROP TABLE rounds;
 -- +goose StatementEnd
 
 -- Same enforcing FK guard as the Up: abort if the rebuild left a
