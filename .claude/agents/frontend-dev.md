@@ -146,43 +146,11 @@ Always `clearInterval(this.timer)` before starting a new countdown and in `reset
 
 ## API contract (what the frontend consumes)
 
-All endpoints are relative (no origin prefix needed — same origin).
+All endpoints are relative (same origin, no prefix). The route table is `internal/server/routes.go` (`/api/...` handlers in `internal/clientapi/`); read it for the current set and request/response shapes rather than a copied list, which rots. Conventions that hold:
 
-### `GET /api/quizzes`
-```json
-[{ "id": 1, "title": "...", "slug": "...", "description": "...", "createdAt": "..." }]
-```
-
-### `POST /api/games`  ← `{ "quizId": 1 }`
-```json
-{ "id": "d5gi9kgn2facjitokja0" }
-```
-`Location` header is also set but not used by the client.
-
-### `GET /api/games/:gameId/questions/next`
-```json
-{
-  "id": 1,
-  "text": "What is ...?",
-  "options": [{ "id": 1, "text": "..." }, ...],
-  "startedAt": "2026-05-01T12:00:00Z",
-  "expiredAt": "2026-05-01T12:00:10Z"
-}
-```
-Returns **404** when there are no more questions — treat as "game over", not an error.
-
-### `POST /api/games/:gameId/questions/:questionId/answers`  ← `{ "optionId": 1 }`
-```json
-{ "optionId": 1, "correct": true, "score": 850 }
-```
-
-### `GET /api/games/:gameId/results`
-```json
-{
-  "gameId": "...",
-  "playerScores": [{ "playerId": 1, "score": 1700 }]
-}
-```
+- Game IDs are short xid strings, not integers; quizzes are addressed by `{slugID}`.
+- `GET .../questions/next` returns **404** when there are no more questions — treat as "game over", not an error. 404 is a business signal in several endpoints.
+- Responses are camelCase JSON; timestamps are ISO 8601 strings.
 
 ## Game flow (state machine)
 
@@ -223,10 +191,4 @@ Every `<label>` must have a `for` attribute pointing to the `id` of a form eleme
 
 ## What to avoid
 
-- Do **not** introduce a build step (npm, Vite, webpack, etc.) — keep it build-free.
-- Do **not** use TypeScript — plain `.js` only.
-- Do **not** add a third-party component library or JS framework beyond Alpine + Bulma.
-- Do **not** add reactive state outside the constructor (Alpine won't track it).
-- Do **not** use inline styles — use Bulma classes.
-- Do **not** hardcode base URLs — all fetch calls use relative paths.
-- Do **not** add CSS files — add a `<style>` block to `index.html` only if Bulma truly has no equivalent.
+See the styling and constraints rules in `.claude/rules/frontend-style.md` (no build step, no TypeScript, no framework beyond Alpine + Bulma, no inline styles, no hardcoded base URLs, no reactive state outside the constructor).

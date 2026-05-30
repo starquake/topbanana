@@ -13,17 +13,10 @@ You are drafting end-user release notes for Top Banana and shipping the release.
 
 ## What kind of doc this is
 
-`RELEASE_NOTES.md` is for **players and quiz hosts**, not for engineers. The audience can't read source. The voice rule from `CLAUDE.md` ("User-facing copy") applies:
+`RELEASE_NOTES.md` is for **players and quiz hosts**, not engineers — the audience can't read source. Apply the **"User-facing copy"** voice rules from `CLAUDE.md` in full: plain factual language with nothing to sell, neutral verbs over marketing ones, no framing words, no narrative story-arc intros, no second-person addressing, no trailing "so that X" rationale tails, no PR/issue numbers, and name the real limit of a fix rather than overclaiming. Release-doc specifics on top of those:
 
-- Plain, factual language. **There is nothing to sell.**
-- Drop framing words: "polished", "headline release", "the big one", "real multiplayer", "a moment to read".
-- Drop narrative intros that summarise the release as a story arc. A single factual lead sentence is enough.
-- Use neutral verbs (added, now shows, accepts, rotates) instead of marketing ones (lets you, gives you, unleashes).
-- Drop second-person addressing where you can. "When you paste a URL into WhatsApp" → "When a `/play/...` URL is pasted into WhatsApp".
-- Drop trailing rationale tails like "so the round doesn't silently stall". State the fact and stop.
-- When a fix has a meaningful limit, name the limit. Overclaiming (e.g. "Clearing cookies no longer lets you replay" when the constraint is only per-account) is worse than the original bug.
+- A single factual lead sentence per release; no story-arc intro.
 - Group by reader role only when it helps them find their entries: **Players / Hosts / Visual / chrome / Behind the scenes**. Drop a section when it would be empty.
-- Never include PR or issue numbers in the body of a release section. They belong in the per-release GitHub auto-generated notes.
 
 ## What goes in vs. what's skipped
 
