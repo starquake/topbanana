@@ -125,9 +125,14 @@ The same voice applies to commit messages and PR descriptions: short, declarativ
 
 ## Migrations
 
-Table rebuilds (the SQLite idiom for `ALTER COLUMN`, FK changes, etc.) must use `PRAGMA defer_foreign_keys = ON`, not `PRAGMA foreign_keys = OFF`. The deferred form keeps FK enforcement on and just postpones the check until COMMIT, so a broken rebuild fails loudly during the migration rather than silently leaving dangling references. See migration `20260520180000_unique_participant_per_player_quiz.sql` for the canonical pattern. Two pre-rule migrations (`20260506000000_add_player_auth_columns.sql` and `20260520200000_quiz_creator.sql`) are grandfathered.
+Table rebuilds (the SQLite idiom for `ALTER COLUMN`, FK changes, etc.) need care with foreign keys, and which pattern to use depends on whether the rebuilt table is FK-referenced by others:
 
-Run `make lint-migrations` to surface any new migration that violates the convention. The target is advisory (exit 0 on hit; only prints offenders) and excludes the grandfathered ones.
+- **Child table** (nothing references it): use `PRAGMA defer_foreign_keys = ON` inside goose's default transaction. It keeps FK enforcement on but postpones the check to COMMIT, so a broken rebuild fails loudly instead of leaving dangling references. Canonical: `20260520180000_unique_participant_per_player_quiz.sql`.
+- **Parent table** (other tables reference it, e.g. `players`): `defer_foreign_keys` does NOT work here — dropping the parent registers child-reference violations that the deferred check at COMMIT still trips on (verified against `modernc.org/sqlite` v1.31.x). Use `-- +goose NO TRANSACTION`, then `PRAGMA foreign_keys = OFF`, an explicit `BEGIN TRANSACTION ... COMMIT`, then `PRAGMA foreign_keys = ON`, and add the file to the `make lint-migrations` allowlist. Canonical: `20260529160000_roles_player_host_admin.sql`.
+
+`PRAGMA foreign_key_check` is NOT a guard — it only returns violation rows and goose discards them, so a broken rebuild commits silently. To abort on a dangling reference, add the `_fk_guard` CHECK-constraint pattern before COMMIT (see `20260529160000`). The full how-to is in the `backend-dev` agent.
+
+Run `make lint-migrations` to surface any new migration using `foreign_keys = OFF` outside the allowlist. It is advisory (exit 0; only prints offenders). The allowlist holds four files: two pre-rule grandfathered (`20260506000000`, `20260520200000`) and two deliberate parent rebuilds (`20260528100000`, `20260529160000`).
 
 ## Hard rules
 
