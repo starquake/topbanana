@@ -5,10 +5,10 @@ import type { QuestionSpec } from './helpers';
 // #444 - questions are grouped into rounds. When a round carries an
 // authored summary, the player SPA renders a round-summary card once
 // every question in the round has been answered, before the next round
-// (or the final leaderboard). Two questions in the quiz's default
-// round, plus a summary on that round, keeps the play loop short while
-// still covering the question -> round-summary -> leaderboard
-// transition.
+// (or the final leaderboard). The quiz's default round holds both
+// questions; authoring a summary on it makes its boundary fire, so the
+// test covers the question -> round-summary -> leaderboard transition
+// over the locked /next wire contract.
 const TWO_QUESTIONS: readonly QuestionSpec[] = [
   { text: 'What is 2+2?', options: ['4', '3', '5', '6'], correctIndices: [0] },
   { text: 'Capital of France?', options: ['Paris', 'London', 'Madrid', 'Rome'], correctIndices: [0] },
@@ -27,6 +27,8 @@ test('player sees a round-summary card after the round and continues to the lead
   await createQuizWithQuestions(page, quizTitle, TWO_QUESTIONS);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
+  // The quiz has exactly one round (the default "Round 1"); .first()
+  // resolves the only Edit round link.
   await page.getByRole('link', { name: 'Edit round' }).first().click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/rounds\/\d+\/edit$/);
   await page.locator('textarea[name=summary]').fill('Halfway through!');
@@ -44,24 +46,30 @@ test('player sees a round-summary card after the round and continues to the lead
   await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
   await page.getByRole('button', { name: 'Start Game' }).click();
 
-  // Q1 - answer the correct option so the running score banks points.
+  // Q1 - answer the correct option. The generous timeout covers the
+  // per-question reveal-countdown beat (#247); the splash assertion
+  // gates the next step on the feedback pause completing so the click
+  // on Q2 lands in its own answer window.
   const q1Option = page.getByRole('button', { name: '4' });
-  await expect(q1Option).toBeVisible();
+  await expect(q1Option).toBeVisible({ timeout: 10_000 });
   await q1Option.click();
+  await expect(page.locator('.splash-correct')).toBeVisible();
 
   // Q2 - answer the correct option so the round completes.
   const q2Option = page.getByRole('button', { name: 'Paris' });
-  await expect(q2Option).toBeVisible();
+  await expect(q2Option).toBeVisible({ timeout: 10_000 });
   await q2Option.click();
+  await expect(page.locator('.splash-correct')).toBeVisible();
 
-  // Round-summary card shows up after the round's last question.
+  // Round-summary card shows up after the round's last question
+  // auto-advances. Generous timeout for the feedback pause + fetch.
   const roundCard = page.getByTestId('round-card');
-  await expect(roundCard).toBeVisible();
+  await expect(roundCard).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId('round-title')).toContainText('Round 1');
   await expect(page.getByTestId('round-score')).toBeVisible();
   await expect(roundCard).toContainText('Halfway through!');
 
   // Continue -> the leaderboard renders (no more questions).
   await page.getByTestId('round-continue').click();
-  await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible({ timeout: 10_000 });
 });
