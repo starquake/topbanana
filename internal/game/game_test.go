@@ -1813,6 +1813,21 @@ func firstRoundID(t *testing.T, qz *quiz.Quiz, quizStore *store.QuizStore) int64
 	return rounds[0].ID
 }
 
+// giveRoundSummary stamps a summary on an existing round so its boundary
+// fires during play. The play iterator skips a round whose summary is
+// empty (#444), so boundary-emission tests must author one first.
+func giveRoundSummary(t *testing.T, quizStore *store.QuizStore, roundID int64, summary string) {
+	t.Helper()
+	round, err := quizStore.GetRound(t.Context(), roundID)
+	if err != nil {
+		t.Fatalf("GetRound err = %v, want nil", err)
+	}
+	round.Summary = summary
+	if err := quizStore.UpdateRound(t.Context(), round); err != nil {
+		t.Fatalf("UpdateRound err = %v, want nil", err)
+	}
+}
+
 func TestService_GetNext(t *testing.T) {
 	t.Parallel()
 
@@ -1868,6 +1883,7 @@ func TestService_GetNext(t *testing.T) {
 			t.Fatalf("CreateQuiz err = %v, want nil", err)
 		}
 		roundID := firstRoundID(t, testQuiz, quizStore)
+		giveRoundSummary(t, quizStore, roundID, "Round one wrapped up")
 
 		testGame := newTestGame(t, testQuiz)
 		if err := gameStore.CreateGame(ctx, testGame); err != nil {
@@ -1920,6 +1936,7 @@ func TestService_GetNext(t *testing.T) {
 			t.Fatalf("CreateQuiz err = %v, want nil", err)
 		}
 		roundID := firstRoundID(t, testQuiz, quizStore)
+		giveRoundSummary(t, quizStore, roundID, "Round one wrapped up")
 
 		testGame := newTestGame(t, testQuiz)
 		if err := gameStore.CreateGame(ctx, testGame); err != nil {
@@ -1975,7 +1992,8 @@ func TestService_GetNext(t *testing.T) {
 			t.Fatalf("CreateQuiz err = %v, want nil", err)
 		}
 		round1 := firstRoundID(t, testQuiz, quizStore)
-		round2 := &quiz.Round{QuizID: testQuiz.ID, Position: 1, Title: "Round 2"}
+		giveRoundSummary(t, quizStore, round1, "Round one wrapped up")
+		round2 := &quiz.Round{QuizID: testQuiz.ID, Position: 1, Title: "Round 2", Summary: "Round two wrapped up"}
 		if err := quizStore.CreateRound(ctx, round2); err != nil {
 			t.Fatalf("CreateRound err = %v, want nil", err)
 		}
