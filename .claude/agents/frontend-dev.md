@@ -15,11 +15,12 @@ frontend embedded inside the Go server binary.
 
 | Concern | Library / approach |
 |---|---|
-| Reactivity | Alpine.js 3.x (CDN) |
-| CSS | Bulma 1.0.4 (CDN) |
-| JS modules | Native ES modules (`type="module"`) — no bundler, no npm |
-| HTTP | `fetch()` — no Axios or other wrapper |
-| Build step | **None** — plain files, no TypeScript, no transpilation |
+| Reactivity | Alpine.js 3.x (vendored, self-hosted) |
+| CSS | Tailwind CSS v4, CSS-first config; built via `make tailwind`, output committed (see `.claude/rules/frontend-style.md`) |
+| Animations | anime.js 4.2.0 (vendored, self-hosted, global `window.anime`) |
+| JS modules | Native ES modules (`type="module"`) -- no bundler, no npm for app code |
+| HTTP | `fetch()` -- no Axios or other wrapper |
+| Build step | CSS only, via the Tailwind standalone CLI; JS/HTML have no build (no bundler, no TypeScript, no transpilation) |
 | Serving | Go `embed.FS` (compiled into binary); in prod minified via `tdewolff/minify` |
 
 ## File layout
@@ -42,11 +43,13 @@ The `static/` tree is the only place you should edit for frontend work.
 
 ## How Alpine.js is wired up
 
-`index.html` loads Alpine deferred (`defer`), then `app.js` as a module:
+`index.html` loads the vendored anime.js (classic script), `app.js` as a module, then
+Alpine deferred -- all self-hosted under `js/vendor/`, no CDN (see #295):
 
 ```html
-<script type="module" src="js/app.js"></script>
-<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script src="/client/js/vendor/anime.umd.min.js"></script>
+<script type="module" src="/client/js/app.js"></script>
+<script defer src="/client/js/vendor/alpine.min.js"></script>
 ```
 
 `app.js` registers the component on `alpine:init`:
@@ -179,16 +182,33 @@ to the `static/` directory so edits are served directly without recompiling:
 CLIENT_DIR=internal/client/static go run ./cmd/server
 ```
 
-Then open `http://localhost:8080/client/`.
+Then open `http://localhost:8080/client/`. When editing styles, run `make tailwind-watch`
+in a second terminal so `app.css` rebuilds on change; commit the rebuilt `app.css`.
 
 In production (`APP_ENV=production`) the embedded files are served minified
 (HTML + CSS + JS) — avoid patterns that break minification (e.g., regex literals
 that look like division, unclosed template strings across lines).
 
+## Animations (anime.js)
+
+The game client uses **anime.js 4.2.0** (vendored, self-hosted, exposed as the global `window.anime`) for in-game feedback motion. Always go through the `runAnim(targets, params)` wrapper in `GameApp.js`; never call `anime` directly:
+
+- It returns early when `prefers-reduced-motion: reduce` is set, and no-ops if the global is missing.
+- It supports both the v4 API (`anime.animate(targets, params)`) and the legacy callable form.
+- `targets` is a CSS selector string or a DOM element; `params` are anime.js properties (`scale`, `translateX`, `rotate`, `opacity`, `duration`, `easing`).
+
+Trigger animations inside `requestAnimationFrame` so the element is laid out first:
+
+```js
+runAnim('[data-feedback]', { scale: [0.9, 1.06, 1], duration: 560, easing: 'easeOutBack' });
+```
+
+Simple fades use Alpine `x-transition` + Tailwind classes; reserve anime.js for keyframed or spring-like motion. The reduced-motion guards in both `runAnim` and `_tailwind.css` must stay intact.
+
 ## Forms and labels
 
-Every `<label>` must have a `for` attribute pointing to the `id` of a form element. To display a read-only value, use `<input type="text" readonly class="input is-static">` — not `<p>` — so the label has a valid target and Bulma styles it correctly.
+Every `<label>` must have a `for` attribute pointing to the `id` of a form element. To display a read-only value, use a `readonly` `<input>` styled with utility classes -- not a `<p>` -- so the label has a valid target.
 
 ## What to avoid
 
-See the styling and constraints rules in `.claude/rules/frontend-style.md` (no build step, no TypeScript, no framework beyond Alpine + Bulma, no inline styles, no hardcoded base URLs, no reactive state outside the constructor).
+See the styling and constraints rules in `.claude/rules/frontend-style.md`: Tailwind v4 for CSS (built via `make tailwind`), no bundler/npm for app JS, no TypeScript, no framework beyond Alpine + anime.js, no inline styles, no hand-written CSS files, no CDN libraries, no hardcoded base URLs, no reactive state outside the constructor.
