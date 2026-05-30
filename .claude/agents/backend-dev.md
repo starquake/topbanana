@@ -98,8 +98,7 @@ Hand-written Store and Service methods that read from the database use the `Get*
 1. **Migration** — add a `.sql` file in `internal/migrations/` using `goose` up/down format.
    Name it `YYYYMMDDHHMMSS_description.sql`.
 2. **SQL query** — add the query to the relevant file in `internal/queries/` using `sqlc` annotations.
-   Run `sqlc generate` to regenerate `internal/db/`.
-   Keep `--` comments ASCII-only: non-ASCII characters (em-dashes, curly apostrophes, etc.) in the comment block above a query confuse `sqlc`'s SQLite preprocessor and produce cryptic errors pointing at *unrelated* queries below. Plain `-` and `'` only.
+   Run `sqlc generate` to regenerate `internal/db/`. ASCII-only in `.sql` (see CLAUDE.md Hard rules).
 3. **Domain types** — add or update structs in the relevant domain package.
 4. **Store interface** — extend the interface in the domain package if new persistence ops are needed.
 5. **Store implementation** — implement the interface method in `internal/store/`.
@@ -136,52 +135,20 @@ The two reviews catch different things — `/review` covers correctness, convent
 
 - Unit tests use `internal/dbtest` to get an in-memory SQLite DB (already migrated).
 - Integration tests use build tag `//go:build integration` and live in `test/integration/`.
-- Always use `t.Context()` instead of `context.Background()` in tests — it is cancelled automatically when the test ends. This applies to `httptest.NewRequestWithContext`, `context.WithCancel`, store calls, and any other place a context is needed inside a test.
 - **Tests use `package <pkg>_test` with a dot import to the package under test** (`. "github.com/starquake/topbanana/internal/<pkg>"`), so call sites read like production code (`HandleFoo(...)`, not `pkg.HandleFoo(...)`). Test files only — production code uses named imports. Skip the dot import in multi-package test files (e.g. anything in `test/integration/`), where uniform named imports beat a "one dot, rest prefixed" mix.
 - **For unexported internals**, add an `export_test.go` (`package <pkg>`) that re-exports the identifier as `Export<Name>` (e.g. `var ExportNewWithClock = newWithClock`); the external `_test` file calls it directly. Keeps every test in the external package and itemises the test-only surface in one file. See `internal/server/export_test.go`, `internal/session/export_test.go`, `internal/game/export_test.go`.
 
 ## Key sentinel errors
 
-| Package | Error | Meaning |
-|---|---|---|
-| `quiz` | `ErrQuizNotFound` | quiz ID does not exist → 404 |
-| `quiz` | `ErrQuestionNotFound` | question ID does not exist → 404 |
-| `game` | `ErrGameNotFound` | game ID does not exist → 404 |
-| `game` | `ErrNoMoreQuestions` | all quiz questions answered → 404 |
-| `game` | `ErrQuestionNotInGame` | question does not belong to this game → 400 |
+Each domain package defines its own sentinel errors (`quiz.ErrQuizNotFound`, `game.ErrGameNotFound`, `game.ErrNoMoreQuestions`, etc.). Grep the domain package for `errors.New(` to see the current set, and the handler to see which HTTP status each maps to. Always match with `errors.Is`, never string comparison.
 
-Always use `errors.Is` to match these, never string comparison.
+## Database schema
 
-## Database schema (summary)
-
-```
-quizzes(id, title, slug, description, created_at)
-  └─ questions(id, quiz_id, text, position)
-       └─ options(id, question_id, text, is_correct)
-
-players(id, username, email, created_at)
-
-games(id[xid], quiz_id, created_at, started_at)
-  ├─ game_participants(id, game_id, player_id, joined_at)
-  ├─ game_questions(id, game_id, question_id, started_at, expired_at)
-  └─ game_answers(id, game_id, player_id, game_question_id, option_id, answered_at)
-```
+The schema is defined by the goose migrations in `internal/migrations/` (ordered by timestamp) and surfaced as queries in `internal/queries/*.sql`. Read the latest migrations rather than a copied summary, which rots. Stable facts:
 
 - Game IDs are short random strings (`github.com/rs/xid`), not integers.
-- Foreign keys are enforced (`_pragma=foreign_keys(1)`).
-- WAL mode is enabled for concurrent reads.
+- Foreign keys are enforced (`_pragma=foreign_keys(1)`); WAL mode is on for concurrent reads.
 
 ## Config / env vars
 
-| Variable | Default | Notes |
-|---|---|---|
-| `APP_ENV` | `development` | set to `production` to require `DB_URI` |
-| `HOST` | `localhost` | |
-| `PORT` | `8080` | |
-| `DB_URI` | SQLite file `topbanana.sqlite` | mandatory in production |
-| `DB_DRIVER` | `sqlite` | only supported value |
-| `CLIENT_DIR` | `""` | path to compiled frontend assets (dev only) |
-
-## Known tech debt
-
-`playerID` is hardcoded to `1` in `internal/clientapi/` — authentication is not implemented yet. Do not add more hardcoded player IDs.
+All env vars are parsed in `internal/config/config.go` — defaults, validation, and which are mandatory in production all live there. Read that file rather than a copied table.
