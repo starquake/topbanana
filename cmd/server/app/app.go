@@ -92,12 +92,12 @@ func ResetPassword(
 		return fmt.Errorf(resetWrap, errResetEmailRequired)
 	}
 
-	cfg, err := config.Parse(getenv)
+	dbc, err := config.ParseDatabase(getenv)
 	if err != nil {
 		return fmt.Errorf("reset password: parse config: %w", err)
 	}
 
-	conn, err := setupDB(ctx, cfg, logger)
+	conn, err := setupDB(ctx, dbc, logger)
 	if err != nil {
 		return err
 	}
@@ -168,12 +168,12 @@ func PromoteAdmin(
 		return fmt.Errorf("promote admin: %w", errPromoteEmailRequired)
 	}
 
-	cfg, err := config.Parse(getenv)
+	dbc, err := config.ParseDatabase(getenv)
 	if err != nil {
 		return fmt.Errorf("promote admin: parse config: %w", err)
 	}
 
-	conn, err := setupDB(ctx, cfg, logger)
+	conn, err := setupDB(ctx, dbc, logger)
 	if err != nil {
 		return err
 	}
@@ -348,7 +348,7 @@ func Check(ctx context.Context, getenv func(string) string, stdout io.Writer) er
 	}
 	logConfigSummary(ctx, logger, cfg)
 
-	conn, err := setupDB(ctx, cfg, logger)
+	conn, err := setupDB(ctx, cfg.DatabaseConfig(), logger)
 	if err != nil {
 		return err
 	}
@@ -389,7 +389,7 @@ func Run(
 	}
 	logConfigSummary(signalCtx, logger, cfg)
 
-	conn, err := setupDB(signalCtx, cfg, logger)
+	conn, err := setupDB(signalCtx, cfg.DatabaseConfig(), logger)
 	if err != nil {
 		return err
 	}
@@ -584,14 +584,14 @@ func buildMailer(
 	return mailer.NewTester(inner), mailer.NewStatusView(smtpCfg, true, cfg.BaseURL), nil
 }
 
-func setupDB(signalCtx context.Context, cfg *config.Config, logger *slog.Logger) (*sql.DB, error) {
+func setupDB(signalCtx context.Context, dbc config.DatabaseConfig, logger *slog.Logger) (*sql.DB, error) {
 	conn, err := database.Open(
 		signalCtx,
-		cfg.DBDriver,
-		cfg.DBURI,
-		cfg.DBMaxOpenConns,
-		cfg.DBMaxIdleConns,
-		cfg.DBConnMaxLifetime,
+		dbc.Driver,
+		dbc.URI,
+		dbc.MaxOpenConns,
+		dbc.MaxIdleConns,
+		dbc.ConnMaxLifetime,
 	)
 	if err != nil {
 		logger.ErrorContext(signalCtx, "error opening database connection", slog.Any("err", err))

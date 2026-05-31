@@ -623,6 +623,173 @@ func TestParse_GoogleOAuth(t *testing.T) {
 	})
 }
 
+func TestParseDatabase(t *testing.T) {
+	t.Parallel()
+
+	t.Run("DB_URI unset outside production falls back to default", func(t *testing.T) {
+		t.Parallel()
+
+		getenv := func(string) string { return "" }
+		dbc, err := ParseDatabase(getenv)
+		if err != nil {
+			t.Fatalf("ParseDatabase err = %v, want nil", err)
+		}
+		if got, want := dbc.URI, DBURIDefault; got != want {
+			t.Errorf("URI = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("DB_URI unset in production returns ErrDBURINotSetInProduction", func(t *testing.T) {
+		t.Parallel()
+
+		getenv := func(key string) string {
+			if key == "APP_ENV" {
+				return "production"
+			}
+
+			return ""
+		}
+		_, err := ParseDatabase(getenv)
+		if got, want := err, ErrDBURINotSetInProduction; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("explicit DB_URI is honored", func(t *testing.T) {
+		t.Parallel()
+
+		getenv := func(key string) string {
+			if key == "DB_URI" {
+				return "file:override.sqlite"
+			}
+
+			return ""
+		}
+		dbc, err := ParseDatabase(getenv)
+		if err != nil {
+			t.Fatalf("ParseDatabase err = %v, want nil", err)
+		}
+		if got, want := dbc.URI, "file:override.sqlite"; got != want {
+			t.Errorf("URI = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("driver and pool defaults", func(t *testing.T) {
+		t.Parallel()
+
+		getenv := func(string) string { return "" }
+		dbc, err := ParseDatabase(getenv)
+		if err != nil {
+			t.Fatalf("ParseDatabase err = %v, want nil", err)
+		}
+		if got, want := dbc.Driver, DBDriverDefault; got != want {
+			t.Errorf("Driver = %q, want %q", got, want)
+		}
+		if got, want := dbc.MaxOpenConns, DBMaxOpenConnsDefault; got != want {
+			t.Errorf("MaxOpenConns = %d, want %d", got, want)
+		}
+		if got, want := dbc.MaxIdleConns, DBMaxIdleConnsDefault; got != want {
+			t.Errorf("MaxIdleConns = %d, want %d", got, want)
+		}
+		if got, want := dbc.ConnMaxLifetime, DBConnMaxLifetimeDefault; got != want {
+			t.Errorf("ConnMaxLifetime = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("pool env overrides are honored", func(t *testing.T) {
+		t.Parallel()
+
+		envs := map[string]string{
+			"DB_MAX_OPEN_CONNS":    "100",
+			"DB_MAX_IDLE_CONNS":    "200",
+			"DB_CONN_MAX_LIFETIME": "10m",
+		}
+		getenv := func(key string) string { return envs[key] }
+		dbc, err := ParseDatabase(getenv)
+		if err != nil {
+			t.Fatalf("ParseDatabase err = %v, want nil", err)
+		}
+		if got, want := dbc.MaxOpenConns, 100; got != want {
+			t.Errorf("MaxOpenConns = %d, want %d", got, want)
+		}
+		if got, want := dbc.MaxIdleConns, 200; got != want {
+			t.Errorf("MaxIdleConns = %d, want %d", got, want)
+		}
+		if got, want := dbc.ConnMaxLifetime, 10*time.Minute; got != want {
+			t.Errorf("ConnMaxLifetime = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("invalid pool override returns error", func(t *testing.T) {
+		t.Parallel()
+
+		getenv := func(key string) string {
+			if key == "DB_MAX_OPEN_CONNS" {
+				return "lots"
+			}
+
+			return ""
+		}
+		_, err := ParseDatabase(getenv)
+		if err == nil {
+			t.Fatal("ParseDatabase err = nil, want non-nil")
+		}
+		if got, want := err.Error(), "invalid DB_MAX_OPEN_CONNS"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+
+	t.Run("does not require SESSION_KEY outside development", func(t *testing.T) {
+		t.Parallel()
+
+		// The whole point: a half-configured / locked-out environment
+		// (production-like APP_ENV, no SESSION_KEY) must still resolve the
+		// DB so the break-glass tools can run. Parse would reject this with
+		// ErrSessionKeyRequired; ParseDatabase must not.
+		envs := map[string]string{
+			"APP_ENV": "production",
+			"DB_URI":  "file:test.sqlite",
+		}
+		getenv := func(key string) string { return envs[key] }
+		dbc, err := ParseDatabase(getenv)
+		if err != nil {
+			t.Fatalf("ParseDatabase err = %v, want nil (no SESSION_KEY needed)", err)
+		}
+		if got, want := dbc.URI, "file:test.sqlite"; got != want {
+			t.Errorf("URI = %q, want %q", got, want)
+		}
+	})
+}
+
+// TestConfig_DatabaseConfig pins that the full-server config and the
+// break-glass tools resolve the same DB values: Parse's result projected
+// through DatabaseConfig() must match ParseDatabase on the same env.
+func TestConfig_DatabaseConfig(t *testing.T) {
+	t.Parallel()
+
+	envs := map[string]string{
+		"APP_ENV":              "test",
+		"DB_URI":               "file:shared.sqlite",
+		"DB_MAX_OPEN_CONNS":    "42",
+		"DB_MAX_IDLE_CONNS":    "7",
+		"DB_CONN_MAX_LIFETIME": "90s",
+		"SESSION_KEY":          "test-session-key",
+	}
+	getenv := func(key string) string { return envs[key] }
+
+	c, err := Parse(getenv)
+	if err != nil {
+		t.Fatalf("Parse err = %v, want nil", err)
+	}
+	dbc, err := ParseDatabase(getenv)
+	if err != nil {
+		t.Fatalf("ParseDatabase err = %v, want nil", err)
+	}
+	if got, want := c.DatabaseConfig(), dbc; got != want {
+		t.Errorf("c.DatabaseConfig() = %+v, want %+v (Parse and ParseDatabase must agree)", got, want)
+	}
+}
+
 func TestConfig_GoogleLoginEnabled(t *testing.T) {
 	t.Parallel()
 

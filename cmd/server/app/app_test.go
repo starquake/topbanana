@@ -141,6 +141,78 @@ func envFor(dbURI string) func(string) string {
 	}
 }
 
+// minimalEnvFor returns a getenv-style closure that exposes ONLY DB_URI -
+// no APP_ENV, no SESSION_KEY, no SMTP/OAuth. This is the locked-out
+// recovery scenario the break-glass tools must run in: config.Parse would
+// reject it (production-secure defaults require SESSION_KEY when APP_ENV is
+// unset), but config.ParseDatabase resolves just the DB so the tools work.
+func minimalEnvFor(dbURI string) func(string) string {
+	return func(key string) string {
+		if key == "DB_URI" {
+			return dbURI
+		}
+
+		return ""
+	}
+}
+
+// TestPromoteAdmin_MinimalEnv_NoSessionKey pins the break-glass contract:
+// PromoteAdmin succeeds with only DB_URI set (no APP_ENV, no SESSION_KEY),
+// which config.Parse would reject. The role change must actually land.
+func TestPromoteAdmin_MinimalEnv_NoSessionKey(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+
+	const (
+		username = "alice"
+		email    = "alice@example.test"
+	)
+	seedPlayer(t, dbURI, username)
+	demoteToHost(t, dbURI, username)
+
+	var stdout, stderr bytes.Buffer
+	if err := PromoteAdmin(t.Context(), minimalEnvFor(dbURI), &stdout, &stderr, email); err != nil {
+		t.Fatalf("PromoteAdmin err = %v, want nil with only DB_URI set", err)
+	}
+
+	p := fetchSeededPlayer(t, dbURI)
+	if got, want := p.Role, auth.RoleAdmin; got != want {
+		t.Errorf("Role after PromoteAdmin = %q, want %q", got, want)
+	}
+}
+
+// TestResetPassword_MinimalEnv_NoSessionKey is the ResetPassword half of
+// the break-glass contract: a password reset succeeds with only DB_URI set.
+func TestResetPassword_MinimalEnv_NoSessionKey(t *testing.T) {
+	t.Parallel()
+
+	dbURI, cleanup := dbtest.SetupTestDB(t)
+	t.Cleanup(cleanup)
+
+	const (
+		username    = "alice"
+		email       = "alice@example.test"
+		newPassword = "new-correct-battery"
+	)
+	originalHash := seedPlayer(t, dbURI, username)
+
+	stdin := strings.NewReader(newPassword + "\n" + newPassword + "\n")
+	var stdout, stderr bytes.Buffer
+	if err := ResetPassword(t.Context(), minimalEnvFor(dbURI), stdin, &stdout, &stderr, email); err != nil {
+		t.Fatalf("ResetPassword err = %v, want nil with only DB_URI set", err)
+	}
+
+	p := fetchSeededPlayer(t, dbURI)
+	if got, want := p.PasswordHash, originalHash; got == want {
+		t.Errorf("PasswordHash after ResetPassword = %q, want a value different from %q", got, want)
+	}
+	if err := auth.CheckPassword(p.PasswordHash, newPassword); err != nil {
+		t.Errorf("CheckPassword(newPassword) err = %v, want nil", err)
+	}
+}
+
 func TestResetPassword_HappyPath_RotatesHash(t *testing.T) {
 	t.Parallel()
 
