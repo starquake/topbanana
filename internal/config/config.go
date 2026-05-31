@@ -29,6 +29,12 @@ var ErrSessionKeyRequired = errors.New("SESSION_KEY must be set")
 // negative value would silently break the gameplay timing contract.
 var ErrRevealDelayNegative = errors.New("REVEAL_DELAY must not be negative")
 
+// ErrLoginCooldownNegative is returned when LOGIN_COOLDOWN parses to a
+// negative duration. The cooldown is a minimum gap between POST /login
+// attempts, so a negative value is meaningless; reject it rather than
+// silently treating it as "no cooldown".
+var ErrLoginCooldownNegative = errors.New("LOGIN_COOLDOWN must not be negative")
+
 // ErrSMTPConfigIncomplete is returned when SMTP env vars are partially
 // populated. SMTP is opt-in (an unconfigured instance still boots and
 // the no-op mailer kicks in), but a partial configuration is almost
@@ -87,6 +93,13 @@ const (
 	// DBConnMaxLifetimeDefault is the default maximum lifetime of a database connection.
 	DBConnMaxLifetimeDefault = 5 * time.Minute
 
+	// LoginCooldownDefault is the default per-IP minimum gap between POST
+	// /login attempts. Mirrors auth.loginCooldown; config does not import
+	// auth (the dependency runs the other way through the server wiring),
+	// so the value is duplicated here and the server wiring passes this
+	// field into auth.NewLoginRateLimiter.
+	LoginCooldownDefault = 3 * time.Second
+
 	// sessionKeyByteLength is the length in bytes of an ephemeral session key generated for development.
 	sessionKeyByteLength = 32
 )
@@ -131,6 +144,13 @@ type Config struct {
 	// via time.ParseDuration; e2e and load-test deployments shrink this to a
 	// few hundred ms to speed up runs without losing the visual reveal phase.
 	RevealDelay time.Duration
+
+	// LoginCooldown is the per-IP minimum gap between POST /login attempts,
+	// passed into auth.NewLoginRateLimiter (#494). Defaults to 3s (mirrors
+	// auth.loginCooldown via LoginCooldownDefault). Parsed from the
+	// LOGIN_COOLDOWN env var via time.ParseDuration; the e2e suite sets it
+	// to 0 to disable the limiter for rapid same-IP logins.
+	LoginCooldown time.Duration
 
 	// GoogleClientID, GoogleClientSecret, and GoogleRedirectURL are the
 	// Google OAuth 2.0 credentials issued in the Google Cloud Console.
@@ -239,6 +259,7 @@ func Parse(getenv func(string) string) (*Config, error) {
 		DBMaxOpenConns:    DBMaxOpenConnsDefault,
 		DBMaxIdleConns:    DBMaxIdleConnsDefault,
 		DBConnMaxLifetime: DBConnMaxLifetimeDefault,
+		LoginCooldown:     LoginCooldownDefault,
 	}
 	// AppEnvironment is intentionally NOT pre-initialised to the
 	// development default: an unset APP_ENV is meant to fail-secure
@@ -349,16 +370,32 @@ func parseTypedEnvVars(getenv func(string) string, c *Config) error {
 		c.RegistrationEnabled = b
 	}
 
-	if val := getenv("REVEAL_DELAY"); val != "" {
-		d, err := time.ParseDuration(val)
-		if err != nil {
-			return fmt.Errorf("invalid REVEAL_DELAY: %q, err: %w", val, err)
-		}
-		if d < 0 {
-			return fmt.Errorf("%w: %q", ErrRevealDelayNegative, val)
-		}
-		c.RevealDelay = d
+	if err := parseNonNegativeDuration(getenv, "REVEAL_DELAY", ErrRevealDelayNegative, &c.RevealDelay); err != nil {
+		return err
 	}
+
+	return parseNonNegativeDuration(getenv, "LOGIN_COOLDOWN", ErrLoginCooldownNegative, &c.LoginCooldown)
+}
+
+// parseNonNegativeDuration reads the named env var as a duration into
+// dst, leaving dst untouched when the var is unset. An unparseable value
+// returns a wrapped error naming the var; a negative value returns the
+// supplied sentinel so callers can match it with [errors.Is].
+func parseNonNegativeDuration(
+	getenv func(string) string, name string, negativeErr error, dst *time.Duration,
+) error {
+	val := getenv(name)
+	if val == "" {
+		return nil
+	}
+	d, err := time.ParseDuration(val)
+	if err != nil {
+		return fmt.Errorf("invalid %s: %q, err: %w", name, val, err)
+	}
+	if d < 0 {
+		return fmt.Errorf("%w: %q", negativeErr, val)
+	}
+	*dst = d
 
 	return nil
 }
