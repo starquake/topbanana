@@ -220,7 +220,7 @@ func addAuthRoutes(
 			)),
 		)
 	}
-	loginLimiter := auth.NewLoginRateLimiter(auth.LoginCooldown(), cfg.TrustedProxyCIDRs)
+	loginLimiter := auth.NewLoginRateLimiter(cfg.LoginCooldown, cfg.TrustedProxyCIDRs)
 	// loginResendLimiter is a dedicated per-IP cooldown for the
 	// verify-email send the login handler issues on an unverified-but-
 	// correct credential attempt (#492). Separate from the resend
