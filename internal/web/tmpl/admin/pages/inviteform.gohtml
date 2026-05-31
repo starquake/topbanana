@@ -1,0 +1,47 @@
+{{define "content"}}
+    <nav aria-label="breadcrumbs" class="mb-8">
+        <ol class="flex items-center text-xs uppercase tracking-[0.14em]">
+            <li><a href="/admin" class="pr-2 text-text-dim hover:text-text">Admin</a></li>
+            <li class="text-text-mute" aria-hidden="true">/</li>
+            <li><a href="/admin/players" class="px-2 text-text-dim hover:text-text">Players</a></li>
+            <li class="text-text-mute" aria-hidden="true">/</li>
+            <li><span class="pl-2 text-text" aria-current="page">Invite</span></li>
+        </ol>
+    </nav>
+
+    <header class="mb-8">
+        <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight">Invite a player</h1>
+        <p class="mt-1.5 max-w-[540px] text-text-dim text-[0.95rem]">
+            Send an email invite. The recipient picks their own username and password from
+            the link; their account lands already email-verified. The link is valid for 7 days.
+        </p>
+    </header>
+
+    {{if .Notice}}
+        <div class="mb-6 rounded-md border border-accent/40 bg-accent/10 p-3 text-sm text-text" role="status">{{.Notice}}</div>
+    {{end}}
+    {{if .Error}}
+        <div class="mb-6 rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm text-text" role="alert">{{.Error}}</div>
+    {{end}}
+
+    <form method="POST" action="/admin/invites" class="flex flex-col gap-4 max-w-md">
+        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+
+        <label class="flex flex-col gap-1 text-sm">
+            <span class="text-text-dim text-xs uppercase tracking-[0.14em]">Email</span>
+            <input type="email" name="email" value="{{.Email}}" required
+                   class="form-input" placeholder="player@example.com">
+        </label>
+
+        <label class="flex flex-col gap-1 text-sm">
+            <span class="text-text-dim text-xs uppercase tracking-[0.14em]">Note (optional)</span>
+            <input type="text" name="note" value="{{.Note}}" autocomplete="off"
+                   class="form-input" placeholder="A reminder of who this is for">
+        </label>
+
+        <div class="flex items-center gap-3 pt-2">
+            <button type="submit" class="btn-primary">Send invite</button>
+            <a href="/admin/players" class="btn-ghost">Cancel</a>
+        </div>
+    </form>
+{{end}}

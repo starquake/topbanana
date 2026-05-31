@@ -160,6 +160,15 @@ func addEmailFlowRoutes(
 	mux.Handle("POST /reset-password", admin.MaxFormSizeMiddleware(csrfMW(
 		auth.HandleResetSubmit(logger, csrfMgr, stores.ResetTokens, sessions, stores.Players),
 	)))
+
+	mux.Handle("GET /accept-invite", auth.HandleAcceptInviteForm(logger, csrfMgr, stores.Invites))
+	mux.Handle("POST /accept-invite", admin.MaxFormSizeMiddleware(csrfMW(
+		auth.HandleAcceptInviteSubmit(logger, csrfMgr, auth.AcceptInviteDeps{
+			Invites:  stores.Invites,
+			Players:  stores.InvitePlayers,
+			Sessions: sessions,
+		}),
+	)))
 }
 
 // homeViewerFunc returns a closure that resolves the signed-in player
@@ -533,6 +542,41 @@ func addAdminPlayerRoutes(
 		"POST /admin/players/{playerID}/password",
 		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
 			admin.HandlePlayerSetPassword(logger, stores.AdminPlayers, deps.flash),
+		))),
+	)
+	addAdminInviteRoutes(mux, logger, csrfMgr, csrfMW, requireAdmin, stores, deps)
+}
+
+// addAdminInviteRoutes registers the admin-initiated invite routes (#318):
+// the GET render of the minimal invite form and the POST that mints an
+// invite + dispatches the email. Admin-only, like the other player-
+// management routes. MaxFormSizeMiddleware fronts the POST in front of
+// csrfMW so the CSRF validator's ParseForm sees a bounded body; csrfMW
+// fronts the auth wrapper so an unauthenticated request without a valid
+// token is rejected with 403 before any auth-state-leaking 303 to /login.
+// The pending-list / resend / revoke management UI is a later slice.
+func addAdminInviteRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	csrfMW func(http.Handler) http.Handler,
+	requireAdmin func(http.Handler) http.Handler,
+	stores *store.Stores,
+	deps adminPlayerDeps,
+) {
+	mux.Handle(
+		"GET /admin/invites/new",
+		requireAdmin(admin.HandleInviteForm(logger, csrfMgr)),
+	)
+	mux.Handle(
+		"POST /admin/invites",
+		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
+			admin.HandleInviteSubmit(logger, csrfMgr, admin.InviteDeps{
+				Players: stores.Players,
+				Invites: stores.Invites,
+				Sender:  deps.sender,
+				BaseURL: deps.baseURL,
+			}),
 		))),
 	)
 }

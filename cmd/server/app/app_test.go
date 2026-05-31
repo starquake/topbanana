@@ -569,6 +569,29 @@ func (s *stubResetSweep) Calls() int {
 	return s.calls
 }
 
+// stubInviteSweep mirrors stubVerifySweep for the invite side.
+type stubInviteSweep struct {
+	mu    sync.Mutex
+	calls int
+	err   error
+}
+
+func (s *stubInviteSweep) DeleteExpiredInvites(_ context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.calls++
+
+	return s.err
+}
+
+func (s *stubInviteSweep) Calls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.calls
+}
+
 // TestRunTokenSweep_TicksUntilCancel pins the loop's two contracts:
 // each tick calls both DeleteExpired* methods, and a context cancel
 // returns the goroutine promptly. A short interval keeps the test
@@ -578,20 +601,22 @@ func TestRunTokenSweep_TicksUntilCancel(t *testing.T) {
 
 	verify := &stubVerifySweep{}
 	reset := &stubResetSweep{}
+	invites := &stubInviteSweep{}
 
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() {
-		RunTokenSweep(ctx, slog.New(slog.DiscardHandler), verify, reset, time.Millisecond)
+		RunTokenSweep(ctx, slog.New(slog.DiscardHandler), verify, reset, invites, time.Millisecond)
 		close(done)
 	}()
 
 	// Wait until at least one tick lands on each store before cancelling.
 	deadline := time.After(time.Second)
-	for verify.Calls() <= 0 || reset.Calls() <= 0 {
+	for verify.Calls() <= 0 || reset.Calls() <= 0 || invites.Calls() <= 0 {
 		select {
 		case <-deadline:
-			t.Fatalf("sweep did not tick; verify=%d reset=%d", verify.Calls(), reset.Calls())
+			t.Fatalf("sweep did not tick; verify=%d reset=%d invites=%d",
+				verify.Calls(), reset.Calls(), invites.Calls())
 		case <-time.After(time.Millisecond):
 		}
 	}
@@ -613,21 +638,23 @@ func TestRunTokenSweep_ContinuesAfterError(t *testing.T) {
 
 	verify := &stubVerifySweep{err: errors.New("verify sweep failed")}
 	reset := &stubResetSweep{err: errors.New("reset sweep failed")}
+	invites := &stubInviteSweep{err: errors.New("invite sweep failed")}
 
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() {
-		RunTokenSweep(ctx, slog.New(slog.DiscardHandler), verify, reset, time.Millisecond)
+		RunTokenSweep(ctx, slog.New(slog.DiscardHandler), verify, reset, invites, time.Millisecond)
 		close(done)
 	}()
 
 	// Wait for at least two ticks per store so the "continue past error"
 	// invariant is observable.
 	deadline := time.After(time.Second)
-	for verify.Calls() < 2 || reset.Calls() < 2 {
+	for verify.Calls() < 2 || reset.Calls() < 2 || invites.Calls() < 2 {
 		select {
 		case <-deadline:
-			t.Fatalf("sweep did not tick twice; verify=%d reset=%d", verify.Calls(), reset.Calls())
+			t.Fatalf("sweep did not tick twice; verify=%d reset=%d invites=%d",
+				verify.Calls(), reset.Calls(), invites.Calls())
 		case <-time.After(time.Millisecond):
 		}
 	}

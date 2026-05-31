@@ -31,7 +31,11 @@ type Stores struct {
 	AdminList    auth.AdminListStore
 	VerifyTokens auth.VerifyTokenStore
 	ResetTokens  auth.ResetTokenStore
-	Home         home.Store
+	Invites      auth.InviteStore
+	// InvitePlayers is the narrow create+verify+read slice the
+	// accept-invite flow uses; backed by the same PlayerStore instance.
+	InvitePlayers auth.InvitePlayerStore
+	Home          home.Store
 }
 
 // New initializes a new Stores instance with the provided database connection.
@@ -45,16 +49,18 @@ func New(conn *sql.DB, logger *slog.Logger) *Stores {
 	games := NewGameStore(conn, logger)
 
 	return &Stores{
-		Quizzes:      NewQuizStore(conn, logger),
-		Games:        games,
-		GameMigrator: games,
-		Players:      players,
-		OAuth:        players,
-		PlayerLister: players,
-		AdminPlayers: players,
-		AdminList:    players,
-		VerifyTokens: players,
-		ResetTokens:  players,
-		Home:         NewHomeStore(conn, logger),
+		Quizzes:       NewQuizStore(conn, logger),
+		Games:         games,
+		GameMigrator:  games,
+		Players:       players,
+		OAuth:         players,
+		PlayerLister:  players,
+		AdminPlayers:  players,
+		AdminList:     players,
+		VerifyTokens:  players,
+		ResetTokens:   players,
+		Invites:       players,
+		InvitePlayers: players,
+		Home:          NewHomeStore(conn, logger),
 	}
 }
