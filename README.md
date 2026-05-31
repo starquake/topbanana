@@ -120,7 +120,7 @@ Following the official guidelines for a [standard Go server project layout](http
 
 ## Configuration
 
-Top Banana is configured through environment variables. Sensible defaults apply in development; production deployments must set at least `SESSION_KEY` and `DB_URI`.
+Top Banana! is configured through environment variables. Sensible defaults apply in development; production deployments must set at least `SESSION_KEY` and `DB_URI`.
 
 ### Server
 

@@ -1,6 +1,6 @@
 # Release notes
 
-What changed in each released version of Top Banana. The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
+What changed in each released version of Top Banana! The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
 ## v2026.5.9 — 2026-05-28
 
@@ -132,7 +132,7 @@ A public start page, share buttons, and tighter gates on the game endpoints.
 - Quiz titles and descriptions appear in link previews for `/play/...` URLs pasted into WhatsApp, Slack, Discord, etc.
 
 ### Visual / chrome
-- The Top Banana logo on the player view and the home page links back to the start page.
+- The Top Banana! logo on the player view and the home page links back to the start page.
 - Primary buttons on the player start screen and the auth pages — "Start Game", "Set your name", "Log in", "Register" — moved to the right of their rows. Secondary controls (Share, register / log-in cross-links) sit on the left.
 
 ### Behind the scenes

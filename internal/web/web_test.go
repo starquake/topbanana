@@ -184,7 +184,7 @@ func TestManifestHandler_InjectsEnvTag(t *testing.T) {
 	if got, want := body, `"[staging] Top Banana!"`; !strings.Contains(got, want) {
 		t.Errorf("body missing %q", want)
 	}
-	if got, want := body, `"[staging] Top Banana"`; !strings.Contains(got, want) {
+	if got, want := body, `"[staging] Top Banana!"`; !strings.Contains(got, want) {
 		t.Errorf("body missing %q", want)
 	}
 }

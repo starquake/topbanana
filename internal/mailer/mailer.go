@@ -78,8 +78,8 @@ type Mailer interface {
 func SendTest(ctx context.Context, m Mailer, to string) error {
 	msg := Message{
 		To:      to,
-		Subject: "Top Banana test email",
-		Body: "This is a test email from Top Banana.\n\n" +
+		Subject: "Top Banana! test email",
+		Body: "This is a test email from Top Banana!\n\n" +
 			"If you can read this, SMTP delivery to your address is working.\n",
 		Kind: KindTest,
 	}

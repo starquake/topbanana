@@ -244,8 +244,8 @@ func notifyOldAddressOfChange(
 ) {
 	msg := mailer.Message{
 		To:      oldEmail,
-		Subject: "Email change requested for your Top Banana account",
-		Body: "Someone requested to change the email on your Top Banana account to " + newEmail + ".\n\n" +
+		Subject: "Email change requested for your Top Banana! account",
+		Body: "Someone requested to change the email on your Top Banana! account to " + newEmail + ".\n\n" +
 			"Your account email has not changed yet; it only changes when the verification link sent to the new address is clicked.\n\n" +
 			"If this was you, no action is needed. If it was not you, change your password now to secure your account.\n",
 		Kind: mailer.KindEmailChangeNotice,

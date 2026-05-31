@@ -98,7 +98,7 @@ func SendResetEmail(
 	}
 	msg := mailer.Message{
 		To:      recipient,
-		Subject: "Reset your Top Banana password",
+		Subject: "Reset your Top Banana! password",
 		Body:    resetEmailBody(link),
 		Kind:    mailer.KindReset,
 	}
@@ -135,7 +135,7 @@ func buildResetLink(baseURL, rawToken string) (string, error) {
 // resetEmailBody is the plain-text body of the reset email. Mirrors
 // the verify body shape so the two channels read consistently.
 func resetEmailBody(link string) string {
-	return "We received a request to reset your Top Banana password.\n\n" +
+	return "We received a request to reset your Top Banana! password.\n\n" +
 		"Click the link below to choose a new one:\n\n" +
 		link + "\n\n" +
 		"This link is valid for 30 minutes. If you did not request a reset,\n" +
