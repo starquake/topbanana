@@ -403,19 +403,14 @@ func Run(
 	envtag.Set(cfg.EnvTitleTag())
 
 	stores := store.New(conn, logger)
-	if sweepErr := stores.VerifyTokens.DeleteExpiredVerifyTokens(signalCtx); sweepErr != nil {
-		logger.WarnContext(signalCtx, "verify-token sweep at startup failed",
-			slog.Any("err", sweepErr))
-	}
-	if sweepErr := stores.ResetTokens.DeleteExpiredResetTokens(signalCtx); sweepErr != nil {
-		logger.WarnContext(signalCtx, "reset-token sweep at startup failed",
-			slog.Any("err", sweepErr))
-	}
+	sweepExpiredAtStartup(signalCtx, logger, stores)
 	// The startup sweep only fires once. Tokens minted in the hours
 	// between deploys (and their flaky-SMTP orphan rows) need a
 	// periodic broom too; the hourly tick keeps both tables bounded on
 	// long-running deploys without burning a goroutine per row (#472).
-	go runTokenSweep(signalCtx, logger, stores.VerifyTokens, stores.ResetTokens, tokenSweepInterval)
+	go runTokenSweep(
+		signalCtx, logger, stores.VerifyTokens, stores.ResetTokens, stores.Invites, tokenSweepInterval,
+	)
 	gameService := game.NewService(stores.Games, stores.Quizzes, logger)
 	if cfg.RevealDelay > 0 {
 		gameService.SetRevealDelay(cfg.RevealDelay)
@@ -455,6 +450,26 @@ type resetTokenSweeper interface {
 	DeleteExpiredResetTokens(ctx context.Context) error
 }
 
+type inviteSweeper interface {
+	DeleteExpiredInvites(ctx context.Context) error
+}
+
+// sweepExpiredAtStartup runs the one-shot expiry sweep across the verify,
+// reset, and invite token tables at boot, before the periodic sweep
+// goroutine takes over. Each failure is logged at warn and the others
+// still run; a single table's transient error must not skip the rest.
+func sweepExpiredAtStartup(ctx context.Context, logger *slog.Logger, stores *store.Stores) {
+	if err := stores.VerifyTokens.DeleteExpiredVerifyTokens(ctx); err != nil {
+		logger.WarnContext(ctx, "verify-token sweep at startup failed", slog.Any("err", err))
+	}
+	if err := stores.ResetTokens.DeleteExpiredResetTokens(ctx); err != nil {
+		logger.WarnContext(ctx, "reset-token sweep at startup failed", slog.Any("err", err))
+	}
+	if err := stores.Invites.DeleteExpiredInvites(ctx); err != nil {
+		logger.WarnContext(ctx, "invite sweep at startup failed", slog.Any("err", err))
+	}
+}
+
 // runTokenSweep ticks at interval and calls both DeleteExpired*
 // methods on each iteration. Returns when ctx is cancelled (which is
 // the signal-driven shutdown context, so a graceful shutdown stops
@@ -466,6 +481,7 @@ func runTokenSweep(
 	logger *slog.Logger,
 	verify tokenSweeper,
 	reset resetTokenSweeper,
+	invites inviteSweeper,
 	interval time.Duration,
 ) {
 	ticker := time.NewTicker(interval)
@@ -480,6 +496,9 @@ func runTokenSweep(
 			}
 			if err := reset.DeleteExpiredResetTokens(ctx); err != nil {
 				logger.WarnContext(ctx, "reset-token periodic sweep failed", slog.Any("err", err))
+			}
+			if err := invites.DeleteExpiredInvites(ctx); err != nil {
+				logger.WarnContext(ctx, "invite periodic sweep failed", slog.Any("err", err))
 			}
 		}
 	}

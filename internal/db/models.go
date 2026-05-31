@@ -66,6 +66,18 @@ type GameSeenRound struct {
 	SeenAt  time.Time
 }
 
+type Invite struct {
+	ID                int64
+	Email             string
+	InvitedByPlayerID sql.NullInt64
+	TokenHash         string
+	Status            string
+	Note              sql.NullString
+	ExpiresAt         time.Time
+	CreatedAt         time.Time
+	AcceptedAt        sql.NullTime
+}
+
 type Option struct {
 	ID         int64
 	QuestionID int64
