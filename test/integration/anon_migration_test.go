@@ -43,12 +43,11 @@ func TestAnonMigration_Integration(t *testing.T) {
 		t.Fatalf("CreateQuiz err = %v, want nil", err)
 	}
 
-	// Register the destination account directly so the anonymous
-	// visitor can sign INTO it later. Need a separate client so its
-	// cookie jar doesn't carry the destination's session into the
-	// anonymous-play step below.
-	destClient := authClient(t)
-	registerForRedirect(ctx, t, destClient, baseURL, "migration-dest", "correct-battery-13")
+	// Register the destination account so the anonymous visitor can sign
+	// INTO it later. Use a throwaway client: the #574 hard gate means
+	// register hands out no session, and the migration is driven by the
+	// anonymous client logging in below, not by this jar.
+	registerForPending(ctx, t, authClient(t), baseURL, "migration-dest", "correct-battery-13")
 	destPlayer, err := stores.Players.GetPlayerByUsername(ctx, "migration-dest")
 	if err != nil {
 		t.Fatalf("lookup destination player err = %v, want nil", err)
@@ -122,7 +121,7 @@ func lookupAnonPlayer(ctx context.Context, t *testing.T, players auth.PlayerStor
 // sees a prior anonymous session and triggers the migration. The
 // username argument is converted to "<username>@example.test" - the
 // integration suite's convention for the email auto-assigned during
-// registerForRedirect, and the post-#446 login credential.
+// registration, and the post-#446 login credential.
 func loginAnonAsDest(ctx context.Context, t *testing.T, client *http.Client, baseURL, username, password string) {
 	t.Helper()
 

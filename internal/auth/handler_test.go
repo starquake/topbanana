@@ -350,12 +350,7 @@ func TestHandleRegisterSubmit_FirstUser_BecomesAdmin(t *testing.T) {
 		"password_confirm": {"correctbattery"},
 	})
 
-	if got, want := rec.Code, http.StatusSeeOther; got != want {
-		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
-	}
-	if got, want := rec.Header().Get("Location"), "/admin/quizzes"; got != want {
-		t.Errorf("Location = %q, want %q", got, want)
-	}
+	assertRegisterPending(t, rec, "alice@example.test")
 
 	p, err := store.GetPlayerByUsername(t.Context(), "alice")
 	if err != nil {
@@ -364,17 +359,49 @@ func TestHandleRegisterSubmit_FirstUser_BecomesAdmin(t *testing.T) {
 	if got, want := p.Role, RoleAdmin; got != want {
 		t.Errorf("Role = %q, want %q", got, want)
 	}
+}
 
-	// Cookie was set
-	cookies := rec.Result().Cookies()
-	found := false
-	for _, c := range cookies {
-		if c.Name == session.CookieName {
-			found = true
+// assertRegisterPending pins the post-#574 hard-gate contract: a
+// successful registration renders the confirmation page with 200,
+// names the recipient address in the body, and does NOT leave a live
+// session cookie. sessions.Clear emits a deletion cookie (empty value,
+// negative MaxAge), which is expected; a non-empty session value is the
+// failure we guard against.
+func assertRegisterPending(t *testing.T, rec *httptest.ResponseRecorder, email string) {
+	t.Helper()
+	if got, want := rec.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if got, want := body, "Verify your email"; !strings.Contains(got, want) {
+		t.Errorf("body missing confirmation headline %q; body=%.300q", want, got)
+	}
+	if got, want := body, email; !strings.Contains(got, want) {
+		t.Errorf("body missing recipient address %q; body=%.300q", want, got)
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == session.CookieName && c.Value != "" {
+			t.Errorf("live session cookie set on register: %+v", c)
 		}
 	}
-	if !found {
-		t.Error("session cookie was not set")
+}
+
+// assertSessionCleared pins the anonymous-upgrade arm of the hard gate
+// (#574): registering while holding an anonymous session cookie must
+// emit a deletion cookie (empty value, negative MaxAge) so the
+// pre-existing anonymous session is signed out rather than left live.
+func assertSessionCleared(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	cleared := false
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == session.CookieName && c.Value == "" && c.MaxAge < 0 {
+			cleared = true
+
+			break
+		}
+	}
+	if !cleared {
+		t.Errorf("expected session cookie to be cleared; cookies = %v", rec.Result().Cookies())
 	}
 }
 
@@ -395,14 +422,7 @@ func TestHandleRegisterSubmit_SecondUser_DefaultsToPlayer(t *testing.T) {
 		"password_confirm": {"correctbattery"},
 	})
 
-	if got, want := rec.Code, http.StatusSeeOther; got != want {
-		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
-	}
-	// #288: a non-admin must NOT land on /admin/quizzes, which would
-	// bounce them through RequireAdmin to the Access Denied page.
-	if got, want := rec.Header().Get("Location"), "/"; got != want {
-		t.Errorf("Location = %q, want %q", got, want)
-	}
+	assertRegisterPending(t, rec, "bob@example.test")
 
 	p, err := store.GetPlayerByUsername(t.Context(), "bob")
 	if err != nil {
@@ -436,9 +456,7 @@ func TestHandleRegisterSubmit_AdminEmailsEnv_PromotesToAdmin(t *testing.T) {
 		"password_confirm": {"correctbattery"},
 	})
 
-	if got, want := rec.Code, http.StatusSeeOther; got != want {
-		t.Fatalf("status = %d, want %d", got, want)
-	}
+	assertRegisterPending(t, rec, "carol@example.test")
 
 	p, err := store.GetPlayerByUsername(t.Context(), "carol")
 	if err != nil {
@@ -585,9 +603,7 @@ func TestHandleRegisterSubmit_MatchingPasswords_CreatesPlayer(t *testing.T) {
 		"password_confirm": {"correctbattery"},
 	})
 
-	if got, want := rec.Code, http.StatusSeeOther; got != want {
-		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
-	}
+	assertRegisterPending(t, rec, "alice@example.test")
 	if _, err := store.GetPlayerByUsername(t.Context(), "alice"); err != nil {
 		t.Errorf("player should have been created, err = %v", err)
 	}
@@ -646,9 +662,7 @@ func TestHandleRegisterSubmit_LowercasesAndTrimsEmail(t *testing.T) {
 		"password_confirm": {"correctbattery"},
 	})
 
-	if got, want := rec.Code, http.StatusSeeOther; got != want {
-		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
-	}
+	assertRegisterPending(t, rec, "alice@example.test")
 	p, err := store.GetPlayerByUsername(t.Context(), "alice")
 	if err != nil {
 		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
@@ -694,9 +708,8 @@ func TestHandleRegisterSubmit_ClaimsAnonymousSession(t *testing.T) {
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if got, want := rec.Code, http.StatusSeeOther; got != want {
-		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
-	}
+	assertRegisterPending(t, rec, "alice@example.test")
+	assertSessionCleared(t, rec)
 
 	// The same row was upgraded - no new row should appear, and the
 	// anonymous username should be gone.
@@ -820,9 +833,8 @@ func TestHandleRegisterSubmit_ClaimAlreadyClaimed_FallsBackToCreate(t *testing.T
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if got, want := rec.Code, http.StatusSeeOther; got != want {
-		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
-	}
+	assertRegisterPending(t, rec, "latecomer@example.test")
+	assertSessionCleared(t, rec)
 	// A fresh row was created instead of clobbering the already-claimed one.
 	latecomer, err := store.GetPlayerByUsername(t.Context(), "latecomer")
 	if err != nil {
@@ -1272,9 +1284,7 @@ func TestHandleRegisterSubmit_BlankUsername_GeneratesPetname(t *testing.T) {
 		"password_confirm": {"correctbattery"},
 	})
 
-	if got, want := rec.Code, http.StatusSeeOther; got != want {
-		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
-	}
+	assertRegisterPending(t, rec, "petname@example.test")
 	// The whitespace-only username path falls into GeneratePetname, so
 	// no row should be created under the empty key. The row exists under
 	// the petname; we look it up by email instead.
@@ -1301,9 +1311,7 @@ func TestHandleRegisterSubmit_PasswordExactlyMinLength(t *testing.T) {
 		"password_confirm": {password},
 	})
 
-	if got, want := rec.Code, http.StatusSeeOther; got != want {
-		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
-	}
+	assertRegisterPending(t, rec, "alice@example.test")
 	if _, err := store.GetPlayerByUsername(t.Context(), "alice"); err != nil {
 		t.Errorf("player should have been created, err = %v", err)
 	}

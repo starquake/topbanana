@@ -245,14 +245,14 @@ func TestHome_Integration_FooterAffordance(t *testing.T) {
 		"REGISTRATION_ENABLED": "true",
 	})
 
-	// Register a password account so the home-page session resolves to
-	// an authenticated player. authClient + the existing register-form
-	// helpers come from auth_redirect_test.go in the same package.
+	// Register a password account and sign it in so the home-page session
+	// resolves to an authenticated player. The #574 hard gate means
+	// register no longer hands out a session, so the cookie is minted
+	// directly (no email verification needed - the home page does not
+	// gate on it). Helpers come from auth_redirect_test.go in the same
+	// package.
 	regClient := authClient(t)
-	location := registerForRedirect(ctx, t, regClient, srv.BaseURL, "homefooter-admin", "correct-battery-13")
-	if got, want := location, "/admin/quizzes"; got != want {
-		t.Fatalf("register Location = %q, want %q (first user becomes admin)", got, want)
-	}
+	registerAndMint(ctx, t, regClient, srv.BaseURL, srv.DBURI, "homefooter-admin", "correct-battery-13")
 
 	t.Run("anonymous request renders the Log in link", func(t *testing.T) {
 		snap := fetchWithClient(ctx, t, authClient(t), srv.BaseURL+"/")

@@ -28,10 +28,8 @@ func TestVerifyGate_UnverifiedAdminBouncesToPending(t *testing.T) {
 	})
 
 	client := authClient(t)
-	loc := registerForRedirect(ctx, t, client, srv.BaseURL, "gate-admin", "gate-admin-pass-123")
-	if got, want := loc, "/admin/quizzes"; got != want {
-		t.Fatalf("register Location = %q, want %q", got, want)
-	}
+	registerForPending(ctx, t, client, srv.BaseURL, "gate-admin", "gate-admin-pass-123")
+	mintSessionCookie(ctx, t, client, srv.BaseURL, srv.DBURI, "gate-admin")
 
 	resp := getWith(ctx, t, client, srv.BaseURL+"/admin/quizzes")
 	defer resp.Body.Close() //nolint:errcheck // cleanup.
@@ -54,7 +52,8 @@ func TestVerifyGate_PendingPageShowsRecipientEmail(t *testing.T) {
 	})
 
 	client := authClient(t)
-	registerForRedirect(ctx, t, client, srv.BaseURL, "gate-pending", "gate-pending-pass-123")
+	registerForPending(ctx, t, client, srv.BaseURL, "gate-pending", "gate-pending-pass-123")
+	mintSessionCookie(ctx, t, client, srv.BaseURL, srv.DBURI, "gate-pending")
 
 	resp := getWith(ctx, t, client, srv.BaseURL+"/verify-email/pending")
 	defer resp.Body.Close() //nolint:errcheck // cleanup.
@@ -106,7 +105,8 @@ func TestVerifyGate_AfterVerifyAdminReachesDashboard(t *testing.T) {
 	})
 
 	client := authClient(t)
-	registerForRedirect(ctx, t, client, srv.BaseURL, "gate-after", "gate-after-pass-123")
+	registerForPending(ctx, t, client, srv.BaseURL, "gate-after", "gate-after-pass-123")
+	mintSessionCookie(ctx, t, client, srv.BaseURL, srv.DBURI, "gate-after")
 
 	dbConn, stores := openStores(t, srv.DBURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.
@@ -147,7 +147,8 @@ func TestVerifyGate_ResendRateLimited(t *testing.T) {
 	})
 
 	client := authClient(t)
-	registerForRedirect(ctx, t, client, srv.BaseURL, "gate-resend", "gate-resend-pass-123")
+	registerForPending(ctx, t, client, srv.BaseURL, "gate-resend", "gate-resend-pass-123")
+	mintSessionCookie(ctx, t, client, srv.BaseURL, srv.DBURI, "gate-resend")
 	csrfToken := fetchCSRFToken(ctx, t, client, srv.BaseURL+"/verify-email/pending")
 
 	first := postResend(ctx, t, client, srv.BaseURL, csrfToken)

@@ -6,7 +6,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/cookiejar"
-	"net/url"
 	"testing"
 )
 
@@ -38,7 +37,7 @@ func TestVerifyEmail_SeparateConnectionStampVisibleToNextRequest(t *testing.T) {
 	// UNVERIFIED on purpose: we want RequireVerifiedEmail to bounce them
 	// until the separate-connection stamp lands.
 	const username = "verify-race"
-	client := registerClientUnverified(ctx, t, baseURL, username)
+	client := registerClientUnverified(ctx, t, baseURL, srv.DBURI, username)
 
 	gated := baseURL + "/admin/quizzes"
 
@@ -79,11 +78,13 @@ func assertBouncedToPending(ctx context.Context, t *testing.T, client *http.Clie
 	}
 }
 
-// registerClientUnverified mirrors registerAdminClient but stops after
-// the register POST, leaving email_verified_at NULL so the caller can
-// drive RequireVerifiedEmail in its unverified state. Returns the
-// cookie-jar client carrying the new session.
-func registerClientUnverified(ctx context.Context, t *testing.T, baseURL, username string) *http.Client {
+// registerClientUnverified registers username through /register and
+// mints a session cookie onto its jar WITHOUT stamping
+// email_verified_at, leaving the player in the signed-in-but-unverified
+// state the caller needs to drive RequireVerifiedEmail. The #574 hard
+// gate means register no longer hands out a session, so the cookie is
+// minted directly (startServer signs with the default testSessionKey).
+func registerClientUnverified(ctx context.Context, t *testing.T, baseURL, dbURI, username string) *http.Client {
 	t.Helper()
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -96,23 +97,8 @@ func registerClientUnverified(ctx context.Context, t *testing.T, baseURL, userna
 		},
 	}
 
-	token := fetchCSRFToken(ctx, t, client, baseURL+"/register")
-	form := url.Values{
-		"username":         {username},
-		"email":            {username + "@example.test"},
-		"password":         {"integration-pass-123"},
-		"password_confirm": {"integration-pass-123"},
-		"csrf_token":       {token},
-	}
-	req := newFormReq(ctx, t, baseURL+"/register", form)
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("register %q err = %v, want nil", username, err)
-	}
-	defer closeBody(t, resp.Body)
-	if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
-		t.Fatalf("register %q status = %d, want %d", username, got, want)
-	}
+	registerForPending(ctx, t, client, baseURL, username, "integration-pass-123")
+	mintSessionCookie(ctx, t, client, baseURL, dbURI, username)
 
 	return client
 }

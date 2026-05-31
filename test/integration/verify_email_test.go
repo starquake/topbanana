@@ -189,10 +189,11 @@ func TestVerifyEmail_MismatchedSessionClears(t *testing.T) {
 		"REGISTRATION_ENABLED": "true",
 	})
 
-	// Register user A and hold their session cookie.
+	// Register user A, verify, and sign them in so clientA holds a live
+	// session cookie. The #574 hard gate means register alone no longer
+	// produces one.
 	clientA := authClient(t)
-	registerForRedirect(ctx, t, clientA, srv.BaseURL, "verify-session-a", "session-a-pass-123")
-	verifyPlayerEmail(ctx, t, srv.DBURI, "verify-session-a")
+	registerVerifyAndSignIn(ctx, t, clientA, srv.BaseURL, srv.DBURI, "verify-session-a", "session-a-pass-123")
 
 	dbConn, stores := openStores(t, srv.DBURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.

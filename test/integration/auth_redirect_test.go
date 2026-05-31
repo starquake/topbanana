@@ -4,14 +4,17 @@ package integration_test
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/session"
 )
 
 // TestAuthRedirect_PerRole pins the #288 fix end-to-end: register and
@@ -35,20 +38,17 @@ func TestAuthRedirect_PerRole(t *testing.T) {
 	})
 	baseURL := srv.BaseURL
 
-	t.Run("admin register lands on /admin/quizzes", func(t *testing.T) {
+	// Register no longer redirects (#574 hard gate): it renders the
+	// "verify your email" confirmation page with 200 and no session.
+	// The login subtests below pin the per-role redirect instead.
+	t.Run("admin register renders pending page", func(t *testing.T) {
 		client := authClient(t)
-		location := registerForRedirect(ctx, t, client, baseURL, "redirect-admin", "redirect-admin-pass-123")
-		if got, want := location, "/admin/quizzes"; got != want {
-			t.Errorf("admin register Location = %q, want %q", got, want)
-		}
+		registerForPending(ctx, t, client, baseURL, "redirect-admin", "redirect-admin-pass-123")
 	})
 
-	t.Run("player register lands on /", func(t *testing.T) {
+	t.Run("player register renders pending page", func(t *testing.T) {
 		client := authClient(t)
-		location := registerForRedirect(ctx, t, client, baseURL, "redirect-player", "redirect-player-pass-123")
-		if got, want := location, "/"; got != want {
-			t.Errorf("player register Location = %q, want %q", got, want)
-		}
+		registerForPending(ctx, t, client, baseURL, "redirect-player", "redirect-player-pass-123")
 	})
 
 	// Stamp email_verified_at on both registered rows so the post-#492
@@ -80,6 +80,41 @@ func TestAuthRedirect_PerRole(t *testing.T) {
 	})
 }
 
+// testSessionKey is the fixed signing key startServer sets as the
+// default SESSION_KEY (see testmain_test.go) so tests can mint a
+// matching session cookie with mintSessionCookie. The hard
+// email-verification gate (#574) means register and login no longer
+// hand out a session for an unverified account, so the verify-gate
+// tests forge the signed-in-but-unverified state directly instead.
+const testSessionKey = "integration-test-session-key-0123456789abcdef"
+
+// mintSessionCookie signs a session cookie for the named player using
+// testSessionKey and installs it on client's jar, putting the client in
+// the signed-in state without going through login. startServer signs
+// cookies with testSessionKey by default, so the minted cookie verifies
+// unless the test overrode SESSION_KEY.
+func mintSessionCookie(ctx context.Context, t *testing.T, client *http.Client, baseURL, dbURI, username string) {
+	t.Helper()
+
+	dbConn, stores := openStores(t, dbURI)
+	defer dbConn.Close() //nolint:errcheck // cleanup.
+
+	player, err := stores.Players.GetPlayerByUsername(ctx, username)
+	if err != nil {
+		t.Fatalf("mintSessionCookie GetPlayerByUsername err = %v, want nil", err)
+	}
+
+	rec := httptest.NewRecorder()
+	session.New([]byte(testSessionKey), false).Set(rec, player.ID, player.SessionVersion)
+	cookie := rec.Result().Cookies()[0]
+
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		t.Fatalf("url.Parse err = %v, want nil", err)
+	}
+	client.Jar.SetCookies(parsed, []*http.Cookie{cookie})
+}
+
 // authClient builds a fresh http.Client with a cookie jar and the
 // don't-follow-redirects policy every auth test in this package uses.
 func authClient(t *testing.T) *http.Client {
@@ -97,14 +132,93 @@ func authClient(t *testing.T) *http.Client {
 	}
 }
 
-// registerForRedirect POSTs /register and returns the Location header
-// from the 303 response so the caller can assert on it directly.
-func registerForRedirect(
+// registerForPending POSTs /register and asserts the post-#574
+// hard-gate contract: 200, the "Verify your email" confirmation body
+// naming the recipient, and no live session cookie on the jar. Returns
+// nothing - the registered row exists in the DB but the visitor is not
+// signed in until they verify and log in (see registerVerifyAndSignIn).
+func registerForPending(
 	ctx context.Context, t *testing.T, client *http.Client, baseURL, username, password string,
-) string {
+) {
 	t.Helper()
 
-	return submitAuthForm(ctx, t, client, baseURL, "/register", username, password)
+	token := fetchCSRFToken(ctx, t, client, baseURL+"/register")
+	resp := postRegister(ctx, t, client, baseURL, token, username, password)
+	defer resp.Body.Close() //nolint:errcheck // cleanup.
+
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("register status = %d, want %d", got, want)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll err = %v, want nil", err)
+	}
+	if got, want := string(body), "Verify your email"; !strings.Contains(got, want) {
+		t.Errorf("register body missing confirmation headline %q; body=%.300q", want, got)
+	}
+	if got, want := string(body), username+"@example.test"; !strings.Contains(got, want) {
+		t.Errorf("register body missing recipient address %q; body=%.300q", want, got)
+	}
+	assertNoLiveSession(t, resp)
+}
+
+// assertNoLiveSession fails when resp carries a session cookie with a
+// non-empty value. A deletion cookie (empty value, negative MaxAge)
+// emitted by sessions.Clear is fine - that is the hard gate signing the
+// anonymous-upgrade path out.
+func assertNoLiveSession(t *testing.T, resp *http.Response) {
+	t.Helper()
+	for _, c := range resp.Cookies() {
+		if c.Name == session.CookieName && c.Value != "" {
+			t.Errorf("live session cookie set on register: %+v", c)
+		}
+	}
+}
+
+// registerVerifyAndSignIn registers username through /register, stamps
+// email_verified_at directly in the DB (bypassing the email channel),
+// then logs in so client's cookie jar carries a live session. This is
+// the post-#574 replacement for the old "register => signed in"
+// behaviour that many tests relied on: the hard gate means a session is
+// only obtained after verification + login.
+func registerVerifyAndSignIn(
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, dbURI, username, password string,
+) {
+	t.Helper()
+
+	registerForPending(ctx, t, client, baseURL, username, password)
+	verifyPlayerEmail(ctx, t, dbURI, username)
+	loginForRedirect(ctx, t, client, baseURL, username, password)
+}
+
+// registerVerifyAndMint registers username, stamps email_verified_at in
+// the DB, and mints a session cookie onto client's jar without going
+// through /login. Use this instead of registerVerifyAndSignIn when a
+// single test signs in several accounts against one server: minting
+// sidesteps the per-IP login cooldown (#494) that back-to-back logins
+// would trip. Relies on startServer's default SESSION_KEY.
+func registerVerifyAndMint(
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, dbURI, username, password string,
+) {
+	t.Helper()
+
+	registerForPending(ctx, t, client, baseURL, username, password)
+	verifyPlayerEmail(ctx, t, dbURI, username)
+	mintSessionCookie(ctx, t, client, baseURL, dbURI, username)
+}
+
+// registerAndMint registers username and mints a session cookie onto
+// client's jar WITHOUT stamping email_verified_at, leaving the player
+// signed in but unverified. Use it when a test needs a signed-in row
+// that must stay in the unverified bucket. Relies on startServer's
+// default SESSION_KEY.
+func registerAndMint(
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, dbURI, username, password string,
+) {
+	t.Helper()
+
+	registerForPending(ctx, t, client, baseURL, username, password)
+	mintSessionCookie(ctx, t, client, baseURL, dbURI, username)
 }
 
 // loginForRedirect POSTs /login and returns the Location header from
@@ -117,14 +231,11 @@ func loginForRedirect(
 	return submitAuthForm(ctx, t, client, baseURL, "/login", username, password)
 }
 
-// submitAuthForm shares the GET-CSRF + POST-form dance between the
-// register and login probes. Asserts the response is 303 (anything
-// else means the auth flow itself failed, not the redirect rule).
-//
-// Username + password_confirm are always populated so the same helper
-// drives both /login (which ignores those fields after #446 - the
-// credential is email) and /register (which uses username as an
-// optional display name and requires the confirm to match).
+// submitAuthForm runs the GET-CSRF + POST-form dance for the /login
+// redirect probe and asserts the response is 303 (anything else means
+// the auth flow itself failed, not the redirect rule). The email
+// credential is derived from username so a row registered as
+// username@example.test logs in cleanly.
 func submitAuthForm(
 	ctx context.Context, t *testing.T, client *http.Client, baseURL, path, username, password string,
 ) string {
@@ -133,10 +244,8 @@ func submitAuthForm(
 	token := fetchCSRFToken(ctx, t, client, baseURL+path)
 
 	form := url.Values{}
-	form.Add("username", username)
 	form.Add("email", username+"@example.test")
 	form.Add("password", password)
-	form.Add("password_confirm", password)
 	form.Add("csrf_token", token)
 
 	req, err := http.NewRequestWithContext(

@@ -63,8 +63,7 @@ func TestAdminHTMX_QuestionReorder(t *testing.T) {
 			return http.ErrUseLastResponse
 		},
 	}
-	registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
-	verifyPlayerEmail(ctx, t, srv.DBURI, "htmx-admin")
+	registerVerifyAndSignIn(ctx, t, client, srv.BaseURL, srv.DBURI, "htmx-admin", "htmx-admin-pass-123")
 
 	adminPlayer, err := stores.Players.GetPlayerByUsername(ctx, "htmx-admin")
 	if err != nil {
@@ -247,8 +246,7 @@ func TestAdminHTMX_RoundMove(t *testing.T) {
 			return http.ErrUseLastResponse
 		},
 	}
-	registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
-	verifyPlayerEmail(ctx, t, srv.DBURI, "htmx-admin")
+	registerVerifyAndSignIn(ctx, t, client, srv.BaseURL, srv.DBURI, "htmx-admin", "htmx-admin-pass-123")
 
 	adminPlayer, err := stores.Players.GetPlayerByUsername(ctx, "htmx-admin")
 	if err != nil {
@@ -404,43 +402,6 @@ func postHXRoundMove(
 	}
 
 	return string(body)
-}
-
-// registerAdminViaHTTP posts /register through the supplied client so
-// the response sets the session cookie on its jar. The first registered
-// user becomes the admin per the existing auth flow. Tests that hit
-// /admin/* afterwards should also call verifyPlayerEmail to satisfy
-// the #111 PR3 verified-email gate.
-func registerAdminViaHTTP(ctx context.Context, t *testing.T, client *http.Client, baseURL string) {
-	t.Helper()
-
-	registerToken := fetchCSRFToken(ctx, t, client, baseURL+"/register")
-
-	form := url.Values{}
-	form.Add("username", "htmx-admin")
-	form.Add("email", "htmx-admin@example.test")
-	form.Add("password", "htmx-admin-pass-123")
-	form.Add("password_confirm", "htmx-admin-pass-123")
-	form.Add("csrf_token", registerToken)
-
-	req, err := http.NewRequestWithContext(
-		ctx, http.MethodPost, baseURL+"/register", strings.NewReader(form.Encode()),
-	)
-	if err != nil {
-		t.Fatalf("NewRequest err = %v, want nil", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("register client.Do err = %v, want nil", err)
-	}
-	if cerr := resp.Body.Close(); cerr != nil {
-		t.Errorf("register Body.Close err = %v, want nil", cerr)
-	}
-	if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
-		t.Fatalf("register status = %d, want %d", got, want)
-	}
 }
 
 // verifyPlayerEmail stamps email_verified_at on the named player so

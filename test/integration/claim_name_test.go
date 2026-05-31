@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
-	"net/url"
 	"strings"
 	"testing"
 )
@@ -39,10 +38,11 @@ func TestClaimName_NonAnonymousReturnsAlreadyClaimed(t *testing.T) {
 		},
 	}
 
-	// Register a password-bearing player. The /register handler sets
-	// password_hash + username_claimed=1, so this row is the
-	// "non-anonymous" case the PATCH must reject.
-	registerPlayer(ctx, t, client, baseURL, "claim-resident", "claim-resident-pass-123")
+	// Register a password-bearing player and sign them in. The /register
+	// handler sets password_hash + username_claimed=1, so this row is
+	// the "non-anonymous" case the PATCH must reject. The hard gate
+	// (#574) means a session only arrives after verify + login.
+	registerVerifyAndSignIn(ctx, t, client, baseURL, srv.DBURI, "claim-resident", "claim-resident-pass-123")
 
 	body, status := patchPlayerUsernameWithBody(ctx, t, client, baseURL, "different-name")
 	if got, want := status, http.StatusConflict; got != want {
@@ -61,44 +61,6 @@ func TestClaimName_NonAnonymousReturnsAlreadyClaimed(t *testing.T) {
 	}
 	if payload.Message == "" {
 		t.Error("body.message is empty, want a non-empty human-readable string")
-	}
-}
-
-// registerPlayer posts /register through the supplied client so the
-// resulting session cookie lands on its jar. Mirrors the existing
-// registerAdminViaHTTP helper but with caller-supplied credentials so
-// the test can pick an account that won't collide with sibling tests.
-func registerPlayer(
-	ctx context.Context, t *testing.T, client *http.Client, baseURL, username, password string,
-) {
-	t.Helper()
-
-	token := fetchCSRFToken(ctx, t, client, baseURL+"/register")
-
-	form := url.Values{}
-	form.Add("username", username)
-	form.Add("email", username+"@example.test")
-	form.Add("password", password)
-	form.Add("password_confirm", password)
-	form.Add("csrf_token", token)
-
-	req, err := http.NewRequestWithContext(
-		ctx, http.MethodPost, baseURL+"/register", strings.NewReader(form.Encode()),
-	)
-	if err != nil {
-		t.Fatalf("NewRequest err = %v, want nil", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("client.Do err = %v, want nil", err)
-	}
-	if cerr := resp.Body.Close(); cerr != nil {
-		t.Errorf("Body.Close err = %v, want nil", cerr)
-	}
-	if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
-		t.Fatalf("register status = %d, want %d", got, want)
 	}
 }
 

@@ -206,39 +206,15 @@ func loginAdminAndResetPlayer(
 	}
 }
 
-// registerGameplayAdmin posts /register through the supplied client so
-// the response sets the session cookie on its jar. The first
-// password-bearing registrant is promoted to admin.
+// registerGameplayAdmin posts /register through the supplied client to
+// create the first password-bearing registrant (promoted to admin). The
+// #574 hard gate means register no longer hands out a session; the
+// caller verifies the email via the store and logs in separately
+// (loginAdminAndResetPlayer) when it needs an authenticated jar.
 func registerGameplayAdmin(ctx context.Context, t *testing.T, client *http.Client, baseURL string) {
 	t.Helper()
 
-	registerToken := fetchCSRFToken(ctx, t, client, baseURL+"/register")
-
-	registerForm := url.Values{}
-	registerForm.Add("username", gameplayAdminUsername)
-	registerForm.Add("email", gameplayAdminUsername+"@example.test")
-	registerForm.Add("password", gameplayAdminPassword)
-	registerForm.Add("password_confirm", gameplayAdminPassword)
-	registerForm.Add("csrf_token", registerToken)
-
-	registerReq, err := http.NewRequestWithContext(
-		ctx, http.MethodPost, baseURL+"/register",
-		strings.NewReader(registerForm.Encode()),
-	)
-	if err != nil {
-		t.Fatalf("failed to build register request: %v", err)
-	}
-	registerReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	registerResp, err := client.Do(registerReq)
-	if err != nil {
-		t.Fatalf("failed to register: %v", err)
-	}
-	if got, want := registerResp.StatusCode, http.StatusSeeOther; got != want {
-		t.Fatalf("register status = %d, want %d", got, want)
-	}
-	if cerr := registerResp.Body.Close(); cerr != nil {
-		t.Errorf("register body close err = %v", cerr)
-	}
+	registerForPending(ctx, t, client, baseURL, gameplayAdminUsername, gameplayAdminPassword)
 }
 
 // integrationSetup bundles the artefacts a gameplay-style integration test

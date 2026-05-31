@@ -60,11 +60,11 @@ func TestOGMetadata_Integration(t *testing.T) {
 
 	t.Run("admin quizzes page exposes sitewide OG defaults", func(t *testing.T) {
 		t.Parallel()
-		// /admin/quizzes is owner-gated, so a fresh registration is the
+		// /admin/quizzes is owner-gated, so registering + signing in is the
 		// cheapest way to land an authenticated client on the page. The
 		// first password-bearing registrant is promoted to admin.
-		// registerAdminViaHTTP expects to see the 303 directly, so
-		// suppress the default redirect policy on the throwaway client.
+		// registerVerifyAndSignIn sees the login 303 directly, so suppress
+		// the default redirect policy on the throwaway client.
 		jar, jerr := cookiejar.New(nil)
 		if jerr != nil {
 			t.Fatalf("cookiejar.New err = %v, want nil", jerr)
@@ -73,8 +73,7 @@ func TestOGMetadata_Integration(t *testing.T) {
 			Jar:           jar,
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
 		}
-		registerAdminViaHTTP(ctx, t, client, baseURL)
-		verifyPlayerEmail(ctx, t, setup.DBURI, "htmx-admin")
+		registerVerifyAndSignIn(ctx, t, client, baseURL, setup.DBURI, "htmx-admin", "htmx-admin-pass-123")
 
 		resp := httpGet(ctx, t, client, baseURL+"/admin/quizzes")
 		defer closeBody(t, resp.Body)

@@ -150,9 +150,9 @@ func TestQuizVisibility_Integration(t *testing.T) {
 			return http.ErrUseLastResponse
 		},
 	}
-	registerPlayer(ctx, t, authClient, baseURL, "visibility-resident", "visibility-pass-123")
+	registerVerifyAndSignIn(ctx, t, authClient, baseURL, setup.DBURI, "visibility-resident", "visibility-pass-123")
 	// Drop the redirect interceptor so subsequent GETs follow 303
-	// redirects normally (the registration handler 303s on success).
+	// redirects normally (the login handler 303s on success).
 	authClient.CheckRedirect = nil
 
 	t.Run("logged-in player can fetch private quiz directly", func(t *testing.T) {

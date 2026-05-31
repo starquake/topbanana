@@ -23,24 +23,42 @@ export const QUIZ_QUESTIONS: readonly QuestionSpec[] = [
 ];
 
 export async function registerAdmin(page: Page, username: string): Promise<void> {
+  await registerForPending(page, username);
+  // The hard email-verification gate (#574) means register no longer
+  // hands out a session: SMTP isn't wired in e2e so we cannot complete
+  // the user-facing verify flow, so stamp email_verified_at directly
+  // (same trick home.spec.ts uses to wipe games), then log in to obtain
+  // a session and land on the admin dashboard.
+  markEmailVerified(username);
+  await login(page, username);
+  await expect(page).toHaveURL(/\/admin\/quizzes$/);
+}
+
+// registerForPending fills and submits the register form, then asserts
+// the post-#574 hard-gate outcome: register renders the "verify your
+// email" confirmation at /register with no session (no redirect). The
+// row now exists but the visitor is not signed in. Email is the
+// credential after #446; username is the optional display name.
+export async function registerForPending(page: Page, username: string): Promise<void> {
   await page.goto('/register');
-  // Email is the credential after #446; username is the optional
-  // display name. Filling both keeps tests deterministic about which
-  // row is created.
   await page.locator('input[name=email]').fill(`${username}@example.test`);
   await page.locator('input[name=username]').fill(username);
   await page.locator('input[name=password]').fill(PASSWORD);
   await page.locator('input[name=password_confirm]').fill(PASSWORD);
   await page.locator('button[type=submit]').click();
-  // Post-register the gate (#111 PR3) bounces unverified admins to
-  // /verify-email/pending. SMTP isn't wired in e2e so we cannot
-  // complete the user-facing verify flow; shell out to sqlite3 to
-  // stamp email_verified_at directly (same trick home.spec.ts uses
-  // to wipe games), then drive the browser to the admin dashboard.
-  await expect(page).toHaveURL(/\/verify-email\/pending$/);
-  markEmailVerified(username);
-  await page.goto('/admin/quizzes');
-  await expect(page).toHaveURL(/\/admin\/quizzes$/);
+  await expect(page).toHaveURL(/\/register$/);
+  await expect(page.getByRole('heading', { name: 'Verify your email' })).toBeVisible();
+}
+
+// login submits the login form for the named account. The caller asserts
+// the post-login landing URL (it varies by role). LOGIN_COOLDOWN is set
+// to 0s in playwright.config.ts, so back-to-back logins in a worker do
+// not trip the per-IP rate limiter.
+export async function login(page: Page, username: string): Promise<void> {
+  await page.goto('/login');
+  await page.locator('input[name=email]').fill(`${username}@example.test`);
+  await page.locator('input[name=password]').fill(PASSWORD);
+  await page.locator('button[type=submit]').click();
 }
 
 export function markEmailVerified(username: string): void {

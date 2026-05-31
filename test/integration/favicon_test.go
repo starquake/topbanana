@@ -77,18 +77,17 @@ func TestFavicon_Integration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("cookiejar.New err = %v, want nil", err)
 		}
-		// CheckRedirect: ErrUseLastResponse so registerAdminViaHTTP sees the
-		// 303 it expects (the default client would follow it). Once the
-		// session cookie is set, GET /admin still returns 200 directly so
-		// the redirect override doesn't affect the favicon check below.
+		// CheckRedirect: ErrUseLastResponse so registerVerifyAndSignIn sees
+		// the login 303 it expects (the default client would follow it).
+		// Once the session cookie is set, GET /admin still returns 200
+		// directly so the override doesn't affect the favicon check below.
 		client := &http.Client{
 			Jar: jar,
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
 		}
-		registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
-		verifyPlayerEmail(ctx, t, srv.DBURI, "htmx-admin")
+		registerVerifyAndSignIn(ctx, t, client, srv.BaseURL, srv.DBURI, "htmx-admin", "htmx-admin-pass-123")
 		assertFaviconLink(ctx, t, client, srv.BaseURL+"/admin")
 	})
 }
