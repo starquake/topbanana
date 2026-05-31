@@ -169,11 +169,17 @@ func TestProfileEmail_CollisionOpaque(t *testing.T) {
 	}
 
 	body := profileEmailFollowFlash(ctx, t, client, srv.BaseURL)
+	// Opacity now rests on both branches rendering the identical
+	// generic "if not already in use" notice, so we assert the
+	// collision case shows that same success-shaped flash (echoes the
+	// typed address, mentions the verification link) rather than
+	// checking for the absence of a leak word: the generic copy itself
+	// contains "already", so a negative substring check no longer holds.
 	if !strings.Contains(body, "verification link") {
 		t.Errorf("collision body should match the success flash for opacity, got %q", body)
 	}
-	if got, leaks := strings.ToLower(body), strings.Contains(strings.ToLower(body), "already"); leaks {
-		t.Errorf("collision body = %q, want a body that does not leak existence (must not contain \"already\")", got)
+	if !strings.Contains(body, "email-rival@example.test") {
+		t.Errorf("collision body should echo the typed address like the success flash, got %q", body)
 	}
 }
 

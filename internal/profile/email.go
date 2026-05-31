@@ -155,10 +155,15 @@ func HandleProfileEmailChange(logger *slog.Logger, deps EmailChangeDeps) http.Ha
 		dispatchEmailChangeIfFree(r.Context(), logger, deps, player.ID, player.Email, newEmail)
 
 		// Always flash the same notice regardless of whether the
-		// address was free. The user knows what they typed, so the
-		// notice can echo the address; an attacker cannot tell from
-		// the response whether that address was already in use.
-		deps.Flash.SetNotice(w, "We sent a verification link to "+newEmail+". Click it to switch your email.")
+		// address was free. The "if not already in use" wording is
+		// honest in both cases: a link is only sent when the address
+		// is free, but the response is identical either way so an
+		// attacker cannot tell which it was. The user knows what they
+		// typed, so the notice can echo the address.
+		deps.Flash.SetNotice(
+			w,
+			"If "+newEmail+" is not already in use, we sent it a verification link. Click the link to switch your email.",
+		)
 		http.Redirect(w, r, "/profile/email", http.StatusSeeOther)
 	})
 }
