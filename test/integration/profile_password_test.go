@@ -33,8 +33,7 @@ func TestProfilePassword_Integration(t *testing.T) {
 	updatedPassword := "fresh-passphrase-99"
 
 	authn := authClient(t)
-	registerForRedirect(ctx, t, authn, srv.BaseURL, username, originalPassword)
-	verifyPlayerEmail(ctx, t, srv.DBURI, username)
+	registerVerifyAndMint(ctx, t, authn, srv.BaseURL, srv.DBURI, username, originalPassword)
 
 	t.Run("anonymous visitor redirected to login", func(t *testing.T) {
 		client := authClient(t)

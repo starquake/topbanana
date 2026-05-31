@@ -18,7 +18,10 @@ async function registerPlayer(
     await playerPage.locator('input[name=password]').fill(PASSWORD);
     await playerPage.locator('input[name=password_confirm]').fill(PASSWORD);
     await playerPage.locator('button[type=submit]').click();
-    await expect(playerPage).toHaveURL('/');
+    // Hard gate (#574): register creates the row then renders the
+    // confirmation page at /register with no session. The row exists
+    // (unverified), which is all the admin action needs.
+    await expect(playerPage).toHaveURL(/\/register$/);
     await playerPage.close();
   } finally {
     await playerContext.close();

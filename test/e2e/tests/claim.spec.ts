@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { registerAdmin, createQuizWithQuestions, playThroughQuiz } from './helpers';
+import { registerAdmin, registerForPending, login, markEmailVerified, createQuizWithQuestions, playThroughQuiz } from './helpers';
 
 // Petname format: Title-cased Adjective-Adjective-Noun, e.g. "Steamy-Farty-Bear".
 // EnsurePlayer middleware generates one of these for every fresh anonymous
@@ -173,15 +173,12 @@ test('Change your name modal pre-fills the input with the current display name',
 // claimed the "first registrant becomes admin" slot.
 test('signed-in player does not see the claim-name CTA on the player client', async ({ page, browserName }) => {
   const username = `e2e-claim-authn-${browserName}-${Date.now()}`;
-  await page.goto('/register');
-  await page.locator('input[name=username]').fill(username);
-  await page.locator('input[name=email]').fill(`${username}@example.test`);
-  await page.locator('input[name=password]').fill('correct-battery-13');
-  await page.locator('input[name=password_confirm]').fill('correct-battery-13');
-  await page.locator('button[type=submit]').click();
-  // Admin lands on /admin/quizzes; subsequent registrants land on /.
-  // Either signals a successful registration + session cookie set.
-  await expect(page).toHaveURL(/(\/admin\/quizzes|\/)$/);
+  // The hard gate (#574) means register no longer signs the player in.
+  // Verify the row directly, then log in so the client sees an
+  // authenticated player.
+  await registerForPending(page, username);
+  markEmailVerified(username);
+  await login(page, username);
 
   await page.goto('/client/');
 

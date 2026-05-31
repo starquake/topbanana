@@ -26,21 +26,9 @@ func TestAdminPlayerMgmt_FilterTabsAndCounts(t *testing.T) {
 	})
 
 	adminClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, adminClient, srv.BaseURL,
-		"mgmt-admin", "mgmt-admin-pass-123",
-	); got != "/admin/quizzes" {
-		t.Fatalf("first registration did not promote to admin: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "mgmt-admin")
+	registerVerifyAndMint(ctx, t, adminClient, srv.BaseURL, srv.DBURI, "mgmt-admin", "mgmt-admin-pass-123")
 
-	playerClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, playerClient, srv.BaseURL,
-		"mgmt-unverified", "mgmt-unverified-pass-123",
-	); got != "/" {
-		t.Fatalf("second registration did not land on /: Location = %q", got)
-	}
+	registerForPending(ctx, t, newAdminMgmtClient(t), srv.BaseURL, "mgmt-unverified", "mgmt-unverified-pass-123")
 
 	body := getOK(ctx, t, adminClient, srv.BaseURL+"/admin/players")
 	if got, want := body, "Unverified"; !strings.Contains(got, want) {
@@ -76,21 +64,9 @@ func TestAdminPlayerMgmt_DetailViewRenders(t *testing.T) {
 	})
 
 	adminClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, adminClient, srv.BaseURL,
-		"detail-admin", "detail-admin-pass-123",
-	); got != "/admin/quizzes" {
-		t.Fatalf("first registration did not promote to admin: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "detail-admin")
+	registerVerifyAndMint(ctx, t, adminClient, srv.BaseURL, srv.DBURI, "detail-admin", "detail-admin-pass-123")
 
-	playerClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, playerClient, srv.BaseURL,
-		"detail-target", "detail-target-pass-123",
-	); got != "/" {
-		t.Fatalf("second registration did not land on /: Location = %q", got)
-	}
+	registerForPending(ctx, t, newAdminMgmtClient(t), srv.BaseURL, "detail-target", "detail-target-pass-123")
 
 	target := lookupPlayerID(ctx, t, srv.DBURI, "detail-target")
 
@@ -117,21 +93,9 @@ func TestAdminPlayerMgmt_MarkVerifiedFlipsRow(t *testing.T) {
 	})
 
 	adminClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, adminClient, srv.BaseURL,
-		"verify-admin", "verify-admin-pass-123",
-	); got != "/admin/quizzes" {
-		t.Fatalf("first registration did not promote to admin: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "verify-admin")
+	registerVerifyAndMint(ctx, t, adminClient, srv.BaseURL, srv.DBURI, "verify-admin", "verify-admin-pass-123")
 
-	playerClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, playerClient, srv.BaseURL,
-		"verify-target", "verify-target-pass-123",
-	); got != "/" {
-		t.Fatalf("second registration did not land on /: Location = %q", got)
-	}
+	registerForPending(ctx, t, newAdminMgmtClient(t), srv.BaseURL, "verify-target", "verify-target-pass-123")
 
 	target := lookupPlayerID(ctx, t, srv.DBURI, "verify-target")
 	verifyURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/verify"
@@ -163,13 +127,7 @@ func TestAdminPlayerMgmt_WrongStateRejected(t *testing.T) {
 	})
 
 	adminClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, adminClient, srv.BaseURL,
-		"reject-admin", "reject-admin-pass-123",
-	); got != "/admin/quizzes" {
-		t.Fatalf("first registration did not promote to admin: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "reject-admin")
+	registerVerifyAndMint(ctx, t, adminClient, srv.BaseURL, srv.DBURI, "reject-admin", "reject-admin-pass-123")
 
 	// Try to mark the admin (already verified) verified again - should
 	// be rejected because the row is not in the unverified bucket.
@@ -205,21 +163,9 @@ func TestAdminPlayerMgmt_SetEmailValidates(t *testing.T) {
 	})
 
 	adminClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, adminClient, srv.BaseURL,
-		"setemail-admin", "setemail-admin-pass-123",
-	); got != "/admin/quizzes" {
-		t.Fatalf("first registration did not promote to admin: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "setemail-admin")
+	registerVerifyAndMint(ctx, t, adminClient, srv.BaseURL, srv.DBURI, "setemail-admin", "setemail-admin-pass-123")
 
-	playerClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, playerClient, srv.BaseURL,
-		"setemail-target", "setemail-target-pass-123",
-	); got != "/" {
-		t.Fatalf("second registration did not land on /: Location = %q", got)
-	}
+	registerForPending(ctx, t, newAdminMgmtClient(t), srv.BaseURL, "setemail-target", "setemail-target-pass-123")
 
 	target := lookupPlayerID(ctx, t, srv.DBURI, "setemail-target")
 	emailURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/email"
@@ -259,21 +205,9 @@ func TestAdminPlayerMgmt_SetEmailClearsVerification(t *testing.T) {
 	})
 
 	adminClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, adminClient, srv.BaseURL,
-		"reverify-admin", "reverify-admin-pass-123",
-	); got != "/admin/quizzes" {
-		t.Fatalf("first registration did not promote to admin: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "reverify-admin")
+	registerVerifyAndMint(ctx, t, adminClient, srv.BaseURL, srv.DBURI, "reverify-admin", "reverify-admin-pass-123")
 
-	playerClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, playerClient, srv.BaseURL,
-		"reverify-target", "reverify-target-pass-123",
-	); got != "/" {
-		t.Fatalf("second registration did not land on /: Location = %q", got)
-	}
+	registerForPending(ctx, t, newAdminMgmtClient(t), srv.BaseURL, "reverify-target", "reverify-target-pass-123")
 	// Verify the target so it starts in the verified bucket.
 	verifyPlayerEmail(ctx, t, srv.DBURI, "reverify-target")
 
@@ -318,13 +252,7 @@ func TestAdminPlayerMgmt_CreatePlayer(t *testing.T) {
 	})
 
 	adminClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, adminClient, srv.BaseURL,
-		"create-admin", "create-admin-pass-123",
-	); got != "/admin/quizzes" {
-		t.Fatalf("first registration did not promote to admin: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "create-admin")
+	registerVerifyAndMint(ctx, t, adminClient, srv.BaseURL, srv.DBURI, "create-admin", "create-admin-pass-123")
 
 	postAdminAction(
 		ctx, t, adminClient, srv.BaseURL,
@@ -373,22 +301,18 @@ func TestAdminPlayerMgmt_CreateRequiresAdmin(t *testing.T) {
 	})
 
 	adminClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, adminClient, srv.BaseURL,
-		"create-admin-boss", "create-admin-boss-pass-123",
-	); got != "/admin/quizzes" {
-		t.Fatalf("first registration did not promote to admin: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "create-admin-boss")
+	registerVerifyAndMint(
+		ctx,
+		t,
+		adminClient,
+		srv.BaseURL,
+		srv.DBURI,
+		"create-admin-boss",
+		"create-admin-boss-pass-123",
+	)
 
 	hostClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, hostClient, srv.BaseURL,
-		"create-host", "create-host-pass-123",
-	); got != "/" {
-		t.Fatalf("second registration did not land on /: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "create-host")
+	registerVerifyAndMint(ctx, t, hostClient, srv.BaseURL, srv.DBURI, "create-host", "create-host-pass-123")
 	makeHost(ctx, t, srv.DBURI, "create-host")
 
 	req, err := http.NewRequestWithContext(
@@ -429,13 +353,7 @@ func TestAdminPlayerMgmt_RequiresCSRF(t *testing.T) {
 	})
 
 	adminClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, adminClient, srv.BaseURL,
-		"csrf-admin", "csrf-admin-pass-123",
-	); got != "/admin/quizzes" {
-		t.Fatalf("first registration did not promote to admin: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "csrf-admin")
+	registerVerifyAndMint(ctx, t, adminClient, srv.BaseURL, srv.DBURI, "csrf-admin", "csrf-admin-pass-123")
 
 	target := lookupPlayerID(ctx, t, srv.DBURI, "csrf-admin")
 	verifyURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/verify"
@@ -471,22 +389,10 @@ func TestAdminPlayerMgmt_NonAdminBlocked(t *testing.T) {
 	})
 
 	adminClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, adminClient, srv.BaseURL,
-		"nonadmin-admin", "nonadmin-admin-pass-123",
-	); got != "/admin/quizzes" {
-		t.Fatalf("first registration did not promote to admin: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "nonadmin-admin")
+	registerVerifyAndMint(ctx, t, adminClient, srv.BaseURL, srv.DBURI, "nonadmin-admin", "nonadmin-admin-pass-123")
 
 	playerClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, playerClient, srv.BaseURL,
-		"nonadmin-target", "nonadmin-target-pass-123",
-	); got != "/" {
-		t.Fatalf("second registration did not land on /: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "nonadmin-target")
+	registerVerifyAndMint(ctx, t, playerClient, srv.BaseURL, srv.DBURI, "nonadmin-target", "nonadmin-target-pass-123")
 
 	target := lookupPlayerID(ctx, t, srv.DBURI, "nonadmin-target")
 	req, err := http.NewRequestWithContext(
@@ -526,21 +432,9 @@ func TestAdminPlayerMgmt_SetRolePromotesToAdmin(t *testing.T) {
 	})
 
 	adminClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, adminClient, srv.BaseURL,
-		"role-admin", "role-admin-pass-123",
-	); got != "/admin/quizzes" {
-		t.Fatalf("first registration did not promote to admin: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "role-admin")
+	registerVerifyAndMint(ctx, t, adminClient, srv.BaseURL, srv.DBURI, "role-admin", "role-admin-pass-123")
 
-	playerClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, playerClient, srv.BaseURL,
-		"role-target", "role-target-pass-123",
-	); got != "/" {
-		t.Fatalf("second registration did not land on /: Location = %q", got)
-	}
+	registerForPending(ctx, t, newAdminMgmtClient(t), srv.BaseURL, "role-target", "role-target-pass-123")
 
 	target := lookupPlayerID(ctx, t, srv.DBURI, "role-target")
 	roleURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/role"
@@ -570,21 +464,9 @@ func TestAdminPlayerMgmt_SetUsername(t *testing.T) {
 	})
 
 	adminClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, adminClient, srv.BaseURL,
-		"setname-admin", "setname-admin-pass-123",
-	); got != "/admin/quizzes" {
-		t.Fatalf("first registration did not promote to admin: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "setname-admin")
+	registerVerifyAndMint(ctx, t, adminClient, srv.BaseURL, srv.DBURI, "setname-admin", "setname-admin-pass-123")
 
-	playerClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, playerClient, srv.BaseURL,
-		"setname-target", "setname-target-pass-123",
-	); got != "/" {
-		t.Fatalf("second registration did not land on /: Location = %q", got)
-	}
+	registerForPending(ctx, t, newAdminMgmtClient(t), srv.BaseURL, "setname-target", "setname-target-pass-123")
 
 	target := lookupPlayerID(ctx, t, srv.DBURI, "setname-target")
 	usernameURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/username"
@@ -618,21 +500,9 @@ func TestAdminPlayerMgmt_SetPassword(t *testing.T) {
 	})
 
 	adminClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, adminClient, srv.BaseURL,
-		"setpass-admin", "setpass-admin-pass-123",
-	); got != "/admin/quizzes" {
-		t.Fatalf("first registration did not promote to admin: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "setpass-admin")
+	registerVerifyAndMint(ctx, t, adminClient, srv.BaseURL, srv.DBURI, "setpass-admin", "setpass-admin-pass-123")
 
-	playerClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, playerClient, srv.BaseURL,
-		"setpass-target", "setpass-target-pass-123",
-	); got != "/" {
-		t.Fatalf("second registration did not land on /: Location = %q", got)
-	}
+	registerForPending(ctx, t, newAdminMgmtClient(t), srv.BaseURL, "setpass-target", "setpass-target-pass-123")
 	verifyPlayerEmail(ctx, t, srv.DBURI, "setpass-target")
 
 	target := lookupPlayerID(ctx, t, srv.DBURI, "setpass-target")
@@ -677,22 +547,10 @@ func TestAdminPlayerMgmt_SetCredentialsRequireAdmin(t *testing.T) {
 	})
 
 	adminClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, adminClient, srv.BaseURL,
-		"creds-admin-boss", "creds-admin-boss-pass-123",
-	); got != "/admin/quizzes" {
-		t.Fatalf("first registration did not promote to admin: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "creds-admin-boss")
+	registerVerifyAndMint(ctx, t, adminClient, srv.BaseURL, srv.DBURI, "creds-admin-boss", "creds-admin-boss-pass-123")
 
 	hostClient := newAdminMgmtClient(t)
-	if got := registerForRedirect(
-		ctx, t, hostClient, srv.BaseURL,
-		"creds-host", "creds-host-pass-123",
-	); got != "/" {
-		t.Fatalf("second registration did not land on /: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "creds-host")
+	registerVerifyAndMint(ctx, t, hostClient, srv.BaseURL, srv.DBURI, "creds-host", "creds-host-pass-123")
 	makeHost(ctx, t, srv.DBURI, "creds-host")
 
 	target := lookupPlayerID(ctx, t, srv.DBURI, "creds-admin-boss")

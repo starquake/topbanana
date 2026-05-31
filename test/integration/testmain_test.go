@@ -67,6 +67,12 @@ func startServer(t *testing.T, extraEnv map[string]string) (context.Context, tes
 			"HOST":    "localhost",
 			"PORT":    "0",
 			"DB_URI":  dbURI,
+			// Fixed signing key so tests can mint a matching session cookie
+			// via mintSessionCookie (auth_redirect_test.go). The #574 hard
+			// gate stopped register from handing out a session, so tests
+			// that need a signed-in-but-unverified client forge the cookie
+			// directly. Overridable via extraEnv.
+			"SESSION_KEY": testSessionKey,
 		}
 		maps.Copy(env, extraEnv)
 

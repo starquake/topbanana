@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { registerAdmin, createQuizWithQuestions, markEmailVerified } from './helpers';
+import { registerAdmin, registerForPending, login, createQuizWithQuestions, markEmailVerified } from './helpers';
 
 // Pre-game navigation on the player SPA: a signed-in player can reach
 // /profile via the account link, and a deep-linked /play/{slug} start
@@ -12,20 +12,12 @@ import { registerAdmin, createQuizWithQuestions, markEmailVerified } from './hel
 // worker), mirroring claim.spec.ts's authenticated-player test.
 test('signed-in player can reach /profile via the account link on the play SPA', async ({ page, browserName }) => {
   const username = `e2e-pregame-authn-${browserName}-${Date.now()}`;
-  await page.goto('/register');
-  await page.locator('input[name=username]').fill(username);
-  await page.locator('input[name=email]').fill(`${username}@example.test`);
-  await page.locator('input[name=password]').fill('correct-battery-13');
-  await page.locator('input[name=password_confirm]').fill('correct-battery-13');
-  await page.locator('button[type=submit]').click();
-  // The post-register redirect target varies with this worker DB's state
-  // (admin bootstrap -> /admin/quizzes, verify gate -> /verify-email/pending,
-  // otherwise /), so just wait for the registration to land somewhere off
-  // /register. /profile sits behind the verify-email gate, so stamp
-  // email_verified_at directly (the same trick registerAdmin uses) so the
-  // account link lands on the profile page rather than the pending screen.
-  await expect(page).not.toHaveURL(/\/register$/);
+  // The hard gate (#574) means register no longer signs the player in.
+  // Verify the row directly, then log in so the SPA sees an
+  // authenticated, verified player.
+  await registerForPending(page, username);
   markEmailVerified(username);
+  await login(page, username);
 
   await page.goto('/client/');
 

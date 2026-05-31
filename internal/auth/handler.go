@@ -138,6 +138,7 @@ func HandleRegisterSubmit(
 	deps RegisterDeps,
 ) http.Handler {
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/register.gohtml")
+	pending := newTemplateRenderer(logger, csrfMgr, "auth/pages/register_pending.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, maxFormBodySize)
@@ -201,9 +202,25 @@ func HandleRegisterSubmit(
 		}
 
 		dispatchVerifyEmail(r.Context(), logger, deps, player.ID, input.CleanedEmail)
-		sessions.Set(w, player.ID, player.SessionVersion)
-		http.Redirect(w, r, landingPathFor(player.Role), http.StatusSeeOther)
+		// Hard email-verification gate (#574): no session until the
+		// address is proven. Clear unconditionally so the anonymous
+		// upgrade path (ClaimPlayer) does not leave the pre-existing
+		// anonymous cookie live and sign the unverified account in.
+		sessions.Clear(w)
+		pending.render(w, r, http.StatusOK, registerPendingData{
+			Title: "Verify your email",
+			Email: input.CleanedEmail,
+		})
 	})
+}
+
+// registerPendingData backs the post-register confirmation page shown
+// after a successful signup. The visitor has no session at this point
+// (the hard gate clears it), so the template is the no-session resend
+// variant pointing at /verify-email/request.
+type registerPendingData struct {
+	Title string
+	Email string
 }
 
 // verifyEmailDispatchTimeout caps the detached SMTP attempt spawned by

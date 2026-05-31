@@ -28,10 +28,11 @@ func TestResetPassword_HappyPath(t *testing.T) {
 	})
 
 	// First password-bearing registrant is promoted to admin, so the
-	// reset-token holder's role landing is /admin/quizzes.
+	// reset-token holder's role landing is /admin/quizzes. The signed
+	// client holds a live session at the pre-reset version so the test
+	// can prove the reset's session_version bump bounces it.
 	signed := authClient(t)
-	registerForRedirect(ctx, t, signed, srv.BaseURL, "reset-happy", "old-pass-12345")
-	verifyPlayerEmail(ctx, t, srv.DBURI, "reset-happy")
+	registerVerifyAndMint(ctx, t, signed, srv.BaseURL, srv.DBURI, "reset-happy", "old-pass-12345")
 
 	dbConn, stores := openStores(t, srv.DBURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.

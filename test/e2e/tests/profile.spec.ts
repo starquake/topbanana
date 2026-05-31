@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { PASSWORD, markEmailVerified } from './helpers';
+import { registerForPending, login, markEmailVerified } from './helpers';
 
 // Registers a plain player (not via registerAdmin, which assumes the
 // ADMIN_EMAILS promotion slot) and clears the verified-email gate so
@@ -7,19 +7,13 @@ import { PASSWORD, markEmailVerified } from './helpers';
 test('profile page links to change-email and change-password', async ({ page, browserName }) => {
   const username = `e2e-profile-${browserName}-${Date.now()}`;
 
-  await page.goto('/register');
-  await page.locator('input[name=email]').fill(`${username}@example.test`);
-  await page.locator('input[name=username]').fill(username);
-  await page.locator('input[name=password]').fill(PASSWORD);
-  await page.locator('input[name=password_confirm]').fill(PASSWORD);
-  await page.locator('button[type=submit]').click();
-
-  // Registration sets the session and redirects off /register (a plain
-  // player lands on /, an admin on /verify-email/pending). Either way the
-  // row now exists, so wait for the redirect, then clear the verified-email
-  // gate that /profile enforces.
-  await expect(page).not.toHaveURL(/\/register$/);
+  // The hard gate (#574) means register no longer signs the player in:
+  // it renders the confirmation page with no session. Verify the row
+  // directly, then log in to clear the verified-email gate /profile
+  // enforces and obtain a session.
+  await registerForPending(page, username);
   markEmailVerified(username);
+  await login(page, username);
 
   await page.goto('/profile');
 

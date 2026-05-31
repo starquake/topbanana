@@ -52,8 +52,7 @@ func TestProfile_Integration(t *testing.T) {
 	// Register an admin so the rest of the subtests have an
 	// authenticated session to drive against.
 	authn := authClient(t)
-	registerForRedirect(ctx, t, authn, srv.BaseURL, "profile-admin", "correct-battery-13")
-	verifyPlayerEmail(ctx, t, srv.DBURI, "profile-admin")
+	registerVerifyAndMint(ctx, t, authn, srv.BaseURL, srv.DBURI, "profile-admin", "correct-battery-13")
 
 	t.Run("GET /profile renders form with the current username", func(t *testing.T) {
 		snap := profileGET(ctx, t, authn, srv.BaseURL)
@@ -82,8 +81,7 @@ func TestProfile_Integration(t *testing.T) {
 
 	t.Run("POST /profile/username with a taken value returns 409", func(t *testing.T) {
 		// Register a second player so the admin can collide with them.
-		other := authClient(t)
-		registerForRedirect(ctx, t, other, srv.BaseURL, "rival-name", "correct-battery-13")
+		registerForPending(ctx, t, authClient(t), srv.BaseURL, "rival-name", "correct-battery-13")
 
 		snap := profilePOST(ctx, t, authn, srv.BaseURL, "rival-name")
 		if got, want := snap.status, http.StatusConflict; got != want {

@@ -51,7 +51,7 @@ func TestLogin_UnverifiedEmail_BlocksAndResends(t *testing.T) {
 	regCSRF := fetchCSRFToken(ctx, t, regClient, srv.BaseURL+"/register")
 	registerResp := postRegister(ctx, t, regClient, srv.BaseURL, regCSRF, username, password)
 	registerResp.Body.Close() //nolint:errcheck // cleanup.
-	if got, want := registerResp.StatusCode, http.StatusSeeOther; got != want {
+	if got, want := registerResp.StatusCode, http.StatusOK; got != want {
 		t.Fatalf("register status = %d, want %d", got, want)
 	}
 
@@ -116,9 +116,9 @@ func waitForVerifyTokenCount(ctx context.Context, t *testing.T, dbConn *sql.DB, 
 }
 
 // postRegister POSTs /register with the given credentials + pre-fetched
-// CSRF token. Mirrors submitAuthForm in auth_redirect_test.go but lives
-// here so the unverified-login test can opt out of the 303-only
-// assertion that helper bakes in.
+// CSRF token and returns the raw response so callers assert on status,
+// body, and cookies themselves. After #574 a successful register
+// renders the confirmation page with 200 and no session cookie.
 func postRegister(
 	ctx context.Context, t *testing.T, client *http.Client, baseURL, csrfToken, username, password string,
 ) *http.Response {

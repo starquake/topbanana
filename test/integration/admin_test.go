@@ -83,40 +83,11 @@ func TestAdmin_Integration(t *testing.T) {
 		},
 	}
 
-	// Register the first user (becomes admin) so subsequent /admin/* requests succeed.
-	// Fetching the GET form first sets the CSRF nonce cookie on the jar and
-	// returns the hidden token, both of which the POST then carries.
-	registerToken := fetchCSRFToken(ctx, t, client, baseURL+"/register")
-
-	registerForm := url.Values{}
-	registerForm.Add("username", "integration-admin")
-	registerForm.Add("email", "integration-admin@example.test")
-	registerForm.Add("password", "integration-pass-123")
-	registerForm.Add("password_confirm", "integration-pass-123")
-	registerForm.Add("csrf_token", registerToken)
-
-	registerReq, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		baseURL+"/register",
-		strings.NewReader(registerForm.Encode()),
-	)
-	if err != nil {
-		t.Fatalf("failed to create register request: %v", err)
-	}
-	registerReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	registerResp, err := client.Do(registerReq)
-	if err != nil {
-		t.Fatalf("failed to register: %v", err)
-	}
-	if got, want := registerResp.StatusCode, http.StatusSeeOther; got != want {
-		t.Fatalf("register status = %d, want %d", got, want)
-	}
-	if cerr := registerResp.Body.Close(); cerr != nil {
-		t.Errorf("failed to close register body: %v", cerr)
-	}
-
-	verifyPlayerEmail(ctx, t, srv.DBURI, "integration-admin")
+	// Register the first user (becomes admin), verify their email, and
+	// sign them in so subsequent /admin/* requests succeed. The #574 hard
+	// gate means register no longer hands out a session, so the sign-in
+	// is an explicit verify + login step.
+	registerVerifyAndSignIn(ctx, t, client, baseURL, srv.DBURI, "integration-admin", "integration-pass-123")
 
 	// Visit the quiz-create form GET so we can pull a fresh CSRF token tied
 	// to the now-authenticated session jar.

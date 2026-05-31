@@ -64,8 +64,7 @@ func TestEmailAdmin_UnconfiguredShowsDisabled(t *testing.T) {
 			return http.ErrUseLastResponse
 		},
 	}
-	registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
-	verifyPlayerEmail(ctx, t, srv.DBURI, "htmx-admin")
+	registerVerifyAndSignIn(ctx, t, client, srv.BaseURL, srv.DBURI, "htmx-admin", "htmx-admin-pass-123")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.BaseURL+"/admin/email", nil)
 	if err != nil {
@@ -121,8 +120,7 @@ func TestEmailAdmin_RendersBaseURLWhenSet(t *testing.T) {
 			return http.ErrUseLastResponse
 		},
 	}
-	registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
-	verifyPlayerEmail(ctx, t, srv.DBURI, "htmx-admin")
+	registerVerifyAndSignIn(ctx, t, client, srv.BaseURL, srv.DBURI, "htmx-admin", "htmx-admin-pass-123")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.BaseURL+"/admin/email", nil)
 	if err != nil {
@@ -172,8 +170,7 @@ func TestEmailAdmin_RendersBaseURLDisabledWhenEmpty(t *testing.T) {
 			return http.ErrUseLastResponse
 		},
 	}
-	registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
-	verifyPlayerEmail(ctx, t, srv.DBURI, "htmx-admin")
+	registerVerifyAndSignIn(ctx, t, client, srv.BaseURL, srv.DBURI, "htmx-admin", "htmx-admin-pass-123")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.BaseURL+"/admin/email", nil)
 	if err != nil {
@@ -231,8 +228,7 @@ func TestEmailAdmin_TestSendOnUnconfiguredRedirectsWithFlash(t *testing.T) {
 			return http.ErrUseLastResponse
 		},
 	}
-	registerAdminViaHTTP(ctx, t, postClient, srv.BaseURL)
-	verifyPlayerEmail(ctx, t, srv.DBURI, "htmx-admin")
+	registerVerifyAndSignIn(ctx, t, postClient, srv.BaseURL, srv.DBURI, "htmx-admin", "htmx-admin-pass-123")
 
 	csrfToken := fetchCSRFToken(ctx, t, postClient, srv.BaseURL+"/admin/email")
 
@@ -336,8 +332,7 @@ func TestEmailAdmin_GetOnTestRouteRedirects(t *testing.T) {
 			return http.ErrUseLastResponse
 		},
 	}
-	registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
-	verifyPlayerEmail(ctx, t, srv.DBURI, "htmx-admin")
+	registerVerifyAndSignIn(ctx, t, client, srv.BaseURL, srv.DBURI, "htmx-admin", "htmx-admin-pass-123")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.BaseURL+"/admin/email/test", nil)
 	if err != nil {
@@ -384,8 +379,7 @@ func TestEmailAdmin_RateLimitsRepeatedSends(t *testing.T) {
 			return http.ErrUseLastResponse
 		},
 	}
-	registerAdminViaHTTP(ctx, t, client, srv.BaseURL)
-	verifyPlayerEmail(ctx, t, srv.DBURI, "htmx-admin")
+	registerVerifyAndSignIn(ctx, t, client, srv.BaseURL, srv.DBURI, "htmx-admin", "htmx-admin-pass-123")
 
 	postOnce := func() *http.Response {
 		t.Helper()

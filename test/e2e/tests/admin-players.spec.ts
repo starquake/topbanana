@@ -31,9 +31,11 @@ test('admin marks an unverified player verified via the detail view', async ({ p
     await targetPage.locator('input[name=password]').fill(PASSWORD);
     await targetPage.locator('input[name=password_confirm]').fill(PASSWORD);
     await targetPage.locator('button[type=submit]').click();
-    // The second registration lands on / (player role) without ever
-    // verifying the address.
-    await expect(targetPage).toHaveURL('/');
+    // Hard gate (#574): register creates the row then renders the
+    // confirmation page at /register with no session. The row exists
+    // and is unverified - exactly the state this test needs so it shows
+    // up under the Unverified tab.
+    await expect(targetPage).toHaveURL(/\/register$/);
     await targetPage.close();
   } finally {
     await targetContext.close();

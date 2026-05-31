@@ -29,8 +29,7 @@ func TestProfileEmail_HappyPathSwapsAndStaysSignedIn(t *testing.T) {
 	ctx, srv := startServer(t, map[string]string{"REGISTRATION_ENABLED": "true"})
 
 	client := authClient(t)
-	registerForRedirect(ctx, t, client, srv.BaseURL, "email-change-happy", "correct-battery-13")
-	verifyPlayerEmail(ctx, t, srv.DBURI, "email-change-happy")
+	registerVerifyAndSignIn(ctx, t, client, srv.BaseURL, srv.DBURI, "email-change-happy", "correct-battery-13")
 
 	const newAddr = "fresh-inbox@example.test"
 
@@ -106,8 +105,7 @@ func TestProfileEmail_MalformedRejected(t *testing.T) {
 	ctx, srv := startServer(t, map[string]string{"REGISTRATION_ENABLED": "true"})
 
 	client := authClient(t)
-	registerForRedirect(ctx, t, client, srv.BaseURL, "email-malformed", "correct-battery-13")
-	verifyPlayerEmail(ctx, t, srv.DBURI, "email-malformed")
+	registerVerifyAndSignIn(ctx, t, client, srv.BaseURL, srv.DBURI, "email-malformed", "correct-battery-13")
 
 	flash := profileEmailPOST(ctx, t, client, srv.BaseURL, "not-an-email")
 	if got, want := flash.status, http.StatusSeeOther; got != want {
@@ -129,8 +127,7 @@ func TestProfileEmail_NoOpRejected(t *testing.T) {
 	ctx, srv := startServer(t, map[string]string{"REGISTRATION_ENABLED": "true"})
 
 	client := authClient(t)
-	registerForRedirect(ctx, t, client, srv.BaseURL, "email-noop", "correct-battery-13")
-	verifyPlayerEmail(ctx, t, srv.DBURI, "email-noop")
+	registerVerifyAndSignIn(ctx, t, client, srv.BaseURL, srv.DBURI, "email-noop", "correct-battery-13")
 
 	flash := profileEmailPOST(ctx, t, client, srv.BaseURL, "email-noop@example.test")
 	if got, want := flash.status, http.StatusSeeOther; got != want {
@@ -151,17 +148,21 @@ func TestProfileEmail_NoOpRejected(t *testing.T) {
 func TestProfileEmail_CollisionOpaque(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, map[string]string{"REGISTRATION_ENABLED": "true"})
+	// Two sign-ins from the same localhost peer share the per-IP login
+	// limiter bucket; disable the cooldown so the second login is not
+	// 429'd by the 3s default (#494).
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+		"LOGIN_COOLDOWN":       "0",
+	})
 
 	// Register the rival who owns the target address.
 	rival := authClient(t)
-	registerForRedirect(ctx, t, rival, srv.BaseURL, "email-rival", "correct-battery-13")
-	verifyPlayerEmail(ctx, t, srv.DBURI, "email-rival")
+	registerVerifyAndSignIn(ctx, t, rival, srv.BaseURL, srv.DBURI, "email-rival", "correct-battery-13")
 
 	// Register the player attempting the change.
 	client := authClient(t)
-	registerForRedirect(ctx, t, client, srv.BaseURL, "email-collide", "correct-battery-13")
-	verifyPlayerEmail(ctx, t, srv.DBURI, "email-collide")
+	registerVerifyAndSignIn(ctx, t, client, srv.BaseURL, srv.DBURI, "email-collide", "correct-battery-13")
 
 	flash := profileEmailPOST(ctx, t, client, srv.BaseURL, "email-rival@example.test")
 	if got, want := flash.status, http.StatusSeeOther; got != want {
@@ -243,8 +244,7 @@ func TestProfileEmail_OldSessionInvalidatedAfterSwap(t *testing.T) {
 	ctx, srv := startServer(t, map[string]string{"REGISTRATION_ENABLED": "true"})
 
 	primary := authClient(t)
-	registerForRedirect(ctx, t, primary, srv.BaseURL, "email-rotate", "correct-battery-13")
-	verifyPlayerEmail(ctx, t, srv.DBURI, "email-rotate")
+	registerVerifyAndSignIn(ctx, t, primary, srv.BaseURL, srv.DBURI, "email-rotate", "correct-battery-13")
 
 	// Mint a second client carrying the same session cookie at the
 	// pre-swap session_version. Easiest way: log in a fresh client
@@ -290,8 +290,7 @@ func TestProfileEmail_WrongPasswordRejected(t *testing.T) {
 	ctx, srv := startServer(t, map[string]string{"REGISTRATION_ENABLED": "true"})
 
 	client := authClient(t)
-	registerForRedirect(ctx, t, client, srv.BaseURL, "email-wrongpw", "correct-battery-13")
-	verifyPlayerEmail(ctx, t, srv.DBURI, "email-wrongpw")
+	registerVerifyAndSignIn(ctx, t, client, srv.BaseURL, srv.DBURI, "email-wrongpw", "correct-battery-13")
 
 	flash := profileEmailPOSTWithPassword(ctx, t, client, srv.BaseURL, "fresh@example.test", "not-the-password")
 	if got, want := flash.status, http.StatusSeeOther; got != want {
@@ -312,8 +311,7 @@ func TestProfileEmail_EmptyPasswordRejected(t *testing.T) {
 	ctx, srv := startServer(t, map[string]string{"REGISTRATION_ENABLED": "true"})
 
 	client := authClient(t)
-	registerForRedirect(ctx, t, client, srv.BaseURL, "email-emptypw", "correct-battery-13")
-	verifyPlayerEmail(ctx, t, srv.DBURI, "email-emptypw")
+	registerVerifyAndSignIn(ctx, t, client, srv.BaseURL, srv.DBURI, "email-emptypw", "correct-battery-13")
 
 	flash := profileEmailPOSTWithPassword(ctx, t, client, srv.BaseURL, "fresh@example.test", "")
 	if got, want := flash.status, http.StatusSeeOther; got != want {

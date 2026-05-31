@@ -55,20 +55,8 @@ func TestAdminPlayersList_RendersForAdmin(t *testing.T) {
 	// plain password player — we need both labels in the rendered table
 	// to pin the AccountType derivation end-to-end.
 	adminClient := authClient(t)
-	if got := registerForRedirect(
-		ctx, t, adminClient, srv.BaseURL,
-		"players-admin", "players-admin-pass-123",
-	); got != "/admin/quizzes" {
-		t.Fatalf("first registration did not promote to admin: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "players-admin")
-	playerClient := authClient(t)
-	if got := registerForRedirect(
-		ctx, t, playerClient, srv.BaseURL,
-		"players-player", "players-player-pass-123",
-	); got != "/" {
-		t.Fatalf("second registration did not stay player: Location = %q", got)
-	}
+	registerVerifyAndMint(ctx, t, adminClient, srv.BaseURL, srv.DBURI, "players-admin", "players-admin-pass-123")
+	registerForPending(ctx, t, authClient(t), srv.BaseURL, "players-player", "players-player-pass-123")
 
 	body := getOK(ctx, t, adminClient, srv.BaseURL+"/admin/players")
 
@@ -96,17 +84,7 @@ func TestAdminPlayersList_PaginationParam(t *testing.T) {
 	})
 
 	client := authClient(t)
-	if got := registerForRedirect(
-		ctx,
-		t,
-		client,
-		srv.BaseURL,
-		"page-admin",
-		"page-admin-pass-123",
-	); got != "/admin/quizzes" {
-		t.Fatalf("registration did not promote to admin: Location = %q", got)
-	}
-	verifyPlayerEmail(ctx, t, srv.DBURI, "page-admin")
+	registerVerifyAndMint(ctx, t, client, srv.BaseURL, srv.DBURI, "page-admin", "page-admin-pass-123")
 
 	// A wildly out-of-range page parameter must clamp to the last
 	// page (here, the only page) rather than 404 or 500. We assert

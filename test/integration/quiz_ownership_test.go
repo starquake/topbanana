@@ -134,12 +134,13 @@ func TestQuizOwnership_Integration(t *testing.T) {
 
 // registerAdminClient builds a cookie-jar HTTP client, registers the
 // supplied username through the public /register form (which promotes
-// to admin via ADMIN_EMAILS), and returns the client carrying the
-// resulting session cookie. dbURI is the test server's DB URI; the
-// helper stamps email_verified_at on the new row so follow-up admin
-// requests pass the #111 PR3 verified-email gate. Mirrors the helper
-// pattern in TestAdmin_Integration but pulled out so the cross-admin
-// test can spin up two distinct sessions cheaply.
+// to admin via ADMIN_EMAILS), stamps email_verified_at, and mints a
+// session cookie onto the jar so follow-up admin requests pass both the
+// auth middleware and the #111 PR3 verified-email gate. After the #574
+// hard gate, register no longer hands out a session, so the cookie is
+// minted directly (startServer signs with the default testSessionKey).
+// Minting also sidesteps the per-IP login cooldown that several
+// back-to-back logins would trip.
 func registerAdminClient(ctx context.Context, t *testing.T, baseURL, dbURI, username string) *http.Client {
 	t.Helper()
 	jar, err := cookiejar.New(nil)
@@ -153,25 +154,9 @@ func registerAdminClient(ctx context.Context, t *testing.T, baseURL, dbURI, user
 		},
 	}
 
-	token := fetchCSRFToken(ctx, t, client, baseURL+"/register")
-	form := url.Values{
-		"username":         {username},
-		"email":            {username + "@example.test"},
-		"password":         {"integration-pass-123"},
-		"password_confirm": {"integration-pass-123"},
-		"csrf_token":       {token},
-	}
-	req := newFormReq(ctx, t, baseURL+"/register", form)
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("register %q err = %v, want nil", username, err)
-	}
-	defer closeBody(t, resp.Body)
-	if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
-		t.Fatalf("register %q status = %d, want %d", username, got, want)
-	}
-
+	registerForPending(ctx, t, client, baseURL, username, "integration-pass-123")
 	verifyPlayerEmail(ctx, t, dbURI, username)
+	mintSessionCookie(ctx, t, client, baseURL, dbURI, username)
 
 	return client
 }
