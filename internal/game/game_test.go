@@ -288,6 +288,24 @@ func newTestQuiz(t *testing.T) *quiz.Quiz {
 	}
 }
 
+// assertBoundaryWindow pins the #548 auto-advance contract at the
+// service layer: a round-boundary item carries a non-zero
+// StartedAt/ExpiredAt window exactly one quiz-default answer duration
+// (timeLimitSeconds) long, for both phases.
+func assertBoundaryWindow(t *testing.T, item *Item, timeLimitSeconds int) {
+	t.Helper()
+	if item.StartedAt.IsZero() {
+		t.Error("item.StartedAt is zero, want a populated timestamp")
+	}
+	if item.ExpiredAt.IsZero() {
+		t.Error("item.ExpiredAt is zero, want a populated timestamp")
+	}
+	want := time.Duration(timeLimitSeconds) * time.Second
+	if got := item.ExpiredAt.Sub(item.StartedAt); got != want {
+		t.Errorf("item window ExpiredAt-StartedAt = %v, want %v (quiz default)", got, want)
+	}
+}
+
 func newTestGame(t *testing.T, qz *quiz.Quiz) *Game {
 	t.Helper()
 
@@ -1933,6 +1951,7 @@ func TestService_GetNext(t *testing.T) {
 		if got, want := item.RoundQuestions, len(testQuiz.Questions); got != want {
 			t.Errorf("item.RoundQuestions = %d, want %d", got, want)
 		}
+		assertBoundaryWindow(t, item, testQuiz.TimeLimitSeconds)
 	})
 
 	t.Run("emits the intro boundary before the round's first question", func(t *testing.T) {
@@ -1976,6 +1995,7 @@ func TestService_GetNext(t *testing.T) {
 		if got, want := item.Round.Summary, "Round one ahead"; got != want {
 			t.Errorf("item.Round.Summary = %q, want %q", got, want)
 		}
+		assertBoundaryWindow(t, item, testQuiz.TimeLimitSeconds)
 	})
 
 	t.Run("skips a round boundary the player has already seen", func(t *testing.T) {

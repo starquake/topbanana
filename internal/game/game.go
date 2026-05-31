@@ -165,6 +165,15 @@ type Item struct {
 	// being shown (#548). Zero on question items.
 	Phase RoundPhase
 
+	// StartedAt and ExpiredAt bound the auto-advance countdown for a
+	// round-boundary item (#548): the card auto-advances when the window
+	// expires (the client also keeps a Continue button to skip). The
+	// window is one quiz-default answer duration (Quiz.TimeLimitSeconds)
+	// long. Both phases carry it. Zero on question items, which carry
+	// their own window on [Question.StartedAt]/[Question.ExpiredAt].
+	StartedAt time.Time
+	ExpiredAt time.Time
+
 	// RoundScore, RoundCorrect, and RoundQuestions carry the player's
 	// own recap for the round, populated only on a results-phase
 	// round-boundary item. RoundScore is the points earned for this
@@ -1365,11 +1374,14 @@ func collectPlayerAnswers(
 func (s *Service) buildRoundBoundaryItem(
 	ctx context.Context, g *Game, qz *quiz.Quiz, playerID int64, round *quiz.Round, phase RoundPhase,
 ) (*Item, error) {
+	startedAt := time.Now()
 	item := &Item{
-		Type:  ItemTypeRoundBoundary,
-		Round: round,
-		Total: len(qz.Questions),
-		Phase: phase,
+		Type:      ItemTypeRoundBoundary,
+		Round:     round,
+		Total:     len(qz.Questions),
+		Phase:     phase,
+		StartedAt: startedAt,
+		ExpiredAt: startedAt.Add(time.Duration(qz.TimeLimitSeconds) * time.Second),
 	}
 	if phase != RoundPhaseResults {
 		return item, nil

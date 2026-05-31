@@ -455,6 +455,20 @@
                             </span>
                         </div>
 
+                        <!-- Auto-advance countdown bar (#548). Reuses the
+                             answer-window progress bar treatment from the
+                             question view: the same <progress> element,
+                             classes, and `progress-answer` drain skin, so
+                             the card visibly counts down to its automatic
+                             advance. JS drives :value via :roundProgress.
+                             The motion-reduce override on the progress
+                             classes in _tailwind.css zeroes the value
+                             transition for reduced-motion users, exactly
+                             as it does for the question countdown. -->
+                        <progress class="progress progress-answer block w-full h-[3px] bg-border rounded-full overflow-hidden mb-6 [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear"
+                                  data-testid="round-countdown"
+                                  :value="roundProgress" max="100"></progress>
+
                         <!-- Round title in the display-font scale as the
                              question text so the screen reads as part of
                              the same flow. -->
@@ -518,6 +532,14 @@
                                 Score <span class="hud-chip-value" x-text="score"></span>
                             </span>
                         </div>
+
+                        <!-- Auto-advance countdown bar (#548): same
+                             treatment as the intro card and the question
+                             view's answer-window bar. See the intro
+                             card's bar for the reduced-motion note. -->
+                        <progress class="progress progress-answer block w-full h-[3px] bg-border rounded-full overflow-hidden mb-6 [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear"
+                                  data-testid="round-countdown"
+                                  :value="roundProgress" max="100"></progress>
 
                         <!-- Recap heading reuses the round title in the
                              display-font scale so the screen reads as

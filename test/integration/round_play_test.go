@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"testing"
+	"time"
 
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
@@ -22,16 +23,18 @@ import (
 // recap fields (RoundScore/RoundCorrect/RoundQuestions) are only
 // populated on the results phase.
 type roundItemRes struct {
-	Type           string `json:"type"`
-	Phase          string `json:"phase"`
-	ID             int64  `json:"id"`
-	Title          string `json:"title"`
-	Summary        string `json:"summary"`
-	Score          int    `json:"score"`
-	RoundScore     int    `json:"roundScore"`
-	RoundCorrect   int    `json:"roundCorrect"`
-	RoundQuestions int    `json:"roundQuestions"`
-	Total          int    `json:"total"`
+	Type           string    `json:"type"`
+	Phase          string    `json:"phase"`
+	ID             int64     `json:"id"`
+	Title          string    `json:"title"`
+	Summary        string    `json:"summary"`
+	Score          int       `json:"score"`
+	RoundScore     int       `json:"roundScore"`
+	RoundCorrect   int       `json:"roundCorrect"`
+	RoundQuestions int       `json:"roundQuestions"`
+	StartedAt      time.Time `json:"startedAt"`
+	ExpiredAt      time.Time `json:"expiredAt"`
+	Total          int       `json:"total"`
 }
 
 // nextItemRes lets the play-loop test peek at the `type` discriminator
@@ -182,6 +185,7 @@ func TestRounds_PlayLoop(t *testing.T) {
 	if got, want := introItem.Total, len(qz.Questions); got != want {
 		t.Errorf("intro.Total = %d, want %d (question total stays across the boundary)", got, want)
 	}
+	assertBoundaryWindow(t, "intro", introItem, qz.TimeLimitSeconds)
 
 	// Repeated /next BEFORE acking the intro returns the SAME intro.
 	repeatIntro := readNextRound(ctx, t, client, baseURL, gameID, "intro")
@@ -225,6 +229,7 @@ func TestRounds_PlayLoop(t *testing.T) {
 	if got, want := resultsItem.Total, len(qz.Questions); got != want {
 		t.Errorf("results.Total = %d, want %d (question total stays across the boundary)", got, want)
 	}
+	assertBoundaryWindow(t, "results", resultsItem, qz.TimeLimitSeconds)
 
 	// --- POST .../seen/results acknowledges the recap ---
 	postRoundSeen(ctx, t, client, baseURL, gameID, resultsItem.ID, "results")
@@ -372,6 +377,23 @@ func readNextRound(
 	}
 
 	return r
+}
+
+// assertBoundaryWindow pins the #548 auto-advance contract: both round
+// boundary phases carry a non-zero StartedAt/ExpiredAt window exactly
+// one quiz-default answer duration (timeLimitSeconds) long.
+func assertBoundaryWindow(t *testing.T, phase string, item roundItemRes, timeLimitSeconds int) {
+	t.Helper()
+	if item.StartedAt.IsZero() {
+		t.Errorf("%s.StartedAt is zero, want a populated timestamp", phase)
+	}
+	if item.ExpiredAt.IsZero() {
+		t.Errorf("%s.ExpiredAt is zero, want a populated timestamp", phase)
+	}
+	want := time.Duration(timeLimitSeconds) * time.Second
+	if got := item.ExpiredAt.Sub(item.StartedAt); got != want {
+		t.Errorf("%s window ExpiredAt-StartedAt = %v, want %v (quiz default)", phase, got, want)
+	}
 }
 
 // createRoundPlayGame issues POST /api/games for the given quiz id and

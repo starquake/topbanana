@@ -767,15 +767,18 @@ type nextQuestionResponse struct {
 // nextRoundIntroResponse is the wire shape for the intro phase of the
 // `type=round_boundary` /next variant (#548). It is emitted before a
 // round's first question and carries the round title + summary so the
-// client can show what is coming. Round boundaries have no countdown so
-// StartedAt/ExpiredAt are dropped; Total keeps the HUD chip rendering
-// across the boundary. No score is carried at the intro.
+// client can show what is coming. StartedAt/ExpiredAt bound a countdown
+// one quiz-default answer duration long so the client auto-advances the
+// card when it expires; Total keeps the HUD chip rendering across the
+// boundary. No score is carried at the intro.
 type nextRoundIntroResponse struct {
 	Type      string    `json:"type"`
 	Phase     string    `json:"phase"`
 	ID        int64     `json:"id"`
 	Title     string    `json:"title"`
 	Summary   string    `json:"summary"`
+	StartedAt time.Time `json:"startedAt"`
+	ExpiredAt time.Time `json:"expiredAt"`
 	ServerNow time.Time `json:"serverNow"`
 	Total     int       `json:"total"`
 }
@@ -796,6 +799,8 @@ type nextRoundResultsResponse struct {
 	RoundScore     int       `json:"roundScore"`
 	RoundCorrect   int       `json:"roundCorrect"`
 	RoundQuestions int       `json:"roundQuestions"`
+	StartedAt      time.Time `json:"startedAt"`
+	ExpiredAt      time.Time `json:"expiredAt"`
 	ServerNow      time.Time `json:"serverNow"`
 	Total          int       `json:"total"`
 }
@@ -803,8 +808,9 @@ type nextRoundResultsResponse struct {
 // HandleQuestionNext returns the next item in the play sequence as a
 // tagged union (`type: "question"` | `"round_boundary"`). Total counts
 // quiz questions, not items, so a round boundary does not bump the HUD
-// position chip. StartedAt/ExpiredAt are omitted on round boundaries;
-// Score is omitted on questions.
+// position chip. Both variants carry StartedAt/ExpiredAt (the boundary
+// window drives the auto-advance countdown); Score is omitted on
+// questions.
 func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gameID, playerID, ok := gameRequest(w, r, logger)
@@ -847,10 +853,11 @@ func writeGetNextError(w http.ResponseWriter, r *http.Request, logger *slog.Logg
 
 // writeRoundBoundaryItem encodes a round-boundary-variant /next
 // response. Split out of HandleQuestionNext to keep that handler under
-// the function-length limit; the round-boundary path has no shuffle /
-// timing arithmetic so the helper is a thin field projection. The intro
-// and results phases (#548) project different fields, so each gets its
-// own response struct.
+// the function-length limit; the round-boundary path has no shuffle so
+// the helper is a thin field projection (the auto-advance window is
+// computed in the service alongside the question window). The intro and
+// results phases (#548) project different fields, so each gets its own
+// response struct.
 func writeRoundBoundaryItem(w http.ResponseWriter, r *http.Request, logger *slog.Logger, item *game.Item) {
 	var res any
 	if item.Phase == game.RoundPhaseResults {
@@ -863,6 +870,8 @@ func writeRoundBoundaryItem(w http.ResponseWriter, r *http.Request, logger *slog
 			RoundScore:     item.RoundScore,
 			RoundCorrect:   item.RoundCorrect,
 			RoundQuestions: item.RoundQuestions,
+			StartedAt:      item.StartedAt,
+			ExpiredAt:      item.ExpiredAt,
 			ServerNow:      time.Now().UTC(),
 			Total:          item.Total,
 		}
@@ -873,6 +882,8 @@ func writeRoundBoundaryItem(w http.ResponseWriter, r *http.Request, logger *slog
 			ID:        item.Round.ID,
 			Title:     item.Round.Title,
 			Summary:   item.Round.Summary,
+			StartedAt: item.StartedAt,
+			ExpiredAt: item.ExpiredAt,
 			ServerNow: time.Now().UTC(),
 			Total:     item.Total,
 		}
