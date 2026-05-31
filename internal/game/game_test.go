@@ -31,8 +31,8 @@ type stubStore struct {
 	getGameByPlayerAndQuiz             func(ctx context.Context, playerID, quizID int64) (*Game, error)
 	deleteGamesForPlayerOnQuiz         func(ctx context.Context, playerID, quizID int64) error
 	listQuizIDsForPlayer               func(ctx context.Context, playerID int64) ([]int64, error)
-	markGroupSeen                      func(ctx context.Context, gameID string, roundID int64) error
-	listSeenRoundIDsByGame             func(ctx context.Context, gameID string) ([]int64, error)
+	markRoundSeen                      func(ctx context.Context, gameID string, roundID int64, phase RoundPhase) error
+	listSeenRoundPhasesByGame          func(ctx context.Context, gameID string) ([]SeenRoundPhase, error)
 }
 
 func (stubStore) Ping(_ context.Context) error { return nil }
@@ -129,24 +129,28 @@ func (s stubStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]
 	return s.listQuizIDsForPlayer(ctx, playerID)
 }
 
-func (s stubStore) MarkRoundSeen(ctx context.Context, gameID string, roundID int64) error {
-	if s.markGroupSeen == nil {
+func (s stubStore) MarkRoundSeen(
+	ctx context.Context, gameID string, roundID int64, phase RoundPhase,
+) error {
+	if s.markRoundSeen == nil {
 		return errStub
 	}
 
-	return s.markGroupSeen(ctx, gameID, roundID)
+	return s.markRoundSeen(ctx, gameID, roundID, phase)
 }
 
-// ListSeenRoundIDsByGame defaults to "no seen rounds" so tests that
+// ListSeenRoundPhasesByGame defaults to "no seen phases" so tests that
 // don't care about round boundaries don't have to wire a stub. The
 // round-walking iterator in [Service.GetNext] calls this on every
 // request.
-func (s stubStore) ListSeenRoundIDsByGame(ctx context.Context, gameID string) ([]int64, error) {
-	if s.listSeenRoundIDsByGame == nil {
+func (s stubStore) ListSeenRoundPhasesByGame(
+	ctx context.Context, gameID string,
+) ([]SeenRoundPhase, error) {
+	if s.listSeenRoundPhasesByGame == nil {
 		return nil, nil
 	}
 
-	return s.listSeenRoundIDsByGame(ctx, gameID)
+	return s.listSeenRoundPhasesByGame(ctx, gameID)
 }
 
 // stubQuizStore satisfies quiz.Store for service-level tests. Only GetQuiz
@@ -1869,7 +1873,7 @@ func TestService_GetNext(t *testing.T) {
 		}
 	})
 
-	t.Run("emits the round boundary after every question in the round is issued", func(t *testing.T) {
+	t.Run("emits the results boundary after every question in the round is issued", func(t *testing.T) {
 		t.Parallel()
 
 		ctx := t.Context()
@@ -1896,14 +1900,17 @@ func TestService_GetNext(t *testing.T) {
 			t.Fatalf("CreateParticipant err = %v, want nil", err)
 		}
 
-		// Issue every question so the only remaining item is the single
-		// round's boundary round summary.
+		// Issue every question and mark the intro phase seen so the only
+		// remaining item is the round's results boundary.
 		for _, q := range testQuiz.Questions {
 			if err := gameStore.CreateQuestion(
 				ctx, &Question{GameID: testGame.ID, QuestionID: q.ID},
 			); err != nil {
 				t.Fatalf("CreateQuestion err = %v, want nil", err)
 			}
+		}
+		if err := gameStore.MarkRoundSeen(ctx, testGame.ID, roundID, RoundPhaseIntro); err != nil {
+			t.Fatalf("MarkRoundSeen (intro) err = %v, want nil", err)
 		}
 
 		svc := NewService(gameStore, quizStore, slog.Default())
@@ -1914,11 +1921,60 @@ func TestService_GetNext(t *testing.T) {
 		if got, want := item.Type, ItemTypeRoundBoundary; got != want {
 			t.Errorf("item.Type = %q, want %q", got, want)
 		}
+		if got, want := item.Phase, RoundPhaseResults; got != want {
+			t.Errorf("item.Phase = %q, want %q", got, want)
+		}
 		if got, want := item.Round.ID, roundID; got != want {
 			t.Errorf("item.Round.ID = %d, want %d", got, want)
 		}
 		if got, want := item.Total, len(testQuiz.Questions); got != want {
 			t.Errorf("item.Total = %d, want %d", got, want)
+		}
+		if got, want := item.RoundQuestions, len(testQuiz.Questions); got != want {
+			t.Errorf("item.RoundQuestions = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("emits the intro boundary before the round's first question", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+		roundID := firstRoundID(t, testQuiz, quizStore)
+		giveRoundSummary(t, quizStore, roundID, "Round one ahead")
+
+		testGame := newTestGame(t, testQuiz)
+		if err := gameStore.CreateGame(ctx, testGame); err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		if err := gameStore.CreateParticipant(
+			ctx,
+			&Participant{GameID: testGame.ID, PlayerID: 1, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("CreateParticipant err = %v, want nil", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+		item, err := svc.GetNext(ctx, testGame.ID, 1)
+		if err != nil {
+			t.Fatalf("GetNext err = %v, want nil", err)
+		}
+		if got, want := item.Type, ItemTypeRoundBoundary; got != want {
+			t.Errorf("item.Type = %q, want %q", got, want)
+		}
+		if got, want := item.Phase, RoundPhaseIntro; got != want {
+			t.Errorf("item.Phase = %q, want %q", got, want)
+		}
+		if got, want := item.Round.Summary, "Round one ahead"; got != want {
+			t.Errorf("item.Round.Summary = %q, want %q", got, want)
 		}
 	})
 
@@ -1955,14 +2011,17 @@ func TestService_GetNext(t *testing.T) {
 				t.Fatalf("CreateQuestion err = %v, want nil", err)
 			}
 		}
-		if err := gameStore.MarkRoundSeen(ctx, testGame.ID, roundID); err != nil {
-			t.Fatalf("MarkRoundSeen err = %v, want nil", err)
+		if err := gameStore.MarkRoundSeen(ctx, testGame.ID, roundID, RoundPhaseIntro); err != nil {
+			t.Fatalf("MarkRoundSeen (intro) err = %v, want nil", err)
+		}
+		if err := gameStore.MarkRoundSeen(ctx, testGame.ID, roundID, RoundPhaseResults); err != nil {
+			t.Fatalf("MarkRoundSeen (results) err = %v, want nil", err)
 		}
 
 		svc := NewService(gameStore, quizStore, slog.Default())
 		_, err := svc.GetNext(ctx, testGame.ID, 1)
 		if got, want := err, ErrNoMoreQuestions; !errors.Is(got, want) {
-			t.Errorf("GetNext err = %v, want %v (all questions issued, boundary seen)", got, want)
+			t.Errorf("GetNext err = %v, want %v (all questions issued, both phases seen)", got, want)
 		}
 	})
 
@@ -1975,10 +2034,12 @@ func TestService_GetNext(t *testing.T) {
 		quizStore := store.NewQuizStore(db, slog.Default())
 		gameStore := store.NewGameStore(db, slog.Default())
 
-		// Two rounds: round 1 holds Q1, round 2 holds Q2. The walk
-		// should be Q1, boundary(round1), Q2, boundary(round2). Each
-		// question is answered before advancing so the resume path does
-		// not hand the same in-flight question back.
+		// Two rounds: round 1 holds Q1, round 2 holds Q2, each with a
+		// summary. The walk should be intro(r1), Q1, results(r1),
+		// intro(r2), Q2, results(r2). Each question is answered before
+		// advancing so the resume path does not hand the same in-flight
+		// question back; each boundary phase is acked so it is not
+		// re-emitted.
 		testQuiz := &quiz.Quiz{
 			Title:             "Two rounds",
 			Slug:              "two-rounds",
@@ -2024,64 +2085,49 @@ func TestService_GetNext(t *testing.T) {
 			}
 		}
 
-		// Q1
-		item, err := svc.GetNext(ctx, testGame.ID, 1)
-		if err != nil {
-			t.Fatalf("GetNext (Q1) err = %v, want nil", err)
+		nextBoundary := func(label string, roundID int64, phase RoundPhase) {
+			t.Helper()
+			item, err := svc.GetNext(ctx, testGame.ID, 1)
+			if err != nil {
+				t.Fatalf("GetNext (%s) err = %v, want nil", label, err)
+			}
+			if got, want := item.Type, ItemTypeRoundBoundary; got != want {
+				t.Fatalf("%s item.Type = %q, want %q", label, got, want)
+			}
+			if got, want := item.Phase, phase; got != want {
+				t.Fatalf("%s item.Phase = %q, want %q", label, got, want)
+			}
+			if got, want := item.Round.ID, roundID; got != want {
+				t.Errorf("%s boundary round = %d, want %d", label, got, want)
+			}
+			if err = svc.MarkRoundSeen(ctx, testGame.ID, 1, roundID, phase); err != nil {
+				t.Fatalf("MarkRoundSeen (%s) err = %v, want nil", label, err)
+			}
 		}
-		if got, want := item.Type, ItemTypeQuestion; got != want {
-			t.Fatalf("first item.Type = %q, want %q", got, want)
+		nextQuestion := func(label string, wantQuestionID int64) {
+			t.Helper()
+			item, err := svc.GetNext(ctx, testGame.ID, 1)
+			if err != nil {
+				t.Fatalf("GetNext (%s) err = %v, want nil", label, err)
+			}
+			if got, want := item.Type, ItemTypeQuestion; got != want {
+				t.Fatalf("%s item.Type = %q, want %q", label, got, want)
+			}
+			if got, want := item.Question.QuizQuestion.ID, wantQuestionID; got != want {
+				t.Errorf("%s question = %d, want %d", label, got, want)
+			}
+			answer(item)
 		}
-		if got, want := item.Question.QuizQuestion.ID, testQuiz.Questions[0].ID; got != want {
-			t.Errorf("first question = %d, want %d", got, want)
-		}
-		answer(item)
 
-		// boundary(round1)
-		item, err = svc.GetNext(ctx, testGame.ID, 1)
-		if err != nil {
-			t.Fatalf("GetNext (boundary 1) err = %v, want nil", err)
-		}
-		if got, want := item.Type, ItemTypeRoundBoundary; got != want {
-			t.Fatalf("second item.Type = %q, want %q", got, want)
-		}
-		if got, want := item.Round.ID, round1; got != want {
-			t.Errorf("second boundary round = %d, want %d", got, want)
-		}
-		if err = svc.MarkRoundSeen(ctx, testGame.ID, 1, round1); err != nil {
-			t.Fatalf("MarkRoundSeen (round1) err = %v, want nil", err)
-		}
-
-		// Q2
-		item, err = svc.GetNext(ctx, testGame.ID, 1)
-		if err != nil {
-			t.Fatalf("GetNext (Q2) err = %v, want nil", err)
-		}
-		if got, want := item.Type, ItemTypeQuestion; got != want {
-			t.Fatalf("third item.Type = %q, want %q", got, want)
-		}
-		if got, want := item.Question.QuizQuestion.ID, testQuiz.Questions[1].ID; got != want {
-			t.Errorf("third question = %d, want %d", got, want)
-		}
-		answer(item)
-
-		// boundary(round2)
-		item, err = svc.GetNext(ctx, testGame.ID, 1)
-		if err != nil {
-			t.Fatalf("GetNext (boundary 2) err = %v, want nil", err)
-		}
-		if got, want := item.Type, ItemTypeRoundBoundary; got != want {
-			t.Fatalf("fourth item.Type = %q, want %q", got, want)
-		}
-		if got, want := item.Round.ID, round2.ID; got != want {
-			t.Errorf("fourth boundary round = %d, want %d", got, want)
-		}
-		if err = svc.MarkRoundSeen(ctx, testGame.ID, 1, round2.ID); err != nil {
-			t.Fatalf("MarkRoundSeen (round2) err = %v, want nil", err)
-		}
+		nextBoundary("intro 1", round1, RoundPhaseIntro)
+		nextQuestion("Q1", testQuiz.Questions[0].ID)
+		nextBoundary("results 1", round1, RoundPhaseResults)
+		nextBoundary("intro 2", round2.ID, RoundPhaseIntro)
+		nextQuestion("Q2", testQuiz.Questions[1].ID)
+		nextBoundary("results 2", round2.ID, RoundPhaseResults)
 
 		// exhausted
-		_, err = svc.GetNext(ctx, testGame.ID, 1)
+		_, err := svc.GetNext(ctx, testGame.ID, 1)
 		if got, want := err, ErrNoMoreQuestions; !errors.Is(got, want) {
 			t.Errorf("final GetNext err = %v, want %v", got, want)
 		}
@@ -2131,6 +2177,104 @@ func TestService_GetNext(t *testing.T) {
 	})
 }
 
+func TestNextRoundSlot(t *testing.T) {
+	t.Parallel()
+
+	// Two rounds: round 1 has a summary (so it shows both boundary
+	// phases), round 2 has none (so it shows neither).
+	rounds := []*quiz.Round{
+		{ID: 10, Position: 1, Title: "First", Summary: "recap one"},
+		{ID: 20, Position: 2, Title: "Second", Summary: ""},
+	}
+	questions := []*quiz.Question{
+		{ID: 1, RoundID: 10},
+		{ID: 2, RoundID: 10},
+		{ID: 3, RoundID: 20},
+	}
+
+	t.Run("intro before the round's first question", func(t *testing.T) {
+		t.Parallel()
+
+		slot := ExportNextRoundSlot(rounds, questions, map[int64]bool{}, nil)
+		if got, want := slot.Kind, ExportSlotKindRoundBoundary; got != want {
+			t.Fatalf("Kind = %q, want %q", got, want)
+		}
+		if got, want := slot.Phase, RoundPhaseIntro; got != want {
+			t.Errorf("Phase = %q, want %q", got, want)
+		}
+		if got, want := slot.Round.ID, int64(10); got != want {
+			t.Errorf("Round.ID = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("intro suppressed once seen yields the first question", func(t *testing.T) {
+		t.Parallel()
+
+		seen := []SeenRoundPhase{{RoundID: 10, Phase: RoundPhaseIntro}}
+		slot := ExportNextRoundSlot(rounds, questions, map[int64]bool{}, seen)
+		if got, want := slot.Kind, ExportSlotKindQuestion; got != want {
+			t.Fatalf("Kind = %q, want %q", got, want)
+		}
+		if got, want := slot.Question.ID, int64(1); got != want {
+			t.Errorf("Question.ID = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("results after the round's questions are asked", func(t *testing.T) {
+		t.Parallel()
+
+		asked := map[int64]bool{1: true, 2: true}
+		seen := []SeenRoundPhase{{RoundID: 10, Phase: RoundPhaseIntro}}
+		slot := ExportNextRoundSlot(rounds, questions, asked, seen)
+		if got, want := slot.Kind, ExportSlotKindRoundBoundary; got != want {
+			t.Fatalf("Kind = %q, want %q", got, want)
+		}
+		if got, want := slot.Phase, RoundPhaseResults; got != want {
+			t.Errorf("Phase = %q, want %q", got, want)
+		}
+		if got, want := slot.Round.ID, int64(10); got != want {
+			t.Errorf("Round.ID = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("results suppressed once seen advances to the next round", func(t *testing.T) {
+		t.Parallel()
+
+		asked := map[int64]bool{1: true, 2: true}
+		seen := []SeenRoundPhase{
+			{RoundID: 10, Phase: RoundPhaseIntro},
+			{RoundID: 10, Phase: RoundPhaseResults},
+		}
+		// Round 2 has no summary, so its only slot is its question.
+		slot := ExportNextRoundSlot(rounds, questions, asked, seen)
+		if got, want := slot.Kind, ExportSlotKindQuestion; got != want {
+			t.Fatalf("Kind = %q, want %q", got, want)
+		}
+		if got, want := slot.Question.ID, int64(3); got != want {
+			t.Errorf("Question.ID = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("round without a summary emits neither boundary", func(t *testing.T) {
+		t.Parallel()
+
+		// Only round 2 (no summary) and its question; once its question
+		// is asked the walk ends with no boundary.
+		soloRounds := []*quiz.Round{{ID: 20, Position: 1, Title: "Solo", Summary: ""}}
+		soloQuestions := []*quiz.Question{{ID: 3, RoundID: 20}}
+
+		before := ExportNextRoundSlot(soloRounds, soloQuestions, map[int64]bool{}, nil)
+		if got, want := before.Kind, ExportSlotKindQuestion; got != want {
+			t.Fatalf("before Kind = %q, want %q", got, want)
+		}
+
+		after := ExportNextRoundSlot(soloRounds, soloQuestions, map[int64]bool{3: true}, nil)
+		if got, want := after.Kind, ""; got != want {
+			t.Errorf("after Kind = %q, want %q (no boundary)", got, want)
+		}
+	})
+}
+
 func TestService_MarkRoundSeen(t *testing.T) {
 	t.Parallel()
 
@@ -2161,11 +2305,21 @@ func TestService_MarkRoundSeen(t *testing.T) {
 		}
 
 		svc := NewService(gameStore, quizStore, slog.Default())
-		if err := svc.MarkRoundSeen(ctx, testGame.ID, 1, roundID); err != nil {
+		if err := svc.MarkRoundSeen(ctx, testGame.ID, 1, roundID, RoundPhaseIntro); err != nil {
 			t.Errorf("first MarkRoundSeen err = %v, want nil", err)
 		}
-		if err := svc.MarkRoundSeen(ctx, testGame.ID, 1, roundID); err != nil {
+		if err := svc.MarkRoundSeen(ctx, testGame.ID, 1, roundID, RoundPhaseIntro); err != nil {
 			t.Errorf("second MarkRoundSeen err = %v, want nil (idempotent)", err)
+		}
+	})
+
+	t.Run("unknown phase returns ErrInvalidRoundPhase", func(t *testing.T) {
+		t.Parallel()
+
+		svc := NewService(stubStore{}, stubQuizStore{}, slog.Default())
+		err := svc.MarkRoundSeen(t.Context(), "game-1", 1, 1, RoundPhase("bogus"))
+		if got, want := err, ErrInvalidRoundPhase; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
 		}
 	})
 
@@ -2196,7 +2350,7 @@ func TestService_MarkRoundSeen(t *testing.T) {
 		}
 
 		svc := NewService(gameStore, quizStore, slog.Default())
-		err := svc.MarkRoundSeen(ctx, testGame.ID, 999, roundID)
+		err := svc.MarkRoundSeen(ctx, testGame.ID, 999, roundID, RoundPhaseIntro)
 		if got, want := err, ErrGameNotFound; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
@@ -2234,7 +2388,7 @@ func TestService_MarkRoundSeen(t *testing.T) {
 		}
 
 		svc := NewService(gameStore, quizStore, slog.Default())
-		err := svc.MarkRoundSeen(ctx, testGame.ID, 1, groupOnB)
+		err := svc.MarkRoundSeen(ctx, testGame.ID, 1, groupOnB, RoundPhaseIntro)
 		if got, want := err, quiz.ErrRoundNotFound; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
 		}

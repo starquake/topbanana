@@ -956,21 +956,22 @@ export class GameApp {
         await this.nextQuestion();
     }
 
-    // continueRound is the Continue button's click handler on the
-    // round-summary card (#444). POSTs the seen ack, clears the round,
-    // then calls nextQuestion() to load whatever comes next (another
-    // round boundary, a question, or 404 → finished).
+    // continueRound is the Continue button's click handler on both the
+    // round intro and round recap cards (#548). POSTs the seen ack for
+    // the current phase ('intro' or 'results'), clears the round, then
+    // calls nextQuestion() to load whatever comes next (the round's
+    // first question, another round boundary, or 404 → finished).
     //
-    // On a network / 5xx failure the round-summary card stays visible
-    // with a retry banner — silently losing the click would strand the
-    // player on a screen with no affordance to recover. The store-side
-    // ack is idempotent so a retry after a transient failure is safe.
+    // On a network / 5xx failure the round card stays visible with a
+    // retry banner — silently losing the click would strand the player
+    // on a screen with no affordance to recover. The store-side ack is
+    // idempotent so a retry after a transient failure is safe.
     async continueRound() {
         if (!this.roundItem || this.continuingRound) return;
         this.continuingRound = true;
         this.roundContinueError = false;
         try {
-            await gameService.markRoundSeen(this.gameId, this.roundItem.id);
+            await gameService.markRoundSeen(this.gameId, this.roundItem.id, this.roundItem.phase);
         } catch (err) {
             console.error('continueRound:', err);
             this.roundContinueError = true;

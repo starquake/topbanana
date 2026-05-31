@@ -406,34 +406,47 @@ func (s *GameStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([
 	return ids, nil
 }
 
-// MarkRoundSeen records that the player passed through the round
-// summary at the given round boundary in the given game (#444). The
-// underlying INSERT uses ON CONFLICT DO NOTHING so a duplicate call is a
-// no-op success, which lets POST /api/games/{gameID}/rounds/{roundID}/seen
+// MarkRoundSeen records that the player acknowledged the given phase of
+// the round boundary in the given game (#548). The underlying INSERT
+// uses ON CONFLICT DO NOTHING so a duplicate call is a no-op success,
+// which lets POST /api/games/{gameID}/rounds/{roundID}/seen/{phase}
 // serve idempotent 204s without the handler having to special-case the
 // retry path.
-func (s *GameStore) MarkRoundSeen(ctx context.Context, gameID string, roundID int64) error {
+func (s *GameStore) MarkRoundSeen(
+	ctx context.Context, gameID string, roundID int64, phase game.RoundPhase,
+) error {
 	if err := s.q.MarkRoundSeen(ctx, db.MarkRoundSeenParams{
 		GameID:  gameID,
 		RoundID: roundID,
+		Phase:   string(phase),
 	}); err != nil {
-		return fmt.Errorf("failed to mark round %d seen on game %q: %w", roundID, gameID, err)
+		return fmt.Errorf("failed to mark round %d phase %q seen on game %q: %w", roundID, phase, gameID, err)
 	}
 
 	return nil
 }
 
-// ListSeenRoundIDsByGame returns the round IDs whose round summary the
-// player has acknowledged in the given game. Used by the round-walking
-// iterator in [game.Service.GetNext] to skip past round boundaries the
-// player already dismissed (#444).
-func (s *GameStore) ListSeenRoundIDsByGame(ctx context.Context, gameID string) ([]int64, error) {
-	ids, err := s.q.ListSeenRoundIDsByGame(ctx, gameID)
+// ListSeenRoundPhasesByGame returns the (round, phase) pairs whose round
+// boundary the player has acknowledged in the given game. Used by the
+// round-walking iterator in [game.Service.GetNext] to skip past round
+// boundary phases the player already dismissed (#548).
+func (s *GameStore) ListSeenRoundPhasesByGame(
+	ctx context.Context, gameID string,
+) ([]game.SeenRoundPhase, error) {
+	rows, err := s.q.ListSeenRoundPhasesByGame(ctx, gameID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list seen round IDs for game %q: %w", gameID, err)
+		return nil, fmt.Errorf("failed to list seen round phases for game %q: %w", gameID, err)
 	}
 
-	return ids, nil
+	phases := make([]game.SeenRoundPhase, len(rows))
+	for i, row := range rows {
+		phases[i] = game.SeenRoundPhase{
+			RoundID: row.RoundID,
+			Phase:   game.RoundPhase(row.Phase),
+		}
+	}
+
+	return phases, nil
 }
 
 // ReattributeGames moves game_answers + game_participants from

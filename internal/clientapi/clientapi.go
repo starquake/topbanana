@@ -764,20 +764,40 @@ type nextQuestionResponse struct {
 	Total     int                  `json:"total"`
 }
 
-// nextRoundBoundaryResponse is the wire shape for the
-// `type=round_boundary` /next variant. Round boundaries have no
-// countdown so StartedAt/ExpiredAt are dropped entirely; Score carries
-// the player's running total for the round-summary screen, Total keeps
-// the HUD chip rendering across the boundary (#444). Title is the
-// round's name; Summary is the authored round summary.
-type nextRoundBoundaryResponse struct {
+// nextRoundIntroResponse is the wire shape for the intro phase of the
+// `type=round_boundary` /next variant (#548). It is emitted before a
+// round's first question and carries the round title + summary so the
+// client can show what is coming. Round boundaries have no countdown so
+// StartedAt/ExpiredAt are dropped; Total keeps the HUD chip rendering
+// across the boundary. No score is carried at the intro.
+type nextRoundIntroResponse struct {
 	Type      string    `json:"type"`
+	Phase     string    `json:"phase"`
 	ID        int64     `json:"id"`
 	Title     string    `json:"title"`
 	Summary   string    `json:"summary"`
-	Score     int       `json:"score"`
 	ServerNow time.Time `json:"serverNow"`
 	Total     int       `json:"total"`
+}
+
+// nextRoundResultsResponse is the wire shape for the results phase of
+// the `type=round_boundary` /next variant (#548). It is emitted after a
+// round's questions and carries the player's own recap for the round:
+// Score is the running game total, RoundScore the points earned for
+// this round, and RoundCorrect of RoundQuestions the questions answered
+// correctly in this round. There is deliberately no cross-player
+// leaderboard here - the recap is self-referential only.
+type nextRoundResultsResponse struct {
+	Type           string    `json:"type"`
+	Phase          string    `json:"phase"`
+	ID             int64     `json:"id"`
+	Title          string    `json:"title"`
+	Score          int       `json:"score"`
+	RoundScore     int       `json:"roundScore"`
+	RoundCorrect   int       `json:"roundCorrect"`
+	RoundQuestions int       `json:"roundQuestions"`
+	ServerNow      time.Time `json:"serverNow"`
+	Total          int       `json:"total"`
 }
 
 // HandleQuestionNext returns the next item in the play sequence as a
@@ -828,16 +848,34 @@ func writeGetNextError(w http.ResponseWriter, r *http.Request, logger *slog.Logg
 // writeRoundBoundaryItem encodes a round-boundary-variant /next
 // response. Split out of HandleQuestionNext to keep that handler under
 // the function-length limit; the round-boundary path has no shuffle /
-// timing arithmetic so the helper is a thin field projection.
+// timing arithmetic so the helper is a thin field projection. The intro
+// and results phases (#548) project different fields, so each gets its
+// own response struct.
 func writeRoundBoundaryItem(w http.ResponseWriter, r *http.Request, logger *slog.Logger, item *game.Item) {
-	res := nextRoundBoundaryResponse{
-		Type:      string(game.ItemTypeRoundBoundary),
-		ID:        item.Round.ID,
-		Title:     item.Round.Title,
-		Summary:   item.Round.Summary,
-		Score:     item.Score,
-		ServerNow: time.Now().UTC(),
-		Total:     item.Total,
+	var res any
+	if item.Phase == game.RoundPhaseResults {
+		res = nextRoundResultsResponse{
+			Type:           string(game.ItemTypeRoundBoundary),
+			Phase:          string(game.RoundPhaseResults),
+			ID:             item.Round.ID,
+			Title:          item.Round.Title,
+			Score:          item.Score,
+			RoundScore:     item.RoundScore,
+			RoundCorrect:   item.RoundCorrect,
+			RoundQuestions: item.RoundQuestions,
+			ServerNow:      time.Now().UTC(),
+			Total:          item.Total,
+		}
+	} else {
+		res = nextRoundIntroResponse{
+			Type:      string(game.ItemTypeRoundBoundary),
+			Phase:     string(game.RoundPhaseIntro),
+			ID:        item.Round.ID,
+			Title:     item.Round.Title,
+			Summary:   item.Round.Summary,
+			ServerNow: time.Now().UTC(),
+			Total:     item.Total,
+		}
 	}
 	if err := handlers.EncodeJSON(w, http.StatusOK, res); err != nil {
 		logger.ErrorContext(r.Context(), "error encoding round boundary item", slog.Any("err", err))
@@ -878,10 +916,12 @@ func writeQuestionItem(
 	}
 }
 
-// HandleRoundSeen records a round-summary acknowledgement at a round
-// boundary. Idempotent: second call returns 204 because the store
-// INSERTs ON CONFLICT DO NOTHING. Game-not-found, not-a-participant,
-// and round-not-in-quiz all return 404 to keep ids opaque to outsiders.
+// HandleRoundSeen records acknowledgement of one round boundary phase
+// (intro or results) carried in the {phase} path value (#548).
+// Idempotent: second call returns 204 because the store INSERTs ON
+// CONFLICT DO NOTHING. Game-not-found, not-a-participant, and
+// round-not-in-quiz all return 404 to keep ids opaque to outsiders; an
+// unknown phase returns 400.
 func HandleRoundSeen(logger *slog.Logger, service *game.Service) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gameID, playerID, ok := gameRequest(w, r, logger)
@@ -894,8 +934,12 @@ func HandleRoundSeen(logger *slog.Logger, service *game.Service) http.Handler {
 			return
 		}
 
-		if err := service.MarkRoundSeen(r.Context(), gameID, playerID, roundID); err != nil {
+		phase := game.RoundPhase(r.PathValue("phase"))
+
+		if err := service.MarkRoundSeen(r.Context(), gameID, playerID, roundID, phase); err != nil {
 			switch {
+			case errors.Is(err, game.ErrInvalidRoundPhase):
+				http.Error(w, err.Error(), http.StatusBadRequest)
 			case errors.Is(err, game.ErrGameNotFound), errors.Is(err, quiz.ErrRoundNotFound):
 				http.NotFound(w, r)
 			default:

@@ -430,18 +430,20 @@
                         </div>
                     </div>
                 </template>
-                <!-- Round-summary card (#444). Renders when /next returns
-                     type=round_boundary and stays put until the player clicks
-                     Continue, which POSTs the seen ack and fetches the
-                     next item. Same flex-column shell as the question
-                     view so the layout doesn't jump on the question →
-                     round → question transition. The HUD chip uses the
-                     prior question's position (the server doesn't bump
-                     position across a round boundary); the Q chip hides on a
-                     position=0 boundary that fires before Q1. -->
-                <template x-if="roundItem">
+                <!-- Round intro card (#548). Renders when /next returns
+                     type=round_boundary with phase=intro, BEFORE the
+                     round's first question. Shows the round title and
+                     optional summary; Continue acks the intro phase and
+                     fetches the round's first question. Same flex-column
+                     shell as the question and recap views so the layout
+                     doesn't jump across the round → question → round
+                     transitions. The HUD chip uses the prior question's
+                     position (the server doesn't bump position across a
+                     round boundary); the Q chip hides on a position=0
+                     boundary that fires before Q1. -->
+                <template x-if="roundItem && roundItem.phase === 'intro'">
                     <div class="flex flex-col min-h-[calc(100svh-5rem)] sm:min-h-[calc(100svh-8rem)]"
-                         data-testid="round-card">
+                         data-testid="round-intro-card">
                         <div class="flex justify-end gap-2 mb-4">
                             <template x-if="lastQuestionPosition > 0">
                                 <span class="hud-chip">
@@ -465,23 +467,87 @@
 
                         <!-- Round summary: optional copy beneath the title.
                              Skipped entirely when empty (admin didn't bother)
-                             — the Continue button then stands alone with the
-                             running score above. -->
+                             — the Continue button then stands alone. -->
                         <template x-if="roundItem.summary">
                             <p class="mb-6 lg:mb-10 font-display leading-snug text-text text-center
                                       text-[clamp(1rem,3vw,1.5rem)]
                                       lg:text-[clamp(1.25rem,2.5vw,2rem)]"
+                               data-testid="round-summary"
                                x-text="roundItem.summary"></p>
                         </template>
 
-                        <!-- Foreground the running score so the player
-                             sees their standing during the pause; the
-                             HUD chip above carries the same number but
-                             at a smaller scale. -->
-                        <p class="mb-8 text-center font-display font-semibold text-accent
+                        <!-- Retry banner mirrors the answer-submit one
+                             (#179): a transient POST failure leaves the
+                             round card visible so the player can click
+                             Continue again. -->
+                        <div x-show="roundContinueError"
+                             role="alert"
+                             class="feedback-banner feedback-danger mb-3 mt-auto">
+                            Couldn't continue — please try again.
+                        </div>
+
+                        <button type="button"
+                                class="btn-primary"
+                                :class="{ 'mt-auto': !roundContinueError }"
+                                :disabled="continuingRound"
+                                data-testid="round-continue"
+                                @click="continueRound()">
+                            <span x-show="!continuingRound">Continue</span>
+                            <span x-show="continuingRound">Loading...</span>
+                        </button>
+                    </div>
+                </template>
+
+                <!-- Round recap card (#548). Renders when /next returns
+                     type=round_boundary with phase=results, AFTER the
+                     round's questions. Shows the round result (points
+                     and correct/total for this round) plus the running
+                     game total; Continue acks the results phase and
+                     fetches the next item. Same flex-column shell as the
+                     intro and question views. -->
+                <template x-if="roundItem && roundItem.phase === 'results'">
+                    <div class="flex flex-col min-h-[calc(100svh-5rem)] sm:min-h-[calc(100svh-8rem)]"
+                         data-testid="round-recap-card">
+                        <div class="flex justify-end gap-2 mb-4">
+                            <template x-if="lastQuestionPosition > 0">
+                                <span class="hud-chip">
+                                    Q <span class="hud-chip-value" x-text="lastQuestionPosition"></span>/<span class="hud-chip-value" x-text="roundItem.total"></span>
+                                </span>
+                            </template>
+                            <span class="hud-chip">
+                                Score <span class="hud-chip-value" x-text="score"></span>
+                            </span>
+                        </div>
+
+                        <!-- Recap heading reuses the round title in the
+                             display-font scale so the screen reads as
+                             part of the same flow as the intro card. -->
+                        <h2 class="mb-4 font-display font-bold leading-[1.1] tracking-tight text-accent text-center
+                                   text-[clamp(1.4rem,4.5vw,2.4rem)]
+                                   lg:text-[clamp(2.25rem,4vw,4rem)]
+                                   2xl:text-[clamp(3rem,3.5vw,5.5rem)]"
+                            data-testid="round-title"
+                            x-text="roundItem.title"></h2>
+
+                        <!-- Round result: points earned and correct/total
+                             for THIS round. -->
+                        <p class="mb-2 text-center font-display font-semibold text-accent
                                   text-[clamp(1.6rem,4vw,2.6rem)]"
+                           data-testid="round-recap-score">
+                            You scored <span x-text="roundItem.roundScore"></span> this round
+                        </p>
+                        <p class="mb-8 font-display leading-snug text-text text-center
+                                  text-[clamp(1rem,3vw,1.5rem)]
+                                  lg:text-[clamp(1.25rem,2.5vw,2rem)]"
+                           data-testid="round-recap-correct">
+                            <span x-text="roundItem.roundCorrect"></span> of <span x-text="roundItem.roundQuestions"></span> correct
+                        </p>
+
+                        <!-- Running game total beneath the round result. -->
+                        <p class="mb-8 text-center font-display font-semibold text-text
+                                  text-[clamp(1.2rem,3vw,1.8rem)]"
                            data-testid="round-score">
-                            Your score: <span x-text="score"></span>
+                            Your score: <span x-text="roundItem.score"></span>
                         </p>
 
                         <!-- Retry banner mirrors the answer-submit one
