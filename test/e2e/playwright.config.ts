@@ -112,7 +112,7 @@ const workerServer = (workerIndex: number) => {
       APP_ENV: 'development',
       HOST: '127.0.0.1',
       PORT: String(port),
-      DB_URI: `file:${dbPath}?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)`,
+      DB_URI: `file:${dbPath}?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate`,
       SESSION_KEY: 'e2e-test-session-key-do-not-use-in-prod-1234567890abcdef',
       REGISTRATION_ENABLED: 'true',
       // Shrink the per-question reveal beat (#247, default 3s) so the

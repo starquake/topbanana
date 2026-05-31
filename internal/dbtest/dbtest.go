@@ -39,7 +39,7 @@ func SetupTestDB(t *testing.T) (string, func()) {
 	}
 
 	dsn := fmt.Sprintf(
-		"file:%s?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)",
+		"file:%s?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate",
 		tmpDBPath,
 	)
 
@@ -66,7 +66,7 @@ func OpenUnmigrated(t *testing.T) *sql.DB {
 
 	db, err := sql.Open(
 		"sqlite",
-		":memory:?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)",
+		":memory:?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate",
 	)
 	if err != nil {
 		t.Fatalf("error opening SQLite database: %v", err)

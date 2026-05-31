@@ -85,7 +85,7 @@ const (
 	// DBDriverDefault is the default database driver. Currently, only sqlite is supported.
 	DBDriverDefault = "sqlite"
 	// DBURIDefault is the default database URI. Default is topbanana.sqlite in the current directory.
-	DBURIDefault = "file:topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)"
+	DBURIDefault = "file:topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate"
 	// DBMaxOpenConnsDefault is the default maximum number of open database connections.
 	DBMaxOpenConnsDefault = 10
 	// DBMaxIdleConnsDefault is the default maximum number of idle database connections.

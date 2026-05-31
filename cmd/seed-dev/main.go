@@ -32,7 +32,7 @@ import (
 // defaultDBURI mirrors config.DBURIDefault. Duplicated here so the
 // seeder can run without depending on the full config package's
 // production-vs-dev gates.
-const defaultDBURI = "file:topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)"
+const defaultDBURI = "file:topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate"
 
 // seededAdminID matches the ID set by migration
 // 20260111110308_add_admin_player.sql. The seeder attributes every
