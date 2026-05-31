@@ -83,23 +83,35 @@ func (*stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Opt
 	return nil, errors.ErrUnsupported
 }
 
-func (*stubQuizStore) ListBreaksByQuiz(_ context.Context, _ int64) ([]*quiz.Break, error) {
+func (*stubQuizStore) ListRoundsByQuiz(_ context.Context, _ int64) ([]*quiz.Round, error) {
 	return nil, errors.ErrUnsupported
 }
 
-func (*stubQuizStore) GetBreak(_ context.Context, _ int64) (*quiz.Break, error) {
+func (*stubQuizStore) GetRound(_ context.Context, _ int64) (*quiz.Round, error) {
 	return nil, errors.ErrUnsupported
 }
 
-func (*stubQuizStore) CreateBreak(_ context.Context, _ *quiz.Break) error {
+func (*stubQuizStore) GetDefaultRound(_ context.Context, _ int64) (*quiz.Round, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (*stubQuizStore) CreateRound(_ context.Context, _ *quiz.Round) error {
 	return errors.ErrUnsupported
 }
 
-func (*stubQuizStore) UpdateBreak(_ context.Context, _ *quiz.Break) error {
+func (*stubQuizStore) UpdateRound(_ context.Context, _ *quiz.Round) error {
 	return errors.ErrUnsupported
 }
-func (*stubQuizStore) DeleteBreak(_ context.Context, _ int64) error { return errors.ErrUnsupported }
-func (*stubQuizStore) MoveBreak(_ context.Context, _, _ int64, _ string) error {
+
+func (*stubQuizStore) DeleteRound(_ context.Context, _ int64) error {
+	return errors.ErrUnsupported
+}
+
+func (*stubQuizStore) MoveRound(_ context.Context, _, _ int64, _ string) error {
+	return errors.ErrUnsupported
+}
+
+func (*stubQuizStore) MoveQuestionToRound(_ context.Context, _, _, _ int64) error {
 	return errors.ErrUnsupported
 }
 
@@ -154,11 +166,11 @@ func (*stubGameStore) ListQuizIDsForPlayer(_ context.Context, _ int64) ([]int64,
 	return nil, errors.ErrUnsupported
 }
 
-func (*stubGameStore) MarkBreakSeen(_ context.Context, _ string, _ int64) error {
+func (*stubGameStore) MarkRoundSeen(_ context.Context, _ string, _ int64) error {
 	return errors.ErrUnsupported
 }
 
-func (*stubGameStore) ListSeenBreakIDsByGame(_ context.Context, _ string) ([]int64, error) {
+func (*stubGameStore) ListSeenRoundIDsByGame(_ context.Context, _ string) ([]int64, error) {
 	return nil, errors.ErrUnsupported
 }
 

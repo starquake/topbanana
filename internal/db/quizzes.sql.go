@@ -37,13 +37,14 @@ func (q *Queries) CreateOption(ctx context.Context, arg CreateOptionParams) (Opt
 }
 
 const createQuestion = `-- name: CreateQuestion :one
-INSERT INTO questions (quiz_id, text, position, image_url, time_limit_seconds)
-VALUES (?, ?, ?, ?, ?)
-RETURNING id, quiz_id, text, position, image_url, time_limit_seconds
+INSERT INTO questions (quiz_id, round_id, text, position, image_url, time_limit_seconds)
+VALUES (?, ?, ?, ?, ?, ?)
+RETURNING id, quiz_id, round_id, text, position, image_url, time_limit_seconds
 `
 
 type CreateQuestionParams struct {
 	QuizID           int64
+	RoundID          int64
 	Text             string
 	Position         int64
 	ImageUrl         string
@@ -53,6 +54,7 @@ type CreateQuestionParams struct {
 func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) (Question, error) {
 	row := q.db.QueryRowContext(ctx, createQuestion,
 		arg.QuizID,
+		arg.RoundID,
 		arg.Text,
 		arg.Position,
 		arg.ImageUrl,
@@ -62,6 +64,7 @@ func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) 
 	err := row.Scan(
 		&i.ID,
 		&i.QuizID,
+		&i.RoundID,
 		&i.Text,
 		&i.Position,
 		&i.ImageUrl,
@@ -205,7 +208,7 @@ func (q *Queries) GetOptionsByIDs(ctx context.Context, ids []int64) ([]Option, e
 }
 
 const getQuestion = `-- name: GetQuestion :one
-SELECT id, quiz_id, text, position, image_url, time_limit_seconds
+SELECT id, quiz_id, round_id, text, position, image_url, time_limit_seconds
 FROM questions
 WHERE id = ?
 LIMIT 1
@@ -217,6 +220,7 @@ func (q *Queries) GetQuestion(ctx context.Context, id int64) (Question, error) {
 	err := row.Scan(
 		&i.ID,
 		&i.QuizID,
+		&i.RoundID,
 		&i.Text,
 		&i.Position,
 		&i.ImageUrl,
@@ -437,7 +441,7 @@ func (q *Queries) ListQuestionIDsByQuizID(ctx context.Context, quizID int64) ([]
 }
 
 const listQuestionsByQuizID = `-- name: ListQuestionsByQuizID :many
-SELECT id, quiz_id, text, position, image_url, time_limit_seconds
+SELECT id, quiz_id, round_id, text, position, image_url, time_limit_seconds
 FROM questions
 WHERE quiz_id = ?
 ORDER BY position
@@ -455,6 +459,7 @@ func (q *Queries) ListQuestionsByQuizID(ctx context.Context, quizID int64) ([]Qu
 		if err := rows.Scan(
 			&i.ID,
 			&i.QuizID,
+			&i.RoundID,
 			&i.Text,
 			&i.Position,
 			&i.ImageUrl,
@@ -564,6 +569,24 @@ func (q *Queries) MaxQuestionPosition(ctx context.Context, quizID int64) (int64,
 	var max_position int64
 	err := row.Scan(&max_position)
 	return max_position, err
+}
+
+const moveQuestionToRound = `-- name: MoveQuestionToRound :execresult
+UPDATE questions
+SET round_id = ?
+WHERE id = ?
+`
+
+type MoveQuestionToRoundParams struct {
+	RoundID int64
+	ID      int64
+}
+
+// Reassigns a question to a different round within the same quiz (#444).
+// Position is unchanged - questions stay in quiz-wide position order, so
+// a round change is a single column rewrite.
+func (q *Queries) MoveQuestionToRound(ctx context.Context, arg MoveQuestionToRoundParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, moveQuestionToRound, arg.RoundID, arg.ID)
 }
 
 const questionCountsByQuiz = `-- name: QuestionCountsByQuiz :many

@@ -780,28 +780,29 @@ func (q *Queries) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]i
 	return items, nil
 }
 
-const listSeenBreakIDsByGame = `-- name: ListSeenBreakIDsByGame :many
-SELECT break_id
-FROM game_seen_breaks
+const listSeenRoundIDsByGame = `-- name: ListSeenRoundIDsByGame :many
+SELECT round_id
+FROM game_seen_rounds
 WHERE game_id = ?
 `
 
-// Lists the break IDs the player has already passed through in the
-// given game. The merged-by-position iterator in game.Service.GetNext
-// uses the result set to skip past acknowledged breaks.
-func (q *Queries) ListSeenBreakIDsByGame(ctx context.Context, gameID string) ([]int64, error) {
-	rows, err := q.db.QueryContext(ctx, listSeenBreakIDsByGame, gameID)
+// Lists the round IDs whose round summary the player has already passed
+// through in the given game. The round-walking iterator in
+// game.Service.GetNext uses the result set to skip past acknowledged
+// round boundaries.
+func (q *Queries) ListSeenRoundIDsByGame(ctx context.Context, gameID string) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listSeenRoundIDsByGame, gameID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var items []int64
 	for rows.Next() {
-		var break_id int64
-		if err := rows.Scan(&break_id); err != nil {
+		var round_id int64
+		if err := rows.Scan(&round_id); err != nil {
 			return nil, err
 		}
-		items = append(items, break_id)
+		items = append(items, round_id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -812,23 +813,23 @@ func (q *Queries) ListSeenBreakIDsByGame(ctx context.Context, gameID string) ([]
 	return items, nil
 }
 
-const markBreakSeen = `-- name: MarkBreakSeen :exec
-INSERT INTO game_seen_breaks (game_id, break_id)
+const markRoundSeen = `-- name: MarkRoundSeen :exec
+INSERT INTO game_seen_rounds (game_id, round_id)
 VALUES (?, ?)
-ON CONFLICT (game_id, break_id) DO NOTHING
+ON CONFLICT (game_id, round_id) DO NOTHING
 `
 
-type MarkBreakSeenParams struct {
+type MarkRoundSeenParams struct {
 	GameID  string
-	BreakID int64
+	RoundID int64
 }
 
-// Records that the player has acknowledged the given break in the
-// given game (#167 slice 2). ON CONFLICT DO NOTHING makes the
-// POST /breaks/{id}/seen endpoint idempotent: a second call returns
-// 204 without bumping seen_at or inserting a duplicate row.
-func (q *Queries) MarkBreakSeen(ctx context.Context, arg MarkBreakSeenParams) error {
-	_, err := q.db.ExecContext(ctx, markBreakSeen, arg.GameID, arg.BreakID)
+// Records that the player has acknowledged the round summary at the
+// given round boundary in the given game (#444). ON CONFLICT DO NOTHING
+// makes the POST /rounds/{id}/seen endpoint idempotent: a second call
+// returns 204 without bumping seen_at or inserting a duplicate row.
+func (q *Queries) MarkRoundSeen(ctx context.Context, arg MarkRoundSeenParams) error {
+	_, err := q.db.ExecContext(ctx, markRoundSeen, arg.GameID, arg.RoundID)
 	return err
 }
 

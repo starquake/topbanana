@@ -764,24 +764,27 @@ type nextQuestionResponse struct {
 	Total     int                  `json:"total"`
 }
 
-// nextBreakResponse is the wire shape for the `type=break` /next
-// variant. Breaks have no countdown so StartedAt/ExpiredAt are dropped
-// entirely; Score carries the player's running total for the break
-// screen, Total keeps the HUD chip rendering across the break (#167).
-type nextBreakResponse struct {
+// nextRoundBoundaryResponse is the wire shape for the
+// `type=round_boundary` /next variant. Round boundaries have no
+// countdown so StartedAt/ExpiredAt are dropped entirely; Score carries
+// the player's running total for the round-summary screen, Total keeps
+// the HUD chip rendering across the boundary (#444). Title is the
+// round's name; Summary is the authored round summary.
+type nextRoundBoundaryResponse struct {
 	Type      string    `json:"type"`
 	ID        int64     `json:"id"`
-	Text      string    `json:"text"`
+	Title     string    `json:"title"`
+	Summary   string    `json:"summary"`
 	Score     int       `json:"score"`
 	ServerNow time.Time `json:"serverNow"`
 	Total     int       `json:"total"`
 }
 
 // HandleQuestionNext returns the next item in the play sequence as a
-// tagged union (`type: "question"` | `"break"`). Total counts quiz
-// questions, not items, so a break does not bump the HUD position
-// chip. StartedAt/ExpiredAt are omitted on breaks; Score is omitted on
-// questions.
+// tagged union (`type: "question"` | `"round_boundary"`). Total counts
+// quiz questions, not items, so a round boundary does not bump the HUD
+// position chip. StartedAt/ExpiredAt are omitted on round boundaries;
+// Score is omitted on questions.
 func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gameID, playerID, ok := gameRequest(w, r, logger)
@@ -796,8 +799,8 @@ func HandleQuestionNext(logger *slog.Logger, service *game.Service) http.Handler
 			return
 		}
 
-		if item.Type == game.ItemTypeBreak {
-			writeBreakItem(w, r, logger, item)
+		if item.Type == game.ItemTypeRoundBoundary {
+			writeRoundBoundaryItem(w, r, logger, item)
 
 			return
 		}
@@ -822,21 +825,22 @@ func writeGetNextError(w http.ResponseWriter, r *http.Request, logger *slog.Logg
 	}
 }
 
-// writeBreakItem encodes a break-variant /next response. Split out of
-// HandleQuestionNext to keep that handler under the function-length
-// limit; the break path has no shuffle / timing arithmetic so the
-// helper is a thin field projection.
-func writeBreakItem(w http.ResponseWriter, r *http.Request, logger *slog.Logger, item *game.Item) {
-	res := nextBreakResponse{
-		Type:      string(game.ItemTypeBreak),
-		ID:        item.Break.ID,
-		Text:      item.Break.Text,
+// writeRoundBoundaryItem encodes a round-boundary-variant /next
+// response. Split out of HandleQuestionNext to keep that handler under
+// the function-length limit; the round-boundary path has no shuffle /
+// timing arithmetic so the helper is a thin field projection.
+func writeRoundBoundaryItem(w http.ResponseWriter, r *http.Request, logger *slog.Logger, item *game.Item) {
+	res := nextRoundBoundaryResponse{
+		Type:      string(game.ItemTypeRoundBoundary),
+		ID:        item.Round.ID,
+		Title:     item.Round.Title,
+		Summary:   item.Round.Summary,
 		Score:     item.Score,
 		ServerNow: time.Now().UTC(),
 		Total:     item.Total,
 	}
 	if err := handlers.EncodeJSON(w, http.StatusOK, res); err != nil {
-		logger.ErrorContext(r.Context(), "error encoding break item", slog.Any("err", err))
+		logger.ErrorContext(r.Context(), "error encoding round boundary item", slog.Any("err", err))
 	}
 }
 
@@ -874,28 +878,28 @@ func writeQuestionItem(
 	}
 }
 
-// HandleBreakSeen records a break acknowledgement. Idempotent: second
-// call returns 204 because the store INSERTs ON CONFLICT DO NOTHING.
-// Game-not-found, not-a-participant, and break-not-in-quiz all return
-// 404 to keep ids opaque to outsiders.
-func HandleBreakSeen(logger *slog.Logger, service *game.Service) http.Handler {
+// HandleRoundSeen records a round-summary acknowledgement at a round
+// boundary. Idempotent: second call returns 204 because the store
+// INSERTs ON CONFLICT DO NOTHING. Game-not-found, not-a-participant,
+// and round-not-in-quiz all return 404 to keep ids opaque to outsiders.
+func HandleRoundSeen(logger *slog.Logger, service *game.Service) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gameID, playerID, ok := gameRequest(w, r, logger)
 		if !ok {
 			return
 		}
 
-		breakID, ok := handlers.ParseIDFromPath(w, r, logger, "breakID")
+		roundID, ok := handlers.ParseIDFromPath(w, r, logger, "roundID")
 		if !ok {
 			return
 		}
 
-		if err := service.MarkBreakSeen(r.Context(), gameID, playerID, breakID); err != nil {
+		if err := service.MarkRoundSeen(r.Context(), gameID, playerID, roundID); err != nil {
 			switch {
-			case errors.Is(err, game.ErrGameNotFound), errors.Is(err, quiz.ErrBreakNotFound):
+			case errors.Is(err, game.ErrGameNotFound), errors.Is(err, quiz.ErrRoundNotFound):
 				http.NotFound(w, r)
 			default:
-				writeInternalError(w, r, logger, "error marking break seen", err)
+				writeInternalError(w, r, logger, "error marking round seen", err)
 			}
 
 			return

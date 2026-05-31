@@ -339,7 +339,7 @@
                  during gameplay (#253) so we don't subtract for it
                  here. -->
             <div x-show="gameId && !finished">
-                <template x-if="question && !breakItem">
+                <template x-if="question && !roundItem">
                     <div class="flex flex-col min-h-[calc(100svh-5rem)] sm:min-h-[calc(100svh-8rem)]">
                         <!-- HUD chips: Q n/total + running score (#253). -->
                         <div class="flex justify-end gap-2 mb-4">
@@ -430,22 +430,22 @@
                         </div>
                     </div>
                 </template>
-                <!-- Break card (#167 slice 2). Renders when /next returns
-                     type=break and stays put until the player clicks
+                <!-- Round-summary card (#444). Renders when /next returns
+                     type=round_boundary and stays put until the player clicks
                      Continue, which POSTs the seen ack and fetches the
                      next item. Same flex-column shell as the question
                      view so the layout doesn't jump on the question →
-                     break → question transition. The HUD chip uses the
+                     round → question transition. The HUD chip uses the
                      prior question's position (the server doesn't bump
-                     position across a break); the Q chip hides on a
-                     position=0 break that fires before Q1. -->
-                <template x-if="breakItem">
+                     position across a round boundary); the Q chip hides on a
+                     position=0 boundary that fires before Q1. -->
+                <template x-if="roundItem">
                     <div class="flex flex-col min-h-[calc(100svh-5rem)] sm:min-h-[calc(100svh-8rem)]"
-                         data-testid="break-card">
+                         data-testid="round-card">
                         <div class="flex justify-end gap-2 mb-4">
                             <template x-if="lastQuestionPosition > 0">
                                 <span class="hud-chip">
-                                    Q <span class="hud-chip-value" x-text="lastQuestionPosition"></span>/<span class="hud-chip-value" x-text="breakItem.total"></span>
+                                    Q <span class="hud-chip-value" x-text="lastQuestionPosition"></span>/<span class="hud-chip-value" x-text="roundItem.total"></span>
                                 </span>
                             </template>
                             <span class="hud-chip">
@@ -453,18 +453,25 @@
                             </span>
                         </div>
 
-                        <!-- Break headline: optional text in the same
-                             display-font scale as the question text so
-                             the screen reads as part of the same flow.
-                             Skipped entirely when text is empty (admin
-                             didn't bother) — the Continue button then
-                             stands alone with the running score above. -->
-                        <template x-if="breakItem.text">
-                            <h2 class="mb-6 lg:mb-10 font-display font-bold leading-[1.1] tracking-tight text-text text-center
-                                       text-[clamp(1.4rem,4.5vw,2.4rem)]
-                                       lg:text-[clamp(2.25rem,4vw,4rem)]
-                                       2xl:text-[clamp(3rem,3.5vw,5.5rem)]"
-                                x-text="breakItem.text"></h2>
+                        <!-- Round title in the display-font scale as the
+                             question text so the screen reads as part of
+                             the same flow. -->
+                        <h2 class="mb-4 font-display font-bold leading-[1.1] tracking-tight text-accent text-center
+                                   text-[clamp(1.4rem,4.5vw,2.4rem)]
+                                   lg:text-[clamp(2.25rem,4vw,4rem)]
+                                   2xl:text-[clamp(3rem,3.5vw,5.5rem)]"
+                            data-testid="round-title"
+                            x-text="roundItem.title"></h2>
+
+                        <!-- Round summary: optional copy beneath the title.
+                             Skipped entirely when empty (admin didn't bother)
+                             — the Continue button then stands alone with the
+                             running score above. -->
+                        <template x-if="roundItem.summary">
+                            <p class="mb-6 lg:mb-10 font-display leading-snug text-text text-center
+                                      text-[clamp(1rem,3vw,1.5rem)]
+                                      lg:text-[clamp(1.25rem,2.5vw,2rem)]"
+                               x-text="roundItem.summary"></p>
                         </template>
 
                         <!-- Foreground the running score so the player
@@ -473,15 +480,15 @@
                              at a smaller scale. -->
                         <p class="mb-8 text-center font-display font-semibold text-accent
                                   text-[clamp(1.6rem,4vw,2.6rem)]"
-                           data-testid="break-score">
+                           data-testid="round-score">
                             Your score: <span x-text="score"></span>
                         </p>
 
                         <!-- Retry banner mirrors the answer-submit one
                              (#179): a transient POST failure leaves the
-                             break card visible so the player can click
+                             round card visible so the player can click
                              Continue again. -->
-                        <div x-show="breakContinueError"
+                        <div x-show="roundContinueError"
                              role="alert"
                              class="feedback-banner feedback-danger mb-3 mt-auto">
                             Couldn't continue — please try again.
@@ -489,16 +496,16 @@
 
                         <button type="button"
                                 class="btn-primary"
-                                :class="{ 'mt-auto': !breakContinueError }"
-                                :disabled="continuingBreak"
-                                data-testid="break-continue"
-                                @click="continueBreak()">
-                            <span x-show="!continuingBreak">Continue</span>
-                            <span x-show="continuingBreak">Loading...</span>
+                                :class="{ 'mt-auto': !roundContinueError }"
+                                :disabled="continuingRound"
+                                data-testid="round-continue"
+                                @click="continueRound()">
+                            <span x-show="!continuingRound">Continue</span>
+                            <span x-show="continuingRound">Loading...</span>
                         </button>
                     </div>
                 </template>
-                <template x-if="!question && !breakItem">
+                <template x-if="!question && !roundItem">
                     <p class="text-text-dim">Loading question...</p>
                 </template>
             </div>

@@ -200,6 +200,7 @@ func (s *QuizStore) ListQuestions(ctx context.Context, quizID int64) ([]*quiz.Qu
 		qs := &quiz.Question{
 			ID:               r.ID,
 			QuizID:           r.QuizID,
+			RoundID:          r.RoundID,
 			Text:             r.Text,
 			Position:         int(r.Position),
 			ImageURL:         r.ImageUrl,
@@ -232,6 +233,7 @@ func (s *QuizStore) GetQuestion(ctx context.Context, id int64) (*quiz.Question, 
 	qs := &quiz.Question{
 		ID:               row.ID,
 		QuizID:           row.QuizID,
+		RoundID:          row.RoundID,
 		Text:             row.Text,
 		Position:         int(row.Position),
 		ImageURL:         row.ImageUrl,
@@ -531,6 +533,18 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 	qz.TimeLimitSeconds = int(row.TimeLimitSeconds)
 	qz.Visibility = row.Visibility
 
+	// Every quiz needs a default round (#444): questions.group_id is NOT
+	// NULL and execCreateQuestion resolves it via GetDefaultRound.
+	// The migration only backfills rounds for quizzes that existed at
+	// migrate time, so newly created quizzes must seed their own here.
+	if _, err = q.CreateRound(ctx, db.CreateRoundParams{
+		QuizID:   qz.ID,
+		Position: 0,
+		Title:    defaultRoundTitle,
+	}); err != nil {
+		return fmt.Errorf("failed to create default question round: %w", err)
+	}
+
 	for _, qs := range qz.Questions {
 		qs.ID = 0
 		qs.QuizID = qz.ID
@@ -623,10 +637,29 @@ func (s *QuizStore) handleQuestions(ctx context.Context, q *db.Queries, qz *quiz
 	return nil
 }
 
-// execCreateQuestion creates a new question.
+// execCreateQuestion creates a new question. questions.round_id is NOT
+// NULL (#444); when the caller leaves RoundID zero, resolve it to the
+// quiz's default (lowest-position) round so slice-1 callers don't have
+// to pick a round. Slice 3 adds real round selection.
 func (s *QuizStore) execCreateQuestion(ctx context.Context, q *db.Queries, qs *quiz.Question) error {
+	if qs.RoundID == 0 {
+		round, err := q.GetDefaultRound(ctx, qs.QuizID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				// No default round means the quiz does not exist (or has
+				// no rounds); map it to the sentinel so callers can tell
+				// it apart from an infra failure.
+				return quiz.ErrRoundNotFound
+			}
+
+			return fmt.Errorf("failed to resolve default question round for quiz %d: %w", qs.QuizID, err)
+		}
+		qs.RoundID = round.ID
+	}
+
 	row, err := q.CreateQuestion(ctx, db.CreateQuestionParams{
 		QuizID:           qs.QuizID,
+		RoundID:          qs.RoundID,
 		Text:             qs.Text,
 		Position:         int64(qs.Position),
 		ImageUrl:         qs.ImageURL,
@@ -637,6 +670,7 @@ func (s *QuizStore) execCreateQuestion(ctx context.Context, q *db.Queries, qs *q
 	}
 
 	qs.ID = row.ID
+	qs.RoundID = row.RoundID
 	qs.TimeLimitSeconds = nullableTimeLimitToPtr(row.TimeLimitSeconds)
 	for _, o := range qs.Options {
 		o.ID = 0

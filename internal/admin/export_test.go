@@ -47,26 +47,12 @@ func ValidateQuizForm(ctx context.Context, q *quiz.Quiz) map[string]string {
 	return (&quizForm{quiz: q}).Valid(ctx)
 }
 
-// ValidateBreakForm exposes the unexported breakForm.Valid behaviour
-// for the same reason as ValidateQuizForm above (#167).
-func ValidateBreakForm(ctx context.Context, q *quiz.Quiz, b *quiz.Break) map[string]string {
-	return (&breakForm{quiz: q, brk: b}).Valid(ctx)
+// ValidateRoundForm exposes the unexported roundForm.Valid behaviour so
+// the external admin_test package can pin the round-form validation
+// rules without exporting the roundForm struct (#444).
+func ValidateRoundForm(ctx context.Context, r *quiz.Round) map[string]string {
+	return (&roundForm{round: r}).Valid(ctx)
 }
-
-// BuildSequence exposes the unexported sequence-merging helper so the
-// external admin_test package can pin the interleave order without
-// running the full HTTP handler stack (#167).
-var BuildSequence = buildSequence
-
-// BuildSlotOptions exposes the unexported "Insert after" dropdown
-// builder so the external admin_test package can pin its labelling
-// and truncation rules (#167).
-var BuildSlotOptions = buildSlotOptions
-
-// DefaultCreateSlot exposes the unexported create-form default-slot
-// helper so the external admin_test package can pin the
-// last-question-vs-empty-quiz fork (#167).
-var DefaultCreateSlot = defaultCreateSlot
 
 // NewEmailRateLimiterWithClock exposes the internal clock-injected
 // rate-limiter constructor so the external admin_test package can pin
@@ -100,17 +86,10 @@ type QuizImportQuestionPayload = quizImportQuestionPayload
 // QuizImportOptionPayload is the option half of [QuizImportPayload].
 type QuizImportOptionPayload = quizImportOptionPayload
 
-// QuizImportBreakPayload is the break half of [QuizImportPayload].
-type QuizImportBreakPayload = quizImportBreakPayload
-
 // QuizFromImportPayload exposes the unexported import-translation
 // helper so the test package can pin the payload-to-domain mapping
 // without spinning the full HTTP handler.
 var QuizFromImportPayload = quizFromImportPayload
-
-// ValidateImportBreaks exposes the import-side break validator so the
-// test package can pin the duplicate-position and slot-mismatch rules.
-var ValidateImportBreaks = validateImportBreaks
 
 // ValidateQuestionForm exposes the unexported questionForm.Valid
 // behaviour so the option-count and at-least-one-correct rules can be

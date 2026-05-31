@@ -406,30 +406,31 @@ func (s *GameStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([
 	return ids, nil
 }
 
-// MarkBreakSeen records that the player passed through the given break
-// in the given game (#167 slice 2). The underlying INSERT uses
-// ON CONFLICT DO NOTHING so a duplicate call is a no-op success, which
-// lets POST /api/games/{gameID}/breaks/{breakID}/seen serve idempotent
-// 204s without the handler having to special-case the retry path.
-func (s *GameStore) MarkBreakSeen(ctx context.Context, gameID string, breakID int64) error {
-	if err := s.q.MarkBreakSeen(ctx, db.MarkBreakSeenParams{
+// MarkRoundSeen records that the player passed through the round
+// summary at the given round boundary in the given game (#444). The
+// underlying INSERT uses ON CONFLICT DO NOTHING so a duplicate call is a
+// no-op success, which lets POST /api/games/{gameID}/rounds/{roundID}/seen
+// serve idempotent 204s without the handler having to special-case the
+// retry path.
+func (s *GameStore) MarkRoundSeen(ctx context.Context, gameID string, roundID int64) error {
+	if err := s.q.MarkRoundSeen(ctx, db.MarkRoundSeenParams{
 		GameID:  gameID,
-		BreakID: breakID,
+		RoundID: roundID,
 	}); err != nil {
-		return fmt.Errorf("failed to mark break %d seen on game %q: %w", breakID, gameID, err)
+		return fmt.Errorf("failed to mark round %d seen on game %q: %w", roundID, gameID, err)
 	}
 
 	return nil
 }
 
-// ListSeenBreakIDsByGame returns the break IDs the player has
-// acknowledged in the given game. Used by the merged iterator in
-// [game.Service.GetNext] to skip past breaks the player already
-// dismissed (#167 slice 2).
-func (s *GameStore) ListSeenBreakIDsByGame(ctx context.Context, gameID string) ([]int64, error) {
-	ids, err := s.q.ListSeenBreakIDsByGame(ctx, gameID)
+// ListSeenRoundIDsByGame returns the round IDs whose round summary the
+// player has acknowledged in the given game. Used by the round-walking
+// iterator in [game.Service.GetNext] to skip past round boundaries the
+// player already dismissed (#444).
+func (s *GameStore) ListSeenRoundIDsByGame(ctx context.Context, gameID string) ([]int64, error) {
+	ids, err := s.q.ListSeenRoundIDsByGame(ctx, gameID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list seen break IDs for game %q: %w", gameID, err)
+		return nil, fmt.Errorf("failed to list seen round IDs for game %q: %w", gameID, err)
 	}
 
 	return ids, nil

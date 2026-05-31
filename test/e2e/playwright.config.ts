@@ -84,8 +84,8 @@ const adminUsernames = [
   'e2e-admin-287-conflict-chromium', 'e2e-admin-287-conflict-firefox',        // api-error-handling.spec.ts 409 branch
   'e2e-admin-quizzes-chromium', 'e2e-admin-quizzes-firefox',                  // player.spec.ts #284 public list test
   'e2e-admin-resume-chromium', 'e2e-admin-resume-firefox',                    // resume.spec.ts #310
-  'e2e-admin-breaks-chromium', 'e2e-admin-breaks-firefox',                    // admin.spec.ts break CRUD (#167)
-  'e2e-admin-break-play-chromium', 'e2e-admin-break-play-firefox',            // break.spec.ts break play loop (#167 slice 2)
+  'e2e-admin-rounds-chromium', 'e2e-admin-rounds-firefox',                    // admin.spec.ts round CRUD (#444)
+  'e2e-admin-round-play-chromium', 'e2e-admin-round-play-firefox',            // round.spec.ts round play loop (#444)
   'e2e-admin-email-chromium', 'e2e-admin-email-firefox',                      // email-admin.spec.ts diagnostics page (#321)
   'e2e-admin-next-chromium', 'e2e-admin-next-firefox',                        // auth.spec.ts deep-link return (#449)
   'e2e-mgmt-admin-chromium', 'e2e-mgmt-admin-firefox',                        // admin-players.spec.ts player management (#450)

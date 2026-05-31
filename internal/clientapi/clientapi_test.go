@@ -114,24 +114,29 @@ func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Opti
 	return nil, errStub
 }
 
-// ListBreaksByQuiz defaults to "no breaks" so existing GetNextQuestion
-// flow tests (#167 slice 2) don't have to opt in: the merged iterator
-// in game.Service.GetNext calls this on every /next request and an
-// errStub would 500 every test that doesn't care about breaks.
-func (stubQuizStore) ListBreaksByQuiz(_ context.Context, _ int64) ([]*quiz.Break, error) {
+// ListRoundsByQuiz defaults to "no rounds" so existing GetNextQuestion
+// flow tests don't have to opt in: the round-walking iterator in
+// game.Service.GetNext calls this on every /next request and an errStub
+// would 500 every test that doesn't care about round boundaries.
+func (stubQuizStore) ListRoundsByQuiz(_ context.Context, _ int64) ([]*quiz.Round, error) {
 	return nil, nil
 }
 
-func (stubQuizStore) GetBreak(_ context.Context, _ int64) (*quiz.Break, error) {
+func (stubQuizStore) GetRound(_ context.Context, _ int64) (*quiz.Round, error) {
 	return nil, errStub
 }
 
-func (stubQuizStore) CreateBreak(_ context.Context, _ *quiz.Break) error {
+func (stubQuizStore) GetDefaultRound(_ context.Context, _ int64) (*quiz.Round, error) {
+	return nil, errStub
+}
+func (stubQuizStore) CreateRound(_ context.Context, _ *quiz.Round) error { return errStub }
+func (stubQuizStore) UpdateRound(_ context.Context, _ *quiz.Round) error { return errStub }
+func (stubQuizStore) DeleteRound(_ context.Context, _ int64) error       { return errStub }
+func (stubQuizStore) MoveRound(_ context.Context, _, _ int64, _ string) error {
 	return errStub
 }
-func (stubQuizStore) UpdateBreak(_ context.Context, _ *quiz.Break) error { return errStub }
-func (stubQuizStore) DeleteBreak(_ context.Context, _ int64) error       { return errStub }
-func (stubQuizStore) MoveBreak(_ context.Context, _, _ int64, _ string) error {
+
+func (stubQuizStore) MoveQuestionToRound(_ context.Context, _, _, _ int64) error {
 	return errStub
 }
 
@@ -148,8 +153,8 @@ type stubGameStore struct {
 	listParticipantsForQuizLeaderboard func(ctx context.Context, quizID int64, staleBefore time.Time) ([]*game.LeaderboardParticipant, error)
 	deleteGamesForPlayerOnQuiz         func(ctx context.Context, playerID, quizID int64) error
 	listQuizIDsForPlayer               func(ctx context.Context, playerID int64) ([]int64, error)
-	markBreakSeen                      func(ctx context.Context, gameID string, breakID int64) error
-	listSeenBreakIDsByGame             func(ctx context.Context, gameID string) ([]int64, error)
+	markGroupSeen                      func(ctx context.Context, gameID string, roundID int64) error
+	listSeenRoundIDsByGame             func(ctx context.Context, gameID string) ([]int64, error)
 }
 
 func (stubGameStore) Ping(_ context.Context) error { return nil }
@@ -200,24 +205,24 @@ func (s stubGameStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64)
 	return s.listQuizIDsForPlayer(ctx, playerID)
 }
 
-func (s stubGameStore) MarkBreakSeen(ctx context.Context, gameID string, breakID int64) error {
-	if s.markBreakSeen == nil {
+func (s stubGameStore) MarkRoundSeen(ctx context.Context, gameID string, roundID int64) error {
+	if s.markGroupSeen == nil {
 		return errStub
 	}
 
-	return s.markBreakSeen(ctx, gameID, breakID)
+	return s.markGroupSeen(ctx, gameID, roundID)
 }
 
-// ListSeenBreakIDsByGame defaults to "no seen breaks" so existing
-// /next flow tests (#167 slice 2) don't have to opt in - the merged
-// iterator calls this on every request and an errStub would 500 every
-// test that doesn't care about breaks.
-func (s stubGameStore) ListSeenBreakIDsByGame(ctx context.Context, gameID string) ([]int64, error) {
-	if s.listSeenBreakIDsByGame == nil {
+// ListSeenRoundIDsByGame defaults to "no seen rounds" so existing
+// /next flow tests don't have to opt in - the round-walking iterator
+// calls this on every request and an errStub would 500 every test that
+// doesn't care about round boundaries.
+func (s stubGameStore) ListSeenRoundIDsByGame(ctx context.Context, gameID string) ([]int64, error) {
+	if s.listSeenRoundIDsByGame == nil {
 		return nil, nil
 	}
 
-	return s.listSeenBreakIDsByGame(ctx, gameID)
+	return s.listSeenRoundIDsByGame(ctx, gameID)
 }
 
 func (s stubGameStore) StartGame(ctx context.Context, id string) error {

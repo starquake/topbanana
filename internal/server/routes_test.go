@@ -157,27 +157,25 @@ func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Opti
 	return nil, errRouteStub
 }
 
-func (stubQuizStore) ListBreaksByQuiz(_ context.Context, _ int64) ([]*quiz.Break, error) {
+func (stubQuizStore) ListRoundsByQuiz(_ context.Context, _ int64) ([]*quiz.Round, error) {
 	return nil, errRouteStub
 }
 
-func (stubQuizStore) GetBreak(_ context.Context, _ int64) (*quiz.Break, error) {
+func (stubQuizStore) GetRound(_ context.Context, _ int64) (*quiz.Round, error) {
 	return nil, errRouteStub
 }
 
-func (stubQuizStore) CreateBreak(_ context.Context, _ *quiz.Break) error {
+func (stubQuizStore) GetDefaultRound(_ context.Context, _ int64) (*quiz.Round, error) {
+	return nil, errRouteStub
+}
+func (stubQuizStore) CreateRound(_ context.Context, _ *quiz.Round) error { return errRouteStub }
+func (stubQuizStore) UpdateRound(_ context.Context, _ *quiz.Round) error { return errRouteStub }
+func (stubQuizStore) DeleteRound(_ context.Context, _ int64) error       { return errRouteStub }
+func (stubQuizStore) MoveRound(_ context.Context, _, _ int64, _ string) error {
 	return errRouteStub
 }
 
-func (stubQuizStore) UpdateBreak(_ context.Context, _ *quiz.Break) error {
-	return errRouteStub
-}
-
-func (stubQuizStore) DeleteBreak(_ context.Context, _ int64) error {
-	return errRouteStub
-}
-
-func (stubQuizStore) MoveBreak(_ context.Context, _, _ int64, _ string) error {
+func (stubQuizStore) MoveQuestionToRound(_ context.Context, _, _, _ int64) error {
 	return errRouteStub
 }
 
@@ -224,11 +222,11 @@ func (stubGameStore) ListQuizIDsForPlayer(_ context.Context, _ int64) ([]int64, 
 	return nil, errRouteStub
 }
 
-func (stubGameStore) MarkBreakSeen(_ context.Context, _ string, _ int64) error {
+func (stubGameStore) MarkRoundSeen(_ context.Context, _ string, _ int64) error {
 	return errRouteStub
 }
 
-func (stubGameStore) ListSeenBreakIDsByGame(_ context.Context, _ string) ([]int64, error) {
+func (stubGameStore) ListSeenRoundIDsByGame(_ context.Context, _ string) ([]int64, error) {
 	return nil, errRouteStub
 }
 

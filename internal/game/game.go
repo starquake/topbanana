@@ -32,7 +32,7 @@ const (
 	defaultStalePeriod = 30 * time.Second
 
 	// errGetGameFmt is the wrap format for store.GetGame errors. Every
-	// entry-point gate (GetNextQuestion, GetNext, MarkBreakSeen,
+	// entry-point gate (GetNextQuestion, GetNext, MarkRoundSeen,
 	// SubmitAnswer, GetResults) wraps the failure with the same
 	// "failed to get game" prefix - revive's add-constant rule fires
 	// after four occurrences, so we hoist the format string here.
@@ -106,32 +106,33 @@ type Participant struct {
 }
 
 // ItemType discriminates the variants of [Item] returned by
-// [Service.GetNext]. The merged-by-position iterator emits one of these
-// per call so the player API can serve a question or a break through
-// the same endpoint (#167 slice 2).
+// [Service.GetNext]. The round-walking iterator emits one of these per
+// call so the player API can serve a question or a round-boundary round
+// summary through the same endpoint (#444).
 type ItemType string
 
 // Item kinds emitted by [Service.GetNext].
 const (
-	ItemTypeQuestion ItemType = "question"
-	ItemTypeBreak    ItemType = "break"
+	ItemTypeQuestion      ItemType = "question"
+	ItemTypeRoundBoundary ItemType = "round_boundary"
 )
 
 // Item is the union returned by [Service.GetNext]. Exactly one of
-// Question or Break is set, matched by Type.
+// Question or Round is set, matched by Type.
 //
-// Score is populated for break items so the break screen can show the
-// player's running total; it is left zero on question items because
-// the HUD chip doesn't carry a score there (#167 slice 2).
+// Score is populated for round-boundary items so the round-summary
+// screen can show the player's running total; it is left zero on
+// question items because the HUD chip doesn't carry a score there
+// (#444).
 //
-// Total is populated for break items as well so the player UI can keep
-// rendering the "Q n / total" chip across a break without a second
-// round-trip. For question items, the total lives on
+// Total is populated for round-boundary items as well so the player UI
+// can keep rendering the "Q n / total" chip across a round summary
+// without a second round-trip. For question items, the total lives on
 // [Question.Total] (populated at issue time by [Service.GetNext]).
 type Item struct {
 	Type     ItemType
 	Question *Question
-	Break    *quiz.Break
+	Round    *quiz.Round
 	Score    int
 	Total    int
 }
@@ -295,14 +296,16 @@ type Store interface {
 	// fan out a leaderboard republish on every quiz the player appears
 	// on.
 	ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]int64, error)
-	// MarkBreakSeen records that the player has passed through the given
-	// break in the given game (#167 slice 2). Idempotent: a second call
-	// with the same (gameID, breakID) is a no-op.
-	MarkBreakSeen(ctx context.Context, gameID string, breakID int64) error
-	// ListSeenBreakIDsByGame returns the break IDs the player has
-	// acknowledged in the given game. The merged iterator in
-	// [Service.GetNext] uses this set to skip past seen breaks (#167).
-	ListSeenBreakIDsByGame(ctx context.Context, gameID string) ([]int64, error)
+	// MarkRoundSeen records that the player has passed through the round
+	// summary at the given round boundary in the given game (#444).
+	// Idempotent: a second call with the same (gameID, roundID) is a
+	// no-op.
+	MarkRoundSeen(ctx context.Context, gameID string, roundID int64) error
+	// ListSeenRoundIDsByGame returns the round IDs whose round summary
+	// the player has acknowledged in the given game. The round-walking
+	// iterator in [Service.GetNext] uses this set to skip past seen
+	// round boundaries (#444).
+	ListSeenRoundIDsByGame(ctx context.Context, gameID string) ([]int64, error)
 }
 
 // LeaderboardPublisher is the tiny seam Service uses to signal that a
@@ -640,34 +643,34 @@ func (s *Service) GetNext(ctx context.Context, gameID string, playerID int64) (*
 		return &Item{Type: ItemTypeQuestion, Question: gq}, nil
 	}
 
-	breaks, err := s.quizStore.ListBreaksByQuiz(ctx, qz.ID)
+	rounds, err := s.quizStore.ListRoundsByQuiz(ctx, qz.ID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list breaks: %w", err)
+		return nil, fmt.Errorf("failed to list rounds: %w", err)
 	}
 
-	seenIDs, err := s.store.ListSeenBreakIDsByGame(ctx, gameID)
+	seenIDs, err := s.store.ListSeenRoundIDsByGame(ctx, gameID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list seen breaks: %w", err)
+		return nil, fmt.Errorf("failed to list seen rounds: %w", err)
 	}
 
 	askedQuestions := make(map[int64]bool, len(g.Questions))
 	for _, gq := range g.Questions {
 		askedQuestions[gq.QuestionID] = true
 	}
-	seenBreaks := make(map[int64]bool, len(seenIDs))
+	seenRounds := make(map[int64]bool, len(seenIDs))
 	for _, id := range seenIDs {
-		seenBreaks[id] = true
+		seenRounds[id] = true
 	}
 
-	switch next := pickNextSlot(qz.Questions, breaks, askedQuestions, seenBreaks); next.kind {
-	case sequenceKindBreak:
+	switch next := nextRoundSlot(rounds, qz.Questions, askedQuestions, seenRounds); next.kind {
+	case slotKindRoundBoundary:
 		score, scoreErr := s.computeGameScore(ctx, g, playerID)
 		if scoreErr != nil {
 			return nil, scoreErr
 		}
 
-		return &Item{Type: ItemTypeBreak, Break: next.brk, Score: score, Total: len(qz.Questions)}, nil
-	case sequenceKindQuestion:
+		return &Item{Type: ItemTypeRoundBoundary, Round: next.round, Score: score, Total: len(qz.Questions)}, nil
+	case slotKindQuestion:
 		gq, qErr := s.issueQuestion(ctx, gameID, qz, next.question, len(g.Questions))
 		if qErr != nil {
 			return nil, qErr
@@ -679,11 +682,11 @@ func (s *Service) GetNext(ctx context.Context, gameID string, playerID int64) (*
 	}
 }
 
-// MarkBreakSeen records that the player has acknowledged a break.
-// Idempotent at the store layer. Tracks the break by id, not by slot,
-// so an admin who moves a break to a new position while a player has
-// it on screen will not re-show the break at its old slot.
-func (s *Service) MarkBreakSeen(ctx context.Context, gameID string, playerID, breakID int64) error {
+// MarkRoundSeen records that the player has acknowledged the round
+// summary at a round boundary. Idempotent at the store layer. Tracks
+// the round by id, so an admin who reorders rounds while a player has a
+// round summary on screen will not re-show it.
+func (s *Service) MarkRoundSeen(ctx context.Context, gameID string, playerID, roundID int64) error {
 	g, err := s.store.GetGame(ctx, gameID)
 	if err != nil {
 		return fmt.Errorf(errGetGameFmt, err)
@@ -692,97 +695,94 @@ func (s *Service) MarkBreakSeen(ctx context.Context, gameID string, playerID, br
 		return ErrGameNotFound
 	}
 
-	brk, err := s.quizStore.GetBreak(ctx, breakID)
+	round, err := s.quizStore.GetRound(ctx, roundID)
 	if err != nil {
-		return fmt.Errorf("failed to get break: %w", err)
+		return fmt.Errorf("failed to get round: %w", err)
 	}
-	if brk.QuizID != g.QuizID {
-		return quiz.ErrBreakNotFound
+	if round.QuizID != g.QuizID {
+		return quiz.ErrRoundNotFound
 	}
 
-	if err := s.store.MarkBreakSeen(ctx, gameID, breakID); err != nil {
-		return fmt.Errorf("failed to mark break seen: %w", err)
+	if err := s.store.MarkRoundSeen(ctx, gameID, roundID); err != nil {
+		return fmt.Errorf("failed to mark round seen: %w", err)
 	}
 
 	return nil
 }
 
-// sequenceKind names the variant of [sequenceSlot]. The string values
-// match the admin template's [admin.SequenceItem] kinds so the same
-// vocabulary travels through the codebase, but the two types are not
-// shared because admin.SequenceItem carries template-only fields.
+// slotKind names the variant of [roundSlot]. A zero value (kind == "")
+// means the walk reached the end with nothing left to emit.
 const (
-	sequenceKindQuestion = "question"
-	sequenceKindBreak    = "break"
+	slotKindQuestion      = "question"
+	slotKindRoundBoundary = "round_boundary"
 )
 
-// sequenceSlot is one slot in the merged play sequence used by
-// [Service.GetNext]. Exactly one of question or brk is set, matched by
-// kind. A zero-value sequenceSlot (kind == "") means the walk reached
+// roundSlot is one slot in the round-driven play sequence used by
+// [Service.GetNext]. Exactly one of question or round is set, matched
+// by kind. A zero-value roundSlot (kind == "") means the walk reached
 // the end with nothing left to emit.
-type sequenceSlot struct {
+type roundSlot struct {
 	kind     string
 	question *quiz.Question
-	brk      *quiz.Break
+	round    *quiz.Round
 }
 
-// pickNextSlot walks the quiz's questions interleaved with the breaks
-// (ordered by position, breaks fire AFTER the question at the same
-// slot - position 0 means before the first question) and returns the
-// first slot the player has neither been issued (question) nor
-// acknowledged (break). Mirrors [admin.buildSequence] for the play
-// surface; the two would diverge only if the admin merge ever
-// reorders, so we keep them in lockstep by hand instead of sharing
-// state across packages.
-func pickNextSlot(
+// nextRoundSlot walks the quiz's rounds in position order. Within each
+// round it issues the round's not-yet-issued questions in question
+// position order; once every question in a round has been issued it
+// emits that round's boundary round-summary item (unless the round has
+// no summary, or the player has already seen it), then advances to the
+// next round. Returns a zero-value roundSlot once every question is
+// issued and every shown round boundary has been seen.
+//
+// A round with an empty Summary has nothing to show at its boundary, so
+// it is skipped: every quiz is created with one default round holding
+// all its questions, and emitting a "your score so far" card before the
+// final results for that single round would be a surprising change for
+// existing quizzes. The card only appears once a host authors a round
+// summary. (When per-round leaderboards land this rule may want to
+// widen to "show whenever the round carries scoring" - see #444.)
+//
+// Questions whose round_id matches no round in the quiz's round list
+// (a defensive case; questions.round_id is NOT NULL and FK-references
+// rounds) are swept after all rounds so they are never
+// silently dropped.
+func nextRoundSlot(
+	rounds []*quiz.Round,
 	questions []*quiz.Question,
-	breaks []*quiz.Break,
 	asked map[int64]bool,
-	seen map[int64]bool,
-) sequenceSlot {
-	bySlot := make(map[int][]*quiz.Break, len(breaks))
-	for _, b := range breaks {
-		bySlot[b.Position] = append(bySlot[b.Position], b)
-	}
-
-	for _, b := range bySlot[0] {
-		if !seen[b.ID] {
-			return sequenceSlot{kind: sequenceKindBreak, brk: b}
-		}
-	}
-
-	// Track which slots get visited by the main walk so we can sweep
-	// any orphaned breaks at the end. A break is orphaned when its
-	// position no longer matches a live question - for example after
-	// an admin deletes the question that used to anchor it. Without
-	// this sweep the break would sit in the DB forever, invisible to
-	// players. The sweep emits the orphan AT THE END of the sequence
-	// (after all live questions) instead of silently dropping it.
-	visited := make(map[int]bool, len(questions)+1)
-	visited[0] = true
-
+	seenRounds map[int64]bool,
+) roundSlot {
+	byRound := make(map[int64][]*quiz.Question, len(rounds))
 	for _, q := range questions {
-		if !asked[q.ID] {
-			return sequenceSlot{kind: sequenceKindQuestion, question: q}
-		}
-		visited[q.Position] = true
-		for _, b := range bySlot[q.Position] {
-			if !seen[b.ID] {
-				return sequenceSlot{kind: sequenceKindBreak, brk: b}
+		byRound[q.RoundID] = append(byRound[q.RoundID], q)
+	}
+
+	for _, round := range rounds {
+		for _, q := range byRound[round.ID] {
+			if !asked[q.ID] {
+				return roundSlot{kind: slotKindQuestion, question: q}
 			}
 		}
-	}
-
-	for _, b := range breaks {
-		if visited[b.Position] {
-			continue
-		}
-		if !seen[b.ID] {
-			return sequenceSlot{kind: sequenceKindBreak, brk: b}
+		if round.Summary != "" && !seenRounds[round.ID] {
+			return roundSlot{kind: slotKindRoundBoundary, round: round}
 		}
 	}
 
-	return sequenceSlot{}
+	// Sweep any question whose round is not in the quiz's round list so
+	// an orphaned question is still served rather than stranding the
+	// game short of the leaderboard.
+	known := make(map[int64]bool, len(rounds))
+	for _, round := range rounds {
+		known[round.ID] = true
+	}
+	for _, q := range questions {
+		if !known[q.RoundID] && !asked[q.ID] {
+			return roundSlot{kind: slotKindQuestion, question: q}
+		}
+	}
+
+	return roundSlot{}
 }
 
 // resumeCandidate returns the most recently issued game_question for
