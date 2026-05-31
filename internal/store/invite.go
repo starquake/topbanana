@@ -91,3 +91,69 @@ func (s *PlayerStore) DeleteExpiredInvites(ctx context.Context) error {
 
 	return nil
 }
+
+// ListPendingInvites returns every still-pending invite, newest first,
+// for the admin management view (#318). The inviter username is resolved
+// via a LEFT JOIN; a NULL (no actor or deleted admin) maps to an empty
+// string so the template renders a neutral dash instead of a Go zero
+// value sneaking through.
+func (s *PlayerStore) ListPendingInvites(ctx context.Context) ([]*auth.PendingInvite, error) {
+	rows, err := s.q.ListPendingInvites(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pending invites: %w", err)
+	}
+
+	invites := make([]*auth.PendingInvite, 0, len(rows))
+	for _, row := range rows {
+		invites = append(invites, &auth.PendingInvite{
+			ID:                row.ID,
+			Email:             row.Email,
+			InvitedByPlayerID: row.InvitedByPlayerID.Int64,
+			InviterUsername:   row.InviterUsername.String,
+			CreatedAt:         row.CreatedAt,
+			ExpiresAt:         row.ExpiresAt,
+		})
+	}
+
+	return invites, nil
+}
+
+// RevokeInvite marks a pending invite revoked. Returns
+// auth.ErrInviteNotPending when the id does not name a still-pending row
+// (already accepted/revoked, or never existed) so the handler can flash a
+// clear message instead of surfacing a 500.
+func (s *PlayerStore) RevokeInvite(ctx context.Context, id int64) error {
+	if _, err := s.q.RevokeInvite(ctx, id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return auth.ErrInviteNotPending
+		}
+
+		return fmt.Errorf("failed to revoke invite: %w", err)
+	}
+
+	return nil
+}
+
+// RotateInviteToken overwrites a pending invite's token hash and expiry
+// (the resend path), returning the invite's email so the caller can
+// dispatch the new link. expiresAt is normalised to UTC for the same
+// lexicographic reason as CreateInvite. Returns auth.ErrInviteNotPending
+// when the id does not name a still-pending row.
+func (s *PlayerStore) RotateInviteToken(
+	ctx context.Context, id int64, newTokenHash string, newExpiresAt time.Time,
+) (string, error) {
+	email, err := s.q.RotateInviteToken(ctx, db.RotateInviteTokenParams{
+		TokenHash: newTokenHash,
+		ExpiresAt: newExpiresAt.UTC(),
+		ID:        id,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", auth.ErrInviteNotPending
+		}
+
+		return "", fmt.Errorf("failed to rotate invite token: %w", err)
+	}
+
+	return email, nil
+}

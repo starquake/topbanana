@@ -48,6 +48,10 @@ func addRoutes(
 			[]byte(cfg.SessionKey), cfg.SecureCookies(),
 			admin.PlayerDetailFlashCookieName, admin.PlayerDetailFlashCookiePath,
 		),
+		inviteFlash: auth.NewSignedFlash(
+			[]byte(cfg.SessionKey), cfg.SecureCookies(),
+			admin.InviteFlashCookieName, admin.InviteFlashCookiePath,
+		),
 		baseURL: cfg.BaseURL,
 	}
 
@@ -359,10 +363,14 @@ type adminEmailDeps struct {
 // a flash, a token store, a mailer, and a base URL, and bundling them
 // keeps addAdminRoutes under revive's argument cap.
 type adminPlayerDeps struct {
-	tokens  auth.VerifyTokenStore
-	sender  auth.VerifyEmailSender
-	flash   *auth.SignedFlash
-	baseURL string
+	tokens auth.VerifyTokenStore
+	sender auth.VerifyEmailSender
+	flash  *auth.SignedFlash
+	// inviteFlash is the one-shot banner for the invite management page
+	// (#318); scoped to its own cookie path so it does not collide with
+	// the player-detail flash.
+	inviteFlash *auth.SignedFlash
+	baseURL     string
 }
 
 func addAdminRoutes(
@@ -547,14 +555,16 @@ func addAdminPlayerRoutes(
 	addAdminInviteRoutes(mux, logger, csrfMgr, csrfMW, requireAdmin, stores, deps)
 }
 
-// addAdminInviteRoutes registers the admin-initiated invite routes (#318):
-// the GET render of the minimal invite form and the POST that mints an
-// invite + dispatches the email. Admin-only, like the other player-
-// management routes. MaxFormSizeMiddleware fronts the POST in front of
-// csrfMW so the CSRF validator's ParseForm sees a bounded body; csrfMW
-// fronts the auth wrapper so an unauthenticated request without a valid
-// token is rejected with 403 before any auth-state-leaking 303 to /login.
-// The pending-list / resend / revoke management UI is a later slice.
+// addAdminInviteRoutes registers the admin invite management routes (#318):
+// the canonical /admin/invites page (pending list + create form), the
+// create POST, and the per-row resend / revoke POST actions. A legacy
+// GET /admin/invites/new 301-redirects to the canonical page so any
+// bookmarked slice-1 link still resolves. Admin-only, like the other
+// player-management routes. MaxFormSizeMiddleware fronts every POST in
+// front of csrfMW so the CSRF validator's ParseForm sees a bounded body;
+// csrfMW fronts the auth wrapper so an unauthenticated request without a
+// valid token is rejected with 403 before any auth-state-leaking 303 to
+// /login.
 func addAdminInviteRoutes(
 	mux *http.ServeMux,
 	logger *slog.Logger,
@@ -564,19 +574,37 @@ func addAdminInviteRoutes(
 	stores *store.Stores,
 	deps adminPlayerDeps,
 ) {
+	inviteDeps := admin.InviteDeps{
+		Players: stores.Players,
+		Invites: stores.Invites,
+		Sender:  deps.sender,
+		Flash:   deps.inviteFlash,
+		BaseURL: deps.baseURL,
+	}
+	mux.Handle(
+		"GET /admin/invites",
+		requireAdmin(admin.HandleInvitesPage(logger, csrfMgr, inviteDeps)),
+	)
 	mux.Handle(
 		"GET /admin/invites/new",
-		requireAdmin(admin.HandleInviteForm(logger, csrfMgr)),
+		requireAdmin(admin.HandleInviteRedirect()),
 	)
 	mux.Handle(
 		"POST /admin/invites",
 		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
-			admin.HandleInviteSubmit(logger, csrfMgr, admin.InviteDeps{
-				Players: stores.Players,
-				Invites: stores.Invites,
-				Sender:  deps.sender,
-				BaseURL: deps.baseURL,
-			}),
+			admin.HandleInviteSubmit(logger, csrfMgr, inviteDeps),
+		))),
+	)
+	mux.Handle(
+		"POST /admin/invites/{id}/resend",
+		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
+			admin.HandleInviteResend(logger, inviteDeps),
+		))),
+	)
+	mux.Handle(
+		"POST /admin/invites/{id}/revoke",
+		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
+			admin.HandleInviteRevoke(logger, inviteDeps),
 		))),
 	)
 }

@@ -98,6 +98,7 @@ const adminUsernames = [
   'e2e-host-gating-chromium', 'e2e-host-gating-firefox',                      // admin-settings.spec.ts host nav gating (#538)
   'e2e-demote-boss-chromium', 'e2e-demote-boss-firefox',                      // admin-settings.spec.ts admin demote (#538)
   'e2e-cred-boss-chromium', 'e2e-cred-boss-firefox',                  // admin-player-credentials.spec.ts name/password (#535)
+  'e2e-admin-invite-chromium', 'e2e-admin-invite-firefox',            // admin-invites.spec.ts invite management (#318)
 ];
 const ADMIN_EMAILS = adminUsernames.map(u => `${u}@example.test`).join(',');
 
@@ -115,6 +116,11 @@ const workerServer = (workerIndex: number) => {
       DB_URI: `file:${dbPath}?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate`,
       SESSION_KEY: 'e2e-test-session-key-do-not-use-in-prod-1234567890abcdef',
       REGISTRATION_ENABLED: 'true',
+      // The invite flow (#318) builds an absolute accept-invite link from
+      // BASE_URL; an empty value makes invite creation fail before the row
+      // is written. Point it at this worker's own server so the admin
+      // invite-management spec can create a pending invite.
+      BASE_URL: `http://127.0.0.1:${port}`,
       // Shrink the per-question reveal beat (#247, default 3s) so the
       // suite isn't paying ~12s of dead time per gameplay spec. 500ms
       // still leaves the .progress-reveal phase observable for the

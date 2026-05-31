@@ -1,0 +1,97 @@
+{{define "content"}}
+    <nav aria-label="breadcrumbs" class="mb-8">
+        <ol class="flex items-center text-xs uppercase tracking-[0.14em]">
+            <li><a href="/admin" class="pr-2 text-text-dim hover:text-text">Admin</a></li>
+            <li class="text-text-mute" aria-hidden="true">/</li>
+            <li><a href="/admin/players" class="px-2 text-text-dim hover:text-text">Players</a></li>
+            <li class="text-text-mute" aria-hidden="true">/</li>
+            <li><span class="pl-2 text-text" aria-current="page">Invites</span></li>
+        </ol>
+    </nav>
+
+    <header class="mb-8">
+        <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight">Invites</h1>
+        <p class="mt-1.5 max-w-[540px] text-text-dim text-[0.95rem]">
+            Send an email invite. The recipient picks their own username and password from
+            the link; their account lands already email-verified. The link is valid for 7 days.
+        </p>
+    </header>
+
+    {{if .Notice}}
+        <div class="mb-6 rounded-md border border-green-500/40 bg-green-500/10 p-3 text-sm text-text" role="status">{{.Notice}}</div>
+    {{end}}
+    {{if .Error}}
+        <div class="mb-6 rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm text-text" role="alert">{{.Error}}</div>
+    {{end}}
+
+    <section class="mb-10" aria-label="Send an invite">
+        <h2 class="mb-4 font-display text-lg font-semibold uppercase tracking-tight">Send an invite</h2>
+        <form method="POST" action="/admin/invites" class="flex flex-col gap-4 max-w-md">
+            <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+
+            <label class="flex flex-col gap-1 text-sm">
+                <span class="text-text-dim text-xs uppercase tracking-[0.14em]">Email</span>
+                <input type="email" name="email" value="{{.Email}}" required
+                       class="form-input" placeholder="player@example.com">
+            </label>
+
+            <label class="flex flex-col gap-1 text-sm">
+                <span class="text-text-dim text-xs uppercase tracking-[0.14em]">Note (optional)</span>
+                <input type="text" name="note" value="{{.Note}}" autocomplete="off"
+                       class="form-input" placeholder="A reminder of who this is for">
+            </label>
+
+            <div class="flex items-center gap-3 pt-2">
+                <button type="submit" class="btn-primary">Send invite</button>
+                <a href="/admin/players" class="btn-ghost">Back to players</a>
+            </div>
+        </form>
+    </section>
+
+    <section aria-label="Pending invites">
+        <h2 class="mb-4 font-display text-lg font-semibold uppercase tracking-tight">Pending invites</h2>
+        {{if .Pending}}
+            <div class="overflow-x-auto border border-border-soft rounded-lg">
+                <table class="w-full text-sm">
+                    <thead class="bg-surface text-text-dim text-[0.7rem] uppercase tracking-[0.14em]">
+                        <tr>
+                            <th scope="col" class="px-4 py-3 text-left">Email</th>
+                            <th scope="col" class="px-4 py-3 text-left">Invited by</th>
+                            <th scope="col" class="px-4 py-3 text-left">Sent</th>
+                            <th scope="col" class="px-4 py-3 text-left">Expires</th>
+                            <th scope="col" class="px-4 py-3 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .Pending}}
+                            <tr class="border-t border-border-soft" data-invite-id="{{.ID}}">
+                                <td class="px-4 py-3 text-text">{{.Email}}</td>
+                                <td class="px-4 py-3 text-text-dim">{{if .InvitedBy}}{{.InvitedBy}}{{else}}&mdash;{{end}}</td>
+                                <td class="px-4 py-3 text-text-dim"><time title="{{.CreatedAt.Format "2006-01-02 15:04"}}">{{humanizeTime .CreatedAt}}</time></td>
+                                <td class="px-4 py-3 text-text-dim"><time title="{{.ExpiresAt.Format "2006-01-02 15:04"}}">{{.ExpiresAt.Format "2006-01-02"}}</time></td>
+                                <td class="px-4 py-3">
+                                    <div class="flex items-center justify-end gap-2">
+                                        <form method="POST" action="/admin/invites/{{.ID}}/resend">
+                                            <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                                            <button type="submit" class="btn-ghost">Resend</button>
+                                        </form>
+                                        <form method="POST" action="/admin/invites/{{.ID}}/revoke"
+                                              onsubmit="return confirm('Revoke this invite? The link will stop working.');">
+                                            <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                                            <button type="submit" class="btn-ghost text-danger">Revoke</button>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+        {{else}}
+            <div class="border border-dashed border-border rounded-xl p-12 text-center">
+                <h3 class="mb-2 font-display text-xl font-bold">No pending invites.</h3>
+                <p class="mb-0 text-text-dim text-[0.95rem]">Send one with the form above.</p>
+            </div>
+        {{end}}
+    </section>
+{{end}}
