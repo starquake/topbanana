@@ -251,6 +251,14 @@ type Quiz struct {
 	// repeat the default.
 	Visibility string
 	Questions  []*Question
+	// Rounds, when non-empty, tells the create path to author the quiz's
+	// rounds explicitly instead of dropping every question in the single
+	// default round (#546). Each Round carries the questions that belong
+	// to it; their quiz-wide Position is still assigned 1..N across all
+	// rounds. Leaving this nil keeps the default-round behaviour: every
+	// question in Questions lands in the auto-created first round. The
+	// regular admin quiz form never sets it.
+	Rounds []*Round
 }
 
 // Question represents a question in a quiz.

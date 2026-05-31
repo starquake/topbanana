@@ -1215,8 +1215,8 @@ func (s *Service) issueQuestion(
 // computeGameScore aggregates the requesting player's running score
 // across every game_answer recorded on the game so far, reusing
 // [Service.CalculateScore] for the per-answer points. Used by
-// [Service.GetNext] to populate the running total on a break item so
-// the player sees their score on the break screen without a separate
+// [Service.GetNext] to populate the running total on a round item so
+// the player sees their score on the round screen without a separate
 // round-trip (#167 slice 2). Filters by playerID because the loaded
 // game carries answers from every participant.
 func (s *Service) computeGameScore(ctx context.Context, g *Game, playerID int64) (int, error) {
@@ -1238,7 +1238,7 @@ func (s *Service) computeGameScore(ctx context.Context, g *Game, playerID int64)
 
 	options, err := s.quizStore.GetOptionsByIDs(ctx, optionIDs)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get options for break score: %w", err)
+		return 0, fmt.Errorf("failed to get options for round score: %w", err)
 	}
 	optionsByID := make(map[int64]*quiz.Option, len(options))
 	for _, o := range options {

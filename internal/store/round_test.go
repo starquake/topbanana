@@ -51,6 +51,73 @@ func TestQuizStore_CreateQuiz_SeedsDefaultGroup(t *testing.T) {
 	}
 }
 
+// TestQuizStore_CreateQuiz_WithAuthoredRounds pins the import rounds[]
+// path (#546): a quiz created with Quiz.Rounds set persists exactly those
+// rounds - the first authored round reuses the auto-seeded default round
+// rather than leaving a stray empty "Round 1" - and each round's
+// questions land on it in quiz-wide position order.
+func TestQuizStore_CreateQuiz_WithAuthoredRounds(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+
+	q1 := &quiz.Question{Text: "Q1", Position: 1, Options: []*quiz.Option{{Text: "a", Correct: true}}}
+	q2 := &quiz.Question{Text: "Q2", Position: 2, Options: []*quiz.Option{{Text: "b", Correct: true}}}
+	q3 := &quiz.Question{Text: "Q3", Position: 3, Options: []*quiz.Option{{Text: "c", Correct: true}}}
+	qz := &quiz.Quiz{
+		Title:             "Authored Rounds",
+		Slug:              "authored-rounds",
+		Description:       "fixture",
+		CreatedByPlayerID: seededAdminID,
+		Rounds: []*quiz.Round{
+			{Title: "First", Summary: "intro", Questions: []*quiz.Question{q1, q2}},
+			{Title: "Second", Questions: []*quiz.Question{q3}},
+		},
+	}
+	if err := quizStore.CreateQuiz(t.Context(), qz); err != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", err)
+	}
+
+	rounds, err := quizStore.ListRoundsByQuiz(t.Context(), qz.ID)
+	if err != nil {
+		t.Fatalf("ListRoundsByQuiz err = %v, want nil", err)
+	}
+	if got, want := len(rounds), 2; got != want {
+		t.Fatalf("len(rounds) = %d, want %d (no stray default round)", got, want)
+	}
+	if got, want := rounds[0].Title, "First"; got != want {
+		t.Errorf("rounds[0].Title = %q, want %q", got, want)
+	}
+	if got, want := rounds[0].Summary, "intro"; got != want {
+		t.Errorf("rounds[0].Summary = %q, want %q", got, want)
+	}
+	if got, want := rounds[0].Position, 0; got != want {
+		t.Errorf("rounds[0].Position = %d, want %d", got, want)
+	}
+	if got, want := rounds[1].Title, "Second"; got != want {
+		t.Errorf("rounds[1].Title = %q, want %q", got, want)
+	}
+	if got, want := rounds[1].Position, 1; got != want {
+		t.Errorf("rounds[1].Position = %d, want %d", got, want)
+	}
+
+	questions, err := quizStore.ListQuestions(t.Context(), qz.ID)
+	if err != nil {
+		t.Fatalf("ListQuestions err = %v, want nil", err)
+	}
+	if got, want := len(questions), 3; got != want {
+		t.Fatalf("len(questions) = %d, want %d", got, want)
+	}
+	roundByID := map[int64]string{rounds[0].ID: "First", rounds[1].ID: "Second"}
+	wantRound := map[string]string{"Q1": "First", "Q2": "First", "Q3": "Second"}
+	for _, qs := range questions {
+		if got, want := roundByID[qs.RoundID], wantRound[qs.Text]; got != want {
+			t.Errorf("question %q in round %q, want %q", qs.Text, got, want)
+		}
+	}
+}
+
 func TestQuizStore_CreateQuestion_LandsInDefaultGroup(t *testing.T) {
 	t.Parallel()
 
@@ -215,7 +282,7 @@ func TestQuizStore_ListRoundsByQuiz(t *testing.T) {
 func TestQuizStore_UpdateRound(t *testing.T) {
 	t.Parallel()
 
-	t.Run("updates title, break text and position", func(t *testing.T) {
+	t.Run("updates title, summary and position", func(t *testing.T) {
 		t.Parallel()
 
 		db := dbtest.Open(t)

@@ -57,13 +57,13 @@ Fields:
 - title (string, required)
 - description (string, required)
 - timeLimitSeconds (integer, optional) - default answer window in seconds; per-question override below wins
-- questions (array, in play order, required) - each has:
-    - text (string, required)
-    - options (array of {text, correct}, required)
-    - timeLimitSeconds (integer, optional) - overrides the quiz default for this question
-- breaks (array, optional) - interludes between questions, each has:
-    - position (integer) - 0 means before question 1; N (> 0) means after the Nth question (the Nth entry in the questions array)
-    - text (string, optional) - shown to the player on the break screen
+- rounds (array, in play order, required) - each named round has:
+    - title (string, required)
+    - summary (string, optional) - shown to the player between rounds
+    - questions (array, in play order, required) - each has:
+        - text (string, required)
+        - options (array of {text, correct}, required)
+        - timeLimitSeconds (integer, optional) - overrides the quiz default for this question
 
 Example shape:
 
@@ -78,10 +78,11 @@ Generate a quiz about: [REPLACE WITH YOUR TOPIC]</code></pre>
             <li><code class="font-mono text-[0.8rem]">title</code> - string, required. Slug is derived server-side.</li>
             <li><code class="font-mono text-[0.8rem]">description</code> - string, required.</li>
             <li><code class="font-mono text-[0.8rem]">timeLimitSeconds</code> - integer, optional. Quiz-wide default answer window.</li>
-            <li><code class="font-mono text-[0.8rem]">questions[].text</code> - string, required.</li>
-            <li><code class="font-mono text-[0.8rem]">questions[].timeLimitSeconds</code> - integer, optional. Overrides the quiz default.</li>
-            <li><code class="font-mono text-[0.8rem]">questions[].options[]</code> - array of <code class="font-mono text-[0.8rem]">{text, correct}</code>. At least one option must be correct.</li>
-            <li><code class="font-mono text-[0.8rem]">breaks[]</code> - optional array. Position 0 = before question 1; N = after the Nth question. Each slot accepts at most one break.</li>
+            <li><code class="font-mono text-[0.8rem]">rounds[].title</code> - string, required. Names the round.</li>
+            <li><code class="font-mono text-[0.8rem]">rounds[].summary</code> - string, optional. Shown to the player between rounds.</li>
+            <li><code class="font-mono text-[0.8rem]">rounds[].questions[].text</code> - string, required.</li>
+            <li><code class="font-mono text-[0.8rem]">rounds[].questions[].timeLimitSeconds</code> - integer, optional. Overrides the quiz default.</li>
+            <li><code class="font-mono text-[0.8rem]">rounds[].questions[].options[]</code> - array of <code class="font-mono text-[0.8rem]">{text, correct}</code>. At least one option must be correct.</li>
         </ul>
     </section>
 {{end}}

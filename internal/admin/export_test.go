@@ -83,6 +83,9 @@ type QuizImportPayload = quizImportPayload
 // QuizImportQuestionPayload is the question half of [QuizImportPayload].
 type QuizImportQuestionPayload = quizImportQuestionPayload
 
+// QuizImportRoundPayload is the round half of [QuizImportPayload] (#546).
+type QuizImportRoundPayload = quizImportRoundPayload
+
 // QuizImportOptionPayload is the option half of [QuizImportPayload].
 type QuizImportOptionPayload = quizImportOptionPayload
 
