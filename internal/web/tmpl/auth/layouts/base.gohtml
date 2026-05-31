@@ -34,6 +34,11 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@500;600;700;800;900&display=swap">
     <link rel="stylesheet" href="/assets/css/app.css">
+    {{/* cooldown.js ticks the rate-limit "Wait Ns" submit buttons down
+         and re-enables them at zero. It self-noops on auth pages with no
+         [data-cooldown] element, so loading it on every auth page is
+         fine. */}}
+    <script type="module" src="/assets/js/cooldown.js" defer></script>
     <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
 </head>
 <body class="bg-bg text-text font-sans antialiased min-h-screen leading-relaxed">
