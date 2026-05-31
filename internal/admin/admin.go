@@ -142,6 +142,8 @@ func navSection(path string) string {
 		return "quizzes"
 	case strings.HasPrefix(path, "/admin/players"):
 		return "players"
+	case strings.HasPrefix(path, "/admin/invites"):
+		return "invites"
 	case strings.HasPrefix(path, "/admin/email"):
 		return "email"
 	case strings.HasPrefix(path, "/admin/settings"):

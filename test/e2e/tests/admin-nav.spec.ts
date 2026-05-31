@@ -1,11 +1,12 @@
 import { test, expect } from './fixtures';
 import { registerAdmin } from './helpers';
 
-// #517 — persistent admin top nav. The three real sections (Quizzes,
-// Players, Email) must be reachable from any admin page via the navbar.
-// Email was previously orphaned (linked only by typing the URL), so the
-// nav link is the load-bearing addition this spec guards.
-test('admin top nav reaches all three sections', async ({ page, browserName }) => {
+// #517 / #582 — persistent admin top nav. The real sections (Quizzes,
+// Players, Invites, Email) must be reachable from any admin page via the
+// navbar. Email was orphaned before #517 and Invites before #582 (each
+// linked only by typing the URL or the dashboard card), so the nav links
+// are the load-bearing additions this spec guards.
+test('admin top nav reaches all sections', async ({ page, browserName }) => {
   const username = `e2e-admin-nav-${browserName}`;
 
   await registerAdmin(page, username);
@@ -19,6 +20,11 @@ test('admin top nav reaches all three sections', async ({ page, browserName }) =
 
   await nav.getByRole('link', { name: 'Players' }).first().click();
   await expect(page).toHaveURL(/\/admin\/players$/);
+
+  // Invites was orphaned before #582 — assert the nav links it and it loads.
+  await nav.getByRole('link', { name: 'Invites' }).first().click();
+  await expect(page).toHaveURL(/\/admin\/invites$/);
+  await expect(page.getByRole('heading', { name: 'Invites', level: 1 })).toBeVisible();
 
   // Email was orphaned before #517 — assert the nav links it and it loads.
   await nav.getByRole('link', { name: 'Email' }).first().click();
@@ -37,4 +43,9 @@ test('admin nav marks the active section', async ({ page, browserName }) => {
   await page.goto('/admin/players');
   await expect(nav.getByRole('link', { name: 'Players' }).first()).toHaveAttribute('aria-current', 'page');
   await expect(nav.getByRole('link', { name: 'Quizzes' }).first()).not.toHaveAttribute('aria-current', 'page');
+
+  // Invites highlights its own section too (#582).
+  await page.goto('/admin/invites');
+  await expect(nav.getByRole('link', { name: 'Invites' }).first()).toHaveAttribute('aria-current', 'page');
+  await expect(nav.getByRole('link', { name: 'Players' }).first()).not.toHaveAttribute('aria-current', 'page');
 });
