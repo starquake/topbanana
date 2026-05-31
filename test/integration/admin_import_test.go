@@ -280,8 +280,8 @@ func TestAdminImport_Integration(t *testing.T) {
 
 	t.Run("rejects an unknown breaks field", func(t *testing.T) {
 		t.Parallel()
-		// Breaks were replaced by rounds (#444) and removed from the
-		// import wire shape. A payload still carrying `breaks` is
+		// Breaks were replaced by rounds (#444, #546) and never existed
+		// in the import wire shape. A payload still carrying `breaks` is
 		// rejected by DisallowUnknownFields, so a host pasting an
 		// old-format document finds out at import time rather than
 		// silently dropping the field.
@@ -305,6 +305,175 @@ func TestAdminImport_Integration(t *testing.T) {
 			ctx, t, client, importURL, breaksJSON,
 			http.StatusBadRequest,
 			[]string{"invalid JSON", `&#34;breaks&#34;`},
+		)
+	})
+
+	t.Run("rounds round-trip", func(t *testing.T) {
+		t.Parallel()
+		// #546: a payload with rounds[] creates those named rounds with
+		// their summaries and assigns each round's questions in payload
+		// order. The quiz view renders round titles, summaries, and the
+		// question texts, so scraping it confirms the whole tree persisted.
+		csrf := fetchCSRFToken(ctx, t, client, importURL)
+		const roundsJSON = `{
+  "title": "Rounds Round-Trip",
+  "description": "Import a quiz authored as named rounds.",
+  "rounds": [
+    {
+      "title": "Geography",
+      "summary": "Where in the world.",
+      "questions": [
+        {
+          "text": "Capital of France?",
+          "options": [
+            { "text": "Paris",  "correct": true  },
+            { "text": "Lyon",   "correct": false }
+          ]
+        },
+        {
+          "text": "Capital of Italy?",
+          "options": [
+            { "text": "Rome",   "correct": true  },
+            { "text": "Milan",  "correct": false }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Science",
+      "summary": "A harder finish.",
+      "questions": [
+        {
+          "text": "Chemical symbol for water?",
+          "options": [
+            { "text": "H2O",  "correct": true  },
+            { "text": "CO2",  "correct": false }
+          ]
+        }
+      ]
+    }
+  ]
+}`
+		form := url.Values{}
+		form.Add("json", roundsJSON)
+		form.Add("csrf_token", csrf)
+		req, err := http.NewRequestWithContext(
+			ctx, http.MethodPost, importURL, strings.NewReader(form.Encode()),
+		)
+		if err != nil {
+			t.Fatalf("NewRequest err = %v, want nil", err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("POST import client.Do err = %v, want nil", err)
+		}
+		if cerr := resp.Body.Close(); cerr != nil {
+			t.Errorf("Body.Close err = %v, want nil", cerr)
+		}
+		if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
+			t.Fatalf("POST import status = %d, want %d", got, want)
+		}
+		quizPath := resp.Header.Get("Location")
+		if !strings.HasPrefix(quizPath, "/admin/quizzes/") {
+			t.Fatalf("Location = %q, want prefix /admin/quizzes/", quizPath)
+		}
+
+		viewReq, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.BaseURL+quizPath, nil)
+		if err != nil {
+			t.Fatalf("NewRequest err = %v, want nil", err)
+		}
+		viewResp, err := client.Do(viewReq)
+		if err != nil {
+			t.Fatalf("GET quiz view client.Do err = %v, want nil", err)
+		}
+		viewBytes, err := io.ReadAll(viewResp.Body)
+		if err != nil {
+			t.Fatalf("ReadAll err = %v, want nil", err)
+		}
+		if cerr := viewResp.Body.Close(); cerr != nil {
+			t.Errorf("Body.Close err = %v, want nil", cerr)
+		}
+		if got, want := viewResp.StatusCode, http.StatusOK; got != want {
+			t.Fatalf("GET quiz view status = %d, want %d", got, want)
+		}
+		body := string(viewBytes)
+		for _, want := range []string{
+			"Geography", "Where in the world.",
+			"Science", "A harder finish.",
+			"Capital of France?", "Capital of Italy?", "Chemical symbol for water?",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("quiz view body should contain %q", want)
+			}
+		}
+		// The authored rounds replace the default round rather than
+		// sitting alongside an empty "Round 1": exactly two rounds.
+		if want := "2 rounds"; !strings.Contains(body, want) {
+			t.Errorf("quiz view body should contain %q (no stray default round)", want)
+		}
+	})
+
+	t.Run("rejects questions and rounds together", func(t *testing.T) {
+		t.Parallel()
+		// #546: questions[] and rounds[] are mutually exclusive.
+		const bothJSON = `{
+  "title": "Both Lists",
+  "description": "Has both a flat questions list and rounds.",
+  "questions": [
+    { "text": "Q", "options": [ { "text": "A", "correct": true } ] }
+  ],
+  "rounds": [
+    {
+      "title": "R1",
+      "questions": [
+        { "text": "Q2", "options": [ { "text": "B", "correct": true } ] }
+      ]
+    }
+  ]
+}`
+		postImportRejection(
+			ctx, t, client, importURL, bothJSON,
+			http.StatusBadRequest,
+			[]string{"validation errors", "either"},
+		)
+	})
+
+	t.Run("rejects a round missing a title", func(t *testing.T) {
+		t.Parallel()
+		// #546: every round needs a title.
+		const noTitleJSON = `{
+  "title": "Round Without Title",
+  "description": "A round with no title is rejected.",
+  "rounds": [
+    {
+      "questions": [
+        { "text": "Q", "options": [ { "text": "A", "correct": true } ] }
+      ]
+    }
+  ]
+}`
+		postImportRejection(
+			ctx, t, client, importURL, noTitleJSON,
+			http.StatusBadRequest,
+			[]string{"validation errors", "title is required"},
+		)
+	})
+
+	t.Run("rejects a round with no questions", func(t *testing.T) {
+		t.Parallel()
+		// #546: every round needs at least one question.
+		const emptyRoundJSON = `{
+  "title": "Empty Round",
+  "description": "A round with no questions is rejected.",
+  "rounds": [
+    { "title": "Lonely", "questions": [] }
+  ]
+}`
+		postImportRejection(
+			ctx, t, client, importURL, emptyRoundJSON,
+			http.StatusBadRequest,
+			[]string{"validation errors", "at least one question is required"},
 		)
 	})
 

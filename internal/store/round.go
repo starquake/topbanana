@@ -91,8 +91,8 @@ func (s *QuizStore) CreateRound(ctx context.Context, g *quiz.Round) error {
 	return nil
 }
 
-// UpdateRound updates an existing round's mutable fields (title, break
-// text, position). A position change that collides with another round on
+// UpdateRound updates an existing round's mutable fields (title, summary,
+// position). A position change that collides with another round on
 // the same quiz surfaces as [quiz.ErrRoundPositionTaken]; a stale id maps
 // to [quiz.ErrUpdatingRoundNoRowsAffected] (#444).
 func (s *QuizStore) UpdateRound(ctx context.Context, g *quiz.Round) error {

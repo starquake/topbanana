@@ -533,7 +533,7 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 	qz.TimeLimitSeconds = int(row.TimeLimitSeconds)
 	qz.Visibility = row.Visibility
 
-	// Every quiz needs a default round (#444): questions.group_id is NOT
+	// Every quiz needs a default round (#444): questions.round_id is NOT
 	// NULL and execCreateQuestion resolves it via GetDefaultRound.
 	// The migration only backfills rounds for quizzes that existed at
 	// migrate time, so newly created quizzes must seed their own here.
@@ -545,6 +545,14 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 		return fmt.Errorf("failed to create default question round: %w", err)
 	}
 
+	if len(qz.Rounds) > 0 {
+		if err = s.createAuthoredRounds(ctx, q, qz); err != nil {
+			return fmt.Errorf("failed to create authored rounds: %w", err)
+		}
+
+		return nil
+	}
+
 	for _, qs := range qz.Questions {
 		qs.ID = 0
 		qs.QuizID = qz.ID
@@ -552,6 +560,56 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 
 	if err = s.handleQuestions(ctx, q, qz); err != nil {
 		return fmt.Errorf("failed to handle questions: %w", err)
+	}
+
+	return nil
+}
+
+// createAuthoredRounds persists a quiz whose rounds were authored
+// explicitly (the JSON-import rounds[] path, #546). The first authored
+// round reuses the default round seeded just above - renamed in place to
+// the authored title and summary - so the quiz never ends up with a
+// stray empty "Round 1" alongside the authored ones. The remaining
+// rounds are created at positions 1..N. Each round's questions are
+// inserted with that round's id, preserving their quiz-wide Position.
+func (s *QuizStore) createAuthoredRounds(ctx context.Context, q *db.Queries, qz *quiz.Quiz) error {
+	defaultRound, err := q.GetDefaultRound(ctx, qz.ID)
+	if err != nil {
+		return fmt.Errorf("failed to resolve default round for quiz %d: %w", qz.ID, err)
+	}
+
+	for i, round := range qz.Rounds {
+		roundID := defaultRound.ID
+		if i == 0 {
+			if _, err = q.UpdateRound(ctx, db.UpdateRoundParams{
+				Title:    round.Title,
+				Summary:  round.Summary,
+				Position: defaultRound.Position,
+				ID:       defaultRound.ID,
+			}); err != nil {
+				return fmt.Errorf("failed to rename default round: %w", err)
+			}
+		} else {
+			row, createErr := q.CreateRound(ctx, db.CreateRoundParams{
+				QuizID:   qz.ID,
+				Position: int64(i),
+				Title:    round.Title,
+				Summary:  round.Summary,
+			})
+			if createErr != nil {
+				return fmt.Errorf("failed to create round %q: %w", round.Title, createErr)
+			}
+			roundID = row.ID
+		}
+
+		for _, qs := range round.Questions {
+			qs.ID = 0
+			qs.QuizID = qz.ID
+			qs.RoundID = roundID
+			if err = s.execCreateQuestion(ctx, q, qs); err != nil {
+				return fmt.Errorf("failed to create question in round %q: %w", round.Title, err)
+			}
+		}
 	}
 
 	return nil

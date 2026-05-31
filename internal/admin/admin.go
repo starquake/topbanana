@@ -1194,8 +1194,21 @@ type quizImportPayload struct {
 	// Optional in the payload - omitted maps to
 	// [quiz.DefaultTimeLimitSeconds], matching the admin form's
 	// new-quiz default.
-	TimeLimitSeconds *int                        `json:"timeLimitSeconds,omitempty"`
-	Questions        []quizImportQuestionPayload `json:"questions"`
+	TimeLimitSeconds *int `json:"timeLimitSeconds,omitempty"`
+	// Questions and Rounds are mutually exclusive (#546). Supply
+	// Questions for a flat quiz (every question lands in the default
+	// round, the original behaviour) or Rounds to author named rounds
+	// with their own questions - never both, never neither.
+	Questions []quizImportQuestionPayload `json:"questions,omitempty"`
+	Rounds    []quizImportRoundPayload    `json:"rounds,omitempty"`
+}
+
+type quizImportRoundPayload struct {
+	Title   string `json:"title"`
+	Summary string `json:"summary,omitempty"`
+	// Questions for this round, in play order. Required and non-empty;
+	// quiz-wide positions are assigned 1..N across all rounds (#546).
+	Questions []quizImportQuestionPayload `json:"questions"`
 }
 
 type quizImportQuestionPayload struct {
@@ -1222,37 +1235,45 @@ const quizImportExample = `{
   "title": "European Capitals",
   "description": "A quick tour of EU capitals.",
   "timeLimitSeconds": 10,
-  "breaks": [
-    { "position": 0, "text": "Welcome! Each question has a 10-second clock unless noted." },
-    { "position": 2, "text": "Halfway there. The next question gives you a bit more time." }
-  ],
-  "questions": [
+  "rounds": [
     {
-      "text": "Which city sits on the river Vltava?",
-      "options": [
-        { "text": "Bratislava", "correct": false },
-        { "text": "Budapest",   "correct": false },
-        { "text": "Prague",     "correct": true  },
-        { "text": "Warsaw",     "correct": false }
+      "title": "Warm-up",
+      "summary": "An easy start before things speed up.",
+      "questions": [
+        {
+          "text": "Which city sits on the river Vltava?",
+          "options": [
+            { "text": "Bratislava", "correct": false },
+            { "text": "Budapest",   "correct": false },
+            { "text": "Prague",     "correct": true  },
+            { "text": "Warsaw",     "correct": false }
+          ]
+        },
+        {
+          "text": "Which two of these are capitals?",
+          "options": [
+            { "text": "Lisbon",   "correct": true  },
+            { "text": "Porto",    "correct": false },
+            { "text": "Helsinki", "correct": true  },
+            { "text": "Tampere",  "correct": false }
+          ]
+        }
       ]
     },
     {
-      "text": "Which two of these are capitals?",
-      "options": [
-        { "text": "Lisbon",   "correct": true  },
-        { "text": "Porto",    "correct": false },
-        { "text": "Helsinki", "correct": true  },
-        { "text": "Tampere",  "correct": false }
-      ]
-    },
-    {
-      "text": "Which capital is furthest north?",
-      "timeLimitSeconds": 20,
-      "options": [
-        { "text": "Reykjavik",  "correct": true  },
-        { "text": "Oslo",       "correct": false },
-        { "text": "Stockholm",  "correct": false },
-        { "text": "Copenhagen", "correct": false }
+      "title": "Final stretch",
+      "summary": "One harder question to finish.",
+      "questions": [
+        {
+          "text": "Which capital is furthest north?",
+          "timeLimitSeconds": 20,
+          "options": [
+            { "text": "Reykjavik",  "correct": true  },
+            { "text": "Oslo",       "correct": false },
+            { "text": "Stockholm",  "correct": false },
+            { "text": "Copenhagen", "correct": false }
+          ]
+        }
       ]
     }
   ]
@@ -1379,7 +1400,12 @@ func parseImportPayload(
 		return parsedImport{}, false
 	}
 
-	qz := quizFromImportPayload(payload)
+	qz, err := quizFromImportPayload(payload)
+	if err != nil {
+		renderErr(w, r, jsonText, fmt.Sprintf("validation errors: %v", err))
+
+		return parsedImport{}, false
+	}
 	if problems := (&quizForm{quiz: qz}).Valid(r.Context()); len(problems) > 0 {
 		renderErr(w, r, jsonText, fmt.Sprintf("validation errors: %v", problems))
 
@@ -1389,15 +1415,38 @@ func parseImportPayload(
 	return parsedImport{JSONText: jsonText, Quiz: qz}, true
 }
 
-// quizFromImportPayload converts the wire-shape payload into the
-// domain model. The slug is always derived from the title - the
-// payload doesn't carry one because LLMs are bad at picking a stable
-// slug and the admin form does the same derivation. Question
-// positions are assigned 1..N in the order questions appear in the
-// JSON. The default round every quiz starts with (migration
-// 20260530000000) holds the imported questions; the store assigns each
-// new question to it (#444).
-func quizFromImportPayload(p quizImportPayload) *quiz.Quiz {
+var (
+	// errImportQuestionsOrRounds is returned when the payload supplies
+	// both a top-level questions[] and rounds[], or neither. The two are
+	// mutually exclusive (#546): one flat list or named rounds, not a mix.
+	errImportQuestionsOrRounds = errors.New(
+		"provide either a top-level questions array or a rounds array, not both and not neither",
+	)
+	// errImportRoundTitleRequired is returned when an imported round
+	// carries no title (#546).
+	errImportRoundTitleRequired = errors.New("title is required")
+	// errImportRoundNoQuestions is returned when an imported round
+	// carries no questions (#546).
+	errImportRoundNoQuestions = errors.New("at least one question is required")
+)
+
+// quizFromImportPayload converts the wire-shape payload into the domain
+// model. The slug is always derived from the title - the payload doesn't
+// carry one because LLMs are bad at picking a stable slug and the admin
+// form does the same derivation. Question positions are assigned 1..N in
+// payload order across all rounds.
+//
+// When the payload carries rounds[], the rounds are mapped onto
+// Quiz.Rounds (each with its own questions) and the same questions are
+// also flattened onto Quiz.Questions so the shared quizForm.Valid runs
+// every per-question rule. With a top-level questions[] instead, the
+// store drops everything in the quiz's default round, the original
+// behaviour (#546).
+func quizFromImportPayload(p quizImportPayload) (*quiz.Quiz, error) {
+	if (len(p.Questions) == 0) == (len(p.Rounds) == 0) {
+		return nil, errImportQuestionsOrRounds
+	}
+
 	// #99: honour the payload's per-quiz default when present; fall
 	// back to the project value so authors who don't care can omit
 	// the field entirely and still pass Quiz.Valid's range check.
@@ -1412,27 +1461,77 @@ func quizFromImportPayload(p quizImportPayload) *quiz.Quiz {
 		TimeLimitSeconds: timeLimit,
 	}
 
-	qz.Questions = make([]*quiz.Question, 0, len(p.Questions))
-	for i, qIn := range p.Questions {
-		qs := &quiz.Question{
-			Text:     qIn.Text,
-			ImageURL: qIn.ImageURL,
-			Position: i + 1,
-			// nil -> "inherit the quiz default", the same semantics
-			// the admin form's blank input carries (#99).
-			TimeLimitSeconds: qIn.TimeLimitSeconds,
+	if len(p.Rounds) > 0 {
+		if err := fillQuizFromRounds(qz, p.Rounds); err != nil {
+			return nil, err
 		}
-		qs.Options = make([]*quiz.Option, 0, len(qIn.Options))
-		for _, oIn := range qIn.Options {
-			qs.Options = append(qs.Options, &quiz.Option{
-				Text:    oIn.Text,
-				Correct: oIn.Correct,
-			})
-		}
-		qz.Questions = append(qz.Questions, qs)
+
+		return qz, nil
 	}
 
-	return qz
+	qz.Questions = make([]*quiz.Question, 0, len(p.Questions))
+	pos := 0
+	for _, qIn := range p.Questions {
+		pos++
+		qz.Questions = append(qz.Questions, questionFromImportPayload(qIn, pos))
+	}
+
+	return qz, nil
+}
+
+// fillQuizFromRounds maps the authored rounds onto qz.Rounds and mirrors
+// every question onto qz.Questions with a quiz-wide 1..N position in
+// payload order, so the shared quizForm.Valid sees the full question set
+// (#546). A round must carry a non-empty title and at least one question.
+func fillQuizFromRounds(qz *quiz.Quiz, rounds []quizImportRoundPayload) error {
+	qz.Rounds = make([]*quiz.Round, 0, len(rounds))
+	pos := 0
+	for i, rIn := range rounds {
+		if rIn.Title == "" {
+			return fmt.Errorf("round %d: %w", i+1, errImportRoundTitleRequired)
+		}
+		if len(rIn.Questions) == 0 {
+			return fmt.Errorf("round %q: %w", rIn.Title, errImportRoundNoQuestions)
+		}
+
+		round := &quiz.Round{
+			Position:  i,
+			Title:     rIn.Title,
+			Summary:   rIn.Summary,
+			Questions: make([]*quiz.Question, 0, len(rIn.Questions)),
+		}
+		for _, qIn := range rIn.Questions {
+			pos++
+			qs := questionFromImportPayload(qIn, pos)
+			round.Questions = append(round.Questions, qs)
+			qz.Questions = append(qz.Questions, qs)
+		}
+		qz.Rounds = append(qz.Rounds, round)
+	}
+
+	return nil
+}
+
+// questionFromImportPayload maps one import question onto the domain
+// type at the given quiz-wide position.
+func questionFromImportPayload(qIn quizImportQuestionPayload, position int) *quiz.Question {
+	qs := &quiz.Question{
+		Text:     qIn.Text,
+		ImageURL: qIn.ImageURL,
+		Position: position,
+		// nil -> "inherit the quiz default", the same semantics
+		// the admin form's blank input carries (#99).
+		TimeLimitSeconds: qIn.TimeLimitSeconds,
+	}
+	qs.Options = make([]*quiz.Option, 0, len(qIn.Options))
+	for _, oIn := range qIn.Options {
+		qs.Options = append(qs.Options, &quiz.Option{
+			Text:    oIn.Text,
+			Correct: oIn.Correct,
+		})
+	}
+
+	return qs
 }
 
 // quizFormData backs the quizform.gohtml template. Error is non-empty
