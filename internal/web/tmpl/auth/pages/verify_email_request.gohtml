@@ -26,7 +26,7 @@
                 <input type="email" name="email" value="{{.Email}}" autocomplete="email" required
                        class="form-input">
             </label>
-            <button type="submit" class="btn-primary" {{if .SubmitDisabled}}disabled aria-disabled="true"{{end}}>
+            <button type="submit" class="btn-primary" data-cooldown="{{.SubmitWaitSecs}}" data-cooldown-label="Send verification link" {{if .SubmitDisabled}}disabled aria-disabled="true"{{end}}>
                 {{if .SubmitDisabled}}Wait {{.SubmitWaitSecs}}s{{else}}Send verification link{{end}}
             </button>
         </form>

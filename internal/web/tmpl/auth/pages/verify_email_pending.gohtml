@@ -22,7 +22,7 @@
 
         <form action="/verify-email/resend" method="POST" class="mb-6">
             <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-            <button type="submit" class="btn-primary" {{if .ResendDisabled}}disabled aria-disabled="true"{{end}}>
+            <button type="submit" class="btn-primary" data-cooldown="{{.ResendWaitSeconds}}" data-cooldown-label="Resend verification email" {{if .ResendDisabled}}disabled aria-disabled="true"{{end}}>
                 {{if .ResendDisabled}}Wait {{.ResendWaitSeconds}}s{{else}}Resend verification email{{end}}
             </button>
         </form>
