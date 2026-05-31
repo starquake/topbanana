@@ -24,7 +24,7 @@
             <label class="flex flex-col gap-1 text-sm">
                 <span class="text-text-dim">Email</span>
                 <input type="email" name="email" value="{{.Email}}" autocomplete="email" required
-                       class="input">
+                       class="form-input">
             </label>
             <button type="submit" class="btn-primary" {{if .SubmitDisabled}}disabled aria-disabled="true"{{end}}>
                 {{if .SubmitDisabled}}Wait {{.SubmitWaitSecs}}s{{else}}Send verification link{{end}}
