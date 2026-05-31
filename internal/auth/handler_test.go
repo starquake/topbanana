@@ -324,7 +324,7 @@ func TestHandleRegisterForm_GET_RendersForm(t *testing.T) {
 		t.Errorf("status = %d, want %d", got, want)
 	}
 	body := rec.Body.String()
-	if want := `name="username"`; !strings.Contains(body, want) {
+	if want := `name="display_name"`; !strings.Contains(body, want) {
 		t.Errorf("body = %q, want substring %q", body, want)
 	}
 	// passwordHelp template func renders the form's help text from the
@@ -344,7 +344,7 @@ func TestHandleRegisterSubmit_FirstUser_BecomesAdmin(t *testing.T) {
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 
 	rec := postForm(t, handler, "/register", url.Values{
-		"username":         {"alice"},
+		"display_name":     {"alice"},
 		"email":            {"alice@example.test"},
 		"password":         {"correctbattery"},
 		"password_confirm": {"correctbattery"},
@@ -416,7 +416,7 @@ func TestHandleRegisterSubmit_SecondUser_DefaultsToPlayer(t *testing.T) {
 
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 	rec := postForm(t, handler, "/register", url.Values{
-		"username":         {"bob"},
+		"display_name":     {"bob"},
 		"email":            {"bob@example.test"},
 		"password":         {"correctbattery"},
 		"password_confirm": {"correctbattery"},
@@ -450,7 +450,7 @@ func TestHandleRegisterSubmit_AdminEmailsEnv_PromotesToAdmin(t *testing.T) {
 		RegisterDeps{AdminEmails: []string{"alice@example.test", "carol@example.test"}},
 	)
 	rec := postForm(t, handler, "/register", url.Values{
-		"username":         {"carol"},
+		"display_name":     {"carol"},
 		"email":            {"carol@example.test"},
 		"password":         {"correctbattery"},
 		"password_confirm": {"correctbattery"},
@@ -474,7 +474,7 @@ func TestHandleRegisterSubmit_PasswordTooShort(t *testing.T) {
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 
 	rec := postForm(t, handler, "/register", url.Values{
-		"username":         {"alice"},
+		"display_name":     {"alice"},
 		"email":            {"alice@example.test"},
 		"password":         {"short"},
 		"password_confirm": {"short"},
@@ -504,7 +504,7 @@ func TestHandleRegisterSubmit_PasswordTooLong(t *testing.T) {
 
 	longPassword := strings.Repeat("a", MaxPasswordLength+1)
 	rec := postForm(t, handler, "/register", url.Values{
-		"username":         {"alice"},
+		"display_name":     {"alice"},
 		"email":            {"alice@example.test"},
 		"password":         {longPassword},
 		"password_confirm": {longPassword},
@@ -532,7 +532,7 @@ func TestHandleRegisterSubmit_DuplicateUsername(t *testing.T) {
 
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 	rec := postForm(t, handler, "/register", url.Values{
-		"username":         {"alice"},
+		"display_name":     {"alice"},
 		"email":            {"alice@example.test"},
 		"password":         {"correctbattery"},
 		"password_confirm": {"correctbattery"},
@@ -565,7 +565,7 @@ func TestHandleRegisterSubmit_DuplicateEmail(t *testing.T) {
 		RegisterDeps{Mailer: sender},
 	)
 	rec := postForm(t, handler, "/register", url.Values{
-		"username":         {"bob"},
+		"display_name":     {"bob"},
 		"email":            {"shared@example.test"},
 		"password":         {"correctbattery"},
 		"password_confirm": {"correctbattery"},
@@ -604,7 +604,7 @@ func TestHandleRegisterSubmit_RejectsInvalidEmail(t *testing.T) {
 	store := newStubPlayerStore()
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 	rec := postForm(t, handler, "/register", url.Values{
-		"username":         {"alice"},
+		"display_name":     {"alice"},
 		"email":            {"not-an-email"},
 		"password":         {"correctbattery"},
 		"password_confirm": {"correctbattery"},
@@ -625,7 +625,7 @@ func TestHandleRegisterSubmit_MatchingPasswords_CreatesPlayer(t *testing.T) {
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 
 	rec := postForm(t, handler, "/register", url.Values{
-		"username":         {"alice"},
+		"display_name":     {"alice"},
 		"email":            {"alice@example.test"},
 		"password":         {"correctbattery"},
 		"password_confirm": {"correctbattery"},
@@ -645,7 +645,7 @@ func TestHandleRegisterSubmit_MismatchedPasswords_Rejects(t *testing.T) {
 
 	password := "correctbattery"
 	rec := postForm(t, handler, "/register", url.Values{
-		"username":         {"alice"},
+		"display_name":     {"alice"},
 		"email":            {"alice@example.test"},
 		"password":         {password},
 		"password_confirm": {"correctbatterydifferent"},
@@ -684,7 +684,7 @@ func TestHandleRegisterSubmit_LowercasesAndTrimsEmail(t *testing.T) {
 	store := newStubPlayerStore()
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 	rec := postForm(t, handler, "/register", url.Values{
-		"username":         {"alice"},
+		"display_name":     {"alice"},
 		"email":            {"  ALICE@Example.Test "},
 		"password":         {"correctbattery"},
 		"password_confirm": {"correctbattery"},
@@ -723,7 +723,7 @@ func TestHandleRegisterSubmit_ClaimsAnonymousSession(t *testing.T) {
 	cookie := rec.Result().Cookies()[0]
 
 	form := url.Values{
-		"username":         {"alice"},
+		"display_name":     {"alice"},
 		"email":            {"alice@example.test"},
 		"password":         {"correctbattery"},
 		"password_confirm": {"correctbattery"},
@@ -786,7 +786,7 @@ func TestHandleRegisterSubmit_ClaimWithTakenUsername(t *testing.T) {
 	cookie := rec.Result().Cookies()[0]
 
 	form := url.Values{
-		"username":         {"alice"}, // already taken by the seeded credentialled row
+		"display_name":     {"alice"}, // already taken by the seeded credentialled row
 		"email":            {"new-alice@example.test"},
 		"password":         {"correctbattery"},
 		"password_confirm": {"correctbattery"},
@@ -848,7 +848,7 @@ func TestHandleRegisterSubmit_ClaimAlreadyClaimed_FallsBackToCreate(t *testing.T
 	cookie := rec.Result().Cookies()[0]
 
 	form := url.Values{
-		"username":         {"latecomer"},
+		"display_name":     {"latecomer"},
 		"email":            {"latecomer@example.test"},
 		"password":         {"correctbattery"},
 		"password_confirm": {"correctbattery"},
@@ -1306,7 +1306,7 @@ func TestHandleRegisterSubmit_BlankUsername_GeneratesPetname(t *testing.T) {
 	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
 
 	rec := postForm(t, handler, "/register", url.Values{
-		"username":         {"   "},
+		"display_name":     {"   "},
 		"email":            {"petname@example.test"},
 		"password":         {"correctbattery"},
 		"password_confirm": {"correctbattery"},
@@ -1333,7 +1333,7 @@ func TestHandleRegisterSubmit_PasswordExactlyMinLength(t *testing.T) {
 
 	password := strings.Repeat("a", MinPasswordLength) // exactly 13 characters
 	rec := postForm(t, handler, "/register", url.Values{
-		"username":         {"alice"},
+		"display_name":     {"alice"},
 		"email":            {"alice@example.test"},
 		"password":         {password},
 		"password_confirm": {password},

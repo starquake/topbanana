@@ -42,7 +42,7 @@ export async function registerAdmin(page: Page, username: string): Promise<void>
 export async function registerForPending(page: Page, username: string): Promise<void> {
   await page.goto('/register');
   await page.locator('input[name=email]').fill(`${username}@example.test`);
-  await page.locator('input[name=username]').fill(username);
+  await page.locator('input[name=display_name]').fill(username);
   await page.locator('input[name=password]').fill(PASSWORD);
   await page.locator('input[name=password_confirm]').fill(PASSWORD);
   await page.locator('button[type=submit]').click();

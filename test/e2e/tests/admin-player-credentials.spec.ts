@@ -14,7 +14,7 @@ async function registerPlayer(
     const playerPage = await playerContext.newPage();
     await playerPage.goto('/register');
     await playerPage.locator('input[name=email]').fill(`${username}@example.test`);
-    await playerPage.locator('input[name=username]').fill(username);
+    await playerPage.locator('input[name=display_name]').fill(username);
     await playerPage.locator('input[name=password]').fill(PASSWORD);
     await playerPage.locator('input[name=password_confirm]').fill(PASSWORD);
     await playerPage.locator('button[type=submit]').click();
@@ -49,7 +49,7 @@ test('admin sets a player display name and password from the detail page', async
 
   // Rename via the new display-name form; PRG returns with a flash and
   // the persisted name shows in the page heading.
-  const nameInput = page.getByLabel('Set display name');
+  const nameInput = page.getByLabel('Name', { exact: true });
   await expect(nameInput).toHaveValue(targetUsername);
   await nameInput.fill(renamedUsername);
   await page.getByRole('button', { name: 'Save display name' }).click();

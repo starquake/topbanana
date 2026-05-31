@@ -80,7 +80,7 @@ func postRename(t *testing.T, store auth.PlayerStore, newName string) (string, *
 	csrfMgr := csrf.New([]byte("test-key-32-bytes-test-key-32byt"), false)
 	handler := HandleProfileUsername(logger, csrfMgr, store)
 
-	form := url.Values{"username": {newName}}
+	form := url.Values{"display_name": {newName}}
 	req := httptest.NewRequestWithContext(
 		t.Context(), http.MethodPost, "/profile/username",
 		strings.NewReader(form.Encode()),

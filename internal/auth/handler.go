@@ -150,7 +150,7 @@ func HandleRegisterSubmit(
 			return
 		}
 
-		rawUsername := r.PostFormValue("username")
+		rawUsername := r.PostFormValue("display_name")
 		rawEmail := r.PostFormValue("email")
 		password := r.PostFormValue("password")
 		passwordConfirm := r.PostFormValue("password_confirm")

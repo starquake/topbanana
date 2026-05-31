@@ -93,8 +93,8 @@
                     </form>
                     <form method="POST" action="/admin/players/{{.Player.ID}}/username" class="flex flex-col gap-2">
                         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                        <label for="username-input" class="text-text-dim text-xs uppercase tracking-[0.14em]">Set display name</label>
-                        <input id="username-input" type="text" name="username" required value="{{.Player.Username}}"
+                        <label for="display-name-input" class="text-text-dim text-xs uppercase tracking-[0.14em]">Name</label>
+                        <input id="display-name-input" type="text" name="display_name" required value="{{.Player.Username}}"
                                class="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text">
                         <button type="submit" class="btn-ghost">Save display name</button>
                     </form>
