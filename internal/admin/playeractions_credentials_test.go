@@ -109,7 +109,7 @@ func postUsername(t *testing.T, store *credStubStore, username string) *httptest
 	t.Helper()
 	handler := HandlePlayerSetUsername(slog.New(slog.DiscardHandler), store, newCredFlash(t))
 
-	form := url.Values{"username": {username}}
+	form := url.Values{"display_name": {username}}
 	req := httptest.NewRequestWithContext(
 		t.Context(), http.MethodPost, "/admin/players/7/username",
 		strings.NewReader(form.Encode()),

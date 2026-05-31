@@ -184,7 +184,7 @@ func HandlePlayerSetUsername(
 			return
 		}
 
-		name := strings.TrimSpace(r.PostFormValue("username"))
+		name := strings.TrimSpace(r.PostFormValue("display_name"))
 
 		_, err := store.RenamePlayer(r.Context(), playerID, name)
 		switch {
@@ -480,7 +480,7 @@ type newPlayerCreateInput struct {
 
 func newPlayerInput(r *http.Request) newPlayerCreateInput {
 	in := newPlayerCreateInput{
-		Username: strings.TrimSpace(r.PostFormValue("username")),
+		Username: strings.TrimSpace(r.PostFormValue("display_name")),
 		Email:    strings.ToLower(strings.TrimSpace(r.PostFormValue("email"))),
 		Password: r.PostFormValue("password"),
 	}

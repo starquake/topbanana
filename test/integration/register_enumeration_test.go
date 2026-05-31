@@ -70,7 +70,7 @@ func registerRaw(
 	token := fetchCSRFToken(ctx, t, client, baseURL+"/register")
 
 	form := url.Values{}
-	form.Add("username", username)
+	form.Add("display_name", username)
 	form.Add("email", email)
 	form.Add("password", password)
 	form.Add("password_confirm", password)

@@ -79,8 +79,8 @@
         <form method="POST" action="/admin/players" class="flex flex-col gap-4 max-w-md">
             <input type="hidden" name="csrf_token" value="{{csrfToken}}">
             <label class="flex flex-col gap-1 text-sm">
-                <span class="text-text-dim text-xs uppercase tracking-[0.14em]">Display name (optional)</span>
-                <input type="text" name="username" autocomplete="off"
+                <span class="text-text-dim text-xs uppercase tracking-[0.14em]">Name (optional)</span>
+                <input type="text" name="display_name" autocomplete="off"
                        class="rounded-md border border-border bg-surface px-3 py-2 text-text" placeholder="Auto-generated if left blank">
             </label>
             <label class="flex flex-col gap-1 text-sm">

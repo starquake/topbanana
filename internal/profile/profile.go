@@ -102,7 +102,7 @@ func HandleProfileUsername(
 			return
 		}
 
-		raw := r.PostFormValue("username")
+		raw := r.PostFormValue("display_name")
 		cleaned := strings.TrimSpace(raw)
 
 		updated, err := players.RenamePlayer(r.Context(), player.ID, cleaned)

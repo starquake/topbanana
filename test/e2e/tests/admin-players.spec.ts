@@ -27,7 +27,7 @@ test('admin marks an unverified player verified via the detail view', async ({ p
     const targetPage = await targetContext.newPage();
     await targetPage.goto('/register');
     await targetPage.locator('input[name=email]').fill(`${targetUsername}@example.test`);
-    await targetPage.locator('input[name=username]').fill(targetUsername);
+    await targetPage.locator('input[name=display_name]').fill(targetUsername);
     await targetPage.locator('input[name=password]').fill(PASSWORD);
     await targetPage.locator('input[name=password_confirm]').fill(PASSWORD);
     await targetPage.locator('button[type=submit]').click();

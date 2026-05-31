@@ -417,11 +417,11 @@ func postAcceptInvite(
 	t.Helper()
 	csrfToken := fetchCSRFToken(ctx, t, client, baseURL+"/login")
 	form := url.Values{
-		"csrf_token": {csrfToken},
-		"token":      {rawToken},
-		"username":   {username},
-		"password":   {invitePassword},
-		"confirm":    {invitePassword},
+		"csrf_token":   {csrfToken},
+		"token":        {rawToken},
+		"display_name": {username},
+		"password":     {invitePassword},
+		"confirm":      {invitePassword},
 	}
 	req := newFormReq(ctx, t, baseURL+"/accept-invite", form)
 	resp, err := client.Do(req)

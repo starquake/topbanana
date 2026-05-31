@@ -131,7 +131,7 @@ func HandleAcceptInviteSubmit(logger *slog.Logger, csrfMgr *csrf.Manager, deps A
 			return
 		}
 
-		username := r.PostFormValue("username")
+		username := r.PostFormValue("display_name")
 		password := r.PostFormValue("password")
 		confirm := r.PostFormValue("confirm")
 		if msg, ok := validateAcceptInviteInput(username, password, confirm); !ok {

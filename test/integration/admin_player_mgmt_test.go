@@ -258,9 +258,9 @@ func TestAdminPlayerMgmt_CreatePlayer(t *testing.T) {
 		ctx, t, adminClient, srv.BaseURL,
 		srv.BaseURL+"/admin/players",
 		url.Values{
-			"username": {"create-target"},
-			"email":    {"create-target@example.test"},
-			"password": {"create-target-pass-123"},
+			"display_name": {"create-target"},
+			"email":        {"create-target@example.test"},
+			"password":     {"create-target-pass-123"},
 		},
 	)
 
@@ -471,7 +471,14 @@ func TestAdminPlayerMgmt_SetUsername(t *testing.T) {
 	target := lookupPlayerID(ctx, t, srv.DBURI, "setname-target")
 	usernameURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/username"
 
-	res := postAdminAction(ctx, t, adminClient, srv.BaseURL, usernameURL, url.Values{"username": {"renamed-target"}})
+	res := postAdminAction(
+		ctx,
+		t,
+		adminClient,
+		srv.BaseURL,
+		usernameURL,
+		url.Values{"display_name": {"renamed-target"}},
+	)
 	if got, want := res.StatusCode, http.StatusSeeOther; got != want {
 		t.Fatalf("set-username status = %d, want %d", got, want)
 	}

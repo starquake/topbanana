@@ -59,8 +59,8 @@ func TestProfile_Integration(t *testing.T) {
 		if got, want := snap.status, http.StatusOK; got != want {
 			t.Fatalf("status = %d, want %d", got, want)
 		}
-		if !strings.Contains(snap.body, `name="username"`) {
-			t.Error("body missing username input")
+		if !strings.Contains(snap.body, `name="display_name"`) {
+			t.Error("body missing display name input")
 		}
 		// The value attribute must contain the signed-in admin's name
 		// so the input arrives pre-filled.
@@ -153,8 +153,8 @@ func profilePOST(ctx context.Context, t *testing.T, client *http.Client, baseURL
 	// current nonce cookie is fresh.
 	priming := profileGET(ctx, t, client, baseURL)
 	form := url.Values{
-		"csrf_token": {priming.csrf},
-		"username":   {username},
+		"csrf_token":   {priming.csrf},
+		"display_name": {username},
 	}
 	req, err := http.NewRequestWithContext(
 		ctx, http.MethodPost, baseURL+"/profile/username", strings.NewReader(form.Encode()),
