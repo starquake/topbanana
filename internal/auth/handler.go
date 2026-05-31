@@ -16,6 +16,7 @@ import (
 	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/envtag"
+	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/session"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
@@ -180,38 +181,76 @@ func HandleRegisterSubmit(
 			return
 		}
 
+		renderers := registerRenderers{form: render, pending: pending, sessions: sessions}
+
 		player, err := claimOrCreatePlayer(
 			r, players, sessions, input.CleanedUsername, input.CleanedEmail, hashed, role,
 		)
 		if err != nil {
-			if msg, ok := registerCollisionMessage(err); ok {
-				render.render(w, r, http.StatusConflict, formData{
-					Title:      "Register",
-					Username:   input.CleanedUsername,
-					Email:      input.CleanedEmail,
-					Message:    msg,
-					ShowGoogle: deps.GoogleEnabled,
-				})
-
-				return
-			}
-			logger.ErrorContext(r.Context(), "error creating player", slog.Any("err", err))
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			handleRegisterError(w, r, logger, renderers, deps, input, err)
 
 			return
 		}
 
 		dispatchVerifyEmail(r.Context(), logger, deps, player.ID, input.CleanedEmail)
-		// Hard email-verification gate (#574): no session until the
-		// address is proven. Clear unconditionally so the anonymous
-		// upgrade path (ClaimPlayer) does not leave the pre-existing
-		// anonymous cookie live and sign the unverified account in.
-		sessions.Clear(w)
-		pending.render(w, r, http.StatusOK, registerPendingData{
-			Title: "Verify your email",
-			Email: input.CleanedEmail,
-		})
+		renderers.renderPending(w, r, input.CleanedEmail)
 	})
+}
+
+// registerRenderers bundles the two register-flow renderers and the
+// session manager so the error/pending helpers stay under revive's
+// argument-count cap.
+type registerRenderers struct {
+	form     *templateRenderer
+	pending  *templateRenderer
+	sessions *session.Manager
+}
+
+// renderPending clears any prior session and renders the confirmation
+// page. The hard email-verification gate (#574) means no session is set
+// until the address is proven; clearing unconditionally signs out the
+// anonymous-upgrade path (ClaimPlayer) so a pre-existing anonymous cookie
+// cannot leave the unverified account signed in.
+func (rr registerRenderers) renderPending(w http.ResponseWriter, r *http.Request, email string) {
+	rr.sessions.Clear(w)
+	rr.pending.render(w, r, http.StatusOK, registerPendingData{
+		Title: "Verify your email",
+		Email: email,
+	})
+}
+
+// handleRegisterError writes the response for a failed
+// claimOrCreatePlayer. ErrEmailTaken is account-existence-opaque: a
+// distinct 409 would turn the form into an enumeration oracle, so it
+// responds exactly as the fresh-signup branch does and notifies the real
+// owner out of band instead (#573). ErrUsernameTaken re-renders the form
+// with a 409 - a display name is a public handle, not an enumeration
+// secret. Anything else is a 500.
+func handleRegisterError(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	renderers registerRenderers,
+	deps RegisterDeps,
+	input registerInput,
+	err error,
+) {
+	switch {
+	case errors.Is(err, ErrEmailTaken):
+		dispatchRegisterExisting(r.Context(), logger, deps, input.CleanedEmail)
+		renderers.renderPending(w, r, input.CleanedEmail)
+	case errors.Is(err, ErrUsernameTaken):
+		renderers.form.render(w, r, http.StatusConflict, formData{
+			Title:      "Register",
+			Username:   input.CleanedUsername,
+			Email:      input.CleanedEmail,
+			Message:    "That display name is already taken.",
+			ShowGoogle: deps.GoogleEnabled,
+		})
+	default:
+		logger.ErrorContext(r.Context(), "error creating player", slog.Any("err", err))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
 }
 
 // registerPendingData backs the post-register confirmation page shown
@@ -260,18 +299,39 @@ func dispatchVerifyEmail(
 	}()
 }
 
-// registerCollisionMessage maps the register-time conflict sentinels
-// onto the user-facing banner. ok=false when err is something else
-// and the caller should treat it as a 500.
-func registerCollisionMessage(err error) (string, bool) {
-	switch {
-	case errors.Is(err, ErrUsernameTaken):
-		return "That display name is already taken.", true
-	case errors.Is(err, ErrEmailTaken):
-		return "Email is already registered. Try logging in.", true
+// dispatchRegisterExisting notifies the owner of an already-registered
+// address that someone attempted to register with it. The collided
+// address IS the existing owner's verified address, so sending to
+// recipient reaches the real owner; the unauthenticated submitter
+// learns nothing. Runs on a detached goroutine with a bounded timeout,
+// mirroring dispatchVerifyEmail, so the email-collision response
+// returns on the same timing path as the success response. A nil
+// Mailer (unit tests) skips the send; a send failure is logged at Warn
+// and never surfaced.
+func dispatchRegisterExisting(
+	ctx context.Context,
+	logger *slog.Logger,
+	deps RegisterDeps,
+	recipient string,
+) {
+	if deps.Mailer == nil {
+		return
 	}
-
-	return "", false
+	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), verifyEmailDispatchTimeout)
+	go func() {
+		defer cancel()
+		msg := mailer.Message{
+			To:      recipient,
+			Subject: "Someone tried to register with your Top Banana! email",
+			Body: "Someone tried to create a Top Banana! account with this email address.\n\n" +
+				"An account already exists for this address. If it was you, sign in or reset your password instead.\n\n" +
+				"If it was not you, no action is needed.\n",
+			Kind: mailer.KindRegisterExisting,
+		}
+		if err := deps.Mailer.Send(bg, msg); err != nil {
+			logger.WarnContext(bg, "register-existing notice failed", slog.Any("err", err))
+		}
+	}()
 }
 
 // claimOrCreatePlayer upgrades an anonymous session row via ClaimPlayer

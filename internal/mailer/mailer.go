@@ -26,6 +26,7 @@ const (
 	KindInvite            Kind = "invite"
 	KindTest              Kind = "test"
 	KindEmailChangeNotice Kind = "email_change_notice"
+	KindRegisterExisting  Kind = "register_existing"
 )
 
 // ErrNotConfigured is the sentinel returned by the no-op mailer's Send
