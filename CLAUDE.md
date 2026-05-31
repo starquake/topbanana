@@ -47,6 +47,8 @@ Pick the right layer:
 
 One-off scripts are reserved for genuinely interactive debugging that can't be expressed as a test (e.g. eyeballing a visual layout, attaching a debugger). If you find yourself writing the same `curl` twice, it's a test.
 
+**New HTTP handler tests are integration tests, not stub-driven unit tests.** A handler whose contract is "wire the request to the store and render" is better pinned end-to-end (router -> middleware -> handler -> store -> DB) than against a stub that re-states what the store should return. Existing stub-driven unit tests stay until they break during an unrelated refactor -- porting them wholesale isn't worth the CI-runtime hit. Decided in #30.
+
 ## Workflow
 
 When starting work on a new ticket: switch to `main`, run `git pull`, then create a new branch. Branch names use dashes (not slashes) and are prefixed with the ticket number — e.g. `1-fix-bugs`. Ask for the ticket number if not provided. Omit the prefix if there is no ticket.
