@@ -72,14 +72,16 @@ func resetTokenLivePreflight(r *http.Request, logger *slog.Logger, tokens ResetT
 // hashes the new password, then calls ConsumeResetToken which atomically
 // marks the token consumed, rotates password_hash, and bumps
 // session_version (so every cookie minted before the reset becomes
-// invalid the moment the transaction commits). The handler does NOT
-// log the user in - it 303s to /login so the new credentials are
-// exercised on the next request.
+// invalid the moment the transaction commits). On success it logs the
+// reset-token holder in with the post-rotation session_version and 303s
+// to their role landing; every OTHER session stays invalidated by the
+// rotation.
 func HandleResetSubmit(
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
 	tokens ResetTokenStore,
 	sessions *session.Manager,
+	players PlayerStore,
 ) http.Handler {
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/reset_password.gohtml")
 	invalid := newTemplateRenderer(logger, csrfMgr, "auth/pages/reset_password_invalid.gohtml")
@@ -112,13 +114,10 @@ func HandleResetSubmit(
 			return
 		}
 
-		_, err = tokens.ConsumeResetToken(r.Context(), HashResetToken(raw), hashed)
+		playerID, err := tokens.ConsumeResetToken(r.Context(), HashResetToken(raw), hashed)
 		switch {
 		case err == nil:
-			// Clear any current session so the user lands on a clean
-			// /login and exercises the new password.
-			sessions.Clear(w)
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			autoLoginAfterReset(w, r, logger, sessions, players, playerID)
 		case errors.Is(err, ErrResetTokenInvalid):
 			invalid.render(w, r, http.StatusGone, resetPageData{Title: "Reset link"})
 		default:
@@ -126,6 +125,36 @@ func HandleResetSubmit(
 			http.Error(w, "internal error", http.StatusInternalServerError)
 		}
 	})
+}
+
+// autoLoginAfterReset signs the reset-token holder in after a
+// successful ConsumeResetToken and 303s to their role landing. It
+// re-fetches the player so the session is minted with the
+// post-rotation session_version - using the pre-rotation value would
+// have the new cookie rejected on the very next request. The password
+// change is already committed at this point, so any failure here
+// (lookup or otherwise) must not surface as an error that hides the
+// successful reset: we log it and fall back to clearing the session
+// and redirecting to /login, where the just-set password works.
+func autoLoginAfterReset(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	sessions *session.Manager,
+	players PlayerStore,
+	playerID int64,
+) {
+	player, err := players.GetPlayerByID(r.Context(), playerID)
+	if err != nil {
+		logger.ErrorContext(r.Context(), "reset-password auto-login lookup failed",
+			slog.Int64("player_id", playerID), slog.Any("err", err))
+		sessions.Clear(w)
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+
+		return
+	}
+	sessions.Set(w, player.ID, player.SessionVersion)
+	http.Redirect(w, r, landingPathFor(player.Role), http.StatusSeeOther)
 }
 
 // validateResetInput pins the same length rule the register form

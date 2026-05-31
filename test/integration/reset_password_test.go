@@ -12,11 +12,13 @@ import (
 	"time"
 
 	"github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/session"
 )
 
 // TestResetPassword_HappyPath registers a player, mints a reset token
 // against the store, posts the new password to /reset-password, and
-// asserts the rotation lands + the old session is invalidated. The
+// asserts the rotation lands, the reset-token holder is auto-logged-in
+// onto their role landing, and every OTHER session is invalidated. The
 // new login with the new password is exercised end-to-end.
 func TestResetPassword_HappyPath(t *testing.T) {
 	t.Parallel()
@@ -25,6 +27,8 @@ func TestResetPassword_HappyPath(t *testing.T) {
 		"REGISTRATION_ENABLED": "true",
 	})
 
+	// First password-bearing registrant is promoted to admin, so the
+	// reset-token holder's role landing is /admin/quizzes.
 	signed := authClient(t)
 	registerForRedirect(ctx, t, signed, srv.BaseURL, "reset-happy", "old-pass-12345")
 	verifyPlayerEmail(ctx, t, srv.DBURI, "reset-happy")
@@ -54,8 +58,12 @@ func TestResetPassword_HappyPath(t *testing.T) {
 	if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
 	}
-	if got, want := resp.Header.Get("Location"), "/login"; got != want {
+	// Auto-login lands the holder on their role page, not /login.
+	if got, want := resp.Header.Get("Location"), "/admin/quizzes"; got != want {
 		t.Errorf("Location = %q, want %q", got, want)
+	}
+	if !hasSessionCookie(resp) {
+		t.Errorf("reset response did not set a %q cookie; auto-login must mint a session", session.CookieName)
 	}
 
 	refreshed, err := stores.Players.GetPlayerByID(ctx, player.ID)
@@ -64,6 +72,14 @@ func TestResetPassword_HappyPath(t *testing.T) {
 	}
 	if got, want := refreshed.SessionVersion, startingVersion+1; got != want {
 		t.Errorf("session_version = %d, want %d (reset must bump)", got, want)
+	}
+
+	// The auto-login cookie carries the post-rotation version, so the
+	// holder can reach a gated page without bouncing to /login.
+	gated := getWith(ctx, t, client, srv.BaseURL+"/admin/quizzes")
+	defer gated.Body.Close() //nolint:errcheck // cleanup.
+	if got, want := gated.StatusCode, http.StatusOK; got != want {
+		t.Errorf("post-reset gated status = %d, want %d (auto-login must reach the landing)", got, want)
 	}
 
 	// The signed-in client's old cookie carried the pre-reset version;
@@ -83,6 +99,19 @@ func TestResetPassword_HappyPath(t *testing.T) {
 	if got, want := loc, "/admin/quizzes"; got != want {
 		t.Errorf("post-reset login Location = %q, want %q", got, want)
 	}
+}
+
+// hasSessionCookie reports whether resp sets a non-empty session
+// cookie. A cleared session writes the same cookie name with an empty
+// value + MaxAge<0, so an empty value does not count as a live session.
+func hasSessionCookie(resp *http.Response) bool {
+	for _, c := range resp.Cookies() {
+		if c.Name == session.CookieName && c.Value != "" {
+			return true
+		}
+	}
+
+	return false
 }
 
 // TestResetPassword_RejectsConsumedReplay pins the single-use rule:
