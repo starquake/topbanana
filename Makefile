@@ -68,15 +68,22 @@ sqlc-generate: $(SQLC_BIN)
 # ship (it did once - the deleted ListAllPlayers/CountAllPlayers funcs
 # lingered in internal/db/players.sql.go). Mirrors the tailwind-check
 # gap-filler for the CSS layer.
+#
+# `sqlc diff` compares freshly-generated output against the files on disk
+# and exits non-zero when they differ - in-memory, without writing or
+# consulting git. The previous `generate` + `git diff` approach conflated
+# "stale" with "regenerated but not yet committed", so every feature
+# branch that touched internal/queries/ failed this check locally until
+# the result was committed (a false failure on #546/#548). Comparing the
+# generated output to the working tree fixes that while staying correct
+# on CI, where the files are already committed.
 .PHONY: sqlc-check
 sqlc-check: $(SQLC_BIN)
-	@$(SQLC_BIN) generate
-	@if ! git diff --quiet -- internal/db; then \
-	    echo "ERROR: internal/db is out of date - run \`make sqlc-generate\` and commit the result."; \
-	    git diff -- internal/db; \
+	@$(SQLC_BIN) diff || { \
+	    echo "ERROR: internal/db is out of date - run \`make sqlc-generate\` to regenerate it."; \
 	    exit 1; \
-	fi; \
-	echo "internal/db is up to date."
+	}
+	@echo "internal/db is up to date."
 
 # Advisory grep for cross-file rationale in comments (#177). Server-side
 # comments that explain what the frontend does with a value rot silently
