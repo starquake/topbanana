@@ -10,53 +10,130 @@ import (
 
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/mailer"
 )
 
-// invitePageData backs the inviteform.gohtml template. Notice carries the
-// success banner after a send; Error carries a validation/conflict banner.
-// Email is preserved across re-renders so a rejected submit does not drop
-// the admin's input.
+// InviteFlashCookieName is the one-shot banner cookie for the invite
+// management page. Scoped to /admin/invites so a revoke/resend PRG hop and
+// the create-submit PRG hop both see it, without leaking onto the rest of
+// /admin.
+const (
+	InviteFlashCookieName = "topbanana_admin_invite_flash"
+	InviteFlashCookiePath = "/admin/invites"
+)
+
+// inviteRow is one row in the pending-invites table. The InvitedBy label
+// is pre-resolved ("invited by X" or empty) so the template stays
+// declarative.
+type inviteRow struct {
+	ID        int64
+	Email     string
+	InvitedBy string
+	CreatedAt time.Time
+	ExpiresAt time.Time
+}
+
+// invitePageData backs the invites.gohtml management page. Pending lists
+// the open invites; Email/Note preserve the create-form input across a
+// rejected submit; Notice/Error carry the PRG banner.
 type invitePageData struct {
-	Title  string
-	Email  string
-	Note   string
-	Notice string
-	Error  string
+	Title   string
+	Pending []inviteRow
+	Email   string
+	Note    string
+	Notice  string
+	Error   string
 }
 
-// HandleInviteForm renders GET /admin/invites/new: a minimal "invite a
-// player" form (email + optional note). The full pending-list management
-// UI is a later slice (#318).
-func HandleInviteForm(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
-	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/inviteform.gohtml")
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		render.Render(w, r, http.StatusOK, invitePageData{Title: "Admin Dashboard - Invite a player"})
-	})
-}
-
-// InviteDeps bundles the dependencies HandleInviteSubmit needs so the
-// constructor stays under revive's argument cap. Mirrors the
+// InviteDeps bundles the dependencies the invite management handlers need
+// so the constructors stay under revive's argument cap. Mirrors the
 // adminPlayerDeps packaging in the routes layer.
 type InviteDeps struct {
 	Players auth.PlayerStore
 	Invites auth.InviteStore
 	Sender  auth.VerifyEmailSender
+	Flash   *auth.SignedFlash
 	BaseURL string
+}
+
+// HandleInvitesPage renders GET /admin/invites: the canonical invite
+// management page, showing the pending-invite list and the create form on
+// one screen. The one-shot flash banner (set by the create/resend/revoke
+// PRG hops) is read and cleared here.
+func HandleInvitesPage(logger *slog.Logger, csrfMgr *csrf.Manager, deps InviteDeps) http.Handler {
+	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/invites.gohtml")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, ok := loadInvitesPage(w, r, logger, csrfMgr, deps.Invites)
+		if !ok {
+			return
+		}
+		if deps.Flash != nil {
+			if fr := deps.Flash.Read(w, r); fr.OK {
+				data.Notice = fr.Notice
+				data.Error = fr.Err
+			}
+		}
+		render.Render(w, r, http.StatusOK, data)
+	})
+}
+
+// loadInvitesPage runs the pending-invite list query and builds the
+// template data. On a store failure it writes a 500 page and returns
+// ok=false so the caller can early-return.
+func loadInvitesPage(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	invites auth.InviteStore,
+) (invitePageData, bool) {
+	pending, err := invites.ListPendingInvites(r.Context())
+	if err != nil {
+		logger.ErrorContext(r.Context(), "error listing pending invites", slog.Any("err", err))
+		render500(w, r, logger, csrfMgr)
+
+		return invitePageData{}, false
+	}
+
+	rows := make([]inviteRow, 0, len(pending))
+	for _, p := range pending {
+		rows = append(rows, inviteRow{
+			ID:        p.ID,
+			Email:     p.Email,
+			InvitedBy: p.InviterUsername,
+			CreatedAt: p.CreatedAt,
+			ExpiresAt: p.ExpiresAt,
+		})
+	}
+
+	return invitePageData{
+		Title:   "Admin Dashboard - Invites",
+		Pending: rows,
+	}, true
+}
+
+// HandleInviteRedirect serves GET /admin/invites/new as a 301 to the
+// canonical /admin/invites page. Slice 1 linked the dashboard at
+// /admin/invites/new; this keeps any bookmarked link working without a
+// second copy of the form.
+func HandleInviteRedirect() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/admin/invites", http.StatusMovedPermanently)
+	})
 }
 
 // HandleInviteSubmit handles POST /admin/invites. Reads email (+ optional
 // note); rejects an email that already has an account ("sign in instead"),
 // otherwise mints + persists an invite and dispatches the invite email,
-// attributing it to the session admin. On success it re-renders the form
-// with a confirmation banner. SendInviteEmail commits the invite row
-// before the send, so a misconfigured-SMTP failure (ErrNotConfigured)
+// attributing it to the session admin. On success it flashes a
+// confirmation and 303-redirects to GET /admin/invites (PRG) so the new
+// pending invite shows up in the list. SendInviteEmail commits the invite
+// row before the send, so a misconfigured-SMTP failure (ErrNotConfigured)
 // still leaves an acceptable invite; that case is reported as a notice so
 // the operator knows the link exists even though the mail did not go out.
 func HandleInviteSubmit(logger *slog.Logger, csrfMgr *csrf.Manager, deps InviteDeps) http.Handler {
-	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/inviteform.gohtml")
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		actor, ok := requireAdminActor(w, r)
 		if !ok {
@@ -65,9 +142,8 @@ func HandleInviteSubmit(logger *slog.Logger, csrfMgr *csrf.Manager, deps InviteD
 		r.Body = http.MaxBytesReader(w, r.Body, maxFormSize)
 		if err := r.ParseForm(); err != nil {
 			logger.InfoContext(r.Context(), "invite form parse failed", slog.Any("err", err))
-			render.Render(w, r, http.StatusBadRequest, invitePageData{
-				Title: "Admin Dashboard - Invite a player",
-				Error: "Form was malformed or too large.",
+			renderInviteFormError(w, r, logger, csrfMgr, deps.Invites, http.StatusBadRequest, inviteFormError{
+				msg: "Form was malformed or too large.",
 			})
 
 			return
@@ -76,20 +152,16 @@ func HandleInviteSubmit(logger *slog.Logger, csrfMgr *csrf.Manager, deps InviteD
 		email := strings.ToLower(strings.TrimSpace(r.PostFormValue("email")))
 		note := strings.TrimSpace(r.PostFormValue("note"))
 		if !auth.LooksLikeEmail(email) {
-			render.Render(w, r, http.StatusBadRequest, invitePageData{
-				Title: "Admin Dashboard - Invite a player",
-				Email: email, Note: note,
-				Error: "Enter a valid email address.",
+			renderInviteFormError(w, r, logger, csrfMgr, deps.Invites, http.StatusBadRequest, inviteFormError{
+				email: email, note: note, msg: "Enter a valid email address.",
 			})
 
 			return
 		}
 
-		if msg, ok := inviteRejectExisting(r.Context(), logger, deps.Players, email); !ok {
-			render.Render(w, r, http.StatusConflict, invitePageData{
-				Title: "Admin Dashboard - Invite a player",
-				Email: email, Note: note,
-				Error: msg,
+		if msg, allow := inviteRejectExisting(r.Context(), logger, deps.Players, email); !allow {
+			renderInviteFormError(w, r, logger, csrfMgr, deps.Invites, http.StatusConflict, inviteFormError{
+				email: email, note: note, msg: msg,
 			})
 
 			return
@@ -97,19 +169,131 @@ func HandleInviteSubmit(logger *slog.Logger, csrfMgr *csrf.Manager, deps InviteD
 
 		result := sendInvite(r.Context(), logger, deps, email, note, actor.ID)
 		if !result.ok {
-			render.Render(w, r, http.StatusInternalServerError, invitePageData{
-				Title: "Admin Dashboard - Invite a player",
-				Email: email, Note: note,
-				Error: result.banner,
+			renderInviteFormError(w, r, logger, csrfMgr, deps.Invites, http.StatusInternalServerError, inviteFormError{
+				email: email, note: note, msg: result.banner,
 			})
 
 			return
 		}
-		render.Render(w, r, http.StatusOK, invitePageData{
-			Title:  "Admin Dashboard - Invite a player",
-			Notice: result.banner,
-		})
+		setInviteNotice(deps.Flash, w, result.banner)
+		http.Redirect(w, r, "/admin/invites", http.StatusSeeOther)
 	})
+}
+
+// HandleInviteResend handles POST /admin/invites/{id}/resend. Mints a fresh
+// token, rotates the pending invite onto it, and dispatches the email with
+// the new link, killing the previously emailed one. A non-pending or
+// non-existent id flashes a clear "no longer pending" message instead of a
+// 500. PRG-redirects to /admin/invites either way.
+func HandleInviteResend(logger *slog.Logger, deps InviteDeps) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inviteID, ok := handlers.ParseIDFromPath(w, r, logger, "id")
+		if !ok {
+			return
+		}
+		if _, ok = requireAdminActor(w, r); !ok {
+			return
+		}
+
+		err := auth.ResendInviteEmail(r.Context(), deps.Invites, deps.Sender, deps.BaseURL, inviteID, time.Now().UTC())
+		switch {
+		case err == nil:
+			setInviteNotice(deps.Flash, w,
+				"Invite resent. The new link is valid for 7 days; the old link no longer works.")
+		case errors.Is(err, auth.ErrInviteNotPending):
+			setInviteError(deps.Flash, w, "That invite is no longer pending.")
+		case errors.Is(err, mailer.ErrNotConfigured):
+			logger.WarnContext(r.Context(), "invite resent but email not sent: SMTP not configured",
+				slog.Int64("invite_id", inviteID))
+			setInviteNotice(
+				deps.Flash,
+				w,
+				"Invite link rotated, but email is not configured so no message was sent. The old link no longer works.",
+			)
+		default:
+			logger.ErrorContext(r.Context(), "invite resend failed",
+				slog.Int64("invite_id", inviteID), slog.Any("err", err))
+			setInviteError(deps.Flash, w, "Could not resend the invite. Try again.")
+		}
+		http.Redirect(w, r, "/admin/invites", http.StatusSeeOther)
+	})
+}
+
+// HandleInviteRevoke handles POST /admin/invites/{id}/revoke. Marks the
+// pending invite revoked so its link stops resolving. A non-pending or
+// non-existent id flashes a clear message instead of a 500. PRG-redirects
+// to /admin/invites either way.
+func HandleInviteRevoke(logger *slog.Logger, deps InviteDeps) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inviteID, ok := handlers.ParseIDFromPath(w, r, logger, "id")
+		if !ok {
+			return
+		}
+		if _, ok = requireAdminActor(w, r); !ok {
+			return
+		}
+
+		err := deps.Invites.RevokeInvite(r.Context(), inviteID)
+		switch {
+		case err == nil:
+			setInviteNotice(deps.Flash, w, "Invite revoked. Its link no longer works.")
+		case errors.Is(err, auth.ErrInviteNotPending):
+			setInviteError(deps.Flash, w, "That invite is no longer pending.")
+		default:
+			logger.ErrorContext(r.Context(), "invite revoke failed",
+				slog.Int64("invite_id", inviteID), slog.Any("err", err))
+			setInviteError(deps.Flash, w, "Could not revoke the invite. Try again.")
+		}
+		http.Redirect(w, r, "/admin/invites", http.StatusSeeOther)
+	})
+}
+
+// inviteFormError is the repopulated create-form input plus the inline
+// error banner for a rejected submit. Bundled so renderInviteFormError
+// stays under revive's argument cap.
+type inviteFormError struct {
+	email string
+	note  string
+	msg   string
+}
+
+// renderInviteFormError re-renders the management page at the given status
+// with the create form repopulated and an inline error banner. The pending
+// list is reloaded so the page stays complete on a rejected submit; a list
+// failure falls through to the 500 page.
+func renderInviteFormError(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	invites auth.InviteStore,
+	status int,
+	formErr inviteFormError,
+) {
+	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/invites.gohtml")
+	data, ok := loadInvitesPage(w, r, logger, csrfMgr, invites)
+	if !ok {
+		return
+	}
+	data.Email = formErr.email
+	data.Note = formErr.note
+	data.Error = formErr.msg
+	render.Render(w, r, status, data)
+}
+
+// setInviteNotice / setInviteError stash a one-shot banner for the next GET
+// /admin/invites. A nil flash (defence-in-depth against a misconfigured
+// wiring layer) is a no-op so the PRG redirect still lands.
+func setInviteNotice(flash *auth.SignedFlash, w http.ResponseWriter, msg string) {
+	if flash != nil {
+		flash.SetNotice(w, msg)
+	}
+}
+
+func setInviteError(flash *auth.SignedFlash, w http.ResponseWriter, msg string) {
+	if flash != nil {
+		flash.SetError(w, msg, 0)
+	}
 }
 
 // inviteRejectExisting reports whether an invite may proceed for email.

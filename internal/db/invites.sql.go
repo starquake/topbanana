@@ -125,3 +125,111 @@ func (q *Queries) GetLiveInviteByTokenHash(ctx context.Context, arg GetLiveInvit
 	err := row.Scan(&i.ID, &i.Email, &i.InvitedByPlayerID)
 	return i, err
 }
+
+const listPendingInvites = `-- name: ListPendingInvites :many
+SELECT
+    invites.id,
+    invites.email,
+    invites.invited_by_player_id,
+    players.username AS inviter_username,
+    invites.created_at,
+    invites.expires_at
+FROM invites
+LEFT JOIN players ON players.id = invites.invited_by_player_id
+WHERE invites.status = 'pending'
+ORDER BY invites.created_at DESC, invites.id DESC
+`
+
+type ListPendingInvitesRow struct {
+	ID                int64
+	Email             string
+	InvitedByPlayerID sql.NullInt64
+	InviterUsername   sql.NullString
+	CreatedAt         time.Time
+	ExpiresAt         time.Time
+}
+
+// Lists every still-pending invite for the admin management view (#318),
+// newest first. LEFT JOIN players surfaces the inviter's username for the
+// "invited by X" column; inviter_username is NULL when the invite carries
+// no actor (invited_by_player_id NULL) or the inviting admin's row has since
+// been deleted (ON DELETE SET NULL). Includes still-expired-but-not-swept
+// rows so the list matches what the sweep has actually pruned; the template
+// surfaces expires_at so the admin can tell a stale link apart.
+func (q *Queries) ListPendingInvites(ctx context.Context) ([]ListPendingInvitesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPendingInvites)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingInvitesRow
+	for rows.Next() {
+		var i ListPendingInvitesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.InvitedByPlayerID,
+			&i.InviterUsername,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const revokeInvite = `-- name: RevokeInvite :one
+UPDATE invites
+SET status = 'revoked'
+WHERE id = ?1
+  AND status = 'pending'
+RETURNING id
+`
+
+// Marks a pending invite revoked so its link stops resolving (#318). Only a
+// pending row moves; an already-accepted, already-revoked, or non-existent id
+// matches nothing and returns sql.ErrNoRows, which the handler maps to a clear
+// "no longer pending" flash rather than a 500. RETURNING id confirms exactly
+// one row changed.
+func (q *Queries) RevokeInvite(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, revokeInvite, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
+const rotateInviteToken = `-- name: RotateInviteToken :one
+UPDATE invites
+SET token_hash = ?1,
+    expires_at = ?2
+WHERE id = ?3
+  AND status = 'pending'
+RETURNING email
+`
+
+type RotateInviteTokenParams struct {
+	TokenHash string
+	ExpiresAt time.Time
+	ID        int64
+}
+
+// Resend path (#318): overwrites a pending invite's token hash and expiry with
+// a freshly minted pair. The new hash makes the new link live; the old hash no
+// longer matches any row, so the previously emailed link is dead (UNIQUE
+// token_hash means the new value cannot collide). Only a pending row moves; a
+// non-pending or non-existent id returns sql.ErrNoRows. RETURNING email lets
+// the handler dispatch the new link without a second read.
+func (q *Queries) RotateInviteToken(ctx context.Context, arg RotateInviteTokenParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, rotateInviteToken, arg.TokenHash, arg.ExpiresAt, arg.ID)
+	var email string
+	err := row.Scan(&email)
+	return email, err
+}

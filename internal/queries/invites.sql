@@ -53,3 +53,49 @@ RETURNING id;
 DELETE FROM invites
 WHERE status = 'pending'
   AND expires_at <= sqlc.arg('now');
+
+-- name: ListPendingInvites :many
+-- Lists every still-pending invite for the admin management view (#318),
+-- newest first. LEFT JOIN players surfaces the inviter's username for the
+-- "invited by X" column; inviter_username is NULL when the invite carries
+-- no actor (invited_by_player_id NULL) or the inviting admin's row has since
+-- been deleted (ON DELETE SET NULL). Includes still-expired-but-not-swept
+-- rows so the list matches what the sweep has actually pruned; the template
+-- surfaces expires_at so the admin can tell a stale link apart.
+SELECT
+    invites.id,
+    invites.email,
+    invites.invited_by_player_id,
+    players.username AS inviter_username,
+    invites.created_at,
+    invites.expires_at
+FROM invites
+LEFT JOIN players ON players.id = invites.invited_by_player_id
+WHERE invites.status = 'pending'
+ORDER BY invites.created_at DESC, invites.id DESC;
+
+-- name: RevokeInvite :one
+-- Marks a pending invite revoked so its link stops resolving (#318). Only a
+-- pending row moves; an already-accepted, already-revoked, or non-existent id
+-- matches nothing and returns sql.ErrNoRows, which the handler maps to a clear
+-- "no longer pending" flash rather than a 500. RETURNING id confirms exactly
+-- one row changed.
+UPDATE invites
+SET status = 'revoked'
+WHERE id = sqlc.arg('id')
+  AND status = 'pending'
+RETURNING id;
+
+-- name: RotateInviteToken :one
+-- Resend path (#318): overwrites a pending invite's token hash and expiry with
+-- a freshly minted pair. The new hash makes the new link live; the old hash no
+-- longer matches any row, so the previously emailed link is dead (UNIQUE
+-- token_hash means the new value cannot collide). Only a pending row moves; a
+-- non-pending or non-existent id returns sql.ErrNoRows. RETURNING email lets
+-- the handler dispatch the new link without a second read.
+UPDATE invites
+SET token_hash = sqlc.arg('token_hash'),
+    expires_at = sqlc.arg('expires_at')
+WHERE id = sqlc.arg('id')
+  AND status = 'pending'
+RETURNING email;

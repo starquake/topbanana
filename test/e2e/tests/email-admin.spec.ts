@@ -15,10 +15,11 @@ test('admin can open the email diagnostics page and see status + log', async ({ 
   await expect(page).toHaveURL(/\/admin\/email$/);
 
   await expect(page.getByRole('heading', { name: /email diagnostics/i })).toBeVisible();
-  // Two "disabled (no-op)" badges in e2e: SMTP is unwired AND BASE_URL
-  // is empty (#495). Pinning the count keeps the test honest if either
+  // One "disabled (no-op)" badge in e2e: SMTP is unwired. BASE_URL is
+  // configured per-worker (the invite flow needs it, #318), so its badge
+  // does not appear. Pinning the count keeps the test honest if SMTP
   // becomes configurable later.
-  await expect(page.getByText(/disabled \(no-op\)/i)).toHaveCount(2);
+  await expect(page.getByText(/disabled \(no-op\)/i)).toHaveCount(1);
 
   const recipient = page.locator('input[name=to]');
   await expect(recipient).toBeVisible();

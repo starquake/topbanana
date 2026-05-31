@@ -91,6 +91,59 @@ func TestSendInviteEmail_StoreFailureSkipsSend(t *testing.T) {
 	}
 }
 
+func TestResendInviteEmail_RotatesAndSends(t *testing.T) {
+	t.Parallel()
+
+	invites := &recordingInviteStore{rotateMail: "bob@example.test"}
+	mailerStub := &recordingSender{}
+	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
+
+	err := ResendInviteEmail(t.Context(), invites, mailerStub, "https://topbanana.example", 42, now)
+	if err != nil {
+		t.Fatalf("ResendInviteEmail err = %v, want nil", err)
+	}
+
+	if got, want := len(invites.rotated), 1; got != want {
+		t.Fatalf("invites.rotated len = %d, want %d", got, want)
+	}
+	rec := invites.rotated[0]
+	if got, want := rec.id, int64(42); got != want {
+		t.Errorf("RotateInviteToken id = %d, want %d", got, want)
+	}
+	if got, want := rec.expiresAt, now.Add(InviteTokenTTL); !got.Equal(want) {
+		t.Errorf("RotateInviteToken expiresAt = %v, want %v (7-day TTL)", got, want)
+	}
+	if got, want := len(rec.tokenHash), 64; got != want {
+		t.Errorf("RotateInviteToken tokenHash len = %d, want %d", got, want)
+	}
+
+	if got, want := len(mailerStub.sent), 1; got != want {
+		t.Fatalf("mailer.sent len = %d, want %d", got, want)
+	}
+	msg := mailerStub.sent[0]
+	if got, want := msg.To, "bob@example.test"; got != want {
+		t.Errorf("msg.To = %q, want %q (the rotated recipient)", got, want)
+	}
+	if !strings.Contains(msg.Body, "https://topbanana.example/accept-invite?token=") {
+		t.Errorf("msg.Body missing accept-invite link, got %q", msg.Body)
+	}
+}
+
+func TestResendInviteEmail_RotateFailureSkipsSend(t *testing.T) {
+	t.Parallel()
+
+	invites := &recordingInviteStore{rotateErr: ErrInviteNotPending}
+	mailerStub := &recordingSender{}
+
+	err := ResendInviteEmail(t.Context(), invites, mailerStub, "https://topbanana.example", 1, time.Now())
+	if got, want := err, ErrInviteNotPending; !errors.Is(got, want) {
+		t.Errorf("err = %v, want wrapping %v", got, want)
+	}
+	if got, want := len(mailerStub.sent), 0; got != want {
+		t.Errorf("mailer.sent len = %d, want %d (rotate failure must not send)", got, want)
+	}
+}
+
 func TestBuildInviteLink_HappyPath(t *testing.T) {
 	t.Parallel()
 
@@ -123,9 +176,12 @@ func TestBuildInviteLink_HappyPath(t *testing.T) {
 }
 
 type recordingInviteStore struct {
-	mu        sync.Mutex
-	created   []createInviteCall
-	createErr error
+	mu         sync.Mutex
+	created    []createInviteCall
+	createErr  error
+	rotated    []rotateInviteCall
+	rotateErr  error
+	rotateMail string
 }
 
 type createInviteCall struct {
@@ -134,6 +190,12 @@ type createInviteCall struct {
 	note              string
 	invitedByPlayerID int64
 	expiresAt         time.Time
+}
+
+type rotateInviteCall struct {
+	id        int64
+	tokenHash string
+	expiresAt time.Time
 }
 
 func (s *recordingInviteStore) CreateInvite(
@@ -166,4 +228,30 @@ func (*recordingInviteStore) ConsumeInvite(_ context.Context, _ string) error {
 
 func (*recordingInviteStore) DeleteExpiredInvites(_ context.Context) error {
 	return nil
+}
+
+func (*recordingInviteStore) ListPendingInvites(_ context.Context) ([]*PendingInvite, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (*recordingInviteStore) RevokeInvite(_ context.Context, _ int64) error {
+	return errors.ErrUnsupported
+}
+
+func (s *recordingInviteStore) RotateInviteToken(
+	_ context.Context, id int64, newTokenHash string, newExpiresAt time.Time,
+) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.rotateErr != nil {
+		return "", s.rotateErr
+	}
+	s.rotated = append(s.rotated, rotateInviteCall{
+		id:        id,
+		tokenHash: newTokenHash,
+		expiresAt: newExpiresAt,
+	})
+
+	return s.rotateMail, nil
 }

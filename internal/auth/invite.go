@@ -26,6 +26,14 @@ const InviteTokenTTL = 7 * 24 * time.Hour
 // valid" page.
 var ErrInviteInvalid = errors.New("invite invalid")
 
+// ErrInviteNotPending is returned by RevokeInvite and RotateInviteToken
+// when the targeted id does not name a still-pending invite (already
+// accepted, already revoked, or never existed). The management handlers
+// map it to a clear flash + 303 rather than a 500: a stale browser tab
+// acting on an invite that just changed state is a normal race, not a
+// server fault.
+var ErrInviteNotPending = errors.New("invite not pending")
+
 // LiveInvite is the slice of a pending invite row the accept flow needs:
 // the row id (for logging), the address the invite was issued to (which
 // becomes the new player's email, already verified), and the audit
@@ -37,6 +45,20 @@ type LiveInvite struct {
 	// deleted (the FK is ON DELETE SET NULL, so the invite outlives its
 	// actor).
 	InvitedByPlayerID int64
+}
+
+// PendingInvite is one row in the admin pending-invite list (#318). It
+// carries enough to render the management table and drive the per-row
+// resend/revoke actions. InviterUsername is the resolved "invited by X"
+// label, empty when the invite carries no actor or the inviting admin's
+// row has since been deleted (ON DELETE SET NULL).
+type PendingInvite struct {
+	ID                int64
+	Email             string
+	InvitedByPlayerID int64
+	InviterUsername   string
+	CreatedAt         time.Time
+	ExpiresAt         time.Time
 }
 
 // InviteStore persists admin-issued invites. Implemented by
@@ -69,6 +91,19 @@ type InviteStore interface {
 	// passed. Called from the startup + periodic sweep so the table cannot
 	// grow without bound. Accepted/revoked rows are kept as an audit trail.
 	DeleteExpiredInvites(ctx context.Context) error
+	// ListPendingInvites returns every still-pending invite, newest first,
+	// for the admin management view (#318).
+	ListPendingInvites(ctx context.Context) ([]*PendingInvite, error)
+	// RevokeInvite marks a pending invite revoked so its link stops
+	// resolving. Returns ErrInviteNotPending when the id does not name a
+	// still-pending invite (already accepted/revoked, or never existed).
+	RevokeInvite(ctx context.Context, id int64) error
+	// RotateInviteToken overwrites a pending invite's token hash and expiry
+	// with a freshly minted pair (the resend path), returning the invite's
+	// email so the caller can dispatch the new link. The old hash no longer
+	// matches any row, killing the previously emailed link. Returns
+	// ErrInviteNotPending when the id does not name a still-pending invite.
+	RotateInviteToken(ctx context.Context, id int64, newTokenHash string, newExpiresAt time.Time) (string, error)
 }
 
 // GenerateInviteToken returns a freshly minted (raw, hash) pair. Same
@@ -111,6 +146,46 @@ func SendInviteEmail(
 	expiresAt := now.Add(InviteTokenTTL)
 	if storeErr := invites.CreateInvite(ctx, recipient, hash, note, invitedByPlayerID, expiresAt); storeErr != nil {
 		return fmt.Errorf("invite: store: %w", storeErr)
+	}
+	msg := mailer.Message{
+		To:      recipient,
+		Subject: "You are invited to Top Banana",
+		Body:    inviteEmailBody(link),
+		Kind:    mailer.KindInvite,
+	}
+	if sendErr := sender.Send(ctx, msg); sendErr != nil {
+		return fmt.Errorf("invite: send: %w", sendErr)
+	}
+
+	return nil
+}
+
+// ResendInviteEmail mints a fresh token, rotates the pending invite's hash
+// + expiry to it via RotateInviteToken, and dispatches the invite email
+// with the new link (#318). Overwriting the hash kills the previously
+// emailed link. Returns ErrInviteNotPending (from the store) when the id no
+// longer names a pending invite; a mailer failure surfaces verbatim so the
+// caller can flash a meaningful message - the rotation has already
+// committed by then, so the new link is live regardless of SMTP.
+func ResendInviteEmail(
+	ctx context.Context,
+	invites InviteStore,
+	sender VerifyEmailSender,
+	baseURL string,
+	inviteID int64,
+	now time.Time,
+) error {
+	raw, hash, err := GenerateInviteToken()
+	if err != nil {
+		return err
+	}
+	link, err := buildInviteLink(baseURL, raw)
+	if err != nil {
+		return err
+	}
+	recipient, err := invites.RotateInviteToken(ctx, inviteID, hash, now.Add(InviteTokenTTL))
+	if err != nil {
+		return fmt.Errorf("invite: rotate: %w", err)
 	}
 	msg := mailer.Message{
 		To:      recipient,
