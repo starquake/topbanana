@@ -206,6 +206,93 @@ type Config struct {
 	TrustedProxyCIDRs []*net.IPNet
 }
 
+// DatabaseConfig holds only the database settings setupDB needs. The
+// break-glass CLI tools (reset-password, promote-admin) resolve just
+// these via [ParseDatabase] so they run in a half-configured or
+// locked-out environment without the full-server validation (SESSION_KEY,
+// SMTP, OAuth, ...) standing in the way.
+type DatabaseConfig struct {
+	Driver          string
+	URI             string
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+}
+
+// DatabaseConfig returns the database-only view of the full config so
+// server-boot callers and the break-glass tools share one path into
+// setupDB.
+func (c *Config) DatabaseConfig() DatabaseConfig {
+	return DatabaseConfig{
+		Driver:          c.DBDriver,
+		URI:             c.DBURI,
+		MaxOpenConns:    c.DBMaxOpenConns,
+		MaxIdleConns:    c.DBMaxIdleConns,
+		ConnMaxLifetime: c.DBConnMaxLifetime,
+	}
+}
+
+// ParseDatabase resolves only the database settings, applying the same
+// rules as [Parse] (DB_URI from env falling back to DBURIDefault outside
+// production, ErrDBURINotSetInProduction when unset in production, driver
+// and pool defaults plus their env overrides) without requiring
+// SESSION_KEY or any other server field. This keeps the break-glass CLI
+// tools runnable when the rest of the config is missing or broken.
+func ParseDatabase(getenv func(string) string) (DatabaseConfig, error) {
+	appEnvironment := getenv("APP_ENV")
+
+	dbc := DatabaseConfig{
+		Driver:          DBDriverDefault,
+		URI:             DBURIDefault,
+		MaxOpenConns:    DBMaxOpenConnsDefault,
+		MaxIdleConns:    DBMaxIdleConnsDefault,
+		ConnMaxLifetime: DBConnMaxLifetimeDefault,
+	}
+	if err := resolveDatabaseConfig(getenv, appEnvironment, &dbc); err != nil {
+		return DatabaseConfig{}, err
+	}
+
+	return dbc, nil
+}
+
+// resolveDatabaseConfig applies the DB_URI fallback / production guard and
+// the pool-setting env overrides onto dbc. Shared by [Parse] and
+// [ParseDatabase] so the two cannot drift.
+func resolveDatabaseConfig(getenv func(string) string, appEnvironment string, dbc *DatabaseConfig) error {
+	if val := getenv("DB_URI"); val != "" {
+		dbc.URI = val
+	}
+	if appEnvironment == AppEnvironmentProduction && getenv("DB_URI") == "" {
+		return ErrDBURINotSetInProduction
+	}
+
+	if val := getenv("DB_MAX_OPEN_CONNS"); val != "" {
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			return fmt.Errorf("invalid DB_MAX_OPEN_CONNS: %q, err: %w", val, err)
+		}
+		dbc.MaxOpenConns = n
+	}
+
+	if val := getenv("DB_MAX_IDLE_CONNS"); val != "" {
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			return fmt.Errorf("invalid DB_MAX_IDLE_CONNS: %q, err: %w", val, err)
+		}
+		dbc.MaxIdleConns = n
+	}
+
+	if val := getenv("DB_CONN_MAX_LIFETIME"); val != "" {
+		d, err := time.ParseDuration(val)
+		if err != nil {
+			return fmt.Errorf("invalid DB_CONN_MAX_LIFETIME: %q, err: %w", val, err)
+		}
+		dbc.ConnMaxLifetime = d
+	}
+
+	return nil
+}
+
 // SMTPConfigured reports whether enough SMTP env vars are populated
 // for the real mailer to dial out. Used by [cmd/server/app.app] to
 // pick between the go-mail-backed mailer and the no-op stub. Mirrors
@@ -278,9 +365,6 @@ func Parse(getenv func(string) string) (*Config, error) {
 	if val := getenv("PORT"); val != "" {
 		c.Port = val
 	}
-	if val := getenv("DB_URI"); val != "" {
-		c.DBURI = val
-	}
 	if c.AppEnvironment == "development" {
 		if val := getenv("CLIENT_DIR"); val != "" {
 			c.ClientDir = val
@@ -290,13 +374,12 @@ func Parse(getenv func(string) string) (*Config, error) {
 		}
 	}
 
-	if err := parseTypedEnvVars(getenv, &c); err != nil {
+	if err := c.applyDatabaseConfig(getenv); err != nil {
 		return nil, err
 	}
 
-	// Mandatory fields
-	if c.AppEnvironment == AppEnvironmentProduction && getenv("DB_URI") == "" {
-		return nil, ErrDBURINotSetInProduction
+	if err := parseTypedEnvVars(getenv, &c); err != nil {
+		return nil, err
 	}
 
 	key, err := resolveSessionKey(getenv("SESSION_KEY"), c.AppEnvironment)
@@ -336,32 +419,10 @@ func (c *Config) GoogleLoginEnabled() bool {
 }
 
 // parseTypedEnvVars reads strict-typed env vars (ints, durations, bools) into c. It returns a
-// wrapped error if any value fails to parse.
+// wrapped error if any value fails to parse. The DB pool settings are
+// resolved separately via [resolveDatabaseConfig] so the break-glass tools
+// can reuse them without the rest of the server config.
 func parseTypedEnvVars(getenv func(string) string, c *Config) error {
-	if val := getenv("DB_MAX_OPEN_CONNS"); val != "" {
-		n, err := strconv.Atoi(val)
-		if err != nil {
-			return fmt.Errorf("invalid DB_MAX_OPEN_CONNS: %q, err: %w", val, err)
-		}
-		c.DBMaxOpenConns = n
-	}
-
-	if val := getenv("DB_MAX_IDLE_CONNS"); val != "" {
-		n, err := strconv.Atoi(val)
-		if err != nil {
-			return fmt.Errorf("invalid DB_MAX_IDLE_CONNS: %q, err: %w", val, err)
-		}
-		c.DBMaxIdleConns = n
-	}
-
-	if val := getenv("DB_CONN_MAX_LIFETIME"); val != "" {
-		d, err := time.ParseDuration(val)
-		if err != nil {
-			return fmt.Errorf("invalid DB_CONN_MAX_LIFETIME: %q, err: %w", val, err)
-		}
-		c.DBConnMaxLifetime = d
-	}
-
 	if val := getenv("REGISTRATION_ENABLED"); val != "" {
 		b, err := strconv.ParseBool(val)
 		if err != nil {
@@ -517,4 +578,22 @@ func resolveSessionKey(envValue, appEnvironment string) (string, error) {
 // IsProduction returns true if the application is running in production.
 func (c *Config) IsProduction() bool {
 	return c.AppEnvironment == AppEnvironmentProduction
+}
+
+// applyDatabaseConfig resolves the database settings into c via the
+// shared resolveDatabaseConfig helper and writes them back onto the
+// DB* fields. Pulled out of Parse so Parse stays within the
+// function-length limit; ParseDatabase uses the same helper.
+func (c *Config) applyDatabaseConfig(getenv func(string) string) error {
+	dbc := c.DatabaseConfig()
+	if err := resolveDatabaseConfig(getenv, c.AppEnvironment, &dbc); err != nil {
+		return err
+	}
+	c.DBDriver = dbc.Driver
+	c.DBURI = dbc.URI
+	c.DBMaxOpenConns = dbc.MaxOpenConns
+	c.DBMaxIdleConns = dbc.MaxIdleConns
+	c.DBConnMaxLifetime = dbc.ConnMaxLifetime
+
+	return nil
 }
