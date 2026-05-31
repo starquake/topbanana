@@ -66,6 +66,83 @@ func TestRoundsMigration_BackfillsDefaultRound(t *testing.T) {
 	}
 }
 
+// TestRoundSeenPhaseMigration_PerPhasePK asserts the #548 rebuild of
+// game_seen_rounds: the composite PK (game_id, round_id, phase) lets the
+// intro and results phases of the same round coexist, while the CHECK
+// constraint rejects any phase outside ('intro','results'). dbtest.Open
+// already ran every migration including the rebuild, so the live schema
+// is what the migration produced.
+func TestRoundSeenPhaseMigration_PerPhasePK(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := dbtest.Open(t)
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v", cerr)
+		}
+	})
+
+	quizStore := store.NewQuizStore(db, slog.Default())
+	creatorID := seedPlayer(t, db)
+	qz := &quiz.Quiz{
+		Title:             "Phase quiz",
+		Slug:              "phase-quiz",
+		CreatedByPlayerID: creatorID,
+		Questions: []*quiz.Question{
+			{Text: "Q1", Position: 1, Options: []*quiz.Option{{Text: "A", Correct: true}, {Text: "B"}}},
+		},
+	}
+	if err := quizStore.CreateQuiz(ctx, qz); err != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", err)
+	}
+	round, err := quizStore.GetDefaultRound(ctx, qz.ID)
+	if err != nil {
+		t.Fatalf("GetDefaultRound err = %v, want nil", err)
+	}
+
+	const gameID = "game-phase-1"
+	if _, err = db.ExecContext(
+		ctx,
+		"INSERT INTO games (id, quiz_id) VALUES (?, ?)",
+		gameID, qz.ID,
+	); err != nil {
+		t.Fatalf("seed game err = %v, want nil", err)
+	}
+
+	// Both phases of the same round must coexist under the composite PK.
+	for _, phase := range []string{"intro", "results"} {
+		if _, err = db.ExecContext(
+			ctx,
+			"INSERT INTO game_seen_rounds (game_id, round_id, phase) VALUES (?, ?, ?)",
+			gameID, round.ID, phase,
+		); err != nil {
+			t.Fatalf("insert phase %q err = %v, want nil", phase, err)
+		}
+	}
+
+	var count int
+	if err = db.QueryRowContext(
+		ctx,
+		"SELECT count(*) FROM game_seen_rounds WHERE game_id = ? AND round_id = ?",
+		gameID, round.ID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count seen rows err = %v, want nil", err)
+	}
+	if got, want := count, 2; got != want {
+		t.Errorf("seen rows = %d, want %d (one per phase)", got, want)
+	}
+
+	// The CHECK constraint must reject an unknown phase.
+	if _, err = db.ExecContext(
+		ctx,
+		"INSERT INTO game_seen_rounds (game_id, round_id, phase) VALUES (?, ?, 'bogus')",
+		gameID, round.ID,
+	); err == nil {
+		t.Error("insert with unknown phase err = nil, want a CHECK violation")
+	}
+}
+
 // questionRoundID reads the round_id column for a question straight from
 // the DB so the test pins the migration's FK wiring without routing
 // through the store mapper.

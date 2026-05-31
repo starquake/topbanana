@@ -65,6 +65,15 @@ export class GameApp {
         // True while the markRoundSeen POST is in flight. Guards the
         // Continue button so a double-click doesn't fire two POSTs.
         this.continuingRound = false;
+        // Drives the round-boundary countdown bar (#548). Starts at 100
+        // and drains 100 -> 0 over the boundary window (the quiz's
+        // default per-question duration), mirroring the answer-window
+        // bar's visual. When it reaches zero the card auto-advances via
+        // the same path Continue uses. `roundTimer` holds the interval
+        // handle so it can be cleared on manual continue, on advance,
+        // and when a new item replaces the boundary.
+        this.roundProgress = 100;
+        this.roundTimer = null;
         this.finished = false;
         this.leaderboard = null;
         this.quizSlugId = null;
@@ -148,7 +157,10 @@ export class GameApp {
         // stack up redundant listeners. closeLeaderboardStream is a
         // safe no-op when there's no active subscription.
         if (typeof window !== 'undefined') {
-            window.addEventListener('beforeunload', () => this.closeLeaderboardStream());
+            window.addEventListener('beforeunload', () => {
+                this.closeLeaderboardStream();
+                this.clearRoundTimer();
+            });
             // Resubscribe when the tab becomes visible again so the
             // dimmed stale state self-heals once the page is
             // foreground again (#362). Browsers throttle background
@@ -545,6 +557,7 @@ export class GameApp {
             clearInterval(this.revealTimer);
             this.revealTimer = null;
         }
+        this.clearRoundTimer();
         this.revealing = false;
         this.splash = null;
         this.splashOn = false;
@@ -608,6 +621,7 @@ export class GameApp {
             // its authoritative total on the round payload so a
             // resume mid-game also picks up the right value.
             if (typeof item.score === 'number') this.score = item.score;
+            this.startRoundCountdown();
 
             return;
         }
@@ -856,6 +870,57 @@ export class GameApp {
         await this.resolveAndAdvance();
     }
 
+    // startRoundCountdown drives the round-boundary auto-advance (#548).
+    // It drains the same kind of progress bar the answer window uses,
+    // 100 -> 0 over [startedAt, expiredAt], on the server-clock basis
+    // serverTime() provides (clockOffset is reconciled from serverNow in
+    // the round_boundary handler before this runs). When the bar hits
+    // zero it advances by the same path Continue takes (continueRound),
+    // so the manual and automatic exits share one code path. If
+    // expiredAt is already in the past (e.g. a resume that lands on an
+    // expired boundary), it advances promptly without spinning an
+    // interval.
+    startRoundCountdown() {
+        this.clearRoundTimer();
+        if (!this.roundItem || !this.roundItem.expiredAt) return;
+        const start = new Date(this.roundItem.startedAt).getTime();
+        const end = new Date(this.roundItem.expiredAt).getTime();
+        const total = end - start;
+        if (!Number.isFinite(total) || total <= 0) {
+            this.roundProgress = 0;
+            void this.continueRound();
+            return;
+        }
+        if (this.serverTime() >= end) {
+            this.roundProgress = 0;
+            void this.continueRound();
+            return;
+        }
+        this.roundProgress = 100;
+        this.roundTimer = setInterval(() => {
+            const remaining = end - this.serverTime();
+            this.roundProgress = Math.max(0, (remaining / total) * 100);
+            if (this.roundProgress <= 0) {
+                this.clearRoundTimer();
+                // Fire-and-forget: setInterval callbacks can't await,
+                // and continueRound handles its own teardown.
+                void this.continueRound();
+            }
+        }, 100);
+    }
+
+    // clearRoundTimer cancels the round-boundary auto-advance interval.
+    // Safe to call when no timer is pending. Called before starting a
+    // fresh countdown, on manual continue, on successful advance, and
+    // whenever a new item replaces the boundary so a stale interval
+    // can't fire after the card is gone.
+    clearRoundTimer() {
+        if (this.roundTimer) {
+            clearInterval(this.roundTimer);
+            this.roundTimer = null;
+        }
+    }
+
     async submitAnswer(optionId) {
         // Defence in depth (#444): no answer buttons render on the
         // round-summary card, but if a synthetic click ever reached here
@@ -956,21 +1021,29 @@ export class GameApp {
         await this.nextQuestion();
     }
 
-    // continueRound is the Continue button's click handler on the
-    // round-summary card (#444). POSTs the seen ack, clears the round,
-    // then calls nextQuestion() to load whatever comes next (another
-    // round boundary, a question, or 404 → finished).
+    // continueRound is the Continue button's click handler on both the
+    // round intro and round recap cards (#548). POSTs the seen ack for
+    // the current phase ('intro' or 'results'), clears the round, then
+    // calls nextQuestion() to load whatever comes next (the round's
+    // first question, another round boundary, or 404 → finished).
     //
-    // On a network / 5xx failure the round-summary card stays visible
-    // with a retry banner — silently losing the click would strand the
-    // player on a screen with no affordance to recover. The store-side
-    // ack is idempotent so a retry after a transient failure is safe.
+    // On a network / 5xx failure the round card stays visible with a
+    // retry banner — silently losing the click would strand the player
+    // on a screen with no affordance to recover. The store-side ack is
+    // idempotent so a retry after a transient failure is safe.
     async continueRound() {
         if (!this.roundItem || this.continuingRound) return;
+        // Cancel the auto-advance countdown the moment we commit to
+        // advancing (#548). Without this a pending interval tick could
+        // fire a second continueRound while the markRoundSeen POST is
+        // in flight; the continuingRound guard catches the re-entry,
+        // but clearing the timer here stops it at the source so the
+        // manual skip and the auto-advance can never both fire.
+        this.clearRoundTimer();
         this.continuingRound = true;
         this.roundContinueError = false;
         try {
-            await gameService.markRoundSeen(this.gameId, this.roundItem.id);
+            await gameService.markRoundSeen(this.gameId, this.roundItem.id, this.roundItem.phase);
         } catch (err) {
             console.error('continueRound:', err);
             this.roundContinueError = true;

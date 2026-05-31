@@ -62,6 +62,7 @@ type GameQuestion struct {
 type GameSeenRound struct {
 	GameID  string
 	RoundID int64
+	Phase   string
 	SeenAt  time.Time
 }
 

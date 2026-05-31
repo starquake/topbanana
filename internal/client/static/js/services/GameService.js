@@ -51,14 +51,15 @@ export class GameService {
         return jsonOrThrow(response);
     }
 
-    // markRoundSeen acknowledges a round boundary (#444). The server
-    // returns 204 No Content; any other status is a real error the
-    // caller surfaces as a retry banner — silently dropping the click
-    // would strand the player on the round card with no recovery.
-    // Idempotent at the server, so a retry after a transient failure
-    // is safe.
-    async markRoundSeen(gameId, roundId) {
-        const response = await fetch(`/api/games/${gameId}/rounds/${roundId}/seen`, {
+    // markRoundSeen acknowledges one phase of a round boundary (#548):
+    // `phase` is 'intro' (before the round's first question) or
+    // 'results' (after the round's questions). The server returns 204
+    // No Content; any other status is a real error the caller surfaces
+    // as a retry banner — silently dropping the click would strand the
+    // player on the round card with no recovery. Idempotent at the
+    // server, so a retry after a transient failure is safe.
+    async markRoundSeen(gameId, roundId, phase) {
+        const response = await fetch(`/api/games/${gameId}/rounds/${roundId}/seen/${phase}`, {
             method: 'POST',
         });
         if (response.ok) return;

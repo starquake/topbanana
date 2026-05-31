@@ -153,8 +153,8 @@ type stubGameStore struct {
 	listParticipantsForQuizLeaderboard func(ctx context.Context, quizID int64, staleBefore time.Time) ([]*game.LeaderboardParticipant, error)
 	deleteGamesForPlayerOnQuiz         func(ctx context.Context, playerID, quizID int64) error
 	listQuizIDsForPlayer               func(ctx context.Context, playerID int64) ([]int64, error)
-	markGroupSeen                      func(ctx context.Context, gameID string, roundID int64) error
-	listSeenRoundIDsByGame             func(ctx context.Context, gameID string) ([]int64, error)
+	markRoundSeen                      func(ctx context.Context, gameID string, roundID int64, phase game.RoundPhase) error
+	listSeenRoundPhasesByGame          func(ctx context.Context, gameID string) ([]game.SeenRoundPhase, error)
 }
 
 func (stubGameStore) Ping(_ context.Context) error { return nil }
@@ -205,24 +205,28 @@ func (s stubGameStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64)
 	return s.listQuizIDsForPlayer(ctx, playerID)
 }
 
-func (s stubGameStore) MarkRoundSeen(ctx context.Context, gameID string, roundID int64) error {
-	if s.markGroupSeen == nil {
+func (s stubGameStore) MarkRoundSeen(
+	ctx context.Context, gameID string, roundID int64, phase game.RoundPhase,
+) error {
+	if s.markRoundSeen == nil {
 		return errStub
 	}
 
-	return s.markGroupSeen(ctx, gameID, roundID)
+	return s.markRoundSeen(ctx, gameID, roundID, phase)
 }
 
-// ListSeenRoundIDsByGame defaults to "no seen rounds" so existing
+// ListSeenRoundPhasesByGame defaults to "no seen phases" so existing
 // /next flow tests don't have to opt in - the round-walking iterator
 // calls this on every request and an errStub would 500 every test that
 // doesn't care about round boundaries.
-func (s stubGameStore) ListSeenRoundIDsByGame(ctx context.Context, gameID string) ([]int64, error) {
-	if s.listSeenRoundIDsByGame == nil {
+func (s stubGameStore) ListSeenRoundPhasesByGame(
+	ctx context.Context, gameID string,
+) ([]game.SeenRoundPhase, error) {
+	if s.listSeenRoundPhasesByGame == nil {
 		return nil, nil
 	}
 
-	return s.listSeenRoundIDsByGame(ctx, gameID)
+	return s.listSeenRoundPhasesByGame(ctx, gameID)
 }
 
 func (s stubGameStore) StartGame(ctx context.Context, id string) error {

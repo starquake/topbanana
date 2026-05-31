@@ -71,6 +71,11 @@ var (
 	// ErrStartingGameNoRowsAffected is returned by [GameStore.StartGame]
 	// when the UPDATE matched no rows - i.e. the game does not exist.
 	ErrStartingGameNoRowsAffected = errors.New("no rows affected when starting game")
+
+	// ErrInvalidRoundPhase is returned by [Service.MarkRoundSeen] when
+	// the phase is not one of the recognised round boundary phases
+	// (#548). Handlers map it to 400.
+	ErrInvalidRoundPhase = errors.New("invalid round phase")
 )
 
 // Game represents a game. It is an instance of a quiz being played by a player.
@@ -117,13 +122,33 @@ const (
 	ItemTypeRoundBoundary ItemType = "round_boundary"
 )
 
+// RoundPhase discriminates the two halves of a round boundary (#548).
+// Intro is emitted before a round's first not-yet-asked question and
+// carries the round title + summary; Results is emitted after all the
+// round's questions have been asked and carries the player's own recap
+// for the round. Both phases are gated on a non-empty round summary.
+type RoundPhase string
+
+// Round boundary phases emitted by [Service.GetNext].
+const (
+	RoundPhaseIntro   RoundPhase = "intro"
+	RoundPhaseResults RoundPhase = "results"
+)
+
+// Valid reports whether p is one of the recognised round boundary
+// phases. Used by the seen endpoint to reject unknown phase path values
+// before they reach the store CHECK constraint.
+func (p RoundPhase) Valid() bool {
+	return p == RoundPhaseIntro || p == RoundPhaseResults
+}
+
 // Item is the union returned by [Service.GetNext]. Exactly one of
 // Question or Round is set, matched by Type.
 //
-// Score is populated for round-boundary items so the round-summary
-// screen can show the player's running total; it is left zero on
-// question items because the HUD chip doesn't carry a score there
-// (#444).
+// Score is populated for results-phase round-boundary items so the
+// recap screen can show the player's running total; it is left zero on
+// intro-phase boundaries (the intro wire shape omits it) and on question
+// items because the HUD chip doesn't carry a score there (#444, #548).
 //
 // Total is populated for round-boundary items as well so the player UI
 // can keep rendering the "Q n / total" chip across a round summary
@@ -135,6 +160,30 @@ type Item struct {
 	Round    *quiz.Round
 	Score    int
 	Total    int
+
+	// Phase is set on round-boundary items to the half of the boundary
+	// being shown (#548). Zero on question items.
+	Phase RoundPhase
+
+	// StartedAt and ExpiredAt bound the auto-advance countdown for a
+	// round-boundary item (#548): the card auto-advances when the window
+	// expires (the client also keeps a Continue button to skip). The
+	// window is one quiz-default answer duration (Quiz.TimeLimitSeconds)
+	// long. Both phases carry it. Zero on question items, which carry
+	// their own window on [Question.StartedAt]/[Question.ExpiredAt].
+	StartedAt time.Time
+	ExpiredAt time.Time
+
+	// RoundScore, RoundCorrect, and RoundQuestions carry the player's
+	// own recap for the round, populated only on a results-phase
+	// round-boundary item. RoundScore is the points earned for this
+	// round's questions; RoundCorrect is how many of the round's
+	// questions the player answered correctly; RoundQuestions is the
+	// number of questions in the round (the denominator). All zero on
+	// intro-phase and question items.
+	RoundScore     int
+	RoundCorrect   int
+	RoundQuestions int
 }
 
 // Question represents a question in a game. It references a quiz question.
@@ -296,16 +345,23 @@ type Store interface {
 	// fan out a leaderboard republish on every quiz the player appears
 	// on.
 	ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]int64, error)
-	// MarkRoundSeen records that the player has passed through the round
-	// summary at the given round boundary in the given game (#444).
-	// Idempotent: a second call with the same (gameID, roundID) is a
-	// no-op.
-	MarkRoundSeen(ctx context.Context, gameID string, roundID int64) error
-	// ListSeenRoundIDsByGame returns the round IDs whose round summary
-	// the player has acknowledged in the given game. The round-walking
-	// iterator in [Service.GetNext] uses this set to skip past seen
-	// round boundaries (#444).
-	ListSeenRoundIDsByGame(ctx context.Context, gameID string) ([]int64, error)
+	// MarkRoundSeen records that the player has acknowledged the given
+	// phase of the round boundary in the given game (#548). Idempotent:
+	// a second call with the same (gameID, roundID, phase) is a no-op.
+	MarkRoundSeen(ctx context.Context, gameID string, roundID int64, phase RoundPhase) error
+	// ListSeenRoundPhasesByGame returns the (round, phase) pairs whose
+	// round boundary the player has acknowledged in the given game. The
+	// round-walking iterator in [Service.GetNext] uses this set to skip
+	// past seen round boundary phases (#548).
+	ListSeenRoundPhasesByGame(ctx context.Context, gameID string) ([]SeenRoundPhase, error)
+}
+
+// SeenRoundPhase is one acknowledged round boundary phase: the round
+// and which half of its boundary the player has already passed through
+// (#548).
+type SeenRoundPhase struct {
+	RoundID int64
+	Phase   RoundPhase
 }
 
 // LeaderboardPublisher is the tiny seam Service uses to signal that a
@@ -648,7 +704,7 @@ func (s *Service) GetNext(ctx context.Context, gameID string, playerID int64) (*
 		return nil, fmt.Errorf("failed to list rounds: %w", err)
 	}
 
-	seenIDs, err := s.store.ListSeenRoundIDsByGame(ctx, gameID)
+	seenPhases, err := s.store.ListSeenRoundPhasesByGame(ctx, gameID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list seen rounds: %w", err)
 	}
@@ -657,19 +713,14 @@ func (s *Service) GetNext(ctx context.Context, gameID string, playerID int64) (*
 	for _, gq := range g.Questions {
 		askedQuestions[gq.QuestionID] = true
 	}
-	seenRounds := make(map[int64]bool, len(seenIDs))
-	for _, id := range seenIDs {
-		seenRounds[id] = true
+	seenRoundPhases := make(map[seenKey]bool, len(seenPhases))
+	for _, sp := range seenPhases {
+		seenRoundPhases[seenKey{roundID: sp.RoundID, phase: sp.Phase}] = true
 	}
 
-	switch next := nextRoundSlot(rounds, qz.Questions, askedQuestions, seenRounds); next.kind {
+	switch next := nextRoundSlot(rounds, qz.Questions, askedQuestions, seenRoundPhases); next.kind {
 	case slotKindRoundBoundary:
-		score, scoreErr := s.computeGameScore(ctx, g, playerID)
-		if scoreErr != nil {
-			return nil, scoreErr
-		}
-
-		return &Item{Type: ItemTypeRoundBoundary, Round: next.round, Score: score, Total: len(qz.Questions)}, nil
+		return s.buildRoundBoundaryItem(ctx, g, qz, playerID, next.round, next.phase)
 	case slotKindQuestion:
 		gq, qErr := s.issueQuestion(ctx, gameID, qz, next.question, len(g.Questions))
 		if qErr != nil {
@@ -682,11 +733,15 @@ func (s *Service) GetNext(ctx context.Context, gameID string, playerID int64) (*
 	}
 }
 
-// MarkRoundSeen records that the player has acknowledged the round
-// summary at a round boundary. Idempotent at the store layer. Tracks
-// the round by id, so an admin who reorders rounds while a player has a
-// round summary on screen will not re-show it.
-func (s *Service) MarkRoundSeen(ctx context.Context, gameID string, playerID, roundID int64) error {
+// MarkRoundSeen records that the player has acknowledged the given
+// phase of a round boundary. Idempotent at the store layer. Tracks the
+// round by id, so an admin who reorders rounds while a player has a
+// round boundary on screen will not re-show it.
+func (s *Service) MarkRoundSeen(ctx context.Context, gameID string, playerID, roundID int64, phase RoundPhase) error {
+	if !phase.Valid() {
+		return ErrInvalidRoundPhase
+	}
+
 	g, err := s.store.GetGame(ctx, gameID)
 	if err != nil {
 		return fmt.Errorf(errGetGameFmt, err)
@@ -703,7 +758,7 @@ func (s *Service) MarkRoundSeen(ctx context.Context, gameID string, playerID, ro
 		return quiz.ErrRoundNotFound
 	}
 
-	if err := s.store.MarkRoundSeen(ctx, gameID, roundID); err != nil {
+	if err := s.store.MarkRoundSeen(ctx, gameID, roundID, phase); err != nil {
 		return fmt.Errorf("failed to mark round seen: %w", err)
 	}
 
@@ -719,29 +774,37 @@ const (
 
 // roundSlot is one slot in the round-driven play sequence used by
 // [Service.GetNext]. Exactly one of question or round is set, matched
-// by kind. A zero-value roundSlot (kind == "") means the walk reached
-// the end with nothing left to emit.
+// by kind. When round is set, phase names which half of the boundary to
+// emit. A zero-value roundSlot (kind == "") means the walk reached the
+// end with nothing left to emit.
 type roundSlot struct {
 	kind     string
 	question *quiz.Question
 	round    *quiz.Round
+	phase    RoundPhase
 }
 
-// nextRoundSlot walks the quiz's rounds in position order. Within each
-// round it issues the round's not-yet-issued questions in question
-// position order; once every question in a round has been issued it
-// emits that round's boundary round-summary item (unless the round has
-// no summary, or the player has already seen it), then advances to the
-// next round. Returns a zero-value roundSlot once every question is
-// issued and every shown round boundary has been seen.
+// seenKey identifies one acknowledged round boundary phase in the
+// seen-state set passed to [nextRoundSlot].
+type seenKey struct {
+	roundID int64
+	phase   RoundPhase
+}
+
+// nextRoundSlot walks the quiz's rounds in position order. For each
+// round, when the round has a non-empty summary it emits (a) an intro
+// boundary before the round's first not-yet-issued question, then (b)
+// the round's not-yet-issued questions in position order, then (c) a
+// results boundary once every question in the round has been issued.
+// Each boundary phase is suppressed once the player has acknowledged
+// it. Returns a zero-value roundSlot once every question is issued and
+// every shown boundary phase has been seen.
 //
 // A round with an empty Summary has nothing to show at its boundary, so
-// it is skipped: every quiz is created with one default round holding
-// all its questions, and emitting a "your score so far" card before the
-// final results for that single round would be a surprising change for
-// existing quizzes. The card only appears once a host authors a round
-// summary. (When per-round leaderboards land this rule may want to
-// widen to "show whenever the round carries scoring" - see #444.)
+// both phases are skipped: every quiz is created with one default round
+// holding all its questions, and emitting boundary cards around the
+// single round's questions would be a surprising change for existing
+// quizzes. The cards only appear once a host authors a round summary.
 //
 // Questions whose round_id matches no round in the quiz's round list
 // (a defensive case; questions.round_id is NOT NULL and FK-references
@@ -751,7 +814,7 @@ func nextRoundSlot(
 	rounds []*quiz.Round,
 	questions []*quiz.Question,
 	asked map[int64]bool,
-	seenRounds map[int64]bool,
+	seenRoundPhases map[seenKey]bool,
 ) roundSlot {
 	byRound := make(map[int64][]*quiz.Question, len(rounds))
 	for _, q := range questions {
@@ -759,13 +822,17 @@ func nextRoundSlot(
 	}
 
 	for _, round := range rounds {
+		hasSummary := round.Summary != ""
+		if hasSummary && !seenRoundPhases[seenKey{roundID: round.ID, phase: RoundPhaseIntro}] {
+			return roundSlot{kind: slotKindRoundBoundary, round: round, phase: RoundPhaseIntro}
+		}
 		for _, q := range byRound[round.ID] {
 			if !asked[q.ID] {
 				return roundSlot{kind: slotKindQuestion, question: q}
 			}
 		}
-		if round.Summary != "" && !seenRounds[round.ID] {
-			return roundSlot{kind: slotKindRoundBoundary, round: round}
+		if hasSummary && !seenRoundPhases[seenKey{roundID: round.ID, phase: RoundPhaseResults}] {
+			return roundSlot{kind: slotKindRoundBoundary, round: round, phase: RoundPhaseResults}
 		}
 	}
 
@@ -1220,45 +1287,157 @@ func (s *Service) issueQuestion(
 // round-trip (#167 slice 2). Filters by playerID because the loaded
 // game carries answers from every participant.
 func (s *Service) computeGameScore(ctx context.Context, g *Game, playerID int64) (int, error) {
-	// Collect every option ID across every issued question's answers
-	// belonging to this player so we can fetch their correctness
-	// flags in one query.
-	var optionIDs []int64
-	for _, gq := range g.Questions {
-		for _, ga := range gq.Answers {
-			if ga.PlayerID != playerID {
-				continue
-			}
-			optionIDs = append(optionIDs, ga.OptionID)
-		}
+	result, err := s.scoreAnswers(ctx, g, playerID, nil)
+
+	return result.Score, err
+}
+
+// scoreResult is the outcome of [Service.scoreAnswers]: the summed
+// points and the number of correctly answered questions over the scored
+// answer set.
+type scoreResult struct {
+	Score   int
+	Correct int
+}
+
+// scoreAnswers scores the requesting player's recorded answers, reusing
+// [Service.CalculateScore] for the per-answer points and a single
+// GetOptionsByIDs round-trip for the correctness flags. When include is
+// non-nil, only answers to questions for which include returns true are
+// counted, which lets the results-phase round recap score one round's
+// questions through the same path as the running total.
+func (s *Service) scoreAnswers(
+	ctx context.Context, g *Game, playerID int64, include func(questionID int64) bool,
+) (scoreResult, error) {
+	answers := collectPlayerAnswers(g, playerID, include)
+	if len(answers) == 0 {
+		return scoreResult{}, nil
 	}
-	if len(optionIDs) == 0 {
-		return 0, nil
+
+	optionIDs := make([]int64, len(answers))
+	for i, ga := range answers {
+		optionIDs[i] = ga.OptionID
 	}
 
 	options, err := s.quizStore.GetOptionsByIDs(ctx, optionIDs)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get options for round score: %w", err)
+		return scoreResult{}, fmt.Errorf("failed to get options for round score: %w", err)
 	}
 	optionsByID := make(map[int64]*quiz.Option, len(options))
 	for _, o := range options {
 		optionsByID[o.ID] = o
 	}
 
-	total := 0
+	var result scoreResult
+	for _, ga := range answers {
+		ga.Option = optionsByID[ga.OptionID]
+		if ga.Option == nil {
+			continue
+		}
+		if ga.Option.Correct {
+			result.Correct++
+		}
+		result.Score += s.CalculateScore(ctx, ga)
+	}
+
+	return result, nil
+}
+
+// collectPlayerAnswers gathers the player's answers across the game's
+// issued questions, attaching each answer's owning question so
+// [Service.CalculateScore] can read the timing window. When include is
+// non-nil, only answers to questions it accepts are returned.
+func collectPlayerAnswers(
+	g *Game, playerID int64, include func(questionID int64) bool,
+) []*Answer {
+	var answers []*Answer
 	for _, gq := range g.Questions {
+		if include != nil && !include(gq.QuestionID) {
+			continue
+		}
 		for _, ga := range gq.Answers {
 			if ga.PlayerID != playerID {
 				continue
 			}
 			ga.Question = gq
-			ga.Option = optionsByID[ga.OptionID]
-			if ga.Option == nil {
-				continue
-			}
-			total += s.CalculateScore(ctx, ga)
+			answers = append(answers, ga)
 		}
 	}
 
-	return total, nil
+	return answers
+}
+
+// buildRoundBoundaryItem assembles the round-boundary [Item] for the
+// given phase and the quiz question total for the HUD chip. The intro
+// phase carries no score (the wire shape omits it), so the running total
+// and per-round recap are computed only for the results phase.
+func (s *Service) buildRoundBoundaryItem(
+	ctx context.Context, g *Game, qz *quiz.Quiz, playerID int64, round *quiz.Round, phase RoundPhase,
+) (*Item, error) {
+	startedAt := time.Now()
+	item := &Item{
+		Type:      ItemTypeRoundBoundary,
+		Round:     round,
+		Total:     len(qz.Questions),
+		Phase:     phase,
+		StartedAt: startedAt,
+		ExpiredAt: startedAt.Add(time.Duration(qz.TimeLimitSeconds) * time.Second),
+	}
+	if phase != RoundPhaseResults {
+		return item, nil
+	}
+
+	score, err := s.computeGameScore(ctx, g, playerID)
+	if err != nil {
+		return nil, err
+	}
+	item.Score = score
+
+	recap, err := s.computeRoundRecap(ctx, g, qz, playerID, round.ID)
+	if err != nil {
+		return nil, err
+	}
+	item.RoundScore = recap.Score
+	item.RoundCorrect = recap.Correct
+	item.RoundQuestions = recap.Questions
+
+	return item, nil
+}
+
+// roundRecap is the player's self-referential recap for one round: the
+// score earned for the round's questions, the number answered
+// correctly, and the round's question count (the denominator).
+type roundRecap struct {
+	Score     int
+	Correct   int
+	Questions int
+}
+
+// computeRoundRecap scores one round for the player, reusing
+// [Service.scoreAnswers] scoped to the round's question IDs so there is
+// a single scoring path. The denominator counts the round's authored
+// questions, not just the issued ones, so a recap shown after the last
+// question still reads "n / total".
+func (s *Service) computeRoundRecap(
+	ctx context.Context, g *Game, qz *quiz.Quiz, playerID, roundID int64,
+) (roundRecap, error) {
+	roundQuestionIDs := make(map[int64]bool)
+	for _, q := range qz.Questions {
+		if q.RoundID == roundID {
+			roundQuestionIDs[q.ID] = true
+		}
+	}
+
+	result, err := s.scoreAnswers(ctx, g, playerID, func(questionID int64) bool {
+		return roundQuestionIDs[questionID]
+	})
+	if err != nil {
+		return roundRecap{}, err
+	}
+
+	return roundRecap{
+		Score:     result.Score,
+		Correct:   result.Correct,
+		Questions: len(roundQuestionIDs),
+	}, nil
 }

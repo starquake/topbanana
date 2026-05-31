@@ -780,29 +780,34 @@ func (q *Queries) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]i
 	return items, nil
 }
 
-const listSeenRoundIDsByGame = `-- name: ListSeenRoundIDsByGame :many
-SELECT round_id
+const listSeenRoundPhasesByGame = `-- name: ListSeenRoundPhasesByGame :many
+SELECT round_id, phase
 FROM game_seen_rounds
 WHERE game_id = ?
 `
 
-// Lists the round IDs whose round summary the player has already passed
-// through in the given game. The round-walking iterator in
-// game.Service.GetNext uses the result set to skip past acknowledged
-// round boundaries.
-func (q *Queries) ListSeenRoundIDsByGame(ctx context.Context, gameID string) ([]int64, error) {
-	rows, err := q.db.QueryContext(ctx, listSeenRoundIDsByGame, gameID)
+type ListSeenRoundPhasesByGameRow struct {
+	RoundID int64
+	Phase   string
+}
+
+// Lists the (round_id, phase) pairs the player has already acknowledged
+// in the given game. The round-walking iterator in game.Service.GetNext
+// uses the result set to skip past acknowledged round boundary phases
+// (#548).
+func (q *Queries) ListSeenRoundPhasesByGame(ctx context.Context, gameID string) ([]ListSeenRoundPhasesByGameRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSeenRoundPhasesByGame, gameID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []int64
+	var items []ListSeenRoundPhasesByGameRow
 	for rows.Next() {
-		var round_id int64
-		if err := rows.Scan(&round_id); err != nil {
+		var i ListSeenRoundPhasesByGameRow
+		if err := rows.Scan(&i.RoundID, &i.Phase); err != nil {
 			return nil, err
 		}
-		items = append(items, round_id)
+		items = append(items, i)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -814,22 +819,23 @@ func (q *Queries) ListSeenRoundIDsByGame(ctx context.Context, gameID string) ([]
 }
 
 const markRoundSeen = `-- name: MarkRoundSeen :exec
-INSERT INTO game_seen_rounds (game_id, round_id)
-VALUES (?, ?)
-ON CONFLICT (game_id, round_id) DO NOTHING
+INSERT INTO game_seen_rounds (game_id, round_id, phase)
+VALUES (?, ?, ?)
+ON CONFLICT (game_id, round_id, phase) DO NOTHING
 `
 
 type MarkRoundSeenParams struct {
 	GameID  string
 	RoundID int64
+	Phase   string
 }
 
-// Records that the player has acknowledged the round summary at the
-// given round boundary in the given game (#444). ON CONFLICT DO NOTHING
-// makes the POST /rounds/{id}/seen endpoint idempotent: a second call
+// Records that the player has acknowledged the given phase of the round
+// boundary in the given game (#548). ON CONFLICT DO NOTHING makes the
+// POST /rounds/{id}/seen/{phase} endpoint idempotent: a second call
 // returns 204 without bumping seen_at or inserting a duplicate row.
 func (q *Queries) MarkRoundSeen(ctx context.Context, arg MarkRoundSeenParams) error {
-	_, err := q.db.ExecContext(ctx, markRoundSeen, arg.GameID, arg.RoundID)
+	_, err := q.db.ExecContext(ctx, markRoundSeen, arg.GameID, arg.RoundID, arg.Phase)
 	return err
 }
 

@@ -237,20 +237,20 @@ FROM games
 WHERE id IN (sqlc.slice('ids'));
 
 -- name: MarkRoundSeen :exec
--- Records that the player has acknowledged the round summary at the
--- given round boundary in the given game (#444). ON CONFLICT DO NOTHING
--- makes the POST /rounds/{id}/seen endpoint idempotent: a second call
+-- Records that the player has acknowledged the given phase of the round
+-- boundary in the given game (#548). ON CONFLICT DO NOTHING makes the
+-- POST /rounds/{id}/seen/{phase} endpoint idempotent: a second call
 -- returns 204 without bumping seen_at or inserting a duplicate row.
-INSERT INTO game_seen_rounds (game_id, round_id)
-VALUES (?, ?)
-ON CONFLICT (game_id, round_id) DO NOTHING;
+INSERT INTO game_seen_rounds (game_id, round_id, phase)
+VALUES (?, ?, ?)
+ON CONFLICT (game_id, round_id, phase) DO NOTHING;
 
--- name: ListSeenRoundIDsByGame :many
--- Lists the round IDs whose round summary the player has already passed
--- through in the given game. The round-walking iterator in
--- game.Service.GetNext uses the result set to skip past acknowledged
--- round boundaries.
-SELECT round_id
+-- name: ListSeenRoundPhasesByGame :many
+-- Lists the (round_id, phase) pairs the player has already acknowledged
+-- in the given game. The round-walking iterator in game.Service.GetNext
+-- uses the result set to skip past acknowledged round boundary phases
+-- (#548).
+SELECT round_id, phase
 FROM game_seen_rounds
 WHERE game_id = ?;
 

@@ -10,22 +10,31 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"testing"
+	"time"
 
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
 )
 
 // roundItemRes is the wire shape for the `type=round_boundary` variant
-// of GET /api/games/{gameID}/questions/next. Pinned out here so the
-// test can decode the discriminated union; nested-structs linter forces
-// the extraction.
+// of GET /api/games/{gameID}/questions/next, covering both the intro and
+// results phases (#548). Pinned out here so the test can decode the
+// discriminated union; nested-structs linter forces the extraction. The
+// recap fields (RoundScore/RoundCorrect/RoundQuestions) are only
+// populated on the results phase.
 type roundItemRes struct {
-	Type    string `json:"type"`
-	ID      int64  `json:"id"`
-	Title   string `json:"title"`
-	Summary string `json:"summary"`
-	Score   int    `json:"score"`
-	Total   int    `json:"total"`
+	Type           string    `json:"type"`
+	Phase          string    `json:"phase"`
+	ID             int64     `json:"id"`
+	Title          string    `json:"title"`
+	Summary        string    `json:"summary"`
+	Score          int       `json:"score"`
+	RoundScore     int       `json:"roundScore"`
+	RoundCorrect   int       `json:"roundCorrect"`
+	RoundQuestions int       `json:"roundQuestions"`
+	StartedAt      time.Time `json:"startedAt"`
+	ExpiredAt      time.Time `json:"expiredAt"`
+	Total          int       `json:"total"`
 }
 
 // nextItemRes lets the play-loop test peek at the `type` discriminator
@@ -139,9 +148,11 @@ func peekType(t *testing.T, body []byte) string {
 }
 
 // TestRounds_PlayLoop drives a player through a single-round quiz over
-// the real HTTP server. Pins the #444 contract: /next returns a tagged
-// union, the round boundary carries the running score and round name,
-// POST .../seen acknowledges the round, and the final /next 404s.
+// the real HTTP server. Pins the #548 contract: /next emits an intro
+// boundary (title + summary, phase=intro) before the round's questions,
+// then each question, then a results boundary (phase=results) carrying
+// the running total and the per-round recap. Acking each phase advances;
+// the final /next 404s.
 func TestRounds_PlayLoop(t *testing.T) {
 	t.Parallel()
 
@@ -155,14 +166,33 @@ func TestRounds_PlayLoop(t *testing.T) {
 	if err := stores.Quizzes.CreateQuiz(ctx, qz); err != nil {
 		t.Fatalf("CreateQuiz err = %v, want nil", err)
 	}
-	// The round boundary only fires for a round with an authored
-	// summary (#444), so stamp one on the default round to exercise the
-	// boundary path.
+	// Both boundary phases only fire for a round with an authored
+	// summary (#548), so stamp one on the default round.
 	giveDefaultRoundSummary(ctx, t, stores, qz.ID, "Round one wrapped up!")
 
 	client := playerClient(t)
 
 	gameID := createRoundPlayGame(ctx, t, client, baseURL, qz.ID)
+
+	// --- Intro boundary: emitted before the round's first question ---
+	introItem := readNextRound(ctx, t, client, baseURL, gameID, "intro")
+	if got, want := introItem.Title, "Round 1"; got != want {
+		t.Errorf("intro.Title = %q, want %q", got, want)
+	}
+	if got, want := introItem.Summary, "Round one wrapped up!"; got != want {
+		t.Errorf("intro.Summary = %q, want %q", got, want)
+	}
+	if got, want := introItem.Total, len(qz.Questions); got != want {
+		t.Errorf("intro.Total = %d, want %d (question total stays across the boundary)", got, want)
+	}
+	assertBoundaryWindow(t, "intro", introItem, qz.TimeLimitSeconds)
+
+	// Repeated /next BEFORE acking the intro returns the SAME intro.
+	repeatIntro := readNextRound(ctx, t, client, baseURL, gameID, "intro")
+	if got, want := repeatIntro.ID, introItem.ID; got != want {
+		t.Errorf("repeat /next intro.ID = %d, want %d (idempotent until seen)", got, want)
+	}
+	postRoundSeen(ctx, t, client, baseURL, gameID, introItem.ID, "intro")
 
 	// --- Q1 + Q2: /next returns each question in turn ---
 	q1ID := answerNextCorrect(ctx, t, client, baseURL, gameID, qz)
@@ -174,42 +204,43 @@ func TestRounds_PlayLoop(t *testing.T) {
 		t.Fatalf("second /next returned questionID = %d, want %d", q2ID, qz.Questions[1].ID)
 	}
 
-	// --- Round boundary: /next returns the round, carrying running score ---
-	roundItem := readNextRound(ctx, t, client, baseURL, gameID)
-	if got, want := roundItem.Title, "Round 1"; got != want {
-		t.Errorf("round.Title = %q, want %q", got, want)
-	}
-	if got, want := roundItem.Summary, "Round one wrapped up!"; got != want {
-		t.Errorf("round.Summary = %q, want %q", got, want)
+	// --- Results boundary: running total + per-round recap ---
+	resultsItem := readNextRound(ctx, t, client, baseURL, gameID, "results")
+	if got, want := resultsItem.Title, "Round 1"; got != want {
+		t.Errorf("results.Title = %q, want %q", got, want)
 	}
 	// Both questions answered correctly at-or-near the start of the
 	// answer window; CalculateScore yields ~1000 each less the
 	// elapsed-fraction penalty. The play-loop test is wall-clock-
 	// sensitive so we just assert the score is in the ballpark of two
 	// correct answers, not the exact value.
-	if got := roundItem.Score; got < 1800 || got > 2000 {
-		t.Errorf("round.Score = %d, want between 1800 and 2000 (two correct answers)", got)
+	if got := resultsItem.Score; got < 1800 || got > 2000 {
+		t.Errorf("results.Score = %d, want between 1800 and 2000 (two correct answers)", got)
 	}
-	if got, want := roundItem.Total, len(qz.Questions); got != want {
-		t.Errorf("round.Total = %d, want %d (question total stays across the boundary)", got, want)
+	if got := resultsItem.RoundScore; got < 1800 || got > 2000 {
+		t.Errorf("results.RoundScore = %d, want between 1800 and 2000 (this round, two correct)", got)
 	}
+	if got, want := resultsItem.RoundCorrect, 2; got != want {
+		t.Errorf("results.RoundCorrect = %d, want %d", got, want)
+	}
+	if got, want := resultsItem.RoundQuestions, len(qz.Questions); got != want {
+		t.Errorf("results.RoundQuestions = %d, want %d", got, want)
+	}
+	if got, want := resultsItem.Total, len(qz.Questions); got != want {
+		t.Errorf("results.Total = %d, want %d (question total stays across the boundary)", got, want)
+	}
+	assertBoundaryWindow(t, "results", resultsItem, qz.TimeLimitSeconds)
 
-	// Repeated /next BEFORE seen returns the SAME round boundary.
-	repeatRound := readNextRound(ctx, t, client, baseURL, gameID)
-	if got, want := repeatRound.ID, roundItem.ID; got != want {
-		t.Errorf("repeat /next round.ID = %d, want %d (idempotent until seen)", got, want)
-	}
-
-	// --- POST .../seen acknowledges the round ---
-	postRoundSeen(ctx, t, client, baseURL, gameID, roundItem.ID)
+	// --- POST .../seen/results acknowledges the recap ---
+	postRoundSeen(ctx, t, client, baseURL, gameID, resultsItem.ID, "results")
 
 	// --- Exhausted: /next 404s ---
 	assertNextStatus(ctx, t, client, baseURL, gameID, http.StatusNotFound)
 }
 
-// TestRounds_SeenIsIdempotent pins the #444 contract that POST .../seen
-// returns 204 even on a repeated call, and the iterator stays past the
-// round boundary (not re-emitting it) afterwards.
+// TestRounds_SeenIsIdempotent pins the #548 contract that POST
+// .../seen/{phase} returns 204 even on a repeated call, and the iterator
+// stays past the round boundary phase (not re-emitting it) afterwards.
 func TestRounds_SeenIsIdempotent(t *testing.T) {
 	t.Parallel()
 
@@ -227,18 +258,57 @@ func TestRounds_SeenIsIdempotent(t *testing.T) {
 
 	client := playerClient(t)
 
-	// Create + answer both questions + reach the round boundary.
+	// Intro -> ack it twice -> answer both questions -> reach results.
 	gameID := createRoundPlayGame(ctx, t, client, baseURL, qz.ID)
+	introItem := readNextRound(ctx, t, client, baseURL, gameID, "intro")
+	postRoundSeen(ctx, t, client, baseURL, gameID, introItem.ID, "intro")
+	postRoundSeen(ctx, t, client, baseURL, gameID, introItem.ID, "intro")
+
 	_ = answerNextCorrect(ctx, t, client, baseURL, gameID, qz)
 	_ = answerNextCorrect(ctx, t, client, baseURL, gameID, qz)
-	roundItem := readNextRound(ctx, t, client, baseURL, gameID)
+	resultsItem := readNextRound(ctx, t, client, baseURL, gameID, "results")
 
-	// First seen: 204.
-	postRoundSeen(ctx, t, client, baseURL, gameID, roundItem.ID)
-	// Second seen: still 204 (no side effects).
-	postRoundSeen(ctx, t, client, baseURL, gameID, roundItem.ID)
+	// First seen: 204. Second seen: still 204 (no side effects).
+	postRoundSeen(ctx, t, client, baseURL, gameID, resultsItem.ID, "results")
+	postRoundSeen(ctx, t, client, baseURL, gameID, resultsItem.ID, "results")
 
-	// /next must be exhausted, not re-emit the round boundary.
+	// /next must be exhausted, not re-emit the results boundary.
+	assertNextStatus(ctx, t, client, baseURL, gameID, http.StatusNotFound)
+}
+
+// TestRounds_NoSummaryShowsNoBoundary pins that a quiz whose round has
+// no authored summary plays straight through both questions with neither
+// an intro nor a results boundary, then /next 404s (the client treats
+// that as "go to the final leaderboard"). This is the EXACTLY-as-today
+// path for single default-round quizzes (#548).
+func TestRounds_NoSummaryShowsNoBoundary(t *testing.T) {
+	t.Parallel()
+
+	ctx, setup := setupIntegration(t)
+	baseURL := setup.BaseURL
+	stores := setup.Stores
+
+	adminPlayer := seedGameplayAdmin(ctx, t, baseURL, stores)
+
+	qz := roundPlayQuiz(adminPlayer.ID)
+	if err := stores.Quizzes.CreateQuiz(ctx, qz); err != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", err)
+	}
+	// No giveDefaultRoundSummary: the default round keeps its empty
+	// summary, so no boundary card should appear.
+
+	client := playerClient(t)
+	gameID := createRoundPlayGame(ctx, t, client, baseURL, qz.ID)
+
+	// Both questions come back as questions, no intro before Q1.
+	if got := answerNextCorrect(ctx, t, client, baseURL, gameID, qz); got != qz.Questions[0].ID {
+		t.Fatalf("first /next questionID = %d, want %d", got, qz.Questions[0].ID)
+	}
+	if got := answerNextCorrect(ctx, t, client, baseURL, gameID, qz); got != qz.Questions[1].ID {
+		t.Fatalf("second /next questionID = %d, want %d", got, qz.Questions[1].ID)
+	}
+
+	// No results boundary: straight to exhausted.
 	assertNextStatus(ctx, t, client, baseURL, gameID, http.StatusNotFound)
 }
 
@@ -282,10 +352,10 @@ func answerNextCorrect(
 	return q.ID
 }
 
-// readNextRound calls /next and asserts the response is the round
-// boundary variant. Returns the decoded round body.
+// readNextRound calls /next, asserts the response is the round boundary
+// variant in the expected phase, and returns the decoded round body.
 func readNextRound(
-	ctx context.Context, t *testing.T, client *http.Client, baseURL, gameID string,
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, gameID, wantPhase string,
 ) roundItemRes {
 	t.Helper()
 	resp := httpGet(ctx, t, client, fmt.Sprintf("%s/api/games/%s/questions/next", baseURL, gameID))
@@ -302,8 +372,28 @@ func readNextRound(
 	if err := json.Unmarshal(body, &r); err != nil {
 		t.Fatalf("decode /next round err = %v, want nil; body=%q", err, body)
 	}
+	if got := r.Phase; got != wantPhase {
+		t.Fatalf("/next round phase = %q, want %q; body=%q", got, wantPhase, body)
+	}
 
 	return r
+}
+
+// assertBoundaryWindow pins the #548 auto-advance contract: both round
+// boundary phases carry a non-zero StartedAt/ExpiredAt window exactly
+// one quiz-default answer duration (timeLimitSeconds) long.
+func assertBoundaryWindow(t *testing.T, phase string, item roundItemRes, timeLimitSeconds int) {
+	t.Helper()
+	if item.StartedAt.IsZero() {
+		t.Errorf("%s.StartedAt is zero, want a populated timestamp", phase)
+	}
+	if item.ExpiredAt.IsZero() {
+		t.Errorf("%s.ExpiredAt is zero, want a populated timestamp", phase)
+	}
+	want := time.Duration(timeLimitSeconds) * time.Second
+	if got := item.ExpiredAt.Sub(item.StartedAt); got != want {
+		t.Errorf("%s window ExpiredAt-StartedAt = %v, want %v (quiz default)", phase, got, want)
+	}
 }
 
 // createRoundPlayGame issues POST /api/games for the given quiz id and
@@ -342,17 +432,17 @@ func assertNextStatus(
 	}
 }
 
-// postRoundSeen calls POST /api/games/{gameID}/rounds/{roundID}/seen
+// postRoundSeen calls POST /api/games/{gameID}/rounds/{roundID}/seen/{phase}
 // and asserts a 204 No Content response. The /api/* surface gates on
 // the session cookie alone; no CSRF token is needed (see addAPIRoutes).
 // Both create and idempotent re-ack paths return 204, so the helper
 // pins that status rather than taking it as a parameter.
 func postRoundSeen(
 	ctx context.Context, t *testing.T, client *http.Client, baseURL, gameID string,
-	roundID int64,
+	roundID int64, phase string,
 ) {
 	t.Helper()
-	target := fmt.Sprintf("%s/api/games/%s/rounds/%d/seen", baseURL, gameID, roundID)
+	target := fmt.Sprintf("%s/api/games/%s/rounds/%d/seen/%s", baseURL, gameID, roundID, phase)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, nil)
 	if err != nil {
 		t.Fatalf("NewRequest seen err = %v, want nil", err)
@@ -401,22 +491,24 @@ func TestRounds_ResetCascadesSeenRows(t *testing.T) {
 	}
 	giveDefaultRoundSummary(ctx, t, stores, qz.ID, "Round one wrapped up!")
 
-	// Drive the game through both questions -> round ack so a
-	// game_seen_rounds row exists. The HTTP client path mirrors how a
+	// Drive the game through both boundary phases so two
+	// game_seen_rounds rows exist. The HTTP client path mirrors how a
 	// real reset would land in production - everything goes through the
 	// same handlers a player would hit.
 	client := playerClient(t)
 	gameID := createRoundPlayGame(ctx, t, client, setup.BaseURL, qz.ID)
+	introItem := readNextRound(ctx, t, client, setup.BaseURL, gameID, "intro")
+	postRoundSeen(ctx, t, client, setup.BaseURL, gameID, introItem.ID, "intro")
 	answerNextCorrect(ctx, t, client, setup.BaseURL, gameID, qz)
 	answerNextCorrect(ctx, t, client, setup.BaseURL, gameID, qz)
-	roundItem := readNextRound(ctx, t, client, setup.BaseURL, gameID)
-	postRoundSeen(ctx, t, client, setup.BaseURL, gameID, roundItem.ID)
+	resultsItem := readNextRound(ctx, t, client, setup.BaseURL, gameID, "results")
+	postRoundSeen(ctx, t, client, setup.BaseURL, gameID, resultsItem.ID, "results")
 
-	seenBefore, err := stores.Games.ListSeenRoundIDsByGame(ctx, gameID)
+	seenBefore, err := stores.Games.ListSeenRoundPhasesByGame(ctx, gameID)
 	if err != nil {
-		t.Fatalf("ListSeenRoundIDsByGame (before) err = %v, want nil", err)
+		t.Fatalf("ListSeenRoundPhasesByGame (before) err = %v, want nil", err)
 	}
-	if got, want := len(seenBefore), 1; got != want {
+	if got, want := len(seenBefore), 2; got != want {
 		t.Fatalf("seen rows before reset = %d, want %d", got, want)
 	}
 
@@ -431,9 +523,9 @@ func TestRounds_ResetCascadesSeenRows(t *testing.T) {
 		t.Fatalf("DeleteGamesForPlayerOnQuiz err = %v, want nil", dErr)
 	}
 
-	seenAfter, err := stores.Games.ListSeenRoundIDsByGame(ctx, gameID)
+	seenAfter, err := stores.Games.ListSeenRoundPhasesByGame(ctx, gameID)
 	if err != nil {
-		t.Fatalf("ListSeenRoundIDsByGame (after) err = %v, want nil", err)
+		t.Fatalf("ListSeenRoundPhasesByGame (after) err = %v, want nil", err)
 	}
 	if got, want := len(seenAfter), 0; got != want {
 		t.Errorf(

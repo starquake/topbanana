@@ -670,7 +670,7 @@ func addAPIRoutes(
 		ensurePlayer(clientapi.HandleAnswerPost(logger, gameService)),
 	)
 	mux.Handle(
-		"POST /api/games/{gameID}/rounds/{roundID}/seen",
+		"POST /api/games/{gameID}/rounds/{roundID}/seen/{phase}",
 		ensurePlayer(clientapi.HandleRoundSeen(logger, gameService)),
 	)
 	mux.Handle("GET /api/games/{gameID}/results", ensurePlayer(clientapi.HandleGameResults(logger, gameService)))

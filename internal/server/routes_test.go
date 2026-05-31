@@ -222,11 +222,11 @@ func (stubGameStore) ListQuizIDsForPlayer(_ context.Context, _ int64) ([]int64, 
 	return nil, errRouteStub
 }
 
-func (stubGameStore) MarkRoundSeen(_ context.Context, _ string, _ int64) error {
+func (stubGameStore) MarkRoundSeen(_ context.Context, _ string, _ int64, _ game.RoundPhase) error {
 	return errRouteStub
 }
 
-func (stubGameStore) ListSeenRoundIDsByGame(_ context.Context, _ string) ([]int64, error) {
+func (stubGameStore) ListSeenRoundPhasesByGame(_ context.Context, _ string) ([]game.SeenRoundPhase, error) {
 	return nil, errRouteStub
 }
 
