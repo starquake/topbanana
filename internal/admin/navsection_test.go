@@ -22,6 +22,8 @@ func TestNavSection(t *testing.T) {
 		{name: "quiz import", path: "/admin/quizzes/import", want: "quizzes"},
 		{name: "players list", path: "/admin/players", want: "players"},
 		{name: "player detail", path: "/admin/players/7", want: "players"},
+		{name: "invites list", path: "/admin/invites", want: "invites"},
+		{name: "invites new", path: "/admin/invites/new", want: "invites"},
 		{name: "email", path: "/admin/email", want: "email"},
 		{name: "email test", path: "/admin/email/test", want: "email"},
 		{name: "settings", path: "/admin/settings", want: "settings"},
