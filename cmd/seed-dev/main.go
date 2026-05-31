@@ -66,10 +66,22 @@ const (
 // JSON can flow through either the live admin endpoint or this
 // tool. Decoupling from quiz.Quiz keeps the wire shape small and
 // LLM-friendly (no IDs, no timestamps).
+//
+// Questions and Rounds are mutually exclusive, matching the admin
+// import payload (#546): a flat quiz supplies Questions (every
+// question lands in the default round), a multi-round quiz supplies
+// Rounds with their own questions.
 type quizFixture struct {
 	Title       string            `json:"title"`
 	Description string            `json:"description"`
-	Questions   []questionFixture `json:"questions"`
+	Questions   []questionFixture `json:"questions,omitempty"`
+	Rounds      []roundFixture    `json:"rounds,omitempty"`
+}
+
+type roundFixture struct {
+	Title     string            `json:"title"`
+	Summary   string            `json:"summary,omitempty"`
+	Questions []questionFixture `json:"questions"`
 }
 
 type questionFixture struct {
@@ -178,7 +190,10 @@ func seedQuizzes(
 ) ([]*quiz.Quiz, error) {
 	out := make([]*quiz.Quiz, 0, len(fixtures))
 	for i := range fixtures {
-		qz := quizFromFixture(&fixtures[i])
+		qz, err := quizFromFixture(&fixtures[i])
+		if err != nil {
+			return out, fmt.Errorf("build quiz %q: %w", fixtures[i].Title, err)
+		}
 		if err := quizzes.CreateQuiz(ctx, qz); err != nil {
 			if errors.Is(err, quiz.ErrSlugTaken) {
 				logger.Info("quiz already exists (skipping)", slog.String("title", qz.Title))
@@ -194,29 +209,107 @@ func seedQuizzes(
 	return out, nil
 }
 
+// errFixtureQuestionsOrRounds is returned when a fixture supplies both a
+// top-level questions array and a rounds array, or neither. The two are
+// mutually exclusive, mirroring the admin import payload (#546). The
+// fixtures are in-repo, so a malformed one is a programming error worth
+// failing the run over rather than tolerating.
+var (
+	errFixtureQuestionsOrRounds = errors.New(
+		"provide either a top-level questions array or a rounds array, not both and not neither",
+	)
+	// errFixtureRoundTitleRequired is returned when a rounds fixture
+	// carries a round with no title, mirroring the admin import (#546).
+	errFixtureRoundTitleRequired = errors.New("round title is required")
+	// errFixtureRoundNoQuestions is returned when a rounds fixture
+	// carries a round with no questions, mirroring the admin import (#546).
+	errFixtureRoundNoQuestions = errors.New("round needs at least one question")
+)
+
 // quizFromFixture converts a fixture into a domain Quiz pinned to the
 // seed admin. Question positions are 1..N in document order; the slug
 // is derived from the title the same way the admin import handler
 // does so an operator who imports the same JSON via /admin/quizzes/
 // import gets the same row shape.
-func quizFromFixture(f *quizFixture) *quiz.Quiz {
+//
+// A rounds fixture maps each round onto qz.Rounds (with a 0-based
+// round Position) and mirrors every question onto qz.Questions with a
+// quiz-wide 1..N position across all rounds - the same flattening the
+// admin import does (#546). The mirror matters here because finishGame
+// iterates qz.Questions to write game_questions; a rounds quiz with no
+// flat mirror would seed plays with zero questions.
+func quizFromFixture(f *quizFixture) (*quiz.Quiz, error) {
+	if (len(f.Questions) == 0) == (len(f.Rounds) == 0) {
+		return nil, errFixtureQuestionsOrRounds
+	}
+
 	qz := &quiz.Quiz{
 		Title:             f.Title,
 		Slug:              slug.Make(f.Title),
 		Description:       f.Description,
 		CreatedByPlayerID: seededAdminID,
 	}
-	qz.Questions = make([]*quiz.Question, 0, len(f.Questions))
-	for i, qf := range f.Questions {
-		qq := &quiz.Question{Text: qf.Text, Position: i + 1}
-		qq.Options = make([]*quiz.Option, 0, len(qf.Options))
-		for _, of := range qf.Options {
-			qq.Options = append(qq.Options, &quiz.Option{Text: of.Text, Correct: of.Correct})
+
+	if len(f.Rounds) > 0 {
+		if err := fillQuizFromRounds(qz, f.Rounds); err != nil {
+			return nil, err
 		}
-		qz.Questions = append(qz.Questions, qq)
+
+		return qz, nil
 	}
 
-	return qz
+	qz.Questions = make([]*quiz.Question, 0, len(f.Questions))
+	for i, qf := range f.Questions {
+		qz.Questions = append(qz.Questions, questionFromFixture(qf, i+1))
+	}
+
+	return qz, nil
+}
+
+// fillQuizFromRounds maps the authored rounds onto qz.Rounds and mirrors
+// every question onto qz.Questions with a quiz-wide 1..N position in
+// document order, so finishGame still finds the full question set when
+// seeding plays (#546). A round must carry a non-empty title and at
+// least one question, mirroring the admin import's per-round checks.
+func fillQuizFromRounds(qz *quiz.Quiz, rounds []roundFixture) error {
+	qz.Rounds = make([]*quiz.Round, 0, len(rounds))
+	pos := 0
+	for i, rf := range rounds {
+		if rf.Title == "" {
+			return fmt.Errorf("round %d: %w", i+1, errFixtureRoundTitleRequired)
+		}
+		if len(rf.Questions) == 0 {
+			return fmt.Errorf("round %q: %w", rf.Title, errFixtureRoundNoQuestions)
+		}
+
+		round := &quiz.Round{
+			Position:  i,
+			Title:     rf.Title,
+			Summary:   rf.Summary,
+			Questions: make([]*quiz.Question, 0, len(rf.Questions)),
+		}
+		for _, qf := range rf.Questions {
+			pos++
+			qq := questionFromFixture(qf, pos)
+			round.Questions = append(round.Questions, qq)
+			qz.Questions = append(qz.Questions, qq)
+		}
+		qz.Rounds = append(qz.Rounds, round)
+	}
+
+	return nil
+}
+
+// questionFromFixture maps one fixture question onto the domain type at
+// the given quiz-wide position.
+func questionFromFixture(qf questionFixture, position int) *quiz.Question {
+	qq := &quiz.Question{Text: qf.Text, Position: position}
+	qq.Options = make([]*quiz.Option, 0, len(qf.Options))
+	for _, of := range qf.Options {
+		qq.Options = append(qq.Options, &quiz.Option{Text: of.Text, Correct: of.Correct})
+	}
+
+	return qq
 }
 
 // seedPlays creates playerCount anonymous players and finishes

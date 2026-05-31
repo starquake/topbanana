@@ -1,11 +1,26 @@
 [
   {
     "title": "European Capitals",
-    "description": "Twelve quick-fire questions covering EU capitals.",
-    "questions": [
-      {"text": "Which city sits on the river Vltava?", "options": [{"text": "Bratislava", "correct": false}, {"text": "Budapest", "correct": false}, {"text": "Prague", "correct": true}, {"text": "Warsaw", "correct": false}]},
-      {"text": "What is the capital of Portugal?", "options": [{"text": "Madrid", "correct": false}, {"text": "Lisbon", "correct": true}, {"text": "Porto", "correct": false}, {"text": "Faro", "correct": false}]},
-      {"text": "Which capital lies on the Danube?", "options": [{"text": "Berlin", "correct": false}, {"text": "Vienna", "correct": true}, {"text": "Rome", "correct": false}, {"text": "Helsinki", "correct": false}]}
+    "description": "A tour of EU capitals, split into two rounds.",
+    "rounds": [
+      {
+        "title": "Warm-up",
+        "summary": "Three well-known capitals to ease everyone in before the harder round.",
+        "questions": [
+          {"text": "Which city sits on the river Vltava?", "options": [{"text": "Bratislava", "correct": false}, {"text": "Budapest", "correct": false}, {"text": "Prague", "correct": true}, {"text": "Warsaw", "correct": false}]},
+          {"text": "What is the capital of Portugal?", "options": [{"text": "Madrid", "correct": false}, {"text": "Lisbon", "correct": true}, {"text": "Porto", "correct": false}, {"text": "Faro", "correct": false}]},
+          {"text": "Which capital lies on the Danube?", "options": [{"text": "Berlin", "correct": false}, {"text": "Vienna", "correct": true}, {"text": "Rome", "correct": false}, {"text": "Helsinki", "correct": false}]}
+        ]
+      },
+      {
+        "title": "Northern reaches",
+        "summary": "The Nordic and Baltic capitals, where the trickier guesses tend to live.",
+        "questions": [
+          {"text": "What is the capital of Finland?", "options": [{"text": "Oslo", "correct": false}, {"text": "Stockholm", "correct": false}, {"text": "Helsinki", "correct": true}, {"text": "Tallinn", "correct": false}]},
+          {"text": "Which city is the capital of Estonia?", "options": [{"text": "Riga", "correct": false}, {"text": "Tallinn", "correct": true}, {"text": "Vilnius", "correct": false}, {"text": "Helsinki", "correct": false}]},
+          {"text": "What is the capital of Denmark?", "options": [{"text": "Copenhagen", "correct": true}, {"text": "Bergen", "correct": false}, {"text": "Malmo", "correct": false}, {"text": "Aarhus", "correct": false}]}
+        ]
+      }
     ]
   },
   {
