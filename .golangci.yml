@@ -139,6 +139,12 @@ linters:
     nolintlint:
       require-explanation: true
       require-specific: true
+      # golangci-lint's incremental cache can intermittently miss the issue a
+      # nolint suppresses (e.g. the revive flag-parameter nolint in
+      # internal/mailer/status.go), making nolintlint flag a still-needed
+      # directive as "unused" and failing CI nondeterministically. Tolerate it.
+      # Upstream bug: https://github.com/golangci/golangci-lint/issues/3228
+      allow-unused: true
     godox:
       keywords:
 #        - TODO     # will be enabled in the future
