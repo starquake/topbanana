@@ -546,6 +546,11 @@ func TestHandleRegisterSubmit_DuplicateUsername(t *testing.T) {
 	}
 }
 
+// TestHandleRegisterSubmit_DuplicateEmail pins the account-enumeration
+// opacity contract (#573): registering with an already-registered email
+// must return the same pending page (200, same body, no live session) as
+// a fresh signup, and dispatch an out-of-band notice to the real owner
+// rather than surface a distinct "already registered" response.
 func TestHandleRegisterSubmit_DuplicateEmail(t *testing.T) {
 	t.Parallel()
 
@@ -554,7 +559,11 @@ func TestHandleRegisterSubmit_DuplicateEmail(t *testing.T) {
 		t.Fatalf("seed CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
+	sender := &recordingSender{}
+	handler := HandleRegisterSubmit(
+		discardLogger(), nil, store, session.New([]byte("k"), true),
+		RegisterDeps{Mailer: sender},
+	)
 	rec := postForm(t, handler, "/register", url.Values{
 		"username":         {"bob"},
 		"email":            {"shared@example.test"},
@@ -562,11 +571,30 @@ func TestHandleRegisterSubmit_DuplicateEmail(t *testing.T) {
 		"password_confirm": {"correctbattery"},
 	})
 
-	if got, want := rec.Code, http.StatusConflict; got != want {
-		t.Errorf("status = %d, want %d", got, want)
+	assertRegisterPending(t, rec, "shared@example.test")
+	if got := rec.Body.String(); strings.Contains(got, "already registered") {
+		t.Errorf("body leaked account existence; body=%.300q", got)
 	}
-	if got, want := rec.Body.String(), "already registered"; !strings.Contains(got, want) {
-		t.Errorf("body did not mention duplicate email, got %q", got)
+
+	// The owner-notification send fires on a detached goroutine; give it
+	// up to a second to land. The mailer is the in-process recordingSender
+	// so the wait is just goroutine scheduling, not network.
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if len(sender.Sent()) > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	sent := sender.Sent()
+	if got, want := len(sent), 1; got != want {
+		t.Fatalf("sender.Sent() len = %d, want %d", got, want)
+	}
+	if got, want := sent[0].Kind, mailer.KindRegisterExisting; got != want {
+		t.Errorf("sent[0].Kind = %q, want %q", got, want)
+	}
+	if got, want := sent[0].To, "shared@example.test"; got != want {
+		t.Errorf("sent[0].To = %q, want %q", got, want)
 	}
 }
 
