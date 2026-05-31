@@ -108,7 +108,7 @@ func renderVerifyOutcome(
 		render.render(w, r, http.StatusOK, verifyEmailPageData{
 			Title:        "Email verified",
 			Heading:      "Email verified",
-			Message:      "Your email address is confirmed. You can now use everything Top Banana has to offer.",
+			Message:      "Your email address is confirmed. You can now use everything Top Banana! has to offer.",
 			ShowContinue: true,
 			ContinueHref: out.landing,
 		})

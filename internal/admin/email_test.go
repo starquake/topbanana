@@ -219,7 +219,7 @@ func TestHandleEmailGet_RendersStatusAndLog(t *testing.T) {
 			{
 				SentAt:  time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC),
 				To:      "ops@example.test",
-				Subject: "Top Banana test email",
+				Subject: "Top Banana! test email",
 				Kind:    mailer.KindTest,
 			},
 		},
@@ -241,7 +241,7 @@ func TestHandleEmailGet_RendersStatusAndLog(t *testing.T) {
 	if got, want := body, "ops@example.test"; !strings.Contains(got, want) {
 		t.Errorf("body should contain log recipient %q", want)
 	}
-	if got, want := body, "Top Banana test email"; !strings.Contains(got, want) {
+	if got, want := body, "Top Banana! test email"; !strings.Contains(got, want) {
 		t.Errorf("body should contain log subject %q", want)
 	}
 }

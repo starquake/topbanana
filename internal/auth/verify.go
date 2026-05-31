@@ -222,10 +222,10 @@ func buildVerifyLink(baseURL, rawToken string) (string, error) {
 // did not initiate the change spots it before opening the message.
 func verifyEmailSubject(pendingEmail string) string {
 	if pendingEmail == "" {
-		return "Confirm your Top Banana email"
+		return "Confirm your Top Banana! email"
 	}
 
-	return "Confirm your new Top Banana email"
+	return "Confirm your new Top Banana! email"
 }
 
 // verifyEmailBody is the plain-text body of the verification email.
@@ -244,7 +244,7 @@ func verifyEmailBody(link, pendingEmail string) string {
 			"ignore this email.\n"
 	}
 
-	return "Someone (hopefully you) asked to change a Top Banana account email\n" +
+	return "Someone (hopefully you) asked to change a Top Banana! account email\n" +
 		"to " + pendingEmail + ".\n\n" +
 		"Click the link below to confirm the change:\n\n" +
 		link + "\n\n" +
