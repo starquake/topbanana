@@ -1,22 +1,14 @@
-// cooldown.js ticks the rate-limit "Wait Ns" submit buttons on the auth
-// pages (forgot-password, verify-email request, verify-email pending)
-// down to zero and re-enables them, so a visitor who waits out the
-// lockout can submit again without reloading the page.
+// cooldown.js re-enables the rate-limit "Wait Ns" submit buttons on the auth
+// pages (forgot-password, verify-email request/pending) by ticking the
+// server-rendered countdown down to zero client-side, so a visitor who waits
+// out the lockout can submit without reloading.
 //
-// The server renders the initial disabled state and the wait count
-// (e.g. `Wait 60s`, `disabled`) at page load; that server-rendered
-// markup stays the source of truth on first paint and works unchanged
-// if this module never runs. All this module does is let the UI catch
-// up to the cooldown the server already enforces: server-side
-// enforcement remains authoritative, so a submit fired right at expiry
-// that the server still considers too early simply re-renders the
-// cooldown page again, which is fine.
-//
-// Generic across all three pages: each button carries the remaining
-// seconds in data-cooldown and its active label in data-cooldown-label,
-// so the page templates differ only in those attribute values. The
-// module is scanned by Tailwind via the @source "../js" directive, but
-// it emits no class names of its own.
+// The server-rendered disabled/"Wait Ns" state stays the source of truth on
+// first paint and if this module never runs; server-side enforcement stays
+// authoritative (a submit right at expiry the server still rejects just
+// re-renders the cooldown page). Each button carries its remaining seconds in
+// data-cooldown and active label in data-cooldown-label, so this is generic
+// across the three pages.
 
 function startCooldown(button) {
     let remaining = Number.parseInt(button.dataset.cooldown ?? '', 10);
