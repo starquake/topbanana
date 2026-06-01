@@ -4,6 +4,8 @@ import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
+import { SESSION_KEY } from './e2e-auth';
+
 // One server + one SQLite file per Playwright worker, so the 4 workers
 // don't contend at the SQLite writer (#398). The worker count is the
 // authoritative knob; the webServer array and the per-test baseURL
@@ -114,7 +116,7 @@ const workerServer = (workerIndex: number) => {
       HOST: '127.0.0.1',
       PORT: String(port),
       DB_URI: `file:${dbPath}?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate`,
-      SESSION_KEY: 'e2e-test-session-key-do-not-use-in-prod-1234567890abcdef',
+      SESSION_KEY,
       REGISTRATION_ENABLED: 'true',
       // The invite flow (#318) builds an absolute accept-invite link from
       // BASE_URL; an empty value makes invite creation fail before the row
@@ -169,13 +171,21 @@ export default defineConfig({
   },
   globalTeardown: './global-teardown.ts',
   projects: [
+    // Logs the shared admin in once (real /login flow) and saves its
+    // storageState. The admin specs opt in per-file via
+    // test.use({ storageState: adminStatePath() }); the dependency only
+    // guarantees the file exists before they run. storageState is NOT set
+    // project-wide so the anonymous / plain-player specs stay signed out.
+    { name: 'setup', testMatch: /auth\.setup\.ts/ },
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+      dependencies: ['setup'],
     },
     {
       name: 'firefox',
       use: { ...devices['Desktop Firefox'] },
+      dependencies: ['setup'],
     },
   ],
   webServer: Array.from({ length: WORKER_COUNT }, (_, i) => workerServer(i)),

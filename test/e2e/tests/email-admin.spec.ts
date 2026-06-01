@@ -1,16 +1,16 @@
 import { test, expect } from './fixtures';
-import { registerAdmin } from './helpers';
+import { adminStatePath } from '../e2e-auth';
+
+// Reuse the shared seed-admin session; this spec only needs to be signed
+// in as an admin to reach the email diagnostics page.
+test.use({ storageState: adminStatePath() });
 
 // #321 - admin email diagnostics view. POST /admin/email/test follows
 // the Post/Redirect/Get pattern: the form action 303s to /admin/email
 // with a one-shot flash cookie that the GET reads + clears. The PRG
 // hop is what keeps Firefox from prompting "resend this form?" on
 // refresh, so the URL assertion below is load-bearing.
-test('admin can open the email diagnostics page and see status + log', async ({ page, browserName }) => {
-  const displayName = `e2e-admin-email-${browserName}`;
-
-  await registerAdmin(page, displayName);
-
+test('admin can open the email diagnostics page and see status + log', async ({ page }) => {
   await page.goto('/admin/email');
   await expect(page).toHaveURL(/\/admin\/email$/);
 

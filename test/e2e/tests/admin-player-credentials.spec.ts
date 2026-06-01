@@ -1,15 +1,23 @@
 import type { BrowserContext } from '@playwright/test';
 
 import { test, expect } from './fixtures';
-import { registerAdmin, markAdmin, PASSWORD } from './helpers';
+import { PASSWORD } from './helpers';
+import { adminStatePath } from '../e2e-auth';
 
-// Registers a fresh plain player in an isolated browser context so the
-// admin session on the main page is left untouched.
+// Act as the shared seed admin; this spec mutates only the separately
+// registered target player, never the seed admin.
+test.use({ storageState: adminStatePath() });
+
+// Registers a fresh plain player in an isolated, anonymous browser context
+// so the admin session on the main page is left untouched. storageState is
+// forced empty so the seed-admin cookie this spec runs with does not leak
+// into the new context; baseURL pins it to the same worker server.
 async function registerPlayer(
   context: BrowserContext,
   displayName: string,
+  baseURL: string,
 ): Promise<void> {
-  const playerContext = await context.browser()!.newContext();
+  const playerContext = await context.browser()!.newContext({ storageState: undefined, baseURL });
   try {
     const playerPage = await playerContext.newPage();
     await playerPage.goto('/register');
@@ -31,15 +39,12 @@ async function registerPlayer(
 // #535 — an Admin can rename a player and set a new password from the
 // player detail page. Both forms live inside the Admin gate in the
 // Actions card.
-test('admin sets a player display name and password from the detail page', async ({ page, context, browserName }) => {
-  const adminDisplayName = `e2e-cred-boss-${browserName}`;
+test('admin sets a player display name and password from the detail page', async ({ page, context, browserName, baseURL }) => {
   const targetDisplayName = `e2e-cred-target-${browserName}`;
   const renamedDisplayName = `e2e-cred-renamed-${browserName}`;
   const newPassword = 'freshpassword13plus';
 
-  await registerAdmin(page, adminDisplayName);
-  markAdmin(adminDisplayName);
-  await registerPlayer(context, targetDisplayName);
+  await registerPlayer(context, targetDisplayName, baseURL!);
 
   // Open the target's detail view from the players list.
   await page.goto('/admin/players');

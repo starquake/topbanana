@@ -112,6 +112,72 @@ function setRole(displayName: string, role: 'player' | 'host' | 'admin'): void {
   }
 }
 
+// csrfTokenPattern scrapes the hidden csrf_token input a server-rendered
+// form carries (the import form, the login form, ...). Tolerant of attribute
+// order: the value may sit before or after the name attribute on the input.
+export const csrfTokenPattern =
+  /<input[^>]*\bname="csrf_token"[^>]*\bvalue="([^"]*)"|<input[^>]*\bvalue="([^"]*)"[^>]*\bname="csrf_token"/;
+
+type ImportOption = { text: string; correct: boolean };
+type ImportQuestion = { text: string; options: ImportOption[] };
+
+export type ImportRound = { title: string; summary?: string; questions: ImportQuestion[] };
+
+export type ImportDoc = {
+  title: string;
+  description: string;
+  timeLimitSeconds?: number;
+  questions?: ImportQuestion[];
+  rounds?: ImportRound[];
+};
+
+// importQuiz creates a full quiz tree in one request via the admin JSON
+// importer, using page.request so the context's storageState admin cookie
+// authenticates the call. It GETs the import form to seed the CSRF cookie
+// and read the hidden token, then POSTs the document. Throws with the
+// response body on a non-redirect outcome so a malformed doc surfaces loudly.
+export async function importQuiz(page: Page, doc: ImportDoc): Promise<void> {
+  const formResp = await page.request.get('/admin/quizzes/import');
+  if (!formResp.ok()) {
+    throw new Error(`GET /admin/quizzes/import failed: ${formResp.status()} ${await formResp.text()}`);
+  }
+  const html = await formResp.text();
+  const match = csrfTokenPattern.exec(html);
+  const csrfToken = match?.[1] ?? match?.[2];
+  if (!csrfToken) {
+    throw new Error(`no csrf_token found in /admin/quizzes/import response; body=${html}`);
+  }
+
+  const postResp = await page.request.post('/admin/quizzes/import', {
+    form: { json: JSON.stringify(doc), csrf_token: csrfToken },
+    maxRedirects: 0,
+  });
+  // The importer 303-redirects to the new quiz on success. maxRedirects: 0
+  // keeps the 303 visible instead of following it to the quiz view.
+  if (postResp.status() !== 303) {
+    throw new Error(`POST /admin/quizzes/import failed: ${postResp.status()} ${await postResp.text()}`);
+  }
+}
+
+// seedQuiz creates a quiz with the given questions via the admin JSON
+// importer instead of driving the authoring UI. Specs that previously
+// called createQuizWithQuestions only to have a quiz exist use this; the
+// playthrough is then found by title via startQuizAsAnonymous.
+export async function seedQuiz(
+  page: Page,
+  title: string,
+  questions: readonly QuestionSpec[] = QUIZ_QUESTIONS,
+): Promise<void> {
+  await importQuiz(page, {
+    title,
+    description: 'E2E seeded quiz',
+    questions: questions.map((q) => ({
+      text: q.text,
+      options: q.options.map((text, i) => ({ text, correct: q.correctIndices.includes(i) })),
+    })),
+  });
+}
+
 export async function createQuizWithQuestions(
   page: Page,
   title: string,

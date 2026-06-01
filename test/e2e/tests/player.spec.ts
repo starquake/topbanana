@@ -1,26 +1,24 @@
 import { test, expect } from './fixtures';
-import { registerAdmin, createQuizWithQuestions, QUIZ_QUESTIONS } from './helpers';
+import { seedQuiz, QUIZ_QUESTIONS } from './helpers';
+import { adminStatePath } from '../e2e-auth';
+
+// Seed the quiz as the shared admin (via the JSON importer), then clear
+// the admin cookie before each playthrough so the gameplay runs anonymous.
+test.use({ storageState: adminStatePath() });
 
 test('admin sets up a multi-question quiz, then a player plays it through to the results screen', async ({ page, browser, browserName }) => {
-  // Four questions × ~500ms reveal delay (#247, shrunk via REVEAL_DELAY) ×
-  // ~2s/3s feedback + ~10s admin setup + browser overhead. Even with the
-  // shorter reveal, slow CI can drift past Playwright's 30s default, so
-  // keep the explicit bump.
-  test.setTimeout(90_000);
+  // The full anonymous playthrough still spans four questions of feedback
+  // and reveal beats; keep a generous budget for slow CI runners. Setup is
+  // now a single import request rather than the authoring UI.
+  test.setTimeout(60_000);
 
   // Per-project unique names so chromium and firefox runs don't collide on the
   // shared server's SQLite file.
-  const adminUser = `e2e-admin-player-${browserName}`;
   const quizTitle = `E2E Player Quiz ${browserName}`;
 
-  // ---- Admin setup: register, then create the quiz with all four variants.
-  await registerAdmin(page, adminUser);
-  await createQuizWithQuestions(page, quizTitle);
-
-  // Log out so the player session is anonymous. The navbar form posts to
-  // /logout and the server 303s back to /login.
-  await page.getByRole('button', { name: 'Log out' }).click();
-  await expect(page).toHaveURL(/\/login$/);
+  // ---- Seed the quiz, then drop the admin cookie so play is anonymous.
+  await seedQuiz(page, quizTitle);
+  await page.context().clearCookies();
 
   // ---- Player flow: visit /quizzes (the public list, #284), click the
   // quiz card to land on /play/{slug-id}, then walk every question by
@@ -200,15 +198,12 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
 // because the SPA's dropdown was retired (the picker now lives at
 // /quizzes), so the navigation contract has to stay green.
 test('public /quizzes lists every quiz and click navigates to play deep-link', async ({ page, browserName }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(30_000);
 
-  const adminUser = `e2e-admin-quizzes-${browserName}`;
   const quizTitle = `E2E Public List ${browserName}`;
 
-  await registerAdmin(page, adminUser);
-  await createQuizWithQuestions(page, quizTitle);
-  await page.getByRole('button', { name: 'Log out' }).click();
-  await expect(page).toHaveURL(/\/login$/);
+  await seedQuiz(page, quizTitle);
+  await page.context().clearCookies();
 
   await page.goto('/quizzes');
   const card = page.getByRole('link', { name: quizTitle });

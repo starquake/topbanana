@@ -1,11 +1,15 @@
 import { test, expect } from './fixtures';
 import {
-  registerAdmin,
-  createQuizWithQuestions,
+  seedQuiz,
   startQuizAsAnonymous,
   answerRemainingQuestions,
   QUIZ_QUESTIONS,
 } from './helpers';
+import { adminStatePath } from '../e2e-auth';
+
+// Seed the quiz as the shared admin via the JSON importer, then clear the
+// admin cookie so the timeout flow runs anonymous.
+test.use({ storageState: adminStatePath() });
 
 // PROGRESS_DRAIN_BUDGET_MS is a wall-clock budget for waiting until the
 // per-question progress bar reaches 0. Sized to comfortably cover the
@@ -30,18 +34,15 @@ const SETTLE_MS = 8_000;
 // Letting the timer expire without answering takes one full countdown
 // plus the 2s feedback pause plus the next question's render time.
 // Following questions are answered immediately (~2s feedback each). The
-// setup overhead (registerAdmin + createQuizWithQuestions) pushes this
-// well past the Playwright default — bump generously.
+// full countdown plus playthrough keeps this above the Playwright default,
+// but with import-based setup a moderate budget suffices.
 test('timing out a question shows the Time out banner and the rest of the quiz still plays through', async ({ page, browserName }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(60_000);
 
-  const adminUser = `e2e-admin-timeout-${browserName}`;
   const quizTitle = `E2E Timeout Quiz ${browserName}`;
 
-  await registerAdmin(page, adminUser);
-  await createQuizWithQuestions(page, quizTitle);
-  await page.getByRole('button', { name: 'Log out' }).click();
-  await expect(page).toHaveURL(/\/login$/);
+  await seedQuiz(page, quizTitle);
+  await page.context().clearCookies();
 
   // Start the quiz as an anonymous player.
   await startQuizAsAnonymous(page, quizTitle);

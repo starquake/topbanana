@@ -1,7 +1,12 @@
 import { test, expect } from './fixtures';
 import type { Page } from './fixtures';
-import { registerAdmin, createQuizWithQuestions } from './helpers';
-import type { QuestionSpec } from './helpers';
+import { importQuiz } from './helpers';
+import type { ImportRound } from './helpers';
+import { adminStatePath } from '../e2e-auth';
+
+// Seed both quizzes as the shared admin via the JSON importer, then clear
+// the admin cookie so the round playthrough runs anonymous.
+test.use({ storageState: adminStatePath() });
 
 // #548 - questions are grouped into rounds, and each round boundary is
 // split into two phases: an intro card shown BEFORE the round's first
@@ -21,35 +26,36 @@ import type { QuestionSpec } from './helpers';
 //      so the boundary window is ~1s; the intro card leaves on its own
 //      WITHOUT a Continue click. Both run under one admin registration
 //      so the auto quiz needs no extra ADMIN_EMAILS entry.
-const TWO_QUESTIONS: readonly QuestionSpec[] = [
-  { text: 'What is 2+2?', options: ['4', '3', '5', '6'], correctIndices: [0] },
-  { text: 'Capital of France?', options: ['Paris', 'London', 'Madrid', 'Rome'], correctIndices: [0] },
-];
-
-// authorRoundSummary opens the default round's edit form and fills its
-// summary so the intro card shows copy during play. Assumes the page is
-// on the quiz view (/admin/quizzes/{id}) and the quiz has exactly one
-// round (the default "Round 1").
-async function authorRoundSummary(page: Page, summary: string): Promise<void> {
-  await page.getByRole('link', { name: 'Edit round' }).first().click();
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/rounds\/\d+\/edit$/);
-  await page.locator('textarea[name=summary]').fill(summary);
-  await page.getByRole('button', { name: 'Save round' }).click();
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
-}
-
-// setQuizTimeLimit opens the quiz edit form and sets the per-question
-// time limit (seconds). The round-boundary auto-advance window length
-// is the quiz's default per-question duration, so a 1s limit gives a
-// ~1s boundary window the auto-advance assertion can wait out without
-// stretching the suite. Assumes the page is on the quiz view.
-async function setQuizTimeLimit(page: Page, seconds: number): Promise<void> {
-  const quizUrl = page.url();
-  await page.goto(`${quizUrl}/edit`);
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/edit$/);
-  await page.locator('#time_limit_seconds').fill(String(seconds));
-  await page.getByRole('button', { name: 'Save' }).click();
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+// roundWithSummary builds a single named round titled "Round 1" (matching
+// the default round's title) carrying the given summary and two questions.
+// Importing one named round replaces the default round, so the played quiz
+// has exactly one round whose intro/recap cards carry the summary copy the
+// boundary-card assertions key on.
+function roundWithSummary(summary: string): ImportRound {
+  return {
+    title: 'Round 1',
+    summary,
+    questions: [
+      {
+        text: 'What is 2+2?',
+        options: [
+          { text: '4', correct: true },
+          { text: '3', correct: false },
+          { text: '5', correct: false },
+          { text: '6', correct: false },
+        ],
+      },
+      {
+        text: 'Capital of France?',
+        options: [
+          { text: 'Paris', correct: true },
+          { text: 'London', correct: false },
+          { text: 'Madrid', correct: false },
+          { text: 'Rome', correct: false },
+        ],
+      },
+    ],
+  };
 }
 
 // startQuiz drives the anonymous player from the public list into the
@@ -63,37 +69,35 @@ async function startQuiz(page: Page, quizTitle: string): Promise<void> {
 }
 
 test('round boundary cards auto-advance on their countdown and skip on Continue', async ({ page, browserName }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(60_000);
 
-  const adminUser = `e2e-admin-round-play-${browserName}`;
   const manualQuiz = `E2E Round Manual ${browserName}`;
   const autoQuiz = `E2E Round Auto ${browserName}`;
 
-  // One admin registration covers both quizzes, so the auto quiz needs
-  // no separate ADMIN_EMAILS entry.
-  await registerAdmin(page, adminUser);
-
   // Manual-skip quiz: default per-question window (long enough that a
-  // Continue click beats the auto-advance), with a summary authored on
-  // the default round so the intro card shows copy.
-  await createQuizWithQuestions(page, manualQuiz, TWO_QUESTIONS);
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
-  await authorRoundSummary(page, 'Halfway through!');
+  // Continue click beats the auto-advance), with a summary on its single
+  // round so the intro card shows copy.
+  await importQuiz(page, {
+    title: manualQuiz,
+    description: 'E2E round manual quiz',
+    rounds: [roundWithSummary('Halfway through!')],
+  });
 
   // Auto-advance quiz: a short per-question window shrinks the boundary
   // window so the intro card auto-advances quickly. 2s is long enough
   // to reliably observe the card + its countdown bar before it leaves,
   // yet short enough to keep the suite fast. The round boundary cards
   // only emit when the round carries a non-empty summary (server gate),
-  // so this quiz needs a summary authored too.
-  await createQuizWithQuestions(page, autoQuiz, TWO_QUESTIONS);
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
-  await authorRoundSummary(page, 'On your marks!');
-  await setQuizTimeLimit(page, 2);
+  // so this quiz needs a summary too.
+  await importQuiz(page, {
+    title: autoQuiz,
+    description: 'E2E round auto quiz',
+    timeLimitSeconds: 2,
+    rounds: [roundWithSummary('On your marks!')],
+  });
 
-  // Log out so the player session is anonymous.
-  await page.getByRole('button', { name: 'Log out' }).click();
-  await expect(page).toHaveURL(/\/login$/);
+  // Drop the admin cookie so the player session is anonymous.
+  await page.context().clearCookies();
 
   // --- Manual skip path (default window) ---
   await startQuiz(page, manualQuiz);

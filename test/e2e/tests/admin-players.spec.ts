@@ -1,28 +1,30 @@
 import { test, expect } from './fixtures';
-import { registerAdmin, PASSWORD } from './helpers';
+import { PASSWORD } from './helpers';
+import { adminStatePath } from '../e2e-auth';
 
-// #450 — admin player management. The golden path: register an admin
-// + a second account, land on /admin/players, filter to the
-// unverified tab, open the second player's detail row, click Mark
-// verified, and confirm the row no longer matches the filter.
+// Act as the shared seed admin; this spec mutates only the separately
+// registered target player, never the seed admin.
+test.use({ storageState: adminStatePath() });
+
+// #450 — admin player management. The golden path: a signed-in admin and
+// a second account, land on /admin/players, filter to the unverified
+// tab, open the second player's detail row, click Mark verified, and
+// confirm the row no longer matches the filter.
 //
 // The second-player branch deliberately registers via the form rather
 // than the helper so the row stays unverified (helpers.markEmailVerified
 // is the bypass the admin-action UI is supposed to replace; using it
 // here would defeat the test).
-test('admin marks an unverified player verified via the detail view', async ({ page, context, browserName }) => {
-  const adminDisplayName = `e2e-mgmt-admin-${browserName}`;
+test('admin marks an unverified player verified via the detail view', async ({ page, context, browserName, baseURL }) => {
   const targetDisplayName = `e2e-mgmt-target-${browserName}`;
 
-  // Register the admin via the helper (which stamps email_verified_at
-  // for the admin so /admin/* loads); the helper finishes on
-  // /admin/quizzes.
-  await registerAdmin(page, adminDisplayName);
-
-  // Register the second player from a fresh context so the admin
-  // session is preserved on the main page. The unverified player is
-  // the "target" the admin will mark verified.
-  const targetContext = await context.browser()!.newContext();
+  // Register the second player from a fresh, anonymous context so the
+  // admin session is preserved on the main page. storageState is forced
+  // empty so the seed-admin cookie this spec runs with does not leak into
+  // the new context (a signed-in /register just redirects away); baseURL
+  // pins it to the same worker server. The unverified player is the
+  // "target" the admin will mark verified.
+  const targetContext = await context.browser()!.newContext({ storageState: undefined, baseURL });
   try {
     const targetPage = await targetContext.newPage();
     await targetPage.goto('/register');

@@ -1,5 +1,9 @@
 import { test, expect } from './fixtures';
-import { registerAdmin } from './helpers';
+import { adminStatePath } from '../e2e-auth';
+
+// Reuse the shared seed-admin session; this spec only needs to be signed
+// in as an admin to drive the invite-management UI.
+test.use({ storageState: adminStatePath() });
 
 // #318 slice 2 - admin invite management UI. Admin-side only: the e2e
 // harness has no SMTP and the raw invite token is never stored, so this
@@ -7,10 +11,7 @@ import { registerAdmin } from './helpers';
 // revoke actions on the pending list. Accept-via-link is exercised in the
 // integration suite, where the token is mintable directly.
 test('admin creates, resends, and revokes an invite from the management page', async ({ page, browserName }) => {
-  const adminDisplayName = `e2e-admin-invite-${browserName}`;
   const inviteEmail = `e2e-invitee-${browserName}@example.test`;
-
-  await registerAdmin(page, adminDisplayName);
 
   // From the dashboard, the Invite tile leads to the management page.
   await page.goto('/admin');

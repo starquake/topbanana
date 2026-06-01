@@ -1,10 +1,14 @@
 import { test, expect, Route, Request } from './fixtures';
 import {
-  registerAdmin,
-  createQuizWithQuestions,
+  seedQuiz,
   startQuizAsAnonymous,
   QUIZ_QUESTIONS,
 } from './helpers';
+import { adminStatePath } from '../e2e-auth';
+
+// Seed each quiz as the shared admin via the JSON importer, then clear the
+// admin cookie so the error-handling flows run anonymous.
+test.use({ storageState: adminStatePath() });
 
 // Covers issue #287: the player-client JS services used to call
 // response.json() on every response, which threw SyntaxError on
@@ -14,15 +18,12 @@ import {
 // "non-retryable" (4xx) and lets the timeout/advance path carry the
 // game forward without showing a misleading banner.
 test('400 on answer POST does not show the retry banner', async ({ page, browserName }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(45_000);
 
-  const adminUser = `e2e-admin-287-${browserName}`;
   const quizTitle = `E2E 287 ${browserName}`;
 
-  await registerAdmin(page, adminUser);
-  await createQuizWithQuestions(page, quizTitle);
-  await page.getByRole('button', { name: 'Log out' }).click();
-  await expect(page).toHaveURL(/\/login$/);
+  await seedQuiz(page, quizTitle);
+  await page.context().clearCookies();
 
   // Fail the first answers POST with a 400 (mimicking the real server
   // path for ErrOptionNotInQuestion). The point is "no banner for
@@ -67,15 +68,12 @@ test('400 on answer POST does not show the retry banner', async ({ page, browser
 // id. The test fakes both endpoints because Playwright route
 // interception is the cheapest way to drive the recovery branch.
 test('409 on startGame recovers via getMyGameForQuiz', async ({ page, browserName }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(30_000);
 
-  const adminUser = `e2e-admin-287-conflict-${browserName}`;
   const quizTitle = `E2E 287 conflict ${browserName}`;
 
-  await registerAdmin(page, adminUser);
-  await createQuizWithQuestions(page, quizTitle);
-  await page.getByRole('button', { name: 'Log out' }).click();
-  await expect(page).toHaveURL(/\/login$/);
+  await seedQuiz(page, quizTitle);
+  await page.context().clearCookies();
 
   // Navigate via the public list (#284) so /api/players/me mints an
   // anonymous player and the resulting /play/{slug-id} pre-selects the

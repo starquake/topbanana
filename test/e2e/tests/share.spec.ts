@@ -1,5 +1,10 @@
 import { test, expect } from './fixtures';
-import { registerAdmin, createQuizWithQuestions, startQuizAsAnonymous, answerRemainingQuestions } from './helpers';
+import { seedQuiz, startQuizAsAnonymous, answerRemainingQuestions } from './helpers';
+import { adminStatePath } from '../e2e-auth';
+
+// Seed each quiz as the shared admin via the JSON importer; the share
+// surfaces are then exercised anonymously after clearing the admin cookie.
+test.use({ storageState: adminStatePath() });
 
 // #176 — share buttons on the player client (start screen + finish
 // screen) and on the public home page. Each surface composes a
@@ -11,15 +16,9 @@ import { registerAdmin, createQuizWithQuestions, startQuizAsAnonymous, answerRem
 // fallback dialog renders.
 
 test('player client start screen has a share button that opens the dialog with invite text', async ({ page, browserName }) => {
-  // registerAdmin (register + verify + login) plus the four-question
-  // quiz authoring runs well past the default 30s budget on a loaded
-  // firefox CI worker (#585); match the playthrough specs' budget.
-  test.setTimeout(90_000);
-  const displayName = `e2e-admin-share-start-${browserName}`;
   const quizTitle = `E2E Share Start Quiz ${browserName}`;
 
-  await registerAdmin(page, displayName);
-  await createQuizWithQuestions(page, quizTitle);
+  await seedQuiz(page, quizTitle);
 
   // Drop the admin session and navigate via the public list (#284)
   // so the deep-link /play/{slug-id} carries the quiz selection
@@ -52,13 +51,12 @@ test('player client start screen has a share button that opens the dialog with i
 });
 
 test('player client finish screen has a share button that includes the score', async ({ page, browserName }) => {
-  // Heavy register + quiz authoring + full playthrough; see #585.
-  test.setTimeout(90_000);
-  const displayName = `e2e-admin-share-finish-${browserName}`;
+  // A full anonymous playthrough still spans four questions of feedback;
+  // keep a moderate budget for slow CI runners. Setup is one import.
+  test.setTimeout(45_000);
   const quizTitle = `E2E Share Finish Quiz ${browserName}`;
 
-  await registerAdmin(page, displayName);
-  await createQuizWithQuestions(page, quizTitle);
+  await seedQuiz(page, quizTitle);
 
   // Play the quiz through as anonymous so the finish screen
   // renders with a real `score` and `quizSlugId`.
@@ -96,13 +94,12 @@ test('player client finish screen has a share button that includes the score', a
 // leaderboard payload instead. This spec exercises the revisit
 // path: play through, navigate away, come back, share.
 test('share-result reads score from the leaderboard so a revisit still brags the real number', async ({ page, browserName }) => {
-  // Heavy register + quiz authoring + full playthrough; see #585.
-  test.setTimeout(90_000);
-  const displayName = `e2e-admin-share-revisit-${browserName}`;
+  // A full anonymous playthrough plus a revisit; keep a moderate budget
+  // for slow CI runners. Setup is one import.
+  test.setTimeout(45_000);
   const quizTitle = `E2E Share Revisit Quiz ${browserName}`;
 
-  await registerAdmin(page, displayName);
-  await createQuizWithQuestions(page, quizTitle);
+  await seedQuiz(page, quizTitle);
 
   // First play-through as anonymous so the score lands on the
   // leaderboard against the auto-petname player row.
@@ -155,16 +152,15 @@ test('share-result reads score from the leaderboard so a revisit still brags the
 });
 
 test('home page popular-card share button opens the dialog with invitation text', async ({ page, browserName }) => {
-  // Heavy register + quiz authoring + full playthrough; see #585.
-  test.setTimeout(90_000);
-  const displayName = `e2e-admin-share-home-${browserName}`;
+  // A full anonymous playthrough is needed before the card appears;
+  // keep a moderate budget for slow CI runners. Setup is one import.
+  test.setTimeout(45_000);
   const quizTitle = `E2E Share Home Quiz ${browserName}`;
 
   // The home page only surfaces quizzes that have at least one
-  // finished play in the last 30 days, so we need to author the
-  // quiz AND play it through anonymously before the card appears.
-  await registerAdmin(page, displayName);
-  await createQuizWithQuestions(page, quizTitle);
+  // finished play in the last 30 days, so we need to seed the quiz
+  // AND play it through anonymously before the card appears.
+  await seedQuiz(page, quizTitle);
   await page.context().clearCookies();
   await startQuizAsAnonymous(page, quizTitle);
   await answerRemainingQuestions(page);
