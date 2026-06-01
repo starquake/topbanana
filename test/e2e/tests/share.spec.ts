@@ -15,10 +15,10 @@ test('player client start screen has a share button that opens the dialog with i
   // quiz authoring runs well past the default 30s budget on a loaded
   // firefox CI worker (#585); match the playthrough specs' budget.
   test.setTimeout(90_000);
-  const username = `e2e-admin-share-start-${browserName}`;
+  const displayName = `e2e-admin-share-start-${browserName}`;
   const quizTitle = `E2E Share Start Quiz ${browserName}`;
 
-  await registerAdmin(page, username);
+  await registerAdmin(page, displayName);
   await createQuizWithQuestions(page, quizTitle);
 
   // Drop the admin session and navigate via the public list (#284)
@@ -54,10 +54,10 @@ test('player client start screen has a share button that opens the dialog with i
 test('player client finish screen has a share button that includes the score', async ({ page, browserName }) => {
   // Heavy register + quiz authoring + full playthrough; see #585.
   test.setTimeout(90_000);
-  const username = `e2e-admin-share-finish-${browserName}`;
+  const displayName = `e2e-admin-share-finish-${browserName}`;
   const quizTitle = `E2E Share Finish Quiz ${browserName}`;
 
-  await registerAdmin(page, username);
+  await registerAdmin(page, displayName);
   await createQuizWithQuestions(page, quizTitle);
 
   // Play the quiz through as anonymous so the finish screen
@@ -98,10 +98,10 @@ test('player client finish screen has a share button that includes the score', a
 test('share-result reads score from the leaderboard so a revisit still brags the real number', async ({ page, browserName }) => {
   // Heavy register + quiz authoring + full playthrough; see #585.
   test.setTimeout(90_000);
-  const username = `e2e-admin-share-revisit-${browserName}`;
+  const displayName = `e2e-admin-share-revisit-${browserName}`;
   const quizTitle = `E2E Share Revisit Quiz ${browserName}`;
 
-  await registerAdmin(page, username);
+  await registerAdmin(page, displayName);
   await createQuizWithQuestions(page, quizTitle);
 
   // First play-through as anonymous so the score lands on the
@@ -157,13 +157,13 @@ test('share-result reads score from the leaderboard so a revisit still brags the
 test('home page popular-card share button opens the dialog with invitation text', async ({ page, browserName }) => {
   // Heavy register + quiz authoring + full playthrough; see #585.
   test.setTimeout(90_000);
-  const username = `e2e-admin-share-home-${browserName}`;
+  const displayName = `e2e-admin-share-home-${browserName}`;
   const quizTitle = `E2E Share Home Quiz ${browserName}`;
 
   // The home page only surfaces quizzes that have at least one
   // finished play in the last 30 days, so we need to author the
   // quiz AND play it through anonymously before the card appears.
-  await registerAdmin(page, username);
+  await registerAdmin(page, displayName);
   await createQuizWithQuestions(page, quizTitle);
   await page.context().clearCookies();
   await startQuizAsAnonymous(page, quizTitle);

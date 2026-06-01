@@ -96,9 +96,9 @@ func TestHandleLoginSubmit_RateLimited(t *testing.T) {
 }
 
 // TestHandleLoginSubmit_RateLimitedFiresOnUnknownUser pins the
-// "always trip regardless of username existence" design constraint:
+// "always trip regardless of displayName existence" design constraint:
 // the limiter check runs BEFORE the credential lookup, so two POSTs
-// against a non-existent username also trip the second response.
+// against a non-existent displayName also trip the second response.
 func TestHandleLoginSubmit_RateLimitedFiresOnUnknownUser(t *testing.T) {
 	t.Parallel()
 
@@ -158,9 +158,9 @@ func TestHandleLoginSubmit_RateLimitedRefusesCorrectCredentials(t *testing.T) {
 	}
 }
 
-func postLogin(t *testing.T, handler http.Handler, username, password string) *httptest.ResponseRecorder {
+func postLogin(t *testing.T, handler http.Handler, displayName, password string) *httptest.ResponseRecorder {
 	t.Helper()
-	form := url.Values{"username": {username}, "password": {password}}
+	form := url.Values{"displayName": {displayName}, "password": {password}}
 	req := httptest.NewRequestWithContext(
 		t.Context(), http.MethodPost, "/login", strings.NewReader(form.Encode()),
 	)

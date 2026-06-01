@@ -5,14 +5,14 @@
             <li class="text-text-mute" aria-hidden="true">/</li>
             <li><a href="/admin/players" class="px-2 text-text-dim hover:text-text">Players</a></li>
             <li class="text-text-mute" aria-hidden="true">/</li>
-            <li><span class="pl-2 text-text" aria-current="page">{{.Player.Username}}</span></li>
+            <li><span class="pl-2 text-text" aria-current="page">{{.Player.DisplayName}}</span></li>
         </ol>
     </nav>
 
     <header class="mb-8 flex flex-col md:flex-row md:items-start md:justify-between gap-5">
         <div>
             <h1 class="font-display font-bold text-3xl leading-[1.15] tracking-tight">
-                {{.Player.Username}}
+                {{.Player.DisplayName}}
                 {{if .Player.IsAdmin}}<span class="ml-2 inline-flex items-center rounded-sm border border-accent bg-accent/10 px-2 py-1 align-middle text-sm text-text">admin</span>{{else if .Player.IsHost}}<span class="ml-2 inline-flex items-center rounded-sm border border-accent bg-accent/10 px-2 py-1 align-middle text-sm text-text">host</span>{{end}}
             </h1>
             <p class="mt-1.5 text-text-dim text-[0.95rem]">State: <span class="text-text">{{.Player.OnboardingState}}</span></p>
@@ -91,10 +91,10 @@
                         </select>
                         <button type="submit" class="btn-primary">Save role</button>
                     </form>
-                    <form method="POST" action="/admin/players/{{.Player.ID}}/username" class="flex flex-col gap-2">
+                    <form method="POST" action="/admin/players/{{.Player.ID}}/display-name" class="flex flex-col gap-2">
                         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                         <label for="display-name-input" class="text-text-dim text-xs uppercase tracking-[0.14em]">Name</label>
-                        <input id="display-name-input" type="text" name="display_name" required value="{{.Player.Username}}"
+                        <input id="display-name-input" type="text" name="display_name" required value="{{.Player.DisplayName}}"
                                class="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text">
                         <button type="submit" class="btn-ghost">Save display name</button>
                     </form>
@@ -138,7 +138,7 @@
                             <span class="text-text">{{.ActionLabel}}{{if .Detail}}: <span class="text-text-dim">{{.Detail}}</span>{{end}}</span>
                             <time class="text-text-dim" title="{{.CreatedAt.Format "2006-01-02 15:04"}}">{{humanizeTime .CreatedAt}}</time>
                         </div>
-                        <div class="mt-1 text-xs text-text-dim">by {{if .ActorUsername}}{{.ActorUsername}}{{else}}(deleted){{end}}</div>
+                        <div class="mt-1 text-xs text-text-dim">by {{if .ActorDisplayName}}{{.ActorDisplayName}}{{else}}(deleted){{end}}</div>
                     </li>
                 {{end}}
             </ul>

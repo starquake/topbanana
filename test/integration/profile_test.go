@@ -54,7 +54,7 @@ func TestProfile_Integration(t *testing.T) {
 	authn := authClient(t)
 	registerVerifyAndMint(ctx, t, authn, srv.BaseURL, srv.DBURI, "profile-admin", "correct-battery-13")
 
-	t.Run("GET /profile renders form with the current username", func(t *testing.T) {
+	t.Run("GET /profile renders form with the current displayName", func(t *testing.T) {
 		snap := profileGET(ctx, t, authn, srv.BaseURL)
 		if got, want := snap.status, http.StatusOK; got != want {
 			t.Fatalf("status = %d, want %d", got, want)
@@ -65,11 +65,11 @@ func TestProfile_Integration(t *testing.T) {
 		// The value attribute must contain the signed-in admin's name
 		// so the input arrives pre-filled.
 		if !strings.Contains(snap.body, `value="profile-admin"`) {
-			t.Error(`body missing value="profile-admin" on the username input`)
+			t.Error(`body missing value="profile-admin" on the displayName input`)
 		}
 	})
 
-	t.Run("POST /profile/username with empty value returns 400", func(t *testing.T) {
+	t.Run("POST /profile/display-name with empty value returns 400", func(t *testing.T) {
 		snap := profilePOST(ctx, t, authn, srv.BaseURL, "   ")
 		if got, want := snap.status, http.StatusBadRequest; got != want {
 			t.Errorf("status = %d, want %d", got, want)
@@ -79,7 +79,7 @@ func TestProfile_Integration(t *testing.T) {
 		}
 	})
 
-	t.Run("POST /profile/username with a taken value returns 409", func(t *testing.T) {
+	t.Run("POST /profile/display-name with a taken value returns 409", func(t *testing.T) {
 		// Register a second player so the admin can collide with them.
 		registerForPending(ctx, t, authClient(t), srv.BaseURL, "rival-name", "correct-battery-13")
 
@@ -88,16 +88,16 @@ func TestProfile_Integration(t *testing.T) {
 			t.Errorf("status = %d, want %d", got, want)
 		}
 		if !strings.Contains(snap.body, "already taken") {
-			t.Error("body missing taken-username error message")
+			t.Error("body missing taken-displayName error message")
 		}
 		// The attempted value sticks in the input so the user can edit
 		// it instead of retyping.
 		if !strings.Contains(snap.body, `value="rival-name"`) {
-			t.Error(`body missing value="rival-name" on the username input after a collision`)
+			t.Error(`body missing value="rival-name" on the displayName input after a collision`)
 		}
 	})
 
-	t.Run("POST /profile/username with a fresh value renames the player", func(t *testing.T) {
+	t.Run("POST /profile/display-name with a fresh value renames the player", func(t *testing.T) {
 		snap := profilePOST(ctx, t, authn, srv.BaseURL, "renamed-admin")
 		if got, want := snap.status, http.StatusOK; got != want {
 			t.Fatalf("status = %d, want %d (body=%q)", got, want, snap.body)
@@ -106,7 +106,7 @@ func TestProfile_Integration(t *testing.T) {
 			t.Error("body missing success banner")
 		}
 		if !strings.Contains(snap.body, `value="renamed-admin"`) {
-			t.Error(`body missing value="renamed-admin" on the username input after a successful rename`)
+			t.Error(`body missing value="renamed-admin" on the displayName input after a successful rename`)
 		}
 	})
 }
@@ -146,7 +146,12 @@ func profileGET(ctx context.Context, t *testing.T, client *http.Client, baseURL 
 	}
 }
 
-func profilePOST(ctx context.Context, t *testing.T, client *http.Client, baseURL, username string) profilePageSnapshot {
+func profilePOST(
+	ctx context.Context,
+	t *testing.T,
+	client *http.Client,
+	baseURL, displayName string,
+) profilePageSnapshot {
 	t.Helper()
 
 	// Re-fetch the page each time so the CSRF token paired with the
@@ -154,10 +159,10 @@ func profilePOST(ctx context.Context, t *testing.T, client *http.Client, baseURL
 	priming := profileGET(ctx, t, client, baseURL)
 	form := url.Values{
 		"csrf_token":   {priming.csrf},
-		"display_name": {username},
+		"display_name": {displayName},
 	}
 	req, err := http.NewRequestWithContext(
-		ctx, http.MethodPost, baseURL+"/profile/username", strings.NewReader(form.Encode()),
+		ctx, http.MethodPost, baseURL+"/profile/display-name", strings.NewReader(form.Encode()),
 	)
 	if err != nil {
 		t.Fatalf("NewRequest err = %v, want nil", err)

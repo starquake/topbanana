@@ -93,15 +93,15 @@ const testSessionKey = "integration-test-session-key-0123456789abcdef"
 // the signed-in state without going through login. startServer signs
 // cookies with testSessionKey by default, so the minted cookie verifies
 // unless the test overrode SESSION_KEY.
-func mintSessionCookie(ctx context.Context, t *testing.T, client *http.Client, baseURL, dbURI, username string) {
+func mintSessionCookie(ctx context.Context, t *testing.T, client *http.Client, baseURL, dbURI, displayName string) {
 	t.Helper()
 
 	dbConn, stores := openStores(t, dbURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.
 
-	player, err := stores.Players.GetPlayerByUsername(ctx, username)
+	player, err := stores.Players.GetPlayerByDisplayName(ctx, displayName)
 	if err != nil {
-		t.Fatalf("mintSessionCookie GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("mintSessionCookie GetPlayerByDisplayName err = %v, want nil", err)
 	}
 
 	rec := httptest.NewRecorder()
@@ -138,12 +138,12 @@ func authClient(t *testing.T) *http.Client {
 // nothing - the registered row exists in the DB but the visitor is not
 // signed in until they verify and log in (see registerVerifyAndSignIn).
 func registerForPending(
-	ctx context.Context, t *testing.T, client *http.Client, baseURL, username, password string,
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, displayName, password string,
 ) {
 	t.Helper()
 
 	token := fetchCSRFToken(ctx, t, client, baseURL+"/register")
-	resp := postRegister(ctx, t, client, baseURL, token, username, password)
+	resp := postRegister(ctx, t, client, baseURL, token, displayName, password)
 	defer resp.Body.Close() //nolint:errcheck // cleanup.
 
 	if got, want := resp.StatusCode, http.StatusOK; got != want {
@@ -156,7 +156,7 @@ func registerForPending(
 	if got, want := string(body), "Verify your email"; !strings.Contains(got, want) {
 		t.Errorf("register body missing confirmation headline %q; body=%.300q", want, got)
 	}
-	if got, want := string(body), username+"@example.test"; !strings.Contains(got, want) {
+	if got, want := string(body), displayName+"@example.test"; !strings.Contains(got, want) {
 		t.Errorf("register body missing recipient address %q; body=%.300q", want, got)
 	}
 	assertNoLiveSession(t, resp)
@@ -175,76 +175,76 @@ func assertNoLiveSession(t *testing.T, resp *http.Response) {
 	}
 }
 
-// registerVerifyAndSignIn registers username through /register, stamps
+// registerVerifyAndSignIn registers displayName through /register, stamps
 // email_verified_at directly in the DB (bypassing the email channel),
 // then logs in so client's cookie jar carries a live session. This is
 // the post-#574 replacement for the old "register => signed in"
 // behaviour that many tests relied on: the hard gate means a session is
 // only obtained after verification + login.
 func registerVerifyAndSignIn(
-	ctx context.Context, t *testing.T, client *http.Client, baseURL, dbURI, username, password string,
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, dbURI, displayName, password string,
 ) {
 	t.Helper()
 
-	registerForPending(ctx, t, client, baseURL, username, password)
-	verifyPlayerEmail(ctx, t, dbURI, username)
-	loginForRedirect(ctx, t, client, baseURL, username, password)
+	registerForPending(ctx, t, client, baseURL, displayName, password)
+	verifyPlayerEmail(ctx, t, dbURI, displayName)
+	loginForRedirect(ctx, t, client, baseURL, displayName, password)
 }
 
-// registerVerifyAndMint registers username, stamps email_verified_at in
+// registerVerifyAndMint registers displayName, stamps email_verified_at in
 // the DB, and mints a session cookie onto client's jar without going
 // through /login. Use this instead of registerVerifyAndSignIn when a
 // single test signs in several accounts against one server: minting
 // sidesteps the per-IP login cooldown (#494) that back-to-back logins
 // would trip. Relies on startServer's default SESSION_KEY.
 func registerVerifyAndMint(
-	ctx context.Context, t *testing.T, client *http.Client, baseURL, dbURI, username, password string,
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, dbURI, displayName, password string,
 ) {
 	t.Helper()
 
-	registerForPending(ctx, t, client, baseURL, username, password)
-	verifyPlayerEmail(ctx, t, dbURI, username)
-	mintSessionCookie(ctx, t, client, baseURL, dbURI, username)
+	registerForPending(ctx, t, client, baseURL, displayName, password)
+	verifyPlayerEmail(ctx, t, dbURI, displayName)
+	mintSessionCookie(ctx, t, client, baseURL, dbURI, displayName)
 }
 
-// registerAndMint registers username and mints a session cookie onto
+// registerAndMint registers displayName and mints a session cookie onto
 // client's jar WITHOUT stamping email_verified_at, leaving the player
 // signed in but unverified. Use it when a test needs a signed-in row
 // that must stay in the unverified bucket. Relies on startServer's
 // default SESSION_KEY.
 func registerAndMint(
-	ctx context.Context, t *testing.T, client *http.Client, baseURL, dbURI, username, password string,
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, dbURI, displayName, password string,
 ) {
 	t.Helper()
 
-	registerForPending(ctx, t, client, baseURL, username, password)
-	mintSessionCookie(ctx, t, client, baseURL, dbURI, username)
+	registerForPending(ctx, t, client, baseURL, displayName, password)
+	mintSessionCookie(ctx, t, client, baseURL, dbURI, displayName)
 }
 
 // loginForRedirect POSTs /login and returns the Location header from
 // the 303 response.
 func loginForRedirect(
-	ctx context.Context, t *testing.T, client *http.Client, baseURL, username, password string,
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, displayName, password string,
 ) string {
 	t.Helper()
 
-	return submitAuthForm(ctx, t, client, baseURL, "/login", username, password)
+	return submitAuthForm(ctx, t, client, baseURL, "/login", displayName, password)
 }
 
 // submitAuthForm runs the GET-CSRF + POST-form dance for the /login
 // redirect probe and asserts the response is 303 (anything else means
 // the auth flow itself failed, not the redirect rule). The email
-// credential is derived from username so a row registered as
-// username@example.test logs in cleanly.
+// credential is derived from displayName so a row registered as
+// displayName@example.test logs in cleanly.
 func submitAuthForm(
-	ctx context.Context, t *testing.T, client *http.Client, baseURL, path, username, password string,
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, path, displayName, password string,
 ) string {
 	t.Helper()
 
 	token := fetchCSRFToken(ctx, t, client, baseURL+path)
 
 	form := url.Values{}
-	form.Add("email", username+"@example.test")
+	form.Add("email", displayName+"@example.test")
 	form.Add("password", password)
 	form.Add("csrf_token", token)
 

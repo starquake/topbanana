@@ -43,7 +43,7 @@
             <table class="w-full text-sm">
                 <thead class="bg-surface text-text-dim text-[0.7rem] uppercase tracking-[0.14em]">
                     <tr>
-                        <th scope="col" class="px-4 py-3 text-left">Username</th>
+                        <th scope="col" class="px-4 py-3 text-left">DisplayName</th>
                         <th scope="col" class="px-4 py-3 text-left">State</th>
                         <th scope="col" class="px-4 py-3 text-left">Account type</th>
                         <th scope="col" class="px-4 py-3 text-left">Email</th>
@@ -56,7 +56,7 @@
                     {{range .Players}}
                         <tr class="border-t border-border-soft" data-state="{{.OnboardingState}}">
                             <td class="px-4 py-3">
-                                <a href="/admin/players/{{.ID}}" class="text-text hover:text-accent">{{.Username}}</a>
+                                <a href="/admin/players/{{.ID}}" class="text-text hover:text-accent">{{.DisplayName}}</a>
                                 {{if .IsAdmin}}<span class="ml-2 inline-flex items-center rounded-sm border border-accent bg-accent/10 px-1.5 py-0.5 text-xs text-text">admin</span>{{end}}
                             </td>
                             <td class="px-4 py-3 text-text-dim">{{.OnboardingState}}</td>

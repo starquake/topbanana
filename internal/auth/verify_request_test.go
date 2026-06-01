@@ -77,10 +77,10 @@ func TestHandleVerifyEmailRequestSubmit_AlwaysFlashesGenericSuccess(t *testing.T
 			); err != nil {
 				t.Fatalf("CreatePlayer verified err = %v, want nil", err)
 			}
-			if p, err := store.GetPlayerByUsername(t.Context(), "verified"); err == nil {
+			if p, err := store.GetPlayerByDisplayName(t.Context(), "verified"); err == nil {
 				p.EmailVerifiedAt = &verified
 			} else {
-				t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+				t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 			}
 			if _, err := store.CreatePlayer(
 				t.Context(), "unverified", "unverified@example.test", "h", RolePlayer,
@@ -142,10 +142,10 @@ func TestHandleVerifyEmailRequestSubmit_AlreadyVerifiedSendsNoMail(t *testing.T)
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 	verified := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
-	if p, err := store.GetPlayerByUsername(t.Context(), "alice"); err == nil {
+	if p, err := store.GetPlayerByDisplayName(t.Context(), "alice"); err == nil {
 		p.EmailVerifiedAt = &verified
 	} else {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
 	tokens := &recordingVerifyTokenStore{}
 	sender := &recordingSender{}

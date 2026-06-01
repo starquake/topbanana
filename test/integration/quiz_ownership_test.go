@@ -133,7 +133,7 @@ func TestQuizOwnership_Integration(t *testing.T) {
 }
 
 // registerAdminClient builds a cookie-jar HTTP client, registers the
-// supplied username through the public /register form (which promotes
+// supplied displayName through the public /register form (which promotes
 // to admin via ADMIN_EMAILS), stamps email_verified_at, and mints a
 // session cookie onto the jar so follow-up admin requests pass both the
 // auth middleware and the #111 PR3 verified-email gate. After the #574
@@ -141,7 +141,7 @@ func TestQuizOwnership_Integration(t *testing.T) {
 // minted directly (startServer signs with the default testSessionKey).
 // Minting also sidesteps the per-IP login cooldown that several
 // back-to-back logins would trip.
-func registerAdminClient(ctx context.Context, t *testing.T, baseURL, dbURI, username string) *http.Client {
+func registerAdminClient(ctx context.Context, t *testing.T, baseURL, dbURI, displayName string) *http.Client {
 	t.Helper()
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -154,9 +154,9 @@ func registerAdminClient(ctx context.Context, t *testing.T, baseURL, dbURI, user
 		},
 	}
 
-	registerForPending(ctx, t, client, baseURL, username, "integration-pass-123")
-	verifyPlayerEmail(ctx, t, dbURI, username)
-	mintSessionCookie(ctx, t, client, baseURL, dbURI, username)
+	registerForPending(ctx, t, client, baseURL, displayName, "integration-pass-123")
+	verifyPlayerEmail(ctx, t, dbURI, displayName)
+	mintSessionCookie(ctx, t, client, baseURL, dbURI, displayName)
 
 	return client
 }

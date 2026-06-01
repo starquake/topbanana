@@ -87,7 +87,7 @@ type resultsRes struct {
 // out of the parent struct to keep nested-structs-friendly types.
 type leaderboardEntryRes struct {
 	PlayerID        int64  `json:"playerId"`
-	Username        string `json:"username"`
+	DisplayName     string `json:"displayName"`
 	Score           int    `json:"score"`
 	IsCurrentPlayer bool   `json:"isCurrentPlayer"`
 }
@@ -99,8 +99,8 @@ type leaderboardRes struct {
 }
 
 const (
-	gameplayAdminUsername = "gameplay-admin"
-	gameplayAdminPassword = "gameplay-admin-pass-123"
+	gameplayAdminDisplayName = "gameplay-admin"
+	gameplayAdminPassword    = "gameplay-admin-pass-123"
 )
 
 // seedGameplayAdmin registers the gameplay-admin via a throwaway jar
@@ -124,9 +124,9 @@ func seedGameplayAdmin(
 	}
 	registerGameplayAdmin(ctx, t, client, baseURL)
 
-	p, err := stores.Players.GetPlayerByUsername(ctx, gameplayAdminUsername)
+	p, err := stores.Players.GetPlayerByDisplayName(ctx, gameplayAdminDisplayName)
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
 	if err := stores.OAuth.MarkPlayerEmailVerifiedIfNew(ctx, p.ID); err != nil {
 		t.Fatalf("MarkPlayerEmailVerifiedIfNew err = %v, want nil", err)
@@ -149,7 +149,7 @@ func loginAdminAndResetPlayer(
 	loginToken := fetchCSRFToken(ctx, t, client, baseURL+"/login")
 
 	loginForm := url.Values{}
-	loginForm.Add("email", gameplayAdminUsername+"@example.test")
+	loginForm.Add("email", gameplayAdminDisplayName+"@example.test")
 	loginForm.Add("password", gameplayAdminPassword)
 	loginForm.Add("csrf_token", loginToken)
 
@@ -214,7 +214,7 @@ func loginAdminAndResetPlayer(
 func registerGameplayAdmin(ctx context.Context, t *testing.T, client *http.Client, baseURL string) {
 	t.Helper()
 
-	registerForPending(ctx, t, client, baseURL, gameplayAdminUsername, gameplayAdminPassword)
+	registerForPending(ctx, t, client, baseURL, gameplayAdminDisplayName, gameplayAdminPassword)
 }
 
 // integrationSetup bundles the artefacts a gameplay-style integration test

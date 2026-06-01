@@ -7,10 +7,10 @@ import { registerAdmin } from './helpers';
 // revoke actions on the pending list. Accept-via-link is exercised in the
 // integration suite, where the token is mintable directly.
 test('admin creates, resends, and revokes an invite from the management page', async ({ page, browserName }) => {
-  const adminUsername = `e2e-admin-invite-${browserName}`;
+  const adminDisplayName = `e2e-admin-invite-${browserName}`;
   const inviteEmail = `e2e-invitee-${browserName}@example.test`;
 
-  await registerAdmin(page, adminUsername);
+  await registerAdmin(page, adminDisplayName);
 
   // From the dashboard, the Invite tile leads to the management page.
   await page.goto('/admin');

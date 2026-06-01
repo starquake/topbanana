@@ -557,8 +557,8 @@ func TestGameStore_ListAnswersForQuizLeaderboard(t *testing.T) {
 		if got, want := rows[0].PlayerID, player.ID; got != want {
 			t.Errorf("rows[0].PlayerID = %d, want %d", got, want)
 		}
-		if got, want := rows[0].Username, player.Username; got != want {
-			t.Errorf("rows[0].Username = %q, want %q", got, want)
+		if got, want := rows[0].DisplayName, player.DisplayName; got != want {
+			t.Errorf("rows[0].DisplayName = %q, want %q", got, want)
 		}
 		if got, want := rows[0].Correct, correctOption.Correct; got != want {
 			t.Errorf("rows[0].Correct = %v, want %v", got, want)
@@ -746,8 +746,8 @@ func TestGameStore_ListParticipantsForQuizLeaderboard(t *testing.T) {
 		if got, want := rows[0].PlayerID, player.ID; got != want {
 			t.Errorf("rows[0].PlayerID = %d, want %d", got, want)
 		}
-		if got, want := rows[0].Username, player.Username; got != want {
-			t.Errorf("rows[0].Username = %q, want %q", got, want)
+		if got, want := rows[0].DisplayName, player.DisplayName; got != want {
+			t.Errorf("rows[0].DisplayName = %q, want %q", got, want)
 		}
 		if got, want := rows[0].IsCompleted, false; got != want {
 			t.Errorf("rows[0].IsCompleted = %v, want %v", got, want)

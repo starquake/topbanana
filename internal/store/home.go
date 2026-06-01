@@ -63,7 +63,7 @@ func (s *HomeStore) ListMostActivePlayers(ctx context.Context) ([]*home.ActivePl
 	for _, r := range rows {
 		out = append(out, &home.ActivePlayer{
 			ID:            r.ID,
-			Username:      r.Username,
+			DisplayName:   r.DisplayName,
 			FinishedCount: int(r.FinishedCount),
 		})
 	}

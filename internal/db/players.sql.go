@@ -14,7 +14,7 @@ import (
 
 const claimPlayer = `-- name: ClaimPlayer :one
 UPDATE players
-SET username = ?1,
+SET display_name = ?1,
     password_hash = ?2,
     email = ?3,
     role = CASE
@@ -35,15 +35,15 @@ SET username = ?1,
         ) THEN CURRENT_TIMESTAMP
         ELSE NULL
     END,
-    username_claimed = 1
+    display_name_claimed = 1
 WHERE players.id = ?5
   AND players.password_hash IS NULL
   AND players.email IS NULL
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
+RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
 `
 
 type ClaimPlayerParams struct {
-	Username      string
+	DisplayName   string
 	PasswordHash  sql.NullString
 	Email         sql.NullString
 	RequestedRole string
@@ -69,14 +69,14 @@ type ClaimPlayerParams struct {
 // claim path lands on Admin. Host is never granted at registration.
 // role_changed_at is stamped when the row becomes admin.
 //
-// username_claimed is set to 1 because the visitor is explicitly choosing
-// their username via the register form. This is the register-after-playing
+// display_name_claimed is set to 1 because the visitor is explicitly choosing
+// their display_name via the register form. This is the register-after-playing
 // path: the row now represents a player who picked their own name, so it
 // must look identical to a CreatePlayerWithCredentials row to downstream
 // callers.
 func (q *Queries) ClaimPlayer(ctx context.Context, arg ClaimPlayerParams) (Player, error) {
 	row := q.db.QueryRowContext(ctx, claimPlayer,
-		arg.Username,
+		arg.DisplayName,
 		arg.PasswordHash,
 		arg.Email,
 		arg.RequestedRole,
@@ -85,12 +85,12 @@ func (q *Queries) ClaimPlayer(ctx context.Context, arg ClaimPlayerParams) (Playe
 	var i Player
 	err := row.Scan(
 		&i.ID,
-		&i.Username,
+		&i.DisplayName,
 		&i.Email,
 		&i.PasswordHash,
 		&i.Role,
 		&i.CreatedAt,
-		&i.UsernameClaimed,
+		&i.DisplayNameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
@@ -121,7 +121,7 @@ SET email = ?1,
 WHERE players.id = ?2
   AND players.password_hash IS NULL
   AND players.email IS NULL
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
+RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
 `
 
 type ClaimPlayerForOAuthParams struct {
@@ -132,8 +132,8 @@ type ClaimPlayerForOAuthParams struct {
 // Upgrades a fully anonymous players row (no password_hash, no email)
 // in place by attaching the OAuth-verified email. Lets a visitor who
 // played anonymously keep their existing player_id (and therefore
-// their game history and any custom username) when they sign in with
-// Google for the first time. The username is left untouched: the
+// their game history and any custom display_name) when they sign in with
+// Google for the first time. The display_name is left untouched: the
 // visitor's auto-petname or PATCH-claimed name carries through onto
 // the OAuth-linked row.
 //
@@ -154,12 +154,12 @@ func (q *Queries) ClaimPlayerForOAuth(ctx context.Context, arg ClaimPlayerForOAu
 	var i Player
 	err := row.Scan(
 		&i.ID,
-		&i.Username,
+		&i.DisplayName,
 		&i.Email,
 		&i.PasswordHash,
 		&i.Role,
 		&i.CreatedAt,
-		&i.UsernameClaimed,
+		&i.DisplayNameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
@@ -250,9 +250,9 @@ func (q *Queries) CountAdmins(ctx context.Context) (int64, error) {
 }
 
 const createAnonymousPlayer = `-- name: CreateAnonymousPlayer :one
-INSERT INTO players (username, role)
+INSERT INTO players (display_name, role)
 VALUES (?1, 'player')
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
+RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
 `
 
 // Used by the EnsurePlayer middleware to back a fresh visitor with a real
@@ -261,20 +261,20 @@ RETURNING id, username, email, password_hash, role, created_at, username_claimed
 // becomes admin" SQL above filters by password_hash IS NOT NULL, so an
 // anonymous row never qualifies for promotion.
 //
-// username_claimed defaults to 0: the auto-generated petname is not a name
+// display_name_claimed defaults to 0: the auto-generated petname is not a name
 // the visitor picked, so the row is unclaimed until they rename via the
 // PATCH /api/players/me endpoint or sign up through ClaimPlayer below.
-func (q *Queries) CreateAnonymousPlayer(ctx context.Context, username string) (Player, error) {
-	row := q.db.QueryRowContext(ctx, createAnonymousPlayer, username)
+func (q *Queries) CreateAnonymousPlayer(ctx context.Context, displayName string) (Player, error) {
+	row := q.db.QueryRowContext(ctx, createAnonymousPlayer, displayName)
 	var i Player
 	err := row.Scan(
 		&i.ID,
-		&i.Username,
+		&i.DisplayName,
 		&i.Email,
 		&i.PasswordHash,
 		&i.Role,
 		&i.CreatedAt,
-		&i.UsernameClaimed,
+		&i.DisplayNameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
@@ -334,7 +334,7 @@ func (q *Queries) CreatePasswordResetToken(ctx context.Context, arg CreatePasswo
 }
 
 const createPlayerFromOAuth = `-- name: CreatePlayerFromOAuth :one
-INSERT INTO players (username, email, email_verified_at, role, role_changed_at, username_claimed)
+INSERT INTO players (display_name, email, email_verified_at, role, role_changed_at, display_name_claimed)
 VALUES (
     ?1,
     ?2,
@@ -357,17 +357,17 @@ VALUES (
     END,
     1
 )
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
+RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
 `
 
 type CreatePlayerFromOAuthParams struct {
-	Username string
-	Email    sql.NullString
+	DisplayName string
+	Email       sql.NullString
 }
 
 // Insert a brand-new player row for a first-time OAuth sign-in. No
 // password_hash (the player has no local credential), email comes from
-// the verified id-token claim, username_claimed is set to 1 because the
+// the verified id-token claim, display_name_claimed is set to 1 because the
 // caller supplies an auto-generated petname that the player will be
 // prompted to change via the existing claim-name modal.
 //
@@ -381,16 +381,16 @@ type CreatePlayerFromOAuthParams struct {
 // the second-and-onward Google sign-ins on a fresh DB would all see
 // count(password_hash IS NOT NULL) == 0 and become admin.
 func (q *Queries) CreatePlayerFromOAuth(ctx context.Context, arg CreatePlayerFromOAuthParams) (Player, error) {
-	row := q.db.QueryRowContext(ctx, createPlayerFromOAuth, arg.Username, arg.Email)
+	row := q.db.QueryRowContext(ctx, createPlayerFromOAuth, arg.DisplayName, arg.Email)
 	var i Player
 	err := row.Scan(
 		&i.ID,
-		&i.Username,
+		&i.DisplayName,
 		&i.Email,
 		&i.PasswordHash,
 		&i.Role,
 		&i.CreatedAt,
-		&i.UsernameClaimed,
+		&i.DisplayNameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
@@ -399,7 +399,7 @@ func (q *Queries) CreatePlayerFromOAuth(ctx context.Context, arg CreatePlayerFro
 }
 
 const createPlayerWithCredentials = `-- name: CreatePlayerWithCredentials :one
-INSERT INTO players (username, password_hash, email, role, role_changed_at, username_claimed)
+INSERT INTO players (display_name, password_hash, email, role, role_changed_at, display_name_claimed)
 VALUES (
     ?1,
     ?2,
@@ -424,11 +424,11 @@ VALUES (
     END,
     1
 )
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
+RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
 `
 
 type CreatePlayerWithCredentialsParams struct {
-	Username      string
+	DisplayName   string
 	PasswordHash  sql.NullString
 	Email         sql.NullString
 	RequestedRole string
@@ -456,13 +456,13 @@ type CreatePlayerWithCredentialsParams struct {
 // stamped only when the row is written as admin, so the settings list can show
 // a "promoted" timestamp.
 //
-// username_claimed is set to 1 because a registering user explicitly chose
-// their username at the register form. The column tracks "did the player
+// display_name_claimed is set to 1 because a registering user explicitly chose
+// their display_name at the register form. The column tracks "did the player
 // pick this name themselves" (vs auto-generated petname), so a fresh
 // registrant must be marked as claimed from the moment the row is written.
 func (q *Queries) CreatePlayerWithCredentials(ctx context.Context, arg CreatePlayerWithCredentialsParams) (Player, error) {
 	row := q.db.QueryRowContext(ctx, createPlayerWithCredentials,
-		arg.Username,
+		arg.DisplayName,
 		arg.PasswordHash,
 		arg.Email,
 		arg.RequestedRole,
@@ -470,12 +470,12 @@ func (q *Queries) CreatePlayerWithCredentials(ctx context.Context, arg CreatePla
 	var i Player
 	err := row.Scan(
 		&i.ID,
-		&i.Username,
+		&i.DisplayName,
 		&i.Email,
 		&i.PasswordHash,
 		&i.Role,
 		&i.CreatedAt,
-		&i.UsernameClaimed,
+		&i.DisplayNameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
@@ -555,8 +555,33 @@ func (q *Queries) GetPasswordResetToken(ctx context.Context, tokenHash string) (
 	return i, err
 }
 
+const getPlayerByDisplayName = `-- name: GetPlayerByDisplayName :one
+SELECT id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
+FROM players
+WHERE display_name = ?
+LIMIT 1
+`
+
+func (q *Queries) GetPlayerByDisplayName(ctx context.Context, displayName string) (Player, error) {
+	row := q.db.QueryRowContext(ctx, getPlayerByDisplayName, displayName)
+	var i Player
+	err := row.Scan(
+		&i.ID,
+		&i.DisplayName,
+		&i.Email,
+		&i.PasswordHash,
+		&i.Role,
+		&i.CreatedAt,
+		&i.DisplayNameClaimed,
+		&i.EmailVerifiedAt,
+		&i.SessionVersion,
+		&i.RoleChangedAt,
+	)
+	return i, err
+}
+
 const getPlayerByEmail = `-- name: GetPlayerByEmail :one
-SELECT id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
+SELECT id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
 FROM players
 WHERE email = ?
 LIMIT 1
@@ -571,12 +596,12 @@ func (q *Queries) GetPlayerByEmail(ctx context.Context, email sql.NullString) (P
 	var i Player
 	err := row.Scan(
 		&i.ID,
-		&i.Username,
+		&i.DisplayName,
 		&i.Email,
 		&i.PasswordHash,
 		&i.Role,
 		&i.CreatedAt,
-		&i.UsernameClaimed,
+		&i.DisplayNameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
@@ -585,7 +610,7 @@ func (q *Queries) GetPlayerByEmail(ctx context.Context, email sql.NullString) (P
 }
 
 const getPlayerByProviderSubject = `-- name: GetPlayerByProviderSubject :one
-SELECT p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed, p.email_verified_at, p.session_version, p.role_changed_at
+SELECT p.id, p.display_name, p.email, p.password_hash, p.role, p.created_at, p.display_name_claimed, p.email_verified_at, p.session_version, p.role_changed_at
 FROM players p
 JOIN player_identities pi ON pi.player_id = p.id
 WHERE pi.provider = ? AND pi.subject = ?
@@ -606,37 +631,12 @@ func (q *Queries) GetPlayerByProviderSubject(ctx context.Context, arg GetPlayerB
 	var i Player
 	err := row.Scan(
 		&i.ID,
-		&i.Username,
+		&i.DisplayName,
 		&i.Email,
 		&i.PasswordHash,
 		&i.Role,
 		&i.CreatedAt,
-		&i.UsernameClaimed,
-		&i.EmailVerifiedAt,
-		&i.SessionVersion,
-		&i.RoleChangedAt,
-	)
-	return i, err
-}
-
-const getPlayerByUsername = `-- name: GetPlayerByUsername :one
-SELECT id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
-FROM players
-WHERE username = ?
-LIMIT 1
-`
-
-func (q *Queries) GetPlayerByUsername(ctx context.Context, username string) (Player, error) {
-	row := q.db.QueryRowContext(ctx, getPlayerByUsername, username)
-	var i Player
-	err := row.Scan(
-		&i.ID,
-		&i.Username,
-		&i.Email,
-		&i.PasswordHash,
-		&i.Role,
-		&i.CreatedAt,
-		&i.UsernameClaimed,
+		&i.DisplayNameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
@@ -666,20 +666,20 @@ func (q *Queries) LinkProviderIdentity(ctx context.Context, arg LinkProviderIden
 }
 
 const listAdmins = `-- name: ListAdmins :many
-SELECT id, username, email, role_changed_at
+SELECT id, display_name, email, role_changed_at
 FROM players
 WHERE role = 'admin'
-ORDER BY username, id
+ORDER BY display_name, id
 `
 
 type ListAdminsRow struct {
 	ID            int64
-	Username      string
+	DisplayName   string
 	Email         sql.NullString
 	RoleChangedAt sql.NullTime
 }
 
-// Every current Admin, ordered by username so the admin settings page
+// Every current Admin, ordered by display_name so the admin settings page
 // (#320/#538) renders a stable list. Only the columns the list needs are
 // selected. role_changed_at is when the role last changed (NULL for rows whose
 // role predates the column).
@@ -694,7 +694,7 @@ func (q *Queries) ListAdmins(ctx context.Context) ([]ListAdminsRow, error) {
 		var i ListAdminsRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.Username,
+			&i.DisplayName,
 			&i.Email,
 			&i.RoleChangedAt,
 		); err != nil {
@@ -795,40 +795,40 @@ func (q *Queries) MarkPlayerEmailVerifiedIfNew(ctx context.Context, id int64) (i
 
 const renamePlayer = `-- name: RenamePlayer :one
 UPDATE players
-SET username = ?1,
-    username_claimed = 1
+SET display_name = ?1,
+    display_name_claimed = 1
 WHERE id = ?2
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
+RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
 `
 
 type RenamePlayerParams struct {
-	Username string
-	ID       int64
+	DisplayName string
+	ID          int64
 }
 
 // Renames any player row by id, regardless of password / email / role.
-// The dedicated profile-page endpoint (POST /profile/username, #410)
+// The dedicated profile-page endpoint (POST /profile/display-name, #410)
 // uses this so authenticated players (password, OAuth, admin) can
 // change their display name. Anonymous rows have their own narrower
-// path via UpdatePlayerUsername above; this query is intentionally
+// path via UpdatePlayerDisplayName above; this query is intentionally
 // not gated by password_hash so the OAuth-only and admin cases also
 // work.
 //
 // Returns the updated row when one was affected; the store wrapper
 // maps sql.ErrNoRows to ErrPlayerNotFound and a UNIQUE constraint
-// failure on players.username to ErrUsernameTaken so the handler can
+// failure on players.display_name to ErrDisplayNameTaken so the handler can
 // map both onto user-facing form errors.
 func (q *Queries) RenamePlayer(ctx context.Context, arg RenamePlayerParams) (Player, error) {
-	row := q.db.QueryRowContext(ctx, renamePlayer, arg.Username, arg.ID)
+	row := q.db.QueryRowContext(ctx, renamePlayer, arg.DisplayName, arg.ID)
 	var i Player
 	err := row.Scan(
 		&i.ID,
-		&i.Username,
+		&i.DisplayName,
 		&i.Email,
 		&i.PasswordHash,
 		&i.Role,
 		&i.CreatedAt,
-		&i.UsernameClaimed,
+		&i.DisplayNameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
@@ -865,7 +865,7 @@ func (q *Queries) ResetPlayerPassword(ctx context.Context, arg ResetPlayerPasswo
 const setPlayerPasswordHash = `-- name: SetPlayerPasswordHash :execrows
 UPDATE players
 SET password_hash    = ?1,
-    username_claimed = 1
+    display_name_claimed = 1
 WHERE email = ?2
 `
 
@@ -875,17 +875,17 @@ type SetPlayerPasswordHashParams struct {
 }
 
 // Used by the cmd/server -reset-password operator tool to rotate a single
-// player's password without disturbing username / role / email. Returns the
+// player's password without disturbing display_name / role / email. Returns the
 // number of affected rows so the caller can map "no rows" to an "email
 // not found" error. The lookup is by email (the post-#446 login credential)
 // so the operator's reset target matches what the player types into /login.
 //
-// username_claimed is set to 1 alongside the password because once an
-// operator has set a password on a row, the username is no longer an
+// display_name_claimed is set to 1 alongside the password because once an
+// operator has set a password on a row, the display_name is no longer an
 // auto-assigned petname the player should be nudged to replace (#289). The
 // migration 20260511120000 ran the same backfill at the time, but only for
 // rows that already had a password_hash; later password sets via this
-// query previously left username_claimed at 0, which made the seed
+// query previously left display_name_claimed at 0, which made the seed
 // admin (id=1) keep popping the claim-name modal in the player client.
 func (q *Queries) SetPlayerPasswordHash(ctx context.Context, arg SetPlayerPasswordHashParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setPlayerPasswordHash, arg.PasswordHash, arg.Email)
@@ -952,42 +952,42 @@ func (q *Queries) SwapPlayerEmail(ctx context.Context, arg SwapPlayerEmailParams
 	return result.RowsAffected()
 }
 
-const updatePlayerUsername = `-- name: UpdatePlayerUsername :one
+const updatePlayerDisplayName = `-- name: UpdatePlayerDisplayName :one
 UPDATE players
-SET username = ?1,
-    username_claimed = 1
+SET display_name = ?1,
+    display_name_claimed = 1
 WHERE id = ?2 AND password_hash IS NULL
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
+RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
 `
 
-type UpdatePlayerUsernameParams struct {
-	Username string
-	ID       int64
+type UpdatePlayerDisplayNameParams struct {
+	DisplayName string
+	ID          int64
 }
 
-// Updates the username on an anonymous player row in place. The WHERE
+// Updates the display_name on an anonymous player row in place. The WHERE
 // clause refuses the update when the player has already claimed a
 // non-anonymous identity (password_hash IS NOT NULL), so the SQL is the
 // atomic guard against a stale anonymous check in the service layer.
 // Returns the updated row when one was affected; the wrapper distinguishes
-// "not anonymous anymore" (sql.ErrNoRows) from "username collision"
-// (UNIQUE constraint failure on players.username).
+// "not anonymous anymore" (sql.ErrNoRows) from "display_name collision"
+// (UNIQUE constraint failure on players.display_name).
 //
-// username_claimed is set to 1 because this is the dedicated claim-name
+// display_name_claimed is set to 1 because this is the dedicated claim-name
 // endpoint (PATCH /api/players/me); the visitor is explicitly picking
 // their display name. After this update the row reads as "player chose
 // this name" identically to the credentialled-registration path.
-func (q *Queries) UpdatePlayerUsername(ctx context.Context, arg UpdatePlayerUsernameParams) (Player, error) {
-	row := q.db.QueryRowContext(ctx, updatePlayerUsername, arg.Username, arg.ID)
+func (q *Queries) UpdatePlayerDisplayName(ctx context.Context, arg UpdatePlayerDisplayNameParams) (Player, error) {
+	row := q.db.QueryRowContext(ctx, updatePlayerDisplayName, arg.DisplayName, arg.ID)
 	var i Player
 	err := row.Scan(
 		&i.ID,
-		&i.Username,
+		&i.DisplayName,
 		&i.Email,
 		&i.PasswordHash,
 		&i.Role,
 		&i.CreatedAt,
-		&i.UsernameClaimed,
+		&i.DisplayNameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,

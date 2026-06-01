@@ -272,7 +272,7 @@ const leaderboardLimit = 10
 // positive signal to render the badge.
 type quizLeaderboardEntryResponse struct {
 	PlayerID        int64  `json:"playerId"`
-	Username        string `json:"username"`
+	DisplayName     string `json:"displayName"`
 	Score           int    `json:"score"`
 	Rank            int    `json:"rank"`
 	IsCurrentPlayer bool   `json:"isCurrentPlayer"`
@@ -290,7 +290,7 @@ type quizLeaderboardResponse struct {
 func toEntryResponse(e game.LeaderboardEntry) quizLeaderboardEntryResponse {
 	return quizLeaderboardEntryResponse{
 		PlayerID:        e.PlayerID,
-		Username:        e.Username,
+		DisplayName:     e.DisplayName,
 		Score:           e.Score,
 		Rank:            e.Rank,
 		IsCurrentPlayer: e.IsCurrentPlayer,
@@ -348,7 +348,7 @@ func writeQuizLeaderboardError(
 
 // HandleQuizLeaderboard returns the top scoring players for the given quiz.
 // Each player appears at most once, with their total score for the quiz; ties
-// are broken by ascending username for a stable order. IsCurrentPlayer is set
+// are broken by ascending displayName for a stable order. IsCurrentPlayer is set
 // on the entry that matches the authenticated player on the request context
 // so the client can highlight that row.
 //
@@ -1077,7 +1077,7 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 // claim-name modal on isAuthenticated.
 type playerResponse struct {
 	ID              int64  `json:"id"`
-	Username        string `json:"username"`
+	DisplayName     string `json:"displayName"`
 	IsAnonymous     bool   `json:"isAnonymous"`
 	HasCustomName   bool   `json:"hasCustomName"`
 	IsAuthenticated bool   `json:"isAuthenticated"`
@@ -1087,7 +1087,7 @@ type playerResponse struct {
 func newPlayerResponse(p *auth.Player) playerResponse {
 	return playerResponse{
 		ID:              p.ID,
-		Username:        p.Username,
+		DisplayName:     p.DisplayName,
 		IsAnonymous:     p.IsAnonymous(),
 		HasCustomName:   p.HasCustomName(),
 		IsAuthenticated: p.IsAuthenticated(),
@@ -1095,13 +1095,13 @@ func newPlayerResponse(p *auth.Player) playerResponse {
 }
 
 // HandlePlayerGetMe returns a handler for GET /api/players/me that reports
-// the calling player's id, username, whether they are still anonymous
+// the calling player's id, displayName, whether they are still anonymous
 // (no password_hash set), and whether they have explicitly picked a
 // display name. hasCustomName and isAnonymous are deliberately
 // independent concepts: a registered user with a password is never
 // anonymous, but a claimed-but-passwordless visitor still is - callers
 // that care about "did this player choose this name" should look at
-// hasCustomName, not isAnonymous. The username is shown verbatim so a
+// hasCustomName, not isAnonymous. The displayName is shown verbatim so a
 // fresh petname can be displayed as-is until the player renames.
 func HandlePlayerGetMe(logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1125,13 +1125,13 @@ func HandlePlayerGetMe(logger *slog.Logger) http.Handler {
 // HandlePlayerClaimName is the score-claim rename for anonymous
 // visitors: the player keeps the same row and session cookie and stays
 // anonymous after picking a display name. 409 covers both
-// username-taken and already-claimed-via-register; the distinct
+// displayName-taken and already-claimed-via-register; the distinct
 // messages let the client tell them apart.
 func HandlePlayerClaimName(
 	logger *slog.Logger, players auth.PlayerStore, gameService *game.Service,
 ) http.Handler {
 	type claimNameRequest struct {
-		Username string `json:"username"`
+		DisplayName string `json:"displayName"`
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1151,18 +1151,18 @@ func HandlePlayerClaimName(
 
 			return
 		}
-		if strings.TrimSpace(req.Username) == "" {
-			http.Error(w, "username is required", http.StatusBadRequest)
+		if strings.TrimSpace(req.DisplayName) == "" {
+			http.Error(w, "display name is required", http.StatusBadRequest)
 
 			return
 		}
 
-		updated, err := players.UpdatePlayerUsername(ctx, current.ID, req.Username)
+		updated, err := players.UpdatePlayerDisplayName(ctx, current.ID, req.DisplayName)
 		if err != nil {
 			switch {
-			case errors.Is(err, auth.ErrUsernameTaken):
+			case errors.Is(err, auth.ErrDisplayNameTaken):
 				writeClaimNameError(w, r, logger,
-					http.StatusConflict, "username_taken", "username already taken")
+					http.StatusConflict, "display_name_taken", "display name already taken")
 			case errors.Is(err, auth.ErrPlayerNotAnonymous):
 				// #289: distinct code so the JS can tell "name in use
 				// by someone else" from "this account already has a
@@ -1170,12 +1170,12 @@ func HandlePlayerClaimName(
 				// the client should re-fetch /me and dismiss the
 				// modal, not show "name is taken".
 				writeClaimNameError(w, r, logger,
-					http.StatusConflict, "already_claimed", "username already set for this account")
-			case errors.Is(err, auth.ErrUsernameEmpty):
+					http.StatusConflict, "already_claimed", "display name already set for this account")
+			case errors.Is(err, auth.ErrDisplayNameEmpty):
 				writeClaimNameError(w, r, logger,
-					http.StatusBadRequest, "username_required", "username is required")
+					http.StatusBadRequest, "display_name_required", "display name is required")
 			default:
-				writeInternalError(w, r, logger, "error updating player username", err)
+				writeInternalError(w, r, logger, "error updating player displayName", err)
 			}
 
 			return

@@ -190,7 +190,7 @@ func homeViewerFunc(players auth.PlayerStore, sessions *session.Manager) home.Vi
 			return nil
 		}
 
-		return &home.Viewer{Username: p.Username}
+		return &home.Viewer{DisplayName: p.DisplayName}
 	}
 }
 
@@ -314,8 +314,8 @@ func addProfileRoutes(
 
 	mux.Handle("GET /profile", requireAuthn(profile.HandleProfile(logger, csrfMgr)))
 	mux.Handle(
-		"POST /profile/username",
-		csrfMW(requireAuthn(profile.HandleProfileUsername(logger, csrfMgr, stores.Players))),
+		"POST /profile/display-name",
+		csrfMW(requireAuthn(profile.HandleProfileDisplayName(logger, csrfMgr, stores.Players))),
 	)
 	mux.Handle("GET /profile/password", requireAuthn(profile.HandleProfilePassword(logger, csrfMgr)))
 	mux.Handle(
@@ -482,7 +482,7 @@ func addAdminSettingsRoutes(
 // addAdminPlayerRoutes registers the admin player-management routes (#450).
 // Every route - the per-player detail view, the verify/resend/email actions,
 // the create-without-verification pair, the id-based role endpoint (#538), and
-// the username + password actions (#535) - is Admin-only (#538): player
+// the displayName + password actions (#535) - is Admin-only (#538): player
 // management moved from the old admin-wide gate up to the top tier.
 // MaxFormSizeMiddleware fronts every POST in front of csrfMW so the CSRF
 // validator's ParseForm sees a bounded body; csrfMW fronts the auth wrapper so
@@ -541,9 +541,9 @@ func addAdminPlayerRoutes(
 		))),
 	)
 	mux.Handle(
-		"POST /admin/players/{playerID}/username",
+		"POST /admin/players/{playerID}/display-name",
 		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
-			admin.HandlePlayerSetUsername(logger, stores.AdminPlayers, deps.flash),
+			admin.HandlePlayerSetDisplayName(logger, stores.AdminPlayers, deps.flash),
 		))),
 	)
 	mux.Handle(

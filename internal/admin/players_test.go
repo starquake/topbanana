@@ -176,20 +176,20 @@ func TestHandlePlayersList_RendersRows(t *testing.T) {
 	finishedAt := time.Date(2026, 5, 20, 18, 30, 0, 0, time.UTC)
 	rows := []*auth.PlayerListRow{
 		{
-			ID: 1, Username: "admin", Email: "a@example.com", Role: auth.RoleAdmin,
+			ID: 1, DisplayName: "admin", Email: "a@example.com", Role: auth.RoleAdmin,
 			HasPassword: true, CreatedAt: createdAt, OnboardingState: auth.OnboardingStateVerified,
 		},
 		{
-			ID: 2, Username: "alice", Email: "alice@example.com", Role: auth.RolePlayer,
+			ID: 2, DisplayName: "alice", Email: "alice@example.com", Role: auth.RolePlayer,
 			HasOAuth: true, OAuthProvider: "google", CreatedAt: createdAt,
 			OnboardingState: auth.OnboardingStateOAuth,
 		},
 		{
-			ID: 3, Username: "bob", Email: "bob@example.com", Role: auth.RolePlayer,
+			ID: 3, DisplayName: "bob", Email: "bob@example.com", Role: auth.RolePlayer,
 			HasPassword: true, CreatedAt: createdAt, OnboardingState: auth.OnboardingStateUnverified,
 		},
 		{
-			ID: 4, Username: "anon-xyz", Role: auth.RolePlayer, CreatedAt: createdAt,
+			ID: 4, DisplayName: "anon-xyz", Role: auth.RolePlayer, CreatedAt: createdAt,
 			OnboardingState: auth.OnboardingStateAnonymous,
 		},
 	}

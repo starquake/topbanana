@@ -15,7 +15,7 @@ import (
 )
 
 // credStubStore implements auth.AdminPlayerStore for the
-// HandlePlayerSetUsername / HandlePlayerSetPassword tests. Only the methods
+// HandlePlayerSetDisplayName / HandlePlayerSetPassword tests. Only the methods
 // those handlers touch record anything; the rest return a sentinel so an
 // accidental call is loud.
 type credStubStore struct {
@@ -33,14 +33,14 @@ type credStubStore struct {
 	auditCalled  bool
 }
 
-func (s *credStubStore) RenamePlayer(_ context.Context, _ int64, username string) (*auth.Player, error) {
+func (s *credStubStore) RenamePlayer(_ context.Context, _ int64, displayName string) (*auth.Player, error) {
 	s.renameCalled = true
-	s.renameName = username
+	s.renameName = displayName
 	if s.renameErr != nil {
 		return nil, s.renameErr
 	}
 
-	return &auth.Player{ID: 7, Username: username}, nil
+	return &auth.Player{ID: 7, DisplayName: displayName}, nil
 }
 
 func (s *credStubStore) ChangePlayerPassword(_ context.Context, _ int64, passwordHash string) error {
@@ -104,14 +104,14 @@ func newCredFlash(t *testing.T) *auth.SignedFlash {
 	return auth.NewSignedFlash([]byte("test-key-test-key-test-key-32byt"), false, "flash", "/admin")
 }
 
-// postUsername drives HandlePlayerSetUsername with the given form value.
-func postUsername(t *testing.T, store *credStubStore, username string) *httptest.ResponseRecorder {
+// postDisplayName drives HandlePlayerSetDisplayName with the given form value.
+func postDisplayName(t *testing.T, store *credStubStore, displayName string) *httptest.ResponseRecorder {
 	t.Helper()
-	handler := HandlePlayerSetUsername(slog.New(slog.DiscardHandler), store, newCredFlash(t))
+	handler := HandlePlayerSetDisplayName(slog.New(slog.DiscardHandler), store, newCredFlash(t))
 
-	form := url.Values{"display_name": {username}}
+	form := url.Values{"display_name": {displayName}}
 	req := httptest.NewRequestWithContext(
-		t.Context(), http.MethodPost, "/admin/players/7/username",
+		t.Context(), http.MethodPost, "/admin/players/7/display-name",
 		strings.NewReader(form.Encode()),
 	)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -144,12 +144,12 @@ func postPassword(t *testing.T, store *credStubStore, password string) *httptest
 	return rec
 }
 
-func TestHandlePlayerSetUsername_SuccessRenamesAndAudits(t *testing.T) {
+func TestHandlePlayerSetDisplayName_SuccessRenamesAndAudits(t *testing.T) {
 	t.Parallel()
 
 	store := &credStubStore{}
 
-	rec := postUsername(t, store, "  New Name  ")
+	rec := postDisplayName(t, store, "  New Name  ")
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)
@@ -160,20 +160,20 @@ func TestHandlePlayerSetUsername_SuccessRenamesAndAudits(t *testing.T) {
 	if got, want := store.renameName, "New Name"; got != want {
 		t.Errorf("rename name = %q, want %q", got, want)
 	}
-	if got, want := store.auditAction, auth.AdminActionUsernameSet; got != want {
+	if got, want := store.auditAction, auth.AdminActionDisplayNameSet; got != want {
 		t.Errorf("audit action = %q, want %q", got, want)
 	}
-	if got, want := store.auditPayload, `"new_username":"New Name"`; !strings.Contains(got, want) {
+	if got, want := store.auditPayload, `"new_displayName":"New Name"`; !strings.Contains(got, want) {
 		t.Errorf("audit payload = %q, should contain %q", got, want)
 	}
 }
 
-func TestHandlePlayerSetUsername_TakenFlashesNoAudit(t *testing.T) {
+func TestHandlePlayerSetDisplayName_TakenFlashesNoAudit(t *testing.T) {
 	t.Parallel()
 
-	store := &credStubStore{renameErr: auth.ErrUsernameTaken}
+	store := &credStubStore{renameErr: auth.ErrDisplayNameTaken}
 
-	rec := postUsername(t, store, "taken")
+	rec := postDisplayName(t, store, "taken")
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)
@@ -183,12 +183,12 @@ func TestHandlePlayerSetUsername_TakenFlashesNoAudit(t *testing.T) {
 	}
 }
 
-func TestHandlePlayerSetUsername_EmptyFlashesNoAudit(t *testing.T) {
+func TestHandlePlayerSetDisplayName_EmptyFlashesNoAudit(t *testing.T) {
 	t.Parallel()
 
-	store := &credStubStore{renameErr: auth.ErrUsernameEmpty}
+	store := &credStubStore{renameErr: auth.ErrDisplayNameEmpty}
 
-	rec := postUsername(t, store, "   ")
+	rec := postDisplayName(t, store, "   ")
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)

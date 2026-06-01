@@ -81,7 +81,7 @@ func (q *Queries) CountPlayersInOnboardingState(ctx context.Context, state strin
 }
 
 const createPlayerByAdmin = `-- name: CreatePlayerByAdmin :one
-INSERT INTO players (username, email, password_hash, email_verified_at, role, username_claimed)
+INSERT INTO players (display_name, email, password_hash, email_verified_at, role, display_name_claimed)
 VALUES (
     ?1,
     ?2,
@@ -90,11 +90,11 @@ VALUES (
     'player',
     1
 )
-RETURNING id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
+RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
 `
 
 type CreatePlayerByAdminParams struct {
-	Username     string
+	DisplayName  string
 	Email        sql.NullString
 	PasswordHash sql.NullString
 }
@@ -106,16 +106,16 @@ type CreatePlayerByAdminParams struct {
 // the row can log in immediately. role is fixed to 'player' - the admin
 // promotion CASE only fires on the public register/oauth paths.
 func (q *Queries) CreatePlayerByAdmin(ctx context.Context, arg CreatePlayerByAdminParams) (Player, error) {
-	row := q.db.QueryRowContext(ctx, createPlayerByAdmin, arg.Username, arg.Email, arg.PasswordHash)
+	row := q.db.QueryRowContext(ctx, createPlayerByAdmin, arg.DisplayName, arg.Email, arg.PasswordHash)
 	var i Player
 	err := row.Scan(
 		&i.ID,
-		&i.Username,
+		&i.DisplayName,
 		&i.Email,
 		&i.PasswordHash,
 		&i.Role,
 		&i.CreatedAt,
-		&i.UsernameClaimed,
+		&i.DisplayNameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
@@ -125,7 +125,7 @@ func (q *Queries) CreatePlayerByAdmin(ctx context.Context, arg CreatePlayerByAdm
 
 const getPlayerWithOnboardingState = `-- name: GetPlayerWithOnboardingState :one
 SELECT
-    p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed, p.email_verified_at, p.session_version, p.role_changed_at,
+    p.id, p.display_name, p.email, p.password_hash, p.role, p.created_at, p.display_name_claimed, p.email_verified_at, p.session_version, p.role_changed_at,
     EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id) AS has_oauth,
     CAST(COALESCE(
         (SELECT pi.provider FROM player_identities pi WHERE pi.player_id = p.id ORDER BY pi.provider LIMIT 1),
@@ -145,19 +145,19 @@ LIMIT 1
 `
 
 type GetPlayerWithOnboardingStateRow struct {
-	ID              int64
-	Username        string
-	Email           sql.NullString
-	PasswordHash    sql.NullString
-	Role            string
-	CreatedAt       time.Time
-	UsernameClaimed int64
-	EmailVerifiedAt sql.NullTime
-	SessionVersion  int64
-	RoleChangedAt   sql.NullTime
-	HasOauth        bool
-	OauthProvider   string
-	OnboardingState string
+	ID                 int64
+	DisplayName        string
+	Email              sql.NullString
+	PasswordHash       sql.NullString
+	Role               string
+	CreatedAt          time.Time
+	DisplayNameClaimed int64
+	EmailVerifiedAt    sql.NullTime
+	SessionVersion     int64
+	RoleChangedAt      sql.NullTime
+	HasOauth           bool
+	OauthProvider      string
+	OnboardingState    string
 }
 
 // Single-row variant used by the per-player detail view. Returns the
@@ -169,12 +169,12 @@ func (q *Queries) GetPlayerWithOnboardingState(ctx context.Context, id int64) (G
 	var i GetPlayerWithOnboardingStateRow
 	err := row.Scan(
 		&i.ID,
-		&i.Username,
+		&i.DisplayName,
 		&i.Email,
 		&i.PasswordHash,
 		&i.Role,
 		&i.CreatedAt,
-		&i.UsernameClaimed,
+		&i.DisplayNameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
@@ -221,7 +221,7 @@ const listAdminAuditForTarget = `-- name: ListAdminAuditForTarget :many
 SELECT
     a.id,
     a.actor_player_id,
-    CAST(COALESCE(p.username, '') AS TEXT) AS actor_username,
+    CAST(COALESCE(p.display_name, '') AS TEXT) AS actor_display_name,
     a.target_player_id,
     a.action,
     a.payload,
@@ -239,13 +239,13 @@ type ListAdminAuditForTargetParams struct {
 }
 
 type ListAdminAuditForTargetRow struct {
-	ID             int64
-	ActorPlayerID  sql.NullInt64
-	ActorUsername  string
-	TargetPlayerID int64
-	Action         string
-	Payload        string
-	CreatedAt      time.Time
+	ID               int64
+	ActorPlayerID    sql.NullInt64
+	ActorDisplayName string
+	TargetPlayerID   int64
+	Action           string
+	Payload          string
+	CreatedAt        time.Time
 }
 
 // Returns the most-recent admin actions taken against the given target
@@ -265,7 +265,7 @@ func (q *Queries) ListAdminAuditForTarget(ctx context.Context, arg ListAdminAudi
 		if err := rows.Scan(
 			&i.ID,
 			&i.ActorPlayerID,
-			&i.ActorUsername,
+			&i.ActorDisplayName,
 			&i.TargetPlayerID,
 			&i.Action,
 			&i.Payload,
@@ -286,7 +286,7 @@ func (q *Queries) ListAdminAuditForTarget(ctx context.Context, arg ListAdminAudi
 
 const listPlayersByOnboardingState = `-- name: ListPlayersByOnboardingState :many
 SELECT
-    p.id, p.username, p.email, p.password_hash, p.role, p.created_at, p.username_claimed, p.email_verified_at, p.session_version, p.role_changed_at,
+    p.id, p.display_name, p.email, p.password_hash, p.role, p.created_at, p.display_name_claimed, p.email_verified_at, p.session_version, p.role_changed_at,
     EXISTS (SELECT 1 FROM player_identities pi WHERE pi.player_id = p.id) AS has_oauth,
     CAST(COALESCE(
         (SELECT pi.provider FROM player_identities pi WHERE pi.player_id = p.id ORDER BY pi.provider LIMIT 1),
@@ -322,19 +322,19 @@ type ListPlayersByOnboardingStateParams struct {
 }
 
 type ListPlayersByOnboardingStateRow struct {
-	ID              int64
-	Username        string
-	Email           sql.NullString
-	PasswordHash    sql.NullString
-	Role            string
-	CreatedAt       time.Time
-	UsernameClaimed int64
-	EmailVerifiedAt sql.NullTime
-	SessionVersion  int64
-	RoleChangedAt   sql.NullTime
-	HasOauth        bool
-	OauthProvider   string
-	OnboardingState string
+	ID                 int64
+	DisplayName        string
+	Email              sql.NullString
+	PasswordHash       sql.NullString
+	Role               string
+	CreatedAt          time.Time
+	DisplayNameClaimed int64
+	EmailVerifiedAt    sql.NullTime
+	SessionVersion     int64
+	RoleChangedAt      sql.NullTime
+	HasOauth           bool
+	OauthProvider      string
+	OnboardingState    string
 }
 
 // Page of players ordered by created_at DESC for the admin list (#450).
@@ -355,12 +355,12 @@ func (q *Queries) ListPlayersByOnboardingState(ctx context.Context, arg ListPlay
 		var i ListPlayersByOnboardingStateRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.Username,
+			&i.DisplayName,
 			&i.Email,
 			&i.PasswordHash,
 			&i.Role,
 			&i.CreatedAt,
-			&i.UsernameClaimed,
+			&i.DisplayNameClaimed,
 			&i.EmailVerifiedAt,
 			&i.SessionVersion,
 			&i.RoleChangedAt,

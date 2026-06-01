@@ -17,8 +17,8 @@
                      so the structure is in place for #103. */}}
                 <span class="pill pill-public">Public</span>
                 <span class="m-0 text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.18em]">Quiz #{{.Quiz.ID}}</span>
-                {{if .Quiz.CreatedByUsername}}
-                    <span class="m-0 text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.18em]">Created by {{.Quiz.CreatedByUsername}}</span>
+                {{if .Quiz.CreatedByDisplayName}}
+                    <span class="m-0 text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.18em]">Created by {{.Quiz.CreatedByDisplayName}}</span>
                 {{end}}
             </div>
 
@@ -244,12 +244,12 @@
                 <div class="player-list">
                     {{range .Players}}
                         <div class="player-row">
-                            <div class="player-name">{{.Username}}</div>
+                            <div class="player-name">{{.DisplayName}}</div>
                             <div class="player-score tabular-nums">{{.Score}}</div>
                             <button type="button"
                                     onclick="openModal('modal-reset-player-{{.PlayerID}}')"
                                     class="player-reset"
-                                    aria-label="Reset {{.Username}}">
+                                    aria-label="Reset {{.DisplayName}}">
                                 Reset
                             </button>
                         </div>
@@ -267,7 +267,7 @@
                                         class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer">&times;</button>
                             </header>
                             <section class="px-6 py-5 text-[0.95rem]">
-                                Are you sure you want to reset <strong class="text-text">&#34;{{.Username}}&#34;</strong>'s attempt? Their game and all answers will be deleted, and they will be able to play this quiz again. This action cannot be undone.
+                                Are you sure you want to reset <strong class="text-text">&#34;{{.DisplayName}}&#34;</strong>'s attempt? Their game and all answers will be deleted, and they will be able to play this quiz again. This action cannot be undone.
                             </section>
                             <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
                                 <button type="button"

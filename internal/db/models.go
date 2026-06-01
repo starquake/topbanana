@@ -94,16 +94,16 @@ type PasswordResetToken struct {
 }
 
 type Player struct {
-	ID              int64
-	Username        string
-	Email           sql.NullString
-	PasswordHash    sql.NullString
-	Role            string
-	CreatedAt       time.Time
-	UsernameClaimed int64
-	EmailVerifiedAt sql.NullTime
-	SessionVersion  int64
-	RoleChangedAt   sql.NullTime
+	ID                 int64
+	DisplayName        string
+	Email              sql.NullString
+	PasswordHash       sql.NullString
+	Role               string
+	CreatedAt          time.Time
+	DisplayNameClaimed int64
+	EmailVerifiedAt    sql.NullTime
+	SessionVersion     int64
+	RoleChangedAt      sql.NullTime
 }
 
 type PlayerIdentity struct {

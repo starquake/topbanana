@@ -1,7 +1,7 @@
--- name: GetPlayerByUsername :one
+-- name: GetPlayerByDisplayName :one
 SELECT *
 FROM players
-WHERE username = ?
+WHERE display_name = ?
 LIMIT 1;
 
 -- name: CreatePlayerWithCredentials :one
@@ -27,13 +27,13 @@ LIMIT 1;
 -- stamped only when the row is written as admin, so the settings list can show
 -- a "promoted" timestamp.
 --
--- username_claimed is set to 1 because a registering user explicitly chose
--- their username at the register form. The column tracks "did the player
+-- display_name_claimed is set to 1 because a registering user explicitly chose
+-- their display_name at the register form. The column tracks "did the player
 -- pick this name themselves" (vs auto-generated petname), so a fresh
 -- registrant must be marked as claimed from the moment the row is written.
-INSERT INTO players (username, password_hash, email, role, role_changed_at, username_claimed)
+INSERT INTO players (display_name, password_hash, email, role, role_changed_at, display_name_claimed)
 VALUES (
-    sqlc.arg('username'),
+    sqlc.arg('display_name'),
     sqlc.arg('password_hash'),
     sqlc.arg('email'),
     CASE
@@ -65,11 +65,11 @@ RETURNING *;
 -- becomes admin" SQL above filters by password_hash IS NOT NULL, so an
 -- anonymous row never qualifies for promotion.
 --
--- username_claimed defaults to 0: the auto-generated petname is not a name
+-- display_name_claimed defaults to 0: the auto-generated petname is not a name
 -- the visitor picked, so the row is unclaimed until they rename via the
 -- PATCH /api/players/me endpoint or sign up through ClaimPlayer below.
-INSERT INTO players (username, role)
-VALUES (sqlc.arg('username'), 'player')
+INSERT INTO players (display_name, role)
+VALUES (sqlc.arg('display_name'), 'player')
 RETURNING *;
 
 -- name: ClaimPlayer :one
@@ -92,13 +92,13 @@ RETURNING *;
 -- claim path lands on Admin. Host is never granted at registration.
 -- role_changed_at is stamped when the row becomes admin.
 --
--- username_claimed is set to 1 because the visitor is explicitly choosing
--- their username via the register form. This is the register-after-playing
+-- display_name_claimed is set to 1 because the visitor is explicitly choosing
+-- their display_name via the register form. This is the register-after-playing
 -- path: the row now represents a player who picked their own name, so it
 -- must look identical to a CreatePlayerWithCredentials row to downstream
 -- callers.
 UPDATE players
-SET username = sqlc.arg('username'),
+SET display_name = sqlc.arg('display_name'),
     password_hash = sqlc.arg('password_hash'),
     email = sqlc.arg('email'),
     role = CASE
@@ -119,7 +119,7 @@ SET username = sqlc.arg('username'),
         ) THEN CURRENT_TIMESTAMP
         ELSE NULL
     END,
-    username_claimed = 1
+    display_name_claimed = 1
 WHERE players.id = sqlc.arg('id')
   AND players.password_hash IS NULL
   AND players.email IS NULL
@@ -127,21 +127,21 @@ RETURNING *;
 
 -- name: SetPlayerPasswordHash :execrows
 -- Used by the cmd/server -reset-password operator tool to rotate a single
--- player's password without disturbing username / role / email. Returns the
+-- player's password without disturbing display_name / role / email. Returns the
 -- number of affected rows so the caller can map "no rows" to an "email
 -- not found" error. The lookup is by email (the post-#446 login credential)
 -- so the operator's reset target matches what the player types into /login.
 --
--- username_claimed is set to 1 alongside the password because once an
--- operator has set a password on a row, the username is no longer an
+-- display_name_claimed is set to 1 alongside the password because once an
+-- operator has set a password on a row, the display_name is no longer an
 -- auto-assigned petname the player should be nudged to replace (#289). The
 -- migration 20260511120000 ran the same backfill at the time, but only for
 -- rows that already had a password_hash; later password sets via this
--- query previously left username_claimed at 0, which made the seed
+-- query previously left display_name_claimed at 0, which made the seed
 -- admin (id=1) keep popping the claim-name modal in the player client.
 UPDATE players
 SET password_hash    = sqlc.arg('password_hash'),
-    username_claimed = 1
+    display_name_claimed = 1
 WHERE email = sqlc.arg('email');
 
 -- name: GetPlayerByEmail :one
@@ -168,7 +168,7 @@ LIMIT 1;
 -- name: CreatePlayerFromOAuth :one
 -- Insert a brand-new player row for a first-time OAuth sign-in. No
 -- password_hash (the player has no local credential), email comes from
--- the verified id-token claim, username_claimed is set to 1 because the
+-- the verified id-token claim, display_name_claimed is set to 1 because the
 -- caller supplies an auto-generated petname that the player will be
 -- prompted to change via the existing claim-name modal.
 --
@@ -181,9 +181,9 @@ LIMIT 1;
 -- deployments from promoting *every* sign-in to admin. Without this,
 -- the second-and-onward Google sign-ins on a fresh DB would all see
 -- count(password_hash IS NOT NULL) == 0 and become admin.
-INSERT INTO players (username, email, email_verified_at, role, role_changed_at, username_claimed)
+INSERT INTO players (display_name, email, email_verified_at, role, role_changed_at, display_name_claimed)
 VALUES (
-    sqlc.arg('username'),
+    sqlc.arg('display_name'),
     sqlc.arg('email'),
     CURRENT_TIMESTAMP,
     CASE
@@ -219,8 +219,8 @@ VALUES (?, ?, ?);
 -- Upgrades a fully anonymous players row (no password_hash, no email)
 -- in place by attaching the OAuth-verified email. Lets a visitor who
 -- played anonymously keep their existing player_id (and therefore
--- their game history and any custom username) when they sign in with
--- Google for the first time. The username is left untouched: the
+-- their game history and any custom display_name) when they sign in with
+-- Google for the first time. The display_name is left untouched: the
 -- visitor's auto-petname or PATCH-claimed name carries through onto
 -- the OAuth-linked row.
 --
@@ -286,41 +286,41 @@ WHERE gp.player_id IN (sqlc.slice('player_ids'))
       (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)
 GROUP BY gp.player_id;
 
--- name: UpdatePlayerUsername :one
--- Updates the username on an anonymous player row in place. The WHERE
+-- name: UpdatePlayerDisplayName :one
+-- Updates the display_name on an anonymous player row in place. The WHERE
 -- clause refuses the update when the player has already claimed a
 -- non-anonymous identity (password_hash IS NOT NULL), so the SQL is the
 -- atomic guard against a stale anonymous check in the service layer.
 -- Returns the updated row when one was affected; the wrapper distinguishes
--- "not anonymous anymore" (sql.ErrNoRows) from "username collision"
--- (UNIQUE constraint failure on players.username).
+-- "not anonymous anymore" (sql.ErrNoRows) from "display_name collision"
+-- (UNIQUE constraint failure on players.display_name).
 --
--- username_claimed is set to 1 because this is the dedicated claim-name
+-- display_name_claimed is set to 1 because this is the dedicated claim-name
 -- endpoint (PATCH /api/players/me); the visitor is explicitly picking
 -- their display name. After this update the row reads as "player chose
 -- this name" identically to the credentialled-registration path.
 UPDATE players
-SET username = sqlc.arg('username'),
-    username_claimed = 1
+SET display_name = sqlc.arg('display_name'),
+    display_name_claimed = 1
 WHERE id = sqlc.arg('id') AND password_hash IS NULL
 RETURNING *;
 
 -- name: RenamePlayer :one
 -- Renames any player row by id, regardless of password / email / role.
--- The dedicated profile-page endpoint (POST /profile/username, #410)
+-- The dedicated profile-page endpoint (POST /profile/display-name, #410)
 -- uses this so authenticated players (password, OAuth, admin) can
 -- change their display name. Anonymous rows have their own narrower
--- path via UpdatePlayerUsername above; this query is intentionally
+-- path via UpdatePlayerDisplayName above; this query is intentionally
 -- not gated by password_hash so the OAuth-only and admin cases also
 -- work.
 --
 -- Returns the updated row when one was affected; the store wrapper
 -- maps sql.ErrNoRows to ErrPlayerNotFound and a UNIQUE constraint
--- failure on players.username to ErrUsernameTaken so the handler can
+-- failure on players.display_name to ErrDisplayNameTaken so the handler can
 -- map both onto user-facing form errors.
 UPDATE players
-SET username = sqlc.arg('username'),
-    username_claimed = 1
+SET display_name = sqlc.arg('display_name'),
+    display_name_claimed = 1
 WHERE id = sqlc.arg('id')
 RETURNING *;
 
@@ -454,14 +454,14 @@ FROM players
 WHERE role = 'admin';
 
 -- name: ListAdmins :many
--- Every current Admin, ordered by username so the admin settings page
+-- Every current Admin, ordered by display_name so the admin settings page
 -- (#320/#538) renders a stable list. Only the columns the list needs are
 -- selected. role_changed_at is when the role last changed (NULL for rows whose
 -- role predates the column).
-SELECT id, username, email, role_changed_at
+SELECT id, display_name, email, role_changed_at
 FROM players
 WHERE role = 'admin'
-ORDER BY username, id;
+ORDER BY display_name, id;
 
 -- name: ResetPlayerPassword :execrows
 -- Atomically rotates password_hash and bumps session_version on the

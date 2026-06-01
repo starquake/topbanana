@@ -14,15 +14,15 @@ import (
 	"github.com/starquake/topbanana/internal/session"
 )
 
-// anonymousUsernamePrefix is the prefix used by the last-resort xid-backed
+// anonymousDisplayNamePrefix is the prefix used by the last-resort xid-backed
 // fallback when GeneratePetname collisions exhaust the retry budget. The
 // petname path is the common case; this prefix only appears in the
 // astronomically unlikely event that the petname pool becomes saturated or
 // the same petname is drawn N times in a row.
-const anonymousUsernamePrefix = "anon-"
+const anonymousDisplayNamePrefix = "anon-"
 
 // petnameMaxAttempts caps how many times EnsurePlayer will retry a petname
-// against the UNIQUE-on-username index before falling back to an xid-backed
+// against the UNIQUE-on-displayName index before falling back to an xid-backed
 // name. With ~15M combinations the chance of one collision is tiny and the
 // chance of five in a row is effectively zero, so five attempts is a safe
 // upper bound that still keeps the request latency bounded.
@@ -104,7 +104,7 @@ func mintAnonymousPlayer(ctx context.Context, players PlayerStore) (*Player, err
 		if err == nil {
 			return player, nil
 		}
-		if !errors.Is(err, ErrUsernameTaken) {
+		if !errors.Is(err, ErrDisplayNameTaken) {
 			return nil, fmt.Errorf("create anonymous player: %w", err)
 		}
 		lastErr = err
@@ -113,7 +113,7 @@ func mintAnonymousPlayer(ctx context.Context, players PlayerStore) (*Player, err
 	// Petname pool collided every attempt. Fall back to an xid-backed name,
 	// which is unique by construction and effectively guarantees the insert
 	// succeeds even if the petname pool ever becomes saturated.
-	player, err := players.CreateAnonymousPlayer(ctx, anonymousUsernamePrefix+xid.New().String())
+	player, err := players.CreateAnonymousPlayer(ctx, anonymousDisplayNamePrefix+xid.New().String())
 	if err != nil {
 		return nil, fmt.Errorf("petname exhausted (last: %w); xid fallback: %w", lastErr, err)
 	}
@@ -152,8 +152,8 @@ func RequireGameHost(
 
 		if !player.CanHost() {
 			render.render(w, r, http.StatusForbidden, formData{
-				Title:    "Access denied",
-				Username: player.Username,
+				Title:       "Access denied",
+				DisplayName: player.DisplayName,
 			})
 
 			return

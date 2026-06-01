@@ -8,14 +8,14 @@ import { registerAdmin, markAdmin, markHost, PASSWORD } from './helpers';
 // row simply needs to exist for the admin to act on.
 async function registerPlayer(
   context: BrowserContext,
-  username: string,
+  displayName: string,
 ): Promise<void> {
   const playerContext = await context.browser()!.newContext();
   try {
     const playerPage = await playerContext.newPage();
     await playerPage.goto('/register');
-    await playerPage.locator('input[name=email]').fill(`${username}@example.test`);
-    await playerPage.locator('input[name=display_name]').fill(username);
+    await playerPage.locator('input[name=email]').fill(`${displayName}@example.test`);
+    await playerPage.locator('input[name=display_name]').fill(displayName);
     await playerPage.locator('input[name=password]').fill(PASSWORD);
     await playerPage.locator('input[name=password_confirm]').fill(PASSWORD);
     await playerPage.locator('button[type=submit]').click();
@@ -32,21 +32,21 @@ async function registerPlayer(
 // #527/#538 — role management lives on the player detail page. An Admin
 // opens a player's detail view, sets their role with the selector, and the
 // change sticks. The Settings page lists Admins and demotes them back to
-// Host via the repointed /role endpoint; it no longer carries a username
+// Host via the repointed /role endpoint; it no longer carries a displayName
 // promote form.
 test('admin promotes a player to admin from the detail page', async ({ page, context, browserName }) => {
-  const adminUsername = `e2e-admin-boss-${browserName}`;
-  const targetUsername = `e2e-admin-target-${browserName}`;
+  const adminDisplayName = `e2e-admin-boss-${browserName}`;
+  const targetDisplayName = `e2e-admin-target-${browserName}`;
 
-  await registerAdmin(page, adminUsername);
-  markAdmin(adminUsername);
-  await registerPlayer(context, targetUsername);
+  await registerAdmin(page, adminDisplayName);
+  markAdmin(adminDisplayName);
+  await registerPlayer(context, targetDisplayName);
 
   // Open the target's detail view from the players list.
   await page.goto('/admin/players');
-  await page.getByRole('link', { name: targetUsername }).click();
+  await page.getByRole('link', { name: targetDisplayName }).click();
   await expect(page).toHaveURL(/\/admin\/players\/\d+$/);
-  await expect(page.getByRole('heading', { name: targetUsername })).toBeVisible();
+  await expect(page.getByRole('heading', { name: targetDisplayName })).toBeVisible();
 
   // The role selector starts at 'player' for a fresh registration.
   const roleSelect = page.getByLabel('Role');
@@ -67,23 +67,23 @@ test('admin promotes a player to admin from the detail page', async ({ page, con
   await page.goto('/admin/settings');
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
   const admins = page.getByRole('region', { name: 'Admins' });
-  await expect(admins.getByRole('cell', { name: targetUsername, exact: true })).toBeVisible();
+  await expect(admins.getByRole('cell', { name: targetDisplayName, exact: true })).toBeVisible();
 
-  // The username promote form is gone.
+  // The displayName promote form is gone.
   await expect(page.getByRole('textbox', { name: 'Promote a player' })).toHaveCount(0);
 });
 
 // The role selector can set every tier, ending on Host.
 test('admin sets a player to host from the detail page', async ({ page, context, browserName }) => {
-  const adminUsername = `e2e-host-boss-${browserName}`;
-  const targetUsername = `e2e-host-target-${browserName}`;
+  const adminDisplayName = `e2e-host-boss-${browserName}`;
+  const targetDisplayName = `e2e-host-target-${browserName}`;
 
-  await registerAdmin(page, adminUsername);
-  markAdmin(adminUsername);
-  await registerPlayer(context, targetUsername);
+  await registerAdmin(page, adminDisplayName);
+  markAdmin(adminDisplayName);
+  await registerPlayer(context, targetDisplayName);
 
   await page.goto('/admin/players');
-  await page.getByRole('link', { name: targetUsername }).click();
+  await page.getByRole('link', { name: targetDisplayName }).click();
   await expect(page).toHaveURL(/\/admin\/players\/\d+$/);
 
   const roleSelect = page.getByLabel('Role');
@@ -99,22 +99,22 @@ test('admin sets a player to host from the detail page', async ({ page, context,
 });
 
 test('admin demotes an admin from the settings table', async ({ page, context, browserName }) => {
-  const adminUsername = `e2e-demote-boss-${browserName}`;
-  const targetUsername = `e2e-demote-target-${browserName}`;
+  const adminDisplayName = `e2e-demote-boss-${browserName}`;
+  const targetDisplayName = `e2e-demote-target-${browserName}`;
 
-  await registerAdmin(page, adminUsername);
-  markAdmin(adminUsername);
+  await registerAdmin(page, adminDisplayName);
+  markAdmin(adminDisplayName);
   // Bootstrap the target straight to Admin so the table has a row to
   // demote that is not the last Admin.
-  await registerPlayer(context, targetUsername);
-  markAdmin(targetUsername);
+  await registerPlayer(context, targetDisplayName);
+  markAdmin(targetDisplayName);
 
   await page.goto('/admin/settings');
   const admins = page.getByRole('region', { name: 'Admins' });
-  await expect(admins.getByRole('cell', { name: targetUsername, exact: true })).toBeVisible();
+  await expect(admins.getByRole('cell', { name: targetDisplayName, exact: true })).toBeVisible();
 
   // The target's row Demote button posts to /role with role=host.
-  const targetRow = admins.getByRole('row', { name: new RegExp(`^${targetUsername}\\b`) });
+  const targetRow = admins.getByRole('row', { name: new RegExp(`^${targetDisplayName}\\b`) });
   page.once('dialog', (dialog) => dialog.accept());
   await targetRow.getByRole('button', { name: 'Demote' }).click();
 
@@ -124,14 +124,14 @@ test('admin demotes an admin from the settings table', async ({ page, context, b
 
   // Back on settings the demoted player no longer appears in the table.
   await page.goto('/admin/settings');
-  await expect(admins.getByRole('cell', { name: targetUsername, exact: true })).toHaveCount(0);
+  await expect(admins.getByRole('cell', { name: targetDisplayName, exact: true })).toHaveCount(0);
 });
 
 test('host does not see Settings and gets 404 at /admin/settings', async ({ page, browserName }) => {
-  const username = `e2e-host-plain-${browserName}`;
+  const displayName = `e2e-host-plain-${browserName}`;
 
-  await registerAdmin(page, username);
-  markHost(username);
+  await registerAdmin(page, displayName);
+  markHost(displayName);
   await page.goto('/admin/quizzes');
 
   // No Settings nav link for a Host.
@@ -146,10 +146,10 @@ test('host does not see Settings and gets 404 at /admin/settings', async ({ page
 // A Host gets the dashboard and Quizzes but never the Admin-only Players
 // or Email links (they 404 for a Host).
 test('host does not see Players or Email nav links and 404s on them', async ({ page, browserName }) => {
-  const username = `e2e-host-gating-${browserName}`;
+  const displayName = `e2e-host-gating-${browserName}`;
 
-  await registerAdmin(page, username);
-  markHost(username);
+  await registerAdmin(page, displayName);
+  markHost(displayName);
   await page.goto('/admin/quizzes');
 
   const nav = page.getByRole('navigation', { name: 'Primary' });

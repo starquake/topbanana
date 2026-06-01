@@ -12,23 +12,23 @@ import (
 
 const listMostActivePlayers = `-- name: ListMostActivePlayers :many
 SELECT p.id              AS id,
-       p.username        AS username,
+       p.display_name        AS display_name,
        COUNT(DISTINCT g.id) AS finished_count
 FROM players p
 JOIN game_participants gp ON gp.player_id = p.id
 JOIN games g ON g.id = gp.game_id
 WHERE g.created_at >= datetime('now', '-30 days')
-  AND p.username_claimed = 1
+  AND p.display_name_claimed = 1
   AND EXISTS (SELECT 1 FROM questions qe WHERE qe.quiz_id = g.quiz_id)
   AND (SELECT COUNT(*) FROM game_questions gq WHERE gq.game_id = g.id) >=
       (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)
 GROUP BY p.id
-ORDER BY finished_count DESC, p.username ASC
+ORDER BY finished_count DESC, p.display_name ASC
 `
 
 type ListMostActivePlayersRow struct {
 	ID            int64
-	Username      string
+	DisplayName   string
 	FinishedCount int64
 }
 
@@ -40,7 +40,7 @@ type ListMostActivePlayersRow struct {
 // and a long-dormant player could outrank a current one (#355).
 //
 // Anonymous (auto-petname) players are filtered out via
-// username_claimed = 1 so the public list only shows names a player
+// display_name_claimed = 1 so the public list only shows names a player
 // deliberately picked. The start-page leaderboard would otherwise be
 // cluttered with throwaway "happy-banana-xyz" entries from one-shot
 // visitors.
@@ -58,7 +58,7 @@ func (q *Queries) ListMostActivePlayers(ctx context.Context) ([]ListMostActivePl
 	var items []ListMostActivePlayersRow
 	for rows.Next() {
 		var i ListMostActivePlayersRow
-		if err := rows.Scan(&i.ID, &i.Username, &i.FinishedCount); err != nil {
+		if err := rows.Scan(&i.ID, &i.DisplayName, &i.FinishedCount); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -346,7 +346,7 @@ func (s *GameStore) ListAnswersForQuizLeaderboard(
 	for _, r := range rows {
 		answers = append(answers, &game.LeaderboardAnswer{
 			PlayerID:          r.PlayerID,
-			Username:          r.Username,
+			DisplayName:       r.DisplayName,
 			QuestionStartedAt: r.QuestionStartedAt,
 			QuestionExpiredAt: r.QuestionExpiredAt,
 			AnsweredAt:        r.AnsweredAt,
@@ -378,8 +378,8 @@ func (s *GameStore) ListParticipantsForQuizLeaderboard(
 	participants := make([]*game.LeaderboardParticipant, 0, len(rows))
 	for _, r := range rows {
 		participants = append(participants, &game.LeaderboardParticipant{
-			PlayerID: r.PlayerID,
-			Username: r.Username,
+			PlayerID:    r.PlayerID,
+			DisplayName: r.DisplayName,
 			// CASE returns 1/0.
 			IsCompleted: r.IsCompleted != 0,
 			IsStale:     r.IsStale != 0,

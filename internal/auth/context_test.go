@@ -10,7 +10,7 @@ import (
 func TestPlayerFromContext_RoundTrip(t *testing.T) {
 	t.Parallel()
 
-	want := &Player{ID: 7, Username: "alice", Role: RoleAdmin}
+	want := &Player{ID: 7, DisplayName: "alice", Role: RoleAdmin}
 	ctx := WithPlayer(t.Context(), want)
 
 	got, ok := PlayerFromContext(ctx)

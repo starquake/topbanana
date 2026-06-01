@@ -23,7 +23,7 @@ func LoginCooldown() time.Duration { return loginCooldown }
 
 // LoginRateLimiter is a per-IP cool-down for POST /login. The handler
 // calls [LoginRateLimiter.Allow] before any credential lookup so the
-// limiter fires whether or not the submitted username exists,
+// limiter fires whether or not the submitted displayName exists,
 // preserving the same response-timing shape the dummy-hash compare
 // already gives the credential-check path.
 //

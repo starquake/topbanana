@@ -7,9 +7,9 @@ import { registerAdmin } from './helpers';
 // hop is what keeps Firefox from prompting "resend this form?" on
 // refresh, so the URL assertion below is load-bearing.
 test('admin can open the email diagnostics page and see status + log', async ({ page, browserName }) => {
-  const username = `e2e-admin-email-${browserName}`;
+  const displayName = `e2e-admin-email-${browserName}`;
 
-  await registerAdmin(page, username);
+  await registerAdmin(page, displayName);
 
   await page.goto('/admin/email');
   await expect(page).toHaveURL(/\/admin\/email$/);

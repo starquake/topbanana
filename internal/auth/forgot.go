@@ -44,7 +44,7 @@ type forgotPageData struct {
 }
 
 // HandleForgotForm renders GET /forgot-password. The form asks for a
-// username or email and posts to the same path. An already-signed-in
+// displayName or email and posts to the same path. An already-signed-in
 // visitor is redirected to their role landing so the password-reset
 // flow is reserved for users who cannot log in.
 func HandleForgotForm(
@@ -123,7 +123,7 @@ func HandleForgotSubmit(
 	})
 }
 
-// dispatchForgotIfMatch looks the identifier up by username then
+// dispatchForgotIfMatch looks the identifier up by displayName then
 // email, and (when found and the player has an email on file)
 // detaches a goroutine that mints+sends a reset link. Lookup misses
 // and OAuth-only rows are silently ignored so the timing of the
@@ -157,7 +157,7 @@ func dispatchForgotIfMatch(
 }
 
 // resolveForgotIdentifier returns the player matching identifier
-// (treated as a username first, then as an email) or (nil, false) if
+// (treated as a displayName first, then as an email) or (nil, false) if
 // neither lookup hits. Errors other than "not found" are swallowed at
 // info level - the account-existence-opaque contract means we cannot
 // surface a transient DB hiccup to the user, and the rate limiter
@@ -165,7 +165,7 @@ func dispatchForgotIfMatch(
 func resolveForgotIdentifier(
 	ctx context.Context, players PlayerStore, identifier string,
 ) (*Player, bool) {
-	if p, err := players.GetPlayerByUsername(ctx, identifier); err == nil {
+	if p, err := players.GetPlayerByDisplayName(ctx, identifier); err == nil {
 		return p, true
 	} else if !errors.Is(err, ErrPlayerNotFound) {
 		return nil, false

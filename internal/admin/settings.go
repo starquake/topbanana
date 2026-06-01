@@ -13,10 +13,10 @@ import (
 // Mirrors auth.AdminEntry. PromotedAt is nil for rows whose role predates the
 // role_changed_at column; the template renders an em dash in that case.
 type adminRow struct {
-	ID         int64
-	Username   string
-	Email      string
-	PromotedAt *time.Time
+	ID          int64
+	DisplayName string
+	Email       string
+	PromotedAt  *time.Time
 }
 
 // settingsPageData backs settings.gohtml. Admins carries the current top-tier
@@ -54,10 +54,10 @@ func HandleSettings(
 		rows := make([]adminRow, 0, len(entries))
 		for _, e := range entries {
 			rows = append(rows, adminRow{
-				ID:         e.ID,
-				Username:   e.Username,
-				Email:      e.Email,
-				PromotedAt: e.RoleChangedAt,
+				ID:          e.ID,
+				DisplayName: e.DisplayName,
+				Email:       e.Email,
+				PromotedAt:  e.RoleChangedAt,
 			})
 		}
 

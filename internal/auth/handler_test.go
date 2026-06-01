@@ -26,7 +26,7 @@ type stubPlayerStore struct {
 	nextID  int64
 	failGet bool
 	// forceAnonCollisions, when > 0, makes the next N CreateAnonymousPlayer
-	// calls return ErrUsernameTaken without inserting. Each call decrements
+	// calls return ErrDisplayNameTaken without inserting. Each call decrements
 	// the counter, so once it reaches zero the stub returns to its normal
 	// insert-or-conflict behaviour. Used by the petname retry-loop tests
 	// to drive the middleware down the collision path a deterministic
@@ -49,11 +49,11 @@ func newStubPlayerStore() *stubPlayerStore {
 	}
 }
 
-func (s *stubPlayerStore) GetPlayerByUsername(_ context.Context, username string) (*Player, error) {
+func (s *stubPlayerStore) GetPlayerByDisplayName(_ context.Context, displayName string) (*Player, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	p, ok := s.byName[username]
+	p, ok := s.byName[displayName]
 	if !ok {
 		return nil, ErrPlayerNotFound
 	}
@@ -95,13 +95,13 @@ func (s *stubPlayerStore) GetPlayerByID(_ context.Context, id int64) (*Player, e
 // rule is observed atomically.
 func (s *stubPlayerStore) CreatePlayer(
 	_ context.Context,
-	username, email, passwordHash, requestedRole string,
+	displayName, email, passwordHash, requestedRole string,
 ) (*Player, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, exists := s.byName[username]; exists {
-		return nil, ErrUsernameTaken
+	if _, exists := s.byName[displayName]; exists {
+		return nil, ErrDisplayNameTaken
 	}
 	if email != "" {
 		for _, p := range s.byID {
@@ -115,21 +115,21 @@ func (s *stubPlayerStore) CreatePlayer(
 
 	p := &Player{
 		ID:           s.nextID,
-		Username:     username,
+		DisplayName:  displayName,
 		Email:        email,
 		PasswordHash: passwordHash,
 		Role:         role,
 	}
 	s.nextID++
 	s.byID[p.ID] = p
-	s.byName[username] = p
+	s.byName[displayName] = p
 
 	return p, nil
 }
 
 // CreateAnonymousPlayer mirrors store.CreateAnonymousPlayer: insert a row
-// with the given username, no password_hash, role = "player".
-func (s *stubPlayerStore) CreateAnonymousPlayer(_ context.Context, username string) (*Player, error) {
+// with the given displayName, no password_hash, role = "player".
+func (s *stubPlayerStore) CreateAnonymousPlayer(_ context.Context, displayName string) (*Player, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -142,32 +142,32 @@ func (s *stubPlayerStore) CreateAnonymousPlayer(_ context.Context, username stri
 	if s.forceAnonCollisions > 0 {
 		s.forceAnonCollisions--
 
-		return nil, ErrUsernameTaken
+		return nil, ErrDisplayNameTaken
 	}
 
-	if _, exists := s.byName[username]; exists {
-		return nil, ErrUsernameTaken
+	if _, exists := s.byName[displayName]; exists {
+		return nil, ErrDisplayNameTaken
 	}
 
 	p := &Player{
-		ID:       s.nextID,
-		Username: username,
-		Role:     RolePlayer,
+		ID:          s.nextID,
+		DisplayName: displayName,
+		Role:        RolePlayer,
 	}
 	s.nextID++
 	s.byID[p.ID] = p
-	s.byName[username] = p
+	s.byName[displayName] = p
 
 	return p, nil
 }
 
 // ClaimPlayer mirrors store.ClaimPlayer: upgrades an anonymous row in place
 // or fails with ErrPlayerAlreadyClaimed / ErrPlayerNotFound /
-// ErrUsernameTaken.
+// ErrDisplayNameTaken.
 func (s *stubPlayerStore) ClaimPlayer(
 	_ context.Context,
 	playerID int64,
-	username, email, passwordHash, requestedRole string,
+	displayName, email, passwordHash, requestedRole string,
 ) (*Player, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -179,8 +179,8 @@ func (s *stubPlayerStore) ClaimPlayer(
 	if existing.PasswordHash != "" {
 		return nil, ErrPlayerAlreadyClaimed
 	}
-	if other, exists := s.byName[username]; exists && other.ID != playerID {
-		return nil, ErrUsernameTaken
+	if other, exists := s.byName[displayName]; exists && other.ID != playerID {
+		return nil, ErrDisplayNameTaken
 	}
 	if email != "" {
 		for _, p := range s.byID {
@@ -190,18 +190,18 @@ func (s *stubPlayerStore) ClaimPlayer(
 		}
 	}
 
-	delete(s.byName, existing.Username)
+	delete(s.byName, existing.DisplayName)
 	existing.Email = email
-	existing.Username = username
+	existing.DisplayName = displayName
 	existing.PasswordHash = passwordHash
 	existing.Role = s.resolveRoleLocked(requestedRole)
-	s.byName[username] = existing
+	s.byName[displayName] = existing
 
 	return existing, nil
 }
 
-func (s *stubPlayerStore) UpdatePlayerUsername(
-	_ context.Context, playerID int64, username string,
+func (s *stubPlayerStore) UpdatePlayerDisplayName(
+	_ context.Context, playerID int64, displayName string,
 ) (*Player, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -213,46 +213,46 @@ func (s *stubPlayerStore) UpdatePlayerUsername(
 	if existing.PasswordHash != "" {
 		return nil, ErrPlayerNotAnonymous
 	}
-	if other, exists := s.byName[username]; exists && other.ID != playerID {
-		return nil, ErrUsernameTaken
+	if other, exists := s.byName[displayName]; exists && other.ID != playerID {
+		return nil, ErrDisplayNameTaken
 	}
 
-	delete(s.byName, existing.Username)
-	existing.Username = username
-	s.byName[username] = existing
+	delete(s.byName, existing.DisplayName)
+	existing.DisplayName = displayName
+	s.byName[displayName] = existing
 
 	return existing, nil
 }
 
 func (s *stubPlayerStore) RenamePlayer(
-	_ context.Context, playerID int64, username string,
+	_ context.Context, playerID int64, displayName string,
 ) (*Player, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if strings.TrimSpace(username) == "" {
-		return nil, ErrUsernameEmpty
+	if strings.TrimSpace(displayName) == "" {
+		return nil, ErrDisplayNameEmpty
 	}
 	existing, ok := s.byID[playerID]
 	if !ok {
 		return nil, ErrPlayerNotFound
 	}
-	if other, exists := s.byName[username]; exists && other.ID != playerID {
-		return nil, ErrUsernameTaken
+	if other, exists := s.byName[displayName]; exists && other.ID != playerID {
+		return nil, ErrDisplayNameTaken
 	}
 
-	delete(s.byName, existing.Username)
-	existing.Username = username
-	s.byName[username] = existing
+	delete(s.byName, existing.DisplayName)
+	existing.DisplayName = displayName
+	s.byName[displayName] = existing
 
 	return existing, nil
 }
 
-func (s *stubPlayerStore) SetPlayerPasswordHash(_ context.Context, username, passwordHash string) error {
+func (s *stubPlayerStore) SetPlayerPasswordHash(_ context.Context, displayName, passwordHash string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	p, ok := s.byName[username]
+	p, ok := s.byName[displayName]
 	if !ok {
 		return ErrPlayerNotFound
 	}
@@ -352,9 +352,9 @@ func TestHandleRegisterSubmit_FirstUser_BecomesAdmin(t *testing.T) {
 
 	assertRegisterPending(t, rec, "alice@example.test")
 
-	p, err := store.GetPlayerByUsername(t.Context(), "alice")
+	p, err := store.GetPlayerByDisplayName(t.Context(), "alice")
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
 	if got, want := p.Role, RoleAdmin; got != want {
 		t.Errorf("Role = %q, want %q", got, want)
@@ -424,9 +424,9 @@ func TestHandleRegisterSubmit_SecondUser_DefaultsToPlayer(t *testing.T) {
 
 	assertRegisterPending(t, rec, "bob@example.test")
 
-	p, err := store.GetPlayerByUsername(t.Context(), "bob")
+	p, err := store.GetPlayerByDisplayName(t.Context(), "bob")
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
 	if got, want := p.Role, RolePlayer; got != want {
 		t.Errorf("Role = %q, want %q", got, want)
@@ -458,9 +458,9 @@ func TestHandleRegisterSubmit_AdminEmailsEnv_PromotesToAdmin(t *testing.T) {
 
 	assertRegisterPending(t, rec, "carol@example.test")
 
-	p, err := store.GetPlayerByUsername(t.Context(), "carol")
+	p, err := store.GetPlayerByDisplayName(t.Context(), "carol")
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
 	if got, want := p.Role, RoleAdmin; got != want {
 		t.Errorf("Role = %q, want %q", got, want)
@@ -487,8 +487,8 @@ func TestHandleRegisterSubmit_PasswordTooShort(t *testing.T) {
 	if got := rec.Body.String(); !strings.Contains(got, want) {
 		t.Errorf("body = %q, want substring %q", got, want)
 	}
-	if _, err := store.GetPlayerByUsername(t.Context(), "alice"); !errors.Is(err, ErrPlayerNotFound) {
-		t.Errorf("player should not have been created, GetPlayerByUsername err = %v", err)
+	if _, err := store.GetPlayerByDisplayName(t.Context(), "alice"); !errors.Is(err, ErrPlayerNotFound) {
+		t.Errorf("player should not have been created, GetPlayerByDisplayName err = %v", err)
 	}
 }
 
@@ -517,12 +517,12 @@ func TestHandleRegisterSubmit_PasswordTooLong(t *testing.T) {
 	if got := rec.Body.String(); !strings.Contains(got, want) {
 		t.Errorf("body = %q, want substring %q", got, want)
 	}
-	if _, err := store.GetPlayerByUsername(t.Context(), "alice"); !errors.Is(err, ErrPlayerNotFound) {
-		t.Errorf("player should not have been created, GetPlayerByUsername err = %v", err)
+	if _, err := store.GetPlayerByDisplayName(t.Context(), "alice"); !errors.Is(err, ErrPlayerNotFound) {
+		t.Errorf("player should not have been created, GetPlayerByDisplayName err = %v", err)
 	}
 }
 
-func TestHandleRegisterSubmit_DuplicateUsername(t *testing.T) {
+func TestHandleRegisterSubmit_DuplicateDisplayName(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
@@ -632,7 +632,7 @@ func TestHandleRegisterSubmit_MatchingPasswords_CreatesPlayer(t *testing.T) {
 	})
 
 	assertRegisterPending(t, rec, "alice@example.test")
-	if _, err := store.GetPlayerByUsername(t.Context(), "alice"); err != nil {
+	if _, err := store.GetPlayerByDisplayName(t.Context(), "alice"); err != nil {
 		t.Errorf("player should have been created, err = %v", err)
 	}
 }
@@ -673,7 +673,7 @@ func TestHandleRegisterSubmit_MismatchedPasswords_Rejects(t *testing.T) {
 	if strings.Contains(body, "correctbatterydifferent") {
 		t.Errorf("body must not leak the submitted password_confirm, got %q", body)
 	}
-	if _, err := store.GetPlayerByUsername(t.Context(), "alice"); !errors.Is(err, ErrPlayerNotFound) {
+	if _, err := store.GetPlayerByDisplayName(t.Context(), "alice"); !errors.Is(err, ErrPlayerNotFound) {
 		t.Errorf("player should not have been created, err = %v", err)
 	}
 }
@@ -691,9 +691,9 @@ func TestHandleRegisterSubmit_LowercasesAndTrimsEmail(t *testing.T) {
 	})
 
 	assertRegisterPending(t, rec, "alice@example.test")
-	p, err := store.GetPlayerByUsername(t.Context(), "alice")
+	p, err := store.GetPlayerByDisplayName(t.Context(), "alice")
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
 	if got, want := p.Email, "alice@example.test"; got != want {
 		t.Errorf("stored email = %q, want %q", got, want)
@@ -740,10 +740,10 @@ func TestHandleRegisterSubmit_ClaimsAnonymousSession(t *testing.T) {
 	assertSessionCleared(t, rec)
 
 	// The same row was upgraded - no new row should appear, and the
-	// anonymous username should be gone.
-	upgraded, err := store.GetPlayerByUsername(t.Context(), "alice")
+	// anonymous displayName should be gone.
+	upgraded, err := store.GetPlayerByDisplayName(t.Context(), "alice")
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
 	if got, want := upgraded.ID, anon.ID; got != want {
 		t.Errorf("upgraded.ID = %d, want %d (player ID should be preserved)", got, want)
@@ -751,16 +751,16 @@ func TestHandleRegisterSubmit_ClaimsAnonymousSession(t *testing.T) {
 	if upgraded.PasswordHash == "" {
 		t.Error("upgraded.PasswordHash is empty, want bcrypt hash from claim")
 	}
-	if _, err := store.GetPlayerByUsername(t.Context(), "anon-existing"); !errors.Is(err, ErrPlayerNotFound) {
-		t.Errorf("anonymous row still resolvable by old username; err = %v, want ErrPlayerNotFound", err)
+	if _, err := store.GetPlayerByDisplayName(t.Context(), "anon-existing"); !errors.Is(err, ErrPlayerNotFound) {
+		t.Errorf("anonymous row still resolvable by old displayName; err = %v, want ErrPlayerNotFound", err)
 	}
 }
 
-// TestHandleRegisterSubmit_ClaimWithTakenUsername returns 409 and leaves
+// TestHandleRegisterSubmit_ClaimWithTakenDisplayName returns 409 and leaves
 // the anonymous row untouched so the visitor can retry with a different
-// username. First-sign-in-wins semantics: the row that already owns the
-// requested username keeps it.
-func TestHandleRegisterSubmit_ClaimWithTakenUsername(t *testing.T) {
+// displayName. First-sign-in-wins semantics: the row that already owns the
+// requested displayName keeps it.
+func TestHandleRegisterSubmit_ClaimWithTakenDisplayName(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
@@ -807,8 +807,8 @@ func TestHandleRegisterSubmit_ClaimWithTakenUsername(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPlayerByID err = %v, want nil", err)
 	}
-	if got, want := stillAnon.Username, "anon-claimer"; got != want {
-		t.Errorf("anonymous row Username = %q, want %q (should be unchanged)", got, want)
+	if got, want := stillAnon.DisplayName, "anon-claimer"; got != want {
+		t.Errorf("anonymous row DisplayName = %q, want %q (should be unchanged)", got, want)
 	}
 	if !stillAnon.IsAnonymous() {
 		t.Error("anonymous row IsAnonymous() = false, want true (should still be unclaimed)")
@@ -864,9 +864,9 @@ func TestHandleRegisterSubmit_ClaimAlreadyClaimed_FallsBackToCreate(t *testing.T
 	assertRegisterPending(t, rec, "latecomer@example.test")
 	assertSessionCleared(t, rec)
 	// A fresh row was created instead of clobbering the already-claimed one.
-	latecomer, err := store.GetPlayerByUsername(t.Context(), "latecomer")
+	latecomer, err := store.GetPlayerByDisplayName(t.Context(), "latecomer")
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
 	if got, dontWant := latecomer.ID, anon.ID; got == dontWant {
 		t.Errorf("latecomer reused the racer's anonymous ID %d, want a fresh row", got)
@@ -1048,13 +1048,13 @@ func loginDeps(
 // stamped via SendVerifyEmail's ConsumeVerifyToken path; in tests we
 // just toggle the column directly because the verify dance is not
 // what these cases pin.
-func markVerified(t *testing.T, store *stubPlayerStore, username string) {
+func markVerified(t *testing.T, store *stubPlayerStore, displayName string) {
 	t.Helper()
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	p, ok := store.byName[username]
+	p, ok := store.byName[displayName]
 	if !ok {
-		t.Fatalf("markVerified: no stub player named %q", username)
+		t.Fatalf("markVerified: no stub player named %q", displayName)
 	}
 	now := time.Now().UTC()
 	p.EmailVerifiedAt = &now
@@ -1295,11 +1295,11 @@ func TestHandleLoginSubmit_EmailMixedCaseAndWhitespace(t *testing.T) {
 	}
 }
 
-// TestHandleRegisterSubmit_BlankUsername_GeneratesPetname pins the post-
+// TestHandleRegisterSubmit_BlankDisplayName_GeneratesPetname pins the post-
 // #446 contract: a blank display name on the register form falls back to
 // GeneratePetname so register-with-just-email is a valid signup. Pre-446
-// this branch was a 400 "Username is required.".
-func TestHandleRegisterSubmit_BlankUsername_GeneratesPetname(t *testing.T) {
+// this branch was a 400 "DisplayName is required.".
+func TestHandleRegisterSubmit_BlankDisplayName_GeneratesPetname(t *testing.T) {
 	t.Parallel()
 
 	store := newStubPlayerStore()
@@ -1313,15 +1313,15 @@ func TestHandleRegisterSubmit_BlankUsername_GeneratesPetname(t *testing.T) {
 	})
 
 	assertRegisterPending(t, rec, "petname@example.test")
-	// The whitespace-only username path falls into GeneratePetname, so
+	// The whitespace-only displayName path falls into GeneratePetname, so
 	// no row should be created under the empty key. The row exists under
 	// the petname; we look it up by email instead.
 	p, err := store.GetPlayerByEmail(t.Context(), "petname@example.test")
 	if err != nil {
 		t.Fatalf("GetPlayerByEmail err = %v, want nil", err)
 	}
-	if p.Username == "" {
-		t.Error("created Username is empty, want a non-empty petname")
+	if p.DisplayName == "" {
+		t.Error("created DisplayName is empty, want a non-empty petname")
 	}
 }
 
@@ -1340,7 +1340,7 @@ func TestHandleRegisterSubmit_PasswordExactlyMinLength(t *testing.T) {
 	})
 
 	assertRegisterPending(t, rec, "alice@example.test")
-	if _, err := store.GetPlayerByUsername(t.Context(), "alice"); err != nil {
+	if _, err := store.GetPlayerByDisplayName(t.Context(), "alice"); err != nil {
 		t.Errorf("player should have been created, err = %v", err)
 	}
 }

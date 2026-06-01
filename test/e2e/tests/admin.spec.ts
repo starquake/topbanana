@@ -5,10 +5,10 @@ import { registerAdmin, createQuizWithQuestions, QUIZ_QUESTIONS } from './helper
 // default so the admin can present the quiz on screen without exposing
 // answers; the summary toggles per question, independent of siblings.
 test('admin quiz view hides answer options behind a per-question spoiler toggle', async ({ page, browserName }) => {
-  const username = `e2e-admin-spoiler-${browserName}`;
+  const displayName = `e2e-admin-spoiler-${browserName}`;
   const quizTitle = `E2E Spoiler Quiz ${browserName}`;
 
-  await registerAdmin(page, username);
+  await registerAdmin(page, displayName);
   await createQuizWithQuestions(page, quizTitle);
 
   // Spoiler is collapsed by default — option text in the DOM is hidden by
@@ -43,10 +43,10 @@ test('admin can add, edit, and delete a round on a quiz', async ({ page, browser
   // rounds; every quiz starts with a default 'Round 1', so the created
   // round is a second section. Selectors scope to its .round-section to
   // stay unambiguous against the default round.
-  const username = `e2e-admin-rounds-${browserName}`;
+  const displayName = `e2e-admin-rounds-${browserName}`;
   const quizTitle = `E2E Rounds Quiz ${browserName}`;
 
-  await registerAdmin(page, username);
+  await registerAdmin(page, displayName);
   await createQuizWithQuestions(page, quizTitle);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
@@ -90,10 +90,10 @@ test('register, create a quiz with varied questions, and see them on the quiz vi
   // Each browser project runs against the same shared server, so use unique
   // names per project. ADMIN_EMAILS (in playwright.config.ts) whitelists
   // these emails so registration promotes them to admin.
-  const username = `e2e-admin-create-${browserName}`;
+  const displayName = `e2e-admin-create-${browserName}`;
   const quizTitle = `E2E Admin Quiz ${browserName}`;
 
-  await registerAdmin(page, username);
+  await registerAdmin(page, displayName);
   await createQuizWithQuestions(page, quizTitle);
 
   // After the last addQuestion the quiz view is loaded. The redesign

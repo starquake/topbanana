@@ -334,8 +334,8 @@ func seedPlays(
 
 	players := make([]*auth.Player, 0, playerCount)
 	for i := range playerCount {
-		username := fmt.Sprintf("seed-player-%d-%d", time.Now().UnixNano(), i)
-		p, err := stores.Players.CreateAnonymousPlayer(ctx, username)
+		displayName := fmt.Sprintf("seed-player-%d-%d", time.Now().UnixNano(), i)
+		p, err := stores.Players.CreateAnonymousPlayer(ctx, displayName)
 		if err != nil {
 			return 0, fmt.Errorf("create anonymous player: %w", err)
 		}
@@ -356,7 +356,7 @@ func seedPlays(
 			if err := finishGame(ctx, stores.Games, p.ID, qz); err != nil {
 				logger.Warn(
 					"finish game",
-					slog.String("player", p.Username),
+					slog.String("player", p.DisplayName),
 					slog.String("quiz", qz.Title),
 					slog.Any("err", err),
 				)

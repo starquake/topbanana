@@ -57,13 +57,13 @@ func TestAdminSettings_Integration(t *testing.T) {
 		}
 
 		// Promote the target to admin via the id-based role endpoint.
-		targetID := playerIDByUsername(ctx, t, srv.DBURI, "settings-target")
+		targetID := playerIDByDisplayName(ctx, t, srv.DBURI, "settings-target")
 		if got, want := postCSRFRoleForm(ctx, t, boss,
 			baseURL+fmt.Sprintf("/admin/players/%d/role", targetID), auth.RoleAdmin,
 		), http.StatusSeeOther; got != want {
 			t.Fatalf("promote status = %d, want %d", got, want)
 		}
-		if got, want := roleByUsername(ctx, t, srv.DBURI, "settings-target"), auth.RoleAdmin; got != want {
+		if got, want := roleByDisplayName(ctx, t, srv.DBURI, "settings-target"), auth.RoleAdmin; got != want {
 			t.Fatalf("after promote role = %q, want %q", got, want)
 		}
 
@@ -79,7 +79,7 @@ func TestAdminSettings_Integration(t *testing.T) {
 		), http.StatusSeeOther; got != want {
 			t.Fatalf("demote status = %d, want %d", got, want)
 		}
-		if got, want := roleByUsername(ctx, t, srv.DBURI, "settings-target"), auth.RoleHost; got != want {
+		if got, want := roleByDisplayName(ctx, t, srv.DBURI, "settings-target"), auth.RoleHost; got != want {
 			t.Fatalf("after demote role = %q, want %q", got, want)
 		}
 	})

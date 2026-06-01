@@ -22,15 +22,15 @@ export const QUIZ_QUESTIONS: readonly QuestionSpec[] = [
   { text: 'Which are prime?',      options: ['2', '3', '5', '9'],               correctIndices: [0, 1, 2] },
 ];
 
-export async function registerAdmin(page: Page, username: string): Promise<void> {
-  await registerForPending(page, username);
+export async function registerAdmin(page: Page, displayName: string): Promise<void> {
+  await registerForPending(page, displayName);
   // The hard email-verification gate (#574) means register no longer
   // hands out a session: SMTP isn't wired in e2e so we cannot complete
   // the user-facing verify flow, so stamp email_verified_at directly
   // (same trick home.spec.ts uses to wipe games), then log in to obtain
   // a session and land on the admin dashboard.
-  markEmailVerified(username);
-  await login(page, username);
+  markEmailVerified(displayName);
+  await login(page, displayName);
   await expect(page).toHaveURL(/\/admin\/quizzes$/);
 }
 
@@ -38,11 +38,11 @@ export async function registerAdmin(page: Page, username: string): Promise<void>
 // the post-#574 hard-gate outcome: register renders the "verify your
 // email" confirmation at /register with no session (no redirect). The
 // row now exists but the visitor is not signed in. Email is the
-// credential after #446; username is the optional display name.
-export async function registerForPending(page: Page, username: string): Promise<void> {
+// credential after #446; displayName is the optional display name.
+export async function registerForPending(page: Page, displayName: string): Promise<void> {
   await page.goto('/register');
-  await page.locator('input[name=email]').fill(`${username}@example.test`);
-  await page.locator('input[name=display_name]').fill(username);
+  await page.locator('input[name=email]').fill(`${displayName}@example.test`);
+  await page.locator('input[name=display_name]').fill(displayName);
   await page.locator('input[name=password]').fill(PASSWORD);
   await page.locator('input[name=password_confirm]').fill(PASSWORD);
   await page.locator('button[type=submit]').click();
@@ -54,14 +54,14 @@ export async function registerForPending(page: Page, username: string): Promise<
 // the post-login landing URL (it varies by role). LOGIN_COOLDOWN is set
 // to 0s in playwright.config.ts, so back-to-back logins in a worker do
 // not trip the per-IP rate limiter.
-export async function login(page: Page, username: string): Promise<void> {
+export async function login(page: Page, displayName: string): Promise<void> {
   await page.goto('/login');
-  await page.locator('input[name=email]').fill(`${username}@example.test`);
+  await page.locator('input[name=email]').fill(`${displayName}@example.test`);
   await page.locator('input[name=password]').fill(PASSWORD);
   await page.locator('button[type=submit]').click();
 }
 
-export function markEmailVerified(username: string): void {
+export function markEmailVerified(displayName: string): void {
   const dataDir = process.env.TOPBANANA_E2E_DATA_DIR;
   if (!dataDir) {
     throw new Error('TOPBANANA_E2E_DATA_DIR is not set; helpers cannot stamp email_verified_at');
@@ -71,14 +71,14 @@ export function markEmailVerified(username: string): void {
   // doesn't actually neutralise an injection payload on its own. Escape
   // the single quote here instead -- standard SQL literal escaping, one
   // line, no extra round-trip through the CLI's parameter parser.
-  const escapedUsername = username.replace(/'/g, "''");
+  const escapedDisplayName = displayName.replace(/'/g, "''");
   const output = execFileSync('sqlite3', [
     dbFile,
-    `UPDATE players SET email_verified_at = CURRENT_TIMESTAMP WHERE username = '${escapedUsername}'; SELECT changes();`,
+    `UPDATE players SET email_verified_at = CURRENT_TIMESTAMP WHERE display_name = '${escapedDisplayName}'; SELECT changes();`,
   ], { encoding: 'utf8' });
   const changed = Number.parseInt(output.trim(), 10);
   if (changed !== 1) {
-    throw new Error(`markEmailVerified(${username}): expected 1 row updated, got ${changed}`);
+    throw new Error(`markEmailVerified(${displayName}): expected 1 row updated, got ${changed}`);
   }
 }
 
@@ -86,29 +86,29 @@ export function markEmailVerified(username: string): void {
 // shelling out to the sqlite3 CLI, mirroring how the production promote
 // path mutates the row. The e2e suite has no Admin out of the box, so
 // this is the bootstrap the settings/role specs use.
-export function markAdmin(username: string): void {
-  setRole(username, 'admin');
+export function markAdmin(displayName: string): void {
+  setRole(displayName, 'admin');
 }
 
 // markHost sets role='host' (the middle tier) for the named player.
-export function markHost(username: string): void {
-  setRole(username, 'host');
+export function markHost(displayName: string): void {
+  setRole(displayName, 'host');
 }
 
-function setRole(username: string, role: 'player' | 'host' | 'admin'): void {
+function setRole(displayName: string, role: 'player' | 'host' | 'admin'): void {
   const dataDir = process.env.TOPBANANA_E2E_DATA_DIR;
   if (!dataDir) {
     throw new Error('TOPBANANA_E2E_DATA_DIR is not set; helpers cannot stamp role');
   }
   const dbFile = join(dataDir, `e2e-${test.info().parallelIndex}.db`);
-  const escapedUsername = username.replace(/'/g, "''");
+  const escapedDisplayName = displayName.replace(/'/g, "''");
   const output = execFileSync('sqlite3', [
     dbFile,
-    `UPDATE players SET role = '${role}' WHERE username = '${escapedUsername}'; SELECT changes();`,
+    `UPDATE players SET role = '${role}' WHERE display_name = '${escapedDisplayName}'; SELECT changes();`,
   ], { encoding: 'utf8' });
   const changed = Number.parseInt(output.trim(), 10);
   if (changed !== 1) {
-    throw new Error(`setRole(${username}, ${role}): expected 1 row updated, got ${changed}`);
+    throw new Error(`setRole(${displayName}, ${role}): expected 1 row updated, got ${changed}`);
   }
 }
 

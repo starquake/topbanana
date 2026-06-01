@@ -24,7 +24,7 @@ const playersPerPage = 100
 // stays declarative.
 type playerRow struct {
 	ID              int64
-	Username        string
+	DisplayName     string
 	Email           string
 	AccountType     string
 	OnboardingState string
@@ -189,7 +189,7 @@ func buildPlayerRows(
 	for _, p := range rows {
 		pr := &playerRow{
 			ID:              p.ID,
-			Username:        p.Username,
+			DisplayName:     p.DisplayName,
 			Email:           p.Email,
 			AccountType:     accountTypeLabel(p),
 			OnboardingState: p.OnboardingState,

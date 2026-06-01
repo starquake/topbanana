@@ -5,15 +5,15 @@ import { registerForPending, login, markEmailVerified } from './helpers';
 // ADMIN_EMAILS promotion slot) and clears the verified-email gate so
 // /profile — which requires a verified email — is reachable.
 test('profile page links to change-email and change-password', async ({ page, browserName }) => {
-  const username = `e2e-profile-${browserName}-${Date.now()}`;
+  const displayName = `e2e-profile-${browserName}-${Date.now()}`;
 
   // The hard gate (#574) means register no longer signs the player in:
   // it renders the confirmation page with no session. Verify the row
   // directly, then log in to clear the verified-email gate /profile
   // enforces and obtain a session.
-  await registerForPending(page, username);
-  markEmailVerified(username);
-  await login(page, username);
+  await registerForPending(page, displayName);
+  markEmailVerified(displayName);
+  await login(page, displayName);
 
   await page.goto('/profile');
 

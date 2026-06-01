@@ -39,8 +39,8 @@
                         {{end}}
                         <div class="mt-auto flex items-center justify-between gap-3 pt-2 text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-text-mute">
                             <span>{{.QuestionCount}} {{if eq .QuestionCount 1}}question{{else}}questions{{end}}</span>
-                            {{if .CreatedByUsername}}
-                                <span>By {{.CreatedByUsername}}</span>
+                            {{if .CreatedByDisplayName}}
+                                <span>By {{.CreatedByDisplayName}}</span>
                             {{end}}
                         </div>
                     </article>

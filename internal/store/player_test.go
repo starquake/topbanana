@@ -57,8 +57,8 @@ func TestPlayerStore_CreateAndGetPlayer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
-	if got, want := created.Username, "alice"; got != want {
-		t.Errorf("CreatePlayer Username = %q, want %q", got, want)
+	if got, want := created.DisplayName, "alice"; got != want {
+		t.Errorf("CreatePlayer DisplayName = %q, want %q", got, want)
 	}
 	if got, want := created.Role, auth.RoleAdmin; got != want {
 		t.Errorf("CreatePlayer Role = %q, want %q", got, want)
@@ -66,24 +66,24 @@ func TestPlayerStore_CreateAndGetPlayer(t *testing.T) {
 	if got, want := created.PasswordHash, "hashed-secret"; got != want {
 		t.Errorf("CreatePlayer PasswordHash = %q, want %q", got, want)
 	}
-	// A registered user explicitly picked their username at the form, so
+	// A registered user explicitly picked their displayName at the form, so
 	// the frontend must see hasCustomName=true and skip the claim modal.
 	if got, want := created.HasCustomName(), true; got != want {
 		t.Errorf("CreatePlayer HasCustomName() = %v, want %v", got, want)
 	}
 
-	fetched, err := ps.GetPlayerByUsername(t.Context(), "alice")
+	fetched, err := ps.GetPlayerByDisplayName(t.Context(), "alice")
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
 	if got, want := fetched.ID, created.ID; got != want {
-		t.Errorf("GetPlayerByUsername ID = %d, want %d", got, want)
+		t.Errorf("GetPlayerByDisplayName ID = %d, want %d", got, want)
 	}
 	if got, want := fetched.Role, auth.RoleAdmin; got != want {
-		t.Errorf("GetPlayerByUsername Role = %q, want %q", got, want)
+		t.Errorf("GetPlayerByDisplayName Role = %q, want %q", got, want)
 	}
 	if got, want := fetched.HasCustomName(), true; got != want {
-		t.Errorf("GetPlayerByUsername HasCustomName() = %v, want %v (re-fetch must persist the flag)", got, want)
+		t.Errorf("GetPlayerByDisplayName HasCustomName() = %v, want %v (re-fetch must persist the flag)", got, want)
 	}
 }
 
@@ -167,28 +167,28 @@ func TestPlayerStore_TrimsWhitespaceOnCreateAndLookup(t *testing.T) {
 	}
 
 	// Lookup with a trailing space matches because the store trims.
-	fetched, err := ps.GetPlayerByUsername(t.Context(), "alice ")
+	fetched, err := ps.GetPlayerByDisplayName(t.Context(), "alice ")
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
-	if got, want := fetched.Username, "alice"; got != want {
-		t.Errorf("Username = %q, want %q (whitespace should have been trimmed)", got, want)
+	if got, want := fetched.DisplayName, "alice"; got != want {
+		t.Errorf("DisplayName = %q, want %q (whitespace should have been trimmed)", got, want)
 	}
 }
 
-func TestPlayerStore_GetPlayerByUsername_NotFound(t *testing.T) {
+func TestPlayerStore_GetPlayerByDisplayName_NotFound(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
-	_, err := ps.GetPlayerByUsername(t.Context(), "ghost")
+	_, err := ps.GetPlayerByDisplayName(t.Context(), "ghost")
 	if got, want := err, auth.ErrPlayerNotFound; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
 }
 
-func TestPlayerStore_CreatePlayer_DuplicateUsername(t *testing.T) {
+func TestPlayerStore_CreatePlayer_DuplicateDisplayName(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.Open(t)
@@ -198,9 +198,9 @@ func TestPlayerStore_CreatePlayer_DuplicateUsername(t *testing.T) {
 		t.Fatalf("CreatePlayer first call err = %v, want nil", err)
 	}
 
-	// Different email, same username -> ErrUsernameTaken.
+	// Different email, same displayName -> ErrDisplayNameTaken.
 	_, err := ps.CreatePlayer(t.Context(), "alice", "alice-other@example.test", "other", auth.RolePlayer)
-	if got, want := err, auth.ErrUsernameTaken; !errors.Is(got, want) {
+	if got, want := err, auth.ErrDisplayNameTaken; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
 }
@@ -351,8 +351,8 @@ func TestPlayerStore_CreateAnonymousPlayer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
-	if got, want := created.Username, "anon-foo"; got != want {
-		t.Errorf("Username = %q, want %q", got, want)
+	if got, want := created.DisplayName, "anon-foo"; got != want {
+		t.Errorf("DisplayName = %q, want %q", got, want)
 	}
 	if got, want := created.PasswordHash, ""; got != want {
 		t.Errorf("PasswordHash = %q, want %q (anonymous row should have NULL hash)", got, want)
@@ -371,7 +371,7 @@ func TestPlayerStore_CreateAnonymousPlayer(t *testing.T) {
 	}
 }
 
-func TestPlayerStore_CreateAnonymousPlayer_DuplicateUsername(t *testing.T) {
+func TestPlayerStore_CreateAnonymousPlayer_DuplicateDisplayName(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.Open(t)
@@ -382,8 +382,8 @@ func TestPlayerStore_CreateAnonymousPlayer_DuplicateUsername(t *testing.T) {
 	}
 
 	_, err := ps.CreateAnonymousPlayer(t.Context(), "anon-clash")
-	if got, want := err, auth.ErrUsernameTaken; !errors.Is(got, want) {
-		t.Errorf("err = %v, want %v (UNIQUE violation should map to ErrUsernameTaken)", got, want)
+	if got, want := err, auth.ErrDisplayNameTaken; !errors.Is(got, want) {
+		t.Errorf("err = %v, want %v (UNIQUE violation should map to ErrDisplayNameTaken)", got, want)
 	}
 }
 
@@ -427,8 +427,8 @@ func TestPlayerStore_ClaimPlayer_UpgradesAnonymousRow(t *testing.T) {
 	if got, want := claimed.ID, anon.ID; got != want {
 		t.Errorf("claimed.ID = %d, want %d (claim must preserve player ID)", got, want)
 	}
-	if got, want := claimed.Username, "alice"; got != want {
-		t.Errorf("claimed.Username = %q, want %q", got, want)
+	if got, want := claimed.DisplayName, "alice"; got != want {
+		t.Errorf("claimed.DisplayName = %q, want %q", got, want)
 	}
 	if got, want := claimed.PasswordHash, "hash"; got != want {
 		t.Errorf("claimed.PasswordHash = %q, want %q", got, want)
@@ -439,7 +439,7 @@ func TestPlayerStore_ClaimPlayer_UpgradesAnonymousRow(t *testing.T) {
 		t.Errorf("claimed.Role = %q, want %q", got, want)
 	}
 	assertRoleState(t, db, claimed.ID, auth.RoleAdmin, true)
-	// The claim flow is an explicit username choice: the player typed it
+	// The claim flow is an explicit displayName choice: the player typed it
 	// into the register form, so the flag must flip alongside the password.
 	if got, want := claimed.HasCustomName(), true; got != want {
 		t.Errorf("claimed.HasCustomName() = %v, want %v", got, want)
@@ -473,9 +473,9 @@ func TestPlayerStore_ClaimPlayer_AlreadyClaimed_ReturnsSentinel(t *testing.T) {
 	}
 
 	// Make sure the original claim was not clobbered by the second attempt.
-	stored, err := ps.GetPlayerByUsername(t.Context(), "alice")
+	stored, err := ps.GetPlayerByDisplayName(t.Context(), "alice")
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
 	if got, want := stored.ID, anon.ID; got != want {
 		t.Errorf("stored.ID = %d, want %d (first claim should win)", got, want)
@@ -494,7 +494,7 @@ func TestPlayerStore_ClaimPlayer_UnknownPlayerID_ReturnsNotFound(t *testing.T) {
 	}
 }
 
-func TestPlayerStore_ClaimPlayer_UsernameTaken(t *testing.T) {
+func TestPlayerStore_ClaimPlayer_DisplayNameTaken(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.Open(t)
@@ -509,12 +509,12 @@ func TestPlayerStore_ClaimPlayer_UsernameTaken(t *testing.T) {
 	}
 
 	_, err = ps.ClaimPlayer(t.Context(), anon.ID, "alice", "alice"+"@example.test", "h", auth.RolePlayer)
-	if got, want := err, auth.ErrUsernameTaken; !errors.Is(got, want) {
+	if got, want := err, auth.ErrDisplayNameTaken; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
 }
 
-func TestPlayerStore_UpdatePlayerUsername(t *testing.T) {
+func TestPlayerStore_UpdatePlayerDisplayName(t *testing.T) {
 	t.Parallel()
 
 	t.Run("renames an anonymous player in place", func(t *testing.T) {
@@ -527,21 +527,21 @@ func TestPlayerStore_UpdatePlayerUsername(t *testing.T) {
 			t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 		}
 		// Sanity-check the precondition: a fresh anonymous row has not
-		// claimed its username yet - that is what makes this scenario
+		// claimed its displayName yet - that is what makes this scenario
 		// meaningful.
 		if got, want := anon.HasCustomName(), false; got != want {
 			t.Fatalf("precondition anon.HasCustomName() = %v, want %v", got, want)
 		}
 
-		updated, err := ps.UpdatePlayerUsername(t.Context(), anon.ID, "alice")
+		updated, err := ps.UpdatePlayerDisplayName(t.Context(), anon.ID, "alice")
 		if err != nil {
-			t.Fatalf("UpdatePlayerUsername err = %v, want nil", err)
+			t.Fatalf("UpdatePlayerDisplayName err = %v, want nil", err)
 		}
 		if got, want := updated.ID, anon.ID; got != want {
 			t.Errorf("updated.ID = %d, want %d (same row)", got, want)
 		}
-		if got, want := updated.Username, "alice"; got != want {
-			t.Errorf("updated.Username = %q, want %q", got, want)
+		if got, want := updated.DisplayName, "alice"; got != want {
+			t.Errorf("updated.DisplayName = %q, want %q", got, want)
 		}
 		if got, want := updated.IsAnonymous(), true; got != want {
 			t.Errorf("updated.IsAnonymous() = %v, want %v (no password set)", got, want)
@@ -574,16 +574,16 @@ func TestPlayerStore_UpdatePlayerUsername(t *testing.T) {
 			t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 		}
 
-		updated, err := ps.UpdatePlayerUsername(t.Context(), anon.ID, "  bob  ")
+		updated, err := ps.UpdatePlayerDisplayName(t.Context(), anon.ID, "  bob  ")
 		if err != nil {
-			t.Fatalf("UpdatePlayerUsername err = %v, want nil", err)
+			t.Fatalf("UpdatePlayerDisplayName err = %v, want nil", err)
 		}
-		if got, want := updated.Username, "bob"; got != want {
-			t.Errorf("updated.Username = %q, want %q (whitespace trimmed)", got, want)
+		if got, want := updated.DisplayName, "bob"; got != want {
+			t.Errorf("updated.DisplayName = %q, want %q (whitespace trimmed)", got, want)
 		}
 	})
 
-	t.Run("empty username returns ErrUsernameEmpty", func(t *testing.T) {
+	t.Run("empty displayName returns ErrDisplayNameEmpty", func(t *testing.T) {
 		t.Parallel()
 		db := dbtest.Open(t)
 		ps := NewPlayerStore(db, slog.Default())
@@ -593,13 +593,13 @@ func TestPlayerStore_UpdatePlayerUsername(t *testing.T) {
 			t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 		}
 
-		_, err = ps.UpdatePlayerUsername(t.Context(), anon.ID, "   ")
-		if got, want := err, auth.ErrUsernameEmpty; !errors.Is(got, want) {
+		_, err = ps.UpdatePlayerDisplayName(t.Context(), anon.ID, "   ")
+		if got, want := err, auth.ErrDisplayNameEmpty; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
 	})
 
-	t.Run("collision returns ErrUsernameTaken", func(t *testing.T) {
+	t.Run("collision returns ErrDisplayNameTaken", func(t *testing.T) {
 		t.Parallel()
 		db := dbtest.Open(t)
 		ps := NewPlayerStore(db, slog.Default())
@@ -618,8 +618,8 @@ func TestPlayerStore_UpdatePlayerUsername(t *testing.T) {
 			t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 		}
 
-		_, err = ps.UpdatePlayerUsername(t.Context(), anon.ID, "claimed")
-		if got, want := err, auth.ErrUsernameTaken; !errors.Is(got, want) {
+		_, err = ps.UpdatePlayerDisplayName(t.Context(), anon.ID, "claimed")
+		if got, want := err, auth.ErrDisplayNameTaken; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
 	})
@@ -640,7 +640,7 @@ func TestPlayerStore_UpdatePlayerUsername(t *testing.T) {
 			t.Fatalf("CreatePlayer err = %v, want nil", err)
 		}
 
-		_, err = ps.UpdatePlayerUsername(t.Context(), credentialled.ID, "newname")
+		_, err = ps.UpdatePlayerDisplayName(t.Context(), credentialled.ID, "newname")
 		if got, want := err, auth.ErrPlayerNotAnonymous; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
@@ -651,7 +651,7 @@ func TestPlayerStore_UpdatePlayerUsername(t *testing.T) {
 		db := dbtest.Open(t)
 		ps := NewPlayerStore(db, slog.Default())
 
-		_, err := ps.UpdatePlayerUsername(t.Context(), 99999, "ghost")
+		_, err := ps.UpdatePlayerDisplayName(t.Context(), 99999, "ghost")
 		if got, want := err, auth.ErrPlayerNotFound; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
@@ -871,10 +871,10 @@ func TestPlayerStore_ListPlayerFinishStats_NoGames(t *testing.T) {
 	}
 }
 
-// TestPlayerStore_SetPlayerPasswordHash_AlsoMarksUsernameClaimed pins
+// TestPlayerStore_SetPlayerPasswordHash_AlsoMarksDisplayNameClaimed pins
 // the #289 fix: the operator's -reset-password CLI eventually calls
 // this store method to give a player a password. Before the fix the
-// SQL only updated password_hash, leaving username_claimed=0 on a
+// SQL only updated password_hash, leaving displayName_claimed=0 on a
 // row whose `password_hash IS NOT NULL` - which dragged the player
 // client into the "claim your name" modal for a logged-in admin. The
 // combined update now keeps the two columns in lockstep.
@@ -883,27 +883,27 @@ func TestPlayerStore_ListPlayerFinishStats_NoGames(t *testing.T) {
 // login credential) and the CHECK constraint on players forbids
 // setting password_hash on a row whose email is NULL, so the seed
 // row created below carries an email from the start.
-func TestPlayerStore_SetPlayerPasswordHash_AlsoMarksUsernameClaimed(t *testing.T) {
+func TestPlayerStore_SetPlayerPasswordHash_AlsoMarksDisplayNameClaimed(t *testing.T) {
 	t.Parallel()
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
 	// CreatePlayer-without-password is not exposed, so seed via the
 	// OAuth helper: it inserts a row with email but no password_hash
-	// and username_claimed=1 already. To exercise the
-	// username_claimed=0 -> 1 flip we then rename to keep the row in
+	// and displayName_claimed=1 already. To exercise the
+	// displayName_claimed=0 -> 1 flip we then rename to keep the row in
 	// the "needs claim" state, then run SetPlayerPasswordHash.
 	const email = "set-hash-test@example.test"
 	row, err := ps.CreatePlayerFromOAuth(t.Context(), "anon-claim-after-pw", email)
 	if err != nil {
 		t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
 	}
-	// CreatePlayerFromOAuth sets username_claimed=1; this test wants
-	// the username_claimed=0 starting state, so reset it via a raw
+	// CreatePlayerFromOAuth sets displayName_claimed=1; this test wants
+	// the displayName_claimed=0 starting state, so reset it via a raw
 	// UPDATE. Production code never does this; the test is exercising
 	// the SetPlayerPasswordHash side effect, not the typical lifecycle.
 	if _, execErr := db.ExecContext(
-		t.Context(), "UPDATE players SET username_claimed = 0 WHERE id = ?", row.ID,
+		t.Context(), "UPDATE players SET display_name_claimed = 0 WHERE id = ?", row.ID,
 	); execErr != nil {
 		t.Fatalf("seed UPDATE err = %v, want nil", execErr)
 	}
@@ -920,7 +920,7 @@ func TestPlayerStore_SetPlayerPasswordHash_AlsoMarksUsernameClaimed(t *testing.T
 		t.Error("PasswordHash empty after reset, want a non-empty hash")
 	}
 	if got, want := got.HasCustomName(), true; got != want {
-		t.Errorf("HasCustomName() = %v, want %v (SetPlayerPasswordHash must also flip username_claimed)", got, want)
+		t.Errorf("HasCustomName() = %v, want %v (SetPlayerPasswordHash must also flip displayName_claimed)", got, want)
 	}
 }
 
@@ -1095,8 +1095,8 @@ func TestPlayerStore_ListAdminAuditForTarget_SurvivesActorDeletion(t *testing.T)
 	if got, want := len(entries), 1; got != want {
 		t.Fatalf("audit entry count = %d, want %d (row must survive actor deletion)", got, want)
 	}
-	if got, want := entries[0].ActorUsername, ""; got != want {
-		t.Errorf("ActorUsername = %q, want %q (deleted actor renders blank)", got, want)
+	if got, want := entries[0].ActorDisplayName, ""; got != want {
+		t.Errorf("ActorDisplayName = %q, want %q (deleted actor renders blank)", got, want)
 	}
 	if got, want := entries[0].ActorPlayerID, int64(0); got != want {
 		t.Errorf("ActorPlayerID = %d, want %d (NULL actor maps to zero)", got, want)

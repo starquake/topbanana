@@ -91,10 +91,10 @@ type Game struct {
 
 // Player represents a player.
 type Player struct {
-	ID        int64
-	Username  string
-	Email     string
-	CreatedAt time.Time
+	ID          int64
+	DisplayName string
+	Email       string
+	CreatedAt   time.Time
 }
 
 // Participant represents a player participating in a game. QuizID is
@@ -232,13 +232,13 @@ type Results struct {
 
 // LeaderboardAnswer is a flat row for the per-quiz leaderboard. It
 // carries every field [Service.CalculateScore] needs plus the player's
-// username and ID, for both finished and in-progress games.
+// displayName and ID, for both finished and in-progress games.
 // IsCompleted is kept on the wire even though GetQuizLeaderboard no
 // longer reads it - the store-level test pins the completion
 // predicate on it.
 type LeaderboardAnswer struct {
 	PlayerID          int64
-	Username          string
+	DisplayName       string
 	QuestionStartedAt time.Time
 	QuestionExpiredAt time.Time
 	AnsweredAt        time.Time
@@ -248,15 +248,15 @@ type LeaderboardAnswer struct {
 
 // LeaderboardParticipant is the minimum needed to surface a player on
 // the live leaderboard before their first answer commits (#335):
-// player_id and username for the row, and the same is_completed flag
+// player_id and displayName for the row, and the same is_completed flag
 // the answer rows carry so the entry can be marked in-progress. The
 // store returns one of these per participant; [Service.GetQuizLeaderboard]
 // uses the list as the canonical set of leaderboard entries and folds
 // in the per-answer scoring inputs from
 // [Store.ListAnswersForQuizLeaderboard].
 type LeaderboardParticipant struct {
-	PlayerID int64
-	Username string
+	PlayerID    int64
+	DisplayName string
 	// IsCompleted: every quiz question has been issued to this game.
 	IsCompleted bool
 	// IsStale: latest game_question is unanswered and expired before
@@ -277,7 +277,7 @@ type LeaderboardParticipant struct {
 // InProgress; admin "Played by" filters on Completed.
 type LeaderboardEntry struct {
 	PlayerID        int64
-	Username        string
+	DisplayName     string
 	Score           int
 	Rank            int
 	IsCurrentPlayer bool
@@ -1044,7 +1044,7 @@ func (s *Service) GetResults(ctx context.Context, gameID string, playerID int64)
 
 // GetQuizLeaderboard returns the top scoring players for a quiz.
 // Mid-quiz players appear with their running partial score so the live
-// view shows everyone who has joined. Ties are broken by username so
+// view shows everyone who has joined. Ties are broken by displayName so
 // the ordering is stable across requests. currentPlayerID flags the
 // requester's entry (and drives CurrentPlayer when they fall outside
 // top-N, #181); pass 0 to flag nothing. limit defaults to 10.
@@ -1101,7 +1101,7 @@ func (s *Service) GetQuizLeaderboard(
 	for _, p := range participants {
 		entries = append(entries, LeaderboardEntry{
 			PlayerID:        p.PlayerID,
-			Username:        p.Username,
+			DisplayName:     p.DisplayName,
 			Score:           playerTotals[p.PlayerID],
 			IsCurrentPlayer: p.PlayerID == currentPlayerID,
 			Completed:       p.IsCompleted,
@@ -1111,12 +1111,12 @@ func (s *Service) GetQuizLeaderboard(
 	}
 
 	slices.SortFunc(entries, func(a, b LeaderboardEntry) int {
-		// Higher scores first; ties broken by ascending username.
+		// Higher scores first; ties broken by ascending displayName.
 		if c := cmp.Compare(b.Score, a.Score); c != 0 {
 			return c
 		}
 
-		return strings.Compare(a.Username, b.Username)
+		return strings.Compare(a.DisplayName, b.DisplayName)
 	})
 
 	return finalizeLeaderboardInPlace(entries, currentPlayerID, limit), nil

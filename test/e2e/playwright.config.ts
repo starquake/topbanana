@@ -64,10 +64,10 @@ process.env.TOPBANANA_E2E_DATA_DIR = dataDir;
 // which server it lands on. Bootstrap-admin (first registrant gets the
 // admin role) only fires once per fresh DB, so the allowlist is what
 // promotes subsequent registrants on the same DB. The suite's
-// registerAdmin helper auto-builds "<username>@example.test" from the
-// per-browser usernames, so the email list mirrors those usernames with
+// registerAdmin helper auto-builds "<displayName>@example.test" from the
+// per-browser displayNames, so the email list mirrors those displayNames with
 // the same suffix.
-const adminUsernames = [
+const adminDisplayNames = [
   'e2e-admin-chromium', 'e2e-admin-firefox',                          // auth.spec.ts
   'e2e-admin-create-chromium', 'e2e-admin-create-firefox',            // admin.spec.ts
   'e2e-admin-player-chromium', 'e2e-admin-player-firefox',            // player.spec.ts
@@ -100,7 +100,7 @@ const adminUsernames = [
   'e2e-cred-boss-chromium', 'e2e-cred-boss-firefox',                  // admin-player-credentials.spec.ts name/password (#535)
   'e2e-admin-invite-chromium', 'e2e-admin-invite-firefox',            // admin-invites.spec.ts invite management (#318)
 ];
-const ADMIN_EMAILS = adminUsernames.map(u => `${u}@example.test`).join(',');
+const ADMIN_EMAILS = adminDisplayNames.map(u => `${u}@example.test`).join(',');
 
 const workerServer = (workerIndex: number) => {
   const port = WORKER_PORTS[workerIndex];
@@ -151,7 +151,7 @@ export default defineConfig({
   // One retry in CI absorbs the post-registration flakes (e.g. the
   // URL race after question Save tracked in #384, or any slow-runner
   // browser nav). Registration steps are still single-shot: a retry
-  // hits ErrUsernameTaken from the prior attempt and fails again,
+  // hits ErrDisplayNameTaken from the prior attempt and fails again,
   // but the affected specs are a small subset and the upside on the
   // larger pool of timing-sensitive UI assertions is worth the
   // trade. Local runs keep retries=0 so flakes surface loudly during

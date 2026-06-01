@@ -49,16 +49,16 @@ type LiveInvite struct {
 
 // PendingInvite is one row in the admin pending-invite list (#318). It
 // carries enough to render the management table and drive the per-row
-// resend/revoke actions. InviterUsername is the resolved "invited by X"
+// resend/revoke actions. InviterDisplayName is the resolved "invited by X"
 // label, empty when the invite carries no actor or the inviting admin's
 // row has since been deleted (ON DELETE SET NULL).
 type PendingInvite struct {
-	ID                int64
-	Email             string
-	InvitedByPlayerID int64
-	InviterUsername   string
-	CreatedAt         time.Time
-	ExpiresAt         time.Time
+	ID                 int64
+	Email              string
+	InvitedByPlayerID  int64
+	InviterDisplayName string
+	CreatedAt          time.Time
+	ExpiresAt          time.Time
 }
 
 // InviteStore persists admin-issued invites. Implemented by
@@ -227,7 +227,7 @@ func buildInviteLink(baseURL, rawToken string) (string, error) {
 // the reset/verify body shape so the channels read consistently.
 func inviteEmailBody(link string) string {
 	return "You have been invited to join Top Banana.\n\n" +
-		"Click the link below to pick a username and password and set up your account:\n\n" +
+		"Click the link below to pick a displayName and password and set up your account:\n\n" +
 		link + "\n\n" +
 		"This link is valid for 7 days. If you were not expecting this invite,\n" +
 		"you can ignore this email.\n"

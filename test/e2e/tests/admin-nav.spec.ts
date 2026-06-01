@@ -7,9 +7,9 @@ import { registerAdmin } from './helpers';
 // linked only by typing the URL or the dashboard card), so the nav links
 // are the load-bearing additions this spec guards.
 test('admin top nav reaches all sections', async ({ page, browserName }) => {
-  const username = `e2e-admin-nav-${browserName}`;
+  const displayName = `e2e-admin-nav-${browserName}`;
 
-  await registerAdmin(page, username);
+  await registerAdmin(page, displayName);
 
   // Scope to the primary nav so the links resolve to the navbar entries,
   // not in-page cards/buttons that happen to share a name.
@@ -33,9 +33,9 @@ test('admin top nav reaches all sections', async ({ page, browserName }) => {
 });
 
 test('admin nav marks the active section', async ({ page, browserName }) => {
-  const username = `e2e-admin-nav-active-${browserName}`;
+  const displayName = `e2e-admin-nav-active-${browserName}`;
 
-  await registerAdmin(page, username);
+  await registerAdmin(page, displayName);
 
   const nav = page.getByRole('navigation', { name: 'Primary' });
 

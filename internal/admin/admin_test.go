@@ -35,7 +35,7 @@ const testAdminID int64 = 1
 // substitute for tests that previously skipped the auth middleware -
 // the owner gate added in #281 needs the player to know who's asking.
 func withTestAdmin(r *http.Request) *http.Request {
-	signedIn := &auth.Player{ID: testAdminID, Username: "admin", Role: auth.RoleAdmin}
+	signedIn := &auth.Player{ID: testAdminID, DisplayName: "admin", Role: auth.RoleAdmin}
 
 	return r.WithContext(auth.WithPlayer(r.Context(), signedIn))
 }
@@ -116,7 +116,7 @@ func (s stubGameStore) ListParticipantsForQuizLeaderboard(
 		}
 		seen[a.PlayerID] = len(out)
 		out = append(out, &game.LeaderboardParticipant{
-			PlayerID: a.PlayerID, Username: a.Username, IsCompleted: a.IsCompleted,
+			PlayerID: a.PlayerID, DisplayName: a.DisplayName, IsCompleted: a.IsCompleted,
 		})
 	}
 
@@ -593,7 +593,7 @@ func TestHandleQuizList_RendersNavbarLogout(t *testing.T) {
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
 	// Unit tests don't go through RequireAdmin, so attach the player directly.
-	signedIn := &auth.Player{ID: 1, Username: "alice", Role: auth.RoleAdmin}
+	signedIn := &auth.Player{ID: 1, DisplayName: "alice", Role: auth.RoleAdmin}
 	req = req.WithContext(auth.WithPlayer(req.Context(), signedIn))
 
 	rr := httptest.NewRecorder()
@@ -605,7 +605,7 @@ func TestHandleQuizList_RendersNavbarLogout(t *testing.T) {
 
 	body := rr.Body.String()
 	if got, want := body, "alice"; !strings.Contains(got, want) {
-		t.Errorf("body should contain signed-in username %q, got %q", want, got)
+		t.Errorf("body should contain signed-in displayName %q, got %q", want, got)
 	}
 	if got, want := body, `action="/logout"`; !strings.Contains(got, want) {
 		t.Errorf("body should contain logout form action %q, got %q", want, got)
@@ -3254,12 +3254,12 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 			listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*game.LeaderboardAnswer, error) {
 				return []*game.LeaderboardAnswer{
 					{
-						PlayerID: 1, Username: "alice",
+						PlayerID: 1, DisplayName: "alice",
 						QuestionStartedAt: now, QuestionExpiredAt: now.Add(10 * time.Second),
 						AnsweredAt: now, Correct: true, IsCompleted: true,
 					},
 					{
-						PlayerID: 2, Username: "bob",
+						PlayerID: 2, DisplayName: "bob",
 						QuestionStartedAt: now, QuestionExpiredAt: now.Add(10 * time.Second),
 						AnsweredAt: now, Correct: true, IsCompleted: true,
 					},

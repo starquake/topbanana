@@ -66,8 +66,8 @@ func TestRequireGameHost_AllowsAdmin(t *testing.T) {
 	if got, want := seenPlayer.ID, admin.ID; got != want {
 		t.Errorf("player.ID on context = %d, want %d", got, want)
 	}
-	if got, want := seenPlayer.Username, "alice"; got != want {
-		t.Errorf("player.Username on context = %q, want %q", got, want)
+	if got, want := seenPlayer.DisplayName, "alice"; got != want {
+		t.Errorf("player.DisplayName on context = %q, want %q", got, want)
 	}
 }
 
@@ -108,7 +108,7 @@ func TestRequireGameHost_DeniesPlayer(t *testing.T) {
 		t.Errorf("body should contain %q, got %q", want, got)
 	}
 	if got, want := rec.Body.String(), "bob"; !strings.Contains(got, want) {
-		t.Errorf("body should contain signed-in username %q, got %q", want, got)
+		t.Errorf("body should contain signed-in displayName %q, got %q", want, got)
 	}
 }
 
@@ -368,13 +368,17 @@ func TestEnsurePlayer_NoCookie_CreatesAnonymousAndSetsCookie(t *testing.T) {
 		t.Errorf("seenPlayer.IsAnonymous() = false, want true (PasswordHash = %q)", seenPlayer.PasswordHash)
 	}
 	// EnsurePlayer should mint a petname-style "Adjective-Adjective-Noun"
-	// username, not the legacy "anon-<xid>" form (the xid form is the
+	// displayName, not the legacy "anon-<xid>" form (the xid form is the
 	// last-resort fallback only).
-	if got := seenPlayer.Username; strings.HasPrefix(got, "anon-") {
-		t.Errorf("seenPlayer.Username = %q, want a petname-style name (no anon- prefix)", got)
+	if got := seenPlayer.DisplayName; strings.HasPrefix(got, "anon-") {
+		t.Errorf("seenPlayer.DisplayName = %q, want a petname-style name (no anon- prefix)", got)
 	}
-	if got, want := strings.Count(seenPlayer.Username, "-"), 2; got != want {
-		t.Errorf("seenPlayer.Username = %q, want %d hyphens (Adjective-Adjective-Noun)", seenPlayer.Username, want)
+	if got, want := strings.Count(seenPlayer.DisplayName, "-"), 2; got != want {
+		t.Errorf(
+			"seenPlayer.DisplayName = %q, want %d hyphens (Adjective-Adjective-Noun)",
+			seenPlayer.DisplayName,
+			want,
+		)
 	}
 	cookie, ok := findCookie(rec, session.CookieName)
 	if !ok {
@@ -492,7 +496,7 @@ func TestEnsurePlayer_PetnameCollision_Retries(t *testing.T) {
 
 	store := newStubPlayerStore()
 	// Force the first three CreateAnonymousPlayer calls to return
-	// ErrUsernameTaken; the fourth attempt should succeed and produce a
+	// ErrDisplayNameTaken; the fourth attempt should succeed and produce a
 	// regular petname row.
 	store.forceAnonCollisions = 3
 	sessions := session.New([]byte("k"), true)
@@ -511,11 +515,11 @@ func TestEnsurePlayer_PetnameCollision_Retries(t *testing.T) {
 	if seenPlayer == nil {
 		t.Fatal("PlayerFromContext returned nil player; middleware should have retried past the collisions")
 	}
-	if got := seenPlayer.Username; strings.HasPrefix(got, "anon-") {
-		t.Errorf("seenPlayer.Username = %q, want a petname-style name (no anon- fallback)", got)
+	if got := seenPlayer.DisplayName; strings.HasPrefix(got, "anon-") {
+		t.Errorf("seenPlayer.DisplayName = %q, want a petname-style name (no anon- fallback)", got)
 	}
-	if got, want := strings.Count(seenPlayer.Username, "-"), 2; got != want {
-		t.Errorf("seenPlayer.Username = %q, want %d hyphens", seenPlayer.Username, want)
+	if got, want := strings.Count(seenPlayer.DisplayName, "-"), 2; got != want {
+		t.Errorf("seenPlayer.DisplayName = %q, want %d hyphens", seenPlayer.DisplayName, want)
 	}
 }
 
@@ -542,8 +546,8 @@ func TestEnsurePlayer_PetnameExhausted_FallsBackToXid(t *testing.T) {
 	if seenPlayer == nil {
 		t.Fatal("PlayerFromContext returned nil player; fallback should have produced one")
 	}
-	if got, want := seenPlayer.Username[:5], "anon-"; got != want {
-		t.Errorf("seenPlayer.Username prefix = %q, want %q (xid fallback after exhausted retries)", got, want)
+	if got, want := seenPlayer.DisplayName[:5], "anon-"; got != want {
+		t.Errorf("seenPlayer.DisplayName prefix = %q, want %q (xid fallback after exhausted retries)", got, want)
 	}
 }
 

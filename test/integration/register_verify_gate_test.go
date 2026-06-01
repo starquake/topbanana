@@ -29,13 +29,13 @@ func TestRegister_HardGate_NoSessionUntilVerified(t *testing.T) {
 	defer dbConn.Close() //nolint:errcheck // cleanup.
 
 	const (
-		username = "hardgate"
-		password = "hard-gate-pass-123"
+		displayName = "hardgate"
+		password    = "hard-gate-pass-123"
 	)
 
 	client := authClient(t)
 	csrf := fetchCSRFToken(ctx, t, client, srv.BaseURL+"/register")
-	resp := postRegister(ctx, t, client, srv.BaseURL, csrf, username, password)
+	resp := postRegister(ctx, t, client, srv.BaseURL, csrf, displayName, password)
 	body, err := io.ReadAll(resp.Body)
 	resp.Body.Close() //nolint:errcheck // cleanup.
 	if err != nil {
@@ -58,9 +58,9 @@ func TestRegister_HardGate_NoSessionUntilVerified(t *testing.T) {
 	}
 
 	// 3. A verify-token row was committed for the new account.
-	player, err := stores.Players.GetPlayerByUsername(ctx, username)
+	player, err := stores.Players.GetPlayerByDisplayName(ctx, displayName)
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
 	if player.EmailVerifiedAt != nil {
 		t.Fatalf("EmailVerifiedAt = %v, want nil right after register", player.EmailVerifiedAt)
@@ -81,9 +81,9 @@ func TestRegister_HardGate_NoSessionUntilVerified(t *testing.T) {
 
 	// 5. Verify the email, log in, and confirm the account now reaches the
 	// authenticated route.
-	verifyPlayerEmail(ctx, t, srv.DBURI, username)
+	verifyPlayerEmail(ctx, t, srv.DBURI, displayName)
 	loginClient := authClient(t)
-	loc := loginForRedirect(ctx, t, loginClient, srv.BaseURL, username, password)
+	loc := loginForRedirect(ctx, t, loginClient, srv.BaseURL, displayName, password)
 	if got, want := loc, "/admin/quizzes"; got != want {
 		t.Errorf("post-verify login Location = %q, want %q (first registrant is admin)", got, want)
 	}

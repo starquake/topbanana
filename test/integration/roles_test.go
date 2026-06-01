@@ -36,7 +36,7 @@ func TestRoles_HostGating(t *testing.T) {
 	// roles-player keeps the default Player tier.
 
 	ownerQuiz := createQuizAs(ctx, t, owner, baseURL, "Owner Host Quiz")
-	hostID := playerIDByUsername(ctx, t, srv.DBURI, "roles-host")
+	hostID := playerIDByDisplayName(ctx, t, srv.DBURI, "roles-host")
 
 	t.Run("host reaches the dashboard", func(t *testing.T) {
 		t.Parallel()
@@ -135,8 +135,8 @@ func TestRoles_RoleChange(t *testing.T) {
 	target := registerAdminClient(ctx, t, baseURL, srv.DBURI, "rc-target")
 
 	makeHost(ctx, t, srv.DBURI, "rc-owner")
-	bossID := playerIDByUsername(ctx, t, srv.DBURI, "rc-boss")
-	targetID := playerIDByUsername(ctx, t, srv.DBURI, "rc-target")
+	bossID := playerIDByDisplayName(ctx, t, srv.DBURI, "rc-boss")
+	targetID := playerIDByDisplayName(ctx, t, srv.DBURI, "rc-target")
 
 	// boss promotes target player -> admin.
 	if got, want := postCSRFRoleForm(ctx, t, boss,
@@ -144,7 +144,7 @@ func TestRoles_RoleChange(t *testing.T) {
 	), http.StatusSeeOther; got != want {
 		t.Fatalf("promote-to-admin status = %d, want %d", got, want)
 	}
-	if got, want := roleByUsername(ctx, t, srv.DBURI, "rc-target"), auth.RoleAdmin; got != want {
+	if got, want := roleByDisplayName(ctx, t, srv.DBURI, "rc-target"), auth.RoleAdmin; got != want {
 		t.Fatalf("after promote role = %q, want %q", got, want)
 	}
 	assertAuditRow(ctx, t, srv.DBURI, targetID, bossID, auth.AdminActionRoleChanged)
@@ -163,7 +163,7 @@ func TestRoles_RoleChange(t *testing.T) {
 	), http.StatusSeeOther; got != want {
 		t.Fatalf("demote-to-host status = %d, want %d", got, want)
 	}
-	if got, want := roleByUsername(ctx, t, srv.DBURI, "rc-target"), auth.RoleHost; got != want {
+	if got, want := roleByDisplayName(ctx, t, srv.DBURI, "rc-target"), auth.RoleHost; got != want {
 		t.Fatalf("after demote role = %q, want %q", got, want)
 	}
 
@@ -191,8 +191,8 @@ func TestRoles_LastAdminGuard(t *testing.T) {
 	solo := registerAdminClient(ctx, t, baseURL, srv.DBURI, "guard-solo")
 	registerAdminClient(ctx, t, baseURL, srv.DBURI, "guard-second")
 
-	soloID := playerIDByUsername(ctx, t, srv.DBURI, "guard-solo")
-	secondID := playerIDByUsername(ctx, t, srv.DBURI, "guard-second")
+	soloID := playerIDByDisplayName(ctx, t, srv.DBURI, "guard-solo")
+	secondID := playerIDByDisplayName(ctx, t, srv.DBURI, "guard-second")
 
 	// The sole Admin cannot demote themselves: refused (303 back with a
 	// flash) and the row stays Admin.
@@ -201,7 +201,7 @@ func TestRoles_LastAdminGuard(t *testing.T) {
 	), http.StatusSeeOther; got != want {
 		t.Fatalf("self-demote status = %d, want %d", got, want)
 	}
-	if got, want := roleByUsername(ctx, t, srv.DBURI, "guard-solo"), auth.RoleAdmin; got != want {
+	if got, want := roleByDisplayName(ctx, t, srv.DBURI, "guard-solo"), auth.RoleAdmin; got != want {
 		t.Fatalf("after refused self-demote role = %q, want %q", got, want)
 	}
 
@@ -211,7 +211,7 @@ func TestRoles_LastAdminGuard(t *testing.T) {
 	), http.StatusSeeOther; got != want {
 		t.Fatalf("promote second status = %d, want %d", got, want)
 	}
-	if got, want := roleByUsername(ctx, t, srv.DBURI, "guard-second"), auth.RoleAdmin; got != want {
+	if got, want := roleByDisplayName(ctx, t, srv.DBURI, "guard-second"), auth.RoleAdmin; got != want {
 		t.Fatalf("after promote second role = %q, want %q", got, want)
 	}
 	if got, want := postCSRFRoleForm(ctx, t, solo,
@@ -219,7 +219,7 @@ func TestRoles_LastAdminGuard(t *testing.T) {
 	), http.StatusSeeOther; got != want {
 		t.Fatalf("demote second status = %d, want %d", got, want)
 	}
-	if got, want := roleByUsername(ctx, t, srv.DBURI, "guard-second"), auth.RoleHost; got != want {
+	if got, want := roleByDisplayName(ctx, t, srv.DBURI, "guard-second"), auth.RoleHost; got != want {
 		t.Errorf("after demote second role = %q, want %q", got, want)
 	}
 }
@@ -250,44 +250,44 @@ func assertAuditRow(ctx context.Context, t *testing.T, dbURI string, target, act
 // the production role endpoint mutates the row. Used to set up Host fixtures
 // (the only non-default tier the integration suite seeds directly; Admin comes
 // from ADMIN_EMAILS / first-registrant promotion).
-func makeHost(ctx context.Context, t *testing.T, dbURI, username string) {
+func makeHost(ctx context.Context, t *testing.T, dbURI, displayName string) {
 	t.Helper()
 	dbConn, stores := openStores(t, dbURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.
 
-	player, err := stores.Players.GetPlayerByUsername(ctx, username)
+	player, err := stores.Players.GetPlayerByDisplayName(ctx, displayName)
 	if err != nil {
-		t.Fatalf("makeHost GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("makeHost GetPlayerByDisplayName err = %v, want nil", err)
 	}
 	if err := stores.AdminPlayers.SetPlayerRole(ctx, player.ID, auth.RoleHost); err != nil {
 		t.Fatalf("makeHost SetPlayerRole err = %v, want nil", err)
 	}
 }
 
-// roleByUsername reads the current role for the named player through the
+// roleByDisplayName reads the current role for the named player through the
 // auth.Player mapping so the test pins the persisted state.
-func roleByUsername(ctx context.Context, t *testing.T, dbURI, username string) string {
+func roleByDisplayName(ctx context.Context, t *testing.T, dbURI, displayName string) string {
 	t.Helper()
 	dbConn, stores := openStores(t, dbURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.
 
-	player, err := stores.Players.GetPlayerByUsername(ctx, username)
+	player, err := stores.Players.GetPlayerByDisplayName(ctx, displayName)
 	if err != nil {
-		t.Fatalf("roleByUsername GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("roleByDisplayName GetPlayerByDisplayName err = %v, want nil", err)
 	}
 
 	return player.Role
 }
 
-// playerIDByUsername returns the players.id for the named player.
-func playerIDByUsername(ctx context.Context, t *testing.T, dbURI, username string) int64 {
+// playerIDByDisplayName returns the players.id for the named player.
+func playerIDByDisplayName(ctx context.Context, t *testing.T, dbURI, displayName string) int64 {
 	t.Helper()
 	dbConn, stores := openStores(t, dbURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.
 
-	player, err := stores.Players.GetPlayerByUsername(ctx, username)
+	player, err := stores.Players.GetPlayerByDisplayName(ctx, displayName)
 	if err != nil {
-		t.Fatalf("playerIDByUsername GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("playerIDByDisplayName GetPlayerByDisplayName err = %v, want nil", err)
 	}
 
 	return player.ID

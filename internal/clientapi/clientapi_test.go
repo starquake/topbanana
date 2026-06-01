@@ -21,7 +21,7 @@ import (
 // when the test exercises a handler that pulls the player off the context
 // (typically because EnsurePlayer would do so in production).
 func withPlayer(ctx context.Context, id int64) context.Context {
-	return auth.WithPlayer(ctx, &auth.Player{ID: id, Username: "stub", Role: auth.RolePlayer})
+	return auth.WithPlayer(ctx, &auth.Player{ID: id, DisplayName: "stub", Role: auth.RolePlayer})
 }
 
 var errStub = errors.New("stub error")
@@ -334,7 +334,7 @@ func (s stubGameStore) ListParticipantsForQuizLeaderboard(
 		}
 		seen[a.PlayerID] = len(out)
 		out = append(out, &game.LeaderboardParticipant{
-			PlayerID: a.PlayerID, Username: a.Username, IsCompleted: a.IsCompleted,
+			PlayerID: a.PlayerID, DisplayName: a.DisplayName, IsCompleted: a.IsCompleted,
 		})
 	}
 
@@ -1379,7 +1379,7 @@ func TestHandleGameResults(t *testing.T) {
 // flat (revive's nested-structs rule).
 type leaderboardTestEntry struct {
 	PlayerID        int64  `json:"playerId"`
-	Username        string `json:"username"`
+	DisplayName     string `json:"displayName"`
 	Score           int    `json:"score"`
 	Rank            int    `json:"rank"`
 	IsCurrentPlayer bool   `json:"isCurrentPlayer"`
@@ -1401,13 +1401,13 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 	// black-box test does not need an exported builder. The 10s window with
 	// answeredOffset=0 yields a 1000-point CalculateScore for a correct
 	// answer and 0 for a wrong one.
-	makeAnswer := func(playerID int64, username string, correct bool) *game.LeaderboardAnswer {
+	makeAnswer := func(playerID int64, displayName string, correct bool) *game.LeaderboardAnswer {
 		const window = 10 * time.Second
 		start := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 
 		return &game.LeaderboardAnswer{
 			PlayerID:          playerID,
-			Username:          username,
+			DisplayName:       displayName,
 			QuestionStartedAt: start,
 			QuestionExpiredAt: start.Add(window),
 			AnsweredAt:        start,
@@ -1464,8 +1464,8 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 			t.Fatalf("len(entries) = %d, want %d", got, want)
 		}
 		// bob (2000) should outrank alice (1000).
-		if got, want := body.Entries[0].Username, "bob"; got != want {
-			t.Errorf("entries[0].Username = %q, want %q", got, want)
+		if got, want := body.Entries[0].DisplayName, "bob"; got != want {
+			t.Errorf("entries[0].DisplayName = %q, want %q", got, want)
 		}
 		if got, want := body.Entries[0].Rank, 1; got != want {
 			t.Errorf("entries[0].Rank = %d, want %d", got, want)
@@ -1473,8 +1473,8 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 		if got, want := body.Entries[0].IsCurrentPlayer, false; got != want {
 			t.Errorf("entries[0].IsCurrentPlayer = %v, want %v", got, want)
 		}
-		if got, want := body.Entries[1].Username, "alice"; got != want {
-			t.Errorf("entries[1].Username = %q, want %q", got, want)
+		if got, want := body.Entries[1].DisplayName, "alice"; got != want {
+			t.Errorf("entries[1].DisplayName = %q, want %q", got, want)
 		}
 		if got, want := body.Entries[1].Rank, 2; got != want {
 			t.Errorf("entries[1].Rank = %d, want %d", got, want)

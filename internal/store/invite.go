@@ -93,7 +93,7 @@ func (s *PlayerStore) DeleteExpiredInvites(ctx context.Context) error {
 }
 
 // ListPendingInvites returns every still-pending invite, newest first,
-// for the admin management view (#318). The inviter username is resolved
+// for the admin management view (#318). The inviter displayName is resolved
 // via a LEFT JOIN; a NULL (no actor or deleted admin) maps to an empty
 // string so the template renders a neutral dash instead of a Go zero
 // value sneaking through.
@@ -106,12 +106,12 @@ func (s *PlayerStore) ListPendingInvites(ctx context.Context) ([]*auth.PendingIn
 	invites := make([]*auth.PendingInvite, 0, len(rows))
 	for _, row := range rows {
 		invites = append(invites, &auth.PendingInvite{
-			ID:                row.ID,
-			Email:             row.Email,
-			InvitedByPlayerID: row.InvitedByPlayerID.Int64,
-			InviterUsername:   row.InviterUsername.String,
-			CreatedAt:         row.CreatedAt,
-			ExpiresAt:         row.ExpiresAt,
+			ID:                 row.ID,
+			Email:              row.Email,
+			InvitedByPlayerID:  row.InvitedByPlayerID.Int64,
+			InviterDisplayName: row.InviterDisplayName.String,
+			CreatedAt:          row.CreatedAt,
+			ExpiresAt:          row.ExpiresAt,
 		})
 	}
 

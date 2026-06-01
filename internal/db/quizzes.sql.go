@@ -239,7 +239,7 @@ SELECT q.id,
        q.created_by_player_id,
        q.time_limit_seconds,
        q.visibility,
-       p.username AS created_by_username
+       p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
 WHERE q.id = ?
@@ -247,20 +247,20 @@ LIMIT 1
 `
 
 type GetQuizRow struct {
-	ID                int64
-	Title             string
-	Slug              string
-	Description       string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	CreatedByPlayerID int64
-	TimeLimitSeconds  int64
-	Visibility        string
-	CreatedByUsername string
+	ID                   int64
+	Title                string
+	Slug                 string
+	Description          string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	CreatedByPlayerID    int64
+	TimeLimitSeconds     int64
+	Visibility           string
+	CreatedByDisplayName string
 }
 
 // Same INNER JOIN as ListQuizzes so single-quiz fetches carry the
-// creator's username for the admin view's "Created by ..." line. See
+// creator's display_name for the admin view's "Created by ..." line. See
 // ListQuizzes for why the LEFT JOIN was dropped (#359).
 func (q *Queries) GetQuiz(ctx context.Context, id int64) (GetQuizRow, error) {
 	row := q.db.QueryRowContext(ctx, getQuiz, id)
@@ -275,7 +275,7 @@ func (q *Queries) GetQuiz(ctx context.Context, id int64) (GetQuizRow, error) {
 		&i.CreatedByPlayerID,
 		&i.TimeLimitSeconds,
 		&i.Visibility,
-		&i.CreatedByUsername,
+		&i.CreatedByDisplayName,
 	)
 	return i, err
 }
@@ -353,7 +353,7 @@ SELECT q.id,
        q.created_by_player_id,
        q.time_limit_seconds,
        q.visibility,
-       p.username AS created_by_username
+       p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
 WHERE q.visibility = 'public'
@@ -361,16 +361,16 @@ ORDER BY q.updated_at DESC, q.id DESC
 `
 
 type ListPublicQuizzesRow struct {
-	ID                int64
-	Title             string
-	Slug              string
-	Description       string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	CreatedByPlayerID int64
-	TimeLimitSeconds  int64
-	Visibility        string
-	CreatedByUsername string
+	ID                   int64
+	Title                string
+	Slug                 string
+	Description          string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	CreatedByPlayerID    int64
+	TimeLimitSeconds     int64
+	Visibility           string
+	CreatedByDisplayName string
 }
 
 // Public-facing variant of ListQuizzes (#103). Filters to visibility =
@@ -395,7 +395,7 @@ func (q *Queries) ListPublicQuizzes(ctx context.Context) ([]ListPublicQuizzesRow
 			&i.CreatedByPlayerID,
 			&i.TimeLimitSeconds,
 			&i.Visibility,
-			&i.CreatedByUsername,
+			&i.CreatedByDisplayName,
 		); err != nil {
 			return nil, err
 		}
@@ -488,23 +488,23 @@ SELECT q.id,
        q.created_by_player_id,
        q.time_limit_seconds,
        q.visibility,
-       p.username AS created_by_username
+       p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
 ORDER BY q.updated_at DESC, q.id DESC
 `
 
 type ListQuizzesRow struct {
-	ID                int64
-	Title             string
-	Slug              string
-	Description       string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	CreatedByPlayerID int64
-	TimeLimitSeconds  int64
-	Visibility        string
-	CreatedByUsername string
+	ID                   int64
+	Title                string
+	Slug                 string
+	Description          string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	CreatedByPlayerID    int64
+	TimeLimitSeconds     int64
+	Visibility           string
+	CreatedByDisplayName string
 }
 
 // INNER JOIN on players so the admin list can render "Created by ..."
@@ -539,7 +539,7 @@ func (q *Queries) ListQuizzes(ctx context.Context) ([]ListQuizzesRow, error) {
 			&i.CreatedByPlayerID,
 			&i.TimeLimitSeconds,
 			&i.Visibility,
-			&i.CreatedByUsername,
+			&i.CreatedByDisplayName,
 		); err != nil {
 			return nil, err
 		}

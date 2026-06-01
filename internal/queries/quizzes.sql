@@ -21,7 +21,7 @@ SELECT q.id,
        q.created_by_player_id,
        q.time_limit_seconds,
        q.visibility,
-       p.username AS created_by_username
+       p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
 ORDER BY q.updated_at DESC, q.id DESC;
@@ -39,7 +39,7 @@ SELECT q.id,
        q.created_by_player_id,
        q.time_limit_seconds,
        q.visibility,
-       p.username AS created_by_username
+       p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
 WHERE q.visibility = 'public'
@@ -56,7 +56,7 @@ GROUP BY quiz_id;
 
 -- name: GetQuiz :one
 -- Same INNER JOIN as ListQuizzes so single-quiz fetches carry the
--- creator's username for the admin view's "Created by ..." line. See
+-- creator's display_name for the admin view's "Created by ..." line. See
 -- ListQuizzes for why the LEFT JOIN was dropped (#359).
 SELECT q.id,
        q.title,
@@ -67,7 +67,7 @@ SELECT q.id,
        q.created_by_player_id,
        q.time_limit_seconds,
        q.visibility,
-       p.username AS created_by_username
+       p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
 WHERE q.id = ?

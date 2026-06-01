@@ -222,7 +222,7 @@ func IsValidVisibility(v string) bool {
 	return slices.Contains(VisibilityValues(), v)
 }
 
-// Quiz represents a quiz. CreatedByPlayerID + CreatedByUsername were
+// Quiz represents a quiz. CreatedByPlayerID + CreatedByDisplayName were
 // added in migration 20260520200000 to support the creator-only-edit
 // rule from #281. CreatedByPlayerID is NOT NULL at the DB level;
 // existing rows were backfilled to the lowest-id admin during the
@@ -230,14 +230,14 @@ func IsValidVisibility(v string) bool {
 // [QuizStore.CreateQuiz] surfaces ErrCreatorRequired rather than
 // letting the FK insert fail at the wire.
 type Quiz struct {
-	ID                int64
-	Title             string
-	Slug              string
-	Description       string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	CreatedByPlayerID int64
-	CreatedByUsername string
+	ID                   int64
+	Title                string
+	Slug                 string
+	Description          string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	CreatedByPlayerID    int64
+	CreatedByDisplayName string
 	// TimeLimitSeconds is the default per-question answer window in
 	// seconds. The game service resolves the priority chain
 	// (Question.TimeLimitSeconds -> Quiz.TimeLimitSeconds -> defaultExpiration)

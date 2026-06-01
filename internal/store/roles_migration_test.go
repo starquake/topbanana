@@ -30,21 +30,24 @@ func TestRolesMigration_RemapsTiers(t *testing.T) {
 	// id=1 is the seed admin (role='admin', is_super_admin=0) from
 	// 20260111110308_add_admin_player.sql; it is already present.
 	seed := []struct {
-		username     string
+		displayName  string
 		role         string
 		isSuperAdmin int
 	}{
-		{username: "plain_player", role: "player", isSuperAdmin: 0},
-		{username: "plain_admin", role: "admin", isSuperAdmin: 0},
-		{username: "super_admin", role: "admin", isSuperAdmin: 1},
+		{displayName: "plain_player", role: "player", isSuperAdmin: 0},
+		{displayName: "plain_admin", role: "admin", isSuperAdmin: 0},
+		{displayName: "super_admin", role: "admin", isSuperAdmin: 1},
 	}
 	for _, s := range seed {
+		// The column is still named username at versionBeforeRolesRemap; a
+		// later migration that goose.Up applies below renames it to
+		// display_name, which is why the assertion query reads display_name.
 		if _, err := db.ExecContext(
 			t.Context(),
 			"INSERT INTO players (username, role, is_super_admin) VALUES (?, ?, ?)",
-			s.username, s.role, s.isSuperAdmin,
+			s.displayName, s.role, s.isSuperAdmin,
 		); err != nil {
-			t.Fatalf("seed %q: %v", s.username, err)
+			t.Fatalf("seed %q: %v", s.displayName, err)
 		}
 	}
 
@@ -57,15 +60,15 @@ func TestRolesMigration_RemapsTiers(t *testing.T) {
 		"plain_admin":  "host",
 		"super_admin":  "admin",
 	}
-	for username, wantRole := range want {
+	for displayName, wantRole := range want {
 		var gotRole string
 		if err := db.QueryRowContext(
-			t.Context(), "SELECT role FROM players WHERE username = ?", username,
+			t.Context(), "SELECT role FROM players WHERE display_name = ?", displayName,
 		).Scan(&gotRole); err != nil {
-			t.Fatalf("read role for %q: %v", username, err)
+			t.Fatalf("read role for %q: %v", displayName, err)
 		}
 		if gotRole != wantRole {
-			t.Errorf("role for %q = %q, want %q", username, gotRole, wantRole)
+			t.Errorf("role for %q = %q, want %q", displayName, gotRole, wantRole)
 		}
 	}
 

@@ -39,7 +39,7 @@ func TestForgotPassword_GETRendersForm(t *testing.T) {
 
 // TestForgotPassword_POSTAlwaysFlashesGenericSuccess pins the
 // account-existence-opaque contract: identical response for an
-// unknown identifier, a real username, and a real email. Each
+// unknown identifier, a real displayName, and a real email. Each
 // subtest gets its own server (and so its own per-IP rate-limit
 // bucket) - sharing one server would have the first POST stamp the
 // limiter and the next two POSTs see the "slow down" flash instead

@@ -60,17 +60,17 @@ func TestRegister_EmailCollisionOpaque(t *testing.T) {
 }
 
 // registerRaw POSTs /register with an explicit email (decoupled from the
-// username, unlike postRegister) and returns the status and body. Used by
-// the opacity test which needs two distinct usernames sharing one email.
+// displayName, unlike postRegister) and returns the status and body. Used by
+// the opacity test which needs two distinct displayNames sharing one email.
 func registerRaw(
-	ctx context.Context, t *testing.T, client *http.Client, baseURL, username, email, password string,
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, displayName, email, password string,
 ) (int, string) {
 	t.Helper()
 
 	token := fetchCSRFToken(ctx, t, client, baseURL+"/register")
 
 	form := url.Values{}
-	form.Add("display_name", username)
+	form.Add("display_name", displayName)
 	form.Add("email", email)
 	form.Add("password", password)
 	form.Add("password_confirm", password)

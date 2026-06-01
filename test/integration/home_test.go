@@ -270,7 +270,7 @@ func TestHome_Integration_FooterAffordance(t *testing.T) {
 		}
 	})
 
-	t.Run("authenticated request renders username and log-out form", func(t *testing.T) {
+	t.Run("authenticated request renders displayName and log-out form", func(t *testing.T) {
 		snap := fetchWithClient(ctx, t, regClient, srv.BaseURL+"/")
 		if got, want := snap.StatusCode, http.StatusOK; got != want {
 			t.Fatalf("status = %d, want %d", got, want)
@@ -279,7 +279,7 @@ func TestHome_Integration_FooterAffordance(t *testing.T) {
 			t.Error("body missing signed-in affordance")
 		}
 		if !strings.Contains(snap.Body, "homefooter-admin") {
-			t.Error("body missing signed-in username")
+			t.Error("body missing signed-in displayName")
 		}
 		if !strings.Contains(snap.Body, `action="/logout"`) {
 			t.Error("body missing log-out form")

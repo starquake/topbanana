@@ -26,7 +26,7 @@ import (
 
 type stubPlayerStore struct{}
 
-func (stubPlayerStore) GetPlayerByUsername(_ context.Context, _ string) (*auth.Player, error) {
+func (stubPlayerStore) GetPlayerByDisplayName(_ context.Context, _ string) (*auth.Player, error) {
 	return nil, auth.ErrPlayerNotFound
 }
 
@@ -58,7 +58,7 @@ func (stubPlayerStore) ChangePlayerPassword(_ context.Context, _ int64, _ string
 	return errRouteStub
 }
 
-func (stubPlayerStore) UpdatePlayerUsername(_ context.Context, _ int64, _ string) (*auth.Player, error) {
+func (stubPlayerStore) UpdatePlayerDisplayName(_ context.Context, _ int64, _ string) (*auth.Player, error) {
 	return nil, errRouteStub
 }
 
@@ -420,8 +420,8 @@ func TestAddRoutes_LoginPOST_RejectsMissingCSRF(t *testing.T) {
 		t.Parallel()
 
 		body := url.Values{
-			"username": {"any"},
-			"password": {"any"},
+			"displayName": {"any"},
+			"password":    {"any"},
 		}.Encode()
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/login", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -470,9 +470,9 @@ func TestAddRoutes_LoginPOST_RejectsMissingCSRF(t *testing.T) {
 		// handler, which in turn returns 401 for the unknown user - that's
 		// fine, the assertion here is "not 403".
 		body := url.Values{
-			"username":   {"ghost"},
-			"password":   {"correctbatterystaple"},
-			"csrf_token": {token},
+			"displayName": {"ghost"},
+			"password":    {"correctbatterystaple"},
+			"csrf_token":  {token},
 		}.Encode()
 		postReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/login", strings.NewReader(body))
 		postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
