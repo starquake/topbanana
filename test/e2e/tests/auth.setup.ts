@@ -20,6 +20,9 @@ setup('authenticate the shared admin', async ({ page }) => {
   if (!dataDir) {
     throw new Error('TOPBANANA_E2E_DATA_DIR is not set; cannot prepare the seed admin');
   }
+  // SEED_ADMIN_PASSWORD_HASH is a fixed bcrypt constant (chars [./A-Za-z0-9$],
+  // no quotes), so it is safe to interpolate directly - unlike the
+  // user-derived values in markEmailVerified/setRole, it needs no escaping.
   execFileSync('sqlite3', [
     join(dataDir, 'e2e-0.db'),
     `UPDATE players SET role = 'admin', password_hash = '${SEED_ADMIN_PASSWORD_HASH}' WHERE id = 1;`,
@@ -29,6 +32,8 @@ setup('authenticate the shared admin', async ({ page }) => {
   await page.locator('input[name=email]').fill(SEED_ADMIN_EMAIL);
   await page.locator('input[name=password]').fill(SEED_ADMIN_PASSWORD);
   await page.locator('button[type=submit]').click();
+  // An admin-role login lands on /admin/quizzes (landingPathFor); reaching it
+  // confirms the credentials worked and the seed admin is on the admin tier.
   await expect(page).toHaveURL(/\/admin\/quizzes$/);
 
   await page.context().storageState({ path: adminStatePath() });

@@ -46,6 +46,9 @@ export const test = base.extend<{}, { seedAdminTopTier: void }>({
       throw new Error('TOPBANANA_E2E_DATA_DIR is not set; cannot prepare the seed admin');
     }
     const dbFile = join(dataDir, `e2e-${workerInfo.parallelIndex}.db`);
+    // SEED_ADMIN_PASSWORD_HASH is a fixed bcrypt constant (no quotes), so it is
+    // safe to interpolate directly; it needs no escaping the way user-derived
+    // values do.
     execFileSync(
       'sqlite3',
       [dbFile, `UPDATE players SET role = 'admin', password_hash = '${SEED_ADMIN_PASSWORD_HASH}' WHERE id = 1;`],
