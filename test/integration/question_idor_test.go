@@ -48,13 +48,13 @@ func TestQuestionIDOR_Integration(t *testing.T) {
 	})
 	stores := store.New(db, slog.Default())
 
-	playerA, err := stores.Players.GetPlayerByUsername(ctx, "idor-admin-a")
+	playerA, err := stores.Players.GetPlayerByDisplayName(ctx, "idor-admin-a")
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername(a) err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName(a) err = %v, want nil", err)
 	}
-	playerB, err := stores.Players.GetPlayerByUsername(ctx, "idor-admin-b")
+	playerB, err := stores.Players.GetPlayerByDisplayName(ctx, "idor-admin-b")
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername(b) err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName(b) err = %v, want nil", err)
 	}
 
 	quizA := &quiz.Quiz{

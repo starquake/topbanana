@@ -106,12 +106,12 @@ func (s *PlayerStore) ListPendingInvites(ctx context.Context) ([]*auth.PendingIn
 	invites := make([]*auth.PendingInvite, 0, len(rows))
 	for _, row := range rows {
 		invites = append(invites, &auth.PendingInvite{
-			ID:                row.ID,
-			Email:             row.Email,
-			InvitedByPlayerID: row.InvitedByPlayerID.Int64,
-			InviterUsername:   row.InviterUsername.String,
-			CreatedAt:         row.CreatedAt,
-			ExpiresAt:         row.ExpiresAt,
+			ID:                 row.ID,
+			Email:              row.Email,
+			InvitedByPlayerID:  row.InvitedByPlayerID.Int64,
+			InviterDisplayName: row.InviterDisplayName.String,
+			CreatedAt:          row.CreatedAt,
+			ExpiresAt:          row.ExpiresAt,
 		})
 	}
 

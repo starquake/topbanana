@@ -354,7 +354,7 @@ func countLegacyAnonUsernames(ctx context.Context, t *testing.T, dbConn *sql.DB)
 	var n int
 	err := dbConn.QueryRowContext(
 		ctx,
-		`SELECT COUNT(*) FROM players WHERE password_hash IS NULL AND username LIKE 'anon-%'`,
+		`SELECT COUNT(*) FROM players WHERE password_hash IS NULL AND display_name LIKE 'anon-%'`,
 	).Scan(&n)
 	if err != nil {
 		t.Fatalf("QueryRow err = %v, want nil", err)

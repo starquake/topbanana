@@ -21,7 +21,7 @@ VALUES (
 SELECT
     a.id,
     a.actor_player_id,
-    CAST(COALESCE(p.username, '') AS TEXT) AS actor_username,
+    CAST(COALESCE(p.display_name, '') AS TEXT) AS actor_display_name,
     a.target_player_id,
     a.action,
     a.payload,
@@ -179,9 +179,9 @@ WHERE id = sqlc.arg('id');
 -- is nullable on the column but the handler enforces a non-empty hash so
 -- the row can log in immediately. role is fixed to 'player' - the admin
 -- promotion CASE only fires on the public register/oauth paths.
-INSERT INTO players (username, email, password_hash, email_verified_at, role, username_claimed)
+INSERT INTO players (display_name, email, password_hash, email_verified_at, role, display_name_claimed)
 VALUES (
-    sqlc.arg('username'),
+    sqlc.arg('display_name'),
     sqlc.arg('email'),
     sqlc.arg('password_hash'),
     CURRENT_TIMESTAMP,

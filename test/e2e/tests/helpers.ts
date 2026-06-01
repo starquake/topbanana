@@ -74,7 +74,7 @@ export function markEmailVerified(username: string): void {
   const escapedUsername = username.replace(/'/g, "''");
   const output = execFileSync('sqlite3', [
     dbFile,
-    `UPDATE players SET email_verified_at = CURRENT_TIMESTAMP WHERE username = '${escapedUsername}'; SELECT changes();`,
+    `UPDATE players SET email_verified_at = CURRENT_TIMESTAMP WHERE display_name = '${escapedUsername}'; SELECT changes();`,
   ], { encoding: 'utf8' });
   const changed = Number.parseInt(output.trim(), 10);
   if (changed !== 1) {
@@ -104,7 +104,7 @@ function setRole(username: string, role: 'player' | 'host' | 'admin'): void {
   const escapedUsername = username.replace(/'/g, "''");
   const output = execFileSync('sqlite3', [
     dbFile,
-    `UPDATE players SET role = '${role}' WHERE username = '${escapedUsername}'; SELECT changes();`,
+    `UPDATE players SET role = '${role}' WHERE display_name = '${escapedUsername}'; SELECT changes();`,
   ], { encoding: 'utf8' });
   const changed = Number.parseInt(output.trim(), 10);
   if (changed !== 1) {

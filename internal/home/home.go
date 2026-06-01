@@ -42,7 +42,7 @@ type PopularQuiz struct {
 // the request is anonymous (no session, or a session pointing at an
 // EnsurePlayer auto-petname row).
 type Viewer struct {
-	Username string
+	DisplayName string
 }
 
 // ViewerFunc resolves the signed-in player for a request, or returns
@@ -70,7 +70,7 @@ func (p PopularQuiz) PlayURL() string {
 // all quizzes; the template renders it as a coarse activity score.
 type ActivePlayer struct {
 	ID            int64
-	Username      string
+	DisplayName   string
 	FinishedCount int
 }
 
@@ -143,12 +143,12 @@ type QuizLister interface {
 // type - no behaviour beyond [AllQuizRow.PlayURL] - so the template
 // doesn't need to know anything about quiz.Quiz internals.
 type AllQuizRow struct {
-	ID                int64
-	Title             string
-	Slug              string
-	Description       string
-	QuestionCount     int
-	CreatedByUsername string
+	ID                   int64
+	Title                string
+	Slug                 string
+	Description          string
+	QuestionCount        int
+	CreatedByDisplayName string
 }
 
 // PlayURL is the share-able deep link the row card points at. Mirrors
@@ -203,12 +203,12 @@ func HandleAllQuizzes(
 		data.Quizzes = make([]*AllQuizRow, 0, len(quizzes))
 		for _, qz := range quizzes {
 			data.Quizzes = append(data.Quizzes, &AllQuizRow{
-				ID:                qz.ID,
-				Title:             qz.Title,
-				Slug:              qz.Slug,
-				Description:       qz.Description,
-				QuestionCount:     counts[qz.ID],
-				CreatedByUsername: qz.CreatedByUsername,
+				ID:                   qz.ID,
+				Title:                qz.Title,
+				Slug:                 qz.Slug,
+				Description:          qz.Description,
+				QuestionCount:        counts[qz.ID],
+				CreatedByDisplayName: qz.CreatedByDisplayName,
 			})
 		}
 

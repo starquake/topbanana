@@ -217,7 +217,7 @@ func TestHomeStore_ListMostActivePlayers(t *testing.T) {
 	// Defensive: the anonymous player's auto-petname username must not
 	// appear in any returned row.
 	for _, r := range rows {
-		if r.Username == "ghost-petname" {
+		if r.DisplayName == "ghost-petname" {
 			t.Errorf("anonymous player surfaced in active list: %+v", r)
 		}
 	}

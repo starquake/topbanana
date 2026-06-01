@@ -413,7 +413,7 @@ func TestHandleEmailTest_DetachesRequestContext(t *testing.T) {
 
 	form := "to=ops@example.test"
 	ctx, cancel := context.WithCancel(t.Context())
-	ctx = auth.WithPlayer(ctx, &auth.Player{ID: 1, Username: "admin", Email: "admin@example.test"})
+	ctx = auth.WithPlayer(ctx, &auth.Player{ID: 1, DisplayName: "admin", Email: "admin@example.test"})
 	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/admin/email/test", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.RemoteAddr = "1.2.3.4:5555"
@@ -490,7 +490,7 @@ var testFlashKey = []byte("test-flash-key-32-bytes-test-key")
 func renderGET(t *testing.T, status mailer.StatusView, recorder *stubRecorder) string {
 	t.Helper()
 
-	ctx := auth.WithPlayer(t.Context(), &auth.Player{ID: 1, Username: "admin", Email: "admin@example.test"})
+	ctx := auth.WithPlayer(t.Context(), &auth.Player{ID: 1, DisplayName: "admin", Email: "admin@example.test"})
 	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/admin/email", nil)
 	rr := httptest.NewRecorder()
 
@@ -521,7 +521,7 @@ func postEmailTest(
 	t.Helper()
 
 	form := "to=" + recipient
-	ctx := auth.WithPlayer(t.Context(), &auth.Player{ID: 1, Username: "admin", Email: "admin@example.test"})
+	ctx := auth.WithPlayer(t.Context(), &auth.Player{ID: 1, DisplayName: "admin", Email: "admin@example.test"})
 	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/admin/email/test", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.RemoteAddr = "1.2.3.4:5555"

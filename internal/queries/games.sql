@@ -86,7 +86,7 @@ RETURNING *;
 -- count). The Go layer collapses one row per (player, game) into a
 -- single LeaderboardEntry with the per-player Completed flag.
 SELECT ga.player_id        AS player_id,
-       p.username           AS username,
+       p.display_name           AS display_name,
        gq.started_at        AS question_started_at,
        gq.expired_at        AS question_expired_at,
        ga.answered_at       AS answered_at,
@@ -112,7 +112,7 @@ WHERE g.quiz_id = ?;
 -- NULL); game_participants.quiz_id is nullable in the schema, which
 -- would otherwise force sqlc to infer sql.NullInt64 for the parameter.
 SELECT gp.player_id AS player_id,
-       p.username   AS username,
+       p.display_name   AS display_name,
        CASE WHEN (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id) > 0
              AND (SELECT COUNT(*) FROM game_questions gqc WHERE gqc.game_id = gp.game_id) >=
                  (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)

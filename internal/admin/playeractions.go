@@ -382,10 +382,10 @@ func roleChangeNotice(role string) string {
 
 // playerCreatePageData backs the playernew.gohtml template.
 type playerCreatePageData struct {
-	Title    string
-	Username string
-	Email    string
-	Error    string
+	Title       string
+	DisplayName string
+	Email       string
+	Error       string
 }
 
 // HandlePlayerCreateForm renders GET /admin/players/new.
@@ -431,8 +431,8 @@ func HandlePlayerCreateSubmit(
 		input := newPlayerInput(r)
 		if input.errMsg != "" {
 			render.Render(w, r, http.StatusBadRequest, playerCreatePageData{
-				Title:    "Admin Dashboard - New Player",
-				Username: input.Username, Email: input.Email,
+				Title:       "Admin Dashboard - New Player",
+				DisplayName: input.DisplayName, Email: input.Email,
 				Error: input.errMsg,
 			})
 
@@ -443,15 +443,15 @@ func HandlePlayerCreateSubmit(
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error hashing password for admin-create", slog.Any("err", err))
 			render.Render(w, r, http.StatusInternalServerError, playerCreatePageData{
-				Title:    "Admin Dashboard - New Player",
-				Username: input.Username, Email: input.Email,
+				Title:       "Admin Dashboard - New Player",
+				DisplayName: input.DisplayName, Email: input.Email,
 				Error: "Could not create player. Try again.",
 			})
 
 			return
 		}
 
-		player, err := store.CreatePlayerByAdmin(r.Context(), input.Username, input.Email, hash)
+		player, err := store.CreatePlayerByAdmin(r.Context(), input.DisplayName, input.Email, hash)
 		if err != nil {
 			renderCreatePlayerError(w, r, render, input, err)
 
@@ -462,7 +462,7 @@ func HandlePlayerCreateSubmit(
 			map[string]string{"new_email": input.Email})
 		flash.SetNotice(w, fmt.Sprintf(
 			"Player %q created with email %s. Hand the password over out-of-band; it is not stored here.",
-			player.Username, input.Email,
+			player.DisplayName, input.Email,
 		))
 		redirectToPlayerDetail(w, r, player.ID)
 	})
@@ -472,20 +472,20 @@ func HandlePlayerCreateSubmit(
 // admin-create-player flow. errMsg carries the first validation
 // failure; the handler re-renders the form with that banner.
 type newPlayerCreateInput struct {
-	Username string
-	Email    string
-	Password string
-	errMsg   string
+	DisplayName string
+	Email       string
+	Password    string
+	errMsg      string
 }
 
 func newPlayerInput(r *http.Request) newPlayerCreateInput {
 	in := newPlayerCreateInput{
-		Username: strings.TrimSpace(r.PostFormValue("display_name")),
-		Email:    strings.ToLower(strings.TrimSpace(r.PostFormValue("email"))),
-		Password: r.PostFormValue("password"),
+		DisplayName: strings.TrimSpace(r.PostFormValue("display_name")),
+		Email:       strings.ToLower(strings.TrimSpace(r.PostFormValue("email"))),
+		Password:    r.PostFormValue("password"),
 	}
-	if in.Username == "" {
-		in.Username = auth.GeneratePetname()
+	if in.DisplayName == "" {
+		in.DisplayName = auth.GeneratePetname()
 	}
 	if !auth.LooksLikeEmail(in.Email) {
 		in.errMsg = "Enter a valid email address."
@@ -524,8 +524,8 @@ func renderCreatePlayerError(
 		// Fall through to the generic 500 message; err is logged by the caller.
 	}
 	render.Render(w, r, status, playerCreatePageData{
-		Title:    "Admin Dashboard - New Player",
-		Username: in.Username, Email: in.Email,
+		Title:       "Admin Dashboard - New Player",
+		DisplayName: in.DisplayName, Email: in.Email,
 		Error: msg,
 	})
 }

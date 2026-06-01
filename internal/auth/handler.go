@@ -63,8 +63,8 @@ const maxFormBodySize = 64 * 1024
 
 // formData is the data passed to the register and login templates.
 type formData struct {
-	Title    string
-	Username string
+	Title       string
+	DisplayName string
 	// Email is the trimmed+lowercased value; preserved across form
 	// re-renders so a failed validation doesn't drop it.
 	Email   string
@@ -150,19 +150,19 @@ func HandleRegisterSubmit(
 			return
 		}
 
-		rawUsername := r.PostFormValue("display_name")
+		rawDisplayName := r.PostFormValue("display_name")
 		rawEmail := r.PostFormValue("email")
 		password := r.PostFormValue("password")
 		passwordConfirm := r.PostFormValue("password_confirm")
 
-		input := validateRegisterInput(rawUsername, rawEmail, password, passwordConfirm)
+		input := validateRegisterInput(rawDisplayName, rawEmail, password, passwordConfirm)
 		if !input.OK {
 			render.render(w, r, http.StatusBadRequest, formData{
-				Title:      "Register",
-				Username:   input.CleanedUsername,
-				Email:      input.CleanedEmail,
-				Message:    input.ErrMsg,
-				ShowGoogle: deps.GoogleEnabled,
+				Title:       "Register",
+				DisplayName: input.CleanedDisplayName,
+				Email:       input.CleanedEmail,
+				Message:     input.ErrMsg,
+				ShowGoogle:  deps.GoogleEnabled,
 			})
 
 			return
@@ -184,7 +184,7 @@ func HandleRegisterSubmit(
 		renderers := registerRenderers{form: render, pending: pending, sessions: sessions}
 
 		player, err := claimOrCreatePlayer(
-			r, players, sessions, input.CleanedUsername, input.CleanedEmail, hashed, role,
+			r, players, sessions, input.CleanedDisplayName, input.CleanedEmail, hashed, role,
 		)
 		if err != nil {
 			handleRegisterError(w, r, logger, renderers, deps, input, err)
@@ -241,11 +241,11 @@ func handleRegisterError(
 		renderers.renderPending(w, r, input.CleanedEmail)
 	case errors.Is(err, ErrUsernameTaken):
 		renderers.form.render(w, r, http.StatusConflict, formData{
-			Title:      "Register",
-			Username:   input.CleanedUsername,
-			Email:      input.CleanedEmail,
-			Message:    "That display name is already taken.",
-			ShowGoogle: deps.GoogleEnabled,
+			Title:       "Register",
+			DisplayName: input.CleanedDisplayName,
+			Email:       input.CleanedEmail,
+			Message:     "That display name is already taken.",
+			ShowGoogle:  deps.GoogleEnabled,
 		})
 	default:
 		logger.ErrorContext(r.Context(), "error creating player", slog.Any("err", err))
@@ -740,11 +740,11 @@ func HandleLogout(sessions *session.Manager) http.Handler {
 
 // registerInput is the result of validateRegisterInput.
 type registerInput struct {
-	// CleanedUsername is the username, whitespace-trimmed. Falls back to
+	// CleanedDisplayName is the username, whitespace-trimmed. Falls back to
 	// a [GeneratePetname] result when the input trims to "" so the post-
 	// #446 register flow accepts a blank display name and still produces
 	// a non-empty username for the schema's NOT NULL guard.
-	CleanedUsername string
+	CleanedDisplayName string
 	// CleanedEmail is the email, whitespace-trimmed and lowercased so
 	// case variants cannot create duplicate accounts.
 	CleanedEmail string
@@ -759,20 +759,20 @@ type registerInput struct {
 // [GeneratePetname] so register-with-just-email works after #446 made
 // the display name optional; email is the credential identifier.
 func validateRegisterInput(username, email, password, passwordConfirm string) registerInput {
-	cleanedUsername := strings.TrimSpace(username)
-	if cleanedUsername == "" {
-		cleanedUsername = GeneratePetname()
+	cleanedDisplayName := strings.TrimSpace(username)
+	if cleanedDisplayName == "" {
+		cleanedDisplayName = GeneratePetname()
 	}
 	cleanedEmail := strings.ToLower(strings.TrimSpace(email))
 	if !LooksLikeEmail(cleanedEmail) {
 		return registerInput{
-			CleanedUsername: cleanedUsername, CleanedEmail: cleanedEmail,
+			CleanedDisplayName: cleanedDisplayName, CleanedEmail: cleanedEmail,
 			ErrMsg: "Enter a valid email address.", OK: false,
 		}
 	}
 	if len(password) < MinPasswordLength {
 		return registerInput{
-			CleanedUsername: cleanedUsername, CleanedEmail: cleanedEmail,
+			CleanedDisplayName: cleanedDisplayName, CleanedEmail: cleanedEmail,
 			ErrMsg: fmt.Sprintf("Password must be at least %d characters.", MinPasswordLength),
 			OK:     false,
 		}
@@ -782,19 +782,19 @@ func validateRegisterInput(username, email, password, passwordConfirm string) re
 		// turns a wrapped 500 into a normal form-validation error with a
 		// user-friendly message.
 		return registerInput{
-			CleanedUsername: cleanedUsername, CleanedEmail: cleanedEmail,
+			CleanedDisplayName: cleanedDisplayName, CleanedEmail: cleanedEmail,
 			ErrMsg: fmt.Sprintf("Password must be at most %d characters.", MaxPasswordLength),
 			OK:     false,
 		}
 	}
 	if password != passwordConfirm {
 		return registerInput{
-			CleanedUsername: cleanedUsername, CleanedEmail: cleanedEmail,
+			CleanedDisplayName: cleanedDisplayName, CleanedEmail: cleanedEmail,
 			ErrMsg: "Passwords do not match.", OK: false,
 		}
 	}
 
-	return registerInput{CleanedUsername: cleanedUsername, CleanedEmail: cleanedEmail, OK: true}
+	return registerInput{CleanedDisplayName: cleanedDisplayName, CleanedEmail: cleanedEmail, OK: true}
 }
 
 // LooksLikeEmail is the shared shape check used by the register flow,

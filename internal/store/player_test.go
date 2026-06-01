@@ -57,7 +57,7 @@ func TestPlayerStore_CreateAndGetPlayer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
-	if got, want := created.Username, "alice"; got != want {
+	if got, want := created.DisplayName, "alice"; got != want {
 		t.Errorf("CreatePlayer Username = %q, want %q", got, want)
 	}
 	if got, want := created.Role, auth.RoleAdmin; got != want {
@@ -72,18 +72,18 @@ func TestPlayerStore_CreateAndGetPlayer(t *testing.T) {
 		t.Errorf("CreatePlayer HasCustomName() = %v, want %v", got, want)
 	}
 
-	fetched, err := ps.GetPlayerByUsername(t.Context(), "alice")
+	fetched, err := ps.GetPlayerByDisplayName(t.Context(), "alice")
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
 	if got, want := fetched.ID, created.ID; got != want {
-		t.Errorf("GetPlayerByUsername ID = %d, want %d", got, want)
+		t.Errorf("GetPlayerByDisplayName ID = %d, want %d", got, want)
 	}
 	if got, want := fetched.Role, auth.RoleAdmin; got != want {
-		t.Errorf("GetPlayerByUsername Role = %q, want %q", got, want)
+		t.Errorf("GetPlayerByDisplayName Role = %q, want %q", got, want)
 	}
 	if got, want := fetched.HasCustomName(), true; got != want {
-		t.Errorf("GetPlayerByUsername HasCustomName() = %v, want %v (re-fetch must persist the flag)", got, want)
+		t.Errorf("GetPlayerByDisplayName HasCustomName() = %v, want %v (re-fetch must persist the flag)", got, want)
 	}
 }
 
@@ -167,22 +167,22 @@ func TestPlayerStore_TrimsWhitespaceOnCreateAndLookup(t *testing.T) {
 	}
 
 	// Lookup with a trailing space matches because the store trims.
-	fetched, err := ps.GetPlayerByUsername(t.Context(), "alice ")
+	fetched, err := ps.GetPlayerByDisplayName(t.Context(), "alice ")
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
-	if got, want := fetched.Username, "alice"; got != want {
+	if got, want := fetched.DisplayName, "alice"; got != want {
 		t.Errorf("Username = %q, want %q (whitespace should have been trimmed)", got, want)
 	}
 }
 
-func TestPlayerStore_GetPlayerByUsername_NotFound(t *testing.T) {
+func TestPlayerStore_GetPlayerByDisplayName_NotFound(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.Open(t)
 	ps := NewPlayerStore(db, slog.Default())
 
-	_, err := ps.GetPlayerByUsername(t.Context(), "ghost")
+	_, err := ps.GetPlayerByDisplayName(t.Context(), "ghost")
 	if got, want := err, auth.ErrPlayerNotFound; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
@@ -351,7 +351,7 @@ func TestPlayerStore_CreateAnonymousPlayer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
-	if got, want := created.Username, "anon-foo"; got != want {
+	if got, want := created.DisplayName, "anon-foo"; got != want {
 		t.Errorf("Username = %q, want %q", got, want)
 	}
 	if got, want := created.PasswordHash, ""; got != want {
@@ -427,8 +427,8 @@ func TestPlayerStore_ClaimPlayer_UpgradesAnonymousRow(t *testing.T) {
 	if got, want := claimed.ID, anon.ID; got != want {
 		t.Errorf("claimed.ID = %d, want %d (claim must preserve player ID)", got, want)
 	}
-	if got, want := claimed.Username, "alice"; got != want {
-		t.Errorf("claimed.Username = %q, want %q", got, want)
+	if got, want := claimed.DisplayName, "alice"; got != want {
+		t.Errorf("claimed.DisplayName = %q, want %q", got, want)
 	}
 	if got, want := claimed.PasswordHash, "hash"; got != want {
 		t.Errorf("claimed.PasswordHash = %q, want %q", got, want)
@@ -473,9 +473,9 @@ func TestPlayerStore_ClaimPlayer_AlreadyClaimed_ReturnsSentinel(t *testing.T) {
 	}
 
 	// Make sure the original claim was not clobbered by the second attempt.
-	stored, err := ps.GetPlayerByUsername(t.Context(), "alice")
+	stored, err := ps.GetPlayerByDisplayName(t.Context(), "alice")
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
 	if got, want := stored.ID, anon.ID; got != want {
 		t.Errorf("stored.ID = %d, want %d (first claim should win)", got, want)
@@ -514,7 +514,7 @@ func TestPlayerStore_ClaimPlayer_UsernameTaken(t *testing.T) {
 	}
 }
 
-func TestPlayerStore_UpdatePlayerUsername(t *testing.T) {
+func TestPlayerStore_UpdatePlayerDisplayName(t *testing.T) {
 	t.Parallel()
 
 	t.Run("renames an anonymous player in place", func(t *testing.T) {
@@ -533,15 +533,15 @@ func TestPlayerStore_UpdatePlayerUsername(t *testing.T) {
 			t.Fatalf("precondition anon.HasCustomName() = %v, want %v", got, want)
 		}
 
-		updated, err := ps.UpdatePlayerUsername(t.Context(), anon.ID, "alice")
+		updated, err := ps.UpdatePlayerDisplayName(t.Context(), anon.ID, "alice")
 		if err != nil {
-			t.Fatalf("UpdatePlayerUsername err = %v, want nil", err)
+			t.Fatalf("UpdatePlayerDisplayName err = %v, want nil", err)
 		}
 		if got, want := updated.ID, anon.ID; got != want {
 			t.Errorf("updated.ID = %d, want %d (same row)", got, want)
 		}
-		if got, want := updated.Username, "alice"; got != want {
-			t.Errorf("updated.Username = %q, want %q", got, want)
+		if got, want := updated.DisplayName, "alice"; got != want {
+			t.Errorf("updated.DisplayName = %q, want %q", got, want)
 		}
 		if got, want := updated.IsAnonymous(), true; got != want {
 			t.Errorf("updated.IsAnonymous() = %v, want %v (no password set)", got, want)
@@ -574,12 +574,12 @@ func TestPlayerStore_UpdatePlayerUsername(t *testing.T) {
 			t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 		}
 
-		updated, err := ps.UpdatePlayerUsername(t.Context(), anon.ID, "  bob  ")
+		updated, err := ps.UpdatePlayerDisplayName(t.Context(), anon.ID, "  bob  ")
 		if err != nil {
-			t.Fatalf("UpdatePlayerUsername err = %v, want nil", err)
+			t.Fatalf("UpdatePlayerDisplayName err = %v, want nil", err)
 		}
-		if got, want := updated.Username, "bob"; got != want {
-			t.Errorf("updated.Username = %q, want %q (whitespace trimmed)", got, want)
+		if got, want := updated.DisplayName, "bob"; got != want {
+			t.Errorf("updated.DisplayName = %q, want %q (whitespace trimmed)", got, want)
 		}
 	})
 
@@ -593,7 +593,7 @@ func TestPlayerStore_UpdatePlayerUsername(t *testing.T) {
 			t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 		}
 
-		_, err = ps.UpdatePlayerUsername(t.Context(), anon.ID, "   ")
+		_, err = ps.UpdatePlayerDisplayName(t.Context(), anon.ID, "   ")
 		if got, want := err, auth.ErrUsernameEmpty; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
@@ -618,7 +618,7 @@ func TestPlayerStore_UpdatePlayerUsername(t *testing.T) {
 			t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 		}
 
-		_, err = ps.UpdatePlayerUsername(t.Context(), anon.ID, "claimed")
+		_, err = ps.UpdatePlayerDisplayName(t.Context(), anon.ID, "claimed")
 		if got, want := err, auth.ErrUsernameTaken; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
@@ -640,7 +640,7 @@ func TestPlayerStore_UpdatePlayerUsername(t *testing.T) {
 			t.Fatalf("CreatePlayer err = %v, want nil", err)
 		}
 
-		_, err = ps.UpdatePlayerUsername(t.Context(), credentialled.ID, "newname")
+		_, err = ps.UpdatePlayerDisplayName(t.Context(), credentialled.ID, "newname")
 		if got, want := err, auth.ErrPlayerNotAnonymous; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
@@ -651,7 +651,7 @@ func TestPlayerStore_UpdatePlayerUsername(t *testing.T) {
 		db := dbtest.Open(t)
 		ps := NewPlayerStore(db, slog.Default())
 
-		_, err := ps.UpdatePlayerUsername(t.Context(), 99999, "ghost")
+		_, err := ps.UpdatePlayerDisplayName(t.Context(), 99999, "ghost")
 		if got, want := err, auth.ErrPlayerNotFound; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
@@ -903,7 +903,7 @@ func TestPlayerStore_SetPlayerPasswordHash_AlsoMarksUsernameClaimed(t *testing.T
 	// UPDATE. Production code never does this; the test is exercising
 	// the SetPlayerPasswordHash side effect, not the typical lifecycle.
 	if _, execErr := db.ExecContext(
-		t.Context(), "UPDATE players SET username_claimed = 0 WHERE id = ?", row.ID,
+		t.Context(), "UPDATE players SET display_name_claimed = 0 WHERE id = ?", row.ID,
 	); execErr != nil {
 		t.Fatalf("seed UPDATE err = %v, want nil", execErr)
 	}
@@ -1095,7 +1095,7 @@ func TestPlayerStore_ListAdminAuditForTarget_SurvivesActorDeletion(t *testing.T)
 	if got, want := len(entries), 1; got != want {
 		t.Fatalf("audit entry count = %d, want %d (row must survive actor deletion)", got, want)
 	}
-	if got, want := entries[0].ActorUsername, ""; got != want {
+	if got, want := entries[0].ActorDisplayName, ""; got != want {
 		t.Errorf("ActorUsername = %q, want %q (deleted actor renders blank)", got, want)
 	}
 	if got, want := entries[0].ActorPlayerID, int64(0); got != want {

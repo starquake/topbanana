@@ -99,9 +99,9 @@ func mintSessionCookie(ctx context.Context, t *testing.T, client *http.Client, b
 	dbConn, stores := openStores(t, dbURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.
 
-	player, err := stores.Players.GetPlayerByUsername(ctx, username)
+	player, err := stores.Players.GetPlayerByDisplayName(ctx, username)
 	if err != nil {
-		t.Fatalf("mintSessionCookie GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("mintSessionCookie GetPlayerByDisplayName err = %v, want nil", err)
 	}
 
 	rec := httptest.NewRecorder()

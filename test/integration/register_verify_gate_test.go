@@ -58,9 +58,9 @@ func TestRegister_HardGate_NoSessionUntilVerified(t *testing.T) {
 	}
 
 	// 3. A verify-token row was committed for the new account.
-	player, err := stores.Players.GetPlayerByUsername(ctx, username)
+	player, err := stores.Players.GetPlayerByDisplayName(ctx, username)
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
 	if player.EmailVerifiedAt != nil {
 		t.Fatalf("EmailVerifiedAt = %v, want nil right after register", player.EmailVerifiedAt)

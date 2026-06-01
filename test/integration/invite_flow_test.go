@@ -152,8 +152,8 @@ func TestAcceptInvite_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPlayerByEmail err = %v, want nil", err)
 	}
-	if got, want := player.Username, "Accepted Player"; got != want {
-		t.Errorf("username = %q, want %q", got, want)
+	if got, want := player.DisplayName, "Accepted Player"; got != want {
+		t.Errorf("display name = %q, want %q", got, want)
 	}
 	if !player.IsEmailVerified() {
 		t.Error("new player must land email-verified")

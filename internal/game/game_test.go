@@ -104,7 +104,7 @@ func (s stubStore) ListParticipantsForQuizLeaderboard(
 		}
 		seen[a.PlayerID] = len(out)
 		out = append(out, &LeaderboardParticipant{
-			PlayerID: a.PlayerID, Username: a.Username, IsCompleted: a.IsCompleted,
+			PlayerID: a.PlayerID, DisplayName: a.DisplayName, IsCompleted: a.IsCompleted,
 		})
 	}
 
@@ -756,7 +756,7 @@ func TestService_GetResults(t *testing.T) {
 			t.Fatalf("failed to get next question: %v", err)
 		}
 
-		insertPlayer2 := `INSERT INTO players (id, username, email, created_at) VALUES (2, 'player2', 'player2@test.com', CURRENT_TIMESTAMP)`
+		insertPlayer2 := `INSERT INTO players (id, display_name, email, created_at) VALUES (2, 'player2', 'player2@test.com', CURRENT_TIMESTAMP)`
 		if _, err = db.ExecContext(ctx, insertPlayer2); err != nil {
 			t.Fatalf("failed to insert player 2: %v", err)
 		}
@@ -817,7 +817,7 @@ func TestService_GetResults(t *testing.T) {
 			t.Fatalf("failed to get next question: %v", err)
 		}
 
-		insertPlayer2 := `INSERT INTO players (id, username, email, created_at) VALUES (2, 'player2', 'player2@test.com', CURRENT_TIMESTAMP)`
+		insertPlayer2 := `INSERT INTO players (id, display_name, email, created_at) VALUES (2, 'player2', 'player2@test.com', CURRENT_TIMESTAMP)`
 		if _, err = db.ExecContext(ctx, insertPlayer2); err != nil {
 			t.Fatalf("failed to insert player 2: %v", err)
 		}
@@ -1256,7 +1256,7 @@ func makeAnswerCompleted(playerID int64, username string, correct, isCompleted b
 
 	return &LeaderboardAnswer{
 		PlayerID:          playerID,
-		Username:          username,
+		DisplayName:       username,
 		QuestionStartedAt: start,
 		QuestionExpiredAt: start.Add(window),
 		AnsweredAt:        start,
@@ -1344,8 +1344,8 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 		if got, want := result.Entries[0].PlayerID, int64(1); got != want {
 			t.Errorf("entries[0].PlayerID = %d, want %d", got, want)
 		}
-		if got, want := result.Entries[0].Username, "alice"; got != want {
-			t.Errorf("entries[0].Username = %q, want %q", got, want)
+		if got, want := result.Entries[0].DisplayName, "alice"; got != want {
+			t.Errorf("entries[0].DisplayName = %q, want %q", got, want)
 		}
 		if got, want := result.Entries[0].Score, 2000; got != want {
 			t.Errorf("entries[0].Score = %d, want %d", got, want)
@@ -1373,8 +1373,8 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 				},
 				listParticipantsForQuizLeaderboard: func(_ context.Context, _ int64, _ time.Time) ([]*LeaderboardParticipant, error) {
 					return []*LeaderboardParticipant{
-						{PlayerID: 1, Username: "alice", IsCompleted: false},
-						{PlayerID: 2, Username: "bob", IsCompleted: false},
+						{PlayerID: 1, DisplayName: "alice", IsCompleted: false},
+						{PlayerID: 2, DisplayName: "bob", IsCompleted: false},
 					}, nil
 				},
 			},
@@ -1393,8 +1393,8 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 		if got, want := len(result.Entries), 2; got != want {
 			t.Fatalf("len(entries) = %d, want %d", got, want)
 		}
-		if got, want := result.Entries[0].Username, "bob"; got != want {
-			t.Errorf("entries[0].Username = %q, want %q", got, want)
+		if got, want := result.Entries[0].DisplayName, "bob"; got != want {
+			t.Errorf("entries[0].DisplayName = %q, want %q", got, want)
 		}
 		if got, want := result.Entries[0].Score, 2000; got != want {
 			t.Errorf("entries[0].Score = %d, want %d", got, want)
@@ -1405,8 +1405,8 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 		if got, want := result.Entries[0].Completed, false; got != want {
 			t.Errorf("entries[0].Completed = %v, want %v (bob's participant row has IsCompleted=false)", got, want)
 		}
-		if got, want := result.Entries[1].Username, "alice"; got != want {
-			t.Errorf("entries[1].Username = %q, want %q", got, want)
+		if got, want := result.Entries[1].DisplayName, "alice"; got != want {
+			t.Errorf("entries[1].DisplayName = %q, want %q", got, want)
 		}
 		if got, want := result.Entries[1].Score, 0; got != want {
 			t.Errorf("entries[1].Score = %d, want %d (no-answer participant)", got, want)
@@ -1488,11 +1488,11 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 		if got, want := len(result.Entries), 2; got != want {
 			t.Fatalf("len(entries) = %d, want %d", got, want)
 		}
-		if got, want := result.Entries[0].Username, "bob"; got != want {
-			t.Errorf("entries[0].Username = %q, want %q", got, want)
+		if got, want := result.Entries[0].DisplayName, "bob"; got != want {
+			t.Errorf("entries[0].DisplayName = %q, want %q", got, want)
 		}
-		if got, want := result.Entries[1].Username, "alice"; got != want {
-			t.Errorf("entries[1].Username = %q, want %q", got, want)
+		if got, want := result.Entries[1].DisplayName, "alice"; got != want {
+			t.Errorf("entries[1].DisplayName = %q, want %q", got, want)
 		}
 		if got, want := result.Entries[0].Rank, 1; got != want {
 			t.Errorf("entries[0].Rank = %d, want %d", got, want)
@@ -1530,7 +1530,11 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		gotNames := []string{result.Entries[0].Username, result.Entries[1].Username, result.Entries[2].Username}
+		gotNames := []string{
+			result.Entries[0].DisplayName,
+			result.Entries[1].DisplayName,
+			result.Entries[2].DisplayName,
+		}
 		wantNames := []string{"alice", "bob", "charlie"}
 		if diff := cmp.Diff(wantNames, gotNames); diff != "" {
 			t.Errorf("username order mismatch (-want +got):\n%s", diff)
@@ -1767,9 +1771,9 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 				},
 				listParticipantsForQuizLeaderboard: func(_ context.Context, _ int64, _ time.Time) ([]*LeaderboardParticipant, error) {
 					return []*LeaderboardParticipant{
-						{PlayerID: 1, Username: "alice", IsCompleted: false, IsStale: false},
-						{PlayerID: 2, Username: "bob", IsCompleted: true, IsStale: false},
-						{PlayerID: 3, Username: "carol", IsCompleted: false, IsStale: true},
+						{PlayerID: 1, DisplayName: "alice", IsCompleted: false, IsStale: false},
+						{PlayerID: 2, DisplayName: "bob", IsCompleted: true, IsStale: false},
+						{PlayerID: 3, DisplayName: "carol", IsCompleted: false, IsStale: true},
 					}, nil
 				},
 			},
@@ -1791,7 +1795,7 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 
 		byName := make(map[string]LeaderboardEntry, len(result.Entries))
 		for _, e := range result.Entries {
-			byName[e.Username] = e
+			byName[e.DisplayName] = e
 		}
 
 		alice := byName["alice"]

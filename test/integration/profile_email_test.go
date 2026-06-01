@@ -56,9 +56,9 @@ func TestProfileEmail_HappyPathSwapsAndStaysSignedIn(t *testing.T) {
 	// the consume path end-to-end we mint another token directly via
 	// the store: dispatchEmailChangeIfFree's send is best-effort and
 	// asynchronous, so we cannot read the raw token off the email.
-	player, err := stores.Players.GetPlayerByUsername(ctx, "email-change-happy")
+	player, err := stores.Players.GetPlayerByDisplayName(ctx, "email-change-happy")
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
 	raw, hash, err := auth.GenerateVerifyToken()
 	if err != nil {
@@ -254,9 +254,9 @@ func TestProfileEmail_OldSessionInvalidatedAfterSwap(t *testing.T) {
 	dbConn, stores := openStores(t, srv.DBURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.
 
-	player, err := stores.Players.GetPlayerByUsername(ctx, "email-rotate")
+	player, err := stores.Players.GetPlayerByDisplayName(ctx, "email-rotate")
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
 	raw, hash, err := auth.GenerateVerifyToken()
 	if err != nil {

@@ -602,7 +602,7 @@ func lookupPlayerID(ctx context.Context, t *testing.T, dbURI, username string) i
 	t.Helper()
 	dbConn, stores := openStores(t, dbURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.
-	player, err := stores.Players.GetPlayerByUsername(ctx, username)
+	player, err := stores.Players.GetPlayerByDisplayName(ctx, username)
 	if err != nil {
 		t.Fatalf("lookupPlayerID err = %v, want nil", err)
 	}

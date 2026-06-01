@@ -32,15 +32,15 @@ import (
 const maxFormBodySize = 16 * 1024
 
 // pageData feeds profile.gohtml. Title flows into the auth layout's
-// <title>. Username is the value pre-filled into the input. Message
-// surfaces server-side validation errors (taken username, empty
+// <title>. DisplayName is the value pre-filled into the input. Message
+// surfaces server-side validation errors (taken display name, empty
 // input, etc.). Saved is true on a successful POST so the template
 // can show a small confirmation banner.
 type pageData struct {
-	Title    string
-	Username string
-	Message  string
-	Saved    bool
+	Title       string
+	DisplayName string
+	Message     string
+	Saved       bool
 }
 
 // HandleProfile returns the [http.Handler] for GET /profile. The
@@ -62,8 +62,8 @@ func HandleProfile(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
 		}
 
 		render.render(w, r, http.StatusOK, pageData{
-			Title:    "Profile",
-			Username: player.Username,
+			Title:       "Profile",
+			DisplayName: player.DisplayName,
 		})
 	})
 }
@@ -107,15 +107,15 @@ func HandleProfileUsername(
 
 		updated, err := players.RenamePlayer(r.Context(), player.ID, cleaned)
 		if err != nil {
-			renderRenameError(render, logger, w, r, player.ID, player.Username, raw, err)
+			renderRenameError(render, logger, w, r, player.ID, player.DisplayName, raw, err)
 
 			return
 		}
 
 		render.render(w, r, http.StatusOK, pageData{
-			Title:    "Profile",
-			Username: updated.Username,
-			Saved:    true,
+			Title:       "Profile",
+			DisplayName: updated.DisplayName,
+			Saved:       true,
 		})
 	})
 }
@@ -137,7 +137,7 @@ func renderRenameError(
 	w http.ResponseWriter,
 	r *http.Request,
 	playerID int64,
-	currentUsername, attempted string,
+	currentDisplayName, attempted string,
 	err error,
 ) {
 	switch {
@@ -145,17 +145,17 @@ func renderRenameError(
 		logger.InfoContext(r.Context(), "profile rename rejected: empty name",
 			slog.Int64("player_id", playerID))
 		render.render(w, r, http.StatusBadRequest, pageData{
-			Title:    "Profile",
-			Username: currentUsername,
-			Message:  "Display name is required.",
+			Title:       "Profile",
+			DisplayName: currentDisplayName,
+			Message:     "Display name is required.",
 		})
 	case errors.Is(err, auth.ErrUsernameTaken):
 		logger.InfoContext(r.Context(), "profile rename rejected: name taken",
 			slog.Int64("player_id", playerID), slog.String("attempted", attempted))
 		render.render(w, r, http.StatusConflict, pageData{
-			Title:    "Profile",
-			Username: attempted,
-			Message:  "That name is already taken. Pick a different one.",
+			Title:       "Profile",
+			DisplayName: attempted,
+			Message:     "That name is already taken. Pick a different one.",
 		})
 	default:
 		logger.ErrorContext(r.Context(), "profile rename failed",

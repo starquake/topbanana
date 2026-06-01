@@ -290,7 +290,7 @@ type quizLeaderboardResponse struct {
 func toEntryResponse(e game.LeaderboardEntry) quizLeaderboardEntryResponse {
 	return quizLeaderboardEntryResponse{
 		PlayerID:        e.PlayerID,
-		Username:        e.Username,
+		Username:        e.DisplayName,
 		Score:           e.Score,
 		Rank:            e.Rank,
 		IsCurrentPlayer: e.IsCurrentPlayer,
@@ -1087,7 +1087,7 @@ type playerResponse struct {
 func newPlayerResponse(p *auth.Player) playerResponse {
 	return playerResponse{
 		ID:              p.ID,
-		Username:        p.Username,
+		Username:        p.DisplayName,
 		IsAnonymous:     p.IsAnonymous(),
 		HasCustomName:   p.HasCustomName(),
 		IsAuthenticated: p.IsAuthenticated(),
@@ -1157,7 +1157,7 @@ func HandlePlayerClaimName(
 			return
 		}
 
-		updated, err := players.UpdatePlayerUsername(ctx, current.ID, req.Username)
+		updated, err := players.UpdatePlayerDisplayName(ctx, current.ID, req.Username)
 		if err != nil {
 			switch {
 			case errors.Is(err, auth.ErrUsernameTaken):

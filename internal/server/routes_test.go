@@ -26,7 +26,7 @@ import (
 
 type stubPlayerStore struct{}
 
-func (stubPlayerStore) GetPlayerByUsername(_ context.Context, _ string) (*auth.Player, error) {
+func (stubPlayerStore) GetPlayerByDisplayName(_ context.Context, _ string) (*auth.Player, error) {
 	return nil, auth.ErrPlayerNotFound
 }
 
@@ -58,7 +58,7 @@ func (stubPlayerStore) ChangePlayerPassword(_ context.Context, _ int64, _ string
 	return errRouteStub
 }
 
-func (stubPlayerStore) UpdatePlayerUsername(_ context.Context, _ int64, _ string) (*auth.Player, error) {
+func (stubPlayerStore) UpdatePlayerDisplayName(_ context.Context, _ int64, _ string) (*auth.Player, error) {
 	return nil, errRouteStub
 }
 

@@ -65,9 +65,9 @@ func TestAdminHTMX_QuestionReorder(t *testing.T) {
 	}
 	registerVerifyAndSignIn(ctx, t, client, srv.BaseURL, srv.DBURI, "htmx-admin", "htmx-admin-pass-123")
 
-	adminPlayer, err := stores.Players.GetPlayerByUsername(ctx, "htmx-admin")
+	adminPlayer, err := stores.Players.GetPlayerByDisplayName(ctx, "htmx-admin")
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
 
 	const (
@@ -248,9 +248,9 @@ func TestAdminHTMX_RoundMove(t *testing.T) {
 	}
 	registerVerifyAndSignIn(ctx, t, client, srv.BaseURL, srv.DBURI, "htmx-admin", "htmx-admin-pass-123")
 
-	adminPlayer, err := stores.Players.GetPlayerByUsername(ctx, "htmx-admin")
+	adminPlayer, err := stores.Players.GetPlayerByDisplayName(ctx, "htmx-admin")
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
 
 	const (
@@ -414,9 +414,9 @@ func verifyPlayerEmail(ctx context.Context, t *testing.T, dbURI, username string
 	dbConn, stores := openStores(t, dbURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.
 
-	player, err := stores.Players.GetPlayerByUsername(ctx, username)
+	player, err := stores.Players.GetPlayerByDisplayName(ctx, username)
 	if err != nil {
-		t.Fatalf("verifyPlayerEmail GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("verifyPlayerEmail GetPlayerByDisplayName err = %v, want nil", err)
 	}
 	if err := stores.OAuth.MarkPlayerEmailVerifiedIfNew(ctx, player.ID); err != nil {
 		t.Fatalf("verifyPlayerEmail MarkPlayerEmailVerifiedIfNew err = %v, want nil", err)

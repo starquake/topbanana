@@ -37,9 +37,9 @@ func TestResetPassword_HappyPath(t *testing.T) {
 	dbConn, stores := openStores(t, srv.DBURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.
 
-	player, err := stores.Players.GetPlayerByUsername(ctx, "reset-happy")
+	player, err := stores.Players.GetPlayerByDisplayName(ctx, "reset-happy")
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
 	startingVersion := player.SessionVersion
 

@@ -27,7 +27,7 @@ func (*emailStubStore) GetPlayerByEmail(_ context.Context, _ string) (*auth.Play
 	return nil, auth.ErrPlayerNotFound
 }
 
-func (*emailStubStore) GetPlayerByUsername(_ context.Context, _ string) (*auth.Player, error) {
+func (*emailStubStore) GetPlayerByDisplayName(_ context.Context, _ string) (*auth.Player, error) {
 	return nil, errors.ErrUnsupported
 }
 
@@ -59,7 +59,7 @@ func (*emailStubStore) ChangePlayerPassword(_ context.Context, _ int64, _ string
 	return errors.ErrUnsupported
 }
 
-func (*emailStubStore) UpdatePlayerUsername(_ context.Context, _ int64, _ string) (*auth.Player, error) {
+func (*emailStubStore) UpdatePlayerDisplayName(_ context.Context, _ int64, _ string) (*auth.Player, error) {
 	return nil, errors.ErrUnsupported
 }
 

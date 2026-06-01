@@ -60,7 +60,7 @@
     <span>Top Banana!</span>
     <div class="flex items-center gap-4">
         {{if .Viewer}}
-            <a href="/profile" class="hover:text-text-dim underline-offset-2 hover:underline">Signed in as <span class="text-text-dim">{{.Viewer.Username}}</span></a>
+            <a href="/profile" class="hover:text-text-dim underline-offset-2 hover:underline">Signed in as <span class="text-text-dim">{{.Viewer.DisplayName}}</span></a>
             <form action="/logout" method="POST" class="m-0 p-0 inline">
                 <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                 <button type="submit" class="m-0 p-0 bg-transparent border-0 cursor-pointer text-text-mute hover:text-text-dim underline-offset-2 hover:underline">Log out</button>

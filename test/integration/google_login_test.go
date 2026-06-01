@@ -529,7 +529,7 @@ func seedPlayerWithEmail(t *testing.T, dbURI, username, email string) {
 	})
 
 	if _, err := db.ExecContext(t.Context(),
-		`INSERT INTO players (username, email, role, username_claimed) VALUES (?, ?, 'player', 1)`,
+		`INSERT INTO players (display_name, email, role, display_name_claimed) VALUES (?, ?, 'player', 1)`,
 		username, email,
 	); err != nil {
 		t.Fatalf("seed insert err = %v, want nil", err)

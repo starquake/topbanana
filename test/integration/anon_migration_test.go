@@ -48,7 +48,7 @@ func TestAnonMigration_Integration(t *testing.T) {
 	// register hands out no session, and the migration is driven by the
 	// anonymous client logging in below, not by this jar.
 	registerForPending(ctx, t, authClient(t), baseURL, "migration-dest", "correct-battery-13")
-	destPlayer, err := stores.Players.GetPlayerByUsername(ctx, "migration-dest")
+	destPlayer, err := stores.Players.GetPlayerByDisplayName(ctx, "migration-dest")
 	if err != nil {
 		t.Fatalf("lookup destination player err = %v, want nil", err)
 	}
@@ -106,7 +106,7 @@ func lookupAnonPlayer(ctx context.Context, t *testing.T, players auth.PlayerStor
 		if err != nil {
 			continue
 		}
-		known := slices.Contains(excluded, p.Username)
+		known := slices.Contains(excluded, p.DisplayName)
 		if !known {
 			return p
 		}

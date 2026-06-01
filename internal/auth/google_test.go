@@ -88,10 +88,10 @@ func (s *stubOAuthStore) CreatePlayerFromOAuth(_ context.Context, username, emai
 	}
 
 	p := &Player{
-		ID:       s.nextID,
-		Username: username,
-		Email:    email,
-		Role:     RolePlayer,
+		ID:          s.nextID,
+		DisplayName: username,
+		Email:       email,
+		Role:        RolePlayer,
 	}
 	s.nextID++
 	s.players[p.ID] = p
@@ -166,9 +166,9 @@ func (s *stubOAuthStore) seedAnonymous(username string) *Player {
 	defer s.mu.Unlock()
 
 	p := &Player{
-		ID:       s.nextID,
-		Username: username,
-		Role:     RolePlayer,
+		ID:          s.nextID,
+		DisplayName: username,
+		Role:        RolePlayer,
 	}
 	s.nextID++
 	s.players[p.ID] = p
@@ -185,10 +185,10 @@ func (s *stubOAuthStore) seed(email, username string) *Player {
 	defer s.mu.Unlock()
 
 	p := &Player{
-		ID:       s.nextID,
-		Username: username,
-		Email:    email,
-		Role:     RolePlayer,
+		ID:          s.nextID,
+		DisplayName: username,
+		Email:       email,
+		Role:        RolePlayer,
 	}
 	s.nextID++
 	s.players[p.ID] = p
@@ -319,8 +319,8 @@ func TestLinkOrCreateGooglePlayer_LinkExistingEmail(t *testing.T) {
 	if got, want := player.ID, existing.ID; got != want {
 		t.Errorf("player.ID = %d, want %d (linked, not created)", got, want)
 	}
-	if got, want := player.Username, "alice"; got != want {
-		t.Errorf("player.Username = %q, want %q", got, want)
+	if got, want := player.DisplayName, "alice"; got != want {
+		t.Errorf("player.DisplayName = %q, want %q", got, want)
 	}
 
 	// Lookup by subject now resolves to the same row.
@@ -397,8 +397,8 @@ func TestLinkOrCreateGooglePlayer_ClaimsAnonymousSession(t *testing.T) {
 	if got, want := player.ID, anon.ID; got != want {
 		t.Errorf("player.ID = %d, want %d (anonymous row reused, not replaced)", got, want)
 	}
-	if got, want := player.Username, "happy-banana"; got != want {
-		t.Errorf("player.Username = %q, want %q (preserved across claim)", got, want)
+	if got, want := player.DisplayName, "happy-banana"; got != want {
+		t.Errorf("player.DisplayName = %q, want %q (preserved across claim)", got, want)
 	}
 	if got, want := player.Email, "claim@example.test"; got != want {
 		t.Errorf("player.Email = %q, want %q (set on claim)", got, want)

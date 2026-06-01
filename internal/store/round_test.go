@@ -14,13 +14,13 @@ func newTestQuizForGroups(t *testing.T, qs *QuizStore) *quiz.Quiz {
 	t.Helper()
 
 	qz := &quiz.Quiz{
-		Title:             "Quiz With Groups",
-		Slug:              "quiz-with-rounds",
-		Description:       "fixture for round tests",
-		CreatedByPlayerID: seededAdminID,
-		CreatedByUsername: seededAdminUsername,
-		TimeLimitSeconds:  quiz.DefaultTimeLimitSeconds,
-		Visibility:        quiz.VisibilityPublic,
+		Title:                "Quiz With Groups",
+		Slug:                 "quiz-with-rounds",
+		Description:          "fixture for round tests",
+		CreatedByPlayerID:    seededAdminID,
+		CreatedByDisplayName: seededAdminUsername,
+		TimeLimitSeconds:     quiz.DefaultTimeLimitSeconds,
+		Visibility:           quiz.VisibilityPublic,
 	}
 	if err := qs.CreateQuiz(t.Context(), qz); err != nil {
 		t.Fatalf("failed to create quiz fixture: %v", err)

@@ -21,7 +21,7 @@ import (
 // when the test exercises a handler that pulls the player off the context
 // (typically because EnsurePlayer would do so in production).
 func withPlayer(ctx context.Context, id int64) context.Context {
-	return auth.WithPlayer(ctx, &auth.Player{ID: id, Username: "stub", Role: auth.RolePlayer})
+	return auth.WithPlayer(ctx, &auth.Player{ID: id, DisplayName: "stub", Role: auth.RolePlayer})
 }
 
 var errStub = errors.New("stub error")
@@ -334,7 +334,7 @@ func (s stubGameStore) ListParticipantsForQuizLeaderboard(
 		}
 		seen[a.PlayerID] = len(out)
 		out = append(out, &game.LeaderboardParticipant{
-			PlayerID: a.PlayerID, Username: a.Username, IsCompleted: a.IsCompleted,
+			PlayerID: a.PlayerID, DisplayName: a.DisplayName, IsCompleted: a.IsCompleted,
 		})
 	}
 
@@ -1407,7 +1407,7 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 
 		return &game.LeaderboardAnswer{
 			PlayerID:          playerID,
-			Username:          username,
+			DisplayName:       username,
 			QuestionStartedAt: start,
 			QuestionExpiredAt: start.Add(window),
 			AnsweredAt:        start,

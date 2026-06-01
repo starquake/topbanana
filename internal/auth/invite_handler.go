@@ -11,14 +11,14 @@ import (
 	"github.com/starquake/topbanana/internal/session"
 )
 
-// invitePageData backs the accept_invite.gohtml template. Username is
+// invitePageData backs the accept_invite.gohtml template. DisplayName is
 // preserved across a failed submit so the recipient does not retype it;
 // Token rides a hidden field so the POST does not need it on the URL bar.
 type invitePageData struct {
-	Title    string
-	Token    string
-	Username string
-	Message  string
+	Title       string
+	Token       string
+	DisplayName string
+	Message     string
 }
 
 // HandleAcceptInviteForm renders GET /accept-invite?token=... The
@@ -136,7 +136,7 @@ func HandleAcceptInviteSubmit(logger *slog.Logger, csrfMgr *csrf.Manager, deps A
 		confirm := r.PostFormValue("confirm")
 		if msg, ok := validateAcceptInviteInput(username, password, confirm); !ok {
 			render.render(w, r, http.StatusBadRequest, invitePageData{
-				Title: "Accept your invite", Token: raw, Username: username, Message: msg,
+				Title: "Accept your invite", Token: raw, DisplayName: username, Message: msg,
 			})
 
 			return
@@ -182,7 +182,7 @@ func acceptInvite(
 	if err != nil {
 		if msg, ok := acceptInviteCollisionMessage(err); ok {
 			render.render(w, r, http.StatusConflict, invitePageData{
-				Title: "Accept your invite", Token: form.token, Username: form.username, Message: msg,
+				Title: "Accept your invite", Token: form.token, DisplayName: form.username, Message: msg,
 			})
 
 			return

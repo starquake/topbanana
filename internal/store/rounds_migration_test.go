@@ -166,7 +166,7 @@ func seedPlayer(t *testing.T, db *sql.DB) int64 {
 	t.Helper()
 	res, err := db.ExecContext(
 		context.Background(),
-		"INSERT INTO players (username, role) VALUES ('mig-admin', 'host')",
+		"INSERT INTO players (display_name, role) VALUES ('mig-admin', 'host')",
 	)
 	if err != nil {
 		t.Fatalf("seed player err = %v, want nil", err)

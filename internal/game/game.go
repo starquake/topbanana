@@ -91,10 +91,10 @@ type Game struct {
 
 // Player represents a player.
 type Player struct {
-	ID        int64
-	Username  string
-	Email     string
-	CreatedAt time.Time
+	ID          int64
+	DisplayName string
+	Email       string
+	CreatedAt   time.Time
 }
 
 // Participant represents a player participating in a game. QuizID is
@@ -238,7 +238,7 @@ type Results struct {
 // predicate on it.
 type LeaderboardAnswer struct {
 	PlayerID          int64
-	Username          string
+	DisplayName       string
 	QuestionStartedAt time.Time
 	QuestionExpiredAt time.Time
 	AnsweredAt        time.Time
@@ -255,8 +255,8 @@ type LeaderboardAnswer struct {
 // in the per-answer scoring inputs from
 // [Store.ListAnswersForQuizLeaderboard].
 type LeaderboardParticipant struct {
-	PlayerID int64
-	Username string
+	PlayerID    int64
+	DisplayName string
 	// IsCompleted: every quiz question has been issued to this game.
 	IsCompleted bool
 	// IsStale: latest game_question is unanswered and expired before
@@ -277,7 +277,7 @@ type LeaderboardParticipant struct {
 // InProgress; admin "Played by" filters on Completed.
 type LeaderboardEntry struct {
 	PlayerID        int64
-	Username        string
+	DisplayName     string
 	Score           int
 	Rank            int
 	IsCurrentPlayer bool
@@ -1101,7 +1101,7 @@ func (s *Service) GetQuizLeaderboard(
 	for _, p := range participants {
 		entries = append(entries, LeaderboardEntry{
 			PlayerID:        p.PlayerID,
-			Username:        p.Username,
+			DisplayName:     p.DisplayName,
 			Score:           playerTotals[p.PlayerID],
 			IsCurrentPlayer: p.PlayerID == currentPlayerID,
 			Completed:       p.IsCompleted,
@@ -1116,7 +1116,7 @@ func (s *Service) GetQuizLeaderboard(
 			return c
 		}
 
-		return strings.Compare(a.Username, b.Username)
+		return strings.Compare(a.DisplayName, b.DisplayName)
 	})
 
 	return finalizeLeaderboardInPlace(entries, currentPlayerID, limit), nil

@@ -356,7 +356,7 @@ func seedPlays(
 			if err := finishGame(ctx, stores.Games, p.ID, qz); err != nil {
 				logger.Warn(
 					"finish game",
-					slog.String("player", p.Username),
+					slog.String("player", p.DisplayName),
 					slog.String("quiz", qz.Title),
 					slog.Any("err", err),
 				)

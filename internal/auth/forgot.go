@@ -165,7 +165,7 @@ func dispatchForgotIfMatch(
 func resolveForgotIdentifier(
 	ctx context.Context, players PlayerStore, identifier string,
 ) (*Player, bool) {
-	if p, err := players.GetPlayerByUsername(ctx, identifier); err == nil {
+	if p, err := players.GetPlayerByDisplayName(ctx, identifier); err == nil {
 		return p, true
 	} else if !errors.Is(err, ErrPlayerNotFound) {
 		return nil, false

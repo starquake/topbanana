@@ -60,7 +60,7 @@ func (s *QuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 			Visibility:        r.Visibility,
 			// INNER JOIN on players makes this a plain string (#359);
 			// the FK guarantees a creator row exists.
-			CreatedByUsername: r.CreatedByUsername,
+			CreatedByDisplayName: r.CreatedByDisplayName,
 		}
 		quizzes = append(quizzes, qz)
 	}
@@ -90,7 +90,7 @@ func (s *QuizStore) ListPublicQuizzes(ctx context.Context) ([]*quiz.Quiz, error)
 			TimeLimitSeconds:  int(r.TimeLimitSeconds),
 			Visibility:        r.Visibility,
 			// INNER JOIN, see ListQuizzes (#359).
-			CreatedByUsername: r.CreatedByUsername,
+			CreatedByDisplayName: r.CreatedByDisplayName,
 		}
 		quizzes = append(quizzes, qz)
 	}
@@ -152,7 +152,7 @@ func (s *QuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 		TimeLimitSeconds:  int(row.TimeLimitSeconds),
 		Visibility:        row.Visibility,
 		// INNER JOIN, see ListQuizzes (#359).
-		CreatedByUsername: row.CreatedByUsername,
+		CreatedByDisplayName: row.CreatedByDisplayName,
 	}
 
 	questions, err := s.ListQuestions(ctx, id)

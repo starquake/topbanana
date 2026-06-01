@@ -131,7 +131,7 @@ SELECT
     invites.id,
     invites.email,
     invites.invited_by_player_id,
-    players.username AS inviter_username,
+    players.display_name AS inviter_display_name,
     invites.created_at,
     invites.expires_at
 FROM invites
@@ -141,17 +141,17 @@ ORDER BY invites.created_at DESC, invites.id DESC
 `
 
 type ListPendingInvitesRow struct {
-	ID                int64
-	Email             string
-	InvitedByPlayerID sql.NullInt64
-	InviterUsername   sql.NullString
-	CreatedAt         time.Time
-	ExpiresAt         time.Time
+	ID                 int64
+	Email              string
+	InvitedByPlayerID  sql.NullInt64
+	InviterDisplayName sql.NullString
+	CreatedAt          time.Time
+	ExpiresAt          time.Time
 }
 
 // Lists every still-pending invite for the admin management view (#318),
-// newest first. LEFT JOIN players surfaces the inviter's username for the
-// "invited by X" column; inviter_username is NULL when the invite carries
+// newest first. LEFT JOIN players surfaces the inviter's display_name for the
+// "invited by X" column; inviter_display_name is NULL when the invite carries
 // no actor (invited_by_player_id NULL) or the inviting admin's row has since
 // been deleted (ON DELETE SET NULL). Includes still-expired-but-not-swept
 // rows so the list matches what the sweep has actually pruned; the template
@@ -169,7 +169,7 @@ func (q *Queries) ListPendingInvites(ctx context.Context) ([]ListPendingInvitesR
 			&i.ID,
 			&i.Email,
 			&i.InvitedByPlayerID,
-			&i.InviterUsername,
+			&i.InviterDisplayName,
 			&i.CreatedAt,
 			&i.ExpiresAt,
 		); err != nil {

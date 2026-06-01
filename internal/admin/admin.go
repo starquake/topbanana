@@ -113,7 +113,7 @@ func (tr *TemplateRenderer) prepare(w http.ResponseWriter, r *http.Request) (*te
 	username := ""
 	isAdmin := false
 	if p, ok := auth.PlayerFromContext(r.Context()); ok {
-		username = p.Username
+		username = p.DisplayName
 		isAdmin = p.IsAdmin()
 	}
 
@@ -160,17 +160,17 @@ func navSection(path string) string {
 // - handlers populate it via [attachCanEdit] before rendering, and a
 // rule change lives entirely in Go.
 type QuizData struct {
-	ID                int64
-	Title             string
-	Slug              string
-	Description       string
-	UpdatedAt         time.Time
-	QuestionCount     int
-	CreatedByPlayerID int64
-	CreatedByUsername string
-	CanEdit           bool
-	TimeLimitSeconds  int
-	Visibility        string
+	ID                   int64
+	Title                string
+	Slug                 string
+	Description          string
+	UpdatedAt            time.Time
+	QuestionCount        int
+	CreatedByPlayerID    int64
+	CreatedByDisplayName string
+	CanEdit              bool
+	TimeLimitSeconds     int
+	Visibility           string
 	// VisibilityOptions feeds the admin form's selector - pulled
 	// straight from the domain constants so a future level addition
 	// only touches one place.
@@ -264,18 +264,18 @@ func quizDataFromQuiz(qz *quiz.Quiz) *QuizData {
 	}
 
 	return &QuizData{
-		ID:                qz.ID,
-		Title:             qz.Title,
-		Slug:              qz.Slug,
-		Description:       qz.Description,
-		UpdatedAt:         qz.UpdatedAt,
-		QuestionCount:     len(qz.Questions),
-		CreatedByPlayerID: qz.CreatedByPlayerID,
-		CreatedByUsername: qz.CreatedByUsername,
-		TimeLimitSeconds:  qz.TimeLimitSeconds,
-		Visibility:        visibility,
-		VisibilityOptions: quiz.VisibilityValues(),
-		Questions:         questionDataFromQuestions(qz.Questions),
+		ID:                   qz.ID,
+		Title:                qz.Title,
+		Slug:                 qz.Slug,
+		Description:          qz.Description,
+		UpdatedAt:            qz.UpdatedAt,
+		QuestionCount:        len(qz.Questions),
+		CreatedByPlayerID:    qz.CreatedByPlayerID,
+		CreatedByDisplayName: qz.CreatedByDisplayName,
+		TimeLimitSeconds:     qz.TimeLimitSeconds,
+		Visibility:           visibility,
+		VisibilityOptions:    quiz.VisibilityValues(),
+		Questions:            questionDataFromQuestions(qz.Questions),
 	}
 }
 
@@ -485,7 +485,7 @@ func requireQuizOwner(
 		return qz, true
 	}
 
-	owner := qz.CreatedByUsername
+	owner := qz.CreatedByDisplayName
 	if owner == "" {
 		owner = "another admin"
 	}
@@ -847,9 +847,9 @@ func HandleQuizList(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 // in-progress and pre-answer participants (#244/#335) so the admin's
 // Reset button is only offered for games the host can safely wipe.
 type PlayerScoreData struct {
-	PlayerID int64
-	Username string
-	Score    int
+	PlayerID    int64
+	DisplayName string
+	Score       int
 }
 
 // HandleQuizView returns the quiz view page. It also fetches the per-quiz
@@ -1083,9 +1083,9 @@ func loadCompletedPlayers(
 			continue
 		}
 		players = append(players, PlayerScoreData{
-			PlayerID: e.PlayerID,
-			Username: e.Username,
-			Score:    e.Score,
+			PlayerID:    e.PlayerID,
+			DisplayName: e.DisplayName,
+			Score:       e.Score,
 		})
 	}
 

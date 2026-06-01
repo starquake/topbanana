@@ -255,9 +255,9 @@ func makeHost(ctx context.Context, t *testing.T, dbURI, username string) {
 	dbConn, stores := openStores(t, dbURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.
 
-	player, err := stores.Players.GetPlayerByUsername(ctx, username)
+	player, err := stores.Players.GetPlayerByDisplayName(ctx, username)
 	if err != nil {
-		t.Fatalf("makeHost GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("makeHost GetPlayerByDisplayName err = %v, want nil", err)
 	}
 	if err := stores.AdminPlayers.SetPlayerRole(ctx, player.ID, auth.RoleHost); err != nil {
 		t.Fatalf("makeHost SetPlayerRole err = %v, want nil", err)
@@ -271,9 +271,9 @@ func roleByUsername(ctx context.Context, t *testing.T, dbURI, username string) s
 	dbConn, stores := openStores(t, dbURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.
 
-	player, err := stores.Players.GetPlayerByUsername(ctx, username)
+	player, err := stores.Players.GetPlayerByDisplayName(ctx, username)
 	if err != nil {
-		t.Fatalf("roleByUsername GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("roleByUsername GetPlayerByDisplayName err = %v, want nil", err)
 	}
 
 	return player.Role
@@ -285,9 +285,9 @@ func playerIDByUsername(ctx context.Context, t *testing.T, dbURI, username strin
 	dbConn, stores := openStores(t, dbURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.
 
-	player, err := stores.Players.GetPlayerByUsername(ctx, username)
+	player, err := stores.Players.GetPlayerByDisplayName(ctx, username)
 	if err != nil {
-		t.Fatalf("playerIDByUsername GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("playerIDByUsername GetPlayerByDisplayName err = %v, want nil", err)
 	}
 
 	return player.ID

@@ -317,7 +317,7 @@ func (q *Queries) GetGameByPlayerAndQuiz(ctx context.Context, arg GetGameByPlaye
 }
 
 const getPlayer = `-- name: GetPlayer :one
-SELECT id, username, email, password_hash, role, created_at, username_claimed, email_verified_at, session_version, role_changed_at
+SELECT id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
 FROM players
 WHERE id = ?
 `
@@ -327,12 +327,12 @@ func (q *Queries) GetPlayer(ctx context.Context, id int64) (Player, error) {
 	var i Player
 	err := row.Scan(
 		&i.ID,
-		&i.Username,
+		&i.DisplayName,
 		&i.Email,
 		&i.PasswordHash,
 		&i.Role,
 		&i.CreatedAt,
-		&i.UsernameClaimed,
+		&i.DisplayNameClaimed,
 		&i.EmailVerifiedAt,
 		&i.SessionVersion,
 		&i.RoleChangedAt,
@@ -420,7 +420,7 @@ func (q *Queries) ListAnswersByGameQuestionID(ctx context.Context, gameQuestionI
 
 const listAnswersForQuizLeaderboard = `-- name: ListAnswersForQuizLeaderboard :many
 SELECT ga.player_id        AS player_id,
-       p.username           AS username,
+       p.display_name           AS display_name,
        gq.started_at        AS question_started_at,
        gq.expired_at        AS question_expired_at,
        ga.answered_at       AS answered_at,
@@ -439,7 +439,7 @@ WHERE g.quiz_id = ?
 
 type ListAnswersForQuizLeaderboardRow struct {
 	PlayerID          int64
-	Username          string
+	DisplayName       string
 	QuestionStartedAt time.Time
 	QuestionExpiredAt time.Time
 	AnsweredAt        time.Time
@@ -469,7 +469,7 @@ func (q *Queries) ListAnswersForQuizLeaderboard(ctx context.Context, quizID int6
 		var i ListAnswersForQuizLeaderboardRow
 		if err := rows.Scan(
 			&i.PlayerID,
-			&i.Username,
+			&i.DisplayName,
 			&i.QuestionStartedAt,
 			&i.QuestionExpiredAt,
 			&i.AnsweredAt,
@@ -674,7 +674,7 @@ func (q *Queries) ListParticipantsByGameID(ctx context.Context, gameID string) (
 
 const listParticipantsForQuizLeaderboard = `-- name: ListParticipantsForQuizLeaderboard :many
 SELECT gp.player_id AS player_id,
-       p.username   AS username,
+       p.display_name   AS display_name,
        CASE WHEN (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id) > 0
              AND (SELECT COUNT(*) FROM game_questions gqc WHERE gqc.game_id = gp.game_id) >=
                  (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)
@@ -699,7 +699,7 @@ type ListParticipantsForQuizLeaderboardParams struct {
 
 type ListParticipantsForQuizLeaderboardRow struct {
 	PlayerID    int64
-	Username    string
+	DisplayName string
 	IsCompleted int64
 	IsStale     int64
 }
@@ -723,7 +723,7 @@ func (q *Queries) ListParticipantsForQuizLeaderboard(ctx context.Context, arg Li
 		var i ListParticipantsForQuizLeaderboardRow
 		if err := rows.Scan(
 			&i.PlayerID,
-			&i.Username,
+			&i.DisplayName,
 			&i.IsCompleted,
 			&i.IsStale,
 		); err != nil {

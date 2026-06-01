@@ -56,7 +56,7 @@ type playerDetailData struct {
 
 type playerDetailRow struct {
 	ID                int64
-	Username          string
+	DisplayName       string
 	Email             string
 	Role              string
 	OnboardingState   string
@@ -78,13 +78,13 @@ type playerDetailGame struct {
 }
 
 type playerDetailAudit struct {
-	ID            int64
-	ActorPlayerID int64
-	ActorUsername string
-	Action        string
-	ActionLabel   string
-	Detail        string
-	CreatedAt     time.Time
+	ID               int64
+	ActorPlayerID    int64
+	ActorDisplayName string
+	Action           string
+	ActionLabel      string
+	Detail           string
+	CreatedAt        time.Time
 }
 
 // HandlePlayerDetail renders GET /admin/players/{playerID}. Reads from
@@ -174,7 +174,7 @@ func buildPlayerDetailData(
 ) playerDetailData {
 	row := playerDetailRow{
 		ID:              detail.ID,
-		Username:        detail.Username,
+		DisplayName:     detail.DisplayName,
 		Email:           detail.Email,
 		Role:            detail.Role,
 		OnboardingState: detail.OnboardingState,
@@ -202,13 +202,13 @@ func buildPlayerDetailData(
 	auditRows := make([]playerDetailAudit, 0, len(audit))
 	for _, a := range audit {
 		auditRows = append(auditRows, playerDetailAudit{
-			ID:            a.ID,
-			ActorPlayerID: a.ActorPlayerID,
-			ActorUsername: a.ActorUsername,
-			Action:        a.Action,
-			ActionLabel:   adminActionLabel(a.Action),
-			Detail:        decodeAuditDetail(a.Action, a.Payload),
-			CreatedAt:     a.CreatedAt,
+			ID:               a.ID,
+			ActorPlayerID:    a.ActorPlayerID,
+			ActorDisplayName: a.ActorDisplayName,
+			Action:           a.Action,
+			ActionLabel:      adminActionLabel(a.Action),
+			Detail:           decodeAuditDetail(a.Action, a.Payload),
+			CreatedAt:        a.CreatedAt,
 		})
 	}
 

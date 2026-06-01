@@ -39,11 +39,11 @@ const (
 func newTestQuizzes() []*quiz.Quiz {
 	return []*quiz.Quiz{
 		{
-			Title:             "Quiz 1",
-			Slug:              "quiz-1",
-			Description:       "Quiz 1 Description",
-			CreatedByPlayerID: seededAdminID,
-			CreatedByUsername: seededAdminUsername,
+			Title:                "Quiz 1",
+			Slug:                 "quiz-1",
+			Description:          "Quiz 1 Description",
+			CreatedByPlayerID:    seededAdminID,
+			CreatedByDisplayName: seededAdminUsername,
 			// #99 / #103: the store normalises a zero TimeLimitSeconds
 			// to the project-wide default and a blank Visibility to
 			// public before INSERT; the fixture mirrors that so
@@ -75,13 +75,13 @@ func newTestQuizzes() []*quiz.Quiz {
 			},
 		},
 		{
-			Title:             "Quiz 2",
-			Slug:              "quiz-2",
-			Description:       "Quiz 2 Description",
-			CreatedByPlayerID: seededAdminID,
-			CreatedByUsername: seededAdminUsername,
-			TimeLimitSeconds:  quiz.DefaultTimeLimitSeconds,
-			Visibility:        quiz.VisibilityPublic,
+			Title:                "Quiz 2",
+			Slug:                 "quiz-2",
+			Description:          "Quiz 2 Description",
+			CreatedByPlayerID:    seededAdminID,
+			CreatedByDisplayName: seededAdminUsername,
+			TimeLimitSeconds:     quiz.DefaultTimeLimitSeconds,
+			Visibility:           quiz.VisibilityPublic,
 			Questions: []*quiz.Question{
 				{
 					Text:     "Question 2-1",
@@ -111,12 +111,12 @@ func newTestQuizzes() []*quiz.Quiz {
 func existingTestQuizzes() []*quiz.Quiz {
 	return []*quiz.Quiz{
 		{
-			ID:                1,
-			Title:             "Quiz 1",
-			Slug:              "quiz-1",
-			Description:       "Quiz 1 Description",
-			CreatedByPlayerID: seededAdminID,
-			CreatedByUsername: seededAdminUsername,
+			ID:                   1,
+			Title:                "Quiz 1",
+			Slug:                 "quiz-1",
+			Description:          "Quiz 1 Description",
+			CreatedByPlayerID:    seededAdminID,
+			CreatedByDisplayName: seededAdminUsername,
 			// #99 / #103: the store normalises a zero TimeLimitSeconds
 			// to the project-wide default and a blank Visibility to
 			// public before INSERT; the fixture mirrors that so
@@ -150,13 +150,13 @@ func existingTestQuizzes() []*quiz.Quiz {
 			},
 		},
 		{
-			Title:             "Quiz 2",
-			Slug:              "quiz-2",
-			Description:       "Quiz 2 Description",
-			CreatedByPlayerID: seededAdminID,
-			CreatedByUsername: seededAdminUsername,
-			TimeLimitSeconds:  quiz.DefaultTimeLimitSeconds,
-			Visibility:        quiz.VisibilityPublic,
+			Title:                "Quiz 2",
+			Slug:                 "quiz-2",
+			Description:          "Quiz 2 Description",
+			CreatedByPlayerID:    seededAdminID,
+			CreatedByDisplayName: seededAdminUsername,
+			TimeLimitSeconds:     quiz.DefaultTimeLimitSeconds,
+			Visibility:           quiz.VisibilityPublic,
 			Questions: []*quiz.Question{
 				{
 					ID:       3,
@@ -266,16 +266,16 @@ func TestQuizStore_ListQuizzes(t *testing.T) {
 	summaries := make([]*quiz.Quiz, 0, len(testQuizzes))
 	for _, qz := range testQuizzes {
 		summaries = append(summaries, &quiz.Quiz{
-			ID:                qz.ID,
-			Title:             qz.Title,
-			Slug:              qz.Slug,
-			Description:       qz.Description,
-			CreatedAt:         qz.CreatedAt,
-			UpdatedAt:         qz.UpdatedAt,
-			CreatedByPlayerID: qz.CreatedByPlayerID,
-			CreatedByUsername: qz.CreatedByUsername,
-			TimeLimitSeconds:  qz.TimeLimitSeconds,
-			Visibility:        qz.Visibility,
+			ID:                   qz.ID,
+			Title:                qz.Title,
+			Slug:                 qz.Slug,
+			Description:          qz.Description,
+			CreatedAt:            qz.CreatedAt,
+			UpdatedAt:            qz.UpdatedAt,
+			CreatedByPlayerID:    qz.CreatedByPlayerID,
+			CreatedByDisplayName: qz.CreatedByDisplayName,
+			TimeLimitSeconds:     qz.TimeLimitSeconds,
+			Visibility:           qz.Visibility,
 		})
 	}
 
@@ -802,16 +802,16 @@ func TestQuizStore_UpdateQuiz(t *testing.T) {
 	}
 
 	updatedQuiz := &quiz.Quiz{
-		ID:                originalQuiz.ID,
-		Title:             originalQuiz.Title + " Updated",
-		Slug:              originalQuiz.Slug + "-updated",
-		Description:       originalQuiz.Description + " Updated",
-		CreatedAt:         originalQuiz.CreatedAt,
-		UpdatedAt:         originalQuiz.UpdatedAt,
-		CreatedByPlayerID: originalQuiz.CreatedByPlayerID,
-		CreatedByUsername: originalQuiz.CreatedByUsername,
-		TimeLimitSeconds:  originalQuiz.TimeLimitSeconds,
-		Visibility:        originalQuiz.Visibility,
+		ID:                   originalQuiz.ID,
+		Title:                originalQuiz.Title + " Updated",
+		Slug:                 originalQuiz.Slug + "-updated",
+		Description:          originalQuiz.Description + " Updated",
+		CreatedAt:            originalQuiz.CreatedAt,
+		UpdatedAt:            originalQuiz.UpdatedAt,
+		CreatedByPlayerID:    originalQuiz.CreatedByPlayerID,
+		CreatedByDisplayName: originalQuiz.CreatedByDisplayName,
+		TimeLimitSeconds:     originalQuiz.TimeLimitSeconds,
+		Visibility:           originalQuiz.Visibility,
 		Questions: []*quiz.Question{
 			{
 				ID:     originalQuiz.Questions[0].ID,

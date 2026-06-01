@@ -144,8 +144,8 @@ func TestInviteStore_ListPendingInvites(t *testing.T) {
 	if !ok {
 		t.Fatal("attributed invite missing from list")
 	}
-	if got, want := attr.InviterUsername, "list-admin"; got != want {
-		t.Errorf("attr.InviterUsername = %q, want %q", got, want)
+	if got, want := attr.InviterDisplayName, "list-admin"; got != want {
+		t.Errorf("attr.InviterDisplayName = %q, want %q", got, want)
 	}
 }
 

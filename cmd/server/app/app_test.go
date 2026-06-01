@@ -124,9 +124,9 @@ func fetchSeededPlayer(t *testing.T, dbURI string) *auth.Player {
 		}
 	})
 	players := store.NewPlayerStore(conn, slog.Default())
-	p, err := players.GetPlayerByUsername(t.Context(), "alice")
+	p, err := players.GetPlayerByDisplayName(t.Context(), "alice")
 	if err != nil {
-		t.Fatalf("GetPlayerByUsername err = %v, want nil", err)
+		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
 
 	return p
@@ -363,7 +363,7 @@ func demoteToHost(t *testing.T, dbURI, username string) {
 		}
 	})
 	if _, err := conn.ExecContext(
-		t.Context(), "UPDATE players SET role = ? WHERE username = ?", auth.RoleHost, username,
+		t.Context(), "UPDATE players SET role = ? WHERE display_name = ?", auth.RoleHost, username,
 	); err != nil {
 		t.Fatalf("demote update err = %v, want nil", err)
 	}

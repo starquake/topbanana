@@ -102,7 +102,7 @@ func loadInvitesPage(
 		rows = append(rows, inviteRow{
 			ID:        p.ID,
 			Email:     p.Email,
-			InvitedBy: p.InviterUsername,
+			InvitedBy: p.InviterDisplayName,
 			CreatedAt: p.CreatedAt,
 			ExpiresAt: p.ExpiresAt,
 		})

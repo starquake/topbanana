@@ -47,8 +47,8 @@ func TestHandle_RendersPopularAndActiveSections(t *testing.T) {
 			{ID: 9, Title: "Capital Cities", Slug: "capital-cities", Description: "Quickfire geography.", PlayCount: 3},
 		},
 		active: []*ActivePlayer{
-			{ID: 1, Username: "alice", FinishedCount: 4},
-			{ID: 2, Username: "bob", FinishedCount: 2},
+			{ID: 1, DisplayName: "alice", FinishedCount: 4},
+			{ID: 2, DisplayName: "bob", FinishedCount: 2},
 		},
 	}
 
@@ -81,7 +81,7 @@ func TestHandle_SingularPlayAndQuizPluralization(t *testing.T) {
 			{ID: 11, Title: "Solo", Slug: "solo", PlayCount: 1},
 		},
 		active: []*ActivePlayer{
-			{ID: 1, Username: "carol", FinishedCount: 1},
+			{ID: 1, DisplayName: "carol", FinishedCount: 1},
 		},
 	}
 	body := serve(t, store)

@@ -38,7 +38,7 @@
                     <tbody>
                         {{range .Admins}}
                             <tr class="border-b border-border-soft last:border-0">
-                                <td class="px-4 py-3 text-text">{{.Username}}</td>
+                                <td class="px-4 py-3 text-text">{{.DisplayName}}</td>
                                 <td class="px-4 py-3 text-text-dim">{{if .Email}}{{.Email}}{{else}}&mdash;{{end}}</td>
                                 <td class="px-4 py-3 text-text-dim">
                                     {{if .PromotedAt}}
@@ -49,7 +49,7 @@
                                 </td>
                                 <td class="px-4 py-3 text-right">
                                     <form method="POST" action="/admin/players/{{.ID}}/role" class="inline-flex"
-                                          onsubmit="return confirm('Remove Admin from {{.Username}}?');">
+                                          onsubmit="return confirm('Remove Admin from {{.DisplayName}}?');">
                                         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                                         <input type="hidden" name="role" value="host">
                                         <button type="submit" class="btn-ghost">Demote</button>

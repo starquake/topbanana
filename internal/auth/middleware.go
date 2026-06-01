@@ -152,8 +152,8 @@ func RequireGameHost(
 
 		if !player.CanHost() {
 			render.render(w, r, http.StatusForbidden, formData{
-				Title:    "Access denied",
-				Username: player.Username,
+				Title:       "Access denied",
+				DisplayName: player.DisplayName,
 			})
 
 			return

@@ -39,16 +39,16 @@ var ErrIdentityAlreadyLinked = errors.New("identity already linked")
 
 // Player represents an authenticated user (admin or player).
 type Player struct {
-	ID       int64
-	Username string
-	Email    string
+	ID          int64
+	DisplayName string
+	Email       string
 	// EmailVerifiedAt is nil until the address is verified. OAuth-linked
 	// rows are stamped at link time because the provider attests the email.
-	EmailVerifiedAt *time.Time
-	PasswordHash    string
-	Role            string
-	CreatedAt       time.Time
-	UsernameClaimed bool
+	EmailVerifiedAt    *time.Time
+	PasswordHash       string
+	Role               string
+	CreatedAt          time.Time
+	DisplayNameClaimed bool
 	// SessionVersion is bumped on password reset so every in-flight
 	// cookie (which carries the version it was issued at) becomes
 	// invalid the moment the reset commits (#112).
@@ -94,7 +94,7 @@ func (p *Player) IsAnonymous() bool {
 // claimed-but-passwordless visitor has HasCustomName=true and
 // IsAnonymous()=true simultaneously.
 func (p *Player) HasCustomName() bool {
-	return p.UsernameClaimed
+	return p.DisplayNameClaimed
 }
 
 // IsAuthenticated reports whether the visitor has signed in. True for
@@ -130,7 +130,7 @@ type AnonymousGameMigrator interface {
 // page query stays simple.
 type PlayerListRow struct {
 	ID              int64
-	Username        string
+	DisplayName     string
 	Email           string
 	Role            string
 	HasPassword     bool
@@ -230,7 +230,7 @@ type PlayerLister interface {
 // narrow.
 type PlayerDetail struct {
 	ID              int64
-	Username        string
+	DisplayName     string
 	Email           string
 	Role            string
 	HasPassword     bool
@@ -254,24 +254,24 @@ type RecentFinishedGame struct {
 // per-player detail view's "Recent admin actions" section (#450). The
 // raw Payload JSON is passed through as a string; the template decodes
 // the few well-known actions on the way out. ActorPlayerID is 0 and
-// ActorUsername is "" when the actor row has since been deleted (the
+// ActorDisplayName is "" when the actor row has since been deleted (the
 // actor FK is ON DELETE SET NULL, so the audit row outlives its actor).
 type AdminAuditEntry struct {
-	ID             int64
-	ActorPlayerID  int64
-	ActorUsername  string
-	TargetPlayerID int64
-	Action         string
-	Payload        string
-	CreatedAt      time.Time
+	ID               int64
+	ActorPlayerID    int64
+	ActorDisplayName string
+	TargetPlayerID   int64
+	Action           string
+	Payload          string
+	CreatedAt        time.Time
 }
 
 // AdminEntry is one row in the Admins list rendered on the admin settings
 // page (#320/#538). Email is empty when the row has no address on file.
 type AdminEntry struct {
-	ID       int64
-	Username string
-	Email    string
+	ID          int64
+	DisplayName string
+	Email       string
 	// RoleChangedAt is when the player's role last changed (the promotion to
 	// Admin, in practice). Nil for rows whose role predates the column.
 	RoleChangedAt *time.Time
@@ -376,9 +376,9 @@ type AdminListStore interface {
 
 // PlayerStore is the persistence interface used by the auth package.
 type PlayerStore interface {
-	// GetPlayerByUsername returns the player with the given username.
+	// GetPlayerByDisplayName returns the player with the given display name.
 	// Returns ErrPlayerNotFound when there is no match.
-	GetPlayerByUsername(ctx context.Context, username string) (*Player, error)
+	GetPlayerByDisplayName(ctx context.Context, displayName string) (*Player, error)
 	// GetPlayerByEmail returns the player with the given email.
 	// Returns ErrPlayerNotFound when there is no match. Used by the
 	// forgot-password flow's username-or-email lookup and the Google
@@ -429,21 +429,21 @@ type PlayerStore interface {
 	// that path also marks the reset row consumed in the same
 	// transaction. Returns ErrPlayerNotFound when no row matches.
 	ChangePlayerPassword(ctx context.Context, playerID int64, passwordHash string) error
-	// UpdatePlayerUsername renames an anonymous (password_hash IS NULL) row
+	// UpdatePlayerDisplayName renames an anonymous (password_hash IS NULL) row
 	// in place. The session cookie keeps pointing at the same row, so the
 	// caller stays "logged in" as the same player; the player remains
 	// anonymous after the rename.
-	// Returns ErrUsernameEmpty when the supplied username trims to the empty
-	// string, ErrUsernameTaken when the requested username is already in use,
+	// Returns ErrUsernameEmpty when the supplied display name trims to the empty
+	// string, ErrUsernameTaken when the requested display name is already in use,
 	// ErrPlayerNotAnonymous when the target row already carries a
-	// password_hash (i.e. it is no longer a valid target for a username-only
+	// password_hash (i.e. it is no longer a valid target for a display-name-only
 	// update), and ErrPlayerNotFound when no row matches the id.
-	UpdatePlayerUsername(ctx context.Context, playerID int64, username string) (*Player, error)
+	UpdatePlayerDisplayName(ctx context.Context, playerID int64, displayName string) (*Player, error)
 	// RenamePlayer changes the display name on any player row, regardless
 	// of password_hash / email / role. Used by the profile-page rename
 	// endpoint so authenticated players (password, OAuth, admin) can
 	// update their own name; anonymous rows still go through
-	// UpdatePlayerUsername.
+	// UpdatePlayerDisplayName.
 	// Returns ErrUsernameEmpty for whitespace-only input, ErrUsernameTaken
 	// on a UNIQUE collision, and ErrPlayerNotFound when the id does not
 	// exist.

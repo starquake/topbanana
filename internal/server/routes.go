@@ -190,7 +190,7 @@ func homeViewerFunc(players auth.PlayerStore, sessions *session.Manager) home.Vi
 			return nil
 		}
 
-		return &home.Viewer{Username: p.Username}
+		return &home.Viewer{DisplayName: p.DisplayName}
 	}
 }
 

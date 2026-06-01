@@ -28,10 +28,10 @@ func (s *renameStubStore) RenamePlayer(_ context.Context, _ int64, username stri
 		return nil, s.renameErr
 	}
 
-	return &auth.Player{ID: 7, Username: username}, nil
+	return &auth.Player{ID: 7, DisplayName: username}, nil
 }
 
-func (*renameStubStore) GetPlayerByUsername(_ context.Context, _ string) (*auth.Player, error) {
+func (*renameStubStore) GetPlayerByDisplayName(_ context.Context, _ string) (*auth.Player, error) {
 	return nil, errors.ErrUnsupported
 }
 
@@ -67,7 +67,7 @@ func (*renameStubStore) ChangePlayerPassword(_ context.Context, _ int64, _ strin
 	return errors.ErrUnsupported
 }
 
-func (*renameStubStore) UpdatePlayerUsername(_ context.Context, _ int64, _ string) (*auth.Player, error) {
+func (*renameStubStore) UpdatePlayerDisplayName(_ context.Context, _ int64, _ string) (*auth.Player, error) {
 	return nil, errors.ErrUnsupported
 }
 
@@ -86,7 +86,7 @@ func postRename(t *testing.T, store auth.PlayerStore, newName string) (string, *
 		strings.NewReader(form.Encode()),
 	)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req = req.WithContext(auth.WithPlayer(req.Context(), &auth.Player{ID: 7, Username: "current-name"}))
+	req = req.WithContext(auth.WithPlayer(req.Context(), &auth.Player{ID: 7, DisplayName: "current-name"}))
 
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)

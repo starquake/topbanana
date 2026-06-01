@@ -40,7 +40,7 @@ func (s *credStubStore) RenamePlayer(_ context.Context, _ int64, username string
 		return nil, s.renameErr
 	}
 
-	return &auth.Player{ID: 7, Username: username}, nil
+	return &auth.Player{ID: 7, DisplayName: username}, nil
 }
 
 func (s *credStubStore) ChangePlayerPassword(_ context.Context, _ int64, passwordHash string) error {

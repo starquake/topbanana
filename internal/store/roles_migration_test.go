@@ -60,7 +60,7 @@ func TestRolesMigration_RemapsTiers(t *testing.T) {
 	for username, wantRole := range want {
 		var gotRole string
 		if err := db.QueryRowContext(
-			t.Context(), "SELECT role FROM players WHERE username = ?", username,
+			t.Context(), "SELECT role FROM players WHERE display_name = ?", username,
 		).Scan(&gotRole); err != nil {
 			t.Fatalf("read role for %q: %v", username, err)
 		}
