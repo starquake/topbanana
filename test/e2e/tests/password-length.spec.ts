@@ -10,14 +10,11 @@ test('register password field shows then clears the too-short hint', async ({ pa
   const password = page.locator('input[name=password]');
   const hint = page.locator('#password-length-hint');
 
-  // Empty value: no hint.
   await expect(hint).toHaveText('');
 
-  // Non-empty but under the minimum: the hint names the threshold.
   await password.fill('short');
   await expect(hint).toHaveText('Must be at least 13 characters.');
 
-  // Long enough: the hint clears.
   await password.fill('correctbatterystaple');
   await expect(hint).toHaveText('');
 });
