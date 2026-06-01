@@ -50,8 +50,8 @@ export class PlayerService {
     // state-drift signal: the client thought the player was anonymous
     // but the server disagrees, so the component should re-fetch /me
     // and dismiss the modal rather than show "name is taken".
-    async claimName(rawUsername) {
-        const displayName = (rawUsername || '').trim();
+    async claimName(rawDisplayName) {
+        const displayName = (rawDisplayName || '').trim();
         if (displayName === '') {
             return { ok: false, status: 400, kind: 'empty', message: 'Please enter a name.' };
         }

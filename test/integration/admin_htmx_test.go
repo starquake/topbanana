@@ -408,13 +408,13 @@ func postHXRoundMove(
 // follow-up requests can pass the #111 PR3 verified-email gate. Used
 // by integration tests that drive /admin/* after registering through
 // the HTTP register flow.
-func verifyPlayerEmail(ctx context.Context, t *testing.T, dbURI, username string) {
+func verifyPlayerEmail(ctx context.Context, t *testing.T, dbURI, displayName string) {
 	t.Helper()
 
 	dbConn, stores := openStores(t, dbURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.
 
-	player, err := stores.Players.GetPlayerByDisplayName(ctx, username)
+	player, err := stores.Players.GetPlayerByDisplayName(ctx, displayName)
 	if err != nil {
 		t.Fatalf("verifyPlayerEmail GetPlayerByDisplayName err = %v, want nil", err)
 	}

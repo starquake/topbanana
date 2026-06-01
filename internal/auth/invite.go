@@ -227,7 +227,7 @@ func buildInviteLink(baseURL, rawToken string) (string, error) {
 // the reset/verify body shape so the channels read consistently.
 func inviteEmailBody(link string) string {
 	return "You have been invited to join Top Banana.\n\n" +
-		"Click the link below to pick a username and password and set up your account:\n\n" +
+		"Click the link below to pick a displayName and password and set up your account:\n\n" +
 		link + "\n\n" +
 		"This link is valid for 7 days. If you were not expecting this invite,\n" +
 		"you can ignore this email.\n"

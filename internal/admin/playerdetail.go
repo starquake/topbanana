@@ -232,7 +232,7 @@ func adminActionLabel(action string) string {
 		return "Marked verified"
 	case auth.AdminActionEmailSet:
 		return "Email set"
-	case auth.AdminActionUsernameSet:
+	case auth.AdminActionDisplayNameSet:
 		return "Display name set"
 	case auth.AdminActionPasswordSet:
 		return "Password set"
@@ -271,8 +271,8 @@ func decodeAuditDetail(action, payload string) string {
 	switch action {
 	case auth.AdminActionEmailSet, auth.AdminActionCreated:
 		return fields["new_email"]
-	case auth.AdminActionUsernameSet:
-		return fields["new_username"]
+	case auth.AdminActionDisplayNameSet:
+		return fields["new_displayName"]
 	case auth.AdminActionRoleChanged,
 		auth.AdminActionPromoteSuper, auth.AdminActionDemoteSuper,
 		auth.AdminActionPromoteAdmin, auth.AdminActionDemoteAdmin:

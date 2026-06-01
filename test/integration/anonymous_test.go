@@ -90,11 +90,11 @@ func TestAnonymous_Integration(t *testing.T) {
 	}
 
 	// Scenario 1b: the newly-minted anonymous player should carry a
-	// petname-style username (Adjective-Adjective-Noun) rather than the
+	// petname-style displayName (Adjective-Adjective-Noun) rather than the
 	// legacy "anon-<xid>" format. The petname path is the default; the
 	// xid fallback only runs when the petname pool collides several times
 	// in a row, which is astronomically unlikely in a single-call test.
-	if got, want := countLegacyAnonUsernames(ctx, t, dbConn), 0; got != want {
+	if got, want := countLegacyAnonDisplayNames(ctx, t, dbConn), 0; got != want {
 		t.Errorf("[scenario 1b] rows matching anon-%% = %d, want %d (petname path should win)", got, want)
 	}
 
@@ -140,18 +140,18 @@ func TestAnonymous_Integration(t *testing.T) {
 
 	// Scenario 4: an anonymous player can PATCH /api/players/me to set
 	// their own display name. The row stays the same (still anonymous,
-	// session cookie unchanged); only the username changes.
-	if got, want := patchPlayerUsername(ctx, t, client1, baseURL, "named-one"), http.StatusOK; got != want {
+	// session cookie unchanged); only the displayName changes.
+	if got, want := patchPlayerDisplayName(ctx, t, client1, baseURL, "named-one"), http.StatusOK; got != want {
 		t.Errorf("[scenario 4] PATCH /api/players/me status = %d, want %d", got, want)
 	}
 
-	// Scenario 4b: GET /api/players/me reflects the new username and the
+	// Scenario 4b: GET /api/players/me reflects the new displayName and the
 	// row is still anonymous (no password_hash) — the front-end relies
 	// on this so the claim affordances disappear after a successful
 	// PATCH but the flow keeps working without forcing a login.
 	gotMe := fetchPlayerMe(ctx, t, client1, baseURL)
-	if got, want := gotMe.Username, "named-one"; got != want {
-		t.Errorf("[scenario 4b] /me username = %q, want %q", got, want)
+	if got, want := gotMe.DisplayName, "named-one"; got != want {
+		t.Errorf("[scenario 4b] /me displayName = %q, want %q", got, want)
 	}
 	if got, want := gotMe.IsAnonymous, true; got != want {
 		t.Errorf("[scenario 4b] /me isAnonymous = %v, want %v", got, want)
@@ -174,15 +174,15 @@ func TestAnonymous_Integration(t *testing.T) {
 	}
 
 	// Scenario 5: a second anonymous player trying to claim the same
-	// username gets 409. The first player keeps "named-one".
-	if got, want := patchPlayerUsername(ctx, t, clientA, baseURL, "named-one"), http.StatusConflict; got != want {
+	// displayName gets 409. The first player keeps "named-one".
+	if got, want := patchPlayerDisplayName(ctx, t, clientA, baseURL, "named-one"), http.StatusConflict; got != want {
 		t.Errorf("[scenario 5] colliding PATCH status = %d, want %d", got, want)
 	}
 
-	// Scenario 6: whitespace-only username is rejected as 400 by the
+	// Scenario 6: whitespace-only displayName is rejected as 400 by the
 	// server-side trim — the front-end trims too, but the contract is
 	// what the integration test pins down.
-	if got, want := patchPlayerUsername(ctx, t, clientA, baseURL, "   "), http.StatusBadRequest; got != want {
+	if got, want := patchPlayerDisplayName(ctx, t, clientA, baseURL, "   "), http.StatusBadRequest; got != want {
 		t.Errorf("[scenario 6] whitespace PATCH status = %d, want %d", got, want)
 	}
 }
@@ -262,7 +262,7 @@ func fetchAPIQuizzes(ctx context.Context, t *testing.T, client *http.Client, bas
 // double-pins the wire contract the front-end consumes.
 type meResponse struct {
 	ID              int64  `json:"id"`
-	Username        string `json:"displayName"`
+	DisplayName     string `json:"displayName"`
 	IsAnonymous     bool   `json:"isAnonymous"`
 	HasCustomName   bool   `json:"hasCustomName"`
 	IsAuthenticated bool   `json:"isAuthenticated"`
@@ -298,15 +298,15 @@ func fetchPlayerMe(ctx context.Context, t *testing.T, client *http.Client, baseU
 	return out
 }
 
-// patchPlayerUsername issues PATCH /api/players/me with the given username
+// patchPlayerDisplayName issues PATCH /api/players/me with the given displayName
 // on the supplied client and returns the response status code. Body close
 // errors are reported but don't fail the test.
-func patchPlayerUsername(
-	ctx context.Context, t *testing.T, client *http.Client, baseURL, username string,
+func patchPlayerDisplayName(
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, displayName string,
 ) int {
 	t.Helper()
 
-	body := fmt.Sprintf(`{"displayName": %q}`, username)
+	body := fmt.Sprintf(`{"displayName": %q}`, displayName)
 	req, err := http.NewRequestWithContext(
 		ctx, http.MethodPatch, baseURL+"/api/players/me", strings.NewReader(body),
 	)
@@ -344,11 +344,11 @@ func countAnonymousPlayers(ctx context.Context, t *testing.T, dbConn *sql.DB) in
 	return n
 }
 
-// countLegacyAnonUsernames returns the number of anonymous rows whose
-// username still uses the legacy "anon-<xid>" prefix. After #165, fresh
+// countLegacyAnonDisplayNames returns the number of anonymous rows whose
+// displayName still uses the legacy "anon-<xid>" prefix. After #165, fresh
 // anonymous players get a petname-style name; a non-zero count here
 // indicates the xid fallback path ran (or the migration did not flow).
-func countLegacyAnonUsernames(ctx context.Context, t *testing.T, dbConn *sql.DB) int {
+func countLegacyAnonDisplayNames(ctx context.Context, t *testing.T, dbConn *sql.DB) int {
 	t.Helper()
 
 	var n int

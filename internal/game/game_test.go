@@ -1243,20 +1243,20 @@ func TestService_CalculateScore_EarlyAnswerClamps(t *testing.T) {
 // makeAnswer produces a flat LeaderboardAnswer answered at the start of the
 // 10s answer window (matching defaultExpiration) so CalculateScore yields a
 // predictable maxPoints (1000) for a correct answer or 0 for a wrong one.
-func makeAnswer(playerID int64, username string, correct bool) *LeaderboardAnswer {
-	return makeAnswerCompleted(playerID, username, correct, true)
+func makeAnswer(playerID int64, displayName string, correct bool) *LeaderboardAnswer {
+	return makeAnswerCompleted(playerID, displayName, correct, true)
 }
 
 // makeAnswerCompleted is the long-form factory used by the #244
 // in-progress test cases. The default makeAnswer keeps IsCompleted=true
 // so existing tests don't need to know about the flag.
-func makeAnswerCompleted(playerID int64, username string, correct, isCompleted bool) *LeaderboardAnswer {
+func makeAnswerCompleted(playerID int64, displayName string, correct, isCompleted bool) *LeaderboardAnswer {
 	const window = 10 * time.Second
 	start := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 
 	return &LeaderboardAnswer{
 		PlayerID:          playerID,
-		DisplayName:       username,
+		DisplayName:       displayName,
 		QuestionStartedAt: start,
 		QuestionExpiredAt: start.Add(window),
 		AnsweredAt:        start,
@@ -1502,14 +1502,14 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 		}
 	})
 
-	t.Run("breaks ties by ascending username", func(t *testing.T) {
+	t.Run("breaks ties by ascending displayName", func(t *testing.T) {
 		t.Parallel()
 
 		svc := NewService(
 			stubStore{
 				listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*LeaderboardAnswer, error) {
 					// Three players with identical 1000-point runs but
-					// usernames intentionally out of order.
+					// displayNames intentionally out of order.
 					return []*LeaderboardAnswer{
 						makeAnswer(1, "charlie", true),
 						makeAnswer(2, "alice", true),
@@ -1537,7 +1537,7 @@ func TestService_GetQuizLeaderboard(t *testing.T) {
 		}
 		wantNames := []string{"alice", "bob", "charlie"}
 		if diff := cmp.Diff(wantNames, gotNames); diff != "" {
-			t.Errorf("username order mismatch (-want +got):\n%s", diff)
+			t.Errorf("displayName order mismatch (-want +got):\n%s", diff)
 		}
 	})
 

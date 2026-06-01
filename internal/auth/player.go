@@ -6,11 +6,11 @@ import (
 	"time"
 )
 
-// ErrPlayerNotFound is returned when a player is not found by username.
+// ErrPlayerNotFound is returned when a player is not found by displayName.
 var ErrPlayerNotFound = errors.New("player not found")
 
-// ErrUsernameTaken is returned when a username is already in use.
-var ErrUsernameTaken = errors.New("username taken")
+// ErrDisplayNameTaken is returned when a displayName is already in use.
+var ErrDisplayNameTaken = errors.New("displayName taken")
 
 // ErrEmailTaken is returned when an email is already in use.
 var ErrEmailTaken = errors.New("email taken")
@@ -19,19 +19,19 @@ var ErrEmailTaken = errors.New("email taken")
 // already has a password_hash set, so it cannot be upgraded again.
 var ErrPlayerAlreadyClaimed = errors.New("player already claimed")
 
-// ErrPlayerNotAnonymous is returned by UpdatePlayerUsername when the target
+// ErrPlayerNotAnonymous is returned by UpdatePlayerDisplayName when the target
 // row exists but already carries a non-anonymous identity (password_hash IS
-// NOT NULL). Username-only changes are reserved for anonymous rows; a
+// NOT NULL). DisplayName-only changes are reserved for anonymous rows; a
 // credentialled account must change its name through a different flow.
 var ErrPlayerNotAnonymous = errors.New("player is not anonymous")
 
-// ErrUsernameEmpty is returned by UpdatePlayerUsername when the supplied
-// username trims to the empty string. Surfaced as a store-level sentinel
+// ErrDisplayNameEmpty is returned by UpdatePlayerDisplayName when the supplied
+// displayName trims to the empty string. Surfaced as a store-level sentinel
 // so callers can map it to a 400 without re-validating themselves.
-var ErrUsernameEmpty = errors.New("username is empty")
+var ErrDisplayNameEmpty = errors.New("displayName is empty")
 
 // ErrIdentityAlreadyLinked is returned by LinkProviderIdentity when the
-// (provider, subject) pair already exists. Distinct from ErrUsernameTaken
+// (provider, subject) pair already exists. Distinct from ErrDisplayNameTaken
 // so the Google callback can distinguish a race between two concurrent
 // first-time sign-ins (handled by retrying the lookup) from a true
 // collision (handled as a 500).
@@ -87,7 +87,7 @@ func (p *Player) IsAnonymous() bool {
 }
 
 // HasCustomName reports whether the player has explicitly picked their
-// username. Anonymous rows start with HasCustomName=false (the username
+// displayName. Anonymous rows start with HasCustomName=false (the displayName
 // is an auto-generated petname); they flip to true on a successful
 // PATCH /api/players/me or via the register flow. Distinct from
 // IsAnonymous() (which is credential-level: no password): a
@@ -288,7 +288,7 @@ type AdminEntry struct {
 const (
 	AdminActionVerify             = "verify"
 	AdminActionEmailSet           = "email_set"
-	AdminActionUsernameSet        = "username_set"
+	AdminActionDisplayNameSet     = "display_name_set"
 	AdminActionPasswordSet        = "password_set"
 	AdminActionCreated            = "created"
 	AdminActionResendVerification = "resend_verification"
@@ -325,9 +325,9 @@ type AdminPlayerStore interface {
 	SetPlayerEmail(ctx context.Context, playerID int64, email string) error
 	// CreatePlayerByAdmin inserts a fresh credentialled row with
 	// email_verified_at stamped. role is fixed to 'player'. Returns
-	// ErrUsernameTaken / ErrEmailTaken on UNIQUE collisions.
+	// ErrDisplayNameTaken / ErrEmailTaken on UNIQUE collisions.
 	CreatePlayerByAdmin(
-		ctx context.Context, username, email, passwordHash string,
+		ctx context.Context, displayName, email, passwordHash string,
 	) (*Player, error)
 	// SetPlayerRole sets the role on the row identified by id (#538), so the
 	// id-based role selector can move a player to any tier. role is one of
@@ -350,10 +350,10 @@ type AdminPlayerStore interface {
 		ctx context.Context, targetPlayerID, limit int64,
 	) ([]*AdminAuditEntry, error)
 	// RenamePlayer changes the display name on the row identified by id,
-	// regardless of password_hash / email / role. Returns ErrUsernameEmpty
-	// for whitespace-only input, ErrUsernameTaken on a UNIQUE collision, and
+	// regardless of password_hash / email / role. Returns ErrDisplayNameEmpty
+	// for whitespace-only input, ErrDisplayNameTaken on a UNIQUE collision, and
 	// ErrPlayerNotFound when the id does not exist.
-	RenamePlayer(ctx context.Context, playerID int64, username string) (*Player, error)
+	RenamePlayer(ctx context.Context, playerID int64, displayName string) (*Player, error)
 	// ChangePlayerPassword atomically rotates password_hash and bumps
 	// session_version on the row identified by id. The session_version bump
 	// invalidates every other live cookie for the same account the moment
@@ -369,7 +369,7 @@ type AdminPlayerStore interface {
 // the other interface slots.
 type AdminListStore interface {
 	AdminPlayerStore
-	// ListAdmins returns every current Admin ordered by username. Empty
+	// ListAdmins returns every current Admin ordered by displayName. Empty
 	// slice when none exist yet.
 	ListAdmins(ctx context.Context) ([]*AdminEntry, error)
 }
@@ -381,7 +381,7 @@ type PlayerStore interface {
 	GetPlayerByDisplayName(ctx context.Context, displayName string) (*Player, error)
 	// GetPlayerByEmail returns the player with the given email.
 	// Returns ErrPlayerNotFound when there is no match. Used by the
-	// forgot-password flow's username-or-email lookup and the Google
+	// forgot-password flow's displayName-or-email lookup and the Google
 	// OAuth link-by-email path.
 	GetPlayerByEmail(ctx context.Context, email string) (*Player, error)
 	// GetPlayerByID returns the player with the given ID.
@@ -390,29 +390,29 @@ type PlayerStore interface {
 	// CreatePlayer creates a player with the given credentials. The
 	// store trims + lowercases the email and atomically promotes the
 	// first password-bearing registrant to admin. Returns
-	// ErrUsernameTaken / ErrEmailTaken on UNIQUE collisions.
-	CreatePlayer(ctx context.Context, username, email, passwordHash, requestedRole string) (*Player, error)
-	// CreateAnonymousPlayer creates a row with the given username, no email,
+	// ErrDisplayNameTaken / ErrEmailTaken on UNIQUE collisions.
+	CreatePlayer(ctx context.Context, displayName, email, passwordHash, requestedRole string) (*Player, error)
+	// CreateAnonymousPlayer creates a row with the given displayName, no email,
 	// no password_hash, and role = "player". Used by EnsurePlayer to back a
 	// brand-new visitor with a real row before they can play. The caller
-	// generates the username (commonly a GeneratePetname result, with an
+	// generates the displayName (commonly a GeneratePetname result, with an
 	// xid-backed "anon-<xid>" form as the last-resort fallback) so the
 	// store stays agnostic about the format.
-	// Returns ErrUsernameTaken when the username collides on the UNIQUE
+	// Returns ErrDisplayNameTaken when the displayName collides on the UNIQUE
 	// index; the petname caller treats this as a retry signal.
-	CreateAnonymousPlayer(ctx context.Context, username string) (*Player, error)
+	CreateAnonymousPlayer(ctx context.Context, displayName string) (*Player, error)
 	// ClaimPlayer upgrades an anonymous row (password_hash IS NULL) in place
 	// with the supplied credentials and requested role. The store mirrors the
 	// "first password-bearing registrant becomes admin" promotion logic of
 	// CreatePlayer so the rule still triggers when a visitor's very first
 	// sign-up flows through the claim path.
 	// Returns ErrPlayerAlreadyClaimed when the target row already has a
-	// password_hash, ErrUsernameTaken when the requested username collides
+	// password_hash, ErrDisplayNameTaken when the requested displayName collides
 	// with another row, and ErrPlayerNotFound when the id does not exist.
 	ClaimPlayer(
 		ctx context.Context,
 		playerID int64,
-		username, email, passwordHash, requestedRole string,
+		displayName, email, passwordHash, requestedRole string,
 	) (*Player, error)
 	// SetPlayerPasswordHash overwrites the password_hash on the row identified
 	// by email. Used by the operator-only -reset-password tool to rotate a
@@ -433,8 +433,8 @@ type PlayerStore interface {
 	// in place. The session cookie keeps pointing at the same row, so the
 	// caller stays "logged in" as the same player; the player remains
 	// anonymous after the rename.
-	// Returns ErrUsernameEmpty when the supplied display name trims to the empty
-	// string, ErrUsernameTaken when the requested display name is already in use,
+	// Returns ErrDisplayNameEmpty when the supplied display name trims to the empty
+	// string, ErrDisplayNameTaken when the requested display name is already in use,
 	// ErrPlayerNotAnonymous when the target row already carries a
 	// password_hash (i.e. it is no longer a valid target for a display-name-only
 	// update), and ErrPlayerNotFound when no row matches the id.
@@ -444,8 +444,8 @@ type PlayerStore interface {
 	// endpoint so authenticated players (password, OAuth, admin) can
 	// update their own name; anonymous rows still go through
 	// UpdatePlayerDisplayName.
-	// Returns ErrUsernameEmpty for whitespace-only input, ErrUsernameTaken
+	// Returns ErrDisplayNameEmpty for whitespace-only input, ErrDisplayNameTaken
 	// on a UNIQUE collision, and ErrPlayerNotFound when the id does not
 	// exist.
-	RenamePlayer(ctx context.Context, playerID int64, username string) (*Player, error)
+	RenamePlayer(ctx context.Context, playerID int64, displayName string) (*Player, error)
 }

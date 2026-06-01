@@ -165,11 +165,11 @@ func HandlePlayerSetEmail(
 	})
 }
 
-// HandlePlayerSetUsername handles POST /admin/players/{playerID}/username.
+// HandlePlayerSetDisplayName handles POST /admin/players/{playerID}/display-name.
 // Admin only (gated by RequireAdmin at the route). Renames the target row to
 // the supplied display name; the store enforces the empty / taken sentinels so
 // the handler only maps them to flashes.
-func HandlePlayerSetUsername(
+func HandlePlayerSetDisplayName(
 	logger *slog.Logger,
 	store auth.AdminPlayerStore,
 	flash *auth.SignedFlash,
@@ -190,16 +190,16 @@ func HandlePlayerSetUsername(
 		switch {
 		case err == nil:
 			writeAudit(r.Context(), logger, store, actor.ID, playerID,
-				auth.AdminActionUsernameSet, map[string]string{"new_username": name})
+				auth.AdminActionDisplayNameSet, map[string]string{"new_displayName": name})
 			flash.SetNotice(w, "Display name updated.")
-		case errors.Is(err, auth.ErrUsernameEmpty):
+		case errors.Is(err, auth.ErrDisplayNameEmpty):
 			flash.SetError(w, "Enter a display name.", 0)
-		case errors.Is(err, auth.ErrUsernameTaken):
+		case errors.Is(err, auth.ErrDisplayNameTaken):
 			flash.SetError(w, "That display name is already taken.", 0)
 		case errors.Is(err, auth.ErrPlayerNotFound):
 			flash.SetError(w, "Player not found.", 0)
 		default:
-			logger.ErrorContext(r.Context(), "error setting player username", slog.Any("err", err))
+			logger.ErrorContext(r.Context(), "error setting player displayName", slog.Any("err", err))
 			flash.SetError(w, "Could not update display name. Try again.", 0)
 		}
 		redirectToPlayerDetail(w, r, playerID)
@@ -514,7 +514,7 @@ func renderCreatePlayerError(
 	status := http.StatusInternalServerError
 	msg := "Could not create player. Try again."
 	switch {
-	case errors.Is(err, auth.ErrUsernameTaken):
+	case errors.Is(err, auth.ErrDisplayNameTaken):
 		status = http.StatusConflict
 		msg = "That display name is already taken."
 	case errors.Is(err, auth.ErrEmailTaken):

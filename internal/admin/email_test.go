@@ -249,7 +249,7 @@ func TestHandleEmailGet_RendersStatusAndLog(t *testing.T) {
 func TestHandleEmailGet_NeverExposesCredentials(t *testing.T) {
 	t.Parallel()
 
-	// StatusView intentionally lacks Username / Password fields, but
+	// StatusView intentionally lacks DisplayName / Password fields, but
 	// pin the rendered body just in case a future change widens the
 	// struct: a credential must never reach the template.
 	status := mailer.StatusView{

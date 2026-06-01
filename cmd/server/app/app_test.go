@@ -69,9 +69,9 @@ func TestCheck_BadDBURI_ReturnsError(t *testing.T) {
 const seedOldPassword = "old-correct-battery"
 
 // seedPlayer opens the dev DB at dbURI and inserts a player with the given
-// username and the shared [seedOldPassword]. Returns the original hash so
+// displayName and the shared [seedOldPassword]. Returns the original hash so
 // tests can assert it actually changed after ResetPassword.
-func seedPlayer(t *testing.T, dbURI, username string) string {
+func seedPlayer(t *testing.T, dbURI, displayName string) string {
 	t.Helper()
 
 	hashed, err := auth.HashPassword(seedOldPassword)
@@ -95,8 +95,8 @@ func seedPlayer(t *testing.T, dbURI, username string) string {
 	players := store.NewPlayerStore(conn, slog.Default())
 	if _, err := players.CreatePlayer(
 		t.Context(),
-		username,
-		username+"@example.test",
+		displayName,
+		displayName+"@example.test",
 		hashed,
 		auth.RolePlayer,
 	); err != nil {
@@ -108,7 +108,7 @@ func seedPlayer(t *testing.T, dbURI, username string) string {
 
 // fetchSeededPlayer re-opens dbURI and returns the seeded "alice" row. Used
 // by "no-write" assertions to confirm the on-disk hash was not overwritten
-// when a failure path triggered before the UPDATE. The username is fixed
+// when a failure path triggered before the UPDATE. The displayName is fixed
 // because every call site asserts against the same seeded user; passing it
 // in just made unparam noisy.
 func fetchSeededPlayer(t *testing.T, dbURI string) *auth.Player {
@@ -166,11 +166,11 @@ func TestPromoteAdmin_MinimalEnv_NoSessionKey(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	const (
-		username = "alice"
-		email    = "alice@example.test"
+		displayName = "alice"
+		email       = "alice@example.test"
 	)
-	seedPlayer(t, dbURI, username)
-	demoteToHost(t, dbURI, username)
+	seedPlayer(t, dbURI, displayName)
+	demoteToHost(t, dbURI, displayName)
 
 	var stdout, stderr bytes.Buffer
 	if err := PromoteAdmin(t.Context(), minimalEnvFor(dbURI), &stdout, &stderr, email); err != nil {
@@ -192,11 +192,11 @@ func TestResetPassword_MinimalEnv_NoSessionKey(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	const (
-		username    = "alice"
+		displayName = "alice"
 		email       = "alice@example.test"
 		newPassword = "new-correct-battery"
 	)
-	originalHash := seedPlayer(t, dbURI, username)
+	originalHash := seedPlayer(t, dbURI, displayName)
 
 	stdin := strings.NewReader(newPassword + "\n" + newPassword + "\n")
 	var stdout, stderr bytes.Buffer
@@ -220,11 +220,11 @@ func TestResetPassword_HappyPath_RotatesHash(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	const (
-		username    = "alice"
+		displayName = "alice"
 		email       = "alice@example.test"
 		newPassword = "new-correct-battery"
 	)
-	originalHash := seedPlayer(t, dbURI, username)
+	originalHash := seedPlayer(t, dbURI, displayName)
 
 	stdin := strings.NewReader(newPassword + "\n" + newPassword + "\n")
 	var stdout, stderr bytes.Buffer
@@ -296,16 +296,16 @@ func TestPromoteAdmin_HappyPath_SetsAdminRole(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	const (
-		username = "alice"
-		email    = "alice@example.test"
+		displayName = "alice"
+		email       = "alice@example.test"
 	)
 	// Seed two players: the first credentialled registrant becomes Admin
 	// automatically, so the SECOND ("bob", a Player) is the meaningful
-	// promote target. We still promote alice's row by username via the
+	// promote target. We still promote alice's row by displayName via the
 	// fixed-"alice" fetch helper; demote it to Host first so the promote is
 	// a real transition rather than a no-op.
-	seedPlayer(t, dbURI, username)
-	demoteToHost(t, dbURI, username)
+	seedPlayer(t, dbURI, displayName)
+	demoteToHost(t, dbURI, displayName)
 
 	var stdout, stderr bytes.Buffer
 	if err := PromoteAdmin(t.Context(), envFor(dbURI), &stdout, &stderr, email); err != nil {
@@ -350,7 +350,7 @@ func TestPromoteAdmin_BlankEmail_ReturnsError(t *testing.T) {
 // demoteToHost flips the seeded player's role to Host so a subsequent
 // PromoteAdmin is a real transition rather than a no-op against the
 // first-registrant Admin promotion.
-func demoteToHost(t *testing.T, dbURI, username string) {
+func demoteToHost(t *testing.T, dbURI, displayName string) {
 	t.Helper()
 
 	conn, err := sql.Open("sqlite", dbURI)
@@ -363,7 +363,7 @@ func demoteToHost(t *testing.T, dbURI, username string) {
 		}
 	})
 	if _, err := conn.ExecContext(
-		t.Context(), "UPDATE players SET role = ? WHERE display_name = ?", auth.RoleHost, username,
+		t.Context(), "UPDATE players SET role = ? WHERE display_name = ?", auth.RoleHost, displayName,
 	); err != nil {
 		t.Fatalf("demote update err = %v, want nil", err)
 	}

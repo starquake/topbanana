@@ -268,7 +268,7 @@ func TestGoogleLogin_CallbackRejectsEmptySubject(t *testing.T) {
 // continuity-across-sign-in rule: a visitor who has been playing
 // anonymously (session cookie pointing at an auto-petname row) and
 // then signs in with Google for the first time keeps that same
-// player_id and username. No new row is created; the existing row
+// player_id and displayName. No new row is created; the existing row
 // just gains the verified email and an identity link.
 func TestGoogleLogin_CallbackClaimsAnonymousSession(t *testing.T) {
 	t.Parallel()
@@ -512,10 +512,10 @@ func lookupPlayerIDByEmail(t *testing.T, dbURI, email string) int64 {
 	return id
 }
 
-// seedPlayerWithEmail inserts a row with the given username + email
+// seedPlayerWithEmail inserts a row with the given displayName + email
 // directly through SQL so the linking test has an existing player to
 // attach to without going through the register form.
-func seedPlayerWithEmail(t *testing.T, dbURI, username, email string) {
+func seedPlayerWithEmail(t *testing.T, dbURI, displayName, email string) {
 	t.Helper()
 
 	db, err := sql.Open("sqlite", dbURI)
@@ -530,7 +530,7 @@ func seedPlayerWithEmail(t *testing.T, dbURI, username, email string) {
 
 	if _, err := db.ExecContext(t.Context(),
 		`INSERT INTO players (display_name, email, role, display_name_claimed) VALUES (?, ?, 'player', 1)`,
-		username, email,
+		displayName, email,
 	); err != nil {
 		t.Fatalf("seed insert err = %v, want nil", err)
 	}

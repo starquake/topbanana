@@ -96,7 +96,7 @@ func seedHomeDB(t *testing.T) homeSeed {
 		t.Fatalf("CreatePlayer bob err = %v, want nil", err)
 	}
 	// Anonymous player - must not surface in the active list because the
-	// query filters on username_claimed = 1.
+	// query filters on displayName_claimed = 1.
 	ghost, err := players.CreateAnonymousPlayer(t.Context(), "ghost-petname")
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer ghost err = %v, want nil", err)
@@ -108,7 +108,7 @@ func seedHomeDB(t *testing.T) homeSeed {
 	// bob: quiz1 = 1 finished total
 	finishGameFor(t, games, bob.ID, quiz1, quiz1.ID)
 	// ghost: quiz1 = 1 finished, bumps quiz1 play count to 3 but must
-	// NOT show up in the active list (unclaimed username).
+	// NOT show up in the active list (unclaimed displayName).
 	finishGameFor(t, games, ghost.ID, quiz1, quiz1.ID)
 
 	// In-progress game on quiz1 by a fresh anonymous bystander: created,
@@ -196,7 +196,7 @@ func TestHomeStore_ListMostActivePlayers(t *testing.T) {
 		t.Fatalf("ListMostActivePlayers err = %v, want nil", err)
 	}
 	// Anonymous "ghost-petname" finished a game but must be filtered out
-	// because username_claimed = 0; only alice and bob remain.
+	// because displayName_claimed = 0; only alice and bob remain.
 	if got, want := len(rows), 2; got != want {
 		t.Fatalf("len(rows) = %d, want %d (rows=%+v)", got, want, rows)
 	}
@@ -214,7 +214,7 @@ func TestHomeStore_ListMostActivePlayers(t *testing.T) {
 		t.Errorf("rows[1].FinishedCount = %d, want %d", got, want)
 	}
 
-	// Defensive: the anonymous player's auto-petname username must not
+	// Defensive: the anonymous player's auto-petname displayName must not
 	// appear in any returned row.
 	for _, r := range rows {
 		if r.DisplayName == "ghost-petname" {

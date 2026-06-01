@@ -40,8 +40,8 @@ func TestLogin_UnverifiedEmail_BlocksAndResends(t *testing.T) {
 	defer dbConn.Close() //nolint:errcheck // cleanup.
 
 	const (
-		username = "login-unverified"
-		password = "correctbattery-unv-13"
+		displayName = "login-unverified"
+		password    = "correctbattery-unv-13"
 	)
 
 	// Register through the real /register handler so the resulting row
@@ -49,13 +49,13 @@ func TestLogin_UnverifiedEmail_BlocksAndResends(t *testing.T) {
 	// email_verified_at stamp and one verify-token row.
 	regClient := authClient(t)
 	regCSRF := fetchCSRFToken(ctx, t, regClient, srv.BaseURL+"/register")
-	registerResp := postRegister(ctx, t, regClient, srv.BaseURL, regCSRF, username, password)
+	registerResp := postRegister(ctx, t, regClient, srv.BaseURL, regCSRF, displayName, password)
 	registerResp.Body.Close() //nolint:errcheck // cleanup.
 	if got, want := registerResp.StatusCode, http.StatusOK; got != want {
 		t.Fatalf("register status = %d, want %d", got, want)
 	}
 
-	player, err := stores.Players.GetPlayerByDisplayName(ctx, username)
+	player, err := stores.Players.GetPlayerByDisplayName(ctx, displayName)
 	if err != nil {
 		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
@@ -72,7 +72,7 @@ func TestLogin_UnverifiedEmail_BlocksAndResends(t *testing.T) {
 	// cookie is unambiguous.
 	loginClient := authClient(t)
 	loginCSRF := fetchCSRFToken(ctx, t, loginClient, srv.BaseURL+"/login")
-	resp := postLoginFormFull(ctx, t, loginClient, srv.BaseURL, loginCSRF, username+"@example.test", password)
+	resp := postLoginFormFull(ctx, t, loginClient, srv.BaseURL, loginCSRF, displayName+"@example.test", password)
 	defer resp.Body.Close() //nolint:errcheck // cleanup.
 
 	if got, want := resp.StatusCode, http.StatusOK; got != want {
@@ -85,7 +85,7 @@ func TestLogin_UnverifiedEmail_BlocksAndResends(t *testing.T) {
 	if got, want := string(body), "verify your email"; !strings.Contains(got, want) {
 		t.Errorf("body missing verify banner; body=%.300q", got)
 	}
-	if got, want := string(body), username+"@example.test"; !strings.Contains(got, want) {
+	if got, want := string(body), displayName+"@example.test"; !strings.Contains(got, want) {
 		t.Errorf("body missing recipient address; body=%.300q", got)
 	}
 	for _, c := range resp.Cookies() {
@@ -120,13 +120,13 @@ func waitForVerifyTokenCount(ctx context.Context, t *testing.T, dbConn *sql.DB, 
 // body, and cookies themselves. After #574 a successful register
 // renders the confirmation page with 200 and no session cookie.
 func postRegister(
-	ctx context.Context, t *testing.T, client *http.Client, baseURL, csrfToken, username, password string,
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, csrfToken, displayName, password string,
 ) *http.Response {
 	t.Helper()
 
 	form := url.Values{}
-	form.Add("display_name", username)
-	form.Add("email", username+"@example.test")
+	form.Add("display_name", displayName)
+	form.Add("email", displayName+"@example.test")
 	form.Add("password", password)
 	form.Add("password_confirm", password)
 	form.Add("csrf_token", csrfToken)

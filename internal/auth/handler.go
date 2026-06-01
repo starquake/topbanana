@@ -223,7 +223,7 @@ func (rr registerRenderers) renderPending(w http.ResponseWriter, r *http.Request
 // claimOrCreatePlayer. ErrEmailTaken is account-existence-opaque: a
 // distinct 409 would turn the form into an enumeration oracle, so it
 // responds exactly as the fresh-signup branch does and notifies the real
-// owner out of band instead (#573). ErrUsernameTaken re-renders the form
+// owner out of band instead (#573). ErrDisplayNameTaken re-renders the form
 // with a 409 - a display name is a public handle, not an enumeration
 // secret. Anything else is a 500.
 func handleRegisterError(
@@ -239,7 +239,7 @@ func handleRegisterError(
 	case errors.Is(err, ErrEmailTaken):
 		dispatchRegisterExisting(r.Context(), logger, deps, input.CleanedEmail)
 		renderers.renderPending(w, r, input.CleanedEmail)
-	case errors.Is(err, ErrUsernameTaken):
+	case errors.Is(err, ErrDisplayNameTaken):
 		renderers.form.render(w, r, http.StatusConflict, formData{
 			Title:       "Register",
 			DisplayName: input.CleanedDisplayName,
@@ -342,17 +342,17 @@ func claimOrCreatePlayer(
 	r *http.Request,
 	players PlayerStore,
 	sessions *session.Manager,
-	username, email, passwordHash, requestedRole string,
+	displayName, email, passwordHash, requestedRole string,
 ) (*Player, error) {
 	playerID, ok := sessions.PlayerID(r)
 	if !ok {
-		return createPlayerWrapped(r, players, username, email, passwordHash, requestedRole)
+		return createPlayerWrapped(r, players, displayName, email, passwordHash, requestedRole)
 	}
 
 	existing, err := players.GetPlayerByID(r.Context(), playerID)
 	if err != nil {
 		if errors.Is(err, ErrPlayerNotFound) {
-			return createPlayerWrapped(r, players, username, email, passwordHash, requestedRole)
+			return createPlayerWrapped(r, players, displayName, email, passwordHash, requestedRole)
 		}
 
 		return nil, fmt.Errorf("get player by id for claim: %w", err)
@@ -361,13 +361,13 @@ func claimOrCreatePlayer(
 		// Session already belongs to a credentialled account. Treat this as a
 		// fresh registration so the new account is created independently;
 		// the existing session is replaced when the caller resets the cookie.
-		return createPlayerWrapped(r, players, username, email, passwordHash, requestedRole)
+		return createPlayerWrapped(r, players, displayName, email, passwordHash, requestedRole)
 	}
 
-	claimed, err := players.ClaimPlayer(r.Context(), playerID, username, email, passwordHash, requestedRole)
+	claimed, err := players.ClaimPlayer(r.Context(), playerID, displayName, email, passwordHash, requestedRole)
 	if err != nil {
 		if errors.Is(err, ErrPlayerAlreadyClaimed) || errors.Is(err, ErrPlayerNotFound) {
-			return createPlayerWrapped(r, players, username, email, passwordHash, requestedRole)
+			return createPlayerWrapped(r, players, displayName, email, passwordHash, requestedRole)
 		}
 
 		return nil, fmt.Errorf("claim player: %w", err)
@@ -381,9 +381,9 @@ func claimOrCreatePlayer(
 func createPlayerWrapped(
 	r *http.Request,
 	players PlayerStore,
-	username, email, passwordHash, requestedRole string,
+	displayName, email, passwordHash, requestedRole string,
 ) (*Player, error) {
-	p, err := players.CreatePlayer(r.Context(), username, email, passwordHash, requestedRole)
+	p, err := players.CreatePlayer(r.Context(), displayName, email, passwordHash, requestedRole)
 	if err != nil {
 		return nil, fmt.Errorf("create player: %w", err)
 	}
@@ -740,10 +740,10 @@ func HandleLogout(sessions *session.Manager) http.Handler {
 
 // registerInput is the result of validateRegisterInput.
 type registerInput struct {
-	// CleanedDisplayName is the username, whitespace-trimmed. Falls back to
+	// CleanedDisplayName is the displayName, whitespace-trimmed. Falls back to
 	// a [GeneratePetname] result when the input trims to "" so the post-
 	// #446 register flow accepts a blank display name and still produces
-	// a non-empty username for the schema's NOT NULL guard.
+	// a non-empty displayName for the schema's NOT NULL guard.
 	CleanedDisplayName string
 	// CleanedEmail is the email, whitespace-trimmed and lowercased so
 	// case variants cannot create duplicate accounts.
@@ -754,12 +754,12 @@ type registerInput struct {
 	OK bool
 }
 
-// validateRegisterInput trims the username and email, lowercases the
-// email, and validates the inputs. A blank username falls back to
+// validateRegisterInput trims the displayName and email, lowercases the
+// email, and validates the inputs. A blank displayName falls back to
 // [GeneratePetname] so register-with-just-email works after #446 made
 // the display name optional; email is the credential identifier.
-func validateRegisterInput(username, email, password, passwordConfirm string) registerInput {
-	cleanedDisplayName := strings.TrimSpace(username)
+func validateRegisterInput(displayName, email, password, passwordConfirm string) registerInput {
+	cleanedDisplayName := strings.TrimSpace(displayName)
 	if cleanedDisplayName == "" {
 		cleanedDisplayName = GeneratePetname()
 	}

@@ -1,9 +1,9 @@
 // Package profile renders the signed-in player's profile page at
 // GET /profile and handles the rename submission at POST
-// /profile/username (#410). The page is the future home for
+// /profile/display-name (#410). The page is the future home for
 // account-level controls: email change (depends on #111), password
 // change (depends on #112), linked OAuth identities, etc. Today it
-// hosts the username editor only; everything else is scoped out of
+// hosts the displayName editor only; everything else is scoped out of
 // the initial cut.
 //
 // Authorisation lives entirely in auth.RequireAuthenticated upstream
@@ -27,7 +27,7 @@ import (
 )
 
 // maxFormBodySize caps the rename POST body. 16 KiB is generous for
-// a single username field + csrf token; mirrors the pattern in
+// a single displayName field + csrf token; mirrors the pattern in
 // internal/auth/handler.go.
 const maxFormBodySize = 16 * 1024
 
@@ -68,17 +68,17 @@ func HandleProfile(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
 	})
 }
 
-// HandleProfileUsername returns the [http.Handler] for POST
-// /profile/username. Parses the form, calls RenamePlayer, and
-// re-renders the page with either the new username + a success
-// banner or the old username + an error banner.
+// HandleProfileDisplayName returns the [http.Handler] for POST
+// /profile/display-name. Parses the form, calls RenamePlayer, and
+// re-renders the page with either the new displayName + a success
+// banner or the old displayName + an error banner.
 //
-// The store enforces the UNIQUE-on-username constraint atomically,
+// The store enforces the UNIQUE-on-displayName constraint atomically,
 // so a concurrent rename to the same target by another player
-// produces a clean ErrUsernameTaken without any application-side
-// race. ErrUsernameEmpty is mapped to a 400 with the same form;
-// ErrUsernameTaken to a 409. Anything else is a 500.
-func HandleProfileUsername(
+// produces a clean ErrDisplayNameTaken without any application-side
+// race. ErrDisplayNameEmpty is mapped to a 400 with the same form;
+// ErrDisplayNameTaken to a 409. Anything else is a 500.
+func HandleProfileDisplayName(
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
 	players auth.PlayerStore,
@@ -141,7 +141,7 @@ func renderRenameError(
 	err error,
 ) {
 	switch {
-	case errors.Is(err, auth.ErrUsernameEmpty):
+	case errors.Is(err, auth.ErrDisplayNameEmpty):
 		logger.InfoContext(r.Context(), "profile rename rejected: empty name",
 			slog.Int64("player_id", playerID))
 		render.render(w, r, http.StatusBadRequest, pageData{
@@ -149,7 +149,7 @@ func renderRenameError(
 			DisplayName: currentDisplayName,
 			Message:     "Display name is required.",
 		})
-	case errors.Is(err, auth.ErrUsernameTaken):
+	case errors.Is(err, auth.ErrDisplayNameTaken):
 		logger.InfoContext(r.Context(), "profile rename rejected: name taken",
 			slog.Int64("player_id", playerID), slog.String("attempted", attempted))
 		render.render(w, r, http.StatusConflict, pageData{

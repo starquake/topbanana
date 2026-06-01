@@ -100,7 +100,7 @@ func lookupAnonPlayer(ctx context.Context, t *testing.T, players auth.PlayerStor
 	// The seed admin is always id=1 and the destination is id=2 in
 	// this test's narrow universe; the anonymous row is therefore
 	// id=3 (or higher if the test grows). Probe by ascending id
-	// until we hit a row whose username is not in the excluded set.
+	// until we hit a row whose displayName is not in the excluded set.
 	for id := int64(2); id <= 20; id++ {
 		p, err := players.GetPlayerByID(ctx, id)
 		if err != nil {
@@ -119,17 +119,17 @@ func lookupAnonPlayer(ctx context.Context, t *testing.T, players auth.PlayerStor
 // loginAnonAsDest POSTs the credentials with the anonymous client's
 // jar carrying the EnsurePlayer session cookie, so the login handler
 // sees a prior anonymous session and triggers the migration. The
-// username argument is converted to "<username>@example.test" - the
+// displayName argument is converted to "<displayName>@example.test" - the
 // integration suite's convention for the email auto-assigned during
 // registration, and the post-#446 login credential.
-func loginAnonAsDest(ctx context.Context, t *testing.T, client *http.Client, baseURL, username, password string) {
+func loginAnonAsDest(ctx context.Context, t *testing.T, client *http.Client, baseURL, displayName, password string) {
 	t.Helper()
 
 	csrfToken := primeLoginCSRF(ctx, t, client, baseURL)
 
 	form := url.Values{
 		"csrf_token": {csrfToken},
-		"email":      {username + "@example.test"},
+		"email":      {displayName + "@example.test"},
 		"password":   {password},
 	}
 	req, err := http.NewRequestWithContext(

@@ -11,22 +11,22 @@ import { registerAdmin, registerForPending, login, createQuizWithQuestions, mark
 // becomes admin" slot may already be taken by another spec in the same
 // worker), mirroring claim.spec.ts's authenticated-player test.
 test('signed-in player can reach /profile via the account link on the play SPA', async ({ page, browserName }) => {
-  const username = `e2e-pregame-authn-${browserName}-${Date.now()}`;
+  const displayName = `e2e-pregame-authn-${browserName}-${Date.now()}`;
   // The hard gate (#574) means register no longer signs the player in.
   // Verify the row directly, then log in so the SPA sees an
   // authenticated, verified player.
-  await registerForPending(page, username);
-  markEmailVerified(username);
-  await login(page, username);
+  await registerForPending(page, displayName);
+  markEmailVerified(displayName);
+  await login(page, displayName);
 
   await page.goto('/client/');
 
-  // The account link shows the player's username and links to /profile.
+  // The account link shows the player's displayName and links to /profile.
   // It is gated on isAuthenticated() so an anonymous visitor never sees
   // it; the claim CTA covers that case instead.
   const accountLink = page.getByTestId('account-profile-link');
   await expect(accountLink).toBeVisible();
-  await expect(accountLink).toHaveText(username);
+  await expect(accountLink).toHaveText(displayName);
 
   // The claim CTA must stay hidden for this signed-in player — the two
   // affordances are mutually exclusive.

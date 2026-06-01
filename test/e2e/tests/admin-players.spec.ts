@@ -11,13 +11,13 @@ import { registerAdmin, PASSWORD } from './helpers';
 // is the bypass the admin-action UI is supposed to replace; using it
 // here would defeat the test).
 test('admin marks an unverified player verified via the detail view', async ({ page, context, browserName }) => {
-  const adminUsername = `e2e-mgmt-admin-${browserName}`;
-  const targetUsername = `e2e-mgmt-target-${browserName}`;
+  const adminDisplayName = `e2e-mgmt-admin-${browserName}`;
+  const targetDisplayName = `e2e-mgmt-target-${browserName}`;
 
   // Register the admin via the helper (which stamps email_verified_at
   // for the admin so /admin/* loads); the helper finishes on
   // /admin/quizzes.
-  await registerAdmin(page, adminUsername);
+  await registerAdmin(page, adminDisplayName);
 
   // Register the second player from a fresh context so the admin
   // session is preserved on the main page. The unverified player is
@@ -26,8 +26,8 @@ test('admin marks an unverified player verified via the detail view', async ({ p
   try {
     const targetPage = await targetContext.newPage();
     await targetPage.goto('/register');
-    await targetPage.locator('input[name=email]').fill(`${targetUsername}@example.test`);
-    await targetPage.locator('input[name=display_name]').fill(targetUsername);
+    await targetPage.locator('input[name=email]').fill(`${targetDisplayName}@example.test`);
+    await targetPage.locator('input[name=display_name]').fill(targetDisplayName);
     await targetPage.locator('input[name=password]').fill(PASSWORD);
     await targetPage.locator('input[name=password_confirm]').fill(PASSWORD);
     await targetPage.locator('button[type=submit]').click();
@@ -47,17 +47,17 @@ test('admin marks an unverified player verified via the detail view', async ({ p
   await expect(page.getByRole('heading', { name: 'Players' })).toBeVisible();
   // Match the target's link in the row rather than getByText, which
   // would also match the substring inside the email cell.
-  await expect(page.getByRole('link', { name: targetUsername })).toBeVisible();
+  await expect(page.getByRole('link', { name: targetDisplayName })).toBeVisible();
 
   // Filter to the unverified tab. The target appears; the admin row does not.
   await page.getByRole('link', { name: /^Unverified/i }).click();
   await expect(page).toHaveURL(/\/admin\/players\?state=unverified/);
-  await expect(page.getByRole('link', { name: targetUsername })).toBeVisible();
+  await expect(page.getByRole('link', { name: targetDisplayName })).toBeVisible();
 
   // Open the target's detail view.
-  await page.getByRole('link', { name: targetUsername }).click();
+  await page.getByRole('link', { name: targetDisplayName }).click();
   await expect(page).toHaveURL(/\/admin\/players\/\d+$/);
-  await expect(page.getByRole('heading', { name: targetUsername })).toBeVisible();
+  await expect(page.getByRole('heading', { name: targetDisplayName })).toBeVisible();
 
   // Confirm before the click because the form's onsubmit handler asks.
   page.once('dialog', async (dialog) => {
@@ -77,5 +77,5 @@ test('admin marks an unverified player verified via the detail view', async ({ p
 
   // Walk back to the unverified tab and confirm the target row is gone.
   await page.goto('/admin/players?state=unverified');
-  await expect(page.getByRole('link', { name: targetUsername })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: targetDisplayName })).toHaveCount(0);
 });

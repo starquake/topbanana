@@ -10,7 +10,7 @@ const PETNAME_PATTERN = /^[A-Z][a-z]+-[A-Z][a-z]+-[A-Z][a-z]+$/;
 test('start screen shows a Playing as card with an auto-generated petname for a fresh anonymous visitor', async ({ page }) => {
   // Playwright's default per-test context has fresh cookies, so navigating
   // to /client/ triggers EnsurePlayer to mint a new anonymous row whose
-  // username is the generated petname.
+  // displayName is the generated petname.
   await page.goto('/client/');
 
   // Two `.claim-cta` blocks live in the DOM at once — start-screen and
@@ -166,19 +166,19 @@ test('Change your name modal pre-fills the input with the current display name',
 });
 
 // Test 5 — authenticated players never see the claim CTA (#409). Their
-// username is stable and changes go through the future profile page
+// displayName is stable and changes go through the future profile page
 // (#410), so the in-game prompt would be noise. Registers as a plain
 // player rather than relying on registerAdmin so the test is robust
 // to ordering — other tests in the same e2e worker may have already
 // claimed the "first registrant becomes admin" slot.
 test('signed-in player does not see the claim-name CTA on the player client', async ({ page, browserName }) => {
-  const username = `e2e-claim-authn-${browserName}-${Date.now()}`;
+  const displayName = `e2e-claim-authn-${browserName}-${Date.now()}`;
   // The hard gate (#574) means register no longer signs the player in.
   // Verify the row directly, then log in so the client sees an
   // authenticated player.
-  await registerForPending(page, username);
-  markEmailVerified(username);
-  await login(page, username);
+  await registerForPending(page, displayName);
+  markEmailVerified(displayName);
+  await login(page, displayName);
 
   await page.goto('/client/');
 

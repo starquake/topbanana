@@ -101,7 +101,7 @@
                  one. Hidden during gameplay (gameId && !finished) so
                  the player's attention stays on the question. Also
                  hidden for authenticated players (#409) since their
-                 username is stable and changes go through the future
+                 displayName is stable and changes go through the future
                  profile page (#410). The end-of-quiz modal is the
                  one-shot "auto-prompt" path and gates on
                  hasCustomName() instead — see #165. -->
@@ -657,7 +657,7 @@
                                 <input id="claim-name-modal" type="text" class="form-input"
                                        maxlength="64" autocomplete="off"
                                        x-init="$nextTick(() => $el.focus())"
-                                       x-model="username"
+                                       x-model="displayName"
                                        @keydown.enter.prevent="submit()"
                                        :disabled="submitting">
                             </div>

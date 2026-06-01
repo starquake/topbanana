@@ -307,7 +307,7 @@ RETURNING *;
 
 -- name: RenamePlayer :one
 -- Renames any player row by id, regardless of password / email / role.
--- The dedicated profile-page endpoint (POST /profile/username, #410)
+-- The dedicated profile-page endpoint (POST /profile/display-name, #410)
 -- uses this so authenticated players (password, OAuth, admin) can
 -- change their display name. Anonymous rows have their own narrower
 -- path via UpdatePlayerDisplayName above; this query is intentionally
@@ -316,7 +316,7 @@ RETURNING *;
 --
 -- Returns the updated row when one was affected; the store wrapper
 -- maps sql.ErrNoRows to ErrPlayerNotFound and a UNIQUE constraint
--- failure on players.display_name to ErrUsernameTaken so the handler can
+-- failure on players.display_name to ErrDisplayNameTaken so the handler can
 -- map both onto user-facing form errors.
 UPDATE players
 SET display_name = sqlc.arg('display_name'),

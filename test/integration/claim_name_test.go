@@ -39,12 +39,12 @@ func TestClaimName_NonAnonymousReturnsAlreadyClaimed(t *testing.T) {
 	}
 
 	// Register a password-bearing player and sign them in. The /register
-	// handler sets password_hash + username_claimed=1, so this row is
+	// handler sets password_hash + displayName_claimed=1, so this row is
 	// the "non-anonymous" case the PATCH must reject. The hard gate
 	// (#574) means a session only arrives after verify + login.
 	registerVerifyAndSignIn(ctx, t, client, baseURL, srv.DBURI, "claim-resident", "claim-resident-pass-123")
 
-	body, status := patchPlayerUsernameWithBody(ctx, t, client, baseURL, "different-name")
+	body, status := patchPlayerDisplayNameWithBody(ctx, t, client, baseURL, "different-name")
 	if got, want := status, http.StatusConflict; got != want {
 		t.Fatalf("PATCH status = %d, want %d (body=%q)", got, want, body)
 	}
@@ -64,15 +64,15 @@ func TestClaimName_NonAnonymousReturnsAlreadyClaimed(t *testing.T) {
 	}
 }
 
-// patchPlayerUsernameWithBody is patchPlayerUsername (in anonymous_test.go)
+// patchPlayerDisplayNameWithBody is patchPlayerDisplayName (in anonymous_test.go)
 // but also returns the response body so the caller can assert on the
 // structured error JSON introduced for #289.
-func patchPlayerUsernameWithBody(
-	ctx context.Context, t *testing.T, client *http.Client, baseURL, username string,
+func patchPlayerDisplayNameWithBody(
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, displayName string,
 ) ([]byte, int) {
 	t.Helper()
 
-	body := fmt.Sprintf(`{"displayName": %q}`, username)
+	body := fmt.Sprintf(`{"displayName": %q}`, displayName)
 	req, err := http.NewRequestWithContext(
 		ctx, http.MethodPatch, baseURL+"/api/players/me", strings.NewReader(body),
 	)

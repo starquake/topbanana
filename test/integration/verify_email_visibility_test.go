@@ -36,8 +36,8 @@ func TestVerifyEmail_SeparateConnectionStampVisibleToNextRequest(t *testing.T) {
 	// First registrant is promoted to Admin via ADMIN_EMAILS but left
 	// UNVERIFIED on purpose: we want RequireVerifiedEmail to bounce them
 	// until the separate-connection stamp lands.
-	const username = "verify-race"
-	client := registerClientUnverified(ctx, t, baseURL, srv.DBURI, username)
+	const displayName = "verify-race"
+	client := registerClientUnverified(ctx, t, baseURL, srv.DBURI, displayName)
 
 	gated := baseURL + "/admin/quizzes"
 
@@ -46,7 +46,7 @@ func TestVerifyEmail_SeparateConnectionStampVisibleToNextRequest(t *testing.T) {
 	assertBouncedToPending(ctx, t, client, gated)
 
 	// Stamp email_verified_at over a SEPARATE connection.
-	verifyPlayerEmail(ctx, t, srv.DBURI, username)
+	verifyPlayerEmail(ctx, t, srv.DBURI, displayName)
 
 	// IMMEDIATELY hit the same gated endpoint. No sleep: this is the
 	// visibility window #555 worried about. The stamp must be visible to
@@ -78,13 +78,13 @@ func assertBouncedToPending(ctx context.Context, t *testing.T, client *http.Clie
 	}
 }
 
-// registerClientUnverified registers username through /register and
+// registerClientUnverified registers displayName through /register and
 // mints a session cookie onto its jar WITHOUT stamping
 // email_verified_at, leaving the player in the signed-in-but-unverified
 // state the caller needs to drive RequireVerifiedEmail. The #574 hard
 // gate means register no longer hands out a session, so the cookie is
 // minted directly (startServer signs with the default testSessionKey).
-func registerClientUnverified(ctx context.Context, t *testing.T, baseURL, dbURI, username string) *http.Client {
+func registerClientUnverified(ctx context.Context, t *testing.T, baseURL, dbURI, displayName string) *http.Client {
 	t.Helper()
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -97,8 +97,8 @@ func registerClientUnverified(ctx context.Context, t *testing.T, baseURL, dbURI,
 		},
 	}
 
-	registerForPending(ctx, t, client, baseURL, username, "integration-pass-123")
-	mintSessionCookie(ctx, t, client, baseURL, dbURI, username)
+	registerForPending(ctx, t, client, baseURL, displayName, "integration-pass-123")
+	mintSessionCookie(ctx, t, client, baseURL, dbURI, displayName)
 
 	return client
 }

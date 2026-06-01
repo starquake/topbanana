@@ -334,8 +334,8 @@ func seedPlays(
 
 	players := make([]*auth.Player, 0, playerCount)
 	for i := range playerCount {
-		username := fmt.Sprintf("seed-player-%d-%d", time.Now().UnixNano(), i)
-		p, err := stores.Players.CreateAnonymousPlayer(ctx, username)
+		displayName := fmt.Sprintf("seed-player-%d-%d", time.Now().UnixNano(), i)
+		p, err := stores.Players.CreateAnonymousPlayer(ctx, displayName)
 		if err != nil {
 			return 0, fmt.Errorf("create anonymous player: %w", err)
 		}

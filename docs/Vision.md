@@ -33,7 +33,7 @@ Phase 1 has landed and a chunk of Phase 1.5 too. The doc below describes the run
 
 ### Schema (post-migration `20260520180000`)
 
-- `players (id, username UNIQUE, email UNIQUE, password_hash, role, username_claimed, created_at)` — `email` and `password_hash` are nullable so anonymous play works without inventing either. `username_claimed` flips to 1 when the player explicitly picks a name (register flow or PATCH `/api/players/me`).
+- `players (id, display_name UNIQUE, email UNIQUE, password_hash, role, display_name_claimed, created_at)` — `email` and `password_hash` are nullable so anonymous play works without inventing either. `display_name_claimed` flips to 1 when the player explicitly picks a name (register flow or PATCH `/api/players/me`).
 - `quizzes (id, title, slug UNIQUE, description, created_at, updated_at)`.
 - `questions (id, quiz_id, text, position, image_url)`. Per-question time limit (`time_limit_seconds`) is still hardcoded at 10s in the service (open ticket #99).
 - `options (id, question_id, text, is_correct)`.
@@ -63,7 +63,7 @@ Multi-stage Dockerfile → distroless. `docker-compose.yml` mounts a volume for 
 - **Reveal countdown + correctness reveal.** Each question opens with a 3-second cyan reveal beat before the answer timer starts; after a wrong pick the correct option lights up.
 - **Fullscreen gameplay.** The player client takes the whole viewport during a round; the brand mark hides until the leaderboard view.
 - **Admin JSON import.** A dedicated `/admin/quizzes/import` form accepts a quiz definition in a single JSON document, designed to be filled out by an LLM.
-- **Public home page.** `GET /` ranks popular quizzes by play count over the last 30 days, lists the most active players (claimed usernames only), and exposes a footer link into `/admin`.
+- **Public home page.** `GET /` ranks popular quizzes by play count over the last 30 days, lists the most active players (claimed display names only), and exposes a footer link into `/admin`.
 - **Share affordance.** A reusable `share.js` module powers Share buttons on the public home cards and on the player client (start + finish screens). Uses `navigator.share` when available; otherwise opens a dialog with WhatsApp / Telegram / Reddit / X / Copy.
 
 ### Known gaps and open tickets
@@ -108,7 +108,7 @@ The decisions below are mostly locked in. Status notes mark which ones are imple
 
 ### 1. Player identity — `players` is the universal actor — **IMPLEMENTED**
 
-`players.email` is nullable, `password_hash` and `role` columns are present, `username_claimed` distinguishes auto-petname rows from explicitly-claimed names. Anonymous play creates a `players` row tied to a session cookie. Registering as an anonymous visitor upgrades the existing row in place via `ClaimPlayer`. First-sign-in-wins for conflicting credentials.
+`players.email` is nullable, `password_hash` and `role` columns are present, `display_name_claimed` distinguishes auto-petname rows from explicitly-claimed names. Anonymous play creates a `players` row tied to a session cookie. Registering as an anonymous visitor upgrades the existing row in place via `ClaimPlayer`. First-sign-in-wins for conflicting credentials.
 
 ### 2. Sessions — signed cookie, no DB table — **IMPLEMENTED**
 

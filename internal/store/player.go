@@ -73,14 +73,14 @@ func (s *PlayerStore) GetPlayerByID(ctx context.Context, id int64) (*auth.Player
 }
 
 // CreatePlayer creates a credentialled player. Email is trimmed and
-// lowercased before insert. Returns auth.ErrUsernameTaken or
+// lowercased before insert. Returns auth.ErrDisplayNameTaken or
 // auth.ErrEmailTaken on UNIQUE collisions; the underlying SQL
 // promotes the first password-bearing registrant to admin.
 func (s *PlayerStore) CreatePlayer(
 	ctx context.Context,
-	username, email, passwordHash, requestedRole string,
+	displayName, email, passwordHash, requestedRole string,
 ) (*auth.Player, error) {
-	cleanedDisplayName := strings.TrimSpace(username)
+	cleanedDisplayName := strings.TrimSpace(displayName)
 	cleanedEmail := strings.ToLower(strings.TrimSpace(email))
 	row, err := s.q.CreatePlayerWithCredentials(ctx, db.CreatePlayerWithCredentialsParams{
 		DisplayName:   cleanedDisplayName,
@@ -95,16 +95,16 @@ func (s *PlayerStore) CreatePlayer(
 	return playerFromRow(row), nil
 }
 
-// CreateAnonymousPlayer inserts a row with the given username, no email, no
+// CreateAnonymousPlayer inserts a row with the given displayName, no email, no
 // password_hash, role = 'player'. Callers (EnsurePlayer) generate a random
-// "anon-<xid>" username so collisions on the unique index are not a concern;
-// if one happens anyway it surfaces as auth.ErrUsernameTaken.
-func (s *PlayerStore) CreateAnonymousPlayer(ctx context.Context, username string) (*auth.Player, error) {
-	row, err := s.q.CreateAnonymousPlayer(ctx, strings.TrimSpace(username))
+// "anon-<xid>" displayName so collisions on the unique index are not a concern;
+// if one happens anyway it surfaces as auth.ErrDisplayNameTaken.
+func (s *PlayerStore) CreateAnonymousPlayer(ctx context.Context, displayName string) (*auth.Player, error) {
+	row, err := s.q.CreateAnonymousPlayer(ctx, strings.TrimSpace(displayName))
 	if err != nil {
 		var sqliteErr *sqlite.Error
 		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
-			return nil, auth.ErrUsernameTaken
+			return nil, auth.ErrDisplayNameTaken
 		}
 
 		return nil, fmt.Errorf("failed to create anonymous player: %w", err)
@@ -119,16 +119,16 @@ func (s *PlayerStore) CreateAnonymousPlayer(ctx context.Context, username string
 // sign-up that flows through the claim path still triggers the promotion
 // atomically.
 //
-// Returns auth.ErrUsernameTaken when the new username collides with another
+// Returns auth.ErrDisplayNameTaken when the new displayName collides with another
 // row, auth.ErrPlayerAlreadyClaimed when the row already has credentials
 // (the WHERE password_hash IS NULL guard filters it out and the UPDATE
 // returns no rows), and auth.ErrPlayerNotFound when no row matches the id.
 func (s *PlayerStore) ClaimPlayer(
 	ctx context.Context,
 	playerID int64,
-	username, email, passwordHash, requestedRole string,
+	displayName, email, passwordHash, requestedRole string,
 ) (*auth.Player, error) {
-	cleanedDisplayName := strings.TrimSpace(username)
+	cleanedDisplayName := strings.TrimSpace(displayName)
 	cleanedEmail := strings.ToLower(strings.TrimSpace(email))
 	row, err := s.q.ClaimPlayer(ctx, db.ClaimPlayerParams{
 		DisplayName:   cleanedDisplayName,
@@ -145,7 +145,7 @@ func (s *PlayerStore) ClaimPlayer(
 }
 
 // UpdatePlayerDisplayName renames an anonymous (password_hash IS NULL)
-// row in place. Returns ErrUsernameTaken on collision,
+// row in place. Returns ErrDisplayNameTaken on collision,
 // ErrPlayerNotAnonymous when the row already has a password_hash
 // (filtered out by the WHERE guard), and ErrPlayerNotFound when the
 // row genuinely does not exist (disambiguated by a follow-up query).
@@ -156,7 +156,7 @@ func (s *PlayerStore) UpdatePlayerDisplayName(
 ) (*auth.Player, error) {
 	cleaned := strings.TrimSpace(displayName)
 	if cleaned == "" {
-		return nil, auth.ErrUsernameEmpty
+		return nil, auth.ErrDisplayNameEmpty
 	}
 
 	row, err := s.q.UpdatePlayerDisplayName(ctx, db.UpdatePlayerDisplayNameParams{
@@ -172,18 +172,18 @@ func (s *PlayerStore) UpdatePlayerDisplayName(
 
 // RenamePlayer changes the display name on an arbitrary player row,
 // not just an anonymous one. Used by the profile-page rename endpoint
-// (POST /profile/username, #410) so authenticated players (password,
-// OAuth, admin) can edit their own name. Returns auth.ErrUsernameEmpty
-// when the input trims to "", auth.ErrUsernameTaken on a UNIQUE
+// (POST /profile/display-name, #410) so authenticated players (password,
+// OAuth, admin) can edit their own name. Returns auth.ErrDisplayNameEmpty
+// when the input trims to "", auth.ErrDisplayNameTaken on a UNIQUE
 // collision, and auth.ErrPlayerNotFound when no row matches the id.
 func (s *PlayerStore) RenamePlayer(
 	ctx context.Context,
 	playerID int64,
-	username string,
+	displayName string,
 ) (*auth.Player, error) {
-	cleaned := strings.TrimSpace(username)
+	cleaned := strings.TrimSpace(displayName)
 	if cleaned == "" {
-		return nil, auth.ErrUsernameEmpty
+		return nil, auth.ErrDisplayNameEmpty
 	}
 
 	row, err := s.q.RenamePlayer(ctx, db.RenamePlayerParams{
@@ -196,7 +196,7 @@ func (s *PlayerStore) RenamePlayer(
 		}
 		var sqliteErr *sqlite.Error
 		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
-			return nil, auth.ErrUsernameTaken
+			return nil, auth.ErrDisplayNameTaken
 		}
 
 		return nil, fmt.Errorf("failed to rename player: %w", err)
@@ -249,21 +249,21 @@ func (s *PlayerStore) GetPlayerByProviderSubject(
 }
 
 // CreatePlayerFromOAuth inserts a new players row with the supplied
-// username + email and no password_hash. Returns auth.ErrUsernameTaken
-// when the username collides (the OAuth handler retries on this
+// displayName + email and no password_hash. Returns auth.ErrDisplayNameTaken
+// when the displayName collides (the OAuth handler retries on this
 // sentinel with a fresh petname).
 func (s *PlayerStore) CreatePlayerFromOAuth(
 	ctx context.Context,
-	username, email string,
+	displayName, email string,
 ) (*auth.Player, error) {
 	row, err := s.q.CreatePlayerFromOAuth(ctx, db.CreatePlayerFromOAuthParams{
-		DisplayName: strings.TrimSpace(username),
+		DisplayName: strings.TrimSpace(displayName),
 		Email:       sql.NullString{String: strings.ToLower(strings.TrimSpace(email)), Valid: true},
 	})
 	if err != nil {
 		var sqliteErr *sqlite.Error
 		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
-			return nil, auth.ErrUsernameTaken
+			return nil, auth.ErrDisplayNameTaken
 		}
 
 		return nil, fmt.Errorf("failed to create player from oauth: %w", err)
@@ -832,12 +832,12 @@ func (s *PlayerStore) SetPlayerEmail(ctx context.Context, playerID int64, email 
 // CreatePlayerByAdmin inserts a fresh credentialled row with
 // email_verified_at stamped (#450). Email is trimmed + lowercased;
 // passwordHash must be non-empty (the handler enforces it before
-// reaching the store). Returns auth.ErrUsernameTaken / auth.ErrEmailTaken
+// reaching the store). Returns auth.ErrDisplayNameTaken / auth.ErrEmailTaken
 // on UNIQUE collisions.
 func (s *PlayerStore) CreatePlayerByAdmin(
-	ctx context.Context, username, email, passwordHash string,
+	ctx context.Context, displayName, email, passwordHash string,
 ) (*auth.Player, error) {
-	cleanedDisplayName := strings.TrimSpace(username)
+	cleanedDisplayName := strings.TrimSpace(displayName)
 	cleanedEmail := strings.ToLower(strings.TrimSpace(email))
 	row, err := s.q.CreatePlayerByAdmin(ctx, db.CreatePlayerByAdminParams{
 		DisplayName:  cleanedDisplayName,
@@ -889,7 +889,7 @@ func (s *PlayerStore) SetPlayerRole(ctx context.Context, playerID int64, role st
 	return nil
 }
 
-// ListAdmins returns every current Admin ordered by username (#320/#538).
+// ListAdmins returns every current Admin ordered by displayName (#320/#538).
 // Empty slice when no Admin exists yet.
 func (s *PlayerStore) ListAdmins(ctx context.Context) ([]*auth.AdminEntry, error) {
 	rows, err := s.q.ListAdmins(ctx)
@@ -980,7 +980,7 @@ func parseSQLiteTimestamp(raw string) *time.Time {
 func (s *PlayerStore) classifyUpdateDisplayNameErr(ctx context.Context, playerID int64, err error) error {
 	var sqliteErr *sqlite.Error
 	if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
-		return auth.ErrUsernameTaken
+		return auth.ErrDisplayNameTaken
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("failed to update player display name: %w", err)
@@ -1024,7 +1024,7 @@ func (s *PlayerStore) classifyClaimErr(
 }
 
 // classifyCredentialConflict maps a SQLITE UNIQUE violation onto
-// ErrUsernameTaken or ErrEmailTaken by looking up which column the
+// ErrDisplayNameTaken or ErrEmailTaken by looking up which column the
 // caller already took. Any other error wraps through unchanged.
 func (s *PlayerStore) classifyCredentialConflict(
 	ctx context.Context, cleanedDisplayName, cleanedEmail string, err error,
@@ -1034,7 +1034,7 @@ func (s *PlayerStore) classifyCredentialConflict(
 		return fmt.Errorf("failed to create player: %w", err)
 	}
 	if _, lookupErr := s.q.GetPlayerByDisplayName(ctx, cleanedDisplayName); lookupErr == nil {
-		return auth.ErrUsernameTaken
+		return auth.ErrDisplayNameTaken
 	}
 	if cleanedEmail != "" {
 		if _, lookupErr := s.q.GetPlayerByEmail(

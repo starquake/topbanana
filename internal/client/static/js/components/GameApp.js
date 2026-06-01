@@ -281,7 +281,7 @@ export class GameApp {
     // the seeded admin role). The claim-name CTA and end-of-quiz
     // auto-open both gate on the negation of this: a signed-in
     // player already has a stable identity and should never see the
-    // "Set your name" prompt — username changes for them belong on
+    // "Set your name" prompt — displayName changes for them belong on
     // the future profile page (#410), not the in-game modal.
     isAuthenticated() {
         return !!(this.player && this.player.isAuthenticated);
@@ -325,8 +325,8 @@ export class GameApp {
     // (the new name will appear on the next page load) rather than
     // surfacing an error on the success path, since the PATCH itself
     // already succeeded.
-    async claimFromModal(username) {
-        const result = await playerService.claimName(username);
+    async claimFromModal(displayName) {
+        const result = await playerService.claimName(displayName);
         if (result.ok) {
             this.player = result.player;
             this.claimModalOpen = false;
@@ -342,7 +342,7 @@ export class GameApp {
         // #289: the server says this account is already non-anonymous,
         // which means our cached `this.player.hasCustomName` was stale
         // (a logged-in admin with a freshly-set password_hash but
-        // username_claimed still 0 ended up here). Refresh /me so
+        // displayName_claimed still 0 ended up here). Refresh /me so
         // hasCustomName flips to true, then dismiss the modal — there
         // is nothing for the user to do here.
         if (result.kind === 'already_claimed') {
@@ -597,7 +597,7 @@ export class GameApp {
             // Auto-open the claim modal only for visitors who have not
             // both (a) authenticated AND (b) picked a custom name yet.
             // Authenticated players never see the modal — their
-            // username is already stable and changes go through the
+            // displayName is already stable and changes go through the
             // profile page (#410). Anonymous players who claimed a
             // petname via PATCH /api/players/me also skip the prompt
             // (hasCustomName true) so the modal does not re-open on

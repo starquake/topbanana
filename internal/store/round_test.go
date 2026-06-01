@@ -18,7 +18,7 @@ func newTestQuizForGroups(t *testing.T, qs *QuizStore) *quiz.Quiz {
 		Slug:                 "quiz-with-rounds",
 		Description:          "fixture for round tests",
 		CreatedByPlayerID:    seededAdminID,
-		CreatedByDisplayName: seededAdminUsername,
+		CreatedByDisplayName: seededAdminDisplayName,
 		TimeLimitSeconds:     quiz.DefaultTimeLimitSeconds,
 		Visibility:           quiz.VisibilityPublic,
 	}

@@ -6,7 +6,7 @@
 // from a dismissed pre-leaderboard form.
 //
 // The parent gameApp injects two callbacks via Alpine's $data:
-//   onSubmit(username) -> { ok, message }  (resolves to the
+//   onSubmit(displayName) -> { ok, message }  (resolves to the
 //       PlayerService.claimName result, with errors already mapped to
 //       human-friendly messages)
 //   onCancel()                              (optional; controls how the
@@ -19,14 +19,14 @@
 // the page at once.
 export function claimNameForm({ initialValue = '', cancelLabel = 'Cancel', submitLabel = 'Save', onSubmit, onCancel } = {}) {
     return {
-        username: initialValue,
+        displayName: initialValue,
         submitting: false,
         error: '',
         cancelLabel,
         submitLabel,
         async submit() {
             if (this.submitting) return;
-            const trimmed = (this.username || '').trim();
+            const trimmed = (this.displayName || '').trim();
             if (trimmed === '') {
                 this.error = 'Please enter a name.';
                 return;
@@ -40,7 +40,7 @@ export function claimNameForm({ initialValue = '', cancelLabel = 'Cancel', submi
                     return;
                 }
                 // On success the parent component swaps the surrounding
-                // UI; we deliberately don't reset `username` here so a
+                // UI; we deliberately don't reset `displayName` here so a
                 // reopened form would inherit the saved value if needed.
             } finally {
                 this.submitting = false;

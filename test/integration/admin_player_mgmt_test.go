@@ -453,10 +453,10 @@ func TestAdminPlayerMgmt_SetRolePromotesToAdmin(t *testing.T) {
 	}
 }
 
-// TestAdminPlayerMgmt_SetUsername drives the #535 username endpoint from a
+// TestAdminPlayerMgmt_SetDisplayName drives the #535 displayName endpoint from a
 // super admin: the target's display name is rewritten, the new name shows on
 // the detail page, and the audit trail records the "Display name set" action.
-func TestAdminPlayerMgmt_SetUsername(t *testing.T) {
+func TestAdminPlayerMgmt_SetDisplayName(t *testing.T) {
 	t.Parallel()
 
 	ctx, srv := startServer(t, map[string]string{
@@ -469,18 +469,18 @@ func TestAdminPlayerMgmt_SetUsername(t *testing.T) {
 	registerForPending(ctx, t, newAdminMgmtClient(t), srv.BaseURL, "setname-target", "setname-target-pass-123")
 
 	target := lookupPlayerID(ctx, t, srv.DBURI, "setname-target")
-	usernameURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/display-name"
+	displayNameURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/display-name"
 
 	res := postAdminAction(
 		ctx,
 		t,
 		adminClient,
 		srv.BaseURL,
-		usernameURL,
+		displayNameURL,
 		url.Values{"display_name": {"renamed-target"}},
 	)
 	if got, want := res.StatusCode, http.StatusSeeOther; got != want {
-		t.Fatalf("set-username status = %d, want %d", got, want)
+		t.Fatalf("set-displayName status = %d, want %d", got, want)
 	}
 
 	detail := getOK(
@@ -541,7 +541,7 @@ func TestAdminPlayerMgmt_SetPassword(t *testing.T) {
 	}
 }
 
-// TestAdminPlayerMgmt_SetCredentialsRequireAdmin pins that the #535 username +
+// TestAdminPlayerMgmt_SetCredentialsRequireAdmin pins that the #535 displayName +
 // password endpoints are Admin-only (#538): a Host gets a 404 (not a 403) on
 // both POSTs so the routes' existence stays hidden. The first registrant is
 // auto-promoted to Admin, so the Host under test is a later registrant demoted
@@ -561,11 +561,11 @@ func TestAdminPlayerMgmt_SetCredentialsRequireAdmin(t *testing.T) {
 	makeHost(ctx, t, srv.DBURI, "creds-host")
 
 	target := lookupPlayerID(ctx, t, srv.DBURI, "creds-admin-boss")
-	usernameURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/display-name"
+	displayNameURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/display-name"
 	passwordURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/password"
 
 	if got, want := postCSRFForm(
-		ctx, t, hostClient, usernameURL,
+		ctx, t, hostClient, displayNameURL,
 	), http.StatusNotFound; got != want {
 		t.Errorf("POST /display-name status = %d, want %d", got, want)
 	}
@@ -595,14 +595,14 @@ func newAdminMgmtClient(t *testing.T) *http.Client {
 	}
 }
 
-// lookupPlayerID resolves the players.id for the given username via a
+// lookupPlayerID resolves the players.id for the given displayName via a
 // direct DB read. Used so the per-player URL can be built without
 // scraping the admin list page.
-func lookupPlayerID(ctx context.Context, t *testing.T, dbURI, username string) int64 {
+func lookupPlayerID(ctx context.Context, t *testing.T, dbURI, displayName string) int64 {
 	t.Helper()
 	dbConn, stores := openStores(t, dbURI)
 	defer dbConn.Close() //nolint:errcheck // cleanup.
-	player, err := stores.Players.GetPlayerByDisplayName(ctx, username)
+	player, err := stores.Players.GetPlayerByDisplayName(ctx, displayName)
 	if err != nil {
 		t.Fatalf("lookupPlayerID err = %v, want nil", err)
 	}

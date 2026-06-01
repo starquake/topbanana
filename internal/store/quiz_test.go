@@ -32,8 +32,8 @@ var (
 // hard-codes id = 1, so reference the constant here rather than
 // duplicating the literal in every fixture.
 const (
-	seededAdminID       int64 = 1
-	seededAdminUsername       = "admin"
+	seededAdminID          int64 = 1
+	seededAdminDisplayName       = "admin"
 )
 
 func newTestQuizzes() []*quiz.Quiz {
@@ -43,7 +43,7 @@ func newTestQuizzes() []*quiz.Quiz {
 			Slug:                 "quiz-1",
 			Description:          "Quiz 1 Description",
 			CreatedByPlayerID:    seededAdminID,
-			CreatedByDisplayName: seededAdminUsername,
+			CreatedByDisplayName: seededAdminDisplayName,
 			// #99 / #103: the store normalises a zero TimeLimitSeconds
 			// to the project-wide default and a blank Visibility to
 			// public before INSERT; the fixture mirrors that so
@@ -79,7 +79,7 @@ func newTestQuizzes() []*quiz.Quiz {
 			Slug:                 "quiz-2",
 			Description:          "Quiz 2 Description",
 			CreatedByPlayerID:    seededAdminID,
-			CreatedByDisplayName: seededAdminUsername,
+			CreatedByDisplayName: seededAdminDisplayName,
 			TimeLimitSeconds:     quiz.DefaultTimeLimitSeconds,
 			Visibility:           quiz.VisibilityPublic,
 			Questions: []*quiz.Question{
@@ -116,7 +116,7 @@ func existingTestQuizzes() []*quiz.Quiz {
 			Slug:                 "quiz-1",
 			Description:          "Quiz 1 Description",
 			CreatedByPlayerID:    seededAdminID,
-			CreatedByDisplayName: seededAdminUsername,
+			CreatedByDisplayName: seededAdminDisplayName,
 			// #99 / #103: the store normalises a zero TimeLimitSeconds
 			// to the project-wide default and a blank Visibility to
 			// public before INSERT; the fixture mirrors that so
@@ -154,7 +154,7 @@ func existingTestQuizzes() []*quiz.Quiz {
 			Slug:                 "quiz-2",
 			Description:          "Quiz 2 Description",
 			CreatedByPlayerID:    seededAdminID,
-			CreatedByDisplayName: seededAdminUsername,
+			CreatedByDisplayName: seededAdminDisplayName,
 			TimeLimitSeconds:     quiz.DefaultTimeLimitSeconds,
 			Visibility:           quiz.VisibilityPublic,
 			Questions: []*quiz.Question{

@@ -20,7 +20,7 @@ import (
 
 // invitePassword is the password every accept-invite test submits; it
 // clears MinPasswordLength, so the only variable under test is the
-// username and the token state.
+// displayName and the token state.
 const invitePassword = "invite-pass-12345"
 
 // TestAdminInvite_CreatesPendingInvite drives the admin POST /admin/invites
@@ -211,10 +211,10 @@ func TestAcceptInvite_RejectsDeadTokens(t *testing.T) {
 	}
 }
 
-// TestAcceptInvite_TakenUsernameKeepsInviteLive pins the ordering choice:
-// a username collision fails the create and leaves the invite pending, so
+// TestAcceptInvite_TakenDisplayNameKeepsInviteLive pins the ordering choice:
+// a displayName collision fails the create and leaves the invite pending, so
 // the recipient can retry on the same link with a different name.
-func TestAcceptInvite_TakenUsernameKeepsInviteLive(t *testing.T) {
+func TestAcceptInvite_TakenDisplayNameKeepsInviteLive(t *testing.T) {
 	t.Parallel()
 
 	ctx, srv := startServer(t, nil)
@@ -240,7 +240,7 @@ func TestAcceptInvite_TakenUsernameKeepsInviteLive(t *testing.T) {
 
 	// The invite must still be live: a retry with a free name succeeds.
 	if _, err := stores.Invites.GetLiveInvite(ctx, auth.HashInviteToken(raw)); err != nil {
-		t.Errorf("invite must stay live after username collision: err = %v", err)
+		t.Errorf("invite must stay live after displayName collision: err = %v", err)
 	}
 	retry := postAcceptInvite(ctx, t, authClient(t), srv.BaseURL, raw, "Free Name")
 	defer retry.Body.Close() //nolint:errcheck // cleanup.
@@ -412,14 +412,14 @@ func postAcceptInvite(
 	ctx context.Context,
 	t *testing.T,
 	client *http.Client,
-	baseURL, rawToken, username string,
+	baseURL, rawToken, displayName string,
 ) *http.Response {
 	t.Helper()
 	csrfToken := fetchCSRFToken(ctx, t, client, baseURL+"/login")
 	form := url.Values{
 		"csrf_token":   {csrfToken},
 		"token":        {rawToken},
-		"display_name": {username},
+		"display_name": {displayName},
 		"password":     {invitePassword},
 		"confirm":      {invitePassword},
 	}

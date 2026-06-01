@@ -605,7 +605,7 @@ func TestHandleQuizList_RendersNavbarLogout(t *testing.T) {
 
 	body := rr.Body.String()
 	if got, want := body, "alice"; !strings.Contains(got, want) {
-		t.Errorf("body should contain signed-in username %q, got %q", want, got)
+		t.Errorf("body should contain signed-in displayName %q, got %q", want, got)
 	}
 	if got, want := body, `action="/logout"`; !strings.Contains(got, want) {
 		t.Errorf("body should contain logout form action %q, got %q", want, got)

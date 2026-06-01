@@ -101,7 +101,7 @@ WHY comments are encouraged when the rationale isn't obvious from the code. But 
 
 Treat cross-file rationale by category:
 
-1. **Server explains what the frontend will do with this** — high rot risk. **Rewrite as self-contained why**. Explain the local rationale only: "this column tracks whether the player explicitly chose their username; defaults false so callers can tell auto-generated names apart from claimed ones." Lose the "the frontend gates X on this" framing.
+1. **Server explains what the frontend will do with this** — high rot risk. **Rewrite as self-contained why**. Explain the local rationale only: "this column tracks whether the player explicitly chose their display name; defaults false so callers can tell auto-generated names apart from claimed ones." Lose the "the frontend gates X on this" framing.
 
 2. **Test comment above an assertion that pins the invariant** — fine. The test fails loudly if the invariant breaks, so the comment can't drift far. Keep the cross-file wording if it adds context.
 

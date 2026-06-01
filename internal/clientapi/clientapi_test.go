@@ -1401,13 +1401,13 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 	// black-box test does not need an exported builder. The 10s window with
 	// answeredOffset=0 yields a 1000-point CalculateScore for a correct
 	// answer and 0 for a wrong one.
-	makeAnswer := func(playerID int64, username string, correct bool) *game.LeaderboardAnswer {
+	makeAnswer := func(playerID int64, displayName string, correct bool) *game.LeaderboardAnswer {
 		const window = 10 * time.Second
 		start := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 
 		return &game.LeaderboardAnswer{
 			PlayerID:          playerID,
-			DisplayName:       username,
+			DisplayName:       displayName,
 			QuestionStartedAt: start,
 			QuestionExpiredAt: start.Add(window),
 			AnsweredAt:        start,

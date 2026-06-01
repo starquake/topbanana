@@ -333,7 +333,7 @@ type profileEmailSnapshot struct {
 }
 
 // profileEmailGET returns the rendered /profile/email page plus the
-// CSRF token, both extracted the same way the username form helpers
+// CSRF token, both extracted the same way the displayName form helpers
 // do upstream.
 func profileEmailGET(ctx context.Context, t *testing.T, client *http.Client, baseURL string) profileEmailSnapshot {
 	t.Helper()

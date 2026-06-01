@@ -536,10 +536,10 @@ func createGooglePlayer(
 	const maxPetnameAttempts = 5
 	var lastErr error
 	for range maxPetnameAttempts {
-		username := GeneratePetname()
-		player, err := identities.CreatePlayerFromOAuth(ctx, username, email)
+		displayName := GeneratePetname()
+		player, err := identities.CreatePlayerFromOAuth(ctx, displayName, email)
 		if err != nil {
-			if errors.Is(err, ErrUsernameTaken) {
+			if errors.Is(err, ErrDisplayNameTaken) {
 				lastErr = err
 
 				continue

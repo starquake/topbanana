@@ -110,10 +110,10 @@ func (tr *TemplateRenderer) prepare(w http.ResponseWriter, r *http.Request) (*te
 		return nil, false
 	}
 
-	username := ""
+	displayName := ""
 	isAdmin := false
 	if p, ok := auth.PlayerFromContext(r.Context()); ok {
-		username = p.DisplayName
+		displayName = p.DisplayName
 		isAdmin = p.IsAdmin()
 	}
 
@@ -125,7 +125,7 @@ func (tr *TemplateRenderer) prepare(w http.ResponseWriter, r *http.Request) (*te
 	section := navSection(r.URL.Path)
 
 	return t.Funcs(template.FuncMap{
-		"currentUser": func() string { return username },
+		"currentUser": func() string { return displayName },
 		"csrfToken":   func() string { return csrfToken },
 		"ogImage":     func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
 		"navSection":  func() string { return section },

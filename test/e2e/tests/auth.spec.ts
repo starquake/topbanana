@@ -5,14 +5,14 @@ const password = 'correctbatterystaple';
 
 test('register, log out, log back in, and reach the admin dashboard', async ({ page, browserName }) => {
   // Each browser project runs against the same shared server, so use a unique
-  // username per project and rely on ADMIN_EMAILS (set in playwright.config.ts)
+  // displayName per project and rely on ADMIN_EMAILS (set in playwright.config.ts)
   // to promote every project's registrant to admin.
-  const username = `e2e-admin-${browserName}`;
+  const displayName = `e2e-admin-${browserName}`;
 
   // registerAdmin handles the register POST, satisfies the #111 PR3
   // verified-email gate by stamping email_verified_at via sqlite3, and
   // leaves the browser at /admin/quizzes ready for the assertions.
-  await registerAdmin(page, username);
+  await registerAdmin(page, displayName);
   await expect(page.getByRole('heading', { name: 'Quizzes', level: 1 })).toBeVisible();
 
   // Log out via the navbar button. The form posts to /logout, the server
@@ -29,7 +29,7 @@ test('register, log out, log back in, and reach the admin dashboard', async ({ p
   await expect(page.getByRole('heading', { name: 'Log in', level: 1 })).toBeVisible();
 
   // Log back in with the same credentials. Email is the credential after #446.
-  await page.locator('input[name=email]').fill(`${username}@example.test`);
+  await page.locator('input[name=email]').fill(`${displayName}@example.test`);
   await page.locator('input[name=password]').fill(password);
   await page.locator('button[type=submit]').click();
 
@@ -51,12 +51,12 @@ test('deep link while logged out lands at the deep link after login', async ({ p
   // (NOT the role landing at /admin/quizzes). Without the next
   // round-trip the admin would land on /admin/quizzes and have to
   // re-navigate by hand.
-  const username = `e2e-admin-next-${browserName}`;
+  const displayName = `e2e-admin-next-${browserName}`;
   const password = 'correctbatterystaple';
 
   // Register fresh (and clear the verified-email gate) so the session
   // is set up for the logout + deep-link flow.
-  await registerAdmin(page, username);
+  await registerAdmin(page, displayName);
 
   await page.getByRole('button', { name: 'Log out' }).click();
   await expect(page).toHaveURL(/\/login$/);
@@ -65,7 +65,7 @@ test('deep link while logged out lands at the deep link after login', async ({ p
   await page.goto('/admin/email');
   await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Femail$/);
 
-  await page.locator('input[name=email]').fill(`${username}@example.test`);
+  await page.locator('input[name=email]').fill(`${displayName}@example.test`);
   await page.locator('input[name=password]').fill(password);
   await page.locator('button[type=submit]').click();
 

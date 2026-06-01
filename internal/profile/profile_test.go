@@ -17,18 +17,18 @@ import (
 )
 
 // renameStubStore implements auth.PlayerStore for the
-// HandleProfileUsername tests. Only RenamePlayer does anything; the
+// HandleProfileDisplayName tests. Only RenamePlayer does anything; the
 // rest return a sentinel so an accidental call is loud.
 type renameStubStore struct {
 	renameErr error
 }
 
-func (s *renameStubStore) RenamePlayer(_ context.Context, _ int64, username string) (*auth.Player, error) {
+func (s *renameStubStore) RenamePlayer(_ context.Context, _ int64, displayName string) (*auth.Player, error) {
 	if s.renameErr != nil {
 		return nil, s.renameErr
 	}
 
-	return &auth.Player{ID: 7, DisplayName: username}, nil
+	return &auth.Player{ID: 7, DisplayName: displayName}, nil
 }
 
 func (*renameStubStore) GetPlayerByDisplayName(_ context.Context, _ string) (*auth.Player, error) {
@@ -71,18 +71,18 @@ func (*renameStubStore) UpdatePlayerDisplayName(_ context.Context, _ int64, _ st
 	return nil, errors.ErrUnsupported
 }
 
-// postRename drives HandleProfileUsername with the given store and form
+// postRename drives HandleProfileDisplayName with the given store and form
 // value, returning the captured log output and the response recorder.
 func postRename(t *testing.T, store auth.PlayerStore, newName string) (string, *httptest.ResponseRecorder) {
 	t.Helper()
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	csrfMgr := csrf.New([]byte("test-key-32-bytes-test-key-32byt"), false)
-	handler := HandleProfileUsername(logger, csrfMgr, store)
+	handler := HandleProfileDisplayName(logger, csrfMgr, store)
 
 	form := url.Values{"display_name": {newName}}
 	req := httptest.NewRequestWithContext(
-		t.Context(), http.MethodPost, "/profile/username",
+		t.Context(), http.MethodPost, "/profile/display-name",
 		strings.NewReader(form.Encode()),
 	)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -94,10 +94,10 @@ func postRename(t *testing.T, store auth.PlayerStore, newName string) (string, *
 	return logs.String(), rec
 }
 
-func TestHandleProfileUsername_LogsTakenRejection(t *testing.T) {
+func TestHandleProfileDisplayName_LogsTakenRejection(t *testing.T) {
 	t.Parallel()
 
-	logs, rec := postRename(t, &renameStubStore{renameErr: auth.ErrUsernameTaken}, "taken-name")
+	logs, rec := postRename(t, &renameStubStore{renameErr: auth.ErrDisplayNameTaken}, "taken-name")
 
 	if got, want := rec.Code, http.StatusConflict; got != want {
 		t.Errorf("status = %d, want %d", got, want)
@@ -111,10 +111,10 @@ func TestHandleProfileUsername_LogsTakenRejection(t *testing.T) {
 	}
 }
 
-func TestHandleProfileUsername_LogsEmptyRejection(t *testing.T) {
+func TestHandleProfileDisplayName_LogsEmptyRejection(t *testing.T) {
 	t.Parallel()
 
-	logs, rec := postRename(t, &renameStubStore{renameErr: auth.ErrUsernameEmpty}, "ignored")
+	logs, rec := postRename(t, &renameStubStore{renameErr: auth.ErrDisplayNameEmpty}, "ignored")
 
 	if got, want := rec.Code, http.StatusBadRequest; got != want {
 		t.Errorf("status = %d, want %d", got, want)
@@ -124,7 +124,7 @@ func TestHandleProfileUsername_LogsEmptyRejection(t *testing.T) {
 	}
 }
 
-func TestHandleProfileUsername_LogsUnexpectedErrorAtError(t *testing.T) {
+func TestHandleProfileDisplayName_LogsUnexpectedErrorAtError(t *testing.T) {
 	t.Parallel()
 
 	logs, rec := postRename(t, &renameStubStore{renameErr: errors.New("db exploded")}, "any-name")

@@ -93,7 +93,7 @@ func TestInviteStore_ExpiredRejected(t *testing.T) {
 }
 
 // TestInviteStore_ListPendingInvites covers the management list query
-// (#318): a pending invite appears with its inviter username resolved via
+// (#318): a pending invite appears with its inviter displayName resolved via
 // the LEFT JOIN, while accepted and revoked invites are excluded.
 func TestInviteStore_ListPendingInvites(t *testing.T) {
 	t.Parallel()
@@ -108,7 +108,7 @@ func TestInviteStore_ListPendingInvites(t *testing.T) {
 	}
 
 	mintInvite(ctx, t, stores.Invites, "list-pending@example.test", time.Now().Add(time.Hour))
-	// Attribute one invite to the admin so the inviter username resolves.
+	// Attribute one invite to the admin so the inviter displayName resolves.
 	_, attrHash, err := auth.GenerateInviteToken()
 	if err != nil {
 		t.Fatalf("GenerateInviteToken err = %v, want nil", err)

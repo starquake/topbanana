@@ -474,12 +474,12 @@ func TestQuizLeaderboard_ShowsParticipantBeforeAnyAnswer(t *testing.T) {
 //
 //  1. Seed a single-question quiz.
 //  2. Client B plays it to completion so they land on the leaderboard
-//     with an auto-petname username.
+//     with an auto-petname displayName.
 //  3. Client A subscribes to the leaderboard stream and drains the
 //     initial snapshot (which already shows client B's row).
 //  4. Client B PATCHes /api/players/me with a chosen display name.
 //  5. Client A must receive a fresh event whose entry for client B
-//     carries the new username.
+//     carries the new displayName.
 //
 // Without the fan-out wired into PATCH /api/players/me, the third step
 // would never repaint subscribed clients and this test would time out
@@ -525,9 +525,9 @@ func TestLeaderboardStream_NameUpdate_RepaintsSubscribers(t *testing.T) {
 	clientB := newCookieJarClient(t)
 	playSingleQuestionQuizToCompletion(ctx, t, srv.BaseURL, clientB, qz)
 
-	// Capture client B's auto-assigned username from /api/players/me so
+	// Capture client B's auto-assigned displayName from /api/players/me so
 	// we know what to compare against in the post-PATCH event.
-	originalName := getMyUsername(ctx, t, srv.BaseURL, clientB)
+	originalName := getMyDisplayName(ctx, t, srv.BaseURL, clientB)
 
 	// Client A subscribes and drains the initial snapshot. It should
 	// already see client B's row.
@@ -554,8 +554,8 @@ func TestLeaderboardStream_NameUpdate_RepaintsSubscribers(t *testing.T) {
 	if got, want := len(initial.Entries), 1; got != want {
 		t.Fatalf("initial event entries len = %d, want %d (client B should be on the board)", got, want)
 	}
-	if got, want := initial.Entries[0].Username, originalName; got != want {
-		t.Errorf("initial event username = %q, want %q (auto-petname)", got, want)
+	if got, want := initial.Entries[0].DisplayName, originalName; got != want {
+		t.Errorf("initial event displayName = %q, want %q (auto-petname)", got, want)
 	}
 
 	// Client B claims a custom display name.
@@ -580,13 +580,13 @@ func TestLeaderboardStream_NameUpdate_RepaintsSubscribers(t *testing.T) {
 	}
 
 	// Client A should receive a second event whose row carries the new
-	// username.
+	// displayName.
 	second := readSSEEvent(t, scanner)
 	if got, want := len(second.Entries), 1; got != want {
 		t.Fatalf("post-rename entries len = %d, want %d", got, want)
 	}
-	if got, want := second.Entries[0].Username, claimedName; got != want {
-		t.Errorf("post-rename username = %q, want %q (claim should propagate via SSE)", got, want)
+	if got, want := second.Entries[0].DisplayName, claimedName; got != want {
+		t.Errorf("post-rename displayName = %q, want %q (claim should propagate via SSE)", got, want)
 	}
 }
 
@@ -659,15 +659,15 @@ func playSingleQuestionQuizToCompletion(
 
 // playerMeResponse is the JSON shape of GET /api/players/me.
 type playerMeResponse struct {
-	ID       int64  `json:"id"`
-	Username string `json:"displayName"`
+	ID          int64  `json:"id"`
+	DisplayName string `json:"displayName"`
 }
 
-// getMyUsername hits GET /api/players/me with the given cookie-jar
-// client and returns the username on file. The EnsurePlayer middleware
+// getMyDisplayName hits GET /api/players/me with the given cookie-jar
+// client and returns the displayName on file. The EnsurePlayer middleware
 // mints a row on first contact, so this also doubles as the "create a
 // player session" probe.
-func getMyUsername(ctx context.Context, t *testing.T, baseURL string, client *http.Client) string {
+func getMyDisplayName(ctx context.Context, t *testing.T, baseURL string, client *http.Client) string {
 	t.Helper()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/players/me", nil)
@@ -691,18 +691,18 @@ func getMyUsername(ctx context.Context, t *testing.T, baseURL string, client *ht
 	if derr := json.NewDecoder(resp.Body).Decode(&out); derr != nil {
 		t.Fatalf("/me decode err = %v, want nil", derr)
 	}
-	if out.Username == "" {
-		t.Fatal("/me returned empty username")
+	if out.DisplayName == "" {
+		t.Fatal("/me returned empty displayName")
 	}
 
-	return out.Username
+	return out.DisplayName
 }
 
 // leaderboardEventEntry mirrors one row in the SSE leaderboard payload.
 // Lifted to package scope so revive's nested-structs rule is happy.
 type leaderboardEventEntry struct {
 	PlayerID        int64  `json:"playerId"`
-	Username        string `json:"displayName"`
+	DisplayName     string `json:"displayName"`
 	Score           int    `json:"score"`
 	Rank            int    `json:"rank"`
 	IsCurrentPlayer bool   `json:"isCurrentPlayer"`

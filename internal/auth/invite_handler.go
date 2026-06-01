@@ -22,7 +22,7 @@ type invitePageData struct {
 }
 
 // HandleAcceptInviteForm renders GET /accept-invite?token=... The
-// pick-username + password form is only shown when the token decodes
+// pick-displayName + password form is only shown when the token decodes
 // against a live (pending, unexpired) invite; otherwise it short-circuits
 // to an "invite link is no longer valid" page (410) so the recipient is
 // not asked to fill in a form the POST will reject.
@@ -74,9 +74,9 @@ func inviteLivePreflight(r *http.Request, logger *slog.Logger, invites InviteSto
 // PlayerStore) so adding the verify-stamp method here does not force
 // every PlayerStore stub in the codebase to grow a method it never calls.
 type InvitePlayerStore interface {
-	// CreatePlayer creates a credentialled player. Returns ErrUsernameTaken
+	// CreatePlayer creates a credentialled player. Returns ErrDisplayNameTaken
 	// / ErrEmailTaken on UNIQUE collisions.
-	CreatePlayer(ctx context.Context, username, email, passwordHash, requestedRole string) (*Player, error)
+	CreatePlayer(ctx context.Context, displayName, email, passwordHash, requestedRole string) (*Player, error)
 	// MarkPlayerEmailVerifiedIfNew stamps email_verified_at when currently
 	// NULL. Idempotent. Clicking the invite link proves control of the
 	// invited address, so the new account lands verified.
@@ -96,14 +96,14 @@ type AcceptInviteDeps struct {
 }
 
 // HandleAcceptInviteSubmit handles POST /accept-invite. It re-validates
-// the token live, validates the chosen username + password (same length
+// the token live, validates the chosen displayName + password (same length
 // rules as register/reset), creates the player with the email carried by
 // the invite and stamps it email-verified (clicking the link proves
 // control of the address), consumes the invite, and auto-logs the new
 // player in.
 //
 // Ordering avoids burning the token on a recoverable failure: the player
-// is created FIRST, then the invite is consumed. A username collision
+// is created FIRST, then the invite is consumed. A displayName collision
 // fails the create and leaves the invite pending, so the recipient can
 // retry with a different name on the same link. The invite is consumed
 // only after the player row exists; a consume failure after a successful
@@ -131,19 +131,19 @@ func HandleAcceptInviteSubmit(logger *slog.Logger, csrfMgr *csrf.Manager, deps A
 			return
 		}
 
-		username := r.PostFormValue("display_name")
+		displayName := r.PostFormValue("display_name")
 		password := r.PostFormValue("password")
 		confirm := r.PostFormValue("confirm")
-		if msg, ok := validateAcceptInviteInput(username, password, confirm); !ok {
+		if msg, ok := validateAcceptInviteInput(displayName, password, confirm); !ok {
 			render.render(w, r, http.StatusBadRequest, invitePageData{
-				Title: "Accept your invite", Token: raw, DisplayName: username, Message: msg,
+				Title: "Accept your invite", Token: raw, DisplayName: displayName, Message: msg,
 			})
 
 			return
 		}
 
 		acceptInvite(w, r, logger, render, deps, acceptInviteForm{
-			invite: invite, token: raw, username: username, password: password,
+			invite: invite, token: raw, displayName: displayName, password: password,
 		})
 	})
 }
@@ -153,10 +153,10 @@ func HandleAcceptInviteSubmit(logger *slog.Logger, csrfMgr *csrf.Manager, deps A
 // argument-limit. The email is taken from invite, not the form, so the
 // address the admin vetted is the one the account carries.
 type acceptInviteForm struct {
-	invite   *LiveInvite
-	token    string
-	username string
-	password string
+	invite      *LiveInvite
+	token       string
+	displayName string
+	password    string
 }
 
 // acceptInvite runs the create-player -> consume-invite -> auto-login
@@ -178,11 +178,11 @@ func acceptInvite(
 		return
 	}
 
-	player, err := deps.Players.CreatePlayer(r.Context(), form.username, form.invite.Email, hashed, RolePlayer)
+	player, err := deps.Players.CreatePlayer(r.Context(), form.displayName, form.invite.Email, hashed, RolePlayer)
 	if err != nil {
 		if msg, ok := acceptInviteCollisionMessage(err); ok {
 			render.render(w, r, http.StatusConflict, invitePageData{
-				Title: "Accept your invite", Token: form.token, DisplayName: form.username, Message: msg,
+				Title: "Accept your invite", Token: form.token, DisplayName: form.displayName, Message: msg,
 			})
 
 			return
@@ -221,11 +221,11 @@ func acceptInvite(
 	http.Redirect(w, r, landingPathFor(refreshed.Role), http.StatusSeeOther)
 }
 
-// validateAcceptInviteInput pins a non-empty username plus the same
+// validateAcceptInviteInput pins a non-empty displayName plus the same
 // password length + confirm-match rules the register/reset forms use.
 // Returns the user-facing banner text and false when rejected.
-func validateAcceptInviteInput(username, password, confirm string) (string, bool) {
-	if username == "" {
+func validateAcceptInviteInput(displayName, password, confirm string) (string, bool) {
+	if displayName == "" {
 		return "Pick a display name.", false
 	}
 	if len(password) < MinPasswordLength {
@@ -242,14 +242,14 @@ func validateAcceptInviteInput(username, password, confirm string) (string, bool
 }
 
 // acceptInviteCollisionMessage maps the create-time conflict sentinels
-// onto the recipient-facing banner. A taken username re-renders the form
+// onto the recipient-facing banner. A taken displayName re-renders the form
 // (the invite stays pending, so a retry works). A taken email means an
 // account was created for this address between invite-send and accept (a
 // race); the recipient is told to sign in. ok=false for any other error
 // so the caller treats it as a 500.
 func acceptInviteCollisionMessage(err error) (string, bool) {
 	switch {
-	case errors.Is(err, ErrUsernameTaken):
+	case errors.Is(err, ErrDisplayNameTaken):
 		return "That display name is already taken. Pick another.", true
 	case errors.Is(err, ErrEmailTaken):
 		return "An account already exists for this email - sign in instead.", true

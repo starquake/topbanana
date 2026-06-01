@@ -108,7 +108,7 @@ func TestRequireGameHost_DeniesPlayer(t *testing.T) {
 		t.Errorf("body should contain %q, got %q", want, got)
 	}
 	if got, want := rec.Body.String(), "bob"; !strings.Contains(got, want) {
-		t.Errorf("body should contain signed-in username %q, got %q", want, got)
+		t.Errorf("body should contain signed-in displayName %q, got %q", want, got)
 	}
 }
 
@@ -368,7 +368,7 @@ func TestEnsurePlayer_NoCookie_CreatesAnonymousAndSetsCookie(t *testing.T) {
 		t.Errorf("seenPlayer.IsAnonymous() = false, want true (PasswordHash = %q)", seenPlayer.PasswordHash)
 	}
 	// EnsurePlayer should mint a petname-style "Adjective-Adjective-Noun"
-	// username, not the legacy "anon-<xid>" form (the xid form is the
+	// displayName, not the legacy "anon-<xid>" form (the xid form is the
 	// last-resort fallback only).
 	if got := seenPlayer.DisplayName; strings.HasPrefix(got, "anon-") {
 		t.Errorf("seenPlayer.DisplayName = %q, want a petname-style name (no anon- prefix)", got)
@@ -496,7 +496,7 @@ func TestEnsurePlayer_PetnameCollision_Retries(t *testing.T) {
 
 	store := newStubPlayerStore()
 	// Force the first three CreateAnonymousPlayer calls to return
-	// ErrUsernameTaken; the fourth attempt should succeed and produce a
+	// ErrDisplayNameTaken; the fourth attempt should succeed and produce a
 	// regular petname row.
 	store.forceAnonCollisions = 3
 	sessions := session.New([]byte("k"), true)

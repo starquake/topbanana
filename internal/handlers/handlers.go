@@ -18,7 +18,7 @@ const (
 
 // maxJSONBodySize caps the request body for /api/* JSON endpoints. 64 KiB is
 // generous for the small request shapes the API accepts (a quiz ID, an option
-// ID, a username) and denies an unauthenticated client the ability to
+// ID, a displayName) and denies an unauthenticated client the ability to
 // exhaust memory by streaming a multi-megabyte body into [json.Decoder].
 const maxJSONBodySize = 64 * 1024
 

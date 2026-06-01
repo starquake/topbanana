@@ -25,10 +25,10 @@ type OAuthIdentityStore interface {
 	GetPlayerByEmail(ctx context.Context, email string) (*Player, error)
 	// CreatePlayerFromOAuth inserts a new players row for a first-time
 	// OAuth sign-in. password_hash is left NULL, email is the supplied
-	// verified address, and username is the caller-generated petname.
-	// Returns ErrUsernameTaken if the petname collides (the OAuth
+	// verified address, and displayName is the caller-generated petname.
+	// Returns ErrDisplayNameTaken if the petname collides (the OAuth
 	// handler retries with a fresh petname on this sentinel).
-	CreatePlayerFromOAuth(ctx context.Context, username, email string) (*Player, error)
+	CreatePlayerFromOAuth(ctx context.Context, displayName, email string) (*Player, error)
 	// LinkProviderIdentity attaches a (provider, subject) pair to the
 	// given player id. Returns ErrIdentityAlreadyLinked when the
 	// (provider, subject) pair already exists (UNIQUE collision).
@@ -39,7 +39,7 @@ type OAuthIdentityStore interface {
 	// login. Returns ErrPlayerNotFound when the row is missing, has
 	// already been credentialled, or already carries an email - in
 	// each case the caller falls through to the create-fresh-player
-	// path. The username on the row is left untouched.
+	// path. The displayName on the row is left untouched.
 	ClaimPlayerForOAuth(ctx context.Context, playerID int64, email string) (*Player, error)
 	// MarkPlayerEmailVerifiedIfNew stamps email_verified_at when
 	// currently NULL. Idempotent.

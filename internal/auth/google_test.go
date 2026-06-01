@@ -71,7 +71,7 @@ func (s *stubOAuthStore) GetPlayerByEmail(_ context.Context, email string) (*Pla
 	return p, nil
 }
 
-func (s *stubOAuthStore) CreatePlayerFromOAuth(_ context.Context, username, email string) (*Player, error) {
+func (s *stubOAuthStore) CreatePlayerFromOAuth(_ context.Context, displayName, email string) (*Player, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -81,15 +81,15 @@ func (s *stubOAuthStore) CreatePlayerFromOAuth(_ context.Context, username, emai
 	if s.createColl > 0 {
 		s.createColl--
 
-		return nil, ErrUsernameTaken
+		return nil, ErrDisplayNameTaken
 	}
 	if _, exists := s.byEmail[email]; exists && email != "" {
-		return nil, ErrUsernameTaken
+		return nil, ErrDisplayNameTaken
 	}
 
 	p := &Player{
 		ID:          s.nextID,
-		DisplayName: username,
+		DisplayName: displayName,
 		Email:       email,
 		Role:        RolePlayer,
 	}
@@ -161,13 +161,13 @@ func (s *stubOAuthStore) MarkPlayerEmailVerifiedIfNew(_ context.Context, playerI
 // seedAnonymous inserts a fully anonymous players row (no password,
 // no email) so the session-claim test has a target the
 // ClaimPlayerForOAuth guard accepts.
-func (s *stubOAuthStore) seedAnonymous(username string) *Player {
+func (s *stubOAuthStore) seedAnonymous(displayName string) *Player {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	p := &Player{
 		ID:          s.nextID,
-		DisplayName: username,
+		DisplayName: displayName,
 		Role:        RolePlayer,
 	}
 	s.nextID++
@@ -180,13 +180,13 @@ func (s *stubOAuthStore) seedAnonymous(username string) *Player {
 // existing target without going through CreatePlayerFromOAuth. Always
 // inserts as a plain "player" - the OAuth race-recovery tests don't
 // exercise admin-promotion paths, so the role is fixed.
-func (s *stubOAuthStore) seed(email, username string) *Player {
+func (s *stubOAuthStore) seed(email, displayName string) *Player {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	p := &Player{
 		ID:          s.nextID,
-		DisplayName: username,
+		DisplayName: displayName,
 		Email:       email,
 		Role:        RolePlayer,
 	}
@@ -359,7 +359,7 @@ func TestLinkOrCreateGooglePlayer_RetriesPetnameCollision(t *testing.T) {
 
 // TestLinkOrCreateGooglePlayer_ExhaustsRetries ensures the loop does
 // not spin forever when collisions keep firing; the caller sees a
-// wrapped ErrUsernameTaken instead.
+// wrapped ErrDisplayNameTaken instead.
 func TestLinkOrCreateGooglePlayer_ExhaustsRetries(t *testing.T) {
 	t.Parallel()
 
@@ -372,7 +372,7 @@ func TestLinkOrCreateGooglePlayer_ExhaustsRetries(t *testing.T) {
 	if err == nil {
 		t.Fatal("ExportLinkOrCreateGooglePlayer err = nil, want non-nil after exhausting retries")
 	}
-	if got, want := err, ErrUsernameTaken; !errors.Is(got, want) {
+	if got, want := err, ErrDisplayNameTaken; !errors.Is(got, want) {
 		t.Errorf("err = %v, want it to wrap %v", got, want)
 	}
 }
@@ -381,7 +381,7 @@ func TestLinkOrCreateGooglePlayer_ExhaustsRetries(t *testing.T) {
 // session-claim path: when the request already has a session pointing
 // at a fully anonymous players row, the OAuth callback upgrades that
 // row in place instead of creating a new one. The visitor keeps their
-// player_id (and any custom username) on first Google sign-in.
+// player_id (and any custom displayName) on first Google sign-in.
 func TestLinkOrCreateGooglePlayer_ClaimsAnonymousSession(t *testing.T) {
 	t.Parallel()
 
