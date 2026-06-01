@@ -5,22 +5,17 @@ import { join } from 'node:path';
 import { adminStatePath, SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD, SEED_ADMIN_PASSWORD_HASH } from '../e2e-auth';
 import { csrfTokenPattern } from './helpers';
 
-// Logs the migration-seeded admin (players.id = 1) in through the real /login
-// flow and saves the resulting cookie jar as the shared storageState the admin
-// specs reuse. Running the genuine login is the point: the suite exercises
-// real Go session issuance + verification and never mints or reimplements a
-// cookie.
+// Logs the seed admin (players.id = 1) in through the real /login flow and
+// saves the cookie jar as the shared storageState the admin specs reuse, so the
+// suite exercises real Go session issuance rather than minting a cookie.
 //
-// Done via the `request` API rather than a browser page so this setup needs no
-// browser binary: CI installs only the one matrixed browser per job, and a
-// page-based setup defaulting to chromium fails on the firefox job. Login is a
-// plain form POST, so HTTP is enough.
+// Uses the `request` API, not a browser page: CI installs only the one
+// matrixed browser per job, so a page-based setup defaulting to chromium fails
+// on the firefox job. Login is a plain form POST, so HTTP suffices.
 //
-// The seed admin ships passwordless on the 'host' tier (roles migration #538),
-// so first stamp a real bcrypt hash and promote it to admin. This setup runs
-// against worker 0 (the config's default baseURL), so it prepares worker 0's
-// DB; the worker fixture does the same on every other worker, so the issued
-// cookie authenticates an admin on all of them.
+// The seed admin ships passwordless on 'host' (roles migration #538), so first
+// stamp a real bcrypt hash and promote it to admin. Runs against worker 0 (the
+// default baseURL); the worker fixture does the same on the others.
 setup('authenticate the shared admin', async ({ request }) => {
   const dataDir = process.env.TOPBANANA_E2E_DATA_DIR;
   if (!dataDir) {

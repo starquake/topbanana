@@ -23,32 +23,21 @@ export const test = base.extend<{}, { seedAdminTopTier: void }>({
     await use(`http://127.0.0.1:${port}`);
   },
 
-  // Prepare the migration-seeded admin (players.id = 1) on this worker's
-  // DB to be the shared top-tier admin the storageState specs act as.
-  // Two stamps, both needed:
-  //   - role = 'admin': the roles migration (#538, 20260529160000)
-  //     intentionally lands the seed admin on 'host' (the middle tier),
-  //     but the admin specs reach Admin-only sections (Players, Email,
-  //     Settings).
-  //   - a non-null password_hash: the "first credentialled registrant
-  //     becomes admin" rule (queries/players.sql) ignores the seed admin
-  //     because it has no password_hash, so without this the first player
-  //     a spec registers as a target would be auto-promoted to admin.
-  //     Stamping any hash makes the seed admin count as the credentialled
-  //     player so targets register as plain 'player'. The value is never
-  //     used to log in (auth is cookie-based via storageState).
-  // Worker-scoped + auto so it runs once per worker after the server (and
-  // its migrated DB) is up, before any test, regardless of which specs the
-  // worker picks up. Idempotent.
+  // Make the migration-seeded admin (players.id = 1) the shared admin the
+  // storageState specs act as. Two stamps:
+  //   - role 'admin': the roles migration (#538) lands it on 'host', but the
+  //     admin specs reach Admin-only sections.
+  //   - a non-null password_hash: marks it the credentialled player so target
+  //     registrations stay plain 'player' (the first-credentialled-becomes-
+  //     admin rule). Never used to log in; auth is cookie-based.
+  // Worker-scoped + auto: runs once per worker after its migrated DB is up.
   seedAdminTopTier: [async ({}, use, workerInfo) => {
     const dataDir = process.env.TOPBANANA_E2E_DATA_DIR;
     if (!dataDir) {
       throw new Error('TOPBANANA_E2E_DATA_DIR is not set; cannot prepare the seed admin');
     }
     const dbFile = join(dataDir, `e2e-${workerInfo.parallelIndex}.db`);
-    // SEED_ADMIN_PASSWORD_HASH is a fixed bcrypt constant (no quotes), so it is
-    // safe to interpolate directly; it needs no escaping the way user-derived
-    // values do.
+    // Fixed bcrypt constant (no quotes), so safe to interpolate without escaping.
     execFileSync(
       'sqlite3',
       [dbFile, `UPDATE players SET role = 'admin', password_hash = '${SEED_ADMIN_PASSWORD_HASH}' WHERE id = 1;`],

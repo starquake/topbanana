@@ -219,13 +219,11 @@ func (rr registerRenderers) renderPending(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// handleRegisterError writes the response for a failed
-// claimOrCreatePlayer. ErrEmailTaken is account-existence-opaque: a
-// distinct 409 would turn the form into an enumeration oracle, so it
-// responds exactly as the fresh-signup branch does and notifies the real
-// owner out of band instead (#573). ErrDisplayNameTaken re-renders the form
-// with a 409 - a display name is a public handle, not an enumeration
-// secret. Anything else is a 500.
+// handleRegisterError writes the response for a failed claimOrCreatePlayer.
+// ErrEmailTaken is account-existence-opaque (#573): a distinct 409 would make
+// the form an enumeration oracle, so it responds like the fresh-signup branch
+// and notifies the real owner out of band. ErrDisplayNameTaken gets a 409 (a
+// display name is public, not a secret); anything else is a 500.
 func handleRegisterError(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -299,15 +297,12 @@ func dispatchVerifyEmail(
 	}()
 }
 
-// dispatchRegisterExisting notifies the owner of an already-registered
-// address that someone attempted to register with it. The collided
-// address IS the existing owner's verified address, so sending to
-// recipient reaches the real owner; the unauthenticated submitter
-// learns nothing. Runs on a detached goroutine with a bounded timeout,
-// mirroring dispatchVerifyEmail, so the email-collision response
-// returns on the same timing path as the success response. A nil
-// Mailer (unit tests) skips the send; a send failure is logged at Warn
-// and never surfaced.
+// dispatchRegisterExisting notifies the owner of an already-registered address
+// that someone tried to register with it. The collided address IS the owner's
+// verified address, so sending to recipient reaches them; the submitter learns
+// nothing. Runs detached with a bounded timeout, mirroring dispatchVerifyEmail,
+// so the collision response keeps the same timing as the success path. A nil
+// Mailer (unit tests) skips the send; failures are logged, never surfaced.
 func dispatchRegisterExisting(
 	ctx context.Context,
 	logger *slog.Logger,
