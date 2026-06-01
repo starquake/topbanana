@@ -112,10 +112,10 @@ function setRole(displayName: string, role: 'player' | 'host' | 'admin'): void {
   }
 }
 
-// csrfTokenPattern scrapes the hidden csrf_token input the import form
-// renders. Tolerant of attribute order: the value may sit before or after
-// the name attribute on the input element.
-const csrfTokenPattern =
+// csrfTokenPattern scrapes the hidden csrf_token input a server-rendered
+// form carries (the import form, the login form, ...). Tolerant of attribute
+// order: the value may sit before or after the name attribute on the input.
+export const csrfTokenPattern =
   /<input[^>]*\bname="csrf_token"[^>]*\bvalue="([^"]*)"|<input[^>]*\bvalue="([^"]*)"[^>]*\bname="csrf_token"/;
 
 type ImportOption = { text: string; correct: boolean };
