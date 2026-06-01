@@ -169,16 +169,23 @@ export default defineConfig({
     trace: 'retain-on-failure',
     video: 'retain-on-failure',
   },
-  globalSetup: './global-setup.ts',
   globalTeardown: './global-teardown.ts',
   projects: [
+    // Logs the shared admin in once (real /login flow) and saves its
+    // storageState. The admin specs opt in per-file via
+    // test.use({ storageState: adminStatePath() }); the dependency only
+    // guarantees the file exists before they run. storageState is NOT set
+    // project-wide so the anonymous / plain-player specs stay signed out.
+    { name: 'setup', testMatch: /auth\.setup\.ts/ },
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+      dependencies: ['setup'],
     },
     {
       name: 'firefox',
       use: { ...devices['Desktop Firefox'] },
+      dependencies: ['setup'],
     },
   ],
   webServer: Array.from({ length: WORKER_COUNT }, (_, i) => workerServer(i)),

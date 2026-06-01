@@ -8,6 +8,8 @@ import { test as base } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
+import { SEED_ADMIN_PASSWORD_HASH } from '../e2e-auth';
+
 // playwright.config.ts discovers a free port per worker and publishes
 // the list as TOPBANANA_E2E_PORTS (comma-separated, indexed by worker).
 // It is always set by the time a worker imports this fixture, since the
@@ -46,7 +48,7 @@ export const test = base.extend<{}, { seedAdminTopTier: void }>({
     const dbFile = join(dataDir, `e2e-${workerInfo.parallelIndex}.db`);
     execFileSync(
       'sqlite3',
-      [dbFile, "UPDATE players SET role = 'admin', password_hash = 'x-e2e-seed-admin' WHERE id = 1;"],
+      [dbFile, `UPDATE players SET role = 'admin', password_hash = '${SEED_ADMIN_PASSWORD_HASH}' WHERE id = 1;`],
       { encoding: 'utf8' },
     );
     await use();
