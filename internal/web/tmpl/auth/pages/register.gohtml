@@ -41,9 +41,11 @@
             <div class="form-field">
                 <label for="password" class="label-eyebrow">Password</label>
                 <input id="password" name="password" type="password" required
-                       autocomplete="new-password"
+                       autocomplete="new-password" minlength="{{passwordMinLength}}"
+                       data-password-length="password-length-hint"
                        class="form-input">
                 <p class="mt-2 text-xs text-text-mute">{{passwordHelp}}</p>
+                <p id="password-length-hint" class="mt-2 text-xs text-danger" role="alert" aria-live="polite"></p>
             </div>
 
             <div class="form-field">

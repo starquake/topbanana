@@ -356,13 +356,14 @@ func optionDataFromOptions(options []*quiz.Option) []*OptionData {
 // its real implementation here - no per-request override needed.
 func parseTemplate(path string) *template.Template {
 	funcs := template.FuncMap{
-		"currentUser":  func() string { return "" },
-		"csrfToken":    func() string { return "" },
-		"ogImage":      func() string { return "" },
-		"navSection":   func() string { return "" },
-		"isAdmin":      func() bool { return false },
-		"envTitleTag":  envtag.Get,
-		"humanizeTime": humanizeTime,
+		"currentUser":       func() string { return "" },
+		"csrfToken":         func() string { return "" },
+		"ogImage":           func() string { return "" },
+		"navSection":        func() string { return "" },
+		"isAdmin":           func() bool { return false },
+		"envTitleTag":       envtag.Get,
+		"humanizeTime":      humanizeTime,
+		"passwordMinLength": func() int { return auth.MinPasswordLength },
 	}
 	base := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "admin/layouts/*.gohtml"),

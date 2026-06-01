@@ -102,9 +102,11 @@
                           onsubmit="return confirm('Set a new password? This signs the player out of their other sessions.');">
                         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                         <label for="password-input" class="text-text-dim text-xs uppercase tracking-[0.14em]">Set password</label>
-                        <input id="password-input" type="password" name="password" required minlength="13" autocomplete="new-password"
+                        <input id="password-input" type="password" name="password" required minlength="{{passwordMinLength}}" autocomplete="new-password"
+                               data-password-length="password-length-hint"
                                class="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text">
                         <p class="text-text-dim text-xs">Hand the password over out-of-band. Setting it signs the player out of their other sessions.</p>
+                        <p id="password-length-hint" class="text-danger text-xs" role="alert" aria-live="polite"></p>
                         <button type="submit" class="btn-primary">Save password</button>
                     </form>
                 {{end}}
