@@ -828,6 +828,48 @@ export class GameApp {
         });
     }
 
+    // animateRoundIntro plays the round intro card's entrance: a brief
+    // fade + rise. The from-state (opacity 0, translateY) is supplied by
+    // anime via the [from, to] array form, NOT by a CSS class — runAnim
+    // no-ops under reduced motion or a missing global, and in that case
+    // the card must already be at its visible resting state rather than
+    // stuck at opacity 0. Triggered from x-init with $el as the card.
+    animateRoundIntro(el) {
+        requestAnimationFrame(() => {
+            runAnim(el, {
+                opacity: [0, 1],
+                translateY: [12, 0],
+                duration: 380,
+                easing: 'easeOutQuad',
+            });
+        });
+    }
+
+    // animateRoundResults plays the recap card's entrance, then staggers
+    // the recap figures (score, correct/total, running total) so the
+    // numbers land one after another. As with animateRoundIntro the
+    // from-state is anime-driven, so a reduced-motion user or a missing
+    // anime global sees the fully visible card and figures immediately.
+    animateRoundResults(el) {
+        requestAnimationFrame(() => {
+            runAnim(el, {
+                opacity: [0, 1],
+                translateY: [12, 0],
+                duration: 380,
+                easing: 'easeOutQuad',
+            });
+            const a = typeof window !== 'undefined' ? window.anime : null;
+            const figures = el.querySelectorAll('[data-recap-figure]');
+            runAnim(figures, {
+                opacity: [0, 1],
+                translateY: [10, 0],
+                duration: 420,
+                delay: a && typeof a.stagger === 'function' ? a.stagger(120, { start: 120 }) : 120,
+                easing: 'easeOutBack',
+            });
+        });
+    }
+
     startCountdown() {
         const start = new Date(this.question.startedAt).getTime();
         const end = new Date(this.question.expiredAt).getTime();

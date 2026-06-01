@@ -443,7 +443,8 @@
                      boundary that fires before Q1. -->
                 <template x-if="roundItem && roundItem.phase === 'intro'">
                     <div class="flex flex-col min-h-[calc(100svh-5rem)] sm:min-h-[calc(100svh-8rem)]"
-                         data-testid="round-intro-card">
+                         data-testid="round-intro-card"
+                         x-init="$nextTick(() => animateRoundIntro($el))">
                         <div class="flex justify-end gap-2 mb-4">
                             <template x-if="lastQuestionPosition > 0">
                                 <span class="hud-chip">
@@ -521,7 +522,8 @@
                      intro and question views. -->
                 <template x-if="roundItem && roundItem.phase === 'results'">
                     <div class="flex flex-col min-h-[calc(100svh-5rem)] sm:min-h-[calc(100svh-8rem)]"
-                         data-testid="round-recap-card">
+                         data-testid="round-recap-card"
+                         x-init="$nextTick(() => animateRoundResults($el))">
                         <div class="flex justify-end gap-2 mb-4">
                             <template x-if="lastQuestionPosition > 0">
                                 <span class="hud-chip">
@@ -555,20 +557,23 @@
                              for THIS round. -->
                         <p class="mb-2 text-center font-display font-semibold text-accent
                                   text-[clamp(1.6rem,4vw,2.6rem)]"
-                           data-testid="round-recap-score">
+                           data-testid="round-recap-score"
+                           data-recap-figure>
                             You scored <span x-text="roundItem.roundScore"></span> this round
                         </p>
                         <p class="mb-8 font-display leading-snug text-text text-center
                                   text-[clamp(1rem,3vw,1.5rem)]
                                   lg:text-[clamp(1.25rem,2.5vw,2rem)]"
-                           data-testid="round-recap-correct">
+                           data-testid="round-recap-correct"
+                           data-recap-figure>
                             <span x-text="roundItem.roundCorrect"></span> of <span x-text="roundItem.roundQuestions"></span> correct
                         </p>
 
                         <!-- Running game total beneath the round result. -->
                         <p class="mb-8 text-center font-display font-semibold text-text
                                   text-[clamp(1.2rem,3vw,1.8rem)]"
-                           data-testid="round-score">
+                           data-testid="round-score"
+                           data-recap-figure>
                             Your score: <span x-text="roundItem.score"></span>
                         </p>
 
