@@ -262,7 +262,7 @@ func fetchAPIQuizzes(ctx context.Context, t *testing.T, client *http.Client, bas
 // double-pins the wire contract the front-end consumes.
 type meResponse struct {
 	ID              int64  `json:"id"`
-	Username        string `json:"username"`
+	Username        string `json:"displayName"`
 	IsAnonymous     bool   `json:"isAnonymous"`
 	HasCustomName   bool   `json:"hasCustomName"`
 	IsAuthenticated bool   `json:"isAuthenticated"`
@@ -306,7 +306,7 @@ func patchPlayerUsername(
 ) int {
 	t.Helper()
 
-	body := fmt.Sprintf(`{"username": %q}`, username)
+	body := fmt.Sprintf(`{"displayName": %q}`, username)
 	req, err := http.NewRequestWithContext(
 		ctx, http.MethodPatch, baseURL+"/api/players/me", strings.NewReader(body),
 	)

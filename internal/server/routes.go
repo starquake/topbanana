@@ -314,7 +314,7 @@ func addProfileRoutes(
 
 	mux.Handle("GET /profile", requireAuthn(profile.HandleProfile(logger, csrfMgr)))
 	mux.Handle(
-		"POST /profile/username",
+		"POST /profile/display-name",
 		csrfMW(requireAuthn(profile.HandleProfileUsername(logger, csrfMgr, stores.Players))),
 	)
 	mux.Handle("GET /profile/password", requireAuthn(profile.HandleProfilePassword(logger, csrfMgr)))
@@ -541,7 +541,7 @@ func addAdminPlayerRoutes(
 		))),
 	)
 	mux.Handle(
-		"POST /admin/players/{playerID}/username",
+		"POST /admin/players/{playerID}/display-name",
 		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
 			admin.HandlePlayerSetUsername(logger, stores.AdminPlayers, deps.flash),
 		))),

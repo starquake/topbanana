@@ -562,7 +562,7 @@ func TestLeaderboardStream_NameUpdate_RepaintsSubscribers(t *testing.T) {
 	const claimedName = "renamed-player"
 	patchReq, err := http.NewRequestWithContext(
 		ctx, http.MethodPatch, srv.BaseURL+"/api/players/me",
-		strings.NewReader(fmt.Sprintf(`{"username": %q}`, claimedName)),
+		strings.NewReader(fmt.Sprintf(`{"displayName": %q}`, claimedName)),
 	)
 	if err != nil {
 		t.Fatalf("NewRequest patch err = %v, want nil", err)
@@ -660,7 +660,7 @@ func playSingleQuestionQuizToCompletion(
 // playerMeResponse is the JSON shape of GET /api/players/me.
 type playerMeResponse struct {
 	ID       int64  `json:"id"`
-	Username string `json:"username"`
+	Username string `json:"displayName"`
 }
 
 // getMyUsername hits GET /api/players/me with the given cookie-jar
@@ -702,7 +702,7 @@ func getMyUsername(ctx context.Context, t *testing.T, baseURL string, client *ht
 // Lifted to package scope so revive's nested-structs rule is happy.
 type leaderboardEventEntry struct {
 	PlayerID        int64  `json:"playerId"`
-	Username        string `json:"username"`
+	Username        string `json:"displayName"`
 	Score           int    `json:"score"`
 	Rank            int    `json:"rank"`
 	IsCurrentPlayer bool   `json:"isCurrentPlayer"`

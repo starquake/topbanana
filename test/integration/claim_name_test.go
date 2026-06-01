@@ -72,7 +72,7 @@ func patchPlayerUsernameWithBody(
 ) ([]byte, int) {
 	t.Helper()
 
-	body := fmt.Sprintf(`{"username": %q}`, username)
+	body := fmt.Sprintf(`{"displayName": %q}`, username)
 	req, err := http.NewRequestWithContext(
 		ctx, http.MethodPatch, baseURL+"/api/players/me", strings.NewReader(body),
 	)

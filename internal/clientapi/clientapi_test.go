@@ -1379,7 +1379,7 @@ func TestHandleGameResults(t *testing.T) {
 // flat (revive's nested-structs rule).
 type leaderboardTestEntry struct {
 	PlayerID        int64  `json:"playerId"`
-	Username        string `json:"username"`
+	DisplayName     string `json:"displayName"`
 	Score           int    `json:"score"`
 	Rank            int    `json:"rank"`
 	IsCurrentPlayer bool   `json:"isCurrentPlayer"`
@@ -1464,8 +1464,8 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 			t.Fatalf("len(entries) = %d, want %d", got, want)
 		}
 		// bob (2000) should outrank alice (1000).
-		if got, want := body.Entries[0].Username, "bob"; got != want {
-			t.Errorf("entries[0].Username = %q, want %q", got, want)
+		if got, want := body.Entries[0].DisplayName, "bob"; got != want {
+			t.Errorf("entries[0].DisplayName = %q, want %q", got, want)
 		}
 		if got, want := body.Entries[0].Rank, 1; got != want {
 			t.Errorf("entries[0].Rank = %d, want %d", got, want)
@@ -1473,8 +1473,8 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 		if got, want := body.Entries[0].IsCurrentPlayer, false; got != want {
 			t.Errorf("entries[0].IsCurrentPlayer = %v, want %v", got, want)
 		}
-		if got, want := body.Entries[1].Username, "alice"; got != want {
-			t.Errorf("entries[1].Username = %q, want %q", got, want)
+		if got, want := body.Entries[1].DisplayName, "alice"; got != want {
+			t.Errorf("entries[1].DisplayName = %q, want %q", got, want)
 		}
 		if got, want := body.Entries[1].Rank, 2; got != want {
 			t.Errorf("entries[1].Rank = %d, want %d", got, want)

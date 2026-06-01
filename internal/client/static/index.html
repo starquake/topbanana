@@ -89,7 +89,7 @@
             <template x-if="isAuthenticated() && !(gameId && !finished)">
                 <p class="mb-6 text-sm text-text-dim text-right">
                     Signed in as
-                    <a href="/profile" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="account-profile-link" x-text="player ? player.username : ''"></a>
+                    <a href="/profile" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="account-profile-link" x-text="player ? player.displayName : ''"></a>
                 </p>
             </template>
 
@@ -116,7 +116,7 @@
                     <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
                         <div class="min-w-0">
                             <p class="label-eyebrow">Playing as</p>
-                            <p data-testid="claim-cta-name" class="font-mono text-accent text-[1.05rem] break-all" x-text="player ? player.username : ''"></p>
+                            <p data-testid="claim-cta-name" class="font-mono text-accent text-[1.05rem] break-all" x-text="player ? player.displayName : ''"></p>
                         </div>
                         <button class="btn-primary ml-auto" @click="openClaimModal()">
                             <span x-show="!hasCustomName()">Set your name</span>
@@ -280,7 +280,7 @@
                                     <tr :aria-current="entry.isCurrentPlayer ? 'true' : null">
                                         <td x-text="entry.rank"></td>
                                         <td>
-                                            <span x-text="entry.username"></span>
+                                            <span x-text="entry.displayName"></span>
                                             <template x-if="entry.inProgress">
                                                 <span class="leaderboard-in-progress" role="img" aria-label="Still answering" title="Still answering"></span>
                                             </template>
@@ -641,7 +641,7 @@
                          x-data="claimNameForm({
                                 submitLabel: 'Save',
                                 cancelLabel: 'Cancel',
-                                initialValue: hasCustomName() ? player.username : '',
+                                initialValue: hasCustomName() ? player.displayName : '',
                                 onSubmit: (name) => claimFromModal(name),
                                 onCancel: () => closeClaimModal(),
                              })">

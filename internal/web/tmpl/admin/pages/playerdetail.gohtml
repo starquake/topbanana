@@ -91,7 +91,7 @@
                         </select>
                         <button type="submit" class="btn-primary">Save role</button>
                     </form>
-                    <form method="POST" action="/admin/players/{{.Player.ID}}/username" class="flex flex-col gap-2">
+                    <form method="POST" action="/admin/players/{{.Player.ID}}/display-name" class="flex flex-col gap-2">
                         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                         <label for="display-name-input" class="text-text-dim text-xs uppercase tracking-[0.14em]">Name</label>
                         <input id="display-name-input" type="text" name="display_name" required value="{{.Player.DisplayName}}"

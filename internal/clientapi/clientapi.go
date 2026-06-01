@@ -272,7 +272,7 @@ const leaderboardLimit = 10
 // positive signal to render the badge.
 type quizLeaderboardEntryResponse struct {
 	PlayerID        int64  `json:"playerId"`
-	Username        string `json:"username"`
+	DisplayName     string `json:"displayName"`
 	Score           int    `json:"score"`
 	Rank            int    `json:"rank"`
 	IsCurrentPlayer bool   `json:"isCurrentPlayer"`
@@ -290,7 +290,7 @@ type quizLeaderboardResponse struct {
 func toEntryResponse(e game.LeaderboardEntry) quizLeaderboardEntryResponse {
 	return quizLeaderboardEntryResponse{
 		PlayerID:        e.PlayerID,
-		Username:        e.DisplayName,
+		DisplayName:     e.DisplayName,
 		Score:           e.Score,
 		Rank:            e.Rank,
 		IsCurrentPlayer: e.IsCurrentPlayer,
@@ -1077,7 +1077,7 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 // claim-name modal on isAuthenticated.
 type playerResponse struct {
 	ID              int64  `json:"id"`
-	Username        string `json:"username"`
+	DisplayName     string `json:"displayName"`
 	IsAnonymous     bool   `json:"isAnonymous"`
 	HasCustomName   bool   `json:"hasCustomName"`
 	IsAuthenticated bool   `json:"isAuthenticated"`
@@ -1087,7 +1087,7 @@ type playerResponse struct {
 func newPlayerResponse(p *auth.Player) playerResponse {
 	return playerResponse{
 		ID:              p.ID,
-		Username:        p.DisplayName,
+		DisplayName:     p.DisplayName,
 		IsAnonymous:     p.IsAnonymous(),
 		HasCustomName:   p.HasCustomName(),
 		IsAuthenticated: p.IsAuthenticated(),
@@ -1131,7 +1131,7 @@ func HandlePlayerClaimName(
 	logger *slog.Logger, players auth.PlayerStore, gameService *game.Service,
 ) http.Handler {
 	type claimNameRequest struct {
-		Username string `json:"username"`
+		DisplayName string `json:"displayName"`
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1151,13 +1151,13 @@ func HandlePlayerClaimName(
 
 			return
 		}
-		if strings.TrimSpace(req.Username) == "" {
+		if strings.TrimSpace(req.DisplayName) == "" {
 			http.Error(w, "username is required", http.StatusBadRequest)
 
 			return
 		}
 
-		updated, err := players.UpdatePlayerDisplayName(ctx, current.ID, req.Username)
+		updated, err := players.UpdatePlayerDisplayName(ctx, current.ID, req.DisplayName)
 		if err != nil {
 			switch {
 			case errors.Is(err, auth.ErrUsernameTaken):

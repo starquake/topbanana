@@ -212,7 +212,7 @@ func TestAdminPlayerMgmt_SetEmailClearsVerification(t *testing.T) {
 	verifyPlayerEmail(ctx, t, srv.DBURI, "reverify-target")
 
 	target := lookupPlayerID(ctx, t, srv.DBURI, "reverify-target")
-	// Match on the role-scoped detail link rather than an email/username
+	// Match on the role-scoped detail link rather than an email/display-name
 	// substring so a flash/banner echoing the value elsewhere on the page
 	// cannot satisfy the assertion (same hazard documented in
 	// TestAdminPlayerMgmt_FilterTabsAndCounts).
@@ -469,7 +469,7 @@ func TestAdminPlayerMgmt_SetUsername(t *testing.T) {
 	registerForPending(ctx, t, newAdminMgmtClient(t), srv.BaseURL, "setname-target", "setname-target-pass-123")
 
 	target := lookupPlayerID(ctx, t, srv.DBURI, "setname-target")
-	usernameURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/username"
+	usernameURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/display-name"
 
 	res := postAdminAction(
 		ctx,
@@ -561,13 +561,13 @@ func TestAdminPlayerMgmt_SetCredentialsRequireAdmin(t *testing.T) {
 	makeHost(ctx, t, srv.DBURI, "creds-host")
 
 	target := lookupPlayerID(ctx, t, srv.DBURI, "creds-admin-boss")
-	usernameURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/username"
+	usernameURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/display-name"
 	passwordURL := srv.BaseURL + "/admin/players/" + intToString(target) + "/password"
 
 	if got, want := postCSRFForm(
 		ctx, t, hostClient, usernameURL,
 	), http.StatusNotFound; got != want {
-		t.Errorf("POST /username status = %d, want %d", got, want)
+		t.Errorf("POST /display-name status = %d, want %d", got, want)
 	}
 	if got, want := postCSRFForm(
 		ctx, t, hostClient, passwordURL,
@@ -671,7 +671,7 @@ func csrfPageForPostURL(baseURL, postURL string) string {
 		return baseURL + "/admin/players/new"
 	}
 	for _, suffix := range []string{
-		"/verify", "/resend-verification", "/email", "/role", "/username", "/password",
+		"/verify", "/resend-verification", "/email", "/role", "/display-name", "/password",
 	} {
 		if before, ok := strings.CutSuffix(postURL, suffix); ok {
 			return before

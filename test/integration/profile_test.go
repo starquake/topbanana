@@ -69,7 +69,7 @@ func TestProfile_Integration(t *testing.T) {
 		}
 	})
 
-	t.Run("POST /profile/username with empty value returns 400", func(t *testing.T) {
+	t.Run("POST /profile/display-name with empty value returns 400", func(t *testing.T) {
 		snap := profilePOST(ctx, t, authn, srv.BaseURL, "   ")
 		if got, want := snap.status, http.StatusBadRequest; got != want {
 			t.Errorf("status = %d, want %d", got, want)
@@ -79,7 +79,7 @@ func TestProfile_Integration(t *testing.T) {
 		}
 	})
 
-	t.Run("POST /profile/username with a taken value returns 409", func(t *testing.T) {
+	t.Run("POST /profile/display-name with a taken value returns 409", func(t *testing.T) {
 		// Register a second player so the admin can collide with them.
 		registerForPending(ctx, t, authClient(t), srv.BaseURL, "rival-name", "correct-battery-13")
 
@@ -97,7 +97,7 @@ func TestProfile_Integration(t *testing.T) {
 		}
 	})
 
-	t.Run("POST /profile/username with a fresh value renames the player", func(t *testing.T) {
+	t.Run("POST /profile/display-name with a fresh value renames the player", func(t *testing.T) {
 		snap := profilePOST(ctx, t, authn, srv.BaseURL, "renamed-admin")
 		if got, want := snap.status, http.StatusOK; got != want {
 			t.Fatalf("status = %d, want %d (body=%q)", got, want, snap.body)
@@ -157,7 +157,7 @@ func profilePOST(ctx context.Context, t *testing.T, client *http.Client, baseURL
 		"display_name": {username},
 	}
 	req, err := http.NewRequestWithContext(
-		ctx, http.MethodPost, baseURL+"/profile/username", strings.NewReader(form.Encode()),
+		ctx, http.MethodPost, baseURL+"/profile/display-name", strings.NewReader(form.Encode()),
 	)
 	if err != nil {
 		t.Fatalf("NewRequest err = %v, want nil", err)

@@ -87,7 +87,7 @@ type resultsRes struct {
 // out of the parent struct to keep nested-structs-friendly types.
 type leaderboardEntryRes struct {
 	PlayerID        int64  `json:"playerId"`
-	Username        string `json:"username"`
+	Username        string `json:"displayName"`
 	Score           int    `json:"score"`
 	IsCurrentPlayer bool   `json:"isCurrentPlayer"`
 }

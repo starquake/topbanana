@@ -97,7 +97,7 @@ export class GameApp {
         // Current player as returned by GET /api/players/me. Stays null
         // until init() resolves; templates guard with `player &&`. When
         // the player renames, the PATCH response replaces this object
-        // so player.username and player.hasCustomName flow through every
+        // so player.displayName and player.hasCustomName flow through every
         // bound template at once.
         this.player = null;
         // Visibility of the shared claim-name modal. A single piece of
