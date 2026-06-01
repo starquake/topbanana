@@ -25,7 +25,10 @@
             </label>
             <label class="flex flex-col gap-1 text-sm">
                 <span class="text-text-dim">Password</span>
-                <input type="password" name="password" autocomplete="new-password" required class="form-input">
+                <input type="password" name="password" autocomplete="new-password" required
+                       minlength="{{passwordMinLength}}" data-password-length="password-length-hint"
+                       class="form-input">
+                <span id="password-length-hint" class="text-xs text-danger" role="alert" aria-live="polite"></span>
             </label>
             <label class="flex flex-col gap-1 text-sm">
                 <span class="text-text-dim">Confirm password</span>

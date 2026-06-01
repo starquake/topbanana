@@ -184,6 +184,7 @@ func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string
 		"passwordHelp": func() string {
 			return fmt.Sprintf("Must be %d-%d characters.", auth.MinPasswordLength, auth.MaxPasswordLength)
 		},
+		"passwordMinLength": func() int { return auth.MinPasswordLength },
 	}
 	layouts := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "auth/layouts/*.gohtml"),

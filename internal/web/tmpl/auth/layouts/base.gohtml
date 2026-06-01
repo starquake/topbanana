@@ -39,6 +39,9 @@
          [data-cooldown] element, so loading it on every auth page is
          fine. */}}
     <script type="module" src="/assets/js/cooldown.js" defer></script>
+    {{/* password-length.js shows a live "too short" hint under new-password
+         inputs. Self-noops where there is no [data-password-length]. */}}
+    <script type="module" src="/assets/js/password-length.js" defer></script>
     <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
 </head>
 <body class="bg-bg text-text font-sans antialiased min-h-screen leading-relaxed">
