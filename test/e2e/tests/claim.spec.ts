@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures';
-import { registerAdmin, registerForPending, login, markEmailVerified, createQuizWithQuestions, playThroughQuiz } from './helpers';
+import { registerForPending, login, markEmailVerified, seedQuiz, playThroughQuiz } from './helpers';
+import { adminStatePath } from '../e2e-auth';
 
 // Petname format: Title-cased Adjective-Adjective-Noun, e.g. "Steamy-Farty-Bear".
 // EnsurePlayer middleware generates one of these for every fresh anonymous
@@ -66,79 +67,78 @@ test('submitting a name via the start-screen modal updates the Playing as card i
   await expect(page).toHaveURL(/\/client\/?$/);
 });
 
-// Test 3 — fresh anonymous visitor sees the claim modal auto-open after the
-// leaderboard renders.
-test('claim modal auto-opens on top of the leaderboard for a fresh anonymous visitor', async ({ page, browserName }) => {
-  // Four questions × ~2s feedback + admin setup overhead pushes this test
-  // past Playwright's 30s default; match player.spec.ts's bump.
-  test.setTimeout(60_000);
+// Tests 3 and 4 seed a quiz as the shared admin via the JSON importer,
+// then play it anonymously after clearing the admin cookie. The other
+// claim tests in this file stay fully anonymous (no admin storageState).
+test.describe('claim modal over a played quiz', () => {
+  test.use({ storageState: adminStatePath() });
 
-  const adminUser = `e2e-admin-claim-${browserName}`;
-  const quizTitle = `E2E Claim Quiz ${browserName}`;
+  // Test 3 — fresh anonymous visitor sees the claim modal auto-open after the
+  // leaderboard renders.
+  test('claim modal auto-opens on top of the leaderboard for a fresh anonymous visitor', async ({ page, browserName }) => {
+    // A full anonymous playthrough spans four questions of feedback; setup
+    // is one import, so a moderate budget suffices.
+    test.setTimeout(45_000);
 
-  // Admin setup: register, create the quiz, log out so the next steps
-  // run anonymously.
-  await registerAdmin(page, adminUser);
-  await createQuizWithQuestions(page, quizTitle);
-  await page.getByRole('button', { name: 'Log out' }).click();
-  await expect(page).toHaveURL(/\/login$/);
+    const quizTitle = `E2E Claim Quiz ${browserName}`;
 
-  // Anonymous player walks the quiz. The pre-leaderboard claim card is
-  // shown because the player is still on the auto-petname; once finished,
-  // the modal auto-opens on top of the leaderboard.
-  await playThroughQuiz(page, quizTitle);
+    await seedQuiz(page, quizTitle);
+    await page.context().clearCookies();
 
-  // Modal is visible — gate is `!hasCustomName()`, which is true for a fresh
-  // anonymous visitor who never PATCHed /api/players/me.
-  const modal = page.locator('[role="dialog"]');
-  await expect(modal).toBeVisible();
-  await expect(modal.locator('#claim-modal-title')).toHaveText('Pick a display name');
-});
+    // Anonymous player walks the quiz. The pre-leaderboard claim card is
+    // shown because the player is still on the auto-petname; once finished,
+    // the modal auto-opens on top of the leaderboard.
+    await playThroughQuiz(page, quizTitle);
 
-// Test 4 — an already-claimed visitor does NOT see the auto-modal after a
-// finished quiz. This is the regression #165 fixed: the prior gate
-// (`isAnonymous()` — i.e. "no password_hash") stayed true after a claim,
-// re-opening the modal every time. The corrected gate is `hasCustomName()`.
-test('claim modal does not auto-open for a visitor who already claimed a name', async ({ page, browserName }) => {
-  test.setTimeout(60_000);
+    // Modal is visible — gate is `!hasCustomName()`, which is true for a fresh
+    // anonymous visitor who never PATCHed /api/players/me.
+    const modal = page.locator('[role="dialog"]');
+    await expect(modal).toBeVisible();
+    await expect(modal.locator('#claim-modal-title')).toHaveText('Pick a display name');
+  });
 
-  const adminUser = `e2e-admin-claim-skip-${browserName}`;
-  const quizTitle = `E2E Claim Skip Quiz ${browserName}`;
-  const chosenName = `Already-Claimed-${browserName}-${Date.now()}`;
+  // Test 4 — an already-claimed visitor does NOT see the auto-modal after a
+  // finished quiz. This is the regression #165 fixed: the prior gate
+  // (`isAnonymous()` — i.e. "no password_hash") stayed true after a claim,
+  // re-opening the modal every time. The corrected gate is `hasCustomName()`.
+  test('claim modal does not auto-open for a visitor who already claimed a name', async ({ page, browserName }) => {
+    test.setTimeout(45_000);
 
-  await registerAdmin(page, adminUser);
-  await createQuizWithQuestions(page, quizTitle);
-  await page.getByRole('button', { name: 'Log out' }).click();
-  await expect(page).toHaveURL(/\/login$/);
+    const quizTitle = `E2E Claim Skip Quiz ${browserName}`;
+    const chosenName = `Already-Claimed-${browserName}-${Date.now()}`;
 
-  // Visit /client/, claim a name via the start-screen modal, then play through.
-  await page.goto('/client/');
-  // Scope to :visible: both start-screen and leaderboard cards live in DOM
-  // at the same time (x-show toggles CSS, not mount state).
-  await expect(page.locator('.claim-cta:visible')).toBeVisible();
-  await page.getByRole('button', { name: 'Set your name' }).click();
+    await seedQuiz(page, quizTitle);
+    await page.context().clearCookies();
 
-  const startModal = page.locator('[role="dialog"]');
-  await expect(startModal).toBeVisible();
-  await startModal.locator('input#claim-name-modal').fill(chosenName);
-  await startModal.getByRole('button', { name: 'Save' }).click();
-  await expect(startModal).toBeHidden();
-  await expect(page.getByRole('button', { name: 'Change your name' })).toBeVisible();
+    // Visit /client/, claim a name via the start-screen modal, then play through.
+    await page.goto('/client/');
+    // Scope to :visible: both start-screen and leaderboard cards live in DOM
+    // at the same time (x-show toggles CSS, not mount state).
+    await expect(page.locator('.claim-cta:visible')).toBeVisible();
+    await page.getByRole('button', { name: 'Set your name' }).click();
 
-  // Now play through. playThroughQuiz issues its own goto('/client/'), which
-  // is fine — the session cookie keeps the same anonymous-but-claimed row.
-  await playThroughQuiz(page, quizTitle);
+    const startModal = page.locator('[role="dialog"]');
+    await expect(startModal).toBeVisible();
+    await startModal.locator('input#claim-name-modal').fill(chosenName);
+    await startModal.getByRole('button', { name: 'Save' }).click();
+    await expect(startModal).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Change your name' })).toBeVisible();
 
-  // The claim modal must NOT auto-open: the player already has a custom name,
-  // so the `!hasCustomName()` gate in nextQuestion() short-circuits.
-  await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+    // Now play through. playThroughQuiz issues its own goto('/client/'), which
+    // is fine — the session cookie keeps the same anonymous-but-claimed row.
+    await playThroughQuiz(page, quizTitle);
 
-  // The leaderboard row for the current player should already show the
-  // chosen name (no second claim step required). Match within the
-  // aria-current row to ignore any other rows.
-  const playerRow = page.locator('table tbody tr[aria-current="true"]');
-  await expect(playerRow).toBeVisible();
-  await expect(playerRow).toContainText(chosenName);
+    // The claim modal must NOT auto-open: the player already has a custom name,
+    // so the `!hasCustomName()` gate in nextQuestion() short-circuits.
+    await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+
+    // The leaderboard row for the current player should already show the
+    // chosen name (no second claim step required). Match within the
+    // aria-current row to ignore any other rows.
+    const playerRow = page.locator('table tbody tr[aria-current="true"]');
+    await expect(playerRow).toBeVisible();
+    await expect(playerRow).toContainText(chosenName);
+  });
 });
 
 // Test 4 — "Change your name" pre-fills the input with the current

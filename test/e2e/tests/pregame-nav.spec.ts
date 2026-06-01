@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures';
-import { registerAdmin, registerForPending, login, createQuizWithQuestions, markEmailVerified } from './helpers';
+import { registerForPending, login, seedQuiz, markEmailVerified } from './helpers';
+import { adminStatePath } from '../e2e-auth';
 
 // Pre-game navigation on the player SPA: a signed-in player can reach
 // /profile via the account link, and a deep-linked /play/{slug} start
@@ -44,31 +45,34 @@ test('signed-in player can reach /profile via the account link on the play SPA',
 // surfaces "Browse all quizzes" as its primary affordance; this pins the
 // secondary escape hatch that lets a deep-link visitor reach the catalog
 // without going home first.
-test('deep-linked play start screen exposes a link to the quizzes catalog', async ({ page, browserName }) => {
-  test.setTimeout(60_000);
+test.describe('deep-linked play start screen', () => {
+  // Seed the quiz as the shared admin via the JSON importer; the deep-link
+  // visit then runs anonymous after clearing the admin cookie.
+  test.use({ storageState: adminStatePath() });
 
-  const adminUser = `e2e-admin-pregame-nav-${browserName}`;
-  const quizTitle = `E2E Pregame Nav ${browserName}`;
+  test('deep-linked play start screen exposes a link to the quizzes catalog', async ({ page, browserName }) => {
+    test.setTimeout(30_000);
 
-  await registerAdmin(page, adminUser);
-  await createQuizWithQuestions(page, quizTitle);
-  await page.getByRole('button', { name: 'Log out' }).click();
-  await expect(page).toHaveURL(/\/login$/);
+    const quizTitle = `E2E Pregame Nav ${browserName}`;
 
-  // Land on the deep link via the public list, the same path a shared
-  // quiz link takes a visitor down.
-  await page.goto('/quizzes');
-  await page.getByRole('link', { name: quizTitle }).click();
-  await expect(page).toHaveURL(/\/play\/[^/]+-\d+$/);
+    await seedQuiz(page, quizTitle);
+    await page.context().clearCookies();
 
-  // The deep-link start screen shows the quiz title + Start cluster. The
-  // browse link sits below as a secondary affordance.
-  await expect(page.getByRole('button', { name: 'Start Game' })).toBeVisible();
-  const browseLink = page.getByTestId('browse-quizzes-link');
-  await expect(browseLink).toBeVisible();
+    // Land on the deep link via the public list, the same path a shared
+    // quiz link takes a visitor down.
+    await page.goto('/quizzes');
+    await page.getByRole('link', { name: quizTitle }).click();
+    await expect(page).toHaveURL(/\/play\/[^/]+-\d+$/);
 
-  await Promise.all([
-    page.waitForURL(/\/quizzes$/),
-    browseLink.click(),
-  ]);
+    // The deep-link start screen shows the quiz title + Start cluster. The
+    // browse link sits below as a secondary affordance.
+    await expect(page.getByRole('button', { name: 'Start Game' })).toBeVisible();
+    const browseLink = page.getByTestId('browse-quizzes-link');
+    await expect(browseLink).toBeVisible();
+
+    await Promise.all([
+      page.waitForURL(/\/quizzes$/),
+      browseLink.click(),
+    ]);
+  });
 });

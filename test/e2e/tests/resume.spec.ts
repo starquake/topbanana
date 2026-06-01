@@ -1,11 +1,15 @@
 import { test, expect } from './fixtures';
 import {
-  registerAdmin,
-  createQuizWithQuestions,
+  seedQuiz,
   startQuizAsAnonymous,
   answerRemainingQuestions,
   QUIZ_QUESTIONS,
 } from './helpers';
+import { adminStatePath } from '../e2e-auth';
+
+// Seed the quiz as the shared admin via the JSON importer, then clear the
+// admin cookie so the resume flow runs anonymous.
+test.use({ storageState: adminStatePath() });
 
 // #310: mobile pull-to-refresh used to bounce the player back to the
 // start screen mid-question. After the resume fix the boot path
@@ -13,18 +17,14 @@ import {
 // re-renders the same question via the idempotent /questions/next
 // path.
 test('mid-game reload lands back on the question, not the start screen', async ({ page, browserName }) => {
-  // registerAdmin + createQuizWithQuestions costs ~10s, the resumed
-  // game then plays through four questions with ~2-3s feedback
-  // pauses each. 90s leaves headroom on slow CI runners.
-  test.setTimeout(90_000);
+  // The resumed game plays through four questions with ~2-3s feedback
+  // pauses each; setup is one import. 45s leaves headroom on slow CI.
+  test.setTimeout(45_000);
 
-  const adminUser = `e2e-admin-resume-${browserName}`;
   const quizTitle = `E2E Resume Quiz ${browserName}`;
 
-  await registerAdmin(page, adminUser);
-  await createQuizWithQuestions(page, quizTitle);
-  await page.getByRole('button', { name: 'Log out' }).click();
-  await expect(page).toHaveURL(/\/login$/);
+  await seedQuiz(page, quizTitle);
+  await page.context().clearCookies();
 
   await startQuizAsAnonymous(page, quizTitle);
 

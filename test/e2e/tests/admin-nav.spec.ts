@@ -1,15 +1,17 @@
 import { test, expect } from './fixtures';
-import { registerAdmin } from './helpers';
+import { adminStatePath } from '../e2e-auth';
+
+// Reuse the shared seed-admin session instead of registering a fresh admin
+// per test; these specs only need to be signed in as an admin.
+test.use({ storageState: adminStatePath() });
 
 // #517 / #582 — persistent admin top nav. The real sections (Quizzes,
 // Players, Invites, Email) must be reachable from any admin page via the
 // navbar. Email was orphaned before #517 and Invites before #582 (each
 // linked only by typing the URL or the dashboard card), so the nav links
 // are the load-bearing additions this spec guards.
-test('admin top nav reaches all sections', async ({ page, browserName }) => {
-  const displayName = `e2e-admin-nav-${browserName}`;
-
-  await registerAdmin(page, displayName);
+test('admin top nav reaches all sections', async ({ page }) => {
+  await page.goto('/admin/quizzes');
 
   // Scope to the primary nav so the links resolve to the navbar entries,
   // not in-page cards/buttons that happen to share a name.
@@ -32,14 +34,9 @@ test('admin top nav reaches all sections', async ({ page, browserName }) => {
   await expect(page.getByRole('heading', { name: /email diagnostics/i })).toBeVisible();
 });
 
-test('admin nav marks the active section', async ({ page, browserName }) => {
-  const displayName = `e2e-admin-nav-active-${browserName}`;
-
-  await registerAdmin(page, displayName);
-
+test('admin nav marks the active section', async ({ page }) => {
   const nav = page.getByRole('navigation', { name: 'Primary' });
 
-  // registerAdmin lands on /admin/quizzes, so the Quizzes link is current.
   await page.goto('/admin/players');
   await expect(nav.getByRole('link', { name: 'Players' }).first()).toHaveAttribute('aria-current', 'page');
   await expect(nav.getByRole('link', { name: 'Quizzes' }).first()).not.toHaveAttribute('aria-current', 'page');

@@ -1,10 +1,14 @@
 import { test, expect } from './fixtures';
 import {
-  registerAdmin,
-  createQuizWithQuestions,
+  seedQuiz,
   startQuizAsAnonymous,
   QUIZ_QUESTIONS,
 } from './helpers';
+import { adminStatePath } from '../e2e-auth';
+
+// Seed the quiz as the shared admin via the JSON importer, then clear the
+// admin cookie so the retry flow runs anonymous.
+test.use({ storageState: adminStatePath() });
 
 // Covers issue #179: when the answers POST throws (server 5xx, network
 // drop), the player client used to leave the question on screen with no
@@ -17,15 +21,12 @@ import {
 // Page.route runs before any browser-side fetch reaches the network, so
 // the failure is indistinguishable from a real 5xx to the client.
 test('retry banner appears when answers POST fails, and a re-click advances the game', async ({ page, browserName }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(45_000);
 
-  const adminUser = `e2e-admin-submit-err-${browserName}`;
   const quizTitle = `E2E Submit Err ${browserName}`;
 
-  await registerAdmin(page, adminUser);
-  await createQuizWithQuestions(page, quizTitle);
-  await page.getByRole('button', { name: 'Log out' }).click();
-  await expect(page).toHaveURL(/\/login$/);
+  await seedQuiz(page, quizTitle);
+  await page.context().clearCookies();
 
   // Fail the first answers POST with a 500; let subsequent ones through.
   // Scoped to POST so the in-progress GETs (countdown, next question)
