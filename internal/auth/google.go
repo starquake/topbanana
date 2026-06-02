@@ -88,8 +88,8 @@ type GoogleAuthenticator struct {
 	cfg      GoogleConfig
 	stateKey []byte
 
-	initOnce sync.Once
-	initErr  error
+	mu       sync.Mutex
+	ready    bool
 	provider *oidc.Provider
 	verifier *oidc.IDTokenVerifier
 	oauth2   *oauth2.Config
@@ -579,45 +579,44 @@ func createGooglePlayer(
 // ensureProvider lazily initialises the OIDC provider, verifier, and
 // oauth2.Config the first time a request arrives. Deferring this past
 // startup keeps the process bootable when Google (or the test mock) is
-// briefly unreachable, and the [sync.Once] means concurrent requests
-// share a single discovery fetch.
+// briefly unreachable.
+//
+// Guarded by a.mu rather than a [sync.Once] because a transient
+// discovery failure must be retryable: a.ready stays false on error so
+// the next request tries again, instead of pinning the server in a
+// failed state. The mutex (held across the discovery fetch) both
+// serialises concurrent first-requests onto a single fetch and provides
+// the happens-before that lets the callback path read a.oauth2 /
+// a.verifier unlocked after ensureProvider returns nil. The previous
+// reset-the-Once-on-error retry raced on its unexported init fields and
+// could deadlock under contention (#622).
 func (a *GoogleAuthenticator) ensureProvider(ctx context.Context) error {
-	a.initOnce.Do(func() {
-		issuer := a.cfg.IssuerURL
-		if issuer == "" {
-			issuer = googleDefaultIssuer
-		}
-
-		provider, err := oidc.NewProvider(ctx, issuer)
-		if err != nil {
-			a.initErr = fmt.Errorf("oidc new provider: %w", err)
-
-			return
-		}
-
-		a.provider = provider
-		a.verifier = provider.Verifier(&oidc.Config{ClientID: a.cfg.ClientID})
-		a.oauth2 = &oauth2.Config{
-			ClientID:     a.cfg.ClientID,
-			ClientSecret: a.cfg.ClientSecret,
-			RedirectURL:  a.cfg.RedirectURL,
-			Endpoint:     provider.Endpoint(),
-			Scopes:       []string{oidc.ScopeOpenID, "email", "profile"},
-		}
-	})
-
-	if a.initErr != nil {
-		// Allow a retry on the next request after a transient failure
-		// (e.g. discovery endpoint flaky during deploy) by resetting
-		// the sync.Once on error. Without this an unlucky first
-		// request would pin the server in a permanent "init failed"
-		// state until restart.
-		err := a.initErr
-		a.initOnce = sync.Once{}
-		a.initErr = nil
-
-		return err
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.ready {
+		return nil
 	}
+
+	issuer := a.cfg.IssuerURL
+	if issuer == "" {
+		issuer = googleDefaultIssuer
+	}
+
+	provider, err := oidc.NewProvider(ctx, issuer)
+	if err != nil {
+		return fmt.Errorf("oidc new provider: %w", err)
+	}
+
+	a.provider = provider
+	a.verifier = provider.Verifier(&oidc.Config{ClientID: a.cfg.ClientID})
+	a.oauth2 = &oauth2.Config{
+		ClientID:     a.cfg.ClientID,
+		ClientSecret: a.cfg.ClientSecret,
+		RedirectURL:  a.cfg.RedirectURL,
+		Endpoint:     provider.Endpoint(),
+		Scopes:       []string{oidc.ScopeOpenID, "email", "profile"},
+	}
+	a.ready = true
 
 	return nil
 }
