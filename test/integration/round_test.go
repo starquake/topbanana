@@ -318,6 +318,34 @@ func TestRounds_EmptyTitleRejected(t *testing.T) {
 	}
 }
 
+// TestRounds_FormLayout pins the round-form layout (#598): the name
+// field renders before the summary field, and the name's helper text
+// reflects that the round title is shown to players at the start of the
+// round (it is rendered on the round intro card in the player client).
+func TestRounds_FormLayout(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+		"ADMIN_EMAILS":         "round-layout-admin@example.test",
+	})
+	baseURL := srv.BaseURL
+
+	client := registerAdminClient(ctx, t, baseURL, srv.DBURI, "round-layout-admin")
+	quizID := createQuizAs(ctx, t, client, baseURL, "Quiz Round Layout")
+
+	body := readBody(ctx, t, client, baseURL+fmt.Sprintf("/admin/quizzes/%d/rounds/new", quizID))
+
+	assertOrder(t, body, "round form", `id="title"`, `id="summary"`)
+
+	if got, want := body, "Shown to players at the start of the round."; !strings.Contains(got, want) {
+		t.Errorf("round form should contain corrected name helper %q", want)
+	}
+	if got, want := body, "not visible to players"; strings.Contains(got, want) {
+		t.Errorf("round form should not contain the stale name helper %q", want)
+	}
+}
+
 // TestRounds_NonOwnerForbidden exercises the requireQuizOwner gate on
 // the mutating round routes. Mirrors the question IDOR tests' shape so a
 // future creator-only-edit rule change touches one spot.

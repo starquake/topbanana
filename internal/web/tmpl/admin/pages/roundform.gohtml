@@ -39,6 +39,21 @@
         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
         <input type="hidden" name="id" value="{{.Round.ID}}">
 
+        {{$titleErr := index .FieldErrors "title"}}
+        <div class="form-field">
+            <label class="label-eyebrow" for="title">
+                Round name
+                <span class="label-hint">Shown to players at the start of the round.</span>
+            </label>
+            <input type="text" id="title" name="title"
+                   value="{{.Round.Title}}"
+                   class="form-input{{if $titleErr}} form-input-error{{end}}"
+                   {{if $titleErr}}aria-invalid="true" aria-describedby="title-error"{{end}}>
+            {{if $titleErr}}
+                <p id="title-error" class="form-help-error" role="alert">{{$titleErr}}</p>
+            {{end}}
+        </div>
+
         {{$textErr := index .FieldErrors "summary"}}
         <div class="form-field">
             <label class="label-eyebrow" for="summary">
@@ -50,21 +65,6 @@
                       {{if $textErr}}aria-invalid="true" aria-describedby="summary-error"{{end}}>{{.Round.Summary}}</textarea>
             {{if $textErr}}
                 <p id="summary-error" class="form-help-error" role="alert">{{$textErr}}</p>
-            {{end}}
-        </div>
-
-        {{$titleErr := index .FieldErrors "title"}}
-        <div class="form-field">
-            <label class="label-eyebrow" for="title">
-                Round name
-                <span class="label-hint">Shown to hosts; not visible to players mid-game.</span>
-            </label>
-            <input type="text" id="title" name="title"
-                   value="{{.Round.Title}}"
-                   class="form-input{{if $titleErr}} form-input-error{{end}}"
-                   {{if $titleErr}}aria-invalid="true" aria-describedby="title-error"{{end}}>
-            {{if $titleErr}}
-                <p id="title-error" class="form-help-error" role="alert">{{$titleErr}}</p>
             {{end}}
         </div>
 
