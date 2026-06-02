@@ -6,6 +6,15 @@ import (
 	"log/slog"
 )
 
+// playerByIDLookup is the slice of PlayerStore that
+// migrateGamesAfterSignIn needs: just the prior-session player lookup.
+// Narrowed so a caller whose store interface is smaller than the full
+// PlayerStore (the invite-accept flow's InvitePlayerStore) can reuse
+// the migration without widening its dependency.
+type playerByIDLookup interface {
+	GetPlayerByID(ctx context.Context, id int64) (*Player, error)
+}
+
 // migrateGamesAfterSignIn moves an anonymous visitor's game history
 // onto the account they just signed into (#406). Refuses the move
 // when the prior row is credentialled - that would be data corruption,
@@ -13,7 +22,7 @@ import (
 func migrateGamesAfterSignIn(
 	ctx context.Context,
 	logger *slog.Logger,
-	players PlayerStore,
+	players playerByIDLookup,
 	games AnonymousGameMigrator,
 	priorSessionPlayerID *int64,
 	signedInPlayerID int64,
