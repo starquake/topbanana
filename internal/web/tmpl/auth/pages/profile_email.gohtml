@@ -8,10 +8,10 @@
         </header>
 
         {{if .Notice}}
-            <div class="mb-6 px-4 py-3 rounded-sm bg-success/10 border border-success/40 text-success text-sm" role="status">{{.Notice}}</div>
+            {{template "authNotice" .Notice}}
         {{end}}
         {{if .Message}}
-            <div class="mb-6 px-4 py-3 rounded-sm bg-danger/10 border border-danger/40 text-danger text-sm" role="alert">{{.Message}}</div>
+            {{template "authError" .Message}}
         {{end}}
 
         {{if .HasPassword}}
