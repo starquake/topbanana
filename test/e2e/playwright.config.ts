@@ -24,19 +24,44 @@ const WORKER_COUNT = 4;
 // override for debugging a single worker on a known port: when set,
 // worker i listens on TOPBANANA_E2E_PORT + i (the old fixed-base
 // behaviour). It is no longer the default.
-const WORKER_PORTS = resolveWorkerPorts(WORKER_COUNT);
+// Mailpit (the e2e SMTP catch-all) needs its own SMTP + HTTP port pair
+// alongside the worker ports. Both are discovered together (see
+// resolvePorts) and shared with the re-loaded worker configs and the
+// fixtures via TOPBANANA_E2E_PORTS / TOPBANANA_E2E_MAILPIT. The mailpit
+// SMTP port goes into each worker server's SMTP_PORT; the HTTP port is
+// where the specs read sent mail back (tests/mailpit.ts reads the same
+// env).
+const { workerPorts: WORKER_PORTS, mailpit: MAILPIT } = resolvePorts(WORKER_COUNT);
 
-function resolveWorkerPorts(count: number): number[] {
-  const cached = process.env.TOPBANANA_E2E_PORTS;
-  if (cached) {
-    return cached.split(',').map(Number);
+function resolvePorts(count: number): { workerPorts: number[]; mailpit: { smtp: number; http: number } } {
+  const cachedWorkers = process.env.TOPBANANA_E2E_PORTS;
+  const cachedMailpit = process.env.TOPBANANA_E2E_MAILPIT;
+  if (cachedWorkers && cachedMailpit) {
+    const [smtp, http] = cachedMailpit.split(',').map(Number);
+    return { workerPorts: cachedWorkers.split(',').map(Number), mailpit: { smtp, http } };
   }
+
   const override = process.env.TOPBANANA_E2E_PORT;
-  const ports = override
-    ? Array.from({ length: count }, (_, i) => Number(override) + i)
-    : discoverFreePorts(count);
-  process.env.TOPBANANA_E2E_PORTS = ports.join(',');
-  return ports;
+  let workerPorts: number[];
+  let mailpitPorts: number[];
+  if (override) {
+    // Debug path: fixed worker ports from the override base; mailpit
+    // still takes free ports since it has no fixed-base contract.
+    workerPorts = Array.from({ length: count }, (_, i) => Number(override) + i);
+    mailpitPorts = discoverFreePorts(2);
+  } else {
+    // Discover worker + mailpit ports in ONE call so the
+    // simultaneous-listener distinctness guarantee (#476) spans both -
+    // two separate calls could hand the same OS port to a worker and to
+    // mailpit, colliding when the servers bind.
+    const all = discoverFreePorts(count + 2);
+    workerPorts = all.slice(0, count);
+    mailpitPorts = all.slice(count);
+  }
+
+  process.env.TOPBANANA_E2E_PORTS = workerPorts.join(',');
+  process.env.TOPBANANA_E2E_MAILPIT = mailpitPorts.join(',');
+  return { workerPorts, mailpit: { smtp: mailpitPorts[0], http: mailpitPorts[1] } };
 }
 
 // Open `count` ephemeral listeners on :0 in a short-lived Node
@@ -133,6 +158,17 @@ const workerServer = (workerIndex: number) => {
       // falsely trip "Too many attempts" on back-to-back same-IP logins.
       LOGIN_COOLDOWN: '0s',
       ADMIN_EMAILS,
+      // Point the mailer at the shared mailpit catch-all so the email
+      // round-trip specs can read the verify / reset / invite link back
+      // over mailpit's API. SMTP_TLS=false keeps it plain SMTP (mailpit
+      // does not offer STARTTLS on its listener); sends are best-effort
+      // and async in the handler, so a worker booting before mailpit is
+      // ready does not break the non-email specs. The link in each mail
+      // is built from BASE_URL above, so it points back at this worker.
+      SMTP_HOST: '127.0.0.1',
+      SMTP_PORT: String(MAILPIT.smtp),
+      SMTP_FROM: 'topbanana@example.test',
+      SMTP_TLS: 'false',
     },
     reuseExistingServer: false,
     timeout: 120_000,
@@ -140,6 +176,24 @@ const workerServer = (workerIndex: number) => {
     stderr: 'pipe' as const,
   };
 };
+
+// mailpitServer runs the pinned mailpit binary as a single shared SMTP
+// catch-all + HTTP API for the whole run (all workers send into it; the
+// specs read messages back filtered by recipient). The binary path comes
+// from the Makefile via TOPBANANA_MAILPIT_BIN; a direct `npx playwright
+// test` (no make) falls back to the build/bin/mailpit the Makefile
+// downloads, resolved against the repo root via cwd.
+const mailpitServer = () => ({
+  command:
+    `${process.env.TOPBANANA_MAILPIT_BIN ?? 'build/bin/mailpit'}` +
+    ` --smtp 127.0.0.1:${MAILPIT.smtp} --listen 127.0.0.1:${MAILPIT.http}`,
+  cwd: '../..',
+  url: `http://127.0.0.1:${MAILPIT.http}/`,
+  reuseExistingServer: false,
+  timeout: 60_000,
+  stdout: 'pipe' as const,
+  stderr: 'pipe' as const,
+});
 
 export default defineConfig({
   testDir: './tests',
@@ -188,5 +242,8 @@ export default defineConfig({
       dependencies: ['setup'],
     },
   ],
-  webServer: Array.from({ length: WORKER_COUNT }, (_, i) => workerServer(i)),
+  // Mailpit first so it is listening before the worker servers (whose
+  // mailer points at it) start; Playwright waits for every entry's url
+  // health check before running tests.
+  webServer: [mailpitServer(), ...Array.from({ length: WORKER_COUNT }, (_, i) => workerServer(i))],
 });

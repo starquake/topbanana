@@ -15,11 +15,12 @@ test('admin can open the email diagnostics page and see status + log', async ({ 
   await expect(page).toHaveURL(/\/admin\/email$/);
 
   await expect(page.getByRole('heading', { name: /email diagnostics/i })).toBeVisible();
-  // One "disabled (no-op)" badge in e2e: SMTP is unwired. BASE_URL is
-  // configured per-worker (the invite flow needs it, #318), so its badge
-  // does not appear. Pinning the count keeps the test honest if SMTP
-  // becomes configurable later.
-  await expect(page.getByText(/disabled \(no-op\)/i)).toHaveCount(1);
+  // SMTP is now wired to the mailpit catch-all and BASE_URL is set
+  // per-worker, so both status rows read configured and no
+  // "disabled (no-op)" badge appears. Pinning the count keeps the test
+  // honest if either wiring regresses.
+  await expect(page.getByText('enabled', { exact: true })).toBeVisible();
+  await expect(page.getByText(/disabled \(no-op\)/i)).toHaveCount(0);
 
   const recipient = page.locator('input[name=to]');
   await expect(recipient).toBeVisible();
@@ -27,13 +28,14 @@ test('admin can open the email diagnostics page and see status + log', async ({ 
 
   // Submit. With PRG the browser lands on /admin/email (not
   // /admin/email/test); the banner is delivered via the flash cookie
-  // the GET clears.
+  // the GET clears. The send now reaches mailpit, so the notice reports
+  // success rather than the not-configured error.
   await page.getByRole('button', { name: /send test email/i }).click();
   await expect(page).toHaveURL(/\/admin\/email$/);
-  await expect(page.getByRole('alert')).toContainText(/email is not configured/i);
+  await expect(page.getByRole('status')).toContainText(/test email sent to ops@example.test/i);
 
   // Flash is one-shot: navigating away and back must drop the banner.
   await page.goto('/admin');
   await page.goto('/admin/email');
-  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByRole('status')).toHaveCount(0);
 });
