@@ -40,8 +40,14 @@ const CookieName = "tb_csrf_nonce"
 // FormField is the name of the hidden form field carrying the CSRF token.
 const FormField = "csrf_token"
 
-// MaxAge is the lifetime of the CSRF nonce cookie in seconds (24h).
-const MaxAge = 24 * 60 * 60
+// MaxAge is the lifetime of the CSRF nonce cookie in seconds (30 days).
+// It must be at least the session cookie lifetime (internal/session.MaxAge):
+// a nonce backs the csrf_token rendered into every form, so if it expires
+// while the session is still valid, a still-signed-in user submitting a
+// form rendered earlier (e.g. a logout button on a tab open past the old
+// 24h) gets a spurious 403 (#614). Invariant pinned by
+// TestCSRFCookieOutlivesSession.
+const MaxAge = 30 * 24 * 60 * 60
 
 // nonceByteLength is the length of the random nonce written to the cookie.
 const nonceByteLength = 16
