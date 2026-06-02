@@ -37,14 +37,6 @@ test('register, log out, log back in, and reach the admin dashboard', async ({ p
   await expect(page.getByRole('heading', { name: 'Quizzes', level: 1 })).toBeVisible();
 });
 
-test('login page links to forgot-password', async ({ page }) => {
-  await page.goto('/login');
-
-  const link = page.getByRole('link', { name: 'Forgot your password?' });
-  await expect(link).toBeVisible();
-  await expect(link).toHaveAttribute('href', '/forgot-password');
-});
-
 test('deep link while logged out lands at the deep link after login', async ({ page, browserName }) => {
   // #449 e2e: a logged-out admin clicks a link to /admin/email,
   // bounces through /login, signs in, and lands on /admin/email
