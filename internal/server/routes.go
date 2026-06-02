@@ -182,12 +182,8 @@ func addEmailFlowRoutes(
 // "Log in" link path.
 func homeViewerFunc(players auth.PlayerStore, sessions *session.Manager) home.ViewerFunc {
 	return func(r *http.Request) *home.Viewer {
-		id, ok := sessions.PlayerID(r)
+		p, ok := auth.AuthenticatedSessionPlayer(r, players, sessions)
 		if !ok {
-			return nil
-		}
-		p, err := players.GetPlayerByID(r.Context(), id)
-		if err != nil || !p.IsAuthenticated() {
 			return nil
 		}
 
