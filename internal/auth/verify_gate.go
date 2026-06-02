@@ -92,7 +92,7 @@ func HandleVerifyPending(
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/verify_email_pending.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p, ok := loadAuthenticatedPlayer(r, players, sessions)
+		p, ok := AuthenticatedSessionPlayer(r, players, sessions)
 		if !ok {
 			redirectToLoginWithNext(w, r)
 
@@ -138,7 +138,7 @@ func HandleVerifyResend(
 	flash *SignedFlash,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p, ok := loadAuthenticatedPlayer(r, players, sessions)
+		p, ok := AuthenticatedSessionPlayer(r, players, sessions)
 		if !ok {
 			redirectToLoginWithNext(w, r)
 
@@ -194,19 +194,16 @@ func HandleVerifyResend(
 	})
 }
 
-// loadAuthenticatedPlayer pulls the session player and reports false
-// when the cookie is missing, invalid, points at a deleted row, or
-// resolves to an anonymous-only row. Centralised so the interstitial
-// and resend handlers agree on what "signed in" means without
-// re-implementing the lookup. Distinct from middleware.go's
-// loadSessionPlayer (which returns the sentinel ErrPlayerNotFound) so
-// callers that only need a bool stay simple.
-func loadAuthenticatedPlayer(r *http.Request, players PlayerStore, sessions *session.Manager) (*Player, bool) {
-	id, ok := sessions.PlayerID(r)
-	if !ok {
-		return nil, false
-	}
-	p, err := players.GetPlayerByID(r.Context(), id)
+// AuthenticatedSessionPlayer returns the credentialled player the
+// request's session points at, reporting false when the cookie is
+// missing, invalid, version-stale, points at a deleted row, or resolves
+// to an anonymous-only row. It builds on loadSessionPlayer so the
+// session_version check - the single definition of a live session -
+// lives in one place (#620); this layer only adds the "must be
+// credentialled" rule its callers share: the interstitial + resend
+// handlers, the /login redirect, and the home-page footer.
+func AuthenticatedSessionPlayer(r *http.Request, players PlayerStore, sessions *session.Manager) (*Player, bool) {
+	p, err := loadSessionPlayer(r, players, sessions)
 	if err != nil || !p.IsAuthenticated() {
 		return nil, false
 	}
