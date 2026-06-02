@@ -1253,7 +1253,7 @@ const quizImportExample = `{
           ]
         },
         {
-          "text": "Which two of these are capitals?",
+          "text": "Which of these is a capital city?",
           "options": [
             { "text": "Lisbon",   "correct": true  },
             { "text": "Porto",    "correct": false },
