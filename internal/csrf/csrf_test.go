@@ -9,7 +9,24 @@ import (
 	"testing"
 
 	. "github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/session"
 )
+
+// TestCSRFCookieOutlivesSession pins #614: the CSRF nonce cookie must
+// live at least as long as the session cookie. If the nonce expires
+// first, a still-signed-in user submitting a form rendered earlier (e.g.
+// a logout button on a tab open past the nonce's lifetime) fails the
+// double-submit check with a spurious 403.
+func TestCSRFCookieOutlivesSession(t *testing.T) {
+	t.Parallel()
+	if got, want := MaxAge, session.MaxAge; got < want {
+		t.Errorf(
+			"csrf.MaxAge = %d, want >= session.MaxAge (%d) so a CSRF token cannot expire before the session that accepts it",
+			got,
+			want,
+		)
+	}
+}
 
 // newGetRequest builds a GET request with the test context attached so
 // httptest plays nicely with t.Cleanup.
