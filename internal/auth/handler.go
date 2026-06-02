@@ -420,9 +420,16 @@ func HandleLoginForm(
 // a [SafeNextPath]-validated value so a deep link visitor with a live
 // session lands on their intended page; falls back to the role
 // landing otherwise. Returns true if it wrote a response - the caller
-// must skip its own render in that case. Errors during the
-// session/player lookup fall through to a normal render so a
-// transient DB hiccup doesn't lock the visitor out of the auth pages.
+// must skip its own render in that case.
+//
+// Resolves the session through loadSessionPlayer (not a bare
+// GetPlayerByID) so the "signed in" test here matches the one the
+// gating middleware applies, session_version included. Without that
+// agreement a cookie left version-stale by a password reset reads as
+// signed-in here but signed-out at the gate, so /login 303s the
+// visitor onto a page that 303s them straight back - an unbreakable
+// loop the visitor cannot even log out of (#615). A missing/dead/stale
+// cookie or a transient lookup error falls through to a normal render.
 func redirectIfSignedIn(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -430,11 +437,7 @@ func redirectIfSignedIn(
 	sessions *session.Manager,
 	next string,
 ) bool {
-	playerID, ok := sessions.PlayerID(r)
-	if !ok {
-		return false
-	}
-	player, err := players.GetPlayerByID(r.Context(), playerID)
+	player, err := loadSessionPlayer(r, players, sessions)
 	if err != nil || !player.IsAuthenticated() {
 		return false
 	}
