@@ -37,6 +37,15 @@ GOLANGCI_BIN     := $(BIN_DIR)/golangci-lint
 SQLC_VERSION := v1.31.1
 SQLC_BIN     := $(BIN_DIR)/sqlc
 
+# mailpit version + binary path. Used by the e2e suite as a local SMTP
+# catch-all so the browser tests can drive the real verify and invite
+# email round-trips (the app sends to mailpit; the specs read the
+# message back over mailpit's HTTP API). Pinned like the Tailwind binary:
+# mailpit is not a Go module tool, so dependabot does not track it - bump
+# the version here manually.
+MAILPIT_VERSION := v1.30.1
+MAILPIT_BIN     := $(BIN_DIR)/mailpit
+
 # Developer check before committing. Includes smoke (#349) so the
 # migration-against-existing-data class of bug — which test-coverage's
 # fresh DB can't catch — fails locally before CI does.
@@ -204,9 +213,9 @@ test-coverage-html: test-coverage
 # `cd test/e2e || exit 1;` instead so the cd lands in the parent
 # shell and both backgrounded playwright runs inherit it.
 .PHONY: test-e2e
-test-e2e:
+test-e2e: $(MAILPIT_BIN)
 	cd test/e2e && npm ci && npx playwright install chromium firefox
-	cd test/e2e && npx playwright test
+	cd test/e2e && TOPBANANA_MAILPIT_BIN=$(abspath $(MAILPIT_BIN)) npx playwright test
 
 # Smoke-test the binary against the existing dev DB: parses config, opens
 # the DB, runs migrations, and exits 0. Catches startup / migration / config
@@ -383,6 +392,41 @@ $(SQLC_BIN):
 	        https://github.com/sqlc-dev/sqlc/releases/download/$(SQLC_VERSION)/$(SQLC_TARBALL) && \
 	    tar -xzf $$tmp/sqlc.tar.gz -C $$tmp && \
 	    mv $$tmp/sqlc $@ && \
+	    rm -rf $$tmp
+	@chmod +x $@
+
+# --- mailpit -----------------------------------------------------------------
+#
+# Release assets are mailpit-<os>-<arch>.tar.gz with the binary at the
+# tarball root, so the download mirrors the sqlc target. The asset arch
+# tokens are amd64/arm64 (like golangci-lint), not sqlc's underscore form.
+
+ifeq ($(UNAME_S),Linux)
+    ifeq ($(UNAME_M),aarch64)
+        MAILPIT_ASSET := mailpit-linux-arm64
+    else
+        MAILPIT_ASSET := mailpit-linux-amd64
+    endif
+else ifeq ($(UNAME_S),Darwin)
+    ifeq ($(UNAME_M),arm64)
+        MAILPIT_ASSET := mailpit-darwin-arm64
+    else
+        MAILPIT_ASSET := mailpit-darwin-amd64
+    endif
+else
+    MAILPIT_ASSET := mailpit-linux-amd64
+endif
+
+MAILPIT_TARBALL := $(MAILPIT_ASSET).tar.gz
+
+$(MAILPIT_BIN):
+	@mkdir -p $(BIN_DIR)
+	@echo "Downloading mailpit $(MAILPIT_VERSION) ($(MAILPIT_ASSET))..."
+	@tmp=$$(mktemp -d) && \
+	    curl -sSfL -o $$tmp/mailpit.tar.gz \
+	        https://github.com/axllent/mailpit/releases/download/$(MAILPIT_VERSION)/$(MAILPIT_TARBALL) && \
+	    tar -xzf $$tmp/mailpit.tar.gz -C $$tmp && \
+	    mv $$tmp/mailpit $@ && \
 	    rm -rf $$tmp
 	@chmod +x $@
 

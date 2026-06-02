@@ -63,6 +63,13 @@ jobs:
         run: npx playwright install-deps ${{ matrix.browser }}
         working-directory: test/e2e
 
+      # The e2e suite runs the verify and invite email round-trips
+      # against a local mailpit SMTP catch-all. The pinned binary is
+      # downloaded into build/bin by the Makefile; playwright.config.ts
+      # starts it as a webServer and points it at build/bin/mailpit.
+      - name: Download mailpit
+        run: make build/bin/mailpit
+
       - name: Run Playwright tests
         run: npx playwright test --project=${{ matrix.browser }}
         working-directory: test/e2e

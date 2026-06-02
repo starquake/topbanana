@@ -25,10 +25,11 @@ export const QUIZ_QUESTIONS: readonly QuestionSpec[] = [
 export async function registerAdmin(page: Page, displayName: string): Promise<void> {
   await registerForPending(page, displayName);
   // The hard email-verification gate (#574) means register no longer
-  // hands out a session: SMTP isn't wired in e2e so we cannot complete
-  // the user-facing verify flow, so stamp email_verified_at directly
-  // (same trick home.spec.ts uses to wipe games), then log in to obtain
-  // a session and land on the admin dashboard.
+  // hands out a session. Stamp email_verified_at directly (same trick
+  // home.spec.ts uses to wipe games) rather than clicking the emailed
+  // link: this is the setup shortcut for the many specs that just need a
+  // signed-in admin. The real link round-trip is covered on its own in
+  // email-roundtrip.spec.ts. Then log in to land on the admin dashboard.
   markEmailVerified(displayName);
   await login(page, displayName);
   await expect(page).toHaveURL(/\/admin\/quizzes$/);

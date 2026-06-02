@@ -5,11 +5,11 @@ import { adminStatePath } from '../e2e-auth';
 // in as an admin to drive the invite-management UI.
 test.use({ storageState: adminStatePath() });
 
-// #318 slice 2 - admin invite management UI. Admin-side only: the e2e
-// harness has no SMTP and the raw invite token is never stored, so this
-// covers the dashboard tile, the create form, and the per-row resend /
-// revoke actions on the pending list. Accept-via-link is exercised in the
-// integration suite, where the token is mintable directly.
+// #318 slice 2 - admin invite management UI. Covers the dashboard tile,
+// the create form, and the per-row resend / revoke actions on the
+// pending list. The accept-via-link round-trip lives in
+// invite-roundtrip.spec.ts (which reads the emailed link from mailpit)
+// and in the integration suite (which mints the token directly).
 test('admin creates, resends, and revokes an invite from the management page', async ({ page, browserName }) => {
   const inviteEmail = `e2e-invitee-${browserName}@example.test`;
 
@@ -19,9 +19,8 @@ test('admin creates, resends, and revokes an invite from the management page', a
   await expect(page).toHaveURL('/admin/invites');
   await expect(page.getByRole('heading', { name: 'Invites', exact: true })).toBeVisible();
 
-  // Submit the create form; SMTP is not configured in e2e, so the banner
-  // says the link exists but no mail went out. The PRG lands back on the
-  // list with the new invite visible.
+  // Submit the create form. The PRG lands back on the list with the new
+  // invite visible (the success banner names the recipient too).
   await page.locator('input[name=email]').fill(inviteEmail);
   await page.locator('input[name=note]').fill('a friend');
   await page.getByRole('button', { name: 'Send invite' }).click();
@@ -34,7 +33,7 @@ test('admin creates, resends, and revokes an invite from the management page', a
   const row = page.getByRole('row').filter({ hasText: inviteEmail });
   await row.getByRole('button', { name: 'Resend' }).click();
   await expect(page).toHaveURL('/admin/invites');
-  await expect(page.getByText('Invite link rotated', { exact: false })).toBeVisible();
+  await expect(page.getByText('Invite resent', { exact: false })).toBeVisible();
   await expect(page.getByRole('cell', { name: inviteEmail })).toBeVisible();
 
   // Revoke drops it from the pending list. The confirm() dialog is auto-
