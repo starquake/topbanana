@@ -38,8 +38,8 @@ SQLC_VERSION := v1.31.1
 SQLC_BIN     := $(BIN_DIR)/sqlc
 
 # mailpit version + binary path. Used by the e2e suite as a local SMTP
-# catch-all so the browser tests can drive the real verify / reset /
-# invite email round-trip (the app sends to mailpit; the specs read the
+# catch-all so the browser tests can drive the real verify and invite
+# email round-trips (the app sends to mailpit; the specs read the
 # message back over mailpit's HTTP API). Pinned like the Tailwind binary:
 # mailpit is not a Go module tool, so dependabot does not track it - bump
 # the version here manually.

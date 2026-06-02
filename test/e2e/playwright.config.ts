@@ -159,7 +159,7 @@ const workerServer = (workerIndex: number) => {
       LOGIN_COOLDOWN: '0s',
       ADMIN_EMAILS,
       // Point the mailer at the shared mailpit catch-all so the email
-      // round-trip specs can read the verify / reset / invite link back
+      // round-trip specs can read the verify and invite link back
       // over mailpit's API. SMTP_TLS=false keeps it plain SMTP (mailpit
       // does not offer STARTTLS on its listener); sends are best-effort
       // and async in the handler, so a worker booting before mailpit is

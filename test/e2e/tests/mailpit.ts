@@ -1,5 +1,5 @@
 // Mailpit query helpers for the email round-trip specs. The worker
-// servers send verify / reset / invite mail to the shared mailpit
+// servers send their mail (verify, invite, ...) to the shared mailpit
 // catch-all (wired in playwright.config.ts); these helpers read it back
 // over mailpit's HTTP API. The app sends mail asynchronously (a
 // best-effort goroutine), so reads poll until the message lands.
@@ -35,9 +35,9 @@ export async function waitForEmailLink(
 
   while (Date.now() < deadline) {
     // Scan every message addressed to the recipient, not just the
-    // newest: a flow often produces more than one (e.g. the register
-    // verify mail plus a later reset mail to the same address), and only
-    // one of them carries the link this caller wants.
+    // newest: a recipient can accumulate more than one mail (a retried
+    // spec re-registers the same address, future flows may add others),
+    // and not all of them carry the link this caller wants.
     const matches = await messagesTo(base, recipient);
     for (const m of matches) {
       const link = await linkFromMessage(base, m.ID, pathContains);
