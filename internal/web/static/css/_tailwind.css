@@ -82,6 +82,14 @@
  * as utilities. Scoped to the base layer so utility classes can still
  * override on a per-element basis. */
 @layer base {
+    /* Alpine's x-cloak attribute: hide an element until Alpine boots and
+     * removes it. The start page's Newest tab panel carries x-cloak so a
+     * JS-off (or pre-hydration) visitor never sees both quiz lists
+     * stacked - the Popular panel renders, the Newest panel stays hidden. */
+    [x-cloak] {
+        display: none !important;
+    }
+
     body {
         font-feature-settings: 'cv11', 'ss01', 'tnum';
         background-image:

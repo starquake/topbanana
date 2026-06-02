@@ -18,6 +18,7 @@ const PRECACHE_URLS = [
     '/assets/css/app.css',
     '/assets/js/htmx.min.js',
     '/assets/js/share.js',
+    '/assets/js/vendor/alpine.min.js',
     '/assets/banana.svg',
     '/assets/banana-192.png',
     '/assets/banana-512.png',

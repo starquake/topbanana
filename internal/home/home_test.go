@@ -19,13 +19,19 @@ import (
 // (the page should still render, with the failing section empty).
 type stubStore struct {
 	popular    []*PopularQuiz
+	newest     []*NewestQuiz
 	active     []*ActivePlayer
 	popularErr error
+	newestErr  error
 	activeErr  error
 }
 
 func (s *stubStore) ListPopularQuizzes(_ context.Context) ([]*PopularQuiz, error) {
 	return s.popular, s.popularErr
+}
+
+func (s *stubStore) ListNewestQuizzes(_ context.Context) ([]*NewestQuiz, error) {
+	return s.newest, s.newestErr
 }
 
 func (s *stubStore) ListMostActivePlayers(_ context.Context) ([]*ActivePlayer, error) {
@@ -99,6 +105,48 @@ func TestHandle_SingularPlayAndQuizPluralization(t *testing.T) {
 	}
 }
 
+func TestHandle_RendersNewestTab(t *testing.T) {
+	t.Parallel()
+
+	store := &stubStore{
+		newest: []*NewestQuiz{
+			{ID: 21, Title: "Fresh Quiz", Slug: "fresh-quiz", Description: "Just made.", QuestionCount: 3},
+			{ID: 22, Title: "Lone Question", Slug: "lone-question", QuestionCount: 1},
+		},
+	}
+	body := serve(t, store)
+
+	for _, want := range []string{
+		// Tab control: a tablist with a Newest tab the Alpine toggle drives.
+		`role="tablist"`,
+		`role="tab"`,
+		`Newest`,
+		// Newest card markup: play link, question-count pill (plural + singular).
+		`href="/play/fresh-quiz-21"`,
+		`Fresh Quiz`,
+		`3 questions`,
+		`href="/play/lone-question-22"`,
+		`1 question`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q", want)
+		}
+	}
+	if strings.Contains(body, "1 questions") {
+		t.Error("body contained plural question form alongside count of 1")
+	}
+}
+
+func TestHandle_NewestEmptyState(t *testing.T) {
+	t.Parallel()
+
+	body := serve(t, &stubStore{})
+
+	if got, want := body, "No quizzes yet."; !strings.Contains(got, want) {
+		t.Errorf("body missing newest empty-state %q", want)
+	}
+}
+
 func TestHandle_EmptyState(t *testing.T) {
 	t.Parallel()
 
@@ -120,6 +168,7 @@ func TestHandle_StoreErrorsDegradeToEmptyState(t *testing.T) {
 
 	store := &stubStore{
 		popularErr: errors.New("boom"),
+		newestErr:  errors.New("boom"),
 		activeErr:  errors.New("boom"),
 	}
 	rec := httptest.NewRecorder()

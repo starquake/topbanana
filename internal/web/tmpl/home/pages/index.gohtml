@@ -21,60 +21,131 @@
     <div class="grid gap-8 md:grid-cols-3">
         {{/* Popular quizzes take two columns on desktop: this is the
              primary action for a visitor landing here, so it earns the
-             real estate. The list collapses to a single column under md. */}}
-        <section class="md:col-span-2" aria-labelledby="popular-heading">
-            <h2 id="popular-heading" class="font-display text-sm font-semibold uppercase tracking-[0.16em] text-text-dim mb-4">
-                Popular quizzes
-            </h2>
-            {{if .PopularQuizzes}}
-                {{/* Stretched-link pattern (same as admin/quizlist):
-                     the play link is anchored to the title and uses a
-                     ::before pseudo-element to cover the whole card,
-                     so the card itself isn't an <a>. That keeps the
-                     share button (at z-10) clickable as a separate
-                     control without nesting interactive elements. */}}
-                <ul class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {{range .PopularQuizzes}}
-                        <li>
-                            <article class="group relative flex flex-col gap-2 h-full p-5 bg-surface border border-border-soft rounded-lg transition-colors hover:border-accent-line">
-                                <span class="text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-text-mute">
-                                    {{.PlayCount}} {{if eq .PlayCount 1}}play{{else}}plays{{end}}
-                                </span>
-                                <h3 class="m-0 font-display text-lg font-semibold leading-snug">
-                                    <a href="{{.PlayURL}}"
-                                       class="text-text group-hover:text-accent transition-colors before:absolute before:inset-0 before:content-['']">
-                                        {{.Title}}
-                                    </a>
-                                </h3>
-                                {{if .Description}}
-                                    <p class="m-0 text-sm text-text-dim line-clamp-2">{{.Description}}</p>
-                                {{end}}
-                                {{/* Accent-tinted pill so the share affordance reads as
-                                     a real action rather than a footer link. Sits on
-                                     z-10 above the stretched-link pseudo so the click
-                                     reaches this button, not the play URL. Anchored
-                                     left (self-start) so a tap aimed at the card's
-                                     right edge — the natural reach for the play CTA —
-                                     can't land on Share by accident. */}}
-                                <button type="button"
-                                        data-share-trigger
-                                        data-share-path="{{.PlayURL}}"
-                                        data-share-title="{{.Title}}"
-                                        data-share-text="Play this quiz: {{.Title}}"
-                                        aria-label="Share {{.Title}}"
-                                        class="relative z-10 self-start mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-[0.1em] bg-accent-soft text-accent border border-accent-line hover:bg-accent hover:text-bg transition-colors cursor-pointer">
-                                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5" aria-hidden="true"><path d="M13.5 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.5 2.5 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5zm-8.5 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm11 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>
-                                    <span>Share</span>
-                                </button>
-                            </article>
-                        </li>
-                    {{end}}
-                </ul>
-            {{else}}
-                <div class="border border-dashed border-border rounded-lg p-8 text-center text-text-dim">
-                    <p class="m-0 text-sm">No quizzes have been played yet. Check back soon.</p>
-                </div>
-            {{end}}
+             real estate. The list collapses to a single column under md.
+
+             The Popular / Newest tabs are an Alpine toggle over two
+             server-rendered lists: both ship in the HTML, so the switch
+             is instant and works offline. With JS off, Alpine never
+             runs and `tab` stays "popular", so the Popular list shows
+             and the Newest list stays hidden by its x-cloak rule -
+             progressive enhancement, no blank section. */}}
+        <section class="md:col-span-2" aria-labelledby="quizzes-heading" x-data="{ tab: 'popular' }">
+            <h2 id="quizzes-heading" class="sr-only">Quizzes</h2>
+            <div role="tablist" aria-label="Quiz lists" class="flex items-center gap-5 mb-4">
+                {{/* Tabs reuse the old section-heading look (font-display,
+                     uppercase, tracked) so the control reads as the section
+                     header it replaces. Active tab is text-text with an
+                     accent underline; inactive is text-dim. */}}
+                <button type="button" role="tab" id="tab-popular" aria-controls="panel-popular"
+                        @click="tab='popular'"
+                        :aria-selected="tab==='popular' ? 'true' : 'false'"
+                        :class="tab==='popular' ? 'text-text border-accent' : 'text-text-dim border-transparent hover:text-text'"
+                        class="font-display text-sm font-semibold uppercase tracking-[0.16em] pb-1 border-b-2 transition-colors cursor-pointer">
+                    Popular
+                </button>
+                <button type="button" role="tab" id="tab-newest" aria-controls="panel-newest"
+                        @click="tab='newest'"
+                        :aria-selected="tab==='newest' ? 'true' : 'false'"
+                        :class="tab==='newest' ? 'text-text border-accent' : 'text-text-dim border-transparent hover:text-text'"
+                        class="font-display text-sm font-semibold uppercase tracking-[0.16em] pb-1 border-b-2 transition-colors cursor-pointer">
+                    Newest
+                </button>
+            </div>
+
+            <div id="panel-popular" role="tabpanel" aria-labelledby="tab-popular" x-show="tab==='popular'">
+                {{if .PopularQuizzes}}
+                    {{/* Stretched-link pattern (same as admin/quizlist):
+                         the play link is anchored to the title and uses a
+                         ::before pseudo-element to cover the whole card,
+                         so the card itself isn't an <a>. That keeps the
+                         share button (at z-10) clickable as a separate
+                         control without nesting interactive elements. */}}
+                    <ul class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {{range .PopularQuizzes}}
+                            <li>
+                                <article class="group relative flex flex-col gap-2 h-full p-5 bg-surface border border-border-soft rounded-lg transition-colors hover:border-accent-line">
+                                    <span class="text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-text-mute">
+                                        {{.PlayCount}} {{if eq .PlayCount 1}}play{{else}}plays{{end}}
+                                    </span>
+                                    <h3 class="m-0 font-display text-lg font-semibold leading-snug">
+                                        <a href="{{.PlayURL}}"
+                                           class="text-text group-hover:text-accent transition-colors before:absolute before:inset-0 before:content-['']">
+                                            {{.Title}}
+                                        </a>
+                                    </h3>
+                                    {{if .Description}}
+                                        <p class="m-0 text-sm text-text-dim line-clamp-2">{{.Description}}</p>
+                                    {{end}}
+                                    {{/* Accent-tinted pill so the share affordance reads as
+                                         a real action rather than a footer link. Sits on
+                                         z-10 above the stretched-link pseudo so the click
+                                         reaches this button, not the play URL. Anchored
+                                         left (self-start) so a tap aimed at the card's
+                                         right edge — the natural reach for the play CTA —
+                                         can't land on Share by accident. */}}
+                                    <button type="button"
+                                            data-share-trigger
+                                            data-share-path="{{.PlayURL}}"
+                                            data-share-title="{{.Title}}"
+                                            data-share-text="Play this quiz: {{.Title}}"
+                                            aria-label="Share {{.Title}}"
+                                            class="relative z-10 self-start mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-[0.1em] bg-accent-soft text-accent border border-accent-line hover:bg-accent hover:text-bg transition-colors cursor-pointer">
+                                        <svg viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5" aria-hidden="true"><path d="M13.5 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.5 2.5 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5zm-8.5 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm11 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>
+                                        <span>Share</span>
+                                    </button>
+                                </article>
+                            </li>
+                        {{end}}
+                    </ul>
+                {{else}}
+                    <div class="border border-dashed border-border rounded-lg p-8 text-center text-text-dim">
+                        <p class="m-0 text-sm">No quizzes have been played yet. Check back soon.</p>
+                    </div>
+                {{end}}
+            </div>
+
+            {{/* Newest list hides until Alpine boots (x-cloak) so a JS-off
+                 visitor never sees both lists stacked. tab defaults to
+                 "popular", so once Alpine runs x-show keeps this panel
+                 hidden until the Newest tab is clicked. */}}
+            <div id="panel-newest" role="tabpanel" aria-labelledby="tab-newest" x-show="tab==='newest'" x-cloak>
+                {{if .NewestQuizzes}}
+                    <ul class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {{range .NewestQuizzes}}
+                            <li>
+                                <article class="group relative flex flex-col gap-2 h-full p-5 bg-surface border border-border-soft rounded-lg transition-colors hover:border-accent-line">
+                                    <span class="text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-text-mute">
+                                        {{.QuestionCount}} {{if eq .QuestionCount 1}}question{{else}}questions{{end}}
+                                    </span>
+                                    <h3 class="m-0 font-display text-lg font-semibold leading-snug">
+                                        <a href="{{.PlayURL}}"
+                                           class="text-text group-hover:text-accent transition-colors before:absolute before:inset-0 before:content-['']">
+                                            {{.Title}}
+                                        </a>
+                                    </h3>
+                                    {{if .Description}}
+                                        <p class="m-0 text-sm text-text-dim line-clamp-2">{{.Description}}</p>
+                                    {{end}}
+                                    <button type="button"
+                                            data-share-trigger
+                                            data-share-path="{{.PlayURL}}"
+                                            data-share-title="{{.Title}}"
+                                            data-share-text="Play this quiz: {{.Title}}"
+                                            aria-label="Share {{.Title}}"
+                                            class="relative z-10 self-start mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-[0.1em] bg-accent-soft text-accent border border-accent-line hover:bg-accent hover:text-bg transition-colors cursor-pointer">
+                                        <svg viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5" aria-hidden="true"><path d="M13.5 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.5 2.5 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5zm-8.5 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm11 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>
+                                        <span>Share</span>
+                                    </button>
+                                </article>
+                            </li>
+                        {{end}}
+                    </ul>
+                {{else}}
+                    <div class="border border-dashed border-border rounded-lg p-8 text-center text-text-dim">
+                        <p class="m-0 text-sm">No quizzes yet.</p>
+                    </div>
+                {{end}}
+            </div>
             {{/* "Browse all" sits below the popular cards so a visitor
                  reads the curated picks first and only falls through to
                  the full catalog at /quizzes (#284) if nothing grabs

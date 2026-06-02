@@ -185,6 +185,101 @@ func TestHomeStore_ListPopularQuizzes(t *testing.T) {
 	}
 }
 
+// TestHomeStore_ListNewestQuizzes pins the "Newest" tab data source:
+// most-recently-created public quizzes first, with private/unlisted and
+// zero-question quizzes excluded so only playable public quizzes surface.
+func TestHomeStore_ListNewestQuizzes(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	logger := slog.Default()
+	quizzes := NewQuizStore(db, logger)
+	hs := NewHomeStore(db, logger)
+
+	withQuestion := func() []*quiz.Question {
+		return []*quiz.Question{
+			{Text: "Q", Position: 1, Options: []*quiz.Option{{Text: "a", Correct: true}}},
+		}
+	}
+
+	// Two public quizzes created in a known order. older is inserted
+	// first, newer second; the query must return newer before older.
+	older := &quiz.Quiz{
+		Title: "Older Public", Slug: "older-public", Description: "first",
+		CreatedByPlayerID: seededAdminID, Visibility: quiz.VisibilityPublic,
+		Questions: withQuestion(),
+	}
+	if err := quizzes.CreateQuiz(t.Context(), older); err != nil {
+		t.Fatalf("CreateQuiz older err = %v, want nil", err)
+	}
+	newer := &quiz.Quiz{
+		Title: "Newer Public", Slug: "newer-public", Description: "second",
+		CreatedByPlayerID: seededAdminID, Visibility: quiz.VisibilityPublic,
+		Questions: withQuestion(),
+	}
+	if err := quizzes.CreateQuiz(t.Context(), newer); err != nil {
+		t.Fatalf("CreateQuiz newer err = %v, want nil", err)
+	}
+
+	// A private quiz with questions: must be excluded by the visibility
+	// gate even though it is the most recently created.
+	private := &quiz.Quiz{
+		Title: "Private", Slug: "private", Description: "hidden",
+		CreatedByPlayerID: seededAdminID, Visibility: quiz.VisibilityPrivate,
+		Questions: withQuestion(),
+	}
+	if err := quizzes.CreateQuiz(t.Context(), private); err != nil {
+		t.Fatalf("CreateQuiz private err = %v, want nil", err)
+	}
+
+	// A public quiz with zero questions: cannot be played, must be
+	// excluded by the EXISTS gate.
+	empty := &quiz.Quiz{
+		Title: "Empty Public", Slug: "empty-public", Description: "no questions",
+		CreatedByPlayerID: seededAdminID, Visibility: quiz.VisibilityPublic,
+	}
+	if err := quizzes.CreateQuiz(t.Context(), empty); err != nil {
+		t.Fatalf("CreateQuiz empty err = %v, want nil", err)
+	}
+
+	// CreateQuiz stamps created_at via the DB default, so all four rows
+	// can share the same second. Backdate older one day so the
+	// created_at DESC ordering is deterministic rather than relying on
+	// the id-DESC tiebreaker alone.
+	if _, err := db.ExecContext(
+		t.Context(),
+		"UPDATE quizzes SET created_at = datetime('now', '-1 day') WHERE id = ?",
+		older.ID,
+	); err != nil {
+		t.Fatalf("backdate older err = %v, want nil", err)
+	}
+
+	rows, err := hs.ListNewestQuizzes(t.Context())
+	if err != nil {
+		t.Fatalf("ListNewestQuizzes err = %v, want nil", err)
+	}
+	if got, want := len(rows), 2; got != want {
+		t.Fatalf("len(rows) = %d, want %d (rows=%+v)", got, want, rows)
+	}
+	if got, want := rows[0].ID, newer.ID; got != want {
+		t.Errorf("rows[0].ID = %d, want %d (newer should rank first)", got, want)
+	}
+	if got, want := rows[1].ID, older.ID; got != want {
+		t.Errorf("rows[1].ID = %d, want %d (older should rank second)", got, want)
+	}
+	if got, want := rows[0].QuestionCount, 1; got != want {
+		t.Errorf("rows[0].QuestionCount = %d, want %d", got, want)
+	}
+	for _, r := range rows {
+		if r.ID == private.ID {
+			t.Errorf("private quiz surfaced in newest list: %+v", r)
+		}
+		if r.ID == empty.ID {
+			t.Errorf("empty public quiz surfaced in newest list: %+v", r)
+		}
+	}
+}
+
 func TestHomeStore_ListMostActivePlayers(t *testing.T) {
 	t.Parallel()
 

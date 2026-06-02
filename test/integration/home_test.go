@@ -92,7 +92,9 @@ func TestHome_Integration(t *testing.T) {
 			// label (e.g. "[development] Top Banana!"); the suffix
 			// "Top Banana!</title>" stays stable in both.
 			"Top Banana!</title>",
-			"Popular quizzes",
+			// The primary section is now a Popular / Newest tablist; the
+			// active-players aside keeps its <h2>.
+			`id="tab-popular"`,
 			"Most active players",
 			"Bananas of the World",
 			"/play/bananas-of-the-world-",
@@ -207,6 +209,30 @@ func TestHome_Integration(t *testing.T) {
 	if err := stores.Quizzes.CreateQuiz(ctx, neverPlayed); err != nil {
 		t.Fatalf("CreateQuiz neverPlayed err = %v, want nil", err)
 	}
+
+	t.Run("GET / renders the Newest tab with a never-played public quiz", func(t *testing.T) {
+		t.Parallel()
+		body := getBody(ctx, t, baseURL+"/")
+
+		for _, want := range []string{
+			// The Newest tab control is present and a11y-labelled.
+			`role="tablist"`,
+			`role="tab"`,
+			`id="tab-newest"`,
+			"Newest",
+			// The never-played quiz is excluded from the popular list
+			// (0 plays in the 30-day window) but must surface in the
+			// newest list, which orders by created_at and ignores plays.
+			"Newly Authored",
+			`href="/play/newly-authored-`,
+			// Newest cards show a question-count pill, not a play count.
+			`1 question`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("body missing newest-tab marker %q", want)
+			}
+		}
+	})
 
 	t.Run("GET /quizzes lists every quiz including ones with zero plays", func(t *testing.T) {
 		t.Parallel()

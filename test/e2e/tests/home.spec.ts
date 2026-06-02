@@ -44,7 +44,7 @@ test('start page fits within the viewport on a fresh DB', async ({ page }) => {
   // Wait for the body to render and any web-font swap to settle so
   // the measurement is taken against final layout, not the initial
   // FOUT pass.
-  await expect(page.getByRole('heading', { name: 'Popular quizzes' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Popular' })).toBeVisible();
 
   const measurement = await page.evaluate(() => ({
     scrollHeight: document.documentElement.scrollHeight,
@@ -70,8 +70,10 @@ test('start page renders the popular + active sections and a discreet admin link
   await expect(page).toHaveTitle(/Top Banana!$/);
   await expect(page.getByRole('heading', { level: 1 })).toContainText(/Top\s*Banana!?/i);
 
-  // Both section labels are <h2> for screen readers.
-  await expect(page.getByRole('heading', { name: 'Popular quizzes', level: 2 })).toBeVisible();
+  // The primary section is a tablist (Popular / Newest) over two
+  // server-rendered lists; the active-players aside stays an <h2>.
+  await expect(page.getByRole('tab', { name: 'Popular' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Newest' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Most active players', level: 2 })).toBeVisible();
 
   // Discreet admin link sits in the footer. Logged-out visitors get
