@@ -131,6 +131,7 @@ func shellAssetPaths() []string {
 		"css/app.css",
 		"js/htmx.min.js",
 		"js/share.js",
+		"js/vendor/alpine.min.js",
 		"banana.svg",
 		"banana-192.png",
 		"banana-512.png",

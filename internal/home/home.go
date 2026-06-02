@@ -37,6 +37,24 @@ type PopularQuiz struct {
 	PlayCount   int
 }
 
+// NewestQuiz is one row in the "newest quizzes" list. QuestionCount is
+// how many questions the quiz has; the template renders it as a
+// "N questions" pill in place of the popular list's play count.
+type NewestQuiz struct {
+	ID            int64
+	Title         string
+	Slug          string
+	Description   string
+	QuestionCount int
+}
+
+// PlayURL is the share-able deep link the home page card points at.
+// Mirrors [PopularQuiz.PlayURL] so a quiz reached from either tab picks
+// up the same share path.
+func (n NewestQuiz) PlayURL() string {
+	return fmt.Sprintf("/play/%s-%d", n.Slug, n.ID)
+}
+
 // Viewer is the slice of the signed-in player the home layout needs to
 // render the "Signed in as X | Log out" footer affordance. Nil when
 // the request is anonymous (no session, or a session pointing at an
@@ -79,6 +97,7 @@ type ActivePlayer struct {
 // substitute a stub that returns canned rows.
 type Store interface {
 	ListPopularQuizzes(ctx context.Context) ([]*PopularQuiz, error)
+	ListNewestQuizzes(ctx context.Context) ([]*NewestQuiz, error)
 	ListMostActivePlayers(ctx context.Context) ([]*ActivePlayer, error)
 }
 
@@ -90,6 +109,7 @@ type Store interface {
 type pageData struct {
 	Title          string
 	PopularQuizzes []*PopularQuiz
+	NewestQuizzes  []*NewestQuiz
 	ActivePlayers  []*ActivePlayer
 	Viewer         *Viewer
 }
@@ -117,6 +137,13 @@ func Handle(
 			logger.ErrorContext(r.Context(), "list popular quizzes", slog.Any("err", err))
 		} else {
 			data.PopularQuizzes = truncate(quizzes)
+		}
+
+		newest, err := store.ListNewestQuizzes(r.Context())
+		if err != nil {
+			logger.ErrorContext(r.Context(), "list newest quizzes", slog.Any("err", err))
+		} else {
+			data.NewestQuizzes = truncate(newest)
 		}
 
 		players, err := store.ListMostActivePlayers(r.Context())

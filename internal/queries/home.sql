@@ -36,6 +36,34 @@ WHERE g.created_at >= datetime('now', '-30 days')
 GROUP BY q.id
 ORDER BY play_count DESC, q.updated_at DESC;
 
+-- name: ListNewestQuizzes :many
+-- Returns the most-recently-created public quizzes, newest first. Backs
+-- the "Newest" tab on the start page so freshly-authored quizzes are
+-- discoverable before they accumulate enough plays to reach the popular
+-- list.
+--
+-- Visibility gate (#103): only quizzes the public can play surface on
+-- the start page. Unlisted is link-only; private requires a logged-in
+-- player, neither of which fits this anonymous list.
+--
+-- The EXISTS gate on questions excludes quizzes with zero questions:
+-- they cannot be played, so they have no business on a "pick a quiz"
+-- list (#275). Same exclusion ListPopularQuizzes applies.
+--
+-- No LIMIT in SQL: sqlc's SQLite parser truncates the surrounding
+-- statement in multi-query files when a LIMIT clause is present, so the
+-- caller slices the result. See ListPopularQuizzes above.
+SELECT q.id          AS id,
+       q.title       AS title,
+       q.slug        AS slug,
+       q.description AS description,
+       q.created_at  AS created_at,
+       (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = q.id) AS question_count
+FROM quizzes q
+WHERE q.visibility = 'public'
+  AND EXISTS (SELECT 1 FROM questions qe WHERE qe.quiz_id = q.id)
+ORDER BY q.created_at DESC, q.id DESC;
+
 -- name: ListMostActivePlayers :many
 -- Returns the players with the most finished games in the last 30
 -- days, descending. The finished definition matches

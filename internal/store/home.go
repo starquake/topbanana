@@ -49,6 +49,29 @@ func (s *HomeStore) ListPopularQuizzes(ctx context.Context) ([]*home.PopularQuiz
 	return out, nil
 }
 
+// ListNewestQuizzes returns the most-recently-created public quizzes,
+// newest first. The underlying query orders by created_at DESC; the
+// caller slices to the desired top-N.
+func (s *HomeStore) ListNewestQuizzes(ctx context.Context) ([]*home.NewestQuiz, error) {
+	rows, err := s.q.ListNewestQuizzes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list newest quizzes: %w", err)
+	}
+
+	out := make([]*home.NewestQuiz, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, &home.NewestQuiz{
+			ID:            r.ID,
+			Title:         r.Title,
+			Slug:          r.Slug,
+			Description:   r.Description,
+			QuestionCount: int(r.QuestionCount),
+		})
+	}
+
+	return out, nil
+}
+
 // ListMostActivePlayers returns the players ranked by number of finished
 // games, descending. Anonymous (unclaimed petname) players are filtered
 // out in SQL so this list only shows display names a player explicitly

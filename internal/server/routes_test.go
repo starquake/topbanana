@@ -236,6 +236,10 @@ func (stubHomeStore) ListPopularQuizzes(_ context.Context) ([]*home.PopularQuiz,
 	return nil, errRouteStub
 }
 
+func (stubHomeStore) ListNewestQuizzes(_ context.Context) ([]*home.NewestQuiz, error) {
+	return nil, errRouteStub
+}
+
 func (stubHomeStore) ListMostActivePlayers(_ context.Context) ([]*home.ActivePlayer, error) {
 	return nil, errRouteStub
 }
