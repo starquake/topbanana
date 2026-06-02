@@ -93,6 +93,10 @@ type AcceptInviteDeps struct {
 	Invites  InviteStore
 	Players  InvitePlayerStore
 	Sessions *session.Manager
+	// Games carries an anonymous visitor's game history onto the new
+	// account when they accept an invite from a guest session, matching
+	// the login / Google paths (#617). Nil disables the migration.
+	Games AnonymousGameMigrator
 }
 
 // HandleAcceptInviteSubmit handles POST /accept-invite. It re-validates
@@ -217,7 +221,15 @@ func acceptInvite(
 
 		return
 	}
+	// Capture the prior session (a guest who played before accepting)
+	// before Set overwrites the cookie, then carry their games onto the
+	// new account - same reattribution the login / Google paths do (#617).
+	var priorSessionPlayerID *int64
+	if id, ok := deps.Sessions.PlayerID(r); ok {
+		priorSessionPlayerID = &id
+	}
 	deps.Sessions.Set(w, refreshed.ID, refreshed.SessionVersion)
+	migrateGamesAfterSignIn(r.Context(), logger, deps.Players, deps.Games, priorSessionPlayerID, refreshed.ID)
 	http.Redirect(w, r, landingPathFor(refreshed.Role), http.StatusSeeOther)
 }
 

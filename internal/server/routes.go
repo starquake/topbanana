@@ -171,6 +171,7 @@ func addEmailFlowRoutes(
 			Invites:  stores.Invites,
 			Players:  stores.InvitePlayers,
 			Sessions: sessions,
+			Games:    stores.GameMigrator,
 		}),
 	)))
 }
