@@ -2,6 +2,48 @@
 
 What changed in each released version of Top Banana! The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.6.0 — 2026-06-02
+
+Quiz breaks become named rounds. Accounts gain Player, Host, and Admin roles with player management and email invites, and new sign-ups verify their email before they are signed in.
+
+### Players
+- Registering no longer signs you in. The confirmation page asks you to verify your email, and pages that need an account stay unreachable until you verify and log in.
+- The registration form no longer reveals whether an email already has an account; registering with an in-use address shows the same confirmation a new one does.
+- Resetting your password signs you in automatically.
+- Changing your email requires your current password, and the confirmation reads the same whether or not the new address is already in use.
+- Each round opens with an intro and closes with a recap during play.
+- The start page has a Newest tab alongside Popular.
+- Before starting a quiz, players see links to their profile and the quiz catalog.
+- The password field shows an inline hint while the entry is too short.
+- The cooldown buttons on the sign-in and forgot-password forms count down and re-enable without a page reload.
+- A quiz played as a guest carries onto the account created when an email invite is accepted.
+- After a password reset, a signed-in account is no longer caught in a login redirect loop.
+- Submitting a form left open for a long time, such as logging out, no longer fails with a permission error.
+- Password managers no longer treat the display-name field as a login username.
+
+### Hosts
+- Quiz breaks are replaced by named rounds, which group questions and can be created, edited, reordered, and deleted.
+- The round form places the summary above the name and corrects the name helper text.
+- Quiz import accepts rounds in the pasted JSON.
+- The quiz import prompt has a copy button and revised guidance.
+- Admins can invite people by email; the invite link creates an already-verified account.
+- Pending invites can be viewed, resent, and revoked from an invite-management page reachable from the admin navbar.
+- Each player is assigned a role of Player, Host, or Admin from a settings page.
+- The first registered account becomes an Admin.
+- Admins can view a player's onboarding state, set a player's display name and password, and mark a player's email verified.
+- A persistent navigation links every admin section.
+
+### Visual / chrome
+- The Top Banana! logo links back to the home page from every auth page.
+- The brand name appears as "Top Banana!" throughout.
+- The round intro and round results cards animate in.
+- The reset-password, verify-email, and forgot-password inputs have visible borders.
+
+### Behind the scenes
+- The per-IP login cooldown is configurable through LOGIN_COOLDOWN.
+- The reset-password and promote-admin break-glass tools run with only the database configured.
+- Database writes use immediate SQLite transactions, avoiding write-conflict errors under concurrent load.
+
 ## v2026.5.9 — 2026-05-28
 
 Email is the login credential. Email verification is required to sign in, and new self-service pages cover password change, email change, and verify-link request. Quiz breaks ship to players.
