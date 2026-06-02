@@ -62,6 +62,23 @@ func TestAdminImport_Integration(t *testing.T) {
 		t.Errorf("import form body got %q, should contain the example title %q", got, "European Capitals")
 	}
 
+	// #600: the page carries a Copy affordance (a [data-copy-target] button
+	// pointing at the prompt block's id) and the prompt itself now spells out
+	// fact-accuracy guidance and the multiple-correct semantics. Assert on the
+	// affordance and on meaningful keywords rather than whole sentences so a
+	// copy tweak doesn't break the test.
+	for _, want := range []string{
+		`data-copy-target`,
+		`id="llm-prompt-text"`,
+		"Verify every fact",
+		"more than one option correct",
+		"any option marked correct scores",
+	} {
+		if got := string(formBody); !strings.Contains(got, want) {
+			t.Errorf("import form body should contain %q", want)
+		}
+	}
+
 	// CSRF token is the same scrape the regular admin tests use.
 	csrfToken := fetchCSRFToken(ctx, t, client, importURL)
 
