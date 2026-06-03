@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"io"
 	"io/fs"
+	"mime"
 	"net/http"
 	"os"
 	"strings"
@@ -32,6 +33,15 @@ var staticFS embed.FS
 // `make tailwind` regen is visible on the next request without a binary
 // restart. Mirrors the CLIENT_DIR override for the player-client half.
 func Handler(cfg *config.Config) http.Handler {
+	// The distroless production image has no /etc/mime.types, so
+	// [mime.TypeByExtension](".woff2") would return empty and
+	// [http.FileServer] would content-sniff the vendored fonts (#599) as
+	// application/octet-stream. Register the type explicitly so the woff2
+	// content-type is correct regardless of the runtime image. The error
+	// is discarded because AddExtensionType only fails on a malformed type
+	// string, and "font/woff2" is a constant valid one.
+	_ = mime.AddExtensionType(".woff2", "font/woff2")
+
 	fileServer := http.FileServer(http.FS(resolveStaticFS(cfg)))
 
 	if cfg.IsProduction() {
@@ -129,6 +139,9 @@ func shellAssetPaths() []string {
 		"manifest.webmanifest",
 		"sw.js",
 		"css/app.css",
+		"fonts/inter-latin.woff2",
+		"fonts/inter-latin-ext.woff2",
+		"fonts/orbitron-latin.woff2",
 		"js/htmx.min.js",
 		"js/share.js",
 		"js/vendor/alpine.min.js",
