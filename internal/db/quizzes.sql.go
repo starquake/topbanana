@@ -280,6 +280,23 @@ func (q *Queries) GetQuiz(ctx context.Context, id int64) (GetQuizRow, error) {
 	return i, err
 }
 
+const getQuizVisibility = `-- name: GetQuizVisibility :one
+SELECT visibility
+FROM quizzes
+WHERE id = ?
+LIMIT 1
+`
+
+// Returns just the visibility column for a quiz. Used by the read-path
+// visibility gate, which only needs visibility + existence and must not
+// pay the questions/options fan-out that GetQuiz materialises.
+func (q *Queries) GetQuizVisibility(ctx context.Context, id int64) (string, error) {
+	row := q.db.QueryRowContext(ctx, getQuizVisibility, id)
+	var visibility string
+	err := row.Scan(&visibility)
+	return visibility, err
+}
+
 const listOptionIDsByQuestionID = `-- name: ListOptionIDsByQuestionID :many
 SELECT id
 FROM options
@@ -317,6 +334,44 @@ WHERE question_id = ?
 
 func (q *Queries) ListOptionsByQuestionID(ctx context.Context, questionID int64) ([]Option, error) {
 	rows, err := q.db.QueryContext(ctx, listOptionsByQuestionID, questionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Option
+	for rows.Next() {
+		var i Option
+		if err := rows.Scan(
+			&i.ID,
+			&i.QuestionID,
+			&i.Text,
+			&i.IsCorrect,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOptionsByQuizID = `-- name: ListOptionsByQuizID :many
+SELECT o.id, o.question_id, o.text, o.is_correct
+FROM options o
+         JOIN questions q ON q.id = o.question_id
+WHERE q.quiz_id = ?
+ORDER BY o.question_id, o.id
+`
+
+// Returns every option for a quiz in one round-trip so callers can group
+// options by question in Go instead of running one query per question.
+func (q *Queries) ListOptionsByQuizID(ctx context.Context, quizID int64) ([]Option, error) {
+	rows, err := q.db.QueryContext(ctx, listOptionsByQuizID, quizID)
 	if err != nil {
 		return nil, err
 	}

@@ -36,6 +36,13 @@ type Store interface {
 	// needs to know whether the quiz is real (e.g. to map a missing quiz
 	// to a 404) and does not need the rest of the tree.
 	QuizExists(ctx context.Context, id int64) (bool, error)
+	// GetQuizVisibility returns just the visibility of a quiz by ID. It
+	// runs a single one-column SELECT and does not load the quiz's
+	// questions or options. Prefer this over GetQuiz when the caller only
+	// needs the visibility level (e.g. the read-path visibility gate) and
+	// does not need the rest of the tree. Returns ErrQuizNotFound when the
+	// quiz does not exist.
+	GetQuizVisibility(ctx context.Context, id int64) (string, error)
 	// CreateQuiz creates a quiz.
 	CreateQuiz(ctx context.Context, qz *Quiz) error
 	// UpdateQuiz updates a quiz.

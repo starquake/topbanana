@@ -413,6 +413,18 @@ func (s *Service) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 	return qz, nil
 }
 
+// GetQuizVisibility proxies to the wrapped quiz store. Exposed so the
+// clientapi read-path visibility gate can check existence + visibility
+// without paying the questions/options fan-out GetQuiz performs.
+func (s *Service) GetQuizVisibility(ctx context.Context, id int64) (string, error) {
+	visibility, err := s.quizStore.GetQuizVisibility(ctx, id)
+	if err != nil {
+		return "", fmt.Errorf("get quiz visibility %d: %w", id, err)
+	}
+
+	return visibility, nil
+}
+
 // SetRevealDelay overrides the per-question reveal beat (#247). The default
 // is 3 s - long enough to read the prompt before the option buttons appear.
 // E2E and load-test deployments shrink this to a few hundred ms to speed up

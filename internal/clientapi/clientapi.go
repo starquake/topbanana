@@ -141,8 +141,8 @@ func HandleQuizList(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 // player. Returns false when the caller is not authorised, in which
 // case the response has already been written as a 404 so the gate is
 // indistinguishable from a genuinely missing quiz.
-func canReadQuiz(w http.ResponseWriter, r *http.Request, qz *quiz.Quiz) bool {
-	if qz.Visibility != quiz.VisibilityPrivate {
+func canReadQuiz(w http.ResponseWriter, r *http.Request, visibility string) bool {
+	if visibility != quiz.VisibilityPrivate {
 		return true
 	}
 	p, ok := auth.PlayerFromContext(r.Context())
@@ -155,15 +155,16 @@ func canReadQuiz(w http.ResponseWriter, r *http.Request, qz *quiz.Quiz) bool {
 	return true
 }
 
-// gateQuizRead loads the quiz by ID via the game service's quiz store
-// proxy and applies canReadQuiz so the leaderboard, leaderboard-stream,
-// my-game, and create-game handlers can reject access without
-// duplicating the load + check + 404 dance.
+// gateQuizRead reads the quiz's visibility by ID via the game service's
+// quiz store proxy and applies canReadQuiz so the leaderboard,
+// leaderboard-stream, my-game, and create-game handlers can reject access
+// without duplicating the load + check + 404 dance. It reads only the
+// visibility column, not the full questions/options tree.
 func gateQuizRead(
 	w http.ResponseWriter, r *http.Request,
 	logger *slog.Logger, service *game.Service, quizID int64,
 ) bool {
-	qz, err := service.GetQuiz(r.Context(), quizID)
+	visibility, err := service.GetQuizVisibility(r.Context(), quizID)
 	if err != nil {
 		if errors.Is(err, quiz.ErrQuizNotFound) {
 			http.NotFound(w, r)
@@ -175,7 +176,7 @@ func gateQuizRead(
 		return false
 	}
 
-	return canReadQuiz(w, r, qz)
+	return canReadQuiz(w, r, visibility)
 }
 
 // HandleQuizGet returns a single quiz with its questions and options.
@@ -219,7 +220,7 @@ func HandleQuizGet(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 
 			return
 		}
-		if !canReadQuiz(w, r, qz) {
+		if !canReadQuiz(w, r, qz.Visibility) {
 			return
 		}
 
