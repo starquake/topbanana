@@ -21,6 +21,10 @@ const (
 func SetupTestDB(t *testing.T) (string, func()) {
 	t.Helper()
 
+	if testing.Short() {
+		t.Skip("integration: needs a real database")
+	}
+
 	tmpDB, err := os.CreateTemp(t.TempDir(), "topbanana-test-*.sqlite")
 	if err != nil {
 		t.Fatalf("failed to create temp db: %v", err)
@@ -50,6 +54,10 @@ func SetupTestDB(t *testing.T) (string, func()) {
 func Open(t *testing.T) *sql.DB {
 	t.Helper()
 
+	if testing.Short() {
+		t.Skip("integration: needs a real database")
+	}
+
 	db := OpenUnmigrated(t)
 
 	err := goose.Up(db, ".")
@@ -63,6 +71,10 @@ func Open(t *testing.T) *sql.DB {
 // OpenUnmigrated opens a database connection without migrations applied.
 func OpenUnmigrated(t *testing.T) *sql.DB {
 	t.Helper()
+
+	if testing.Short() {
+		t.Skip("integration: needs a real database")
+	}
 
 	db, err := sql.Open(
 		"sqlite",

@@ -1,5 +1,3 @@
-//go:build integration
-
 // Package integration_test (this file) exercises the Google OAuth
 // sign-in flow against a real server + DB. The Google endpoints are
 // mocked with an httptest.Server pointed at via GOOGLE_ISSUER_URL;

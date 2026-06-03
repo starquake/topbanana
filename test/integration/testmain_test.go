@@ -1,5 +1,3 @@
-//go:build integration
-
 package integration_test
 
 import (
@@ -50,6 +48,10 @@ type testServer struct {
 // REGISTRATION_ENABLED without redoing the rest of the boilerplate.
 func startServer(t *testing.T, extraEnv map[string]string) (context.Context, testServer) {
 	t.Helper()
+
+	if testing.Short() {
+		t.Skip("integration: needs a real server")
+	}
 
 	ctx, stop := testutil.SignalCtx(t)
 	stdout := testutil.NewTestWriter(t)

@@ -4,8 +4,8 @@ AL# topbanana
 
 ```bash
 make check            # lint + sql-lint + build + all tests — run before every commit
-make test             # unit tests only
-make test-integration # integration tests (-tags=integration)
+make test             # fast suite; integration tests skip under -short
+make test-integration # everything, incl. integration (no -short)
 make test-e2e         # end-to-end browser tests (Playwright; requires Node.js)
 make smoke            # validate startup against the existing dev DB (no HTTP listener)
 ```
@@ -42,11 +42,10 @@ Every change or new feature must have tests. The command sequence to run before 
 Pick the right layer:
 
 - **Unit test** (`*_test.go` next to the code) — pure logic, no I/O.
-- **Integration test** (`-tags=integration`) — anything that touches real I/O: the real server, DB, HTTP routing, or embedded assets. The defining marker is the `//go:build integration` tag, **not** the file name or folder. **Name test files after what they test, stdlib-style — do NOT use an `_integration` suffix.** The tag, not the name, marks a file as integration. Two homes for them:
+- **Integration test** — anything that touches real I/O: the real server, DB, HTTP routing, or embedded assets. These are gated by `testing.Short()`, **not** a build tag: they `t.Skip` under `-short` because they acquire their dependency through a choke point that calls `testing.Short()` — `dbtest.Open` / `dbtest.OpenUnmigrated` / `dbtest.SetupTestDB` for DB-backed layer tests, and `startServer` (the `test/integration` harness) for full-stack tests. So `make test` (`-short`) skips them and `make check` / `make test-coverage` / CI (no `-short`) run them. **Name test files after what they test, stdlib-style.** There is no need to split a file by gating: unit and integration tests can live together in one source-paired `foo_test.go`. Three homes:
   - **Full-stack / black-box** tests, driven through the running server (package `integration_test`), live in `test/integration/` and share its server + DB + cookie-jar harness.
-  - **Layer tests** that exercise one store/service directly against a real DB (via `dbtest.Open`) live **beside the code they test** (e.g. `internal/store/`, `internal/game/`) and carry the tag too — model: `internal/store/round_test.go`. Do not relocate these into `test/integration/`.
+  - **Layer tests** that exercise one store/service directly against a real DB (via `dbtest.Open`) live **beside the code they test** (e.g. `internal/store/`, `internal/game/`) — model: `internal/store/round_test.go`. Do not relocate these into `test/integration/`.
   - **Migration tests** live in `internal/migrations` (package `migrations_test`) — model: `internal/migrations/rounds_test.go`.
-  Either way the tag keeps them out of the fast `make test` unit suite; they run under `make check` / CI. A mixed file (unit tests + DB tests) keeps its unit tests in `foo_test.go` and splits the DB tests into a second tag-gated file named after the feature (e.g. `commands_test.go`), not `foo_integration_test.go`.
 - **E2E test** (`test/e2e/`, Playwright) — behaviour that only makes sense in a real browser: clicks, navigation, form flows, JS-driven UI.
 
 One-off scripts are reserved for genuinely interactive debugging that can't be expressed as a test (e.g. eyeballing a visual layout, attaching a debugger). If you find yourself writing the same `curl` twice, it's a test.

@@ -1,5 +1,3 @@
-//go:build integration
-
 package app_test
 
 import (

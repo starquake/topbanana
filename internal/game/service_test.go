@@ -1,5 +1,3 @@
-//go:build integration
-
 package game_test
 
 import (
