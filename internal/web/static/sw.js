@@ -16,6 +16,9 @@ const CACHE_NAME = 'topbanana-shell-' + CACHE_VERSION;
 const PRECACHE_URLS = [
     '/manifest.webmanifest',
     '/assets/css/app.css',
+    '/assets/fonts/inter-latin.woff2',
+    '/assets/fonts/inter-latin-ext.woff2',
+    '/assets/fonts/orbitron-latin.woff2',
     '/assets/js/htmx.min.js',
     '/assets/js/share.js',
     '/assets/js/vendor/alpine.min.js',
