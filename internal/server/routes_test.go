@@ -1,22 +1,25 @@
+//go:build integration
+
 package server_test
 
 import (
-	"context"
-	"errors"
+	"database/sql"
+	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/game"
-	"github.com/starquake/topbanana/internal/home"
 	"github.com/starquake/topbanana/internal/leaderboard"
 	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/quiz"
@@ -24,242 +27,119 @@ import (
 	"github.com/starquake/topbanana/internal/store"
 )
 
-type stubPlayerStore struct{}
+// seededAdminID is the player row the migrations insert; a seeded quiz needs
+// a creator and this id is guaranteed present on a freshly migrated DB.
+const seededAdminID int64 = 1
 
-func (stubPlayerStore) GetPlayerByDisplayName(_ context.Context, _ string) (*auth.Player, error) {
-	return nil, auth.ErrPlayerNotFound
+// newRouter builds the real router over real stores on the given DB. These
+// tests assert routing and middleware behavior, so most cases run against an
+// empty migrated DB: an unmatched route 404s from the mux, and a matched
+// route reaches its handler regardless of whether a row exists.
+func newRouter(t *testing.T, db *sql.DB, cfg *config.Config) *http.ServeMux {
+	t.Helper()
+
+	logger := slog.New(slog.DiscardHandler)
+	stores := store.New(db, logger)
+	gameSvc := game.NewService(stores.Games, stores.Quizzes, logger)
+	mux := http.NewServeMux()
+	ExportAddRoutes(
+		mux, logger, stores, gameSvc, leaderboard.NewHub(), cfg,
+		mailer.NewTester(mailer.NewNoop()), mailer.StatusView{},
+	)
+
+	return mux
 }
 
-func (stubPlayerStore) GetPlayerByEmail(_ context.Context, _ string) (*auth.Player, error) {
-	return nil, auth.ErrPlayerNotFound
+// seedQuiz inserts a public, one-question quiz and returns it with its id
+// populated. The first quiz on a fresh DB gets id 1, so its slugID path
+// segment is "<slug>-1".
+func seedQuiz(t *testing.T, quizzes quiz.Store) *quiz.Quiz {
+	t.Helper()
+
+	qz := &quiz.Quiz{
+		Title:             "Routes Quiz",
+		Slug:              "routes-quiz",
+		Description:       "for the routing test",
+		CreatedByPlayerID: seededAdminID,
+		Visibility:        quiz.VisibilityPublic,
+		Questions: []*quiz.Question{
+			{Text: "Q1", Position: 1, Options: []*quiz.Option{{Text: "A", Correct: true}, {Text: "B"}}},
+		},
+	}
+	if err := quizzes.CreateQuiz(t.Context(), qz); err != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", err)
+	}
+
+	return qz
 }
 
-func (stubPlayerStore) GetPlayerByID(_ context.Context, _ int64) (*auth.Player, error) {
-	return nil, auth.ErrPlayerNotFound
+// createGame POSTs /api/games as the cookie-jar player, which mints the
+// anonymous player row (persisting its session cookie in the jar) and starts
+// a game on the quiz. It returns the new game's id so the game-scoped routes
+// resolve to a game the same player participates in.
+func createGame(t *testing.T, client *http.Client, baseURL string, quizID int64) string {
+	t.Helper()
+
+	body := strings.NewReader(`{"quizId":` + strconv.FormatInt(quizID, 10) + `}`)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, baseURL+"/api/games", body)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("POST /api/games err = %v, want nil", err)
+	}
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+		}
+	}()
+
+	if got, want := resp.StatusCode, http.StatusCreated; got != want {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST /api/games status = %d, want %d, body=%q", got, want, raw)
+	}
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	if derr := json.NewDecoder(resp.Body).Decode(&created); derr != nil {
+		t.Fatalf("decode create-game response err = %v, want nil", derr)
+	}
+	if created.ID == "" {
+		t.Fatal("create-game response carried an empty game id")
+	}
+
+	return created.ID
 }
 
-func (stubPlayerStore) CreatePlayer(_ context.Context, _, _, _, _ string) (*auth.Player, error) {
-	return nil, errRouteStub
-}
-
-func (stubPlayerStore) CreateAnonymousPlayer(_ context.Context, _ string) (*auth.Player, error) {
-	return nil, errRouteStub
-}
-
-func (stubPlayerStore) ClaimPlayer(_ context.Context, _ int64, _, _, _, _ string) (*auth.Player, error) {
-	return nil, errRouteStub
-}
-
-func (stubPlayerStore) SetPlayerPasswordHash(_ context.Context, _, _ string) error {
-	return errRouteStub
-}
-
-func (stubPlayerStore) ChangePlayerPassword(_ context.Context, _ int64, _ string) error {
-	return errRouteStub
-}
-
-func (stubPlayerStore) UpdatePlayerDisplayName(_ context.Context, _ int64, _ string) (*auth.Player, error) {
-	return nil, errRouteStub
-}
-
-func (stubPlayerStore) RenamePlayer(_ context.Context, _ int64, _ string) (*auth.Player, error) {
-	return nil, errRouteStub
-}
-
-var errRouteStub = errors.New("stub")
-
-type stubQuizStore struct{}
-
-func (stubQuizStore) Ping(_ context.Context) error {
-	return nil
-}
-
-func (stubQuizStore) GetQuiz(_ context.Context, id int64) (*quiz.Quiz, error) {
-	return &quiz.Quiz{
-		ID:          id,
-		Title:       "Stub Quiz",
-		Slug:        "stub-quiz",
-		Description: "stub",
-		Questions:   nil,
-	}, nil
-}
-
-func (stubQuizStore) QuizExists(_ context.Context, _ int64) (bool, error) {
-	return true, nil
-}
-
-func (stubQuizStore) GetQuestion(_ context.Context, id int64) (*quiz.Question, error) {
-	return &quiz.Question{
-		ID:       id,
-		QuizID:   1,
-		Text:     "Stub Question",
-		ImageURL: "",
-		Position: 1,
-		Options:  nil,
-	}, nil
-}
-
-func (stubQuizStore) ListQuizzes(_ context.Context) ([]*quiz.Quiz, error) {
-	return []*quiz.Quiz{
-		{ID: 1, Title: "Stub Quiz", Slug: "stub-quiz", Description: "stub"},
-	}, nil
-}
-
-func (s stubQuizStore) ListPublicQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
-	return s.ListQuizzes(ctx)
-}
-
-func (stubQuizStore) QuestionCountsByQuiz(_ context.Context) (map[int64]int, error) {
-	return map[int64]int{}, nil
-}
-
-func (stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error {
-	return errRouteStub
-}
-
-func (stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error {
-	return errRouteStub
-}
-
-func (stubQuizStore) DeleteQuiz(_ context.Context, _ int64) error {
-	return errRouteStub
-}
-
-func (stubQuizStore) CreateQuestion(_ context.Context, _ *quiz.Question) error {
-	return errRouteStub
-}
-
-func (stubQuizStore) CreateQuestionAtNextPosition(_ context.Context, _ *quiz.Question) error {
-	return errRouteStub
-}
-
-func (stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error {
-	return errRouteStub
-}
-
-func (stubQuizStore) SwapQuestionPositions(_ context.Context, _, _ int64, _ string) error {
-	return errRouteStub
-}
-
-func (stubQuizStore) DeleteQuestion(_ context.Context, _ int64) error {
-	return errRouteStub
-}
-
-func (stubQuizStore) ListQuestions(_ context.Context, _ int64) ([]*quiz.Question, error) {
-	return nil, errRouteStub
-}
-
-func (stubQuizStore) GetOption(_ context.Context, _ int64) (*quiz.Option, error) {
-	return nil, errRouteStub
-}
-
-func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Option, error) {
-	return nil, errRouteStub
-}
-
-func (stubQuizStore) ListRoundsByQuiz(_ context.Context, _ int64) ([]*quiz.Round, error) {
-	return nil, errRouteStub
-}
-
-func (stubQuizStore) GetRound(_ context.Context, _ int64) (*quiz.Round, error) {
-	return nil, errRouteStub
-}
-
-func (stubQuizStore) GetDefaultRound(_ context.Context, _ int64) (*quiz.Round, error) {
-	return nil, errRouteStub
-}
-func (stubQuizStore) CreateRound(_ context.Context, _ *quiz.Round) error { return errRouteStub }
-func (stubQuizStore) UpdateRound(_ context.Context, _ *quiz.Round) error { return errRouteStub }
-func (stubQuizStore) DeleteRound(_ context.Context, _ int64) error       { return errRouteStub }
-func (stubQuizStore) MoveRound(_ context.Context, _, _ int64, _ string) error {
-	return errRouteStub
-}
-
-func (stubQuizStore) MoveQuestionToRound(_ context.Context, _, _, _ int64) error {
-	return errRouteStub
-}
-
-type stubGameStore struct{}
-
-func (stubGameStore) Ping(_ context.Context) error { return nil }
-
-func (stubGameStore) GetGame(_ context.Context, _ string) (*game.Game, error) {
-	return nil, errRouteStub
-}
-
-func (stubGameStore) GetGameByPlayerAndQuiz(_ context.Context, _, _ int64) (*game.Game, error) {
-	return nil, game.ErrGameNotFound
-}
-
-func (stubGameStore) CreateGame(_ context.Context, _ *game.Game) error { return errRouteStub }
-func (stubGameStore) StartGame(_ context.Context, _ string) error      { return errRouteStub }
-func (stubGameStore) CreateParticipant(_ context.Context, _ *game.Participant) error {
-	return errRouteStub
-}
-
-func (stubGameStore) CreateGameAndParticipant(_ context.Context, _ *game.Game, _ *game.Participant) error {
-	return errRouteStub
-}
-func (stubGameStore) CreateQuestion(_ context.Context, _ *game.Question) error { return errRouteStub }
-func (stubGameStore) CreateAnswer(_ context.Context, _ *game.Answer) error     { return errRouteStub }
-func (stubGameStore) ListAnswersForQuizLeaderboard(
-	_ context.Context, _ int64,
-) ([]*game.LeaderboardAnswer, error) {
-	return nil, errRouteStub
-}
-
-func (stubGameStore) ListParticipantsForQuizLeaderboard(
-	_ context.Context, _ int64, _ time.Time,
-) ([]*game.LeaderboardParticipant, error) {
-	return nil, errRouteStub
-}
-
-func (stubGameStore) DeleteGamesForPlayerOnQuiz(_ context.Context, _, _ int64) error {
-	return errRouteStub
-}
-
-func (stubGameStore) ListQuizIDsForPlayer(_ context.Context, _ int64) ([]int64, error) {
-	return nil, errRouteStub
-}
-
-func (stubGameStore) MarkRoundSeen(_ context.Context, _ string, _ int64, _ game.RoundPhase) error {
-	return errRouteStub
-}
-
-func (stubGameStore) ListSeenRoundPhasesByGame(_ context.Context, _ string) ([]game.SeenRoundPhase, error) {
-	return nil, errRouteStub
-}
-
-type stubHomeStore struct{}
-
-func (stubHomeStore) ListPopularQuizzes(_ context.Context) ([]*home.PopularQuiz, error) {
-	return nil, errRouteStub
-}
-
-func (stubHomeStore) ListNewestQuizzes(_ context.Context) ([]*home.NewestQuiz, error) {
-	return nil, errRouteStub
-}
-
-func (stubHomeStore) ListMostActivePlayers(_ context.Context) ([]*home.ActivePlayer, error) {
-	return nil, errRouteStub
-}
-
+// TestAddRoutes_RegisteredRoutesDoNot404 drives every registered route through
+// the real router and asserts none falls through to the mux's not-found
+// handler. The quiz- and game-scoped routes look a resource up and would 404
+// from inside the handler on an empty DB, so the test seeds a quiz and starts
+// a game owned by the request's anonymous player and threads the real ids into
+// those paths.
 func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 	t.Parallel()
 
-	logger := slog.New(slog.DiscardHandler)
-	stores := &store.Stores{
-		Quizzes: stubQuizStore{},
-		Players: stubPlayerStore{},
-		Home:    stubHomeStore{},
+	db := dbtest.Open(t)
+	stores := store.New(db, slog.New(slog.DiscardHandler))
+	mux := newRouter(t, db, &config.Config{RegistrationEnabled: true})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New err = %v, want nil", err)
 	}
-	gameSvc := game.NewService(stubGameStore{}, stubQuizStore{}, logger)
-	mux := http.NewServeMux()
-	ExportAddRoutes(
-		mux, logger, stores, gameSvc, leaderboard.NewHub(),
-		&config.Config{RegistrationEnabled: true},
-		mailer.NewTester(mailer.NewNoop()), mailer.StatusView{},
-	)
+	client := &http.Client{Jar: jar}
+
+	qz := seedQuiz(t, stores.Quizzes)
+	slugID := qz.Slug + "-" + strconv.FormatInt(qz.ID, 10)
+	gameID := createGame(t, client, srv.URL, qz.ID)
 
 	tests := []struct {
 		name   string
@@ -274,16 +154,16 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 		{name: "Admin Reset Player", method: http.MethodPost, path: "/admin/quizzes/1/players/2/reset"},
 
 		{name: "API Quiz List", method: http.MethodGet, path: "/api/quizzes"},
-		{name: "API Quiz Get", method: http.MethodGet, path: "/api/quizzes/1"},
-		{name: "API Quiz Leaderboard", method: http.MethodGet, path: "/api/quizzes/quiz-1/leaderboard"},
-		{name: "API Quiz My Game", method: http.MethodGet, path: "/api/quizzes/quiz-1/my-game"},
+		{name: "API Quiz Get", method: http.MethodGet, path: "/api/quizzes/" + slugID},
+		{name: "API Quiz Leaderboard", method: http.MethodGet, path: "/api/quizzes/" + slugID + "/leaderboard"},
+		{name: "API Quiz My Game", method: http.MethodGet, path: "/api/quizzes/" + slugID + "/my-game"},
 
-		{name: "Play Quiz", method: http.MethodGet, path: "/play/quiz-1"},
+		{name: "Play Quiz", method: http.MethodGet, path: "/play/" + slugID},
 
 		{name: "API Game Create", method: http.MethodPost, path: "/api/games"},
-		{name: "API Question Next", method: http.MethodGet, path: "/api/games/game-1/questions/next"},
-		{name: "API Answer Post", method: http.MethodPost, path: "/api/games/game-1/questions/1/answers"},
-		{name: "API Game Results", method: http.MethodGet, path: "/api/games/game-1/results"},
+		{name: "API Question Next", method: http.MethodGet, path: "/api/games/" + gameID + "/questions/next"},
+		{name: "API Answer Post", method: http.MethodPost, path: "/api/games/" + gameID + "/questions/1/answers"},
+		{name: "API Game Results", method: http.MethodGet, path: "/api/games/" + gameID + "/results"},
 
 		{name: "Admin Quiz Save (create)", method: http.MethodPost, path: "/admin/quizzes"},
 		{name: "Admin Quiz Save (update)", method: http.MethodPost, path: "/admin/quizzes/1"},
@@ -306,12 +186,24 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			req := httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, nil)
-			rec := httptest.NewRecorder()
+			// Drive through the cookie-jar client so every request carries
+			// the anonymous session minted by createGame; the game- and
+			// quiz-scoped routes resolve to the seeded game's owner.
+			req, err := http.NewRequestWithContext(t.Context(), tc.method, srv.URL+tc.path, nil)
+			if err != nil {
+				t.Fatalf("NewRequest err = %v, want nil", err)
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatalf("client.Do err = %v, want nil", err)
+			}
+			defer func() {
+				if cerr := resp.Body.Close(); cerr != nil {
+					t.Errorf("resp.Body.Close err = %v, want nil", cerr)
+				}
+			}()
 
-			mux.ServeHTTP(rec, req)
-
-			if rec.Code == http.StatusNotFound {
+			if resp.StatusCode == http.StatusNotFound {
 				t.Errorf("unexpected 404 for %s %s", tc.method, tc.path)
 			}
 		})
@@ -321,19 +213,8 @@ func TestAddRoutes_RegisteredRoutesDoNot404(t *testing.T) {
 func TestAddRoutes_RegisterDisabled_Returns404(t *testing.T) {
 	t.Parallel()
 
-	logger := slog.New(slog.DiscardHandler)
-	stores := &store.Stores{
-		Quizzes: stubQuizStore{},
-		Players: stubPlayerStore{},
-		Home:    stubHomeStore{},
-	}
-	gameSvc := game.NewService(stubGameStore{}, stubQuizStore{}, logger)
-	mux := http.NewServeMux()
 	// Default-false RegistrationEnabled - /register routes should not be registered.
-	ExportAddRoutes(
-		mux, logger, stores, gameSvc, leaderboard.NewHub(), &config.Config{},
-		mailer.NewTester(mailer.NewNoop()), mailer.StatusView{},
-	)
+	mux := newRouter(t, dbtest.Open(t), &config.Config{})
 
 	tests := []struct {
 		name   string
@@ -362,23 +243,7 @@ func TestAddRoutes_RegisterDisabled_Returns404(t *testing.T) {
 func TestAddRoutes_UnknownRouteReturns404(t *testing.T) {
 	t.Parallel()
 
-	logger := slog.New(slog.DiscardHandler)
-
-	stores := &store.Stores{
-		Quizzes: stubQuizStore{},
-		Players: stubPlayerStore{},
-		Home:    stubHomeStore{},
-	}
-	mux := http.NewServeMux()
-	ExportAddRoutes(
-		mux,
-		logger,
-		stores,
-		game.NewService(stubGameStore{}, stubQuizStore{}, logger),
-		leaderboard.NewHub(),
-		&config.Config{},
-		mailer.NewTester(mailer.NewNoop()), mailer.StatusView{},
-	)
+	mux := newRouter(t, dbtest.Open(t), &config.Config{})
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/unknown/path", nil)
 	rec := httptest.NewRecorder()
@@ -402,23 +267,7 @@ var csrfFormPattern = regexp.MustCompile(`name="csrf_token" value="([^"]+)"`)
 func TestAddRoutes_LoginPOST_RejectsMissingCSRF(t *testing.T) {
 	t.Parallel()
 
-	logger := slog.New(slog.DiscardHandler)
-	stores := &store.Stores{
-		Quizzes: stubQuizStore{},
-		Players: stubPlayerStore{},
-		Home:    stubHomeStore{},
-	}
-	mux := http.NewServeMux()
-	cfg := &config.Config{SessionKey: "test-session-key"}
-	ExportAddRoutes(
-		mux,
-		logger,
-		stores,
-		game.NewService(stubGameStore{}, stubQuizStore{}, logger),
-		leaderboard.NewHub(),
-		cfg,
-		mailer.NewTester(mailer.NewNoop()), mailer.StatusView{},
-	)
+	mux := newRouter(t, dbtest.Open(t), &config.Config{SessionKey: "test-session-key"})
 
 	t.Run("missing token returns 403", func(t *testing.T) {
 		t.Parallel()
@@ -493,22 +342,7 @@ func TestAddRoutes_LoginPOST_RejectsMissingCSRF(t *testing.T) {
 func TestAddRoutes_AdminRouteWithoutSession_RedirectsToLogin(t *testing.T) {
 	t.Parallel()
 
-	logger := slog.New(slog.DiscardHandler)
-	stores := &store.Stores{
-		Quizzes: stubQuizStore{},
-		Players: stubPlayerStore{},
-		Home:    stubHomeStore{},
-	}
-	mux := http.NewServeMux()
-	ExportAddRoutes(
-		mux,
-		logger,
-		stores,
-		game.NewService(stubGameStore{}, stubQuizStore{}, logger),
-		leaderboard.NewHub(),
-		&config.Config{},
-		mailer.NewTester(mailer.NewNoop()), mailer.StatusView{},
-	)
+	mux := newRouter(t, dbtest.Open(t), &config.Config{})
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
 	rec := httptest.NewRecorder()
@@ -533,23 +367,7 @@ func TestAddRoutes_AdminRouteWithoutSession_RedirectsToLogin(t *testing.T) {
 func TestAddRoutes_AdminPOSTWithoutCSRF_Returns403_NotAuthRedirect(t *testing.T) {
 	t.Parallel()
 
-	logger := slog.New(slog.DiscardHandler)
-	stores := &store.Stores{
-		Quizzes: stubQuizStore{},
-		Players: stubPlayerStore{},
-		Home:    stubHomeStore{},
-	}
-	mux := http.NewServeMux()
-	cfg := &config.Config{SessionKey: "test-session-key"}
-	ExportAddRoutes(
-		mux,
-		logger,
-		stores,
-		game.NewService(stubGameStore{}, stubQuizStore{}, logger),
-		leaderboard.NewHub(),
-		cfg,
-		mailer.NewTester(mailer.NewNoop()), mailer.StatusView{},
-	)
+	mux := newRouter(t, dbtest.Open(t), &config.Config{SessionKey: "test-session-key"})
 
 	body := strings.NewReader(url.Values{}.Encode())
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/1/delete", body)
