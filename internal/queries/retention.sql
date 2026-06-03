@@ -4,21 +4,22 @@
 -- role 'player' with no email, no password, and a display name still
 -- auto-generated (display_name_claimed = 0). created_at is the mint time
 -- (there is no last-seen column), so the cutoff is "minted more than the
--- 90-day retention window ago". The cutoff is computed in SQL with
--- datetime('now','-90 days') so both sides of the comparison are SQLite
--- text in the CURRENT_TIMESTAMP encoding rows are minted with; a bound Go
--- time.Time would arrive RFC3339-encoded and the cross-format comparison
--- would silently lie. A guest with a finished game is kept regardless of
--- age so the sweep never erases a leaderboard score (#626); "finished" is
--- every question of the quiz issued as a game_question, the same finisher
--- predicate the leaderboard uses.
+-- retention window ago". The window in days is a caller-supplied integer,
+-- but the cutoff is computed in SQL (datetime('now', '-<days> days')) so
+-- both sides of the comparison are SQLite text in the CURRENT_TIMESTAMP
+-- encoding rows are minted with; a bound Go time.Time would arrive
+-- RFC3339-encoded and the cross-format comparison would silently lie. A
+-- guest with a finished game is kept regardless of age so the sweep never
+-- erases a leaderboard score (#626); "finished" is every question of the
+-- quiz issued as a game_question, the same finisher predicate the
+-- leaderboard uses.
 SELECT p.id
 FROM players p
 WHERE p.role = 'player'
   AND p.email IS NULL
   AND p.password_hash IS NULL
   AND p.display_name_claimed = 0
-  AND p.created_at < datetime('now', '-90 days')
+  AND p.created_at < datetime('now', '-' || CAST(sqlc.arg('days') AS INTEGER) || ' days')
   AND NOT EXISTS (
         SELECT 1
         FROM game_participants gp
@@ -51,12 +52,13 @@ WHERE id IN (sqlc.slice('ids'));
 -- leaderboard queries use. created_at is used (not started_at) because
 -- started_at is NULL for a game that was created but never started, and
 -- such a game is exactly the kind of abandonment this sweep prunes. The
--- 30-day cutoff is computed in SQL with datetime('now','-30 days') so both
--- sides of the comparison are SQLite text in the CURRENT_TIMESTAMP encoding
--- rows are minted with, not a cross-format Go time.Time comparison.
+-- window in days is a caller-supplied integer, but the cutoff is computed
+-- in SQL (datetime('now', '-<days> days')) so both sides of the comparison
+-- are SQLite text in the CURRENT_TIMESTAMP encoding rows are minted with,
+-- not a cross-format Go time.Time comparison.
 SELECT g.id
 FROM games g
-WHERE g.created_at < datetime('now', '-30 days')
+WHERE g.created_at < datetime('now', '-' || CAST(sqlc.arg('days') AS INTEGER) || ' days')
   AND NOT (
         (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id) > 0
     AND (SELECT COUNT(*) FROM game_questions gqc WHERE gqc.game_id = g.id) >=

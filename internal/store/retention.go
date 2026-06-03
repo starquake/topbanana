@@ -18,10 +18,24 @@ import (
 // the limit and keeps each per-batch write-lock short.
 const retentionBatchSize = 1000
 
+// Retention windows in days. The day count is the single source of truth in
+// Go; each sweep passes it as an integer bound parameter and the cutoff date
+// is computed in SQL (datetime('now', '-<days> days')) so the comparison
+// stays in the CURRENT_TIMESTAMP text encoding rows are minted with rather
+// than a cross-format Go [time.Time].
+const (
+	// AnonymousRetentionDays is how long after mint an anonymous player with
+	// no finished game is kept before the sweep prunes it (#626).
+	AnonymousRetentionDays = 90
+	// AbandonedGameDays is how long after creation a never-finished game is
+	// kept before the sweep prunes it (#627).
+	AbandonedGameDays = 30
+)
+
 // RetentionStore runs the periodic data-retention sweeps: it prunes stale
 // anonymous players together with all their game data (#626) and abandoned,
-// never-finished games regardless of player (#627). Both sweeps compute their
-// cutoff in SQL (datetime('now','-N days')) so they take no time argument.
+// never-finished games regardless of player (#627). Each sweep takes its
+// retention window in days and computes the cutoff date in SQL.
 type RetentionStore struct {
 	q      *db.Queries
 	db     *sql.DB
@@ -35,7 +49,7 @@ func NewRetentionStore(conn *sql.DB, logger *slog.Logger) *RetentionStore {
 }
 
 // SweepStaleAnonymousPlayers hard-deletes anonymous players minted more than
-// 90 days ago and every game row that references them (#626). The dependent
+// days ago and every game row that references them (#626). The dependent
 // game_* rows are dropped in foreign-key order before the player rows;
 // game_seen_rounds cascades from games on delete, so it needs no explicit
 // pass. Guests holding a finished game are excluded by
@@ -49,8 +63,8 @@ func NewRetentionStore(conn *sql.DB, logger *slog.Logger) *RetentionStore {
 // the next pass picks up whatever the failed batch left behind. Within a
 // batch the FK-ordered delete (answers -> questions -> participants -> games,
 // then players) leaves no dangling children.
-func (s *RetentionStore) SweepStaleAnonymousPlayers(ctx context.Context) error {
-	playerIDs, err := s.q.ListStaleAnonymousPlayerIDs(ctx)
+func (s *RetentionStore) SweepStaleAnonymousPlayers(ctx context.Context, days int) error {
+	playerIDs, err := s.q.ListStaleAnonymousPlayerIDs(ctx, int64(days))
 	if err != nil {
 		return fmt.Errorf("failed to list stale anonymous players: %w", err)
 	}
@@ -64,7 +78,7 @@ func (s *RetentionStore) SweepStaleAnonymousPlayers(ctx context.Context) error {
 	return nil
 }
 
-// SweepAbandonedGames hard-deletes games created more than 30 days ago that
+// SweepAbandonedGames hard-deletes games created more than days ago that
 // never finished, along with their dependent game_* rows (#627). It does not
 // touch players. "Finished" means every question of the game's quiz has been
 // issued; see ListAbandonedGameIDs for the predicate.
@@ -73,8 +87,8 @@ func (s *RetentionStore) SweepStaleAnonymousPlayers(ctx context.Context) error {
 // transaction per chunk so the write-lock is released between batches and
 // partial progress survives a transient failure -- acceptable for a
 // background sweep, which simply re-snapshots on the next pass.
-func (s *RetentionStore) SweepAbandonedGames(ctx context.Context) error {
-	gameIDs, err := s.q.ListAbandonedGameIDs(ctx)
+func (s *RetentionStore) SweepAbandonedGames(ctx context.Context, days int) error {
+	gameIDs, err := s.q.ListAbandonedGameIDs(ctx, int64(days))
 	if err != nil {
 		return fmt.Errorf("failed to list abandoned games: %w", err)
 	}

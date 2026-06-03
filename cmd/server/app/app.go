@@ -458,21 +458,21 @@ type inviteSweeper interface {
 
 // retentionSweeper is the slice of the retention store the sweep calls.
 // Narrow interface so the unit test can drive the loop without a real DB.
-// The cutoff windows live in SQL (datetime('now','-N days')), so neither
-// method takes a time argument.
+// Each method takes its retention window in days; the cutoff date is then
+// computed in SQL.
 type retentionSweeper interface {
-	SweepStaleAnonymousPlayers(ctx context.Context) error
-	SweepAbandonedGames(ctx context.Context) error
+	SweepStaleAnonymousPlayers(ctx context.Context, days int) error
+	SweepAbandonedGames(ctx context.Context, days int) error
 }
 
-// runRetentionSweep runs both data-retention sweeps once, logging each
-// failure at warn so a transient error in one does not skip the other or
-// abort the surrounding token sweep.
+// runRetentionSweep runs both data-retention sweeps once with the configured
+// retention windows, logging each failure at warn so a transient error in one
+// does not skip the other or abort the surrounding token sweep.
 func runRetentionSweep(ctx context.Context, logger *slog.Logger, retention retentionSweeper) {
-	if err := retention.SweepStaleAnonymousPlayers(ctx); err != nil {
+	if err := retention.SweepStaleAnonymousPlayers(ctx, store.AnonymousRetentionDays); err != nil {
 		logger.WarnContext(ctx, "anonymous-player retention sweep failed", slog.Any("err", err))
 	}
-	if err := retention.SweepAbandonedGames(ctx); err != nil {
+	if err := retention.SweepAbandonedGames(ctx, store.AbandonedGameDays); err != nil {
 		logger.WarnContext(ctx, "abandoned-game retention sweep failed", slog.Any("err", err))
 	}
 }

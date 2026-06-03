@@ -599,23 +599,27 @@ type stubRetentionSweep struct {
 	mu               sync.Mutex
 	anonCalls        int
 	gameCalls        int
+	lastAnonDays     int
+	lastGameDays     int
 	anonErr, gameErr error
 }
 
-func (s *stubRetentionSweep) SweepStaleAnonymousPlayers(_ context.Context) error {
+func (s *stubRetentionSweep) SweepStaleAnonymousPlayers(_ context.Context, days int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.anonCalls++
+	s.lastAnonDays = days
 
 	return s.anonErr
 }
 
-func (s *stubRetentionSweep) SweepAbandonedGames(_ context.Context) error {
+func (s *stubRetentionSweep) SweepAbandonedGames(_ context.Context, days int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.gameCalls++
+	s.lastGameDays = days
 
 	return s.gameErr
 }
@@ -632,6 +636,20 @@ func (s *stubRetentionSweep) GameCalls() int {
 	defer s.mu.Unlock()
 
 	return s.gameCalls
+}
+
+func (s *stubRetentionSweep) LastAnonDays() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.lastAnonDays
+}
+
+func (s *stubRetentionSweep) LastGameDays() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.lastGameDays
 }
 
 // TestRunTokenSweep_TicksUntilCancel pins the loop's two contracts:
@@ -711,6 +729,25 @@ func TestRunTokenSweep_ContinuesAfterError(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+// TestRunRetentionSweep_PassesConfiguredWindows pins that the helper wires the
+// production retention windows (the store package constants) into each sweep,
+// so the day counts have a single source of truth in Go rather than drifting
+// between the scheduler and the SQL.
+func TestRunRetentionSweep_PassesConfiguredWindows(t *testing.T) {
+	t.Parallel()
+
+	retention := &stubRetentionSweep{}
+
+	RunRetentionSweep(t.Context(), slog.New(slog.DiscardHandler), retention)
+
+	if got, want := retention.LastAnonDays(), store.AnonymousRetentionDays; got != want {
+		t.Errorf("anon sweep days = %d, want %d", got, want)
+	}
+	if got, want := retention.LastGameDays(), store.AbandonedGameDays; got != want {
+		t.Errorf("game sweep days = %d, want %d", got, want)
+	}
 }
 
 // TestRunRetentionSweep_RunsGameSweepAfterAnonError pins that a failure in
