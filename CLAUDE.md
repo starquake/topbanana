@@ -42,7 +42,10 @@ Every change or new feature must have tests. The command sequence to run before 
 Pick the right layer:
 
 - **Unit test** (`*_test.go` next to the code) — pure logic, no I/O.
-- **Integration test** (`test/integration/`, `-tags=integration`) — anything that touches the real server, DB, HTTP routing, or embedded assets. The harness provides a real server, real DB, and cookie jars; add scenarios to an existing `*_test.go` or create a new one.
+- **Integration test** (`-tags=integration`) — anything that touches real I/O: the real server, DB, HTTP routing, or embedded assets. The defining marker is the `//go:build integration` tag, **not** the folder. Two homes for them:
+  - **Full-stack / black-box** tests, driven through the running server (package `integration_test`), live in `test/integration/` and share its server + DB + cookie-jar harness.
+  - **Layer tests** that exercise one store/service directly against a real DB (via `dbtest.Open`) live **beside the code they test** (e.g. `internal/store/`, `internal/game/`) and carry the tag too — model: `internal/store/rounds_migration_integration_test.go`. Do not relocate these into `test/integration/`.
+  Either way the tag keeps them out of the fast `make test` unit suite; they run under `make check` / CI. **Name a tagged file `*_integration_test.go`** so its integration status is visible without opening it; `*_test.go` is reserved for the unit suite. A mixed file (unit tests + DB tests) keeps its unit tests in `foo_test.go` and gets the DB tests split into a tagged `foo_integration_test.go` rather than tagging the whole file.
 - **E2E test** (`test/e2e/`, Playwright) — behaviour that only makes sense in a real browser: clicks, navigation, form flows, JS-driven UI.
 
 One-off scripts are reserved for genuinely interactive debugging that can't be expressed as a test (e.g. eyeballing a visual layout, attaching a debugger). If you find yourself writing the same `curl` twice, it's a test.
