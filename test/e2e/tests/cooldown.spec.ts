@@ -34,12 +34,18 @@ test('forgot-password cooldown button counts down and re-enables', async ({ page
   // countdown.
   await page.locator('input[name=identifier]').fill('nobody@example.test');
   await submit.click();
+  // Wait for the PRG redirect to land before asserting, and give the
+  // disabled-state checks a generous timeout: under firefox on a loaded CI
+  // runner the redirect + render can exceed the default 5s, which flaked the
+  // button-disabled assertion -- and once the first attempt failed, the armed
+  // 60s per-IP limiter then doomed the retry. See #643.
+  await page.waitForURL(/\/forgot-password$/);
 
   // The stable locator always resolves, so these state assertions auto-wait
   // through the redirect and cooldown.js's relabel. Tolerate any countdown
   // value rather than the exact "Wait 60s" frame, which is racy under load.
-  await expect(submit).toBeDisabled();
-  await expect(submit).toHaveText(/^Wait \d+s$/);
+  await expect(submit).toBeDisabled({ timeout: 15_000 });
+  await expect(submit).toHaveText(/^Wait \d+s$/, { timeout: 15_000 });
 
   // Advance past the full 60s cooldown without real waiting. runFor
   // (not fastForward) fires every intermediate 1s tick of cooldown.js's
