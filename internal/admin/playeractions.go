@@ -284,6 +284,8 @@ func roleIsValid(role string) bool {
 func HandlePlayerSetRole(
 	logger *slog.Logger,
 	store auth.AdminPlayerStore,
+	sender auth.VerifyEmailSender,
+	mailConfigured bool,
 	flash *auth.SignedFlash,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -337,7 +339,10 @@ func HandlePlayerSetRole(
 
 		writeAudit(r.Context(), logger, store, actor.ID, playerID, auth.AdminActionRoleChanged,
 			map[string]string{"from": from, "to": desired})
-		flash.SetNotice(w, roleChangeNotice(desired))
+
+		notice := roleChangeNotice(desired) +
+			maybeNotifyRoleChange(r, logger, sender, mailConfigured, detail, desired, playerID)
+		flash.SetNotice(w, notice)
 		redirectToPlayerDetail(w, r, playerID)
 	})
 }
@@ -368,16 +373,83 @@ func guardLastAdmin(
 	return true
 }
 
-// roleChangeNotice is the success flash naming the new tier.
-func roleChangeNotice(role string) string {
+// roleLabel maps a role constant to its human word, so the success
+// flash and the notification email name the tier the same way.
+func roleLabel(role string) string {
 	switch role {
 	case auth.RoleAdmin:
-		return "Player role set to admin."
+		return "admin"
 	case auth.RoleHost:
-		return "Player role set to host."
+		return "host"
 	default:
-		return "Player role set to player."
+		return "player"
 	}
+}
+
+// roleChangeNotice is the success flash naming the new tier.
+func roleChangeNotice(role string) string {
+	return "Player role set to " + roleLabel(role) + "."
+}
+
+// maybeNotifyRoleChange honours the opt-in checkbox: when it is unset it
+// returns an empty string so the flash is unchanged. When set, it
+// dispatches the role-change notice (if SMTP is configured and the target
+// has a verified email) and returns the sentence to append to the success
+// flash. A player without a verified address, or an instance without
+// email configured, gets no mail and a flash that says so.
+//
+//nolint:revive // mailConfigured reflects whether SMTP is wired (an instance fact carried from mailer.StatusView), not a behavioural toggle the caller flips per request.
+func maybeNotifyRoleChange(
+	r *http.Request,
+	logger *slog.Logger,
+	sender auth.VerifyEmailSender,
+	mailConfigured bool,
+	detail *auth.PlayerDetail,
+	desired string,
+	playerID int64,
+) string {
+	if r.PostFormValue("notify_email") == "" {
+		return ""
+	}
+	if !mailConfigured {
+		return " Email is not configured, so no notification was sent."
+	}
+	if detail.Email == "" || detail.EmailVerifiedAt == nil {
+		return " The player has no verified email, so no notification was sent."
+	}
+	dispatchRoleChangeNotice(r.Context(), logger, sender, detail.Email, desired, playerID)
+
+	return " A notification email was sent to the player."
+}
+
+// dispatchRoleChangeNotice sends a best-effort notice to the player that
+// an administrator changed their role. Mirrors notifyOldAddressOfChange:
+// the send runs on a detached goroutine with a bounded timeout so a
+// closed browser tab does not cancel it and SMTP latency is not
+// observable from the redirect; a failure is logged at Warn and never
+// blocks the response.
+func dispatchRoleChangeNotice(
+	ctx context.Context,
+	logger *slog.Logger,
+	sender auth.VerifyEmailSender,
+	recipient, role string,
+	playerID int64,
+) {
+	msg := mailer.Message{
+		To:      recipient,
+		Subject: "Your Top Banana! account role changed",
+		Body: "An administrator changed the role on your Top Banana! account to " + roleLabel(role) + ".\n\n" +
+			"If you have questions about this change, contact the site administrator.\n",
+		Kind: mailer.KindRoleChangeNotice,
+	}
+	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), mailer.SendTimeout+15*time.Second)
+	go func() {
+		defer cancel()
+		if err := sender.Send(bg, msg); err != nil {
+			logger.WarnContext(bg, "role change notice dispatch failed",
+				slog.Int64("player_id", playerID), slog.Any("err", err))
+		}
+	}()
 }
 
 // playerCreatePageData backs the playernew.gohtml template.

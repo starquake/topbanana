@@ -69,6 +69,11 @@ func EmailRateLimiterEntryCount(l *EmailRateLimiter) int {
 	return len(l.last)
 }
 
+// RoleChangeNotice exposes the unexported plain success flash builder so
+// the role-change opt-out test can assert the no-email wording without
+// hard-coding it.
+var RoleChangeNotice = roleChangeNotice
+
 // DispatchAdminResendVerification exposes the unexported resend-email
 // dispatcher so the test package can pin its "did I actually dispatch"
 // boolean contract: false (and no audit row) when email is not

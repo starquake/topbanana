@@ -133,10 +133,20 @@ func (e *adminEnv) seedCredentialledPlayer(t *testing.T, displayName, email, rol
 func (e *adminEnv) seedVerifiedPlayer(t *testing.T, displayName, email, role string) {
 	t.Helper()
 
+	e.seedVerifiedPlayerID(t, displayName, email, role)
+}
+
+// seedVerifiedPlayerID is seedVerifiedPlayer returning the new row's id,
+// so a test can target the verified player by id.
+func (e *adminEnv) seedVerifiedPlayerID(t *testing.T, displayName, email, role string) int64 {
+	t.Helper()
+
 	id := e.seedCredentialledPlayer(t, displayName, email, role)
 	if err := e.admin.SetPlayerEmailVerifiedNow(t.Context(), id); err != nil {
 		t.Fatalf("SetPlayerEmailVerifiedNow(%d) err = %v, want nil", id, err)
 	}
+
+	return id
 }
 
 // seedOAuthPlayer inserts an OAuth-only row (no password) linked to the

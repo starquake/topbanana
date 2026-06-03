@@ -52,7 +52,8 @@ func addRoutes(
 			[]byte(cfg.SessionKey), cfg.SecureCookies(),
 			admin.InviteFlashCookieName, admin.InviteFlashCookiePath,
 		),
-		baseURL: cfg.BaseURL,
+		baseURL:        cfg.BaseURL,
+		mailConfigured: mailerStatus.Configured,
 	}
 
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mailerTester)
@@ -368,6 +369,10 @@ type adminPlayerDeps struct {
 	// the player-detail flash.
 	inviteFlash *auth.SignedFlash
 	baseURL     string
+	// mailConfigured reports whether SMTP is wired, so the role-change
+	// handler only claims a notification email was sent when one could
+	// actually leave the box.
+	mailConfigured bool
 }
 
 func addAdminRoutes(
@@ -534,7 +539,7 @@ func addAdminPlayerRoutes(
 	mux.Handle(
 		"POST /admin/players/{playerID}/role",
 		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
-			admin.HandlePlayerSetRole(logger, stores.AdminPlayers, deps.flash),
+			admin.HandlePlayerSetRole(logger, stores.AdminPlayers, deps.sender, deps.mailConfigured, deps.flash),
 		))),
 	)
 	mux.Handle(
