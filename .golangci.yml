@@ -195,9 +195,5 @@ formatters:
 
 run:
   timeout: 5m
-  # Without this, files guarded by `//go:build integration` are silently
-  # excluded from every lint pass and accumulate violations unnoticed.
-  build-tags:
-    - integration
 severity:
   default: error

@@ -151,35 +151,39 @@ build:
 	mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/ ./...
 
-# Run only unit tests (excludes files with //go:build integration)
+# Fast suite: integration tests skip under -short (via the dbtest /
+# startServer choke points), so this runs only the pure-logic tests.
 .PHONY: test
 test:
-	go test -v -race ./...
+	go test -v -short -race ./...
 
-# Run only integration tests
+# Everything, including integration tests (no -short, so the choke-point
+# skips do not fire).
 .PHONY: test-integration
 test-integration:
-	go test -v -race -tags=integration ./test/integration/...
+	go test -v -race ./...
 
 # Run all tests
 .PHONY: test-all
 test-all:
-	go test -v -race -tags=integration ./...
+	go test -v -race ./...
 
 # Run tests matching the given name regex. Pass NAME=TestFoo to filter, or
-# NAME='TestFoo/sub-case' for a sub-test. The integration build tag is set
-# so both unit and integration tests are reachable.
+# NAME='TestFoo/sub-case' for a sub-test. No -short, so integration tests
+# are reachable too.
 #
 # Example: make test-one NAME=TestConfig_SecureCookies
 .PHONY: test-one
 test-one:
 	@test -n "$(NAME)" || { echo "Usage: make test-one NAME=TestFoo"; exit 1; }
-	go test -v -race -tags=integration -run '$(NAME)' ./...
+	go test -v -race -run '$(NAME)' ./...
 
+# Coverage must run the full suite (no -short) so integration tests count
+# toward the .testcoverage.yml threshold.
 .PHONY: test-coverage
 test-coverage:
 	mkdir -p $(COV_DIR)
-	go test -v -race -tags=integration -coverpkg=$(shell go list ./... | grep -v -E "dbtest|testutil" | paste -sd "," -) -coverprofile=$(COV_DIR)/coverage.out ./...
+	go test -v -race -coverpkg=$(shell go list ./... | grep -v -E "dbtest|testutil" | paste -sd "," -) -coverprofile=$(COV_DIR)/coverage.out ./...
 	go tool cover -func=$(COV_DIR)/coverage.out
 
 .PHONY: test-coverage-html
