@@ -14,8 +14,14 @@ test('forgot-password cooldown button counts down and re-enables', async ({ page
 
   await page.goto('/forgot-password');
 
-  const submit = page.getByRole('button', { name: 'Send reset link' });
+  // Stable handle on the single submit button. Its accessible name changes
+  // as it counts down ("Send reset link" <-> "Wait Ns"), so locate it by type
+  // and assert on state/text, not the moving name: a name-based locator returns
+  // "element not found" in the window before cooldown.js relabels the button,
+  // which flaked on loaded firefox runners (#643).
+  const submit = page.locator('button[type="submit"]');
   await expect(submit).toBeEnabled();
+  await expect(submit).toHaveText('Send reset link');
 
   // First submit succeeds and arms the limiter; the PRG redirect lands
   // back on /forgot-password with the opaque success notice.
@@ -24,13 +30,16 @@ test('forgot-password cooldown button counts down and re-enables', async ({ page
   await expect(page).toHaveURL(/\/forgot-password$/);
 
   // Second submit inside the 60s window trips the limiter. The redirect
-  // re-renders the page with the button disabled and showing "Wait 60s".
+  // re-renders the page with the button disabled and showing a "Wait Ns"
+  // countdown.
   await page.locator('input[name=identifier]').fill('nobody@example.test');
-  await page.getByRole('button', { name: /^Wait \d+s$|^Send reset link$/ }).click();
+  await submit.click();
 
-  const cooldownButton = page.getByRole('button', { name: /^Wait \d+s$/ });
-  await expect(cooldownButton).toBeDisabled();
-  await expect(cooldownButton).toHaveText('Wait 60s');
+  // The stable locator always resolves, so these state assertions auto-wait
+  // through the redirect and cooldown.js's relabel. Tolerate any countdown
+  // value rather than the exact "Wait 60s" frame, which is racy under load.
+  await expect(submit).toBeDisabled();
+  await expect(submit).toHaveText(/^Wait \d+s$/);
 
   // Advance past the full 60s cooldown without real waiting. runFor
   // (not fastForward) fires every intermediate 1s tick of cooldown.js's
@@ -38,8 +47,8 @@ test('forgot-password cooldown button counts down and re-enables', async ({ page
   // timer only once.
   await page.clock.runFor(61_000);
 
-  // The button re-enables and the active label returns, with no reload.
-  const reEnabled = page.getByRole('button', { name: 'Send reset link' });
-  await expect(reEnabled).toBeEnabled();
-  await expect(reEnabled).not.toHaveAttribute('aria-disabled', /.*/);
+  // The button re-enables with the active label restored, no reload.
+  await expect(submit).toBeEnabled();
+  await expect(submit).toHaveText('Send reset link');
+  await expect(submit).not.toHaveAttribute('aria-disabled', /.*/);
 });
