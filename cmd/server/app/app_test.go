@@ -592,6 +592,66 @@ func (s *stubInviteSweep) Calls() int {
 	return s.calls
 }
 
+// stubRetentionSweep counts how many times each retention method was
+// called and optionally returns an error. Concurrent-safe so the sweep
+// goroutine and the test can touch it from different goroutines.
+type stubRetentionSweep struct {
+	mu               sync.Mutex
+	anonCalls        int
+	gameCalls        int
+	lastAnonDays     int
+	lastGameDays     int
+	anonErr, gameErr error
+}
+
+func (s *stubRetentionSweep) SweepStaleAnonymousPlayers(_ context.Context, days int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.anonCalls++
+	s.lastAnonDays = days
+
+	return s.anonErr
+}
+
+func (s *stubRetentionSweep) SweepAbandonedGames(_ context.Context, days int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.gameCalls++
+	s.lastGameDays = days
+
+	return s.gameErr
+}
+
+func (s *stubRetentionSweep) AnonCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.anonCalls
+}
+
+func (s *stubRetentionSweep) GameCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.gameCalls
+}
+
+func (s *stubRetentionSweep) LastAnonDays() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.lastAnonDays
+}
+
+func (s *stubRetentionSweep) LastGameDays() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.lastGameDays
+}
+
 // TestRunTokenSweep_TicksUntilCancel pins the loop's two contracts:
 // each tick calls both DeleteExpired* methods, and a context cancel
 // returns the goroutine promptly. A short interval keeps the test
@@ -602,21 +662,24 @@ func TestRunTokenSweep_TicksUntilCancel(t *testing.T) {
 	verify := &stubVerifySweep{}
 	reset := &stubResetSweep{}
 	invites := &stubInviteSweep{}
+	retention := &stubRetentionSweep{}
 
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() {
-		RunTokenSweep(ctx, slog.New(slog.DiscardHandler), verify, reset, invites, time.Millisecond)
+		RunTokenSweep(ctx, slog.New(slog.DiscardHandler), verify, reset, invites, retention, time.Millisecond)
 		close(done)
 	}()
 
 	// Wait until at least one tick lands on each store before cancelling.
 	deadline := time.After(time.Second)
-	for verify.Calls() <= 0 || reset.Calls() <= 0 || invites.Calls() <= 0 {
+	for verify.Calls() <= 0 || reset.Calls() <= 0 || invites.Calls() <= 0 ||
+		retention.AnonCalls() <= 0 || retention.GameCalls() <= 0 {
 		select {
 		case <-deadline:
-			t.Fatalf("sweep did not tick; verify=%d reset=%d invites=%d",
-				verify.Calls(), reset.Calls(), invites.Calls())
+			t.Fatalf("sweep did not tick; verify=%d reset=%d invites=%d anon=%d game=%d",
+				verify.Calls(), reset.Calls(), invites.Calls(),
+				retention.AnonCalls(), retention.GameCalls())
 		case <-time.After(time.Millisecond):
 		}
 	}
@@ -639,27 +702,70 @@ func TestRunTokenSweep_ContinuesAfterError(t *testing.T) {
 	verify := &stubVerifySweep{err: errors.New("verify sweep failed")}
 	reset := &stubResetSweep{err: errors.New("reset sweep failed")}
 	invites := &stubInviteSweep{err: errors.New("invite sweep failed")}
+	retention := &stubRetentionSweep{
+		anonErr: errors.New("anon sweep failed"),
+		gameErr: errors.New("game sweep failed"),
+	}
 
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() {
-		RunTokenSweep(ctx, slog.New(slog.DiscardHandler), verify, reset, invites, time.Millisecond)
+		RunTokenSweep(ctx, slog.New(slog.DiscardHandler), verify, reset, invites, retention, time.Millisecond)
 		close(done)
 	}()
 
 	// Wait for at least two ticks per store so the "continue past error"
 	// invariant is observable.
 	deadline := time.After(time.Second)
-	for verify.Calls() < 2 || reset.Calls() < 2 || invites.Calls() < 2 {
+	for verify.Calls() < 2 || reset.Calls() < 2 || invites.Calls() < 2 ||
+		retention.AnonCalls() < 2 || retention.GameCalls() < 2 {
 		select {
 		case <-deadline:
-			t.Fatalf("sweep did not tick twice; verify=%d reset=%d invites=%d",
-				verify.Calls(), reset.Calls(), invites.Calls())
+			t.Fatalf("sweep did not tick twice; verify=%d reset=%d invites=%d anon=%d game=%d",
+				verify.Calls(), reset.Calls(), invites.Calls(),
+				retention.AnonCalls(), retention.GameCalls())
 		case <-time.After(time.Millisecond):
 		}
 	}
 	cancel()
 	<-done
+}
+
+// TestRunRetentionSweep_PassesConfiguredWindows pins that the helper wires the
+// production retention windows (the store package constants) into each sweep,
+// so the day counts have a single source of truth in Go rather than drifting
+// between the scheduler and the SQL.
+func TestRunRetentionSweep_PassesConfiguredWindows(t *testing.T) {
+	t.Parallel()
+
+	retention := &stubRetentionSweep{}
+
+	RunRetentionSweep(t.Context(), slog.New(slog.DiscardHandler), retention)
+
+	if got, want := retention.LastAnonDays(), store.AnonymousRetentionDays; got != want {
+		t.Errorf("anon sweep days = %d, want %d", got, want)
+	}
+	if got, want := retention.LastGameDays(), store.AbandonedGameDays; got != want {
+		t.Errorf("game sweep days = %d, want %d", got, want)
+	}
+}
+
+// TestRunRetentionSweep_RunsGameSweepAfterAnonError pins that a failure in
+// the anonymous-player sweep does not skip the abandoned-game sweep: both
+// run on every pass regardless of the other's outcome.
+func TestRunRetentionSweep_RunsGameSweepAfterAnonError(t *testing.T) {
+	t.Parallel()
+
+	retention := &stubRetentionSweep{anonErr: errors.New("anon sweep failed")}
+
+	RunRetentionSweep(t.Context(), slog.New(slog.DiscardHandler), retention)
+
+	if got, want := retention.AnonCalls(), 1; got != want {
+		t.Errorf("anon sweep calls = %d, want %d", got, want)
+	}
+	if got, want := retention.GameCalls(), 1; got != want {
+		t.Errorf("game sweep calls = %d, want %d", got, want)
+	}
 }
 
 // TestBuildMailer_WarnsWhenSMTPConfiguredAndBaseURLEmpty pins the

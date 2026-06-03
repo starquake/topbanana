@@ -36,6 +36,7 @@ type Stores struct {
 	// accept-invite flow uses; backed by the same PlayerStore instance.
 	InvitePlayers auth.InvitePlayerStore
 	Home          home.Store
+	Retention     *RetentionStore
 }
 
 // New initializes a new Stores instance with the provided database connection.
@@ -62,5 +63,6 @@ func New(conn *sql.DB, logger *slog.Logger) *Stores {
 		Invites:       players,
 		InvitePlayers: players,
 		Home:          NewHomeStore(conn, logger),
+		Retention:     NewRetentionStore(conn, logger),
 	}
 }
