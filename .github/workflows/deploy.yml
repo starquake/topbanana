@@ -2,7 +2,7 @@ name: Deploy
 
 on:
   workflow_run:
-    workflows: ["Docker"]
+    workflows: ["CI"]
     types:
       - completed
   workflow_dispatch:
@@ -164,7 +164,7 @@ jobs:
           if [[ ! "$IMAGE_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             IMAGE_TAG="latest"
           fi
-          echo "tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Copy docker-compose file
         uses: appleboy/scp-action@v1.0.0

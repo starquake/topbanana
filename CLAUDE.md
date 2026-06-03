@@ -59,7 +59,7 @@ When implementing review findings or other non-trivial code changes, delegate to
 
 ## CI required checks
 
-The `main` branch is protected: a PR cannot merge until every check in the required list has passed. The required list lives on the repo (set via `gh api -X PUT repos/starquake/topbanana/branches/main/protection`), not in this file, so it can drift silently. Current required contexts: `build`, `lint`, `e2e (chromium)`, `e2e (firefox)`.
+The `main` branch is protected: a PR cannot merge until every check in the required list has passed. The required list lives on the repo (set via `gh api -X PUT repos/starquake/topbanana/branches/main/protection`), not in this file, so it can drift silently. Current required contexts: `build`, `lint`, `e2e (chromium)`, `e2e (firefox)` — all jobs of the single `CI` workflow (`.github/workflows/ci.yml`). Required contexts are job names, so they are unaffected by which workflow file a job lives in as long as the job name is preserved.
 
 **When you add or rename a workflow job under `.github/workflows/`**, update the required-checks list in the same PR. Otherwise the new job is purely advisory and a PR can merge while it fails. Update via:
 
@@ -74,8 +74,10 @@ When removing a workflow job, drop its context from the required list too — le
 
 Staging and production are **independent pipelines** (`.github/workflows/deploy.yml`), not a soak-and-promote chain — production never auto-promotes from staging.
 
-- **Staging** deploys on every merge to `main`: Docker builds `edge` + SHA tags, a successful run on `main` fires `deploy-staging`, goose runs pending migrations on container boot (12x5s health-check loop gates success).
-- **Production** deploys when a `v*.*.*` tag is pushed: Docker builds `{version}` (e.g. `2026.5.8`) + `{major}.{minor}`, a successful run on the tag fires `deploy-production` pulling that exact version. Production is whatever the latest `v*.*.*` tag points at.
+The image is **built once, after the suite is green**, and reused — the `CI` workflow's `docker-build` job `needs: [build, lint, e2e]`, so a published image always implies the tests passed for that commit (#630). `deploy.yml` keys on the `CI` workflow succeeding (not a separate Docker build), so a deploy only fires when tests + image are both green.
+
+- **Staging** deploys on every merge to `main`: `docker-build` pushes `edge` + `sha-<commit>` tags after the suite passes, a successful `CI` run on `main` fires `deploy-staging`, goose runs pending migrations on container boot (12x5s health-check loop gates success).
+- **Production** deploys when a `v*.*.*` tag is pushed: the `promote` job **retags the existing `sha-<commit>` image** (the one built and tested on `main`) to `{version}` (e.g. `2026.5.8`) + `{major}.{minor}` — no rebuild and no re-run of the suite. A successful `CI` run on the tag fires `deploy-production` pulling that exact version. Production is whatever the latest `v*.*.*` tag points at.
 - **Manual**: `workflow_dispatch` with an `environment` input redeploys without a code change.
 
 Consequences for work in flight: "merged to `main`" means live in **staging**, not production. Production stays on the last tag until a new one is cut, and all changes since the previous tag ship together when it is. A schema migration runs on staging at next container boot, on production at next tag deploy.
