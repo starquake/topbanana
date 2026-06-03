@@ -26,7 +26,7 @@ UNAME_M := $(shell uname -m)
 # download rule lower down) because Make expands prerequisites at parse
 # time: if `lint: $(GOLANGCI_BIN)` runs before this variable is defined,
 # the prereq evaluates to empty and the download never fires. The
-# version MUST match `with: version:` in .github/workflows/golangci-lint.yml
+# version MUST match `with: version:` in the lint job of .github/workflows/ci.yml
 # — bump both together; dependabot does not track this field.
 GOLANGCI_VERSION := v2.12.2
 GOLANGCI_BIN     := $(BIN_DIR)/golangci-lint

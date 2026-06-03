@@ -1,10 +1,16 @@
 name: CI
 
 on:
+  schedule:
+    - cron: '24 6 * * *'
   push:
     branches: [ main ]
+    # Release tags promote the already-built main image; they do not
+    # re-run the suite or rebuild (see the promote job).
+    tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 # Cancel the older run when a new push lands on the same branch / PR.
 # Saves runner minutes on fixup pushes (#202).
@@ -12,10 +18,37 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-jobs:
-  build:
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    # Skip on release tags: the suite already ran when this commit
+    # landed on main, and the tag only promotes that image (#630).
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          # Pinned. MUST match GOLANGCI_VERSION in the project Makefile —
+          # bump them together so local `make lint` matches CI exactly.
+          version: v2.12.2
+
+  build:
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      # go-test-coverage commits the badge to the badges branch on main.
+      contents: write
 
     steps:
     - uses: actions/checkout@v6
@@ -31,14 +64,14 @@ jobs:
     # change that adds a utility class can ship without the
     # corresponding CSS, and local `make check` only catches it for
     # contributors who happen to run it. Lint lives in its own
-    # golangci-lint workflow (the github-action handles caching + PR
-    # annotations natively, which `make lint` does not), so the build
-    # job only needs the tailwind gap-filler.
+    # job (the github-action handles caching + PR annotations
+    # natively, which `make lint` does not), so the build job only
+    # needs the tailwind gap-filler.
     - name: Tailwind drift check
       run: make tailwind-check
 
     # Catch drift between internal/queries/ and the generated
-    # internal/db/ layer. `sqlc vet` (in the lint workflow) only lints
+    # internal/db/ layer. `sqlc vet` (in the lint job) only lints
     # the queries; it does not re-run generate, so a query edited or
     # deleted without regenerating leaves stale code in internal/db/
     # that ships unnoticed. Regenerate here and fail on any diff.
@@ -49,7 +82,7 @@ jobs:
     # asciicheck only catches non-ASCII in identifiers; comments and
     # string literals (where em dashes break sqlc v1.31.1) slip past it.
     # `make lint-ascii` greps for them and now exits non-zero, so this
-    # step blocks a regression. Lives here rather than the lint workflow
+    # step blocks a regression. Lives here rather than the lint job
     # because that job runs the golangci-lint action directly, not `make`.
     - name: ASCII source check
       run: make lint-ascii
@@ -87,3 +120,208 @@ jobs:
       run: |
         make seed-dev
         make smoke
+
+  e2e:
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    # Matrixed by browser so chromium and firefox run on separate
+    # runners in parallel — roughly halves wall-clock time. Each
+    # matrix job gets its own filesystem, so the playwright.config
+    # mkdtemp data dir is naturally isolated across browsers (#202).
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
+
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "stable"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: test/e2e/package-lock.json
+
+      - name: Install npm dependencies
+        run: npm ci
+        working-directory: test/e2e
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          # Per-browser cache key so the chromium job doesn't pull in
+          # firefox's binaries and vice versa.
+          key: playwright-${{ runner.os }}-${{ matrix.browser }}-${{ hashFiles('test/e2e/package-lock.json') }}
+
+      # Browser binaries skip on cache hit; system deps still run each
+      # time because apt-get state isn't cached. See #202 for the split.
+      - name: Install Playwright browser
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install ${{ matrix.browser }}
+        working-directory: test/e2e
+
+      - name: Install Playwright system deps
+        run: npx playwright install-deps ${{ matrix.browser }}
+        working-directory: test/e2e
+
+      # The e2e suite runs the verify and invite email round-trips
+      # against a local mailpit SMTP catch-all. The pinned binary is
+      # downloaded into build/bin by the Makefile; playwright.config.ts
+      # starts it as a webServer and points it at build/bin/mailpit.
+      - name: Download mailpit
+        run: make build/bin/mailpit
+
+      - name: Run Playwright tests
+        run: npx playwright test --project=${{ matrix.browser }}
+        working-directory: test/e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-${{ matrix.browser }}
+          path: test/e2e/playwright-report
+          retention-days: 7
+
+  # Build once, after the suite is green, so a published image always
+  # implies the tests passed for that commit (#630). Release tags do not
+  # build here; the promote job retags this image instead.
+  docker-build:
+    needs: [build, lint, e2e]
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # This is used to complete the identity challenge
+      # with sigstore/fulcio when running outside of PRs.
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      # Install the cosign tool except on PR
+      # https://github.com/sigstore/cosign-installer
+      - name: Install cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@v4.1.2 # check for latest version
+        with:
+          cosign-release: 'v2.2.4'
+
+      # Set up BuildKit Docker container builder to be able to build
+      # multi-platform images and export cache
+      # https://github.com/docker/setup-buildx-action
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # Login against a Docker registry except on PR
+      # https://github.com/docker/login-action
+      - name: Log into registry ${{ env.REGISTRY }}
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Extract metadata (tags, labels) for Docker. No semver tags here:
+      # version tags are created by the promote job from this same image.
+      # https://github.com/docker/metadata-action
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,format=long
+            type=edge,branch=main
+          flavor: |
+            latest=auto
+
+      # Build and push Docker image with Buildx (only push on push to main or schedule)
+      # https://github.com/docker/build-push-action
+      - name: Build and push Docker image
+        id: build-and-push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Sign the resulting Docker image digest except on PRs.
+      # This will only write to the public Rekor transparency log when the Docker
+      # repository is public to avoid leaking data.  If you would like to publish
+      # transparency data even for private images, pass --force to cosign below.
+      # https://github.com/sigstore/cosign
+      - name: Sign the published Docker image
+        if: ${{ github.event_name != 'pull_request' }}
+        env:
+          # https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-an-intermediate-environment-variable
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.build-and-push.outputs.digest }}
+        run: echo "${TAGS}" | xargs -I {} cosign sign --yes "{}@${DIGEST}"
+
+  # Promote the already-built, already-tested main image for this commit
+  # to its release tags. No rebuild and no re-run of the suite: the tag
+  # is cut on a main commit, so its sha-<commit> image already exists and
+  # was signed by docker-build. cosign signatures bind to the digest, so
+  # the new tags inherit that signature (#630).
+  promote:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log into registry ${{ env.REGISTRY }}
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+          flavor: |
+            latest=auto
+
+      - name: Promote main image to release tags
+        env:
+          SRC: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          # Fail loudly if the tested main image is missing: a v* tag must
+          # point at a commit whose main build pushed its sha image.
+          if ! docker buildx imagetools inspect "$SRC" >/dev/null 2>&1; then
+            echo "ERROR: ${SRC} not found; tag a commit that was built on main" >&2
+            exit 1
+          fi
+          args=()
+          while IFS= read -r tag; do
+            [ -n "$tag" ] && args+=( --tag "$tag" )
+          done <<< "$TAGS"
+          docker buildx imagetools create "${args[@]}" "$SRC"
