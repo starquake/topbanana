@@ -1,3 +1,5 @@
+//go:build integration
+
 package auth_test
 
 import (
@@ -10,13 +12,16 @@ import (
 
 	. "github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/session"
+	"github.com/starquake/topbanana/internal/store"
 )
 
 func TestHandleForgotForm_AnonymousRenders(t *testing.T) {
 	t.Parallel()
 
-	rec := runForgotGET(t, newStubPlayerStore(), nil)
+	stores := store.New(dbtest.Open(t), discardLogger())
+	rec := runForgotGET(t, stores.Players)
 	if got, want := rec.Code, http.StatusOK; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
@@ -28,8 +33,8 @@ func TestHandleForgotForm_AnonymousRenders(t *testing.T) {
 func TestHandleForgotForm_SignedInRedirectsToLanding(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	p, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", "h", RolePlayer)
+	stores := store.New(dbtest.Open(t), discardLogger())
+	p, err := stores.Players.CreatePlayer(t.Context(), "alice", "alice@example.test", "h", RolePlayer)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
@@ -43,7 +48,7 @@ func TestHandleForgotForm_SignedInRedirectsToLanding(t *testing.T) {
 
 	csrfMgr := csrf.New([]byte("k"), true)
 	flash := NewSignedFlash([]byte("k"), true, ForgotFlashCookieName, ForgotFlashCookiePath)
-	HandleForgotForm(discardLogger(), csrfMgr, store, sessions, flash).ServeHTTP(rec, req)
+	HandleForgotForm(discardLogger(), csrfMgr, stores.Players, sessions, flash).ServeHTTP(rec, req)
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)
@@ -64,12 +69,14 @@ func TestHandleForgotSubmit_AlwaysFlashesGenericSuccess(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			store := newStubPlayerStore()
-			if _, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", "h", RolePlayer); err != nil {
+			stores := store.New(dbtest.Open(t), discardLogger())
+			if _, err := stores.Players.CreatePlayer(
+				t.Context(), "alice", "alice@example.test", "h", RolePlayer,
+			); err != nil {
 				t.Fatalf("CreatePlayer err = %v, want nil", err)
 			}
 
-			rec := runForgotPOST(t, store, &recordingResetTokenStore{}, &recordingSender{},
+			rec := runForgotPOST(t, stores.Players, &recordingResetTokenStore{}, &recordingSender{},
 				NewVerifyResendLimiter(time.Minute, nil), tc.identifier)
 
 			if got, want := rec.Code, http.StatusSeeOther; got != want {
@@ -85,14 +92,16 @@ func TestHandleForgotSubmit_AlwaysFlashesGenericSuccess(t *testing.T) {
 func TestHandleForgotSubmit_RealMatchDispatchesEmail(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	if _, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", "h", RolePlayer); err != nil {
+	stores := store.New(dbtest.Open(t), discardLogger())
+	if _, err := stores.Players.CreatePlayer(
+		t.Context(), "alice", "alice@example.test", "h", RolePlayer,
+	); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 	tokens := &recordingResetTokenStore{}
 	sender := &recordingSender{}
 
-	rec := runForgotPOST(t, store, tokens, sender,
+	rec := runForgotPOST(t, stores.Players, tokens, sender,
 		NewVerifyResendLimiter(time.Minute, nil), "alice")
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
@@ -115,11 +124,11 @@ func TestHandleForgotSubmit_RealMatchDispatchesEmail(t *testing.T) {
 func TestHandleForgotSubmit_UnknownAccountSendsNoMail(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
+	stores := store.New(dbtest.Open(t), discardLogger())
 	tokens := &recordingResetTokenStore{}
 	sender := &recordingSender{}
 
-	runForgotPOST(t, store, tokens, sender,
+	runForgotPOST(t, stores.Players, tokens, sender,
 		NewVerifyResendLimiter(time.Minute, nil), "ghost")
 
 	// Wait long enough that an async dispatch would have landed.
@@ -132,19 +141,21 @@ func TestHandleForgotSubmit_UnknownAccountSendsNoMail(t *testing.T) {
 func TestHandleForgotSubmit_RateLimitedBlocksDispatch(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	if _, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", "h", RolePlayer); err != nil {
+	stores := store.New(dbtest.Open(t), discardLogger())
+	if _, err := stores.Players.CreatePlayer(
+		t.Context(), "alice", "alice@example.test", "h", RolePlayer,
+	); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 	tokens := &recordingResetTokenStore{}
 	sender := &recordingSender{}
 	limiter := NewVerifyResendLimiter(time.Minute, nil)
 
-	first := runForgotPOST(t, store, tokens, sender, limiter, "alice")
+	first := runForgotPOST(t, stores.Players, tokens, sender, limiter, "alice")
 	if got, want := first.Code, http.StatusSeeOther; got != want {
 		t.Fatalf("first status = %d, want %d", got, want)
 	}
-	second := runForgotPOST(t, store, tokens, sender, limiter, "alice")
+	second := runForgotPOST(t, stores.Players, tokens, sender, limiter, "alice")
 	if got, want := second.Code, http.StatusSeeOther; got != want {
 		t.Errorf("second status = %d, want %d", got, want)
 	}
@@ -153,12 +164,12 @@ func TestHandleForgotSubmit_RateLimitedBlocksDispatch(t *testing.T) {
 	}
 }
 
-func runForgotGET(t *testing.T, store PlayerStore, _ *SignedFlash) *httptest.ResponseRecorder {
+func runForgotGET(t *testing.T, players PlayerStore) *httptest.ResponseRecorder {
 	t.Helper()
 	csrfMgr := csrf.New([]byte("k"), true)
 	flash := NewSignedFlash([]byte("k"), true, ForgotFlashCookieName, ForgotFlashCookiePath)
 	sessions := session.New([]byte("k"), true)
-	handler := HandleForgotForm(discardLogger(), csrfMgr, store, sessions, flash)
+	handler := HandleForgotForm(discardLogger(), csrfMgr, players, sessions, flash)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/forgot-password", nil)
 	rec := httptest.NewRecorder()
@@ -169,7 +180,7 @@ func runForgotGET(t *testing.T, store PlayerStore, _ *SignedFlash) *httptest.Res
 
 func runForgotPOST(
 	t *testing.T,
-	store PlayerStore,
+	players PlayerStore,
 	tokens ResetTokenStore,
 	sender VerifyEmailSender,
 	limiter *VerifyResendLimiter,
@@ -179,7 +190,7 @@ func runForgotPOST(
 	sessions := session.New([]byte("k"), true)
 	flash := NewSignedFlash([]byte("k"), true, ForgotFlashCookieName, ForgotFlashCookiePath)
 	handler := HandleForgotSubmit(
-		discardLogger(), store, sessions, tokens, sender,
+		discardLogger(), players, sessions, tokens, sender,
 		"https://topbanana.example", limiter, flash,
 	)
 
