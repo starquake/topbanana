@@ -49,7 +49,14 @@
      scroll. Same fix as the home page got in #285. */}}
 <body class="bg-bg text-text font-sans antialiased min-h-dvh leading-relaxed">
     <main class="max-w-[720px] lg:max-w-5xl mx-auto px-5 lg:px-8 py-10 sm:py-16">
-        <div x-data="gameApp" @keydown.escape.window="claimModalOpen && closeClaimModal()">
+        {{/* x-cloak hides the whole SPA shell until Alpine boots (the
+             rule [x-cloak]{display:none} ships in app.css). Every region
+             here is gated on game state that app.js resolves after boot,
+             so the deferred-Alpine window would otherwise paint the
+             stacked x-show panels and the wrong start-screen affordances
+             (e.g. "Browse all quizzes" before a deep-linked quiz loads)
+             before the conditions evaluate (#605). */}}
+        <div x-data="gameApp" x-cloak @keydown.escape.window="claimModalOpen && closeClaimModal()">
             <!-- Brand mark: same banana SVG + Top/Banana/! pattern as the
                  admin navbar (see internal/web/tmpl/admin/layouts/navbar.gohtml).
                  The brand wraps an <a href="/"> so clicking the logo
