@@ -1,7 +1,9 @@
+//go:build integration
+
 package auth_test
 
 import (
-	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,13 +11,16 @@ import (
 	"time"
 
 	. "github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/session"
+	"github.com/starquake/topbanana/internal/store"
 )
 
 func TestHandleVerifyEmail_MissingToken(t *testing.T) {
 	t.Parallel()
 
-	rec := runVerifyEmail(t, &stubVerifyTokens{}, "")
+	db := dbtest.Open(t)
+	rec := runVerifyEmail(t, db, "")
 	if got, want := rec.Code, http.StatusBadRequest; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
@@ -24,21 +29,42 @@ func TestHandleVerifyEmail_MissingToken(t *testing.T) {
 func TestHandleVerifyEmail_Success(t *testing.T) {
 	t.Parallel()
 
-	store := &stubVerifyTokens{consumePlayerID: 99}
-	rec := runVerifyEmail(t, store, "raw-token")
+	db := dbtest.Open(t)
+	stores := store.New(db, discardLogger())
+	player := createVerifyPlayer(t, stores.Players, "alice", "alice@example.test", RolePlayer)
+	if player.EmailVerifiedAt != nil {
+		t.Fatalf("seed player should start unverified, EmailVerifiedAt = %v", player.EmailVerifiedAt)
+	}
+	raw := seedVerifyToken(t, stores.VerifyTokens, player.ID, time.Now().Add(time.Hour))
 
+	rec := runVerifyEmail(t, db, raw)
 	if got, want := rec.Code, http.StatusOK; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
-	if got, want := store.consumedHash, HashVerifyToken("raw-token"); got != want {
-		t.Errorf("consumedHash = %q, want %q", got, want)
+
+	verified, err := stores.Players.GetPlayerByID(t.Context(), player.ID)
+	if err != nil {
+		t.Fatalf("GetPlayerByID err = %v, want nil", err)
+	}
+	if verified.EmailVerifiedAt == nil {
+		t.Error("EmailVerifiedAt is nil after successful verify, want stamped")
 	}
 }
 
 func TestHandleVerifyEmail_AlreadyUsed(t *testing.T) {
 	t.Parallel()
 
-	rec := runVerifyEmail(t, &stubVerifyTokens{consumeErr: ErrVerifyTokenAlreadyUsed}, "raw-token")
+	db := dbtest.Open(t)
+	stores := store.New(db, discardLogger())
+	player := createVerifyPlayer(t, stores.Players, "alice", "alice@example.test", RolePlayer)
+	raw := seedVerifyToken(t, stores.VerifyTokens, player.ID, time.Now().Add(time.Hour))
+
+	// Burn the token once so the second consume reports already-used.
+	if _, err := stores.VerifyTokens.ConsumeVerifyToken(t.Context(), HashVerifyToken(raw)); err != nil {
+		t.Fatalf("first ConsumeVerifyToken err = %v, want nil", err)
+	}
+
+	rec := runVerifyEmail(t, db, raw)
 	if got, want := rec.Code, http.StatusOK; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
@@ -47,7 +73,13 @@ func TestHandleVerifyEmail_AlreadyUsed(t *testing.T) {
 func TestHandleVerifyEmail_Invalid(t *testing.T) {
 	t.Parallel()
 
-	rec := runVerifyEmail(t, &stubVerifyTokens{consumeErr: ErrVerifyTokenInvalid}, "raw-token")
+	db := dbtest.Open(t)
+	stores := store.New(db, discardLogger())
+	player := createVerifyPlayer(t, stores.Players, "alice", "alice@example.test", RolePlayer)
+	// An expired-but-unconsumed token classifies as invalid -> 410 Gone.
+	raw := seedVerifyToken(t, stores.VerifyTokens, player.ID, time.Now().Add(-time.Hour))
+
+	rec := runVerifyEmail(t, db, raw)
 	if got, want := rec.Code, http.StatusGone; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
@@ -60,22 +92,22 @@ func TestHandleVerifyEmail_Invalid(t *testing.T) {
 func TestHandleVerifyEmail_MismatchedSessionClears(t *testing.T) {
 	t.Parallel()
 
-	players := newStubPlayerStore()
-	sessionPlayer, err := players.CreatePlayer(
-		t.Context(), "session-user", "session@example.test", "h", "admin",
-	)
-	if err != nil {
-		t.Fatalf("CreatePlayer err = %v, want nil", err)
-	}
-	tokens := &stubVerifyTokens{consumePlayerID: sessionPlayer.ID + 1}
+	db := dbtest.Open(t)
+	stores := store.New(db, discardLogger())
+	// First password-bearing registrant is promoted to admin, so seed the
+	// session player first to give it the admin role the fix would otherwise
+	// land on if the session were honoured.
+	sessionPlayer := createVerifyPlayer(t, stores.Players, "session-user", "session@example.test", RoleAdmin)
+	tokenOwner := createVerifyPlayer(t, stores.Players, "token-owner", "token-owner@example.test", RolePlayer)
+	raw := seedVerifyToken(t, stores.VerifyTokens, tokenOwner.ID, time.Now().Add(time.Hour))
 	sessions := session.New([]byte("test-key-32-bytes-test-key-32byt"), false)
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, sessionPlayer.ID, sessionPlayer.SessionVersion)
 	cookie := rec.Result().Cookies()[0]
 
-	handler := HandleVerifyEmail(discardLogger(), nil, tokens, players, sessions)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/verify-email?token=raw-token", nil)
+	handler := HandleVerifyEmail(discardLogger(), nil, stores.VerifyTokens, stores.Players, sessions)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/verify-email?token="+raw, nil)
 	req.AddCookie(cookie)
 	out := httptest.NewRecorder()
 	handler.ServeHTTP(out, req)
@@ -106,22 +138,18 @@ func TestHandleVerifyEmail_MismatchedSessionClears(t *testing.T) {
 func TestHandleVerifyEmail_MatchingSessionKeepsLanding(t *testing.T) {
 	t.Parallel()
 
-	players := newStubPlayerStore()
-	player, err := players.CreatePlayer(
-		t.Context(), "match-user", "match@example.test", "h", "admin",
-	)
-	if err != nil {
-		t.Fatalf("CreatePlayer err = %v, want nil", err)
-	}
-	tokens := &stubVerifyTokens{consumePlayerID: player.ID}
+	db := dbtest.Open(t)
+	stores := store.New(db, discardLogger())
+	player := createVerifyPlayer(t, stores.Players, "match-user", "match@example.test", RoleAdmin)
+	raw := seedVerifyToken(t, stores.VerifyTokens, player.ID, time.Now().Add(time.Hour))
 	sessions := session.New([]byte("test-key-32-bytes-test-key-32byt"), false)
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, player.ID, player.SessionVersion)
 	cookie := rec.Result().Cookies()[0]
 
-	handler := HandleVerifyEmail(discardLogger(), nil, tokens, players, sessions)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/verify-email?token=raw-token", nil)
+	handler := HandleVerifyEmail(discardLogger(), nil, stores.VerifyTokens, stores.Players, sessions)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/verify-email?token="+raw, nil)
 	req.AddCookie(cookie)
 	out := httptest.NewRecorder()
 	handler.ServeHTTP(out, req)
@@ -134,12 +162,12 @@ func TestHandleVerifyEmail_MatchingSessionKeepsLanding(t *testing.T) {
 	}
 }
 
-func runVerifyEmail(t *testing.T, tokens *stubVerifyTokens, raw string) *httptest.ResponseRecorder {
+func runVerifyEmail(t *testing.T, db *sql.DB, raw string) *httptest.ResponseRecorder {
 	t.Helper()
 
-	players := newStubPlayerStore()
-	sessions := session.New([]byte("k"), true)
-	handler := HandleVerifyEmail(discardLogger(), nil, tokens, players, sessions)
+	stores := store.New(db, discardLogger())
+	sessions := session.New([]byte("test-key-32-bytes-test-key-32byt"), true)
+	handler := HandleVerifyEmail(discardLogger(), nil, stores.VerifyTokens, stores.Players, sessions)
 
 	target := "/verify-email"
 	if raw != "" {
@@ -152,27 +180,36 @@ func runVerifyEmail(t *testing.T, tokens *stubVerifyTokens, raw string) *httptes
 	return rec
 }
 
-type stubVerifyTokens struct {
-	consumePlayerID int64
-	consumeErr      error
-	consumedHash    string
-}
+// createVerifyPlayer inserts a credentialled player through the real
+// store and returns it. The verify-handler tests need a real row the
+// token can reference and the session can point at.
+func createVerifyPlayer(
+	t *testing.T, players PlayerStore, displayName, email, role string,
+) *Player {
+	t.Helper()
 
-func (*stubVerifyTokens) CreateVerifyToken(
-	_ context.Context, _ string, _ int64, _ time.Time, _ string,
-) error {
-	return nil
-}
-
-func (s *stubVerifyTokens) ConsumeVerifyToken(_ context.Context, tokenHash string) (int64, error) {
-	s.consumedHash = tokenHash
-	if s.consumeErr != nil {
-		return s.consumePlayerID, s.consumeErr
+	p, err := players.CreatePlayer(t.Context(), displayName, email, "hash", role)
+	if err != nil {
+		t.Fatalf("CreatePlayer %q err = %v, want nil", displayName, err)
 	}
 
-	return s.consumePlayerID, nil
+	return p
 }
 
-func (*stubVerifyTokens) DeleteExpiredVerifyTokens(_ context.Context) error {
-	return nil
+// seedVerifyToken mints a raw token, stores its hash for the given player
+// with the supplied expiry through the real store, and returns the raw
+// token so the caller can drive the handler with it. A past expiry yields
+// the expired-but-unconsumed row the invalid-link branch reads.
+func seedVerifyToken(t *testing.T, tokens VerifyTokenStore, playerID int64, expiresAt time.Time) string {
+	t.Helper()
+
+	raw, hash, err := GenerateVerifyToken()
+	if err != nil {
+		t.Fatalf("GenerateVerifyToken err = %v, want nil", err)
+	}
+	if err := tokens.CreateVerifyToken(t.Context(), hash, playerID, expiresAt, ""); err != nil {
+		t.Fatalf("CreateVerifyToken err = %v, want nil", err)
+	}
+
+	return raw
 }

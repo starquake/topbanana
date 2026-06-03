@@ -1,3 +1,5 @@
+//go:build integration
+
 package auth_test
 
 import (
@@ -10,13 +12,16 @@ import (
 
 	. "github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/session"
+	"github.com/starquake/topbanana/internal/store"
 )
 
 func TestHandleVerifyEmailRequestForm_AnonymousRenders(t *testing.T) {
 	t.Parallel()
 
-	rec := runVerifyRequestGET(t, newStubPlayerStore())
+	stores := store.New(dbtest.Open(t), discardLogger())
+	rec := runVerifyRequestGET(t, stores.Players)
 	if got, want := rec.Code, http.StatusOK; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
@@ -28,8 +33,8 @@ func TestHandleVerifyEmailRequestForm_AnonymousRenders(t *testing.T) {
 func TestHandleVerifyEmailRequestForm_SignedInRedirectsToLanding(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	p, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", "h", RolePlayer)
+	stores := store.New(dbtest.Open(t), discardLogger())
+	p, err := stores.Players.CreatePlayer(t.Context(), "alice", "alice@example.test", "h", RolePlayer)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
@@ -43,7 +48,7 @@ func TestHandleVerifyEmailRequestForm_SignedInRedirectsToLanding(t *testing.T) {
 
 	csrfMgr := csrf.New([]byte("k"), true)
 	flash := NewSignedFlash([]byte("k"), true, VerifyRequestFlashCookieName, VerifyRequestFlashCookiePath)
-	HandleVerifyEmailRequestForm(discardLogger(), csrfMgr, store, sessions, flash).ServeHTTP(rec, req)
+	HandleVerifyEmailRequestForm(discardLogger(), csrfMgr, stores.Players, sessions, flash).ServeHTTP(rec, req)
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)
@@ -57,7 +62,6 @@ func TestHandleVerifyEmailRequestForm_SignedInRedirectsToLanding(t *testing.T) {
 func TestHandleVerifyEmailRequestSubmit_AlwaysFlashesGenericSuccess(t *testing.T) {
 	t.Parallel()
 
-	verified := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
 		name  string
 		email string
@@ -71,24 +75,21 @@ func TestHandleVerifyEmailRequestSubmit_AlwaysFlashesGenericSuccess(t *testing.T
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			store := newStubPlayerStore()
-			if _, err := store.CreatePlayer(
+			stores := store.New(dbtest.Open(t), discardLogger())
+			verifiedPlayer, err := stores.Players.CreatePlayer(
 				t.Context(), "verified", "verified@example.test", "h", RolePlayer,
-			); err != nil {
+			)
+			if err != nil {
 				t.Fatalf("CreatePlayer verified err = %v, want nil", err)
 			}
-			if p, err := store.GetPlayerByDisplayName(t.Context(), "verified"); err == nil {
-				p.EmailVerifiedAt = &verified
-			} else {
-				t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
-			}
-			if _, err := store.CreatePlayer(
+			markVerifiedViaStore(t, stores.VerifyTokens, verifiedPlayer.ID)
+			if _, err := stores.Players.CreatePlayer(
 				t.Context(), "unverified", "unverified@example.test", "h", RolePlayer,
 			); err != nil {
 				t.Fatalf("CreatePlayer unverified err = %v, want nil", err)
 			}
 
-			rec := runVerifyRequestPOST(t, store, &recordingVerifyTokenStore{}, &recordingSender{},
+			rec := runVerifyRequestPOST(t, stores.Players, &recordingVerifyTokenStore{}, &recordingSender{},
 				NewVerifyResendLimiter(time.Minute, nil), tc.email)
 
 			if got, want := rec.Code, http.StatusSeeOther; got != want {
@@ -104,8 +105,8 @@ func TestHandleVerifyEmailRequestSubmit_AlwaysFlashesGenericSuccess(t *testing.T
 func TestHandleVerifyEmailRequestSubmit_UnverifiedMatchDispatchesEmail(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	if _, err := store.CreatePlayer(
+	stores := store.New(dbtest.Open(t), discardLogger())
+	if _, err := stores.Players.CreatePlayer(
 		t.Context(), "alice", "alice@example.test", "h", RolePlayer,
 	); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
@@ -113,7 +114,7 @@ func TestHandleVerifyEmailRequestSubmit_UnverifiedMatchDispatchesEmail(t *testin
 	tokens := &recordingVerifyTokenStore{}
 	sender := &recordingSender{}
 
-	rec := runVerifyRequestPOST(t, store, tokens, sender,
+	rec := runVerifyRequestPOST(t, stores.Players, tokens, sender,
 		NewVerifyResendLimiter(time.Minute, nil), "alice@example.test")
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
@@ -135,22 +136,18 @@ func TestHandleVerifyEmailRequestSubmit_UnverifiedMatchDispatchesEmail(t *testin
 func TestHandleVerifyEmailRequestSubmit_AlreadyVerifiedSendsNoMail(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	if _, err := store.CreatePlayer(
+	stores := store.New(dbtest.Open(t), discardLogger())
+	p, err := stores.Players.CreatePlayer(
 		t.Context(), "alice", "alice@example.test", "h", RolePlayer,
-	); err != nil {
+	)
+	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
-	verified := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
-	if p, err := store.GetPlayerByDisplayName(t.Context(), "alice"); err == nil {
-		p.EmailVerifiedAt = &verified
-	} else {
-		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
-	}
+	markVerifiedViaStore(t, stores.VerifyTokens, p.ID)
 	tokens := &recordingVerifyTokenStore{}
 	sender := &recordingSender{}
 
-	runVerifyRequestPOST(t, store, tokens, sender,
+	runVerifyRequestPOST(t, stores.Players, tokens, sender,
 		NewVerifyResendLimiter(time.Minute, nil), "alice@example.test")
 
 	time.Sleep(50 * time.Millisecond)
@@ -162,11 +159,11 @@ func TestHandleVerifyEmailRequestSubmit_AlreadyVerifiedSendsNoMail(t *testing.T)
 func TestHandleVerifyEmailRequestSubmit_UnknownEmailSendsNoMail(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
+	stores := store.New(dbtest.Open(t), discardLogger())
 	tokens := &recordingVerifyTokenStore{}
 	sender := &recordingSender{}
 
-	runVerifyRequestPOST(t, store, tokens, sender,
+	runVerifyRequestPOST(t, stores.Players, tokens, sender,
 		NewVerifyResendLimiter(time.Minute, nil), "ghost@example.test")
 
 	time.Sleep(50 * time.Millisecond)
@@ -178,8 +175,8 @@ func TestHandleVerifyEmailRequestSubmit_UnknownEmailSendsNoMail(t *testing.T) {
 func TestHandleVerifyEmailRequestSubmit_RateLimitedBlocksDispatch(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	if _, err := store.CreatePlayer(
+	stores := store.New(dbtest.Open(t), discardLogger())
+	if _, err := stores.Players.CreatePlayer(
 		t.Context(), "alice", "alice@example.test", "h", RolePlayer,
 	); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
@@ -188,11 +185,11 @@ func TestHandleVerifyEmailRequestSubmit_RateLimitedBlocksDispatch(t *testing.T) 
 	sender := &recordingSender{}
 	limiter := NewVerifyResendLimiter(time.Minute, nil)
 
-	first := runVerifyRequestPOST(t, store, tokens, sender, limiter, "alice@example.test")
+	first := runVerifyRequestPOST(t, stores.Players, tokens, sender, limiter, "alice@example.test")
 	if got, want := first.Code, http.StatusSeeOther; got != want {
 		t.Fatalf("first status = %d, want %d", got, want)
 	}
-	second := runVerifyRequestPOST(t, store, tokens, sender, limiter, "alice@example.test")
+	second := runVerifyRequestPOST(t, stores.Players, tokens, sender, limiter, "alice@example.test")
 	if got, want := second.Code, http.StatusSeeOther; got != want {
 		t.Errorf("second status = %d, want %d", got, want)
 	}
@@ -201,12 +198,32 @@ func TestHandleVerifyEmailRequestSubmit_RateLimitedBlocksDispatch(t *testing.T) 
 	}
 }
 
-func runVerifyRequestGET(t *testing.T, store PlayerStore) *httptest.ResponseRecorder {
+// markVerifiedViaStore stamps email_verified_at on the player by minting
+// then consuming a verify token through the real store - the same path
+// production uses to flip the column. The PlayerStore interface exposes
+// no direct verify toggle, so the token round-trip is how a test marks a
+// real row verified.
+func markVerifiedViaStore(t *testing.T, tokens VerifyTokenStore, playerID int64) {
+	t.Helper()
+
+	raw, hash, err := GenerateVerifyToken()
+	if err != nil {
+		t.Fatalf("GenerateVerifyToken err = %v, want nil", err)
+	}
+	if err := tokens.CreateVerifyToken(t.Context(), hash, playerID, time.Now().Add(time.Hour), ""); err != nil {
+		t.Fatalf("CreateVerifyToken err = %v, want nil", err)
+	}
+	if _, err := tokens.ConsumeVerifyToken(t.Context(), HashVerifyToken(raw)); err != nil {
+		t.Fatalf("ConsumeVerifyToken err = %v, want nil", err)
+	}
+}
+
+func runVerifyRequestGET(t *testing.T, players PlayerStore) *httptest.ResponseRecorder {
 	t.Helper()
 	csrfMgr := csrf.New([]byte("k"), true)
 	flash := NewSignedFlash([]byte("k"), true, VerifyRequestFlashCookieName, VerifyRequestFlashCookiePath)
 	sessions := session.New([]byte("k"), true)
-	handler := HandleVerifyEmailRequestForm(discardLogger(), csrfMgr, store, sessions, flash)
+	handler := HandleVerifyEmailRequestForm(discardLogger(), csrfMgr, players, sessions, flash)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/verify-email/request", nil)
 	rec := httptest.NewRecorder()
@@ -217,7 +234,7 @@ func runVerifyRequestGET(t *testing.T, store PlayerStore) *httptest.ResponseReco
 
 func runVerifyRequestPOST(
 	t *testing.T,
-	store PlayerStore,
+	players PlayerStore,
 	tokens VerifyTokenStore,
 	sender VerifyEmailSender,
 	limiter *VerifyResendLimiter,
@@ -227,7 +244,7 @@ func runVerifyRequestPOST(
 	sessions := session.New([]byte("k"), true)
 	flash := NewSignedFlash([]byte("k"), true, VerifyRequestFlashCookieName, VerifyRequestFlashCookiePath)
 	handler := HandleVerifyEmailRequestSubmit(
-		discardLogger(), store, sessions, tokens, sender,
+		discardLogger(), players, sessions, tokens, sender,
 		"https://topbanana.example", limiter, flash,
 	)
 
