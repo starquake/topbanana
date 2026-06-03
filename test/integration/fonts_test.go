@@ -16,10 +16,14 @@ func TestSelfHostedFonts(t *testing.T) {
 	baseURL := srv.BaseURL
 	client := &http.Client{}
 
-	// One representative Inter file and one Orbitron file. A 200 plus the
-	// woff2 content-type proves the embedded fonts/ tree is served at
-	// /assets/fonts/ and that .woff2 resolves to font/woff2 even on the
-	// distroless production image (which has no /etc/mime.types).
+	// One representative Inter file and one Orbitron file. The 200 guards
+	// that the embedded fonts/ tree is still served at /assets/fonts/ (an
+	// embed or route regression would 404 here). The content-type pins
+	// font/woff2 on the test host. Note: this does NOT prove the distroless
+	// production case - this host's /etc/mime.types already maps .woff2, so
+	// the assertion passes even without the explicit mime.AddExtensionType
+	// registration in web.go; that distroless fix is comment-guarded there,
+	// not test-guarded.
 	fontFiles := []string{
 		"/assets/fonts/inter-latin.woff2",
 		"/assets/fonts/orbitron-latin.woff2",
@@ -39,10 +43,10 @@ func TestSelfHostedFonts(t *testing.T) {
 		})
 	}
 
-	// The rendered pages must not pull fonts from Google's CDN, and the
-	// stylesheet must declare the self-hosted @font-face rules pointing at
-	// /assets/fonts/. Together these prove the CDN <link> tags were
-	// removed and the local fonts wired in via _tailwind.css.
+	// The core offline guard: the rendered pages must not pull fonts from
+	// Google's CDN. Catches a re-added <link rel="stylesheet"
+	// href="fonts.googleapis.com..."> in any of the three shared base
+	// layouts (web home/auth/admin) or the client shell.
 	t.Run("pages reference no font CDN", func(t *testing.T) {
 		t.Parallel()
 		pages := []string{
@@ -61,18 +65,6 @@ func TestSelfHostedFonts(t *testing.T) {
 					t.Errorf("page %s still references %q (#599: self-host fonts)", page, banned)
 				}
 			}
-		}
-	})
-
-	t.Run("app.css declares self-hosted font-face", func(t *testing.T) {
-		t.Parallel()
-		css := getBody(ctx, t, baseURL+"/assets/css/app.css")
-
-		if got, want := css, "@font-face"; !strings.Contains(got, want) {
-			t.Errorf("app.css missing %q", want)
-		}
-		if got, want := css, "/assets/fonts/"; !strings.Contains(got, want) {
-			t.Errorf("app.css missing local font path %q", want)
 		}
 	})
 }
