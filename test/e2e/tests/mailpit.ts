@@ -16,7 +16,9 @@ export function mailpitBaseURL(): string {
 }
 
 type MailpitSummary = { ID: string; To: { Address: string }[] };
-type MailpitMessage = { Text?: string; HTML?: string };
+type MailpitMessage = { Subject?: string; Text?: string; HTML?: string };
+
+export type DeliveredEmail = { subject: string; text: string };
 
 // waitForEmailLink polls mailpit for the newest message addressed to
 // `recipient` and returns the first absolute URL whose path contains
@@ -52,6 +54,39 @@ export async function waitForEmailLink(
   }
 
   throw new Error(`waitForEmailLink(${recipient}, ${pathContains}) timed out: ${lastErr}`);
+}
+
+// waitForEmail polls mailpit for a message addressed to `recipient` and
+// returns its subject and text body. Some notices (e.g. the role-change
+// notice) carry no link, so unlike waitForEmailLink this returns the
+// message content for the caller to assert on. Filters by the unique
+// per-test recipient so parallel workers do not cross-read the shared
+// inbox.
+export async function waitForEmail(recipient: string, timeoutMs = 10_000): Promise<DeliveredEmail> {
+  const base = mailpitBaseURL();
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const matches = await messagesTo(base, recipient);
+    for (const m of matches) {
+      const body = await messageBody(base, m.ID);
+      if (body) {
+        return body;
+      }
+    }
+    await sleep(150);
+  }
+
+  throw new Error(`waitForEmail(${recipient}) timed out: no message arrived`);
+}
+
+async function messageBody(base: string, id: string): Promise<DeliveredEmail | undefined> {
+  const res = await fetch(`${base}/api/v1/message/${id}`);
+  if (!res.ok) {
+    return undefined;
+  }
+  const body = (await res.json()) as MailpitMessage;
+  return { subject: body.Subject ?? '', text: body.Text ?? body.HTML ?? '' };
 }
 
 async function messagesTo(base: string, recipient: string): Promise<MailpitSummary[]> {

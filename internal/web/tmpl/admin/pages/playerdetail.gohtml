@@ -89,6 +89,10 @@
                             <option value="host" {{if eq .Player.Role "host"}}selected{{end}}>Host</option>
                             <option value="admin" {{if eq .Player.Role "admin"}}selected{{end}}>Admin</option>
                         </select>
+                        <label class="flex items-center gap-2 text-text-dim text-xs">
+                            <input type="checkbox" name="notify_email" value="on">
+                            Email the player about this change
+                        </label>
                         <button type="submit" class="btn-primary">Save role</button>
                     </form>
                     <form method="POST" action="/admin/players/{{.Player.ID}}/display-name" class="flex flex-col gap-2">
