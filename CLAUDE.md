@@ -51,7 +51,9 @@ Pick the right layer:
 
 One-off scripts are reserved for genuinely interactive debugging that can't be expressed as a test (e.g. eyeballing a visual layout, attaching a debugger). If you find yourself writing the same `curl` twice, it's a test.
 
-**New HTTP handler tests are integration tests, not stub-driven unit tests.** A handler whose contract is "wire the request to the store and render" is better pinned end-to-end (router -> middleware -> handler -> store -> DB) than against a stub that re-states what the store should return. Existing stub-driven unit tests stay until they break during an unrelated refactor -- porting them wholesale isn't worth the CI-runtime hit. Decided in #30.
+**HTTP handler tests are integration tests, not stub-driven unit tests.** A handler whose contract is "wire the request to the store and render" is pinned end-to-end (router -> middleware -> handler -> store -> DB) against a real store on a `dbtest` DB, not against a stub that re-states what the store should return -- a stub passes even when the real wiring (routing, query, serialization) is broken. The previously-grandfathered stub-driven handler tests are being converted in #638 (reversing the original #30 decision to leave them).
+
+Keep a purpose-built **fault-injection double** only where a real store genuinely cannot reproduce a case: a forced petname collision, the specific internal error string a leak test asserts is *not* exposed, a `GetX` failure on a path a real FK makes otherwise unreachable. Those are legitimate fakes (like a mailer spy or a closed DB), not tautological store stubs -- keep them, and keep their tests as untagged unit tests. For an ordinary "store errored" branch, prefer a closed DB over a double.
 
 ## Workflow
 
