@@ -1,6 +1,6 @@
 //go:build integration
 
-package integration_test
+package game_test
 
 import (
 	"context"
@@ -10,7 +10,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/starquake/topbanana/internal/game"
+	"github.com/starquake/topbanana/internal/dbtest"
+	. "github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/leaderboard"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
@@ -27,17 +28,8 @@ import (
 func TestCreateGameRace_Integration(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, nil)
-
-	dbConn, err := sql.Open("sqlite", srv.DBURI)
-	if err != nil {
-		t.Fatalf("failed to open db: %v", err)
-	}
-	t.Cleanup(func() {
-		if cerr := dbConn.Close(); cerr != nil {
-			t.Errorf("dbConn.Close err = %v, want nil", cerr)
-		}
-	})
+	ctx := t.Context()
+	db := dbtest.Open(t)
 
 	qz := &quiz.Quiz{
 		Title:             "Race Quiz",
@@ -55,7 +47,7 @@ func TestCreateGameRace_Integration(t *testing.T) {
 			},
 		},
 	}
-	stores := store.New(dbConn, slog.Default())
+	stores := store.New(db, slog.Default())
 	if cerr := stores.Quizzes.CreateQuiz(ctx, qz); cerr != nil {
 		t.Fatalf("CreateQuiz err = %v, want nil", cerr)
 	}
@@ -68,7 +60,7 @@ func TestCreateGameRace_Integration(t *testing.T) {
 	// Drive Service.CreateGame directly so the test can fan out the call
 	// without spinning up two HTTP clients (which would serialise via
 	// EnsurePlayer's session cookie logic).
-	svc := game.NewService(stores.Games, stores.Quizzes, slog.Default())
+	svc := NewService(stores.Games, stores.Quizzes, slog.Default())
 	svc.SetLeaderboardPublisher(leaderboard.NewHub())
 
 	// Fire N parallel CreateGame goroutines. With the UNIQUE index in
@@ -78,7 +70,7 @@ func TestCreateGameRace_Integration(t *testing.T) {
 	// against flaky scheduling on slow CI runners.
 	const parallel = 4
 	results := make([]error, parallel)
-	games := make([]*game.Game, parallel)
+	games := make([]*Game, parallel)
 
 	var wg sync.WaitGroup
 	wg.Add(parallel)
@@ -103,7 +95,7 @@ func TestCreateGameRace_Integration(t *testing.T) {
 			} else {
 				winnerGameID = games[i].ID
 			}
-		case errors.Is(r, game.ErrGameAlreadyExists):
+		case errors.Is(r, ErrGameAlreadyExists):
 			alreadyExistsCount++
 		default:
 			t.Errorf("goroutine %d returned unexpected error: %v", i, r)
@@ -120,7 +112,7 @@ func TestCreateGameRace_Integration(t *testing.T) {
 	// Sanity check the DB side too: exactly one game_participants row
 	// for (player, quiz). Without the DB-level constraint the row count
 	// would track the buggy success count.
-	rowCount := countParticipantRows(ctx, t, dbConn, player.ID, qz.ID)
+	rowCount := countParticipantRows(ctx, t, db, player.ID, qz.ID)
 	if got, want := rowCount, 1; got != want {
 		t.Errorf("game_participants rows for (player=%d, quiz=%d) = %d, want %d",
 			player.ID, qz.ID, got, want)

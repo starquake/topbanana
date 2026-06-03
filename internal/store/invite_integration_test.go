@@ -1,13 +1,18 @@
 //go:build integration
 
-package integration_test
+package store_test
 
 import (
+	"context"
+	"database/sql"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/dbtest"
+	. "github.com/starquake/topbanana/internal/store"
 )
 
 // TestInviteStore_RoundtripSingleUse covers the store-level roundtrip for
@@ -17,9 +22,9 @@ import (
 func TestInviteStore_RoundtripSingleUse(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, nil)
-	dbConn, stores := openStores(t, srv.DBURI)
-	defer dbConn.Close() //nolint:errcheck // cleanup.
+	ctx := t.Context()
+	db := dbtest.Open(t)
+	stores := New(db, slog.Default())
 
 	admin, err := stores.Players.CreatePlayer(ctx, "inv-admin", "inv-admin@example.test", "h", "admin")
 	if err != nil {
@@ -68,9 +73,9 @@ func TestInviteStore_RoundtripSingleUse(t *testing.T) {
 func TestInviteStore_ExpiredRejected(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, nil)
-	dbConn, stores := openStores(t, srv.DBURI)
-	defer dbConn.Close() //nolint:errcheck // cleanup.
+	ctx := t.Context()
+	db := dbtest.Open(t)
+	stores := New(db, slog.Default())
 
 	raw, hash, err := auth.GenerateInviteToken()
 	if err != nil {
@@ -98,9 +103,9 @@ func TestInviteStore_ExpiredRejected(t *testing.T) {
 func TestInviteStore_ListPendingInvites(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, nil)
-	dbConn, stores := openStores(t, srv.DBURI)
-	defer dbConn.Close() //nolint:errcheck // cleanup.
+	ctx := t.Context()
+	db := dbtest.Open(t)
+	stores := New(db, slog.Default())
 
 	admin, err := stores.Players.CreatePlayer(ctx, "list-admin", "list-admin@example.test", "h", "admin")
 	if err != nil {
@@ -120,7 +125,7 @@ func TestInviteStore_ListPendingInvites(t *testing.T) {
 	}
 	// A revoked invite must not appear.
 	mintInvite(ctx, t, stores.Invites, "list-revoked@example.test", time.Now().Add(time.Hour))
-	revokedID := inviteIDForEmail(ctx, t, dbConn, "list-revoked@example.test")
+	revokedID := inviteIDForEmail(ctx, t, db, "list-revoked@example.test")
 	if rerr := stores.Invites.RevokeInvite(ctx, revokedID); rerr != nil {
 		t.Fatalf("RevokeInvite err = %v, want nil", rerr)
 	}
@@ -155,12 +160,12 @@ func TestInviteStore_ListPendingInvites(t *testing.T) {
 func TestInviteStore_RevokeNotPending(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, nil)
-	dbConn, stores := openStores(t, srv.DBURI)
-	defer dbConn.Close() //nolint:errcheck // cleanup.
+	ctx := t.Context()
+	db := dbtest.Open(t)
+	stores := New(db, slog.Default())
 
 	mintInvite(ctx, t, stores.Invites, "revoke-twice@example.test", time.Now().Add(time.Hour))
-	id := inviteIDForEmail(ctx, t, dbConn, "revoke-twice@example.test")
+	id := inviteIDForEmail(ctx, t, db, "revoke-twice@example.test")
 	if err := stores.Invites.RevokeInvite(ctx, id); err != nil {
 		t.Fatalf("first RevokeInvite err = %v, want nil", err)
 	}
@@ -178,12 +183,12 @@ func TestInviteStore_RevokeNotPending(t *testing.T) {
 func TestInviteStore_RotateInviteToken(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, nil)
-	dbConn, stores := openStores(t, srv.DBURI)
-	defer dbConn.Close() //nolint:errcheck // cleanup.
+	ctx := t.Context()
+	db := dbtest.Open(t)
+	stores := New(db, slog.Default())
 
 	oldRaw := mintInvite(ctx, t, stores.Invites, "rotate@example.test", time.Now().Add(time.Hour))
-	id := inviteIDForEmail(ctx, t, dbConn, "rotate@example.test")
+	id := inviteIDForEmail(ctx, t, db, "rotate@example.test")
 
 	newRaw, newHash, err := auth.GenerateInviteToken()
 	if err != nil {
@@ -225,9 +230,9 @@ func TestInviteStore_RotateInviteToken(t *testing.T) {
 func TestInviteStore_KindSeparation(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, nil)
-	dbConn, stores := openStores(t, srv.DBURI)
-	defer dbConn.Close() //nolint:errcheck // cleanup.
+	ctx := t.Context()
+	db := dbtest.Open(t)
+	stores := New(db, slog.Default())
 
 	player, err := stores.Players.CreatePlayer(ctx, "kind-sep", "kind-sep@example.test", "h", "player")
 	if err != nil {
@@ -266,4 +271,34 @@ func TestInviteStore_KindSeparation(t *testing.T) {
 	if live {
 		t.Error("invite-token hash resolved as a live reset token; tables must not cross-resolve")
 	}
+}
+
+// mintInvite creates a pending invite directly through the store and returns
+// the raw token (the only place the raw value lives, since CreateInvite
+// persists only the hash).
+func mintInvite(
+	ctx context.Context, t *testing.T, invites auth.InviteStore, email string, expiresAt time.Time,
+) string {
+	t.Helper()
+	raw, hash, err := auth.GenerateInviteToken()
+	if err != nil {
+		t.Fatalf("GenerateInviteToken err = %v, want nil", err)
+	}
+	if cerr := invites.CreateInvite(ctx, email, hash, "", 0, expiresAt); cerr != nil {
+		t.Fatalf("CreateInvite err = %v, want nil", cerr)
+	}
+
+	return raw
+}
+
+// inviteIDForEmail returns the id of the (single) invite row for email.
+func inviteIDForEmail(ctx context.Context, t *testing.T, db *sql.DB, email string) int64 {
+	t.Helper()
+	var id int64
+	row := db.QueryRowContext(ctx, "SELECT id FROM invites WHERE email = ? ORDER BY id DESC LIMIT 1", email)
+	if err := row.Scan(&id); err != nil {
+		t.Fatalf("inviteIDForEmail scan err = %v, want nil", err)
+	}
+
+	return id
 }

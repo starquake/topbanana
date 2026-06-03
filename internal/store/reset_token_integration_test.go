@@ -1,13 +1,16 @@
 //go:build integration
 
-package integration_test
+package store_test
 
 import (
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/dbtest"
+	. "github.com/starquake/topbanana/internal/store"
 )
 
 // TestResetTokenStore_RoundtripHappyPath covers the store-level
@@ -18,9 +21,9 @@ import (
 func TestResetTokenStore_RoundtripHappyPath(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, nil)
-	dbConn, stores := openStores(t, srv.DBURI)
-	defer dbConn.Close() //nolint:errcheck // cleanup.
+	ctx := t.Context()
+	db := dbtest.Open(t)
+	stores := New(db, slog.Default())
 
 	player, err := stores.Players.CreatePlayer(
 		ctx, "reset-happy", "reset-happy@example.test", "old-hash", "player",
@@ -64,9 +67,9 @@ func TestResetTokenStore_RoundtripHappyPath(t *testing.T) {
 func TestResetTokenStore_ReplayRejectsConsumedToken(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, nil)
-	dbConn, stores := openStores(t, srv.DBURI)
-	defer dbConn.Close() //nolint:errcheck // cleanup.
+	ctx := t.Context()
+	db := dbtest.Open(t)
+	stores := New(db, slog.Default())
 
 	player, err := stores.Players.CreatePlayer(
 		ctx, "reset-replay", "reset-replay@example.test", "h", "player",
@@ -105,9 +108,9 @@ func TestResetTokenStore_ReplayRejectsConsumedToken(t *testing.T) {
 func TestResetTokenStore_ExpiredTokenRejected(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, nil)
-	dbConn, stores := openStores(t, srv.DBURI)
-	defer dbConn.Close() //nolint:errcheck // cleanup.
+	ctx := t.Context()
+	db := dbtest.Open(t)
+	stores := New(db, slog.Default())
 
 	player, err := stores.Players.CreatePlayer(
 		ctx, "reset-expired", "reset-expired@example.test", "old", "player",
@@ -145,9 +148,9 @@ func TestResetTokenStore_ExpiredTokenRejected(t *testing.T) {
 func TestResetTokenStore_InvalidHashRejected(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, nil)
-	dbConn, stores := openStores(t, srv.DBURI)
-	defer dbConn.Close() //nolint:errcheck // cleanup.
+	ctx := t.Context()
+	db := dbtest.Open(t)
+	stores := New(db, slog.Default())
 
 	_, cerr := stores.ResetTokens.ConsumeResetToken(ctx, "no-such-hash", "new")
 	if got, want := cerr, auth.ErrResetTokenInvalid; !errors.Is(got, want) {
