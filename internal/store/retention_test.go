@@ -1,6 +1,4 @@
-//go:build integration
-
-package integration_test
+package store_test
 
 import (
 	"context"
@@ -8,9 +6,8 @@ import (
 	"log/slog"
 	"testing"
 
-	_ "modernc.org/sqlite"
-
-	"github.com/starquake/topbanana/internal/store"
+	"github.com/starquake/topbanana/internal/dbtest"
+	. "github.com/starquake/topbanana/internal/store"
 )
 
 // retentionSeed holds the IDs the retention sweep test seeds so the
@@ -45,36 +42,28 @@ const (
 	seedRecent = "datetime('now', '-1 hour')"
 )
 
-// TestRetentionSweep exercises both retention sweeps against a real DB:
-// stale anonymous players with no finished game (and their game data) are
-// removed, but an old anonymous player holding a finished game is kept so
-// its leaderboard score survives (#626); abandoned never-finished games are
-// pruned regardless of player (#627); and recent players, finished games,
-// and signed-in players all survive. The sweeps take no cutoff -- the windows
-// live in SQL -- so they run against real wall-clock now.
+// TestRetentionSweep exercises both retention sweeps against a real migrated
+// SQLite database (no HTTP server): stale anonymous players with no finished
+// game (and their game data) are removed, but an old anonymous player holding
+// a finished game is kept so its leaderboard score survives (#626); abandoned
+// never-finished games are pruned regardless of player (#627); and recent
+// players, finished games, and signed-in players all survive. The sweeps take
+// the retention window in days; the cutoff is computed in SQL against real
+// wall-clock now.
 func TestRetentionSweep(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, nil)
-
-	db, err := sql.Open("sqlite", srv.DBURI)
-	if err != nil {
-		t.Fatalf("sql.Open err = %v, want nil", err)
-	}
-	t.Cleanup(func() {
-		if cerr := db.Close(); cerr != nil {
-			t.Errorf("db.Close err = %v, want nil", cerr)
-		}
-	})
+	ctx := t.Context()
+	db := dbtest.Open(t)
 
 	seed := seedRetention(ctx, t, db)
 
-	stores := store.New(db, slog.Default())
+	retention := NewRetentionStore(db, slog.Default())
 
-	if err := stores.Retention.SweepStaleAnonymousPlayers(ctx); err != nil {
+	if err := retention.SweepStaleAnonymousPlayers(ctx, AnonymousRetentionDays); err != nil {
 		t.Fatalf("SweepStaleAnonymousPlayers err = %v, want nil", err)
 	}
-	if err := stores.Retention.SweepAbandonedGames(ctx); err != nil {
+	if err := retention.SweepAbandonedGames(ctx, AbandonedGameDays); err != nil {
 		t.Fatalf("SweepAbandonedGames err = %v, want nil", err)
 	}
 
@@ -95,11 +84,12 @@ type seededQuiz struct {
 
 // at is a SQLite datetime expression (e.g. seedOld) substituted into the
 // created_at columns rather than bound as a parameter, so the rows store the
-// CURRENT_TIMESTAMP text encoding the sweep queries compare against.
-func seedQuiz(ctx context.Context, t *testing.T, db *sql.DB, slug, at string) seededQuiz {
+// CURRENT_TIMESTAMP text encoding the sweep queries compare against. ownerID
+// owns the quiz (quizzes.created_by_player_id is NOT NULL).
+func seedQuiz(ctx context.Context, t *testing.T, db *sql.DB, slug, at string, ownerID int64) seededQuiz {
 	t.Helper()
 
-	quizID := insertQuiz(ctx, t, db, slug, at)
+	quizID := insertQuiz(ctx, t, db, slug, at, ownerID)
 	roundID := insertRound(ctx, t, db, quizID, at)
 	q1 := insertQuestion(ctx, t, db, quizID, roundID, 0)
 	q2 := insertQuestion(ctx, t, db, quizID, roundID, 1)
@@ -117,6 +107,10 @@ func seedQuiz(ctx context.Context, t *testing.T, db *sql.DB, slug, at string) se
 func seedRetention(ctx context.Context, t *testing.T, db *sql.DB) retentionSeed {
 	t.Helper()
 
+	// A signed-in player owns every seeded quiz (quizzes.created_by_player_id
+	// is NOT NULL). It is not anonymous, so the sweep never touches it.
+	ownerID := insertSignedInPlayer(ctx, t, db, "quiz-owner", seedRecent)
+
 	var s retentionSeed
 	s.anonFinishedID = insertAnonPlayer(ctx, t, db, "anon-finished", seedOld)
 	s.anonCruftID = insertAnonPlayer(ctx, t, db, "anon-cruft", seedOld)
@@ -128,7 +122,7 @@ func seedRetention(ctx context.Context, t *testing.T, db *sql.DB) retentionSeed 
 	// with an answer and a seen-round row). The player and the finished game
 	// are kept regardless of age so the leaderboard score survives; its
 	// separate old unfinished game is still pruned by the abandoned-game sweep.
-	qf := seedQuiz(ctx, t, db, "anon-fin", seedOld)
+	qf := seedQuiz(ctx, t, db, "anon-fin", seedOld, ownerID)
 	s.anonFinishedGameID = insertGame(ctx, t, db, "g-anon-fin", qf.quizID, seedOld)
 	insertParticipant(ctx, t, db, s.anonFinishedGameID, s.anonFinishedID, qf.quizID, seedOld)
 	gqA := insertGameQuestion(ctx, t, db, s.anonFinishedGameID, qf.q1, seedOld)
@@ -136,7 +130,7 @@ func seedRetention(ctx context.Context, t *testing.T, db *sql.DB) retentionSeed 
 	insertGameAnswer(ctx, t, db, s.anonFinishedGameID, s.anonFinishedID, gqA, qf.opt1, seedOld)
 	insertSeenRound(ctx, t, db, s.anonFinishedGameID, qf.roundID, "intro", seedOld)
 
-	qfu := seedQuiz(ctx, t, db, "anon-fin-unf", seedOld)
+	qfu := seedQuiz(ctx, t, db, "anon-fin-unf", seedOld, ownerID)
 	s.anonFinishedUnfGameID = insertGame(ctx, t, db, "g-anon-fin-unf", qfu.quizID, seedOld)
 	insertParticipant(ctx, t, db, s.anonFinishedUnfGameID, s.anonFinishedID, qfu.quizID, seedOld)
 	insertGameQuestion(ctx, t, db, s.anonFinishedUnfGameID, qfu.q1, seedOld)
@@ -144,19 +138,19 @@ func seedRetention(ctx context.Context, t *testing.T, db *sql.DB) retentionSeed 
 	// Two anonymous old players with NO finished game (only an old unfinished
 	// one each). Pure casual-visitor cruft: the players and their games are
 	// swept by #626. Two of them prove the sweep handles multiple stale rows.
-	qc := seedQuiz(ctx, t, db, "anon-cruft", seedOld)
+	qc := seedQuiz(ctx, t, db, "anon-cruft", seedOld, ownerID)
 	s.anonCruftGameID = insertGame(ctx, t, db, "g-anon-cruft", qc.quizID, seedOld)
 	insertParticipant(ctx, t, db, s.anonCruftGameID, s.anonCruftID, qc.quizID, seedOld)
 	insertGameQuestion(ctx, t, db, s.anonCruftGameID, qc.q1, seedOld)
 
-	qc2 := seedQuiz(ctx, t, db, "anon-cruft-2", seedOld)
+	qc2 := seedQuiz(ctx, t, db, "anon-cruft-2", seedOld, ownerID)
 	s.anonCruft2GameID = insertGame(ctx, t, db, "g-anon-cruft-2", qc2.quizID, seedOld)
 	insertParticipant(ctx, t, db, s.anonCruft2GameID, s.anonCruft2ID, qc2.quizID, seedOld)
 	insertGameQuestion(ctx, t, db, s.anonCruft2GameID, qc2.q1, seedOld)
 
 	// Anonymous recent player: an unfinished game. Survives - minted inside
 	// the 90-day window, and its game is younger than 30 days.
-	qr := seedQuiz(ctx, t, db, "anon-rec", seedRecent)
+	qr := seedQuiz(ctx, t, db, "anon-rec", seedRecent, ownerID)
 	s.anonRecentGameID = insertGame(ctx, t, db, "g-anon-rec", qr.quizID, seedRecent)
 	insertParticipant(ctx, t, db, s.anonRecentGameID, s.anonRecentID, qr.quizID, seedRecent)
 	insertGameQuestion(ctx, t, db, s.anonRecentGameID, qr.q1, seedRecent)
@@ -164,25 +158,25 @@ func seedRetention(ctx context.Context, t *testing.T, db *sql.DB) retentionSeed 
 	// Signed-in player: two abandoned (unfinished, >30d) games that the
 	// abandoned-game sweep should prune even though the player stays. Two of
 	// them prove the sweep handles multiple stale games.
-	qa := seedQuiz(ctx, t, db, "abandoned", seedMidOld)
+	qa := seedQuiz(ctx, t, db, "abandoned", seedMidOld, ownerID)
 	s.abandonedGameID = insertGame(ctx, t, db, "g-abandoned", qa.quizID, seedMidOld)
 	insertParticipant(ctx, t, db, s.abandonedGameID, s.signedInID, qa.quizID, seedMidOld)
 	insertGameQuestion(ctx, t, db, s.abandonedGameID, qa.q1, seedMidOld)
 
-	qa2 := seedQuiz(ctx, t, db, "abandoned-2", seedMidOld)
+	qa2 := seedQuiz(ctx, t, db, "abandoned-2", seedMidOld, ownerID)
 	s.abandoned2GameID = insertGame(ctx, t, db, "g-abandoned-2", qa2.quizID, seedMidOld)
 	insertParticipant(ctx, t, db, s.abandoned2GameID, s.signedInID, qa2.quizID, seedMidOld)
 	insertGameQuestion(ctx, t, db, s.abandoned2GameID, qa2.q1, seedMidOld)
 
 	// Signed-in player: a recent unfinished game. Survives - younger than 30d.
-	qru := seedQuiz(ctx, t, db, "recent-unf", seedRecent)
+	qru := seedQuiz(ctx, t, db, "recent-unf", seedRecent, ownerID)
 	s.recentUnfinishedGameID = insertGame(ctx, t, db, "g-recent-unf", qru.quizID, seedRecent)
 	insertParticipant(ctx, t, db, s.recentUnfinishedGameID, s.signedInID, qru.quizID, seedRecent)
 	insertGameQuestion(ctx, t, db, s.recentUnfinishedGameID, qru.q1, seedRecent)
 
 	// Signed-in player: an old but FINISHED game. Survives - "abandoned"
 	// is unfinished-only, so age alone does not prune a completed game.
-	qsf := seedQuiz(ctx, t, db, "signed-fin", seedOld)
+	qsf := seedQuiz(ctx, t, db, "signed-fin", seedOld, ownerID)
 	s.signedInFinishedGameID = insertGame(ctx, t, db, "g-signed-fin", qsf.quizID, seedOld)
 	insertParticipant(ctx, t, db, s.signedInFinishedGameID, s.signedInID, qsf.quizID, seedOld)
 	insertGameQuestion(ctx, t, db, s.signedInFinishedGameID, qsf.q1, seedOld)
@@ -232,12 +226,12 @@ func assertRetention(ctx context.Context, t *testing.T, db *sql.DB, s retentionS
 // The at argument is a trusted SQLite datetime expression (a test constant),
 // inlined into the statement so created_at evaluates server-side to a
 // CURRENT_TIMESTAMP-shaped string rather than a bound RFC3339 value.
-func insertQuiz(ctx context.Context, t *testing.T, db *sql.DB, slug, at string) int64 {
+func insertQuiz(ctx context.Context, t *testing.T, db *sql.DB, slug, at string, ownerID int64) int64 {
 	t.Helper()
 	res, err := db.ExecContext(ctx,
 		`INSERT INTO quizzes (title, slug, created_at, updated_at, created_by_player_id)
 		 VALUES ('Retention Quiz', ?, `+at+`, `+at+`, ?)`,
-		slug, seededAdminID,
+		slug, ownerID,
 	)
 	if err != nil {
 		t.Fatalf("insert quiz err = %v, want nil", err)
