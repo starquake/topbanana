@@ -1,0 +1,64 @@
+-- name: ListStaleAnonymousPlayerIDs :many
+-- Lists ids of anonymous players minted more than 90 days ago that hold no
+-- finished game. "Anonymous" is a guest who never claimed an account:
+-- role 'player' with no email, no password, and a display name still
+-- auto-generated (display_name_claimed = 0). created_at is the mint time
+-- (there is no last-seen column), so the cutoff is "minted more than the
+-- 90-day retention window ago". The cutoff is computed in SQL with
+-- datetime('now','-90 days') so both sides of the comparison are SQLite
+-- text in the CURRENT_TIMESTAMP encoding rows are minted with; a bound Go
+-- time.Time would arrive RFC3339-encoded and the cross-format comparison
+-- would silently lie. A guest with a finished game is kept regardless of
+-- age so the sweep never erases a leaderboard score (#626); "finished" is
+-- every question of the quiz issued as a game_question, the same finisher
+-- predicate the leaderboard uses.
+SELECT p.id
+FROM players p
+WHERE p.role = 'player'
+  AND p.email IS NULL
+  AND p.password_hash IS NULL
+  AND p.display_name_claimed = 0
+  AND p.created_at < datetime('now', '-90 days')
+  AND NOT EXISTS (
+        SELECT 1
+        FROM game_participants gp
+                 JOIN games g ON g.id = gp.game_id
+        WHERE gp.player_id = p.id
+          AND (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id) > 0
+          AND (SELECT COUNT(*) FROM game_questions gqc WHERE gqc.game_id = g.id) >=
+              (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)
+  );
+
+-- name: ListGameIDsForPlayers :many
+-- Lists every distinct game id any of the given players participates in.
+-- The anonymous-player sweep snapshots these up front so the dependent
+-- game_* deletes hit a stable set as the participant rows drain (#626).
+SELECT DISTINCT gp.game_id
+FROM game_participants gp
+WHERE gp.player_id IN (sqlc.slice('player_ids'));
+
+-- name: DeletePlayersByIDs :exec
+-- Hard-deletes the given player rows. Run last in the anonymous-player
+-- sweep, after every game_* row that references them has been removed.
+DELETE
+FROM players
+WHERE id IN (sqlc.slice('ids'));
+
+-- name: ListAbandonedGameIDs :many
+-- Lists ids of games that are NOT finished and were created more than 30
+-- days ago (#627). A game is "finished" when every question of its quiz
+-- has been issued as a game_question -- the same finisher predicate the
+-- leaderboard queries use. created_at is used (not started_at) because
+-- started_at is NULL for a game that was created but never started, and
+-- such a game is exactly the kind of abandonment this sweep prunes. The
+-- 30-day cutoff is computed in SQL with datetime('now','-30 days') so both
+-- sides of the comparison are SQLite text in the CURRENT_TIMESTAMP encoding
+-- rows are minted with, not a cross-format Go time.Time comparison.
+SELECT g.id
+FROM games g
+WHERE g.created_at < datetime('now', '-30 days')
+  AND NOT (
+        (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id) > 0
+    AND (SELECT COUNT(*) FROM game_questions gqc WHERE gqc.game_id = g.id) >=
+        (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = g.quiz_id)
+  );

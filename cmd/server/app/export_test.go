@@ -29,6 +29,11 @@ var (
 // without standing up the full server (#472).
 var RunTokenSweep = runTokenSweep
 
+// RunRetentionSweep exposes the unexported data-retention sweep helper so
+// the external app_test package can pin its warn-and-continue behaviour
+// without standing up the full server (#626).
+var RunRetentionSweep = runRetentionSweep
+
 // BuildMailer exposes the unexported mailer-construction helper so
 // the external app_test package can pin the WARN-when-BASE_URL-is-
 // missing log behaviour (#495) without standing up the full server.

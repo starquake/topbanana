@@ -409,7 +409,9 @@ func Run(
 	// periodic broom too; the hourly tick keeps both tables bounded on
 	// long-running deploys without burning a goroutine per row (#472).
 	go runTokenSweep(
-		signalCtx, logger, stores.VerifyTokens, stores.ResetTokens, stores.Invites, tokenSweepInterval,
+		signalCtx, logger,
+		stores.VerifyTokens, stores.ResetTokens, stores.Invites, stores.Retention,
+		tokenSweepInterval,
 	)
 	gameService := game.NewService(stores.Games, stores.Quizzes, logger)
 	if cfg.RevealDelay > 0 {
@@ -454,9 +456,31 @@ type inviteSweeper interface {
 	DeleteExpiredInvites(ctx context.Context) error
 }
 
+// retentionSweeper is the slice of the retention store the sweep calls.
+// Narrow interface so the unit test can drive the loop without a real DB.
+// The cutoff windows live in SQL (datetime('now','-N days')), so neither
+// method takes a time argument.
+type retentionSweeper interface {
+	SweepStaleAnonymousPlayers(ctx context.Context) error
+	SweepAbandonedGames(ctx context.Context) error
+}
+
+// runRetentionSweep runs both data-retention sweeps once, logging each
+// failure at warn so a transient error in one does not skip the other or
+// abort the surrounding token sweep.
+func runRetentionSweep(ctx context.Context, logger *slog.Logger, retention retentionSweeper) {
+	if err := retention.SweepStaleAnonymousPlayers(ctx); err != nil {
+		logger.WarnContext(ctx, "anonymous-player retention sweep failed", slog.Any("err", err))
+	}
+	if err := retention.SweepAbandonedGames(ctx); err != nil {
+		logger.WarnContext(ctx, "abandoned-game retention sweep failed", slog.Any("err", err))
+	}
+}
+
 // sweepExpiredAtStartup runs the one-shot expiry sweep across the verify,
-// reset, and invite token tables at boot, before the periodic sweep
-// goroutine takes over. Each failure is logged at warn and the others
+// reset, and invite token tables plus the data-retention sweeps (stale
+// anonymous players and abandoned games) at boot, before the periodic
+// sweep goroutine takes over. Each failure is logged at warn and the others
 // still run; a single table's transient error must not skip the rest.
 func sweepExpiredAtStartup(ctx context.Context, logger *slog.Logger, stores *store.Stores) {
 	if err := stores.VerifyTokens.DeleteExpiredVerifyTokens(ctx); err != nil {
@@ -468,20 +492,23 @@ func sweepExpiredAtStartup(ctx context.Context, logger *slog.Logger, stores *sto
 	if err := stores.Invites.DeleteExpiredInvites(ctx); err != nil {
 		logger.WarnContext(ctx, "invite sweep at startup failed", slog.Any("err", err))
 	}
+	runRetentionSweep(ctx, logger, stores.Retention)
 }
 
-// runTokenSweep ticks at interval and calls both DeleteExpired*
-// methods on each iteration. Returns when ctx is cancelled (which is
-// the signal-driven shutdown context, so a graceful shutdown stops
-// the sweep before the DB is closed). A sweep failure is logged at
-// warn and the loop continues; one bad tick should not silence the
-// next hour's pass.
+// runTokenSweep ticks at interval and on each iteration runs the verify,
+// reset, and invite token expiry sweeps plus the data-retention sweeps
+// (stale anonymous players and abandoned games). Returns when ctx is
+// cancelled (which is the signal-driven shutdown context, so a graceful
+// shutdown stops the sweep before the DB is closed). A sweep failure is
+// logged at warn and the loop continues; one bad tick should not silence
+// the next hour's pass.
 func runTokenSweep(
 	ctx context.Context,
 	logger *slog.Logger,
 	verify tokenSweeper,
 	reset resetTokenSweeper,
 	invites inviteSweeper,
+	retention retentionSweeper,
 	interval time.Duration,
 ) {
 	ticker := time.NewTicker(interval)
@@ -500,6 +527,7 @@ func runTokenSweep(
 			if err := invites.DeleteExpiredInvites(ctx); err != nil {
 				logger.WarnContext(ctx, "invite periodic sweep failed", slog.Any("err", err))
 			}
+			runRetentionSweep(ctx, logger, retention)
 		}
 	}
 }
