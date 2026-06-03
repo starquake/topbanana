@@ -1,298 +1,23 @@
+//go:build integration
+
 package auth_test
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	. "github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/session"
+	"github.com/starquake/topbanana/internal/store"
 )
-
-// stubPlayerStore is an in-memory PlayerStore for tests.
-type stubPlayerStore struct {
-	mu      sync.Mutex
-	byID    map[int64]*Player
-	byName  map[string]*Player
-	nextID  int64
-	failGet bool
-	// forceAnonCollisions, when > 0, makes the next N CreateAnonymousPlayer
-	// calls return ErrDisplayNameTaken without inserting. Each call decrements
-	// the counter, so once it reaches zero the stub returns to its normal
-	// insert-or-conflict behaviour. Used by the petname retry-loop tests
-	// to drive the middleware down the collision path a deterministic
-	// number of times.
-	forceAnonCollisions int
-	// forceAnonErr, when set, is returned by the NEXT CreateAnonymousPlayer
-	// call and then automatically cleared. The single-shot semantics keep
-	// each test scenario self-contained: setting the error and then
-	// triggering a single request exercises one error branch without
-	// leaking the failure into any follow-up call inside the same test.
-	// Used to exercise the non-collision error branch of EnsurePlayer.
-	forceAnonErr error
-}
-
-func newStubPlayerStore() *stubPlayerStore {
-	return &stubPlayerStore{
-		byID:   map[int64]*Player{},
-		byName: map[string]*Player{},
-		nextID: 1,
-	}
-}
-
-func (s *stubPlayerStore) GetPlayerByDisplayName(_ context.Context, displayName string) (*Player, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	p, ok := s.byName[displayName]
-	if !ok {
-		return nil, ErrPlayerNotFound
-	}
-
-	return p, nil
-}
-
-func (s *stubPlayerStore) GetPlayerByEmail(_ context.Context, email string) (*Player, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for _, p := range s.byID {
-		if p.Email == email {
-			return p, nil
-		}
-	}
-
-	return nil, ErrPlayerNotFound
-}
-
-func (s *stubPlayerStore) GetPlayerByID(_ context.Context, id int64) (*Player, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.failGet {
-		return nil, errors.New("boom")
-	}
-	p, ok := s.byID[id]
-	if !ok {
-		return nil, ErrPlayerNotFound
-	}
-
-	return p, nil
-}
-
-// CreatePlayer mirrors the SQL semantics of internal/queries/players.sql:
-// honour an explicit "admin" request, otherwise promote the very first
-// password-bearing player to admin so the "first registrant becomes admin"
-// rule is observed atomically.
-func (s *stubPlayerStore) CreatePlayer(
-	_ context.Context,
-	displayName, email, passwordHash, requestedRole string,
-) (*Player, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, exists := s.byName[displayName]; exists {
-		return nil, ErrDisplayNameTaken
-	}
-	if email != "" {
-		for _, p := range s.byID {
-			if p.Email == email {
-				return nil, ErrEmailTaken
-			}
-		}
-	}
-
-	role := s.resolveRoleLocked(requestedRole)
-
-	p := &Player{
-		ID:           s.nextID,
-		DisplayName:  displayName,
-		Email:        email,
-		PasswordHash: passwordHash,
-		Role:         role,
-	}
-	s.nextID++
-	s.byID[p.ID] = p
-	s.byName[displayName] = p
-
-	return p, nil
-}
-
-// CreateAnonymousPlayer mirrors store.CreateAnonymousPlayer: insert a row
-// with the given displayName, no password_hash, role = "player".
-func (s *stubPlayerStore) CreateAnonymousPlayer(_ context.Context, displayName string) (*Player, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.forceAnonErr != nil {
-		err := s.forceAnonErr
-		s.forceAnonErr = nil
-
-		return nil, err
-	}
-	if s.forceAnonCollisions > 0 {
-		s.forceAnonCollisions--
-
-		return nil, ErrDisplayNameTaken
-	}
-
-	if _, exists := s.byName[displayName]; exists {
-		return nil, ErrDisplayNameTaken
-	}
-
-	p := &Player{
-		ID:          s.nextID,
-		DisplayName: displayName,
-		Role:        RolePlayer,
-	}
-	s.nextID++
-	s.byID[p.ID] = p
-	s.byName[displayName] = p
-
-	return p, nil
-}
-
-// ClaimPlayer mirrors store.ClaimPlayer: upgrades an anonymous row in place
-// or fails with ErrPlayerAlreadyClaimed / ErrPlayerNotFound /
-// ErrDisplayNameTaken.
-func (s *stubPlayerStore) ClaimPlayer(
-	_ context.Context,
-	playerID int64,
-	displayName, email, passwordHash, requestedRole string,
-) (*Player, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	existing, ok := s.byID[playerID]
-	if !ok {
-		return nil, ErrPlayerNotFound
-	}
-	if existing.PasswordHash != "" {
-		return nil, ErrPlayerAlreadyClaimed
-	}
-	if other, exists := s.byName[displayName]; exists && other.ID != playerID {
-		return nil, ErrDisplayNameTaken
-	}
-	if email != "" {
-		for _, p := range s.byID {
-			if p.ID != playerID && p.Email == email {
-				return nil, ErrEmailTaken
-			}
-		}
-	}
-
-	delete(s.byName, existing.DisplayName)
-	existing.Email = email
-	existing.DisplayName = displayName
-	existing.PasswordHash = passwordHash
-	existing.Role = s.resolveRoleLocked(requestedRole)
-	s.byName[displayName] = existing
-
-	return existing, nil
-}
-
-func (s *stubPlayerStore) UpdatePlayerDisplayName(
-	_ context.Context, playerID int64, displayName string,
-) (*Player, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	existing, ok := s.byID[playerID]
-	if !ok {
-		return nil, ErrPlayerNotFound
-	}
-	if existing.PasswordHash != "" {
-		return nil, ErrPlayerNotAnonymous
-	}
-	if other, exists := s.byName[displayName]; exists && other.ID != playerID {
-		return nil, ErrDisplayNameTaken
-	}
-
-	delete(s.byName, existing.DisplayName)
-	existing.DisplayName = displayName
-	s.byName[displayName] = existing
-
-	return existing, nil
-}
-
-func (s *stubPlayerStore) RenamePlayer(
-	_ context.Context, playerID int64, displayName string,
-) (*Player, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if strings.TrimSpace(displayName) == "" {
-		return nil, ErrDisplayNameEmpty
-	}
-	existing, ok := s.byID[playerID]
-	if !ok {
-		return nil, ErrPlayerNotFound
-	}
-	if other, exists := s.byName[displayName]; exists && other.ID != playerID {
-		return nil, ErrDisplayNameTaken
-	}
-
-	delete(s.byName, existing.DisplayName)
-	existing.DisplayName = displayName
-	s.byName[displayName] = existing
-
-	return existing, nil
-}
-
-func (s *stubPlayerStore) SetPlayerPasswordHash(_ context.Context, displayName, passwordHash string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	p, ok := s.byName[displayName]
-	if !ok {
-		return ErrPlayerNotFound
-	}
-	p.PasswordHash = passwordHash
-
-	return nil
-}
-
-func (s *stubPlayerStore) ChangePlayerPassword(_ context.Context, playerID int64, passwordHash string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	p, ok := s.byID[playerID]
-	if !ok {
-		return ErrPlayerNotFound
-	}
-	p.PasswordHash = passwordHash
-	p.SessionVersion++
-
-	return nil
-}
-
-// resolveRoleLocked applies the same "first password-bearing registrant
-// becomes admin" rule as the production SQL. Caller must hold s.mu.
-func (s *stubPlayerStore) resolveRoleLocked(requestedRole string) string {
-	if requestedRole == RoleAdmin {
-		return RoleAdmin
-	}
-	for _, existing := range s.byID {
-		if existing.PasswordHash != "" {
-			return RolePlayer
-		}
-	}
-
-	return RoleAdmin
-}
-
-func discardLogger() *slog.Logger {
-	return slog.New(slog.DiscardHandler)
-}
 
 func postForm(t *testing.T, handler http.Handler, path string, values url.Values) *httptest.ResponseRecorder {
 	t.Helper()
@@ -311,7 +36,7 @@ func TestHandleRegisterForm_GET_RendersForm(t *testing.T) {
 	handler := HandleRegisterForm(
 		discardLogger(),
 		nil,
-		newStubPlayerStore(),
+		store.NewPlayerStore(dbtest.Open(t), discardLogger()),
 		session.New([]byte("k"), true),
 		false,
 	)
@@ -340,8 +65,8 @@ func TestHandleRegisterForm_GET_RendersForm(t *testing.T) {
 func TestHandleRegisterSubmit_FirstUser_BecomesAdmin(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	handler := HandleRegisterSubmit(discardLogger(), nil, players, session.New([]byte("k"), true), RegisterDeps{})
 
 	rec := postForm(t, handler, "/register", url.Values{
 		"display_name":     {"alice"},
@@ -352,7 +77,7 @@ func TestHandleRegisterSubmit_FirstUser_BecomesAdmin(t *testing.T) {
 
 	assertRegisterPending(t, rec, "alice@example.test")
 
-	p, err := store.GetPlayerByDisplayName(t.Context(), "alice")
+	p, err := players.GetPlayerByDisplayName(t.Context(), "alice")
 	if err != nil {
 		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
@@ -408,13 +133,21 @@ func assertSessionCleared(t *testing.T, rec *httptest.ResponseRecorder) {
 func TestHandleRegisterSubmit_SecondUser_DefaultsToPlayer(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	// Pre-seed first admin.
-	if _, err := store.CreatePlayer(t.Context(), "admin", "admin@example.test", "hash", RoleAdmin); err != nil {
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	// Pre-seed a credentialled admin so bob is not auto-promoted by the
+	// first-credentialled-registrant rule. (The migration-seeded admin row
+	// has no password_hash, so it does not count for that rule.)
+	if _, err := players.CreatePlayer(
+		t.Context(),
+		"seed-admin",
+		"seed-admin@example.test",
+		"hash",
+		RoleAdmin,
+	); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
+	handler := HandleRegisterSubmit(discardLogger(), nil, players, session.New([]byte("k"), true), RegisterDeps{})
 	rec := postForm(t, handler, "/register", url.Values{
 		"display_name":     {"bob"},
 		"email":            {"bob@example.test"},
@@ -424,7 +157,7 @@ func TestHandleRegisterSubmit_SecondUser_DefaultsToPlayer(t *testing.T) {
 
 	assertRegisterPending(t, rec, "bob@example.test")
 
-	p, err := store.GetPlayerByDisplayName(t.Context(), "bob")
+	p, err := players.GetPlayerByDisplayName(t.Context(), "bob")
 	if err != nil {
 		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
@@ -436,16 +169,16 @@ func TestHandleRegisterSubmit_SecondUser_DefaultsToPlayer(t *testing.T) {
 func TestHandleRegisterSubmit_AdminEmailsEnv_PromotesToAdmin(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
 	// Pre-seed first user so the count > 0 and the env var path is exercised.
-	if _, err := store.CreatePlayer(t.Context(), "first", "first@example.test", "h", RolePlayer); err != nil {
+	if _, err := players.CreatePlayer(t.Context(), "first", "first@example.test", "h", RolePlayer); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
 	handler := HandleRegisterSubmit(
 		discardLogger(),
 		nil,
-		store,
+		players,
 		session.New([]byte("k"), true),
 		RegisterDeps{AdminEmails: []string{"alice@example.test", "carol@example.test"}},
 	)
@@ -458,7 +191,7 @@ func TestHandleRegisterSubmit_AdminEmailsEnv_PromotesToAdmin(t *testing.T) {
 
 	assertRegisterPending(t, rec, "carol@example.test")
 
-	p, err := store.GetPlayerByDisplayName(t.Context(), "carol")
+	p, err := players.GetPlayerByDisplayName(t.Context(), "carol")
 	if err != nil {
 		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
@@ -470,8 +203,8 @@ func TestHandleRegisterSubmit_AdminEmailsEnv_PromotesToAdmin(t *testing.T) {
 func TestHandleRegisterSubmit_PasswordTooShort(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	handler := HandleRegisterSubmit(discardLogger(), nil, players, session.New([]byte("k"), true), RegisterDeps{})
 
 	rec := postForm(t, handler, "/register", url.Values{
 		"display_name":     {"alice"},
@@ -487,7 +220,7 @@ func TestHandleRegisterSubmit_PasswordTooShort(t *testing.T) {
 	if got := rec.Body.String(); !strings.Contains(got, want) {
 		t.Errorf("body = %q, want substring %q", got, want)
 	}
-	if _, err := store.GetPlayerByDisplayName(t.Context(), "alice"); !errors.Is(err, ErrPlayerNotFound) {
+	if _, err := players.GetPlayerByDisplayName(t.Context(), "alice"); !errors.Is(err, ErrPlayerNotFound) {
 		t.Errorf("player should not have been created, GetPlayerByDisplayName err = %v", err)
 	}
 }
@@ -499,8 +232,8 @@ func TestHandleRegisterSubmit_PasswordTooShort(t *testing.T) {
 func TestHandleRegisterSubmit_PasswordTooLong(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	handler := HandleRegisterSubmit(discardLogger(), nil, players, session.New([]byte("k"), true), RegisterDeps{})
 
 	longPassword := strings.Repeat("a", MaxPasswordLength+1)
 	rec := postForm(t, handler, "/register", url.Values{
@@ -517,7 +250,7 @@ func TestHandleRegisterSubmit_PasswordTooLong(t *testing.T) {
 	if got := rec.Body.String(); !strings.Contains(got, want) {
 		t.Errorf("body = %q, want substring %q", got, want)
 	}
-	if _, err := store.GetPlayerByDisplayName(t.Context(), "alice"); !errors.Is(err, ErrPlayerNotFound) {
+	if _, err := players.GetPlayerByDisplayName(t.Context(), "alice"); !errors.Is(err, ErrPlayerNotFound) {
 		t.Errorf("player should not have been created, GetPlayerByDisplayName err = %v", err)
 	}
 }
@@ -525,12 +258,12 @@ func TestHandleRegisterSubmit_PasswordTooLong(t *testing.T) {
 func TestHandleRegisterSubmit_DuplicateDisplayName(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	if _, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", "h", RolePlayer); err != nil {
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	if _, err := players.CreatePlayer(t.Context(), "alice", "alice@example.test", "h", RolePlayer); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
+	handler := HandleRegisterSubmit(discardLogger(), nil, players, session.New([]byte("k"), true), RegisterDeps{})
 	rec := postForm(t, handler, "/register", url.Values{
 		"display_name":     {"alice"},
 		"email":            {"alice@example.test"},
@@ -554,14 +287,14 @@ func TestHandleRegisterSubmit_DuplicateDisplayName(t *testing.T) {
 func TestHandleRegisterSubmit_DuplicateEmail(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	if _, err := store.CreatePlayer(t.Context(), "alice", "shared@example.test", "h", RolePlayer); err != nil {
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	if _, err := players.CreatePlayer(t.Context(), "alice", "shared@example.test", "h", RolePlayer); err != nil {
 		t.Fatalf("seed CreatePlayer err = %v, want nil", err)
 	}
 
 	sender := &recordingSender{}
 	handler := HandleRegisterSubmit(
-		discardLogger(), nil, store, session.New([]byte("k"), true),
+		discardLogger(), nil, players, session.New([]byte("k"), true),
 		RegisterDeps{Mailer: sender},
 	)
 	rec := postForm(t, handler, "/register", url.Values{
@@ -601,8 +334,8 @@ func TestHandleRegisterSubmit_DuplicateEmail(t *testing.T) {
 func TestHandleRegisterSubmit_RejectsInvalidEmail(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	handler := HandleRegisterSubmit(discardLogger(), nil, players, session.New([]byte("k"), true), RegisterDeps{})
 	rec := postForm(t, handler, "/register", url.Values{
 		"display_name":     {"alice"},
 		"email":            {"not-an-email"},
@@ -621,8 +354,8 @@ func TestHandleRegisterSubmit_RejectsInvalidEmail(t *testing.T) {
 func TestHandleRegisterSubmit_MatchingPasswords_CreatesPlayer(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	handler := HandleRegisterSubmit(discardLogger(), nil, players, session.New([]byte("k"), true), RegisterDeps{})
 
 	rec := postForm(t, handler, "/register", url.Values{
 		"display_name":     {"alice"},
@@ -632,7 +365,7 @@ func TestHandleRegisterSubmit_MatchingPasswords_CreatesPlayer(t *testing.T) {
 	})
 
 	assertRegisterPending(t, rec, "alice@example.test")
-	if _, err := store.GetPlayerByDisplayName(t.Context(), "alice"); err != nil {
+	if _, err := players.GetPlayerByDisplayName(t.Context(), "alice"); err != nil {
 		t.Errorf("player should have been created, err = %v", err)
 	}
 }
@@ -640,8 +373,8 @@ func TestHandleRegisterSubmit_MatchingPasswords_CreatesPlayer(t *testing.T) {
 func TestHandleRegisterSubmit_MismatchedPasswords_Rejects(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	handler := HandleRegisterSubmit(discardLogger(), nil, players, session.New([]byte("k"), true), RegisterDeps{})
 
 	password := "correctbattery"
 	rec := postForm(t, handler, "/register", url.Values{
@@ -673,7 +406,7 @@ func TestHandleRegisterSubmit_MismatchedPasswords_Rejects(t *testing.T) {
 	if strings.Contains(body, "correctbatterydifferent") {
 		t.Errorf("body must not leak the submitted password_confirm, got %q", body)
 	}
-	if _, err := store.GetPlayerByDisplayName(t.Context(), "alice"); !errors.Is(err, ErrPlayerNotFound) {
+	if _, err := players.GetPlayerByDisplayName(t.Context(), "alice"); !errors.Is(err, ErrPlayerNotFound) {
 		t.Errorf("player should not have been created, err = %v", err)
 	}
 }
@@ -681,8 +414,8 @@ func TestHandleRegisterSubmit_MismatchedPasswords_Rejects(t *testing.T) {
 func TestHandleRegisterSubmit_LowercasesAndTrimsEmail(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	handler := HandleRegisterSubmit(discardLogger(), nil, players, session.New([]byte("k"), true), RegisterDeps{})
 	rec := postForm(t, handler, "/register", url.Values{
 		"display_name":     {"alice"},
 		"email":            {"  ALICE@Example.Test "},
@@ -691,7 +424,7 @@ func TestHandleRegisterSubmit_LowercasesAndTrimsEmail(t *testing.T) {
 	})
 
 	assertRegisterPending(t, rec, "alice@example.test")
-	p, err := store.GetPlayerByDisplayName(t.Context(), "alice")
+	p, err := players.GetPlayerByDisplayName(t.Context(), "alice")
 	if err != nil {
 		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
@@ -708,14 +441,14 @@ func TestHandleRegisterSubmit_LowercasesAndTrimsEmail(t *testing.T) {
 func TestHandleRegisterSubmit_ClaimsAnonymousSession(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	anon, err := store.CreateAnonymousPlayer(t.Context(), "anon-existing")
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	anon, err := players.CreateAnonymousPlayer(t.Context(), "anon-existing")
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
 
 	sessions := session.New([]byte("k"), true)
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, sessions, RegisterDeps{})
+	handler := HandleRegisterSubmit(discardLogger(), nil, players, sessions, RegisterDeps{})
 
 	// Build a request that already carries the anonymous session cookie.
 	rec := httptest.NewRecorder()
@@ -741,7 +474,7 @@ func TestHandleRegisterSubmit_ClaimsAnonymousSession(t *testing.T) {
 
 	// The same row was upgraded - no new row should appear, and the
 	// anonymous displayName should be gone.
-	upgraded, err := store.GetPlayerByDisplayName(t.Context(), "alice")
+	upgraded, err := players.GetPlayerByDisplayName(t.Context(), "alice")
 	if err != nil {
 		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
@@ -751,7 +484,7 @@ func TestHandleRegisterSubmit_ClaimsAnonymousSession(t *testing.T) {
 	if upgraded.PasswordHash == "" {
 		t.Error("upgraded.PasswordHash is empty, want bcrypt hash from claim")
 	}
-	if _, err := store.GetPlayerByDisplayName(t.Context(), "anon-existing"); !errors.Is(err, ErrPlayerNotFound) {
+	if _, err := players.GetPlayerByDisplayName(t.Context(), "anon-existing"); !errors.Is(err, ErrPlayerNotFound) {
 		t.Errorf("anonymous row still resolvable by old displayName; err = %v, want ErrPlayerNotFound", err)
 	}
 }
@@ -763,8 +496,8 @@ func TestHandleRegisterSubmit_ClaimsAnonymousSession(t *testing.T) {
 func TestHandleRegisterSubmit_ClaimWithTakenDisplayName(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	if _, err := store.CreatePlayer(
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	if _, err := players.CreatePlayer(
 		t.Context(),
 		"alice",
 		"alice@example.test",
@@ -773,13 +506,13 @@ func TestHandleRegisterSubmit_ClaimWithTakenDisplayName(t *testing.T) {
 	); err != nil {
 		t.Fatalf("seed CreatePlayer err = %v, want nil", err)
 	}
-	anon, err := store.CreateAnonymousPlayer(t.Context(), "anon-claimer")
+	anon, err := players.CreateAnonymousPlayer(t.Context(), "anon-claimer")
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
 
 	sessions := session.New([]byte("k"), true)
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, sessions, RegisterDeps{})
+	handler := HandleRegisterSubmit(discardLogger(), nil, players, sessions, RegisterDeps{})
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, anon.ID, 0)
@@ -803,7 +536,7 @@ func TestHandleRegisterSubmit_ClaimWithTakenDisplayName(t *testing.T) {
 		t.Errorf("status = %d, want %d", got, want)
 	}
 	// Anonymous row was not mutated.
-	stillAnon, err := store.GetPlayerByID(t.Context(), anon.ID)
+	stillAnon, err := players.GetPlayerByID(t.Context(), anon.ID)
 	if err != nil {
 		t.Fatalf("GetPlayerByID err = %v, want nil", err)
 	}
@@ -823,13 +556,13 @@ func TestHandleRegisterSubmit_ClaimWithTakenDisplayName(t *testing.T) {
 func TestHandleRegisterSubmit_ClaimAlreadyClaimed_FallsBackToCreate(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	anon, err := store.CreateAnonymousPlayer(t.Context(), "anon-racer")
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	anon, err := players.CreateAnonymousPlayer(t.Context(), "anon-racer")
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
 	// Simulate another tab claiming the row first.
-	if _, claimErr := store.ClaimPlayer(
+	if _, claimErr := players.ClaimPlayer(
 		t.Context(),
 		anon.ID,
 		"winner",
@@ -841,7 +574,7 @@ func TestHandleRegisterSubmit_ClaimAlreadyClaimed_FallsBackToCreate(t *testing.T
 	}
 
 	sessions := session.New([]byte("k"), true)
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, sessions, RegisterDeps{})
+	handler := HandleRegisterSubmit(discardLogger(), nil, players, sessions, RegisterDeps{})
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, anon.ID, 0) // cookie still points at the now-claimed row
@@ -864,7 +597,7 @@ func TestHandleRegisterSubmit_ClaimAlreadyClaimed_FallsBackToCreate(t *testing.T
 	assertRegisterPending(t, rec, "latecomer@example.test")
 	assertSessionCleared(t, rec)
 	// A fresh row was created instead of clobbering the already-claimed one.
-	latecomer, err := store.GetPlayerByDisplayName(t.Context(), "latecomer")
+	latecomer, err := players.GetPlayerByDisplayName(t.Context(), "latecomer")
 	if err != nil {
 		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
@@ -879,7 +612,7 @@ func TestHandleLoginForm_GET_RendersForm(t *testing.T) {
 	handler := HandleLoginForm(
 		discardLogger(),
 		nil,
-		newStubPlayerStore(),
+		store.NewPlayerStore(dbtest.Open(t), discardLogger()),
 		session.New([]byte("k"), true),
 		false,
 		false,
@@ -903,7 +636,7 @@ func TestHandleLoginForm_RegistrationDisabled_HidesRegisterLink(t *testing.T) {
 	handler := HandleLoginForm(
 		discardLogger(),
 		nil,
-		newStubPlayerStore(),
+		store.NewPlayerStore(dbtest.Open(t), discardLogger()),
 		session.New([]byte("k"), true),
 		false,
 		false,
@@ -927,7 +660,7 @@ func TestHandleLoginForm_RegistrationEnabled_ShowsRegisterLink(t *testing.T) {
 	handler := HandleLoginForm(
 		discardLogger(),
 		nil,
-		newStubPlayerStore(),
+		store.NewPlayerStore(dbtest.Open(t), discardLogger()),
 		session.New([]byte("k"), true),
 		true,
 		false,
@@ -952,7 +685,7 @@ func TestHandleLoginForm_RegistrationEnabled_ShowsRegisterLink(t *testing.T) {
 func TestHandleLoginForm_AlreadySignedIn_RedirectsToLanding(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
 	hash, err := HashPassword("correctbattery")
 	if err != nil {
 		t.Fatalf("HashPassword err = %v, want nil", err)
@@ -961,7 +694,7 @@ func TestHandleLoginForm_AlreadySignedIn_RedirectsToLanding(t *testing.T) {
 	// registrant becomes admin" rule (mirroring the production SQL)
 	// promotes that row, not carol. Carol then stays as a plain
 	// player and the redirect lands on / instead of /admin/quizzes.
-	if _, seedErr := store.CreatePlayer(
+	if _, seedErr := players.CreatePlayer(
 		t.Context(),
 		"first-admin",
 		"first-admin@example.test",
@@ -970,13 +703,13 @@ func TestHandleLoginForm_AlreadySignedIn_RedirectsToLanding(t *testing.T) {
 	); seedErr != nil {
 		t.Fatalf("seed admin err = %v, want nil", seedErr)
 	}
-	player, err := store.CreatePlayer(t.Context(), "carol", "carol@example.test", hash, RolePlayer)
+	player, err := players.CreatePlayer(t.Context(), "carol", "carol@example.test", hash, RolePlayer)
 	if err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
 	sessions := session.New([]byte("k"), true)
-	handler := HandleLoginForm(discardLogger(), nil, store, sessions, false, false)
+	handler := HandleLoginForm(discardLogger(), nil, players, sessions, false, false)
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, player.ID, 0)
@@ -1001,14 +734,14 @@ func TestHandleLoginForm_AlreadySignedIn_RedirectsToLanding(t *testing.T) {
 func TestHandleLoginForm_AnonymousSession_RendersForm(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	anon, err := store.CreateAnonymousPlayer(t.Context(), "anon-fancy")
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	anon, err := players.CreateAnonymousPlayer(t.Context(), "anon-fancy")
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
 
 	sessions := session.New([]byte("k"), true)
-	handler := HandleLoginForm(discardLogger(), nil, store, sessions, false, false)
+	handler := HandleLoginForm(discardLogger(), nil, players, sessions, false, false)
 
 	rec := httptest.NewRecorder()
 	sessions.Set(rec, anon.ID, 0)
@@ -1027,54 +760,53 @@ func TestHandleLoginForm_AnonymousSession_RendersForm(t *testing.T) {
 	}
 }
 
-// loginDeps returns a LoginDeps with the supplied store + session
+// loginDeps returns a LoginDeps with the supplied players + session
 // manager + limiter and the rest of the fields zero-valued. Mailer /
 // Tokens / ResendLimiter staying nil keeps the verify-resend branch
 // dormant for tests that don't exercise it; the verified-email
 // helper [markVerified] is what flips the gate off for happy-path
 // tests.
 func loginDeps(
-	store PlayerStore, sessions *session.Manager, limiter *LoginRateLimiter,
+	players PlayerStore, sessions *session.Manager, limiter *LoginRateLimiter,
 ) LoginDeps {
 	return LoginDeps{
-		Players:  store,
+		Players:  players,
 		Sessions: sessions,
 		Limiter:  limiter,
 	}
 }
 
-// markVerified stamps email_verified_at on the named stub player so
-// the post-#492 login gate lets them through. Production rows get
-// stamped via SendVerifyEmail's ConsumeVerifyToken path; in tests we
-// just toggle the column directly because the verify dance is not
-// what these cases pin.
-func markVerified(t *testing.T, store *stubPlayerStore, displayName string) {
+// markVerified stamps email_verified_at on the named player so the
+// post-#492 login gate lets them through. Production rows get stamped
+// via SendVerifyEmail's ConsumeVerifyToken path; in tests we set the
+// column directly through SetPlayerEmailVerifiedNow because the verify
+// dance is not what these cases pin.
+func markVerified(t *testing.T, players *store.PlayerStore, displayName string) {
 	t.Helper()
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	p, ok := store.byName[displayName]
-	if !ok {
-		t.Fatalf("markVerified: no stub player named %q", displayName)
+	p, err := players.GetPlayerByDisplayName(t.Context(), displayName)
+	if err != nil {
+		t.Fatalf("markVerified: GetPlayerByDisplayName(%q) err = %v, want nil", displayName, err)
 	}
-	now := time.Now().UTC()
-	p.EmailVerifiedAt = &now
+	if err := players.SetPlayerEmailVerifiedNow(t.Context(), p.ID); err != nil {
+		t.Fatalf("markVerified: SetPlayerEmailVerifiedNow err = %v, want nil", err)
+	}
 }
 
 func TestHandleLoginSubmit_Success(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
 	hash, err := HashPassword("correctbattery")
 	if err != nil {
 		t.Fatalf("HashPassword err = %v, want nil", err)
 	}
-	if _, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RoleAdmin); err != nil {
+	if _, err := players.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RoleAdmin); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
-	markVerified(t, store, "alice")
+	markVerified(t, players, "alice")
 
 	handler := HandleLoginSubmit(discardLogger(), nil,
-		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
+		loginDeps(players, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 	rec := postForm(t, handler, "/login", url.Values{
 		"email":    {"alice@example.test"},
 		"password": {"correctbattery"},
@@ -1094,18 +826,18 @@ func TestHandleLoginSubmit_Success(t *testing.T) {
 func TestHandleLoginSubmit_HonoursNext(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
 	hash, err := HashPassword("correctbattery")
 	if err != nil {
 		t.Fatalf("HashPassword err = %v, want nil", err)
 	}
-	if _, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RoleAdmin); err != nil {
+	if _, err := players.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RoleAdmin); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
-	markVerified(t, store, "alice")
+	markVerified(t, players, "alice")
 
 	handler := HandleLoginSubmit(discardLogger(), nil,
-		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
+		loginDeps(players, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 	rec := postForm(t, handler, "/login", url.Values{
 		"email":    {"alice@example.test"},
 		"password": {"correctbattery"},
@@ -1126,18 +858,18 @@ func TestHandleLoginSubmit_HonoursNext(t *testing.T) {
 func TestHandleLoginSubmit_RejectsUnsafeNext(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
 	hash, err := HashPassword("correctbattery")
 	if err != nil {
 		t.Fatalf("HashPassword err = %v, want nil", err)
 	}
-	if _, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RoleAdmin); err != nil {
+	if _, err := players.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RoleAdmin); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
-	markVerified(t, store, "alice")
+	markVerified(t, players, "alice")
 
 	handler := HandleLoginSubmit(discardLogger(), nil,
-		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
+		loginDeps(players, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 	rec := postForm(t, handler, "/login", url.Values{
 		"email":    {"alice@example.test"},
 		"password": {"correctbattery"},
@@ -1158,10 +890,10 @@ func TestHandleLoginSubmit_RejectsUnsafeNext(t *testing.T) {
 func TestHandleLoginSubmit_Success_Player(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
 	// Pre-seed an admin so the "first password-bearing registrant
 	// becomes admin" rule doesn't accidentally promote bob.
-	if _, err := store.CreatePlayer(
+	if _, err := players.CreatePlayer(
 		t.Context(),
 		"first-admin",
 		"first-admin@example.test",
@@ -1174,13 +906,13 @@ func TestHandleLoginSubmit_Success_Player(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HashPassword err = %v, want nil", err)
 	}
-	if _, err := store.CreatePlayer(t.Context(), "bob", "bob@example.test", hash, RolePlayer); err != nil {
+	if _, err := players.CreatePlayer(t.Context(), "bob", "bob@example.test", hash, RolePlayer); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
-	markVerified(t, store, "bob")
+	markVerified(t, players, "bob")
 
 	handler := HandleLoginSubmit(discardLogger(), nil,
-		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
+		loginDeps(players, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 	rec := postForm(t, handler, "/login", url.Values{
 		"email":    {"bob@example.test"},
 		"password": {"correctbattery"},
@@ -1197,9 +929,9 @@ func TestHandleLoginSubmit_Success_Player(t *testing.T) {
 func TestHandleLoginSubmit_BadCredentials_UnknownUser(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
 	handler := HandleLoginSubmit(discardLogger(), nil,
-		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
+		loginDeps(players, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 
 	rec := postForm(t, handler, "/login", url.Values{
 		"email":    {"ghost@example.test"},
@@ -1217,18 +949,18 @@ func TestHandleLoginSubmit_BadCredentials_UnknownUser(t *testing.T) {
 func TestHandleLoginSubmit_BadCredentials_WrongPassword(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
 	hash, err := HashPassword("right-password-yes")
 	if err != nil {
 		t.Fatalf("HashPassword err = %v, want nil", err)
 	}
-	if _, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RolePlayer); err != nil {
+	if _, err := players.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RolePlayer); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
-	markVerified(t, store, "alice")
+	markVerified(t, players, "alice")
 
 	handler := HandleLoginSubmit(discardLogger(), nil,
-		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
+		loginDeps(players, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 	rec := postForm(t, handler, "/login", url.Values{
 		"email":    {"alice@example.test"},
 		"password": {"wrong-password-no"},
@@ -1246,13 +978,13 @@ func TestHandleLoginSubmit_RejectsEmptyHash(t *testing.T) {
 	t.Parallel()
 
 	// Seed a player with no password hash (legacy admin from migration).
-	store := newStubPlayerStore()
-	if _, err := store.CreatePlayer(t.Context(), "legacy", "legacy@example.test", "", RoleAdmin); err != nil {
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	if _, err := players.CreatePlayer(t.Context(), "legacy", "legacy@example.test", "", RoleAdmin); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
 	handler := HandleLoginSubmit(discardLogger(), nil,
-		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
+		loginDeps(players, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 	rec := postForm(t, handler, "/login", url.Values{
 		"email":    {"legacy@example.test"},
 		"password": {"anything-goes-here-13"},
@@ -1270,18 +1002,18 @@ func TestHandleLoginSubmit_RejectsEmptyHash(t *testing.T) {
 func TestHandleLoginSubmit_EmailMixedCaseAndWhitespace(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
 	hash, err := HashPassword("correctbattery")
 	if err != nil {
 		t.Fatalf("HashPassword err = %v, want nil", err)
 	}
-	if _, err := store.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RoleAdmin); err != nil {
+	if _, err := players.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RoleAdmin); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
-	markVerified(t, store, "alice")
+	markVerified(t, players, "alice")
 
 	handler := HandleLoginSubmit(discardLogger(), nil,
-		loginDeps(store, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
+		loginDeps(players, session.New([]byte("k"), true), NewLoginRateLimiter(time.Minute, nil)))
 	rec := postForm(t, handler, "/login", url.Values{
 		"email":    {"  ALICE@Example.Test "},
 		"password": {"correctbattery"},
@@ -1302,8 +1034,8 @@ func TestHandleLoginSubmit_EmailMixedCaseAndWhitespace(t *testing.T) {
 func TestHandleRegisterSubmit_BlankDisplayName_GeneratesPetname(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	handler := HandleRegisterSubmit(discardLogger(), nil, players, session.New([]byte("k"), true), RegisterDeps{})
 
 	rec := postForm(t, handler, "/register", url.Values{
 		"display_name":     {"   "},
@@ -1316,7 +1048,7 @@ func TestHandleRegisterSubmit_BlankDisplayName_GeneratesPetname(t *testing.T) {
 	// The whitespace-only displayName path falls into GeneratePetname, so
 	// no row should be created under the empty key. The row exists under
 	// the petname; we look it up by email instead.
-	p, err := store.GetPlayerByEmail(t.Context(), "petname@example.test")
+	p, err := players.GetPlayerByEmail(t.Context(), "petname@example.test")
 	if err != nil {
 		t.Fatalf("GetPlayerByEmail err = %v, want nil", err)
 	}
@@ -1328,8 +1060,8 @@ func TestHandleRegisterSubmit_BlankDisplayName_GeneratesPetname(t *testing.T) {
 func TestHandleRegisterSubmit_PasswordExactlyMinLength(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
-	handler := HandleRegisterSubmit(discardLogger(), nil, store, session.New([]byte("k"), true), RegisterDeps{})
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	handler := HandleRegisterSubmit(discardLogger(), nil, players, session.New([]byte("k"), true), RegisterDeps{})
 
 	password := strings.Repeat("a", MinPasswordLength) // exactly 13 characters
 	rec := postForm(t, handler, "/register", url.Values{
@@ -1340,7 +1072,7 @@ func TestHandleRegisterSubmit_PasswordExactlyMinLength(t *testing.T) {
 	})
 
 	assertRegisterPending(t, rec, "alice@example.test")
-	if _, err := store.GetPlayerByDisplayName(t.Context(), "alice"); err != nil {
+	if _, err := players.GetPlayerByDisplayName(t.Context(), "alice"); err != nil {
 		t.Errorf("player should have been created, err = %v", err)
 	}
 }
@@ -1399,12 +1131,12 @@ func TestHandleLogout_ClearsCookieAndRedirects(t *testing.T) {
 func TestHandleLoginSubmit_UnverifiedEmail_RefusesAndResends(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
 	hash, err := HashPassword("correctbattery")
 	if err != nil {
 		t.Fatalf("HashPassword err = %v, want nil", err)
 	}
-	if _, err := store.CreatePlayer(t.Context(), "unv", "unv@example.test", hash, RolePlayer); err != nil {
+	if _, err := players.CreatePlayer(t.Context(), "unv", "unv@example.test", hash, RolePlayer); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
 
@@ -1412,7 +1144,7 @@ func TestHandleLoginSubmit_UnverifiedEmail_RefusesAndResends(t *testing.T) {
 	sender := &recordingSender{}
 	sessions := session.New([]byte("k"), true)
 	handler := HandleLoginSubmit(discardLogger(), nil, LoginDeps{
-		Players:       store,
+		Players:       players,
 		Sessions:      sessions,
 		Limiter:       NewLoginRateLimiter(time.Minute, nil),
 		Mailer:        sender,
@@ -1474,20 +1206,20 @@ func TestHandleLoginSubmit_UnverifiedEmail_RefusesAndResends(t *testing.T) {
 func TestHandleLoginSubmit_VerifiedEmail_SignsIn(t *testing.T) {
 	t.Parallel()
 
-	store := newStubPlayerStore()
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
 	hash, err := HashPassword("correctbattery")
 	if err != nil {
 		t.Fatalf("HashPassword err = %v, want nil", err)
 	}
-	if _, err := store.CreatePlayer(t.Context(), "ver", "ver@example.test", hash, RoleAdmin); err != nil {
+	if _, err := players.CreatePlayer(t.Context(), "ver", "ver@example.test", hash, RoleAdmin); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
-	markVerified(t, store, "ver")
+	markVerified(t, players, "ver")
 
 	tokens := &recordingVerifyTokenStore{}
 	sender := &recordingSender{}
 	handler := HandleLoginSubmit(discardLogger(), nil, LoginDeps{
-		Players:       store,
+		Players:       players,
 		Sessions:      session.New([]byte("k"), true),
 		Limiter:       NewLoginRateLimiter(time.Minute, nil),
 		Mailer:        sender,
