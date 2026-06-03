@@ -1,367 +1,41 @@
+//go:build integration
+
 package clientapi_test
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/starquake/topbanana/internal/auth"
 	. "github.com/starquake/topbanana/internal/clientapi"
 	"github.com/starquake/topbanana/internal/game"
-	"github.com/starquake/topbanana/internal/quiz"
 )
 
-// withPlayer returns ctx annotated with a stub authenticated player. Use it
+// withPlayer returns ctx annotated with an authenticated player. Use it
 // when the test exercises a handler that pulls the player off the context
-// (typically because EnsurePlayer would do so in production).
+// (typically because EnsurePlayer would do so in production). The id must
+// be a real players row so the game/participant foreign keys hold.
 func withPlayer(ctx context.Context, id int64) context.Context {
 	return auth.WithPlayer(ctx, &auth.Player{ID: id, DisplayName: "stub", Role: auth.RolePlayer})
-}
-
-var errStub = errors.New("stub error")
-
-type stubQuizStore struct {
-	listQuizzes       func(ctx context.Context) ([]*quiz.Quiz, error)
-	listPublicQuizzes func(ctx context.Context) ([]*quiz.Quiz, error)
-	getQuiz           func(ctx context.Context, id int64) (*quiz.Quiz, error)
-	quizExists        func(ctx context.Context, id int64) (bool, error)
-	getOption         func(ctx context.Context, id int64) (*quiz.Option, error)
-	getQuestion       func(ctx context.Context, id int64) (*quiz.Question, error)
-}
-
-func (stubQuizStore) Ping(_ context.Context) error { return nil }
-
-func (s stubQuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
-	if s.listQuizzes == nil {
-		return nil, errStub
-	}
-
-	return s.listQuizzes(ctx)
-}
-
-func (s stubQuizStore) ListPublicQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
-	if s.listPublicQuizzes != nil {
-		return s.listPublicQuizzes(ctx)
-	}
-	if s.listQuizzes != nil {
-		return s.listQuizzes(ctx)
-	}
-
-	return nil, errStub
-}
-
-func (stubQuizStore) QuestionCountsByQuiz(_ context.Context) (map[int64]int, error) {
-	return map[int64]int{}, nil
-}
-
-func (s stubQuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
-	if s.getQuiz == nil {
-		return nil, errStub
-	}
-
-	return s.getQuiz(ctx, id)
-}
-
-func (s stubQuizStore) QuizExists(ctx context.Context, id int64) (bool, error) {
-	if s.quizExists == nil {
-		return false, errors.ErrUnsupported
-	}
-
-	return s.quizExists(ctx, id)
-}
-
-func (s stubQuizStore) GetOption(ctx context.Context, id int64) (*quiz.Option, error) {
-	if s.getOption == nil {
-		return nil, errStub
-	}
-
-	return s.getOption(ctx, id)
-}
-
-func (stubQuizStore) CreateQuiz(_ context.Context, _ *quiz.Quiz) error         { return errStub }
-func (stubQuizStore) UpdateQuiz(_ context.Context, _ *quiz.Quiz) error         { return errStub }
-func (stubQuizStore) DeleteQuiz(_ context.Context, _ int64) error              { return errStub }
-func (stubQuizStore) CreateQuestion(_ context.Context, _ *quiz.Question) error { return errStub }
-func (stubQuizStore) CreateQuestionAtNextPosition(_ context.Context, _ *quiz.Question) error {
-	return errStub
-}
-func (stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error { return errStub }
-
-func (stubQuizStore) SwapQuestionPositions(_ context.Context, _, _ int64, _ string) error {
-	return errStub
-}
-func (stubQuizStore) DeleteQuestion(_ context.Context, _ int64) error { return errStub }
-
-func (stubQuizStore) ListQuestions(_ context.Context, _ int64) ([]*quiz.Question, error) {
-	return nil, errStub
-}
-
-func (s stubQuizStore) GetQuestion(ctx context.Context, id int64) (*quiz.Question, error) {
-	if s.getQuestion == nil {
-		return nil, errStub
-	}
-
-	return s.getQuestion(ctx, id)
-}
-
-func (stubQuizStore) GetOptionsByIDs(_ context.Context, _ []int64) ([]*quiz.Option, error) {
-	return nil, errStub
-}
-
-// ListRoundsByQuiz defaults to "no rounds" so existing GetNextQuestion
-// flow tests don't have to opt in: the round-walking iterator in
-// game.Service.GetNext calls this on every /next request and an errStub
-// would 500 every test that doesn't care about round boundaries.
-func (stubQuizStore) ListRoundsByQuiz(_ context.Context, _ int64) ([]*quiz.Round, error) {
-	return nil, nil
-}
-
-func (stubQuizStore) GetRound(_ context.Context, _ int64) (*quiz.Round, error) {
-	return nil, errStub
-}
-
-func (stubQuizStore) GetDefaultRound(_ context.Context, _ int64) (*quiz.Round, error) {
-	return nil, errStub
-}
-func (stubQuizStore) CreateRound(_ context.Context, _ *quiz.Round) error { return errStub }
-func (stubQuizStore) UpdateRound(_ context.Context, _ *quiz.Round) error { return errStub }
-func (stubQuizStore) DeleteRound(_ context.Context, _ int64) error       { return errStub }
-func (stubQuizStore) MoveRound(_ context.Context, _, _ int64, _ string) error {
-	return errStub
-}
-
-func (stubQuizStore) MoveQuestionToRound(_ context.Context, _, _, _ int64) error {
-	return errStub
-}
-
-type stubGameStore struct {
-	getGame                            func(ctx context.Context, id string) (*game.Game, error)
-	getGameByPlayerAndQuiz             func(ctx context.Context, playerID, quizID int64) (*game.Game, error)
-	createGame                         func(ctx context.Context, g *game.Game) error
-	createGameAndParticipant           func(ctx context.Context, g *game.Game, p *game.Participant) error
-	startGame                          func(ctx context.Context, id string) error
-	createParticipant                  func(ctx context.Context, p *game.Participant) error
-	createQuestion                     func(ctx context.Context, gq *game.Question) error
-	createAnswer                       func(ctx context.Context, a *game.Answer) error
-	listAnswersForQuizLeaderboard      func(ctx context.Context, quizID int64) ([]*game.LeaderboardAnswer, error)
-	listParticipantsForQuizLeaderboard func(ctx context.Context, quizID int64, staleBefore time.Time) ([]*game.LeaderboardParticipant, error)
-	deleteGamesForPlayerOnQuiz         func(ctx context.Context, playerID, quizID int64) error
-	listQuizIDsForPlayer               func(ctx context.Context, playerID int64) ([]int64, error)
-	markRoundSeen                      func(ctx context.Context, gameID string, roundID int64, phase game.RoundPhase) error
-	listSeenRoundPhasesByGame          func(ctx context.Context, gameID string) ([]game.SeenRoundPhase, error)
-}
-
-func (stubGameStore) Ping(_ context.Context) error { return nil }
-
-func (s stubGameStore) GetGame(ctx context.Context, id string) (*game.Game, error) {
-	if s.getGame == nil {
-		return nil, errStub
-	}
-
-	return s.getGame(ctx, id)
-}
-
-func (s stubGameStore) GetGameByPlayerAndQuiz(
-	ctx context.Context, playerID, quizID int64,
-) (*game.Game, error) {
-	if s.getGameByPlayerAndQuiz == nil {
-		// Default to "no existing game" so existing CreateGame tests
-		// continue to exercise the success path.
-		return nil, game.ErrGameNotFound
-	}
-
-	return s.getGameByPlayerAndQuiz(ctx, playerID, quizID)
-}
-
-func (s stubGameStore) CreateGame(ctx context.Context, g *game.Game) error {
-	if s.createGame == nil {
-		return errStub
-	}
-
-	return s.createGame(ctx, g)
-}
-
-func (s stubGameStore) DeleteGamesForPlayerOnQuiz(
-	ctx context.Context, playerID, quizID int64,
-) error {
-	if s.deleteGamesForPlayerOnQuiz == nil {
-		return errStub
-	}
-
-	return s.deleteGamesForPlayerOnQuiz(ctx, playerID, quizID)
-}
-
-func (s stubGameStore) ListQuizIDsForPlayer(ctx context.Context, playerID int64) ([]int64, error) {
-	if s.listQuizIDsForPlayer == nil {
-		return nil, errStub
-	}
-
-	return s.listQuizIDsForPlayer(ctx, playerID)
-}
-
-func (s stubGameStore) MarkRoundSeen(
-	ctx context.Context, gameID string, roundID int64, phase game.RoundPhase,
-) error {
-	if s.markRoundSeen == nil {
-		return errStub
-	}
-
-	return s.markRoundSeen(ctx, gameID, roundID, phase)
-}
-
-// ListSeenRoundPhasesByGame defaults to "no seen phases" so existing
-// /next flow tests don't have to opt in - the round-walking iterator
-// calls this on every request and an errStub would 500 every test that
-// doesn't care about round boundaries.
-func (s stubGameStore) ListSeenRoundPhasesByGame(
-	ctx context.Context, gameID string,
-) ([]game.SeenRoundPhase, error) {
-	if s.listSeenRoundPhasesByGame == nil {
-		return nil, nil
-	}
-
-	return s.listSeenRoundPhasesByGame(ctx, gameID)
-}
-
-func (s stubGameStore) StartGame(ctx context.Context, id string) error {
-	if s.startGame == nil {
-		return errStub
-	}
-
-	return s.startGame(ctx, id)
-}
-
-func (s stubGameStore) CreateParticipant(ctx context.Context, p *game.Participant) error {
-	if s.createParticipant == nil {
-		return errStub
-	}
-
-	return s.createParticipant(ctx, p)
-}
-
-// CreateGameAndParticipant serves the dedicated stub when set;
-// otherwise falls back to calling createGame + createParticipant +
-// startGame in sequence so test setups written against the old
-// three-call shape keep working without per-test churn. New tests
-// that need to assert the transaction boundary (e.g. participant
-// fails after game inserts) should wire createGameAndParticipant
-// directly.
-func (s stubGameStore) CreateGameAndParticipant(
-	ctx context.Context, g *game.Game, p *game.Participant,
-) error {
-	if s.createGameAndParticipant != nil {
-		return s.createGameAndParticipant(ctx, g, p)
-	}
-	if s.createGame != nil {
-		if err := s.createGame(ctx, g); err != nil {
-			return err
-		}
-	}
-	p.GameID = g.ID
-	if s.createParticipant != nil {
-		if err := s.createParticipant(ctx, p); err != nil {
-			return err
-		}
-	}
-	if s.startGame != nil {
-		if err := s.startGame(ctx, g.ID); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (s stubGameStore) CreateQuestion(ctx context.Context, gq *game.Question) error {
-	if s.createQuestion == nil {
-		return errStub
-	}
-
-	return s.createQuestion(ctx, gq)
-}
-
-func (s stubGameStore) CreateAnswer(ctx context.Context, a *game.Answer) error {
-	if s.createAnswer == nil {
-		return errStub
-	}
-
-	return s.createAnswer(ctx, a)
-}
-
-func (s stubGameStore) ListAnswersForQuizLeaderboard(
-	ctx context.Context, quizID int64,
-) ([]*game.LeaderboardAnswer, error) {
-	if s.listAnswersForQuizLeaderboard == nil {
-		return nil, errStub
-	}
-
-	return s.listAnswersForQuizLeaderboard(ctx, quizID)
-}
-
-// ListParticipantsForQuizLeaderboard serves the participants stub when
-// set; otherwise it derives participants from the configured answer
-// stub so existing leaderboard tests don't have to wire both. Tests
-// that need to exercise the no-answer-participant path (#335) set the
-// participants stub explicitly.
-func (s stubGameStore) ListParticipantsForQuizLeaderboard(
-	ctx context.Context, quizID int64, staleBefore time.Time,
-) ([]*game.LeaderboardParticipant, error) {
-	if s.listParticipantsForQuizLeaderboard != nil {
-		return s.listParticipantsForQuizLeaderboard(ctx, quizID, staleBefore)
-	}
-	if s.listAnswersForQuizLeaderboard == nil {
-		return nil, errStub
-	}
-
-	answers, err := s.listAnswersForQuizLeaderboard(ctx, quizID)
-	if err != nil {
-		return nil, err
-	}
-
-	seen := make(map[int64]int)
-	var out []*game.LeaderboardParticipant
-	for _, a := range answers {
-		if i, ok := seen[a.PlayerID]; ok {
-			out[i].IsCompleted = a.IsCompleted
-
-			continue
-		}
-		seen[a.PlayerID] = len(out)
-		out = append(out, &game.LeaderboardParticipant{
-			PlayerID: a.PlayerID, DisplayName: a.DisplayName, IsCompleted: a.IsCompleted,
-		})
-	}
-
-	return out, nil
-}
-
-func newService(gs stubGameStore, qs stubQuizStore) *game.Service {
-	return game.NewService(gs, qs, slog.New(slog.DiscardHandler))
 }
 
 func TestHandleQuizList(t *testing.T) {
 	t.Parallel()
 
-	logger := slog.New(slog.DiscardHandler)
-	now := time.Now().Truncate(time.Second)
-
 	t.Run("returns quizzes as JSON", func(t *testing.T) {
 		t.Parallel()
 
-		handler := HandleQuizList(logger, stubQuizStore{
-			listQuizzes: func(_ context.Context) ([]*quiz.Quiz, error) {
-				return []*quiz.Quiz{
-					{ID: 1, Title: "Quiz One", Slug: "quiz-one", Description: "First", CreatedAt: now},
-					{ID: 2, Title: "Quiz Two", Slug: "quiz-two", Description: "Second", CreatedAt: now},
-				}, nil
-			},
-		})
+		env := newTestEnv(t)
+		env.seedQuiz(t, twoQuestionQuiz("Quiz One", "quiz-one"))
+		env.seedQuiz(t, twoQuestionQuiz("Quiz Two", "quiz-two"))
+
+		handler := HandleQuizList(env.logger, env.quizzes)
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
 		rec := httptest.NewRecorder()
@@ -384,11 +58,10 @@ func TestHandleQuizList(t *testing.T) {
 	t.Run("returns 500 on store error", func(t *testing.T) {
 		t.Parallel()
 
-		handler := HandleQuizList(logger, stubQuizStore{
-			listQuizzes: func(_ context.Context) ([]*quiz.Quiz, error) {
-				return nil, errStub
-			},
-		})
+		env := newTestEnv(t)
+		env.closeStore(t)
+
+		handler := HandleQuizList(env.logger, env.quizzes)
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes", nil)
 		rec := httptest.NewRecorder()
@@ -403,41 +76,18 @@ func TestHandleQuizList(t *testing.T) {
 func TestHandleQuizGet(t *testing.T) {
 	t.Parallel()
 
-	logger := slog.New(slog.DiscardHandler)
-	now := time.Now().Truncate(time.Second)
-
 	t.Run("returns full quiz with questions and options", func(t *testing.T) {
 		t.Parallel()
 
-		store := stubQuizStore{
-			getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{
-					ID:          id,
-					Title:       "Quiz One",
-					Slug:        "quiz-one",
-					Description: "First",
-					CreatedAt:   now,
-					Questions: []*quiz.Question{
-						{
-							ID:       10,
-							QuizID:   id,
-							Text:     "Question text",
-							ImageURL: "http://example.com/img.png",
-							Position: 1,
-							Options: []*quiz.Option{
-								{ID: 100, QuestionID: 10, Text: "Option A", Correct: true},
-								{ID: 101, QuestionID: 10, Text: "Option B", Correct: false},
-							},
-						},
-					},
-				}, nil
-			},
-		}
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz One", "quiz-one"))
 
-		handler := HandleQuizGet(logger, store)
+		handler := HandleQuizGet(env.logger, env.quizzes)
 
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes/quiz-one-1", nil)
-		req.SetPathValue("slugID", "quiz-one-1")
+		req := httptest.NewRequestWithContext(
+			t.Context(), http.MethodGet, fmt.Sprintf("/api/quizzes/quiz-one-%d", qz.ID), nil,
+		)
+		req.SetPathValue("slugID", fmt.Sprintf("quiz-one-%d", qz.ID))
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -459,7 +109,7 @@ func TestHandleQuizGet(t *testing.T) {
 			t.Fatal("questions field missing or wrong type")
 		}
 
-		if got, want := len(questions), 1; got != want {
+		if got, want := len(questions), 2; got != want {
 			t.Fatalf("len(questions) = %v, want %v", got, want)
 		}
 
@@ -481,13 +131,9 @@ func TestHandleQuizGet(t *testing.T) {
 	t.Run("returns 404 when quiz not found", func(t *testing.T) {
 		t.Parallel()
 
-		store := stubQuizStore{
-			getQuiz: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
-				return nil, quiz.ErrQuizNotFound
-			},
-		}
+		env := newTestEnv(t)
 
-		handler := HandleQuizGet(logger, store)
+		handler := HandleQuizGet(env.logger, env.quizzes)
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes/quiz-one-99", nil)
 		req.SetPathValue("slugID", "quiz-one-99")
@@ -502,13 +148,10 @@ func TestHandleQuizGet(t *testing.T) {
 	t.Run("returns 500 on store error", func(t *testing.T) {
 		t.Parallel()
 
-		store := stubQuizStore{
-			getQuiz: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
-				return nil, errStub
-			},
-		}
+		env := newTestEnv(t)
+		env.closeStore(t)
 
-		handler := HandleQuizGet(logger, store)
+		handler := HandleQuizGet(env.logger, env.quizzes)
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/quizzes/quiz-one-1", nil)
 		req.SetPathValue("slugID", "quiz-one-1")
@@ -524,16 +167,14 @@ func TestHandleQuizGet(t *testing.T) {
 func TestHandleCreateGame(t *testing.T) {
 	t.Parallel()
 
-	logger := slog.New(slog.DiscardHandler)
-
 	t.Run("returns 400 on bad request body", func(t *testing.T) {
 		t.Parallel()
 
-		svc := newService(stubGameStore{}, stubQuizStore{})
-		handler := HandleCreateGame(logger, svc)
+		env := newTestEnv(t)
+		handler := HandleCreateGame(env.logger, env.service)
 
 		req := httptest.NewRequestWithContext(
-			context.Background(), http.MethodPost, "/api/games",
+			t.Context(), http.MethodPost, "/api/games",
 			strings.NewReader("{bad json}"),
 		)
 		rec := httptest.NewRecorder()
@@ -547,16 +188,13 @@ func TestHandleCreateGame(t *testing.T) {
 	t.Run("returns 404 when quiz not found", func(t *testing.T) {
 		t.Parallel()
 
-		svc := newService(stubGameStore{}, stubQuizStore{
-			getQuiz: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
-				return nil, quiz.ErrQuizNotFound
-			},
-		})
-		handler := HandleCreateGame(logger, svc)
+		env := newTestEnv(t)
+		playerID := env.seedPlayer(t, "creator-404")
+		handler := HandleCreateGame(env.logger, env.service)
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 7), http.MethodPost, "/api/games",
-			strings.NewReader(`{"quizId": 1}`),
+			withPlayer(t.Context(), playerID), http.MethodPost, "/api/games",
+			strings.NewReader(`{"quizId": 999}`),
 		)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
@@ -569,23 +207,16 @@ func TestHandleCreateGame(t *testing.T) {
 	t.Run("returns 500 on game store error", func(t *testing.T) {
 		t.Parallel()
 
-		svc := newService(
-			stubGameStore{
-				createGame: func(_ context.Context, _ *game.Game) error {
-					return errStub
-				},
-			},
-			stubQuizStore{
-				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-					return &quiz.Quiz{ID: id, Title: "Q"}, nil
-				},
-			},
-		)
-		handler := HandleCreateGame(logger, svc)
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
+		playerID := env.seedPlayer(t, "creator-500")
+		env.closeStore(t)
+
+		handler := HandleCreateGame(env.logger, env.service)
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 7), http.MethodPost, "/api/games",
-			strings.NewReader(`{"quizId": 1}`),
+			withPlayer(t.Context(), playerID), http.MethodPost, "/api/games",
+			strings.NewReader(fmt.Sprintf(`{"quizId": %d}`, qz.ID)),
 		)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
@@ -598,29 +229,14 @@ func TestHandleCreateGame(t *testing.T) {
 	t.Run("uses player ID from context", func(t *testing.T) {
 		t.Parallel()
 
-		const wantPlayerID = int64(42)
-		var seenPlayerID int64
-		svc := newService(
-			stubGameStore{
-				createGame: func(_ context.Context, _ *game.Game) error { return nil },
-				createParticipant: func(_ context.Context, p *game.Participant) error {
-					seenPlayerID = p.PlayerID
-
-					return nil
-				},
-				startGame: func(_ context.Context, _ string) error { return nil },
-			},
-			stubQuizStore{
-				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-					return &quiz.Quiz{ID: id, Title: "Q"}, nil
-				},
-			},
-		)
-		handler := HandleCreateGame(logger, svc)
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
+		playerID := env.seedPlayer(t, "creator-ctx")
+		handler := HandleCreateGame(env.logger, env.service)
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), wantPlayerID), http.MethodPost, "/api/games",
-			strings.NewReader(`{"quizId": 1}`),
+			withPlayer(t.Context(), playerID), http.MethodPost, "/api/games",
+			strings.NewReader(fmt.Sprintf(`{"quizId": %d}`, qz.ID)),
 		)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
@@ -628,26 +244,30 @@ func TestHandleCreateGame(t *testing.T) {
 		if got, want := rec.Code, http.StatusCreated; got != want {
 			t.Fatalf("status code = %v, want %v (body=%q)", got, want, rec.Body.String())
 		}
-		if got, want := seenPlayerID, wantPlayerID; got != want {
-			t.Errorf("CreateParticipant PlayerID = %d, want %d", got, want)
+
+		// The created game must belong to the player on the context: a
+		// resume probe for that (player, quiz) pair now finds the game.
+		g, err := env.service.GetGameForPlayerOnQuiz(t.Context(), playerID, qz.ID)
+		if err != nil {
+			t.Fatalf("GetGameForPlayerOnQuiz err = %v, want the created game", err)
+		}
+		if got := g.ID; got == "" {
+			t.Error("created game has empty ID")
 		}
 	})
 
 	t.Run("returns 500 when player missing on context", func(t *testing.T) {
 		t.Parallel()
 
-		svc := newService(stubGameStore{}, stubQuizStore{
-			getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{ID: id, Title: "Q"}, nil
-			},
-		})
-		handler := HandleCreateGame(logger, svc)
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
+		handler := HandleCreateGame(env.logger, env.service)
 
 		// No player on the context - handler should refuse rather than
 		// silently fall back to a hardcoded ID.
 		req := httptest.NewRequestWithContext(
 			t.Context(), http.MethodPost, "/api/games",
-			strings.NewReader(`{"quizId": 1}`),
+			strings.NewReader(fmt.Sprintf(`{"quizId": %d}`, qz.ID)),
 		)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
@@ -661,25 +281,21 @@ func TestHandleCreateGame(t *testing.T) {
 func TestHandleCreateGame_AlreadyExists(t *testing.T) {
 	t.Parallel()
 
-	logger := slog.New(slog.DiscardHandler)
+	env := newTestEnv(t)
+	qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
+	playerID := env.seedPlayer(t, "creator-dup")
 
-	svc := newService(
-		stubGameStore{
-			getGameByPlayerAndQuiz: func(_ context.Context, _, _ int64) (*game.Game, error) {
-				return &game.Game{ID: "existing"}, nil
-			},
-		},
-		stubQuizStore{
-			getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{ID: id, Title: "Q"}, nil
-			},
-		},
-	)
-	handler := HandleCreateGame(logger, svc)
+	// First game claims the (player, quiz) slot; the second create must
+	// surface 409 via the UNIQUE(player_id, quiz_id) guard.
+	if _, err := env.service.CreateGame(t.Context(), qz.ID, playerID); err != nil {
+		t.Fatalf("seed CreateGame err = %v, want nil", err)
+	}
+
+	handler := HandleCreateGame(env.logger, env.service)
 
 	req := httptest.NewRequestWithContext(
-		withPlayer(t.Context(), 7), http.MethodPost, "/api/games",
-		strings.NewReader(`{"quizId": 1}`),
+		withPlayer(t.Context(), playerID), http.MethodPost, "/api/games",
+		strings.NewReader(fmt.Sprintf(`{"quizId": %d}`, qz.ID)),
 	)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -700,40 +316,30 @@ type gameForQuizTestResponse struct {
 func TestHandleGameForQuiz(t *testing.T) {
 	t.Parallel()
 
-	logger := slog.New(slog.DiscardHandler)
-
 	t.Run("returns 200 with completed=false for an in-progress game", func(t *testing.T) {
 		t.Parallel()
 
-		svc := newService(
-			stubGameStore{
-				getGameByPlayerAndQuiz: func(_ context.Context, _, _ int64) (*game.Game, error) {
-					return &game.Game{
-						ID:     "abc",
-						QuizID: 1,
-						// Only the first of two questions has been issued.
-						Questions: []*game.Question{{QuestionID: 10}},
-					}, nil
-				},
-			},
-			stubQuizStore{
-				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-					return &quiz.Quiz{
-						ID: id,
-						Questions: []*quiz.Question{
-							{ID: 10}, {ID: 20},
-						},
-					}, nil
-				},
-			},
-		)
-		handler := HandleGameForQuiz(logger, svc)
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
+		playerID := env.seedPlayer(t, "resume-progress")
+
+		// Create the game and issue only the first of two questions, so
+		// the resume probe reports it as still in progress.
+		g, err := env.service.CreateGame(t.Context(), qz.ID, playerID)
+		if err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		if _, err := env.service.GetNext(t.Context(), g.ID, playerID); err != nil {
+			t.Fatalf("GetNext err = %v, want nil", err)
+		}
+
+		handler := HandleGameForQuiz(env.logger, env.service)
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 7), http.MethodGet,
-			"/api/quizzes/q-1/my-game", nil,
+			withPlayer(t.Context(), playerID), http.MethodGet,
+			fmt.Sprintf("/api/quizzes/q-%d/my-game", qz.ID), nil,
 		)
-		req.SetPathValue("slugID", "q-1")
+		req.SetPathValue("slugID", fmt.Sprintf("q-%d", qz.ID))
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -745,7 +351,7 @@ func TestHandleGameForQuiz(t *testing.T) {
 		if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
-		if got, want := body.GameID, "abc"; got != want {
+		if got, want := body.GameID, g.ID; got != want {
 			t.Errorf("body.GameID = %q, want %q", got, want)
 		}
 		if got, want := body.Completed, false; got != want {
@@ -756,34 +362,21 @@ func TestHandleGameForQuiz(t *testing.T) {
 	t.Run("returns 200 with completed=true once every question has been issued", func(t *testing.T) {
 		t.Parallel()
 
-		svc := newService(
-			stubGameStore{
-				getGameByPlayerAndQuiz: func(_ context.Context, _, _ int64) (*game.Game, error) {
-					return &game.Game{
-						ID:        "done",
-						QuizID:    1,
-						Questions: []*game.Question{{QuestionID: 10}, {QuestionID: 20}},
-					}, nil
-				},
-			},
-			stubQuizStore{
-				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-					return &quiz.Quiz{
-						ID: id,
-						Questions: []*quiz.Question{
-							{ID: 10}, {ID: 20},
-						},
-					}, nil
-				},
-			},
-		)
-		handler := HandleGameForQuiz(logger, svc)
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
+		playerID := env.seedPlayer(t, "resume-done")
+
+		// Play every question to completion so the game is completed and
+		// has no open question window.
+		env.playCorrectly(t, qz, playerID, len(qz.Questions))
+
+		handler := HandleGameForQuiz(env.logger, env.service)
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 7), http.MethodGet,
-			"/api/quizzes/q-1/my-game", nil,
+			withPlayer(t.Context(), playerID), http.MethodGet,
+			fmt.Sprintf("/api/quizzes/q-%d/my-game", qz.ID), nil,
 		)
-		req.SetPathValue("slugID", "q-1")
+		req.SetPathValue("slugID", fmt.Sprintf("q-%d", qz.ID))
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -803,25 +396,17 @@ func TestHandleGameForQuiz(t *testing.T) {
 	t.Run("returns 404 when player has no game for the quiz", func(t *testing.T) {
 		t.Parallel()
 
-		svc := newService(
-			stubGameStore{
-				getGameByPlayerAndQuiz: func(_ context.Context, _, _ int64) (*game.Game, error) {
-					return nil, game.ErrGameNotFound
-				},
-			},
-			stubQuizStore{
-				getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-					return &quiz.Quiz{ID: id}, nil
-				},
-			},
-		)
-		handler := HandleGameForQuiz(logger, svc)
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
+		playerID := env.seedPlayer(t, "no-game")
+
+		handler := HandleGameForQuiz(env.logger, env.service)
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 7), http.MethodGet,
-			"/api/quizzes/q-1/my-game", nil,
+			withPlayer(t.Context(), playerID), http.MethodGet,
+			fmt.Sprintf("/api/quizzes/q-%d/my-game", qz.ID), nil,
 		)
-		req.SetPathValue("slugID", "q-1")
+		req.SetPathValue("slugID", fmt.Sprintf("q-%d", qz.ID))
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -833,15 +418,13 @@ func TestHandleGameForQuiz(t *testing.T) {
 	t.Run("returns 404 when quiz itself does not exist", func(t *testing.T) {
 		t.Parallel()
 
-		svc := newService(stubGameStore{}, stubQuizStore{
-			getQuiz: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
-				return nil, quiz.ErrQuizNotFound
-			},
-		})
-		handler := HandleGameForQuiz(logger, svc)
+		env := newTestEnv(t)
+		playerID := env.seedPlayer(t, "no-quiz")
+
+		handler := HandleGameForQuiz(env.logger, env.service)
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 7), http.MethodGet,
+			withPlayer(t.Context(), playerID), http.MethodGet,
 			"/api/quizzes/q-99/my-game", nil,
 		)
 		req.SetPathValue("slugID", "q-99")
@@ -856,13 +439,16 @@ func TestHandleGameForQuiz(t *testing.T) {
 	t.Run("returns 500 when player missing from context", func(t *testing.T) {
 		t.Parallel()
 
-		handler := HandleGameForQuiz(logger, newService(stubGameStore{}, stubQuizStore{}))
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
+
+		handler := HandleGameForQuiz(env.logger, env.service)
 
 		req := httptest.NewRequestWithContext(
 			t.Context(), http.MethodGet,
-			"/api/quizzes/q-1/my-game", nil,
+			fmt.Sprintf("/api/quizzes/q-%d/my-game", qz.ID), nil,
 		)
-		req.SetPathValue("slugID", "q-1")
+		req.SetPathValue("slugID", fmt.Sprintf("q-%d", qz.ID))
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -875,12 +461,11 @@ func TestHandleGameForQuiz(t *testing.T) {
 func TestHandleQuestionNext(t *testing.T) {
 	t.Parallel()
 
-	logger := slog.New(slog.DiscardHandler)
-
 	t.Run("returns 400 when gameID missing", func(t *testing.T) {
 		t.Parallel()
 
-		handler := HandleQuestionNext(logger, newService(stubGameStore{}, stubQuizStore{}))
+		env := newTestEnv(t)
+		handler := HandleQuestionNext(env.logger, env.service)
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/games//questions/next", nil)
 		rec := httptest.NewRecorder()
@@ -894,17 +479,14 @@ func TestHandleQuestionNext(t *testing.T) {
 	t.Run("returns 404 when game not found", func(t *testing.T) {
 		t.Parallel()
 
-		svc := newService(stubGameStore{
-			getGame: func(_ context.Context, _ string) (*game.Game, error) {
-				return nil, game.ErrGameNotFound
-			},
-		}, stubQuizStore{})
+		env := newTestEnv(t)
+		playerID := env.seedPlayer(t, "next-missing-game")
 
 		mux := http.NewServeMux()
-		mux.Handle("GET /api/games/{gameID}/questions/next", HandleQuestionNext(logger, svc))
+		mux.Handle("GET /api/games/{gameID}/questions/next", HandleQuestionNext(env.logger, env.service))
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 7), http.MethodGet, "/api/games/missing-game/questions/next", nil,
+			withPlayer(t.Context(), playerID), http.MethodGet, "/api/games/missing-game/questions/next", nil,
 		)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
@@ -917,28 +499,31 @@ func TestHandleQuestionNext(t *testing.T) {
 	t.Run("returns 404 when quiz not found", func(t *testing.T) {
 		t.Parallel()
 
-		svc := newService(
-			stubGameStore{
-				getGame: func(_ context.Context, id string) (*game.Game, error) {
-					return &game.Game{
-						ID:           id,
-						QuizID:       1,
-						Participants: []*game.Participant{{GameID: id, PlayerID: 7}},
-					}, nil
+		// A real game always references a real quiz (FK), so the
+		// "game exists, quiz vanished" branch can't arise from seeded
+		// data alone. Inject a game whose QuizID points at no quiz row so
+		// the service's GetQuiz returns the real quiz.ErrQuizNotFound,
+		// which the handler maps to 404. The player is wired in as a
+		// participant so the gate passes through to the quiz load.
+		env := newTestEnv(t)
+		const playerID = int64(7)
+		svc := game.NewService(
+			errGameStore{
+				Store: env.games,
+				injectedGame: &game.Game{
+					ID:           "game-1",
+					QuizID:       999999,
+					Participants: []*game.Participant{{GameID: "game-1", PlayerID: playerID}},
 				},
 			},
-			stubQuizStore{
-				getQuiz: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
-					return nil, quiz.ErrQuizNotFound
-				},
-			},
+			env.quizzes, env.logger,
 		)
 
 		mux := http.NewServeMux()
-		mux.Handle("GET /api/games/{gameID}/questions/next", HandleQuestionNext(logger, svc))
+		mux.Handle("GET /api/games/{gameID}/questions/next", HandleQuestionNext(env.logger, svc))
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 7), http.MethodGet, "/api/games/game-1/questions/next", nil,
+			withPlayer(t.Context(), playerID), http.MethodGet, "/api/games/game-1/questions/next", nil,
 		)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
@@ -951,36 +536,19 @@ func TestHandleQuestionNext(t *testing.T) {
 	t.Run("returns 404 when no more questions", func(t *testing.T) {
 		t.Parallel()
 
-		svc := newService(
-			stubGameStore{
-				getGame: func(_ context.Context, id string) (*game.Game, error) {
-					return &game.Game{
-						ID:     id,
-						QuizID: 1,
-						Questions: []*game.Question{
-							{QuestionID: 10},
-						},
-						Participants: []*game.Participant{{GameID: id, PlayerID: 7}},
-					}, nil
-				},
-			},
-			stubQuizStore{
-				getQuiz: func(_ context.Context, qid int64) (*quiz.Quiz, error) {
-					return &quiz.Quiz{
-						ID: qid,
-						Questions: []*quiz.Question{
-							{ID: 10, Text: "Q1"},
-						},
-					}, nil
-				},
-			},
-		)
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
+		playerID := env.seedPlayer(t, "next-exhausted")
+
+		// Drain every question so the next /next call exhausts the quiz.
+		gameID := env.playCorrectly(t, qz, playerID, len(qz.Questions))
 
 		mux := http.NewServeMux()
-		mux.Handle("GET /api/games/{gameID}/questions/next", HandleQuestionNext(logger, svc))
+		mux.Handle("GET /api/games/{gameID}/questions/next", HandleQuestionNext(env.logger, env.service))
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 7), http.MethodGet, "/api/games/game-1/questions/next", nil,
+			withPlayer(t.Context(), playerID), http.MethodGet,
+			fmt.Sprintf("/api/games/%s/questions/next", gameID), nil,
 		)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
@@ -995,19 +563,23 @@ func TestHandleQuestionNext(t *testing.T) {
 
 		// Use an error whose message is recognisable so the assertion
 		// below can pin its absence from the response body. Before #274
-		// the body would echo the wrapped string verbatim.
+		// the body would echo the wrapped string verbatim. A real store
+		// can't produce this exact marker, so inject it at the game store
+		// the service wraps (see errGameStore).
+		env := newTestEnv(t)
+		playerID := env.seedPlayer(t, "next-leak")
+
 		secretErr := errors.New("internal-database-table-name-leak")
-		svc := newService(stubGameStore{
-			getGame: func(_ context.Context, _ string) (*game.Game, error) {
-				return nil, secretErr
-			},
-		}, stubQuizStore{})
+		svc := game.NewService(
+			errGameStore{Store: env.games, getGameErr: secretErr},
+			env.quizzes, env.logger,
+		)
 
 		mux := http.NewServeMux()
-		mux.Handle("GET /api/games/{gameID}/questions/next", HandleQuestionNext(logger, svc))
+		mux.Handle("GET /api/games/{gameID}/questions/next", HandleQuestionNext(env.logger, svc))
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 7), http.MethodGet, "/api/games/game-1/questions/next", nil,
+			withPlayer(t.Context(), playerID), http.MethodGet, "/api/games/game-1/questions/next", nil,
 		)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
@@ -1028,34 +600,23 @@ func TestHandleQuestionNext(t *testing.T) {
 		t.Parallel()
 
 		const imageURL = "https://example.com/picture.png"
-		svc := newService(
-			stubGameStore{
-				getGame: func(_ context.Context, id string) (*game.Game, error) {
-					return &game.Game{
-						ID:           id,
-						QuizID:       1,
-						Participants: []*game.Participant{{GameID: id, PlayerID: 7}},
-					}, nil
-				},
-				createQuestion: func(_ context.Context, _ *game.Question) error { return nil },
-			},
-			stubQuizStore{
-				getQuiz: func(_ context.Context, qid int64) (*quiz.Quiz, error) {
-					return &quiz.Quiz{
-						ID: qid,
-						Questions: []*quiz.Question{
-							{ID: 42, Text: "Q1", ImageURL: imageURL, Options: []*quiz.Option{{ID: 1, Text: "A"}}},
-						},
-					}, nil
-				},
-			},
-		)
+		env := newTestEnv(t)
+		qz := twoQuestionQuiz("Quiz", "quiz")
+		qz.Questions[0].ImageURL = imageURL
+		env.seedQuiz(t, qz)
+		playerID := env.seedPlayer(t, "next-image")
+
+		g, err := env.service.CreateGame(t.Context(), qz.ID, playerID)
+		if err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
 
 		mux := http.NewServeMux()
-		mux.Handle("GET /api/games/{gameID}/questions/next", HandleQuestionNext(logger, svc))
+		mux.Handle("GET /api/games/{gameID}/questions/next", HandleQuestionNext(env.logger, env.service))
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 7), http.MethodGet, "/api/games/game-1/questions/next", nil,
+			withPlayer(t.Context(), playerID), http.MethodGet,
+			fmt.Sprintf("/api/games/%s/questions/next", g.ID), nil,
 		)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
@@ -1072,12 +633,11 @@ func TestHandleQuestionNext(t *testing.T) {
 func TestHandleAnswerPost(t *testing.T) {
 	t.Parallel()
 
-	logger := slog.New(slog.DiscardHandler)
-
 	t.Run("returns 400 when gameID missing", func(t *testing.T) {
 		t.Parallel()
 
-		handler := HandleAnswerPost(logger, newService(stubGameStore{}, stubQuizStore{}))
+		env := newTestEnv(t)
+		handler := HandleAnswerPost(env.logger, env.service)
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
 		rec := httptest.NewRecorder()
@@ -1091,14 +651,17 @@ func TestHandleAnswerPost(t *testing.T) {
 	t.Run("returns 400 when questionID invalid", func(t *testing.T) {
 		t.Parallel()
 
+		env := newTestEnv(t)
+		playerID := env.seedPlayer(t, "answer-badqid")
+
 		mux := http.NewServeMux()
 		mux.Handle(
 			"POST /api/games/{gameID}/questions/{questionID}/answers",
-			HandleAnswerPost(logger, newService(stubGameStore{}, stubQuizStore{})),
+			HandleAnswerPost(env.logger, env.service),
 		)
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 7), http.MethodPost,
+			withPlayer(t.Context(), playerID), http.MethodPost,
 			"/api/games/game-1/questions/not-a-number/answers",
 			strings.NewReader(`{"optionId": 1}`),
 		)
@@ -1113,14 +676,17 @@ func TestHandleAnswerPost(t *testing.T) {
 	t.Run("returns 400 on bad request body", func(t *testing.T) {
 		t.Parallel()
 
+		env := newTestEnv(t)
+		playerID := env.seedPlayer(t, "answer-badbody")
+
 		mux := http.NewServeMux()
 		mux.Handle(
 			"POST /api/games/{gameID}/questions/{questionID}/answers",
-			HandleAnswerPost(logger, newService(stubGameStore{}, stubQuizStore{})),
+			HandleAnswerPost(env.logger, env.service),
 		)
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 7), http.MethodPost,
+			withPlayer(t.Context(), playerID), http.MethodPost,
 			"/api/games/game-1/questions/1/answers",
 			strings.NewReader("{bad json}"),
 		)
@@ -1135,20 +701,17 @@ func TestHandleAnswerPost(t *testing.T) {
 	t.Run("returns 404 when game not found", func(t *testing.T) {
 		t.Parallel()
 
-		svc := newService(stubGameStore{
-			getGame: func(_ context.Context, _ string) (*game.Game, error) {
-				return nil, game.ErrGameNotFound
-			},
-		}, stubQuizStore{})
+		env := newTestEnv(t)
+		playerID := env.seedPlayer(t, "answer-nogame")
 
 		mux := http.NewServeMux()
 		mux.Handle(
 			"POST /api/games/{gameID}/questions/{questionID}/answers",
-			HandleAnswerPost(logger, svc),
+			HandleAnswerPost(env.logger, env.service),
 		)
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 7), http.MethodPost,
+			withPlayer(t.Context(), playerID), http.MethodPost,
 			"/api/games/missing/questions/1/answers",
 			strings.NewReader(`{"optionId": 1}`),
 		)
@@ -1163,21 +726,26 @@ func TestHandleAnswerPost(t *testing.T) {
 	t.Run("returns 404 when question not in game", func(t *testing.T) {
 		t.Parallel()
 
-		svc := newService(stubGameStore{
-			getGame: func(_ context.Context, id string) (*game.Game, error) {
-				return &game.Game{ID: id, QuizID: 1}, nil
-			},
-		}, stubQuizStore{})
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
+		playerID := env.seedPlayer(t, "answer-qnotin")
+
+		// Fresh game has no issued questions, so any question id is "not
+		// in game" from the answer path's view.
+		g, err := env.service.CreateGame(t.Context(), qz.ID, playerID)
+		if err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
 
 		mux := http.NewServeMux()
 		mux.Handle(
 			"POST /api/games/{gameID}/questions/{questionID}/answers",
-			HandleAnswerPost(logger, svc),
+			HandleAnswerPost(env.logger, env.service),
 		)
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 7), http.MethodPost,
-			"/api/games/game-1/questions/99/answers",
+			withPlayer(t.Context(), playerID), http.MethodPost,
+			fmt.Sprintf("/api/games/%s/questions/%d/answers", g.ID, qz.Questions[0].ID),
 			strings.NewReader(`{"optionId": 1}`),
 		)
 		rec := httptest.NewRecorder()
@@ -1191,48 +759,32 @@ func TestHandleAnswerPost(t *testing.T) {
 	t.Run("returns 400 when option does not belong to question", func(t *testing.T) {
 		t.Parallel()
 
-		svc := newService(
-			stubGameStore{
-				getGame: func(_ context.Context, id string) (*game.Game, error) {
-					return &game.Game{
-						ID:     id,
-						QuizID: 1,
-						Questions: []*game.Question{
-							{ID: 1, GameID: id, QuestionID: 10},
-						},
-						// Participant gate (#272): player 7 must be a
-						// participant of the game for the service to
-						// pass through to the option-validation path
-						// that's under test here.
-						Participants: []*game.Participant{{GameID: id, PlayerID: 7}},
-					}, nil
-				},
-			},
-			stubQuizStore{
-				getQuestion: func(_ context.Context, id int64) (*quiz.Question, error) {
-					// Return a question whose option set does not include
-					// option 200 - SubmitAnswer must surface
-					// ErrOptionNotInQuestion, which the handler maps to 400.
-					return &quiz.Question{
-						ID:      id,
-						QuizID:  1,
-						Text:    "Q",
-						Options: []*quiz.Option{{ID: 50, QuestionID: id}},
-					}, nil
-				},
-			},
-		)
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
+		playerID := env.seedPlayer(t, "answer-wrongopt")
+
+		// Issue the first question so it is in the game, then submit an
+		// option id that belongs to a different question: SubmitAnswer
+		// surfaces ErrOptionNotInQuestion, which the handler maps to 400.
+		g, err := env.service.CreateGame(t.Context(), qz.ID, playerID)
+		if err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		if _, err := env.service.GetNext(t.Context(), g.ID, playerID); err != nil {
+			t.Fatalf("GetNext err = %v, want nil", err)
+		}
+		foreignOptionID := qz.Questions[1].Options[0].ID
 
 		mux := http.NewServeMux()
 		mux.Handle(
 			"POST /api/games/{gameID}/questions/{questionID}/answers",
-			HandleAnswerPost(logger, svc),
+			HandleAnswerPost(env.logger, env.service),
 		)
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 7), http.MethodPost,
-			"/api/games/game-1/questions/10/answers",
-			strings.NewReader(`{"optionId": 200}`),
+			withPlayer(t.Context(), playerID), http.MethodPost,
+			fmt.Sprintf("/api/games/%s/questions/%d/answers", g.ID, qz.Questions[0].ID),
+			strings.NewReader(fmt.Sprintf(`{"optionId": %d}`, foreignOptionID)),
 		)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
@@ -1245,31 +797,19 @@ func TestHandleAnswerPost(t *testing.T) {
 	t.Run("returns 500 when player missing on context", func(t *testing.T) {
 		t.Parallel()
 
-		svc := newService(
-			stubGameStore{
-				getGame: func(_ context.Context, id string) (*game.Game, error) {
-					return &game.Game{
-						ID:     id,
-						QuizID: 1,
-						Questions: []*game.Question{
-							{ID: 1, GameID: id, QuestionID: 10},
-						},
-					}, nil
-				},
-			},
-			stubQuizStore{},
-		)
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
 
 		mux := http.NewServeMux()
 		mux.Handle(
 			"POST /api/games/{gameID}/questions/{questionID}/answers",
-			HandleAnswerPost(logger, svc),
+			HandleAnswerPost(env.logger, env.service),
 		)
 
 		req := httptest.NewRequestWithContext(
 			t.Context(), http.MethodPost,
-			"/api/games/game-1/questions/10/answers",
-			strings.NewReader(`{"optionId": 200}`),
+			fmt.Sprintf("/api/games/game-1/questions/%d/answers", qz.Questions[0].ID),
+			strings.NewReader(`{"optionId": 1}`),
 		)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
@@ -1282,20 +822,18 @@ func TestHandleAnswerPost(t *testing.T) {
 	t.Run("returns 500 on game error", func(t *testing.T) {
 		t.Parallel()
 
-		svc := newService(stubGameStore{
-			getGame: func(_ context.Context, _ string) (*game.Game, error) {
-				return nil, errStub
-			},
-		}, stubQuizStore{})
+		env := newTestEnv(t)
+		playerID := env.seedPlayer(t, "answer-storeerr")
+		env.closeStore(t)
 
 		mux := http.NewServeMux()
 		mux.Handle(
 			"POST /api/games/{gameID}/questions/{questionID}/answers",
-			HandleAnswerPost(logger, svc),
+			HandleAnswerPost(env.logger, env.service),
 		)
 
 		req := httptest.NewRequestWithContext(
-			context.Background(), http.MethodPost,
+			withPlayer(t.Context(), playerID), http.MethodPost,
 			"/api/games/game-1/questions/1/answers",
 			strings.NewReader(`{"optionId": 1}`),
 		)
@@ -1311,12 +849,11 @@ func TestHandleAnswerPost(t *testing.T) {
 func TestHandleGameResults(t *testing.T) {
 	t.Parallel()
 
-	logger := slog.New(slog.DiscardHandler)
-
 	t.Run("returns 400 when gameID missing", func(t *testing.T) {
 		t.Parallel()
 
-		handler := HandleGameResults(logger, newService(stubGameStore{}, stubQuizStore{}))
+		env := newTestEnv(t)
+		handler := HandleGameResults(env.logger, env.service)
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 		rec := httptest.NewRecorder()
@@ -1330,17 +867,14 @@ func TestHandleGameResults(t *testing.T) {
 	t.Run("returns 404 when game not found", func(t *testing.T) {
 		t.Parallel()
 
-		svc := newService(stubGameStore{
-			getGame: func(_ context.Context, _ string) (*game.Game, error) {
-				return nil, game.ErrGameNotFound
-			},
-		}, stubQuizStore{})
+		env := newTestEnv(t)
+		playerID := env.seedPlayer(t, "results-nogame")
 
 		mux := http.NewServeMux()
-		mux.Handle("GET /api/games/{gameID}/results", HandleGameResults(logger, svc))
+		mux.Handle("GET /api/games/{gameID}/results", HandleGameResults(env.logger, env.service))
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 7), http.MethodGet, "/api/games/missing-game/results", nil,
+			withPlayer(t.Context(), playerID), http.MethodGet, "/api/games/missing-game/results", nil,
 		)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
@@ -1353,17 +887,15 @@ func TestHandleGameResults(t *testing.T) {
 	t.Run("returns 500 on game store error", func(t *testing.T) {
 		t.Parallel()
 
-		svc := newService(stubGameStore{
-			getGame: func(_ context.Context, _ string) (*game.Game, error) {
-				return nil, errStub
-			},
-		}, stubQuizStore{})
+		env := newTestEnv(t)
+		playerID := env.seedPlayer(t, "results-storeerr")
+		env.closeStore(t)
 
 		mux := http.NewServeMux()
-		mux.Handle("GET /api/games/{gameID}/results", HandleGameResults(logger, svc))
+		mux.Handle("GET /api/games/{gameID}/results", HandleGameResults(env.logger, env.service))
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 7), http.MethodGet, "/api/games/game-1/results", nil,
+			withPlayer(t.Context(), playerID), http.MethodGet, "/api/games/game-1/results", nil,
 		)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
@@ -1395,61 +927,31 @@ type leaderboardTestResponse struct {
 func TestHandleQuizLeaderboard(t *testing.T) {
 	t.Parallel()
 
-	logger := slog.New(slog.DiscardHandler)
-
-	// makeAnswer mirrors the helper in internal/game; replicated here so the
-	// black-box test does not need an exported builder. The 10s window with
-	// answeredOffset=0 yields a 1000-point CalculateScore for a correct
-	// answer and 0 for a wrong one.
-	makeAnswer := func(playerID int64, displayName string, correct bool) *game.LeaderboardAnswer {
-		const window = 10 * time.Second
-		start := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-
-		return &game.LeaderboardAnswer{
-			PlayerID:          playerID,
-			DisplayName:       displayName,
-			QuestionStartedAt: start,
-			QuestionExpiredAt: start.Add(window),
-			AnsweredAt:        start,
-			Correct:           correct,
-		}
-	}
-
 	t.Run("returns leaderboard with isCurrentPlayer set", func(t *testing.T) {
 		t.Parallel()
 
-		gs := stubGameStore{
-			listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*game.LeaderboardAnswer, error) {
-				return []*game.LeaderboardAnswer{
-					makeAnswer(1, "alice", true),
-					makeAnswer(2, "bob", true),
-					makeAnswer(2, "bob", true),
-				}, nil
-			},
-		}
-		qs := stubQuizStore{
-			quizExists: func(_ context.Context, _ int64) (bool, error) {
-				return true, nil
-			},
-			// #103: gate loads the quiz via service.GetQuiz to check
-			// visibility before serving the leaderboard. Returning a
-			// public quiz here lets the gate pass through.
-			getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{ID: id, Visibility: quiz.VisibilityPublic}, nil
-			},
-		}
-		handler := HandleQuizLeaderboard(logger, newService(gs, qs))
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
+
+		// alice answers one question correctly (1000); bob answers both
+		// (2000), so bob outranks alice. The current player is alice.
+		alice := env.seedPlayer(t, "alice")
+		bob := env.seedPlayer(t, "bob")
+		env.playCorrectly(t, qz, alice, 1)
+		env.playCorrectly(t, qz, bob, 2)
+
+		handler := HandleQuizLeaderboard(env.logger, env.service)
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 1), http.MethodGet,
-			"/api/quizzes/quiz-1/leaderboard", nil,
+			withPlayer(t.Context(), alice), http.MethodGet,
+			fmt.Sprintf("/api/quizzes/quiz-%d/leaderboard", qz.ID), nil,
 		)
-		req.SetPathValue("slugID", "quiz-1")
+		req.SetPathValue("slugID", fmt.Sprintf("quiz-%d", qz.ID))
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
 		if got, want := rec.Code, http.StatusOK; got != want {
-			t.Fatalf("status code = %v, want %v", got, want)
+			t.Fatalf("status code = %v, want %v (body=%q)", got, want, rec.Body.String())
 		}
 
 		var body leaderboardTestResponse
@@ -1457,7 +959,7 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 			t.Fatalf("failed to decode response: %v", err)
 		}
 
-		if got, want := body.QuizID, int64(1); got != want {
+		if got, want := body.QuizID, qz.ID; got != want {
 			t.Errorf("quizId = %d, want %d", got, want)
 		}
 		if got, want := len(body.Entries), 2; got != want {
@@ -1483,11 +985,11 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 			t.Errorf("entries[1].IsCurrentPlayer = %v, want %v", got, want)
 		}
 		// currentPlayer field is always populated when the player has a
-		// row; in this case alice (player 1) ranks 2.
+		// row; in this case alice ranks 2.
 		if body.CurrentPlayer == nil {
 			t.Fatal("currentPlayer = nil, want alice's standing")
 		}
-		if got, want := body.CurrentPlayer.PlayerID, int64(1); got != want {
+		if got, want := body.CurrentPlayer.PlayerID, alice; got != want {
 			t.Errorf("currentPlayer.PlayerID = %d, want %d", got, want)
 		}
 		if got, want := body.CurrentPlayer.Rank, 2; got != want {
@@ -1498,21 +1000,13 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 	t.Run("returns 404 when quiz not found", func(t *testing.T) {
 		t.Parallel()
 
-		qs := stubQuizStore{
-			quizExists: func(_ context.Context, _ int64) (bool, error) {
-				return false, nil
-			},
-			// #103: gate hits service.GetQuiz before the service path
-			// runs. ErrQuizNotFound here mirrors the missing-row reply
-			// the gate maps to a 404.
-			getQuiz: func(_ context.Context, _ int64) (*quiz.Quiz, error) {
-				return nil, quiz.ErrQuizNotFound
-			},
-		}
-		handler := HandleQuizLeaderboard(logger, newService(stubGameStore{}, qs))
+		env := newTestEnv(t)
+		playerID := env.seedPlayer(t, "lb-noquiz")
+
+		handler := HandleQuizLeaderboard(env.logger, env.service)
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 1), http.MethodGet,
+			withPlayer(t.Context(), playerID), http.MethodGet,
 			"/api/quizzes/missing-99/leaderboard", nil,
 		)
 		req.SetPathValue("slugID", "missing-99")
@@ -1527,14 +1021,18 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 	t.Run("returns 500 when player missing from context", func(t *testing.T) {
 		t.Parallel()
 
-		handler := HandleQuizLeaderboard(logger, newService(stubGameStore{}, stubQuizStore{}))
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
+
+		handler := HandleQuizLeaderboard(env.logger, env.service)
 
 		// No withPlayer wrapper - simulate a misconfigured route that
 		// forgot to wrap the handler in EnsurePlayer.
 		req := httptest.NewRequestWithContext(
-			t.Context(), http.MethodGet, "/api/quizzes/quiz-1/leaderboard", nil,
+			t.Context(), http.MethodGet,
+			fmt.Sprintf("/api/quizzes/quiz-%d/leaderboard", qz.ID), nil,
 		)
-		req.SetPathValue("slugID", "quiz-1")
+		req.SetPathValue("slugID", fmt.Sprintf("quiz-%d", qz.ID))
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -1546,29 +1044,18 @@ func TestHandleQuizLeaderboard(t *testing.T) {
 	t.Run("returns 500 when service errors", func(t *testing.T) {
 		t.Parallel()
 
-		gs := stubGameStore{
-			listAnswersForQuizLeaderboard: func(_ context.Context, _ int64) ([]*game.LeaderboardAnswer, error) {
-				return nil, errStub
-			},
-		}
-		qs := stubQuizStore{
-			quizExists: func(_ context.Context, _ int64) (bool, error) {
-				return true, nil
-			},
-			// #103: gate loads the quiz via service.GetQuiz to check
-			// visibility before serving the leaderboard. Returning a
-			// public quiz here lets the gate pass through.
-			getQuiz: func(_ context.Context, id int64) (*quiz.Quiz, error) {
-				return &quiz.Quiz{ID: id, Visibility: quiz.VisibilityPublic}, nil
-			},
-		}
-		handler := HandleQuizLeaderboard(logger, newService(gs, qs))
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "quiz"))
+		playerID := env.seedPlayer(t, "lb-storeerr")
+		env.closeStore(t)
+
+		handler := HandleQuizLeaderboard(env.logger, env.service)
 
 		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), 1), http.MethodGet,
-			"/api/quizzes/quiz-1/leaderboard", nil,
+			withPlayer(t.Context(), playerID), http.MethodGet,
+			fmt.Sprintf("/api/quizzes/quiz-%d/leaderboard", qz.ID), nil,
 		)
-		req.SetPathValue("slugID", "quiz-1")
+		req.SetPathValue("slugID", fmt.Sprintf("quiz-%d", qz.ID))
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
