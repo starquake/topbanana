@@ -1,35 +1,21 @@
+//go:build integration
+
 package admin_test
 
 import (
 	"context"
 	"log/slog"
 	"testing"
-	"time"
 
 	. "github.com/starquake/topbanana/internal/admin"
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/mailer"
 )
 
-// stubVerifyTokenStore satisfies auth.VerifyTokenStore for the dispatch
-// test. The methods are no-ops so the spawned send goroutine completes
-// without blocking.
-type stubVerifyTokenStore struct{}
-
-func (stubVerifyTokenStore) CreateVerifyToken(
-	_ context.Context, _ string, _ int64, _ time.Time, _ string,
-) error {
-	return nil
-}
-
-func (stubVerifyTokenStore) ConsumeVerifyToken(_ context.Context, _ string) (int64, error) {
-	return 0, nil
-}
-
-func (stubVerifyTokenStore) DeleteExpiredVerifyTokens(_ context.Context) error { return nil }
-
 // stubVerifyEmailSender satisfies auth.VerifyEmailSender; Send is a
-// no-op so the spawned goroutine completes promptly.
+// no-op so the spawned goroutine completes promptly without standing up
+// SMTP. It is a legitimate dispatch spy, not a tautological store stub,
+// so it stays even though the token store is now real.
 type stubVerifyEmailSender struct{}
 
 func (stubVerifyEmailSender) Send(_ context.Context, _ mailer.Message) error { return nil }
@@ -37,9 +23,13 @@ func (stubVerifyEmailSender) Send(_ context.Context, _ mailer.Message) error { r
 // TestDispatchAdminResendVerification_BoolContract pins the dispatch
 // helper's report of whether it actually sent: false (so the caller
 // skips the audit row + success notice) when email is unconfigured,
-// true when it spawns the send.
+// true when it spawns the send. The token store is the real store so
+// the "fully configured" branch exercises a genuine CreateVerifyToken
+// for the seeded admin (player id 1).
 func TestDispatchAdminResendVerification_BoolContract(t *testing.T) {
 	t.Parallel()
+
+	env := newAdminEnv(t)
 
 	tests := []struct {
 		name       string
@@ -55,17 +45,17 @@ func TestDispatchAdminResendVerification_BoolContract(t *testing.T) {
 			baseURL:    "https://x.test",
 			wantResult: false,
 		},
-		{name: "nil sender", tokens: stubVerifyTokenStore{}, sender: nil, baseURL: "https://x.test", wantResult: false},
+		{name: "nil sender", tokens: env.tokens, sender: nil, baseURL: "https://x.test", wantResult: false},
 		{
 			name:       "empty baseURL",
-			tokens:     stubVerifyTokenStore{},
+			tokens:     env.tokens,
 			sender:     stubVerifyEmailSender{},
 			baseURL:    "",
 			wantResult: false,
 		},
 		{
 			name:       "fully configured",
-			tokens:     stubVerifyTokenStore{},
+			tokens:     env.tokens,
 			sender:     stubVerifyEmailSender{},
 			baseURL:    "https://x.test",
 			wantResult: true,
@@ -77,7 +67,7 @@ func TestDispatchAdminResendVerification_BoolContract(t *testing.T) {
 			t.Parallel()
 
 			got := DispatchAdminResendVerification(
-				t.Context(), slog.Default(), tc.tokens, tc.sender, tc.baseURL, "to@example.test", 1,
+				t.Context(), slog.Default(), tc.tokens, tc.sender, tc.baseURL, "to@example.test", testAdminID,
 			)
 			if want := tc.wantResult; got != want {
 				t.Errorf("DispatchAdminResendVerification = %v, want %v", got, want)

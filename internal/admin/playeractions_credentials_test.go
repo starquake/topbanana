@@ -1,12 +1,13 @@
+//go:build integration
+
 package admin_test
 
 import (
-	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -14,109 +15,42 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 )
 
-// credStubStore implements auth.AdminPlayerStore for the
-// HandlePlayerSetDisplayName / HandlePlayerSetPassword tests. Only the methods
-// those handlers touch record anything; the rest return a sentinel so an
-// accidental call is loud.
-type credStubStore struct {
-	renameErr error
-	passErr   error
-
-	renameName   string
-	renameCalled bool
-
-	passHash   string
-	passCalled bool
-
-	auditAction  string
-	auditPayload string
-	auditCalled  bool
-}
-
-func (s *credStubStore) RenamePlayer(_ context.Context, _ int64, displayName string) (*auth.Player, error) {
-	s.renameCalled = true
-	s.renameName = displayName
-	if s.renameErr != nil {
-		return nil, s.renameErr
-	}
-
-	return &auth.Player{ID: 7, DisplayName: displayName}, nil
-}
-
-func (s *credStubStore) ChangePlayerPassword(_ context.Context, _ int64, passwordHash string) error {
-	s.passCalled = true
-	s.passHash = passwordHash
-
-	return s.passErr
-}
-
-func (s *credStubStore) InsertAdminAudit(
-	_ context.Context, _, _ int64, action, payload string,
-) error {
-	s.auditCalled = true
-	s.auditAction = action
-	s.auditPayload = payload
-
-	return nil
-}
-
-func (*credStubStore) GetPlayerDetail(_ context.Context, _ int64) (*auth.PlayerDetail, error) {
-	return nil, errors.ErrUnsupported
-}
-
-func (*credStubStore) ListRecentFinishedGamesForPlayer(
-	_ context.Context, _, _ int64,
-) ([]*auth.RecentFinishedGame, error) {
-	return nil, errors.ErrUnsupported
-}
-
-func (*credStubStore) SetPlayerEmailVerifiedNow(_ context.Context, _ int64) error {
-	return errors.ErrUnsupported
-}
-
-func (*credStubStore) SetPlayerEmail(_ context.Context, _ int64, _ string) error {
-	return errors.ErrUnsupported
-}
-
-func (*credStubStore) CreatePlayerByAdmin(
-	_ context.Context, _, _, _ string,
-) (*auth.Player, error) {
-	return nil, errors.ErrUnsupported
-}
-
-func (*credStubStore) SetPlayerRole(_ context.Context, _ int64, _ string) error {
-	return errors.ErrUnsupported
-}
-
-func (*credStubStore) CountAdmins(_ context.Context) (int64, error) {
-	return 0, errors.ErrUnsupported
-}
-
-func (*credStubStore) ListAdminAuditForTarget(
-	_ context.Context, _, _ int64,
-) ([]*auth.AdminAuditEntry, error) {
-	return nil, errors.ErrUnsupported
-}
-
 func newCredFlash(t *testing.T) *auth.SignedFlash {
 	t.Helper()
 
 	return auth.NewSignedFlash([]byte("test-key-test-key-test-key-32byt"), false, "flash", "/admin")
 }
 
-// postDisplayName drives HandlePlayerSetDisplayName with the given form value.
-func postDisplayName(t *testing.T, store *credStubStore, displayName string) *httptest.ResponseRecorder {
+// auditEntries returns the admin-audit rows recorded against the target
+// player, newest first, so a test can assert what (if anything) the
+// handler audited.
+func (e *adminEnv) auditEntries(t *testing.T, targetID int64) []*auth.AdminAuditEntry {
 	t.Helper()
-	handler := HandlePlayerSetDisplayName(slog.New(slog.DiscardHandler), store, newCredFlash(t))
+
+	entries, err := e.admin.ListAdminAuditForTarget(t.Context(), targetID, 10)
+	if err != nil {
+		t.Fatalf("ListAdminAuditForTarget(%d) err = %v, want nil", targetID, err)
+	}
+
+	return entries
+}
+
+// postDisplayName drives HandlePlayerSetDisplayName against the target
+// player with the given form value.
+func postDisplayName(
+	t *testing.T, env *adminEnv, targetID int64, displayName string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	handler := HandlePlayerSetDisplayName(slog.New(slog.DiscardHandler), env.admin, newCredFlash(t))
 
 	form := url.Values{"display_name": {displayName}}
 	req := httptest.NewRequestWithContext(
-		t.Context(), http.MethodPost, "/admin/players/7/display-name",
+		t.Context(), http.MethodPost, "/admin/players/"+strconv.FormatInt(targetID, 10)+"/display-name",
 		strings.NewReader(form.Encode()),
 	)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.SetPathValue("playerID", "7")
-	req = req.WithContext(auth.WithPlayer(req.Context(), &auth.Player{ID: 1, Role: auth.RoleAdmin}))
+	req.SetPathValue("playerID", strconv.FormatInt(targetID, 10))
+	req = req.WithContext(auth.WithPlayer(req.Context(), &auth.Player{ID: testAdminID, Role: auth.RoleAdmin}))
 
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -124,19 +58,22 @@ func postDisplayName(t *testing.T, store *credStubStore, displayName string) *ht
 	return rec
 }
 
-// postPassword drives HandlePlayerSetPassword with the given form value.
-func postPassword(t *testing.T, store *credStubStore, password string) *httptest.ResponseRecorder {
+// postPassword drives HandlePlayerSetPassword against the target player
+// with the given form value.
+func postPassword(
+	t *testing.T, env *adminEnv, targetID int64, password string,
+) *httptest.ResponseRecorder {
 	t.Helper()
-	handler := HandlePlayerSetPassword(slog.New(slog.DiscardHandler), store, newCredFlash(t))
+	handler := HandlePlayerSetPassword(slog.New(slog.DiscardHandler), env.admin, newCredFlash(t))
 
 	form := url.Values{"password": {password}}
 	req := httptest.NewRequestWithContext(
-		t.Context(), http.MethodPost, "/admin/players/7/password",
+		t.Context(), http.MethodPost, "/admin/players/"+strconv.FormatInt(targetID, 10)+"/password",
 		strings.NewReader(form.Encode()),
 	)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.SetPathValue("playerID", "7")
-	req = req.WithContext(auth.WithPlayer(req.Context(), &auth.Player{ID: 1, Role: auth.RoleAdmin}))
+	req.SetPathValue("playerID", strconv.FormatInt(targetID, 10))
+	req = req.WithContext(auth.WithPlayer(req.Context(), &auth.Player{ID: testAdminID, Role: auth.RoleAdmin}))
 
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -147,23 +84,30 @@ func postPassword(t *testing.T, store *credStubStore, password string) *httptest
 func TestHandlePlayerSetDisplayName_SuccessRenamesAndAudits(t *testing.T) {
 	t.Parallel()
 
-	store := &credStubStore{}
+	env := newAdminEnv(t)
+	target := env.seedPlayer(t, "before")
 
-	rec := postDisplayName(t, store, "  New Name  ")
+	rec := postDisplayName(t, env, target, "  New Name  ")
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
-	if !store.renameCalled {
-		t.Fatal("RenamePlayer not called, want the rename applied")
+	// The rename trims and persists; reload to confirm.
+	detail, err := env.admin.GetPlayerDetail(t.Context(), target)
+	if err != nil {
+		t.Fatalf("GetPlayerDetail err = %v, want nil", err)
 	}
-	if got, want := store.renameName, "New Name"; got != want {
-		t.Errorf("rename name = %q, want %q", got, want)
+	if got, want := detail.DisplayName, "New Name"; got != want {
+		t.Errorf("display name = %q, want %q", got, want)
 	}
-	if got, want := store.auditAction, auth.AdminActionDisplayNameSet; got != want {
+	entries := env.auditEntries(t, target)
+	if got, want := len(entries), 1; got != want {
+		t.Fatalf("audit entries = %d, want %d", got, want)
+	}
+	if got, want := entries[0].Action, auth.AdminActionDisplayNameSet; got != want {
 		t.Errorf("audit action = %q, want %q", got, want)
 	}
-	if got, want := store.auditPayload, `"new_displayName":"New Name"`; !strings.Contains(got, want) {
+	if got, want := entries[0].Payload, `"new_displayName":"New Name"`; !strings.Contains(got, want) {
 		t.Errorf("audit payload = %q, should contain %q", got, want)
 	}
 }
@@ -171,75 +115,101 @@ func TestHandlePlayerSetDisplayName_SuccessRenamesAndAudits(t *testing.T) {
 func TestHandlePlayerSetDisplayName_TakenFlashesNoAudit(t *testing.T) {
 	t.Parallel()
 
-	store := &credStubStore{renameErr: auth.ErrDisplayNameTaken}
+	env := newAdminEnv(t)
+	// Two players; renaming the target to the other's name collides on the
+	// UNIQUE display_name index, producing auth.ErrDisplayNameTaken.
+	env.seedPlayer(t, "taken")
+	target := env.seedPlayer(t, "before")
 
-	rec := postDisplayName(t, store, "taken")
+	rec := postDisplayName(t, env, target, "taken")
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
-	if store.auditCalled {
-		t.Error("audit written, want none when the rename collides")
+	if got, want := len(env.auditEntries(t, target)), 0; got != want {
+		t.Errorf("audit entries = %d, want %d when the rename collides", got, want)
+	}
+	// The name must be unchanged.
+	detail, err := env.admin.GetPlayerDetail(t.Context(), target)
+	if err != nil {
+		t.Fatalf("GetPlayerDetail err = %v, want nil", err)
+	}
+	if got, want := detail.DisplayName, "before"; got != want {
+		t.Errorf("display name = %q, want %q (unchanged)", got, want)
 	}
 }
 
 func TestHandlePlayerSetDisplayName_EmptyFlashesNoAudit(t *testing.T) {
 	t.Parallel()
 
-	store := &credStubStore{renameErr: auth.ErrDisplayNameEmpty}
+	env := newAdminEnv(t)
+	target := env.seedPlayer(t, "before")
 
-	rec := postDisplayName(t, store, "   ")
+	// A whitespace-only value trims to "" and produces ErrDisplayNameEmpty.
+	rec := postDisplayName(t, env, target, "   ")
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
-	if store.auditCalled {
-		t.Error("audit written, want none on empty input")
+	if got, want := len(env.auditEntries(t, target)), 0; got != want {
+		t.Errorf("audit entries = %d, want %d on empty input", got, want)
 	}
 }
 
 func TestHandlePlayerSetPassword_SuccessHashesAndAudits(t *testing.T) {
 	t.Parallel()
 
-	store := &credStubStore{}
+	env := newAdminEnv(t)
+	// The target carries an email (OAuth-only, no password) so the
+	// CHECK (password_hash IS NULL OR email IS NOT NULL) constraint is
+	// satisfied once the admin sets a password.
+	target := env.seedOAuthPlayer(t, "before", "before@example.test", "google", "sub-before")
 	const plaintext = "correct horse battery staple"
 
-	rec := postPassword(t, store, plaintext)
+	rec := postPassword(t, env, target, plaintext)
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
-	if !store.passCalled {
-		t.Fatal("ChangePlayerPassword not called, want the password rotated")
+	// The target now carries a password.
+	detail, err := env.admin.GetPlayerDetail(t.Context(), target)
+	if err != nil {
+		t.Fatalf("GetPlayerDetail err = %v, want nil", err)
 	}
-	if store.passHash == "" {
-		t.Error("password hash is empty, want a bcrypt hash")
+	if !detail.HasPassword {
+		t.Error("HasPassword = false, want the password rotated")
 	}
-	if store.passHash == plaintext {
-		t.Error("password hash equals plaintext, want it hashed")
+	entries := env.auditEntries(t, target)
+	if got, want := len(entries), 1; got != want {
+		t.Fatalf("audit entries = %d, want %d", got, want)
 	}
-	if got, want := store.auditAction, auth.AdminActionPasswordSet; got != want {
+	if got, want := entries[0].Action, auth.AdminActionPasswordSet; got != want {
 		t.Errorf("audit action = %q, want %q", got, want)
 	}
-	if strings.Contains(store.auditPayload, plaintext) {
-		t.Errorf("audit payload = %q, must not contain the plaintext password", store.auditPayload)
+	if strings.Contains(entries[0].Payload, plaintext) {
+		t.Errorf("audit payload = %q, must not contain the plaintext password", entries[0].Payload)
 	}
 }
 
 func TestHandlePlayerSetPassword_TooShortRejectedNoMutation(t *testing.T) {
 	t.Parallel()
 
-	store := &credStubStore{}
+	env := newAdminEnv(t)
+	target := env.seedOAuthPlayer(t, "before", "before@example.test", "google", "sub-before")
 
-	rec := postPassword(t, store, strings.Repeat("a", auth.MinPasswordLength-1))
+	rec := postPassword(t, env, target, strings.Repeat("a", auth.MinPasswordLength-1))
 
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)
 	}
-	if store.passCalled {
-		t.Error("ChangePlayerPassword called, want no mutation on a too-short password")
+	detail, err := env.admin.GetPlayerDetail(t.Context(), target)
+	if err != nil {
+		t.Fatalf("GetPlayerDetail err = %v, want nil", err)
 	}
-	if store.auditCalled {
-		t.Error("audit written, want none on a rejected password")
+	if detail.HasPassword {
+		t.Error("HasPassword = true, want no mutation on a too-short password")
+	}
+	if got, want := len(env.auditEntries(t, target)), 0; got != want {
+		t.Errorf("audit entries = %d, want %d on a rejected password", got, want)
 	}
 }
