@@ -1,6 +1,6 @@
 //go:build integration
 
-package store_test
+package migrations_test
 
 import (
 	"testing"
