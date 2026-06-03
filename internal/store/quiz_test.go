@@ -399,6 +399,128 @@ func TestQuizStore_GetQuiz(t *testing.T) {
 	})
 }
 
+func TestQuizStore_ListQuestions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("groups options under their question in order", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		questions, err := quizStore.ListQuestions(t.Context(), testQuiz.ID)
+		if err != nil {
+			t.Fatalf("ListQuestions err = %v, want nil", err)
+		}
+
+		if got, want := len(questions), len(testQuiz.Questions); got != want {
+			t.Fatalf("len(questions) = %d, want %d", got, want)
+		}
+
+		// ListQuestionsByQuizID orders by position, so the slice order is
+		// stable and each question must carry exactly its own options.
+		for i, qs := range questions {
+			wantQS := testQuiz.Questions[i]
+			if got, want := qs.ID, wantQS.ID; got != want {
+				t.Errorf("question[%d].ID = %d, want %d", i, got, want)
+			}
+
+			if got, want := len(qs.Options), len(wantQS.Options); got != want {
+				t.Fatalf("question[%d] len(Options) = %d, want %d", i, got, want)
+			}
+			for j, opt := range qs.Options {
+				if got, want := opt.QuestionID, qs.ID; got != want {
+					t.Errorf("question[%d].Options[%d].QuestionID = %d, want %d", i, j, got, want)
+				}
+				if got, want := opt.ID, wantQS.Options[j].ID; got != want {
+					t.Errorf("question[%d].Options[%d].ID = %d, want %d", i, j, got, want)
+				}
+				if got, want := opt.Text, wantQS.Options[j].Text; got != want {
+					t.Errorf("question[%d].Options[%d].Text = %q, want %q", i, j, got, want)
+				}
+			}
+		}
+	})
+
+	t.Run("question with no options yields a non-nil empty slice", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		testQuiz.Questions = nil
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		optionless := &quiz.Question{
+			QuizID:   testQuiz.ID,
+			Text:     "Optionless question",
+			Position: 10,
+		}
+		if err := quizStore.CreateQuestion(t.Context(), optionless); err != nil {
+			t.Fatalf("failed to create optionless question: %v", err)
+		}
+
+		questions, err := quizStore.ListQuestions(t.Context(), testQuiz.ID)
+		if err != nil {
+			t.Fatalf("ListQuestions err = %v, want nil", err)
+		}
+		if got, want := len(questions), 1; got != want {
+			t.Fatalf("len(questions) = %d, want %d", got, want)
+		}
+		if questions[0].Options == nil {
+			t.Error("question.Options = nil, want non-nil empty slice")
+		}
+		if got, want := len(questions[0].Options), 0; got != want {
+			t.Errorf("len(question.Options) = %d, want %d", got, want)
+		}
+	})
+}
+
+func TestQuizStore_GetQuizVisibility(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns the visibility of an existing quiz", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		testQuiz.Visibility = quiz.VisibilityPrivate
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		visibility, err := quizStore.GetQuizVisibility(t.Context(), testQuiz.ID)
+		if err != nil {
+			t.Fatalf("GetQuizVisibility err = %v, want nil", err)
+		}
+		if got, want := visibility, quiz.VisibilityPrivate; got != want {
+			t.Errorf("GetQuizVisibility = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("returns ErrQuizNotFound for a missing quiz", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		_, err := quizStore.GetQuizVisibility(t.Context(), 999)
+		if got, want := err, quiz.ErrQuizNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+}
+
 func TestQuizStore_GetQuiz_ErrorHandling(t *testing.T) {
 	t.Parallel()
 

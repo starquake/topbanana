@@ -80,6 +80,15 @@ LIMIT 1;
 -- of questions and options that GetQuiz materialises.
 SELECT EXISTS(SELECT 1 FROM quizzes WHERE id = ?) AS quiz_exists;
 
+-- name: GetQuizVisibility :one
+-- Returns just the visibility column for a quiz. Used by the read-path
+-- visibility gate, which only needs visibility + existence and must not
+-- pay the questions/options fan-out that GetQuiz materialises.
+SELECT visibility
+FROM quizzes
+WHERE id = ?
+LIMIT 1;
+
 -- name: CreateQuiz :one
 -- created_by_player_id is NOT NULL with an FK to players.id (migration
 -- 20260520200000 / #281). [QuizStore.CreateQuiz] short-circuits with
@@ -184,6 +193,15 @@ LIMIT 1;
 SELECT *
 FROM options
 WHERE id IN (sqlc.slice('ids'));
+
+-- name: ListOptionsByQuizID :many
+-- Returns every option for a quiz in one round-trip so callers can group
+-- options by question in Go instead of running one query per question.
+SELECT o.*
+FROM options o
+         JOIN questions q ON q.id = o.question_id
+WHERE q.quiz_id = ?
+ORDER BY o.question_id, o.id;
 
 -- name: CreateOption :one
 INSERT INTO options (question_id, text, is_correct)

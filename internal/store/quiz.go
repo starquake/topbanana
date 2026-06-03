@@ -164,6 +164,22 @@ func (s *QuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 	return qz, nil
 }
 
+// GetQuizVisibility returns just the visibility of a quiz by its ID,
+// without loading its questions or options. Returns ErrQuizNotFound when
+// the quiz does not exist.
+func (s *QuizStore) GetQuizVisibility(ctx context.Context, id int64) (string, error) {
+	visibility, err := s.q.GetQuizVisibility(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", quiz.ErrQuizNotFound
+		}
+
+		return "", fmt.Errorf("failed to get quiz visibility: %w", err)
+	}
+
+	return visibility, nil
+}
+
 // CreateQuiz creates a new quiz using a transaction.
 func (s *QuizStore) CreateQuiz(ctx context.Context, qz *quiz.Quiz) error {
 	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
@@ -195,6 +211,11 @@ func (s *QuizStore) ListQuestions(ctx context.Context, quizID int64) ([]*quiz.Qu
 		return nil, fmt.Errorf("failed to list questions for quiz %d: %w", quizID, err)
 	}
 
+	optionsByQuestion, err := s.listOptionsByQuiz(ctx, quizID)
+	if err != nil {
+		return nil, err
+	}
+
 	questions := make([]*quiz.Question, 0, len(rows))
 	for _, r := range rows {
 		qs := &quiz.Question{
@@ -207,9 +228,9 @@ func (s *QuizStore) ListQuestions(ctx context.Context, quizID int64) ([]*quiz.Qu
 			TimeLimitSeconds: nullableTimeLimitToPtr(r.TimeLimitSeconds),
 		}
 
-		options, listErr := s.listOptions(ctx, qs.ID)
-		if listErr != nil {
-			return nil, fmt.Errorf("failed to list options for question %d: %w", qs.ID, listErr)
+		options := optionsByQuestion[qs.ID]
+		if options == nil {
+			options = []*quiz.Option{}
 		}
 		qs.Options = options
 
@@ -876,6 +897,29 @@ func (s *QuizStore) listOptions(ctx context.Context, questionID int64) ([]*quiz.
 	}
 
 	return options, nil
+}
+
+// listOptionsByQuiz fetches every option for a quiz in one query and
+// groups them by question ID, so ListQuestions avoids one option query
+// per question on the hot read path. Per-question order matches
+// listOptions (ascending option ID).
+func (s *QuizStore) listOptionsByQuiz(ctx context.Context, quizID int64) (map[int64][]*quiz.Option, error) {
+	rows, err := s.q.ListOptionsByQuizID(ctx, quizID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list options for quiz %d: %w", quizID, err)
+	}
+
+	optionsByQuestion := make(map[int64][]*quiz.Option)
+	for _, r := range rows {
+		optionsByQuestion[r.QuestionID] = append(optionsByQuestion[r.QuestionID], &quiz.Option{
+			ID:         r.ID,
+			QuestionID: r.QuestionID,
+			Text:       r.Text,
+			Correct:    r.IsCorrect,
+		})
+	}
+
+	return optionsByQuestion, nil
 }
 
 func (s *QuizStore) handleOptions(ctx context.Context, q *db.Queries, qs *quiz.Question) error {
