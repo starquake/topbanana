@@ -64,16 +64,16 @@ When implementing review findings or other non-trivial code changes, delegate to
 
 ## CI required checks
 
-The `main` branch is protected: a PR cannot merge until every check in the required list has passed. The required list lives on the repo (set via `gh api -X PUT repos/starquake/topbanana/branches/main/protection`), not in this file, so it can drift silently. Current required contexts: `build`, `lint`, `e2e (chromium)`, `e2e (firefox)` — all jobs of the single `CI` workflow (`.github/workflows/ci.yml`). Required contexts are job names, so they are unaffected by which workflow file a job lives in as long as the job name is preserved.
+The `main` branch is protected by a repository **ruleset** ("Default"), not classic branch protection (the `branches/main/protection` API 404s). It is **strict**, so a PR must be up to date with `main` and pass every required check to merge. The required list lives in the ruleset, not this file, so it can drift silently. Current required contexts: `build`, `lint`, `e2e (chromium)`, `e2e (firefox)` — all jobs of the single `CI` workflow (`.github/workflows/ci.yml`), matched by job name.
 
-**When you add or rename a workflow job under `.github/workflows/`**, update the required-checks list in the same PR. Otherwise the new job is purely advisory and a PR can merge while it fails. Update via:
+**When you add or rename a workflow job**, update the ruleset's required checks in the same PR, or the job is only advisory. Edit via the rulesets API — GET the ruleset, modify `required_status_checks` (each entry needs `integration_id: 15368`, the Actions app), PUT it back:
 
 ```bash
-gh api repos/starquake/topbanana/branches/main/protection | jq '.required_status_checks.contexts'   # show current
-gh api -X PUT repos/starquake/topbanana/branches/main/protection --input <payload.json>             # replace
+RID=$(gh api repos/starquake/topbanana/rulesets --jq '.[] | select(.name=="Default").id')
+gh api repos/starquake/topbanana/rulesets/$RID --jq '.rules[] | select(.type=="required_status_checks") | [.parameters.required_status_checks[].context]'
 ```
 
-When removing a workflow job, drop its context from the required list too — leaving a stale required-context name makes every PR mergeable-blocked indefinitely.
+When removing a job, drop its context from the ruleset too — a stale required-context name blocks every PR indefinitely.
 
 ## Deploys
 
