@@ -704,6 +704,42 @@ func TestHandleQuizSave_ErrorHandling(t *testing.T) {
 		}
 	})
 
+	t.Run("slug conflict re-renders the form at 409", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+		env := newAdminEnv(t)
+		// Seed a quiz whose title derives slug "quiz-one"; creating a new
+		// quiz with the same title derives the same slug, so the UNIQUE
+		// slug index trips and maps to quiz.ErrSlugTaken.
+		env.seedQuiz(t, ownedQuiz("Quiz One", "quiz-one"))
+
+		form := url.Values{
+			"title":       {"Quiz One"},
+			"description": {"Duplicate"},
+		}
+		handler := HandleQuizSave(logger, nil, env.quizzes)
+		req := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			"/admin/quizzes",
+			strings.NewReader(form.Encode()),
+		)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, withTestAdmin(req))
+
+		if got, want := rr.Code, http.StatusConflict; got != want {
+			t.Fatalf("got status code %v, want %v, log:\n%v", got, want, buf.String())
+		}
+		if got, want := rr.Body.String(), "A quiz with this title already exists"; !strings.Contains(got, want) {
+			t.Errorf("body should contain %q; body=%q", want, got)
+		}
+	})
+
 	t.Run("storing existing quiz fails", func(t *testing.T) {
 		t.Parallel()
 
@@ -1795,6 +1831,31 @@ func TestHandleQuestionMove(t *testing.T) {
 		handler.ServeHTTP(rr, withTestAdmin(req))
 
 		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Errorf("status = %d, want %d, log:\n%v", got, want, buf.String())
+		}
+	})
+
+	t.Run("unknown question renders 404", func(t *testing.T) {
+		t.Parallel()
+
+		buf := bytes.Buffer{}
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+		env := newAdminEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Q", "q"))
+
+		handler := HandleQuestionMove(logger, nil, env.quizzes)
+		req := httptest.NewRequestWithContext(
+			t.Context(), http.MethodPost,
+			fmt.Sprintf("/admin/quizzes/%d/questions/999999/move/down", qz.ID), nil,
+		)
+		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
+		req.SetPathValue("questionID", "999999")
+		req.SetPathValue("direction", "down")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, withTestAdmin(req))
+
+		if got, want := rr.Code, http.StatusNotFound; got != want {
 			t.Errorf("status = %d, want %d, log:\n%v", got, want, buf.String())
 		}
 	})

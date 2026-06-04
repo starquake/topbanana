@@ -228,6 +228,60 @@ func TestHandleQuestionMoveToRound(t *testing.T) {
 	})
 }
 
+func postRoundMove(
+	t *testing.T, env *adminEnv, quizID, roundID, direction string,
+	actor func(*http.Request) *http.Request,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	handler := HandleRoundMove(slog.New(slog.DiscardHandler), newRoundsCSRF(), env.quizzes)
+
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost,
+		"/admin/quizzes/"+quizID+"/rounds/"+roundID+"/move/"+direction, nil,
+	)
+	req.SetPathValue("quizID", quizID)
+	req.SetPathValue("roundID", roundID)
+	req.SetPathValue("direction", direction)
+	req = actor(req)
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	return rec
+}
+
+func TestHandleRoundMove(t *testing.T) {
+	t.Parallel()
+
+	t.Run("invalid direction renders a 400", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+		f := seedRoundsQuiz(t, env)
+
+		rec := postRoundMove(
+			t, env, strconv.FormatInt(f.quiz.ID, 10), strconv.FormatInt(f.secondRound, 10), "sideways", adminActor,
+		)
+		if got, want := rec.Code, http.StatusBadRequest; got != want {
+			t.Errorf("status = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("unknown round renders a 404", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+		f := seedRoundsQuiz(t, env)
+
+		rec := postRoundMove(
+			t, env, strconv.FormatInt(f.quiz.ID, 10), "999999", "up", adminActor,
+		)
+		if got, want := rec.Code, http.StatusNotFound; got != want {
+			t.Errorf("status = %d, want %d", got, want)
+		}
+	})
+}
+
 func deleteRound(
 	t *testing.T, env *adminEnv, quizID, roundID string,
 	actor func(*http.Request) *http.Request,
