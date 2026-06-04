@@ -230,6 +230,60 @@ func newPlayerInputRequest(t *testing.T, displayName, email, password string) *h
 	return req
 }
 
+// postCreatePlayer drives HandlePlayerCreateSubmit with the given form
+// fields, posing as the seeded admin so requireAdminActor passes.
+func postCreatePlayer(
+	t *testing.T, env *adminEnv, displayName, email, password string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	handler := HandlePlayerCreateSubmit(slog.New(slog.DiscardHandler), nil, env.admin, newCredFlash(t))
+
+	req := newPlayerInputRequest(t, displayName, email, password)
+	req = req.WithContext(auth.WithPlayer(req.Context(), &auth.Player{ID: testAdminID, Role: auth.RoleAdmin}))
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	return rec
+}
+
+func TestHandlePlayerCreateSubmit_DisplayNameTakenRenders409(t *testing.T) {
+	t.Parallel()
+
+	env := newAdminEnv(t)
+	// Seed a player owning the display name; the admin-create then collides
+	// on the UNIQUE display_name index, mapping to auth.ErrDisplayNameTaken.
+	env.seedCredentialledPlayer(t, "Taken Name", "existing@example.test", auth.RolePlayer)
+
+	rec := postCreatePlayer(t, env, "Taken Name", "fresh@example.test", "correct-horse-battery")
+
+	if got, want := rec.Code, http.StatusConflict; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := rec.Body.String(), "That display name is already taken."; !strings.Contains(got, want) {
+		t.Errorf("body should contain %q; body=%q", want, got)
+	}
+}
+
+func TestHandlePlayerCreateSubmit_EmailTakenRenders409(t *testing.T) {
+	t.Parallel()
+
+	env := newAdminEnv(t)
+	// Seed a player owning the email; the admin-create uses a fresh display
+	// name so the only collision is the UNIQUE email index, mapping to
+	// auth.ErrEmailTaken.
+	env.seedCredentialledPlayer(t, "Existing Name", "taken@example.test", auth.RolePlayer)
+
+	rec := postCreatePlayer(t, env, "Fresh Name", "taken@example.test", "correct-horse-battery")
+
+	if got, want := rec.Code, http.StatusConflict; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := rec.Body.String(), "Another account already uses that email."; !strings.Contains(got, want) {
+		t.Errorf("body should contain %q; body=%q", want, got)
+	}
+}
+
 func TestNewPlayerInput(t *testing.T) {
 	t.Parallel()
 

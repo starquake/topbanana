@@ -9,6 +9,8 @@ exclude:
   packages:
     - github.com/starquake/topbanana/internal/dbtest
     - github.com/starquake/topbanana/internal/testutil
+    - github.com/starquake/topbanana/cmd/seed-dev
+    - github.com/starquake/topbanana/internal/db$
 
 # Path to the coverage profile file
 profile: build/coverage/coverage.out

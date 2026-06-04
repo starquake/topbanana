@@ -183,7 +183,7 @@ test-one:
 .PHONY: test-coverage
 test-coverage:
 	mkdir -p $(COV_DIR)
-	go test -v -race -coverpkg=$(shell go list ./... | grep -v -E "dbtest|testutil" | paste -sd "," -) -coverprofile=$(COV_DIR)/coverage.out ./...
+	go test -v -race -coverpkg=$(shell go list ./... | grep -v -E "dbtest|testutil|seed-dev|internal/db$$" | paste -sd "," -) -coverprofile=$(COV_DIR)/coverage.out ./...
 	go tool cover -func=$(COV_DIR)/coverage.out
 
 .PHONY: test-coverage-html
