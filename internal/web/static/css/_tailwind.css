@@ -370,10 +370,61 @@
      * .q-thumb stays defined so the resume work only flips the grid
      * back to five columns. */
     .q-row {
-        @apply bg-surface border border-border-soft rounded-lg p-5
+        @apply relative bg-surface border border-border-soft rounded-lg p-5
                grid gap-4 items-start
                grid-cols-[auto_1fr]
-               md:grid-cols-[48px_1fr_auto_auto] md:items-center md:py-4 md:px-5;
+               md:grid-cols-[48px_1fr_auto_auto] md:items-center md:py-4 md:pr-5 md:pl-9;
+    }
+    /* Drag rails for round + question reorder (#199). A full-height grab
+     * column on the left edge of each item (Notion/Trello style), with the
+     * grip icon vertically centred. Drag is desktop-mouse only -- native
+     * HTML5 DnD does not engage on touch -- so the rail is hidden below md;
+     * touch/keyboard hosts reorder via the always-present Up/Down buttons +
+     * move-to-round <select>. The round rail is a flex sibling on the
+     * section's outer-left edge; the question rail is absolutely positioned
+     * on each row's left edge (so it stays out of the .q-row grid flow and
+     * cannot shift the read-only column layout), inset to the right of the
+     * round rail. */
+    .drag-rail {
+        @apply hidden md:flex items-center justify-center shrink-0
+               bg-transparent border-0
+               text-text-mute hover:text-text hover:bg-surface-2
+               focus-visible:outline-none focus-visible:shadow-focus
+               transition-colors;
+        cursor: grab;
+    }
+    .drag-rail:active {
+        cursor: grabbing;
+    }
+    .drag-rail-round {
+        @apply w-8 self-stretch rounded-l-lg;
+    }
+    .drag-rail-question {
+        @apply absolute inset-y-0 left-0 w-7 rounded-l-lg;
+    }
+    /* Round grouping (#444). A flex row so the round drag rail (#199) can
+     * span the full section height on the outer-left edge; .round-body holds
+     * the header, question list, and summary and carries the inner padding. */
+    .round-section {
+        @apply flex border border-border-soft rounded-lg;
+    }
+    .round-body {
+        @apply flex-1 min-w-0 p-4;
+    }
+    /* SortableJS state classes (#199). The ghost is the placeholder gap, the
+     * chosen item is the one held, the drag clone is what follows the cursor. */
+    .sortable-ghost {
+        @apply opacity-40 outline outline-2 outline-dashed outline-accent;
+    }
+    .sortable-chosen {
+        @apply shadow-focus;
+    }
+    .sortable-drag {
+        @apply opacity-90;
+    }
+    /* Inline banner shown when a reorder POST fails and the list snaps back. */
+    .reorder-error {
+        @apply mb-2 px-3 py-2 rounded-sm bg-danger/10 border border-danger/40 text-danger text-sm;
     }
     .q-position {
         @apply font-display font-extrabold text-[1.75rem] leading-none tracking-wide

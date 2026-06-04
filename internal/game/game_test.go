@@ -247,6 +247,14 @@ func (stubQuizStore) MoveQuestionToRound(_ context.Context, _, _, _ int64) error
 	return errStub
 }
 
+func (stubQuizStore) MoveRoundToPosition(_ context.Context, _, _ int64, _ int) error {
+	return errStub
+}
+
+func (stubQuizStore) MoveQuestionToPosition(_ context.Context, _, _, _ int64, _ int) error {
+	return errStub
+}
+
 func TestGame_IsCompleted(t *testing.T) {
 	t.Parallel()
 

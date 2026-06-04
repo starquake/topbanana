@@ -278,6 +278,112 @@ func swapRoundPositions(ctx context.Context, q *db.Queries, current, neighbour d
 	return nil
 }
 
+// MoveRoundToPosition moves a round to an absolute 1-based slot within
+// its quiz, renumbering every round so positions stay dense 1..N. The
+// load, renumber, and writes share a transaction so a concurrent round
+// create cannot squeeze into a slot mid-renumber (#199).
+func (s *QuizStore) MoveRoundToPosition(ctx context.Context, quizID, roundID int64, newPosition int) error {
+	if err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		return moveRoundToPositionTx(ctx, q, quizID, roundID, newPosition)
+	}); err != nil {
+		return fmt.Errorf("failed to move round to position: %w", err)
+	}
+
+	return nil
+}
+
+// moveRoundToPositionTx is the transactional body of
+// MoveRoundToPosition. Pulled out so the public method stays under
+// revive's cognitive-complexity budget and the sentinel errors are not
+// wrapped on the way out.
+func moveRoundToPositionTx(ctx context.Context, q *db.Queries, quizID, roundID int64, newPosition int) error {
+	rounds, err := q.ListRoundsByQuiz(ctx, quizID)
+	if err != nil {
+		return fmt.Errorf("failed to list rounds for move to position: %w", err)
+	}
+
+	idx := slices.IndexFunc(rounds, func(g db.Round) bool { return g.ID == roundID })
+	if idx == -1 {
+		return quiz.ErrRoundNotFound
+	}
+
+	moved := rounds[idx]
+	reordered := slices.Delete(slices.Clone(rounds), idx, idx+1)
+	target := clampIndex(newPosition, len(reordered))
+	reordered = slices.Insert(reordered, target, moved)
+
+	ids := make([]int64, len(reordered))
+	current := make([]int64, len(reordered))
+	for i, rnd := range reordered {
+		ids[i], current[i] = rnd.ID, rnd.Position
+	}
+
+	return renumberDensePositions(ctx, ids, current, func(ctx context.Context, id, pos int64) error {
+		if _, err := q.UpdateRoundPosition(ctx, db.UpdateRoundPositionParams{Position: pos, ID: id}); err != nil {
+			return fmt.Errorf("update round position: %w", err)
+		}
+
+		return nil
+	})
+}
+
+// renumberDensePositions assigns the ids the dense positions 1..N (in the
+// order given) via setPos, using the negative-parking idiom. SQLite checks
+// the UNIQUE(quiz_id, position) index per statement (no deferred
+// uniqueness), so any row whose final position differs from its current
+// one (current[i]) is first parked at a distinct negative slot (-id,
+// unique because ids are positive) before the second pass assigns the
+// final positions. Rows already at their final position are skipped so a
+// no-op move writes nothing. Shared by the round and question reorder
+// paths, which differ only in which Update*Position query setPos calls.
+func renumberDensePositions(
+	ctx context.Context,
+	ids, current []int64,
+	setPos func(ctx context.Context, id, pos int64) error,
+) error {
+	type move struct {
+		id       int64
+		finalPos int64
+	}
+	var moves []move
+	for i, id := range ids {
+		finalPos := int64(i + 1)
+		if current[i] == finalPos {
+			continue
+		}
+		moves = append(moves, move{id: id, finalPos: finalPos})
+	}
+
+	for _, m := range moves {
+		if err := setPos(ctx, m.id, -m.id); err != nil {
+			return fmt.Errorf("park position: %w", err)
+		}
+	}
+	for _, m := range moves {
+		if err := setPos(ctx, m.id, m.finalPos); err != nil {
+			return fmt.Errorf("settle position: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// clampIndex maps a 1-based target position onto a valid insertion index
+// in [0, length]. Out-of-range inputs clamp to the ends instead of
+// erroring, matching the drag UX where a drop past either edge means
+// "first" or "last".
+func clampIndex(position, length int) int {
+	idx := position - 1
+	if idx < 0 {
+		return 0
+	}
+	if idx > length {
+		return length
+	}
+
+	return idx
+}
+
 // roundFromRow maps a sqlc rounds row onto the domain type.
 func roundFromRow(r db.Round) *quiz.Round {
 	return &quiz.Round{

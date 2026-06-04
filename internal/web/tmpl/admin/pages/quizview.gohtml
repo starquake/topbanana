@@ -378,4 +378,10 @@
             }
         });
     </script>
+    {{/* Drag-and-drop reorder for rounds and questions (#199). Vendored
+         SortableJS plus a plain ES module; both are admin-only and loaded
+         only on this page, not in the global base layout. The module
+         self-noops when the edit handles are absent (read-only viewer). */}}
+    <script src="/assets/js/vendor/sortable.min.js" defer></script>
+    <script type="module" src="/assets/js/quiz-reorder.js" defer></script>
 {{end}}
