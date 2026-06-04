@@ -94,6 +94,15 @@ export class GameApp {
         // is hidden in that case so the player just sees a description and
         // a Start button. Stays null on /client/, where the dropdown shows.
         this.deepLinkedQuiz = null;
+        // Gates the deep-link title/description so it only paints once
+        // checkAlreadyPlayed has resolved the start state. Without it the
+        // header renders optimistically on a deep link, then vanishes when
+        // an already-completed quiz flips `finished` true after the
+        // probe's two fetches — a visible title/leaderboard layout shift
+        // on load. Flipped true at the tail of every checkAlreadyPlayed
+        // call and reset to false whenever the selected quiz changes so a
+        // later switch re-hides until the new probe lands.
+        this.startStateResolved = false;
         // Current player as returned by GET /api/players/me. Stays null
         // until init() resolves; templates guard with `player &&`. When
         // the player renames, the PATCH response replaces this object
@@ -466,9 +475,17 @@ export class GameApp {
             this.finished = false;
             this.leaderboard = null;
             this.quizSlugId = null;
+            // Re-hide the deep-link header until this probe resolves the
+            // new quiz's start state, so a switch can't flash the prior
+            // resolved header against the new quiz's pending state.
+            this.startStateResolved = false;
         }
 
-        if (!slugId) return null;
+        if (!slugId) {
+            this.startStateResolved = true;
+
+            return null;
+        }
 
         // Hoist quizSlugId + leaderboard fetch above the completed gate
         // so the start screen surfaces the leaderboard for the selected
@@ -500,6 +517,12 @@ export class GameApp {
             // SSE was already opened above so the completed-view row
             // updates live too — no extra subscribe needed here.
         }
+
+        // Start state is now known: either the deep-link header may paint
+        // (not completed) or it stays hidden behind `!finished`. Flipping
+        // this last means the header appears once, in its final position,
+        // rather than flashing in then out.
+        this.startStateResolved = true;
 
         return existing;
     }
