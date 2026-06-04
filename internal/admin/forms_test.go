@@ -292,3 +292,51 @@ func TestQuestionForm_Valid_OptionRules(t *testing.T) {
 		})
 	}
 }
+
+func TestParseOptionalTimeLimit(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		raw     string
+		wantNil bool
+		want    int
+	}{
+		"blank yields nil (inherit quiz default)": {
+			raw:     "",
+			wantNil: true,
+		},
+		"whitespace-only yields nil": {
+			raw:     "   ",
+			wantNil: true,
+		},
+		"valid number yields a pointer to it": {
+			raw:  "45",
+			want: 45,
+		},
+		"non-numeric yields a pointer to 0": {
+			raw:  "abc",
+			want: 0,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := ParseOptionalTimeLimit(tc.raw)
+			if tc.wantNil {
+				if got != nil {
+					t.Errorf("ParseOptionalTimeLimit(%q) = %v, want nil", tc.raw, *got)
+				}
+
+				return
+			}
+			if got == nil {
+				t.Fatalf("ParseOptionalTimeLimit(%q) = nil, want %d", tc.raw, tc.want)
+			}
+			if *got != tc.want {
+				t.Errorf("ParseOptionalTimeLimit(%q) = %d, want %d", tc.raw, *got, tc.want)
+			}
+		})
+	}
+}

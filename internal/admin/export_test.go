@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/starquake/topbanana/internal/quiz"
 )
@@ -114,3 +115,27 @@ func ValidateQuestionForm(ctx context.Context, q *quiz.Question) map[string]stri
 // MaxOptions exposes the per-question option cap so tests can build a
 // payload one over the limit without hard-coding the value.
 const MaxOptions = maxOptions
+
+// ParseOptionalTimeLimit exposes the unexported per-question
+// time_limit_seconds parser so the external admin_test package can pin
+// the blank / valid / garbage mapping without driving the form handler.
+var ParseOptionalTimeLimit = parseOptionalTimeLimit
+
+// NewPlayerInputResult is the test-visible projection of the unexported
+// newPlayerCreateInput: the resolved display name and the first
+// validation error message. Returned by [NewPlayerInputResultFor] so the
+// external admin_test package can pin newPlayerInput's branches without
+// reaching the unexported errMsg field.
+type NewPlayerInputResult struct {
+	DisplayName string
+	ErrMsg      string
+}
+
+// NewPlayerInputResultFor runs the unexported newPlayerInput against r and
+// projects the result so the external admin_test package can assert the
+// petname fallback and the per-field validation messages.
+func NewPlayerInputResultFor(r *http.Request) NewPlayerInputResult {
+	in := newPlayerInput(r)
+
+	return NewPlayerInputResult{DisplayName: in.DisplayName, ErrMsg: in.errMsg}
+}
