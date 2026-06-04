@@ -463,6 +463,7 @@ dev:
 	watchexec \
 	    --restart \
 	    --stop-signal SIGTERM \
+	    --shell=none \
 	    --watch cmd \
 	    --watch internal \
 	    --watch go.mod \
