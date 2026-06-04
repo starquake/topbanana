@@ -375,6 +375,37 @@
                grid-cols-[auto_1fr]
                md:grid-cols-[48px_1fr_auto_auto] md:items-center md:py-4 md:px-5;
     }
+    /* Drag handle for round + question reorder (#199). Visually matches
+     * .icon-btn but advertises a grab affordance and opts out of touch
+     * scrolling so a touch-drag is not stolen by the page scroller. The
+     * question handle sits in the .q-actions cluster; the round handle in
+     * the round header. */
+    .drag-handle {
+        @apply w-9 h-9 inline-flex items-center justify-center rounded-sm bg-transparent border-0
+               text-text-mute hover:text-text hover:bg-surface-2
+               focus-visible:outline-none focus-visible:shadow-focus
+               transition-colors;
+        cursor: grab;
+        touch-action: none;
+    }
+    .drag-handle:active {
+        cursor: grabbing;
+    }
+    /* SortableJS state classes (#199). The ghost is the placeholder gap, the
+     * chosen item is the one held, the drag clone is what follows the cursor. */
+    .sortable-ghost {
+        @apply opacity-40 outline outline-2 outline-dashed outline-accent;
+    }
+    .sortable-chosen {
+        @apply shadow-focus;
+    }
+    .sortable-drag {
+        @apply opacity-90;
+    }
+    /* Inline banner shown when a reorder POST fails and the list snaps back. */
+    .reorder-error {
+        @apply mb-2 px-3 py-2 rounded-sm bg-danger/10 border border-danger/40 text-danger text-sm;
+    }
     .q-position {
         @apply font-display font-extrabold text-[1.75rem] leading-none tracking-wide
                text-accent tabular-nums opacity-90

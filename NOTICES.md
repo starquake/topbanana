@@ -116,6 +116,39 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
+## SortableJS — MIT License
+
+A copy of SortableJS 1.15.6 is vendored at
+`internal/web/static/js/vendor/sortable.min.js` (introduced in #199). It
+powers the drag-and-drop reorder of rounds and questions on the admin quiz
+view and is loaded only on that page, self-hosted rather than from a CDN
+(following the precedent set for anime.js / Alpine.js in #295). SortableJS
+is published under the MIT License:
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2019 All contributors to Sortable
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
 ## Inter — SIL Open Font License 1.1 (OFL-1.1)
 
 The Inter typeface (body/sans font) is vendored under
