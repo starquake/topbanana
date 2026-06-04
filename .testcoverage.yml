@@ -1,7 +1,8 @@
 # Test coverage configuration
 
-# Threshold for total coverage (percentage)
-threshold-total: 80
+# Total-coverage threshold is enforced in .github/workflows/ci.yml: the
+# action's threshold-total input defaults to -1 and overrides any value
+# set here, so a threshold in this file has no effect. See #667.
 
 # List of packages to exclude from coverage report
 exclude:
