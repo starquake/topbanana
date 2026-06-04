@@ -1,7 +1,8 @@
 // quiz-reorder.js powers drag-and-drop reordering of rounds and questions
 // on the admin quiz view (#199), layered on top of the existing Up/Down
 // buttons and the move-to-round <select>, which stay as the no-JS / touch /
-// a11y fallback. The drag affordances (the grip handles and the data-*
+// keyboard / a11y fallback (native HTML5 DnD is desktop-mouse only). The drag
+// affordances (the grip handles and the data-*
 // hooks this module reads) only render for an owner/editor, so this module
 // self-noops for a read-only viewer.
 //
@@ -173,11 +174,11 @@ function initSortable(root) {
 
     const shared = { name: 'questions' };
 
-    // SortableJS uses native HTML5 drag-and-drop for mouse input and its own
-    // touch-event handling for touch devices (long-press to grab), so the
-    // drag affordance covers both pointer types (#199). Keyboard users and
-    // anyone without a pointer reorder via the always-present Up/Down buttons
-    // + move-to-round <select>, which stay in the markup as the fallback.
+    // SortableJS runs in native HTML5 drag-and-drop mode, which fires for mouse
+    // input only and does NOT engage on touchscreens (#199 keeps touch drag out
+    // of scope). Touch, keyboard, and no-pointer users reorder via the
+    // always-present Up/Down buttons + move-to-round <select>, which stay in the
+    // markup as the fallback. The drag rails are hidden below md to match.
     const common = {
         animation: ANIMATION_MS,
         onStart: captureSnapshot,

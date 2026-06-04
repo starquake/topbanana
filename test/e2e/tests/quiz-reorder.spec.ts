@@ -9,9 +9,10 @@ import { adminStatePath } from '../e2e-auth';
 test.use({ storageState: adminStatePath() });
 
 // #199 - drag-and-drop reorder for rounds and questions on the admin quiz
-// view. SortableJS runs in its default native-HTML5-DnD mode (mouse) with its
-// built-in touch handling for touch devices; the Up/Down buttons and
-// move-to-round <select> stay as the no-JS / keyboard fallback. Each drop
+// view. SortableJS runs in its default native-HTML5-DnD mode, which fires for
+// mouse input only and does not engage on touchscreens; touch, keyboard, and
+// no-JS users reorder via the Up/Down buttons + move-to-round <select>
+// fallback. Each drop
 // POSTs to the reorder endpoint and swaps in the server-rendered
 // #questions-list partial, so the assertions key on the PERSISTED order after
 // a reload, never on intermediate drag state.
