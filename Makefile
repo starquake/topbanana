@@ -434,11 +434,22 @@ $(MAILPIT_BIN):
 	    rm -rf $$tmp
 	@chmod +x $@
 
+# Build stamp for local `go run` dev (#663). Unlike `go build`, `go run`
+# does NOT embed VCS info, so without these ldflags the admin footer and
+# /version would show the commit as "unknown". Mirrors the Dockerfile's
+# ldflags (the version package reads them); Commit gets a "-dirty" marker
+# when the tree differs from HEAD. `make build` needs none of this - it
+# uses `go build`, which stamps VCS for free.
+VERSION_PKG := github.com/starquake/topbanana/internal/version
+VERSION_LDFLAGS := -X $(VERSION_PKG).Version=$(shell cat VERSION 2>/dev/null) \
+                   -X $(VERSION_PKG).Commit=$(shell git rev-parse HEAD 2>/dev/null)$(shell git diff --quiet HEAD 2>/dev/null || echo -dirty) \
+                   -X $(VERSION_PKG).Date=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+
 # Run the Go server in development. Pair with `make tailwind-watch` in a
 # second terminal to regenerate app.css on template edits.
 .PHONY: server
 server:
-	go run ./cmd/server/
+	go run -ldflags "$(VERSION_LDFLAGS)" ./cmd/server/
 
 # Run the Go server with auto-restart on source changes. Watches cmd/,
 # internal/, and the go.mod/go.sum pair; ignores the generated sqlc
@@ -458,7 +469,7 @@ dev:
 	    --watch go.sum \
 	    --ignore 'internal/db/**' \
 	    --ignore 'internal/web/static/css/app.css' \
-	    -- go run ./cmd/server/
+	    -- go run -ldflags "$(VERSION_LDFLAGS)" ./cmd/server/
 
 .PHONY: clean
 clean:

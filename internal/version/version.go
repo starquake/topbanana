@@ -18,6 +18,7 @@ package version
 
 import (
 	"runtime/debug"
+	"strings"
 	"sync/atomic"
 
 	"github.com/starquake/topbanana/internal/config"
@@ -100,14 +101,21 @@ func resolvedCommit() string {
 	return short
 }
 
-// shorten truncates a commit sha to shortCommitLen characters, leaving
-// any "-dirty" caller-appended suffix to be added after.
+// shorten truncates a commit sha to shortCommitLen characters. It
+// preserves a trailing "-dirty" marker (which the Makefile appends to
+// the ldflags-stamped commit for local `go run` dev) so truncation does
+// not swallow it; the ReadBuildInfo path passes a bare revision and
+// appends its own marker after.
 func shorten(commit string) string {
+	suffix := ""
+	if rest, found := strings.CutSuffix(commit, "-dirty"); found {
+		commit, suffix = rest, "-dirty"
+	}
 	if len(commit) > shortCommitLen {
-		return commit[:shortCommitLen]
+		commit = commit[:shortCommitLen]
 	}
 
-	return commit
+	return commit + suffix
 }
 
 // CommitLabel returns the resolved short commit, or "unknown" when no

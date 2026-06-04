@@ -98,6 +98,17 @@ func TestCommitLabel_ShortensStampedCommit(t *testing.T) {
 }
 
 //nolint:paralleltest // mutates shared package globals; must run serially.
+func TestCommitLabel_PreservesDirtyThroughShorten(t *testing.T) {
+	// The Makefile stamps "<full-sha>-dirty" for local `go run`; truncation
+	// must keep the marker rather than swallow it.
+	setStamp(t, "", "0123456789abcdef-dirty")
+
+	if got, want := CommitLabel(), "0123456-dirty"; got != want {
+		t.Errorf("CommitLabel() = %q, want %q", got, want)
+	}
+}
+
+//nolint:paralleltest // mutates shared package globals; must run serially.
 func TestRelease_Fallback(t *testing.T) {
 	setStamp(t, "", "")
 
