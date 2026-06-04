@@ -244,6 +244,34 @@ func IsValidVisibility(v string) bool {
 	return slices.Contains(VisibilityValues(), v)
 }
 
+// Play modes (MP-0 / #677). The DB CHECK on quizzes.mode enforces the
+// same set; keeping them as typed constants means handlers and
+// templates don't sprinkle stringly-typed values across the codebase.
+//
+//   - ModeSolo - self-paced; listed in the solo browse paths and
+//     playable by anyone who can read it.
+//   - ModeLive - hosted-only (MP-1+); never listed in the solo browse
+//     paths and never solo-playable, so it cannot be pre-played and
+//     spoiled before a hosted game.
+const (
+	ModeSolo = "solo"
+	ModeLive = "live"
+)
+
+// ModeValues lists the play modes in the order the admin form's
+// selector renders them. Returned as a fresh slice on every call so
+// callers can range over it without sharing a backing array (and to
+// keep the gochecknoglobals linter happy).
+func ModeValues() []string {
+	return []string{ModeSolo, ModeLive}
+}
+
+// IsValidMode reports whether m is one of the recognised play modes
+// (MP-0 / #677).
+func IsValidMode(m string) bool {
+	return slices.Contains(ModeValues(), m)
+}
+
 // Quiz represents a quiz. CreatedByPlayerID + CreatedByDisplayName were
 // added in migration 20260520200000 to support the creator-only-edit
 // rule from #281. CreatedByPlayerID is NOT NULL at the DB level;
@@ -272,7 +300,13 @@ type Quiz struct {
 	// layer so existing fixtures and the JSON-import path don't need to
 	// repeat the default.
 	Visibility string
-	Questions  []*Question
+	// Mode is the play mode (MP-0 / #677): ModeSolo or ModeLive. A live
+	// quiz is hosted-only - never listed in the solo browse paths and
+	// never solo-playable. A zero value (empty string) is treated as
+	// ModeSolo by the store layer so existing fixtures and the
+	// JSON-import path don't need to repeat the default.
+	Mode      string
+	Questions []*Question
 	// Rounds, when non-empty, tells the create path to author the quiz's
 	// rounds explicitly instead of dropping every question in the single
 	// default round (#546). Each Round carries the questions that belong

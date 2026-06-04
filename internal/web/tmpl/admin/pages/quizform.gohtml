@@ -126,6 +126,24 @@
             {{end}}
         </div>
 
+        {{$modeErr := index .FieldErrors "mode"}}
+        <div class="form-field">
+            <label class="label-eyebrow" for="mode">
+                Play mode
+                <span class="label-hint">Solo — self-paced; players pick it from the quiz list. Live — hosted only; never solo-playable, so it can't be spoiled before a hosted game.</span>
+            </label>
+            <select id="mode" name="mode"
+                    class="form-input max-w-[260px]{{if $modeErr}} form-input-error{{end}}"
+                    {{if $modeErr}}aria-invalid="true" aria-describedby="mode-error"{{end}}>
+                {{range .Quiz.ModeOptions}}
+                    <option value="{{.}}" {{if eq . $.Quiz.Mode}}selected{{end}}>{{.}}</option>
+                {{end}}
+            </select>
+            {{if $modeErr}}
+                <p id="mode-error" class="form-help-error" role="alert">{{$modeErr}}</p>
+            {{end}}
+        </div>
+
         <div class="form-actions">
             <button type="submit" name="action" value="Save" class="btn-primary">Save quiz</button>
             <a href="{{if .Quiz.ID}}/admin/quizzes/{{.Quiz.ID}}{{else}}/admin/quizzes{{end}}" class="btn-ghost">Cancel</a>

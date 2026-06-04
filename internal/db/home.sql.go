@@ -81,6 +81,7 @@ SELECT q.id          AS id,
        (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = q.id) AS question_count
 FROM quizzes q
 WHERE q.visibility = 'public'
+  AND q.mode = 'solo'
   AND EXISTS (SELECT 1 FROM questions qe WHERE qe.quiz_id = q.id)
 ORDER BY q.created_at DESC, q.id DESC
 `
@@ -101,7 +102,8 @@ type ListNewestQuizzesRow struct {
 //
 // Visibility gate (#103): only quizzes the public can play surface on
 // the start page. Unlisted is link-only; private requires a logged-in
-// player, neither of which fits this anonymous list.
+// player, neither of which fits this anonymous list. Mode gate (MP-0 /
+// #677): live quizzes are hosted-only, so they are excluded here too.
 //
 // The EXISTS gate on questions excludes quizzes with zero questions:
 // they cannot be played, so they have no business on a "pick a quiz"
@@ -151,6 +153,7 @@ FROM quizzes q
 JOIN games g ON g.quiz_id = q.id
 WHERE g.created_at >= datetime('now', '-30 days')
   AND q.visibility = 'public'
+  AND q.mode = 'solo'
   AND EXISTS (SELECT 1 FROM questions qe WHERE qe.quiz_id = q.id)
   AND (SELECT COUNT(*) FROM game_questions gq WHERE gq.game_id = g.id) >=
       (SELECT COUNT(*) FROM questions qc WHERE qc.quiz_id = q.id)
@@ -187,7 +190,9 @@ type ListPopularQuizzesRow struct {
 //
 // Visibility gate (#103): only quizzes the public can play surface on
 // the start page. Unlisted is link-only; private requires a logged-in
-// player, neither of which fits this anonymous list.
+// player, neither of which fits this anonymous list. Mode gate (MP-0 /
+// #677): live quizzes are hosted-only and never solo-playable, so they
+// are excluded from the start page too.
 func (q *Queries) ListPopularQuizzes(ctx context.Context) ([]ListPopularQuizzesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listPopularQuizzes)
 	if err != nil {

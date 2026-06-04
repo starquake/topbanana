@@ -176,7 +176,11 @@ type QuizData struct {
 	// straight from the domain constants so a future level addition
 	// only touches one place.
 	VisibilityOptions []string
-	Questions         []*QuestionData
+	Mode              string
+	// ModeOptions feeds the admin form's play-mode selector (MP-0 /
+	// #677) - pulled straight from the domain constants.
+	ModeOptions []string
+	Questions   []*QuestionData
 }
 
 // QuestionData is the data for a question. TimeLimitSecondsValue is the
@@ -263,6 +267,10 @@ func quizDataFromQuiz(qz *quiz.Quiz) *QuizData {
 	if visibility == "" {
 		visibility = quiz.VisibilityPublic
 	}
+	mode := qz.Mode
+	if mode == "" {
+		mode = quiz.ModeSolo
+	}
 
 	return &QuizData{
 		ID:                   qz.ID,
@@ -276,6 +284,8 @@ func quizDataFromQuiz(qz *quiz.Quiz) *QuizData {
 		TimeLimitSeconds:     qz.TimeLimitSeconds,
 		Visibility:           visibility,
 		VisibilityOptions:    quiz.VisibilityValues(),
+		Mode:                 mode,
+		ModeOptions:          quiz.ModeValues(),
 		Questions:            questionDataFromQuestions(qz.Questions),
 	}
 }
@@ -637,6 +647,14 @@ func fillQuizFromForm(
 		qz.Visibility = v
 	} else {
 		qz.Visibility = quiz.VisibilityPublic
+	}
+	// Play mode (MP-0 / #677). Defaults to solo if the form omits it; an
+	// unrecognised value is passed through verbatim so Quiz.Valid
+	// surfaces an inline error.
+	if m := r.PostFormValue("mode"); m != "" {
+		qz.Mode = m
+	} else {
+		qz.Mode = quiz.ModeSolo
 	}
 	if problems := (&quizForm{quiz: qz}).Valid(r.Context()); len(problems) > 0 {
 		return problems, true
@@ -1165,6 +1183,8 @@ func HandleQuizCreate(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
 				TimeLimitSeconds:  quiz.DefaultTimeLimitSeconds,
 				Visibility:        quiz.VisibilityPublic,
 				VisibilityOptions: quiz.VisibilityValues(),
+				Mode:              quiz.ModeSolo,
+				ModeOptions:       quiz.ModeValues(),
 			},
 		})
 	})
