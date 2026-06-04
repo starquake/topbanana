@@ -68,3 +68,60 @@ func TestSelfHostedFonts(t *testing.T) {
 		}
 	})
 }
+
+// TestFontPreloadLinks covers ticket #691: each surface that renders the
+// self-hosted fonts must declare <link rel="preload" as="font"> for the
+// above-the-fold subsets so the browser fetches them before parsing
+// app.css. Without the preload the first paint falls back to a system
+// font and the custom face only appears on a refresh (the service worker
+// has it cached by then). The extended-latin subset is deliberately NOT
+// preloaded - it is rarely used and preloading an unused font triggers a
+// browser console warning. This test pins the served HTML, which is the
+// only place the preload is observable; the FOUT itself is a timing flash
+// and not reliably assertable.
+func TestFontPreloadLinks(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+	})
+	baseURL := srv.BaseURL
+
+	wantLinks := []string{
+		`<link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>`,
+		`<link rel="preload" href="/assets/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>`,
+	}
+
+	assertPreloads := func(t *testing.T, body string) {
+		t.Helper()
+		for _, want := range wantLinks {
+			if !strings.Contains(body, want) {
+				t.Errorf("body missing font preload %q (#691); body=%q", want, body)
+			}
+		}
+		// The extended-latin subset must not be preloaded - it is rarely
+		// needed and preloading an unused font wastes bandwidth and warns.
+		if banned := `rel="preload" href="/assets/fonts/inter-latin-ext.woff2"`; strings.Contains(body, banned) {
+			t.Errorf("body preloads the extended-latin subset (%q), which should not be preloaded (#691)", banned)
+		}
+	}
+
+	// Home layout (public) and auth layout (public /login) need no session.
+	t.Run("home layout", func(t *testing.T) {
+		t.Parallel()
+		assertPreloads(t, getBody(ctx, t, baseURL+"/"))
+	})
+	t.Run("auth layout", func(t *testing.T) {
+		t.Parallel()
+		assertPreloads(t, getBody(ctx, t, baseURL+"/login"))
+	})
+
+	// Admin layout requires an authenticated admin session. The first
+	// registrant is promoted to admin, matching the other admin tests.
+	t.Run("admin layout", func(t *testing.T) {
+		t.Parallel()
+		adminClient := authClient(t)
+		registerVerifyAndMint(ctx, t, adminClient, baseURL, srv.DBURI, "preload-admin", "preload-admin-pass-123")
+		assertPreloads(t, getOK(ctx, t, adminClient, baseURL+"/admin"))
+	})
+}
