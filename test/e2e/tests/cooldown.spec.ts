@@ -23,27 +23,39 @@ test('forgot-password cooldown button counts down and re-enables', async ({ page
   await expect(submit).toBeEnabled();
   await expect(submit).toHaveText('Send reset link');
 
-  // First submit succeeds and arms the limiter; the PRG redirect lands
-  // back on /forgot-password with the opaque success notice.
+  // Drive the button into the disabled "Wait Ns" state WITHOUT assuming the
+  // per-IP limiter starts clear. The forgot-password limiter is in-memory and
+  // its 60s window is keyed on the source IP (127.0.0.1 for every worker), so
+  // this spec's bucket is shared with the other browser project's run of the
+  // same spec and with retries on the same worker server. The disabled state
+  // renders only when a submit is *rejected* (a one-shot error flash); a fresh
+  // browser context always GETs an enabled button, so the bucket's server-side
+  // state - not the page - decides whether the FIRST submit is allowed or
+  // already rejected.
+  //
+  // The old fixed "submit once to arm, submit again to trip" dance assumed a
+  // clean bucket: when it was already armed (a prior run within 60s), the
+  // first submit was itself rejected, the button went disabled, and the second
+  // submit could not be clicked (disabled button + frozen virtual clock) - the
+  // #643 flake. Instead: submit once, then submit again only if the button is
+  // still enabled. Either path lands on the disabled state.
   await page.locator('input[name=identifier]').fill('nobody@example.test');
   await submit.click();
-  await expect(page).toHaveURL(/\/forgot-password$/);
-
-  // Second submit inside the 60s window trips the limiter. The redirect
-  // re-renders the page with the button disabled and showing a "Wait Ns"
-  // countdown.
-  await page.locator('input[name=identifier]').fill('nobody@example.test');
-  await submit.click();
-  // Wait for the PRG redirect to land before asserting, and give the
-  // disabled-state checks a generous timeout: under firefox on a loaded CI
-  // runner the redirect + render can exceed the default 5s, which flaked the
-  // button-disabled assertion -- and once the first attempt failed, the armed
-  // 60s per-IP limiter then doomed the retry. See #643.
   await page.waitForURL(/\/forgot-password$/);
+  await expect(submit).toBeVisible();
+
+  if (await submit.isEnabled()) {
+    // Bucket was clear: the first submit was allowed (success notice, button
+    // still enabled). Submit again inside the window to trip the limiter.
+    await page.locator('input[name=identifier]').fill('nobody@example.test');
+    await submit.click();
+    await page.waitForURL(/\/forgot-password$/);
+  }
 
   // The stable locator always resolves, so these state assertions auto-wait
   // through the redirect and cooldown.js's relabel. Tolerate any countdown
-  // value rather than the exact "Wait 60s" frame, which is racy under load.
+  // value rather than the exact "Wait 60s" frame: a contaminating prior run
+  // leaves a smaller remaining count, and the exact frame is racy under load.
   await expect(submit).toBeDisabled({ timeout: 15_000 });
   await expect(submit).toHaveText(/^Wait \d+s$/, { timeout: 15_000 });
 
