@@ -9,6 +9,11 @@ import (
 // HumanizeTime exposes the unexported humanizeTime helper for tests.
 var HumanizeTime = humanizeTime
 
+// HumanizeSince exposes the pure relative-time formatter (reference now
+// passed in) so tests assert it deterministically without racing the
+// clock (#666).
+var HumanizeSince = humanizeSince
+
 // CanEditQuiz exposes the unexported creator-or-admin edit
 // predicate (#281/#319) so the external admin_test package can pin the
 // creator / admin / unrelated-host matrix without driving the

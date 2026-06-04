@@ -385,7 +385,15 @@ const hoursPerDay = 24
 // It rounds down to the largest matching bucket and uses absolute zero-handling
 // for "just now" so a freshly written record renders sensibly.
 func humanizeTime(t time.Time) string {
-	d := time.Since(t)
+	return humanizeSince(time.Now(), t)
+}
+
+// humanizeSince is the pure relative-time formatter, with the reference
+// "now" passed in rather than read from the clock. Splitting it out keeps
+// the formatting deterministic and testable: a test passes a fixed now
+// instead of racing [time.Now] against scheduling jitter (#666).
+func humanizeSince(now, t time.Time) string {
+	d := now.Sub(t)
 	switch {
 	case d < time.Minute:
 		return "just now"
