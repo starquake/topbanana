@@ -108,10 +108,24 @@ No need to ask the user for the version — derive it.
 
 6. **After sign-off**: commit, push, open PR with empty body (no `Closes #N` — there is no ticket), wait for checks, squash-merge, sync local main. Follow the existing project commit/PR conventions.
 
-7. **Tag and ship the release** once the notes are on main:
+7. **Wait for `main`'s image build before tagging.** Merging the notes kicks off the post-merge `CI` run on `main`, whose `docker-build` job publishes the `sha-<commit>` (and `edge`) image. The tag's `promote` job does **not** rebuild — it *retags that exact `sha-<commit>` image* to the version. So the image must already exist when you push the tag; tag too soon and `promote` fails with `sha-<commit> not found; tag a commit that was built on main`, the run is marked failed, and the production deploy never fires (the tag + GitHub release still succeed, leaving a half-shipped release). Watch the post-merge run to completion and confirm the image exists before tagging:
 
    ```
    git checkout main && git pull --rebase
+   # Wait for the post-merge CI run (build/lint/e2e -> docker-build) to finish.
+   MAIN_CI=$(gh run list --branch main --workflow CI --limit 1 --json databaseId --jq '.[0].databaseId')
+   gh run watch "$MAIN_CI" --exit-status
+   # Confirm the image the tag's promote will retag actually exists in GHCR:
+   gh api /users/starquake/packages/container/topbanana/versions \
+     --jq '.[].metadata.container.tags[]' | grep -qx "sha-$(git rev-parse HEAD)" \
+     && echo "image present, safe to tag" || echo "IMAGE MISSING - do not tag yet"
+   ```
+
+   If the image is missing, the merge commit was not the one `docker-build` built (e.g. a later commit landed on `main`) - resolve that before tagging rather than pushing a tag the `promote` step cannot satisfy.
+
+8. **Tag and ship the release** once the image is published:
+
+   ```
    git tag -a vYYYY.M.N -m "vYYYY.M.N"
    git push origin vYYYY.M.N
 
@@ -124,7 +138,7 @@ No need to ask the user for the version — derive it.
 
    The `--notes-file` extract pulls just the new release's section out of `RELEASE_NOTES.md`. `--generate-notes` is **mandatory**: gh prepends the curated `--notes-file` body and appends GitHub's auto-generated "What's Changed" PR list plus the Full Changelog link, so the release body reads `curated notes` then `## What's Changed`. `--notes-start-tag <previous-tag>` (the same previous tag from step 2) scopes that PR list to this release's range. Every release must carry the PR list — it is the per-PR engineering history `RELEASE_NOTES.md` points readers to; omitting `--generate-notes` is the drift that left several releases without it. Use a process substitution (or a temp file) — `gh release create` reads `--notes-file` from a file path.
 
-8. Confirm the release page renders the notes correctly: `gh release view vYYYY.M.N`.
+9. Confirm the release page renders the notes correctly: `gh release view vYYYY.M.N`. Then confirm the production deploy fired: the tag's `CI` run (its `promote` job) must go green, which is what triggers `deploy-production`. If `promote` failed because the image was not yet published when you tagged, re-run that job once the image exists (`gh run rerun <tag-CI-run-id> --failed`) - do not push a new tag.
 
 ## What not to do
 
@@ -132,5 +146,6 @@ No need to ask the user for the version — derive it.
 - Do not include unreleased work-in-progress from feature branches.
 - Do not write a body for the PR that updates `RELEASE_NOTES.md` — there is no associated ticket.
 - Do not tag before the release-notes PR has merged. The tag should point at the commit that contains the notes.
+- Do not push the version tag before `main`'s `docker-build` has published the `sha-<commit>` image (step 7). The tag's `promote` retags that image; tagging early fails `promote` and the production deploy never fires.
 - Do not bump CalVer to skip a number. Sequential micros within the month.
 - Do not edit a tag once pushed. If the notes are wrong, ship a follow-up release.
