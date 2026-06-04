@@ -75,6 +75,21 @@ func EmailRateLimiterEntryCount(l *EmailRateLimiter) int {
 	return len(l.last)
 }
 
+// NewPerTargetLimiterWithClock exposes the internal clock-injected
+// per-target rate-limiter constructor so the external admin_test package
+// can pin the per-player-id cool-down without sleeping.
+var NewPerTargetLimiterWithClock = newPerTargetLimiterWithClock
+
+// PerTargetLimiterEntryCount returns how many targets the limiter is
+// tracking right now. Lets the unit test pin the prune-stale-entries
+// behaviour without exporting the internal map.
+func PerTargetLimiterEntryCount(l *PerTargetLimiter) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return len(l.last)
+}
+
 // RoleChangeNotice exposes the unexported plain success flash builder so
 // the role-change opt-out test can assert the no-email wording without
 // hard-coding it.

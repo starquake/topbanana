@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -165,6 +166,64 @@ func TestService_GetGameForPlayerOnQuiz(t *testing.T) {
 		_, err := svc.GetGameForPlayerOnQuiz(t.Context(), 1, 999)
 		if got, want := err, quiz.ErrQuizNotFound; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+}
+
+func TestService_GetQuiz(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns the seeded quiz", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		got, err := svc.GetQuiz(ctx, testQuiz.ID)
+		if err != nil {
+			t.Fatalf("GetQuiz err = %v, want nil", err)
+		}
+		if got == nil {
+			t.Fatal("GetQuiz returned nil quiz, want the seeded quiz")
+		}
+		if want := testQuiz.ID; got.ID != want {
+			t.Errorf("quiz ID = %d, want %d", got.ID, want)
+		}
+		if want := testQuiz.Title; got.Title != want {
+			t.Errorf("quiz Title = %q, want %q", got.Title, want)
+		}
+	})
+
+	t.Run("wraps the store error with a get-quiz prefix", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		if err := db.Close(); err != nil {
+			t.Fatalf("closing test DB err = %v, want nil", err)
+		}
+
+		_, err := svc.GetQuiz(ctx, 1)
+		if err == nil {
+			t.Fatal("GetQuiz err = nil, want a wrapped store error")
+		}
+		if got, want := err.Error(), "get quiz"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
 }
