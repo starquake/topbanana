@@ -3,6 +3,7 @@ package store_test
 import (
 	"errors"
 	"log/slog"
+	"slices"
 	"testing"
 
 	"github.com/starquake/topbanana/internal/dbtest"
@@ -555,6 +556,138 @@ func TestQuizStore_MoveRound(t *testing.T) {
 		}
 		if got, want := reloaded.Position, 1; got != want {
 			t.Errorf("reloaded.Position = %d, want %d (move should not have happened)", got, want)
+		}
+	})
+}
+
+// roundOrder returns the round IDs of a quiz in ascending position order
+// and asserts the positions are dense 1..N (the invariant
+// MoveRoundToPosition maintains).
+func roundOrder(t *testing.T, qs *QuizStore, quizID int64) []int64 {
+	t.Helper()
+	rounds, err := qs.ListRoundsByQuiz(t.Context(), quizID)
+	if err != nil {
+		t.Fatalf("ListRoundsByQuiz err = %v", err)
+	}
+	ids := make([]int64, 0, len(rounds))
+	for i, g := range rounds {
+		if got, want := g.Position, i+1; got != want {
+			t.Errorf("rounds[%d].Position = %d, want %d (dense 1..N)", i, got, want)
+		}
+		ids = append(ids, g.ID)
+	}
+
+	return ids
+}
+
+func TestQuizStore_MoveRoundToPosition(t *testing.T) {
+	t.Parallel()
+
+	seed := func(t *testing.T) (*QuizStore, *quiz.Quiz, map[string]int64) {
+		t.Helper()
+		db := dbtest.Open(t)
+		qs := NewQuizStore(db, slog.Default())
+		qz := newTestQuizForGroups(t, qs)
+
+		ids := map[string]int64{}
+		rounds, err := qs.ListRoundsByQuiz(t.Context(), qz.ID)
+		if err != nil {
+			t.Fatalf("ListRoundsByQuiz err = %v", err)
+		}
+		ids["A"] = rounds[0].ID
+		for i, title := range []string{"B", "C"} {
+			g := &quiz.Round{QuizID: qz.ID, Position: i + 1, Title: title}
+			if err := qs.CreateRound(t.Context(), g); err != nil {
+				t.Fatalf("CreateRound err = %v", err)
+			}
+			ids[title] = g.ID
+		}
+
+		return qs, qz, ids
+	}
+
+	t.Run("to first", func(t *testing.T) {
+		t.Parallel()
+
+		qs, qz, ids := seed(t)
+		if err := qs.MoveRoundToPosition(t.Context(), qz.ID, ids["C"], 1); err != nil {
+			t.Fatalf("MoveRoundToPosition err = %v, want nil", err)
+		}
+		want := []int64{ids["C"], ids["A"], ids["B"]}
+		if got := roundOrder(t, qs, qz.ID); !slices.Equal(got, want) {
+			t.Errorf("order = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("to last", func(t *testing.T) {
+		t.Parallel()
+
+		qs, qz, ids := seed(t)
+		if err := qs.MoveRoundToPosition(t.Context(), qz.ID, ids["A"], 3); err != nil {
+			t.Fatalf("MoveRoundToPosition err = %v, want nil", err)
+		}
+		want := []int64{ids["B"], ids["C"], ids["A"]}
+		if got := roundOrder(t, qs, qz.ID); !slices.Equal(got, want) {
+			t.Errorf("order = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("to middle", func(t *testing.T) {
+		t.Parallel()
+
+		qs, qz, ids := seed(t)
+		if err := qs.MoveRoundToPosition(t.Context(), qz.ID, ids["A"], 2); err != nil {
+			t.Fatalf("MoveRoundToPosition err = %v, want nil", err)
+		}
+		want := []int64{ids["B"], ids["A"], ids["C"]}
+		if got := roundOrder(t, qs, qz.ID); !slices.Equal(got, want) {
+			t.Errorf("order = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("no-op same position keeps order", func(t *testing.T) {
+		t.Parallel()
+
+		qs, qz, ids := seed(t)
+		if err := qs.MoveRoundToPosition(t.Context(), qz.ID, ids["B"], 2); err != nil {
+			t.Fatalf("MoveRoundToPosition err = %v, want nil", err)
+		}
+		want := []int64{ids["A"], ids["B"], ids["C"]}
+		if got := roundOrder(t, qs, qz.ID); !slices.Equal(got, want) {
+			t.Errorf("order = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("out-of-range position clamps to last", func(t *testing.T) {
+		t.Parallel()
+
+		qs, qz, ids := seed(t)
+		if err := qs.MoveRoundToPosition(t.Context(), qz.ID, ids["A"], 99); err != nil {
+			t.Fatalf("MoveRoundToPosition err = %v, want nil", err)
+		}
+		want := []int64{ids["B"], ids["C"], ids["A"]}
+		if got := roundOrder(t, qs, qz.ID); !slices.Equal(got, want) {
+			t.Errorf("order = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("missing round returns ErrRoundNotFound", func(t *testing.T) {
+		t.Parallel()
+
+		qs, qz, ids := seed(t)
+		err := qs.MoveRoundToPosition(t.Context(), qz.ID, ids["C"]+9999, 1)
+		if got, want := err, quiz.ErrRoundNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("foreign quiz returns ErrRoundNotFound", func(t *testing.T) {
+		t.Parallel()
+
+		qs, qz, ids := seed(t)
+		err := qs.MoveRoundToPosition(t.Context(), qz.ID+1, ids["A"], 1)
+		if got, want := err, quiz.ErrRoundNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
 		}
 	})
 }
