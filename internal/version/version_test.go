@@ -1,10 +1,41 @@
 package version_test
 
 import (
+	"runtime/debug"
 	"testing"
 
 	. "github.com/starquake/topbanana/internal/version"
 )
+
+func TestCommitFromSettings(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		settings []debug.BuildSetting
+		want     string
+	}{
+		{"no revision recorded", []debug.BuildSetting{{Key: "GOARCH", Value: "amd64"}}, ""},
+		{"clean revision", []debug.BuildSetting{
+			{Key: "vcs.revision", Value: "0123456789abcdef"},
+			{Key: "vcs.modified", Value: "false"},
+		}, "0123456"},
+		{"dirty revision", []debug.BuildSetting{
+			{Key: "vcs.revision", Value: "0123456789abcdef"},
+			{Key: "vcs.modified", Value: "true"},
+		}, "0123456-dirty"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got, want := CommitFromSettings(tc.settings), tc.want; got != want {
+				t.Errorf("CommitFromSettings(%v) = %q, want %q", tc.settings, got, want)
+			}
+		})
+	}
+}
 
 // These tests mutate the package-level build-stamp vars and the
 // process-wide env, so they must run serially: t.Parallel would let two

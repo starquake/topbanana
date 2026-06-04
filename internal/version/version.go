@@ -79,8 +79,18 @@ func resolvedCommit() string {
 		return ""
 	}
 
+	return commitFromSettings(info.Settings)
+}
+
+// commitFromSettings derives the short commit from a build's VCS
+// settings: the short vcs.revision, plus a "-dirty" marker when
+// vcs.modified is set. Returns "" when no revision is recorded (e.g. a
+// build by file path, which Go does not VCS-stamp). Split out from
+// resolvedCommit so the revision/dirty branches are unit-testable with
+// synthetic settings, without depending on how the test binary was built.
+func commitFromSettings(settings []debug.BuildSetting) string {
 	var revision, modified string
-	for _, s := range info.Settings {
+	for _, s := range settings {
 		switch s.Key {
 		case "vcs.revision":
 			revision = s.Value
