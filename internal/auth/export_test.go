@@ -47,6 +47,18 @@ func ExportClaimAnonymousSessionPlayer(
 	return claimAnonymousSessionPlayer(ctx, identities, sessionPlayerID, subject, email)
 }
 
+// ExportLinkExistingPlayerByEmail exposes linkExistingPlayerByEmail so
+// the silent link-by-email branches (lookup error, link-race refetch,
+// mark-verified error) can be unit-tested with a fault-injection store
+// without staging the whole linkOrCreateGooglePlayer flow.
+func ExportLinkExistingPlayerByEmail(
+	ctx context.Context,
+	identities OAuthIdentityStore,
+	subject, email string,
+) (*Player, error) {
+	return linkExistingPlayerByEmail(ctx, identities, subject, email)
+}
+
 // ExportCreateGooglePlayer exposes createGooglePlayer so the
 // race-recovery branch (LinkProviderIdentity returns
 // ErrIdentityAlreadyLinked because another callback won) can be
@@ -92,3 +104,13 @@ var (
 // rate-limiter constructor so the external auth_test package can pin
 // the per-IP cool-down without sleeping (#494).
 var NewLoginRateLimiterWithClock = newLoginRateLimiterWithClock
+
+// ValidateAcceptInviteInput exposes validateAcceptInviteInput so the
+// external test package can pin the display-name + password rule table
+// from input strings without staging an HTTP request.
+var ValidateAcceptInviteInput = validateAcceptInviteInput
+
+// AcceptInviteCollisionMessage exposes acceptInviteCollisionMessage so
+// the external test package can pin the create-conflict sentinel
+// mapping without staging the whole accept-invite flow.
+var AcceptInviteCollisionMessage = acceptInviteCollisionMessage

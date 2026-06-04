@@ -1354,3 +1354,70 @@ func TestPlayerStore_SetPlayerEmail(t *testing.T) {
 		}
 	})
 }
+
+// TestPlayerStore_CreatePlayerFromOAuth_HappyPath pins the create path:
+// the display name is trimmed, the email is lower-cased, and a player
+// with a player role is returned.
+func TestPlayerStore_CreatePlayerFromOAuth_HappyPath(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	player, err := ps.CreatePlayerFromOAuth(t.Context(), "  Oauthy  ", "  Fresh@Example.Test ")
+	if err != nil {
+		t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
+	}
+	if got, want := player.DisplayName, "Oauthy"; got != want {
+		t.Errorf("DisplayName = %q, want %q (trimmed)", got, want)
+	}
+	if got, want := player.Email, "fresh@example.test"; got != want {
+		t.Errorf("Email = %q, want %q (lower-cased)", got, want)
+	}
+	// The role CASE in the query promotes the first OAuth-only registrant
+	// to admin, so the exact role depends on DB state; only assert it is
+	// populated.
+	if player.Role == "" {
+		t.Error("Role = empty, want non-empty")
+	}
+}
+
+// TestPlayerStore_CreatePlayerFromOAuth_DuplicateDisplayName pins that a
+// UNIQUE display-name collision maps to auth.ErrDisplayNameTaken, the
+// sentinel the OAuth handler retries on with a fresh petname.
+func TestPlayerStore_CreatePlayerFromOAuth_DuplicateDisplayName(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	if _, err := ps.CreatePlayerFromOAuth(t.Context(), "samename", "first@example.test"); err != nil {
+		t.Fatalf("first CreatePlayerFromOAuth err = %v, want nil", err)
+	}
+
+	_, err := ps.CreatePlayerFromOAuth(t.Context(), "samename", "second@example.test")
+	if got, want := err, auth.ErrDisplayNameTaken; !errors.Is(got, want) {
+		t.Errorf("CreatePlayerFromOAuth err = %v, want %v", got, want)
+	}
+}
+
+// TestPlayerStore_CreatePlayerFromOAuth_ClosedDBWraps pins the
+// store-error branch: a closed DB surfaces a wrapped "failed to create
+// player from oauth" rather than a bare driver error.
+func TestPlayerStore_CreatePlayerFromOAuth_ClosedDBWraps(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+	if err := db.Close(); err != nil {
+		t.Fatalf("failed to close database: %v", err)
+	}
+
+	_, err := ps.CreatePlayerFromOAuth(t.Context(), "anyone", "anyone@example.test")
+	if err == nil {
+		t.Fatal("CreatePlayerFromOAuth err = nil, want non-nil on closed DB")
+	}
+	if got, want := err.Error(), "failed to create player from oauth"; !strings.Contains(got, want) {
+		t.Errorf("err.Error() = %q, should contain %q", got, want)
+	}
+}
