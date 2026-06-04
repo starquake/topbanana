@@ -192,8 +192,8 @@
                      are just noise on top of that. The quiz picker
                      stays visible so the player can pick a different
                      quiz to play next. -->
-                <template x-if="deepLinkedQuiz && !finished">
-                    <div class="mb-6">
+                <template x-if="deepLinkedQuiz && !finished && startStateResolved">
+                    <div class="mb-6" data-testid="deep-link-header">
                         <h2 class="mb-2 font-display text-2xl font-semibold text-text" x-text="deepLinkedQuiz.title"></h2>
                         <p class="text-text-dim leading-relaxed" x-text="deepLinkedQuiz.description"></p>
                     </div>
