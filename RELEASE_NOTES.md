@@ -2,6 +2,22 @@
 
 What changed in each released version of Top Banana! The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.6.1 — 2026-06-04
+
+Hosts can reorder rounds and questions by dragging and email a player when changing their role. The player screen no longer flashes unstyled content while it loads, and the admin area shows the deployed release version.
+
+### Hosts
+- Rounds and questions can be reordered by dragging them on the quiz page; the up and down buttons remain for touch devices.
+- When changing a player's role, an admin can choose to email the player about the change.
+- The admin area shows the deployed release version.
+
+### Visual / chrome
+- The player screen no longer flashes unstyled content while it loads.
+
+### Behind the scenes
+- Fonts load from the server instead of a third-party CDN.
+- A periodic cleanup removes stale anonymous players and abandoned games.
+
 ## v2026.6.0 — 2026-06-02
 
 Quiz breaks become named rounds. Accounts gain Player, Host, and Admin roles with player management and email invites, and new sign-ups verify their email before they are signed in.
