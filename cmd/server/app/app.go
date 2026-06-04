@@ -25,6 +25,7 @@ import (
 	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/server"
 	"github.com/starquake/topbanana/internal/store"
+	"github.com/starquake/topbanana/internal/version"
 )
 
 const (
@@ -86,6 +87,7 @@ func Run(
 	}()
 
 	envtag.Set(cfg.EnvTitleTag())
+	version.SetEnv(cfg.AppEnvironment)
 
 	stores := store.New(conn, logger)
 	sweepExpiredAtStartup(signalCtx, logger, stores)

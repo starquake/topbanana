@@ -23,6 +23,7 @@ import (
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/quiz"
+	"github.com/starquake/topbanana/internal/version"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
 
@@ -362,6 +363,7 @@ func parseTemplate(path string) *template.Template {
 		"navSection":        func() string { return "" },
 		"isAdmin":           func() bool { return false },
 		"envTitleTag":       envtag.Get,
+		"versionLabel":      version.Label,
 		"humanizeTime":      humanizeTime,
 		"passwordMinLength": func() int { return auth.MinPasswordLength },
 	}

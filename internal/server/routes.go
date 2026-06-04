@@ -83,6 +83,10 @@ func addRoutes(
 	// Health
 	mux.Handle("GET /healthz", health.HandleHealthz(logger, stores))
 
+	// Build stamp (#663). Public + side-effect free so uptime checks and
+	// humans can read which release + commit is live without auth.
+	mux.Handle("GET /version", health.HandleVersion(logger))
+
 	// Public start page (#166). Registered as `GET /{$}` so only the exact
 	// root matches; unknown paths fall through to Go's mux default 404.
 	// The home pages share two per-request closures: viewerFunc resolves

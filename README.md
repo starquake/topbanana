@@ -76,6 +76,12 @@ Registration is closed by default. Two ways to create the first admin:
 1. **Open registration briefly.** Start the server with `REGISTRATION_ENABLED=true`, visit `/register`, sign up — the first password-bearing registrant is auto-promoted to admin — then restart with the variable unset.
 2. **Whitelist an email.** Set `ADMIN_EMAILS=alice@example.test` (comma-separated), keep registration open, and any user that registers with one of those emails is promoted on signup. Useful for self-hosted deployments where you control the email up front.
 
+### Version stamp
+
+The admin footer and the public `GET /version` endpoint report which release and commit are running. There is nothing to set: the release version is baked in from the committed `VERSION` file at build time, and the commit comes from the build (or, for a local `go build`/`go run`, from the working checkout, including a `-dirty` marker). A `production` deploy shows the release (`v2026.6.0 (abc1234)`); every other environment shows the commit (`development (abc1234)`).
+
+To self-host **production** with an accurate release number, build from a release tag or run a released image. An untagged `main` build run as `production` shows the last release's `VERSION` alongside its newer commit, because `VERSION` only changes when a release is cut — the commit is the disambiguator.
+
 ## Project Structure
 
 Following the official guidelines for a [standard Go server project layout](https://go.dev/doc/modules/layout#server-project).
