@@ -115,13 +115,16 @@ No need to ask the user for the version — derive it.
    # Wait for the post-merge CI run (build/lint/e2e -> docker-build) to finish.
    MAIN_CI=$(gh run list --branch main --workflow CI --limit 1 --json databaseId --jq '.[0].databaseId')
    gh run watch "$MAIN_CI" --exit-status
-   # Confirm the image the tag's promote will retag actually exists in GHCR:
-   gh api /users/starquake/packages/container/topbanana/versions \
-     --jq '.[].metadata.container.tags[]' | grep -qx "sha-$(git rev-parse HEAD)" \
-     && echo "image present, safe to tag" || echo "IMAGE MISSING - do not tag yet"
+   # Confirm the docker-build job actually ran and succeeded - it is what
+   # publishes the sha-<commit> image the tag's promote retags. (Use the job
+   # result, not a GHCR query: the gh token usually lacks read:packages, so a
+   # `gh api .../packages` lookup 403s and looks falsely empty.)
+   gh run view "$MAIN_CI" --json jobs \
+     --jq '.jobs[] | select(.name=="docker-build") | .conclusion' | grep -qx success \
+     && echo "image published, safe to tag" || echo "docker-build did NOT succeed - do not tag yet"
    ```
 
-   If the image is missing, the merge commit was not the one `docker-build` built (e.g. a later commit landed on `main`) - resolve that before tagging rather than pushing a tag the `promote` step cannot satisfy.
+   Also confirm `MAIN_CI` is the run for the notes commit (`gh run view "$MAIN_CI" --json headSha`), not a later push. If `docker-build` did not succeed, do not tag - resolve it first rather than pushing a tag the `promote` step cannot satisfy.
 
 8. **Tag and ship the release** once the image is published:
 
