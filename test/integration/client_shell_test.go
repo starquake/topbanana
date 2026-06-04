@@ -41,3 +41,34 @@ func assertRootCloaked(ctx context.Context, t *testing.T, url string) {
 		)
 	}
 }
+
+// TestClientShell_PreloadsFonts pins #691: the player SPA shell must
+// preload the above-the-fold font subsets so the browser fetches them
+// before parsing app.css. Without the preload the first load paints the
+// fallback font and the custom face only appears on a refresh (the
+// service worker has it cached by then). The extended-latin subset is
+// deliberately not preloaded.
+func TestClientShell_PreloadsFonts(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, nil)
+
+	resp := httpGet(ctx, t, http.DefaultClient, srv.BaseURL+"/client/")
+	defer closeBody(t, resp.Body)
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d", got, want)
+	}
+	body := readAllString(t, resp.Body)
+
+	for _, want := range []string{
+		`<link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>`,
+		`<link rel="preload" href="/assets/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("client shell missing font preload %q (#691)", want)
+		}
+	}
+	if banned := `rel="preload" href="/assets/fonts/inter-latin-ext.woff2"`; strings.Contains(body, banned) {
+		t.Error("client shell preloads the extended-latin subset, which should not be preloaded (#691)")
+	}
+}
