@@ -199,6 +199,121 @@ func renderRoundMoveError(
 	}
 }
 
+// HandleRoundPosition handles a drag-and-drop round reorder (#199). The
+// form body carries new_position (1-based). On success it re-renders the
+// questions_list partial so the dragged DOM reconciles against server
+// truth; the store clamps an out-of-range slot rather than erroring, so a
+// stale drop still settles on a valid order.
+func HandleRoundPosition(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		quizID, ok := handlers.ParseIDFromPath(w, r, logger, "quizID")
+		if !ok {
+			return
+		}
+		if _, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+			return
+		}
+		roundID, ok := handlers.ParseIDFromPath(w, r, logger, "roundID")
+		if !ok {
+			return
+		}
+
+		newPosition, ok := positionFromForm(w, r, logger, csrfMgr)
+		if !ok {
+			return
+		}
+
+		if err := quizStore.MoveRoundToPosition(r.Context(), quizID, roundID, newPosition); err != nil {
+			if errors.Is(err, quiz.ErrRoundNotFound) {
+				render404(w, r, logger, csrfMgr)
+
+				return
+			}
+			logger.ErrorContext(r.Context(), "error moving round to position", slog.Any("err", err))
+			render500(w, r, logger, csrfMgr)
+
+			return
+		}
+
+		renderRoundsPartial(w, r, logger, csrfMgr, render, quizStore, quizID)
+	})
+}
+
+// HandleQuestionPosition handles a drag-and-drop question reorder (#199).
+// The form body carries new_position (1-based, within the target round)
+// and round_id (the round the question lands in, possibly its current
+// one). On success it re-renders the questions_list partial. A cross-quiz
+// question or round id surfaces as 404 to keep ids opaque (#339).
+func HandleQuestionPosition(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		quizID, ok := handlers.ParseIDFromPath(w, r, logger, "quizID")
+		if !ok {
+			return
+		}
+		if _, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+			return
+		}
+		questionID, ok := handlers.ParseIDFromPath(w, r, logger, "questionID")
+		if !ok {
+			return
+		}
+
+		newPosition, ok := positionFromForm(w, r, logger, csrfMgr)
+		if !ok {
+			return
+		}
+		roundID, err := handlers.IDFromString(r.PostFormValue("round_id"))
+		if err != nil || roundID == 0 {
+			render400(w, r, logger, csrfMgr, "invalid round id")
+
+			return
+		}
+
+		if moveErr := quizStore.MoveQuestionToPosition(
+			r.Context(), quizID, questionID, roundID, newPosition,
+		); moveErr != nil {
+			switch {
+			case errors.Is(moveErr, quiz.ErrQuestionNotFound), errors.Is(moveErr, quiz.ErrRoundNotFound):
+				render404(w, r, logger, csrfMgr)
+			default:
+				logger.ErrorContext(r.Context(), "error moving question to position", slog.Any("err", moveErr))
+				render500(w, r, logger, csrfMgr)
+			}
+
+			return
+		}
+
+		renderRoundsPartial(w, r, logger, csrfMgr, render, quizStore, quizID)
+	})
+}
+
+// positionFromForm parses the bounded, form-encoded body and reads the
+// 1-based new_position field shared by both drag-reorder handlers. A
+// parse failure or a non-integer / missing value renders a 400 and
+// returns ok=false.
+func positionFromForm(
+	w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrfMgr *csrf.Manager,
+) (int, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormSize)
+	if err := r.ParseForm(); err != nil {
+		render400(w, r, logger, csrfMgr, "error parsing form")
+
+		return 0, false
+	}
+	position, err := strconv.Atoi(r.PostFormValue("new_position"))
+	if err != nil {
+		render400(w, r, logger, csrfMgr, "invalid position")
+
+		return 0, false
+	}
+
+	return position, true
+}
+
 // HandleRoundDelete removes a round. Owner-gated so only the quiz's
 // creator can drop one of its rounds. Deleting a round cascades to its
 // questions via the ON DELETE CASCADE on questions.round_id.

@@ -686,8 +686,16 @@ func addAdminRoundRoutes(
 		csrfMW(requireGameHost(admin.HandleRoundMove(logger, csrfMgr, stores.Quizzes))),
 	)
 	mux.Handle(
+		"POST /admin/quizzes/{quizID}/rounds/{roundID}/position",
+		csrfMW(requireGameHost(admin.HandleRoundPosition(logger, csrfMgr, stores.Quizzes))),
+	)
+	mux.Handle(
 		"POST /admin/quizzes/{quizID}/questions/{questionID}/round",
 		csrfMW(requireGameHost(admin.HandleQuestionMoveToRound(logger, csrfMgr, stores.Quizzes))),
+	)
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/questions/{questionID}/position",
+		csrfMW(requireGameHost(admin.HandleQuestionPosition(logger, csrfMgr, stores.Quizzes))),
 	)
 }
 

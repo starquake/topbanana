@@ -113,6 +113,21 @@ type Store interface {
 	// ErrQuestionNotFound (question not on quiz) or ErrRoundNotFound
 	// (round not on quiz). The question keeps its quiz-wide position.
 	MoveQuestionToRound(ctx context.Context, quizID, questionID, groupID int64) error
+	// MoveRoundToPosition moves the round with roundID to the 1-based
+	// newPosition within its quiz, renumbering every round so positions
+	// stay dense 1..N. newPosition is clamped to [1, N] rather than
+	// erroring, matching the drag UX. Returns ErrRoundNotFound when the
+	// round id does not belong to the quiz.
+	MoveRoundToPosition(ctx context.Context, quizID, roundID int64, newPosition int) error
+	// MoveQuestionToPosition moves the question with questionID into
+	// targetRoundID at the 1-based newPosition within that round, then
+	// recomputes every question's quiz-wide position so each round's
+	// questions stay contiguous and in round-position order, dense 1..N.
+	// newPosition is clamped to the target round's bounds rather than
+	// erroring, matching the drag UX. Both ids must belong to quizID; a
+	// mismatch returns ErrQuestionNotFound (question not on quiz) or
+	// ErrRoundNotFound (round not on quiz).
+	MoveQuestionToPosition(ctx context.Context, quizID, questionID, targetRoundID int64, newPosition int) error
 }
 
 var (

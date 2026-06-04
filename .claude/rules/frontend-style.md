@@ -36,7 +36,7 @@ Styling uses **Tailwind CSS v4**, configured CSS-first (there is no `tailwind.co
 
 - **No bundler or npm for application JS.** App code is plain ES modules plus vendored libraries; the only build step in the project is the Tailwind standalone CLI for CSS.
 - No TypeScript -- plain `.js` only.
-- No third-party component library or JS framework beyond Alpine + anime.js.
+- No third-party component library or JS framework beyond Alpine + anime.js. The one allowed exception is SortableJS (a focused drag-and-drop utility, vendored self-hosted at `internal/web/static/js/vendor/sortable.min.js`, admin-only), added deliberately for the rounds/questions reorder (#199). It is not a general framework license: reach for it only for drag-and-drop, not as a wedge to pull in more libraries.
 - No inline styles (`style="..."`) -- use utilities, or a `@theme` token / `@layer` component class.
 - No hand-written `.css` files. Styling changes go through `_tailwind.css` (tokens, `@layer`), never a new stylesheet.
 - No reactive state added outside an Alpine component constructor (Alpine will not track it).

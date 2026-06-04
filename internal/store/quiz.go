@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
@@ -459,6 +460,132 @@ func execSwapQuestionPositions(
 	}
 
 	return nil
+}
+
+// MoveQuestionToPosition moves a question to a 1-based slot within a
+// target round (which may differ from its current round), then recomputes
+// every question's quiz-wide position so the questions of each round stay
+// contiguous and in round-position order, dense 1..N. The validation,
+// reassignment, and renumber share a transaction so a concurrent edit
+// cannot leave a half-moved state (#199).
+func (s *QuizStore) MoveQuestionToPosition(
+	ctx context.Context, quizID, questionID, targetRoundID int64, newPosition int,
+) error {
+	if err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		return moveQuestionToPositionTx(ctx, q, quizID, questionID, targetRoundID, newPosition)
+	}); err != nil {
+		return fmt.Errorf("failed to move question to position: %w", err)
+	}
+
+	return nil
+}
+
+// moveQuestionToPositionTx is the transactional body of
+// MoveQuestionToPosition. Pulled out so the public method stays under
+// revive's cognitive-complexity budget and the sentinel errors are not
+// wrapped on the way out.
+func moveQuestionToPositionTx(
+	ctx context.Context, q *db.Queries, quizID, questionID, targetRoundID int64, newPosition int,
+) error {
+	if err := validateQuestionMove(ctx, q, quizID, questionID, targetRoundID); err != nil {
+		return err
+	}
+
+	rounds, err := q.ListRoundsByQuiz(ctx, quizID)
+	if err != nil {
+		return fmt.Errorf("failed to list rounds for question move: %w", err)
+	}
+	questions, err := q.ListQuestionsByQuizID(ctx, quizID)
+	if err != nil {
+		return fmt.Errorf("failed to list questions for question move: %w", err)
+	}
+
+	ordered := reorderQuestionsForMove(rounds, questions, questionID, targetRoundID, newPosition)
+
+	if _, err = q.MoveQuestionToRound(ctx, db.MoveQuestionToRoundParams{
+		RoundID: targetRoundID,
+		ID:      questionID,
+	}); err != nil {
+		return fmt.Errorf("update question round: %w", err)
+	}
+
+	ids := make([]int64, len(ordered))
+	current := make([]int64, len(ordered))
+	for i, qs := range ordered {
+		ids[i], current[i] = qs.ID, qs.Position
+	}
+
+	return renumberDensePositions(ctx, ids, current, func(ctx context.Context, id, pos int64) error {
+		if _, err := q.UpdateQuestionPosition(ctx, db.UpdateQuestionPositionParams{Position: pos, ID: id}); err != nil {
+			return fmt.Errorf("update question position: %w", err)
+		}
+
+		return nil
+	})
+}
+
+// validateQuestionMove confirms the question and target round both exist
+// and belong to quizID, mirroring moveQuestionToRoundTx's cross-quiz IDOR
+// gate.
+func validateQuestionMove(ctx context.Context, q *db.Queries, quizID, questionID, targetRoundID int64) error {
+	question, err := q.GetQuestion(ctx, questionID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return quiz.ErrQuestionNotFound
+		}
+
+		return fmt.Errorf("load question for position move: %w", err)
+	}
+	if question.QuizID != quizID {
+		return quiz.ErrQuestionNotFound
+	}
+
+	round, err := q.GetRound(ctx, targetRoundID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return quiz.ErrRoundNotFound
+		}
+
+		return fmt.Errorf("load round for position move: %w", err)
+	}
+	if round.QuizID != quizID {
+		return quiz.ErrRoundNotFound
+	}
+
+	return nil
+}
+
+// reorderQuestionsForMove builds the final quiz-wide question order after
+// moving questionID into targetRoundID at the 1-based newPosition. It
+// groups questions by round (preserving the position order they arrive
+// in), removes the moved question from its current round's list, inserts
+// it into the target round's list at the clamped index, then flattens the
+// rounds in position order. The returned slice is the desired order;
+// the caller assigns the dense 1..N positions via renumberDensePositions.
+func reorderQuestionsForMove(
+	rounds []db.Round, questions []db.Question, questionID, targetRoundID int64, newPosition int,
+) []db.Question {
+	byRound := make(map[int64][]db.Question, len(rounds))
+	var moved db.Question
+	for _, qs := range questions {
+		if qs.ID == questionID {
+			moved = qs
+
+			continue
+		}
+		byRound[qs.RoundID] = append(byRound[qs.RoundID], qs)
+	}
+
+	targetList := byRound[targetRoundID]
+	target := clampIndex(newPosition, len(targetList))
+	byRound[targetRoundID] = slices.Insert(targetList, target, moved)
+
+	ordered := make([]db.Question, 0, len(questions))
+	for _, rnd := range rounds {
+		ordered = append(ordered, byRound[rnd.ID]...)
+	}
+
+	return ordered
 }
 
 // GetOption retrieves an option by its ID from the data store and returns it. Returns ErrOptionNotFound if no option is found.

@@ -2199,3 +2199,265 @@ func TestQuizStore_SwapQuestionPositions(t *testing.T) {
 		}
 	})
 }
+
+// roundQuizFixture is a quiz seeded with named rounds and questions for
+// MoveQuestionToPosition tests. roundIDs and questionIDs are keyed by the
+// names passed to seedRoundQuiz.
+type roundQuizFixture struct {
+	quiz        *quiz.Quiz
+	roundIDs    map[string]int64
+	questionIDs map[string]int64
+}
+
+// seedRoundQuiz builds a quiz whose rounds (in order) each hold the named
+// questions listed for them. The auto-seeded default round is renamed to
+// the first round's name so the quiz has exactly the requested rounds.
+// Questions are created in the order given so their quiz-wide positions
+// run 1..N down the rounds.
+func seedRoundQuiz(
+	t *testing.T, quizStore *QuizStore, rounds []string, byRound map[string][]string,
+) roundQuizFixture {
+	t.Helper()
+
+	qz := &quiz.Quiz{
+		Title:             "Round Move Quiz",
+		Slug:              "round-move-quiz",
+		Description:       "for position-move tests",
+		CreatedByPlayerID: seededAdminID,
+	}
+	if err := quizStore.CreateQuiz(t.Context(), qz); err != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", err)
+	}
+
+	roundIDs := map[string]int64{}
+	deflt, err := quizStore.GetDefaultRound(t.Context(), qz.ID)
+	if err != nil {
+		t.Fatalf("GetDefaultRound err = %v", err)
+	}
+	for i, name := range rounds {
+		if i == 0 {
+			deflt.Title = name
+			if err := quizStore.UpdateRound(t.Context(), deflt); err != nil {
+				t.Fatalf("UpdateRound err = %v", err)
+			}
+			roundIDs[name] = deflt.ID
+
+			continue
+		}
+		g := &quiz.Round{QuizID: qz.ID, Position: i, Title: name}
+		if err := quizStore.CreateRound(t.Context(), g); err != nil {
+			t.Fatalf("CreateRound err = %v", err)
+		}
+		roundIDs[name] = g.ID
+	}
+
+	questionIDs := map[string]int64{}
+	pos := 0
+	for _, roundName := range rounds {
+		for _, qText := range byRound[roundName] {
+			pos++
+			qs := &quiz.Question{
+				QuizID:   qz.ID,
+				RoundID:  roundIDs[roundName],
+				Text:     qText,
+				Position: pos,
+				Options:  []*quiz.Option{{Text: "A", Correct: true}},
+			}
+			if err := quizStore.CreateQuestion(t.Context(), qs); err != nil {
+				t.Fatalf("CreateQuestion %q err = %v", qText, err)
+			}
+			questionIDs[qText] = qs.ID
+		}
+	}
+
+	return roundQuizFixture{quiz: qz, roundIDs: roundIDs, questionIDs: questionIDs}
+}
+
+// assertQuestionLayout reloads the quiz and asserts the quiz-wide question
+// order (by text), dense 1..N positions, and each question's round id.
+func assertQuestionLayout(
+	t *testing.T,
+	quizStore *QuizStore,
+	quizID int64,
+	wantOrder []string,
+	wantRoundByText map[string]int64,
+) {
+	t.Helper()
+	listed, err := quizStore.ListQuestions(t.Context(), quizID)
+	if err != nil {
+		t.Fatalf("ListQuestions err = %v", err)
+	}
+	gotOrder := make([]string, 0, len(listed))
+	for i, qs := range listed {
+		gotOrder = append(gotOrder, qs.Text)
+		if got, want := qs.Position, i+1; got != want {
+			t.Errorf("question %q Position = %d, want %d (dense 1..N)", qs.Text, got, want)
+		}
+		if got, want := qs.RoundID, wantRoundByText[qs.Text]; got != want {
+			t.Errorf("question %q RoundID = %d, want %d", qs.Text, got, want)
+		}
+	}
+	if diff := cmp.Diff(wantOrder, gotOrder); diff != "" {
+		t.Errorf("question order mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestQuizStore_MoveQuestionToPosition(t *testing.T) {
+	t.Parallel()
+
+	rounds := []string{"R1", "R2"}
+	layout := map[string][]string{
+		"R1": {"Q1", "Q2", "Q3"},
+		"R2": {"Q4", "Q5"},
+	}
+
+	t.Run("within-round move to top", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		f := seedRoundQuiz(t, quizStore, rounds, layout)
+
+		if err := quizStore.MoveQuestionToPosition(
+			t.Context(), f.quiz.ID, f.questionIDs["Q3"], f.roundIDs["R1"], 1,
+		); err != nil {
+			t.Fatalf("MoveQuestionToPosition err = %v, want nil", err)
+		}
+		assertQuestionLayout(t, quizStore, f.quiz.ID,
+			[]string{"Q3", "Q1", "Q2", "Q4", "Q5"},
+			map[string]int64{
+				"Q1": f.roundIDs["R1"], "Q2": f.roundIDs["R1"], "Q3": f.roundIDs["R1"],
+				"Q4": f.roundIDs["R2"], "Q5": f.roundIDs["R2"],
+			})
+	})
+
+	t.Run("within-round move to bottom", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		f := seedRoundQuiz(t, quizStore, rounds, layout)
+
+		if err := quizStore.MoveQuestionToPosition(
+			t.Context(), f.quiz.ID, f.questionIDs["Q1"], f.roundIDs["R1"], 3,
+		); err != nil {
+			t.Fatalf("MoveQuestionToPosition err = %v, want nil", err)
+		}
+		assertQuestionLayout(t, quizStore, f.quiz.ID,
+			[]string{"Q2", "Q3", "Q1", "Q4", "Q5"},
+			map[string]int64{
+				"Q1": f.roundIDs["R1"], "Q2": f.roundIDs["R1"], "Q3": f.roundIDs["R1"],
+				"Q4": f.roundIDs["R2"], "Q5": f.roundIDs["R2"],
+			})
+	})
+
+	t.Run("within-round move to middle", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		f := seedRoundQuiz(t, quizStore, rounds, layout)
+
+		if err := quizStore.MoveQuestionToPosition(
+			t.Context(), f.quiz.ID, f.questionIDs["Q1"], f.roundIDs["R1"], 2,
+		); err != nil {
+			t.Fatalf("MoveQuestionToPosition err = %v, want nil", err)
+		}
+		assertQuestionLayout(t, quizStore, f.quiz.ID,
+			[]string{"Q2", "Q1", "Q3", "Q4", "Q5"},
+			map[string]int64{
+				"Q1": f.roundIDs["R1"], "Q2": f.roundIDs["R1"], "Q3": f.roundIDs["R1"],
+				"Q4": f.roundIDs["R2"], "Q5": f.roundIDs["R2"],
+			})
+	})
+
+	t.Run("cross-round move changes round_id and renumbers", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		f := seedRoundQuiz(t, quizStore, rounds, layout)
+
+		// Move Q2 (R1) into R2 at slot 1.
+		if err := quizStore.MoveQuestionToPosition(
+			t.Context(), f.quiz.ID, f.questionIDs["Q2"], f.roundIDs["R2"], 1,
+		); err != nil {
+			t.Fatalf("MoveQuestionToPosition err = %v, want nil", err)
+		}
+		assertQuestionLayout(t, quizStore, f.quiz.ID,
+			[]string{"Q1", "Q3", "Q2", "Q4", "Q5"},
+			map[string]int64{
+				"Q1": f.roundIDs["R1"], "Q3": f.roundIDs["R1"],
+				"Q2": f.roundIDs["R2"], "Q4": f.roundIDs["R2"], "Q5": f.roundIDs["R2"],
+			})
+	})
+
+	t.Run("move into an empty round", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		f := seedRoundQuiz(t, quizStore, []string{"R1", "R2", "R3"}, map[string][]string{
+			"R1": {"Q1", "Q2"},
+			"R2": {"Q3"},
+			"R3": {},
+		})
+
+		if err := quizStore.MoveQuestionToPosition(
+			t.Context(), f.quiz.ID, f.questionIDs["Q1"], f.roundIDs["R3"], 1,
+		); err != nil {
+			t.Fatalf("MoveQuestionToPosition err = %v, want nil", err)
+		}
+		assertQuestionLayout(t, quizStore, f.quiz.ID,
+			[]string{"Q2", "Q3", "Q1"},
+			map[string]int64{
+				"Q2": f.roundIDs["R1"], "Q3": f.roundIDs["R2"], "Q1": f.roundIDs["R3"],
+			})
+	})
+
+	t.Run("out-of-range position clamps to round bottom", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		f := seedRoundQuiz(t, quizStore, rounds, layout)
+
+		// newPosition 99 in R1 clamps to the end of R1's list.
+		if err := quizStore.MoveQuestionToPosition(
+			t.Context(), f.quiz.ID, f.questionIDs["Q1"], f.roundIDs["R1"], 99,
+		); err != nil {
+			t.Fatalf("MoveQuestionToPosition err = %v, want nil", err)
+		}
+		assertQuestionLayout(t, quizStore, f.quiz.ID,
+			[]string{"Q2", "Q3", "Q1", "Q4", "Q5"},
+			map[string]int64{
+				"Q1": f.roundIDs["R1"], "Q2": f.roundIDs["R1"], "Q3": f.roundIDs["R1"],
+				"Q4": f.roundIDs["R2"], "Q5": f.roundIDs["R2"],
+			})
+	})
+
+	t.Run("unknown question returns ErrQuestionNotFound", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		f := seedRoundQuiz(t, quizStore, rounds, layout)
+
+		err := quizStore.MoveQuestionToPosition(t.Context(), f.quiz.ID, 999999, f.roundIDs["R1"], 1)
+		if got, want := err, quiz.ErrQuestionNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("foreign quiz returns ErrQuestionNotFound", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		f := seedRoundQuiz(t, quizStore, rounds, layout)
+
+		err := quizStore.MoveQuestionToPosition(
+			t.Context(), f.quiz.ID+1, f.questionIDs["Q1"], f.roundIDs["R1"], 1,
+		)
+		if got, want := err, quiz.ErrQuestionNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("foreign round returns ErrRoundNotFound", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		f := seedRoundQuiz(t, quizStore, rounds, layout)
+
+		err := quizStore.MoveQuestionToPosition(
+			t.Context(), f.quiz.ID, f.questionIDs["Q1"], 999999, 1,
+		)
+		if got, want := err, quiz.ErrRoundNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+}
