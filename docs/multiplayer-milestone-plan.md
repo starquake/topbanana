@@ -2,7 +2,8 @@
 
 Planning document for the hosted, synchronized "quiz night" mode. This is a
 proposal for how to slice the work into reviewable, testable tickets. The
-tickets here are descriptions only; the GitHub issues are not created yet.
+tickets here are now tracked as GitHub issues in the "Multiplayer Launch"
+milestone (MP-0..MP-10 = #677-#687); each ticket below links to its issue.
 
 ## The game loop (target)
 
@@ -170,7 +171,7 @@ independently reviewable and end-to-end testable.
 
 ### Phase 0 - Foundation
 
-**MP-0: Quiz play mode (solo | live) (backend + admin form)**
+**MP-0: Quiz play mode (solo | live) (backend + admin form)** - [#677](https://github.com/starquake/topbanana/issues/677)
 - Goal: every quiz is explicitly either a solo quiz or a live quiz, so a live
   quiz can never be pre-played solo (no spoilers) and a solo quiz can't be
   hosted live.
@@ -189,7 +190,7 @@ independently reviewable and end-to-end testable.
 
 ### Phase A - Lobby (end to end)
 
-**MP-1: Hosted session model + lobby REST API (backend)**
+**MP-1: Hosted session model + lobby REST API (backend)** - [#678](https://github.com/starquake/topbanana/issues/678)
 - Goal: a logged-in host creates a live session for any visible quiz; players
   join anonymously and toggle ready; one endpoint returns the lobby state.
 - Scope: `sessions` + `session_players` tables + sqlc; session domain type +
@@ -207,7 +208,7 @@ independently reviewable and end-to-end testable.
 - Out of scope: SSE, timing, gameplay.
 - Depends on: MP-0 (the `live`-mode gate).
 
-**MP-2: Session event channel (SSE side-channel) (backend)**
+**MP-2: Session event channel (SSE side-channel) (backend)** - [#679](https://github.com/starquake/topbanana/issues/679)
 - Goal: every surface is notified the instant session state changes, and
   reconnects cleanly, without SSE carrying game data.
 - Scope: a per-session hub mirroring `leaderboard.Hub`; `GET
@@ -221,7 +222,7 @@ independently reviewable and end-to-end testable.
 - Out of scope: frontend.
 - Depends on: MP-1.
 
-**MP-3: Host presentation + lobby + QR + start control (frontend)**
+**MP-3: Host presentation + lobby + QR + start control (frontend)** - [#680](https://github.com/starquake/topbanana/issues/680)
 - Goal: a host clicks "Play live" on a quiz and gets a TV-ready lobby with the
   join QR + room code, sees players appear and ready-up live, and can start.
 - Scope: new host/presentation route + view; "Play live" entry from the quiz
@@ -235,7 +236,7 @@ independently reviewable and end-to-end testable.
 - Out of scope: in-game screens.
 - Depends on: MP-1, MP-2.
 
-**MP-4: Player join + lobby + ready (frontend)**
+**MP-4: Player join + lobby + ready (frontend)** - [#681](https://github.com/starquake/topbanana/issues/681)
 - Goal: a player scans the QR or types the code on a PC, enters a display name,
   lands in the lobby, and toggles ready - updating the TV live.
 - Scope: join route (QR deep-link target + a "enter code" form for PC);
@@ -249,7 +250,7 @@ _End of Phase A: the lobby works and is demoable end to end._
 
 ### Phase B - Synchronized engine (backend)
 
-**MP-5: Session runner - start + round/question loop + answering + reveal (backend)**
+**MP-5: Session runner - start + round/question loop + answering + reveal (backend)** - [#682](https://github.com/starquake/topbanana/issues/682)
 - Goal: a started session marches itself through rounds and questions on a
   server clock - issuing each question with a synced deadline, accepting
   answers, closing on all-answered-or-timeout, and revealing the correct
@@ -275,7 +276,7 @@ _End of Phase A: the lobby works and is demoable end to end._
   seam is "start + question issue/answer/close" vs "reveal beat"; prefer keeping
   them together.
 
-**MP-6: Round results, final standings + leaderboard recording (backend)**
+**MP-6: Round results, final standings + leaderboard recording (backend)** - [#683](https://github.com/starquake/topbanana/issues/683)
 - Goal: after each round the session exposes per-player round deltas + running
   totals (for the bar graph), and on finish produces final standings and records
   the result into the quiz's existing leaderboard.
@@ -290,7 +291,7 @@ _End of Phase A: the lobby works and is demoable end to end._
 
 ### Phase C - Gameplay frontend
 
-**MP-7: Player in-game play (frontend)**
+**MP-7: Player in-game play (frontend)** - [#684](https://github.com/starquake/topbanana/issues/684)
 - Goal: a player plays a synchronized question - question with a countdown
   synced to the server deadline, one answer submit, then a "waiting" state (no
   correctness), then the revealed correct answer.
@@ -302,7 +303,7 @@ _End of Phase A: the lobby works and is demoable end to end._
   waiting then the correct answer; countdown driven by Playwright's clock.
 - Depends on: MP-5 (and MP-3/MP-4 for setup).
 
-**MP-8: TV in-game presentation (frontend)**
+**MP-8: TV in-game presentation (frontend)** - [#685](https://github.com/starquake/topbanana/issues/685)
 - Goal: the TV shows the live question with a countdown and the answer-order
   badges filling in, then the all-answered/reveal state with the correct
   answer, then advances.
@@ -313,7 +314,7 @@ _End of Phase A: the lobby works and is demoable end to end._
   correctness hidden until reveal, and the advance.
 - Depends on: MP-5.
 
-**MP-9: Round score bar-graph animation (TV + player)**
+**MP-9: Round score bar-graph animation (TV + player)** - [#686](https://github.com/starquake/topbanana/issues/686)
 - Goal: between rounds, a bar graph of standings animates the round's points
   being added and re-sorts the leaders to the top.
 - Scope: round_results screen consuming MP-6's deltas + totals; anime.js bar
@@ -325,7 +326,7 @@ _End of Phase A: the lobby works and is demoable end to end._
 
 ### Phase D - Robustness
 
-**MP-10: Reconnection, disconnects, and lifecycle edges**
+**MP-10: Reconnection, disconnects, and lifecycle edges** - [#687](https://github.com/starquake/topbanana/issues/687)
 - Goal: the live game survives dropped connections and messy real-world states.
 - Scope: SSE reconnect resync (player/TV/host re-GET state and land on the right
   phase via deadlines); "active player" definition for all-answered
