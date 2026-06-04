@@ -2,6 +2,10 @@
 
 What changed in each released version of Top Banana! The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.6.2 — 2026-06-04
+
+The site fonts now appear on the first visit instead of only after a refresh.
+
 ## v2026.6.1 — 2026-06-04
 
 Hosts can reorder rounds and questions by dragging and email a player when changing their role. The player screen no longer flashes unstyled content while it loads, and the admin area shows the deployed release version.
