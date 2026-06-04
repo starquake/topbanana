@@ -2461,3 +2461,114 @@ func TestQuizStore_MoveQuestionToPosition(t *testing.T) {
 		}
 	})
 }
+
+func TestQuizStore_GetOption(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns the stored option", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		want := testQuiz.Questions[0].Options[2]
+		got, err := quizStore.GetOption(t.Context(), want.ID)
+		if err != nil {
+			t.Fatalf("GetOption err = %v, want nil", err)
+		}
+		if diff := cmp.Diff(got, want); diff != "" {
+			t.Errorf("option diff (-got +want):\n%s", diff)
+		}
+	})
+
+	t.Run("returns ErrOptionNotFound for a missing option", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		opt, err := quizStore.GetOption(t.Context(), 999)
+		if got, want := err, quiz.ErrOptionNotFound; !errors.Is(got, want) {
+			t.Errorf("GetOption err = %v, want %v", got, want)
+		}
+		if opt != nil {
+			t.Errorf("option = %v, want nil", opt)
+		}
+	})
+
+	t.Run("wraps the underlying error on a closed DB", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close database: %v", err)
+		}
+
+		_, err := quizStore.GetOption(t.Context(), 1)
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+		if got, want := err.Error(), "failed to get option"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+}
+
+func TestQuizStore_CreateQuestionAtNextPosition(t *testing.T) {
+	t.Parallel()
+
+	t.Run("appends after the highest existing position", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		// newTestQuizzes seeds positions 10 and 20, so the next slot is 21.
+		qs := &quiz.Question{
+			QuizID:  testQuiz.ID,
+			Text:    "Appended question",
+			Options: []*quiz.Option{{Text: "A", Correct: true}},
+		}
+		if err := quizStore.CreateQuestionAtNextPosition(t.Context(), qs); err != nil {
+			t.Fatalf("CreateQuestionAtNextPosition err = %v, want nil", err)
+		}
+		if got, want := qs.Position, 21; got != want {
+			t.Errorf("qs.Position = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("wraps the underlying error on a closed DB", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close database: %v", err)
+		}
+
+		qs := &quiz.Question{QuizID: testQuiz.ID, Text: "doomed"}
+		err := quizStore.CreateQuestionAtNextPosition(t.Context(), qs)
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+		if got, want := err.Error(), "failed to create question at next position"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+}

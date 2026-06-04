@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/starquake/topbanana/internal/dbtest"
@@ -68,6 +69,47 @@ func TestRetentionSweep(t *testing.T) {
 	}
 
 	assertRetention(ctx, t, db, seed)
+}
+
+// TestSweepAbandonedGames_DeleteError pins the deleteGamesByIDs error
+// branch: an abandoned game is seeded with a game_answer, then a
+// BEFORE DELETE trigger on game_answers aborts the first dependent
+// delete so the sweep surfaces the wrapped failure instead of swallowing
+// it.
+func TestSweepAbandonedGames_DeleteError(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := dbtest.Open(t)
+
+	ownerID := insertSignedInPlayer(ctx, t, db, "abandoned-owner", seedRecent)
+	q := seedQuiz(ctx, t, db, "abandoned-err", seedMidOld, ownerID)
+	gameID := insertGame(ctx, t, db, "g-abandoned-err", q.quizID, seedMidOld)
+	insertParticipant(ctx, t, db, gameID, ownerID, q.quizID, seedMidOld)
+	gq := insertGameQuestion(ctx, t, db, gameID, q.q1, seedMidOld)
+	insertGameAnswer(ctx, t, db, gameID, ownerID, gq, q.opt1, seedMidOld)
+
+	if _, err := db.ExecContext(ctx, `
+		CREATE TRIGGER game_answers_no_delete
+		BEFORE DELETE ON game_answers
+		BEGIN
+			SELECT RAISE(ABORT, 'no deletes');
+		END;
+	`); err != nil {
+		t.Fatalf("failed to create trigger: %v", err)
+	}
+
+	retention := NewRetentionStore(db, slog.Default())
+	err := retention.SweepAbandonedGames(ctx, AbandonedGameDays)
+	if err == nil {
+		t.Fatal("got nil, want error")
+	}
+	if got, want := err.Error(), "failed to delete game answers"; !strings.Contains(got, want) {
+		t.Errorf("err.Error() = %q, should contain %q", got, want)
+	}
+	if got, want := err.Error(), "failed to sweep abandoned games"; !strings.Contains(got, want) {
+		t.Errorf("err.Error() = %q, should contain %q", got, want)
+	}
 }
 
 // seededQuiz bundles the quiz, its round, and its two questions (each with

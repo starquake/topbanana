@@ -101,9 +101,9 @@ jobs:
         # Enforced total-coverage floor. The action's threshold-total input
         # defaults to -1 (gate off) and overrides any value in the config
         # file, so the threshold has to live here to take effect. Set just
-        # below current coverage as a regression floor; ratchet up toward
-        # 80 as coverage rises (#667).
-        threshold-total: 79
+        # below current coverage as a regression floor; ratchet up as
+        # coverage rises (#667).
+        threshold-total: 80
 
         ## when token is not specified (value '') this feature is turned off
         ## in this example badge is created and committed only for main branch

@@ -211,3 +211,84 @@ func TestHandlePlayerSetPassword_TooShortRejectedNoMutation(t *testing.T) {
 		t.Errorf("audit entries = %d, want %d on a rejected password", got, want)
 	}
 }
+
+// newPlayerInputRequest builds a POST request carrying the create-player
+// form fields as a urlencoded body. httptest.NewRequest is banned by the
+// noctx linter, so the request is built with a context.
+func newPlayerInputRequest(t *testing.T, displayName, email, password string) *http.Request {
+	t.Helper()
+
+	form := url.Values{}
+	form.Set("display_name", displayName)
+	form.Set("email", email)
+	form.Set("password", password)
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, "/admin/players", strings.NewReader(form.Encode()),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	return req
+}
+
+func TestNewPlayerInput(t *testing.T) {
+	t.Parallel()
+
+	const (
+		validEmail = "new@example.test"
+		// MinPasswordLength is 13, MaxPasswordLength is 72.
+		validPassword = "correct-horse-battery"
+	)
+
+	t.Run("blank display name falls back to a generated petname", func(t *testing.T) {
+		t.Parallel()
+
+		got := NewPlayerInputResultFor(newPlayerInputRequest(t, "", validEmail, validPassword))
+		if got.DisplayName == "" {
+			t.Error("DisplayName = empty, want a generated petname")
+		}
+		if got.ErrMsg != "" {
+			t.Errorf("ErrMsg = %q, want empty", got.ErrMsg)
+		}
+	})
+
+	t.Run("invalid email is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		got := NewPlayerInputResultFor(newPlayerInputRequest(t, "Alice", "not-an-email", validPassword))
+		if want := "Enter a valid email address."; got.ErrMsg != want {
+			t.Errorf("ErrMsg = %q, want %q", got.ErrMsg, want)
+		}
+	})
+
+	t.Run("too-short password is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		got := NewPlayerInputResultFor(newPlayerInputRequest(t, "Alice", validEmail, "short"))
+		if want := "at least"; !strings.Contains(got.ErrMsg, want) {
+			t.Errorf("ErrMsg = %q, should contain %q", got.ErrMsg, want)
+		}
+	})
+
+	t.Run("too-long password is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		got := NewPlayerInputResultFor(
+			newPlayerInputRequest(t, "Alice", validEmail, strings.Repeat("x", 73)),
+		)
+		if want := "at most"; !strings.Contains(got.ErrMsg, want) {
+			t.Errorf("ErrMsg = %q, should contain %q", got.ErrMsg, want)
+		}
+	})
+
+	t.Run("valid input has no error message", func(t *testing.T) {
+		t.Parallel()
+
+		got := NewPlayerInputResultFor(newPlayerInputRequest(t, "Alice", validEmail, validPassword))
+		if got.ErrMsg != "" {
+			t.Errorf("ErrMsg = %q, want empty", got.ErrMsg)
+		}
+		if got.DisplayName != "Alice" {
+			t.Errorf("DisplayName = %q, want %q", got.DisplayName, "Alice")
+		}
+	})
+}

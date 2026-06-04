@@ -1251,3 +1251,106 @@ func TestResetTokenStore_InvalidHashRejected(t *testing.T) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
 }
+
+func TestParseSQLiteTimestamp(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		raw     string
+		wantNil bool
+		want    time.Time
+	}{
+		"sqlite datetime format": {
+			raw:  "2026-06-04 12:34:56",
+			want: time.Date(2026, 6, 4, 12, 34, 56, 0, time.UTC),
+		},
+		"rfc3339 format": {
+			raw:  "2026-06-04T12:34:56Z",
+			want: time.Date(2026, 6, 4, 12, 34, 56, 0, time.UTC),
+		},
+		"unparseable falls through to nil": {
+			raw:     "not a timestamp",
+			wantNil: true,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := ParseSQLiteTimestamp(tc.raw)
+			if tc.wantNil {
+				if got != nil {
+					t.Errorf("ParseSQLiteTimestamp(%q) = %v, want nil", tc.raw, got)
+				}
+
+				return
+			}
+			if got == nil {
+				t.Fatalf("ParseSQLiteTimestamp(%q) = nil, want %v", tc.raw, tc.want)
+			}
+			if !got.Equal(tc.want) {
+				t.Errorf("ParseSQLiteTimestamp(%q) = %v, want %v", tc.raw, *got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPlayerStore_SetPlayerEmail(t *testing.T) {
+	t.Parallel()
+
+	t.Run("happy path overwrites the email", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		ps := NewPlayerStore(db, slog.Default())
+
+		created, err := ps.CreatePlayerByAdmin(t.Context(), "set-email-happy", "before@example.test", "hashed-secret")
+		if err != nil {
+			t.Fatalf("CreatePlayerByAdmin err = %v, want nil", err)
+		}
+
+		if setErr := ps.SetPlayerEmail(t.Context(), created.ID, "after@example.test"); setErr != nil {
+			t.Fatalf("SetPlayerEmail err = %v, want nil", setErr)
+		}
+
+		got, err := ps.GetPlayerByID(t.Context(), created.ID)
+		if err != nil {
+			t.Fatalf("GetPlayerByID err = %v, want nil", err)
+		}
+		if want := "after@example.test"; got.Email != want {
+			t.Errorf("Email = %q, want %q", got.Email, want)
+		}
+	})
+
+	t.Run("returns ErrEmailTaken on a UNIQUE collision", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		ps := NewPlayerStore(db, slog.Default())
+
+		if _, err := ps.CreatePlayerByAdmin(
+			t.Context(), "set-email-owner", "taken@example.test", "hashed-secret",
+		); err != nil {
+			t.Fatalf("CreatePlayerByAdmin (owner) err = %v, want nil", err)
+		}
+		other, err := ps.CreatePlayerByAdmin(t.Context(), "set-email-other", "other@example.test", "hashed-secret")
+		if err != nil {
+			t.Fatalf("CreatePlayerByAdmin (other) err = %v, want nil", err)
+		}
+
+		err = ps.SetPlayerEmail(t.Context(), other.ID, "taken@example.test")
+		if got, want := err, auth.ErrEmailTaken; !errors.Is(got, want) {
+			t.Errorf("SetPlayerEmail err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns ErrPlayerNotFound for an unknown id", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		ps := NewPlayerStore(db, slog.Default())
+
+		err := ps.SetPlayerEmail(t.Context(), 999999, "nobody@example.test")
+		if got, want := err, auth.ErrPlayerNotFound; !errors.Is(got, want) {
+			t.Errorf("SetPlayerEmail err = %v, want %v", got, want)
+		}
+	})
+}

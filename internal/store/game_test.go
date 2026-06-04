@@ -179,6 +179,65 @@ func TestGameStore_CreateParticipant(t *testing.T) {
 			t.Error("p.JoinedAt is zero, want non-zero time")
 		}
 	})
+
+	t.Run("returns ErrGameAlreadyExists on the (player, quiz) UNIQUE collision", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		playerStore := NewPlayerStore(db, slog.Default())
+		player, err := playerStore.CreateAnonymousPlayer(t.Context(), "anon-participant-dup")
+		if err != nil {
+			t.Fatalf("failed to create player: %v", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		first := &game.Game{QuizID: testQuiz.ID}
+		if err = gameStore.CreateGame(t.Context(), first); err != nil {
+			t.Fatalf("failed to create first game: %v", err)
+		}
+		if err = gameStore.CreateParticipant(
+			t.Context(), &game.Participant{GameID: first.ID, PlayerID: player.ID, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("failed to create first participant: %v", err)
+		}
+
+		// A second participant for the same (player, quiz) trips the
+		// UNIQUE INDEX from 20260520180000.
+		second := &game.Game{QuizID: testQuiz.ID}
+		if err = gameStore.CreateGame(t.Context(), second); err != nil {
+			t.Fatalf("failed to create second game: %v", err)
+		}
+		err = gameStore.CreateParticipant(
+			t.Context(), &game.Participant{GameID: second.ID, PlayerID: player.ID, QuizID: testQuiz.ID},
+		)
+		if got, want := err, game.ErrGameAlreadyExists; !errors.Is(got, want) {
+			t.Errorf("CreateParticipant err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("wraps the underlying error on a closed DB", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		gameStore := NewGameStore(db, slog.Default())
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close db: %v", err)
+		}
+
+		err := gameStore.CreateParticipant(
+			t.Context(), &game.Participant{GameID: "g", PlayerID: 1, QuizID: 1},
+		)
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+		if got, want := err.Error(), "failed to create participant"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
 }
 
 func TestGameStore_CreateQuestion(t *testing.T) {
@@ -265,6 +324,81 @@ func TestGameStore_CreateAnswer(t *testing.T) {
 		}
 		if got, want := a.AnsweredAt, tappedAt; !got.Equal(want) {
 			t.Errorf("a.AnsweredAt = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns ErrAnswerAlreadyRecorded on a duplicate answer", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		g := &game.Game{QuizID: testQuiz.ID}
+		if err := gameStore.CreateGame(t.Context(), g); err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+
+		now := time.Now()
+		gq := &game.Question{
+			GameID:     g.ID,
+			QuestionID: testQuiz.Questions[0].ID,
+			StartedAt:  now,
+			ExpiredAt:  now.Add(10 * time.Second),
+		}
+		if err := gameStore.CreateQuestion(t.Context(), gq); err != nil {
+			t.Fatalf("failed to create game question: %v", err)
+		}
+
+		a := &game.Answer{
+			GameID:     g.ID,
+			PlayerID:   1,
+			QuestionID: gq.ID,
+			OptionID:   testQuiz.Questions[0].Options[0].ID,
+			AnsweredAt: now,
+		}
+		if err := gameStore.CreateAnswer(t.Context(), a); err != nil {
+			t.Fatalf("first CreateAnswer err = %v, want nil", err)
+		}
+
+		// A second answer for the same (game, player, game_question) trips
+		// the UNIQUE constraint and maps to the sentinel (#353).
+		dup := &game.Answer{
+			GameID:     g.ID,
+			PlayerID:   1,
+			QuestionID: gq.ID,
+			OptionID:   testQuiz.Questions[0].Options[1].ID,
+			AnsweredAt: now,
+		}
+		err := gameStore.CreateAnswer(t.Context(), dup)
+		if got, want := err, game.ErrAnswerAlreadyRecorded; !errors.Is(got, want) {
+			t.Errorf("CreateAnswer err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("wraps the underlying error on a closed DB", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		gameStore := NewGameStore(db, slog.Default())
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close db: %v", err)
+		}
+
+		err := gameStore.CreateAnswer(t.Context(), &game.Answer{
+			GameID:     "g",
+			PlayerID:   1,
+			QuestionID: 1,
+			OptionID:   1,
+			AnsweredAt: time.Now(),
+		})
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+		if got, want := err.Error(), "failed to create answer"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
 		}
 	})
 }
@@ -463,6 +597,95 @@ func TestGameStore_DeleteGamesForPlayerOnQuiz(t *testing.T) {
 		// Bystander's game must still exist.
 		if _, err = gameStore.GetGame(t.Context(), bystanderGame.ID); err != nil {
 			t.Errorf("bystander game lookup err = %v, want nil", err)
+		}
+	})
+
+	t.Run("wraps the underlying error on a closed DB", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		gameStore := NewGameStore(db, slog.Default())
+		if err := db.Close(); err != nil {
+			t.Fatalf("failed to close db: %v", err)
+		}
+
+		err := gameStore.DeleteGamesForPlayerOnQuiz(t.Context(), 1, 1)
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+		if got, want := err.Error(), "failed to begin transaction"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+
+	t.Run("rolls back and surfaces the error when a dependent delete fails", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+
+		quizStore := NewQuizStore(db, slog.Default())
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		playerStore := NewPlayerStore(db, slog.Default())
+		player, err := playerStore.CreateAnonymousPlayer(t.Context(), "anon-reset-rollback")
+		if err != nil {
+			t.Fatalf("failed to create player: %v", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		g := &game.Game{QuizID: testQuiz.ID}
+		if err = gameStore.CreateGame(t.Context(), g); err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+		if err = gameStore.CreateParticipant(
+			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID, QuizID: testQuiz.ID},
+		); err != nil {
+			t.Fatalf("failed to create participant: %v", err)
+		}
+		now := time.Now().UTC().Truncate(time.Second)
+		gq := &game.Question{
+			GameID:     g.ID,
+			QuestionID: testQuiz.Questions[0].ID,
+			StartedAt:  now,
+			ExpiredAt:  now.Add(10 * time.Second),
+		}
+		if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+			t.Fatalf("failed to create game question: %v", err)
+		}
+		if err = gameStore.CreateAnswer(t.Context(), &game.Answer{
+			GameID:     g.ID,
+			PlayerID:   player.ID,
+			QuestionID: gq.ID,
+			OptionID:   testQuiz.Questions[0].Options[0].ID,
+			AnsweredAt: now,
+		}); err != nil {
+			t.Fatalf("failed to create answer: %v", err)
+		}
+
+		// Abort the answers delete so the transaction body fails and the
+		// method takes its rollback path.
+		if _, err = db.ExecContext(t.Context(), `
+			CREATE TRIGGER game_answers_no_delete_reset
+			BEFORE DELETE ON game_answers
+			BEGIN
+				SELECT RAISE(ABORT, 'no deletes');
+			END;
+		`); err != nil {
+			t.Fatalf("failed to create trigger: %v", err)
+		}
+
+		err = gameStore.DeleteGamesForPlayerOnQuiz(t.Context(), player.ID, testQuiz.ID)
+		if err == nil {
+			t.Fatal("got nil, want error")
+		}
+		if got, want := err.Error(), "failed to delete answers"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+
+		// Rollback must leave the game intact.
+		if _, err = gameStore.GetGame(t.Context(), g.ID); err != nil {
+			t.Errorf("game lookup after rollback err = %v, want nil", err)
 		}
 	})
 }

@@ -691,3 +691,102 @@ func TestQuizStore_MoveRoundToPosition(t *testing.T) {
 		}
 	})
 }
+
+func TestQuizStore_MoveQuestionToRound(t *testing.T) {
+	t.Parallel()
+
+	rounds := []string{"R1", "R2"}
+	layout := map[string][]string{
+		"R1": {"Q1", "Q2"},
+		"R2": {"Q3"},
+	}
+
+	t.Run("reassigns the question to the target round", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		f := seedRoundQuiz(t, quizStore, rounds, layout)
+
+		if err := quizStore.MoveQuestionToRound(
+			t.Context(), f.quiz.ID, f.questionIDs["Q1"], f.roundIDs["R2"],
+		); err != nil {
+			t.Fatalf("MoveQuestionToRound err = %v, want nil", err)
+		}
+
+		moved, err := quizStore.GetQuestion(t.Context(), f.questionIDs["Q1"])
+		if err != nil {
+			t.Fatalf("GetQuestion err = %v, want nil", err)
+		}
+		if got, want := moved.RoundID, f.roundIDs["R2"]; got != want {
+			t.Errorf("moved.RoundID = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("unknown question returns ErrQuestionNotFound", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		f := seedRoundQuiz(t, quizStore, rounds, layout)
+
+		err := quizStore.MoveQuestionToRound(t.Context(), f.quiz.ID, 999999, f.roundIDs["R2"])
+		if got, want := err, quiz.ErrQuestionNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("question on a foreign quiz returns ErrQuestionNotFound", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		f := seedRoundQuiz(t, quizStore, rounds, layout)
+
+		err := quizStore.MoveQuestionToRound(t.Context(), f.quiz.ID+1, f.questionIDs["Q1"], f.roundIDs["R2"])
+		if got, want := err, quiz.ErrQuestionNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("unknown round returns ErrRoundNotFound", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		f := seedRoundQuiz(t, quizStore, rounds, layout)
+
+		err := quizStore.MoveQuestionToRound(t.Context(), f.quiz.ID, f.questionIDs["Q1"], 999999)
+		if got, want := err, quiz.ErrRoundNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("round on a foreign quiz returns ErrRoundNotFound", func(t *testing.T) {
+		t.Parallel()
+		quizStore := NewQuizStore(dbtest.Open(t), slog.Default())
+		f := seedRoundQuiz(t, quizStore, rounds, layout)
+
+		// Seed a second quiz and target one of its rounds; the cross-quiz
+		// guard must reject it even though the round id is real.
+		other := seedRoundQuiz2(t, quizStore)
+		err := quizStore.MoveQuestionToRound(t.Context(), f.quiz.ID, f.questionIDs["Q1"], other.roundIDs["R1"])
+		if got, want := err, quiz.ErrRoundNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+}
+
+// seedRoundQuiz2 seeds a second quiz with a distinct slug so a cross-quiz
+// round-move test has a real but foreign round id to aim at.
+func seedRoundQuiz2(t *testing.T, quizStore *QuizStore) roundQuizFixture {
+	t.Helper()
+
+	qz := &quiz.Quiz{
+		Title:             "Other Round Quiz",
+		Slug:              "other-round-quiz",
+		Description:       "foreign-round fixture",
+		CreatedByPlayerID: seededAdminID,
+	}
+	if err := quizStore.CreateQuiz(t.Context(), qz); err != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", err)
+	}
+	deflt, err := quizStore.GetDefaultRound(t.Context(), qz.ID)
+	if err != nil {
+		t.Fatalf("GetDefaultRound err = %v, want nil", err)
+	}
+
+	return roundQuizFixture{quiz: qz, roundIDs: map[string]int64{"R1": deflt.ID}}
+}
