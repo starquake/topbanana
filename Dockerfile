@@ -12,9 +12,21 @@ RUN go mod download
 # Copy source code
 COPY . .
 
+# Build stamp (#663). The release version is read from the committed
+# VERSION file; commit + date arrive as build args because .git is
+# dockerignored, so runtime/debug.ReadBuildInfo() cannot recover them
+# inside the image build. CI passes COMMIT + DATE; a bare `docker build`
+# leaves them empty and the binary falls back to "unknown"/"".
+ARG COMMIT=""
+ARG DATE=""
+
 # Build the application
 # CGO_ENABLED=0 for a static binary
-RUN CGO_ENABLED=0 GOOS=linux go build -o /server ./cmd/server/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-X github.com/starquake/topbanana/internal/version.Version=$(cat VERSION) \
+              -X github.com/starquake/topbanana/internal/version.Commit=${COMMIT} \
+              -X github.com/starquake/topbanana/internal/version.Date=${DATE}" \
+    -o /server ./cmd/server/main.go
 
 # Create data directory in build stage
 RUN mkdir -p /data

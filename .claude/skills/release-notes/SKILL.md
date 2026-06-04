@@ -94,6 +94,8 @@ No need to ask the user for the version — derive it.
 
 3. **Draft the new section** at the top of `RELEASE_NOTES.md`, directly under the `# Release notes` title and the paragraph that follows it. Insert above the previous release.
 
+   **Also bump the `VERSION` file** at the repo root to the same version in bare form (no `v` prefix, single line, e.g. `2026.6.0`). The build reads this file and stamps it into the binary, so the admin footer and `/version` endpoint report the release (#663). Keep it in lockstep with the `## vYYYY.M.N` heading you just wrote, and stage it alongside `RELEASE_NOTES.md` in the release-notes commit.
+
 4. **Audit the draft** before showing the user. Re-read the voice rules above. Common drift to catch:
 
    - Editorial words in the lead ("an audit pass that **tightens**", "the **big** one").

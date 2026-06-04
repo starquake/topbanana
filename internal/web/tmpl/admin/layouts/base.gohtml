@@ -44,6 +44,14 @@
 <section class="max-w-shell mx-auto px-5 py-10">
     {{template "content" .}}
 </section>
+{{/* Build stamp (#663): an unobtrusive footer on every admin page so an
+     operator can tell at a glance which release + commit is live.
+     Production shows the release version; every other environment shows
+     the commit. Reuses the home footer's muted utilities so no new
+     Tailwind class is introduced. */}}
+<footer class="max-w-shell mx-auto px-5 py-6 w-full text-xs text-text-mute">
+    {{versionLabel}}
+</footer>
 <script>
     // Admin modals get dialog ARIA + focus management + Esc-to-close
     // wiring at open time (#364). Templates only declare:
