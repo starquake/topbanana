@@ -167,6 +167,8 @@ func (*fakeStore) EnterQuestion(context.Context, string, int64, int64, time.Time
 
 func (*fakeStore) EnterReveal(context.Context, string) error { return errors.ErrUnsupported }
 
+func (*fakeStore) EnterRoundResults(context.Context, string) error { return errors.ErrUnsupported }
+
 func (*fakeStore) Finish(context.Context, string) error { return errors.ErrUnsupported }
 
 func (*fakeStore) RecordAnswer(context.Context, string, int64, int64, int64, time.Time) error {
@@ -186,6 +188,14 @@ func (*fakeStore) SetAnswerScore(context.Context, string, int64, int64, int) err
 }
 
 func (*fakeStore) ListLiveSessionIDs(context.Context) ([]string, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (*fakeStore) ListRoundStandings(context.Context, string, int64) ([]*Standing, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (*fakeStore) ListFinalStandings(context.Context, string) ([]*Standing, error) {
 	return nil, errors.ErrUnsupported
 }
 

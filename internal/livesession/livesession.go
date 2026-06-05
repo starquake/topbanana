@@ -58,20 +58,20 @@ var (
 )
 
 // Phase is the server-authoritative state-machine label for a session.
-// The runner (MP-5 / #682) advances a session through the gameplay phases;
-// round_results lands in MP-6. The DB CHECK on sessions.phase enforces the
-// same set.
+// The runner (MP-5 / #682, MP-6 / #683) advances a session through the
+// gameplay phases. The DB CHECK on sessions.phase enforces the same set.
 type Phase string
 
 // Session phases. The runner advances lobby -> round_intro -> question ->
-// reveal (repeating per question, with a round_intro between rounds) ->
-// finished.
+// reveal (repeating per question) -> round_results (after the last question
+// of a round) -> the next round's round_intro, and ends at finished.
 const (
-	PhaseLobby      Phase = "lobby"
-	PhaseRoundIntro Phase = "round_intro"
-	PhaseQuestion   Phase = "question"
-	PhaseReveal     Phase = "reveal"
-	PhaseFinished   Phase = "finished"
+	PhaseLobby        Phase = "lobby"
+	PhaseRoundIntro   Phase = "round_intro"
+	PhaseQuestion     Phase = "question"
+	PhaseReveal       Phase = "reveal"
+	PhaseRoundResults Phase = "round_results"
+	PhaseFinished     Phase = "finished"
 )
 
 // errGetSessionByCodeFmt is the wrap format every code-keyed lookup shares
@@ -136,6 +136,26 @@ type LobbyState struct {
 	// Revealed is true once the session is in the reveal phase, the single
 	// gate the handler reads to decide whether to expose correctness.
 	Revealed bool
+	// Standings carries the per-player ranking the bar graph (MP-9) consumes.
+	// Populated in the round_results phase (with each player's points-this-round
+	// alongside the running total) and in the finished phase (final standings,
+	// where RoundScore is 0 since no single round is in focus). Nil in every
+	// other phase. Ordered best-first, rank stamped 1-indexed.
+	Standings []*Standing
+}
+
+// Standing is one player's place in the session ranking shown between rounds
+// (round_results) and at the end (finished). RoundScore is the points the
+// player earned in the round that just finished (0 in the finished phase, which
+// has no single round in focus); TotalScore is their cumulative session score.
+// Rank is 1-indexed over the full roster, ties broken by display name so the
+// ordering is stable across reads.
+type Standing struct {
+	PlayerID    int64
+	DisplayName string
+	RoundScore  int
+	TotalScore  int
+	Rank        int
 }
 
 // Store is the persistence surface the live-session domain needs. Defined
@@ -190,6 +210,10 @@ type Store interface {
 	// EnterReveal moves the session into the reveal phase, leaving the
 	// current question and window in place.
 	EnterReveal(ctx context.Context, sessionID string) error
+	// EnterRoundResults moves the session into the round_results phase shown
+	// after the last question of a round, leaving current_round_id in place so
+	// a reader knows which round just finished.
+	EnterRoundResults(ctx context.Context, sessionID string) error
 	// Finish ends the session: marks it finished and clears the
 	// per-question runner columns.
 	Finish(ctx context.Context, sessionID string) error
@@ -214,6 +238,14 @@ type Store interface {
 	// ListLiveSessionIDs returns the ids of every session not yet finished,
 	// in creation order, so the runner can scan active rooms each beat.
 	ListLiveSessionIDs(ctx context.Context) ([]string, error)
+	// ListRoundStandings returns one row per roster player with the score they
+	// earned in the given round and their cumulative session total, ordered
+	// best-first. Used to populate the round_results state.
+	ListRoundStandings(ctx context.Context, sessionID string, roundID int64) ([]*Standing, error)
+	// ListFinalStandings returns one row per roster player with their
+	// cumulative session total, ordered best-first. Used to populate the
+	// finished state. RoundScore on each returned Standing is 0.
+	ListFinalStandings(ctx context.Context, sessionID string) ([]*Standing, error)
 }
 
 // SessionAnswer is one recorded pick. Correct is the chosen option's
@@ -503,6 +535,9 @@ func (s *Service) GetLobbyState(ctx context.Context, joinCode string, playerID i
 	if err = s.populateInGame(ctx, state); err != nil {
 		return nil, err
 	}
+	if err = s.populateStandings(ctx, state); err != nil {
+		return nil, err
+	}
 
 	return state, nil
 }
@@ -574,6 +609,44 @@ func (s *Service) populateInGame(ctx context.Context, state *LobbyState) error {
 	state.Answers = answers
 
 	return nil
+}
+
+// populateStandings fills Standings with the per-player ranking the bar graph
+// consumes: the round delta + running total in the round_results phase (keyed
+// on the round that just finished), and the cumulative final standings in the
+// finished phase. Leaves Standings nil in every other phase, which has no
+// ranking to show. Ranks are stamped 1-indexed over the store's best-first
+// ordering.
+func (s *Service) populateStandings(ctx context.Context, state *LobbyState) error {
+	sess := state.Session
+	switch {
+	case sess.Phase == PhaseRoundResults && sess.CurrentRoundID != nil:
+		standings, err := s.store.ListRoundStandings(ctx, sess.ID, *sess.CurrentRoundID)
+		if err != nil {
+			return fmt.Errorf("failed to list round standings for state: %w", err)
+		}
+		state.Standings = rankStandings(standings)
+	case sess.Phase == PhaseFinished:
+		standings, err := s.store.ListFinalStandings(ctx, sess.ID)
+		if err != nil {
+			return fmt.Errorf("failed to list final standings for state: %w", err)
+		}
+		state.Standings = rankStandings(standings)
+	default:
+		// Every other phase carries no standings.
+	}
+
+	return nil
+}
+
+// rankStandings stamps a 1-indexed rank onto each standing in store order
+// (already best-first, ties broken by display name) and returns the slice.
+func rankStandings(standings []*Standing) []*Standing {
+	for i, st := range standings {
+		st.Rank = i + 1
+	}
+
+	return standings
 }
 
 // isParticipant reports whether playerID is the host or a roster player.

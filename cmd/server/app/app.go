@@ -198,10 +198,11 @@ func runnerConfig(cfg *config.Config) livesession.RunnerConfig {
 	beat := cfg.SessionRunnerBeat
 
 	return livesession.RunnerConfig{
-		BeatInterval:    max(beat/runnerBeatTickDivisor, time.Millisecond),
-		RoundIntroBeat:  beat,
-		RevealBeat:      beat,
-		AutoStartWindow: beat,
+		BeatInterval:     max(beat/runnerBeatTickDivisor, time.Millisecond),
+		RoundIntroBeat:   beat,
+		RevealBeat:       beat,
+		RoundResultsBeat: beat,
+		AutoStartWindow:  beat,
 	}
 }
 

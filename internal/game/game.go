@@ -354,6 +354,22 @@ type Store interface {
 	// round-walking iterator in [Service.GetNext] uses this set to skip
 	// past seen round boundary phases (#548).
 	ListSeenRoundPhasesByGame(ctx context.Context, gameID string) ([]SeenRoundPhase, error)
+	// ListSessionResultsForQuizLeaderboard returns one row per player who
+	// played a FINISHED hosted live session of the quiz, with their summed
+	// session score and a display name. Live games record into the quiz's
+	// standard leaderboard (decision 3); GetQuizLeaderboard folds these in
+	// alongside the solo game rows. A session contributes only once finished,
+	// so an in-progress game does not appear. Scores are the already-computed
+	// session totals (the same CalculateScore curve), not recomputed.
+	ListSessionResultsForQuizLeaderboard(ctx context.Context, quizID int64) ([]SessionResult, error)
+}
+
+// SessionResult is one player's summed score across the finished hosted live
+// sessions of a quiz, with the display name to show on the quiz leaderboard.
+type SessionResult struct {
+	PlayerID    int64
+	DisplayName string
+	Score       int
 }
 
 // SeenRoundPhase is one acknowledged round boundary phase: the round
@@ -1100,6 +1116,11 @@ func (s *Service) GetQuizLeaderboard(
 		return nil, fmt.Errorf("failed to list leaderboard answers: %w", err)
 	}
 
+	sessionResults, err := s.store.ListSessionResultsForQuizLeaderboard(ctx, quizID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list leaderboard session results: %w", err)
+	}
+
 	playerTotals := make(map[int64]int)
 	for _, r := range rows {
 		// Synthesise just enough of an *Answer / *Question / *quiz.Option
@@ -1115,19 +1136,11 @@ func (s *Service) GetQuizLeaderboard(
 		}
 		playerTotals[r.PlayerID] += s.CalculateScore(ctx, a)
 	}
-
-	entries := make([]LeaderboardEntry, 0, len(participants))
-	for _, p := range participants {
-		entries = append(entries, LeaderboardEntry{
-			PlayerID:        p.PlayerID,
-			DisplayName:     p.DisplayName,
-			Score:           playerTotals[p.PlayerID],
-			IsCurrentPlayer: p.PlayerID == currentPlayerID,
-			Completed:       p.IsCompleted,
-			// Stale rows stay on the board (#336) but drop the dot.
-			InProgress: !p.IsCompleted && !p.IsStale,
-		})
+	for _, sr := range sessionResults {
+		playerTotals[sr.PlayerID] += sr.Score
 	}
+
+	entries := mergeLeaderboardEntries(participants, sessionResults, playerTotals, currentPlayerID)
 
 	slices.SortFunc(entries, func(a, b LeaderboardEntry) int {
 		// Higher scores first; ties broken by ascending displayName.
@@ -1139,6 +1152,50 @@ func (s *Service) GetQuizLeaderboard(
 	})
 
 	return finalizeLeaderboardInPlace(entries, currentPlayerID, limit), nil
+}
+
+// mergeLeaderboardEntries builds the leaderboard entry set from the solo
+// participants (the canonical set, #335) plus any player who only appears via a
+// finished hosted live session (decision 3). playerTotals already folds in both
+// the solo and session scores. A player present in both a solo game and a
+// session is carried once, from the participant row (so the solo Completed /
+// InProgress flags win); a session-only player is added as a completed entry,
+// since a finished session is a completed play of the quiz.
+func mergeLeaderboardEntries(
+	participants []*LeaderboardParticipant,
+	sessionResults []SessionResult,
+	playerTotals map[int64]int,
+	currentPlayerID int64,
+) []LeaderboardEntry {
+	seen := make(map[int64]struct{}, len(participants))
+	entries := make([]LeaderboardEntry, 0, len(participants)+len(sessionResults))
+	for _, p := range participants {
+		seen[p.PlayerID] = struct{}{}
+		entries = append(entries, LeaderboardEntry{
+			PlayerID:        p.PlayerID,
+			DisplayName:     p.DisplayName,
+			Score:           playerTotals[p.PlayerID],
+			IsCurrentPlayer: p.PlayerID == currentPlayerID,
+			Completed:       p.IsCompleted,
+			// Stale rows stay on the board (#336) but drop the dot.
+			InProgress: !p.IsCompleted && !p.IsStale,
+		})
+	}
+	for _, sr := range sessionResults {
+		if _, ok := seen[sr.PlayerID]; ok {
+			continue
+		}
+		seen[sr.PlayerID] = struct{}{}
+		entries = append(entries, LeaderboardEntry{
+			PlayerID:        sr.PlayerID,
+			DisplayName:     sr.DisplayName,
+			Score:           playerTotals[sr.PlayerID],
+			IsCurrentPlayer: sr.PlayerID == currentPlayerID,
+			Completed:       true,
+		})
+	}
+
+	return entries
 }
 
 // finalizeLeaderboardInPlace stamps 1-indexed rank on every entry, extracts the

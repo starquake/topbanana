@@ -13,6 +13,69 @@ import (
 // sessions parent table to widen the phase CHECK and add the runner columns.
 const sessionRunnerVersion = 20260606120000
 
+// sessionRoundResultsVersion is the MP-6 migration that rebuilds the sessions
+// parent table to add the round_results phase to the phase CHECK.
+const sessionRoundResultsVersion = 20260607120000
+
+// TestSessionRoundResultsMigration_PhaseCheck pins the MP-6 schema (#683): the
+// widened phase CHECK accepts round_results, and the Down rebuild coerces a
+// session sitting in round_results back to reveal to satisfy the old narrower
+// CHECK, then the re-Up accepts round_results again. dbtest.Open already ran
+// every migration, so the live schema is what the Up produced.
+func TestSessionRoundResultsMigration_PhaseCheck(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := dbtest.Open(t)
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v", cerr)
+		}
+	})
+
+	var quizID int64
+	if err := db.QueryRowContext(
+		ctx,
+		`INSERT INTO quizzes (title, slug, description, created_by_player_id, mode)
+		 VALUES ('Live', 'live-round-results-mig', 'd', 1, 'live') RETURNING id`,
+	).Scan(&quizID); err != nil {
+		t.Fatalf("seed quiz err = %v, want nil", err)
+	}
+	if _, err := db.ExecContext(
+		ctx,
+		`INSERT INTO sessions (id, quiz_id, host_player_id, join_code, phase)
+		 VALUES ('sess-rr-1', ?, 1, 'RRS234', 'round_results')`,
+		quizID,
+	); err != nil {
+		t.Fatalf("seed round_results session err = %v, want nil", err)
+	}
+
+	if err := goose.DownTo(db, ".", sessionRoundResultsVersion-1); err != nil {
+		t.Fatalf("goose.DownTo err = %v, want nil", err)
+	}
+
+	// After the rollback the session survives with round_results coerced to
+	// reveal.
+	var phase string
+	if err := db.QueryRowContext(ctx, "SELECT phase FROM sessions WHERE id = 'sess-rr-1'").Scan(&phase); err != nil {
+		t.Fatalf("read phase after down err = %v, want nil", err)
+	}
+	if got, want := phase, "reveal"; got != want {
+		t.Errorf("phase after down = %q, want %q", got, want)
+	}
+
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("goose.Up after down err = %v, want nil", err)
+	}
+
+	// The widened CHECK is back: round_results is accepted again.
+	if _, err := db.ExecContext(
+		ctx, "UPDATE sessions SET phase = 'round_results' WHERE id = 'sess-rr-1'",
+	); err != nil {
+		t.Errorf("update to round_results after re-up err = %v, want nil", err)
+	}
+}
+
 // TestSessionRunnerMigration_DownUpRoundTrip exercises the parent-table
 // rebuild's Down path (the risky one: dropping a parent with foreign_keys=OFF
 // inside an explicit transaction) and the re-Up afterwards, with a seeded

@@ -22,14 +22,15 @@ var errStub = errors.New("stub error")
 // getGameByPlayerAndQuiz field defaults to "not found" rather than errStub
 // so the existing CreateGame happy-path tests do not have to opt in.
 type stubStore struct {
-	getGame                            func(ctx context.Context, gameID string) (*Game, error)
-	listAnswersForQuizLeaderboard      func(ctx context.Context, quizID int64) ([]*LeaderboardAnswer, error)
-	listParticipantsForQuizLeaderboard func(ctx context.Context, quizID int64, staleBefore time.Time) ([]*LeaderboardParticipant, error)
-	getGameByPlayerAndQuiz             func(ctx context.Context, playerID, quizID int64) (*Game, error)
-	deleteGamesForPlayerOnQuiz         func(ctx context.Context, playerID, quizID int64) error
-	listQuizIDsForPlayer               func(ctx context.Context, playerID int64) ([]int64, error)
-	markRoundSeen                      func(ctx context.Context, gameID string, roundID int64, phase RoundPhase) error
-	listSeenRoundPhasesByGame          func(ctx context.Context, gameID string) ([]SeenRoundPhase, error)
+	getGame                              func(ctx context.Context, gameID string) (*Game, error)
+	listAnswersForQuizLeaderboard        func(ctx context.Context, quizID int64) ([]*LeaderboardAnswer, error)
+	listParticipantsForQuizLeaderboard   func(ctx context.Context, quizID int64, staleBefore time.Time) ([]*LeaderboardParticipant, error)
+	getGameByPlayerAndQuiz               func(ctx context.Context, playerID, quizID int64) (*Game, error)
+	deleteGamesForPlayerOnQuiz           func(ctx context.Context, playerID, quizID int64) error
+	listQuizIDsForPlayer                 func(ctx context.Context, playerID int64) ([]int64, error)
+	markRoundSeen                        func(ctx context.Context, gameID string, roundID int64, phase RoundPhase) error
+	listSeenRoundPhasesByGame            func(ctx context.Context, gameID string) ([]SeenRoundPhase, error)
+	listSessionResultsForQuizLeaderboard func(ctx context.Context, quizID int64) ([]SessionResult, error)
 }
 
 func (stubStore) Ping(_ context.Context) error { return nil }
@@ -106,6 +107,19 @@ func (s stubStore) ListParticipantsForQuizLeaderboard(
 	}
 
 	return out, nil
+}
+
+// ListSessionResultsForQuizLeaderboard serves the session-results stub when
+// set; otherwise it returns no rows, so existing leaderboard tests (which only
+// seeded solo answers) keep passing without opting in.
+func (s stubStore) ListSessionResultsForQuizLeaderboard(
+	ctx context.Context, quizID int64,
+) ([]SessionResult, error) {
+	if s.listSessionResultsForQuizLeaderboard == nil {
+		return nil, nil
+	}
+
+	return s.listSessionResultsForQuizLeaderboard(ctx, quizID)
 }
 
 func (s stubStore) DeleteGamesForPlayerOnQuiz(

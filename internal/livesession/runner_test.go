@@ -48,10 +48,11 @@ type runnerHarness struct {
 
 // runnerCfg uses tiny beats so a single clock step crosses each threshold.
 var runnerCfg = RunnerConfig{
-	BeatInterval:    time.Millisecond,
-	RoundIntroBeat:  time.Second,
-	RevealBeat:      time.Second,
-	AutoStartWindow: 2 * time.Second,
+	BeatInterval:     time.Millisecond,
+	RoundIntroBeat:   time.Second,
+	RevealBeat:       time.Second,
+	RoundResultsBeat: time.Second,
+	AutoStartWindow:  2 * time.Second,
 }
 
 // newRunnerHarness seeds a live quiz with the given rounds (each a slice of
@@ -257,12 +258,19 @@ func TestRunner_FullFlow(t *testing.T) {
 		t.Fatalf("phase after timeout = %q, want %q (timeout close)", got, want)
 	}
 
-	// Reveal beat -> round 1 done -> round 2 intro.
+	// Reveal beat -> round 1 done -> round_results (the between-rounds screen).
 	h.clock.advance(runnerCfg.RevealBeat)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseRoundResults; got != want {
+		t.Fatalf("phase after round 1 last reveal = %q, want %q (round results)", got, want)
+	}
+
+	// round_results beat -> round 2 intro.
+	h.clock.advance(runnerCfg.RoundResultsBeat)
 	h.tick(ctx)
 	intro2 := h.reload(t)
 	if got, want := intro2.Phase, PhaseRoundIntro; got != want {
-		t.Fatalf("phase after round 1 = %q, want %q (next round intro)", got, want)
+		t.Fatalf("phase after round results = %q, want %q (next round intro)", got, want)
 	}
 
 	// Round 2 intro -> its single question -> timeout reveal -> finished.
@@ -276,7 +284,14 @@ func TestRunner_FullFlow(t *testing.T) {
 	if got, want := h.phase(t), PhaseReveal; got != want {
 		t.Fatalf("phase after round 2 question = %q, want %q", got, want)
 	}
+
+	// The last round also shows round_results before the session finishes.
 	h.clock.advance(runnerCfg.RevealBeat)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseRoundResults; got != want {
+		t.Fatalf("phase after round 2 reveal = %q, want %q (final round results)", got, want)
+	}
+	h.clock.advance(runnerCfg.RoundResultsBeat)
 	h.tick(ctx)
 	final := h.reload(t)
 	if got, want := final.Phase, PhaseFinished; got != want {

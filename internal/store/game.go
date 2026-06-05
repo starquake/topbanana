@@ -389,6 +389,30 @@ func (s *GameStore) ListParticipantsForQuizLeaderboard(
 	return participants, nil
 }
 
+// ListSessionResultsForQuizLeaderboard returns one row per player who played a
+// finished hosted live session of the quiz, with their summed session score.
+// The query lives in sessions.sql; the game leaderboard folds the result in so
+// a live game shows up on the quiz's standard leaderboard (decision 3).
+func (s *GameStore) ListSessionResultsForQuizLeaderboard(
+	ctx context.Context, quizID int64,
+) ([]game.SessionResult, error) {
+	rows, err := s.q.ListSessionResultsForQuizLeaderboard(ctx, quizID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list session leaderboard results for quiz %d: %w", quizID, err)
+	}
+
+	results := make([]game.SessionResult, 0, len(rows))
+	for _, r := range rows {
+		results = append(results, game.SessionResult{
+			PlayerID:    r.PlayerID,
+			DisplayName: r.DisplayName,
+			Score:       int(r.TotalScore),
+		})
+	}
+
+	return results, nil
+}
+
 // ListQuizIDsForPlayer returns the distinct quiz IDs the player has
 // joined. Used by the claim-name flow to repaint every affected
 // leaderboard SSE stream when a player changes their display name.

@@ -296,6 +296,23 @@ type sessionStateResponse struct {
 	// question and reveal phases do). Options never carry a correct flag
 	// before reveal - correctOptionIds below is populated only at reveal.
 	Question *sessionQuestionResponse `json:"question,omitempty"`
+	// Standings is the per-player ranking the bar graph (MP-9) consumes: the
+	// round delta + running total in the round_results phase, and the
+	// cumulative final standings in the finished phase. Null in every other
+	// phase. Ordered best-first, rank stamped 1-indexed.
+	Standings []sessionStandingResponse `json:"standings,omitempty"`
+}
+
+// sessionStandingResponse is one player's place in the between-rounds /
+// final ranking. roundScore is the player's points in the round that just
+// finished (0 in the finished phase, which has no single round in focus);
+// totalScore is their cumulative session score; rank is 1-indexed.
+type sessionStandingResponse struct {
+	PlayerID    int64  `json:"playerId"`
+	DisplayName string `json:"displayName"`
+	RoundScore  int    `json:"roundScore"`
+	TotalScore  int    `json:"totalScore"`
+	Rank        int    `json:"rank"`
 }
 
 // sessionOptionResponse is one answer option. correct is surfaced ONLY in the
@@ -390,7 +407,29 @@ func newSessionStateResponse(state *livesession.LobbyState) sessionStateResponse
 		},
 		ServerNow: time.Now().UTC(),
 		Question:  newSessionQuestionResponse(state),
+		Standings: newSessionStandingsResponse(state),
 	}
+}
+
+// newSessionStandingsResponse projects the domain standings onto the wire
+// shape. Returns nil outside the phases that carry standings (round_results
+// and finished), so the field is omitted from the JSON.
+func newSessionStandingsResponse(state *livesession.LobbyState) []sessionStandingResponse {
+	if len(state.Standings) == 0 {
+		return nil
+	}
+	standings := make([]sessionStandingResponse, 0, len(state.Standings))
+	for _, st := range state.Standings {
+		standings = append(standings, sessionStandingResponse{
+			PlayerID:    st.PlayerID,
+			DisplayName: st.DisplayName,
+			RoundScore:  st.RoundScore,
+			TotalScore:  st.TotalScore,
+			Rank:        st.Rank,
+		})
+	}
+
+	return standings
 }
 
 // newSessionQuestionResponse projects the live question view onto the wire
