@@ -14,6 +14,7 @@ import (
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/health"
 	"github.com/starquake/topbanana/internal/home"
+	"github.com/starquake/topbanana/internal/host"
 	"github.com/starquake/topbanana/internal/livesession"
 	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/profile"
@@ -60,6 +61,7 @@ func addRoutes(
 	addAdminRoutes(mux, logger, stores, gameService, sessions, csrfMgr, emailDeps, playerDeps)
 	addProfileRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mailerTester)
 	addAPIRoutes(mux, logger, stores, gameService, realtime, sessions)
+	addHostRoutes(mux, logger, stores, sessions, csrfMgr, realtime.SessionService)
 
 	// Client
 	clientHandler := client.Handler(cfg)
@@ -790,4 +792,31 @@ func addSessionRoutes(
 		"GET /api/sessions/{code}/events",
 		ensurePlayer(clientapi.HandleSessionEvents(logger, sessionService, sessionHub)),
 	)
+}
+
+// addHostRoutes registers the host presentation surface (MP-3 / #680): the
+// "Play live" entry that opens a session and the TV lobby it redirects to,
+// plus the host start control. All three are host-gated (RequireGameHost)
+// and the mutating POSTs carry CSRF protection. The lobby reads live state
+// through the JSON API the page polls (SSE tick -> GET /state); the host
+// handlers reuse the shared session service so the page and the API see the
+// same in-memory session.
+func addHostRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	stores *store.Stores,
+	sessions *session.Manager,
+	csrfMgr *csrf.Manager,
+	sessionService *livesession.Service,
+) {
+	requireGameHost := func(h http.Handler) http.Handler {
+		return auth.RequireGameHost(auth.RequireVerifiedEmail(h), stores.Players, sessions, csrfMgr, logger)
+	}
+	csrfMW := csrfMgr.Middleware
+
+	handlers := host.NewHandlers(logger, csrfMgr, sessionService)
+
+	mux.Handle("POST /host", csrfMW(requireGameHost(http.HandlerFunc(handlers.Create))))
+	mux.Handle("GET /host/{code}", requireGameHost(http.HandlerFunc(handlers.Lobby)))
+	mux.Handle("POST /host/{code}/start", csrfMW(requireGameHost(http.HandlerFunc(handlers.Start))))
 }

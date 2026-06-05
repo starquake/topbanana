@@ -60,6 +60,19 @@
             </div>
 
             <div class="flex flex-wrap gap-2">
+                {{/* Play live opens a hosted session and drops the host on the
+                     TV lobby. Only live quizzes are hostable (MP-0 / #677), so
+                     the entry shows for mode='live' only. */}}
+                {{if eq .Quiz.Mode "live"}}
+                <form method="post" action="/host" class="inline-flex">
+                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                    <input type="hidden" name="quiz_id" value="{{.Quiz.ID}}">
+                    <button type="submit" class="btn-primary gap-2">
+                        <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M10.804 8 5 4.633v6.734zM5.696 4.41a.5.5 0 0 0-.696.46v6.266a.5.5 0 0 0 .696.46l5.453-3.133a.5.5 0 0 0 0-.866z"/><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/></svg>
+                        <span>Play live</span>
+                    </button>
+                </form>
+                {{end}}
                 <button type="button"
                         onclick="openModal('modal-share-quiz-{{.Quiz.ID}}')"
                         class="btn-ghost gap-2">

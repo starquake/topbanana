@@ -113,6 +113,27 @@ function setRole(displayName: string, role: 'player' | 'host' | 'admin'): void {
   }
 }
 
+// setQuizMode flips a quiz's play mode by title, shelling out to the
+// sqlite3 CLI the same way the role/verification helpers do. The admin
+// importer only creates solo quizzes (#677), so a host-lobby spec that
+// needs a live quiz seeds one solo and flips it here.
+export function setQuizMode(title: string, mode: 'solo' | 'live'): void {
+  const dataDir = process.env.TOPBANANA_E2E_DATA_DIR;
+  if (!dataDir) {
+    throw new Error('TOPBANANA_E2E_DATA_DIR is not set; helpers cannot stamp quiz mode');
+  }
+  const dbFile = join(dataDir, `e2e-${test.info().parallelIndex}.db`);
+  const escapedTitle = title.replace(/'/g, "''");
+  const output = execFileSync('sqlite3', [
+    dbFile,
+    `UPDATE quizzes SET mode = '${mode}' WHERE title = '${escapedTitle}'; SELECT changes();`,
+  ], { encoding: 'utf8' });
+  const changed = Number.parseInt(output.trim(), 10);
+  if (changed !== 1) {
+    throw new Error(`setQuizMode(${title}, ${mode}): expected 1 row updated, got ${changed}`);
+  }
+}
+
 // csrfTokenPattern scrapes the hidden csrf_token input a server-rendered
 // form carries (the import form, the login form, ...). Tolerant of attribute
 // order: the value may sit before or after the name attribute on the input.
