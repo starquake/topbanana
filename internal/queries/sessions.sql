@@ -63,3 +63,106 @@ FROM session_players
 WHERE session_id = ?
   AND left_at IS NULL
 ORDER BY joined_at, id;
+
+-- name: ListLiveSessionIDs :many
+-- Ids of every session not yet finished, in creation order. The runner scans
+-- these each beat to auto-start lobbies and advance in-flight games; finished
+-- sessions are skipped so the scan stays bounded to active rooms.
+SELECT id
+FROM sessions
+WHERE phase != 'finished'
+ORDER BY created_at, id;
+
+-- name: StartSession :execresult
+-- Stamps started_at and moves the session out of the lobby. Scoped to a
+-- session still in the lobby so a re-issued start (host double-click, or the
+-- auto-start racing the host) is a no-op rather than resetting the clock.
+UPDATE sessions
+SET started_at = CURRENT_TIMESTAMP
+WHERE id = ?
+  AND started_at IS NULL;
+
+-- name: SetSessionRoundIntro :exec
+-- Moves the session into the round_intro phase for the given round and clears
+-- the per-question runner columns (the intro screen runs before any question
+-- is issued).
+UPDATE sessions
+SET phase               = 'round_intro',
+    current_round_id    = ?,
+    current_question_id = NULL,
+    question_started_at = NULL,
+    question_expires_at = NULL
+WHERE id = ?;
+
+-- name: SetSessionQuestion :exec
+-- Issues a question: records the current round + question and the server
+-- answer window (started_at -> expires_at), and moves into the question phase.
+UPDATE sessions
+SET phase               = 'question',
+    current_round_id    = ?,
+    current_question_id = ?,
+    question_started_at = ?,
+    question_expires_at = ?
+WHERE id = ?;
+
+-- name: SetSessionReveal :exec
+-- Moves the session into the reveal phase, leaving the current question and
+-- its window in place so a reader still sees which question is being revealed.
+UPDATE sessions
+SET phase = 'reveal'
+WHERE id = ?;
+
+-- name: SetSessionFinished :exec
+-- Ends the session: marks it finished and clears the per-question runner
+-- columns.
+UPDATE sessions
+SET phase               = 'finished',
+    current_question_id = NULL,
+    question_started_at = NULL,
+    question_expires_at = NULL,
+    finished_at         = CURRENT_TIMESTAMP
+WHERE id = ?;
+
+-- name: UpsertSessionAnswer :exec
+-- Records a player's pick for the current session question. answered_at is the
+-- server timestamp the pick landed. Idempotent on (session_id, question_id,
+-- player_id): a re-submit overwrites the option and timestamp rather than
+-- duplicating, so a double-tap before close is the last pick rather than an
+-- error. score stays NULL until the question closes.
+INSERT INTO session_answers (session_id, question_id, player_id, option_id, answered_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (session_id, question_id, player_id)
+    DO UPDATE SET option_id   = excluded.option_id,
+                  answered_at = excluded.answered_at;
+
+-- name: CountSessionAnswersForQuestion :one
+-- Number of players who have picked for the given session question. The runner
+-- closes a question early once this reaches the active-player count.
+SELECT count(*) AS answer_count
+FROM session_answers
+WHERE session_id = ?
+  AND question_id = ?;
+
+-- name: ListSessionAnswersForQuestion :many
+-- Every pick for the given session question in answered order, joined to the
+-- chosen option's correctness. Drives scoring at close and the answered-order
+-- view. is_correct is the option flag; the runner only surfaces it to clients
+-- in the reveal phase.
+SELECT sa.player_id,
+       sa.option_id,
+       sa.answered_at,
+       sa.score,
+       o.is_correct
+FROM session_answers sa
+         JOIN options o ON o.id = sa.option_id
+WHERE sa.session_id = ?
+  AND sa.question_id = ?
+ORDER BY sa.answered_at, sa.id;
+
+-- name: SetSessionAnswerScore :exec
+-- Writes the computed score for one pick at question close.
+UPDATE session_answers
+SET score = ?
+WHERE session_id = ?
+  AND question_id = ?
+  AND player_id = ?;

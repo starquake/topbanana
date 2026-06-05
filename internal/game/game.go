@@ -1179,29 +1179,46 @@ func finalizeLeaderboardInPlace(entries []LeaderboardEntry, currentPlayerID int6
 // CalculateScore calculates the score for a given answer.
 func (s *Service) CalculateScore(ctx context.Context, a *Answer) int {
 	// TODO: Should this be the points for answering immediately? Or within one second?
+	return ScoreAnswer(ctx, s.logger, a.Option.Correct, a.Question.StartedAt, a.Question.ExpiredAt, a.AnsweredAt)
+}
 
-	if !a.Option.Correct {
+// ScoreAnswer scores a pick from its timing primitives, letting the
+// live-session runner (MP-5 / #682) reuse the exact CalculateScore curve via
+// the service it already holds, without building a game.Answer.
+func (s *Service) ScoreAnswer(ctx context.Context, correct bool, startedAt, expiredAt, answeredAt time.Time) int {
+	return ScoreAnswer(ctx, s.logger, correct, startedAt, expiredAt, answeredAt)
+}
+
+// ScoreAnswer is the pure scoring formula, decoupled from the [Answer]
+// struct so other domains (the live-session runner, MP-5 / #682) can reuse
+// the exact same curve without building a game.Answer. A wrong pick scores
+// zero, a pick after the window scores zero, and a correct pick scores
+// linearly from maxPoints at startedAt down to zero at expiredAt.
+//
+//nolint:revive // correct is the option's correctness (a scoring input), not a behavioural control flag.
+func ScoreAnswer(
+	ctx context.Context, logger *slog.Logger, correct bool, startedAt, expiredAt, answeredAt time.Time,
+) int {
+	if !correct {
 		return 0
 	}
 
-	if a.AnsweredAt.After(a.Question.ExpiredAt) {
-		s.logger.InfoContext(ctx, "score=0, a.AnsweredAt > question.ExpiredAt, answered too late!")
+	if answeredAt.After(expiredAt) {
+		logger.InfoContext(ctx, "score=0, answeredAt > expiredAt, answered too late!")
 
 		return 0
 	}
 
-	answerWindow := a.Question.ExpiredAt.Sub(a.Question.StartedAt)
+	answerWindow := expiredAt.Sub(startedAt)
 	duration := max(
 		// Defensive clamp: a hand-crafted client could POST an answer
-		// before StartedAt (which sits in the future due to the reveal
+		// before startedAt (which sits in the future due to the reveal
 		// delay - #247). Without clamping, a negative duration would
 		// score above maxPoints. Treat early arrivals as if they landed
-		// at StartedAt.
-		a.AnsweredAt.Sub(a.Question.StartedAt), 0)
+		// at startedAt.
+		answeredAt.Sub(startedAt), 0)
 
-	score := int(float64(maxPoints) - (duration.Seconds() / answerWindow.Seconds() * float64(maxPoints)))
-
-	return score
+	return int(float64(maxPoints) - (duration.Seconds() / answerWindow.Seconds() * float64(maxPoints)))
 }
 
 // resolveAnswerTarget finds the issued game_question for the supplied

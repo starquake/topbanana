@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	. "github.com/starquake/topbanana/internal/livesession"
 	"github.com/starquake/topbanana/internal/quiz"
@@ -134,6 +135,58 @@ func (f *fakeStore) AddPlayer(_ context.Context, _ string, playerID int64, displ
 
 func (f *fakeStore) SetReady(context.Context, string, int64, bool) error {
 	return f.setReadyErr
+}
+
+// The runner-facing Store methods below are exercised by the runner's
+// integration tests against a real DB; this fault-injection double only
+// covers the lobby service paths, so they return ErrUnsupported to fail
+// loudly if a lobby test path ever reaches them unexpectedly.
+
+func (f *fakeStore) GetSessionByID(_ context.Context, _ string) (*Session, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.session == nil {
+		return nil, ErrSessionNotFound
+	}
+
+	return f.session, nil
+}
+
+func (*fakeStore) MarkStarted(context.Context, string) (bool, error) {
+	return false, errors.ErrUnsupported
+}
+
+func (*fakeStore) EnterRoundIntro(context.Context, string, int64) error {
+	return errors.ErrUnsupported
+}
+
+func (*fakeStore) EnterQuestion(context.Context, string, int64, int64, time.Time, time.Time) error {
+	return errors.ErrUnsupported
+}
+
+func (*fakeStore) EnterReveal(context.Context, string) error { return errors.ErrUnsupported }
+
+func (*fakeStore) Finish(context.Context, string) error { return errors.ErrUnsupported }
+
+func (*fakeStore) RecordAnswer(context.Context, string, int64, int64, int64, time.Time) error {
+	return errors.ErrUnsupported
+}
+
+func (*fakeStore) CountAnswers(context.Context, string, int64) (int, error) {
+	return 0, errors.ErrUnsupported
+}
+
+func (*fakeStore) ListAnswers(context.Context, string, int64) ([]*SessionAnswer, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (*fakeStore) SetAnswerScore(context.Context, string, int64, int64, int) error {
+	return errors.ErrUnsupported
+}
+
+func (*fakeStore) ListLiveSessionIDs(context.Context) ([]string, error) {
+	return nil, errors.ErrUnsupported
 }
 
 // fakeQuiz returns the configured quiz or ErrQuizNotFound when nil.

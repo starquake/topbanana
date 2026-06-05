@@ -175,6 +175,79 @@ func HandleSessionReady(logger *slog.Logger, service *livesession.Service) http.
 	})
 }
 
+// HandleSessionStart is the host's override to begin the game immediately,
+// bypassing the auto-start ready window. Only the host may call it. Returns
+// 204 on success, 403 when the caller is not the host, 404 for an unknown
+// code, and 204 (idempotent no-op) when the session has already started.
+func HandleSessionStart(logger *slog.Logger, service *livesession.Service) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		player, ok := auth.PlayerFromContext(ctx)
+		if !ok {
+			logger.ErrorContext(ctx, "missing player on context for session start")
+			http.Error(w, "internal error", http.StatusInternalServerError)
+
+			return
+		}
+
+		err := service.Start(ctx, r.PathValue("code"), player.ID)
+		switch {
+		case err == nil, errors.Is(err, livesession.ErrSessionAlreadyStarted):
+			w.WriteHeader(http.StatusNoContent)
+		case errors.Is(err, livesession.ErrSessionNotFound):
+			http.NotFound(w, r)
+		case errors.Is(err, livesession.ErrNotHost):
+			http.Error(w, "forbidden", http.StatusForbidden)
+		default:
+			writeInternalError(w, r, logger, "error starting session", err)
+		}
+	})
+}
+
+// HandleSessionAnswer records the calling participant's pick for the session's
+// current question. The answer is timestamped on the server (the request body
+// carries only the chosen option) so scoring uses the server clock. Returns
+// 204 on success, 404 for an unknown code or a non-participant (the code stays
+// opaque to outsiders), and 409 when no question is currently open for
+// answers.
+func HandleSessionAnswer(logger *slog.Logger, service *livesession.Service) http.Handler {
+	type answerRequest struct {
+		OptionID int64 `json:"optionId"`
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		player, ok := auth.PlayerFromContext(ctx)
+		if !ok {
+			logger.ErrorContext(ctx, "missing player on context for session answer")
+			http.Error(w, "internal error", http.StatusInternalServerError)
+
+			return
+		}
+
+		req, err := handlers.DecodeJSON[answerRequest](w, r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+
+			return
+		}
+
+		err = service.SubmitAnswer(ctx, r.PathValue("code"), player.ID, req.OptionID, time.Now().UTC())
+		switch {
+		case err == nil:
+			w.WriteHeader(http.StatusNoContent)
+		case errors.Is(err, livesession.ErrSessionNotFound), errors.Is(err, livesession.ErrNotParticipant):
+			http.NotFound(w, r)
+		case errors.Is(err, livesession.ErrQuestionNotOpen):
+			http.Error(w, "no question is open for answers", http.StatusConflict)
+		default:
+			writeInternalError(w, r, logger, "error recording session answer", err)
+		}
+	})
+}
+
 // sessionPlayerResponse is one roster row in the lobby state. playerId is
 // the underlying players.id so a surface can correlate the host (hostId
 // below) and highlight the viewer's own row; displayName + isReady drive
@@ -219,6 +292,44 @@ type sessionStateResponse struct {
 	Players   []sessionPlayerResponse `json:"players"`
 	Quiz      sessionQuizResponse     `json:"quiz"`
 	ServerNow time.Time               `json:"serverNow"`
+	// Question is the live question (round_intro carries no question yet; the
+	// question and reveal phases do). Options never carry a correct flag
+	// before reveal - correctOptionIds below is populated only at reveal.
+	Question *sessionQuestionResponse `json:"question,omitempty"`
+}
+
+// sessionOptionResponse is one answer option. correct is surfaced ONLY in the
+// reveal phase via the question's correctOptionIds; before reveal a surface
+// sees option text and id only, so it cannot leak the answer.
+type sessionOptionResponse struct {
+	ID   int64  `json:"id"`
+	Text string `json:"text"`
+}
+
+// sessionAnswerResponse is one recorded pick. playerId + answered order drive
+// the answered badges; correct and score are populated ONLY at reveal (nil
+// before), so a pre-reveal read never tells a client which pick was right.
+type sessionAnswerResponse struct {
+	PlayerID int64 `json:"playerId"`
+	Correct  *bool `json:"correct,omitempty"`
+	Score    *int  `json:"score,omitempty"`
+}
+
+// sessionQuestionResponse is the live question view. startedAt / expiresAt are
+// the server answer window so a client drives its countdown off expiresAt
+// minus serverNow. answeredPlayerIds is the pick order without correctness.
+// correctOptionIds is empty until reveal.
+type sessionQuestionResponse struct {
+	ID                int64                   `json:"id"`
+	RoundID           int64                   `json:"roundId"`
+	Text              string                  `json:"text"`
+	ImageURL          string                  `json:"imageUrl,omitempty"`
+	Options           []sessionOptionResponse `json:"options"`
+	StartedAt         *time.Time              `json:"startedAt,omitempty"`
+	ExpiresAt         *time.Time              `json:"expiresAt,omitempty"`
+	AnsweredPlayerIDs []int64                 `json:"answeredPlayerIds"`
+	Answers           []sessionAnswerResponse `json:"answers"`
+	CorrectOptionIDs  []int64                 `json:"correctOptionIds"`
 }
 
 // HandleSessionState returns the authoritative lobby state. Participant-
@@ -278,7 +389,64 @@ func newSessionStateResponse(state *livesession.LobbyState) sessionStateResponse
 			QuestionCount: len(state.Quiz.Questions),
 		},
 		ServerNow: time.Now().UTC(),
+		Question:  newSessionQuestionResponse(state),
 	}
+}
+
+// newSessionQuestionResponse projects the live question view onto the wire
+// shape, enforcing the no-spoiler guarantee: correctness (per-option and
+// per-answer) is included only when state.Revealed is true.
+func newSessionQuestionResponse(state *livesession.LobbyState) *sessionQuestionResponse {
+	if state.CurrentQuestion == nil {
+		return nil
+	}
+	q := state.CurrentQuestion
+
+	options := make([]sessionOptionResponse, 0, len(q.Options))
+	for _, o := range q.Options {
+		options = append(options, sessionOptionResponse{ID: o.ID, Text: o.Text})
+	}
+
+	answeredIDs := make([]int64, 0, len(state.Answers))
+	answers := make([]sessionAnswerResponse, 0, len(state.Answers))
+	for _, a := range state.Answers {
+		answeredIDs = append(answeredIDs, a.PlayerID)
+		ans := sessionAnswerResponse{PlayerID: a.PlayerID}
+		if state.Revealed {
+			correct := a.Correct
+			ans.Correct = &correct
+			ans.Score = a.Score
+		}
+		answers = append(answers, ans)
+	}
+
+	correctIDs := []int64{}
+	if state.Revealed {
+		for _, o := range q.Options {
+			if o.Correct {
+				correctIDs = append(correctIDs, o.ID)
+			}
+		}
+	}
+
+	resp := &sessionQuestionResponse{
+		ID:                q.ID,
+		RoundID:           q.RoundID,
+		Text:              q.Text,
+		ImageURL:          q.ImageURL,
+		Options:           options,
+		AnsweredPlayerIDs: answeredIDs,
+		Answers:           answers,
+		CorrectOptionIDs:  correctIDs,
+	}
+	if state.Session.QuestionStartedAt != nil {
+		resp.StartedAt = state.Session.QuestionStartedAt
+	}
+	if state.Session.QuestionExpiresAt != nil {
+		resp.ExpiresAt = state.Session.QuestionExpiresAt
+	}
+
+	return resp
 }
 
 // sessionEventResponse is the wire shape of one SSE tick on the session

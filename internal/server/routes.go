@@ -14,7 +14,6 @@ import (
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/health"
 	"github.com/starquake/topbanana/internal/home"
-	"github.com/starquake/topbanana/internal/leaderboard"
 	"github.com/starquake/topbanana/internal/livesession"
 	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/profile"
@@ -28,7 +27,7 @@ func addRoutes(
 	logger *slog.Logger,
 	stores *store.Stores,
 	gameService *game.Service,
-	leaderboardHub *leaderboard.Hub,
+	realtime Realtime,
 	cfg *config.Config,
 	mailerTester *mailer.Tester,
 	mailerStatus mailer.StatusView,
@@ -60,7 +59,7 @@ func addRoutes(
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mailerTester)
 	addAdminRoutes(mux, logger, stores, gameService, sessions, csrfMgr, emailDeps, playerDeps)
 	addProfileRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mailerTester)
-	addAPIRoutes(mux, logger, stores, gameService, leaderboardHub, sessions)
+	addAPIRoutes(mux, logger, stores, gameService, realtime, sessions)
 
 	// Client
 	clientHandler := client.Handler(cfg)
@@ -721,7 +720,7 @@ func addAPIRoutes(
 	logger *slog.Logger,
 	stores *store.Stores,
 	gameService *game.Service,
-	leaderboardHub *leaderboard.Hub,
+	realtime Realtime,
 	sessions *session.Manager,
 ) {
 	ensurePlayer := func(h http.Handler) http.Handler {
@@ -741,7 +740,7 @@ func addAPIRoutes(
 	)
 	mux.Handle(
 		"GET /api/quizzes/{slugID}/leaderboard/stream",
-		ensurePlayer(clientapi.HandleQuizLeaderboardStream(logger, gameService, leaderboardHub)),
+		ensurePlayer(clientapi.HandleQuizLeaderboardStream(logger, gameService, realtime.LeaderboardHub)),
 	)
 	mux.Handle(
 		"GET /api/quizzes/{slugID}/my-game",
@@ -762,32 +761,30 @@ func addAPIRoutes(
 	)
 	mux.Handle("GET /api/games/{gameID}/results", ensurePlayer(clientapi.HandleGameResults(logger, gameService)))
 
-	addSessionRoutes(mux, logger, stores, ensurePlayer)
+	addSessionRoutes(mux, logger, realtime.SessionService, realtime.SessionHub, ensurePlayer)
 }
 
 // addSessionRoutes registers the hosted live-session API (MP-1 / #678,
-// MP-2 / #679). The session service and its event hub are built here from
-// the live-session + quiz stores rather than threaded through server.New:
-// they have no startup-time configuration and nothing else needs a handle
-// to them yet. The hub is the process-local pub/sub for the SSE event
-// channel; the service publishes a tick on every lobby mutation (join,
-// ready) and the events handler subscribes. Every route is wrapped in
-// ensurePlayer so create (host gate, in-handler), join, ready, state, and
-// events all see a players row on the context; the host gate and
-// participant gates live in the handlers and service.
+// MP-2 / #679, MP-5 / #682). The service and its event hub are built in
+// app.Run (the runner goroutine needs the same instances and the shutdown
+// context), so they are threaded in here. The hub is the process-local
+// pub/sub for the SSE event channel; the service and runner publish a tick on
+// every transition and the events handler subscribes. Every route is wrapped
+// in ensurePlayer so create (host gate, in-handler), join, ready, start,
+// answer, state, and events all see a players row on the context; the host
+// gate and participant gates live in the handlers and service.
 func addSessionRoutes(
 	mux *http.ServeMux,
 	logger *slog.Logger,
-	stores *store.Stores,
+	sessionService *livesession.Service,
+	sessionHub *livesession.Hub,
 	ensurePlayer func(http.Handler) http.Handler,
 ) {
-	sessionService := livesession.NewService(stores.LiveSessions, stores.Quizzes, logger)
-	sessionHub := livesession.NewHub()
-	sessionService.SetPublisher(sessionHub)
-
 	mux.Handle("POST /api/sessions", ensurePlayer(clientapi.HandleSessionCreate(logger, sessionService)))
 	mux.Handle("POST /api/sessions/{code}/join", ensurePlayer(clientapi.HandleSessionJoin(logger, sessionService)))
 	mux.Handle("POST /api/sessions/{code}/ready", ensurePlayer(clientapi.HandleSessionReady(logger, sessionService)))
+	mux.Handle("POST /api/sessions/{code}/start", ensurePlayer(clientapi.HandleSessionStart(logger, sessionService)))
+	mux.Handle("POST /api/sessions/{code}/answer", ensurePlayer(clientapi.HandleSessionAnswer(logger, sessionService)))
 	mux.Handle("GET /api/sessions/{code}/state", ensurePlayer(clientapi.HandleSessionState(logger, sessionService)))
 	mux.Handle(
 		"GET /api/sessions/{code}/events",

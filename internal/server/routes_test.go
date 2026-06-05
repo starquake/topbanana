@@ -19,6 +19,7 @@ import (
 	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/leaderboard"
+	"github.com/starquake/topbanana/internal/livesession"
 	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/quiz"
 	. "github.com/starquake/topbanana/internal/server"
@@ -39,9 +40,17 @@ func newRouter(t *testing.T, db *sql.DB, cfg *config.Config) *http.ServeMux {
 	logger := slog.New(slog.DiscardHandler)
 	stores := store.New(db, logger)
 	gameSvc := game.NewService(stores.Games, stores.Quizzes, logger)
+	sessionSvc := livesession.NewService(stores.LiveSessions, stores.Quizzes, logger)
+	sessionHub := livesession.NewHub()
+	sessionSvc.SetPublisher(sessionHub)
 	mux := http.NewServeMux()
+	realtime := Realtime{
+		LeaderboardHub: leaderboard.NewHub(),
+		SessionService: sessionSvc,
+		SessionHub:     sessionHub,
+	}
 	ExportAddRoutes(
-		mux, logger, stores, gameSvc, leaderboard.NewHub(), cfg,
+		mux, logger, stores, gameSvc, realtime, cfg,
 		mailer.NewTester(mailer.NewNoop()), mailer.StatusView{},
 	)
 
