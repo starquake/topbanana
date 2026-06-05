@@ -73,6 +73,12 @@ func addRoutes(
 	mux.Handle("GET /client/{$}", http.HandlerFunc(shell.Index))
 	mux.Handle("/client/", clientHandler)
 	mux.Handle("GET /play/{slugID}", http.HandlerFunc(shell.Play))
+	// Player join + lobby surface (MP-4 / #681). The bare /join is the PC
+	// enter-code entry; /join/{code} is the QR deep-link target. Both render
+	// the same join.html shell; the room code is read from the URL
+	// client-side, so the shell carries no per-session data.
+	mux.Handle("GET /join/{$}", http.HandlerFunc(shell.Join))
+	mux.Handle("GET /join/{code}", http.HandlerFunc(shell.Join))
 
 	// Admin + auth static assets (Tailwind output, embedded in the binary).
 	mux.Handle("/assets/", web.Handler(cfg))

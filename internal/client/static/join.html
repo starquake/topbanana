@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{envTitleTag}}{{.Title}}</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/banana.svg" sizes="any">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/assets/banana-192.png">
+    <meta name="theme-color" content="#ffd23f">
+    {{/* Open Graph / Twitter Card metadata. The join surface carries the
+         sitewide defaults: a room code is short-lived and per-session, so a
+         shared /join link previews generic site copy rather than leaking a
+         live game. og:image is absolute per the OG spec - {{ogImage}}
+         resolves to scheme://host/assets/og-image.png at render time. */}}
+    <meta property="og:site_name" content="Top Banana!">
+    <meta property="og:title" content="{{.Title}}">
+    <meta property="og:description" content="{{.Description}}">
+    <meta property="og:type" content="website">
+    <meta property="og:image" content="{{ogImage}}">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Top Banana! - banana icon and wordmark on a dark background">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{.Title}}">
+    <meta name="twitter:description" content="{{.Description}}">
+    <meta name="twitter:image" content="{{ogImage}}">
+    <link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/assets/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/assets/css/app.css">
+    {{/* Alpine.js (vendored, self-hosted, #295) drives the join + lobby
+         surface. The join surface has no anime.js dependency: its motion is
+         Alpine x-transition + Tailwind, which already respects
+         prefers-reduced-motion via the motion-reduce rules in app.css. */}}
+    <script type="module" src="/client/js/join.js"></script>
+    <script defer src="/client/js/vendor/alpine.min.js"></script>
+    <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
+</head>
+{{/* min-h-dvh (not min-h-screen / 100vh) so the body tracks the visible
+     viewport on mobile browsers across URL-bar collapse (#308), the same
+     fix the solo client and home page use. */}}
+<body class="bg-bg text-text font-sans antialiased min-h-dvh leading-relaxed">
+    <main class="max-w-[480px] mx-auto px-5 py-10 sm:py-16">
+        {{/* x-cloak hides the shell until Alpine boots and resolves which
+             phase to paint, so the deferred-Alpine window doesn't flash the
+             enter-code form on a /join/{code} deep link before init() runs. */}}
+        <div x-data="joinApp" x-cloak>
+            <h1 class="mb-10 font-display font-extrabold text-2xl tracking-wide uppercase">
+                <a href="/" aria-label="Top Banana!"
+                   class="inline-flex items-center text-text no-underline hover:text-text">
+                    <span class="w-7 h-7 mr-3 text-accent drop-shadow-[0_0_8px_rgba(255,210,63,0.45)] inline-flex shrink-0" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M4 13c3.5-2 8-2 10 2a5.5 5.5 0 0 1 8 5"/><path d="M5.15 17.89c5.52-1.52 8.65-6.89 7-12C11.55 4 11.5 2 13 2c3.22 0 5 5.5 5 8 0 6.5-4.2 12-10.49 12C5.11 22 2 22 2 20c0-1.5 1.14-1.55 3.15-2.11Z"/></svg>
+                    </span>
+                    <span aria-hidden="true">Top<span class="text-accent">Banana</span>!</span>
+                </a>
+            </h1>
+
+            <!-- Enter-code phase: typed-code form for a PC join (no QR). -->
+            <div x-show="phase === 'code'">
+                <h2 class="mb-2 font-display text-2xl font-semibold text-text">Join a game</h2>
+                <p class="mb-6 text-text-dim">Enter the room code shown on the screen.</p>
+                <form @submit.prevent="submitCode()" class="flex flex-col gap-4">
+                    <div>
+                        <label class="label-eyebrow" for="join-code">Room code</label>
+                        <input id="join-code" type="text"
+                               class="form-input font-mono uppercase tracking-[0.3em] text-center text-xl"
+                               maxlength="6" autocomplete="off" autocapitalize="characters"
+                               inputmode="text" autofocus
+                               data-testid="join-code-input"
+                               x-model="codeInput">
+                    </div>
+                    <template x-if="error">
+                        <div class="feedback-banner feedback-danger" x-text="error"></div>
+                    </template>
+                    <button type="submit" class="btn-primary self-start" data-testid="join-code-submit">Continue</button>
+                </form>
+            </div>
+
+            <!-- Name phase: pick a display name, then join. -->
+            <div x-show="phase === 'name'">
+                <h2 class="mb-2 font-display text-2xl font-semibold text-text">
+                    Joining <span class="font-mono text-accent" x-text="code"></span>
+                </h2>
+                <p class="mb-6 text-text-dim">Pick a name everyone will see in the lobby.</p>
+                <form @submit.prevent="submitName()" class="flex flex-col gap-4">
+                    <div>
+                        <label class="label-eyebrow" for="join-name">Display name</label>
+                        <input id="join-name" type="text" class="form-input"
+                               maxlength="64" autocomplete="off" autofocus
+                               data-testid="join-name-input"
+                               x-model="displayName"
+                               :disabled="busy">
+                    </div>
+                    <template x-if="error">
+                        <div class="feedback-banner feedback-danger" x-text="error"></div>
+                    </template>
+                    <button type="submit" class="btn-primary self-start"
+                            data-testid="join-name-submit"
+                            :disabled="busy"
+                            x-text="busy ? 'Joining...' : 'Join game'"></button>
+                </form>
+            </div>
+
+            <!-- Lobby phase: roster + ready toggle, driven by SSE -> GET state. -->
+            <div x-show="phase === 'lobby'">
+                <template x-if="lobbyClosed">
+                    <div class="feedback-banner feedback-danger mb-6" role="status" data-testid="lobby-closed">
+                        This game is no longer available.
+                    </div>
+                </template>
+
+                <template x-if="!lobbyClosed && state">
+                    <div>
+                        <div class="mb-6">
+                            <p class="label-eyebrow">Lobby</p>
+                            <h2 class="font-display text-2xl font-semibold text-text" x-text="state.quiz.title"></h2>
+                            <p class="text-text-dim">
+                                Room <span class="font-mono text-accent" x-text="state.joinCode"></span>
+                                <span class="mx-1">&middot;</span>
+                                Playing as <span class="text-text" x-text="myDisplayName"></span>
+                            </p>
+                        </div>
+
+                        <h3 class="label-eyebrow mb-3">
+                            Players
+                            (<span x-text="state.players.length"></span>)
+                        </h3>
+                        <ul class="mb-6 flex flex-col gap-2" data-testid="lobby-roster">
+                            <template x-for="player in state.players" :key="player.playerId">
+                                <li class="flex items-center justify-between gap-3 rounded-md border border-border-soft bg-surface px-4 py-3"
+                                    :class="{ 'border-accent-line': isMe(player) }"
+                                    :data-ready="player.isReady ? 'true' : 'false'"
+                                    :aria-current="isMe(player) ? 'true' : null">
+                                    <span class="flex items-center gap-2 min-w-0">
+                                        <span class="truncate" x-text="player.displayName"></span>
+                                        <template x-if="isHost(player)">
+                                            <span class="hud-chip shrink-0">Host</span>
+                                        </template>
+                                        <template x-if="isMe(player)">
+                                            <span class="hud-chip shrink-0">You</span>
+                                        </template>
+                                    </span>
+                                    <span class="shrink-0 text-sm"
+                                          :class="player.isReady ? 'text-cyan' : 'text-text-dim'"
+                                          x-text="player.isReady ? 'Ready' : 'Not ready'"></span>
+                                </li>
+                            </template>
+                        </ul>
+
+                        <template x-if="error">
+                            <div class="feedback-banner feedback-danger mb-3" role="alert" x-text="error"></div>
+                        </template>
+
+                        <button type="button"
+                                class="btn-primary w-full"
+                                data-testid="ready-toggle"
+                                :data-ready="isReady ? 'true' : 'false'"
+                                :disabled="busy"
+                                @click="toggleReady()">
+                            <span x-show="!isReady">I'm ready</span>
+                            <span x-show="isReady">Not ready</span>
+                        </button>
+                    </div>
+                </template>
+
+                <template x-if="!lobbyClosed && !state">
+                    <p class="text-text-dim">Loading lobby...</p>
+                </template>
+            </div>
+        </div>
+    </main>
+</body>
+</html>
