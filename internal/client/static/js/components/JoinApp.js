@@ -1,4 +1,5 @@
 import { sessionService } from '../services/SessionService.js';
+import { runAnim } from '../util/anim.js';
 
 // JOIN_PATH_PATTERN matches /join/<code>, capturing the room code. The bare
 // /join entry (enter-code form) has no capture group, so the component falls
@@ -12,39 +13,6 @@ const QUESTION_OPTION_TONES = ['btn-answer-tone-a', 'btn-answer-tone-b', 'btn-an
 // STANDINGS_BAR_DURATION is how long the between-rounds bar graph spends
 // growing each bar from its pre-round total to its new total (ms).
 const STANDINGS_BAR_DURATION = 900;
-
-// reducedMotion returns true when the OS-level preference is set; the
-// bar-graph animation short-circuits to its final state in that case so the
-// surface behaves identically to a no-animation build for affected users.
-function reducedMotion() {
-    return typeof window !== 'undefined'
-        && typeof window.matchMedia === 'function'
-        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
-
-// runAnim wraps anime.js with safe fallbacks so a missing global or a
-// reduced-motion preference never leaves a half-rendered frame: the caller
-// supplies an onComplete that snaps to the final state, and we invoke it
-// directly when animation is skipped. Mirrors the solo client's helper
-// (GameApp.js) so the two surfaces share one reduced-motion contract.
-function runAnim(targets, params) {
-    if (reducedMotion()) {
-        if (typeof params.complete === 'function') params.complete();
-        return;
-    }
-    const a = typeof window !== 'undefined' ? window.anime : null;
-    if (!a) {
-        if (typeof params.complete === 'function') params.complete();
-        return;
-    }
-    if (typeof a.animate === 'function') {
-        a.animate(targets, params);
-    } else if (typeof a === 'function') {
-        a({ targets, ...params });
-    } else if (typeof params.complete === 'function') {
-        params.complete();
-    }
-}
 
 // JoinApp is the Alpine component behind the player join + lobby + in-game
 // surface (MP-4 / #681, MP-7 / #684). It is deliberately separate from gameApp
