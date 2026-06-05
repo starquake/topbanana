@@ -21,6 +21,7 @@ SELECT q.id,
        q.created_by_player_id,
        q.time_limit_seconds,
        q.visibility,
+       q.mode,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
@@ -29,7 +30,9 @@ ORDER BY q.updated_at DESC, q.id DESC;
 -- name: ListPublicQuizzes :many
 -- Public-facing variant of ListQuizzes (#103). Filters to visibility =
 -- 'public' so unlisted and private quizzes never appear in the player
--- client's quiz picker or on the home page's all-quizzes view.
+-- client's quiz picker or on the home page's all-quizzes view. The
+-- mode = 'solo' filter (MP-0 / #677) keeps live (hosted-only) quizzes
+-- out of the solo browse paths too.
 SELECT q.id,
        q.title,
        q.slug,
@@ -39,10 +42,12 @@ SELECT q.id,
        q.created_by_player_id,
        q.time_limit_seconds,
        q.visibility,
+       q.mode,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
 WHERE q.visibility = 'public'
+  AND q.mode = 'solo'
 ORDER BY q.updated_at DESC, q.id DESC;
 
 -- name: QuestionCountsByQuiz :many
@@ -67,6 +72,7 @@ SELECT q.id,
        q.created_by_player_id,
        q.time_limit_seconds,
        q.visibility,
+       q.mode,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
@@ -94,8 +100,8 @@ LIMIT 1;
 -- 20260520200000 / #281). [QuizStore.CreateQuiz] short-circuits with
 -- ErrCreatorRequired when the caller forgot to stamp the session
 -- admin, so the FK constraint is the second line of defence.
-INSERT INTO quizzes (title, slug, description, created_by_player_id, time_limit_seconds, visibility, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+INSERT INTO quizzes (title, slug, description, created_by_player_id, time_limit_seconds, visibility, mode, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 RETURNING *;
 
 -- name: UpdateQuiz :execresult
@@ -105,6 +111,7 @@ SET title              = ?,
     description        = ?,
     time_limit_seconds = ?,
     visibility         = ?,
+    mode               = ?,
     updated_at         = CURRENT_TIMESTAMP
 WHERE id = ?;
 

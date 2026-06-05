@@ -179,30 +179,56 @@ func gateQuizRead(
 	return canReadQuiz(w, r, visibility)
 }
 
+// quizGetOptionResponse, quizGetQuestionResponse, and quizGetResponse are
+// the wire shape of the solo play data endpoint (HandleQuizGet). Declared
+// at package scope so the question-mapping helper can build them outside
+// the handler body.
+type quizGetOptionResponse struct {
+	ID   int64  `json:"id"`
+	Text string `json:"text"`
+}
+
+type quizGetQuestionResponse struct {
+	ID       int64                   `json:"id"`
+	Text     string                  `json:"text"`
+	ImageURL string                  `json:"imageUrl"`
+	Position int                     `json:"position"`
+	Options  []quizGetOptionResponse `json:"options"`
+}
+
+type quizGetResponse struct {
+	ID          int64                     `json:"id"`
+	Title       string                    `json:"title"`
+	Slug        string                    `json:"slug"`
+	Description string                    `json:"description"`
+	CreatedAt   time.Time                 `json:"createdAt"`
+	Questions   []quizGetQuestionResponse `json:"questions"`
+}
+
+// quizGetQuestions maps a quiz's questions + options onto the play
+// endpoint's wire shape. correct-flag and time-limit fields are
+// deliberately omitted so the solo client never receives the answer key.
+func quizGetQuestions(qz *quiz.Quiz) []quizGetQuestionResponse {
+	questions := make([]quizGetQuestionResponse, 0, len(qz.Questions))
+	for _, qs := range qz.Questions {
+		opts := make([]quizGetOptionResponse, 0, len(qs.Options))
+		for _, o := range qs.Options {
+			opts = append(opts, quizGetOptionResponse{ID: o.ID, Text: o.Text})
+		}
+		questions = append(questions, quizGetQuestionResponse{
+			ID:       qs.ID,
+			Text:     qs.Text,
+			ImageURL: qs.ImageURL,
+			Position: qs.Position,
+			Options:  opts,
+		})
+	}
+
+	return questions
+}
+
 // HandleQuizGet returns a single quiz with its questions and options.
 func HandleQuizGet(logger *slog.Logger, quizStore quiz.Store) http.Handler {
-	type optionResponse struct {
-		ID   int64  `json:"id"`
-		Text string `json:"text"`
-	}
-
-	type questionResponse struct {
-		ID       int64            `json:"id"`
-		Text     string           `json:"text"`
-		ImageURL string           `json:"imageUrl"`
-		Position int              `json:"position"`
-		Options  []optionResponse `json:"options"`
-	}
-
-	type quizResponse struct {
-		ID          int64              `json:"id"`
-		Title       string             `json:"title"`
-		Slug        string             `json:"slug"`
-		Description string             `json:"description"`
-		CreatedAt   time.Time          `json:"createdAt"`
-		Questions   []questionResponse `json:"questions"`
-	}
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		quizID, ok := handlers.ParseIDFromSlugPath(w, r, logger, "slugID")
 		if !ok {
@@ -223,29 +249,22 @@ func HandleQuizGet(logger *slog.Logger, quizStore quiz.Store) http.Handler {
 		if !canReadQuiz(w, r, qz.Visibility) {
 			return
 		}
+		// Live quizzes are hosted-only (MP-0 / #677): the solo play
+		// endpoint must not serve one. A 404 keeps it indistinguishable
+		// from a missing quiz so a hosted quiz can't be pre-played.
+		if qz.Mode == quiz.ModeLive {
+			http.NotFound(w, r)
 
-		questions := make([]questionResponse, 0, len(qz.Questions))
-		for _, qs := range qz.Questions {
-			opts := make([]optionResponse, 0, len(qs.Options))
-			for _, o := range qs.Options {
-				opts = append(opts, optionResponse{ID: o.ID, Text: o.Text})
-			}
-			questions = append(questions, questionResponse{
-				ID:       qs.ID,
-				Text:     qs.Text,
-				ImageURL: qs.ImageURL,
-				Position: qs.Position,
-				Options:  opts,
-			})
+			return
 		}
 
-		res := quizResponse{
+		res := quizGetResponse{
 			ID:          qz.ID,
 			Title:       qz.Title,
 			Slug:        qz.Slug,
 			Description: qz.Description,
 			CreatedAt:   qz.CreatedAt,
-			Questions:   questions,
+			Questions:   quizGetQuestions(qz),
 		}
 
 		err = handlers.EncodeJSON(w, http.StatusOK, res)

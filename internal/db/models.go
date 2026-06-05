@@ -134,6 +134,7 @@ type Quiz struct {
 	CreatedByPlayerID int64
 	TimeLimitSeconds  int64
 	Visibility        string
+	Mode              string
 }
 
 type Round struct {

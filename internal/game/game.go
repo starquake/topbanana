@@ -525,6 +525,13 @@ func (s *Service) CreateGame(ctx context.Context, quizID, playerID int64) (*Game
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quiz: %w", err)
 	}
+	// Live quizzes are hosted-only (MP-0 / #677): a solo game can never be
+	// created for one. Surface ErrQuizNotFound so the handler returns 404,
+	// keeping a live quiz indistinguishable from a missing one and giving
+	// no spoiler that a hosted quiz exists at this id.
+	if qz.Mode == quiz.ModeLive {
+		return nil, quiz.ErrQuizNotFound
+	}
 
 	existing, err := s.store.GetGameByPlayerAndQuiz(ctx, playerID, qz.ID)
 	if err != nil && !errors.Is(err, ErrGameNotFound) {

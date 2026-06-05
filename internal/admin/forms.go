@@ -46,6 +46,12 @@ func (f *quizForm) Valid(ctx context.Context) map[string]string {
 	if q.Visibility != "" && !quiz.IsValidVisibility(q.Visibility) {
 		problems["visibility"] = "Visibility must be one of: public, unlisted, private"
 	}
+	// An empty mode is treated as "solo" by the store; only flag
+	// genuinely unrecognised values so the admin form's selector can
+	// surface them inline (MP-0 / #677).
+	if q.Mode != "" && !quiz.IsValidMode(q.Mode) {
+		problems["mode"] = "Mode must be one of: solo, live"
+	}
 	for qsIndex, question := range q.Questions {
 		qf := &questionForm{question: question}
 		for k, v := range qf.Valid(ctx) {

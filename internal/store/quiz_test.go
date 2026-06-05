@@ -51,6 +51,7 @@ func newTestQuizzes() []*quiz.Quiz {
 			// succeed without per-test ignore directives.
 			TimeLimitSeconds: quiz.DefaultTimeLimitSeconds,
 			Visibility:       quiz.VisibilityPublic,
+			Mode:             quiz.ModeSolo,
 			Questions: []*quiz.Question{
 				{
 					Text:     "Question 1-1",
@@ -82,6 +83,7 @@ func newTestQuizzes() []*quiz.Quiz {
 			CreatedByDisplayName: seededAdminDisplayName,
 			TimeLimitSeconds:     quiz.DefaultTimeLimitSeconds,
 			Visibility:           quiz.VisibilityPublic,
+			Mode:                 quiz.ModeSolo,
 			Questions: []*quiz.Question{
 				{
 					Text:     "Question 2-1",
@@ -124,6 +126,7 @@ func existingTestQuizzes() []*quiz.Quiz {
 			// succeed without per-test ignore directives.
 			TimeLimitSeconds: quiz.DefaultTimeLimitSeconds,
 			Visibility:       quiz.VisibilityPublic,
+			Mode:             quiz.ModeSolo,
 			Questions: []*quiz.Question{
 				{
 					ID:       1,
@@ -157,6 +160,7 @@ func existingTestQuizzes() []*quiz.Quiz {
 			CreatedByDisplayName: seededAdminDisplayName,
 			TimeLimitSeconds:     quiz.DefaultTimeLimitSeconds,
 			Visibility:           quiz.VisibilityPublic,
+			Mode:                 quiz.ModeSolo,
 			Questions: []*quiz.Question{
 				{
 					ID:       3,
@@ -276,6 +280,7 @@ func TestQuizStore_ListQuizzes(t *testing.T) {
 			CreatedByDisplayName: qz.CreatedByDisplayName,
 			TimeLimitSeconds:     qz.TimeLimitSeconds,
 			Visibility:           qz.Visibility,
+			Mode:                 qz.Mode,
 		})
 	}
 
@@ -934,6 +939,7 @@ func TestQuizStore_UpdateQuiz(t *testing.T) {
 		CreatedByDisplayName: originalQuiz.CreatedByDisplayName,
 		TimeLimitSeconds:     originalQuiz.TimeLimitSeconds,
 		Visibility:           originalQuiz.Visibility,
+		Mode:                 originalQuiz.Mode,
 		Questions: []*quiz.Question{
 			{
 				ID:     originalQuiz.Questions[0].ID,

@@ -59,6 +59,7 @@ func (s *QuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 			CreatedByPlayerID: r.CreatedByPlayerID,
 			TimeLimitSeconds:  int(r.TimeLimitSeconds),
 			Visibility:        r.Visibility,
+			Mode:              r.Mode,
 			// INNER JOIN on players makes this a plain string (#359);
 			// the FK guarantees a creator row exists.
 			CreatedByDisplayName: r.CreatedByDisplayName,
@@ -90,6 +91,7 @@ func (s *QuizStore) ListPublicQuizzes(ctx context.Context) ([]*quiz.Quiz, error)
 			CreatedByPlayerID: r.CreatedByPlayerID,
 			TimeLimitSeconds:  int(r.TimeLimitSeconds),
 			Visibility:        r.Visibility,
+			Mode:              r.Mode,
 			// INNER JOIN, see ListQuizzes (#359).
 			CreatedByDisplayName: r.CreatedByDisplayName,
 		}
@@ -152,6 +154,7 @@ func (s *QuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 		CreatedByPlayerID: row.CreatedByPlayerID,
 		TimeLimitSeconds:  int(row.TimeLimitSeconds),
 		Visibility:        row.Visibility,
+		Mode:              row.Mode,
 		// INNER JOIN, see ListQuizzes (#359).
 		CreatedByDisplayName: row.CreatedByDisplayName,
 	}
@@ -663,6 +666,10 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 	if visibility == "" {
 		visibility = quiz.VisibilityPublic
 	}
+	mode := qz.Mode
+	if mode == "" {
+		mode = quiz.ModeSolo
+	}
 	row, err := q.CreateQuiz(ctx, db.CreateQuizParams{
 		Title:             qz.Title,
 		Slug:              qz.Slug,
@@ -670,6 +677,7 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 		CreatedByPlayerID: qz.CreatedByPlayerID,
 		TimeLimitSeconds:  int64(timeLimit),
 		Visibility:        visibility,
+		Mode:              mode,
 	})
 	if err != nil {
 		return classifySlugConflictErr(err, "failed to create quiz")
@@ -680,6 +688,7 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 	qz.UpdatedAt = row.UpdatedAt
 	qz.TimeLimitSeconds = int(row.TimeLimitSeconds)
 	qz.Visibility = row.Visibility
+	qz.Mode = row.Mode
 
 	// Every quiz needs a default round (#444): questions.round_id is NOT
 	// NULL and execCreateQuestion resolves it via GetDefaultRound.
@@ -772,6 +781,10 @@ func (s *QuizStore) execUpdateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 	if visibility == "" {
 		visibility = quiz.VisibilityPublic
 	}
+	mode := qz.Mode
+	if mode == "" {
+		mode = quiz.ModeSolo
+	}
 	var err error
 	timeLimit := qz.TimeLimitSeconds
 	if timeLimit == 0 {
@@ -783,6 +796,7 @@ func (s *QuizStore) execUpdateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 		Description:      qz.Description,
 		TimeLimitSeconds: int64(timeLimit),
 		Visibility:       visibility,
+		Mode:             mode,
 		ID:               qz.ID,
 	})
 	if err != nil {

@@ -74,9 +74,9 @@ func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) 
 }
 
 const createQuiz = `-- name: CreateQuiz :one
-INSERT INTO quizzes (title, slug, description, created_by_player_id, time_limit_seconds, visibility, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-RETURNING id, title, slug, description, created_at, updated_at, created_by_player_id, time_limit_seconds, visibility
+INSERT INTO quizzes (title, slug, description, created_by_player_id, time_limit_seconds, visibility, mode, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+RETURNING id, title, slug, description, created_at, updated_at, created_by_player_id, time_limit_seconds, visibility, mode
 `
 
 type CreateQuizParams struct {
@@ -86,6 +86,7 @@ type CreateQuizParams struct {
 	CreatedByPlayerID int64
 	TimeLimitSeconds  int64
 	Visibility        string
+	Mode              string
 }
 
 // created_by_player_id is NOT NULL with an FK to players.id (migration
@@ -100,6 +101,7 @@ func (q *Queries) CreateQuiz(ctx context.Context, arg CreateQuizParams) (Quiz, e
 		arg.CreatedByPlayerID,
 		arg.TimeLimitSeconds,
 		arg.Visibility,
+		arg.Mode,
 	)
 	var i Quiz
 	err := row.Scan(
@@ -112,6 +114,7 @@ func (q *Queries) CreateQuiz(ctx context.Context, arg CreateQuizParams) (Quiz, e
 		&i.CreatedByPlayerID,
 		&i.TimeLimitSeconds,
 		&i.Visibility,
+		&i.Mode,
 	)
 	return i, err
 }
@@ -239,6 +242,7 @@ SELECT q.id,
        q.created_by_player_id,
        q.time_limit_seconds,
        q.visibility,
+       q.mode,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
@@ -256,6 +260,7 @@ type GetQuizRow struct {
 	CreatedByPlayerID    int64
 	TimeLimitSeconds     int64
 	Visibility           string
+	Mode                 string
 	CreatedByDisplayName string
 }
 
@@ -275,6 +280,7 @@ func (q *Queries) GetQuiz(ctx context.Context, id int64) (GetQuizRow, error) {
 		&i.CreatedByPlayerID,
 		&i.TimeLimitSeconds,
 		&i.Visibility,
+		&i.Mode,
 		&i.CreatedByDisplayName,
 	)
 	return i, err
@@ -408,10 +414,12 @@ SELECT q.id,
        q.created_by_player_id,
        q.time_limit_seconds,
        q.visibility,
+       q.mode,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
 WHERE q.visibility = 'public'
+  AND q.mode = 'solo'
 ORDER BY q.updated_at DESC, q.id DESC
 `
 
@@ -425,12 +433,15 @@ type ListPublicQuizzesRow struct {
 	CreatedByPlayerID    int64
 	TimeLimitSeconds     int64
 	Visibility           string
+	Mode                 string
 	CreatedByDisplayName string
 }
 
 // Public-facing variant of ListQuizzes (#103). Filters to visibility =
 // 'public' so unlisted and private quizzes never appear in the player
-// client's quiz picker or on the home page's all-quizzes view.
+// client's quiz picker or on the home page's all-quizzes view. The
+// mode = 'solo' filter (MP-0 / #677) keeps live (hosted-only) quizzes
+// out of the solo browse paths too.
 func (q *Queries) ListPublicQuizzes(ctx context.Context) ([]ListPublicQuizzesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listPublicQuizzes)
 	if err != nil {
@@ -450,6 +461,7 @@ func (q *Queries) ListPublicQuizzes(ctx context.Context) ([]ListPublicQuizzesRow
 			&i.CreatedByPlayerID,
 			&i.TimeLimitSeconds,
 			&i.Visibility,
+			&i.Mode,
 			&i.CreatedByDisplayName,
 		); err != nil {
 			return nil, err
@@ -543,6 +555,7 @@ SELECT q.id,
        q.created_by_player_id,
        q.time_limit_seconds,
        q.visibility,
+       q.mode,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
@@ -559,6 +572,7 @@ type ListQuizzesRow struct {
 	CreatedByPlayerID    int64
 	TimeLimitSeconds     int64
 	Visibility           string
+	Mode                 string
 	CreatedByDisplayName string
 }
 
@@ -594,6 +608,7 @@ func (q *Queries) ListQuizzes(ctx context.Context) ([]ListQuizzesRow, error) {
 			&i.CreatedByPlayerID,
 			&i.TimeLimitSeconds,
 			&i.Visibility,
+			&i.Mode,
 			&i.CreatedByDisplayName,
 		); err != nil {
 			return nil, err
@@ -766,6 +781,7 @@ SET title              = ?,
     description        = ?,
     time_limit_seconds = ?,
     visibility         = ?,
+    mode               = ?,
     updated_at         = CURRENT_TIMESTAMP
 WHERE id = ?
 `
@@ -776,6 +792,7 @@ type UpdateQuizParams struct {
 	Description      string
 	TimeLimitSeconds int64
 	Visibility       string
+	Mode             string
 	ID               int64
 }
 
@@ -786,6 +803,7 @@ func (q *Queries) UpdateQuiz(ctx context.Context, arg UpdateQuizParams) (sql.Res
 		arg.Description,
 		arg.TimeLimitSeconds,
 		arg.Visibility,
+		arg.Mode,
 		arg.ID,
 	)
 }
