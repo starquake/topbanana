@@ -1,8 +1,10 @@
 {{define "content"}}
-    {{/* The whole lobby is one Alpine island. It hydrates from the
+    {{/* The whole TV surface is one Alpine island. It hydrates from the
          server-rendered code/quiz (no flash), then host-lobby.js subscribes
          to the session SSE channel and re-GETs /state on every tick to keep
-         the roster and ready states live. */}}
+         the phase, roster, question, and answered order live. The server
+         drives every phase transition; the TV only re-renders whatever phase
+         the latest state read reports (MP-3 / #680, MP-8 / #685). */}}
     <main x-data="hostLobby({{.JoinCode | printf "%q"}})"
           class="min-h-dvh flex flex-col">
         <header class="flex items-center justify-between gap-4 px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1rem,2.5vh,2rem)] border-b border-border-soft">
@@ -15,7 +17,9 @@
             </p>
         </header>
 
-        <div class="flex-1 grid gap-[clamp(1.5rem,4vw,4rem)] px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1.5rem,4vh,3rem)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] items-center">
+        {{/* ----- Lobby phase: scan-to-join + live roster + start. ----- */}}
+        <div x-show="phase === 'lobby'"
+             class="flex-1 grid gap-[clamp(1.5rem,4vw,4rem)] px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1.5rem,4vh,3rem)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] items-center">
             {{/* Left: scan-to-join card with the server-rendered QR + URL. */}}
             <section aria-label="Join by phone"
                      class="flex flex-col items-center gap-[clamp(1rem,3vh,2rem)]">
@@ -77,7 +81,110 @@
             </section>
         </div>
 
-        {{/* Footer: connection state + host start control. */}}
+        {{/* ----- Round intro: a brief between-rounds hold while the runner
+             issues the first question. Kept minimal; the standings screens
+             (round_results / finished) are MP-9. ----- */}}
+        <div x-show="phase === 'round_intro'"
+             class="flex-1 flex flex-col items-center justify-center gap-4 px-[clamp(1.5rem,4vw,4rem)] text-center"
+             data-phase-intro>
+            <p class="m-0 text-text-dim text-[clamp(0.9rem,1.8vw,1.25rem)] font-semibold uppercase tracking-[0.18em]">
+                Get ready
+            </p>
+            <p class="m-0 font-display font-extrabold text-[clamp(2rem,6vw,4rem)] leading-tight">
+                Next round
+            </p>
+        </div>
+
+        {{/* ----- Question + reveal: the live question, countdown bar, answer
+             grid, and the answered-order badges filling in. The same block
+             serves both phases; reveal swaps the countdown for the
+             all-answered indicator and lights the correct option(s). ----- */}}
+        <div x-show="phase === 'question' || phase === 'reveal'"
+             class="flex-1 flex flex-col gap-[clamp(1rem,3vh,2.25rem)] px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1.25rem,3vh,2.5rem)]"
+             data-phase-question>
+            {{/* Countdown bar: drains over the answer window in the question
+                 phase, sits empty at reveal. Driven off the server deadline by
+                 host-lobby.js (no client-clock dependence). The native
+                 <progress> element matches the player client's treatment;
+                 motion-reduce zeroes the value transition. */}}
+            <progress class="block w-full h-2 bg-border-soft rounded-full overflow-hidden appearance-none [&::-webkit-progress-bar]:bg-border-soft [&::-webkit-progress-value]:bg-accent [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear [&::-moz-progress-bar]:bg-accent"
+                      :value="progress" max="100"
+                      aria-hidden="true"
+                      data-countdown-bar></progress>
+
+            <template x-if="question">
+                <div class="flex-1 flex flex-col gap-[clamp(1rem,3vh,2rem)]">
+                    <h2 class="m-0 font-display font-extrabold text-[clamp(1.5rem,4.5vw,3.25rem)] leading-tight text-center"
+                        x-text="question.text"
+                        data-question-text></h2>
+
+                    {{/* Answer grid. correct/wrong colouring only appears at
+                         reveal: isCorrectOption() reads correctOptionIds, which
+                         the server leaves empty before reveal, so the answer is
+                         never lit early. */}}
+                    <ul class="m-0 list-none p-0 grid gap-3 sm:grid-cols-2 max-w-[60rem] w-full mx-auto"
+                        role="list">
+                        <template x-for="option in question.options" :key="option.id">
+                            <li class="flex items-center gap-3 px-5 py-4 rounded-xl border text-left transition-colors"
+                                :class="phase === 'reveal' && isCorrectOption(option.id)
+                                    ? 'bg-success/15 border-success text-success'
+                                    : (phase === 'reveal'
+                                        ? 'bg-surface border-border-soft text-text-dim'
+                                        : 'bg-surface border-border-soft')"
+                                :data-correct="phase === 'reveal' && isCorrectOption(option.id) ? 'true' : 'false'"
+                                data-answer-option>
+                                <span class="font-semibold text-[clamp(1rem,2vw,1.5rem)]"
+                                      x-text="option.text"></span>
+                                <span x-show="phase === 'reveal' && isCorrectOption(option.id)"
+                                      class="ml-auto shrink-0 text-[0.7rem] font-semibold uppercase tracking-[0.12em] px-2 py-1 rounded-sm bg-success/20 text-success"
+                                      data-correct-badge>Correct</span>
+                            </li>
+                        </template>
+                    </ul>
+
+                    {{/* Answered-order badges: one per pick, in the order the
+                         picks landed (answeredPlayerIds), with no correctness
+                         shown. The all-answered indicator lights once every
+                         roster player has locked in. */}}
+                    <div class="flex flex-col items-center gap-3">
+                        <div class="flex items-center gap-2 text-text-dim text-[clamp(0.85rem,1.6vw,1.1rem)] font-semibold uppercase tracking-[0.12em]">
+                            <span x-text="`${answeredCount()} / ${players.length} answered`"
+                                  data-answered-count></span>
+                            <span x-show="allAnswered()"
+                                  class="px-2 py-1 rounded-sm bg-success/15 text-success text-[0.7rem]"
+                                  data-all-answered>All in</span>
+                        </div>
+
+                        <ul class="m-0 list-none p-0 flex flex-wrap justify-center gap-2"
+                            role="list">
+                            <template x-for="(playerId, index) in question.answeredPlayerIds" :key="playerId">
+                                <li class="flex items-center gap-2 px-3 py-2 rounded-full bg-surface border border-border-soft"
+                                    data-answered-badge>
+                                    <span class="font-display font-bold text-accent tabular-nums text-[clamp(0.8rem,1.5vw,1.05rem)]"
+                                          x-text="index + 1"
+                                          data-answered-order></span>
+                                    <span class="font-semibold text-[clamp(0.85rem,1.6vw,1.1rem)] truncate max-w-[14ch]"
+                                          x-text="displayNameFor(playerId)"
+                                          data-answered-name></span>
+                                </li>
+                            </template>
+                        </ul>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        {{/* ----- Round results / finished: standings placeholder. The bar
+             graph + final standings are MP-9; this keeps the TV from going
+             blank between rounds and at the end. ----- */}}
+        <div x-show="phase === 'round_results' || phase === 'finished'"
+             class="flex-1 flex flex-col items-center justify-center gap-4 px-[clamp(1.5rem,4vw,4rem)] text-center"
+             data-phase-results>
+            <p class="m-0 font-display font-extrabold text-[clamp(2rem,6vw,4rem)] leading-tight"
+               x-text="phase === 'finished' ? 'Final scores' : 'Scores so far'"></p>
+        </div>
+
+        {{/* Footer: connection state + host start control (lobby only). */}}
         <footer class="flex flex-wrap items-center justify-between gap-4 px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1rem,2.5vh,2rem)] border-t border-border-soft">
             <p class="m-0 flex items-center gap-2 text-text-dim text-[clamp(0.8rem,1.5vw,1rem)]">
                 <span class="inline-block w-2.5 h-2.5 rounded-full"
@@ -86,7 +193,8 @@
                 <span x-text="connected ? 'Live' : 'Reconnecting...'"></span>
             </p>
 
-            <form method="post" :action="'/host/' + joinCode + '/start'" @submit.prevent="start()">
+            <form x-show="phase === 'lobby'"
+                  method="post" :action="'/host/' + joinCode + '/start'" @submit.prevent="start()">
                 <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                 <button type="submit"
                         class="inline-flex items-center justify-center gap-2 min-h-[52px] px-8 rounded-lg bg-accent text-bg font-display font-extrabold text-[clamp(0.9rem,1.7vw,1.15rem)] uppercase tracking-[0.12em] border-0 transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
