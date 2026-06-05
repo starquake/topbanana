@@ -1,4 +1,4 @@
-AL# topbanana
+# topbanana
 
 ## Commands
 
@@ -16,11 +16,13 @@ Per-change order of operations:
 
 1. Implement the change.
 2. Run the full local check suite: `make lint-fix`, `make check`, `make smoke`, `make test-e2e`. Fix anything they surface.
-3. Run the `/review` + `/go-style-review` loop. Fix every actionable finding; re-run until both return clean. The diff that ships to GitHub must already be review-clean — findings landing as follow-up commits are friction we don't want. Hold the line on this step order even if asked "isn't the review supposed to be after push?": it is not.
+3. Run the `/review` + `/go-style-review` loop. Fix every actionable finding; re-run until both return clean. The diff that ships to GitHub must already be review-clean — findings landing as follow-up commits are friction we don't want. Hold the line on this step order even if asked "isn't the review supposed to be after push?": it is not. **Clear the golangci cache first** (`rm -rf ~/.cache/golangci-lint`) and run the loop yourself — a warm-cache green or a dev-agent's self-reported "clean" can hide findings.
 4. Stage the files explicitly (`git add <paths>` — never `-A` or `.`), so secrets and binaries don't sneak in.
 5. Commit with a plain-language subject line. Avoid jargon; prefer simple verbs ("change", "update", "fix", "add", "remove"); start with a capital letter; single short subject line, no body or rationale paragraphs.
 6. Push the branch and open a draft PR. PR body follows "Linking a PR to a ticket" below.
 7. Ask explicitly: "Did the review look OK?" or equivalent. Wait for the user's explicit go-ahead — silence is not consent. Do not merge before sign-off; do not merge while the PR is still a Draft.
+
+**No WIP commits in shipping history.** If a crash or handoff forces a checkpoint commit to make in-flight work durable, fold it back into one clean commit (`git reset --soft main`, then recommit with a plain subject) before opening the PR.
 
 **Sign-off does not carry.** A "looks good" covers only the diff that was on GitHub at that moment. If you make any further change after sign-off — fixing a lint issue, addressing a comment, anything — commit and push it, then ask for sign-off again on the new lines.
 
@@ -48,7 +50,11 @@ Pick the right layer:
   - **Migration tests** live in `internal/migrations` (package `migrations_test`) — model: `internal/migrations/rounds_test.go`.
 - **E2E test** (`test/e2e/`, Playwright) — behaviour that only makes sense in a real browser: clicks, navigation, form flows, JS-driven UI.
 
-One-off scripts are reserved for genuinely interactive debugging that can't be expressed as a test (e.g. eyeballing a visual layout, attaching a debugger). If you find yourself writing the same `curl` twice, it's a test.
+One-off scripts are reserved for genuinely interactive debugging that can't be expressed as a test (e.g. eyeballing a visual layout, attaching a debugger). If you find yourself writing the same `curl` twice, it's a test. The Playwright MCP (`browser_*` tools) falls under the same rule: use it to *look* at the live UI interactively, never as the way you assure a behaviour — anything worth guaranteeing goes into a `test/e2e/` spec that runs in CI.
+
+**A flaky test is a bug to file, not to rerun past.** When a test fails then passes on a plain rerun, open a GitHub issue capturing it rather than retrying until green.
+
+**The coverage gate is live.** CI enforces a total-coverage floor (currently 80); the authoritative `threshold-total` lives in the coverage step of `.github/workflows/ci.yml` — the action's default of `-1` overrides any value in `.testcoverage.yml`, so set it in the workflow.
 
 **HTTP handler tests are integration tests, not stub-driven unit tests.** A handler whose contract is "wire the request to the store and render" is pinned end-to-end (router -> middleware -> handler -> store -> DB) against a real store on a `dbtest` DB, not against a stub that re-states what the store should return -- a stub passes even when the real wiring (routing, query, serialization) is broken. The previously-grandfathered stub-driven handler tests are being converted in #638 (reversing the original #30 decision to leave them).
 
@@ -142,6 +148,14 @@ Table rebuilds (the SQLite idiom for `ALTER COLUMN`, FK changes, etc.) need care
 `PRAGMA foreign_key_check` is NOT a guard — it only returns violation rows and goose discards them, so a broken rebuild commits silently. To abort on a dangling reference, add the `_fk_guard` CHECK-constraint pattern before COMMIT (see `20260529160000`). The full how-to is in the `backend-dev` agent.
 
 Run `make lint-migrations` to surface any new migration using `foreign_keys = OFF` outside the allowlist. It is advisory (exit 0; only prints offenders). The allowlist holds four files: two pre-rule grandfathered (`20260506000000`, `20260520200000`) and two deliberate parent rebuilds (`20260528100000`, `20260529160000`).
+
+## Tooling
+
+- **Prefer modern CLI tools**: `rg` / `fd` / `sd` / `yq` / `ast-grep` over `grep` / `find` / `sed` / `wc`. Reach for `ast-grep` first when matching code structure (invoke it as `ast-grep`, not `sg`). Inspect files with the Read tool, not `sed` / `cat`.
+- **`golangci-lint` lives at `build/bin/golangci-lint`** (not on `PATH`). To clear its cache use `rm -rf ~/.cache/golangci-lint` — `golangci-lint cache clean` is a silent no-op because the binary isn't on `PATH`.
+- **"main lint red but local clean" is usually a stale-cache phantom** — an unused-`nolint` flagged on a still-needed directive. `nolintlint.allow-unused: true` in `.golangci.yml` tolerates it; confirm via the failing check-run that only `lint` is red. `.golangci.yml` also excludes `.claude` — agents run in worktrees under `.claude/worktrees/`, and without the exclusion golangci scans those sibling checkouts and floods the run with phantom findings.
+- **Don't install tooling that ships on the GitHub runner image** (e.g. `sqlite3`); lean on what's preinstalled.
+- **One Make target per long-running dev process** (e.g. `tailwind-watch`, the server) — not a combined supervisor — so each is independently startable and killable.
 
 ## Hard rules
 
