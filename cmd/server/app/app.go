@@ -102,7 +102,14 @@ func Run(
 		tokenSweepInterval,
 	)
 	gameService, leaderboardHub := newGameService(cfg, logger, stores)
-	sessionService, sessionHub := startSessionRunner(signalCtx, cfg, logger, stores, gameService)
+	// Own the runner's context so shutdown waits for its goroutine to exit
+	// before Run returns - else it logs past test teardown under -race (#608).
+	runnerCtx, stopRunner := context.WithCancel(signalCtx)
+	sessionService, sessionHub, runnerDone := startSessionRunner(runnerCtx, cfg, logger, stores, gameService)
+	defer func() {
+		stopRunner()
+		<-runnerDone
+	}()
 
 	mailerTester, mailerStatus, err := buildMailer(signalCtx, cfg, logger)
 	if err != nil {
@@ -149,23 +156,29 @@ func newGameService(cfg *config.Config, logger *slog.Logger, stores *store.Store
 // publish ticks through the hub, the runner advances phases on the server
 // clock, and Start hands a started session to the runner via SetAdvancer. The
 // runner is one goroutine bound to ctx (the shutdown context), so it stops
-// before the DB closes. Returns the service + hub for server wiring (MP-5 /
-// #682).
+// before the DB closes. Returns the service + hub for server wiring plus a
+// done channel that closes when the runner goroutine exits, so the caller
+// can wait for it on shutdown rather than leaking a still-logging goroutine
+// past Run (MP-5 / #682, #608).
 func startSessionRunner(
 	ctx context.Context,
 	cfg *config.Config,
 	logger *slog.Logger,
 	stores *store.Stores,
 	scorer livesession.Scorer,
-) (*livesession.Service, *livesession.Hub) {
+) (*livesession.Service, *livesession.Hub, <-chan struct{}) {
 	service := livesession.NewService(stores.LiveSessions, stores.Quizzes, logger)
 	hub := livesession.NewHub()
 	service.SetPublisher(hub)
 	runner := livesession.NewRunner(stores.LiveSessions, stores.Quizzes, hub, scorer, logger, runnerConfig(cfg))
 	service.SetAdvancer(runner)
-	go runner.Run(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runner.Run(ctx)
+	}()
 
-	return service, hub
+	return service, hub, done
 }
 
 // runnerBeatTickDivisor keeps the runner's per-beat scan tick a fraction of
