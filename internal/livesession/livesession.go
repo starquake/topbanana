@@ -53,6 +53,11 @@ const (
 	PhaseLobby Phase = "lobby"
 )
 
+// errGetSessionByCodeFmt is the wrap format every code-keyed lookup shares
+// when GetSessionByJoinCode fails, so the wrapped sentinel
+// ([ErrSessionNotFound]) still surfaces to callers via [errors.Is].
+const errGetSessionByCodeFmt = "failed to get session by join code: %w"
+
 // Session is one hosted run of a live quiz. Players holds the lobby roster
 // when populated by [Store.GetSessionByJoinCode]; it is nil on the bare
 // create/get paths that do not fan out the roster.
@@ -133,12 +138,24 @@ type QuizReader interface {
 	GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error)
 }
 
+// Publisher is the tiny seam the service uses to signal that a session's
+// state has moved (MP-2 / #679). Implemented by *Hub in production;
+// nil-by-default so tests that don't care about the event channel don't
+// have to wire anything up. The service calls Publish after every
+// successful lobby mutation (join, ready) so subscribers re-GET
+// /api/sessions/{code}/state. The returned Tick is ignored by the service;
+// the SSE handler is the consumer.
+type Publisher interface {
+	Publish(code string, phase Phase) Tick
+}
+
 // Service orchestrates the live-session use cases over the store layer and
 // the quiz reader.
 type Service struct {
 	store     Store
 	quizzes   QuizReader
 	logger    *slog.Logger
+	publisher Publisher
 	newCode   func() string
 	codeTries int
 }
@@ -175,6 +192,17 @@ func newServiceWithCodeGen(
 		newCode:   newCode,
 		codeTries: tries,
 	}
+}
+
+// SetPublisher wires a publisher invoked after every successful lobby
+// mutation so SSE subscribers learn that the session state moved. Optional
+// - the service works fine without one (publishes become no-ops).
+//
+// Not safe for concurrent use: must be called during startup wiring,
+// before the service is handed to any HTTP handler that may mutate a
+// session. There is no in-flight reconfiguration use case for this field.
+func (s *Service) SetPublisher(p Publisher) {
+	s.publisher = p
 }
 
 // CreateSession opens a hosted session for the given quiz on behalf of the
@@ -221,30 +249,18 @@ func (s *Service) Join(
 ) (*Player, error) {
 	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
 	if err != nil {
-		return nil, fmt.Errorf("failed to get session by join code: %w", err)
+		return nil, fmt.Errorf(errGetSessionByCodeFmt, err)
 	}
 
-	player, err := s.store.AddPlayer(ctx, sess.ID, playerID, displayName)
-	if err == nil {
-		return player, nil
-	}
-	if !errors.Is(err, ErrDisplayNameTaken) {
-		return nil, fmt.Errorf("failed to add session player: %w", err)
+	player, err := s.addPlayerWithPetnameFallback(ctx, sess.ID, playerID, displayName, petname)
+	if err != nil {
+		return nil, err
 	}
 
-	// Per-session display-name collision: fall back to petnames until one
-	// is free, mirroring the anonymous-join petname retry (EnsurePlayer).
-	for range joinCodeAttempts {
-		player, err = s.store.AddPlayer(ctx, sess.ID, playerID, petname())
-		if err == nil {
-			return player, nil
-		}
-		if !errors.Is(err, ErrDisplayNameTaken) {
-			return nil, fmt.Errorf("failed to add session player with petname: %w", err)
-		}
-	}
+	// A new roster row changes the lobby, so signal subscribers to re-GET.
+	s.publish(sess.JoinCode, sess.Phase)
 
-	return nil, fmt.Errorf("failed to add session player after petname retries: %w", err)
+	return player, nil
 }
 
 // SetReady toggles the participant's ready flag in the session identified
@@ -253,12 +269,15 @@ func (s *Service) Join(
 func (s *Service) SetReady(ctx context.Context, joinCode string, playerID int64, ready bool) error {
 	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
 	if err != nil {
-		return fmt.Errorf("failed to get session by join code: %w", err)
+		return fmt.Errorf(errGetSessionByCodeFmt, err)
 	}
 
 	if err = s.store.SetReady(ctx, sess.ID, playerID, ready); err != nil {
 		return fmt.Errorf("failed to set ready: %w", err)
 	}
+
+	// A flipped ready flag changes the lobby, so signal subscribers to re-GET.
+	s.publish(sess.JoinCode, sess.Phase)
 
 	return nil
 }
@@ -272,7 +291,7 @@ func (s *Service) SetReady(ctx context.Context, joinCode string, playerID int64,
 func (s *Service) GetLobbyState(ctx context.Context, joinCode string, playerID int64) (*LobbyState, error) {
 	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
 	if err != nil {
-		return nil, fmt.Errorf("failed to get session by join code: %w", err)
+		return nil, fmt.Errorf(errGetSessionByCodeFmt, err)
 	}
 
 	if !s.canView(sess, playerID) {
@@ -285,6 +304,27 @@ func (s *Service) GetLobbyState(ctx context.Context, joinCode string, playerID i
 	}
 
 	return &LobbyState{Session: sess, Quiz: qz}, nil
+}
+
+// AuthorizeView resolves a join code to its canonical code and current
+// phase, gated to participants exactly like [GetLobbyState]: only the host
+// or a roster player passes. The SSE event handler (MP-2 / #679) calls this
+// before subscribing so a stranger who knows or guesses the code cannot
+// open an event stream and learn the session exists - it returns
+// [ErrNotParticipant] (which the handler maps to 404, same as an unknown
+// code) for a non-participant. The returned code is the canonical form to
+// subscribe under; the phase seeds the stream's initial tick.
+func (s *Service) AuthorizeView(ctx context.Context, joinCode string, playerID int64) (string, Phase, error) {
+	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
+	if err != nil {
+		return "", "", fmt.Errorf(errGetSessionByCodeFmt, err)
+	}
+
+	if !s.canView(sess, playerID) {
+		return "", "", ErrNotParticipant
+	}
+
+	return sess.JoinCode, sess.Phase, nil
 }
 
 // canView reports whether playerID may read the session's lobby: the host
@@ -331,4 +371,43 @@ func (s *Service) allocateJoinCode(ctx context.Context) (string, error) {
 	}
 
 	return "", ErrJoinCodeUnavailable
+}
+
+// addPlayerWithPetnameFallback adds the player under the requested display
+// name, falling back to petnames on a per-session display-name collision
+// (mirroring the anonymous-join petname retry in EnsurePlayer) until one is
+// free or the attempt budget is exhausted.
+func (s *Service) addPlayerWithPetnameFallback(
+	ctx context.Context, sessionID string, playerID int64, displayName string, petname func() string,
+) (*Player, error) {
+	player, err := s.store.AddPlayer(ctx, sessionID, playerID, displayName)
+	if err == nil {
+		return player, nil
+	}
+	if !errors.Is(err, ErrDisplayNameTaken) {
+		return nil, fmt.Errorf("failed to add session player: %w", err)
+	}
+
+	for range joinCodeAttempts {
+		player, err = s.store.AddPlayer(ctx, sessionID, playerID, petname())
+		if err == nil {
+			return player, nil
+		}
+		if !errors.Is(err, ErrDisplayNameTaken) {
+			return nil, fmt.Errorf("failed to add session player with petname: %w", err)
+		}
+	}
+
+	return nil, fmt.Errorf("failed to add session player after petname retries: %w", err)
+}
+
+// publish fans out a session tick if a publisher is wired. The single
+// choke point through which the lobby mutations (Join, SetReady) signal
+// "state moved; re-GET /state" - keeping the bump-and-fan-out in one place
+// so a later mutation (MP-5+) cannot forget to publish.
+func (s *Service) publish(code string, phase Phase) {
+	if s.publisher == nil {
+		return
+	}
+	s.publisher.Publish(code, phase)
 }

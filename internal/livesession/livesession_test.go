@@ -219,3 +219,133 @@ func TestService_Join_FallsBackToPetnameOnCollision(t *testing.T) {
 		t.Errorf("Join DisplayName = %q, want %q", got, want)
 	}
 }
+
+// spyPublisher records the (code, phase) of each publish so a test can
+// assert a lobby mutation fanned out exactly one tick. It is an outbound
+// spy, not a tautological store double.
+type spyPublisher struct {
+	mu     sync.Mutex
+	codes  []string
+	phases []Phase
+}
+
+func (p *spyPublisher) Publish(code string, phase Phase) Tick {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.codes = append(p.codes, code)
+	p.phases = append(p.phases, phase)
+
+	return Tick{Version: uint64(len(p.codes)), Phase: phase}
+}
+
+func TestService_Join_PublishesTick(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeStore{session: &Session{ID: "s1", JoinCode: "ROOM12", Phase: PhaseLobby}}
+	spy := &spyPublisher{}
+	svc := NewService(store, &fakeQuiz{}, slog.Default())
+	svc.SetPublisher(spy)
+
+	if _, err := svc.Join(t.Context(), "room12", 5, "Wanted", func() string { return "Pet" }); err != nil {
+		t.Fatalf("Join err = %v, want nil", err)
+	}
+
+	spy.mu.Lock()
+	defer spy.mu.Unlock()
+	if got, want := len(spy.codes), 1; got != want {
+		t.Fatalf("publish count = %d, want %d (join must publish exactly one tick)", got, want)
+	}
+	// Publish uses the canonical code off the session, not the raw input.
+	if got, want := spy.codes[0], "ROOM12"; got != want {
+		t.Errorf("published code = %q, want %q (canonical join code)", got, want)
+	}
+	if got, want := spy.phases[0], PhaseLobby; got != want {
+		t.Errorf("published phase = %q, want %q", got, want)
+	}
+}
+
+func TestService_SetReady_PublishesTick(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeStore{session: &Session{ID: "s1", JoinCode: "ROOM12", Phase: PhaseLobby}}
+	spy := &spyPublisher{}
+	svc := NewService(store, &fakeQuiz{}, slog.Default())
+	svc.SetPublisher(spy)
+
+	if err := svc.SetReady(t.Context(), "ROOM12", 5, true); err != nil {
+		t.Fatalf("SetReady err = %v, want nil", err)
+	}
+
+	spy.mu.Lock()
+	defer spy.mu.Unlock()
+	if got, want := len(spy.codes), 1; got != want {
+		t.Fatalf("publish count = %d, want %d (ready must publish exactly one tick)", got, want)
+	}
+	if got, want := spy.phases[0], PhaseLobby; got != want {
+		t.Errorf("published phase = %q, want %q", got, want)
+	}
+}
+
+func TestService_AuthorizeView_GatesNonParticipants(t *testing.T) {
+	t.Parallel()
+
+	sess := &Session{
+		ID:           "s1",
+		JoinCode:     "ROOM12",
+		Phase:        PhaseLobby,
+		HostPlayerID: 1,
+		Players:      []*Player{{PlayerID: 5}},
+	}
+	store := &fakeStore{session: sess}
+	svc := NewService(store, &fakeQuiz{}, slog.Default())
+
+	// Host passes and gets the canonical code + phase back.
+	code, phase, err := svc.AuthorizeView(t.Context(), "room12", 1)
+	if err != nil {
+		t.Fatalf("AuthorizeView host err = %v, want nil", err)
+	}
+	if got, want := code, "ROOM12"; got != want {
+		t.Errorf("AuthorizeView code = %q, want %q (canonical)", got, want)
+	}
+	if got, want := phase, PhaseLobby; got != want {
+		t.Errorf("AuthorizeView phase = %q, want %q", got, want)
+	}
+
+	// Roster player passes too.
+	if _, _, perr := svc.AuthorizeView(t.Context(), "ROOM12", 5); perr != nil {
+		t.Errorf("AuthorizeView roster player err = %v, want nil", perr)
+	}
+
+	// A stranger is rejected as a non-participant (handler maps to 404).
+	if _, _, serr := svc.AuthorizeView(t.Context(), "ROOM12", 999); !errors.Is(serr, ErrNotParticipant) {
+		t.Errorf("AuthorizeView stranger err = %v, want %v", serr, ErrNotParticipant)
+	}
+}
+
+func TestService_AuthorizeView_UnknownCode(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeStore{} // nil session yields ErrSessionNotFound
+	svc := NewService(store, &fakeQuiz{}, slog.Default())
+
+	if _, _, err := svc.AuthorizeView(t.Context(), "NOPE99", 1); !errors.Is(err, ErrSessionNotFound) {
+		t.Errorf("AuthorizeView unknown code err = %v, want %v", err, ErrSessionNotFound)
+	}
+}
+
+func TestService_Mutations_TolerateNilPublisher(t *testing.T) {
+	t.Parallel()
+
+	// With no publisher wired, the lobby mutations must still succeed - the
+	// publish step is best-effort and nil-tolerant.
+	store := &fakeStore{session: &Session{ID: "s1", JoinCode: "ROOM12", Phase: PhaseLobby}}
+	svc := NewService(store, &fakeQuiz{}, slog.Default())
+
+	if _, err := svc.Join(t.Context(), "ROOM12", 5, "Wanted", func() string { return "Pet" }); err != nil {
+		t.Errorf("Join with nil publisher err = %v, want nil", err)
+	}
+	if err := svc.SetReady(t.Context(), "ROOM12", 5, true); err != nil {
+		t.Errorf("SetReady with nil publisher err = %v, want nil", err)
+	}
+}

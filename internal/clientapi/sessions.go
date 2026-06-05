@@ -1,7 +1,10 @@
 package clientapi
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -276,4 +279,159 @@ func newSessionStateResponse(state *livesession.LobbyState) sessionStateResponse
 		},
 		ServerNow: time.Now().UTC(),
 	}
+}
+
+// sessionEventResponse is the wire shape of one SSE tick on the session
+// event channel (MP-2 / #679). It deliberately carries NO game data - only
+// a monotonic version and the phase. A tick (or a reconnect, which resends
+// the current version) means "session state moved; re-GET
+// /api/sessions/{code}/state". The full authoritative read is the state
+// endpoint; this channel is a pure side-channel that never carries roster,
+// quiz, or player data, so it cannot drift out of sync with the DTO.
+type sessionEventResponse struct {
+	Version uint64 `json:"version"`
+	Phase   string `json:"phase"`
+}
+
+// sessionEventHeartbeatInterval is how often the session SSE handler emits
+// a no-op comment frame to keep the connection alive when the session is
+// quiet. Same value and rationale as the leaderboard stream
+// (leaderboardHeartbeatInterval): 25s lands inside common proxy / NAT /
+// mobile-carrier idle timeouts without the keep-alive cost of a faster
+// tick.
+const sessionEventHeartbeatInterval = 25 * time.Second
+
+// sessionEventStreamer bundles the per-request dependencies of the session
+// SSE stream. Mirrors leaderboardStreamer so the two share the same flush /
+// heartbeat / write-deadline handling.
+type sessionEventStreamer struct {
+	w      http.ResponseWriter
+	rc     *http.ResponseController
+	logger *slog.Logger
+}
+
+// writeTick writes one tick as a single SSE `data:` frame and flushes.
+// Returns false on any write/flush/encode failure (client disconnected,
+// broken pipe) so the caller can exit the stream loop cleanly.
+func (s *sessionEventStreamer) writeTick(ctx context.Context, tick livesession.Tick) bool {
+	payload, err := json.Marshal(sessionEventResponse{Version: tick.Version, Phase: string(tick.Phase)})
+	if err != nil {
+		s.logger.ErrorContext(ctx, "error marshalling session event", slog.Any("err", err))
+
+		return false
+	}
+	if _, err := fmt.Fprintf(s.w, "data: %s\n\n", payload); err != nil {
+		return false
+	}
+	if err := s.rc.Flush(); err != nil {
+		return false
+	}
+
+	return true
+}
+
+// writeHeartbeat writes a single SSE comment frame (`:\n\n`) and flushes.
+// EventSource ignores comment lines, so this never fires a client-side
+// onmessage; its only job is keeping the connection warm so an idle stream
+// is not torn down by an intermediate proxy. Returns false on write/flush
+// failure so the caller can exit cleanly.
+func (s *sessionEventStreamer) writeHeartbeat() bool {
+	if _, err := fmt.Fprint(s.w, ":\n\n"); err != nil {
+		return false
+	}
+	if err := s.rc.Flush(); err != nil {
+		return false
+	}
+
+	return true
+}
+
+// run drains the hub channel and writes one SSE frame per tick until the
+// client disconnects or the channel closes. The heartbeat ticker emits a
+// no-op comment frame every sessionEventHeartbeatInterval to keep an idle
+// connection warm.
+func (s *sessionEventStreamer) run(ctx context.Context, events <-chan livesession.Tick) {
+	heartbeat := time.NewTicker(sessionEventHeartbeatInterval)
+	defer heartbeat.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case tick, ok := <-events:
+			if !ok {
+				return
+			}
+			if !s.writeTick(ctx, tick) {
+				return
+			}
+		case <-heartbeat.C:
+			if !s.writeHeartbeat() {
+				return
+			}
+		}
+	}
+}
+
+// HandleSessionEvents streams session ticks over SSE (MP-2 / #679).
+// Participant-gated exactly like GET /state: only the host or a roster
+// player may subscribe, so a stranger with the code gets a 404 (the
+// subscription must not leak that the session exists). The stream carries
+// no game data - each tick is {version, phase}, a signal to re-GET
+// /api/sessions/{code}/state. A reconnect re-runs the gate and resends the
+// current version, which doubles as the resync path.
+func HandleSessionEvents(logger *slog.Logger, service *livesession.Service, hub *livesession.Hub) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		player, ok := auth.PlayerFromContext(ctx)
+		if !ok {
+			logger.ErrorContext(ctx, "missing player on context for session events")
+			http.Error(w, "internal error", http.StatusInternalServerError)
+
+			return
+		}
+
+		// Gate BEFORE any header write so a non-participant / unknown code
+		// can still be surfaced as a proper HTTP 404 rather than a half-open
+		// text/event-stream.
+		code, phase, err := service.AuthorizeView(ctx, r.PathValue("code"), player.ID)
+		if err != nil {
+			if errors.Is(err, livesession.ErrSessionNotFound) || errors.Is(err, livesession.ErrNotParticipant) {
+				http.NotFound(w, r)
+
+				return
+			}
+			writeInternalError(w, r, logger, "error authorizing session events", err)
+
+			return
+		}
+
+		// Subscribe under the canonical code; the returned version seeds the
+		// initial frame so a fresh subscriber learns where it stands without
+		// racing a publish.
+		events, version, unsubscribe := hub.Subscribe(code)
+		defer unsubscribe()
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+
+		rc := http.NewResponseController(w)
+		// Clear the per-request write deadline so the HTTP server's
+		// WriteTimeout does not kill this long-lived response on the first
+		// write past the deadline (same fix as the leaderboard stream).
+		if derr := rc.SetWriteDeadline(time.Time{}); derr != nil {
+			logger.WarnContext(ctx, "could not clear SSE write deadline", slog.Any("err", derr))
+		}
+
+		streamer := &sessionEventStreamer{w: w, rc: rc, logger: logger}
+
+		if !streamer.writeTick(ctx, livesession.Tick{Version: version, Phase: phase}) {
+			return
+		}
+
+		streamer.run(ctx, events)
+	})
 }

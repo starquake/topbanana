@@ -765,12 +765,15 @@ func addAPIRoutes(
 	addSessionRoutes(mux, logger, stores, ensurePlayer)
 }
 
-// addSessionRoutes registers the hosted live-session API (MP-1 / #678).
-// The session service is built here from the live-session + quiz stores
-// rather than threaded through server.New: it has no startup-time
-// configuration and nothing else needs a handle to it yet. Every route is
-// wrapped in ensurePlayer so create (host gate, in-handler), join, ready,
-// and state all see a players row on the context; the host gate and
+// addSessionRoutes registers the hosted live-session API (MP-1 / #678,
+// MP-2 / #679). The session service and its event hub are built here from
+// the live-session + quiz stores rather than threaded through server.New:
+// they have no startup-time configuration and nothing else needs a handle
+// to them yet. The hub is the process-local pub/sub for the SSE event
+// channel; the service publishes a tick on every lobby mutation (join,
+// ready) and the events handler subscribes. Every route is wrapped in
+// ensurePlayer so create (host gate, in-handler), join, ready, state, and
+// events all see a players row on the context; the host gate and
 // participant gates live in the handlers and service.
 func addSessionRoutes(
 	mux *http.ServeMux,
@@ -779,9 +782,15 @@ func addSessionRoutes(
 	ensurePlayer func(http.Handler) http.Handler,
 ) {
 	sessionService := livesession.NewService(stores.LiveSessions, stores.Quizzes, logger)
+	sessionHub := livesession.NewHub()
+	sessionService.SetPublisher(sessionHub)
 
 	mux.Handle("POST /api/sessions", ensurePlayer(clientapi.HandleSessionCreate(logger, sessionService)))
 	mux.Handle("POST /api/sessions/{code}/join", ensurePlayer(clientapi.HandleSessionJoin(logger, sessionService)))
 	mux.Handle("POST /api/sessions/{code}/ready", ensurePlayer(clientapi.HandleSessionReady(logger, sessionService)))
 	mux.Handle("GET /api/sessions/{code}/state", ensurePlayer(clientapi.HandleSessionState(logger, sessionService)))
+	mux.Handle(
+		"GET /api/sessions/{code}/events",
+		ensurePlayer(clientapi.HandleSessionEvents(logger, sessionService, sessionHub)),
+	)
 }
