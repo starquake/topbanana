@@ -24,6 +24,9 @@ const (
 	// defaultRevealBeat is how long the revealed answer shows before the
 	// runner advances to the next question (or round, or finish).
 	defaultRevealBeat = 4 * time.Second
+	// defaultRoundResultsBeat is how long the between-rounds standings screen
+	// shows before the runner advances to the next round's intro (or finish).
+	defaultRoundResultsBeat = 6 * time.Second
 	// defaultAutoStartWindow is how long every joined player must have been
 	// ready before the runner auto-starts the game. The host can override
 	// this at any time via Start.
@@ -59,10 +62,11 @@ type Scorer interface {
 // fall back to the package defaults, so a caller overrides only what it
 // needs (the e2e suite shrinks the beats; tests inject tiny values).
 type RunnerConfig struct {
-	BeatInterval    time.Duration
-	RoundIntroBeat  time.Duration
-	RevealBeat      time.Duration
-	AutoStartWindow time.Duration
+	BeatInterval     time.Duration
+	RoundIntroBeat   time.Duration
+	RevealBeat       time.Duration
+	RoundResultsBeat time.Duration
+	AutoStartWindow  time.Duration
 }
 
 func (c RunnerConfig) withDefaults() RunnerConfig {
@@ -74,6 +78,9 @@ func (c RunnerConfig) withDefaults() RunnerConfig {
 	}
 	if c.RevealBeat <= 0 {
 		c.RevealBeat = defaultRevealBeat
+	}
+	if c.RoundResultsBeat <= 0 {
+		c.RoundResultsBeat = defaultRoundResultsBeat
 	}
 	if c.AutoStartWindow <= 0 {
 		c.AutoStartWindow = defaultAutoStartWindow
@@ -211,6 +218,8 @@ func (r *Runner) advance(ctx context.Context, sessionID string, now time.Time) {
 		r.advanceQuestion(ctx, sess, now)
 	case PhaseReveal:
 		r.advanceReveal(ctx, sess, now)
+	case PhaseRoundResults:
+		r.advanceRoundResults(ctx, sess, now)
 	case PhaseFinished:
 		r.forget(sess.ID)
 	default:
@@ -299,8 +308,9 @@ func (r *Runner) advanceQuestion(ctx context.Context, sess *Session, now time.Ti
 	r.publish(sess.JoinCode, PhaseReveal)
 }
 
-// advanceReveal moves to the next question (or round, or finish) once the
-// reveal beat has elapsed.
+// advanceReveal moves to the next question once the reveal beat has elapsed,
+// or - when the revealed question was the last of its round - into the
+// between-rounds round_results screen.
 func (r *Runner) advanceReveal(ctx context.Context, sess *Session, now time.Time) {
 	if now.Sub(r.phaseEnteredAt(sess.ID, now)) < r.cfg.RevealBeat {
 		return
@@ -316,11 +326,28 @@ func (r *Runner) advanceReveal(ctx context.Context, sess *Session, now time.Time
 
 		return
 	}
+	r.enterRoundResults(ctx, sess, now)
+}
+
+// advanceRoundResults moves on from the between-rounds standings screen once
+// the round_results beat has elapsed: into the next round's intro, or finish
+// when the round just shown was the last.
+func (r *Runner) advanceRoundResults(ctx context.Context, sess *Session, now time.Time) {
+	if now.Sub(r.phaseEnteredAt(sess.ID, now)) < r.cfg.RoundResultsBeat {
+		return
+	}
+
+	plan, err := r.loadPlan(ctx, sess)
+	if err != nil {
+		return
+	}
 	r.advanceAfterRound(ctx, sess, plan, now)
 }
 
 // advanceAfterRound moves into the next round's intro, or finishes the
-// session when the current round was the last.
+// session when the current round was the last. Reached from round_results
+// (the normal between-rounds path) and from a round that had no questions to
+// run (which has no standings to show, so it skips round_results).
 func (r *Runner) advanceAfterRound(ctx context.Context, sess *Session, plan questionPlan, now time.Time) {
 	nextRound, ok := plan.nextRound(sess.CurrentRoundID)
 	if !ok {
@@ -362,6 +389,25 @@ func (r *Runner) enterRoundIntro(ctx context.Context, sess *Session, roundID int
 	}
 	r.markPhase(sess.ID, now)
 	r.publish(sess.JoinCode, PhaseRoundIntro)
+}
+
+// enterRoundResults persists the round_results transition (leaving
+// current_round_id in place so the standings read knows which round just
+// finished) and stamps the beat clock so the standings show for the full
+// RoundResultsBeat.
+func (r *Runner) enterRoundResults(ctx context.Context, sess *Session, now time.Time) {
+	if err := r.store.EnterRoundResults(ctx, sess.ID); err != nil {
+		r.logger.WarnContext(
+			ctx,
+			"runner failed to enter round results",
+			slog.String(logSessionKey, sess.ID),
+			slog.Any("err", err),
+		)
+
+		return
+	}
+	r.markPhase(sess.ID, now)
+	r.publish(sess.JoinCode, PhaseRoundResults)
 }
 
 // issueQuestion persists the question transition with its server answer window

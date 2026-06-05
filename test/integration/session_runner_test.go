@@ -111,7 +111,7 @@ func answerSession(
 func TestSessionRunner_HostStartQuestionAnswerReveal(t *testing.T) {
 	t.Parallel()
 
-	ctx, setup := setupIntegrationWithEnv(t, map[string]string{"SESSION_RUNNER_BEAT": "30ms"})
+	ctx, setup := setupIntegrationWithEnv(t, map[string]string{"SESSION_RUNNER_BEAT": "250ms"})
 	baseURL := setup.BaseURL
 
 	qz := seedRunnerLiveQuiz(ctx, t, setup.Stores.Quizzes, "runner-host-start")
@@ -195,7 +195,7 @@ func TestSessionRunner_HostStartQuestionAnswerReveal(t *testing.T) {
 func TestSessionRunner_AnswerRejectedOutsideQuestion(t *testing.T) {
 	t.Parallel()
 
-	ctx, setup := setupIntegrationWithEnv(t, map[string]string{"SESSION_RUNNER_BEAT": "30ms"})
+	ctx, setup := setupIntegrationWithEnv(t, map[string]string{"SESSION_RUNNER_BEAT": "250ms"})
 	baseURL := setup.BaseURL
 
 	qz := seedRunnerLiveQuiz(ctx, t, setup.Stores.Quizzes, "runner-answer-gate")

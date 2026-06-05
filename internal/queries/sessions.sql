@@ -166,3 +166,76 @@ SET score = ?
 WHERE session_id = ?
   AND question_id = ?
   AND player_id = ?;
+
+-- name: SetSessionRoundResults :exec
+-- Moves the session into the round_results phase shown after the last question
+-- of a round (before the next round's intro). current_round_id stays put so the
+-- state read knows which round just finished; the per-question runner columns
+-- are cleared because no question is live in this phase.
+UPDATE sessions
+SET phase               = 'round_results',
+    current_question_id = NULL,
+    question_started_at = NULL,
+    question_expires_at = NULL
+WHERE id = ?;
+
+-- name: ListSessionStandings :many
+-- Per-player standings for a session: the score the player earned in the given
+-- round (round_score) and their cumulative score across the whole session
+-- (total_score). Anchored on the roster (LEFT JOIN to scored answers) so a
+-- player who never answered still appears at 0, which the bar graph needs. The
+-- round is selected by questions.round_id; coalesce turns "no scored answer" /
+-- "score still NULL" into 0. Ordered by total_score desc, then display_name so
+-- ranking is stable across reads.
+SELECT sp.player_id    AS player_id,
+       sp.display_name AS display_name,
+       CAST(COALESCE(SUM(CASE WHEN q.round_id = sqlc.arg('round_id') THEN sa.score END), 0) AS INTEGER) AS round_score,
+       CAST(COALESCE(SUM(sa.score), 0) AS INTEGER)                                                      AS total_score
+FROM session_players sp
+         LEFT JOIN session_answers sa
+                   ON sa.session_id = sp.session_id AND sa.player_id = sp.player_id
+         LEFT JOIN questions q ON q.id = sa.question_id
+WHERE sp.session_id = sqlc.arg('session_id')
+  AND sp.left_at IS NULL
+GROUP BY sp.player_id, sp.display_name
+ORDER BY total_score DESC, sp.display_name;
+
+-- name: ListSessionFinalStandings :many
+-- Per-player final standings for a session: cumulative score across the whole
+-- session, anchored on the roster so non-answerers appear at 0. Same ordering
+-- as ListSessionStandings; used at the finished phase, where there is no
+-- "current round" to break out.
+SELECT sp.player_id                              AS player_id,
+       sp.display_name                           AS display_name,
+       CAST(COALESCE(SUM(sa.score), 0) AS INTEGER) AS total_score
+FROM session_players sp
+         LEFT JOIN session_answers sa
+                   ON sa.session_id = sp.session_id AND sa.player_id = sp.player_id
+WHERE sp.session_id = sqlc.arg('session_id')
+  AND sp.left_at IS NULL
+GROUP BY sp.player_id, sp.display_name
+ORDER BY total_score DESC, sp.display_name;
+
+-- name: ListSessionResultsForQuizLeaderboard :many
+-- One row per (player) summing their score across every FINISHED live session
+-- of the given quiz, so the quiz's standard leaderboard reflects hosted games
+-- alongside solo play (decision 3). A live session contributes only once it is
+-- finished, so a game in progress does not pollute the board; re-finishing a
+-- session changes nothing here (the phase is already 'finished'), which keeps
+-- the contribution idempotent. Anchored on the roster so a player who joined
+-- but never scored still surfaces at 0, matching the solo leaderboard's
+-- joined-but-unanswered behaviour (#335). Scores are read straight from
+-- session_answers.score (already computed at close with the same CalculateScore
+-- curve solo play uses) rather than recomputed. Keyed on player_id alone (a
+-- player may host or play more than one finished session of the same quiz);
+-- their scores sum and MAX(display_name) picks one stable name for the row.
+SELECT sp.player_id                               AS player_id,
+       CAST(MAX(sp.display_name) AS TEXT)          AS display_name,
+       CAST(COALESCE(SUM(sa.score), 0) AS INTEGER) AS total_score
+FROM sessions s
+         JOIN session_players sp ON sp.session_id = s.id AND sp.left_at IS NULL
+         LEFT JOIN session_answers sa
+                   ON sa.session_id = sp.session_id AND sa.player_id = sp.player_id
+WHERE s.quiz_id = ?
+  AND s.phase = 'finished'
+GROUP BY sp.player_id;

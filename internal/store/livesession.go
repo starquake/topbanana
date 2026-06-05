@@ -222,6 +222,15 @@ func (s *LiveSessionStore) EnterReveal(ctx context.Context, sessionID string) er
 	return nil
 }
 
+// EnterRoundResults moves the session into the round_results phase.
+func (s *LiveSessionStore) EnterRoundResults(ctx context.Context, sessionID string) error {
+	if err := s.q.SetSessionRoundResults(ctx, sessionID); err != nil {
+		return fmt.Errorf("failed to enter round results: %w", err)
+	}
+
+	return nil
+}
+
 // Finish ends the session.
 func (s *LiveSessionStore) Finish(ctx context.Context, sessionID string) error {
 	if err := s.q.SetSessionFinished(ctx, sessionID); err != nil {
@@ -229,6 +238,56 @@ func (s *LiveSessionStore) Finish(ctx context.Context, sessionID string) error {
 	}
 
 	return nil
+}
+
+// ListRoundStandings returns one Standing per roster player with the score
+// earned in the given round and their cumulative session total, ordered
+// best-first. Rank is left 0 for the service to stamp.
+func (s *LiveSessionStore) ListRoundStandings(
+	ctx context.Context, sessionID string, roundID int64,
+) ([]*livesession.Standing, error) {
+	rows, err := s.q.ListSessionStandings(ctx, db.ListSessionStandingsParams{
+		RoundID:   roundID,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list session round standings: %w", err)
+	}
+
+	standings := make([]*livesession.Standing, 0, len(rows))
+	for _, r := range rows {
+		standings = append(standings, &livesession.Standing{
+			PlayerID:    r.PlayerID,
+			DisplayName: r.DisplayName,
+			RoundScore:  int(r.RoundScore),
+			TotalScore:  int(r.TotalScore),
+		})
+	}
+
+	return standings, nil
+}
+
+// ListFinalStandings returns one Standing per roster player with their
+// cumulative session total, ordered best-first. RoundScore is 0 and Rank is
+// left 0 for the service to stamp.
+func (s *LiveSessionStore) ListFinalStandings(
+	ctx context.Context, sessionID string,
+) ([]*livesession.Standing, error) {
+	rows, err := s.q.ListSessionFinalStandings(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list session final standings: %w", err)
+	}
+
+	standings := make([]*livesession.Standing, 0, len(rows))
+	for _, r := range rows {
+		standings = append(standings, &livesession.Standing{
+			PlayerID:    r.PlayerID,
+			DisplayName: r.DisplayName,
+			TotalScore:  int(r.TotalScore),
+		})
+	}
+
+	return standings, nil
 }
 
 // RecordAnswer records (or overwrites) a player's pick for the current

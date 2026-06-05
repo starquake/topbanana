@@ -453,3 +453,249 @@ func TestLiveSessionStore_AnswersRoundTrip(t *testing.T) {
 		t.Errorf("scored answer Score = %v, want 800", scored[0].Score)
 	}
 }
+
+// newTwoRoundLiveQuiz seeds a live quiz with two rounds (two questions then
+// one), first option of each correct, loaded so round/question ids are
+// resolved.
+func newTwoRoundLiveQuiz(t *testing.T, qs *QuizStore) *quiz.Quiz {
+	t.Helper()
+
+	rw := func(pos int) *quiz.Question {
+		return &quiz.Question{
+			Text: "Q", Position: pos,
+			Options: []*quiz.Option{{Text: "right", Correct: true}, {Text: "wrong"}},
+		}
+	}
+	qz := &quiz.Quiz{
+		Title:             "Standings Quiz",
+		Slug:              "standings-quiz",
+		Description:       "fixture",
+		CreatedByPlayerID: seededAdminID,
+		Visibility:        quiz.VisibilityPublic,
+		Mode:              quiz.ModeLive,
+		Rounds: []*quiz.Round{
+			{Title: "R1", Questions: []*quiz.Question{rw(1), rw(2)}},
+			{Title: "R2", Questions: []*quiz.Question{rw(3)}},
+		},
+	}
+	if err := qs.CreateQuiz(t.Context(), qz); err != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", err)
+	}
+	loaded, err := qs.GetQuiz(t.Context(), qz.ID)
+	if err != nil {
+		t.Fatalf("GetQuiz err = %v, want nil", err)
+	}
+
+	return loaded
+}
+
+// TestLiveSessionStore_Standings seeds two players who score across a
+// two-round quiz and asserts the per-round and final standings: round_score
+// scopes to the round, total_score is cumulative, non-answerers appear at 0,
+// and rows come back best-first.
+func TestLiveSessionStore_Standings(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	playerStore := NewPlayerStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	qz := newTwoRoundLiveQuiz(t, quizStore)
+	r1q1, r1q2, r2q1 := qz.Questions[0], qz.Questions[1], qz.Questions[2]
+	round1, round2 := r1q1.RoundID, r2q1.RoundID
+
+	sess := &livesession.Session{QuizID: qz.ID, HostPlayerID: seededAdminID, JoinCode: "STND23"}
+	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+	at := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+
+	winner, err := playerStore.CreateAnonymousPlayer(t.Context(), "stnd-win")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer winner err = %v, want nil", err)
+	}
+	loser, err := playerStore.CreateAnonymousPlayer(t.Context(), "stnd-los")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer loser err = %v, want nil", err)
+	}
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, winner.ID, "Win"); err != nil {
+		t.Fatalf("AddPlayer winner err = %v, want nil", err)
+	}
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, loser.ID, "Los"); err != nil {
+		t.Fatalf("AddPlayer loser err = %v, want nil", err)
+	}
+
+	// Winner scores 100 in each round-1 question and 50 in round 2; loser only
+	// answers (and never scores) round-1 question 1.
+	scoreAnswer(t, sessionStore, sess.ID, r1q1.ID, winner.ID, r1q1.Options[0].ID, at, 100)
+	scoreAnswer(t, sessionStore, sess.ID, r1q2.ID, winner.ID, r1q2.Options[0].ID, at, 100)
+	scoreAnswer(t, sessionStore, sess.ID, r2q1.ID, winner.ID, r2q1.Options[0].ID, at, 50)
+	scoreAnswer(t, sessionStore, sess.ID, r1q1.ID, loser.ID, r1q1.Options[1].ID, at, 0)
+
+	round1Standings, err := sessionStore.ListRoundStandings(t.Context(), sess.ID, round1)
+	if err != nil {
+		t.Fatalf("ListRoundStandings r1 err = %v, want nil", err)
+	}
+	if got, want := len(round1Standings), 2; got != want {
+		t.Fatalf("round 1 standings = %d, want %d (full roster)", got, want)
+	}
+	// Best-first: winner leads.
+	if got, want := round1Standings[0].PlayerID, winner.ID; got != want {
+		t.Errorf("round 1 leader = %d, want %d", got, want)
+	}
+	if got, want := round1Standings[0].RoundScore, 200; got != want {
+		t.Errorf("winner round 1 score = %d, want %d", got, want)
+	}
+	// All answers are seeded up front, so total_score is the cumulative session
+	// total at query time (round 1's 200 plus round 2's 50); round_score is what
+	// scopes to the round.
+	if got, want := round1Standings[0].TotalScore, 250; got != want {
+		t.Errorf("winner round 1 total = %d, want %d (cumulative across all rounds)", got, want)
+	}
+	if got, want := round1Standings[1].RoundScore, 0; got != want {
+		t.Errorf("loser round 1 score = %d, want %d", got, want)
+	}
+
+	round2Standings, err := sessionStore.ListRoundStandings(t.Context(), sess.ID, round2)
+	if err != nil {
+		t.Fatalf("ListRoundStandings r2 err = %v, want nil", err)
+	}
+	// In round 2 the winner earned only 50, but the cumulative total carries
+	// round 1 too.
+	if got, want := round2Standings[0].RoundScore, 50; got != want {
+		t.Errorf("winner round 2 score = %d, want %d", got, want)
+	}
+	if got, want := round2Standings[0].TotalScore, 250; got != want {
+		t.Errorf("winner round 2 total = %d, want %d", got, want)
+	}
+
+	finalStandings, err := sessionStore.ListFinalStandings(t.Context(), sess.ID)
+	if err != nil {
+		t.Fatalf("ListFinalStandings err = %v, want nil", err)
+	}
+	if got, want := finalStandings[0].TotalScore, 250; got != want {
+		t.Errorf("winner final total = %d, want %d", got, want)
+	}
+	if got, want := finalStandings[0].RoundScore, 0; got != want {
+		t.Errorf("final RoundScore = %d, want 0 (no single round in focus)", got)
+	}
+	if got, want := finalStandings[1].TotalScore, 0; got != want {
+		t.Errorf("loser final total = %d, want %d", got, want)
+	}
+}
+
+// TestLiveSessionStore_EnterRoundResults pins the round_results phase
+// transition: it moves the session into round_results and keeps the current
+// round in place while clearing the per-question columns.
+func TestLiveSessionStore_EnterRoundResults(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	qz := newLiveQuizWithQuestion(t, quizStore)
+	q := qz.Questions[0]
+
+	sess := &livesession.Session{QuizID: qz.ID, HostPlayerID: seededAdminID, JoinCode: "ERRS23"}
+	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+	started := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	if err := sessionStore.EnterQuestion(
+		t.Context(), sess.ID, q.RoundID, q.ID, started, started.Add(10*time.Second),
+	); err != nil {
+		t.Fatalf("EnterQuestion err = %v, want nil", err)
+	}
+
+	if err := sessionStore.EnterRoundResults(t.Context(), sess.ID); err != nil {
+		t.Fatalf("EnterRoundResults err = %v, want nil", err)
+	}
+	got, err := sessionStore.GetSessionByID(t.Context(), sess.ID)
+	if err != nil {
+		t.Fatalf("GetSessionByID err = %v, want nil", err)
+	}
+	if want := livesession.PhaseRoundResults; got.Phase != want {
+		t.Errorf("phase = %q, want %q", got.Phase, want)
+	}
+	if got.CurrentRoundID == nil || *got.CurrentRoundID != q.RoundID {
+		t.Errorf("CurrentRoundID = %v, want %d", got.CurrentRoundID, q.RoundID)
+	}
+	if got.CurrentQuestionID != nil {
+		t.Errorf("round_results CurrentQuestionID = %v, want nil", *got.CurrentQuestionID)
+	}
+}
+
+// TestGameStore_ListSessionResultsForQuizLeaderboard pins that only FINISHED
+// sessions contribute to the quiz leaderboard results, with per-player scores
+// summed.
+func TestGameStore_ListSessionResultsForQuizLeaderboard(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	playerStore := NewPlayerStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	gameStore := NewGameStore(db, slog.Default())
+	qz := newLiveQuizWithQuestion(t, quizStore)
+	q := qz.Questions[0]
+	at := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+
+	player, err := playerStore.CreateAnonymousPlayer(t.Context(), "lb-sess-p1")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	sess := &livesession.Session{QuizID: qz.ID, HostPlayerID: seededAdminID, JoinCode: "LBSS23"}
+	if err = sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, player.ID, "Pat"); err != nil {
+		t.Fatalf("AddPlayer err = %v, want nil", err)
+	}
+	scoreAnswer(t, sessionStore, sess.ID, q.ID, player.ID, q.Options[0].ID, at, 700)
+
+	// Not finished yet: no leaderboard contribution.
+	before, err := gameStore.ListSessionResultsForQuizLeaderboard(t.Context(), qz.ID)
+	if err != nil {
+		t.Fatalf("ListSessionResultsForQuizLeaderboard before finish err = %v, want nil", err)
+	}
+	if got, want := len(before), 0; got != want {
+		t.Errorf("session results before finish = %d, want %d (only finished sessions count)", got, want)
+	}
+
+	if err = sessionStore.Finish(t.Context(), sess.ID); err != nil {
+		t.Fatalf("Finish err = %v, want nil", err)
+	}
+
+	after, err := gameStore.ListSessionResultsForQuizLeaderboard(t.Context(), qz.ID)
+	if err != nil {
+		t.Fatalf("ListSessionResultsForQuizLeaderboard after finish err = %v, want nil", err)
+	}
+	if got, want := len(after), 1; got != want {
+		t.Fatalf("session results after finish = %d, want %d", got, want)
+	}
+	if got, want := after[0].PlayerID, player.ID; got != want {
+		t.Errorf("result PlayerID = %d, want %d", got, want)
+	}
+	if got, want := after[0].Score, 700; got != want {
+		t.Errorf("result Score = %d, want %d", got, want)
+	}
+	if got, want := after[0].DisplayName, "Pat"; got != want {
+		t.Errorf("result DisplayName = %q, want %q", got, want)
+	}
+}
+
+// scoreAnswer records a pick and immediately writes its score, the
+// record-then-score-at-close sequence the runner performs.
+func scoreAnswer(
+	t *testing.T, s *LiveSessionStore, sessionID string, questionID, playerID, optionID int64,
+	answeredAt time.Time, score int,
+) {
+	t.Helper()
+	if err := s.RecordAnswer(t.Context(), sessionID, questionID, playerID, optionID, answeredAt); err != nil {
+		t.Fatalf("RecordAnswer err = %v, want nil", err)
+	}
+	if err := s.SetAnswerScore(t.Context(), sessionID, questionID, playerID, score); err != nil {
+		t.Fatalf("SetAnswerScore err = %v, want nil", err)
+	}
+}
