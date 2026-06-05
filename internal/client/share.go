@@ -55,7 +55,20 @@ type shellData struct {
 // Index handles GET /client/{$} - the SPA root with no quiz context. Uses
 // the sitewide default Open Graph card.
 func (s *ShellHandlers) Index(w http.ResponseWriter, r *http.Request) {
-	s.render(w, r, shellData{
+	s.render(w, r, "index.html", shellData{
+		Title:               defaultOGTitle,
+		Description:         defaultOGDescription,
+		RegistrationEnabled: s.cfg.RegistrationEnabled,
+	})
+}
+
+// Join handles GET /join and GET /join/{code} - the player join + lobby
+// surface (MP-4 / #681). It renders join.html with the sitewide Open Graph
+// card: a room code is short-lived and per-session, so a shared /join link
+// must not leak a live game into link previews. The room code is read from
+// the URL client-side; the shell carries no per-session data.
+func (s *ShellHandlers) Join(w http.ResponseWriter, r *http.Request) {
+	s.render(w, r, "join.html", shellData{
 		Title:               defaultOGTitle,
 		Description:         defaultOGDescription,
 		RegistrationEnabled: s.cfg.RegistrationEnabled,
@@ -78,7 +91,7 @@ func (s *ShellHandlers) Play(w http.ResponseWriter, r *http.Request) {
 		s.applyQuizOG(r, id, &data)
 	}
 
-	s.render(w, r, data)
+	s.render(w, r, "index.html", data)
 }
 
 // applyQuizOG overrides the share card's title/description with the named
@@ -107,18 +120,18 @@ func (s *ShellHandlers) applyQuizOG(r *http.Request, id int64, data *shellData) 
 	}
 }
 
-// render parses index.html on each request: cheap (~50us for a ~100-line
-// file) and keeps the ClientDir dev path picking up live edits without a
-// rebuild. Page loads are infrequent compared to /api/* traffic, so the
-// extra allocation is in the noise.
-func (s *ShellHandlers) render(w http.ResponseWriter, r *http.Request, data shellData) {
+// render parses the named shell template on each request: cheap (~50us for a
+// ~100-line file) and keeps the ClientDir dev path picking up live edits
+// without a rebuild. Page loads are infrequent compared to /api/* traffic, so
+// the extra allocation is in the noise.
+func (s *ShellHandlers) render(w http.ResponseWriter, r *http.Request, name string, data shellData) {
 	funcs := template.FuncMap{
 		"ogImage":     func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
 		"envTitleTag": envtag.Get,
 	}
-	t, err := template.New("index.html").Funcs(funcs).ParseFS(s.fsys(), "index.html")
+	t, err := template.New(name).Funcs(funcs).ParseFS(s.fsys(), name)
 	if err != nil {
-		s.logger.ErrorContext(r.Context(), "parse index template", slog.Any("err", err))
+		s.logger.ErrorContext(r.Context(), "parse shell template", slog.Any("err", err), slog.String("template", name))
 		http.Error(w, "internal error", http.StatusInternalServerError)
 
 		return
@@ -127,7 +140,7 @@ func (s *ShellHandlers) render(w http.ResponseWriter, r *http.Request, data shel
 	if err := t.Execute(w, data); err != nil {
 		// Headers are already flushed - log and let the client see a
 		// truncated response rather than a stray 500.
-		s.logger.ErrorContext(r.Context(), "render index template", slog.Any("err", err))
+		s.logger.ErrorContext(r.Context(), "render shell template", slog.Any("err", err), slog.String("template", name))
 	}
 }
 
