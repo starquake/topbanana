@@ -337,6 +337,63 @@ func (s *LiveSessionStore) CountAnswers(ctx context.Context, sessionID string, q
 	return int(count), nil
 }
 
+// TouchLastSeen refreshes the participant's last_seen_at heartbeat. Returns
+// [livesession.ErrNotParticipant] when no roster row matches the (join code,
+// player) pair.
+func (s *LiveSessionStore) TouchLastSeen(ctx context.Context, joinCode string, playerID int64) error {
+	res, err := s.q.TouchSessionPlayerLastSeen(ctx, db.TouchSessionPlayerLastSeenParams{
+		PlayerID: playerID,
+		JoinCode: joinCode,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to touch session player last seen: %w", err)
+	}
+	if database.MustRowsAffected(res) == 0 {
+		return livesession.ErrNotParticipant
+	}
+
+	return nil
+}
+
+// sqliteTimestampLayout matches SQLite's CURRENT_TIMESTAMP text encoding
+// ('YYYY-MM-DD HH:MM:SS'). The active-window cutoff is formatted with it so the
+// last_seen_at comparison stays a same-encoding string compare; binding a Go
+// [time.Time] would arrive in a different format and the comparison would
+// silently lie (see retention.sql for the same trap).
+const sqliteTimestampLayout = "2006-01-02 15:04:05"
+
+// CountActiveUnanswered returns how many roster players are still active
+// (last_seen_at at or after since) yet have not picked for the session
+// question.
+func (s *LiveSessionStore) CountActiveUnanswered(
+	ctx context.Context, sessionID string, questionID int64, since time.Time,
+) (int, error) {
+	count, err := s.q.CountActivePlayersUnansweredForQuestion(ctx, db.CountActivePlayersUnansweredForQuestionParams{
+		SessionID:  sessionID,
+		Since:      since.UTC().Format(sqliteTimestampLayout),
+		QuestionID: questionID,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to count active unanswered players: %w", err)
+	}
+
+	return int(count), nil
+}
+
+// CountActive returns how many roster players are still active (last_seen_at
+// at or after since).
+func (s *LiveSessionStore) CountActive(ctx context.Context, sessionID string, since time.Time) (int, error) {
+	count, err := s.q.CountActivePlayersForSession(ctx, db.CountActivePlayersForSessionParams{
+		SessionID: sessionID,
+		Since:     since.UTC().Format(sqliteTimestampLayout),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to count active players: %w", err)
+	}
+
+	return int(count), nil
+}
+
 // ListAnswers returns every pick for the session question in answered order,
 // with the chosen option's correctness.
 func (s *LiveSessionStore) ListAnswers(

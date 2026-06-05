@@ -289,7 +289,7 @@ func (r *Runner) advanceQuestion(ctx context.Context, sess *Session, now time.Ti
 	}
 
 	timedOut := !now.Before(*sess.QuestionExpiresAt)
-	if !timedOut && !r.allActiveAnswered(ctx, sess) {
+	if !timedOut && !r.allActiveAnswered(ctx, sess, now) {
 		return
 	}
 
@@ -477,19 +477,34 @@ func (r *Runner) scoreQuestion(ctx context.Context, sess *Session) {
 }
 
 // allActiveAnswered reports whether every active player has answered the
-// current question. Active is defined minimally for MP-5 as every roster
-// player (the full heartbeat lifecycle is MP-10). An empty roster never
-// early-closes, so the question times out instead of closing instantly.
-func (r *Runner) allActiveAnswered(ctx context.Context, sess *Session) bool {
-	active := len(sess.Players)
-	if active == 0 {
-		return false
-	}
-	count, err := r.store.CountAnswers(ctx, sess.ID, *sess.CurrentQuestionID)
+// current question, so the runner can early-close before the timeout. Active
+// means last_seen_at within ActiveWindow of now (the heartbeat the held SSE
+// connection beats), so a dropped player whose heartbeat has gone stale no
+// longer holds the question open. An empty or all-stale roster never
+// early-closes (it has no active answerer to wait on); the question times out
+// instead. since is computed from the runner's injected clock so tests stay
+// deterministic.
+func (r *Runner) allActiveAnswered(ctx context.Context, sess *Session, now time.Time) bool {
+	since := now.Add(-ActiveWindow)
+	active, err := r.store.CountActive(ctx, sess.ID, since)
 	if err != nil {
 		r.logger.WarnContext(
 			ctx,
-			"runner failed to count answers",
+			"runner failed to count active players",
+			slog.String(logSessionKey, sess.ID),
+			slog.Any("err", err),
+		)
+
+		return false
+	}
+	if active == 0 {
+		return false
+	}
+	unanswered, err := r.store.CountActiveUnanswered(ctx, sess.ID, *sess.CurrentQuestionID, since)
+	if err != nil {
+		r.logger.WarnContext(
+			ctx,
+			"runner failed to count active unanswered players",
 			slog.String(logSessionKey, sess.ID),
 			slog.Any("err", err),
 		)
@@ -497,7 +512,7 @@ func (r *Runner) allActiveAnswered(ctx context.Context, sess *Session) bool {
 		return false
 	}
 
-	return count >= active
+	return unanswered == 0
 }
 
 // questionWindow resolves the answer window for a question: the per-question

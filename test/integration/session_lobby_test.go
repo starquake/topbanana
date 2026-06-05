@@ -270,6 +270,39 @@ func TestSessionLobby_DisplayNameCollisionFallsBackToPetname(t *testing.T) {
 	}
 }
 
+// TestSessionLobby_JoinAfterStartIs409 pins the late-join gate (MP-10): once
+// the host starts the session the lobby closes, so a fresh player joining the
+// running session gets a 409 rather than landing mid-game (v1 has no late
+// join).
+func TestSessionLobby_JoinAfterStartIs409(t *testing.T) {
+	t.Parallel()
+
+	ctx, setup := setupIntegration(t)
+	baseURL := setup.BaseURL
+	qz := seedLiveQuiz(ctx, t, setup.Stores.Quizzes, "lobby-late-join")
+
+	host := &http.Client{
+		Jar:           mustJar(t),
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	registerVerifyAndSignIn(ctx, t, host, baseURL, setup.DBURI, "late-join-host", "late-join-pass-123")
+
+	code := createSession(ctx, t, host, baseURL, qz.ID)
+
+	// An early player joins the lobby; the host then starts the game.
+	early := newAnonClient(t)
+	joinSession(ctx, t, early, baseURL, code, "Early")
+	startSession(ctx, t, host, baseURL, code)
+
+	// A latecomer joining the now-running session is rejected with 409.
+	late := newAnonClient(t)
+	resp := httpPostJSON(ctx, t, late, fmt.Sprintf("%s/api/sessions/%s/join", baseURL, code), `{"displayName":"Late"}`)
+	defer closeBody(t, resp.Body)
+	if got, want := resp.StatusCode, http.StatusConflict; got != want {
+		t.Errorf("late join status = %d, want %d", got, want)
+	}
+}
+
 // TestSessionLobby_JoinCodesAreUnique opens two sessions and asserts the
 // generated join codes differ.
 func TestSessionLobby_JoinCodesAreUnique(t *testing.T) {

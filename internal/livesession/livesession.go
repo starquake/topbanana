@@ -61,6 +61,11 @@ var (
 	// be played once; an admin reset clears the participation so the player
 	// can join again. Handlers map it to 403.
 	ErrAlreadyPlayed = errors.New("player has already played this quiz")
+
+	// ErrLobbyClosed is returned by [Service.Join] when the session has
+	// already left the lobby: the lobby closes at start and v1 has no
+	// late join. Handlers map it to 409.
+	ErrLobbyClosed = errors.New("session lobby has closed")
 )
 
 // Phase is the server-authoritative state-machine label for a session.
@@ -78,6 +83,20 @@ const (
 	PhaseReveal       Phase = "reveal"
 	PhaseRoundResults Phase = "round_results"
 	PhaseFinished     Phase = "finished"
+)
+
+const (
+	// HeartbeatInterval is how often a held SSE connection refreshes the
+	// participant's last_seen_at. The runner reads last_seen_at to decide who
+	// is still active; a player who answered but whose tab is now in the
+	// background still beats on this cadence, so they keep counting as active.
+	HeartbeatInterval = 10 * time.Second
+	// ActiveWindow is how long after a participant's last heartbeat the runner
+	// still counts them as active. Set to 3x HeartbeatInterval so a single
+	// dropped or delayed beat does not prematurely mark a present player stale;
+	// a genuinely disconnected player ages out within this window and stops
+	// holding a question open.
+	ActiveWindow = 3 * HeartbeatInterval
 )
 
 // errGetSessionByCodeFmt is the wrap format every code-keyed lookup shares
@@ -235,10 +254,19 @@ type Store interface {
 		questionID, playerID, optionID int64,
 		answeredAt time.Time,
 	) error
-	// CountAnswers returns how many players have picked for the given
-	// session question, so the runner can close early once every active
-	// player has answered.
-	CountAnswers(ctx context.Context, sessionID string, questionID int64) (int, error)
+	// TouchLastSeen refreshes a participant's last_seen_at, the active-player
+	// heartbeat. Returns [ErrNotParticipant] when the (join code, player)
+	// pair matches no roster row. Keyed on join code so the SSE handler need
+	// only carry the code it already gates on.
+	TouchLastSeen(ctx context.Context, joinCode string, playerID int64) error
+	// CountActiveUnanswered returns how many roster players are still active
+	// (last_seen_at at or after since) yet have not picked for the given
+	// session question. The runner early-closes once this reaches 0.
+	CountActiveUnanswered(ctx context.Context, sessionID string, questionID int64, since time.Time) (int, error)
+	// CountActive returns how many roster players are still active
+	// (last_seen_at at or after since), so the runner can tell an empty /
+	// all-stale roster (which must time out) from one with a live answerer.
+	CountActive(ctx context.Context, sessionID string, since time.Time) (int, error)
 	// ListAnswers returns every pick for the given session question in
 	// answered order, with the chosen option's correctness, for scoring at
 	// close and the answered-order view.
@@ -402,20 +430,43 @@ func (s *Service) CreateSession(ctx context.Context, quizID, hostPlayerID int64)
 	return sess, nil
 }
 
+// rosterHasPlayer reports whether playerID already holds a roster row in the
+// session, so a re-join past the lobby is treated as a reconnect rather than a
+// rejected late join.
+func rosterHasPlayer(players []*Player, playerID int64) bool {
+	for _, p := range players {
+		if p.PlayerID == playerID {
+			return true
+		}
+	}
+
+	return false
+}
+
 // Join adds the player to the session identified by join code under the
 // requested display name. The display name is required; a per-session
 // collision is recovered transparently by retrying with a petname, so the
 // caller always lands in the lobby (decision 4 / claim-name parity). The
 // chosen display name is carried on the returned [Player]. Returns
-// [ErrSessionNotFound] when the code resolves to no session and
-// [ErrAlreadyPlayed] when the player has already finished a session of the
-// same quiz (a live quiz is played once until an admin resets it).
+// [ErrSessionNotFound] when the code resolves to no session,
+// [ErrLobbyClosed] when the session has already left the lobby (v1 has no
+// late join), and [ErrAlreadyPlayed] when the player has already finished a
+// session of the same quiz (a live quiz is played once until an admin resets
+// it).
 func (s *Service) Join(
 	ctx context.Context, joinCode string, playerID int64, displayName string, petname func() string,
 ) (*Player, error) {
 	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
 	if err != nil {
 		return nil, fmt.Errorf(errGetSessionByCodeFmt, err)
+	}
+
+	// The lobby closes at start: v1 has no late join. A player already on the
+	// roster may still re-join once the session has left the lobby - that is a
+	// reconnect/resume (their row is revived), not a late join - so only a
+	// player with no existing roster row is rejected past the lobby.
+	if sess.Phase != PhaseLobby && !rosterHasPlayer(sess.Players, playerID) {
+		return nil, ErrLobbyClosed
 	}
 
 	played, err := s.store.PlayerFinishedSessionForQuiz(ctx, playerID, sess.QuizID)
@@ -581,6 +632,20 @@ func (s *Service) AuthorizeView(ctx context.Context, joinCode string, playerID i
 	}
 
 	return sess.JoinCode, sess.Phase, nil
+}
+
+// TouchLastSeen refreshes the participant's last_seen_at heartbeat for the
+// session identified by join code, marking them active. The SSE events
+// handler calls it when the connection opens and periodically while it is
+// held, so a dropped player goes stale and the runner stops counting them as
+// active. Returns [ErrNotParticipant] when the caller has no roster row in
+// the session.
+func (s *Service) TouchLastSeen(ctx context.Context, joinCode string, playerID int64) error {
+	if err := s.store.TouchLastSeen(ctx, normalizeJoinCode(joinCode), playerID); err != nil {
+		return fmt.Errorf("failed to touch session player last seen: %w", err)
+	}
+
+	return nil
 }
 
 // currentQuizQuestion loads the quiz question the session is currently

@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"database/sql"
 	"errors"
 	"log/slog"
 	"testing"
@@ -451,6 +452,185 @@ func TestLiveSessionStore_AnswersRoundTrip(t *testing.T) {
 	}
 	if scored[0].Score == nil || *scored[0].Score != 800 {
 		t.Errorf("scored answer Score = %v, want 800", scored[0].Score)
+	}
+}
+
+// TestLiveSessionStore_TouchLastSeen pins the heartbeat write: it refreshes a
+// participant's last_seen_at keyed on join code, and reports a non-participant
+// when no roster row matches.
+func TestLiveSessionStore_TouchLastSeen(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	playerStore := NewPlayerStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	qz := newLiveQuiz(t, quizStore)
+
+	sess := &livesession.Session{QuizID: qz.ID, HostPlayerID: seededAdminID, JoinCode: "TCH234"}
+	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+	p, err := playerStore.CreateAnonymousPlayer(t.Context(), "touch-p1")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p.ID, "Touched"); err != nil {
+		t.Fatalf("AddPlayer err = %v, want nil", err)
+	}
+
+	// Backdate the roster row so the touch has an observable effect.
+	stale := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	setLastSeen(t, db, sess.ID, p.ID, stale)
+
+	if err = sessionStore.TouchLastSeen(t.Context(), "TCH234", p.ID); err != nil {
+		t.Fatalf("TouchLastSeen err = %v, want nil", err)
+	}
+	loaded, err := sessionStore.GetSessionByJoinCode(t.Context(), "TCH234")
+	if err != nil {
+		t.Fatalf("GetSessionByJoinCode err = %v, want nil", err)
+	}
+	if !loaded.Players[0].LastSeenAt.After(stale) {
+		t.Errorf("LastSeenAt = %v, want refreshed past the backdated %v", loaded.Players[0].LastSeenAt, stale)
+	}
+
+	// A player with no roster row is a non-participant.
+	if err = sessionStore.TouchLastSeen(t.Context(), "TCH234", seededAdminID); !errors.Is(
+		err, livesession.ErrNotParticipant,
+	) {
+		t.Errorf("TouchLastSeen non-participant err = %v, want %v", err, livesession.ErrNotParticipant)
+	}
+}
+
+// TestLiveSessionStore_ActiveCounts pins the active-player counts across the
+// last_seen_at window boundary: a fresh player is counted active and counted
+// unanswered until they pick, while a player whose last_seen_at is before the
+// cutoff is excluded from both counts. This is what lets the runner early-close
+// once every still-active player has answered, ignoring a dropped player.
+func TestLiveSessionStore_ActiveCounts(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	playerStore := NewPlayerStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	qz := newLiveQuizWithQuestion(t, quizStore)
+	q := qz.Questions[0]
+
+	sess := &livesession.Session{QuizID: qz.ID, HostPlayerID: seededAdminID, JoinCode: "ACTV23"}
+	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+
+	fresh, err := playerStore.CreateAnonymousPlayer(t.Context(), "actv-fresh")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer fresh err = %v, want nil", err)
+	}
+	stalePlayer, err := playerStore.CreateAnonymousPlayer(t.Context(), "actv-stale")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer stale err = %v, want nil", err)
+	}
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, fresh.ID, "Fresh"); err != nil {
+		t.Fatalf("AddPlayer fresh err = %v, want nil", err)
+	}
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, stalePlayer.ID, "Stale"); err != nil {
+		t.Fatalf("AddPlayer stale err = %v, want nil", err)
+	}
+
+	now := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	since := now.Add(-30 * time.Second)
+	// Fresh player beats just inside the window; stale player last beat well
+	// before the cutoff.
+	setLastSeen(t, db, sess.ID, fresh.ID, now.Add(-5*time.Second))
+	setLastSeen(t, db, sess.ID, stalePlayer.ID, now.Add(-10*time.Minute))
+
+	active, err := sessionStore.CountActive(t.Context(), sess.ID, since)
+	if err != nil {
+		t.Fatalf("CountActive err = %v, want nil", err)
+	}
+	if got, want := active, 1; got != want {
+		t.Errorf("CountActive = %d, want %d (only the fresh player)", got, want)
+	}
+
+	unanswered, err := sessionStore.CountActiveUnanswered(t.Context(), sess.ID, q.ID, since)
+	if err != nil {
+		t.Fatalf("CountActiveUnanswered err = %v, want nil", err)
+	}
+	if got, want := unanswered, 1; got != want {
+		t.Errorf("CountActiveUnanswered = %d, want %d (fresh, not yet answered)", got, want)
+	}
+
+	// Once the fresh player answers, no active player is unanswered.
+	if err = sessionStore.RecordAnswer(t.Context(), sess.ID, q.ID, fresh.ID, q.Options[0].ID, now); err != nil {
+		t.Fatalf("RecordAnswer err = %v, want nil", err)
+	}
+	unanswered, err = sessionStore.CountActiveUnanswered(t.Context(), sess.ID, q.ID, since)
+	if err != nil {
+		t.Fatalf("CountActiveUnanswered after answer err = %v, want nil", err)
+	}
+	if got, want := unanswered, 0; got != want {
+		t.Errorf("CountActiveUnanswered after answer = %d, want %d (early-close trigger)", got, want)
+	}
+}
+
+// TestLiveSessionStore_ActiveCounts_RealTimestampEncoding guards the
+// cross-format comparison trap: a roster row stamped by the production write
+// path (TouchLastSeen -> SQLite CURRENT_TIMESTAMP text) must be counted active
+// against a cutoff derived from a Go time.Time. The store formats the cutoff in
+// the CURRENT_TIMESTAMP encoding so the comparison is a same-format string
+// compare; binding the time.Time directly would arrive in a different format
+// and silently exclude every real row.
+func TestLiveSessionStore_ActiveCounts_RealTimestampEncoding(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	playerStore := NewPlayerStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	qz := newLiveQuiz(t, quizStore)
+
+	sess := &livesession.Session{QuizID: qz.ID, HostPlayerID: seededAdminID, JoinCode: "RENC23"}
+	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+	p, err := playerStore.CreateAnonymousPlayer(t.Context(), "renc-p1")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p.ID, "Real"); err != nil {
+		t.Fatalf("AddPlayer err = %v, want nil", err)
+	}
+	// Stamp last_seen_at via the production heartbeat path (CURRENT_TIMESTAMP).
+	if err = sessionStore.TouchLastSeen(t.Context(), "RENC23", p.ID); err != nil {
+		t.Fatalf("TouchLastSeen err = %v, want nil", err)
+	}
+
+	// A cutoff one window in the real past must still count the just-touched
+	// player as active. time.Now() (not a fixed literal) keeps it aligned with
+	// the wall-clock CURRENT_TIMESTAMP the heartbeat just wrote.
+	since := time.Now().UTC().Add(-30 * time.Second)
+	active, err := sessionStore.CountActive(t.Context(), sess.ID, since)
+	if err != nil {
+		t.Fatalf("CountActive err = %v, want nil", err)
+	}
+	if got, want := active, 1; got != want {
+		t.Errorf("CountActive = %d, want %d (real CURRENT_TIMESTAMP row must compare active)", got, want)
+	}
+}
+
+// setLastSeen backdates a roster row's last_seen_at so a test can place a
+// player on either side of the active-window cutoff. Writes the timestamp in
+// SQLite's CURRENT_TIMESTAMP text format ('YYYY-MM-DD HH:MM:SS') - the same
+// encoding production rows are stamped in - so the store's string comparison
+// against the formatted cutoff is exercised faithfully. Test-only fixture write.
+func setLastSeen(t *testing.T, db *sql.DB, sessionID string, playerID int64, at time.Time) {
+	t.Helper()
+	if _, err := db.ExecContext(
+		t.Context(),
+		"UPDATE session_players SET last_seen_at = ? WHERE session_id = ? AND player_id = ?",
+		at.UTC().Format("2006-01-02 15:04:05"), sessionID, playerID,
+	); err != nil {
+		t.Fatalf("setLastSeen err = %v, want nil", err)
 	}
 }
 

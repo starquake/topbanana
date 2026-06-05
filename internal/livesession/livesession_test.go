@@ -187,7 +187,15 @@ func (*fakeStore) RecordAnswer(context.Context, string, int64, int64, int64, tim
 	return errors.ErrUnsupported
 }
 
-func (*fakeStore) CountAnswers(context.Context, string, int64) (int, error) {
+func (*fakeStore) TouchLastSeen(context.Context, string, int64) error {
+	return errors.ErrUnsupported
+}
+
+func (*fakeStore) CountActiveUnanswered(context.Context, string, int64, time.Time) (int, error) {
+	return 0, errors.ErrUnsupported
+}
+
+func (*fakeStore) CountActive(context.Context, string, time.Time) (int, error) {
 	return 0, errors.ErrUnsupported
 }
 
@@ -272,7 +280,7 @@ func TestService_Join_FallsBackToPetnameOnCollision(t *testing.T) {
 	// The requested name collides twice; the service retries with petnames
 	// and lands on the first free one.
 	store := &fakeStore{
-		session:           &Session{ID: "s1", JoinCode: "ROOM12"},
+		session:           &Session{ID: "s1", JoinCode: "ROOM12", Phase: PhaseLobby},
 		addPlayerTakenFor: 2,
 	}
 	svc := NewService(store, &fakeQuiz{}, slog.Default())
@@ -299,7 +307,7 @@ func TestService_Join_BlockedAfterFinishedPlay(t *testing.T) {
 	t.Parallel()
 
 	store := &fakeStore{
-		session:      &Session{ID: "s1", QuizID: 7, JoinCode: "ROOM12"},
+		session:      &Session{ID: "s1", QuizID: 7, JoinCode: "ROOM12", Phase: PhaseLobby},
 		playedResult: true,
 	}
 	svc := NewService(store, &fakeQuiz{}, slog.Default())
@@ -311,6 +319,52 @@ func TestService_Join_BlockedAfterFinishedPlay(t *testing.T) {
 	// The gate fires before the roster write, so no AddPlayer happened.
 	if got, want := len(store.addedNames), 0; got != want {
 		t.Errorf("addedNames len = %d, want %d (gate must precede AddPlayer)", got, want)
+	}
+}
+
+// TestService_Join_ClosedAfterStart pins the late-join gate: once a session
+// has left the lobby (any non-lobby phase), Join rejects with ErrLobbyClosed
+// before touching the roster - v1 has no late join.
+func TestService_Join_ClosedAfterStart(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeStore{
+		session: &Session{ID: "s1", QuizID: 7, JoinCode: "ROOM12", Phase: PhaseQuestion},
+	}
+	svc := NewService(store, &fakeQuiz{}, slog.Default())
+
+	_, err := svc.Join(t.Context(), "ROOM12", 5, "Wanted", func() string { return "Pet" })
+	if got, want := err, ErrLobbyClosed; !errors.Is(got, want) {
+		t.Errorf("Join err = %v, want %v", got, want)
+	}
+	// The gate fires before the roster write, so no AddPlayer happened, and the
+	// replay gate was never consulted.
+	if got, want := len(store.addedNames), 0; got != want {
+		t.Errorf("addedNames len = %d, want %d (gate must precede AddPlayer)", got, want)
+	}
+}
+
+// TestService_Join_ExistingPlayerResumesAfterStart pins the reconnect carve-out:
+// a player already on the roster may re-join once the session has left the
+// lobby (their row is revived), so a mid-game reconnect is not rejected as a
+// late join.
+func TestService_Join_ExistingPlayerResumesAfterStart(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeStore{
+		session: &Session{
+			ID: "s1", QuizID: 7, JoinCode: "ROOM12", Phase: PhaseQuestion,
+			Players: []*Player{{PlayerID: 5, DisplayName: "Sam"}},
+		},
+	}
+	svc := NewService(store, &fakeQuiz{}, slog.Default())
+	svc.SetPublisher(&spyPublisher{})
+
+	if _, err := svc.Join(t.Context(), "ROOM12", 5, "Sam", func() string { return "Pet" }); err != nil {
+		t.Fatalf("Join (resume) err = %v, want nil", err)
+	}
+	if got, want := len(store.addedNames), 1; got != want {
+		t.Errorf("addedNames len = %d, want %d (resume revives the roster row)", got, want)
 	}
 }
 

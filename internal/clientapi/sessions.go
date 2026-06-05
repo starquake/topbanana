@@ -80,9 +80,10 @@ func HandleSessionCreate(logger *slog.Logger, service *livesession.Service) http
 // a display name carried in the body. A per-session display-name collision
 // is resolved transparently by the service (petname fallback), so the
 // response always carries the display name the player actually landed
-// with. Returns 404 when the join code is unknown and 403 when the player
-// has already finished a session of the same quiz (a live quiz is played
-// once until an admin resets it).
+// with. Returns 404 when the join code is unknown, 409 when the session has
+// already left the lobby (v1 has no late join), and 403 when the player has
+// already finished a session of the same quiz (a live quiz is played once
+// until an admin resets it).
 func HandleSessionJoin(logger *slog.Logger, service *livesession.Service) http.Handler {
 	type joinRequest struct {
 		DisplayName string `json:"displayName"`
@@ -121,6 +122,8 @@ func HandleSessionJoin(logger *slog.Logger, service *livesession.Service) http.H
 			switch {
 			case errors.Is(err, livesession.ErrSessionNotFound):
 				http.NotFound(w, r)
+			case errors.Is(err, livesession.ErrLobbyClosed):
+				http.Error(w, "this game has already started", http.StatusConflict)
 			case errors.Is(err, livesession.ErrAlreadyPlayed):
 				http.Error(w, "you have already played this quiz", http.StatusForbidden)
 			default:
@@ -584,6 +587,35 @@ func (s *sessionEventStreamer) run(ctx context.Context, events <-chan livesessio
 	}
 }
 
+// beatLastSeen bumps the participant's last_seen_at heartbeat while the SSE
+// connection is held: once immediately, then every livesession.HeartbeatInterval
+// until ctx is cancelled (the client disconnects). Runs in its own goroutine so
+// it does not block the stream loop; touch failures are logged at debug since a
+// transient miss is recovered by the next beat and the player simply ages out
+// of the active window if the beats stop. Stopping on ctx cancel is what lets a
+// dropped player go stale so the runner no longer waits on them.
+func beatLastSeen(
+	ctx context.Context, logger *slog.Logger, service *livesession.Service, code string, playerID int64,
+) {
+	touch := func() {
+		if err := service.TouchLastSeen(ctx, code, playerID); err != nil {
+			logger.DebugContext(ctx, "session heartbeat touch failed", slog.Any("err", err))
+		}
+	}
+	touch()
+
+	ticker := time.NewTicker(livesession.HeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			touch()
+		}
+	}
+}
+
 // HandleSessionEvents streams session ticks over SSE (MP-2 / #679).
 // Participant-gated exactly like GET /state: only the host or a roster
 // player may subscribe, so a stranger with the code gets a 404 (the
@@ -623,6 +655,12 @@ func HandleSessionEvents(logger *slog.Logger, service *livesession.Service, hub 
 		// racing a publish.
 		events, version, unsubscribe := hub.Subscribe(code)
 		defer unsubscribe()
+
+		// The held connection is the active-player heartbeat: bump
+		// last_seen_at now and on a ticker while it is open, so the runner
+		// keeps counting this player as active and a disconnect (ctx
+		// cancelled) lets them age out of the active window (MP-10).
+		go beatLastSeen(ctx, logger, service, code, player.ID)
 
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-store")

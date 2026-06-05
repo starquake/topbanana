@@ -18,10 +18,12 @@ export class SessionService {
     // returns { ok: true, displayName, isReady } - the displayName echoed
     // back is the one the player actually landed with, since a per-session
     // collision is resolved server-side with a petname fallback. A 404
-    // (unknown code) maps to { ok: false, kind: 'notFound' }; a 403 (the
-    // player has already played this quiz) to { ok: false, kind:
-    // 'alreadyPlayed' }; a 400 (empty name) to { ok: false, kind: 'empty' };
-    // anything else to { ok: false, kind: 'error' }.
+    // (unknown code) maps to { ok: false, kind: 'notFound' }; a 409 (the
+    // session already started, so the lobby has closed) to { ok: false,
+    // kind: 'closed' }; a 403 (the player has already played this quiz) to
+    // { ok: false, kind: 'alreadyPlayed' }; a 400 (empty name) to
+    // { ok: false, kind: 'empty' }; anything else to { ok: false, kind:
+    // 'error' }.
     async join(code, rawDisplayName) {
         const displayName = (rawDisplayName || '').trim();
         if (displayName === '') {
@@ -43,6 +45,9 @@ export class SessionService {
         }
         if (response.status === 404) {
             return { ok: false, kind: 'notFound', message: 'No game found with that code.' };
+        }
+        if (response.status === 409) {
+            return { ok: false, kind: 'closed', message: 'This game has already started.' };
         }
         if (response.status === 403) {
             return { ok: false, kind: 'alreadyPlayed', message: "You've already played this quiz." };
