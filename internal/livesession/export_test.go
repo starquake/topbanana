@@ -1,5 +1,10 @@
 package livesession
 
+import (
+	"context"
+	"time"
+)
+
 // ExportNewServiceWithCodeGen re-exports newServiceWithCodeGen so the
 // external test package can construct a Service with an injected join-code
 // generator (to force collisions deterministically) without widening the
@@ -15,4 +20,11 @@ func ExportHubSubscriberCount(h *Hub, code string) int {
 	defer h.mu.Unlock()
 
 	return len(h.subs[code])
+}
+
+// ExportRunnerTick drives one runner scan at the given instant, so a test can
+// advance a session through its phases off a controlled clock without waiting
+// on the beat ticker. Test-only.
+func ExportRunnerTick(ctx context.Context, r *Runner, now time.Time) {
+	r.tick(ctx, now)
 }

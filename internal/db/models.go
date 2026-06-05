@@ -148,14 +148,28 @@ type Round struct {
 }
 
 type Session struct {
-	ID           string
-	QuizID       int64
-	HostPlayerID int64
-	JoinCode     string
-	Phase        string
-	CreatedAt    time.Time
-	StartedAt    sql.NullTime
-	FinishedAt   sql.NullTime
+	ID                string
+	QuizID            int64
+	HostPlayerID      int64
+	JoinCode          string
+	Phase             string
+	CurrentRoundID    sql.NullInt64
+	CurrentQuestionID sql.NullInt64
+	QuestionStartedAt sql.NullTime
+	QuestionExpiresAt sql.NullTime
+	CreatedAt         time.Time
+	StartedAt         sql.NullTime
+	FinishedAt        sql.NullTime
+}
+
+type SessionAnswer struct {
+	ID         int64
+	SessionID  string
+	QuestionID int64
+	PlayerID   int64
+	OptionID   int64
+	AnsweredAt time.Time
+	Score      sql.NullInt64
 }
 
 type SessionPlayer struct {

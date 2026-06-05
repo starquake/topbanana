@@ -4,8 +4,73 @@ import (
 	"context"
 	"testing"
 
+	"github.com/pressly/goose/v3"
+
 	"github.com/starquake/topbanana/internal/dbtest"
 )
+
+// sessionRunnerVersion is the session-runner migration that rebuilds the
+// sessions parent table to widen the phase CHECK and add the runner columns.
+const sessionRunnerVersion = 20260606120000
+
+// TestSessionRunnerMigration_DownUpRoundTrip exercises the parent-table
+// rebuild's Down path (the risky one: dropping a parent with foreign_keys=OFF
+// inside an explicit transaction) and the re-Up afterwards, with a seeded
+// session row, so a broken rollback fails loudly here rather than in
+// production. The Down coerces any past-lobby phase back to 'lobby' to satisfy
+// the old narrow CHECK; this asserts the row survives the round trip.
+func TestSessionRunnerMigration_DownUpRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := dbtest.Open(t)
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v", cerr)
+		}
+	})
+
+	var quizID int64
+	if err := db.QueryRowContext(
+		ctx,
+		`INSERT INTO quizzes (title, slug, description, created_by_player_id, mode)
+		 VALUES ('Live', 'live-roundtrip-mig', 'd', 1, 'live') RETURNING id`,
+	).Scan(&quizID); err != nil {
+		t.Fatalf("seed quiz err = %v, want nil", err)
+	}
+	if _, err := db.ExecContext(
+		ctx,
+		`INSERT INTO sessions (id, quiz_id, host_player_id, join_code, phase)
+		 VALUES ('sess-rt-1', ?, 1, 'RTP234', 'question')`,
+		quizID,
+	); err != nil {
+		t.Fatalf("seed session err = %v, want nil", err)
+	}
+
+	if err := goose.DownTo(db, ".", sessionRunnerVersion-1); err != nil {
+		t.Fatalf("goose.DownTo err = %v, want nil", err)
+	}
+
+	// After the rollback the session survives with phase coerced to 'lobby'.
+	var phase string
+	if err := db.QueryRowContext(ctx, "SELECT phase FROM sessions WHERE id = 'sess-rt-1'").Scan(&phase); err != nil {
+		t.Fatalf("read phase after down err = %v, want nil", err)
+	}
+	if got, want := phase, "lobby"; got != want {
+		t.Errorf("phase after down = %q, want %q", got, want)
+	}
+
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("goose.Up after down err = %v, want nil", err)
+	}
+
+	// The widened CHECK is back: a runner phase is accepted again.
+	if _, err := db.ExecContext(
+		ctx, "UPDATE sessions SET phase = 'reveal' WHERE id = 'sess-rt-1'",
+	); err != nil {
+		t.Errorf("update to runner phase after re-up err = %v, want nil", err)
+	}
+}
 
 // TestSessionsMigration_Constraints pins the MP-1 schema (#678): the
 // sessions and session_players tables exist with their UNIQUE and CHECK
@@ -74,11 +139,106 @@ func TestSessionsMigration_Constraints(t *testing.T) {
 		_, err := db.ExecContext(
 			ctx,
 			`INSERT INTO sessions (id, quiz_id, host_player_id, join_code, phase)
-			 VALUES ('sess-mig-bad', ?, 1, 'PHZ234', 'question')`,
+			 VALUES ('sess-mig-bad', ?, 1, 'PHZ234', 'nonsense')`,
 			quizID,
 		)
 		if err == nil {
 			t.Error("insert with unknown phase err = nil, want a CHECK violation")
+		}
+	})
+}
+
+// TestSessionRunnerMigration_PhasesAndAnswers pins the MP-5 schema (#682):
+// the widened phase CHECK accepts the runner phases, the runner timing
+// columns exist on sessions, and session_answers enforces one pick per
+// (session, question, player). dbtest.Open ran every migration including the
+// table rebuild, so this asserts the rebuild preserved the lobby row and
+// produced the new shape.
+func TestSessionRunnerMigration_PhasesAndAnswers(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := dbtest.Open(t)
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v", cerr)
+		}
+	})
+
+	var quizID int64
+	if err := db.QueryRowContext(
+		ctx,
+		`INSERT INTO quizzes (title, slug, description, created_by_player_id, mode)
+		 VALUES ('Live', 'live-runner-mig', 'd', 1, 'live') RETURNING id`,
+	).Scan(&quizID); err != nil {
+		t.Fatalf("seed quiz err = %v, want nil", err)
+	}
+	if _, err := db.ExecContext(
+		ctx,
+		`INSERT INTO sessions (id, quiz_id, host_player_id, join_code) VALUES ('sess-run-1', ?, 1, 'RUN234')`,
+		quizID,
+	); err != nil {
+		t.Fatalf("seed session err = %v, want nil", err)
+	}
+
+	t.Run("phase CHECK accepts the runner phases", func(t *testing.T) {
+		t.Parallel()
+		for _, phase := range []string{"round_intro", "question", "reveal", "finished"} {
+			if _, err := db.ExecContext(
+				ctx, "UPDATE sessions SET phase = ? WHERE id = 'sess-run-1'", phase,
+			); err != nil {
+				t.Errorf("update phase to %q err = %v, want nil", phase, err)
+			}
+		}
+	})
+
+	t.Run("session_answers is unique per (session, question, player)", func(t *testing.T) {
+		t.Parallel()
+		var roundID int64
+		if err := db.QueryRowContext(
+			ctx, `INSERT INTO rounds (quiz_id, position, title) VALUES (?, 1, 'R') RETURNING id`, quizID,
+		).Scan(&roundID); err != nil {
+			t.Fatalf("seed round err = %v, want nil", err)
+		}
+		var questionID int64
+		if err := db.QueryRowContext(
+			ctx,
+			`INSERT INTO questions (quiz_id, round_id, text, position) VALUES (?, ?, 'Q', 1) RETURNING id`,
+			quizID, roundID,
+		).Scan(&questionID); err != nil {
+			t.Fatalf("seed question err = %v, want nil", err)
+		}
+		var optionID int64
+		if err := db.QueryRowContext(
+			ctx,
+			`INSERT INTO options (question_id, text, is_correct) VALUES (?, 'A', 1) RETURNING id`,
+			questionID,
+		).Scan(&optionID); err != nil {
+			t.Fatalf("seed option err = %v, want nil", err)
+		}
+		var playerID int64
+		if err := db.QueryRowContext(
+			ctx, `INSERT INTO players (display_name, role) VALUES ('run-join-1', 'player') RETURNING id`,
+		).Scan(&playerID); err != nil {
+			t.Fatalf("seed player err = %v, want nil", err)
+		}
+		if _, err := db.ExecContext(
+			ctx,
+			`INSERT INTO session_answers (session_id, question_id, player_id, option_id)
+			 VALUES ('sess-run-1', ?, ?, ?)`,
+			questionID, playerID, optionID,
+		); err != nil {
+			t.Fatalf("seed answer err = %v, want nil", err)
+		}
+
+		_, err := db.ExecContext(
+			ctx,
+			`INSERT INTO session_answers (session_id, question_id, player_id, option_id)
+			 VALUES ('sess-run-1', ?, ?, ?)`,
+			questionID, playerID, optionID,
+		)
+		if err == nil {
+			t.Error("duplicate answer err = nil, want a UNIQUE violation")
 		}
 	})
 }

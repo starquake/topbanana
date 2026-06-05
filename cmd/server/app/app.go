@@ -22,6 +22,7 @@ import (
 	"github.com/starquake/topbanana/internal/envtag"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/leaderboard"
+	"github.com/starquake/topbanana/internal/livesession"
 	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/server"
 	"github.com/starquake/topbanana/internal/store"
@@ -100,22 +101,20 @@ func Run(
 		stores.VerifyTokens, stores.ResetTokens, stores.Invites, stores.Retention,
 		tokenSweepInterval,
 	)
-	gameService := game.NewService(stores.Games, stores.Quizzes, logger)
-	if cfg.RevealDelay > 0 {
-		gameService.SetRevealDelay(cfg.RevealDelay)
-	}
-	// Process-local pub/sub for the leaderboard SSE stream (#239). The
-	// same hub is handed to the game service (publisher) and the server
-	// (subscriber side) so submitted answers fan out to live viewers.
-	leaderboardHub := leaderboard.NewHub()
-	gameService.SetLeaderboardPublisher(leaderboardHub)
+	gameService, leaderboardHub := newGameService(cfg, logger, stores)
+	sessionService, sessionHub := startSessionRunner(signalCtx, cfg, logger, stores, gameService)
 
 	mailerTester, mailerStatus, err := buildMailer(signalCtx, cfg, logger)
 	if err != nil {
 		return err
 	}
 
-	srv := server.New(logger, stores, gameService, leaderboardHub, cfg, mailerTester, mailerStatus)
+	realtime := server.Realtime{
+		LeaderboardHub: leaderboardHub,
+		SessionService: sessionService,
+		SessionHub:     sessionHub,
+	}
+	srv := server.New(logger, stores, gameService, realtime, cfg, mailerTester, mailerStatus)
 	if ln == nil {
 		ln, err = listener(signalCtx, cfg, logger)
 		if err != nil {
@@ -126,6 +125,71 @@ func Run(
 	}
 
 	return runHTTPServer(ctx, signalCtx, ln, srv, logger)
+}
+
+// newGameService builds the game service with the reveal-delay override
+// applied and the leaderboard hub wired as its publisher. The hub is the
+// process-local pub/sub for the leaderboard SSE stream (#239): the same
+// instance feeds the game service (publisher) and the server (subscriber
+// side) so submitted answers fan out to live viewers. Returns both so the
+// server can subscribe to the same hub.
+func newGameService(cfg *config.Config, logger *slog.Logger, stores *store.Stores) (*game.Service, *leaderboard.Hub) {
+	gameService := game.NewService(stores.Games, stores.Quizzes, logger)
+	if cfg.RevealDelay > 0 {
+		gameService.SetRevealDelay(cfg.RevealDelay)
+	}
+	leaderboardHub := leaderboard.NewHub()
+	gameService.SetLeaderboardPublisher(leaderboardHub)
+
+	return gameService, leaderboardHub
+}
+
+// startSessionRunner wires the hosted live-session service, its SSE tick hub,
+// and the runner over one set of instances: the service and runner both
+// publish ticks through the hub, the runner advances phases on the server
+// clock, and Start hands a started session to the runner via SetAdvancer. The
+// runner is one goroutine bound to ctx (the shutdown context), so it stops
+// before the DB closes. Returns the service + hub for server wiring (MP-5 /
+// #682).
+func startSessionRunner(
+	ctx context.Context,
+	cfg *config.Config,
+	logger *slog.Logger,
+	stores *store.Stores,
+	scorer livesession.Scorer,
+) (*livesession.Service, *livesession.Hub) {
+	service := livesession.NewService(stores.LiveSessions, stores.Quizzes, logger)
+	hub := livesession.NewHub()
+	service.SetPublisher(hub)
+	runner := livesession.NewRunner(stores.LiveSessions, stores.Quizzes, hub, scorer, logger, runnerConfig(cfg))
+	service.SetAdvancer(runner)
+	go runner.Run(ctx)
+
+	return service, hub
+}
+
+// runnerBeatTickDivisor keeps the runner's per-beat scan tick a fraction of
+// the configured beat so a shrunk beat is observed promptly without spinning.
+const runnerBeatTickDivisor = 4
+
+// runnerConfig builds the live-session runner config from cfg. When
+// SESSION_RUNNER_BEAT is set (the e2e / integration suites shrink it), it
+// drives the round-intro and reveal beats and the auto-start window so a
+// hosted game advances quickly; otherwise the runner falls back to its
+// built-in defaults. The tick interval tracks the beat so a shrunk beat is
+// observed promptly without spinning the loop when the beat is the default.
+func runnerConfig(cfg *config.Config) livesession.RunnerConfig {
+	if cfg.SessionRunnerBeat <= 0 {
+		return livesession.RunnerConfig{}
+	}
+	beat := cfg.SessionRunnerBeat
+
+	return livesession.RunnerConfig{
+		BeatInterval:    max(beat/runnerBeatTickDivisor, time.Millisecond),
+		RoundIntroBeat:  beat,
+		RevealBeat:      beat,
+		AutoStartWindow: beat,
+	}
 }
 
 // tokenSweeper is the slice of the verify / reset stores the periodic

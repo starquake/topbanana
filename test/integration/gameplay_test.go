@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -232,9 +233,19 @@ type integrationSetup struct {
 func setupIntegration(t *testing.T) (context.Context, integrationSetup) {
 	t.Helper()
 
-	ctx, srv := startServer(t, map[string]string{
-		"REGISTRATION_ENABLED": "true",
-	})
+	return setupIntegrationWithEnv(t, nil)
+}
+
+// setupIntegrationWithEnv is setupIntegration with extra env merged on top of
+// the registration-enabled default, so a test can shrink the session runner
+// beats (SESSION_RUNNER_BEAT) and still get a store.Stores for direct seeding.
+func setupIntegrationWithEnv(t *testing.T, extra map[string]string) (context.Context, integrationSetup) {
+	t.Helper()
+
+	env := map[string]string{"REGISTRATION_ENABLED": "true"}
+	maps.Copy(env, extra)
+
+	ctx, srv := startServer(t, env)
 
 	db, err := sql.Open("sqlite", srv.DBURI)
 	if err != nil {

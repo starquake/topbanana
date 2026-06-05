@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/rs/xid"
 	"modernc.org/sqlite"
@@ -150,6 +151,174 @@ func (s *LiveSessionStore) SetReady(
 	return nil
 }
 
+// GetSessionByID resolves a session by its primary key with the lobby roster
+// populated. Returns [livesession.ErrSessionNotFound] when the id is unknown.
+func (s *LiveSessionStore) GetSessionByID(ctx context.Context, id string) (*livesession.Session, error) {
+	row, err := s.q.GetSession(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, livesession.ErrSessionNotFound
+		}
+
+		return nil, fmt.Errorf("failed to get session by id: %w", err)
+	}
+
+	sess := sessionFromRow(row)
+	sess.Players, err = s.listPlayers(ctx, sess.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return sess, nil
+}
+
+// MarkStarted stamps started_at on a lobby session and reports whether it won
+// the race. The UPDATE is scoped to started_at IS NULL, so exactly one of a
+// host Start / auto-start sees a row affected.
+func (s *LiveSessionStore) MarkStarted(ctx context.Context, sessionID string) (bool, error) {
+	res, err := s.q.StartSession(ctx, sessionID)
+	if err != nil {
+		return false, fmt.Errorf("failed to start session: %w", err)
+	}
+
+	return database.MustRowsAffected(res) > 0, nil
+}
+
+// EnterRoundIntro moves the session into the round_intro phase for the round.
+func (s *LiveSessionStore) EnterRoundIntro(ctx context.Context, sessionID string, roundID int64) error {
+	if err := s.q.SetSessionRoundIntro(ctx, db.SetSessionRoundIntroParams{
+		CurrentRoundID: sql.NullInt64{Int64: roundID, Valid: true},
+		ID:             sessionID,
+	}); err != nil {
+		return fmt.Errorf("failed to enter round intro: %w", err)
+	}
+
+	return nil
+}
+
+// EnterQuestion issues a question with its server answer window.
+func (s *LiveSessionStore) EnterQuestion(
+	ctx context.Context, sessionID string, roundID, questionID int64, startedAt, expiresAt time.Time,
+) error {
+	if err := s.q.SetSessionQuestion(ctx, db.SetSessionQuestionParams{
+		CurrentRoundID:    sql.NullInt64{Int64: roundID, Valid: true},
+		CurrentQuestionID: sql.NullInt64{Int64: questionID, Valid: true},
+		QuestionStartedAt: sql.NullTime{Time: startedAt, Valid: true},
+		QuestionExpiresAt: sql.NullTime{Time: expiresAt, Valid: true},
+		ID:                sessionID,
+	}); err != nil {
+		return fmt.Errorf("failed to enter question: %w", err)
+	}
+
+	return nil
+}
+
+// EnterReveal moves the session into the reveal phase.
+func (s *LiveSessionStore) EnterReveal(ctx context.Context, sessionID string) error {
+	if err := s.q.SetSessionReveal(ctx, sessionID); err != nil {
+		return fmt.Errorf("failed to enter reveal: %w", err)
+	}
+
+	return nil
+}
+
+// Finish ends the session.
+func (s *LiveSessionStore) Finish(ctx context.Context, sessionID string) error {
+	if err := s.q.SetSessionFinished(ctx, sessionID); err != nil {
+		return fmt.Errorf("failed to finish session: %w", err)
+	}
+
+	return nil
+}
+
+// RecordAnswer records (or overwrites) a player's pick for the current
+// session question.
+func (s *LiveSessionStore) RecordAnswer(
+	ctx context.Context, sessionID string, questionID, playerID, optionID int64, answeredAt time.Time,
+) error {
+	if err := s.q.UpsertSessionAnswer(ctx, db.UpsertSessionAnswerParams{
+		SessionID:  sessionID,
+		QuestionID: questionID,
+		PlayerID:   playerID,
+		OptionID:   optionID,
+		AnsweredAt: answeredAt,
+	}); err != nil {
+		return fmt.Errorf("failed to record session answer: %w", err)
+	}
+
+	return nil
+}
+
+// CountAnswers returns how many players have picked for the session question.
+func (s *LiveSessionStore) CountAnswers(ctx context.Context, sessionID string, questionID int64) (int, error) {
+	count, err := s.q.CountSessionAnswersForQuestion(ctx, db.CountSessionAnswersForQuestionParams{
+		SessionID:  sessionID,
+		QuestionID: questionID,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to count session answers: %w", err)
+	}
+
+	return int(count), nil
+}
+
+// ListAnswers returns every pick for the session question in answered order,
+// with the chosen option's correctness.
+func (s *LiveSessionStore) ListAnswers(
+	ctx context.Context, sessionID string, questionID int64,
+) ([]*livesession.SessionAnswer, error) {
+	rows, err := s.q.ListSessionAnswersForQuestion(ctx, db.ListSessionAnswersForQuestionParams{
+		SessionID:  sessionID,
+		QuestionID: questionID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list session answers: %w", err)
+	}
+
+	answers := make([]*livesession.SessionAnswer, 0, len(rows))
+	for _, r := range rows {
+		a := &livesession.SessionAnswer{
+			PlayerID:   r.PlayerID,
+			OptionID:   r.OptionID,
+			AnsweredAt: r.AnsweredAt,
+			Correct:    r.IsCorrect,
+		}
+		if r.Score.Valid {
+			score := int(r.Score.Int64)
+			a.Score = &score
+		}
+		answers = append(answers, a)
+	}
+
+	return answers, nil
+}
+
+// SetAnswerScore writes the computed score for one pick at close.
+func (s *LiveSessionStore) SetAnswerScore(
+	ctx context.Context, sessionID string, questionID, playerID int64, score int,
+) error {
+	if err := s.q.SetSessionAnswerScore(ctx, db.SetSessionAnswerScoreParams{
+		Score:      sql.NullInt64{Int64: int64(score), Valid: true},
+		SessionID:  sessionID,
+		QuestionID: questionID,
+		PlayerID:   playerID,
+	}); err != nil {
+		return fmt.Errorf("failed to set session answer score: %w", err)
+	}
+
+	return nil
+}
+
+// ListLiveSessionIDs returns the ids of every session not yet finished.
+func (s *LiveSessionStore) ListLiveSessionIDs(ctx context.Context) ([]string, error) {
+	ids, err := s.q.ListLiveSessionIDs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list live session ids: %w", err)
+	}
+
+	return ids, nil
+}
+
 // listPlayers loads the lobby roster for a session in join order.
 func (s *LiveSessionStore) listPlayers(ctx context.Context, sessionID string) ([]*livesession.Player, error) {
 	rows, err := s.q.ListSessionPlayers(ctx, sessionID)
@@ -175,6 +344,18 @@ func sessionFromRow(row db.Session) *livesession.Session {
 		JoinCode:     row.JoinCode,
 		Phase:        livesession.Phase(row.Phase),
 		CreatedAt:    row.CreatedAt,
+	}
+	if row.CurrentRoundID.Valid {
+		sess.CurrentRoundID = &row.CurrentRoundID.Int64
+	}
+	if row.CurrentQuestionID.Valid {
+		sess.CurrentQuestionID = &row.CurrentQuestionID.Int64
+	}
+	if row.QuestionStartedAt.Valid {
+		sess.QuestionStartedAt = &row.QuestionStartedAt.Time
+	}
+	if row.QuestionExpiresAt.Valid {
+		sess.QuestionExpiresAt = &row.QuestionExpiresAt.Time
 	}
 	if row.StartedAt.Valid {
 		sess.StartedAt = &row.StartedAt.Time

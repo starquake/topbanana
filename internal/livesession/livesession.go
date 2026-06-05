@@ -40,17 +40,38 @@ var (
 	// as a sentinel so the handler can map it to a 500 rather than leaking
 	// the retry-exhaustion detail.
 	ErrJoinCodeUnavailable = errors.New("could not allocate a unique join code")
+
+	// ErrNotHost is returned by host-gated actions ([Service.Start]) when
+	// the caller is not the session's host. Handlers map it to 403.
+	ErrNotHost = errors.New("player is not the session host")
+
+	// ErrSessionAlreadyStarted is returned by [Service.Start] when the
+	// session has already left the lobby. Handlers treat it as an
+	// idempotent no-op (the host clicked start twice or the auto-start
+	// raced the host).
+	ErrSessionAlreadyStarted = errors.New("session has already started")
+
+	// ErrQuestionNotOpen is returned by [Service.SubmitAnswer] when the
+	// session is not currently in the question phase, the option is not
+	// part of the current question, or the answer window has closed.
+	ErrQuestionNotOpen = errors.New("no question is open for answers")
 )
 
 // Phase is the server-authoritative state-machine label for a session.
-// Only [PhaseLobby] exists in MP-1; the later gameplay phases (round
-// intro, question, reveal, results, finished) land in MP-5. The DB CHECK
-// on sessions.phase enforces the same (currently single-value) set.
+// The runner (MP-5 / #682) advances a session through the gameplay phases;
+// round_results lands in MP-6. The DB CHECK on sessions.phase enforces the
+// same set.
 type Phase string
 
-// Session phases. Only PhaseLobby exists today (MP-1 / #678).
+// Session phases. The runner advances lobby -> round_intro -> question ->
+// reveal (repeating per question, with a round_intro between rounds) ->
+// finished.
 const (
-	PhaseLobby Phase = "lobby"
+	PhaseLobby      Phase = "lobby"
+	PhaseRoundIntro Phase = "round_intro"
+	PhaseQuestion   Phase = "question"
+	PhaseReveal     Phase = "reveal"
+	PhaseFinished   Phase = "finished"
 )
 
 // errGetSessionByCodeFmt is the wrap format every code-keyed lookup shares
@@ -67,10 +88,20 @@ type Session struct {
 	HostPlayerID int64
 	JoinCode     string
 	Phase        Phase
-	CreatedAt    time.Time
-	StartedAt    *time.Time
-	FinishedAt   *time.Time
-	Players      []*Player
+	// CurrentRoundID / CurrentQuestionID point at the question the runner
+	// is currently driving; nil in the lobby and once finished.
+	CurrentRoundID    *int64
+	CurrentQuestionID *int64
+	// QuestionStartedAt / QuestionExpiresAt are the server-authoritative
+	// answer window for the current question (the same StartedAt/ExpiredAt
+	// the solo game uses). Clients drive their countdown off
+	// QuestionExpiresAt minus the server clock, never their own wall clock.
+	QuestionStartedAt *time.Time
+	QuestionExpiresAt *time.Time
+	CreatedAt         time.Time
+	StartedAt         *time.Time
+	FinishedAt        *time.Time
+	Players           []*Player
 }
 
 // Player is one roster row: a player who joined a session, with the
@@ -91,9 +122,20 @@ type Player struct {
 // round-trip. This is the frozen DTO contract the later FE/BE phases
 // (MP-2..MP-5) build on; the JSON wire shape is pinned in the clientapi
 // handler.
+//
+// CurrentQuestion and Answers are populated only in the gameplay phases
+// (round_intro onward); they are nil in the lobby. Correctness on the
+// question's options and on each answer is surfaced ONLY in the reveal
+// phase - before reveal the question carries option text without a correct
+// flag and the answers carry player+order only, never which pick was right.
 type LobbyState struct {
-	Session *Session
-	Quiz    *quiz.Quiz
+	Session         *Session
+	Quiz            *quiz.Quiz
+	CurrentQuestion *quiz.Question
+	Answers         []*SessionAnswer
+	// Revealed is true once the session is in the reveal phase, the single
+	// gate the handler reads to decide whether to expose correctness.
+	Revealed bool
 }
 
 // Store is the persistence surface the live-session domain needs. Defined
@@ -124,6 +166,66 @@ type Store interface {
 	// [ErrNotParticipant] when the player has no roster row in the
 	// session.
 	SetReady(ctx context.Context, sessionID string, playerID int64, ready bool) error
+	// GetSessionByID resolves a session by its primary key with the roster
+	// populated. The runner works in session ids (its in-memory bookkeeping
+	// is keyed by id), while the lobby paths work in join codes. Returns
+	// [ErrSessionNotFound] when the id is unknown.
+	GetSessionByID(ctx context.Context, id string) (*Session, error)
+	// MarkStarted stamps started_at on a session still in the lobby and
+	// reports whether it won the race (true) or the session had already
+	// started (false). Used by both the host Start and the auto-start so
+	// only one of them issues the first round.
+	MarkStarted(ctx context.Context, sessionID string) (bool, error)
+	// EnterRoundIntro moves the session into the round_intro phase for the
+	// given round, clearing the per-question runner columns.
+	EnterRoundIntro(ctx context.Context, sessionID string, roundID int64) error
+	// EnterQuestion issues a question: records the current round + question
+	// and the server answer window, and moves into the question phase.
+	EnterQuestion(
+		ctx context.Context,
+		sessionID string,
+		roundID, questionID int64,
+		startedAt, expiresAt time.Time,
+	) error
+	// EnterReveal moves the session into the reveal phase, leaving the
+	// current question and window in place.
+	EnterReveal(ctx context.Context, sessionID string) error
+	// Finish ends the session: marks it finished and clears the
+	// per-question runner columns.
+	Finish(ctx context.Context, sessionID string) error
+	// RecordAnswer records (or overwrites) a player's pick for the current
+	// session question. Idempotent on (session, question, player).
+	RecordAnswer(
+		ctx context.Context,
+		sessionID string,
+		questionID, playerID, optionID int64,
+		answeredAt time.Time,
+	) error
+	// CountAnswers returns how many players have picked for the given
+	// session question, so the runner can close early once every active
+	// player has answered.
+	CountAnswers(ctx context.Context, sessionID string, questionID int64) (int, error)
+	// ListAnswers returns every pick for the given session question in
+	// answered order, with the chosen option's correctness, for scoring at
+	// close and the answered-order view.
+	ListAnswers(ctx context.Context, sessionID string, questionID int64) ([]*SessionAnswer, error)
+	// SetAnswerScore writes the computed score for one pick at close.
+	SetAnswerScore(ctx context.Context, sessionID string, questionID, playerID int64, score int) error
+	// ListLiveSessionIDs returns the ids of every session not yet finished,
+	// in creation order, so the runner can scan active rooms each beat.
+	ListLiveSessionIDs(ctx context.Context) ([]string, error)
+}
+
+// SessionAnswer is one recorded pick. Correct is the chosen option's
+// correctness; the runner only ever surfaces it to clients in the reveal
+// phase, never before (the no-spoiler guarantee). Score is nil until the
+// question closes.
+type SessionAnswer struct {
+	PlayerID   int64
+	OptionID   int64
+	AnsweredAt time.Time
+	Correct    bool
+	Score      *int
 }
 
 // ErrDisplayNameTaken is returned by [Store.AddPlayer] when the requested
@@ -149,6 +251,18 @@ type Publisher interface {
 	Publish(code string, phase Phase) Tick
 }
 
+// Advancer is the seam through which [Service.Start] hands a freshly
+// started session to the runner so it begins the first round immediately
+// (the host-Start override) instead of waiting for the next runner beat.
+// Implemented by *Runner in production; nil-by-default so tests that drive
+// the runner directly (or do not need a runner) need not wire one.
+type Advancer interface {
+	// Begin starts the runner driving the session identified by id from the
+	// lobby into its first round. Safe to call more than once for the same
+	// session; a session already past the lobby is a no-op.
+	Begin(ctx context.Context, sessionID string)
+}
+
 // Service orchestrates the live-session use cases over the store layer and
 // the quiz reader.
 type Service struct {
@@ -156,6 +270,7 @@ type Service struct {
 	quizzes   QuizReader
 	logger    *slog.Logger
 	publisher Publisher
+	advancer  Advancer
 	newCode   func() string
 	codeTries int
 }
@@ -203,6 +318,13 @@ func newServiceWithCodeGen(
 // session. There is no in-flight reconfiguration use case for this field.
 func (s *Service) SetPublisher(p Publisher) {
 	s.publisher = p
+}
+
+// SetAdvancer wires the runner that [Service.Start] hands a started session
+// to so it begins immediately. Same startup-only contract as
+// [Service.SetPublisher]: call during wiring, before any handler runs.
+func (s *Service) SetAdvancer(a Advancer) {
+	s.advancer = a
 }
 
 // CreateSession opens a hosted session for the given quiz on behalf of the
@@ -282,6 +404,80 @@ func (s *Service) SetReady(ctx context.Context, joinCode string, playerID int64,
 	return nil
 }
 
+// Start is the host's override to begin the game immediately, bypassing the
+// auto-start ready window. Only the host may call it. Marks the session
+// started and hands it to the runner to enter the first round at once.
+// Returns [ErrSessionNotFound] for an unknown code, [ErrNotHost] when the
+// caller is not the host, and [ErrSessionAlreadyStarted] when the session has
+// already left the lobby (treated as an idempotent no-op by the handler).
+func (s *Service) Start(ctx context.Context, joinCode string, hostPlayerID int64) error {
+	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
+	if err != nil {
+		return fmt.Errorf(errGetSessionByCodeFmt, err)
+	}
+	if sess.HostPlayerID != hostPlayerID {
+		return ErrNotHost
+	}
+
+	won, err := s.store.MarkStarted(ctx, sess.ID)
+	if err != nil {
+		return fmt.Errorf("failed to mark session started: %w", err)
+	}
+	if !won {
+		return ErrSessionAlreadyStarted
+	}
+
+	if s.advancer != nil {
+		s.advancer.Begin(ctx, sess.ID)
+	}
+
+	return nil
+}
+
+// SubmitAnswer records the caller's pick for the session's current question.
+// The pick is validated against the live question (the option must belong to
+// it and the answer window must be open) and stored without its correctness
+// being surfaced - the runner scores it at close. Returns [ErrSessionNotFound]
+// for an unknown code, [ErrNotParticipant] when the caller has not joined,
+// and [ErrQuestionNotOpen] when no question is currently accepting answers or
+// the option is not part of it.
+func (s *Service) SubmitAnswer(
+	ctx context.Context, joinCode string, playerID, optionID int64, answeredAt time.Time,
+) error {
+	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
+	if err != nil {
+		return fmt.Errorf(errGetSessionByCodeFmt, err)
+	}
+	if !s.isParticipant(sess, playerID) {
+		return ErrNotParticipant
+	}
+	if sess.Phase != PhaseQuestion || sess.CurrentQuestionID == nil || sess.QuestionExpiresAt == nil {
+		return ErrQuestionNotOpen
+	}
+	if answeredAt.After(*sess.QuestionExpiresAt) {
+		return ErrQuestionNotOpen
+	}
+
+	question, err := s.currentQuizQuestion(ctx, sess)
+	if err != nil {
+		return err
+	}
+	if !optionBelongsToQuestion(question, optionID) {
+		return ErrQuestionNotOpen
+	}
+
+	if err = s.store.RecordAnswer(ctx, sess.ID, *sess.CurrentQuestionID, playerID, optionID, answeredAt); err != nil {
+		return fmt.Errorf("failed to record session answer: %w", err)
+	}
+
+	// A new pick changes the answered-order view, so signal subscribers to
+	// re-GET. The runner closes the question on the next beat if everyone has
+	// now answered.
+	s.publish(sess.JoinCode, sess.Phase)
+
+	return nil
+}
+
 // GetLobbyState returns the authoritative lobby state for the session
 // identified by join code: the session (with its roster) plus the quiz
 // metadata the lobby renders. Participant-gated: only a player on the
@@ -294,7 +490,7 @@ func (s *Service) GetLobbyState(ctx context.Context, joinCode string, playerID i
 		return nil, fmt.Errorf(errGetSessionByCodeFmt, err)
 	}
 
-	if !s.canView(sess, playerID) {
+	if !s.isParticipant(sess, playerID) {
 		return nil, ErrNotParticipant
 	}
 
@@ -303,7 +499,12 @@ func (s *Service) GetLobbyState(ctx context.Context, joinCode string, playerID i
 		return nil, fmt.Errorf("failed to get quiz for lobby state: %w", err)
 	}
 
-	return &LobbyState{Session: sess, Quiz: qz}, nil
+	state := &LobbyState{Session: sess, Quiz: qz, Revealed: sess.Phase == PhaseReveal}
+	if err = s.populateInGame(ctx, state); err != nil {
+		return nil, err
+	}
+
+	return state, nil
 }
 
 // AuthorizeView resolves a join code to its canonical code and current
@@ -320,21 +521,81 @@ func (s *Service) AuthorizeView(ctx context.Context, joinCode string, playerID i
 		return "", "", fmt.Errorf(errGetSessionByCodeFmt, err)
 	}
 
-	if !s.canView(sess, playerID) {
+	if !s.isParticipant(sess, playerID) {
 		return "", "", ErrNotParticipant
 	}
 
 	return sess.JoinCode, sess.Phase, nil
 }
 
-// canView reports whether playerID may read the session's lobby: the host
-// always can, and any roster player can.
-func (*Service) canView(sess *Session, playerID int64) bool {
+// currentQuizQuestion loads the quiz question the session is currently
+// running. Returns [ErrQuestionNotOpen] when the current question id no
+// longer resolves against the quiz (a deleted question mid-game).
+func (s *Service) currentQuizQuestion(ctx context.Context, sess *Session) (*quiz.Question, error) {
+	qz, err := s.quizzes.GetQuiz(ctx, sess.QuizID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get quiz for answer: %w", err)
+	}
+	for _, q := range qz.Questions {
+		if q.ID == *sess.CurrentQuestionID {
+			return q, nil
+		}
+	}
+
+	return nil, ErrQuestionNotOpen
+}
+
+// populateInGame fills CurrentQuestion + Answers when the session is running a
+// question (the question and reveal phases). Pre-reveal the answers carry no
+// correctness; the handler still strips the option correct flag too. Leaves
+// the fields nil in the lobby / round_intro / finished phases, which have no
+// live question.
+func (s *Service) populateInGame(ctx context.Context, state *LobbyState) error {
+	sess := state.Session
+	if sess.CurrentQuestionID == nil {
+		return nil
+	}
+	if sess.Phase != PhaseQuestion && sess.Phase != PhaseReveal {
+		return nil
+	}
+
+	for _, q := range state.Quiz.Questions {
+		if q.ID == *sess.CurrentQuestionID {
+			state.CurrentQuestion = q
+
+			break
+		}
+	}
+
+	answers, err := s.store.ListAnswers(ctx, sess.ID, *sess.CurrentQuestionID)
+	if err != nil {
+		return fmt.Errorf("failed to list session answers for state: %w", err)
+	}
+	state.Answers = answers
+
+	return nil
+}
+
+// isParticipant reports whether playerID is the host or a roster player.
+func (*Service) isParticipant(sess *Session, playerID int64) bool {
 	if sess.HostPlayerID == playerID {
 		return true
 	}
 	for _, p := range sess.Players {
 		if p.PlayerID == playerID {
+			return true
+		}
+	}
+
+	return false
+}
+
+// optionBelongsToQuestion reports whether optionID is one of the question's
+// options. The runner records picks only for the live question's own
+// options so a crafted client cannot answer with an unrelated option id.
+func optionBelongsToQuestion(question *quiz.Question, optionID int64) bool {
+	for _, o := range question.Options {
+		if o.ID == optionID {
 			return true
 		}
 	}
