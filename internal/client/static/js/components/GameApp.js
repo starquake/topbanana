@@ -1,6 +1,7 @@
 import { quizService } from '../services/QuizService.js';
 import { gameService } from '../services/GameService.js';
 import { playerService } from '../services/PlayerService.js';
+import { runAnim } from '../util/anim.js';
 import { openShareDialog } from '/assets/js/share.js';
 
 // PLAY_PATH_PATTERN matches /play/<anything>-<integer>; the integer suffix
@@ -14,29 +15,6 @@ const PLAY_PATH_PATTERN = /^\/play\/.+-(\d+)\/?$/;
 // transient drop; the browser auto-retries between each onerror so
 // the actual elapsed time is ~9s before we flip.
 const leaderboardErrorRetryLimit = 3;
-
-// reducedMotion returns true when the OS-level preference is set; all
-// JS-driven animation calls below short-circuit in that case so the page
-// behaves identically to a no-animation build for affected users.
-function reducedMotion() {
-    return typeof window !== 'undefined'
-        && typeof window.matchMedia === 'function'
-        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
-
-// runAnim wraps anime.js with safe fallbacks so missing globals or
-// unsupported reduced-motion preferences don't break the page. The
-// targets argument can be a CSS selector string or a DOM element.
-function runAnim(targets, params) {
-    if (reducedMotion()) return;
-    const a = typeof window !== 'undefined' ? window.anime : null;
-    if (!a) return;
-    if (typeof a.animate === 'function') {
-        a.animate(targets, params);
-    } else if (typeof a === 'function') {
-        a({ targets, ...params });
-    }
-}
 
 export class GameApp {
     constructor() {
