@@ -5,20 +5,33 @@ import { sessionService } from '../services/SessionService.js';
 // back to the typed-code phase there.
 const JOIN_PATH_PATTERN = /^\/join\/([^/]+)\/?$/;
 
-// JoinApp is the Alpine component behind the player join + lobby surface
-// (MP-4 / #681). It is deliberately separate from gameApp (the solo client)
-// and from the host/TV surface: it owns only the player's own join form and
-// lobby view.
+// QUESTION_OPTION_TONES cycles the four answer-button tones over a question's
+// options, matching the solo client's per-index Kahoot-style colours.
+const QUESTION_OPTION_TONES = ['btn-answer-tone-a', 'btn-answer-tone-b', 'btn-answer-tone-c', 'btn-answer-tone-d'];
+
+// JoinApp is the Alpine component behind the player join + lobby + in-game
+// surface (MP-4 / #681, MP-7 / #684). It is deliberately separate from gameApp
+// (the solo client) and from the host/TV surface: it owns only the player's
+// own join form, lobby view, and synchronized question play.
 //
-// Three phases, gated by `phase`:
+// `phase` is the local join-flow stage:
 //   - 'code'  : no room code yet - the PC enter-code form.
 //   - 'name'  : code known, not joined - the display-name form.
-//   - 'lobby' : joined - the roster + ready toggle, driven by SSE.
+//   - 'lobby' : joined - everything from the lobby roster through play and the
+//               final standings is driven by the server phase on state.phase.
 //
-// The lobby follows the frozen contract: the SSE channel carries only
+// Once in the 'lobby' stage the view rendered is decided by state.phase (the
+// server-authoritative session phase): lobby roster, round_intro, question,
+// reveal, round_results, or finished. The player never advances the phase -
+// the runner does, server-side - they only submit one answer per question.
+//
+// Everything follows the frozen contract: the SSE channel carries only
 // {version, phase} ticks, so every tick (and the initial frame on subscribe)
-// triggers a fresh GET /state. The component never reads roster data off the
-// stream.
+// triggers a fresh GET /state. The component never reads game data off the
+// stream; GET /state is the only authoritative read. The per-question
+// countdown runs off QuestionExpiresAt minus the server clock (derived from
+// the state response's serverNow), never the device wall clock - the same
+// technique the solo client uses.
 export class JoinApp {
     constructor() {
         // 'code' | 'name' | 'lobby'.
@@ -49,6 +62,33 @@ export class JoinApp {
         this.lobbyClosed = false;
         // The SSE subscription handle, closed on teardown and before re-open.
         this.eventSource = null;
+
+        // --- In-game state (MP-7 / #684) -------------------------------------
+        // Offset between the server clock and Date.now() in ms, refreshed from
+        // serverNow in every state read. serverTime() applies it so the
+        // per-question countdown runs against the server's view of "now"
+        // rather than a skewed device clock (mirrors the solo client, #180).
+        this.clockOffset = 0;
+        // Drives the per-question countdown bar: 100 at the start of the answer
+        // window, draining to 0 at the deadline.
+        this.questionProgress = 100;
+        // Interval handle for the countdown, cleared before each new countdown
+        // and on teardown.
+        this.questionTimer = null;
+        // The question id the countdown / answered flag are currently tracking,
+        // so a state refresh only resets them when the runner moves to a new
+        // question (not on every tick within the same one).
+        this.currentQuestionId = null;
+        // The option the player picked for the current question, or null before
+        // they answer. Drives the "answered, waiting" state and (at reveal) the
+        // highlight of their own pick.
+        this.pickedOptionId = null;
+        // True while the answer POST is in flight, to guard the option buttons.
+        this.submitting = false;
+        // Surfaces a retry banner when an answer POST throws (5xx / network).
+        // Cleared on the next pick. A 409 (window closed) is not an error: the
+        // player still lands in the answered/waiting state.
+        this.answerError = false;
     }
 
     // init resolves the room code from the URL. A /join/{code} deep link lands
@@ -61,8 +101,12 @@ export class JoinApp {
             this.phase = 'name';
         }
         // Closing the stream on unload avoids leaking a server-side
-        // subscriber when the player navigates away or closes the tab.
-        window.addEventListener('beforeunload', () => this.closeStream());
+        // subscriber when the player navigates away or closes the tab; clearing
+        // the question timer stops a stale countdown interval from firing.
+        window.addEventListener('beforeunload', () => {
+            this.closeStream();
+            this.clearQuestionTimer();
+        });
     }
 
     // submitCode advances from the enter-code form to the name form. It does
@@ -154,10 +198,105 @@ export class JoinApp {
         if (state === null) {
             this.lobbyClosed = true;
             this.closeStream();
+            this.clearQuestionTimer();
             return;
         }
         this.state = state;
+        this.syncClockFrom(state);
         this.syncReadyFromState();
+        this.syncQuestionFromState();
+    }
+
+    // syncClockFrom recomputes clockOffset from the serverNow that travels with
+    // every state read, so the per-question countdown runs on the server's
+    // clock rather than a skewed device clock (mirrors the solo client, #180).
+    // A missing or unparseable serverNow leaves the offset untouched.
+    syncClockFrom(state) {
+        if (!state || !state.serverNow) return;
+        const serverMs = new Date(state.serverNow).getTime();
+        if (!Number.isFinite(serverMs)) return;
+        this.clockOffset = serverMs - Date.now();
+    }
+
+    // serverTime returns the current time in ms as the server sees it, using
+    // the offset captured on the last state read. All countdown math goes
+    // through this helper.
+    serverTime() {
+        return Date.now() + this.clockOffset;
+    }
+
+    // syncQuestionFromState reconciles the in-game question view with the
+    // server phase on each state read. When the runner moves to a new question
+    // (a different question id, or the question phase re-entered) it resets the
+    // per-question pick + countdown; entering the question phase (re)starts the
+    // countdown off the server deadline; leaving it clears the timer. The pick
+    // is reset only on a genuine question change, so an SSE tick within the
+    // same question does not wipe the player's answered/waiting state.
+    syncQuestionFromState() {
+        const question = this.state ? this.state.question : null;
+        const phase = this.state ? this.state.phase : null;
+
+        const questionId = question ? question.id : null;
+        if (questionId !== this.currentQuestionId) {
+            this.currentQuestionId = questionId;
+            this.pickedOptionId = null;
+            this.answerError = false;
+        }
+
+        // Drive the countdown only while the question is open AND the player
+        // has not yet answered. Once they pick, the bar freezes on the
+        // answered/waiting state - a later tick (e.g. another player answering)
+        // must not re-arm the countdown and un-freeze it.
+        if (phase === 'question' && question && !this.hasAnswered()) {
+            this.startQuestionCountdown(question);
+            return;
+        }
+        // Any non-answering state (already answered, or a non-question phase:
+        // reveal, round_intro, round_results, finished, lobby) freezes the bar.
+        this.clearQuestionTimer();
+        if (phase === 'reveal') {
+            this.questionProgress = 0;
+        }
+    }
+
+    // startQuestionCountdown drives the answer-window bar 100 -> 0 over
+    // [startedAt, expiresAt] on the server clock. Idempotent across ticks
+    // within the same question: it clears any prior interval first, then
+    // re-derives the remaining window from the absolute server deadline, so a
+    // resync mid-question simply re-anchors the bar where it should be. If the
+    // window is already past it pins the bar at 0 without spinning an interval.
+    startQuestionCountdown(question) {
+        this.clearQuestionTimer();
+        if (!question || !question.startedAt || !question.expiresAt) {
+            this.questionProgress = 100;
+            return;
+        }
+        const start = new Date(question.startedAt).getTime();
+        const end = new Date(question.expiresAt).getTime();
+        const total = end - start;
+        if (!Number.isFinite(total) || total <= 0) {
+            this.questionProgress = 0;
+            return;
+        }
+        const tick = () => {
+            const remaining = end - this.serverTime();
+            this.questionProgress = Math.max(0, Math.min(100, (remaining / total) * 100));
+            if (this.questionProgress <= 0) {
+                this.clearQuestionTimer();
+            }
+        };
+        tick();
+        if (this.questionProgress <= 0) return;
+        this.questionTimer = setInterval(tick, 100);
+    }
+
+    // clearQuestionTimer cancels the countdown interval. Safe to call when no
+    // timer is pending.
+    clearQuestionTimer() {
+        if (this.questionTimer) {
+            clearInterval(this.questionTimer);
+            this.questionTimer = null;
+        }
     }
 
     // syncReadyFromState mirrors the viewer's own ready flag off the roster so
@@ -221,5 +360,96 @@ export class JoinApp {
     // isMe reports whether a roster row is the viewer's own, for highlighting.
     isMe(player) {
         return player.displayName === this.myDisplayName;
+    }
+
+    // currentQuestion returns the live question off the authoritative state, or
+    // null outside the question / reveal phases.
+    currentQuestion() {
+        return this.state ? this.state.question : null;
+    }
+
+    // hasAnswered reports whether the player has locked in a pick for the
+    // current question, gating the "answered, waiting" state.
+    hasAnswered() {
+        return this.pickedOptionId !== null;
+    }
+
+    // submitAnswer records the player's single pick for the current question.
+    // One answer per question: once a pick lands (or a benign 409 says the
+    // window closed) the buttons lock into the answered/waiting state. The
+    // server timestamps the pick on its own clock, so no client time is sent.
+    // A 5xx / network failure leaves the pick unset and raises a retry banner
+    // so the player can try again while the window is still open.
+    async submitAnswer(optionId) {
+        if (this.submitting || this.hasAnswered()) return;
+        const question = this.currentQuestion();
+        if (!this.state || this.state.phase !== 'question' || !question) return;
+        this.submitting = true;
+        this.answerError = false;
+        // Lock the pick optimistically so the buttons disable the instant the
+        // player taps, before the POST resolves; a hard failure rolls it back.
+        this.pickedOptionId = optionId;
+        // Stop the local countdown at the tap so the bar freezes on the
+        // answered state rather than continuing to drain visually.
+        this.clearQuestionTimer();
+        try {
+            const result = await sessionService.answer(this.code, optionId);
+            if (!result.ok && result.kind === 'closed') {
+                // The window closed between the tap and the POST. The player
+                // gets no more attempts this question, so hold the answered
+                // state rather than surfacing an error.
+                return;
+            }
+        } catch {
+            this.pickedOptionId = null;
+            this.answerError = true;
+            // Re-arm the countdown so the player keeps the time they had left;
+            // the absolute server deadline makes startQuestionCountdown
+            // recompute the real remaining window.
+            this.startQuestionCountdown(question);
+        } finally {
+            this.submitting = false;
+        }
+    }
+
+    // correctOptionIds returns the revealed correct-option ids, empty before
+    // reveal (the no-spoiler guarantee: the server omits them until then).
+    correctOptionIds() {
+        const question = this.currentQuestion();
+        return question && Array.isArray(question.correctOptionIds) ? question.correctOptionIds : [];
+    }
+
+    // isRevealed reports whether the session is in the reveal phase, where the
+    // correct answer is shown.
+    isRevealed() {
+        return !!this.state && this.state.phase === 'reveal';
+    }
+
+    // pickWasCorrect reports whether the player's revealed pick was a correct
+    // option. Meaningful only at reveal; false before then or if they did not
+    // answer.
+    pickWasCorrect() {
+        if (this.pickedOptionId === null) return false;
+        return this.correctOptionIds().includes(this.pickedOptionId);
+    }
+
+    // optionStateClass returns the answer-button class string. During the
+    // answer window it is the per-index tone, with the player's own pick
+    // marked once they have answered. At reveal the correctness skin wins: the
+    // correct option(s) light up, a wrong pick is flagged, and everything else
+    // dims.
+    optionStateClass(option, idx) {
+        if (this.isRevealed()) {
+            if (this.correctOptionIds().includes(option.id)) return 'btn-answer-correct';
+            if (this.pickedOptionId === option.id) return 'btn-answer-wrong';
+            return 'btn-answer-dim';
+        }
+        const tone = QUESTION_OPTION_TONES[idx % QUESTION_OPTION_TONES.length];
+        // The player's locked-in pick keeps its tone but gains a filled
+        // background + accent ring so the answered/waiting state is legible
+        // without leaking correctness. Uses existing theme-token utilities so
+        // no new CSS class is needed.
+        if (this.pickedOptionId === option.id) return `btn-answer ${tone} bg-surface-2 ring-2 ring-accent`;
+        return `btn-answer ${tone}`;
     }
 }

@@ -101,7 +101,10 @@
                 </form>
             </div>
 
-            <!-- Lobby phase: roster + ready toggle, driven by SSE -> GET state. -->
+            <!-- Joined: the lobby roster through play and final standings, all
+                 driven by the server phase on state.phase off the SSE -> GET
+                 state loop. The runner owns phase transitions; the player only
+                 submits one answer per question. -->
             <div x-show="phase === 'lobby'">
                 <template x-if="lobbyClosed">
                     <div class="feedback-banner feedback-danger mb-6" role="status" data-testid="lobby-closed">
@@ -109,8 +112,9 @@
                     </div>
                 </template>
 
-                <template x-if="!lobbyClosed && state">
-                    <div>
+                <!-- Lobby roster + ready toggle. -->
+                <template x-if="!lobbyClosed && state && state.phase === 'lobby'">
+                    <div data-testid="lobby-view">
                         <div class="mb-6">
                             <p class="label-eyebrow">Lobby</p>
                             <h2 class="font-display text-2xl font-semibold text-text" x-text="state.quiz.title"></h2>
@@ -160,6 +164,92 @@
                             <span x-show="!isReady">I'm ready</span>
                             <span x-show="isReady">Not ready</span>
                         </button>
+                    </div>
+                </template>
+
+                <!-- Round intro: a brief "get ready" screen between rounds. -->
+                <template x-if="!lobbyClosed && state && state.phase === 'round_intro'">
+                    <div class="text-center py-16" data-testid="round-intro">
+                        <p class="label-eyebrow">Get ready</p>
+                        <h2 class="mt-2 font-display text-3xl font-semibold text-text">The next round is starting</h2>
+                        <p class="mt-4 text-text-dim">Hang tight - the first question is on its way.</p>
+                    </div>
+                </template>
+
+                <!-- Question: synchronized answer window. One pick, then the
+                     answered/waiting state until the runner reveals. -->
+                <template x-if="!lobbyClosed && state && state.phase === 'question' && state.question">
+                    <div data-testid="question-view">
+                        <progress class="progress block w-full h-[3px] bg-border rounded-full overflow-hidden mb-6 progress-answer [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear"
+                                  :value="questionProgress" max="100"></progress>
+
+                        <h2 class="mb-6 font-display text-2xl font-semibold text-text"
+                            data-testid="question-text"
+                            x-text="state.question.text"></h2>
+
+                        <template x-if="answerError">
+                            <div class="feedback-banner feedback-danger mb-4" role="alert" data-testid="answer-error">
+                                Couldn't submit your answer - tap again to retry.
+                            </div>
+                        </template>
+
+                        <div class="flex flex-col gap-3" data-testid="question-options">
+                            <template x-for="(option, idx) in state.question.options" :key="option.id">
+                                <button type="button"
+                                        :class="optionStateClass(option, idx)"
+                                        :data-picked="pickedOptionId === option.id ? 'true' : 'false'"
+                                        :disabled="submitting || hasAnswered()"
+                                        @click="submitAnswer(option.id)"
+                                        x-text="option.text"></button>
+                            </template>
+                        </div>
+
+                        <template x-if="hasAnswered()">
+                            <p class="mt-6 text-center text-text-dim" role="status" data-testid="answered-waiting">
+                                Answer locked in - waiting for everyone else...
+                            </p>
+                        </template>
+                    </div>
+                </template>
+
+                <!-- Reveal: the correct answer is shown, with the player's own
+                     pick flagged. No live countdown runs here. -->
+                <template x-if="!lobbyClosed && state && state.phase === 'reveal' && state.question">
+                    <div data-testid="reveal-view">
+                        <p class="label-eyebrow" data-testid="reveal-verdict"
+                           x-text="pickWasCorrect() ? 'Correct!' : (hasAnswered() ? 'Not quite' : 'Time up')"></p>
+                        <h2 class="mb-6 mt-1 font-display text-2xl font-semibold text-text"
+                            x-text="state.question.text"></h2>
+
+                        <div class="flex flex-col gap-3" data-testid="reveal-options">
+                            <template x-for="(option, idx) in state.question.options" :key="option.id">
+                                <button type="button"
+                                        :class="optionStateClass(option, idx)"
+                                        :data-correct="correctOptionIds().includes(option.id) ? 'true' : 'false'"
+                                        :data-picked="pickedOptionId === option.id ? 'true' : 'false'"
+                                        disabled
+                                        x-text="option.text"></button>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Between-rounds standings. The leaderboard bar graph is
+                     MP-9; this surface just confirms the round is over. -->
+                <template x-if="!lobbyClosed && state && state.phase === 'round_results'">
+                    <div class="text-center py-16" data-testid="round-results">
+                        <p class="label-eyebrow">Round complete</p>
+                        <h2 class="mt-2 font-display text-3xl font-semibold text-text">Scores are in</h2>
+                        <p class="mt-4 text-text-dim">The next round is coming up.</p>
+                    </div>
+                </template>
+
+                <!-- Finished: the session is over. -->
+                <template x-if="!lobbyClosed && state && state.phase === 'finished'">
+                    <div class="text-center py-16" data-testid="finished-view">
+                        <p class="label-eyebrow">Game over</p>
+                        <h2 class="mt-2 font-display text-3xl font-semibold text-text">Thanks for playing!</h2>
+                        <p class="mt-4 text-text-dim">The final standings are on the main screen.</p>
                     </div>
                 </template>
 

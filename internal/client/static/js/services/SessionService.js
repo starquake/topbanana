@@ -67,6 +67,30 @@ export class SessionService {
         await jsonOrThrow(response);
     }
 
+    // answer records the caller's pick for the session's current question.
+    // The server timestamps the pick on its own clock (the body carries only
+    // the chosen option), so no client time is threaded through. Resolves to
+    // { ok: true } on the 204, { ok: false, kind: 'closed' } on a 409 (the
+    // answer window closed or no question is open - a benign race the UI
+    // absorbs by holding the answered state anyway), and throws on any other
+    // status so a transient failure surfaces as a retry banner rather than
+    // silently dropping the pick.
+    async answer(code, optionId) {
+        const response = await fetch(`/api/sessions/${encodeURIComponent(code)}/answer`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ optionId }),
+        });
+        if (response.status === 204) {
+            return { ok: true };
+        }
+        if (response.status === 409) {
+            return { ok: false, kind: 'closed' };
+        }
+        await jsonOrThrow(response);
+        return { ok: true };
+    }
+
     // getState returns the authoritative lobby state, or null on a 404
     // (the session vanished, or the caller is no longer a participant). The
     // component treats null as "the lobby is gone" and surfaces it rather
