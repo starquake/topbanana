@@ -15,6 +15,7 @@ import (
 	"github.com/starquake/topbanana/internal/health"
 	"github.com/starquake/topbanana/internal/home"
 	"github.com/starquake/topbanana/internal/leaderboard"
+	"github.com/starquake/topbanana/internal/livesession"
 	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/profile"
 	"github.com/starquake/topbanana/internal/session"
@@ -760,4 +761,27 @@ func addAPIRoutes(
 		ensurePlayer(clientapi.HandleRoundSeen(logger, gameService)),
 	)
 	mux.Handle("GET /api/games/{gameID}/results", ensurePlayer(clientapi.HandleGameResults(logger, gameService)))
+
+	addSessionRoutes(mux, logger, stores, ensurePlayer)
+}
+
+// addSessionRoutes registers the hosted live-session API (MP-1 / #678).
+// The session service is built here from the live-session + quiz stores
+// rather than threaded through server.New: it has no startup-time
+// configuration and nothing else needs a handle to it yet. Every route is
+// wrapped in ensurePlayer so create (host gate, in-handler), join, ready,
+// and state all see a players row on the context; the host gate and
+// participant gates live in the handlers and service.
+func addSessionRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	stores *store.Stores,
+	ensurePlayer func(http.Handler) http.Handler,
+) {
+	sessionService := livesession.NewService(stores.LiveSessions, stores.Quizzes, logger)
+
+	mux.Handle("POST /api/sessions", ensurePlayer(clientapi.HandleSessionCreate(logger, sessionService)))
+	mux.Handle("POST /api/sessions/{code}/join", ensurePlayer(clientapi.HandleSessionJoin(logger, sessionService)))
+	mux.Handle("POST /api/sessions/{code}/ready", ensurePlayer(clientapi.HandleSessionReady(logger, sessionService)))
+	mux.Handle("GET /api/sessions/{code}/state", ensurePlayer(clientapi.HandleSessionState(logger, sessionService)))
 }
