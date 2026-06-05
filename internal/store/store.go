@@ -8,6 +8,7 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/home"
+	"github.com/starquake/topbanana/internal/livesession"
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
@@ -37,6 +38,7 @@ type Stores struct {
 	InvitePlayers auth.InvitePlayerStore
 	Home          home.Store
 	Retention     *RetentionStore
+	LiveSessions  livesession.Store
 }
 
 // New initializes a new Stores instance with the provided database connection.
@@ -64,5 +66,6 @@ func New(conn *sql.DB, logger *slog.Logger) *Stores {
 		InvitePlayers: players,
 		Home:          NewHomeStore(conn, logger),
 		Retention:     NewRetentionStore(conn, logger),
+		LiveSessions:  NewLiveSessionStore(conn, logger),
 	}
 }

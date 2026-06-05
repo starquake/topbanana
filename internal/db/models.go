@@ -146,3 +146,25 @@ type Round struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
+
+type Session struct {
+	ID           string
+	QuizID       int64
+	HostPlayerID int64
+	JoinCode     string
+	Phase        string
+	CreatedAt    time.Time
+	StartedAt    sql.NullTime
+	FinishedAt   sql.NullTime
+}
+
+type SessionPlayer struct {
+	ID          int64
+	SessionID   string
+	PlayerID    int64
+	DisplayName string
+	IsReady     int64
+	JoinedAt    time.Time
+	LastSeenAt  time.Time
+	LeftAt      sql.NullTime
+}

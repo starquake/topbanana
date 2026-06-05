@@ -74,19 +74,37 @@ func (s *ShellHandlers) Play(w http.ResponseWriter, r *http.Request) {
 		RegistrationEnabled: s.cfg.RegistrationEnabled,
 	}
 
-	id, err := handlers.IDFromSlugID(r.PathValue("slugID"))
-	if err == nil {
-		if q, qerr := s.quizStore.GetQuiz(r.Context(), id); qerr == nil && q != nil {
-			data.Title = q.Title + pageTitleSuffix
-			if q.Description != "" {
-				data.Description = q.Description
-			}
-		} else if qerr != nil && !errors.Is(qerr, quiz.ErrQuizNotFound) {
-			s.logger.ErrorContext(r.Context(), "play share: quiz lookup", slog.Any("err", qerr))
-		}
+	if id, err := handlers.IDFromSlugID(r.PathValue("slugID")); err == nil {
+		s.applyQuizOG(r, id, &data)
 	}
 
 	s.render(w, r, data)
+}
+
+// applyQuizOG overrides the share card's title/description with the named
+// quiz's own values, leaving the sitewide defaults in place when the quiz
+// is missing or is a live quiz. A live quiz is hosted-only (MP-0 / #677):
+// injecting its title/description would leak them into link previews before
+// the hosted game runs, defeating the no-spoiler guarantee, so it keeps the
+// default card - a degraded preview, not a 404 (#678), mirroring the
+// missing-quiz fallback.
+func (s *ShellHandlers) applyQuizOG(r *http.Request, id int64, data *shellData) {
+	q, err := s.quizStore.GetQuiz(r.Context(), id)
+	if err != nil {
+		if !errors.Is(err, quiz.ErrQuizNotFound) {
+			s.logger.ErrorContext(r.Context(), "play share: quiz lookup", slog.Any("err", err))
+		}
+
+		return
+	}
+	if q == nil || q.Mode == quiz.ModeLive {
+		return
+	}
+
+	data.Title = q.Title + pageTitleSuffix
+	if q.Description != "" {
+		data.Description = q.Description
+	}
 }
 
 // render parses index.html on each request: cheap (~50us for a ~100-line
