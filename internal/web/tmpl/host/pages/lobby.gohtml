@@ -174,14 +174,48 @@
             </template>
         </div>
 
-        {{/* ----- Round results / finished: standings placeholder. The bar
-             graph + final standings are MP-9; this keeps the TV from going
-             blank between rounds and at the end. ----- */}}
+        {{/* ----- Round results / finished: the standings bar graph (MP-9 /
+             #686). Each player is a horizontal bar whose width maps to their
+             cumulative total against the leader's. Entering round_results the
+             bars grow from each player's pre-round total to their new total
+             while the numeric labels count up, then rest in rank order
+             (best-first). The finished phase carries roundScore=0, so the bars
+             render at their final width straight away (no grow). The animation
+             is driven in host-lobby.js via anime.js with a reduced-motion /
+             missing-global fallback that snaps to the final state. ----- */}}
         <div x-show="phase === 'round_results' || phase === 'finished'"
-             class="flex-1 flex flex-col items-center justify-center gap-4 px-[clamp(1.5rem,4vw,4rem)] text-center"
+             class="flex-1 flex flex-col gap-[clamp(1rem,3vh,2rem)] px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1.5rem,4vh,3rem)]"
              data-phase-results>
-            <p class="m-0 font-display font-extrabold text-[clamp(2rem,6vw,4rem)] leading-tight"
+            <p class="m-0 font-display font-extrabold text-[clamp(2rem,6vw,4rem)] leading-tight text-center"
                x-text="phase === 'finished' ? 'Final scores' : 'Scores so far'"></p>
+
+            <ul class="m-0 list-none p-0 flex flex-col gap-3 max-w-[60rem] w-full mx-auto"
+                role="list"
+                data-testid="standings-bars"
+                data-standings-bars>
+                <template x-for="bar in standingsBars" :key="bar.playerId">
+                    <li class="rounded-xl border border-border-soft bg-surface px-5 py-4"
+                        :data-rank="bar.rank"
+                        :data-player-id="bar.playerId"
+                        data-standings-row>
+                        <div class="flex items-baseline justify-between gap-3 mb-2">
+                            <span class="flex items-center gap-3 min-w-0">
+                                <span class="font-display font-bold text-accent tabular-nums shrink-0 text-[clamp(1rem,2vw,1.5rem)]"
+                                      x-text="bar.rank"></span>
+                                <span class="font-semibold truncate text-[clamp(1rem,2vw,1.5rem)]"
+                                      x-text="bar.displayName"
+                                      data-standings-name></span>
+                            </span>
+                            <span class="font-display font-bold tabular-nums shrink-0 text-[clamp(1rem,2vw,1.5rem)]"
+                                  x-text="bar.displayTotal"
+                                  data-standings-total></span>
+                        </div>
+                        <progress class="block w-full h-3 bg-border-soft rounded-full overflow-hidden appearance-none [&::-webkit-progress-bar]:bg-border-soft [&::-webkit-progress-value]:bg-accent [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear [&::-moz-progress-bar]:bg-accent [&::-moz-progress-bar]:rounded-full"
+                                  :value="bar.displayTotal" :max="maxStandingsTotal"
+                                  aria-hidden="true"></progress>
+                    </li>
+                </template>
+            </ul>
         </div>
 
         {{/* Footer: connection state + host start control (lobby only). */}}

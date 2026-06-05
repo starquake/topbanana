@@ -28,10 +28,14 @@
     <link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="preload" href="/assets/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="/assets/css/app.css">
-    {{/* Alpine.js (vendored, self-hosted, #295) drives the join + lobby
-         surface. The join surface has no anime.js dependency: its motion is
-         Alpine x-transition + Tailwind, which already respects
-         prefers-reduced-motion via the motion-reduce rules in app.css. */}}
+    {{/* anime.js (4.2.0, MIT) powers the between-rounds standings bar graph
+         (MP-9 / #686). It is the same vendored, self-hosted build the solo
+         client loads (#295); JoinApp's runAnim wrapper keeps a reduced-motion
+         and missing-global fallback so the bars snap to their final state when
+         it is absent. Alpine.js (vendored, self-hosted) drives the rest of the
+         join + lobby surface, whose other motion is Alpine x-transition +
+         Tailwind and respects prefers-reduced-motion via app.css. */}}
+    <script src="/client/js/vendor/anime.umd.min.js"></script>
     <script type="module" src="/client/js/join.js"></script>
     <script defer src="/client/js/vendor/alpine.min.js"></script>
     <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
@@ -234,22 +238,84 @@
                     </div>
                 </template>
 
-                <!-- Between-rounds standings. The leaderboard bar graph is
-                     MP-9; this surface just confirms the round is over. -->
+                <!-- Between-rounds standings (MP-9 / #686). Each player is a
+                     horizontal bar whose width maps to their cumulative total
+                     against the leader's. On entering the phase the bars grow
+                     from each player's pre-round total to their new total while
+                     the numeric label counts up, then rest in rank order
+                     (best-first). The viewer's own row is highlighted. The
+                     animation is driven in JoinApp via anime.js with a
+                     reduced-motion / no-global fallback that snaps to the final
+                     state. -->
                 <template x-if="!lobbyClosed && state && state.phase === 'round_results'">
-                    <div class="text-center py-16" data-testid="round-results">
+                    <div data-testid="round-results">
                         <p class="label-eyebrow">Round complete</p>
-                        <h2 class="mt-2 font-display text-3xl font-semibold text-text">Scores are in</h2>
-                        <p class="mt-4 text-text-dim">The next round is coming up.</p>
+                        <h2 class="mt-2 mb-6 font-display text-3xl font-semibold text-text">Scores are in</h2>
+                        <ul class="flex flex-col gap-2" data-testid="standings-bars">
+                            <template x-for="bar in standingsBars" :key="bar.playerId">
+                                <li class="rounded-md border bg-surface px-4 py-3"
+                                    :class="bar.isMe ? 'border-accent-line' : 'border-border-soft'"
+                                    :data-rank="bar.rank"
+                                    :data-player-id="bar.playerId"
+                                    :aria-current="bar.isMe ? 'true' : null"
+                                    data-standings-row>
+                                    <div class="flex items-baseline justify-between gap-3 mb-2">
+                                        <span class="flex items-center gap-2 min-w-0">
+                                            <span class="font-display font-bold text-accent tabular-nums shrink-0"
+                                                  x-text="bar.rank"></span>
+                                            <span class="truncate" x-text="bar.displayName" data-standings-name></span>
+                                            <template x-if="bar.isMe">
+                                                <span class="hud-chip shrink-0">You</span>
+                                            </template>
+                                        </span>
+                                        <span class="font-display font-bold tabular-nums shrink-0"
+                                              x-text="bar.displayTotal" data-standings-total></span>
+                                    </div>
+                                    <progress class="block w-full h-2 bg-border rounded-full overflow-hidden appearance-none [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:bg-accent [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear [&::-moz-progress-bar]:bg-accent [&::-moz-progress-bar]:rounded-full"
+                                              :value="bar.displayTotal" :max="maxStandingsTotal"
+                                              aria-hidden="true"></progress>
+                                </li>
+                            </template>
+                        </ul>
+                        <p class="mt-6 text-text-dim">The next round is coming up.</p>
                     </div>
                 </template>
 
-                <!-- Finished: the session is over. -->
+                <!-- Finished: the session is over. The same standings bar graph
+                     shows the final totals; finished carries roundScore=0, so
+                     there is no round delta to add - the bars render at their
+                     final width straight away (no grow animation). -->
                 <template x-if="!lobbyClosed && state && state.phase === 'finished'">
-                    <div class="text-center py-16" data-testid="finished-view">
+                    <div data-testid="finished-view">
                         <p class="label-eyebrow">Game over</p>
-                        <h2 class="mt-2 font-display text-3xl font-semibold text-text">Thanks for playing!</h2>
-                        <p class="mt-4 text-text-dim">The final standings are on the main screen.</p>
+                        <h2 class="mt-2 mb-6 font-display text-3xl font-semibold text-text">Final standings</h2>
+                        <ul class="flex flex-col gap-2" data-testid="standings-bars">
+                            <template x-for="bar in standingsBars" :key="bar.playerId">
+                                <li class="rounded-md border bg-surface px-4 py-3"
+                                    :class="bar.isMe ? 'border-accent-line' : 'border-border-soft'"
+                                    :data-rank="bar.rank"
+                                    :data-player-id="bar.playerId"
+                                    :aria-current="bar.isMe ? 'true' : null"
+                                    data-standings-row>
+                                    <div class="flex items-baseline justify-between gap-3 mb-2">
+                                        <span class="flex items-center gap-2 min-w-0">
+                                            <span class="font-display font-bold text-accent tabular-nums shrink-0"
+                                                  x-text="bar.rank"></span>
+                                            <span class="truncate" x-text="bar.displayName" data-standings-name></span>
+                                            <template x-if="bar.isMe">
+                                                <span class="hud-chip shrink-0">You</span>
+                                            </template>
+                                        </span>
+                                        <span class="font-display font-bold tabular-nums shrink-0"
+                                              x-text="bar.displayTotal" data-standings-total></span>
+                                    </div>
+                                    <progress class="block w-full h-2 bg-border rounded-full overflow-hidden appearance-none [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:bg-accent [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear [&::-moz-progress-bar]:bg-accent [&::-moz-progress-bar]:rounded-full"
+                                              :value="bar.displayTotal" :max="maxStandingsTotal"
+                                              aria-hidden="true"></progress>
+                                </li>
+                            </template>
+                        </ul>
+                        <p class="mt-6 text-text-dim">Thanks for playing!</p>
                     </div>
                 </template>
 

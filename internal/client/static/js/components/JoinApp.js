@@ -9,6 +9,43 @@ const JOIN_PATH_PATTERN = /^\/join\/([^/]+)\/?$/;
 // options, matching the solo client's per-index Kahoot-style colours.
 const QUESTION_OPTION_TONES = ['btn-answer-tone-a', 'btn-answer-tone-b', 'btn-answer-tone-c', 'btn-answer-tone-d'];
 
+// STANDINGS_BAR_DURATION is how long the between-rounds bar graph spends
+// growing each bar from its pre-round total to its new total (ms).
+const STANDINGS_BAR_DURATION = 900;
+
+// reducedMotion returns true when the OS-level preference is set; the
+// bar-graph animation short-circuits to its final state in that case so the
+// surface behaves identically to a no-animation build for affected users.
+function reducedMotion() {
+    return typeof window !== 'undefined'
+        && typeof window.matchMedia === 'function'
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+// runAnim wraps anime.js with safe fallbacks so a missing global or a
+// reduced-motion preference never leaves a half-rendered frame: the caller
+// supplies an onComplete that snaps to the final state, and we invoke it
+// directly when animation is skipped. Mirrors the solo client's helper
+// (GameApp.js) so the two surfaces share one reduced-motion contract.
+function runAnim(targets, params) {
+    if (reducedMotion()) {
+        if (typeof params.complete === 'function') params.complete();
+        return;
+    }
+    const a = typeof window !== 'undefined' ? window.anime : null;
+    if (!a) {
+        if (typeof params.complete === 'function') params.complete();
+        return;
+    }
+    if (typeof a.animate === 'function') {
+        a.animate(targets, params);
+    } else if (typeof a === 'function') {
+        a({ targets, ...params });
+    } else if (typeof params.complete === 'function') {
+        params.complete();
+    }
+}
+
 // JoinApp is the Alpine component behind the player join + lobby + in-game
 // surface (MP-4 / #681, MP-7 / #684). It is deliberately separate from gameApp
 // (the solo client) and from the host/TV surface: it owns only the player's
@@ -89,6 +126,26 @@ export class JoinApp {
         // Cleared on the next pick. A 409 (window closed) is not an error: the
         // player still lands in the answered/waiting state.
         this.answerError = false;
+
+        // --- Between-rounds bar graph (MP-9 / #686) -------------------------
+        // Rendered rows for the round_results / finished standings bar graph.
+        // Each row is { playerId, displayName, rank, total, preTotal, isMe,
+        // displayTotal }, where displayTotal is the animated value the bar
+        // width + numeric label bind to. The array is held in rank order (the
+        // server already returns standings best-first) so the rows end sorted
+        // with the leaders on top once the animation settles.
+        this.standingsBars = [];
+        // The largest total across the current standings, so each bar's width
+        // maps to its share of the leader's bar (leader = full width). Guarded
+        // to at least 1 so a zero-score round never divides by zero.
+        this.maxStandingsTotal = 1;
+        // Identifies the round the current bar graph is animating so the
+        // grow-and-resort animation fires once per round_results entry rather
+        // than on every SSE tick within the same phase - mirrors how
+        // syncQuestionFromState only resets on a genuine question change. The
+        // key combines the phase and the current question id (the last
+        // question of the round just finished) so a new round retriggers it.
+        this.lastStandingsKey = null;
     }
 
     // init resolves the room code from the URL. A /join/{code} deep link lands
@@ -205,6 +262,7 @@ export class JoinApp {
         this.syncClockFrom(state);
         this.syncReadyFromState();
         this.syncQuestionFromState();
+        this.syncStandingsFromState();
     }
 
     // syncClockFrom recomputes clockOffset from the serverNow that travels with
@@ -257,6 +315,85 @@ export class JoinApp {
         if (phase === 'reveal') {
             this.questionProgress = 0;
         }
+    }
+
+    // syncStandingsFromState reconciles the between-rounds / final bar graph
+    // with each state read. The server carries a standings array in the
+    // round_results and finished phases (null elsewhere). On a genuine new
+    // round_results entry it builds the rows starting at each player's
+    // pre-round total and animates the bars growing to the new total while
+    // the numeric labels count up, then leaves the rows in rank order. A
+    // later tick within the same phase does not re-trigger the animation, so
+    // the bars don't replay on every SSE beat. The finished phase reuses the
+    // same rows but skips the grow animation (roundScore is 0 there - there
+    // is no single round in focus), landing straight on the final totals.
+    syncStandingsFromState() {
+        const phase = this.state ? this.state.phase : null;
+        const standings = this.state && Array.isArray(this.state.standings) ? this.state.standings : null;
+        if ((phase !== 'round_results' && phase !== 'finished') || !standings) {
+            this.standingsBars = [];
+            this.maxStandingsTotal = 1;
+            this.lastStandingsKey = null;
+            return;
+        }
+
+        // Re-key on the phase plus the question id of the round that just
+        // finished so a new round (or the transition into finished) fires the
+        // animation exactly once. A repeat tick with the same key is a no-op.
+        const questionId = this.state.question ? this.state.question.id : 'none';
+        const key = `${phase}:${questionId}`;
+        if (key === this.lastStandingsKey) return;
+        this.lastStandingsKey = key;
+
+        this.maxStandingsTotal = Math.max(1, ...standings.map((s) => s.totalScore));
+        const animate = phase === 'round_results';
+        this.standingsBars = standings.map((s) => ({
+            playerId: s.playerId,
+            displayName: s.displayName,
+            rank: s.rank,
+            total: s.totalScore,
+            preTotal: s.totalScore - s.roundScore,
+            isMe: s.displayName === this.myDisplayName,
+            // Start at the pre-round total when animating, otherwise land on
+            // the final total straight away (finished, reduced motion).
+            displayTotal: animate ? s.totalScore - s.roundScore : s.totalScore,
+        }));
+
+        if (!animate) return;
+        this.animateStandingsBars();
+    }
+
+    // animateStandingsBars grows each row's displayTotal from its pre-round
+    // total to its new total, which the template binds to both the bar width
+    // and the numeric label so the count-up and the bar fill move together.
+    // Under reduced motion or a missing anime global runAnim snaps straight to
+    // the final state via the complete callback, so the bars never stick at a
+    // half-grown frame. The rows are already in rank order (best-first), so
+    // the leaders rest on top once the growth settles.
+    animateStandingsBars() {
+        const bars = this.standingsBars;
+        const snap = () => {
+            bars.forEach((bar) => { bar.displayTotal = bar.total; });
+        };
+        const a = typeof window !== 'undefined' ? window.anime : null;
+        const hasRound = bars.some((bar) => bar.total !== bar.preTotal);
+        if (!hasRound || !a) {
+            snap();
+            return;
+        }
+        // Animate one proxy object per bar so anime updates the reactive
+        // displayTotal Alpine renders. Math.round keeps the label on whole
+        // points throughout the count-up.
+        bars.forEach((bar) => {
+            const proxy = { v: bar.preTotal };
+            runAnim(proxy, {
+                v: bar.total,
+                duration: STANDINGS_BAR_DURATION,
+                easing: 'easeOutCubic',
+                update: () => { bar.displayTotal = Math.round(proxy.v); },
+                complete: () => { bar.displayTotal = bar.total; },
+            });
+        });
     }
 
     // startQuestionCountdown drives the answer-window bar 100 -> 0 over
