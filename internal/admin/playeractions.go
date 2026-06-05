@@ -119,6 +119,50 @@ func HandlePlayerResendVerification(
 	})
 }
 
+// HandlePlayerResetLiveQuiz handles
+// POST /admin/players/{playerID}/live-quizzes/{quizID}/reset. It clears the
+// player's participation in every session of the given live quiz (their
+// roster rows and recorded picks), which lifts the replay gate so the
+// player can join a new session of that quiz. Idempotent: a player with no
+// participation is a 303 no-op. Records an admin_audit row carrying the
+// quiz id.
+func HandlePlayerResetLiveQuiz(
+	logger *slog.Logger,
+	store auth.AdminPlayerStore,
+	flash *auth.SignedFlash,
+) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		playerID, ok := handlers.ParseIDFromPath(w, r, logger, "playerID")
+		if !ok {
+			return
+		}
+		quizID, ok := handlers.ParseIDFromPath(w, r, logger, "quizID")
+		if !ok {
+			return
+		}
+		actor, ok := requireAdminActor(w, r)
+		if !ok {
+			return
+		}
+
+		if _, ok = loadActionTarget(w, r, logger, store, playerID); !ok {
+			return
+		}
+
+		if err := store.ResetLiveSessionPlaysForPlayerOnQuiz(r.Context(), playerID, quizID); err != nil {
+			logger.ErrorContext(r.Context(), "error resetting live quiz for player", slog.Any("err", err))
+			flash.SetError(w, "Could not reset the live quiz play. Try again.", 0)
+			redirectToPlayerDetail(w, r, playerID)
+
+			return
+		}
+		writeAudit(r.Context(), logger, store, actor.ID, playerID,
+			auth.AdminActionLiveQuizReset, map[string]string{"quiz_id": strconv.FormatInt(quizID, 10)})
+		flash.SetNotice(w, "Live quiz play reset. The player can join a new session of it.")
+		redirectToPlayerDetail(w, r, playerID)
+	})
+}
+
 // HandlePlayerSetEmail handles POST /admin/players/{playerID}/email.
 // Validates with auth.LooksLikeEmail, rejects collisions with the
 // existing ErrEmailTaken sentinel, and clears email_verified_at so the

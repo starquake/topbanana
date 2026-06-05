@@ -10,6 +10,7 @@ import (
 	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/leaderboard"
+	"github.com/starquake/topbanana/internal/livesession"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
 )
@@ -19,16 +20,17 @@ import (
 // in-memory SQLite DB, so handlers hit real data instead of stubbed
 // returns.
 type adminEnv struct {
-	logger  *slog.Logger
-	db      *sql.DB
-	quizzes quiz.Store
-	games   game.Store
-	players auth.PlayerStore
-	oauth   auth.OAuthIdentityStore
-	lister  auth.PlayerLister
-	admin   auth.AdminPlayerStore
-	tokens  auth.VerifyTokenStore
-	service *game.Service
+	logger   *slog.Logger
+	db       *sql.DB
+	quizzes  quiz.Store
+	games    game.Store
+	players  auth.PlayerStore
+	oauth    auth.OAuthIdentityStore
+	lister   auth.PlayerLister
+	admin    auth.AdminPlayerStore
+	tokens   auth.VerifyTokenStore
+	sessions livesession.Store
+	service  *game.Service
 }
 
 // newAdminEnv opens a migrated dbtest DB, builds the real stores, and
@@ -45,16 +47,17 @@ func newAdminEnv(t *testing.T) *adminEnv {
 	svc.SetLeaderboardPublisher(leaderboard.NewHub())
 
 	return &adminEnv{
-		logger:  logger,
-		db:      conn,
-		quizzes: stores.Quizzes,
-		games:   stores.Games,
-		players: stores.Players,
-		oauth:   stores.OAuth,
-		lister:  stores.PlayerLister,
-		admin:   stores.AdminPlayers,
-		tokens:  stores.VerifyTokens,
-		service: svc,
+		logger:   logger,
+		db:       conn,
+		quizzes:  stores.Quizzes,
+		games:    stores.Games,
+		players:  stores.Players,
+		oauth:    stores.OAuth,
+		lister:   stores.PlayerLister,
+		admin:    stores.AdminPlayers,
+		tokens:   stores.VerifyTokens,
+		sessions: stores.LiveSessions,
+		service:  svc,
 	}
 }
 
@@ -218,6 +221,50 @@ func correctOptionID(t *testing.T, qz *quiz.Quiz, questionIndex int) (questionID
 	t.Fatalf("question %d in quiz %d has no correct option", questionIndex, qz.ID)
 
 	return 0, 0
+}
+
+// liveQuiz is a mode='live' fixture with one question, attributed to the
+// seeded admin so the session create path's quiz_id FK and owner rules
+// hold. Used by the admin live-reset tests.
+func liveQuiz() *quiz.Quiz {
+	qz := ownedQuiz("Live Q", "live-q")
+	qz.Mode = quiz.ModeLive
+	qz.Questions = []*quiz.Question{
+		{
+			Text:     "What is the capital of France?",
+			Position: 1,
+			Options: []*quiz.Option{
+				{Text: "Paris", Correct: true},
+				{Text: "London", Correct: false},
+			},
+		},
+	}
+
+	return qz
+}
+
+// seedFinishedLiveSession opens a session for the live quiz, joins the
+// player, records one answer, and finishes the session - producing the
+// finished-roster + recorded-pick shape the live reset clears.
+func (e *adminEnv) seedFinishedLiveSession(t *testing.T, qz *quiz.Quiz, playerID int64, joinCode string) {
+	t.Helper()
+
+	ctx := t.Context()
+	sess := &livesession.Session{QuizID: qz.ID, HostPlayerID: testAdminID, JoinCode: joinCode}
+	if err := e.sessions.CreateSession(ctx, sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+	if _, err := e.sessions.AddPlayer(ctx, sess.ID, playerID, "Player"); err != nil {
+		t.Fatalf("AddPlayer err = %v, want nil", err)
+	}
+	q := qz.Questions[0]
+	answeredAt := time.Date(2026, time.June, 5, 12, 0, 5, 0, time.UTC)
+	if err := e.sessions.RecordAnswer(ctx, sess.ID, q.ID, playerID, q.Options[0].ID, answeredAt); err != nil {
+		t.Fatalf("RecordAnswer err = %v, want nil", err)
+	}
+	if err := e.sessions.Finish(ctx, sess.ID); err != nil {
+		t.Fatalf("Finish err = %v, want nil", err)
+	}
 }
 
 // playThrough creates a game for the player and answers all the quiz's

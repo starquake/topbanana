@@ -134,6 +134,29 @@
         {{end}}
     </section>
 
+    <section class="mb-10" aria-label="Live quiz plays">
+        <h2 class="mb-3 font-display text-lg">Live quiz plays</h2>
+        {{if .LivePlays}}
+            <ul class="rounded-lg border border-border-soft divide-y divide-border-soft">
+                {{range .LivePlays}}
+                    <li class="flex items-center justify-between gap-4 px-4 py-3 text-sm">
+                        <a href="/admin/quizzes/{{.QuizID}}" class="text-text hover:text-accent">{{.QuizTitle}}</a>
+                        <div class="flex items-center gap-4">
+                            <time class="text-text-dim" title="{{.FinishedAt.Format "2006-01-02 15:04"}}">{{humanizeTime .FinishedAt}}</time>
+                            <form method="POST" action="/admin/players/{{$.Player.ID}}/live-quizzes/{{.QuizID}}/reset"
+                                  onsubmit="return confirm('Reset this player&#39;s play of this quiz? Their participation and answers will be deleted, and they will be able to join a new session of it. This cannot be undone.');">
+                                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                                <button type="submit" class="btn-ghost">Reset</button>
+                            </form>
+                        </div>
+                    </li>
+                {{end}}
+            </ul>
+        {{else}}
+            <p class="text-text-dim text-sm">No finished live quizzes yet.</p>
+        {{end}}
+    </section>
+
     <section aria-label="Recent admin actions">
         <h2 class="mb-3 font-display text-lg">Recent admin actions</h2>
         {{if .AuditEntries}}

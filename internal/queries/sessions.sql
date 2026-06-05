@@ -24,6 +24,69 @@ WHERE join_code = ?;
 -- regenerate on collision before paying for the INSERT.
 SELECT EXISTS(SELECT 1 FROM sessions WHERE join_code = ?) AS code_exists;
 
+-- name: PlayerFinishedSessionForQuiz :one
+-- Reports whether the player has a roster row in a finished session of the
+-- given quiz. Backs the replay gate: a live quiz may be played once, so a
+-- player who already sat through a finished session of it is blocked from
+-- joining a new one until an admin resets their participation.
+SELECT EXISTS (
+    SELECT 1
+    FROM session_players sp
+    JOIN sessions s ON s.id = sp.session_id
+    WHERE sp.player_id = sqlc.arg('player_id')
+      AND s.quiz_id = sqlc.arg('quiz_id')
+      AND s.phase = 'finished'
+) AS has_finished;
+
+-- name: ListFinishedSessionPlaysForPlayer :many
+-- Finished live-quiz plays for the given player, newest-first, one row per
+-- quiz. A play is a roster row in a finished session; collapsing to one row
+-- per quiz keeps the admin detail list to "quizzes this player has played"
+-- rather than every individual session. finished_at is the most recent
+-- finish time among the player's sessions of that quiz, read off the
+-- representative session row (not aggregated) so it stays a typed DATETIME.
+-- Joined to quizzes for the title so the detail view renders without a
+-- second round trip.
+SELECT
+    s.quiz_id              AS quiz_id,
+    CAST(q.title AS TEXT)  AS quiz_title,
+    s.finished_at          AS finished_at
+FROM sessions s
+JOIN quizzes q ON q.id = s.quiz_id
+WHERE s.phase = 'finished'
+  AND s.finished_at = (
+      SELECT MAX(s2.finished_at)
+      FROM sessions s2
+      JOIN session_players sp2 ON sp2.session_id = s2.id
+      WHERE s2.quiz_id = s.quiz_id
+        AND s2.phase = 'finished'
+        AND sp2.player_id = sqlc.arg('player_id')
+  )
+  AND EXISTS (
+      SELECT 1 FROM session_players sp
+      WHERE sp.session_id = s.id
+        AND sp.player_id = sqlc.arg('player_id')
+  )
+GROUP BY s.quiz_id
+ORDER BY s.finished_at DESC, s.quiz_id DESC
+LIMIT sqlc.arg('row_limit');
+
+-- name: DeleteSessionAnswersForPlayerOnQuiz :exec
+-- Hard-deletes the player's recorded picks across every session of the given
+-- quiz. Run before DeleteSessionPlayersForPlayerOnQuiz so the answer rows go
+-- first (session_answers has no FK to session_players, so order is not
+-- enforced, but deleting children-then-roster reads cleanly).
+DELETE FROM session_answers
+WHERE player_id = sqlc.arg('player_id')
+  AND session_id IN (SELECT id FROM sessions WHERE quiz_id = sqlc.arg('quiz_id'));
+
+-- name: DeleteSessionPlayersForPlayerOnQuiz :exec
+-- Hard-deletes the player's roster rows across every session of the given
+-- quiz, clearing the replay gate so the player can join a new session of it.
+DELETE FROM session_players
+WHERE player_id = sqlc.arg('player_id')
+  AND session_id IN (SELECT id FROM sessions WHERE quiz_id = sqlc.arg('quiz_id'));
+
 -- name: UpsertSessionPlayer :one
 -- Adds a player to a session's roster, or revives an existing row on
 -- re-join (clearing left_at and refreshing last_seen_at + display_name).

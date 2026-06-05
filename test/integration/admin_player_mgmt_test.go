@@ -675,6 +675,11 @@ func csrfPageForPostURL(baseURL, postURL string) string {
 			return before
 		}
 	}
+	// The live-quiz reset POST carries a /live-quizzes/{quizID}/reset suffix;
+	// its form lives on the same per-player detail page, so trim back to it.
+	if before, _, ok := strings.Cut(postURL, "/live-quizzes/"); ok {
+		return before
+	}
 
 	return postURL
 }

@@ -55,6 +55,12 @@ var (
 	// session is not currently in the question phase, the option is not
 	// part of the current question, or the answer window has closed.
 	ErrQuestionNotOpen = errors.New("no question is open for answers")
+
+	// ErrAlreadyPlayed is returned by [Service.Join] when the player has
+	// already sat through a finished session of the quiz. A live quiz may
+	// be played once; an admin reset clears the participation so the player
+	// can join again. Handlers map it to 403.
+	ErrAlreadyPlayed = errors.New("player has already played this quiz")
 )
 
 // Phase is the server-authoritative state-machine label for a session.
@@ -177,6 +183,10 @@ type Store interface {
 	// lobby roster populated. Returns [ErrSessionNotFound] when no session
 	// uses the code.
 	GetSessionByJoinCode(ctx context.Context, joinCode string) (*Session, error)
+	// PlayerFinishedSessionForQuiz reports whether the player has a roster
+	// row in a finished session of the given quiz. Backs the replay gate in
+	// [Service.Join].
+	PlayerFinishedSessionForQuiz(ctx context.Context, playerID, quizID int64) (bool, error)
 	// AddPlayer adds (or revives) a roster row for the player under the
 	// requested display name. Returns [ErrDisplayNameTaken] on a
 	// per-session display-name collision so the caller can fall back to a
@@ -397,13 +407,23 @@ func (s *Service) CreateSession(ctx context.Context, quizID, hostPlayerID int64)
 // collision is recovered transparently by retrying with a petname, so the
 // caller always lands in the lobby (decision 4 / claim-name parity). The
 // chosen display name is carried on the returned [Player]. Returns
-// [ErrSessionNotFound] when the code resolves to no session.
+// [ErrSessionNotFound] when the code resolves to no session and
+// [ErrAlreadyPlayed] when the player has already finished a session of the
+// same quiz (a live quiz is played once until an admin resets it).
 func (s *Service) Join(
 	ctx context.Context, joinCode string, playerID int64, displayName string, petname func() string,
 ) (*Player, error) {
 	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
 	if err != nil {
 		return nil, fmt.Errorf(errGetSessionByCodeFmt, err)
+	}
+
+	played, err := s.store.PlayerFinishedSessionForQuiz(ctx, playerID, sess.QuizID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check prior play: %w", err)
+	}
+	if played {
+		return nil, ErrAlreadyPlayed
 	}
 
 	player, err := s.addPlayerWithPetnameFallback(ctx, sess.ID, playerID, displayName, petname)

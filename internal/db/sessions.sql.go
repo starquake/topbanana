@@ -74,6 +74,44 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 	return i, err
 }
 
+const deleteSessionAnswersForPlayerOnQuiz = `-- name: DeleteSessionAnswersForPlayerOnQuiz :exec
+DELETE FROM session_answers
+WHERE player_id = ?1
+  AND session_id IN (SELECT id FROM sessions WHERE quiz_id = ?2)
+`
+
+type DeleteSessionAnswersForPlayerOnQuizParams struct {
+	PlayerID int64
+	QuizID   int64
+}
+
+// Hard-deletes the player's recorded picks across every session of the given
+// quiz. Run before DeleteSessionPlayersForPlayerOnQuiz so the answer rows go
+// first (session_answers has no FK to session_players, so order is not
+// enforced, but deleting children-then-roster reads cleanly).
+func (q *Queries) DeleteSessionAnswersForPlayerOnQuiz(ctx context.Context, arg DeleteSessionAnswersForPlayerOnQuizParams) error {
+	_, err := q.db.ExecContext(ctx, deleteSessionAnswersForPlayerOnQuiz, arg.PlayerID, arg.QuizID)
+	return err
+}
+
+const deleteSessionPlayersForPlayerOnQuiz = `-- name: DeleteSessionPlayersForPlayerOnQuiz :exec
+DELETE FROM session_players
+WHERE player_id = ?1
+  AND session_id IN (SELECT id FROM sessions WHERE quiz_id = ?2)
+`
+
+type DeleteSessionPlayersForPlayerOnQuizParams struct {
+	PlayerID int64
+	QuizID   int64
+}
+
+// Hard-deletes the player's roster rows across every session of the given
+// quiz, clearing the replay gate so the player can join a new session of it.
+func (q *Queries) DeleteSessionPlayersForPlayerOnQuiz(ctx context.Context, arg DeleteSessionPlayersForPlayerOnQuizParams) error {
+	_, err := q.db.ExecContext(ctx, deleteSessionPlayersForPlayerOnQuiz, arg.PlayerID, arg.QuizID)
+	return err
+}
+
 const getSession = `-- name: GetSession :one
 SELECT id, quiz_id, host_player_id, join_code, phase, current_round_id, current_question_id, question_started_at, question_expires_at, created_at, started_at, finished_at
 FROM sessions
@@ -167,6 +205,74 @@ func (q *Queries) JoinCodeExists(ctx context.Context, joinCode string) (bool, er
 	var code_exists bool
 	err := row.Scan(&code_exists)
 	return code_exists, err
+}
+
+const listFinishedSessionPlaysForPlayer = `-- name: ListFinishedSessionPlaysForPlayer :many
+SELECT
+    s.quiz_id              AS quiz_id,
+    CAST(q.title AS TEXT)  AS quiz_title,
+    s.finished_at          AS finished_at
+FROM sessions s
+JOIN quizzes q ON q.id = s.quiz_id
+WHERE s.phase = 'finished'
+  AND s.finished_at = (
+      SELECT MAX(s2.finished_at)
+      FROM sessions s2
+      JOIN session_players sp2 ON sp2.session_id = s2.id
+      WHERE s2.quiz_id = s.quiz_id
+        AND s2.phase = 'finished'
+        AND sp2.player_id = ?1
+  )
+  AND EXISTS (
+      SELECT 1 FROM session_players sp
+      WHERE sp.session_id = s.id
+        AND sp.player_id = ?1
+  )
+GROUP BY s.quiz_id
+ORDER BY s.finished_at DESC, s.quiz_id DESC
+LIMIT ?2
+`
+
+type ListFinishedSessionPlaysForPlayerParams struct {
+	PlayerID int64
+	RowLimit int64
+}
+
+type ListFinishedSessionPlaysForPlayerRow struct {
+	QuizID     int64
+	QuizTitle  string
+	FinishedAt sql.NullTime
+}
+
+// Finished live-quiz plays for the given player, newest-first, one row per
+// quiz. A play is a roster row in a finished session; collapsing to one row
+// per quiz keeps the admin detail list to "quizzes this player has played"
+// rather than every individual session. finished_at is the most recent
+// finish time among the player's sessions of that quiz, read off the
+// representative session row (not aggregated) so it stays a typed DATETIME.
+// Joined to quizzes for the title so the detail view renders without a
+// second round trip.
+func (q *Queries) ListFinishedSessionPlaysForPlayer(ctx context.Context, arg ListFinishedSessionPlaysForPlayerParams) ([]ListFinishedSessionPlaysForPlayerRow, error) {
+	rows, err := q.db.QueryContext(ctx, listFinishedSessionPlaysForPlayer, arg.PlayerID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFinishedSessionPlaysForPlayerRow
+	for rows.Next() {
+		var i ListFinishedSessionPlaysForPlayerRow
+		if err := rows.Scan(&i.QuizID, &i.QuizTitle, &i.FinishedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listLiveSessionIDs = `-- name: ListLiveSessionIDs :many
@@ -463,6 +569,33 @@ func (q *Queries) ListSessionStandings(ctx context.Context, arg ListSessionStand
 		return nil, err
 	}
 	return items, nil
+}
+
+const playerFinishedSessionForQuiz = `-- name: PlayerFinishedSessionForQuiz :one
+SELECT EXISTS (
+    SELECT 1
+    FROM session_players sp
+    JOIN sessions s ON s.id = sp.session_id
+    WHERE sp.player_id = ?1
+      AND s.quiz_id = ?2
+      AND s.phase = 'finished'
+) AS has_finished
+`
+
+type PlayerFinishedSessionForQuizParams struct {
+	PlayerID int64
+	QuizID   int64
+}
+
+// Reports whether the player has a roster row in a finished session of the
+// given quiz. Backs the replay gate: a live quiz may be played once, so a
+// player who already sat through a finished session of it is blocked from
+// joining a new one until an admin resets their participation.
+func (q *Queries) PlayerFinishedSessionForQuiz(ctx context.Context, arg PlayerFinishedSessionForQuizParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, playerFinishedSessionForQuiz, arg.PlayerID, arg.QuizID)
+	var has_finished bool
+	err := row.Scan(&has_finished)
+	return has_finished, err
 }
 
 const setSessionAnswerScore = `-- name: SetSessionAnswerScore :exec
