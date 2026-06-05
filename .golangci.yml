@@ -159,6 +159,10 @@ linters:
     generated: lax
     paths:
       - internal/db
+      # Claude Code agents run in git worktrees under .claude/worktrees/;
+      # without this golangci-lint scans those sibling checkouts and floods
+      # the run with phantom findings from the in-flight branch copies.
+      - .claude
     rules:
       - path: (_test\.go|internal/testutil/|test/)
         linters:
