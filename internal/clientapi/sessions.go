@@ -80,7 +80,9 @@ func HandleSessionCreate(logger *slog.Logger, service *livesession.Service) http
 // a display name carried in the body. A per-session display-name collision
 // is resolved transparently by the service (petname fallback), so the
 // response always carries the display name the player actually landed
-// with. Returns 404 when the join code is unknown.
+// with. Returns 404 when the join code is unknown and 403 when the player
+// has already finished a session of the same quiz (a live quiz is played
+// once until an admin resets it).
 func HandleSessionJoin(logger *slog.Logger, service *livesession.Service) http.Handler {
 	type joinRequest struct {
 		DisplayName string `json:"displayName"`
@@ -116,12 +118,14 @@ func HandleSessionJoin(logger *slog.Logger, service *livesession.Service) http.H
 
 		joined, err := service.Join(ctx, r.PathValue("code"), player.ID, displayName, auth.GeneratePetname)
 		if err != nil {
-			if errors.Is(err, livesession.ErrSessionNotFound) {
+			switch {
+			case errors.Is(err, livesession.ErrSessionNotFound):
 				http.NotFound(w, r)
-
-				return
+			case errors.Is(err, livesession.ErrAlreadyPlayed):
+				http.Error(w, "you have already played this quiz", http.StatusForbidden)
+			default:
+				writeInternalError(w, r, logger, "error joining session", err)
 			}
-			writeInternalError(w, r, logger, "error joining session", err)
 
 			return
 		}

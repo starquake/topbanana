@@ -489,6 +489,32 @@ func newTwoRoundLiveQuiz(t *testing.T, qs *QuizStore) *quiz.Quiz {
 	return loaded
 }
 
+// seedFinishedSession opens a session for qz, joins playerID, records one
+// answer to the quiz's first question, and finishes it - producing the
+// finished-roster-row + recorded-pick shape the replay gate and the admin
+// live reset operate on.
+func seedFinishedSession(
+	t *testing.T, sessionStore *LiveSessionStore, qz *quiz.Quiz, joinCode string, playerID int64,
+) {
+	t.Helper()
+
+	sess := &livesession.Session{QuizID: qz.ID, HostPlayerID: seededAdminID, JoinCode: joinCode}
+	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+	if _, err := sessionStore.AddPlayer(t.Context(), sess.ID, playerID, "Player"); err != nil {
+		t.Fatalf("AddPlayer err = %v, want nil", err)
+	}
+	q := qz.Questions[0]
+	answeredAt := time.Date(2026, time.June, 5, 12, 0, 5, 0, time.UTC)
+	if err := sessionStore.RecordAnswer(t.Context(), sess.ID, q.ID, playerID, q.Options[0].ID, answeredAt); err != nil {
+		t.Fatalf("RecordAnswer err = %v, want nil", err)
+	}
+	if err := sessionStore.Finish(t.Context(), sess.ID); err != nil {
+		t.Fatalf("Finish err = %v, want nil", err)
+	}
+}
+
 // TestLiveSessionStore_Standings seeds two players who score across a
 // two-round quiz and asserts the per-round and final standings: round_score
 // scopes to the round, total_score is cumulative, non-answerers appear at 0,
@@ -697,5 +723,159 @@ func scoreAnswer(
 	}
 	if err := s.SetAnswerScore(t.Context(), sessionID, questionID, playerID, score); err != nil {
 		t.Fatalf("SetAnswerScore err = %v, want nil", err)
+	}
+}
+
+func TestLiveSessionStore_PlayerFinishedSessionForQuiz(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	playerStore := NewPlayerStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	qz := newLiveQuizWithQuestion(t, quizStore)
+
+	player, err := playerStore.CreateAnonymousPlayer(t.Context(), "finished-p")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	// No participation yet: the gate is open.
+	played, err := sessionStore.PlayerFinishedSessionForQuiz(t.Context(), player.ID, qz.ID)
+	if err != nil {
+		t.Fatalf("PlayerFinishedSessionForQuiz err = %v, want nil", err)
+	}
+	if got, want := played, false; got != want {
+		t.Errorf("played (before) = %v, want %v", got, want)
+	}
+
+	seedFinishedSession(t, sessionStore, qz, "FINI23", player.ID)
+
+	played, err = sessionStore.PlayerFinishedSessionForQuiz(t.Context(), player.ID, qz.ID)
+	if err != nil {
+		t.Fatalf("PlayerFinishedSessionForQuiz err = %v, want nil", err)
+	}
+	if got, want := played, true; got != want {
+		t.Errorf("played (after finish) = %v, want %v", got, want)
+	}
+}
+
+func TestLiveSessionStore_PlayerFinishedSessionForQuiz_UnfinishedDoesNotCount(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	playerStore := NewPlayerStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	qz := newLiveQuizWithQuestion(t, quizStore)
+
+	player, err := playerStore.CreateAnonymousPlayer(t.Context(), "lobby-p")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	// A roster row in a still-open (lobby) session must not trip the gate -
+	// only a finished session blocks a replay.
+	sess := &livesession.Session{QuizID: qz.ID, HostPlayerID: seededAdminID, JoinCode: "OPEN23"}
+	if err = sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, player.ID, "Open"); err != nil {
+		t.Fatalf("AddPlayer err = %v, want nil", err)
+	}
+
+	played, err := sessionStore.PlayerFinishedSessionForQuiz(t.Context(), player.ID, qz.ID)
+	if err != nil {
+		t.Fatalf("PlayerFinishedSessionForQuiz err = %v, want nil", err)
+	}
+	if got, want := played, false; got != want {
+		t.Errorf("played = %v, want %v (unfinished session must not gate)", got, want)
+	}
+}
+
+func TestPlayerStore_ListFinishedSessionPlaysForPlayer(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	playerStore := NewPlayerStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	qz := newLiveQuizWithQuestion(t, quizStore)
+
+	player, err := playerStore.CreateAnonymousPlayer(t.Context(), "plays-p")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	// Two finished sessions of the same quiz collapse to one play row.
+	seedFinishedSession(t, sessionStore, qz, "PLAY01", player.ID)
+	seedFinishedSession(t, sessionStore, qz, "PLAY02", player.ID)
+
+	plays, err := playerStore.ListFinishedSessionPlaysForPlayer(t.Context(), player.ID, 20)
+	if err != nil {
+		t.Fatalf("ListFinishedSessionPlaysForPlayer err = %v, want nil", err)
+	}
+	if got, want := len(plays), 1; got != want {
+		t.Fatalf("len(plays) = %d, want %d (one row per quiz)", got, want)
+	}
+	if got, want := plays[0].QuizID, qz.ID; got != want {
+		t.Errorf("plays[0].QuizID = %d, want %d", got, want)
+	}
+	if got, want := plays[0].QuizTitle, qz.Title; got != want {
+		t.Errorf("plays[0].QuizTitle = %q, want %q", got, want)
+	}
+	if plays[0].FinishedAt.IsZero() {
+		t.Error("plays[0].FinishedAt is zero, want a timestamp")
+	}
+}
+
+func TestPlayerStore_ResetLiveSessionPlaysForPlayerOnQuiz(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	playerStore := NewPlayerStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	qz := newLiveQuizWithQuestion(t, quizStore)
+
+	player, err := playerStore.CreateAnonymousPlayer(t.Context(), "reset-p")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	other, err := playerStore.CreateAnonymousPlayer(t.Context(), "reset-other")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer other err = %v, want nil", err)
+	}
+
+	seedFinishedSession(t, sessionStore, qz, "RES101", player.ID)
+	seedFinishedSession(t, sessionStore, qz, "RES102", other.ID)
+
+	if err = playerStore.ResetLiveSessionPlaysForPlayerOnQuiz(t.Context(), player.ID, qz.ID); err != nil {
+		t.Fatalf("ResetLiveSessionPlaysForPlayerOnQuiz err = %v, want nil", err)
+	}
+
+	// The reset player's gate is clear and their rows are gone.
+	played, err := sessionStore.PlayerFinishedSessionForQuiz(t.Context(), player.ID, qz.ID)
+	if err != nil {
+		t.Fatalf("PlayerFinishedSessionForQuiz err = %v, want nil", err)
+	}
+	if got, want := played, false; got != want {
+		t.Errorf("played after reset = %v, want %v", got, want)
+	}
+	plays, err := playerStore.ListFinishedSessionPlaysForPlayer(t.Context(), player.ID, 20)
+	if err != nil {
+		t.Fatalf("ListFinishedSessionPlaysForPlayer err = %v, want nil", err)
+	}
+	if got, want := len(plays), 0; got != want {
+		t.Errorf("len(plays) after reset = %d, want %d", got, want)
+	}
+
+	// Another player's participation in the same quiz is untouched.
+	otherPlayed, err := sessionStore.PlayerFinishedSessionForQuiz(t.Context(), other.ID, qz.ID)
+	if err != nil {
+		t.Fatalf("PlayerFinishedSessionForQuiz other err = %v, want nil", err)
+	}
+	if got, want := otherPlayed, true; got != want {
+		t.Errorf("other played after reset = %v, want %v (must be unaffected)", got, want)
 	}
 }

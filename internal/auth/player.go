@@ -250,6 +250,16 @@ type RecentFinishedGame struct {
 	CreatedAt time.Time
 }
 
+// FinishedSessionPlay is one row in the "Live quiz plays" section of the
+// admin per-player detail view: a quiz the player has played in a finished
+// live session, with the most recent finish time. The reset affordance
+// posts the quiz id back so an admin can clear the play.
+type FinishedSessionPlay struct {
+	QuizID     int64
+	QuizTitle  string
+	FinishedAt time.Time
+}
+
 // AdminAuditEntry is one row in the admin_audit table, rendered on the
 // per-player detail view's "Recent admin actions" section (#450). The
 // raw Payload JSON is passed through as a string; the template decodes
@@ -297,6 +307,7 @@ const (
 	AdminActionDemoteSuper        = "demote_super"
 	AdminActionPromoteAdmin       = "promote_admin"
 	AdminActionDemoteAdmin        = "demote_admin"
+	AdminActionLiveQuizReset      = "live_quiz_reset"
 )
 
 // AdminPlayerStore is the read+write persistence interface the admin
@@ -314,6 +325,17 @@ type AdminPlayerStore interface {
 	ListRecentFinishedGamesForPlayer(
 		ctx context.Context, playerID, limit int64,
 	) ([]*RecentFinishedGame, error)
+	// ListFinishedSessionPlaysForPlayer returns at most limit live-quiz
+	// plays the player has finished, newest-first, one row per quiz. Empty
+	// slice when the player has never finished a live session.
+	ListFinishedSessionPlaysForPlayer(
+		ctx context.Context, playerID, limit int64,
+	) ([]*FinishedSessionPlay, error)
+	// ResetLiveSessionPlaysForPlayerOnQuiz hard-deletes the player's
+	// session_answers and session_players rows across every session of the
+	// given quiz, clearing the replay gate so the player can join a new
+	// session of it.
+	ResetLiveSessionPlaysForPlayerOnQuiz(ctx context.Context, playerID, quizID int64) error
 	// SetPlayerEmailVerifiedNow stamps email_verified_at to the
 	// current wall-clock time. Idempotent against an already-verified
 	// row (the timestamp is refreshed). Returns ErrPlayerNotFound when

@@ -34,6 +34,11 @@ const recentFinishedGamesLimit = 5
 // rationale as recentFinishedGamesLimit.
 const adminAuditLimit = 20
 
+// livePlaysLimit caps the "Live quiz plays" section, one row per quiz.
+// Same rationale as recentFinishedGamesLimit; #141 covers pagination for
+// genuinely large histories.
+const livePlaysLimit = 20
+
 // AdminResendVerificationCooldown is the per-target cool-down between
 // consecutive admin-initiated resend-verification clicks. A stuck
 // operator pounding the button should not turn the page into an
@@ -46,6 +51,7 @@ type playerDetailData struct {
 	Title          string
 	Player         playerDetailRow
 	RecentGames    []playerDetailGame
+	LivePlays      []playerDetailLivePlay
 	AuditEntries   []playerDetailAudit
 	CanVerify      bool
 	CanResend      bool
@@ -75,6 +81,12 @@ type playerDetailGame struct {
 	QuizID    int64
 	QuizTitle string
 	CreatedAt time.Time
+}
+
+type playerDetailLivePlay struct {
+	QuizID     int64
+	QuizTitle  string
+	FinishedAt time.Time
 }
 
 type playerDetailAudit struct {
@@ -153,6 +165,14 @@ func loadPlayerDetail(
 		return playerDetailData{}, false
 	}
 
+	livePlays, err := store.ListFinishedSessionPlaysForPlayer(ctx, playerID, livePlaysLimit)
+	if err != nil {
+		logger.ErrorContext(ctx, "error listing finished session plays", slog.Any("err", err))
+		render500(w, r, logger, csrfMgr)
+
+		return playerDetailData{}, false
+	}
+
 	audit, err := store.ListAdminAuditForTarget(ctx, playerID, adminAuditLimit)
 	if err != nil {
 		logger.ErrorContext(ctx, "error listing admin audit", slog.Any("err", err))
@@ -161,7 +181,7 @@ func loadPlayerDetail(
 		return playerDetailData{}, false
 	}
 
-	return buildPlayerDetailData(detail, games, audit), true
+	return buildPlayerDetailData(detail, games, livePlays, audit), true
 }
 
 // buildPlayerDetailData merges the row + games + audit into the
@@ -170,6 +190,7 @@ func loadPlayerDetail(
 func buildPlayerDetailData(
 	detail *auth.PlayerDetail,
 	games []*auth.RecentFinishedGame,
+	livePlays []*auth.FinishedSessionPlay,
 	audit []*auth.AdminAuditEntry,
 ) playerDetailData {
 	row := playerDetailRow{
@@ -199,6 +220,13 @@ func buildPlayerDetailData(
 		})
 	}
 
+	livePlayRows := make([]playerDetailLivePlay, 0, len(livePlays))
+	for _, p := range livePlays {
+		livePlayRows = append(livePlayRows, playerDetailLivePlay{
+			QuizID: p.QuizID, QuizTitle: p.QuizTitle, FinishedAt: p.FinishedAt,
+		})
+	}
+
 	auditRows := make([]playerDetailAudit, 0, len(audit))
 	for _, a := range audit {
 		auditRows = append(auditRows, playerDetailAudit{
@@ -216,6 +244,7 @@ func buildPlayerDetailData(
 		Title:          "Admin Dashboard - Player",
 		Player:         row,
 		RecentGames:    gameRows,
+		LivePlays:      livePlayRows,
 		AuditEntries:   auditRows,
 		CanVerify:      detail.OnboardingState == auth.OnboardingStateUnverified,
 		CanResend:      detail.OnboardingState == auth.OnboardingStateUnverified && detail.Email != "",
@@ -250,6 +279,8 @@ func adminActionLabel(action string) string {
 		return "Promoted to host"
 	case auth.AdminActionDemoteAdmin:
 		return "Host removed"
+	case auth.AdminActionLiveQuizReset:
+		return "Live quiz play reset"
 	default:
 		return action
 	}
@@ -273,6 +304,12 @@ func decodeAuditDetail(action, payload string) string {
 		return fields["new_email"]
 	case auth.AdminActionDisplayNameSet:
 		return fields["new_displayName"]
+	case auth.AdminActionLiveQuizReset:
+		if quizID := fields["quiz_id"]; quizID != "" {
+			return "quiz #" + quizID
+		}
+
+		return ""
 	case auth.AdminActionRoleChanged,
 		auth.AdminActionPromoteSuper, auth.AdminActionDemoteSuper,
 		auth.AdminActionPromoteAdmin, auth.AdminActionDemoteAdmin:
