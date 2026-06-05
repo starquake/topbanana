@@ -153,6 +153,11 @@ const workerServer = (workerIndex: number) => {
       // still leaves the .progress-reveal phase observable for the
       // visibility assertion in player.spec.ts.
       REVEAL_DELAY: '500ms',
+      // Shrink the live-session runner beats (round-intro, reveal, between-
+      // rounds, and the lobby auto-start window all default to multiple
+      // seconds) so the synchronized-play specs advance through the phases
+      // without paying the production dwell time.
+      SESSION_RUNNER_BEAT: '500ms',
       // Disable the per-IP POST /login cooldown (#494, default 3s). The
       // suite logs in repeatedly from 127.0.0.1, so the cooldown would
       // falsely trip "Too many attempts" on back-to-back same-IP logins.
