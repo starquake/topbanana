@@ -23,6 +23,7 @@
 @source "../../tmpl/admin";
 @source "../../tmpl/auth";
 @source "../../tmpl/home";
+@source "../../tmpl/host";
 @source "../js";
 @source "../../../client/static";
 

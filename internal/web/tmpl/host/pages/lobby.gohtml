@@ -1,0 +1,105 @@
+{{define "content"}}
+    {{/* The whole lobby is one Alpine island. It hydrates from the
+         server-rendered code/quiz (no flash), then host-lobby.js subscribes
+         to the session SSE channel and re-GETs /state on every tick to keep
+         the roster and ready states live. */}}
+    <main x-data="hostLobby({{.JoinCode | printf "%q"}})"
+          class="min-h-dvh flex flex-col">
+        <header class="flex items-center justify-between gap-4 px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1rem,2.5vh,2rem)] border-b border-border-soft">
+            <div class="flex items-center gap-3">
+                <img src="/assets/banana.svg" alt="" class="w-9 h-9" aria-hidden="true">
+                <span class="font-display font-extrabold uppercase tracking-[0.18em] text-[clamp(1rem,2vw,1.4rem)]">Top Banana!</span>
+            </div>
+            <p class="m-0 text-text-dim text-[clamp(0.85rem,1.6vw,1.1rem)] font-semibold uppercase tracking-[0.14em] truncate max-w-[40vw]">
+                {{.QuizTitle}}
+            </p>
+        </header>
+
+        <div class="flex-1 grid gap-[clamp(1.5rem,4vw,4rem)] px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1.5rem,4vh,3rem)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] items-center">
+            {{/* Left: scan-to-join card with the server-rendered QR + URL. */}}
+            <section aria-label="Join by phone"
+                     class="flex flex-col items-center gap-[clamp(1rem,3vh,2rem)]">
+                <p class="m-0 text-text-dim text-[clamp(0.9rem,1.8vw,1.25rem)] font-semibold uppercase tracking-[0.18em]">
+                    Scan to join
+                </p>
+                <div class="bg-white rounded-2xl p-[clamp(1rem,2vw,1.75rem)] shadow-2xl w-[clamp(13rem,28vw,22rem)]">
+                    {{/* QR is a server-rendered SVG; it scales to the box width. */}}
+                    {{.QRSVG}}
+                </div>
+                <p class="m-0 text-text-mute font-mono text-[clamp(0.75rem,1.4vw,1rem)] break-all text-center max-w-[28ch]">
+                    {{.JoinURL}}
+                </p>
+            </section>
+
+            {{/* Right: the big room code plus the live roster. */}}
+            <section aria-label="Room" class="flex flex-col gap-[clamp(1.25rem,3vh,2.5rem)]">
+                <div>
+                    <p class="m-0 text-text-dim text-[clamp(0.9rem,1.8vw,1.25rem)] font-semibold uppercase tracking-[0.18em]">
+                        Or enter code
+                    </p>
+                    <p class="m-0 font-display font-extrabold tracking-[0.12em] text-accent leading-none text-[clamp(3.5rem,11vw,8rem)] tabular-nums">
+                        {{.JoinCode}}
+                    </p>
+                </div>
+
+                <div>
+                    <div class="flex items-baseline justify-between gap-3 mb-3">
+                        <h2 class="m-0 font-display text-[clamp(1.1rem,2.2vw,1.6rem)] font-bold uppercase tracking-[0.12em]">
+                            Players
+                        </h2>
+                        <span class="text-text-dim text-[clamp(0.85rem,1.6vw,1.1rem)] tabular-nums"
+                              x-text="playerCountLabel()"></span>
+                    </div>
+
+                    {{/* Empty state until the first player joins. */}}
+                    <p x-show="players.length === 0"
+                       class="m-0 text-text-dim text-[clamp(0.9rem,1.7vw,1.15rem)]">
+                        Waiting for players to join...
+                    </p>
+
+                    <ul x-show="players.length > 0"
+                        class="m-0 list-none p-0 grid gap-2 grid-cols-1 sm:grid-cols-2"
+                        role="list">
+                        <template x-for="p in players" :key="p.playerId">
+                            <li class="flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-surface border"
+                                :class="p.isReady ? 'border-success/60' : 'border-border-soft'"
+                                data-player-row>
+                                <span class="font-semibold text-[clamp(0.95rem,1.7vw,1.2rem)] truncate"
+                                      x-text="p.displayName"></span>
+                                <span class="shrink-0 text-[0.7rem] font-semibold uppercase tracking-[0.12em] px-2 py-1 rounded-sm"
+                                      :class="p.isReady ? 'bg-success/15 text-success' : 'bg-border-soft text-text-dim'"
+                                      x-text="p.isReady ? 'Ready' : 'Not ready'"
+                                      data-ready-state></span>
+                            </li>
+                        </template>
+                    </ul>
+                </div>
+            </section>
+        </div>
+
+        {{/* Footer: connection state + host start control. */}}
+        <footer class="flex flex-wrap items-center justify-between gap-4 px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1rem,2.5vh,2rem)] border-t border-border-soft">
+            <p class="m-0 flex items-center gap-2 text-text-dim text-[clamp(0.8rem,1.5vw,1rem)]">
+                <span class="inline-block w-2.5 h-2.5 rounded-full"
+                      :class="connected ? 'bg-success' : 'bg-warning'"
+                      aria-hidden="true"></span>
+                <span x-text="connected ? 'Live' : 'Reconnecting...'"></span>
+            </p>
+
+            <form method="post" :action="'/host/' + joinCode + '/start'" @submit.prevent="start()">
+                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                <button type="submit"
+                        class="inline-flex items-center justify-center gap-2 min-h-[52px] px-8 rounded-lg bg-accent text-bg font-display font-extrabold text-[clamp(0.9rem,1.7vw,1.15rem)] uppercase tracking-[0.12em] border-0 transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                        :disabled="starting || players.length === 0">
+                    <span x-text="players.length === 0 ? 'Waiting for players' : 'Start game'"></span>
+                </button>
+            </form>
+
+            {{/* Host-facing status line for the start control. */}}
+            <p x-show="startMessage"
+               x-text="startMessage"
+               class="basis-full m-0 text-right text-warning text-[clamp(0.8rem,1.5vw,1rem)]"
+               role="status"></p>
+        </footer>
+    </main>
+{{end}}

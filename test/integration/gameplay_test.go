@@ -236,14 +236,16 @@ func setupIntegration(t *testing.T) (context.Context, integrationSetup) {
 	return setupIntegrationWithEnv(t, nil)
 }
 
-// setupIntegrationWithEnv is setupIntegration with extra env merged on top of
-// the registration-enabled default, so a test can shrink the session runner
-// beats (SESSION_RUNNER_BEAT) and still get a store.Stores for direct seeding.
-func setupIntegrationWithEnv(t *testing.T, extra map[string]string) (context.Context, integrationSetup) {
+// setupIntegrationWithEnv is setupIntegration with extra environment merged
+// over the defaults, so a test can register more than one host against the
+// same server (LOGIN_COOLDOWN=0 disables the per-IP login cooldown, the same
+// knob the e2e suite uses) or shrink the session runner beats
+// (SESSION_RUNNER_BEAT) while still getting a store.Stores for direct seeding.
+func setupIntegrationWithEnv(t *testing.T, extraEnv map[string]string) (context.Context, integrationSetup) {
 	t.Helper()
 
 	env := map[string]string{"REGISTRATION_ENABLED": "true"}
-	maps.Copy(env, extra)
+	maps.Copy(env, extraEnv)
 
 	ctx, srv := startServer(t, env)
 
