@@ -75,6 +75,14 @@ func startServer(t *testing.T, extraEnv map[string]string) (context.Context, tes
 			// that need a signed-in-but-unverified client forge the cookie
 			// directly. Overridable via extraEnv.
 			"SESSION_KEY": testSessionKey,
+			// Quiet the MP-5 session runner by default. Its 250ms beat
+			// polls the DB (ListLiveSessionIDs) in every test server, and
+			// ~100 parallel servers each polling under -race + coverage adds
+			// enough background load to widen the #608 readiness flake. The
+			// vast majority of integration tests never exercise the runner,
+			// so park its beat; the runner tests opt back in via extraEnv
+			// (SESSION_RUNNER_BEAT=30ms), which maps.Copy layers on top.
+			"SESSION_RUNNER_BEAT": "1h",
 		}
 		maps.Copy(env, extraEnv)
 
