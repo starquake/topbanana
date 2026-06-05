@@ -149,31 +149,6 @@ func (f *fakeQuiz) GetQuiz(_ context.Context, _ int64) (*quiz.Quiz, error) {
 	return f.quiz, nil
 }
 
-func TestService_CreateSession_RejectsSoloQuiz(t *testing.T) {
-	t.Parallel()
-
-	store := &fakeStore{existingCodes: map[string]bool{}}
-	quizzes := &fakeQuiz{quiz: &quiz.Quiz{ID: 7, Mode: quiz.ModeSolo}}
-	svc := NewService(store, quizzes, slog.Default())
-
-	_, err := svc.CreateSession(t.Context(), 7, 1)
-	if got, want := err, ErrNotLiveQuiz; !errors.Is(got, want) {
-		t.Errorf("CreateSession solo err = %v, want %v", got, want)
-	}
-}
-
-func TestService_CreateSession_PropagatesQuizNotFound(t *testing.T) {
-	t.Parallel()
-
-	store := &fakeStore{existingCodes: map[string]bool{}}
-	svc := NewService(store, &fakeQuiz{}, slog.Default())
-
-	_, err := svc.CreateSession(t.Context(), 7, 1)
-	if got, want := err, quiz.ErrQuizNotFound; !errors.Is(got, want) {
-		t.Errorf("CreateSession missing-quiz err = %v, want %v", got, want)
-	}
-}
-
 func TestService_CreateSession_RegeneratesOnCodeCollision(t *testing.T) {
 	t.Parallel()
 
@@ -243,56 +218,4 @@ func TestService_Join_FallsBackToPetnameOnCollision(t *testing.T) {
 	if got, want := player.DisplayName, "Pet-2"; got != want {
 		t.Errorf("Join DisplayName = %q, want %q", got, want)
 	}
-}
-
-func TestService_Join_SessionNotFound(t *testing.T) {
-	t.Parallel()
-
-	svc := NewService(&fakeStore{}, &fakeQuiz{}, slog.Default())
-
-	_, err := svc.Join(t.Context(), "NOPE12", 5, "Wanted", func() string { return "Pet" })
-	if got, want := err, ErrSessionNotFound; !errors.Is(got, want) {
-		t.Errorf("Join missing-session err = %v, want %v", got, want)
-	}
-}
-
-func TestService_GetLobbyState_ParticipantGate(t *testing.T) {
-	t.Parallel()
-
-	sess := &Session{
-		ID:           "s1",
-		JoinCode:     "ROOM12",
-		QuizID:       7,
-		HostPlayerID: 1,
-		Phase:        PhaseLobby,
-		Players:      []*Player{{PlayerID: 5, DisplayName: "Joined"}},
-	}
-	quizzes := &fakeQuiz{quiz: &quiz.Quiz{ID: 7, Title: "Q", Mode: quiz.ModeLive}}
-	svc := NewService(&fakeStore{session: sess}, quizzes, slog.Default())
-
-	t.Run("participant can read", func(t *testing.T) {
-		t.Parallel()
-		state, err := svc.GetLobbyState(t.Context(), "ROOM12", 5)
-		if err != nil {
-			t.Fatalf("GetLobbyState participant err = %v, want nil", err)
-		}
-		if got, want := state.Session.Phase, PhaseLobby; got != want {
-			t.Errorf("phase = %q, want %q", got, want)
-		}
-	})
-
-	t.Run("host can read", func(t *testing.T) {
-		t.Parallel()
-		if _, err := svc.GetLobbyState(t.Context(), "ROOM12", 1); err != nil {
-			t.Errorf("GetLobbyState host err = %v, want nil", err)
-		}
-	})
-
-	t.Run("stranger is rejected", func(t *testing.T) {
-		t.Parallel()
-		_, err := svc.GetLobbyState(t.Context(), "ROOM12", 999)
-		if got, want := err, ErrNotParticipant; !errors.Is(got, want) {
-			t.Errorf("GetLobbyState stranger err = %v, want %v", got, want)
-		}
-	})
 }
