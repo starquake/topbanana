@@ -143,7 +143,7 @@ func shellAssetPaths() []string {
 		"fonts/inter-latin-ext.woff2",
 		"fonts/orbitron-latin.woff2",
 		"js/htmx.min.js",
-		"js/share.js",
+		"js/dist/share.js",
 		"js/vendor/alpine.min.js",
 		"banana.svg",
 		"banana-192.png",

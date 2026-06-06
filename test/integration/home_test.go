@@ -149,7 +149,7 @@ func TestHome_Integration(t *testing.T) {
 			`data-share-text="Play this quiz: Bananas of the World"`,
 			`data-share-path="/play/capital-cities-`,
 			`data-share-title="Capital Cities"`,
-			`<script type="module" src="/assets/js/share.js"></script>`,
+			`<script type="module" src="/assets/js/dist/share.js"></script>`,
 		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("body missing share-trigger marker %q", want)
@@ -157,9 +157,9 @@ func TestHome_Integration(t *testing.T) {
 		}
 	})
 
-	t.Run("share.js asset is served", func(t *testing.T) {
+	t.Run("share bundle asset is served", func(t *testing.T) {
 		t.Parallel()
-		resp := httpGet(ctx, t, &http.Client{}, baseURL+"/assets/js/share.js")
+		resp := httpGet(ctx, t, &http.Client{}, baseURL+"/assets/js/dist/share.js")
 		defer closeBody(t, resp.Body)
 
 		if got, want := resp.StatusCode, http.StatusOK; got != want {

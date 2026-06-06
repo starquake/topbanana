@@ -28,11 +28,12 @@
     <link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="preload" href="/assets/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="/assets/css/app.css">
-    {{/* share.js auto-wires [data-share-trigger] buttons on the
+    {{/* The share bundle auto-wires [data-share-trigger] buttons on the
          popular-quiz cards below. Loaded as a module so the
          openShareDialog export is available if other surfaces ever
-         want to drive the dialog programmatically. */}}
-    <script type="module" src="/assets/js/share.js"></script>
+         want to drive the dialog programmatically. esbuild bundle
+         (#721); the dialog logic is shared with the player client. */}}
+    <script type="module" src="/assets/js/dist/share.js"></script>
     {{/* Alpine drives the Popular / Newest tab toggle on the start page.
          Vendored + self-hosted (no CDN, per frontend-style.md); deferred
          so it boots after the DOM parses without blocking first paint. */}}

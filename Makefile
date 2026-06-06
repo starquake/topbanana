@@ -317,13 +317,17 @@ tailwind-check: $(TAILWIND_BIN)
 	    rm -f $$tmp; \
 	    echo "$(TAILWIND_OUTPUT) is up to date."
 
-# --- esbuild (player client JS bundles) --------------------------------------
+# --- esbuild (player client + web/host JS bundles) ---------------------------
 #
-# The player client's app JS is bundled per entry point with esbuild and the
-# minified output is committed (like app.css), so the binary embeds the
-# bundles and the distroless image needs no Node at build time. Source stays
-# as plain ES modules under internal/client/static/js/{components,services,
-# util}; only how it is delivered changes (#721).
+# Both the player client and the web/host app JS are bundled per entry point
+# with esbuild and the minified output is committed (like app.css), so the
+# binary embeds the bundles and the distroless image needs no Node at build
+# time. Source stays as plain ES modules; only how it is delivered changes
+# (#721). The genuinely-duplicated client logic (server clock, the per-question
+# countdown, the standings bar graph, the share dialog) lives once in
+# frontend/shared and is inlined into each tree's bundle through the @shared
+# alias, so neither bundle fetches a module from the other tree at runtime
+# (#721, slice 2).
 #
 # esbuild is a dev-only build tool, installed from the committed
 # package.json + package-lock.json into node_modules/ (gitignored). The
@@ -331,17 +335,21 @@ tailwind-check: $(TAILWIND_BIN)
 
 ESBUILD_BIN     := node_modules/.bin/esbuild
 JS_DEPS         := node_modules/.package-lock.json
-JS_SRC_DIR      := internal/client/static/js
-JS_OUT_DIR      := $(JS_SRC_DIR)/dist
-JS_ENTRIES      := $(JS_SRC_DIR)/app.js $(JS_SRC_DIR)/join.js
+
+JS_CLIENT_DIR   := internal/client/static/js
+JS_CLIENT_OUT   := $(JS_CLIENT_DIR)/dist
+JS_CLIENT_ENTRIES := $(JS_CLIENT_DIR)/app.js $(JS_CLIENT_DIR)/join.js
+
+JS_WEB_DIR      := internal/web/static/js
+JS_WEB_OUT      := $(JS_WEB_DIR)/dist
+JS_WEB_ENTRIES  := $(JS_WEB_DIR)/host-lobby.js $(JS_WEB_DIR)/share.js
 
 # Alpine 3 targets modern evergreen browsers; es2020 matches the syntax the
-# source already uses (async/await, optional chaining). share.js is the one
-# cross-tree module (served from /assets/js/ by the web tree); mark it
-# external so the bundle keeps the runtime import instead of inlining a file
-# that lives outside the client tree (slice 2 territory).
+# source already uses (async/await, optional chaining). The @shared alias
+# resolves the cross-tree modules in frontend/shared so each bundle inlines
+# them and stays self-contained.
 ESBUILD_FLAGS   := --bundle --minify --format=esm --target=es2020 \
-                   --external:/assets/js/share.js
+                   --alias:@shared=./frontend/shared
 
 $(JS_DEPS): package.json package-lock.json
 	npm ci
@@ -349,30 +357,40 @@ $(JS_DEPS): package.json package-lock.json
 
 .PHONY: js
 js: $(JS_DEPS)
-	$(ESBUILD_BIN) $(JS_ENTRIES) $(ESBUILD_FLAGS) --outdir=$(JS_OUT_DIR)
+	$(ESBUILD_BIN) $(JS_CLIENT_ENTRIES) $(ESBUILD_FLAGS) --outdir=$(JS_CLIENT_OUT)
+	$(ESBUILD_BIN) $(JS_WEB_ENTRIES) $(ESBUILD_FLAGS) --outdir=$(JS_WEB_OUT)
 
 # Rebuild on change during development. Mirrors `make js` flags so the
 # watcher output matches what `make js` produces and never drifts from the
-# committed bundles.
+# committed bundles. Watches both trees in one invocation.
 .PHONY: js-watch
 js-watch: $(JS_DEPS)
-	$(ESBUILD_BIN) $(JS_ENTRIES) $(ESBUILD_FLAGS) --outdir=$(JS_OUT_DIR) --watch
+	$(ESBUILD_BIN) $(JS_CLIENT_ENTRIES) $(JS_WEB_ENTRIES) $(ESBUILD_FLAGS) \
+	    --outbase=internal --outdir=internal --watch
 
-# Rebuild into a temp dir and diff against the committed bundles. Wired into
-# `make check` so a client JS change without `make js` fails pre-commit
-# instead of shipping a stale bundle. Mirrors tailwind-check.
+# Rebuild each tree into a temp dir and diff against the committed bundles.
+# Wired into `make check` so a JS change without `make js` fails pre-commit
+# instead of shipping a stale bundle. Mirrors tailwind-check; covers both the
+# client and web/host bundles.
 .PHONY: js-check
 js-check: $(JS_DEPS)
+	@$(MAKE) --no-print-directory js-check-one \
+	    JS_CHECK_ENTRIES="$(JS_CLIENT_ENTRIES)" JS_CHECK_OUT="$(JS_CLIENT_OUT)"
+	@$(MAKE) --no-print-directory js-check-one \
+	    JS_CHECK_ENTRIES="$(JS_WEB_ENTRIES)" JS_CHECK_OUT="$(JS_WEB_OUT)"
+
+.PHONY: js-check-one
+js-check-one:
 	@tmp=$$(mktemp -d) && \
-	    $(ESBUILD_BIN) $(JS_ENTRIES) $(ESBUILD_FLAGS) --outdir=$$tmp >/dev/null 2>&1 && \
-	    if ! diff -rq $$tmp $(JS_OUT_DIR) >/dev/null; then \
-	        echo "ERROR: $(JS_OUT_DIR) is out of date — run \`make js\` and commit the result."; \
-	        diff -ru $(JS_OUT_DIR) $$tmp || true; \
+	    $(ESBUILD_BIN) $(JS_CHECK_ENTRIES) $(ESBUILD_FLAGS) --outdir=$$tmp >/dev/null 2>&1 && \
+	    if ! diff -rq $$tmp $(JS_CHECK_OUT) >/dev/null; then \
+	        echo "ERROR: $(JS_CHECK_OUT) is out of date — run \`make js\` and commit the result."; \
+	        diff -ru $(JS_CHECK_OUT) $$tmp || true; \
 	        rm -rf $$tmp; \
 	        exit 1; \
 	    fi; \
 	    rm -rf $$tmp; \
-	    echo "$(JS_OUT_DIR) is up to date."
+	    echo "$(JS_CHECK_OUT) is up to date."
 
 # --- golangci-lint -----------------------------------------------------------
 #

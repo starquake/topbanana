@@ -9,14 +9,15 @@
     <link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="preload" href="/assets/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="/assets/css/app.css">
-    {{/* host-lobby.js drives the SSE-tick -> GET /state refresh and the
+    {{/* The host bundle drives the SSE-tick -> GET /state refresh and the
          host start control. anime.js (4.2.0, MIT) powers the between-rounds
-         standings bar graph (MP-9 / #686); host-lobby.js wraps it in a
+         standings bar graph (MP-9 / #686); the bundle wraps it in a
          reduced-motion / missing-global fallback that snaps the bars to their
-         final state. Alpine is vendored and self-hosted under /assets/js/vendor
-         (same copies the admin surface uses). */}}
+         final state. esbuild bundle (#721); the countdown and standings logic
+         are shared with the player client. Alpine is vendored and self-hosted
+         under /assets/js/vendor (same copies the admin surface uses). */}}
     <script src="/assets/js/vendor/anime.umd.min.js"></script>
-    <script type="module" src="/assets/js/host-lobby.js"></script>
+    <script type="module" src="/assets/js/dist/host-lobby.js"></script>
     <script defer src="/assets/js/vendor/alpine.min.js"></script>
 </head>
 <body class="bg-bg text-text font-sans antialiased min-h-dvh">

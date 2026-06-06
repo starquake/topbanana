@@ -88,6 +88,23 @@ func TestPWA_Integration(t *testing.T) {
 		}
 	})
 
+	t.Run("every precached URL is served", func(t *testing.T) {
+		t.Parallel()
+
+		swBody := getBody(ctx, t, srv.BaseURL+"/sw.js")
+		urls := parsePrecacheURLs(t, swBody)
+		// A bundle rename (e.g. share.js -> dist/share.js) that updated
+		// PRECACHE_URLS but not the served path would leave the SW caching a
+		// 404 forever; fetch each precache entry and require a 200 so the
+		// precache <-> served-bundle correspondence can never silently drift.
+		if got, want := len(urls), 13; got != want {
+			t.Errorf("parsed %d precache URLs, want %d - update this guard if PRECACHE_URLS changed", got, want)
+		}
+		for _, path := range urls {
+			assertServed200(ctx, t, srv.BaseURL+path)
+		}
+	})
+
 	t.Run("png icons are served with image/png", func(t *testing.T) {
 		t.Parallel()
 		for _, path := range []string{
@@ -138,6 +155,19 @@ func assertPWAHeadMarkup(ctx context.Context, t *testing.T, url string) {
 	}
 }
 
+// assertServed200 fetches url and requires a 200, closing the body. Used to
+// confirm every precached path resolves to a real served asset.
+func assertServed200(ctx context.Context, t *testing.T, url string) {
+	t.Helper()
+
+	resp := httpGet(ctx, t, http.DefaultClient, url)
+	defer closeBody(t, resp.Body)
+
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Errorf("%s status = %d, want %d", url, got, want)
+	}
+}
+
 func assertPNGAsset(ctx context.Context, t *testing.T, url string) {
 	t.Helper()
 
@@ -150,6 +180,34 @@ func assertPNGAsset(ctx context.Context, t *testing.T, url string) {
 	if got, want := resp.Header.Get("Content-Type"), "image/png"; !strings.HasPrefix(got, want) {
 		t.Errorf("%s Content-Type = %q, want prefix %q", url, got, want)
 	}
+}
+
+// parsePrecacheURLs pulls the quoted paths out of the PRECACHE_URLS array in
+// the served sw.js so the precache list is verified against the live server
+// rather than a hand-copied table that could rot.
+func parsePrecacheURLs(t *testing.T, swBody string) []string {
+	t.Helper()
+
+	const marker = "PRECACHE_URLS = ["
+	_, after, ok := strings.Cut(swBody, marker)
+	if !ok {
+		t.Fatalf("sw.js does not contain %q", marker)
+	}
+	end := strings.Index(after, "]")
+	if end < 0 {
+		t.Fatal("sw.js PRECACHE_URLS array is not closed")
+	}
+
+	var urls []string
+	for entry := range strings.SplitSeq(after[:end], ",") {
+		entry = strings.TrimSpace(entry)
+		entry = strings.Trim(entry, "'\"")
+		if entry != "" {
+			urls = append(urls, entry)
+		}
+	}
+
+	return urls
 }
 
 func readAllString(t *testing.T, body io.Reader) string {

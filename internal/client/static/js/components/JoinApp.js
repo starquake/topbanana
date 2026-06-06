@@ -1,17 +1,15 @@
 import { sessionService } from '../services/SessionService.js';
 import { playerService } from '../services/PlayerService.js';
-import { runAnim } from '../util/anim.js';
-import { clockOffsetFromServerNow, serverTime } from '../util/serverClock.js';
+import { runAnim } from '@shared/anim.js';
+import { clockOffsetFromServerNow, serverTime } from '@shared/serverClock.js';
+import { startQuestionCountdown } from '@shared/countdown.js';
+import { buildStandingsRows, animateStandingsBars } from '@shared/standings.js';
 import { optionStateClass } from '../util/answerOptions.js';
 
 // JOIN_PATH_PATTERN matches /join/<code>, capturing the room code. The bare
 // /join entry (enter-code form) has no capture group, so the component falls
 // back to the typed-code phase there.
 const JOIN_PATH_PATTERN = /^\/join\/([^/]+)\/?$/;
-
-// STANDINGS_BAR_DURATION is how long the between-rounds bar graph spends
-// growing each bar from its pre-round total to its new total (ms).
-const STANDINGS_BAR_DURATION = 900;
 
 // SESSION_STORAGE_KEY holds the remembered { code } the player joined, so a
 // reload or a brief drop can resume by re-joining without the player
@@ -494,7 +492,7 @@ export class JoinApp {
         // 0 -> 100; at startedAt the options open and the bar drains over the
         // answer window.
         if (phase === 'question' && question && !this.hasAnswered()) {
-            this.startQuestionCountdown(question);
+            this.startCountdown(question);
             return;
         }
         // Any non-answering state (already answered, or a non-question phase:
@@ -535,125 +533,30 @@ export class JoinApp {
         if (key === this.lastStandingsKey) return;
         this.lastStandingsKey = key;
 
-        this.maxStandingsTotal = Math.max(1, ...standings.map((s) => s.totalScore));
         const animate = phase === 'round_results';
-        this.standingsBars = standings.map((s) => ({
-            playerId: s.playerId,
-            displayName: s.displayName,
-            rank: s.rank,
-            total: s.totalScore,
-            preTotal: s.totalScore - s.roundScore,
-            isMe: this.ownsRow(s),
-            // Start at the pre-round total when animating, otherwise land on
-            // the final total straight away (finished, reduced motion).
-            displayTotal: animate ? s.totalScore - s.roundScore : s.totalScore,
-        }));
+        const { rows, maxTotal } = buildStandingsRows(standings, {
+            animate,
+            ownsRow: (row) => this.ownsRow(row),
+        });
+        this.standingsBars = rows;
+        this.maxStandingsTotal = maxTotal;
 
         if (!animate) return;
-        this.animateStandingsBars();
+        animateStandingsBars(this.standingsBars, runAnim);
     }
 
-    // animateStandingsBars grows each row's displayTotal from its pre-round
-    // total to its new total, which the template binds to both the bar width
-    // and the numeric label so the count-up and the bar fill move together.
-    // Under reduced motion or a missing anime global runAnim snaps straight to
-    // the final state via the complete callback, so the bars never stick at a
-    // half-grown frame. The rows are already in rank order (best-first), so
-    // the leaders rest on top once the growth settles.
-    animateStandingsBars() {
-        const bars = this.standingsBars;
-        const snap = () => {
-            bars.forEach((bar) => { bar.displayTotal = bar.total; });
-        };
-        const a = typeof window !== 'undefined' ? window.anime : null;
-        const hasRound = bars.some((bar) => bar.total !== bar.preTotal);
-        if (!hasRound || !a) {
-            snap();
-            return;
-        }
-        // Animate one proxy object per bar so anime updates the reactive
-        // displayTotal Alpine renders. Math.round keeps the label on whole
-        // points throughout the count-up.
-        bars.forEach((bar) => {
-            const proxy = { v: bar.preTotal };
-            runAnim(proxy, {
-                v: bar.total,
-                duration: STANDINGS_BAR_DURATION,
-                easing: 'easeOutCubic',
-                update: () => { bar.displayTotal = Math.round(proxy.v); },
-                complete: () => { bar.displayTotal = bar.total; },
-            });
+    // startCountdown drives the per-question bar through the shared helper:
+    // a read beat filling 0 -> 100 while options stay hidden, then an
+    // answer-window drain 100 -> 0 over [startedAt, expiresAt]. Both phases run
+    // on the server clock. Idempotent across ticks within the same question.
+    startCountdown(question) {
+        startQuestionCountdown(question, {
+            serverNow: () => this.serverTime(),
+            setProgress: (pct) => { this.questionProgress = pct; },
+            setRevealing: (revealing) => { this.revealing = revealing; },
+            setTimer: (handle) => { this.questionTimer = handle; },
+            clearTimer: () => this.clearQuestionTimer(),
         });
-    }
-
-    // startQuestionCountdown drives the per-question bar. Before the answer
-    // window opens (serverNow < startedAt) it runs the read beat, filling the
-    // bar 0 -> 100 while the options stay hidden; at startedAt it flips to the
-    // answer-window countdown, draining 100 -> 0 over [startedAt, expiresAt].
-    // Both phases run on the server clock. Idempotent across ticks within the
-    // same question: it clears any prior interval first and re-derives from the
-    // absolute server timestamps, so a resync mid-question re-anchors the bar.
-    startQuestionCountdown(question) {
-        this.clearQuestionTimer();
-        if (!question || !question.startedAt || !question.expiresAt) {
-            this.revealing = false;
-            this.questionProgress = 100;
-            return;
-        }
-        const start = new Date(question.startedAt).getTime();
-        if (Number.isFinite(start) && this.serverTime() < start) {
-            this.startReadBeat(question, start);
-            return;
-        }
-        this.startAnswerCountdown(question);
-    }
-
-    // startReadBeat fills the bar 0 -> 100 over [serverNow, startedAt] while the
-    // options stay hidden, then hands off to startAnswerCountdown the moment the
-    // window opens. Mirrors the solo game's reveal beat (#247).
-    startReadBeat(question, startAt) {
-        const beatStart = this.serverTime();
-        const beatTotal = startAt - beatStart;
-        this.revealing = true;
-        this.questionProgress = 0;
-        const tick = () => {
-            const now = this.serverTime();
-            if (now >= startAt) {
-                this.questionProgress = 100;
-                this.clearQuestionTimer();
-                this.revealing = false;
-                this.startAnswerCountdown(question);
-                return;
-            }
-            this.questionProgress = Math.max(0, Math.min(100, ((now - beatStart) / beatTotal) * 100));
-        };
-        tick();
-        this.questionTimer = setInterval(tick, 100);
-    }
-
-    // startAnswerCountdown drains the bar 100 -> 0 over [startedAt, expiresAt]
-    // on the server clock. If the window is already past it pins the bar at 0
-    // without spinning an interval.
-    startAnswerCountdown(question) {
-        this.clearQuestionTimer();
-        this.revealing = false;
-        const start = new Date(question.startedAt).getTime();
-        const end = new Date(question.expiresAt).getTime();
-        const total = end - start;
-        if (!Number.isFinite(total) || total <= 0) {
-            this.questionProgress = 0;
-            return;
-        }
-        const tick = () => {
-            const remaining = end - this.serverTime();
-            this.questionProgress = Math.max(0, Math.min(100, (remaining / total) * 100));
-            if (this.questionProgress <= 0) {
-                this.clearQuestionTimer();
-            }
-        };
-        tick();
-        if (this.questionProgress <= 0) return;
-        this.questionTimer = setInterval(tick, 100);
     }
 
     // clearQuestionTimer cancels the countdown interval. Safe to call when no
@@ -784,9 +687,9 @@ export class JoinApp {
             this.pickedOptionId = null;
             this.answerError = true;
             // Re-arm the countdown so the player keeps the time they had left;
-            // the absolute server deadline makes startQuestionCountdown
-            // recompute the real remaining window.
-            this.startQuestionCountdown(question);
+            // the absolute server deadline makes the shared helper recompute
+            // the real remaining window.
+            this.startCountdown(question);
         } finally {
             this.submitting = false;
         }

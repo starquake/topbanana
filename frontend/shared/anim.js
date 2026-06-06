@@ -1,7 +1,8 @@
-// Shared anime.js wrapper for the player-client surfaces (the solo game and
-// the join / lobby / in-game surface). anime.js is vendored and self-hosted;
-// this module keeps one reduced-motion + missing-global contract instead of a
-// copy per component.
+// Shared anime.js wrapper for every animated surface: the solo game, the
+// join / lobby / in-game player surface, and the host TV. anime.js is vendored
+// and self-hosted; this module keeps one reduced-motion + missing-global
+// contract instead of a copy per component. esbuild inlines it into each
+// tree's bundle, so there is no cross-tree runtime fetch.
 
 // reducedMotion returns true when the OS-level prefers-reduced-motion
 // preference is set, so animation calls short-circuit to their final state
