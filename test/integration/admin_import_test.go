@@ -71,6 +71,10 @@ func TestAdminImport_Integration(t *testing.T) {
 		"Verify every fact",
 		"more than one option correct",
 		"any option marked correct scores",
+		// #752: the import form carries a required play-mode selector
+		// with no option pre-selected, so the admin must choose.
+		`name="mode" required`,
+		`Choose a play mode...`,
 	} {
 		if got := string(formBody); !strings.Contains(got, want) {
 			t.Errorf("import form body should contain %q", want)
@@ -107,6 +111,7 @@ func TestAdminImport_Integration(t *testing.T) {
 
 	form := url.Values{}
 	form.Add("json", quizJSON)
+	form.Add("mode", "solo")
 	form.Add("csrf_token", csrfToken)
 
 	postReq, err := http.NewRequestWithContext(
@@ -241,6 +246,7 @@ func TestAdminImport_Integration(t *testing.T) {
 }`
 		tlForm := url.Values{}
 		tlForm.Add("json", tlJSON)
+		tlForm.Add("mode", "solo")
 		tlForm.Add("csrf_token", csrf)
 		req, err := http.NewRequestWithContext(
 			ctx, http.MethodPost, importURL, strings.NewReader(tlForm.Encode()),
@@ -370,6 +376,7 @@ func TestAdminImport_Integration(t *testing.T) {
 }`
 		form := url.Values{}
 		form.Add("json", roundsJSON)
+		form.Add("mode", "solo")
 		form.Add("csrf_token", csrf)
 		req, err := http.NewRequestWithContext(
 			ctx, http.MethodPost, importURL, strings.NewReader(form.Encode()),
@@ -523,6 +530,171 @@ func TestAdminImport_Integration(t *testing.T) {
 			[]string{"already exists", "Import Round-Trip"},
 		)
 	})
+
+	t.Run("rejects an import with no play mode", func(t *testing.T) {
+		t.Parallel()
+		// #752: the import form has no default play mode. A post with the
+		// mode field omitted (or empty) is rejected at 400 with the form
+		// re-rendered, so the admin cannot import a quiz without choosing.
+		const noModeJSON = `{
+  "title": "No Mode Chosen",
+  "description": "Imported without picking a play mode.",
+  "questions": [
+    { "text": "Q", "options": [ { "text": "A", "correct": true } ] }
+  ]
+}`
+		csrf := fetchCSRFToken(ctx, t, client, importURL)
+		form := url.Values{}
+		form.Add("json", noModeJSON)
+		form.Add("csrf_token", csrf)
+		req, err := http.NewRequestWithContext(
+			ctx, http.MethodPost, importURL, strings.NewReader(form.Encode()),
+		)
+		if err != nil {
+			t.Fatalf("NewRequest err = %v, want nil", err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("POST import client.Do err = %v, want nil", err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("ReadAll err = %v, want nil", err)
+		}
+		if cerr := resp.Body.Close(); cerr != nil {
+			t.Errorf("Body.Close err = %v, want nil", cerr)
+		}
+		if got, want := resp.StatusCode, http.StatusBadRequest; got != want {
+			t.Errorf("POST import status = %d, want %d", got, want)
+		}
+		if got := string(body); !strings.Contains(got, "choose a play mode") {
+			t.Errorf("body got %q, should contain %q", got, "choose a play mode")
+		}
+	})
+
+	t.Run("rejects an unrecognised play mode", func(t *testing.T) {
+		t.Parallel()
+		// #752: only the recognised play modes pass. A bogus value is
+		// rejected the same way a missing one is.
+		const badModeJSON = `{
+  "title": "Bogus Mode",
+  "description": "Imported with an unrecognised play mode.",
+  "questions": [
+    { "text": "Q", "options": [ { "text": "A", "correct": true } ] }
+  ]
+}`
+		csrf := fetchCSRFToken(ctx, t, client, importURL)
+		form := url.Values{}
+		form.Add("json", badModeJSON)
+		form.Add("mode", "co-op")
+		form.Add("csrf_token", csrf)
+		req, err := http.NewRequestWithContext(
+			ctx, http.MethodPost, importURL, strings.NewReader(form.Encode()),
+		)
+		if err != nil {
+			t.Fatalf("NewRequest err = %v, want nil", err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("POST import client.Do err = %v, want nil", err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("ReadAll err = %v, want nil", err)
+		}
+		if cerr := resp.Body.Close(); cerr != nil {
+			t.Errorf("Body.Close err = %v, want nil", cerr)
+		}
+		if got, want := resp.StatusCode, http.StatusBadRequest; got != want {
+			t.Errorf("POST import status = %d, want %d", got, want)
+		}
+		if got := string(body); !strings.Contains(got, "choose a play mode") {
+			t.Errorf("body got %q, should contain %q", got, "choose a play mode")
+		}
+	})
+
+	t.Run("imported quiz persists the chosen play mode", func(t *testing.T) {
+		t.Parallel()
+		// #752: the form selection is the source of truth - the JSON wire
+		// shape carries no mode. Import once per mode and confirm the
+		// chosen value lands on the quiz (visible as the selected option
+		// on the edit form's mode selector).
+		for _, mode := range []string{"solo", "live"} {
+			t.Run(mode, func(t *testing.T) {
+				t.Parallel()
+				assertImportPersistsMode(ctx, t, client, srv.BaseURL, importURL, mode)
+			})
+		}
+	})
+}
+
+// assertImportPersistsMode imports a minimal quiz with the given play
+// mode and asserts the edit form's mode selector renders that mode as the
+// selected option, confirming the form selection persisted on the quiz
+// (#752). The quiz title embeds the mode so concurrent subtests derive
+// distinct slugs and don't collide.
+func assertImportPersistsMode(
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, importURL, mode string,
+) {
+	t.Helper()
+
+	quizJSON := `{
+  "title": "Mode Persist ` + mode + `",
+  "description": "Round-trip the chosen play mode.",
+  "questions": [
+    { "text": "Q", "options": [ { "text": "A", "correct": true }, { "text": "B", "correct": false } ] }
+  ]
+}`
+	csrf := fetchCSRFToken(ctx, t, client, importURL)
+	form := url.Values{}
+	form.Add("json", quizJSON)
+	form.Add("mode", mode)
+	form.Add("csrf_token", csrf)
+	req, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, importURL, strings.NewReader(form.Encode()),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("POST import client.Do err = %v, want nil", err)
+	}
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("Body.Close err = %v, want nil", cerr)
+	}
+	if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("POST import status = %d, want %d", got, want)
+	}
+	quizPath := resp.Header.Get("Location")
+	if !strings.HasPrefix(quizPath, "/admin/quizzes/") {
+		t.Fatalf("Location = %q, want prefix /admin/quizzes/", quizPath)
+	}
+
+	editReq, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+quizPath+"/edit", nil)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	editResp, err := client.Do(editReq)
+	if err != nil {
+		t.Fatalf("GET edit client.Do err = %v, want nil", err)
+	}
+	editBytes, err := io.ReadAll(editResp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll err = %v, want nil", err)
+	}
+	if cerr := editResp.Body.Close(); cerr != nil {
+		t.Errorf("Body.Close err = %v, want nil", cerr)
+	}
+	if got, want := editResp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("GET edit status = %d, want %d", got, want)
+	}
+	if want := `value="` + mode + `" selected`; !strings.Contains(string(editBytes), want) {
+		t.Errorf("quiz edit form should mark %q as the selected play mode", mode)
+	}
 }
 
 // postImportRejection posts the given JSON to the import endpoint and
@@ -540,6 +712,9 @@ func postImportRejection(
 	csrfToken := fetchCSRFToken(ctx, t, client, importURL)
 	form := url.Values{}
 	form.Add("json", jsonBody)
+	// A valid mode keeps these negative-path posts failing on their
+	// intended branch rather than tripping the #752 mode requirement.
+	form.Add("mode", "solo")
 	form.Add("csrf_token", csrfToken)
 
 	req, err := http.NewRequestWithContext(

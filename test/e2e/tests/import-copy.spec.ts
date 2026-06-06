@@ -18,4 +18,33 @@ test.describe('quiz import copy button', () => {
     await copyButton.click();
     await expect(copyButton).toContainText('Copied');
   });
+
+  // #752 - the play-mode selector has no pre-selected option, so the
+  // browser blocks the submit until the admin picks solo or live. Pin
+  // the no-default state and that picking a mode clears the constraint.
+  test('play-mode selector requires an explicit choice before submit', async ({ page }) => {
+    await page.goto('/admin/quizzes/import');
+
+    const modeSelect = page.locator('select[name="mode"]');
+    await expect(modeSelect).toBeVisible();
+    // No mode is pre-selected: the empty placeholder option is current.
+    await expect(modeSelect).toHaveValue('');
+
+    // A required control with no value is invalid, so the browser refuses
+    // to submit the form.
+    const submitButton = page.getByRole('button', { name: 'Import quiz' });
+    await submitButton.click();
+    await expect(page).toHaveURL(/\/admin\/quizzes\/import$/);
+    const invalidBeforeChoice = await modeSelect.evaluate(
+      (el) => (el as HTMLSelectElement).validity.valueMissing,
+    );
+    expect(invalidBeforeChoice).toBe(true);
+
+    // Picking a mode satisfies the constraint.
+    await modeSelect.selectOption('live');
+    const invalidAfterChoice = await modeSelect.evaluate(
+      (el) => (el as HTMLSelectElement).validity.valueMissing,
+    );
+    expect(invalidAfterChoice).toBe(false);
+  });
 });
