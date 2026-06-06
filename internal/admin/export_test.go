@@ -129,6 +129,10 @@ type QuizImportOptionPayload = quizImportOptionPayload
 // without spinning the full HTTP handler.
 var QuizFromImportPayload = quizFromImportPayload
 
+// StripCodeFences exposes the unexported fenced-code-block stripper so the
+// test package can pin the paste-from-an-LLM-code-block tolerance.
+var StripCodeFences = stripCodeFences
+
 // ValidateQuestionForm exposes the unexported questionForm.Valid
 // behaviour so the option-count and at-least-one-correct rules can be
 // tested directly without constructing a full quiz.

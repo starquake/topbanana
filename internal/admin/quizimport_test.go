@@ -168,3 +168,29 @@ func TestQuizFromImportPayload_RoundShape(t *testing.T) {
 		})
 	}
 }
+
+// TestStripCodeFences pins the import paste tolerance: a ```json (or bare ```)
+// fenced block pasted from an LLM is unwrapped to its inner JSON, while
+// unfenced input passes through untouched.
+func TestStripCodeFences(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"unfenced passes through", `{"title":"x"}`, `{"title":"x"}`},
+		{"json fence", "```json\n{\"title\":\"x\"}\n```", `{"title":"x"}`},
+		{"bare fence", "```\n{\"title\":\"x\"}\n```", `{"title":"x"}`},
+		{"leading and trailing whitespace", "  ```json\n{\"title\":\"x\"}\n```  ", `{"title":"x"}`},
+		{"fence with no closing", "```json\n{\"title\":\"x\"}", `{"title":"x"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got, want := admin.StripCodeFences(tt.in), tt.want; got != want {
+				t.Errorf("StripCodeFences(%q) = %q, want %q", tt.in, got, want)
+			}
+		})
+	}
+}

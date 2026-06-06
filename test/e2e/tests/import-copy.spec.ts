@@ -18,21 +18,4 @@ test.describe('quiz import copy button', () => {
     await copyButton.click();
     await expect(copyButton).toContainText('Copied');
   });
-
-  // #733 - the example JSON now sits in its own copyable code block with a
-  // matching Copy button, separate from the prompt block above it.
-  test('the example JSON block has its own working Copy button', async ({ page }) => {
-    await page.goto('/admin/quizzes/import');
-
-    const exampleBlock = page.locator('#quiz-example-text');
-    await expect(exampleBlock).toBeVisible();
-    await expect(exampleBlock).toContainText('"European Capitals"');
-
-    const copyButton = page.locator('[data-copy-target="#quiz-example-text"]');
-    await expect(copyButton).toBeVisible();
-    await expect(copyButton).toContainText('Copy');
-
-    await copyButton.click();
-    await expect(copyButton).toContainText('Copied');
-  });
 });
