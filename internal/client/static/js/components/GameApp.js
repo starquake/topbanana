@@ -2,6 +2,8 @@ import { quizService } from '../services/QuizService.js';
 import { gameService } from '../services/GameService.js';
 import { playerService } from '../services/PlayerService.js';
 import { runAnim } from '../util/anim.js';
+import { clockOffsetFromServerNow, serverTime } from '../util/serverClock.js';
+import { optionStateClass } from '../util/answerOptions.js';
 import { openShareDialog } from '/assets/js/share.js';
 
 // PLAY_PATH_PATTERN matches /play/<anything>-<integer>; the integer suffix
@@ -642,10 +644,8 @@ export class GameApp {
     // serverNow (older server) leaves clockOffset at 0 — the existing
     // skew-vulnerable behaviour, not a regression.
     syncClockFrom(question) {
-        if (!question || !question.serverNow) return;
-        const serverMs = new Date(question.serverNow).getTime();
-        if (!Number.isFinite(serverMs)) return;
-        this.clockOffset = serverMs - Date.now();
+        const offset = clockOffsetFromServerNow(question && question.serverNow);
+        if (offset !== null) this.clockOffset = offset;
     }
 
     // serverTime returns the current time in ms as the server sees it,
@@ -655,7 +655,7 @@ export class GameApp {
     // (forward skew) or hold it open past the server window (backward
     // skew) — see #180.
     serverTime() {
-        return Date.now() + this.clockOffset;
+        return serverTime(this.clockOffset);
     }
 
     // startRevealCountdown drives the pre-answer beat (#247) by filling
@@ -1110,14 +1110,11 @@ export class GameApp {
     // Timed-out questions have no correctOptionIds (the server isn't
     // told about a timeout), so every option falls through to dim.
     optionStateClass(option, idx) {
-        if (this.feedback) {
-            const correctIds = this.feedback.correctOptionIds || [];
-            if (correctIds.includes(option.id)) return 'btn-answer-correct';
-            if (this.feedback.pickedOptionId === option.id) return 'btn-answer-wrong';
-            return 'btn-answer-dim';
-        }
-        const tones = ['btn-answer-tone-a', 'btn-answer-tone-b', 'btn-answer-tone-c', 'btn-answer-tone-d'];
-        return `btn-answer ${tones[idx % tones.length]}`;
+        return optionStateClass(option, idx, {
+            revealed: !!this.feedback,
+            correctIds: this.feedback ? this.feedback.correctOptionIds || [] : [],
+            pickedId: this.feedback ? this.feedback.pickedOptionId : null,
+        });
     }
 
 }
