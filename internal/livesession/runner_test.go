@@ -55,6 +55,7 @@ var runnerCfg = RunnerConfig{
 	RevealBeat:       time.Second,
 	RoundResultsBeat: time.Second,
 	AutoStartWindow:  2 * time.Second,
+	QuestionReadBeat: time.Second,
 }
 
 // newRunnerHarness seeds a live quiz with the given rounds (each a slice of
@@ -341,6 +342,78 @@ func TestRunner_FullFlow(t *testing.T) {
 	}
 }
 
+// TestRunner_QuestionReadBeatAnchorsWindow pins that issuing a question opens
+// the answer window after the read beat: StartedAt is the issue instant plus
+// the read beat and ExpiresAt is StartedAt plus the question window, so the
+// question text shows during [issuedAt, StartedAt) before the options open.
+func TestRunner_QuestionReadBeatAnchorsWindow(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+
+	if err := h.service.Start(ctx, h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+	issuedAt := h.clock.Now().Add(runnerCfg.RoundIntroBeat)
+	h.clock.advance(runnerCfg.RoundIntroBeat)
+	h.tick(ctx)
+
+	q := h.reload(t)
+	if got, want := q.Phase, PhaseQuestion; got != want {
+		t.Fatalf("phase after intro beat = %q, want %q", got, want)
+	}
+	assertQuestionWindow(t, q, issuedAt)
+}
+
+// TestRunner_DoesNotEarlyCloseDuringReadBeat pins that a question does not
+// early-close while the read beat is still running: even with every active
+// player present, there is nothing to early-close on until answers open at
+// StartedAt, so a tick during [issuedAt, StartedAt) leaves the question phase
+// in place.
+func TestRunner_DoesNotEarlyCloseDuringReadBeat(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	sessionID := h.sessionID(t)
+
+	if err := h.service.Start(ctx, h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+	h.clock.advance(runnerCfg.RoundIntroBeat)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseQuestion; got != want {
+		t.Fatalf("phase after intro beat = %q, want %q", got, want)
+	}
+
+	// Both players are active, but the read beat is still running, so nobody can
+	// answer yet. A tick within [issuedAt, StartedAt) must not close.
+	for _, pid := range h.players {
+		h.setLastSeen(t, sessionID, pid, h.clock.Now())
+	}
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseQuestion; got != want {
+		t.Fatalf("phase during read beat = %q, want %q (must not early-close)", got, want)
+	}
+
+	// Once answers open, both active players answer and the question closes early.
+	h.clock.advance(runnerCfg.QuestionReadBeat)
+	optRight := correctOptionID(ctx, t, h.service, h.code, h.players[0])
+	answerAt := h.clock.Now()
+	for _, pid := range h.players {
+		if err := h.service.SubmitAnswer(ctx, h.code, pid, optRight, answerAt); err != nil {
+			t.Fatalf("SubmitAnswer err = %v, want nil", err)
+		}
+	}
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseReveal; got != want {
+		t.Fatalf("phase after answers open and all answer = %q, want %q (early close)", got, want)
+	}
+}
+
 // TestRunner_AutoStart drives the auto-start path: the lobby starts itself
 // once every joined player has been ready for the auto-start window, with no
 // host Start.
@@ -564,16 +637,21 @@ func TestRunner_DoesNotAbandonLobby(t *testing.T) {
 	}
 }
 
-func assertQuestionWindow(t *testing.T, sess *Session, now time.Time) {
+// assertQuestionWindow pins that issuing a question opens the answer window
+// after the read beat: StartedAt is the issue instant plus the read beat (the
+// question text shows during [issuedAt, StartedAt)), and ExpiresAt is StartedAt
+// plus the 10s default window.
+func assertQuestionWindow(t *testing.T, sess *Session, issuedAt time.Time) {
 	t.Helper()
 	if sess.QuestionStartedAt == nil || sess.QuestionExpiresAt == nil {
 		t.Fatal("question phase has nil StartedAt/ExpiresAt")
 	}
-	if got, want := *sess.QuestionStartedAt, now; !got.Equal(want) {
-		t.Errorf("QuestionStartedAt = %v, want %v", got, want)
+	wantStart := issuedAt.Add(runnerCfg.QuestionReadBeat)
+	if got, want := *sess.QuestionStartedAt, wantStart; !got.Equal(want) {
+		t.Errorf("QuestionStartedAt = %v, want %v (issued + read beat)", got, want)
 	}
-	if got, want := *sess.QuestionExpiresAt, now.Add(10*time.Second); !got.Equal(want) {
-		t.Errorf("QuestionExpiresAt = %v, want %v (10s default window)", got, want)
+	if got, want := *sess.QuestionExpiresAt, wantStart.Add(10*time.Second); !got.Equal(want) {
+		t.Errorf("QuestionExpiresAt = %v, want %v (StartedAt + 10s default window)", got, want)
 	}
 }
 
@@ -645,8 +723,9 @@ func assertRevealScores(
 		t.Fatalf("reveal answered count = %d, want %d", got, want)
 	}
 
-	// The two players answered the correct option 2s into a 10s window, so the
-	// formula yields 1000 - 0.2*1000 = 800.
+	// Both players answered the correct option partway into the 10s window
+	// (anchored at StartedAt, after the read beat), so the formula yields a
+	// score between 0 and 1000; scoreAt mirrors the curve for the expectation.
 	wantScore := scoreAt(question, answeredAt)
 	for _, a := range state.Answers {
 		if !a.Correct {

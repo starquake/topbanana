@@ -85,8 +85,15 @@ test.describe('player synchronized play', () => {
     await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId('question-text')).toHaveText(firstQuestion.text);
 
-    // The countdown bar drains from its full value off the server deadline:
-    // its value attribute drops below 100 within the answer window.
+    // Read beat (#247 parity): the question shows first with the options HIDDEN
+    // and a "Get ready" indicator, so the player reads before answers open.
+    await expect(page.getByTestId('question-read-beat')).toBeVisible();
+    await expect(page.getByTestId('question-options')).toBeHidden();
+
+    // After the read beat the answer window opens: the options appear and the
+    // countdown bar drains from its full value off the server deadline (value
+    // attribute drops below 100 within the answer window).
+    await expect(page.getByTestId('question-options')).toBeVisible({ timeout: 10_000 });
     const progress = page.locator('[data-testid="question-view"] progress.progress');
     await expect(async () => {
       const value = Number(await progress.getAttribute('value'));

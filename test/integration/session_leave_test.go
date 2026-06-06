@@ -92,7 +92,10 @@ func TestSessionLeave_DropsFromRoster(t *testing.T) {
 func TestSessionLeave_DropsFromAnsweredBadges(t *testing.T) {
 	t.Parallel()
 
-	ctx, setup := setupIntegrationWithEnv(t, map[string]string{"SESSION_RUNNER_BEAT": "250ms"})
+	ctx, setup := setupIntegrationWithEnv(t, map[string]string{
+		"SESSION_RUNNER_BEAT": "250ms",
+		"REVEAL_DELAY":        "200ms",
+	})
 	baseURL := setup.BaseURL
 	qz := seedRunnerLiveQuiz(ctx, t, setup.Stores.Quizzes, "leave-badges")
 
@@ -117,6 +120,8 @@ func TestSessionLeave_DropsFromAnsweredBadges(t *testing.T) {
 		t.Fatal("question phase has no question in state")
 	}
 	pick := state.Question.Options[0].ID
+	// Answers open after the read beat; wait for the window before submitting.
+	waitForAnswersOpen(ctx, t, leaver, baseURL, code)
 	answerSession(ctx, t, leaver, baseURL, code, pick, http.StatusNoContent)
 
 	// The leaver leaves; their badge must drop from the still-open question.

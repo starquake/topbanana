@@ -188,22 +188,25 @@ const runnerBeatTickDivisor = 4
 // runnerConfig builds the live-session runner config from cfg. When
 // SESSION_RUNNER_BEAT is set (the e2e / integration suites shrink it), it
 // drives the round-intro and reveal beats and the auto-start window so a
-// hosted game advances quickly; otherwise the runner falls back to its
-// built-in defaults. The tick interval tracks the beat so a shrunk beat is
-// observed promptly without spinning the loop when the beat is the default.
+// hosted game advances quickly; otherwise those fall back to the runner's
+// built-in defaults. The question read beat tracks REVEAL_DELAY independently
+// of SESSION_RUNNER_BEAT, so the live read beat matches the solo game's
+// pre-answer beat (3s default; the e2e's 500ms shrinks both). The tick
+// interval tracks the runner beat so a shrunk beat is observed promptly
+// without spinning the loop when the beat is the default.
 func runnerConfig(cfg *config.Config) livesession.RunnerConfig {
+	rc := livesession.RunnerConfig{QuestionReadBeat: cfg.RevealDelay}
 	if cfg.SessionRunnerBeat <= 0 {
-		return livesession.RunnerConfig{}
+		return rc
 	}
 	beat := cfg.SessionRunnerBeat
+	rc.BeatInterval = max(beat/runnerBeatTickDivisor, time.Millisecond)
+	rc.RoundIntroBeat = beat
+	rc.RevealBeat = beat
+	rc.RoundResultsBeat = beat
+	rc.AutoStartWindow = beat
 
-	return livesession.RunnerConfig{
-		BeatInterval:     max(beat/runnerBeatTickDivisor, time.Millisecond),
-		RoundIntroBeat:   beat,
-		RevealBeat:       beat,
-		RoundResultsBeat: beat,
-		AutoStartWindow:  beat,
-	}
+	return rc
 }
 
 // tokenSweeper is the slice of the verify / reset stores the periodic

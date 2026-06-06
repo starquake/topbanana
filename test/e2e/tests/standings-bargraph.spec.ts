@@ -43,25 +43,39 @@ function makeQuizLiveByTitle(title: string): number {
 
 type SessionState = {
   phase: string;
-  question: { id: number; options: { id: number; text: string }[] } | null;
+  serverNow: string;
+  question: { id: number; startedAt: string | null; options: { id: number; text: string }[] } | null;
 };
 
 // answerOverApi resolves the option id whose text matches off the participant's
 // GET /state and POSTs it, so an API-only player can answer a known choice with
-// no UI. Returns silently when the session is not currently in the question
-// phase (the runner may have advanced past it).
+// no UI. It waits for the answer window to open (serverNow at or after
+// startedAt) before posting, since the read beat (#247 parity) holds answers
+// closed for a brief beat after the question is issued. Returns silently when
+// the session is not currently in the question phase (the runner may have
+// advanced past it).
 async function answerOverApi(
   request: APIRequestContext,
   code: string,
   text: string,
 ): Promise<void> {
-  const resp = await request.get(`/api/sessions/${code}/state`);
-  if (!resp.ok()) return;
-  const state = (await resp.json()) as SessionState;
-  if (state.phase !== 'question' || !state.question) return;
-  const option = state.question.options.find((o) => o.text === text);
-  if (!option) return;
-  await request.post(`/api/sessions/${code}/answer`, { data: { optionId: option.id } });
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const resp = await request.get(`/api/sessions/${code}/state`);
+    if (!resp.ok()) return;
+    const state = (await resp.json()) as SessionState;
+    if (state.phase !== 'question' || !state.question) return;
+    const open = state.question.startedAt
+      ? Date.parse(state.serverNow) >= Date.parse(state.question.startedAt)
+      : true;
+    if (open) {
+      const option = state.question.options.find((o) => o.text === text);
+      if (!option) return;
+      await request.post(`/api/sessions/${code}/answer`, { data: { optionId: option.id } });
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
 }
 
 // answerOnPage clicks the option with the given text on the player surface once

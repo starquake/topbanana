@@ -34,6 +34,12 @@ const (
 	// defaultQuestionWindow is the answer window for a question when neither
 	// the question nor its quiz sets a time limit.
 	defaultQuestionWindow = 10 * time.Second
+	// defaultQuestionReadBeat is how long the question text shows before the
+	// answer options open and the answer window starts. Mirrors the solo
+	// game's reveal beat (#247) so every player gets the same read time before
+	// the same full answer time. The app wires it from REVEAL_DELAY, the same
+	// knob the solo game uses.
+	defaultQuestionReadBeat = 3 * time.Second
 )
 
 // logSessionKey is the slog attribute key the runner logs the session id
@@ -67,6 +73,9 @@ type RunnerConfig struct {
 	RevealBeat       time.Duration
 	RoundResultsBeat time.Duration
 	AutoStartWindow  time.Duration
+	// QuestionReadBeat is how long the question text shows before the answer
+	// options open and the answer window starts.
+	QuestionReadBeat time.Duration
 }
 
 func (c RunnerConfig) withDefaults() RunnerConfig {
@@ -84,6 +93,9 @@ func (c RunnerConfig) withDefaults() RunnerConfig {
 	}
 	if c.AutoStartWindow <= 0 {
 		c.AutoStartWindow = defaultAutoStartWindow
+	}
+	if c.QuestionReadBeat <= 0 {
+		c.QuestionReadBeat = defaultQuestionReadBeat
 	}
 
 	return c
@@ -415,11 +427,15 @@ func (r *Runner) enterRoundResults(ctx context.Context, sess *Session, now time.
 }
 
 // issueQuestion persists the question transition with its server answer window
-// and publishes. The window runs from now to now + the resolved per-question
-// time limit.
+// and publishes. The answer window opens after the read beat, so the question
+// text shows during [now, startedAt) before the options open: StartedAt is now
+// + QuestionReadBeat and ExpiresAt is StartedAt + the resolved per-question
+// time limit. This mirrors the solo game's reveal beat (#247) so every player
+// gets the same read time and the same full answer time.
 func (r *Runner) issueQuestion(ctx context.Context, sess *Session, q *quiz.Question, now time.Time) {
-	expires := now.Add(r.questionWindow(ctx, sess.QuizID, q))
-	if err := r.store.EnterQuestion(ctx, sess.ID, q.RoundID, q.ID, now, expires); err != nil {
+	startedAt := now.Add(r.cfg.QuestionReadBeat)
+	expires := startedAt.Add(r.questionWindow(ctx, sess.QuizID, q))
+	if err := r.store.EnterQuestion(ctx, sess.ID, q.RoundID, q.ID, startedAt, expires); err != nil {
 		r.logger.WarnContext(
 			ctx,
 			"runner failed to enter question",

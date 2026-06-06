@@ -139,6 +139,12 @@ export class JoinApp {
         // Interval handle for the countdown, cleared before each new countdown
         // and on teardown.
         this.questionTimer = null;
+        // True during the read beat [serverNow, startedAt): the question text
+        // shows but the options are hidden until the answer window opens. The
+        // bar fills 0 -> 100 while revealing is true, then drains 100 -> 0 over
+        // the answer window - one bar, two phases, mirroring the solo game's
+        // reveal beat (#247).
+        this.revealing = false;
         // The question id the countdown / answered flag are currently tracking,
         // so a state refresh only resets them when the runner moves to a new
         // question (not on every tick within the same one).
@@ -447,14 +453,19 @@ export class JoinApp {
         // Drive the countdown only while the question is open AND the player
         // has not yet answered. Once they pick, the bar freezes on the
         // answered/waiting state - a later tick (e.g. another player answering)
-        // must not re-arm the countdown and un-freeze it.
+        // must not re-arm the countdown and un-freeze it. During the read beat
+        // (serverNow < startedAt) the options stay hidden and the bar fills
+        // 0 -> 100; at startedAt the options open and the bar drains over the
+        // answer window.
         if (phase === 'question' && question && !this.hasAnswered()) {
             this.startQuestionCountdown(question);
             return;
         }
         // Any non-answering state (already answered, or a non-question phase:
-        // reveal, round_intro, round_results, finished, lobby) freezes the bar.
+        // reveal, round_intro, round_results, finished, lobby) freezes the bar
+        // and ends any read beat.
         this.clearQuestionTimer();
+        this.revealing = false;
         if (phase === 'reveal') {
             this.questionProgress = 0;
         }
@@ -539,18 +550,57 @@ export class JoinApp {
         });
     }
 
-    // startQuestionCountdown drives the answer-window bar 100 -> 0 over
-    // [startedAt, expiresAt] on the server clock. Idempotent across ticks
-    // within the same question: it clears any prior interval first, then
-    // re-derives the remaining window from the absolute server deadline, so a
-    // resync mid-question simply re-anchors the bar where it should be. If the
-    // window is already past it pins the bar at 0 without spinning an interval.
+    // startQuestionCountdown drives the per-question bar. Before the answer
+    // window opens (serverNow < startedAt) it runs the read beat, filling the
+    // bar 0 -> 100 while the options stay hidden; at startedAt it flips to the
+    // answer-window countdown, draining 100 -> 0 over [startedAt, expiresAt].
+    // Both phases run on the server clock. Idempotent across ticks within the
+    // same question: it clears any prior interval first and re-derives from the
+    // absolute server timestamps, so a resync mid-question re-anchors the bar.
     startQuestionCountdown(question) {
         this.clearQuestionTimer();
         if (!question || !question.startedAt || !question.expiresAt) {
+            this.revealing = false;
             this.questionProgress = 100;
             return;
         }
+        const start = new Date(question.startedAt).getTime();
+        if (Number.isFinite(start) && this.serverTime() < start) {
+            this.startReadBeat(question, start);
+            return;
+        }
+        this.startAnswerCountdown(question);
+    }
+
+    // startReadBeat fills the bar 0 -> 100 over [serverNow, startedAt] while the
+    // options stay hidden, then hands off to startAnswerCountdown the moment the
+    // window opens. Mirrors the solo game's reveal beat (#247).
+    startReadBeat(question, startAt) {
+        const beatStart = this.serverTime();
+        const beatTotal = startAt - beatStart;
+        this.revealing = true;
+        this.questionProgress = 0;
+        const tick = () => {
+            const now = this.serverTime();
+            if (now >= startAt) {
+                this.questionProgress = 100;
+                this.clearQuestionTimer();
+                this.revealing = false;
+                this.startAnswerCountdown(question);
+                return;
+            }
+            this.questionProgress = Math.max(0, Math.min(100, ((now - beatStart) / beatTotal) * 100));
+        };
+        tick();
+        this.questionTimer = setInterval(tick, 100);
+    }
+
+    // startAnswerCountdown drains the bar 100 -> 0 over [startedAt, expiresAt]
+    // on the server clock. If the window is already past it pins the bar at 0
+    // without spinning an interval.
+    startAnswerCountdown(question) {
+        this.clearQuestionTimer();
+        this.revealing = false;
         const start = new Date(question.startedAt).getTime();
         const end = new Date(question.expiresAt).getTime();
         const total = end - start;

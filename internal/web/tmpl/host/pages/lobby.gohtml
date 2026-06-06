@@ -102,12 +102,14 @@
         <div x-show="phase === 'question' || phase === 'reveal'"
              class="flex-1 flex flex-col gap-[clamp(1rem,3vh,2.25rem)] px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1.25rem,3vh,2.5rem)]"
              data-phase-question>
-            {{/* Countdown bar: drains over the answer window in the question
-                 phase, sits empty at reveal. Driven off the server deadline by
-                 host-lobby.js (no client-clock dependence). The native
-                 <progress> element matches the player client's treatment;
-                 motion-reduce zeroes the value transition. */}}
-            <progress class="block w-full h-2 bg-border-soft rounded-full overflow-hidden appearance-none [&::-webkit-progress-bar]:bg-border-soft [&::-webkit-progress-value]:bg-accent [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear [&::-moz-progress-bar]:bg-accent"
+            {{/* Countdown bar, two phases (mirrors the player surface and the
+                 solo game, #247): while `revealing` is true it fills 0 -> 100
+                 over the read beat, then drains 100 -> 0 over the answer window;
+                 it sits empty at reveal. Driven off the server deadline by
+                 host-lobby.js (no client-clock dependence). motion-reduce zeroes
+                 the value transition. */}}
+            <progress class="block w-full h-2 bg-border-soft rounded-full overflow-hidden appearance-none [&::-webkit-progress-bar]:bg-border-soft [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear"
+                      :class="revealing ? '[&::-webkit-progress-value]:bg-cyan [&::-moz-progress-bar]:bg-cyan' : '[&::-webkit-progress-value]:bg-accent [&::-moz-progress-bar]:bg-accent'"
                       :value="progress" max="100"
                       aria-hidden="true"
                       data-countdown-bar></progress>
@@ -118,11 +120,21 @@
                         x-text="question.text"
                         data-question-text></h2>
 
+                    {{/* Read beat: the options and answered-order area stay
+                         hidden while `revealing` is true (the question phase
+                         before answers open), so the room reads the question
+                         before answers open. host-lobby.js flips `revealing`
+                         off when the read beat elapses. */}}
+                    <p x-show="phase === 'question' && revealing"
+                       class="text-center text-text-dim text-[clamp(1rem,2vw,1.5rem)] font-semibold uppercase tracking-[0.12em]"
+                       data-read-beat>Get ready</p>
+
                     {{/* Answer grid. correct/wrong colouring only appears at
                          reveal: isCorrectOption() reads correctOptionIds, which
                          the server leaves empty before reveal, so the answer is
                          never lit early. */}}
-                    <ul class="m-0 list-none p-0 grid gap-3 sm:grid-cols-2 max-w-[60rem] w-full mx-auto"
+                    <ul x-show="phase === 'reveal' || !revealing"
+                        class="m-0 list-none p-0 grid gap-3 sm:grid-cols-2 max-w-[60rem] w-full mx-auto"
                         role="list">
                         <template x-for="option in question.options" :key="option.id">
                             <li class="flex items-center gap-3 px-5 py-4 rounded-xl border text-left transition-colors"
@@ -145,8 +157,10 @@
                     {{/* Answered-order badges: one per pick, in the order the
                          picks landed (answeredPlayerIds), with no correctness
                          shown. The all-answered indicator lights once every
-                         roster player has locked in. */}}
-                    <div class="flex flex-col items-center gap-3">
+                         roster player has locked in. Hidden during the read beat
+                         (the question phase while `revealing` is true). */}}
+                    <div x-show="phase === 'reveal' || !revealing"
+                         class="flex flex-col items-center gap-3">
                         <div class="flex items-center gap-2 text-text-dim text-[clamp(0.85rem,1.6vw,1.1rem)] font-semibold uppercase tracking-[0.12em]">
                             <span x-text="`${answeredCount()} / ${players.length} answered`"
                                   data-answered-count></span>
