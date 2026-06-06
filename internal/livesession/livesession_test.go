@@ -84,6 +84,10 @@ type fakeStore struct {
 
 	setReadyErr error
 
+	// markLeftErr is what MarkPlayerLeft reports, so a test can drive the
+	// not-a-participant branch of Leave without a real roster row.
+	markLeftErr error
+
 	// alreadyPlayed is what PlayerFinishedSessionForQuiz reports, so a test
 	// can drive the replay gate without a real finished session.
 	alreadyPlayed error
@@ -189,6 +193,13 @@ func (*fakeStore) RecordAnswer(context.Context, string, int64, int64, int64, tim
 
 func (*fakeStore) TouchLastSeen(context.Context, string, int64) error {
 	return errors.ErrUnsupported
+}
+
+func (f *fakeStore) MarkPlayerLeft(context.Context, string, int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.markLeftErr
 }
 
 func (*fakeStore) CountActiveUnanswered(context.Context, string, int64, time.Time) (int, error) {
@@ -432,6 +443,65 @@ func TestService_SetReady_PublishesTick(t *testing.T) {
 	}
 	if got, want := spy.phases[0], PhaseLobby; got != want {
 		t.Errorf("published phase = %q, want %q", got, want)
+	}
+}
+
+func TestService_Leave_PublishesTick(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeStore{session: &Session{ID: "s1", JoinCode: "ROOM12", Phase: PhaseQuestion}}
+	spy := &spyPublisher{}
+	svc := NewService(store, &fakeQuiz{}, slog.Default())
+	svc.SetPublisher(spy)
+
+	if err := svc.Leave(t.Context(), "room12", 5); err != nil {
+		t.Fatalf("Leave err = %v, want nil", err)
+	}
+
+	spy.mu.Lock()
+	defer spy.mu.Unlock()
+	if got, want := len(spy.codes), 1; got != want {
+		t.Fatalf("publish count = %d, want %d (leave must publish exactly one tick)", got, want)
+	}
+	// Publish uses the canonical code off the session, not the raw input.
+	if got, want := spy.codes[0], "ROOM12"; got != want {
+		t.Errorf("published code = %q, want %q (canonical join code)", got, want)
+	}
+	if got, want := spy.phases[0], PhaseQuestion; got != want {
+		t.Errorf("published phase = %q, want %q", got, want)
+	}
+}
+
+func TestService_Leave_NotParticipant(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeStore{
+		session:     &Session{ID: "s1", JoinCode: "ROOM12", Phase: PhaseLobby},
+		markLeftErr: ErrNotParticipant,
+	}
+	spy := &spyPublisher{}
+	svc := NewService(store, &fakeQuiz{}, slog.Default())
+	svc.SetPublisher(spy)
+
+	if got, want := svc.Leave(t.Context(), "ROOM12", 5), ErrNotParticipant; !errors.Is(got, want) {
+		t.Errorf("Leave err = %v, want %v", got, want)
+	}
+
+	spy.mu.Lock()
+	defer spy.mu.Unlock()
+	if got, want := len(spy.codes), 0; got != want {
+		t.Errorf("publish count = %d, want %d (a failed leave must not publish)", got, want)
+	}
+}
+
+func TestService_Leave_SessionNotFound(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeStore{}
+	svc := NewService(store, &fakeQuiz{}, slog.Default())
+
+	if got, want := svc.Leave(t.Context(), "NOPE12", 5), ErrSessionNotFound; !errors.Is(got, want) {
+		t.Errorf("Leave err = %v, want %v", got, want)
 	}
 }
 

@@ -1059,3 +1059,172 @@ func TestPlayerStore_ResetLiveSessionPlaysForPlayerOnQuiz(t *testing.T) {
 		t.Errorf("other played after reset = %v, want %v (must be unaffected)", got, want)
 	}
 }
+
+// TestLiveSessionStore_MarkPlayerLeft_ExcludesFromRoster pins MP-10: after a
+// player leaves, their roster row drops out of the lobby read, while a player
+// who stayed remains. A second leave is a no-op that reports
+// ErrNotParticipant (the active row is already gone).
+func TestLiveSessionStore_MarkPlayerLeft_ExcludesFromRoster(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	playerStore := NewPlayerStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	qz := newLiveQuiz(t, quizStore)
+
+	sess := &livesession.Session{QuizID: qz.ID, HostPlayerID: seededAdminID, JoinCode: "LEFT23"}
+	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+
+	stayer, err := playerStore.CreateAnonymousPlayer(t.Context(), "leave-stay")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer stayer err = %v, want nil", err)
+	}
+	leaver, err := playerStore.CreateAnonymousPlayer(t.Context(), "leave-go")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer leaver err = %v, want nil", err)
+	}
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, stayer.ID, "Stay"); err != nil {
+		t.Fatalf("AddPlayer stayer err = %v, want nil", err)
+	}
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, leaver.ID, "Go"); err != nil {
+		t.Fatalf("AddPlayer leaver err = %v, want nil", err)
+	}
+
+	if err = sessionStore.MarkPlayerLeft(t.Context(), "LEFT23", leaver.ID); err != nil {
+		t.Fatalf("MarkPlayerLeft err = %v, want nil", err)
+	}
+
+	loaded, err := sessionStore.GetSessionByJoinCode(t.Context(), "LEFT23")
+	if err != nil {
+		t.Fatalf("GetSessionByJoinCode err = %v, want nil", err)
+	}
+	if got, want := len(loaded.Players), 1; got != want {
+		t.Fatalf("len(Players) after leave = %d, want %d", got, want)
+	}
+	if got, want := loaded.Players[0].PlayerID, stayer.ID; got != want {
+		t.Errorf("remaining player = %d, want %d (the stayer)", got, want)
+	}
+
+	// A repeat leave matches no active row and is a no-op.
+	if got, want := sessionStore.MarkPlayerLeft(
+		t.Context(),
+		"LEFT23",
+		leaver.ID,
+	), livesession.ErrNotParticipant; !errors.Is(
+		got,
+		want,
+	) {
+		t.Errorf("repeat MarkPlayerLeft err = %v, want %v", got, want)
+	}
+}
+
+// TestLiveSessionStore_MarkPlayerLeft_NotParticipant pins that a leave from a
+// player who never joined reports ErrNotParticipant rather than silently
+// succeeding.
+func TestLiveSessionStore_MarkPlayerLeft_NotParticipant(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	qz := newLiveQuiz(t, quizStore)
+
+	sess := &livesession.Session{QuizID: qz.ID, HostPlayerID: seededAdminID, JoinCode: "NLVE23"}
+	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+
+	if got, want := sessionStore.MarkPlayerLeft(
+		t.Context(),
+		"NLVE23",
+		seededAdminID,
+	), livesession.ErrNotParticipant; !errors.Is(
+		got,
+		want,
+	) {
+		t.Errorf("MarkPlayerLeft non-member err = %v, want %v", got, want)
+	}
+}
+
+// TestLiveSessionStore_MarkPlayerLeft_ExcludesFromStandings pins MP-10 on the
+// standings reads: a left player drops out of both the round and final
+// standings, while the stayer's scores are unchanged. ListAnswers, which also
+// backs scoring at close, deliberately still returns the left player's pick so
+// their score is recorded and counts toward the quiz leaderboard (decision 3);
+// the answered-order badges drop left players at the display layer instead.
+func TestLiveSessionStore_MarkPlayerLeft_ExcludesFromStandings(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	playerStore := NewPlayerStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	qz := newTwoRoundLiveQuiz(t, quizStore)
+	r1q1 := qz.Questions[0]
+	round1 := r1q1.RoundID
+
+	sess := &livesession.Session{QuizID: qz.ID, HostPlayerID: seededAdminID, JoinCode: "LSTN23"}
+	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+	at := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+
+	stayer, err := playerStore.CreateAnonymousPlayer(t.Context(), "lstn-stay")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer stayer err = %v, want nil", err)
+	}
+	leaver, err := playerStore.CreateAnonymousPlayer(t.Context(), "lstn-go")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer leaver err = %v, want nil", err)
+	}
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, stayer.ID, "Stay"); err != nil {
+		t.Fatalf("AddPlayer stayer err = %v, want nil", err)
+	}
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, leaver.ID, "Go"); err != nil {
+		t.Fatalf("AddPlayer leaver err = %v, want nil", err)
+	}
+
+	// Both answer and score round-1 question 1; the leaver out-scores the stayer.
+	scoreAnswer(t, sessionStore, sess.ID, r1q1.ID, stayer.ID, r1q1.Options[0].ID, at, 100)
+	scoreAnswer(t, sessionStore, sess.ID, r1q1.ID, leaver.ID, r1q1.Options[0].ID, at, 200)
+
+	if err = sessionStore.MarkPlayerLeft(t.Context(), "LSTN23", leaver.ID); err != nil {
+		t.Fatalf("MarkPlayerLeft err = %v, want nil", err)
+	}
+
+	roundStandings, err := sessionStore.ListRoundStandings(t.Context(), sess.ID, round1)
+	if err != nil {
+		t.Fatalf("ListRoundStandings err = %v, want nil", err)
+	}
+	if got, want := len(roundStandings), 1; got != want {
+		t.Fatalf("round standings after leave = %d, want %d (only the stayer)", got, want)
+	}
+	if got, want := roundStandings[0].PlayerID, stayer.ID; got != want {
+		t.Errorf("round standings player = %d, want %d (the stayer)", got, want)
+	}
+
+	finalStandings, err := sessionStore.ListFinalStandings(t.Context(), sess.ID)
+	if err != nil {
+		t.Fatalf("ListFinalStandings err = %v, want nil", err)
+	}
+	if got, want := len(finalStandings), 1; got != want {
+		t.Fatalf("final standings after leave = %d, want %d (only the stayer)", got, want)
+	}
+	if got, want := finalStandings[0].PlayerID, stayer.ID; got != want {
+		t.Errorf("final standings player = %d, want %d (the stayer)", got, want)
+	}
+
+	// ListAnswers also backs scoring at close, so it must NOT drop the left
+	// player: their recorded pick stays readable so the runner's score (and
+	// thus their quiz-leaderboard contribution) survives a mid-question leave.
+	answers, err := sessionStore.ListAnswers(t.Context(), sess.ID, r1q1.ID)
+	if err != nil {
+		t.Fatalf("ListAnswers err = %v, want nil", err)
+	}
+	if got, want := len(answers), 2; got != want {
+		t.Fatalf("answers after leave = %d, want %d (both, scoring read is unfiltered)", got, want)
+	}
+}

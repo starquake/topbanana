@@ -401,7 +401,12 @@ type ListSessionAnswersForQuestionRow struct {
 // Every pick for the given session question in answered order, joined to the
 // chosen option's correctness. Drives scoring at close and the answered-order
 // view. is_correct is the option flag; the runner only surfaces it to clients
-// in the reveal phase.
+// in the reveal phase. Deliberately NOT filtered by session_players.left_at:
+// this read also backs scoring at close (the runner scores every recorded
+// pick), so a player who answered then left must still be scored, which keeps
+// their contribution to the quiz leaderboard intact (MP-10 decision 3). The
+// answered-order badges drop left players at the display layer instead, gated
+// on the live roster the state read already carries.
 func (q *Queries) ListSessionAnswersForQuestion(ctx context.Context, arg ListSessionAnswersForQuestionParams) ([]ListSessionAnswersForQuestionRow, error) {
 	rows, err := q.db.QueryContext(ctx, listSessionAnswersForQuestion, arg.SessionID, arg.QuestionID)
 	if err != nil {
@@ -524,7 +529,7 @@ SELECT sp.player_id                               AS player_id,
        CAST(MAX(sp.display_name) AS TEXT)          AS display_name,
        CAST(COALESCE(SUM(sa.score), 0) AS INTEGER) AS total_score
 FROM sessions s
-         JOIN session_players sp ON sp.session_id = s.id AND sp.left_at IS NULL
+         JOIN session_players sp ON sp.session_id = s.id
          LEFT JOIN session_answers sa
                    ON sa.session_id = sp.session_id AND sa.player_id = sp.player_id
 WHERE s.quiz_id = ?
@@ -550,6 +555,11 @@ type ListSessionResultsForQuizLeaderboardRow struct {
 // curve solo play uses) rather than recomputed. Keyed on player_id alone (a
 // player may host or play more than one finished session of the same quiz);
 // their scores sum and MAX(display_name) picks one stable name for the row.
+// left_at is deliberately NOT filtered here (unlike the live roster /
+// standings reads): a player who played still counts toward the quiz's
+// standard leaderboard even if they left the room before the session
+// finished (MP-10). Leaving drops a player from the in-session surfaces, not
+// from the record of having played.
 func (q *Queries) ListSessionResultsForQuizLeaderboard(ctx context.Context, quizID int64) ([]ListSessionResultsForQuizLeaderboardRow, error) {
 	rows, err := q.db.QueryContext(ctx, listSessionResultsForQuizLeaderboard, quizID)
 	if err != nil {
@@ -633,6 +643,29 @@ func (q *Queries) ListSessionStandings(ctx context.Context, arg ListSessionStand
 		return nil, err
 	}
 	return items, nil
+}
+
+const markSessionPlayerLeft = `-- name: MarkSessionPlayerLeft :execresult
+UPDATE session_players
+SET left_at = CURRENT_TIMESTAMP
+WHERE player_id = ?1
+  AND left_at IS NULL
+  AND session_id = (SELECT id FROM sessions WHERE join_code = ?2)
+`
+
+type MarkSessionPlayerLeftParams struct {
+	PlayerID int64
+	JoinCode string
+}
+
+// Marks the participant as having left the session identified by join code,
+// stamping left_at so the live reads (roster, answered-order badges,
+// standings) drop them immediately. Scoped to left_at IS NULL so a second
+// leave is a no-op rather than re-stamping the timestamp; the execresult lets
+// the store map zero rows affected to "not an active participant". Keyed on
+// join code so the handler need only carry the code it already gates on.
+func (q *Queries) MarkSessionPlayerLeft(ctx context.Context, arg MarkSessionPlayerLeftParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, markSessionPlayerLeft, arg.PlayerID, arg.JoinCode)
 }
 
 const playerFinishedSessionForQuiz = `-- name: PlayerFinishedSessionForQuiz :one

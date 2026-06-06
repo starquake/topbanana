@@ -255,6 +255,38 @@ func HandleSessionAnswer(logger *slog.Logger, service *livesession.Service) http
 	})
 }
 
+// HandleSessionLeave drops the calling participant from the session,
+// stamping their roster row as left so they fall out of the live reads
+// (roster, answered-order badges, standings) at once. It reads no request
+// body: a player leaves via navigator.sendBeacon on tab close, whose POST
+// may carry an empty or non-JSON body, so the handler must not require one.
+// Returns 204 on success and 404 for an unknown code, a non-participant, or a
+// repeat leave (the row is already marked left) - the code stays opaque to
+// outsiders, mirroring the other session gates.
+func HandleSessionLeave(logger *slog.Logger, service *livesession.Service) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		player, ok := auth.PlayerFromContext(ctx)
+		if !ok {
+			logger.ErrorContext(ctx, "missing player on context for session leave")
+			http.Error(w, "internal error", http.StatusInternalServerError)
+
+			return
+		}
+
+		err := service.Leave(ctx, r.PathValue("code"), player.ID)
+		switch {
+		case err == nil:
+			w.WriteHeader(http.StatusNoContent)
+		case errors.Is(err, livesession.ErrSessionNotFound), errors.Is(err, livesession.ErrNotParticipant):
+			http.NotFound(w, r)
+		default:
+			writeInternalError(w, r, logger, "error leaving session", err)
+		}
+	})
+}
+
 // sessionPlayerResponse is one roster row in the lobby state. playerId is
 // the underlying players.id so a surface can correlate the host (hostId
 // below) and highlight the viewer's own row; displayName + isReady drive
@@ -453,9 +485,20 @@ func newSessionQuestionResponse(state *livesession.LobbyState) *sessionQuestionR
 		options = append(options, sessionOptionResponse{ID: o.ID, Text: o.Text})
 	}
 
+	// The roster already excludes players who have left, so a left player's
+	// pick drops out of the answered-order badges here (MP-10) without
+	// touching the store read that also backs scoring at close.
+	live := make(map[int64]struct{}, len(state.Session.Players))
+	for _, p := range state.Session.Players {
+		live[p.PlayerID] = struct{}{}
+	}
+
 	answeredIDs := make([]int64, 0, len(state.Answers))
 	answers := make([]sessionAnswerResponse, 0, len(state.Answers))
 	for _, a := range state.Answers {
+		if _, ok := live[a.PlayerID]; !ok {
+			continue
+		}
 		answeredIDs = append(answeredIDs, a.PlayerID)
 		ans := sessionAnswerResponse{PlayerID: a.PlayerID}
 		if state.Revealed {
