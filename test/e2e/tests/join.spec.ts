@@ -56,8 +56,12 @@ test.describe('player join + lobby', () => {
     const { joinCode } = await createResp.json() as { joinCode: string };
     expect(joinCode).toMatch(/^[A-Z0-9]{6}$/);
 
-    // Player flow: anonymous page, typed code -> name -> lobby.
+    // Player flow: anonymous page, typed code -> name -> lobby. GET /join
+    // serves the enter-code form, which is the page the host lobby's
+    // typed-code guidance points players at (#750).
     await page.goto('/join');
+    await expect(page.getByTestId('join-code-input')).toBeVisible();
+    await expect(page.getByTestId('join-code-submit')).toBeVisible();
     await page.getByTestId('join-code-input').fill(joinCode.toLowerCase());
     await page.getByTestId('join-code-submit').click();
 
