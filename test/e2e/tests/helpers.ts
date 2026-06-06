@@ -158,9 +158,15 @@ export type ImportDoc = {
 // importQuiz creates a full quiz tree in one request via the admin JSON
 // importer, using page.request so the context's storageState admin cookie
 // authenticates the call. It GETs the import form to seed the CSRF cookie
-// and read the hidden token, then POSTs the document. Throws with the
-// response body on a non-redirect outcome so a malformed doc surfaces loudly.
-export async function importQuiz(page: Page, doc: ImportDoc): Promise<void> {
+// and read the hidden token, then POSTs the document. The play mode is a
+// required form field with no default (#752); callers pass it separately
+// from the JSON document, defaulting to solo. Throws with the response
+// body on a non-redirect outcome so a malformed doc surfaces loudly.
+export async function importQuiz(
+  page: Page,
+  doc: ImportDoc,
+  mode: 'solo' | 'live' = 'solo',
+): Promise<void> {
   const formResp = await page.request.get('/admin/quizzes/import');
   if (!formResp.ok()) {
     throw new Error(`GET /admin/quizzes/import failed: ${formResp.status()} ${await formResp.text()}`);
@@ -173,7 +179,7 @@ export async function importQuiz(page: Page, doc: ImportDoc): Promise<void> {
   }
 
   const postResp = await page.request.post('/admin/quizzes/import', {
-    form: { json: JSON.stringify(doc), csrf_token: csrfToken },
+    form: { json: JSON.stringify(doc), mode, csrf_token: csrfToken },
     maxRedirects: 0,
   });
   // The importer 303-redirects to the new quiz on success. maxRedirects: 0

@@ -1270,11 +1270,17 @@ const quizImportExample = `{
 // quizImportPageData is the render-time data for quizimport.gohtml. Both
 // the form (GET) and save (POST) handlers populate it, so the type is
 // declared once at package scope rather than re-declared per handler.
+//
+// Mode holds the play mode the admin picked; it has no default so the
+// selector forces an explicit choice (#752). ModeOptions feeds the
+// selector with the recognised play modes.
 type quizImportPageData struct {
-	Title   string
-	JSON    string
-	Example string
-	Error   string
+	Title       string
+	JSON        string
+	Example     string
+	Error       string
+	Mode        string
+	ModeOptions []string
 }
 
 // HandleQuizImportForm renders the JSON-import page. The textarea is empty
@@ -1285,8 +1291,9 @@ func HandleQuizImportForm(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handl
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		render.Render(w, r, http.StatusOK, quizImportPageData{
-			Title:   "Admin Dashboard - Import Quiz",
-			Example: quizImportExample,
+			Title:       "Admin Dashboard - Import Quiz",
+			Example:     quizImportExample,
+			ModeOptions: quiz.ModeValues(),
 		})
 	})
 }
@@ -1299,16 +1306,18 @@ func HandleQuizImportForm(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handl
 func HandleQuizImportSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizimport.gohtml")
 
-	renderStatus := func(w http.ResponseWriter, r *http.Request, status int, jsonText, msg string) {
+	renderStatus := func(w http.ResponseWriter, r *http.Request, status int, jsonText, mode, msg string) {
 		render.Render(w, r, status, quizImportPageData{
-			Title:   "Admin Dashboard - Import Quiz",
-			JSON:    jsonText,
-			Example: quizImportExample,
-			Error:   msg,
+			Title:       "Admin Dashboard - Import Quiz",
+			JSON:        jsonText,
+			Example:     quizImportExample,
+			Error:       msg,
+			Mode:        mode,
+			ModeOptions: quiz.ModeValues(),
 		})
 	}
-	renderErr := func(w http.ResponseWriter, r *http.Request, jsonText, msg string) {
-		renderStatus(w, r, http.StatusBadRequest, jsonText, msg)
+	renderErr := func(w http.ResponseWriter, r *http.Request, jsonText, mode, msg string) {
+		renderStatus(w, r, http.StatusBadRequest, jsonText, mode, msg)
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1329,7 +1338,7 @@ func HandleQuizImportSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 				// (#293): re-render at 409 with the JSON intact so the
 				// admin can rename and resubmit without re-pasting.
 				renderStatus(
-					w, r, http.StatusConflict, parsed.JSONText,
+					w, r, http.StatusConflict, parsed.JSONText, parsed.Quiz.Mode,
 					"A quiz with this title already exists - change the title in the JSON and resubmit.",
 				)
 
@@ -1362,19 +1371,30 @@ type parsedImport struct {
 // revive's function-length and gocognit limits.
 func parseImportPayload(
 	w http.ResponseWriter, r *http.Request, logger *slog.Logger,
-	renderErr func(http.ResponseWriter, *http.Request, string, string),
+	renderErr func(http.ResponseWriter, *http.Request, string, string, string),
 ) (parsedImport, bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxFormSize)
 	if err := r.ParseForm(); err != nil {
 		logger.ErrorContext(r.Context(), "error parsing import form", slog.Any("err", err))
-		renderErr(w, r, "", "request body too large or malformed")
+		renderErr(w, r, "", "", "request body too large or malformed")
 
 		return parsedImport{}, false
 	}
 
+	// Play mode has no default on the import form (#752): the admin must
+	// pick solo or live before the import proceeds. Reject a missing or
+	// unrecognised value here rather than silently defaulting to solo the
+	// way the regular quiz form does.
+	mode := r.PostFormValue("mode")
 	jsonText := r.PostFormValue("json")
+	if !quiz.IsValidMode(mode) {
+		renderErr(w, r, stripCodeFences(jsonText), mode, "choose a play mode (solo or live) before importing")
+
+		return parsedImport{}, false
+	}
+
 	if jsonText == "" {
-		renderErr(w, r, "", "json field is required")
+		renderErr(w, r, "", mode, "json field is required")
 
 		return parsedImport{}, false
 	}
@@ -1386,19 +1406,20 @@ func parseImportPayload(
 	dec := json.NewDecoder(strings.NewReader(jsonText))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&payload); err != nil {
-		renderErr(w, r, jsonText, fmt.Sprintf("invalid JSON: %v", err))
+		renderErr(w, r, jsonText, mode, fmt.Sprintf("invalid JSON: %v", err))
 
 		return parsedImport{}, false
 	}
 
 	qz, err := quizFromImportPayload(payload)
 	if err != nil {
-		renderErr(w, r, jsonText, fmt.Sprintf("validation errors: %v", err))
+		renderErr(w, r, jsonText, mode, fmt.Sprintf("validation errors: %v", err))
 
 		return parsedImport{}, false
 	}
+	qz.Mode = mode
 	if problems := (&quizForm{quiz: qz}).Valid(r.Context()); len(problems) > 0 {
-		renderErr(w, r, jsonText, fmt.Sprintf("validation errors: %v", problems))
+		renderErr(w, r, jsonText, mode, fmt.Sprintf("validation errors: %v", problems))
 
 		return parsedImport{}, false
 	}

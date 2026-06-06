@@ -31,6 +31,20 @@
         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
 
         <div class="form-field">
+            <label class="label-eyebrow" for="mode">
+                Play mode
+                <span class="label-hint">Solo — self-paced; players pick it from the quiz list. Live — hosted only; never solo-playable, so it can't be spoiled before a hosted game. Required.</span>
+            </label>
+            <select id="mode" name="mode" required
+                    class="form-input max-w-[260px]">
+                <option value="" disabled {{if not .Mode}}selected{{end}}>Choose a play mode...</option>
+                {{range .ModeOptions}}
+                    <option value="{{.}}" {{if eq . $.Mode}}selected{{end}}>{{.}}</option>
+                {{end}}
+            </select>
+        </div>
+
+        <div class="form-field">
             <label class="label-eyebrow" for="json">
                 Quiz JSON
                 <span class="label-hint">UTF-8, no comments, unknown fields are rejected</span>
