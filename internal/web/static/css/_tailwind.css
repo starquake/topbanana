@@ -731,11 +731,11 @@
         @apply [&::-webkit-progress-value]:bg-accent [&::-moz-progress-bar]:bg-accent;
     }
 
-    /* Per-question feedback banner. Restrained card with a single
-     * accent-coloured top border — three semantic variants. The
-     * `[data-feedback]` selector on the same element is what
-     * GameApp.js's anime.js animation hooks into; the class drives
-     * styling, the attribute drives motion. */
+    /* Feedback banner — a restrained card with a single accent-coloured
+     * top border, used for the inline error notices (start-screen error,
+     * answer-submit retry, name-claim error). The .feedback-danger
+     * variant swaps the top border and first-line text to the danger
+     * colour. */
     .feedback-banner {
         @apply bg-surface text-text border border-border border-t-2 border-t-accent rounded-sm px-5 py-4;
     }
