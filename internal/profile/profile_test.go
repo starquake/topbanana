@@ -124,6 +124,33 @@ func TestHandleProfileDisplayName_LogsEmptyRejection(t *testing.T) {
 	}
 }
 
+func TestAdminNextPath(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		in   string
+		want string
+	}{
+		"admin dashboard":      {"/admin", "/admin"},
+		"admin subpath":        {"/admin/quizzes", "/admin/quizzes"},
+		"empty":                {"", ""},
+		"non-admin internal":   {"/profile/email", ""},
+		"admin lookalike host": {"/adminish", ""},
+		"absolute url":         {"https://evil.example/admin", ""},
+		"protocol relative":    {"//evil.example/admin", ""},
+		"backslash trick":      {"/admin\\@evil.example", ""},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got, want := AdminNextPath(tc.in), tc.want; got != want {
+				t.Errorf("AdminNextPath(%q) = %q, want %q", tc.in, got, want)
+			}
+		})
+	}
+}
+
 func TestHandleProfileDisplayName_LogsUnexpectedErrorAtError(t *testing.T) {
 	t.Parallel()
 

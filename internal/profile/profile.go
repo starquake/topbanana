@@ -35,12 +35,44 @@ const maxFormBodySize = 16 * 1024
 // <title>. DisplayName is the value pre-filled into the input. Message
 // surfaces server-side validation errors (taken display name, empty
 // input, etc.). Saved is true on a successful POST so the template
-// can show a small confirmation banner.
+// can show a small confirmation banner. Back* drive the form's
+// return link so a visitor arriving from the admin chrome lands back
+// on the dashboard instead of the public home page.
 type pageData struct {
 	Title       string
 	DisplayName string
 	Message     string
 	Saved       bool
+	BackHref    string
+	BackLabel   string
+	Next        string
+}
+
+// profileBack resolves the page's return link from the ?next= query
+// param. Only an internal admin path is honoured (validated through
+// auth.SafeNextPath, then gated to the /admin prefix so this stays a
+// closed allowlist, not an open redirect); anything else falls back to
+// the public home page. Next is echoed back so the POST re-render can
+// preserve the return target across a validation error.
+func profileBack(r *http.Request) (href, label, next string) {
+	next = adminNextPath(r.URL.Query().Get("next"))
+	href, label = backFromNext(next)
+
+	return href, label, next
+}
+
+// adminNextPath returns raw when it is a safe same-site path under
+// /admin, otherwise "". The auth.SafeNextPath guard rejects schemes,
+// hosts, and backslash tricks; the prefix check then narrows the
+// allowlist to the admin surface so no other internal path can ride
+// the return link.
+func adminNextPath(raw string) string {
+	safe := auth.SafeNextPath(raw)
+	if safe == "/admin" || strings.HasPrefix(safe, "/admin/") {
+		return safe
+	}
+
+	return ""
 }
 
 // HandleProfile returns the [http.Handler] for GET /profile. The
@@ -61,9 +93,13 @@ func HandleProfile(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
 			return
 		}
 
+		backHref, backLabel, next := profileBack(r)
 		render.render(w, r, http.StatusOK, pageData{
 			Title:       "Profile",
 			DisplayName: player.DisplayName,
+			BackHref:    backHref,
+			BackLabel:   backLabel,
+			Next:        next,
 		})
 	})
 }
@@ -105,19 +141,53 @@ func HandleProfileDisplayName(
 		raw := r.PostFormValue("display_name")
 		cleaned := strings.TrimSpace(raw)
 
+		// The return target rides the POST as a hidden field so the
+		// back link survives a re-render; re-validate it on the way in
+		// rather than trusting the submitted value.
+		next := adminNextPath(r.PostFormValue("next"))
+
 		updated, err := players.RenamePlayer(r.Context(), player.ID, cleaned)
 		if err != nil {
-			renderRenameError(render, logger, w, r, player.ID, player.DisplayName, raw, err)
+			renderRenameError(render, logger, w, r, renameAttempt{
+				playerID:           player.ID,
+				currentDisplayName: player.DisplayName,
+				attempted:          raw,
+				next:               next,
+			}, err)
 
 			return
 		}
 
+		backHref, backLabel := backFromNext(next)
 		render.render(w, r, http.StatusOK, pageData{
 			Title:       "Profile",
 			DisplayName: updated.DisplayName,
 			Saved:       true,
+			BackHref:    backHref,
+			BackLabel:   backLabel,
+			Next:        next,
 		})
 	})
+}
+
+// backFromNext maps an already-validated next path to the back link's
+// href + label, defaulting to the public home page when next is empty.
+func backFromNext(next string) (href, label string) {
+	if next != "" {
+		return next, "Back to admin"
+	}
+
+	return "/", "Back to home"
+}
+
+// renameAttempt carries the per-request context a failed rename needs
+// to re-render the form: who tried, what they had, what they typed, and
+// where their back link should point.
+type renameAttempt struct {
+	playerID           int64
+	currentDisplayName string
+	attempted          string
+	next               string
 }
 
 // renderRenameError maps a store error to the right HTTP status +
@@ -136,30 +206,36 @@ func renderRenameError(
 	logger *slog.Logger,
 	w http.ResponseWriter,
 	r *http.Request,
-	playerID int64,
-	currentDisplayName, attempted string,
+	a renameAttempt,
 	err error,
 ) {
+	backHref, backLabel := backFromNext(a.next)
 	switch {
 	case errors.Is(err, auth.ErrDisplayNameEmpty):
 		logger.InfoContext(r.Context(), "profile rename rejected: empty name",
-			slog.Int64("player_id", playerID))
+			slog.Int64("player_id", a.playerID))
 		render.render(w, r, http.StatusBadRequest, pageData{
 			Title:       "Profile",
-			DisplayName: currentDisplayName,
+			DisplayName: a.currentDisplayName,
 			Message:     "Display name is required.",
+			BackHref:    backHref,
+			BackLabel:   backLabel,
+			Next:        a.next,
 		})
 	case errors.Is(err, auth.ErrDisplayNameTaken):
 		logger.InfoContext(r.Context(), "profile rename rejected: name taken",
-			slog.Int64("player_id", playerID), slog.String("attempted", attempted))
+			slog.Int64("player_id", a.playerID), slog.String("attempted", a.attempted))
 		render.render(w, r, http.StatusConflict, pageData{
 			Title:       "Profile",
-			DisplayName: attempted,
+			DisplayName: a.attempted,
 			Message:     "That name is already taken. Pick a different one.",
+			BackHref:    backHref,
+			BackLabel:   backLabel,
+			Next:        a.next,
 		})
 	default:
 		logger.ErrorContext(r.Context(), "profile rename failed",
-			slog.Int64("player_id", playerID), slog.Any("err", err))
+			slog.Int64("player_id", a.playerID), slog.Any("err", err))
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}
 }

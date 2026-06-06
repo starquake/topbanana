@@ -31,16 +31,12 @@
                 </div>
             </div>
             <div class="flex items-center gap-4 text-sm">
-                <span class="hidden sm:inline text-text-dim">Signed in as&nbsp;<strong class="text-text font-medium">{{currentUser}}</strong></span>
-                <form action="/logout" method="POST" class="inline-flex">
-                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                    <button type="submit"
-                            class="inline-flex items-center min-h-[36px] px-3 py-2 border border-border rounded-sm bg-transparent text-text-dim text-xs uppercase font-semibold tracking-[0.14em]
-                                   transition-colors hover:border-accent hover:text-text
-                                   focus-visible:outline-none focus-visible:shadow-focus focus-visible:border-accent">
-                        Log out
-                    </button>
-                </form>
+                {{/* next=/admin lands the profile back-link on the dashboard so
+                     the round-trip from here returns where it started. The
+                     profile handler validates it (auth.SafeNextPath + an admin
+                     prefix gate) before honouring it. */}}
+                <span class="hidden sm:inline text-text-dim">Signed in as&nbsp;<a href="/profile?next=/admin"
+                       class="text-text font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:shadow-focus rounded-sm">{{currentUser}}</a></span>
             </div>
         </div>
         {{/* Narrow screens: section links wrap to a second row so they never

@@ -34,6 +34,39 @@ test('admin top nav reaches all sections', async ({ page }) => {
   await expect(page.getByRole('heading', { name: /email diagnostics/i })).toBeVisible();
 });
 
+// #732 — the "Signed in as <name>" text links to the profile page, and
+// reaching it from the admin chrome lands the back link on the dashboard
+// so the round-trip returns where it started.
+test('admin "Signed in as" links to profile and returns to the dashboard', async ({ page }) => {
+  await page.goto('/admin/quizzes');
+
+  const nav = page.getByRole('navigation', { name: 'Primary' });
+  // The display name is the only link inside the "Signed in as" label.
+  await nav.locator('a[href="/profile?next=/admin"]').click();
+  await expect(page).toHaveURL(/\/profile\?next=\/admin$/);
+
+  // The profile back link points at the admin dashboard, not the home page.
+  const back = page.getByRole('link', { name: 'Back to admin' });
+  await expect(back).toBeVisible();
+  await expect(back).toHaveAttribute('href', '/admin');
+
+  await back.click();
+  await expect(page).toHaveURL(/\/admin$/);
+});
+
+// #732 — Log out moved out of the top nav to the admin footer; it must
+// stay a working POST form reachable on every admin page.
+test('admin footer logs the user out', async ({ page }) => {
+  await page.goto('/admin/quizzes');
+
+  const footer = page.getByRole('contentinfo');
+  await footer.getByRole('button', { name: 'Log out' }).click();
+
+  // Logout clears the session; admin pages now bounce to /login.
+  await page.goto('/admin/quizzes');
+  await expect(page).toHaveURL(/\/login/);
+});
+
 test('admin nav marks the active section', async ({ page }) => {
   const nav = page.getByRole('navigation', { name: 'Primary' });
 
