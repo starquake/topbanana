@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { seedQuiz, QUIZ_QUESTIONS } from './helpers';
+import { seedQuiz, QUIZ_QUESTIONS, claimAndJoin } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' (the importer lands quizzes
 // on 'solo', and only live quizzes are hostable, MP-0 / #677) and returns its
@@ -39,6 +39,10 @@ test.describe('reconnect and resume', () => {
     test.setTimeout(60_000);
 
     const quizTitle = `Resume Live ${Date.now()}`;
+    // Player names are global on players.display_name now (#716), so use
+    // unique names to avoid colliding with a parallel spec on the worker DB.
+    const robin = `Robin-${Date.now()}`;
+    const quincy = `Quincy-${Date.now()}`;
 
     // Host side: seed the quiz, make it live, and open a session as the admin
     // (storageState) in its own context so the player page stays anonymous.
@@ -58,17 +62,15 @@ test.describe('reconnect and resume', () => {
     // reloads and resumes. The runner only closes once every active player has
     // answered.
     const otherContext = await page.context().browser()!.newContext({ storageState: undefined, baseURL });
-    const otherJoin = await otherContext.request.post(`/api/sessions/${joinCode}/join`, {
-      data: { displayName: 'Robin' },
-    });
-    expect(otherJoin.status()).toBe(200);
+    await claimAndJoin(otherContext.request, joinCode, robin);
 
-    // Player joins via the deep link and lands in the lobby. The landed code +
-    // name are now remembered in localStorage for the resume on reload.
+    // Player joins via the deep link and lands in the lobby (claims their name
+    // through the shared flow, then joins nameless, #716). The landed code is
+    // now remembered in localStorage for the resume on reload.
     await page.goto(`/join/${joinCode}`);
-    await page.getByTestId('join-name-input').fill('Quincy');
+    await page.getByTestId('join-name-input').fill(quincy);
     await page.getByTestId('join-name-submit').click();
-    await expect(page.getByTestId('lobby-roster').getByText('Quincy')).toBeVisible();
+    await expect(page.getByTestId('lobby-roster').getByText(quincy)).toBeVisible();
 
     // Host starts the game; the runner drives round_intro -> question.
     const startResp = await host.request.post(`/api/sessions/${joinCode}/start`);

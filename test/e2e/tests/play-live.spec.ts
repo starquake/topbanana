@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { seedQuiz, QUIZ_QUESTIONS } from './helpers';
+import { seedQuiz, QUIZ_QUESTIONS, claimAndJoin } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' (the importer lands quizzes
 // on 'solo', and only live quizzes are hostable, MP-0 / #677) and returns its
@@ -45,6 +45,10 @@ test.describe('player synchronized play', () => {
     test.setTimeout(60_000);
 
     const quizTitle = `Live Play ${Date.now()}`;
+    // Player names are global on players.display_name now (#716), so use
+    // unique names to avoid colliding with a parallel spec on the worker DB.
+    const robin = `Robin-${Date.now()}`;
+    const quincy = `Quincy-${Date.now()}`;
 
     // Host side: seed the quiz, make it live, and open a session as the admin
     // (storageState) in its own context so the player page stays anonymous.
@@ -62,17 +66,15 @@ test.describe('player synchronized play', () => {
     // A second, API-only player joins from its own anonymous context (its own
     // session cookie -> a distinct anonymous player) and holds its answer so
     // the question does not early-close the instant the page player answers.
+    // The join carries no name (#716): it claims players.display_name first.
     const otherContext = await page.context().browser()!.newContext({ storageState: undefined, baseURL });
-    const otherJoin = await otherContext.request.post(`/api/sessions/${joinCode}/join`, {
-      data: { displayName: 'Robin' },
-    });
-    expect(otherJoin.status()).toBe(200);
+    await claimAndJoin(otherContext.request, joinCode, robin);
 
     // Player joins via the deep link and lands in the lobby.
     await page.goto(`/join/${joinCode}`);
-    await page.getByTestId('join-name-input').fill('Quincy');
+    await page.getByTestId('join-name-input').fill(quincy);
     await page.getByTestId('join-name-submit').click();
-    await expect(page.getByTestId('lobby-roster').getByText('Quincy')).toBeVisible();
+    await expect(page.getByTestId('lobby-roster').getByText(quincy)).toBeVisible();
 
     // Host starts the game immediately (bypassing the auto-start window). The
     // runner drives round_intro -> question on its own beat.

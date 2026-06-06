@@ -105,16 +105,16 @@ WHERE player_id = sqlc.arg('player_id')
   AND session_id IN (SELECT id FROM sessions WHERE quiz_id = sqlc.arg('quiz_id'));
 
 -- name: UpsertSessionPlayer :one
--- Adds a player to a session's roster, or revives an existing row on
--- re-join (clearing left_at and refreshing last_seen_at + display_name).
--- A per-session display-name collision trips UNIQUE (session_id,
--- display_name); the caller retries with a petname. The (session_id,
--- player_id) UNIQUE makes the upsert idempotent for the same player.
-INSERT INTO session_players (session_id, player_id, display_name)
-VALUES (?, ?, ?)
+-- Adds a player to a session's roster, or revives an existing row on re-join
+-- (clearing left_at and refreshing last_seen_at). The display name is no
+-- longer stored per session (#716): the roster reads join players and select
+-- the current players.display_name, so a rename propagates everywhere. The
+-- (session_id, player_id) UNIQUE makes the upsert idempotent for the same
+-- player.
+INSERT INTO session_players (session_id, player_id)
+VALUES (?, ?)
 ON CONFLICT (session_id, player_id)
-    DO UPDATE SET display_name = excluded.display_name,
-                  left_at      = NULL,
+    DO UPDATE SET left_at      = NULL,
                   last_seen_at = CURRENT_TIMESTAMP
 RETURNING *;
 
@@ -137,12 +137,22 @@ WHERE session_id = ?
 
 -- name: ListSessionPlayers :many
 -- The lobby roster in join order. Excludes players who have left (left_at
--- set, MP-10) so the lobby shows the current room.
-SELECT *
-FROM session_players
-WHERE session_id = ?
-  AND left_at IS NULL
-ORDER BY joined_at, id;
+-- set, MP-10) so the lobby shows the current room. display_name is the
+-- player's CURRENT players.display_name (#716), joined live so a rename shows
+-- everywhere rather than a per-session snapshot.
+SELECT sp.id,
+       sp.session_id,
+       sp.player_id,
+       CAST(p.display_name AS TEXT) AS display_name,
+       sp.is_ready,
+       sp.joined_at,
+       sp.last_seen_at,
+       sp.left_at
+FROM session_players sp
+         JOIN players p ON p.id = sp.player_id
+WHERE sp.session_id = ?
+  AND sp.left_at IS NULL
+ORDER BY sp.joined_at, sp.id;
 
 -- name: ListLiveSessionIDs :many
 -- Ids of every session not yet finished, in creation order. The runner scans
@@ -342,36 +352,41 @@ WHERE id = ?;
 -- (total_score). Anchored on the roster (LEFT JOIN to scored answers) so a
 -- player who never answered still appears at 0, which the bar graph needs. The
 -- round is selected by questions.round_id; coalesce turns "no scored answer" /
--- "score still NULL" into 0. Ordered by total_score desc, then display_name so
--- ranking is stable across reads.
-SELECT sp.player_id    AS player_id,
-       sp.display_name AS display_name,
+-- "score still NULL" into 0. display_name is the player's CURRENT
+-- players.display_name (#716), joined live so a rename shows in the standings.
+-- Ordered by total_score desc, then display_name so ranking is stable across
+-- reads.
+SELECT sp.player_id                 AS player_id,
+       CAST(p.display_name AS TEXT) AS display_name,
        CAST(COALESCE(SUM(CASE WHEN q.round_id = sqlc.arg('round_id') THEN sa.score END), 0) AS INTEGER) AS round_score,
        CAST(COALESCE(SUM(sa.score), 0) AS INTEGER)                                                      AS total_score
 FROM session_players sp
+         JOIN players p ON p.id = sp.player_id
          LEFT JOIN session_answers sa
                    ON sa.session_id = sp.session_id AND sa.player_id = sp.player_id
          LEFT JOIN questions q ON q.id = sa.question_id
 WHERE sp.session_id = sqlc.arg('session_id')
   AND sp.left_at IS NULL
-GROUP BY sp.player_id, sp.display_name
-ORDER BY total_score DESC, sp.display_name;
+GROUP BY sp.player_id, p.display_name
+ORDER BY total_score DESC, p.display_name;
 
 -- name: ListSessionFinalStandings :many
 -- Per-player final standings for a session: cumulative score across the whole
--- session, anchored on the roster so non-answerers appear at 0. Same ordering
--- as ListSessionStandings; used at the finished phase, where there is no
--- "current round" to break out.
+-- session, anchored on the roster so non-answerers appear at 0. display_name is
+-- the player's CURRENT players.display_name (#716), joined live so a rename
+-- shows in the final standings. Same ordering as ListSessionStandings; used at
+-- the finished phase, where there is no "current round" to break out.
 SELECT sp.player_id                              AS player_id,
-       sp.display_name                           AS display_name,
+       CAST(p.display_name AS TEXT)              AS display_name,
        CAST(COALESCE(SUM(sa.score), 0) AS INTEGER) AS total_score
 FROM session_players sp
+         JOIN players p ON p.id = sp.player_id
          LEFT JOIN session_answers sa
                    ON sa.session_id = sp.session_id AND sa.player_id = sp.player_id
 WHERE sp.session_id = sqlc.arg('session_id')
   AND sp.left_at IS NULL
-GROUP BY sp.player_id, sp.display_name
-ORDER BY total_score DESC, sp.display_name;
+GROUP BY sp.player_id, p.display_name
+ORDER BY total_score DESC, p.display_name;
 
 -- name: ListSessionResultsForQuizLeaderboard :many
 -- One row per (player) summing their score across every FINISHED live session
@@ -385,19 +400,22 @@ ORDER BY total_score DESC, sp.display_name;
 -- session_answers.score (already computed at close with the same CalculateScore
 -- curve solo play uses) rather than recomputed. Keyed on player_id alone (a
 -- player may host or play more than one finished session of the same quiz);
--- their scores sum and MAX(display_name) picks one stable name for the row.
+-- their scores sum. display_name is the player's CURRENT players.display_name
+-- (#716), joined live so a rename reflects on the quiz's standard leaderboard
+-- exactly as solo play already does (games.sql joins players the same way).
 -- left_at is deliberately NOT filtered here (unlike the live roster /
 -- standings reads): a player who played still counts toward the quiz's
 -- standard leaderboard even if they left the room before the session
 -- finished (MP-10). Leaving drops a player from the in-session surfaces, not
 -- from the record of having played.
 SELECT sp.player_id                               AS player_id,
-       CAST(MAX(sp.display_name) AS TEXT)          AS display_name,
+       CAST(p.display_name AS TEXT)               AS display_name,
        CAST(COALESCE(SUM(sa.score), 0) AS INTEGER) AS total_score
 FROM sessions s
          JOIN session_players sp ON sp.session_id = s.id
+         JOIN players p ON p.id = sp.player_id
          LEFT JOIN session_answers sa
                    ON sa.session_id = sp.session_id AND sa.player_id = sp.player_id
 WHERE s.quiz_id = ?
   AND s.phase = 'finished'
-GROUP BY sp.player_id;
+GROUP BY sp.player_id, p.display_name;

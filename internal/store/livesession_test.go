@@ -119,19 +119,19 @@ func TestLiveSessionStore_AddPlayer_AndRoster(t *testing.T) {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
 
-	p1, err := playerStore.CreateAnonymousPlayer(t.Context(), "roster-p1")
+	p1, err := playerStore.CreateAnonymousPlayer(t.Context(), "Alice")
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer p1 err = %v, want nil", err)
 	}
-	p2, err := playerStore.CreateAnonymousPlayer(t.Context(), "roster-p2")
+	p2, err := playerStore.CreateAnonymousPlayer(t.Context(), "Bob")
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer p2 err = %v, want nil", err)
 	}
 
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p1.ID, "Alice"); err != nil {
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p1.ID); err != nil {
 		t.Fatalf("AddPlayer p1 err = %v, want nil", err)
 	}
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p2.ID, "Bob"); err != nil {
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p2.ID); err != nil {
 		t.Fatalf("AddPlayer p2 err = %v, want nil", err)
 	}
 
@@ -142,12 +142,18 @@ func TestLiveSessionStore_AddPlayer_AndRoster(t *testing.T) {
 	if got, want := len(loaded.Players), 2; got != want {
 		t.Fatalf("len(Players) = %d, want %d", got, want)
 	}
+	// The roster's DisplayName is the player's current players.display_name
+	// (#716), not a per-session snapshot.
 	if got, want := loaded.Players[0].DisplayName, "Alice"; got != want {
-		t.Errorf("Players[0].DisplayName = %q, want %q (join order)", got, want)
+		t.Errorf("Players[0].DisplayName = %q, want %q (join order, current player name)", got, want)
 	}
 }
 
-func TestLiveSessionStore_AddPlayer_DisplayNameTaken(t *testing.T) {
+// TestLiveSessionStore_Roster_ReflectsPlayerRename pins the #716 propagation
+// guarantee at the store layer: renaming the player's players.display_name
+// changes what the live roster read returns, because the roster joins players
+// rather than storing a per-session snapshot.
+func TestLiveSessionStore_Roster_ReflectsPlayerRename(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.Open(t)
@@ -156,25 +162,31 @@ func TestLiveSessionStore_AddPlayer_DisplayNameTaken(t *testing.T) {
 	sessionStore := NewLiveSessionStore(db, slog.Default())
 	qz := newLiveQuiz(t, quizStore)
 
-	sess := &livesession.Session{QuizID: qz.ID, HostPlayerID: seededAdminID, JoinCode: "DUPN23"}
+	sess := &livesession.Session{QuizID: qz.ID, HostPlayerID: seededAdminID, JoinCode: "RNAM23"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
-	p1, err := playerStore.CreateAnonymousPlayer(t.Context(), "dupn-p1")
+	p, err := playerStore.CreateAnonymousPlayer(t.Context(), "Before")
 	if err != nil {
-		t.Fatalf("CreateAnonymousPlayer p1 err = %v, want nil", err)
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
-	p2, err := playerStore.CreateAnonymousPlayer(t.Context(), "dupn-p2")
-	if err != nil {
-		t.Fatalf("CreateAnonymousPlayer p2 err = %v, want nil", err)
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p.ID); err != nil {
+		t.Fatalf("AddPlayer err = %v, want nil", err)
 	}
 
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p1.ID, "Sam"); err != nil {
-		t.Fatalf("AddPlayer p1 err = %v, want nil", err)
+	if _, err = playerStore.RenamePlayer(t.Context(), p.ID, "After"); err != nil {
+		t.Fatalf("RenamePlayer err = %v, want nil", err)
 	}
-	_, err = sessionStore.AddPlayer(t.Context(), sess.ID, p2.ID, "Sam")
-	if got, want := err, livesession.ErrDisplayNameTaken; !errors.Is(got, want) {
-		t.Errorf("AddPlayer collision err = %v, want %v", got, want)
+
+	loaded, err := sessionStore.GetSessionByJoinCode(t.Context(), "RNAM23")
+	if err != nil {
+		t.Fatalf("GetSessionByJoinCode err = %v, want nil", err)
+	}
+	if got, want := len(loaded.Players), 1; got != want {
+		t.Fatalf("len(Players) = %d, want %d", got, want)
+	}
+	if got, want := loaded.Players[0].DisplayName, "After"; got != want {
+		t.Errorf("roster DisplayName after rename = %q, want %q (rename must propagate)", got, want)
 	}
 }
 
@@ -191,15 +203,15 @@ func TestLiveSessionStore_AddPlayer_RejoinIsIdempotent(t *testing.T) {
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
-	p1, err := playerStore.CreateAnonymousPlayer(t.Context(), "rejn-p1")
+	p1, err := playerStore.CreateAnonymousPlayer(t.Context(), "Rejoiner")
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
 
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p1.ID, "First"); err != nil {
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p1.ID); err != nil {
 		t.Fatalf("AddPlayer err = %v, want nil", err)
 	}
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p1.ID, "Second"); err != nil {
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p1.ID); err != nil {
 		t.Fatalf("AddPlayer rejoin err = %v, want nil", err)
 	}
 
@@ -210,8 +222,8 @@ func TestLiveSessionStore_AddPlayer_RejoinIsIdempotent(t *testing.T) {
 	if got, want := len(loaded.Players), 1; got != want {
 		t.Errorf("len(Players) after rejoin = %d, want %d", got, want)
 	}
-	if got, want := loaded.Players[0].DisplayName, "Second"; got != want {
-		t.Errorf("rejoin DisplayName = %q, want %q", got, want)
+	if got, want := loaded.Players[0].DisplayName, "Rejoiner"; got != want {
+		t.Errorf("rejoin DisplayName = %q, want %q (current player name)", got, want)
 	}
 }
 
@@ -232,7 +244,7 @@ func TestLiveSessionStore_SetReady(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p1.ID, "Ready Player"); err != nil {
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p1.ID); err != nil {
 		t.Fatalf("AddPlayer err = %v, want nil", err)
 	}
 
@@ -412,7 +424,7 @@ func TestLiveSessionStore_AnswersRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p.ID, "Ann"); err != nil {
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p.ID); err != nil {
 		t.Fatalf("AddPlayer err = %v, want nil", err)
 	}
 
@@ -475,7 +487,7 @@ func TestLiveSessionStore_TouchLastSeen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p.ID, "Touched"); err != nil {
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p.ID); err != nil {
 		t.Fatalf("AddPlayer err = %v, want nil", err)
 	}
 
@@ -574,10 +586,10 @@ func TestLiveSessionStore_ActiveCounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer stale err = %v, want nil", err)
 	}
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, fresh.ID, "Fresh"); err != nil {
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, fresh.ID); err != nil {
 		t.Fatalf("AddPlayer fresh err = %v, want nil", err)
 	}
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, stalePlayer.ID, "Stale"); err != nil {
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, stalePlayer.ID); err != nil {
 		t.Fatalf("AddPlayer stale err = %v, want nil", err)
 	}
 
@@ -641,7 +653,7 @@ func TestLiveSessionStore_ActiveCounts_RealTimestampEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p.ID, "Real"); err != nil {
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p.ID); err != nil {
 		t.Fatalf("AddPlayer err = %v, want nil", err)
 	}
 	// Stamp last_seen_at via the production heartbeat path (CURRENT_TIMESTAMP).
@@ -726,7 +738,7 @@ func seedFinishedSession(
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
-	if _, err := sessionStore.AddPlayer(t.Context(), sess.ID, playerID, "Player"); err != nil {
+	if _, err := sessionStore.AddPlayer(t.Context(), sess.ID, playerID); err != nil {
 		t.Fatalf("AddPlayer err = %v, want nil", err)
 	}
 	q := qz.Questions[0]
@@ -768,10 +780,10 @@ func TestLiveSessionStore_Standings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer loser err = %v, want nil", err)
 	}
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, winner.ID, "Win"); err != nil {
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, winner.ID); err != nil {
 		t.Fatalf("AddPlayer winner err = %v, want nil", err)
 	}
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, loser.ID, "Los"); err != nil {
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, loser.ID); err != nil {
 		t.Fatalf("AddPlayer loser err = %v, want nil", err)
 	}
 
@@ -832,6 +844,31 @@ func TestLiveSessionStore_Standings(t *testing.T) {
 	if got, want := finalStandings[1].TotalScore, 0; got != want {
 		t.Errorf("loser final total = %d, want %d", got, want)
 	}
+	// The standings carry the player's current players.display_name, set on
+	// creation here.
+	if got, want := finalStandings[0].DisplayName, "stnd-win"; got != want {
+		t.Errorf("winner standings DisplayName = %q, want %q (current player name)", got, want)
+	}
+
+	// #716 propagation: renaming the winner updates what the standings reads
+	// return, because they join players rather than store a per-session name.
+	if _, err = playerStore.RenamePlayer(t.Context(), winner.ID, "Champion"); err != nil {
+		t.Fatalf("RenamePlayer err = %v, want nil", err)
+	}
+	renamedRound, err := sessionStore.ListRoundStandings(t.Context(), sess.ID, round1)
+	if err != nil {
+		t.Fatalf("ListRoundStandings after rename err = %v, want nil", err)
+	}
+	if got, want := renamedRound[0].DisplayName, "Champion"; got != want {
+		t.Errorf("round standings DisplayName after rename = %q, want %q (rename must propagate)", got, want)
+	}
+	renamedFinal, err := sessionStore.ListFinalStandings(t.Context(), sess.ID)
+	if err != nil {
+		t.Fatalf("ListFinalStandings after rename err = %v, want nil", err)
+	}
+	if got, want := renamedFinal[0].DisplayName, "Champion"; got != want {
+		t.Errorf("final standings DisplayName after rename = %q, want %q (rename must propagate)", got, want)
+	}
 }
 
 // TestLiveSessionStore_EnterRoundResults pins the round_results phase
@@ -890,7 +927,7 @@ func TestGameStore_ListSessionResultsForQuizLeaderboard(t *testing.T) {
 	q := qz.Questions[0]
 	at := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
 
-	player, err := playerStore.CreateAnonymousPlayer(t.Context(), "lb-sess-p1")
+	player, err := playerStore.CreateAnonymousPlayer(t.Context(), "Pat")
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 	}
@@ -899,7 +936,7 @@ func TestGameStore_ListSessionResultsForQuizLeaderboard(t *testing.T) {
 	if err = sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, player.ID, "Pat"); err != nil {
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, player.ID); err != nil {
 		t.Fatalf("AddPlayer err = %v, want nil", err)
 	}
 	scoreAnswer(t, sessionStore, sess.ID, q.ID, player.ID, q.Options[0].ID, at, 700)
@@ -932,6 +969,22 @@ func TestGameStore_ListSessionResultsForQuizLeaderboard(t *testing.T) {
 	}
 	if got, want := after[0].DisplayName, "Pat"; got != want {
 		t.Errorf("result DisplayName = %q, want %q", got, want)
+	}
+
+	// #716 propagation: renaming the player updates the finished session's
+	// quiz-leaderboard name, matching how solo play already reflects a rename.
+	if _, err = playerStore.RenamePlayer(t.Context(), player.ID, "Patricia"); err != nil {
+		t.Fatalf("RenamePlayer err = %v, want nil", err)
+	}
+	renamed, err := gameStore.ListSessionResultsForQuizLeaderboard(t.Context(), qz.ID)
+	if err != nil {
+		t.Fatalf("ListSessionResultsForQuizLeaderboard after rename err = %v, want nil", err)
+	}
+	if got, want := len(renamed), 1; got != want {
+		t.Fatalf("session results after rename = %d, want %d", got, want)
+	}
+	if got, want := renamed[0].DisplayName, "Patricia"; got != want {
+		t.Errorf("result DisplayName after rename = %q, want %q (rename must propagate)", got, want)
 	}
 }
 
@@ -1004,7 +1057,7 @@ func TestLiveSessionStore_PlayerFinishedSessionForQuiz_UnfinishedDoesNotCount(t 
 	if err = sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, player.ID, "Open"); err != nil {
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, player.ID); err != nil {
 		t.Fatalf("AddPlayer err = %v, want nil", err)
 	}
 
@@ -1130,10 +1183,10 @@ func TestLiveSessionStore_MarkPlayerLeft_ExcludesFromRoster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer leaver err = %v, want nil", err)
 	}
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, stayer.ID, "Stay"); err != nil {
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, stayer.ID); err != nil {
 		t.Fatalf("AddPlayer stayer err = %v, want nil", err)
 	}
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, leaver.ID, "Go"); err != nil {
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, leaver.ID); err != nil {
 		t.Fatalf("AddPlayer leaver err = %v, want nil", err)
 	}
 
@@ -1224,10 +1277,10 @@ func TestLiveSessionStore_MarkPlayerLeft_ExcludesFromStandings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer leaver err = %v, want nil", err)
 	}
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, stayer.ID, "Stay"); err != nil {
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, stayer.ID); err != nil {
 		t.Fatalf("AddPlayer stayer err = %v, want nil", err)
 	}
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, leaver.ID, "Go"); err != nil {
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, leaver.ID); err != nil {
 		t.Fatalf("AddPlayer leaver err = %v, want nil", err)
 	}
 
@@ -1299,7 +1352,7 @@ func TestLiveSessionStore_SessionHasPlayer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer stranger err = %v, want nil", err)
 	}
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, joined.ID, "Joined"); err != nil {
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, joined.ID); err != nil {
 		t.Fatalf("AddPlayer err = %v, want nil", err)
 	}
 

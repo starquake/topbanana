@@ -61,11 +61,9 @@ func TestGenerateJoinCode_Distinct(t *testing.T) {
 }
 
 // fakeStore is a fault-injection double for the service tests: a real
-// store cannot force a join-code probe collision on demand, and the
-// service's petname-collision retry needs a store that reports
-// ErrDisplayNameTaken N times then succeeds. It is not a tautological
-// restatement of the store - it injects specific failure sequences the
-// real store cannot reproduce deterministically.
+// store cannot force a join-code probe collision on demand. It is not a
+// tautological restatement of the store - it injects specific failure
+// sequences the real store cannot reproduce deterministically.
 type fakeStore struct {
 	mu sync.Mutex
 
@@ -77,10 +75,9 @@ type fakeStore struct {
 	// ErrSessionNotFound.
 	session *Session
 
-	// addPlayerTakenFor counts how many AddPlayer calls should report
-	// ErrDisplayNameTaken before succeeding.
-	addPlayerTakenFor int
-	addedNames        []string
+	// addedPlayerIDs records the player ids passed to AddPlayer so a test can
+	// assert a roster row was (or was not) written.
+	addedPlayerIDs []int64
 
 	setReadyErr error
 
@@ -148,18 +145,13 @@ func (f *fakeStore) SessionHasPlayer(_ context.Context, _ string, _ int64) (bool
 	return f.hasPlayer, f.hasPlayerResult
 }
 
-func (f *fakeStore) AddPlayer(_ context.Context, _ string, playerID int64, displayName string) (*Player, error) {
+func (f *fakeStore) AddPlayer(_ context.Context, _ string, playerID int64) (*Player, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	if f.addPlayerTakenFor > 0 {
-		f.addPlayerTakenFor--
+	f.addedPlayerIDs = append(f.addedPlayerIDs, playerID)
 
-		return nil, ErrDisplayNameTaken
-	}
-	f.addedNames = append(f.addedNames, displayName)
-
-	return &Player{PlayerID: playerID, DisplayName: displayName}, nil
+	return &Player{PlayerID: playerID}, nil
 }
 
 func (f *fakeStore) SetReady(context.Context, string, int64, bool) error {
@@ -302,32 +294,24 @@ func TestService_CreateSession_ExhaustsCodeBudget(t *testing.T) {
 	}
 }
 
-func TestService_Join_FallsBackToPetnameOnCollision(t *testing.T) {
+// TestService_Join_AddsRosterRowWithoutName pins the nameless join contract
+// (#716): Join carries no display name (the player is already named on their
+// players row before joining), so it just adds the roster row for the player id.
+func TestService_Join_AddsRosterRowWithoutName(t *testing.T) {
 	t.Parallel()
 
-	// The requested name collides twice; the service retries with petnames
-	// and lands on the first free one.
-	store := &fakeStore{
-		session:           &Session{ID: "s1", JoinCode: "ROOM12", Phase: PhaseLobby},
-		addPlayerTakenFor: 2,
-	}
+	store := &fakeStore{session: &Session{ID: "s1", JoinCode: "ROOM12", Phase: PhaseLobby}}
 	svc := NewService(store, &fakeQuiz{}, slog.Default())
 
-	var petCalls int
-	petname := func() string {
-		petCalls++
-
-		return "Pet-" + strconv.Itoa(petCalls)
-	}
-
-	player, err := svc.Join(t.Context(), "ROOM12", 5, "Wanted", petname)
+	player, err := svc.Join(t.Context(), "ROOM12", 5)
 	if err != nil {
 		t.Fatalf("Join err = %v, want nil", err)
 	}
-	// addPlayerTakenFor=2 means: "Wanted" taken, first petname taken,
-	// second petname succeeds.
-	if got, want := player.DisplayName, "Pet-2"; got != want {
-		t.Errorf("Join DisplayName = %q, want %q", got, want)
+	if got, want := player.PlayerID, int64(5); got != want {
+		t.Errorf("Join PlayerID = %d, want %d", got, want)
+	}
+	if got, want := store.addedPlayerIDs, []int64{5}; len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("addedPlayerIDs = %v, want %v", got, want)
 	}
 }
 
@@ -340,13 +324,13 @@ func TestService_Join_BlockedAfterFinishedPlay(t *testing.T) {
 	}
 	svc := NewService(store, &fakeQuiz{}, slog.Default())
 
-	_, err := svc.Join(t.Context(), "ROOM12", 5, "Wanted", func() string { return "Pet" })
+	_, err := svc.Join(t.Context(), "ROOM12", 5)
 	if got, want := err, ErrAlreadyPlayed; !errors.Is(got, want) {
 		t.Errorf("Join err = %v, want %v", got, want)
 	}
 	// The gate fires before the roster write, so no AddPlayer happened.
-	if got, want := len(store.addedNames), 0; got != want {
-		t.Errorf("addedNames len = %d, want %d (gate must precede AddPlayer)", got, want)
+	if got, want := len(store.addedPlayerIDs), 0; got != want {
+		t.Errorf("addedPlayerIDs len = %d, want %d (gate must precede AddPlayer)", got, want)
 	}
 }
 
@@ -363,14 +347,14 @@ func TestService_Join_ClosedAfterStart(t *testing.T) {
 	}
 	svc := NewService(store, &fakeQuiz{}, slog.Default())
 
-	_, err := svc.Join(t.Context(), "ROOM12", 5, "Wanted", func() string { return "Pet" })
+	_, err := svc.Join(t.Context(), "ROOM12", 5)
 	if got, want := err, ErrLobbyClosed; !errors.Is(got, want) {
 		t.Errorf("Join err = %v, want %v", got, want)
 	}
 	// The gate fires before the roster write, so no AddPlayer happened, and the
 	// replay gate was never consulted.
-	if got, want := len(store.addedNames), 0; got != want {
-		t.Errorf("addedNames len = %d, want %d (gate must precede AddPlayer)", got, want)
+	if got, want := len(store.addedPlayerIDs), 0; got != want {
+		t.Errorf("addedPlayerIDs len = %d, want %d (gate must precede AddPlayer)", got, want)
 	}
 }
 
@@ -396,11 +380,11 @@ func TestService_Join_ResumesLeftPlayerAfterStart(t *testing.T) {
 	svc := NewService(store, &fakeQuiz{}, slog.Default())
 	svc.SetPublisher(&spyPublisher{})
 
-	if _, err := svc.Join(t.Context(), "ROOM12", 5, "Sam", func() string { return "Pet" }); err != nil {
+	if _, err := svc.Join(t.Context(), "ROOM12", 5); err != nil {
 		t.Fatalf("Join (resume) err = %v, want nil", err)
 	}
-	if got, want := len(store.addedNames), 1; got != want {
-		t.Errorf("addedNames len = %d, want %d (resume revives the roster row)", got, want)
+	if got, want := len(store.addedPlayerIDs), 1; got != want {
+		t.Errorf("addedPlayerIDs len = %d, want %d (resume revives the roster row)", got, want)
 	}
 }
 
@@ -431,7 +415,7 @@ func TestService_Join_PublishesTick(t *testing.T) {
 	svc := NewService(store, &fakeQuiz{}, slog.Default())
 	svc.SetPublisher(spy)
 
-	if _, err := svc.Join(t.Context(), "room12", 5, "Wanted", func() string { return "Pet" }); err != nil {
+	if _, err := svc.Join(t.Context(), "room12", 5); err != nil {
 		t.Fatalf("Join err = %v, want nil", err)
 	}
 
@@ -592,7 +576,7 @@ func TestService_Mutations_TolerateNilPublisher(t *testing.T) {
 	store := &fakeStore{session: &Session{ID: "s1", JoinCode: "ROOM12", Phase: PhaseLobby}}
 	svc := NewService(store, &fakeQuiz{}, slog.Default())
 
-	if _, err := svc.Join(t.Context(), "ROOM12", 5, "Wanted", func() string { return "Pet" }); err != nil {
+	if _, err := svc.Join(t.Context(), "ROOM12", 5); err != nil {
 		t.Errorf("Join with nil publisher err = %v, want nil", err)
 	}
 	if err := svc.SetReady(t.Context(), "ROOM12", 5, true); err != nil {

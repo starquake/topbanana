@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { importQuiz } from './helpers';
+import { importQuiz, claimAndJoin } from './helpers';
 
 // MP-9 (#686): the between-rounds standings bar graph on the round_results /
 // finished screens, on BOTH the host TV surface and the player join surface.
@@ -124,6 +124,11 @@ test('the standings bar graph shows final order and totals on the TV and player 
   test.setTimeout(90_000);
 
   const quizTitle = `MP9 Standings ${browserName} ${Date.now()}`;
+  // Player display names are global on players.display_name now (#716), so
+  // parallel specs sharing a worker DB must not collide on a literal name.
+  const suffix = `${browserName}-${Date.now()}`;
+  const quincy = `Quincy-${suffix}`;
+  const robin = `Robin-${suffix}`;
 
   // Host context (shared admin) seeds a two-round quiz, makes it live, opens a
   // session, and watches the TV. The player surface (page) stays anonymous.
@@ -181,15 +186,14 @@ test('the standings bar graph shows final order and totals on the TV and player 
     reducedMotion: 'reduce',
   });
   const other = otherContext.request;
-  const otherJoin = await other.post(`/api/sessions/${joinCode}/join`, { data: { displayName: 'Robin' } });
-  expect(otherJoin.status()).toBe(200);
+  await claimAndJoin(other, joinCode, robin);
 
   // The page player joins via the deep link and lands in the lobby.
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto(`/join/${joinCode}`);
-  await page.getByTestId('join-name-input').fill('Quincy');
+  await page.getByTestId('join-name-input').fill(quincy);
   await page.getByTestId('join-name-submit').click();
-  await expect(page.getByTestId('lobby-roster').getByText('Quincy')).toBeVisible();
+  await expect(page.getByTestId('lobby-roster').getByText(quincy)).toBeVisible();
 
   // Host starts the game; the runner drives the phases on its own beat.
   const startResp = await host.request.post(`/api/sessions/${joinCode}/start`);
@@ -207,10 +211,10 @@ test('the standings bar graph shows final order and totals on the TV and player 
   await expect(async () => {
     const rows = await readStandingsRows(page);
     expect(rows.length).toBe(2);
-    expect(rows[0].name).toBe('Quincy');
+    expect(rows[0].name).toBe(quincy);
     expect(rows[0].rank).toBe('1');
     expect(Number(rows[0].total)).toBeGreaterThan(0);
-    expect(rows[1].name).toBe('Robin');
+    expect(rows[1].name).toBe(robin);
     expect(rows[1].rank).toBe('2');
     expect(Number(rows[1].total)).toBe(0);
   }).toPass({ timeout: 10_000 });
@@ -231,10 +235,10 @@ test('the standings bar graph shows final order and totals on the TV and player 
     .toBeVisible({ timeout: 20_000 });
   const tvRows = await readStandingsRows(host);
   expect(tvRows.length).toBe(2);
-  expect(tvRows[0].name).toBe('Quincy');
+  expect(tvRows[0].name).toBe(quincy);
   expect(tvRows[0].rank).toBe('1');
   expect(Number(tvRows[0].total)).toBeGreaterThan(0);
-  expect(tvRows[1].name).toBe('Robin');
+  expect(tvRows[1].name).toBe(robin);
   expect(tvRows[1].rank).toBe('2');
   expect(Number(tvRows[1].total)).toBe(0);
 
@@ -242,10 +246,10 @@ test('the standings bar graph shows final order and totals on the TV and player 
     .toBeVisible({ timeout: 20_000 });
   const playerRows = await readStandingsRows(page);
   expect(playerRows.length).toBe(2);
-  expect(playerRows[0].name).toBe('Quincy');
+  expect(playerRows[0].name).toBe(quincy);
   expect(playerRows[0].rank).toBe('1');
   expect(Number(playerRows[0].total)).toBeGreaterThan(0);
-  expect(playerRows[1].name).toBe('Robin');
+  expect(playerRows[1].name).toBe(robin);
   expect(playerRows[1].rank).toBe('2');
   expect(Number(playerRows[1].total)).toBe(0);
 

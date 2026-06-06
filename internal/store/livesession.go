@@ -133,24 +133,18 @@ func (s *LiveSessionStore) SessionHasPlayer(
 	return has, nil
 }
 
-// AddPlayer adds (or revives on re-join) a roster row for the player under
-// the requested display name. Returns [livesession.ErrDisplayNameTaken] on
-// a per-session display-name collision so the service can fall back to a
-// petname.
+// AddPlayer adds (or revives on re-join) a roster row for the player. The
+// display name is no longer stored per session (#716): the roster reads join
+// players and select the current players.display_name, so the returned Player
+// carries no name (the lobby/state read fans it out from the live join).
 func (s *LiveSessionStore) AddPlayer(
-	ctx context.Context, sessionID string, playerID int64, displayName string,
+	ctx context.Context, sessionID string, playerID int64,
 ) (*livesession.Player, error) {
 	row, err := s.q.UpsertSessionPlayer(ctx, db.UpsertSessionPlayerParams{
-		SessionID:   sessionID,
-		PlayerID:    playerID,
-		DisplayName: displayName,
+		SessionID: sessionID,
+		PlayerID:  playerID,
 	})
 	if err != nil {
-		var sqliteErr *sqlite.Error
-		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
-			return nil, livesession.ErrDisplayNameTaken
-		}
-
 		return nil, fmt.Errorf("failed to add session player: %w", err)
 	}
 
@@ -512,7 +506,7 @@ func (s *LiveSessionStore) listPlayers(ctx context.Context, sessionID string) ([
 
 	players := make([]*livesession.Player, 0, len(rows))
 	for _, r := range rows {
-		players = append(players, playerFromSessionRow(r))
+		players = append(players, playerFromRosterRow(r))
 	}
 
 	return players, nil
@@ -569,9 +563,9 @@ func applySessionRow(sess *livesession.Session, row db.Session) {
 	}
 }
 
-// playerFromSessionRow maps a generated session_players row onto the
-// domain roster type.
-func playerFromSessionRow(row db.SessionPlayer) *livesession.Player {
+// playerFromRosterRow maps a roster read (joined to players for the current
+// display_name, #716) onto the domain roster type.
+func playerFromRosterRow(row db.ListSessionPlayersRow) *livesession.Player {
 	return &livesession.Player{
 		ID:          row.ID,
 		SessionID:   row.SessionID,
@@ -580,5 +574,20 @@ func playerFromSessionRow(row db.SessionPlayer) *livesession.Player {
 		IsReady:     row.IsReady != 0,
 		JoinedAt:    row.JoinedAt,
 		LastSeenAt:  row.LastSeenAt,
+	}
+}
+
+// playerFromSessionRow maps the bare session_players row returned by the
+// AddPlayer upsert onto the domain roster type. The row no longer carries a
+// display name (#716): the lobby/state read fans the current
+// players.display_name out via playerFromRosterRow.
+func playerFromSessionRow(row db.SessionPlayer) *livesession.Player {
+	return &livesession.Player{
+		ID:         row.ID,
+		SessionID:  row.SessionID,
+		PlayerID:   row.PlayerID,
+		IsReady:    row.IsReady != 0,
+		JoinedAt:   row.JoinedAt,
+		LastSeenAt: row.LastSeenAt,
 	}
 }

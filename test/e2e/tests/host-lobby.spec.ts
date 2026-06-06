@@ -6,6 +6,7 @@ import {
   login,
   seedQuiz,
   setQuizMode,
+  claimAndJoin,
 } from './helpers';
 
 // MP-3 (#680): the host puts a live quiz on a TV and gets a lobby with the
@@ -55,17 +56,17 @@ test('host lobby shows the room code, QR, and a joined player readying up live',
   // A player joins from a fresh anonymous context via the REST API (MP-4
   // owns the join UI). The context gets its own session cookie, so the
   // server mints a distinct anonymous player for it.
+  // Player names are global on players.display_name now (#716), so use a
+  // unique name to avoid colliding with a parallel spec on the worker DB.
+  const casey = `Casey-${browserName}-${Date.now()}`;
   const playerContext = await context.browser()!.newContext({ storageState: undefined, baseURL });
   try {
-    const joinResp = await playerContext.request.post(`/api/sessions/${code}/join`, {
-      data: { displayName: 'Casey' },
-    });
-    expect(joinResp.status()).toBe(200);
+    await claimAndJoin(playerContext.request, code, casey);
 
     // The TV roster updates live off the SSE tick -> GET /state refresh.
     const roster = page.locator('[data-player-row]');
     await expect(roster).toHaveCount(1);
-    await expect(roster.first()).toContainText('Casey');
+    await expect(roster.first()).toContainText(casey);
     await expect(roster.first().locator('[data-ready-state]')).toHaveText('Not ready');
 
     // The player readies up; the TV reflects it without a reload.

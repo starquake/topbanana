@@ -254,7 +254,7 @@ func (e *adminEnv) seedFinishedLiveSession(t *testing.T, qz *quiz.Quiz, playerID
 	if err := e.sessions.CreateSession(ctx, sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
-	if _, err := e.sessions.AddPlayer(ctx, sess.ID, playerID, "Player"); err != nil {
+	if _, err := e.sessions.AddPlayer(ctx, sess.ID, playerID); err != nil {
 		t.Fatalf("AddPlayer err = %v, want nil", err)
 	}
 	q := qz.Questions[0]

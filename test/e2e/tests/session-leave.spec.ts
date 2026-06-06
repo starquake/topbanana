@@ -6,6 +6,7 @@ import {
   login,
   seedQuiz,
   setQuizMode,
+  claimAndJoin,
 } from './helpers';
 
 // MP-10 (#687): when a player leaves, their row drops out of the live roster
@@ -41,17 +42,15 @@ test('a player leaving drops out of the host roster live', async ({
   await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
   const code = page.url().split('/host/')[1];
 
+  // Player names are global on players.display_name now (#716), so use unique
+  // names to avoid colliding with a parallel spec on the worker DB.
+  const alice = `Alice-${browserName}-${Date.now()}`;
+  const bob = `Bob-${browserName}-${Date.now()}`;
   const aliceContext = await context.browser()!.newContext({ storageState: undefined, baseURL });
   const bobContext = await context.browser()!.newContext({ storageState: undefined, baseURL });
   try {
-    const aliceJoin = await aliceContext.request.post(`/api/sessions/${code}/join`, {
-      data: { displayName: 'Alice' },
-    });
-    expect(aliceJoin.status()).toBe(200);
-    const bobJoin = await bobContext.request.post(`/api/sessions/${code}/join`, {
-      data: { displayName: 'Bob' },
-    });
-    expect(bobJoin.status()).toBe(200);
+    await claimAndJoin(aliceContext.request, code, alice);
+    await claimAndJoin(bobContext.request, code, bob);
 
     // Both rows show on the TV once the join ticks land.
     const roster = page.locator('[data-player-row]');
@@ -63,7 +62,7 @@ test('a player leaving drops out of the host roster live', async ({
 
     // The TV roster drops to just Bob without a reload.
     await expect(roster).toHaveCount(1);
-    await expect(roster.first()).toContainText('Bob');
+    await expect(roster.first()).toContainText(bob);
   } finally {
     await aliceContext.close();
     await bobContext.close();

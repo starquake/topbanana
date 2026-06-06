@@ -1,6 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
+import type { APIRequestContext } from '@playwright/test';
+
 import type { Page } from './fixtures';
 import { test, expect } from './fixtures';
 
@@ -327,4 +329,21 @@ export async function answerRemainingQuestions(page: Page, fromIndex = 0): Promi
   // delay adds up.
   await expect(page.getByRole('heading', { name: 'Game Finished!' })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
+}
+
+// claimAndJoin drives the #716 anonymous-player join contract over the REST
+// API: it claims displayName on the request context's players row (the shared
+// claim endpoint the live join routes an unnamed player through), then posts
+// the nameless join. The roster, badges, and standings then read that current
+// players.display_name. Used by the API-driven players in the live-session
+// specs (the player join UI lives behind its own form, exercised elsewhere).
+export async function claimAndJoin(
+  request: APIRequestContext,
+  code: string,
+  displayName: string,
+): Promise<void> {
+  const claimResp = await request.patch('/api/players/me', { data: { displayName } });
+  expect(claimResp.status(), `claim ${displayName}: ${await claimResp.text()}`).toBe(200);
+  const joinResp = await request.post(`/api/sessions/${code}/join`);
+  expect(joinResp.status(), `join ${displayName}: ${await joinResp.text()}`).toBe(200);
 }

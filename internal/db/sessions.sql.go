@@ -234,7 +234,7 @@ func (q *Queries) GetSessionByJoinCode(ctx context.Context, joinCode string) (Se
 }
 
 const getSessionPlayer = `-- name: GetSessionPlayer :one
-SELECT id, session_id, player_id, display_name, is_ready, joined_at, last_seen_at, left_at
+SELECT id, session_id, player_id, is_ready, joined_at, last_seen_at, left_at
 FROM session_players
 WHERE session_id = ?
   AND player_id = ?
@@ -252,7 +252,6 @@ func (q *Queries) GetSessionPlayer(ctx context.Context, arg GetSessionPlayerPara
 		&i.ID,
 		&i.SessionID,
 		&i.PlayerID,
-		&i.DisplayName,
 		&i.IsReady,
 		&i.JoinedAt,
 		&i.LastSeenAt,
@@ -441,15 +440,16 @@ func (q *Queries) ListSessionAnswersForQuestion(ctx context.Context, arg ListSes
 
 const listSessionFinalStandings = `-- name: ListSessionFinalStandings :many
 SELECT sp.player_id                              AS player_id,
-       sp.display_name                           AS display_name,
+       CAST(p.display_name AS TEXT)              AS display_name,
        CAST(COALESCE(SUM(sa.score), 0) AS INTEGER) AS total_score
 FROM session_players sp
+         JOIN players p ON p.id = sp.player_id
          LEFT JOIN session_answers sa
                    ON sa.session_id = sp.session_id AND sa.player_id = sp.player_id
 WHERE sp.session_id = ?1
   AND sp.left_at IS NULL
-GROUP BY sp.player_id, sp.display_name
-ORDER BY total_score DESC, sp.display_name
+GROUP BY sp.player_id, p.display_name
+ORDER BY total_score DESC, p.display_name
 `
 
 type ListSessionFinalStandingsRow struct {
@@ -459,9 +459,10 @@ type ListSessionFinalStandingsRow struct {
 }
 
 // Per-player final standings for a session: cumulative score across the whole
-// session, anchored on the roster so non-answerers appear at 0. Same ordering
-// as ListSessionStandings; used at the finished phase, where there is no
-// "current round" to break out.
+// session, anchored on the roster so non-answerers appear at 0. display_name is
+// the player's CURRENT players.display_name (#716), joined live so a rename
+// shows in the final standings. Same ordering as ListSessionStandings; used at
+// the finished phase, where there is no "current round" to break out.
 func (q *Queries) ListSessionFinalStandings(ctx context.Context, sessionID string) ([]ListSessionFinalStandingsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listSessionFinalStandings, sessionID)
 	if err != nil {
@@ -486,24 +487,45 @@ func (q *Queries) ListSessionFinalStandings(ctx context.Context, sessionID strin
 }
 
 const listSessionPlayers = `-- name: ListSessionPlayers :many
-SELECT id, session_id, player_id, display_name, is_ready, joined_at, last_seen_at, left_at
-FROM session_players
-WHERE session_id = ?
-  AND left_at IS NULL
-ORDER BY joined_at, id
+SELECT sp.id,
+       sp.session_id,
+       sp.player_id,
+       CAST(p.display_name AS TEXT) AS display_name,
+       sp.is_ready,
+       sp.joined_at,
+       sp.last_seen_at,
+       sp.left_at
+FROM session_players sp
+         JOIN players p ON p.id = sp.player_id
+WHERE sp.session_id = ?
+  AND sp.left_at IS NULL
+ORDER BY sp.joined_at, sp.id
 `
 
+type ListSessionPlayersRow struct {
+	ID          int64
+	SessionID   string
+	PlayerID    int64
+	DisplayName string
+	IsReady     int64
+	JoinedAt    time.Time
+	LastSeenAt  time.Time
+	LeftAt      sql.NullTime
+}
+
 // The lobby roster in join order. Excludes players who have left (left_at
-// set, MP-10) so the lobby shows the current room.
-func (q *Queries) ListSessionPlayers(ctx context.Context, sessionID string) ([]SessionPlayer, error) {
+// set, MP-10) so the lobby shows the current room. display_name is the
+// player's CURRENT players.display_name (#716), joined live so a rename shows
+// everywhere rather than a per-session snapshot.
+func (q *Queries) ListSessionPlayers(ctx context.Context, sessionID string) ([]ListSessionPlayersRow, error) {
 	rows, err := q.db.QueryContext(ctx, listSessionPlayers, sessionID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []SessionPlayer
+	var items []ListSessionPlayersRow
 	for rows.Next() {
-		var i SessionPlayer
+		var i ListSessionPlayersRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.SessionID,
@@ -529,15 +551,16 @@ func (q *Queries) ListSessionPlayers(ctx context.Context, sessionID string) ([]S
 
 const listSessionResultsForQuizLeaderboard = `-- name: ListSessionResultsForQuizLeaderboard :many
 SELECT sp.player_id                               AS player_id,
-       CAST(MAX(sp.display_name) AS TEXT)          AS display_name,
+       CAST(p.display_name AS TEXT)               AS display_name,
        CAST(COALESCE(SUM(sa.score), 0) AS INTEGER) AS total_score
 FROM sessions s
          JOIN session_players sp ON sp.session_id = s.id
+         JOIN players p ON p.id = sp.player_id
          LEFT JOIN session_answers sa
                    ON sa.session_id = sp.session_id AND sa.player_id = sp.player_id
 WHERE s.quiz_id = ?
   AND s.phase = 'finished'
-GROUP BY sp.player_id
+GROUP BY sp.player_id, p.display_name
 `
 
 type ListSessionResultsForQuizLeaderboardRow struct {
@@ -557,7 +580,9 @@ type ListSessionResultsForQuizLeaderboardRow struct {
 // session_answers.score (already computed at close with the same CalculateScore
 // curve solo play uses) rather than recomputed. Keyed on player_id alone (a
 // player may host or play more than one finished session of the same quiz);
-// their scores sum and MAX(display_name) picks one stable name for the row.
+// their scores sum. display_name is the player's CURRENT players.display_name
+// (#716), joined live so a rename reflects on the quiz's standard leaderboard
+// exactly as solo play already does (games.sql joins players the same way).
 // left_at is deliberately NOT filtered here (unlike the live roster /
 // standings reads): a player who played still counts toward the quiz's
 // standard leaderboard even if they left the room before the session
@@ -587,18 +612,19 @@ func (q *Queries) ListSessionResultsForQuizLeaderboard(ctx context.Context, quiz
 }
 
 const listSessionStandings = `-- name: ListSessionStandings :many
-SELECT sp.player_id    AS player_id,
-       sp.display_name AS display_name,
+SELECT sp.player_id                 AS player_id,
+       CAST(p.display_name AS TEXT) AS display_name,
        CAST(COALESCE(SUM(CASE WHEN q.round_id = ?1 THEN sa.score END), 0) AS INTEGER) AS round_score,
        CAST(COALESCE(SUM(sa.score), 0) AS INTEGER)                                                      AS total_score
 FROM session_players sp
+         JOIN players p ON p.id = sp.player_id
          LEFT JOIN session_answers sa
                    ON sa.session_id = sp.session_id AND sa.player_id = sp.player_id
          LEFT JOIN questions q ON q.id = sa.question_id
 WHERE sp.session_id = ?2
   AND sp.left_at IS NULL
-GROUP BY sp.player_id, sp.display_name
-ORDER BY total_score DESC, sp.display_name
+GROUP BY sp.player_id, p.display_name
+ORDER BY total_score DESC, p.display_name
 `
 
 type ListSessionStandingsParams struct {
@@ -618,8 +644,10 @@ type ListSessionStandingsRow struct {
 // (total_score). Anchored on the roster (LEFT JOIN to scored answers) so a
 // player who never answered still appears at 0, which the bar graph needs. The
 // round is selected by questions.round_id; coalesce turns "no scored answer" /
-// "score still NULL" into 0. Ordered by total_score desc, then display_name so
-// ranking is stable across reads.
+// "score still NULL" into 0. display_name is the player's CURRENT
+// players.display_name (#716), joined live so a rename shows in the standings.
+// Ordered by total_score desc, then display_name so ranking is stable across
+// reads.
 func (q *Queries) ListSessionStandings(ctx context.Context, arg ListSessionStandingsParams) ([]ListSessionStandingsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listSessionStandings, arg.RoundID, arg.SessionID)
 	if err != nil {
@@ -962,34 +990,32 @@ func (q *Queries) UpsertSessionAnswer(ctx context.Context, arg UpsertSessionAnsw
 }
 
 const upsertSessionPlayer = `-- name: UpsertSessionPlayer :one
-INSERT INTO session_players (session_id, player_id, display_name)
-VALUES (?, ?, ?)
+INSERT INTO session_players (session_id, player_id)
+VALUES (?, ?)
 ON CONFLICT (session_id, player_id)
-    DO UPDATE SET display_name = excluded.display_name,
-                  left_at      = NULL,
+    DO UPDATE SET left_at      = NULL,
                   last_seen_at = CURRENT_TIMESTAMP
-RETURNING id, session_id, player_id, display_name, is_ready, joined_at, last_seen_at, left_at
+RETURNING id, session_id, player_id, is_ready, joined_at, last_seen_at, left_at
 `
 
 type UpsertSessionPlayerParams struct {
-	SessionID   string
-	PlayerID    int64
-	DisplayName string
+	SessionID string
+	PlayerID  int64
 }
 
-// Adds a player to a session's roster, or revives an existing row on
-// re-join (clearing left_at and refreshing last_seen_at + display_name).
-// A per-session display-name collision trips UNIQUE (session_id,
-// display_name); the caller retries with a petname. The (session_id,
-// player_id) UNIQUE makes the upsert idempotent for the same player.
+// Adds a player to a session's roster, or revives an existing row on re-join
+// (clearing left_at and refreshing last_seen_at). The display name is no
+// longer stored per session (#716): the roster reads join players and select
+// the current players.display_name, so a rename propagates everywhere. The
+// (session_id, player_id) UNIQUE makes the upsert idempotent for the same
+// player.
 func (q *Queries) UpsertSessionPlayer(ctx context.Context, arg UpsertSessionPlayerParams) (SessionPlayer, error) {
-	row := q.db.QueryRowContext(ctx, upsertSessionPlayer, arg.SessionID, arg.PlayerID, arg.DisplayName)
+	row := q.db.QueryRowContext(ctx, upsertSessionPlayer, arg.SessionID, arg.PlayerID)
 	var i SessionPlayer
 	err := row.Scan(
 		&i.ID,
 		&i.SessionID,
 		&i.PlayerID,
-		&i.DisplayName,
 		&i.IsReady,
 		&i.JoinedAt,
 		&i.LastSeenAt,
