@@ -217,6 +217,17 @@ SET last_seen_at = CURRENT_TIMESTAMP
 WHERE player_id = sqlc.arg('player_id')
   AND session_id = (SELECT id FROM sessions WHERE join_code = sqlc.arg('join_code'));
 
+-- name: TouchSessionHostLastSeen :execresult
+-- Refreshes the host's host_last_seen_at, the host-presence heartbeat. The SSE
+-- events handler calls it when the host's connection opens and periodically
+-- while it is held, so a host who disconnects mid-game goes stale and the
+-- runner's abandon sweep finishes the lingering session (MP-10). Keyed on
+-- join_code so the handler need only carry the code it already gates on. The
+-- execresult lets the store tell a missed update (unknown code) from a hit.
+UPDATE sessions
+SET host_last_seen_at = CURRENT_TIMESTAMP
+WHERE join_code = sqlc.arg('join_code');
+
 -- name: MarkSessionPlayerLeft :execresult
 -- Marks the participant as having left the session identified by join code,
 -- stamping left_at so the live reads (roster, answered-order badges,

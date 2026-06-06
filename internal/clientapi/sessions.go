@@ -630,22 +630,23 @@ func (s *sessionEventStreamer) run(ctx context.Context, events <-chan livesessio
 	}
 }
 
-// beatLastSeen bumps the participant's last_seen_at heartbeat while the SSE
-// connection is held: once immediately, then every livesession.HeartbeatInterval
-// until ctx is cancelled (the client disconnects). Runs in its own goroutine so
-// it does not block the stream loop; touch failures are logged at debug since a
-// transient miss is recovered by the next beat and the player simply ages out
-// of the active window if the beats stop. Stopping on ctx cancel is what lets a
-// dropped player go stale so the runner no longer waits on them.
-func beatLastSeen(
-	ctx context.Context, logger *slog.Logger, service *livesession.Service, code string, playerID int64,
-) {
-	touch := func() {
-		if err := service.TouchLastSeen(ctx, code, playerID); err != nil {
+// beatPresence bumps a presence heartbeat while the SSE connection is held:
+// once immediately, then every livesession.HeartbeatInterval until ctx is
+// cancelled (the client disconnects). touch is the heartbeat the caller chose -
+// the host's host_last_seen_at (which the runner's abandon sweep reads) or a
+// roster player's own last_seen_at (which the active-player count reads). Runs
+// in its own goroutine so it does not block the stream loop; touch failures are
+// logged at debug since a transient miss is recovered by the next beat and the
+// presence simply ages out if the beats stop. Stopping on ctx cancel is what
+// lets a dropped player or host go stale so the runner reacts (stops waiting on
+// a dropped player; finishes a host-abandoned session).
+func beatPresence(ctx context.Context, logger *slog.Logger, touch func(context.Context) error) {
+	beat := func() {
+		if err := touch(ctx); err != nil {
 			logger.DebugContext(ctx, "session heartbeat touch failed", slog.Any("err", err))
 		}
 	}
-	touch()
+	beat()
 
 	ticker := time.NewTicker(livesession.HeartbeatInterval)
 	defer ticker.Stop()
@@ -654,7 +655,7 @@ func beatLastSeen(
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			touch()
+			beat()
 		}
 	}
 }
@@ -681,7 +682,7 @@ func HandleSessionEvents(logger *slog.Logger, service *livesession.Service, hub 
 		// Gate BEFORE any header write so a non-participant / unknown code
 		// can still be surfaced as a proper HTTP 404 rather than a half-open
 		// text/event-stream.
-		code, phase, err := service.AuthorizeView(ctx, r.PathValue("code"), player.ID)
+		view, err := service.AuthorizeView(ctx, r.PathValue("code"), player.ID)
 		if err != nil {
 			if errors.Is(err, livesession.ErrSessionNotFound) || errors.Is(err, livesession.ErrNotParticipant) {
 				http.NotFound(w, r)
@@ -696,14 +697,23 @@ func HandleSessionEvents(logger *slog.Logger, service *livesession.Service, hub 
 		// Subscribe under the canonical code; the returned version seeds the
 		// initial frame so a fresh subscriber learns where it stands without
 		// racing a publish.
-		events, version, unsubscribe := hub.Subscribe(code)
+		events, version, unsubscribe := hub.Subscribe(view.Code)
 		defer unsubscribe()
 
-		// The held connection is the active-player heartbeat: bump
-		// last_seen_at now and on a ticker while it is open, so the runner
-		// keeps counting this player as active and a disconnect (ctx
-		// cancelled) lets them age out of the active window (MP-10).
-		go beatLastSeen(ctx, logger, service, code, player.ID)
+		// The held connection is the presence heartbeat: bump now and on a
+		// ticker while it is open, so a disconnect (ctx cancelled) lets the
+		// presence go stale. The host beats host_last_seen_at (the runner's
+		// abandon sweep reads it); a roster player beats their own
+		// last_seen_at (the runner's active-player count reads it) (MP-10).
+		touch := func(ctx context.Context) error {
+			return service.TouchLastSeen(ctx, view.Code, player.ID)
+		}
+		if view.IsHost {
+			touch = func(ctx context.Context) error {
+				return service.TouchHostLastSeen(ctx, view.Code)
+			}
+		}
+		go beatPresence(ctx, logger, touch)
 
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-store")
@@ -720,7 +730,7 @@ func HandleSessionEvents(logger *slog.Logger, service *livesession.Service, hub 
 
 		streamer := &sessionEventStreamer{w: w, rc: rc, logger: logger}
 
-		if !streamer.writeTick(ctx, livesession.Tick{Version: version, Phase: phase}) {
+		if !streamer.writeTick(ctx, livesession.Tick{Version: version, Phase: view.Phase}) {
 			return
 		}
 

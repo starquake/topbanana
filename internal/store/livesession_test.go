@@ -502,6 +502,50 @@ func TestLiveSessionStore_TouchLastSeen(t *testing.T) {
 	}
 }
 
+// TestLiveSessionStore_TouchHostLastSeen pins the host-presence write: it
+// stamps host_last_seen_at (NULL on a fresh session) keyed on join code, the
+// session read surfaces it, and an unknown code reports ErrSessionNotFound.
+func TestLiveSessionStore_TouchHostLastSeen(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	qz := newLiveQuiz(t, quizStore)
+
+	sess := &livesession.Session{QuizID: qz.ID, HostPlayerID: seededAdminID, JoinCode: "HST234"}
+	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+
+	// A fresh session has never seen its host.
+	fresh, err := sessionStore.GetSessionByID(t.Context(), sess.ID)
+	if err != nil {
+		t.Fatalf("GetSessionByID err = %v, want nil", err)
+	}
+	if fresh.HostLastSeenAt != nil {
+		t.Errorf("HostLastSeenAt on a fresh session = %v, want nil", *fresh.HostLastSeenAt)
+	}
+
+	if err = sessionStore.TouchHostLastSeen(t.Context(), "HST234"); err != nil {
+		t.Fatalf("TouchHostLastSeen err = %v, want nil", err)
+	}
+	loaded, err := sessionStore.GetSessionByID(t.Context(), sess.ID)
+	if err != nil {
+		t.Fatalf("GetSessionByID after touch err = %v, want nil", err)
+	}
+	if loaded.HostLastSeenAt == nil {
+		t.Fatal("HostLastSeenAt after touch = nil, want a timestamp")
+	}
+
+	// An unknown code matches no session.
+	if err = sessionStore.TouchHostLastSeen(t.Context(), "NOPE99"); !errors.Is(
+		err, livesession.ErrSessionNotFound,
+	) {
+		t.Errorf("TouchHostLastSeen unknown code err = %v, want %v", err, livesession.ErrSessionNotFound)
+	}
+}
+
 // TestLiveSessionStore_ActiveCounts pins the active-player counts across the
 // last_seen_at window boundary: a fresh player is counted active and counted
 // unanswered until they pick, while a player whose last_seen_at is before the

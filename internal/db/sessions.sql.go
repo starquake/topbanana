@@ -99,7 +99,7 @@ func (q *Queries) CountSessionAnswersForQuestion(ctx context.Context, arg CountS
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (id, quiz_id, host_player_id, join_code)
 VALUES (?, ?, ?, ?)
-RETURNING id, quiz_id, host_player_id, join_code, phase, current_round_id, current_question_id, question_started_at, question_expires_at, created_at, started_at, finished_at
+RETURNING id, quiz_id, host_player_id, join_code, phase, current_round_id, current_question_id, question_started_at, question_expires_at, created_at, started_at, finished_at, host_last_seen_at
 `
 
 type CreateSessionParams struct {
@@ -134,6 +134,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.CreatedAt,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.HostLastSeenAt,
 	)
 	return i, err
 }
@@ -177,7 +178,7 @@ func (q *Queries) DeleteSessionPlayersForPlayerOnQuiz(ctx context.Context, arg D
 }
 
 const getSession = `-- name: GetSession :one
-SELECT id, quiz_id, host_player_id, join_code, phase, current_round_id, current_question_id, question_started_at, question_expires_at, created_at, started_at, finished_at
+SELECT id, quiz_id, host_player_id, join_code, phase, current_round_id, current_question_id, question_started_at, question_expires_at, created_at, started_at, finished_at, host_last_seen_at
 FROM sessions
 WHERE id = ?
 `
@@ -198,12 +199,13 @@ func (q *Queries) GetSession(ctx context.Context, id string) (Session, error) {
 		&i.CreatedAt,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.HostLastSeenAt,
 	)
 	return i, err
 }
 
 const getSessionByJoinCode = `-- name: GetSessionByJoinCode :one
-SELECT id, quiz_id, host_player_id, join_code, phase, current_round_id, current_question_id, question_started_at, question_expires_at, created_at, started_at, finished_at
+SELECT id, quiz_id, host_player_id, join_code, phase, current_round_id, current_question_id, question_started_at, question_expires_at, created_at, started_at, finished_at, host_last_seen_at
 FROM sessions
 WHERE join_code = ?
 `
@@ -226,6 +228,7 @@ func (q *Queries) GetSessionByJoinCode(ctx context.Context, joinCode string) (Se
 		&i.CreatedAt,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.HostLastSeenAt,
 	)
 	return i, err
 }
@@ -857,6 +860,22 @@ WHERE id = ?
 // auto-start racing the host) is a no-op rather than resetting the clock.
 func (q *Queries) StartSession(ctx context.Context, id string) (sql.Result, error) {
 	return q.db.ExecContext(ctx, startSession, id)
+}
+
+const touchSessionHostLastSeen = `-- name: TouchSessionHostLastSeen :execresult
+UPDATE sessions
+SET host_last_seen_at = CURRENT_TIMESTAMP
+WHERE join_code = ?1
+`
+
+// Refreshes the host's host_last_seen_at, the host-presence heartbeat. The SSE
+// events handler calls it when the host's connection opens and periodically
+// while it is held, so a host who disconnects mid-game goes stale and the
+// runner's abandon sweep finishes the lingering session (MP-10). Keyed on
+// join_code so the handler need only carry the code it already gates on. The
+// execresult lets the store tell a missed update (unknown code) from a hit.
+func (q *Queries) TouchSessionHostLastSeen(ctx context.Context, joinCode string) (sql.Result, error) {
+	return q.db.ExecContext(ctx, touchSessionHostLastSeen, joinCode)
 }
 
 const touchSessionPlayerLastSeen = `-- name: TouchSessionPlayerLastSeen :execresult
