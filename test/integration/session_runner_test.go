@@ -15,14 +15,16 @@ import (
 // frozen state DTO (MP-5 / #682). It carries only what the runner tests
 // assert; the lobby fields are covered by session_lobby_test.
 type sessionRunnerStateRes struct {
-	Phase    string                  `json:"phase"`
-	Question *sessionRunnerQuestion  `json:"question"`
-	Players  []sessionStatePlayerRes `json:"players"`
+	Phase     string                  `json:"phase"`
+	Question  *sessionRunnerQuestion  `json:"question"`
+	Players   []sessionStatePlayerRes `json:"players"`
+	ServerNow time.Time               `json:"serverNow"`
 }
 
 type sessionRunnerQuestion struct {
 	ID                int64              `json:"id"`
 	Options           []sessionRunnerOpt `json:"options"`
+	StartedAt         *time.Time         `json:"startedAt"`
 	ExpiresAt         *time.Time         `json:"expiresAt"`
 	AnsweredPlayerIDs []int64            `json:"answeredPlayerIds"`
 	Answers           []sessionRunnerAns `json:"answers"`
@@ -80,6 +82,27 @@ func waitForPhase(
 	return last
 }
 
+// waitForAnswersOpen polls GET /state until the question's answer window has
+// opened (serverNow at or after startedAt), returning the matching state. The
+// answer window opens after the read beat, so a poll before startedAt is still
+// in the read beat; the helper waits for the beat to elapse rather than
+// sleeping a fixed amount.
+func waitForAnswersOpen(
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, code string,
+) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	var last sessionRunnerStateRes
+	for time.Now().Before(deadline) {
+		last = getRunnerState(ctx, t, client, baseURL, code)
+		if last.Question != nil && last.Question.StartedAt != nil && !last.ServerNow.Before(*last.Question.StartedAt) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("question answer window never opened; last phase %q", last.Phase)
+}
+
 // startSession posts the host Start and asserts the 204.
 func startSession(ctx context.Context, t *testing.T, client *http.Client, baseURL, code string) {
 	t.Helper()
@@ -111,7 +134,10 @@ func answerSession(
 func TestSessionRunner_HostStartQuestionAnswerReveal(t *testing.T) {
 	t.Parallel()
 
-	ctx, setup := setupIntegrationWithEnv(t, map[string]string{"SESSION_RUNNER_BEAT": "250ms"})
+	ctx, setup := setupIntegrationWithEnv(t, map[string]string{
+		"SESSION_RUNNER_BEAT": "250ms",
+		"REVEAL_DELAY":        "500ms",
+	})
 	baseURL := setup.BaseURL
 
 	qz := seedRunnerLiveQuiz(ctx, t, setup.Stores.Quizzes, "runner-host-start")
@@ -144,10 +170,21 @@ func TestSessionRunner_HostStartQuestionAnswerReveal(t *testing.T) {
 	if len(state.Question.Options) == 0 {
 		t.Fatal("question has no options")
 	}
+	if state.Question.StartedAt == nil {
+		t.Fatal("question has no startedAt (answers-open) anchor")
+	}
 
-	// The player answers the FIRST option (seeded correct). The state read
-	// before reveal still must not say which pick was right.
+	// During the read beat the answer window has not opened yet: a pick lands as
+	// 409, so a client cannot pre-submit before the options open.
 	pick := state.Question.Options[0].ID
+	if state.ServerNow.Before(*state.Question.StartedAt) {
+		answerSession(ctx, t, player, baseURL, code, pick, http.StatusConflict)
+	}
+
+	// Once the read beat elapses the window opens; the player answers the FIRST
+	// option (seeded correct). The state read before reveal still must not say
+	// which pick was right.
+	waitForAnswersOpen(ctx, t, player, baseURL, code)
 	answerSession(ctx, t, player, baseURL, code, pick, http.StatusNoContent)
 
 	preReveal := getRunnerState(ctx, t, player, baseURL, code)

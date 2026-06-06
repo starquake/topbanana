@@ -580,10 +580,16 @@ func (s *Service) SubmitAnswer(
 	if !s.isParticipant(sess, playerID) {
 		return ErrNotParticipant
 	}
-	if sess.Phase != PhaseQuestion || sess.CurrentQuestionID == nil || sess.QuestionExpiresAt == nil {
+	if sess.Phase != PhaseQuestion ||
+		sess.CurrentQuestionID == nil ||
+		sess.QuestionStartedAt == nil ||
+		sess.QuestionExpiresAt == nil {
 		return ErrQuestionNotOpen
 	}
-	if answeredAt.After(*sess.QuestionExpiresAt) {
+	// The window opens at StartedAt (after the read beat) and closes at
+	// ExpiresAt; a pick outside [StartedAt, ExpiresAt] is rejected, so a client
+	// cannot pre-submit during the read beat.
+	if answeredAt.Before(*sess.QuestionStartedAt) || answeredAt.After(*sess.QuestionExpiresAt) {
 		return ErrQuestionNotOpen
 	}
 

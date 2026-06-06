@@ -62,6 +62,12 @@ function hostLobby(joinCode) {
         // off the server's view of the deadline regardless of TV clock skew.
         serverClockSkew: 0,
         progress: 100,
+        // True during the read beat [serverNow, startedAt): the question text
+        // shows but the options stay hidden until the answer window opens. The
+        // bar fills 0 -> 100 while revealing is true, then drains 100 -> 0 over
+        // the answer window - mirrors the player surface and the solo game's
+        // reveal beat (#247).
+        revealing: false,
         connected: false,
         starting: false,
         startMessage: '',
@@ -160,6 +166,7 @@ function hostLobby(joinCode) {
                 this.startCountdown();
             } else {
                 this.stopCountdown();
+                this.revealing = false;
                 this.progress = this.phase === 'reveal' ? 0 : 100;
             }
 
@@ -235,19 +242,63 @@ function hostLobby(joinCode) {
             });
         },
 
+        // serverTime estimates the server's "now" from the TV wall clock minus
+        // the measured skew, so every countdown runs on the server's view of
+        // the deadline regardless of TV clock skew.
+        serverTime() {
+            return Date.now() - this.serverClockSkew;
+        },
+
+        // startCountdown drives the per-question bar. Before the window opens
+        // (serverNow < startedAt) it runs the read beat, filling 0 -> 100 while
+        // the options stay hidden; at startedAt it flips to the answer-window
+        // countdown, draining 100 -> 0. Mirrors the solo game's reveal beat
+        // (#247) and the player surface.
         startCountdown() {
             this.stopCountdown();
             const start = this.question.startedAt ? Date.parse(this.question.startedAt) : NaN;
             const end = this.question.expiresAt ? Date.parse(this.question.expiresAt) : NaN;
             if (Number.isNaN(start) || Number.isNaN(end) || end <= start) {
+                this.revealing = false;
                 this.progress = 100;
 
                 return;
             }
+            if (this.serverTime() < start) {
+                this.startReadBeat(start, end);
+
+                return;
+            }
+            this.startAnswerCountdown(start, end);
+        },
+
+        startReadBeat(start, end) {
+            const beatStart = this.serverTime();
+            const beatTotal = start - beatStart;
+            this.revealing = true;
+            this.progress = 0;
+            const update = () => {
+                const serverNow = this.serverTime();
+                if (serverNow >= start) {
+                    this.progress = 100;
+                    this.stopCountdown();
+                    this.revealing = false;
+                    this.startAnswerCountdown(start, end);
+
+                    return;
+                }
+                this.progress = Math.max(0, Math.min(100, ((serverNow - beatStart) / beatTotal) * 100));
+            };
+            update();
+            this.timer = setInterval(update, 100);
+        },
+
+        startAnswerCountdown(start, end) {
+            this.stopCountdown();
+            this.revealing = false;
             const total = end - start;
             const update = () => {
-                // serverNow estimate = client clock minus the measured skew.
-                const serverNow = Date.now() - this.serverClockSkew;
+                const serverNow = this.serverTime();
                 const remaining = end - serverNow;
                 this.progress = Math.max(0, Math.min(100, (remaining / total) * 100));
                 if (this.progress <= 0) {

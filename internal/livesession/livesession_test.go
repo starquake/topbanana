@@ -599,3 +599,68 @@ func TestService_Mutations_TolerateNilPublisher(t *testing.T) {
 		t.Errorf("SetReady with nil publisher err = %v, want nil", err)
 	}
 }
+
+// TestService_SubmitAnswer_RespectsWindowBounds pins the answer gate against a
+// real DB-backed session driven into the question phase by the runner: a pick
+// before StartedAt (during the read beat) is rejected with ErrQuestionNotOpen,
+// a pick inside [StartedAt, ExpiresAt] succeeds, and a pick after ExpiresAt is
+// rejected. The read beat anchors StartedAt after the question is issued, so a
+// client must not be able to pre-submit during the read beat.
+func TestService_SubmitAnswer_RespectsWindowBounds(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+
+	if err := h.service.Start(ctx, h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+	h.clock.advance(runnerCfg.RoundIntroBeat)
+	h.tick(ctx)
+	q := h.reload(t)
+	if got, want := q.Phase, PhaseQuestion; got != want {
+		t.Fatalf("phase after intro beat = %q, want %q", got, want)
+	}
+	if q.QuestionStartedAt == nil || q.QuestionExpiresAt == nil {
+		t.Fatal("question phase has nil StartedAt/ExpiresAt")
+	}
+	startedAt, expiresAt := *q.QuestionStartedAt, *q.QuestionExpiresAt
+	optRight := correctOptionID(ctx, t, h.service, h.code, h.players[0])
+	player := h.players[0]
+
+	// Before StartedAt (still in the read beat): rejected.
+	beforeOpen := startedAt.Add(-time.Millisecond)
+	if got, want := h.service.SubmitAnswer(
+		ctx,
+		h.code,
+		player,
+		optRight,
+		beforeOpen,
+	), ErrQuestionNotOpen; !errors.Is(
+		got,
+		want,
+	) {
+		t.Errorf("SubmitAnswer during read beat err = %v, want %v", got, want)
+	}
+
+	// At StartedAt (answers open): accepted.
+	if err := h.service.SubmitAnswer(ctx, h.code, player, optRight, startedAt); err != nil {
+		t.Errorf("SubmitAnswer at StartedAt err = %v, want nil", err)
+	}
+
+	// After ExpiresAt (window closed): rejected.
+	afterClose := expiresAt.Add(time.Millisecond)
+	if got, want := h.service.SubmitAnswer(
+		ctx,
+		h.code,
+		player,
+		optRight,
+		afterClose,
+	), ErrQuestionNotOpen; !errors.Is(
+		got,
+		want,
+	) {
+		t.Errorf("SubmitAnswer after ExpiresAt err = %v, want %v", got, want)
+	}
+}

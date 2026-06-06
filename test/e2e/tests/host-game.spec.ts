@@ -24,24 +24,37 @@ import {
 
 type SessionState = {
   phase: string;
+  serverNow: string;
   question: {
     id: number;
+    startedAt: string | null;
     options: { id: number; text: string }[];
   } | null;
 };
 
 // optionIdForText reads the participant's GET /state and resolves the option
 // id whose text matches, so a player can answer a known choice over the API.
+// It polls until the answer window has opened (serverNow at or after
+// startedAt), since the read beat (#247 parity) holds answers closed for a
+// brief beat after the question is issued and a pick before then would 409.
 async function optionIdForText(
   request: APIRequestContext,
   code: string,
   text: string,
 ): Promise<number> {
-  const resp = await request.get(`/api/sessions/${code}/state`);
-  expect(resp.ok(), `state read: ${resp.status()} ${await resp.text()}`).toBeTruthy();
-  const state = (await resp.json()) as SessionState;
-  expect(state.phase, 'expected the session to be in the question phase').toBe('question');
-  const option = state.question?.options.find((o) => o.text === text);
+  let state: SessionState | undefined;
+  await expect(async () => {
+    const resp = await request.get(`/api/sessions/${code}/state`);
+    expect(resp.ok(), `state read: ${resp.status()} ${await resp.text()}`).toBeTruthy();
+    state = (await resp.json()) as SessionState;
+    expect(state.phase, 'expected the session to be in the question phase').toBe('question');
+    expect(state.question?.startedAt, 'question should carry an answers-open anchor').toBeTruthy();
+    expect(
+      Date.parse(state.serverNow) >= Date.parse(state.question!.startedAt!),
+      'answer window should have opened (read beat elapsed)',
+    ).toBeTruthy();
+  }).toPass({ timeout: 10_000 });
+  const option = state!.question?.options.find((o) => o.text === text);
   expect(option, `option ${text} not found in question`).toBeTruthy();
 
   return option!.id;
@@ -98,6 +111,13 @@ test('host TV shows the live question, answered order, and the reveal', async ({
     const questionView = page.locator('[data-phase-question]');
     await expect(questionView).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('[data-question-text]')).toHaveText('What is 2+2?');
+
+    // Read beat (#247 parity): the TV shows the question with the options and
+    // answered-order area hidden behind a "Get ready" indicator until the
+    // answer window opens, then the options appear.
+    await expect(page.locator('[data-read-beat]')).toBeVisible();
+    await expect(page.locator('[data-answer-option]').first()).toBeHidden();
+    await expect(page.locator('[data-answer-option]').first()).toBeVisible({ timeout: 10_000 });
 
     // Before any answer, correctness is hidden: no option is lit correct and
     // no Correct badge is visible (the no-spoiler guarantee). The badge spans

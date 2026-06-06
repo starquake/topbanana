@@ -184,7 +184,12 @@
                      answered/waiting state until the runner reveals. -->
                 <template x-if="!lobbyClosed && state && state.phase === 'question' && state.question">
                     <div data-testid="question-view">
-                        <progress class="progress block w-full h-[3px] bg-border rounded-full overflow-hidden mb-6 progress-answer [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear"
+                        <!-- One bar, two phases (mirrors the solo game, #247):
+                             while `revealing` is true it fills 0 -> 100 in cyan
+                             during the read beat, then drains 100 -> 0 in accent
+                             over the answer window once the options open. -->
+                        <progress class="progress block w-full h-[3px] bg-border rounded-full overflow-hidden mb-6 [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear"
+                                  :class="revealing ? 'progress-reveal' : 'progress-answer'"
                                   :value="questionProgress" max="100"></progress>
 
                         <h2 class="mb-6 font-display text-2xl font-semibold text-text"
@@ -197,7 +202,15 @@
                             </div>
                         </template>
 
-                        <div class="flex flex-col gap-3" data-testid="question-options">
+                        <!-- Read beat: the options stay hidden while `revealing`
+                             is true, so the player reads the question before the
+                             answer window opens. JoinApp flips `revealing` off
+                             when the read beat elapses. -->
+                        <p x-show="revealing" class="label-eyebrow text-center" data-testid="question-read-beat">
+                            Get ready
+                        </p>
+
+                        <div x-show="!revealing" class="flex flex-col gap-3" data-testid="question-options">
                             <template x-for="(option, idx) in state.question.options" :key="option.id">
                                 <button type="button"
                                         :class="optionStateClass(option, idx)"

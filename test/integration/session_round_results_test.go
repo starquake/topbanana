@@ -39,6 +39,7 @@ type sessionResultsStateRes struct {
 	Phase     string                 `json:"phase"`
 	Question  *sessionRunnerQuestion `json:"question"`
 	Standings []sessionStandingRes   `json:"standings"`
+	ServerNow time.Time              `json:"serverNow"`
 }
 
 // getResultsState reads GET /state into the standings-aware decode target.
@@ -80,6 +81,29 @@ func waitForResultsPhase(
 	return last
 }
 
+// waitForResultsAnswersOpen polls GET /state until the given question's answer
+// window has opened (serverNow at or after startedAt), returning the matching
+// state. The window opens after the read beat, so a pick before then would
+// 409.
+func waitForResultsAnswersOpen(
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, code string, questionID int64,
+) sessionResultsStateRes {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	var last sessionResultsStateRes
+	for time.Now().Before(deadline) {
+		last = getResultsState(ctx, t, client, baseURL, code)
+		q := last.Question
+		if q != nil && q.ID == questionID && q.StartedAt != nil && !last.ServerNow.Before(*q.StartedAt) {
+			return last
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("question %d answer window never opened; last phase %q", questionID, last.Phase)
+
+	return last
+}
+
 // playQuestion drives one question to close: it waits for the question phase,
 // has the winner pick the correct option (index 0) and the loser the wrong one
 // (index 1) on the SAME question, then waits until that question leaves the
@@ -94,6 +118,10 @@ func playQuestion(
 		t.Fatal("question phase missing a two-option question")
 	}
 	qID := state.Question.ID
+
+	// Answers open after the read beat, so wait until the window opens before
+	// submitting; a pick during the read beat would 409.
+	state = waitForResultsAnswersOpen(ctx, t, winner, baseURL, code, qID)
 	answerSession(ctx, t, winner, baseURL, code, state.Question.Options[0].ID, http.StatusNoContent)
 	answerSession(ctx, t, loser, baseURL, code, state.Question.Options[1].ID, http.StatusNoContent)
 
@@ -135,10 +163,14 @@ func findStanding(t *testing.T, standings []sessionStandingRes, playerID int64) 
 func TestSessionRoundResults_DeltasTotalsAndLeaderboard(t *testing.T) {
 	t.Parallel()
 
-	// A 100ms beat keeps the beat-gated phases (round_intro / reveal /
+	// A 250ms beat keeps the beat-gated phases (round_intro / reveal /
 	// round_results) observable by the 5ms poller without slowing the test
-	// much; the questions close early on all-answered, not the beat.
-	ctx, setup := setupIntegrationWithEnv(t, map[string]string{"SESSION_RUNNER_BEAT": "250ms"})
+	// much; the questions close early on all-answered, not the beat. A short
+	// read beat keeps the per-question pre-answer window brief.
+	ctx, setup := setupIntegrationWithEnv(t, map[string]string{
+		"SESSION_RUNNER_BEAT": "250ms",
+		"REVEAL_DELAY":        "200ms",
+	})
 	baseURL := setup.BaseURL
 
 	qz := seedMultiRoundLiveQuiz(ctx, t, setup.Stores.Quizzes, "round-results")
