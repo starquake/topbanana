@@ -758,29 +758,6 @@ export class GameApp {
         }
     }
 
-    // animateFeedback gives the feedback notification a noticeable kick
-    // — pop-in for correct answers, a bigger shake for wrong ones. The
-    // amplitudes are larger than the static design because the rest of
-    // the page stays still, so the motion has to carry the moment.
-    animateFeedback(correct) {
-        requestAnimationFrame(() => {
-            if (correct) {
-                runAnim('[data-feedback]', {
-                    scale: [0.9, 1.06, 1],
-                    rotate: ['-1.2deg', '1deg', '0deg'],
-                    duration: 560,
-                    easing: 'easeOutBack',
-                });
-            } else {
-                runAnim('[data-feedback]', {
-                    translateX: [-18, 18, -14, 14, -8, 8, 0],
-                    duration: 460,
-                    easing: 'easeOutQuad',
-                });
-            }
-        });
-    }
-
     // showSplash flashes a full-screen verdict overlay (#253) for a
     // brief hold before auto-clearing. The fade-in AND the fade-out
     // are both driven by Alpine x-transition classes on the splash
@@ -812,21 +789,6 @@ export class GameApp {
         setTimeout(() => {
             this.splashOn = false;
         }, 700);
-    }
-
-    // animateTimeout settles the timeout banner in with a soft scale + fade,
-    // intentionally quieter than the wrong-answer shake: the player did not
-    // make a wrong decision — the clock simply ran out — so the motion
-    // should feel like a gentle "moving on" rather than a buzzer.
-    animateTimeout() {
-        requestAnimationFrame(() => {
-            runAnim('[data-feedback]', {
-                opacity: [0, 1],
-                scale: [0.96, 1],
-                duration: 420,
-                easing: 'easeOutQuart',
-            });
-        });
     }
 
     // animateRoundIntro plays the round intro card's entrance: a brief
@@ -909,7 +871,6 @@ export class GameApp {
         if (this.feedback || this.submittingAnswer || this.splashOn) return;
         this.feedback = { timedOut: true, correct: false, score: 0 };
         this.showSplash('timeout');
-        this.animateTimeout();
         await this.resolveAndAdvance();
     }
 
@@ -1004,7 +965,6 @@ export class GameApp {
             this.feedback = fb;
             this.score += fb.score || 0;
             this.showSplash(fb.correct ? 'correct' : 'wrong');
-            this.animateFeedback(this.feedback.correct);
         } catch (err) {
             // POST failed. The retry banner (#179) only makes sense
             // for transient failures the player can recover from by
@@ -1034,7 +994,6 @@ export class GameApp {
             // doesn't get stuck on a blank, button-less screen.
             this.feedback = { timedOut: true, correct: false, score: 0 };
             this.showSplash('timeout');
-            this.animateTimeout();
             await this.resolveAndAdvance();
 
             return;
