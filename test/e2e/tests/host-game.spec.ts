@@ -111,11 +111,11 @@ test('host TV shows the live question, answered order, and the reveal', async ({
     // The TV roster shows both players before the start.
     await expect(page.locator('[data-player-row]')).toHaveCount(2);
 
-    // Host starts the game; the runner moves the session into the first
+    // Host starts the game now; the runner moves the session into the first
     // question. The TV swaps from the lobby to the question view off the SSE
     // tick. (round_intro is a brief hold; the question view is what we wait
     // for.)
-    await page.getByRole('button', { name: 'Start game' }).click();
+    await page.getByRole('button', { name: 'Start now' }).click();
 
     const questionView = page.locator('[data-phase-question]');
     await expect(questionView).toBeVisible({ timeout: 15_000 });

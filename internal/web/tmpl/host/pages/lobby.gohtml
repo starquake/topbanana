@@ -256,7 +256,10 @@
             </ul>
         </div>
 
-        {{/* Footer: connection state + host start control (lobby only). */}}
+        {{/* Footer: connection state + host start controls (lobby only). The
+             host either starts now, or arms a last-call countdown. While the
+             countdown is armed every surface shows "Starting in M:SS" off the
+             server clock; the host can still start now (skip) or cancel it. */}}
         <footer class="shrink-0 flex flex-wrap items-center justify-between gap-4 px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1rem,2.5vh,2rem)] border-t border-border-soft">
             <p class="m-0 flex items-center gap-2 text-text-dim text-[clamp(0.8rem,1.5vw,1rem)]">
                 <span class="inline-block w-2.5 h-2.5 rounded-full"
@@ -265,17 +268,48 @@
                 <span x-text="connected ? 'Live' : 'Reconnecting...'"></span>
             </p>
 
-            <form x-show="phase === 'lobby'"
-                  method="post" :action="'/host/' + joinCode + '/start'" @submit.prevent="start()">
-                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                <button type="submit"
-                        class="inline-flex items-center justify-center gap-2 min-h-[52px] px-8 rounded-lg bg-accent text-bg font-display font-extrabold text-[clamp(0.9rem,1.7vw,1.15rem)] uppercase tracking-[0.12em] border-0 transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                        :disabled="starting || players.length === 0">
-                    <span x-text="players.length === 0 ? 'Waiting for players' : 'Start game'"></span>
-                </button>
-            </form>
+            {{/* Armed: the live countdown, with Start now (skip) + Cancel. */}}
+            <div x-show="phase === 'lobby' && armed()"
+                 class="flex flex-wrap items-center gap-4"
+                 data-start-countdown>
+                <p class="m-0 font-display font-extrabold text-accent text-[clamp(1.1rem,2.4vw,1.75rem)] tabular-nums"
+                   x-text="startCountdownLabel()"
+                   role="status"
+                   data-start-countdown-label></p>
+                <form method="post" :action="'/host/' + joinCode + '/start'" @submit.prevent="start()">
+                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                    <button type="submit"
+                            class="inline-flex items-center justify-center gap-2 min-h-[52px] px-6 rounded-lg bg-accent text-bg font-display font-extrabold text-[clamp(0.9rem,1.7vw,1.15rem)] uppercase tracking-[0.12em] border-0 transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                            :disabled="starting"
+                            data-skip-start>Start now</button>
+                </form>
+                <button type="button"
+                        class="inline-flex items-center justify-center gap-2 min-h-[52px] px-6 rounded-lg bg-surface text-text font-display font-bold text-[clamp(0.9rem,1.7vw,1.15rem)] uppercase tracking-[0.12em] border border-border-soft transition-colors hover:border-text-dim focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                        :disabled="arming"
+                        @click="cancelStart()"
+                        data-cancel-start>Cancel</button>
+            </div>
 
-            {{/* Host-facing status line for the start control. */}}
+            {{/* Not armed: Start now + Start in 60s. */}}
+            <div x-show="phase === 'lobby' && !armed()"
+                 class="flex flex-wrap items-center gap-4">
+                <form method="post" :action="'/host/' + joinCode + '/start'" @submit.prevent="start()">
+                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                    <button type="submit"
+                            class="inline-flex items-center justify-center gap-2 min-h-[52px] px-8 rounded-lg bg-accent text-bg font-display font-extrabold text-[clamp(0.9rem,1.7vw,1.15rem)] uppercase tracking-[0.12em] border-0 transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                            :disabled="starting || arming || players.length === 0"
+                            data-start-now>
+                        <span x-text="players.length === 0 ? 'Waiting for players' : 'Start now'"></span>
+                    </button>
+                </form>
+                <button type="button"
+                        class="inline-flex items-center justify-center gap-2 min-h-[52px] px-6 rounded-lg bg-surface text-text font-display font-bold text-[clamp(0.9rem,1.7vw,1.15rem)] uppercase tracking-[0.12em] border border-border-soft transition-colors hover:border-text-dim focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                        :disabled="starting || arming || players.length === 0"
+                        @click="armStart()"
+                        data-arm-start>Start in 60s</button>
+            </div>
+
+            {{/* Host-facing status line for the start controls. */}}
             <p x-show="startMessage"
                x-text="startMessage"
                class="basis-full m-0 text-right text-warning text-[clamp(0.8rem,1.5vw,1rem)]"

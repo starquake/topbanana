@@ -537,6 +537,70 @@ func TestParse_SessionRunnerBeat(t *testing.T) {
 	})
 }
 
+func TestParse_SessionStartCountdown(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid values", func(t *testing.T) {
+		t.Parallel()
+
+		tests := []struct {
+			name  string
+			value string
+			want  time.Duration
+		}{
+			{"unset defaults to zero", "", 0},
+			{"explicit zero parses", "0s", 0},
+			{"2s parses", "2s", 2 * time.Second},
+			{"60s parses", "60s", 60 * time.Second},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+
+				getenv := func(key string) string {
+					if key == "SESSION_START_COUNTDOWN" {
+						return tt.value
+					}
+					if key == "APP_ENV" {
+						return "development"
+					}
+
+					return ""
+				}
+
+				c, err := Parse(getenv)
+				if err != nil {
+					t.Fatalf("Parse() err = %v, want nil", err)
+				}
+				if got, want := c.SessionStartCountdown, tt.want; got != want {
+					t.Errorf("SessionStartCountdown = %v, want %v", got, want)
+				}
+			})
+		}
+	})
+
+	t.Run("unparseable value returns error", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := Parse(getenvFailure("SESSION_START_COUNTDOWN", "soon"))
+		if err == nil {
+			t.Fatal("Parse() with invalid SESSION_START_COUNTDOWN: err = nil, want non-nil")
+		}
+		if got, want := err.Error(), "invalid SESSION_START_COUNTDOWN"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+
+	t.Run("negative value returns error", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := Parse(getenvFailure("SESSION_START_COUNTDOWN", "-1s"))
+		if got, want := err, ErrSessionStartCountdownNegative; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+}
+
 func TestParse_LoginCooldown(t *testing.T) {
 	t.Parallel()
 

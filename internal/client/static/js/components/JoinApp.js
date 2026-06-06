@@ -3,6 +3,7 @@ import { playerService } from '../services/PlayerService.js';
 import { runAnim } from '@shared/anim.js';
 import { clockOffsetFromServerNow, serverTime } from '@shared/serverClock.js';
 import { startQuestionCountdown } from '@shared/countdown.js';
+import { startStartCountdown, formatCountdown } from '@shared/startCountdown.js';
 import { buildStandingsRows, animateStandingsBars } from '@shared/standings.js';
 import { optionStateClass } from '../util/answerOptions.js';
 
@@ -181,6 +182,17 @@ export class JoinApp {
         // key combines the phase and the current question id (the last
         // question of the round just finished) so a new round retriggers it.
         this.lastStandingsKey = null;
+
+        // --- Host-armed last-call countdown (#735) ---------------------------
+        // The absolute armed start deadline (ISO string) off the latest state
+        // read while in the lobby, or null when no countdown is armed.
+        this.startAt = null;
+        // Whole seconds left until startAt, driven off the server clock so the
+        // player lobby and the host TV tick in lockstep.
+        this.startRemaining = 0;
+        // Interval handle for the start countdown, cleared before each new one
+        // and on teardown.
+        this.startTimer = null;
     }
 
     // init resolves the room code (from a /join/{code} deep link or a
@@ -204,6 +216,7 @@ export class JoinApp {
         window.addEventListener('beforeunload', () => {
             this.closeStream();
             this.clearQuestionTimer();
+            this.clearStartTimer();
             if (this.phase === 'lobby' && this.code) {
                 sessionService.leave(this.code);
             }
@@ -438,6 +451,7 @@ export class JoinApp {
             this.lobbyClosed = true;
             this.closeStream();
             this.clearQuestionTimer();
+            this.clearStartTimer();
             // The room is gone or we are no longer a participant, so a future
             // load must not try to resume into it.
             forgetSession();
@@ -447,7 +461,50 @@ export class JoinApp {
         this.syncClockFrom(state);
         this.syncReadyFromState();
         this.syncQuestionFromState();
+        this.syncStartCountdownFromState();
         this.syncStandingsFromState();
+    }
+
+    // syncStartCountdownFromState reconciles the host-armed last-call countdown
+    // with each state read. The server carries startAt only while a countdown
+    // is armed in the lobby; once it fires (or is cancelled) the field is gone,
+    // so the live "Starting in M:SS" line gives way to the static waiting hint
+    // and the timer stops.
+    syncStartCountdownFromState() {
+        const phase = this.state ? this.state.phase : null;
+        this.startAt = phase === 'lobby' ? (this.state.startAt ?? null) : null;
+        if (!this.startAt) {
+            this.clearStartTimer();
+            this.startRemaining = 0;
+            return;
+        }
+        startStartCountdown(this.startAt, {
+            serverNow: () => this.serverTime(),
+            setRemaining: (sec) => { this.startRemaining = sec; },
+            setTimer: (handle) => { this.startTimer = handle; },
+            clearTimer: () => this.clearStartTimer(),
+        });
+    }
+
+    // clearStartTimer cancels the start-countdown interval. Safe to call when
+    // no timer is pending.
+    clearStartTimer() {
+        if (this.startTimer) {
+            clearInterval(this.startTimer);
+            this.startTimer = null;
+        }
+    }
+
+    // startArmed reports whether a last-call countdown is running, so the lobby
+    // swaps the static waiting hint for the live countdown.
+    startArmed() {
+        return !!this.startAt;
+    }
+
+    // startCountdownLabel is the "Starting in M:SS" text the player lobby shows
+    // while the countdown is armed.
+    startCountdownLabel() {
+        return `Starting in ${formatCountdown(this.startRemaining)}`;
     }
 
     // syncClockFrom recomputes clockOffset from the serverNow that travels with

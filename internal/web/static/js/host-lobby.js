@@ -22,6 +22,7 @@
 import { runAnim } from '@shared/anim.js';
 import { clockOffsetFromServerNow, serverTime } from '@shared/serverClock.js';
 import { startQuestionCountdown } from '@shared/countdown.js';
+import { startStartCountdown, formatCountdown } from '@shared/startCountdown.js';
 import { buildStandingsRows, animateStandingsBars } from '@shared/standings.js';
 
 function hostLobby(joinCode) {
@@ -47,6 +48,21 @@ function hostLobby(joinCode) {
         startMessage: '',
         source: null,
         timer: null,
+
+        // --- Host-armed last-call countdown (#735) --------------------------
+        // The absolute armed deadline (ISO string) off the latest state read,
+        // or null when no countdown is armed. armed() reads it to decide
+        // whether to show the "Starting in M:SS" line and the Cancel control.
+        startAt: null,
+        // Whole seconds left until startAt, driven off the server clock so the
+        // host TV and every player lobby tick in lockstep.
+        startRemaining: 0,
+        // Interval handle for the start countdown, cleared before each new one
+        // and on teardown.
+        startTimer: null,
+        // True while an arm / cancel request is in flight, to guard the
+        // controls.
+        arming: false,
 
         // --- Between-rounds standings bar graph (MP-9 / #686) ---------------
         // Rendered rows for the round_results / finished standings, in rank
@@ -106,6 +122,7 @@ function hostLobby(joinCode) {
         teardown() {
             this.disconnect();
             this.stopCountdown();
+            this.stopStartCountdown();
         },
 
         async refresh() {
@@ -144,7 +161,48 @@ function hostLobby(joinCode) {
                 this.progress = this.phase === 'reveal' ? 0 : 100;
             }
 
+            this.syncStartCountdown(state);
             this.syncStandings(state);
+        },
+
+        // syncStartCountdown reconciles the host-armed last-call countdown with
+        // each state read. The server carries startAt only while a countdown is
+        // armed in the lobby; once it fires (or is cancelled) the field is gone,
+        // so the line and Cancel control disappear and the timer stops.
+        syncStartCountdown(state) {
+            this.startAt = this.phase === 'lobby' ? (state.startAt ?? null) : null;
+            if (!this.startAt) {
+                this.stopStartCountdown();
+                this.startRemaining = 0;
+
+                return;
+            }
+            startStartCountdown(this.startAt, {
+                serverNow: () => this.serverTime(),
+                setRemaining: (sec) => { this.startRemaining = sec; },
+                setTimer: (handle) => { this.startTimer = handle; },
+                clearTimer: () => this.stopStartCountdown(),
+            });
+        },
+
+        stopStartCountdown() {
+            if (this.startTimer) {
+                clearInterval(this.startTimer);
+                this.startTimer = null;
+            }
+        },
+
+        // armed reports whether a last-call countdown is currently running, so
+        // the template swaps the "Start in 60s" control for the live countdown
+        // plus a Cancel control.
+        armed() {
+            return !!this.startAt;
+        },
+
+        // startCountdownLabel is the "Starting in M:SS" text the host TV shows
+        // while the countdown is armed.
+        startCountdownLabel() {
+            return `Starting in ${formatCountdown(this.startRemaining)}`;
         },
 
         // syncStandings reconciles the between-rounds / final bar graph with
@@ -296,6 +354,48 @@ function hostLobby(joinCode) {
                 this.startMessage = 'Could not start the game. Try again.';
             } finally {
                 this.starting = false;
+            }
+        },
+
+        // armStart arms the last-call countdown via the host-gated JSON API.
+        // The server stamps the absolute deadline; the SSE tick -> refresh
+        // surfaces it (startAt) and starts the local countdown, so there is
+        // nothing to set here beyond clearing the disabled state.
+        async armStart() {
+            this.arming = true;
+            this.startMessage = '';
+            try {
+                const response = await fetch(
+                    `/api/sessions/${encodeURIComponent(this.joinCode)}/arm-start`,
+                    { method: 'POST', headers: { Accept: 'application/json' } },
+                );
+                if (!response.ok) {
+                    this.startMessage = 'Could not arm the countdown. Try again.';
+                }
+            } catch (err) {
+                this.startMessage = 'Could not arm the countdown. Try again.';
+            } finally {
+                this.arming = false;
+            }
+        },
+
+        // cancelStart cancels an armed countdown via the host-gated JSON API.
+        // The SSE tick -> refresh clears startAt and stops the local countdown.
+        async cancelStart() {
+            this.arming = true;
+            this.startMessage = '';
+            try {
+                const response = await fetch(
+                    `/api/sessions/${encodeURIComponent(this.joinCode)}/cancel-start`,
+                    { method: 'POST', headers: { Accept: 'application/json' } },
+                );
+                if (!response.ok) {
+                    this.startMessage = 'Could not cancel the countdown. Try again.';
+                }
+            } catch (err) {
+                this.startMessage = 'Could not cancel the countdown. Try again.';
+            } finally {
+                this.arming = false;
             }
         },
 

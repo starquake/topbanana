@@ -798,6 +798,14 @@ func addSessionRoutes(
 	mux.Handle("POST /api/sessions/{code}/join", ensurePlayer(clientapi.HandleSessionJoin(logger, sessionService)))
 	mux.Handle("POST /api/sessions/{code}/ready", ensurePlayer(clientapi.HandleSessionReady(logger, sessionService)))
 	mux.Handle("POST /api/sessions/{code}/start", ensurePlayer(clientapi.HandleSessionStart(logger, sessionService)))
+	mux.Handle(
+		"POST /api/sessions/{code}/arm-start",
+		ensurePlayer(clientapi.HandleSessionArmStart(logger, sessionService)),
+	)
+	mux.Handle(
+		"POST /api/sessions/{code}/cancel-start",
+		ensurePlayer(clientapi.HandleSessionCancelStart(logger, sessionService)),
+	)
 	mux.Handle("POST /api/sessions/{code}/answer", ensurePlayer(clientapi.HandleSessionAnswer(logger, sessionService)))
 	mux.Handle("POST /api/sessions/{code}/leave", ensurePlayer(clientapi.HandleSessionLeave(logger, sessionService)))
 	mux.Handle("GET /api/sessions/{code}/state", ensurePlayer(clientapi.HandleSessionState(logger, sessionService)))

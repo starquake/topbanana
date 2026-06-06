@@ -159,6 +159,22 @@
                             <div class="feedback-banner feedback-danger mb-3" role="alert" x-text="error"></div>
                         </template>
 
+                        <!-- Host-armed last-call countdown (#735): while armed,
+                             the live "Starting in M:SS" replaces the static
+                             waiting hint, driven off the server clock so it
+                             matches the host TV. -->
+                        <template x-if="startArmed()">
+                            <p class="mb-3 text-center font-display text-2xl font-semibold text-accent tabular-nums"
+                               role="status"
+                               data-testid="start-countdown"
+                               x-text="startCountdownLabel()"></p>
+                        </template>
+                        <template x-if="!startArmed()">
+                            <p class="mb-3 text-center text-text-dim" data-testid="waiting-hint">
+                                Waiting for the host to start the game...
+                            </p>
+                        </template>
+
                         <button type="button"
                                 class="btn-primary w-full"
                                 data-testid="ready-toggle"

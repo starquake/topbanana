@@ -88,6 +88,15 @@ test.describe('player join + lobby', () => {
     await page.getByTestId('ready-toggle').click();
     await expect(aliceRow).toHaveAttribute('data-ready', 'false');
 
+    // While no last-call countdown is armed the lobby shows the static waiting
+    // hint (#735). When the host arms the countdown the live "Starting in M:SS"
+    // replaces it, driven off the server clock and pushed by the SSE tick.
+    await expect(page.getByTestId('waiting-hint')).toBeVisible();
+    const armResp = await host.request.post(`/api/sessions/${joinCode}/arm-start`);
+    expect(armResp.status(), `arm-start: ${armResp.status()} ${await armResp.text()}`).toBe(204);
+    await expect(page.getByTestId('start-countdown')).toContainText('Starting in');
+    await expect(page.getByTestId('waiting-hint')).toHaveCount(0);
+
     await hostContext.close();
   });
 
