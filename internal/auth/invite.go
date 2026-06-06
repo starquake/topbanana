@@ -149,7 +149,7 @@ func SendInviteEmail(
 	}
 	msg := mailer.Message{
 		To:      recipient,
-		Subject: "You are invited to Top Banana",
+		Subject: "You are invited to Top Banana!",
 		Body:    inviteEmailBody(link),
 		Kind:    mailer.KindInvite,
 	}
@@ -189,7 +189,7 @@ func ResendInviteEmail(
 	}
 	msg := mailer.Message{
 		To:      recipient,
-		Subject: "You are invited to Top Banana",
+		Subject: "You are invited to Top Banana!",
 		Body:    inviteEmailBody(link),
 		Kind:    mailer.KindInvite,
 	}
@@ -226,9 +226,9 @@ func buildInviteLink(baseURL, rawToken string) (string, error) {
 // inviteEmailBody is the plain-text body of the invite email. Mirrors
 // the reset/verify body shape so the channels read consistently.
 func inviteEmailBody(link string) string {
-	return "You have been invited to join Top Banana.\n\n" +
-		"Click the link below to pick a displayName and password and set up your account:\n\n" +
+	return "You have been invited to join Top Banana!\n\n" +
+		"Use the link below to choose a display name and password and set up your account:\n\n" +
 		link + "\n\n" +
-		"This link is valid for 7 days. If you were not expecting this invite,\n" +
+		"This link is valid for 7 days. If you were not expecting this invite, " +
 		"you can ignore this email.\n"
 }
