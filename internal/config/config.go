@@ -36,13 +36,19 @@ var ErrRevealDelayNegative = errors.New("REVEAL_DELAY must not be negative")
 var ErrLoginCooldownNegative = errors.New("LOGIN_COOLDOWN must not be negative")
 
 // ErrSessionRunnerBeatNegative is returned when SESSION_RUNNER_BEAT parses to
-// a negative duration. It shrinks the live-session runner's round-intro and
-// reveal beats and auto-start window, so a negative value is meaningless.
+// a negative duration. It shrinks the live-session runner's round-intro,
+// reveal, and between-rounds beats, so a negative value is meaningless.
 var ErrSessionRunnerBeatNegative = errors.New("SESSION_RUNNER_BEAT must not be negative")
 
 // ErrSessionRevealBeatNegative is returned when SESSION_REVEAL_BEAT parses to a
 // negative duration.
 var ErrSessionRevealBeatNegative = errors.New("SESSION_REVEAL_BEAT must not be negative")
+
+// ErrSessionStartCountdownNegative is returned when SESSION_START_COUNTDOWN
+// parses to a negative duration. It is the length of the host-armed last-call
+// countdown, so a negative value is meaningless; reject it rather than
+// silently treating it as "start immediately".
+var ErrSessionStartCountdownNegative = errors.New("SESSION_START_COUNTDOWN must not be negative")
 
 // ErrSMTPConfigIncomplete is returned when SMTP env vars are partially
 // populated. SMTP is opt-in (an unconfigured instance still boots and
@@ -154,12 +160,12 @@ type Config struct {
 	// few hundred ms to speed up runs without losing the visual reveal phase.
 	RevealDelay time.Duration
 
-	// SessionRunnerBeat overrides the live-session runner's round-intro and
-	// reveal beats and its auto-start ready window (MP-5 / #682). Zero means
-	// "use the built-in defaults" (3s / 4s / 5s). Parsed from the
-	// SESSION_RUNNER_BEAT env var via time.ParseDuration; the e2e and
-	// integration suites shrink it to a few milliseconds so a hosted game
-	// marches through its phases without slowing the suite.
+	// SessionRunnerBeat overrides the live-session runner's round-intro,
+	// reveal, and between-rounds beats (MP-5 / #682). Zero means "use the
+	// built-in defaults" (3s / 4s / 6s). Parsed from the SESSION_RUNNER_BEAT
+	// env var via time.ParseDuration; the e2e and integration suites shrink it
+	// to a few milliseconds so a hosted game marches through its phases without
+	// slowing the suite.
 	SessionRunnerBeat time.Duration
 
 	// SessionRevealBeat overrides only the post-answer reveal beat, on top of
@@ -170,6 +176,14 @@ type Config struct {
 	// advances; this knob keeps the reveal comfortably observable without
 	// slowing the other beats (mirrors REVEAL_DELAY for the pre-answer beat).
 	SessionRevealBeat time.Duration
+
+	// SessionStartCountdown is the length of the host-armed last-call countdown
+	// (#735): the host arms "Start in 60s" and the runner starts the game when
+	// it elapses. Zero means "use the built-in default" (60s). Parsed from the
+	// SESSION_START_COUNTDOWN env var via time.ParseDuration; the e2e suite
+	// shrinks it to a couple of seconds so the armed-start spec does not pay the
+	// production dwell time.
+	SessionStartCountdown time.Duration
 
 	// LoginCooldown is the per-IP minimum gap between POST /login attempts,
 	// passed into auth.NewLoginRateLimiter (#494). Defaults to 3s (mirrors
@@ -469,6 +483,12 @@ func parseTypedEnvVars(getenv func(string) string, c *Config) error {
 
 	if err := parseNonNegativeDuration(
 		getenv, "SESSION_REVEAL_BEAT", ErrSessionRevealBeatNegative, &c.SessionRevealBeat,
+	); err != nil {
+		return err
+	}
+
+	if err := parseNonNegativeDuration(
+		getenv, "SESSION_START_COUNTDOWN", ErrSessionStartCountdownNegative, &c.SessionStartCountdown,
 	); err != nil {
 		return err
 	}

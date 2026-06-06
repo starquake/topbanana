@@ -11,6 +11,43 @@ import (
 	"time"
 )
 
+const armSessionStart = `-- name: ArmSessionStart :execresult
+UPDATE sessions
+SET start_at = ?
+WHERE id = ?
+  AND started_at IS NULL
+`
+
+type ArmSessionStartParams struct {
+	StartAt sql.NullTime
+	ID      string
+}
+
+// Arms the host's last-call countdown: stamps start_at with the absolute
+// server deadline at which the runner begins the game. Scoped to a session
+// still in the lobby (started_at IS NULL, the same "not yet begun" gate
+// StartSession uses) so arming a started game is a no-op; re-arming while in
+// the lobby overwrites the deadline (the host can re-arm). The execresult lets
+// the store map zero rows affected to "not in the lobby".
+func (q *Queries) ArmSessionStart(ctx context.Context, arg ArmSessionStartParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, armSessionStart, arg.StartAt, arg.ID)
+}
+
+const cancelSessionStart = `-- name: CancelSessionStart :execresult
+UPDATE sessions
+SET start_at = NULL
+WHERE id = ?
+  AND started_at IS NULL
+`
+
+// Cancels an armed last-call countdown by clearing start_at. Scoped to a
+// session still in the lobby (started_at IS NULL) so a cancel after the game
+// has begun is a no-op. The execresult lets the store map zero rows affected
+// to "not in the lobby".
+func (q *Queries) CancelSessionStart(ctx context.Context, id string) (sql.Result, error) {
+	return q.db.ExecContext(ctx, cancelSessionStart, id)
+}
+
 const countActivePlayersForSession = `-- name: CountActivePlayersForSession :one
 SELECT count(*) AS active_count
 FROM session_players sp
@@ -99,7 +136,7 @@ func (q *Queries) CountSessionAnswersForQuestion(ctx context.Context, arg CountS
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (id, quiz_id, host_player_id, join_code)
 VALUES (?, ?, ?, ?)
-RETURNING id, quiz_id, host_player_id, join_code, phase, current_round_id, current_question_id, question_started_at, question_expires_at, created_at, started_at, finished_at, host_last_seen_at
+RETURNING id, quiz_id, host_player_id, join_code, phase, current_round_id, current_question_id, question_started_at, question_expires_at, created_at, started_at, finished_at, host_last_seen_at, start_at
 `
 
 type CreateSessionParams struct {
@@ -135,6 +172,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.HostLastSeenAt,
+		&i.StartAt,
 	)
 	return i, err
 }
@@ -178,7 +216,7 @@ func (q *Queries) DeleteSessionPlayersForPlayerOnQuiz(ctx context.Context, arg D
 }
 
 const getSession = `-- name: GetSession :one
-SELECT id, quiz_id, host_player_id, join_code, phase, current_round_id, current_question_id, question_started_at, question_expires_at, created_at, started_at, finished_at, host_last_seen_at
+SELECT id, quiz_id, host_player_id, join_code, phase, current_round_id, current_question_id, question_started_at, question_expires_at, created_at, started_at, finished_at, host_last_seen_at, start_at
 FROM sessions
 WHERE id = ?
 `
@@ -200,12 +238,13 @@ func (q *Queries) GetSession(ctx context.Context, id string) (Session, error) {
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.HostLastSeenAt,
+		&i.StartAt,
 	)
 	return i, err
 }
 
 const getSessionByJoinCode = `-- name: GetSessionByJoinCode :one
-SELECT id, quiz_id, host_player_id, join_code, phase, current_round_id, current_question_id, question_started_at, question_expires_at, created_at, started_at, finished_at, host_last_seen_at
+SELECT id, quiz_id, host_player_id, join_code, phase, current_round_id, current_question_id, question_started_at, question_expires_at, created_at, started_at, finished_at, host_last_seen_at, start_at
 FROM sessions
 WHERE join_code = ?
 `
@@ -229,6 +268,7 @@ func (q *Queries) GetSessionByJoinCode(ctx context.Context, joinCode string) (Se
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.HostLastSeenAt,
+		&i.StartAt,
 	)
 	return i, err
 }

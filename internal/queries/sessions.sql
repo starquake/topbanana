@@ -172,6 +172,28 @@ SET started_at = CURRENT_TIMESTAMP
 WHERE id = ?
   AND started_at IS NULL;
 
+-- name: ArmSessionStart :execresult
+-- Arms the host's last-call countdown: stamps start_at with the absolute
+-- server deadline at which the runner begins the game. Scoped to a session
+-- still in the lobby (started_at IS NULL, the same "not yet begun" gate
+-- StartSession uses) so arming a started game is a no-op; re-arming while in
+-- the lobby overwrites the deadline (the host can re-arm). The execresult lets
+-- the store map zero rows affected to "not in the lobby".
+UPDATE sessions
+SET start_at = ?
+WHERE id = ?
+  AND started_at IS NULL;
+
+-- name: CancelSessionStart :execresult
+-- Cancels an armed last-call countdown by clearing start_at. Scoped to a
+-- session still in the lobby (started_at IS NULL) so a cancel after the game
+-- has begun is a no-op. The execresult lets the store map zero rows affected
+-- to "not in the lobby".
+UPDATE sessions
+SET start_at = NULL
+WHERE id = ?
+  AND started_at IS NULL;
+
 -- name: SetSessionRoundIntro :exec
 -- Moves the session into the round_intro phase for the given round and clears
 -- the per-question runner columns (the intro screen runs before any question

@@ -54,9 +54,12 @@ var runnerCfg = RunnerConfig{
 	RoundIntroBeat:   time.Second,
 	RevealBeat:       time.Second,
 	RoundResultsBeat: time.Second,
-	AutoStartWindow:  2 * time.Second,
 	QuestionReadBeat: time.Second,
 }
+
+// startCountdown is the host-armed last-call window the runner harness sets on
+// the service, so ArmStart stamps a deadline this far ahead of the clock.
+const startCountdown = 2 * time.Second
 
 // newRunnerHarness seeds a live quiz with the given rounds (each a slice of
 // option-correctness for its questions), opens a session, joins two players,
@@ -80,6 +83,7 @@ func newRunnerHarness(t *testing.T, start time.Time, rounds [][]bool) *runnerHar
 	service := NewService(sessionStore, quizStore, logger)
 	hub := NewHub()
 	service.SetPublisher(hub)
+	service.SetStartCountdown(startCountdown)
 	scorer := game.NewService(nil, quizStore, logger)
 	clock := &fakeClock{now: start}
 	runner := NewRunner(sessionStore, quizStore, hub, scorer, logger, runnerCfg)
@@ -410,65 +414,70 @@ func TestRunner_DoesNotEarlyCloseDuringReadBeat(t *testing.T) {
 	}
 }
 
-// TestRunner_AutoStart drives the auto-start path: the lobby starts itself
-// once every joined player has been ready for the auto-start window, with no
-// host Start.
-func TestRunner_AutoStart(t *testing.T) {
+// TestRunner_ArmedStartFiresAtDeadline drives the host-armed last-call
+// countdown (#735): a lobby with no armed start_at never starts on its own,
+// arming stamps a deadline, a tick before the deadline holds in the lobby, and
+// a tick at or after the deadline starts the game into round_intro.
+func TestRunner_ArmedStartFiresAtDeadline(t *testing.T) {
 	t.Parallel()
 
 	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
 	h := newRunnerHarness(t, start, [][]bool{{true}})
 	ctx := t.Context()
 
-	// Not all ready yet: a tick must not start the game.
+	// No armed countdown: a tick (even with players present) must not start.
 	h.tick(ctx)
 	if got, want := h.phase(t), PhaseLobby; got != want {
-		t.Fatalf("phase with no ready players = %q, want %q", got, want)
+		t.Fatalf("phase with no armed start = %q, want %q", got, want)
 	}
 
-	// Everyone readies; the window starts now (first all-ready observation).
-	for _, pid := range h.players {
-		if err := h.service.SetReady(ctx, h.code, pid, true); err != nil {
-			t.Fatalf("SetReady err = %v, want nil", err)
-		}
+	// Host arms the countdown; the deadline is now + startCountdown.
+	if err := h.service.ArmStart(ctx, h.code, 1, h.clock.Now()); err != nil {
+		t.Fatalf("ArmStart err = %v, want nil", err)
 	}
-	h.tick(ctx) // observes all-ready, seeds the window; still lobby.
+	if got := h.reload(t).StartAt; got == nil {
+		t.Fatal("StartAt after ArmStart = nil, want a deadline")
+	}
+
+	// A tick before the deadline holds in the lobby.
+	h.clock.advance(startCountdown - time.Millisecond)
+	h.tick(ctx)
 	if got, want := h.phase(t), PhaseLobby; got != want {
-		t.Fatalf("phase at window start = %q, want %q (window not elapsed)", got, want)
+		t.Fatalf("phase before deadline = %q, want %q", got, want)
 	}
 
-	// Window elapses -> auto-start into round_intro.
-	h.clock.advance(runnerCfg.AutoStartWindow)
+	// At the deadline the runner starts the game into round_intro.
+	h.clock.advance(time.Millisecond)
 	h.tick(ctx)
 	if got, want := h.phase(t), PhaseRoundIntro; got != want {
-		t.Fatalf("phase after auto-start window = %q, want %q", got, want)
+		t.Fatalf("phase at armed deadline = %q, want %q", got, want)
 	}
 }
 
-// TestRunner_UnreadyResetsAutoStart pins that a player un-readying resets the
-// auto-start window so the game does not start under the original timer.
-func TestRunner_UnreadyResetsAutoStart(t *testing.T) {
+// TestRunner_CancelStartStopsCountdown pins that cancelling an armed countdown
+// clears start_at so the deadline passing no longer starts the game.
+func TestRunner_CancelStartStopsCountdown(t *testing.T) {
 	t.Parallel()
 
 	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
 	h := newRunnerHarness(t, start, [][]bool{{true}})
 	ctx := t.Context()
 
-	for _, pid := range h.players {
-		if err := h.service.SetReady(ctx, h.code, pid, true); err != nil {
-			t.Fatalf("SetReady err = %v, want nil", err)
-		}
+	if err := h.service.ArmStart(ctx, h.code, 1, h.clock.Now()); err != nil {
+		t.Fatalf("ArmStart err = %v, want nil", err)
 	}
-	h.tick(ctx) // seeds the window.
+	if err := h.service.CancelStart(ctx, h.code, 1); err != nil {
+		t.Fatalf("CancelStart err = %v, want nil", err)
+	}
+	if got := h.reload(t).StartAt; got != nil {
+		t.Fatalf("StartAt after CancelStart = %v, want nil", got)
+	}
 
-	// One player un-readies before the window elapses; the window must reset.
-	if err := h.service.SetReady(ctx, h.code, h.players[0], false); err != nil {
-		t.Fatalf("SetReady false err = %v, want nil", err)
-	}
-	h.clock.advance(runnerCfg.AutoStartWindow)
+	// The original deadline passes, but with start_at cleared the game holds.
+	h.clock.advance(startCountdown + time.Second)
 	h.tick(ctx)
 	if got, want := h.phase(t), PhaseLobby; got != want {
-		t.Fatalf("phase after un-ready = %q, want %q (window reset)", got, want)
+		t.Fatalf("phase after cancel + deadline = %q, want %q (no start)", got, want)
 	}
 }
 

@@ -166,34 +166,73 @@ func HandleSessionReady(logger *slog.Logger, service *livesession.Service) http.
 	})
 }
 
-// HandleSessionStart is the host's override to begin the game immediately,
-// bypassing the auto-start ready window. Only the host may call it. Returns
-// 204 on success, 403 when the caller is not the host, 404 for an unknown
-// code, and 204 (idempotent no-op) when the session has already started.
-func HandleSessionStart(logger *slog.Logger, service *livesession.Service) http.Handler {
+// hostSessionAction wraps a host-gated, no-body session mutation (start now,
+// arm, cancel) into an [http.Handler]. The three controls share the same shape:
+// resolve the context player, run action, then map the result - nil or the
+// supplied idempotent sentinel to 204, ErrSessionNotFound to 404, ErrNotHost to
+// 403, anything else to a logged 500. action is the only thing that differs per
+// control; idempotent is the per-control "already in that state" sentinel (an
+// already-started game for start, an already-left lobby for arm/cancel) that
+// maps to a 204 no-op; what names the action in the log messages.
+func hostSessionAction(
+	logger *slog.Logger,
+	what string,
+	idempotent error,
+	action func(ctx context.Context, code string, playerID int64) error,
+) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
 		player, ok := auth.PlayerFromContext(ctx)
 		if !ok {
-			logger.ErrorContext(ctx, "missing player on context for session start")
+			logger.ErrorContext(ctx, "missing player on context for session "+what)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 
 			return
 		}
 
-		err := service.Start(ctx, r.PathValue("code"), player.ID)
+		err := action(ctx, r.PathValue("code"), player.ID)
 		switch {
-		case err == nil, errors.Is(err, livesession.ErrSessionAlreadyStarted):
+		case err == nil, errors.Is(err, idempotent):
 			w.WriteHeader(http.StatusNoContent)
 		case errors.Is(err, livesession.ErrSessionNotFound):
 			http.NotFound(w, r)
 		case errors.Is(err, livesession.ErrNotHost):
 			http.Error(w, "forbidden", http.StatusForbidden)
 		default:
-			writeInternalError(w, r, logger, "error starting session", err)
+			writeInternalError(w, r, logger, "error on session "+what, err)
 		}
 	})
+}
+
+// HandleSessionStart is the host "Start now" control: it begins the game
+// immediately, skipping any armed last-call countdown. Only the host may call
+// it. Returns 204 on success, 403 when the caller is not the host, 404 for an
+// unknown code, and 204 (idempotent no-op) when the session has already
+// started.
+func HandleSessionStart(logger *slog.Logger, service *livesession.Service) http.Handler {
+	return hostSessionAction(logger, "start", livesession.ErrSessionAlreadyStarted, service.Start)
+}
+
+// HandleSessionArmStart arms the host's last-call countdown (the "Start in 60s"
+// control): it stamps the absolute start deadline that every surface renders.
+// Only the host may call it. Returns 204 on success, 403 when the caller is not
+// the host, 404 for an unknown code, and 204 (idempotent no-op) when the
+// session has already left the lobby.
+func HandleSessionArmStart(logger *slog.Logger, service *livesession.Service) http.Handler {
+	return hostSessionAction(logger, "arm-start", livesession.ErrNotInLobby,
+		func(ctx context.Context, code string, playerID int64) error {
+			return service.ArmStart(ctx, code, playerID, time.Now().UTC())
+		})
+}
+
+// HandleSessionCancelStart cancels an armed last-call countdown (the host
+// "Cancel" control), clearing the start deadline. Only the host may call it.
+// Returns 204 on success, 403 when the caller is not the host, 404 for an
+// unknown code, and 204 (idempotent no-op) when the session has already left
+// the lobby.
+func HandleSessionCancelStart(logger *slog.Logger, service *livesession.Service) http.Handler {
+	return hostSessionAction(logger, "cancel-start", livesession.ErrNotInLobby, service.CancelStart)
 }
 
 // HandleSessionAnswer records the calling participant's pick for the session's
@@ -315,6 +354,11 @@ type sessionStateResponse struct {
 	Players   []sessionPlayerResponse `json:"players"`
 	Quiz      sessionQuizResponse     `json:"quiz"`
 	ServerNow time.Time               `json:"serverNow"`
+	// StartAt is the absolute deadline of the host's armed last-call countdown
+	// (#735), as an ISO timestamp; omitted when no countdown is armed. Every
+	// surface renders the same "Starting in M:SS" off startAt minus serverNow,
+	// so a skewed device clock cannot desync the countdown.
+	StartAt *time.Time `json:"startAt,omitempty"`
 	// Question is the live question (round_intro carries no question yet; the
 	// question and reveal phases do). Options never carry a correct flag
 	// before reveal - correctOptionIds below is populated only at reveal.
@@ -429,6 +473,7 @@ func newSessionStateResponse(state *livesession.LobbyState) sessionStateResponse
 			QuestionCount: len(state.Quiz.Questions),
 		},
 		ServerNow: time.Now().UTC(),
+		StartAt:   state.Session.StartAt,
 		Question:  newSessionQuestionResponse(state),
 		Standings: newSessionStandingsResponse(state),
 	}

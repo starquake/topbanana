@@ -201,7 +201,7 @@ func (s *LiveSessionStore) GetSessionByID(ctx context.Context, id string) (*live
 
 // MarkStarted stamps started_at on a lobby session and reports whether it won
 // the race. The UPDATE is scoped to started_at IS NULL, so exactly one of a
-// host Start / auto-start sees a row affected.
+// host Start / armed-countdown firing sees a row affected.
 func (s *LiveSessionStore) MarkStarted(ctx context.Context, sessionID string) (bool, error) {
 	res, err := s.q.StartSession(ctx, sessionID)
 	if err != nil {
@@ -209,6 +209,38 @@ func (s *LiveSessionStore) MarkStarted(ctx context.Context, sessionID string) (b
 	}
 
 	return database.MustRowsAffected(res) > 0, nil
+}
+
+// ArmStart stamps start_at (the last-call countdown deadline) on a lobby
+// session. Returns [livesession.ErrNotInLobby] when the UPDATE matches no
+// lobby row (the session has already left the lobby).
+func (s *LiveSessionStore) ArmStart(ctx context.Context, sessionID string, startAt time.Time) error {
+	res, err := s.q.ArmSessionStart(ctx, db.ArmSessionStartParams{
+		StartAt: sql.NullTime{Time: startAt, Valid: true},
+		ID:      sessionID,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to arm session start: %w", err)
+	}
+	if database.MustRowsAffected(res) == 0 {
+		return livesession.ErrNotInLobby
+	}
+
+	return nil
+}
+
+// CancelStart clears start_at on a lobby session, stopping an armed countdown.
+// Returns [livesession.ErrNotInLobby] when the UPDATE matches no lobby row.
+func (s *LiveSessionStore) CancelStart(ctx context.Context, sessionID string) error {
+	res, err := s.q.CancelSessionStart(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to cancel session start: %w", err)
+	}
+	if database.MustRowsAffected(res) == 0 {
+		return livesession.ErrNotInLobby
+	}
+
+	return nil
 }
 
 // EnterRoundIntro moves the session into the round_intro phase for the round.
@@ -543,6 +575,9 @@ func sessionFromRow(row db.Session) *livesession.Session {
 	}
 	if row.HostLastSeenAt.Valid {
 		sess.HostLastSeenAt = &row.HostLastSeenAt.Time
+	}
+	if row.StartAt.Valid {
+		sess.StartAt = &row.StartAt.Time
 	}
 
 	return sess

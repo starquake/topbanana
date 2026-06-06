@@ -160,10 +160,10 @@ const workerServer = (workerIndex: number) => {
       // slow CI (see #712). Still leaves the solo .progress-reveal phase
       // observable for player.spec.ts.
       REVEAL_DELAY: '2s',
-      // Shrink the live-session runner beats (round-intro, reveal, between-
-      // rounds, and the lobby auto-start window all default to multiple
-      // seconds) so the synchronized-play specs advance through the phases
-      // without paying the production dwell time.
+      // Shrink the live-session runner beats (round-intro, reveal, and the
+      // between-rounds beat all default to multiple seconds) so the
+      // synchronized-play specs advance through the phases without paying the
+      // production dwell time.
       SESSION_RUNNER_BEAT: '500ms',
       // Keep the post-answer reveal observable on slow CI browsers. The 500ms
       // runner beat marches the phases fast, but the reveal (where the host TV
@@ -171,6 +171,11 @@ const workerServer = (workerIndex: number) => {
       // window for firefox to observe before the runner advances - mirrors
       // REVEAL_DELAY for the pre-answer read beat (see #719).
       SESSION_REVEAL_BEAT: '2s',
+      // Shrink the host-armed last-call countdown (#735, default 60s) so the
+      // armed-start spec can watch it fire without a minute of dead time. The
+      // host arms "Start in 60s"; with this set the runner starts the game ~2s
+      // later, leaving the countdown observable but the spec quick.
+      SESSION_START_COUNTDOWN: '2s',
       // Disable the per-IP POST /login cooldown (#494, default 3s). The
       // suite logs in repeatedly from 127.0.0.1, so the cooldown would
       // falsely trip "Too many attempts" on back-to-back same-IP logins.

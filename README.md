@@ -152,6 +152,7 @@ Top Banana! is configured through environment variables. Sensible defaults apply
 ### Gameplay
 
 - **`REVEAL_DELAY`** — Go duration string (e.g. `1500ms`) for the per-question reveal beat. Defaults to a small value chosen for live play.
+- **`SESSION_START_COUNTDOWN`** — Go duration string (e.g. `60s`) for the host's "Start in 60s" last-call countdown in a hosted live session. Defaults to 60 seconds.
 
 ## Troubleshooting
 

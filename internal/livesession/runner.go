@@ -13,10 +13,10 @@ import (
 
 const (
 	// defaultBeatInterval is how often the runner scans live sessions and
-	// advances their phase. Small enough that a reveal beat or auto-start
-	// window fires within a tick of its deadline, large enough that the
-	// per-beat scan over active rooms is cheap. Tests inject a fast clock
-	// and call the tick directly, so they do not wait on this.
+	// advances their phase. Small enough that a reveal beat or the armed
+	// last-call deadline fires within a tick, large enough that the per-beat
+	// scan over active rooms is cheap. Tests inject a fast clock and call the
+	// tick directly, so they do not wait on this.
 	defaultBeatInterval = 250 * time.Millisecond
 	// defaultRoundIntroBeat is how long the round_intro screen shows before
 	// the round's first question is issued.
@@ -27,10 +27,6 @@ const (
 	// defaultRoundResultsBeat is how long the between-rounds standings screen
 	// shows before the runner advances to the next round's intro (or finish).
 	defaultRoundResultsBeat = 6 * time.Second
-	// defaultAutoStartWindow is how long every joined player must have been
-	// ready before the runner auto-starts the game. The host can override
-	// this at any time via Start.
-	defaultAutoStartWindow = 5 * time.Second
 	// defaultQuestionWindow is the answer window for a question when neither
 	// the question nor its quiz sets a time limit.
 	defaultQuestionWindow = 10 * time.Second
@@ -72,7 +68,6 @@ type RunnerConfig struct {
 	RoundIntroBeat   time.Duration
 	RevealBeat       time.Duration
 	RoundResultsBeat time.Duration
-	AutoStartWindow  time.Duration
 	// QuestionReadBeat is how long the question text shows before the answer
 	// options open and the answer window starts.
 	QuestionReadBeat time.Duration
@@ -91,9 +86,6 @@ func (c RunnerConfig) withDefaults() RunnerConfig {
 	if c.RoundResultsBeat <= 0 {
 		c.RoundResultsBeat = defaultRoundResultsBeat
 	}
-	if c.AutoStartWindow <= 0 {
-		c.AutoStartWindow = defaultAutoStartWindow
-	}
 	if c.QuestionReadBeat <= 0 {
 		c.QuestionReadBeat = defaultQuestionReadBeat
 	}
@@ -102,9 +94,9 @@ func (c RunnerConfig) withDefaults() RunnerConfig {
 }
 
 // Runner advances live sessions through their phases on a server clock. It is
-// the single owner of the timed transitions (auto-start, round_intro ->
-// question, close on timeout-or-all-answered, reveal -> next) and publishes a
-// tick on every transition. One Runner per process (the deploy is
+// the single owner of the timed transitions (armed last-call start, round_intro
+// -> question, close on timeout-or-all-answered, reveal -> next) and publishes
+// a tick on every transition. One Runner per process (the deploy is
 // single-instance); its in-memory bookkeeping is keyed by session id.
 //
 // The clock and beats are injectable so tests drive a session from start
@@ -124,10 +116,6 @@ type Runner struct {
 	// beat-gated phase (round_intro or reveal), so the beat is measured from
 	// the transition rather than persisted.
 	phaseSince map[string]time.Time
-	// allReadySince records when every joined player in a lobby became ready,
-	// so the auto-start window is measured from that moment and reset the
-	// instant someone un-readies or a not-ready player joins.
-	allReadySince map[string]time.Time
 }
 
 // NewRunner builds a runner over the live-session store, quiz reader, tick
@@ -136,15 +124,14 @@ func NewRunner(
 	store Store, quizzes QuizReader, publisher Publisher, scorer Scorer, logger *slog.Logger, cfg RunnerConfig,
 ) *Runner {
 	return &Runner{
-		store:         store,
-		quizzes:       quizzes,
-		publisher:     publisher,
-		scorer:        scorer,
-		logger:        logger,
-		clock:         realClock{},
-		cfg:           cfg.withDefaults(),
-		phaseSince:    make(map[string]time.Time),
-		allReadySince: make(map[string]time.Time),
+		store:      store,
+		quizzes:    quizzes,
+		publisher:  publisher,
+		scorer:     scorer,
+		logger:     logger,
+		clock:      realClock{},
+		cfg:        cfg.withDefaults(),
+		phaseSince: make(map[string]time.Time),
 	}
 }
 
@@ -171,11 +158,11 @@ func (r *Runner) Run(ctx context.Context) {
 	}
 }
 
-// Begin is the host-Start override: it drives the just-started session out of
-// the lobby into its first round_intro at once, rather than waiting for the
-// next beat to notice it. Start has already marked the session started, so
-// Begin skips the auto-start ready window entirely. A session no longer in
-// the lobby (a double Start, or the auto-start having won) is a no-op.
+// Begin is the host "Start now" path: it drives the just-started session out
+// of the lobby into its first round_intro at once, rather than waiting for the
+// next beat to notice it. Start has already marked the session started. A
+// session no longer in the lobby (a double Start, or the armed countdown having
+// won) is a no-op.
 func (r *Runner) Begin(ctx context.Context, sessionID string) {
 	now := r.clock.Now()
 	sess, err := r.store.GetSessionByID(ctx, sessionID)
@@ -244,17 +231,13 @@ func (r *Runner) advance(ctx context.Context, sessionID string, now time.Time) {
 	}
 }
 
-// advanceLobby auto-starts a lobby once every joined player has been ready for
-// the auto-start window. The window resets the moment the roster stops being
-// all-ready (someone un-readies, or a not-ready player joins). An empty lobby
-// never auto-starts.
+// advanceLobby starts a lobby once its host-armed last-call countdown reaches
+// its deadline (#735): a session whose start_at is set and at or before now
+// leaves the lobby into its first round, the same transition host "Start now"
+// drives. A lobby with no armed countdown (start_at nil) is a no-op - the host
+// controls the start; the runner never auto-starts on its own.
 func (r *Runner) advanceLobby(ctx context.Context, sess *Session, now time.Time) {
-	if !allPlayersReady(sess) {
-		r.clearReadySince(sess.ID)
-
-		return
-	}
-	if now.Sub(r.readySince(sess.ID, now)) < r.cfg.AutoStartWindow {
+	if sess.StartAt == nil || now.Before(*sess.StartAt) {
 		return
 	}
 
@@ -262,7 +245,7 @@ func (r *Runner) advanceLobby(ctx context.Context, sess *Session, now time.Time)
 	if err != nil {
 		r.logger.WarnContext(
 			ctx,
-			"runner failed to auto-start session",
+			"runner failed to start session at armed countdown",
 			slog.String(logSessionKey, sess.ID),
 			slog.Any("err", err),
 		)
@@ -620,47 +603,10 @@ func (r *Runner) phaseEnteredAt(sessionID string, now time.Time) time.Time {
 	return t
 }
 
-// readySince returns when the lobby became all-ready, seeding it with now the
-// first time the runner observes the all-ready state.
-func (r *Runner) readySince(sessionID string, now time.Time) time.Time {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	t, ok := r.allReadySince[sessionID]
-	if !ok {
-		r.allReadySince[sessionID] = now
-		t = now
-	}
-
-	return t
-}
-
-func (r *Runner) clearReadySince(sessionID string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.allReadySince, sessionID)
-}
-
 func (r *Runner) forget(sessionID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.phaseSince, sessionID)
-	delete(r.allReadySince, sessionID)
-}
-
-// allPlayersReady reports whether a lobby has at least one player and every
-// joined player is ready. The host is not a roster player, so a host-only
-// room never auto-starts (the host uses Start).
-func allPlayersReady(sess *Session) bool {
-	if len(sess.Players) == 0 {
-		return false
-	}
-	for _, p := range sess.Players {
-		if !p.IsReady {
-			return false
-		}
-	}
-
-	return true
 }
 
 // questionPlan is the runner's flattened view of a quiz: its questions grouped

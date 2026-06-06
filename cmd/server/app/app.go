@@ -170,6 +170,7 @@ func startSessionRunner(
 	service := livesession.NewService(stores.LiveSessions, stores.Quizzes, logger)
 	hub := livesession.NewHub()
 	service.SetPublisher(hub)
+	service.SetStartCountdown(cfg.SessionStartCountdown)
 	runner := livesession.NewRunner(stores.LiveSessions, stores.Quizzes, hub, scorer, logger, runnerConfig(cfg))
 	service.SetAdvancer(runner)
 	done := make(chan struct{})
@@ -187,13 +188,13 @@ const runnerBeatTickDivisor = 4
 
 // runnerConfig builds the live-session runner config from cfg. When
 // SESSION_RUNNER_BEAT is set (the e2e / integration suites shrink it), it
-// drives the round-intro and reveal beats and the auto-start window so a
-// hosted game advances quickly; otherwise those fall back to the runner's
-// built-in defaults. The question read beat tracks REVEAL_DELAY independently
-// of SESSION_RUNNER_BEAT, so the live read beat matches the solo game's
-// pre-answer beat (3s default; the e2e's 500ms shrinks both). The tick
-// interval tracks the runner beat so a shrunk beat is observed promptly
-// without spinning the loop when the beat is the default.
+// drives the round-intro, reveal, and between-rounds beats so a hosted game
+// advances quickly; otherwise those fall back to the runner's built-in
+// defaults. The question read beat tracks REVEAL_DELAY independently of
+// SESSION_RUNNER_BEAT, so the live read beat matches the solo game's pre-answer
+// beat (3s default; the e2e's 500ms shrinks both). The tick interval tracks the
+// runner beat so a shrunk beat is observed promptly without spinning the loop
+// when the beat is the default.
 func runnerConfig(cfg *config.Config) livesession.RunnerConfig {
 	rc := livesession.RunnerConfig{QuestionReadBeat: cfg.RevealDelay}
 	if cfg.SessionRunnerBeat <= 0 {
@@ -204,7 +205,6 @@ func runnerConfig(cfg *config.Config) livesession.RunnerConfig {
 	rc.RoundIntroBeat = beat
 	rc.RevealBeat = beat
 	rc.RoundResultsBeat = beat
-	rc.AutoStartWindow = beat
 
 	// The reveal beat can be lengthened independently so a shrunk runner beat
 	// still leaves the revealed answer observable (e.g. in the e2e suite).

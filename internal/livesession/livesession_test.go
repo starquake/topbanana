@@ -178,6 +178,14 @@ func (*fakeStore) MarkStarted(context.Context, string) (bool, error) {
 	return false, errors.ErrUnsupported
 }
 
+func (*fakeStore) ArmStart(context.Context, string, time.Time) error {
+	return errors.ErrUnsupported
+}
+
+func (*fakeStore) CancelStart(context.Context, string) error {
+	return errors.ErrUnsupported
+}
+
 func (*fakeStore) EnterRoundIntro(context.Context, string, int64) error {
 	return errors.ErrUnsupported
 }

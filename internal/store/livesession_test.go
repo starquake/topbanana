@@ -405,6 +405,67 @@ func TestLiveSessionStore_PhaseTransitions(t *testing.T) {
 	}
 }
 
+func TestLiveSessionStore_ArmAndCancelStart(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	qz := newLiveQuizWithQuestion(t, quizStore)
+
+	sess := &livesession.Session{QuizID: qz.ID, HostPlayerID: seededAdminID, JoinCode: "ARM234"}
+	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+
+	// Arm stamps the deadline; the read carries it back.
+	deadline := time.Date(2026, time.June, 5, 12, 1, 0, 0, time.UTC)
+	if err := sessionStore.ArmStart(t.Context(), sess.ID, deadline); err != nil {
+		t.Fatalf("ArmStart err = %v, want nil", err)
+	}
+	armed, err := sessionStore.GetSessionByID(t.Context(), sess.ID)
+	if err != nil {
+		t.Fatalf("GetSessionByID err = %v, want nil", err)
+	}
+	if armed.StartAt == nil {
+		t.Fatal("StartAt after ArmStart = nil, want the deadline")
+	}
+	if got, want := *armed.StartAt, deadline; !got.Equal(want) {
+		t.Errorf("StartAt = %v, want %v", got, want)
+	}
+
+	// Cancel clears it.
+	if err = sessionStore.CancelStart(t.Context(), sess.ID); err != nil {
+		t.Fatalf("CancelStart err = %v, want nil", err)
+	}
+	cancelled, err := sessionStore.GetSessionByID(t.Context(), sess.ID)
+	if err != nil {
+		t.Fatalf("GetSessionByID err = %v, want nil", err)
+	}
+	if cancelled.StartAt != nil {
+		t.Errorf("StartAt after CancelStart = %v, want nil", *cancelled.StartAt)
+	}
+
+	// Once the session has left the lobby, arm/cancel are no-ops mapped to
+	// ErrNotInLobby.
+	if _, err = sessionStore.MarkStarted(t.Context(), sess.ID); err != nil {
+		t.Fatalf("MarkStarted err = %v, want nil", err)
+	}
+	if got, want := sessionStore.ArmStart(
+		t.Context(),
+		sess.ID,
+		deadline,
+	), livesession.ErrNotInLobby; !errors.Is(
+		got,
+		want,
+	) {
+		t.Errorf("ArmStart past lobby err = %v, want %v", got, want)
+	}
+	if got, want := sessionStore.CancelStart(t.Context(), sess.ID), livesession.ErrNotInLobby; !errors.Is(got, want) {
+		t.Errorf("CancelStart past lobby err = %v, want %v", got, want)
+	}
+}
+
 func TestLiveSessionStore_AnswersRoundTrip(t *testing.T) {
 	t.Parallel()
 

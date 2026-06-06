@@ -66,6 +66,13 @@ var (
 	// already left the lobby: the lobby closes at start and v1 has no
 	// late join. Handlers map it to 409.
 	ErrLobbyClosed = errors.New("session lobby has closed")
+
+	// ErrNotInLobby is returned by [Service.ArmStart] / [Service.CancelStart]
+	// when the session has already left the lobby, so the last-call countdown
+	// can only be armed or cancelled while the game has not begun. Handlers
+	// treat it as an idempotent no-op (the host clicked after the game already
+	// started). Distinct from [ErrLobbyClosed], which is the player-join gate.
+	ErrNotInLobby = errors.New("session is no longer in the lobby")
 )
 
 // Phase is the server-authoritative state-machine label for a session.
@@ -97,6 +104,12 @@ const (
 	// a genuinely disconnected player ages out within this window and stops
 	// holding a question open.
 	ActiveWindow = 3 * HeartbeatInterval
+	// DefaultStartCountdown is how long the host's armed last-call countdown
+	// runs before the runner starts the game (#735). The host arms it with
+	// "Start in 60s"; the service stamps the absolute deadline at now + this.
+	// The e2e suite shrinks it via SESSION_START_COUNTDOWN so a spec does not
+	// pay the production dwell time.
+	DefaultStartCountdown = 60 * time.Second
 	// AbandonTimeout is how long a started (mid-game, not finished) session may
 	// go without a host heartbeat before the runner finishes it as abandoned.
 	// The host beats every HeartbeatInterval (10s) over its held SSE
@@ -135,6 +148,11 @@ type Session struct {
 	CreatedAt         time.Time
 	StartedAt         *time.Time
 	FinishedAt        *time.Time
+	// StartAt is the absolute server deadline of an armed last-call countdown
+	// (#735): nil when no countdown is armed. The runner starts the game on the
+	// first lobby tick at or after StartAt; the state read surfaces it so every
+	// surface renders the same server-clock countdown.
+	StartAt *time.Time
 	// HostLastSeenAt is when the host last beat its held SSE connection; nil
 	// when the host has never beat. The runner's abandon sweep ages a started
 	// session from COALESCE(HostLastSeenAt, StartedAt) and finishes it once
@@ -245,9 +263,17 @@ type Store interface {
 	GetSessionByID(ctx context.Context, id string) (*Session, error)
 	// MarkStarted stamps started_at on a session still in the lobby and
 	// reports whether it won the race (true) or the session had already
-	// started (false). Used by both the host Start and the auto-start so
-	// only one of them issues the first round.
+	// started (false). Used by the host Start and the armed-countdown firing
+	// so only one of them issues the first round.
 	MarkStarted(ctx context.Context, sessionID string) (bool, error)
+	// ArmStart stamps start_at (the absolute last-call countdown deadline) on a
+	// session still in the lobby. Returns [ErrNotInLobby] when the session has
+	// already left the lobby. Re-arming in the lobby overwrites the deadline.
+	ArmStart(ctx context.Context, sessionID string, startAt time.Time) error
+	// CancelStart clears start_at on a session still in the lobby, stopping an
+	// armed countdown. Returns [ErrNotInLobby] when the session has already
+	// left the lobby.
+	CancelStart(ctx context.Context, sessionID string) error
 	// EnterRoundIntro moves the session into the round_intro phase for the
 	// given round, clearing the per-question runner columns.
 	EnterRoundIntro(ctx context.Context, sessionID string, roundID int64) error
@@ -371,6 +397,10 @@ type Service struct {
 	advancer  Advancer
 	newCode   func() string
 	codeTries int
+	// startCountdown is how far in the future ArmStart stamps the last-call
+	// deadline. Zero falls back to DefaultStartCountdown so a service built
+	// without SetStartCountdown still arms a sane 60s countdown.
+	startCountdown time.Duration
 }
 
 // joinCodeAttempts caps how many distinct codes the generator tries
@@ -423,6 +453,16 @@ func (s *Service) SetPublisher(p Publisher) {
 // [Service.SetPublisher]: call during wiring, before any handler runs.
 func (s *Service) SetAdvancer(a Advancer) {
 	s.advancer = a
+}
+
+// SetStartCountdown overrides how far in the future [Service.ArmStart] stamps
+// the last-call deadline (#735). Zero or negative leaves the default
+// (DefaultStartCountdown). Same startup-only contract as [Service.SetPublisher].
+func (s *Service) SetStartCountdown(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	s.startCountdown = d
 }
 
 // CreateSession opens a hosted session for the given quiz on behalf of the
@@ -530,12 +570,13 @@ func (s *Service) SetReady(ctx context.Context, joinCode string, playerID int64,
 	return nil
 }
 
-// Start is the host's override to begin the game immediately, bypassing the
-// auto-start ready window. Only the host may call it. Marks the session
-// started and hands it to the runner to enter the first round at once.
-// Returns [ErrSessionNotFound] for an unknown code, [ErrNotHost] when the
-// caller is not the host, and [ErrSessionAlreadyStarted] when the session has
-// already left the lobby (treated as an idempotent no-op by the handler).
+// Start begins the game immediately (the host "Start now" control). Only the
+// host may call it. Marks the session started and hands it to the runner to
+// enter the first round at once, so it also skips (overrides) any armed
+// last-call countdown. Returns [ErrSessionNotFound] for an unknown code,
+// [ErrNotHost] when the caller is not the host, and [ErrSessionAlreadyStarted]
+// when the session has already left the lobby (treated as an idempotent no-op
+// by the handler).
 func (s *Service) Start(ctx context.Context, joinCode string, hostPlayerID int64) error {
 	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
 	if err != nil {
@@ -556,6 +597,63 @@ func (s *Service) Start(ctx context.Context, joinCode string, hostPlayerID int64
 	if s.advancer != nil {
 		s.advancer.Begin(ctx, sess.ID)
 	}
+
+	return nil
+}
+
+// ArmStart arms the host's last-call countdown (the "Start in 60s" control):
+// it stamps the absolute deadline at now + the configured countdown, so every
+// surface renders the same server-clock countdown and the runner starts the
+// game once it elapses. Host-gated and lobby-phase only. Joins during the
+// countdown do not reset it (the deadline is absolute). Re-arming while in the
+// lobby overwrites the deadline. Returns [ErrSessionNotFound] for an unknown
+// code, [ErrNotHost] when the caller is not the host, and [ErrNotInLobby] when
+// the session has already left the lobby.
+func (s *Service) ArmStart(ctx context.Context, joinCode string, hostPlayerID int64, now time.Time) error {
+	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
+	if err != nil {
+		return fmt.Errorf(errGetSessionByCodeFmt, err)
+	}
+	if sess.HostPlayerID != hostPlayerID {
+		return ErrNotHost
+	}
+
+	countdown := s.startCountdown
+	if countdown <= 0 {
+		countdown = DefaultStartCountdown
+	}
+	if err = s.store.ArmStart(ctx, sess.ID, now.Add(countdown)); err != nil {
+		return fmt.Errorf("failed to arm session start: %w", err)
+	}
+
+	// An armed countdown changes what every surface shows, so signal
+	// subscribers to re-GET the state (which now carries the deadline).
+	s.publish(sess.JoinCode, sess.Phase)
+
+	return nil
+}
+
+// CancelStart cancels an armed last-call countdown (the host "Cancel"
+// control), clearing the deadline so the lobby returns to waiting on the host.
+// Host-gated and lobby-phase only. Returns [ErrSessionNotFound] for an unknown
+// code, [ErrNotHost] when the caller is not the host, and [ErrNotInLobby] when
+// the session has already left the lobby.
+func (s *Service) CancelStart(ctx context.Context, joinCode string, hostPlayerID int64) error {
+	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
+	if err != nil {
+		return fmt.Errorf(errGetSessionByCodeFmt, err)
+	}
+	if sess.HostPlayerID != hostPlayerID {
+		return ErrNotHost
+	}
+
+	if err = s.store.CancelStart(ctx, sess.ID); err != nil {
+		return fmt.Errorf("failed to cancel session start: %w", err)
+	}
+
+	// A cleared countdown changes what every surface shows, so signal
+	// subscribers to re-GET the state.
+	s.publish(sess.JoinCode, sess.Phase)
 
 	return nil
 }
