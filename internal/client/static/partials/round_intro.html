@@ -1,0 +1,21 @@
+{{define "round-intro-card"}}
+<!-- Round title + optional summary shared by the solo (index.html) and live
+     (join.html) round-intro screens (#548, #748). Each surface wraps this in
+     its own round-intro conditional and keeps its surface-specific chrome
+     (solo: HUD chips, countdown bar, Continue button; live: the eyebrow) around
+     it. The Alpine expressions resolve in BOTH components: roundTitle() and
+     roundSummary() exist on GameApp and JoinApp alike. -->
+<h2 class="mb-4 font-display font-bold leading-[1.1] tracking-tight text-accent text-center
+           text-[clamp(1.4rem,4.5vw,2.4rem)]
+           lg:text-[clamp(2.25rem,4vw,4rem)]
+           2xl:text-[clamp(3rem,3.5vw,5.5rem)]"
+    data-testid="round-title"
+    x-text="roundTitle()"></h2>
+<template x-if="roundSummary()">
+    <p class="mb-6 lg:mb-10 font-display leading-snug text-text text-center
+              text-[clamp(1rem,3vw,1.5rem)]
+              lg:text-[clamp(1.25rem,2.5vw,2rem)]"
+       data-testid="round-summary"
+       x-text="roundSummary()"></p>
+</template>
+{{end}}

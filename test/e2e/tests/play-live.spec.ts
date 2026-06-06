@@ -81,6 +81,14 @@ test.describe('player synchronized play', () => {
     const startResp = await host.request.post(`/api/sessions/${joinCode}/start`);
     expect(startResp.status(), `start session: ${startResp.status()} ${await startResp.text()}`).toBe(204);
 
+    // Round intro (#748): the between-rounds screen names the round about to
+    // start. The seeded quiz lands every question in the default round titled
+    // "Round 1", so the title shows it and the eyebrow reads "Round 1 of 1" -
+    // never the old generic "next round" wording.
+    await expect(page.getByTestId('round-intro')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('round-title')).toHaveText('Round 1');
+    await expect(page.getByTestId('round-intro-eyebrow')).toHaveText('Round 1 of 1');
+
     // The question view appears once the runner issues the first question. The
     // question text is the only spoiler-free signal the player gets.
     const firstQuestion = QUIZ_QUESTIONS[0];

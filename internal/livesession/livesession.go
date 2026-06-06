@@ -202,6 +202,23 @@ type LobbyState struct {
 	// where RoundScore is 0 since no single round is in focus). Nil in every
 	// other phase. Ordered best-first, rank stamped 1-indexed.
 	Standings []*Standing
+	// CurrentRound describes the round the session is about to play: its title,
+	// summary, and position so the between-rounds screen names the round and can
+	// word its heading correctly on the first round (#748). Populated only in the
+	// round_intro phase; nil in every other phase.
+	CurrentRound *RoundInfo
+}
+
+// RoundInfo describes the round shown on the round_intro screen (#748): its
+// title and summary plus where it sits in the quiz, so a surface can show what
+// the round is about and tell the first round (which has no previous round)
+// apart from a later one. Number is 1-indexed; Total is the round count, so a
+// surface knows Number == 1 means the first round.
+type RoundInfo struct {
+	Title   string
+	Summary string
+	Number  int
+	Total   int
 }
 
 // Standing is one player's place in the session ranking shown between rounds
@@ -358,10 +375,12 @@ type SessionAnswer struct {
 }
 
 // QuizReader is the slice of the quiz store the service needs: load the
-// full quiz (for mode + lobby metadata). Kept narrow so the service does
-// not depend on the whole quiz.Store surface.
+// full quiz (for mode + lobby metadata) and its rounds (for the round_intro
+// title/summary, which GetQuiz does not load). Kept narrow so the service
+// does not depend on the whole quiz.Store surface.
 type QuizReader interface {
 	GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error)
+	ListRoundsByQuiz(ctx context.Context, quizID int64) ([]*quiz.Round, error)
 }
 
 // Publisher is the tiny seam the service uses to signal that a session's
@@ -736,6 +755,9 @@ func (s *Service) GetLobbyState(ctx context.Context, joinCode string, playerID i
 	if err = s.populateStandings(ctx, state); err != nil {
 		return nil, err
 	}
+	if err = s.populateRoundIntro(ctx, state); err != nil {
+		return nil, err
+	}
 
 	return state, nil
 }
@@ -897,6 +919,39 @@ func (s *Service) populateStandings(ctx context.Context, state *LobbyState) erro
 		state.Standings = rankStandings(standings)
 	default:
 		// Every other phase carries no standings.
+	}
+
+	return nil
+}
+
+// populateRoundIntro fills CurrentRound with the round the session is about to
+// play (its title, summary, and 1-indexed position), so the round_intro screen
+// names the round and words its heading correctly on the first round (#748).
+// Leaves CurrentRound nil in every other phase, and when the current round id
+// resolves to no round (a deleted round mid-game), so the surface falls back to
+// its generic copy rather than naming a stale round.
+func (s *Service) populateRoundIntro(ctx context.Context, state *LobbyState) error {
+	sess := state.Session
+	if sess.Phase != PhaseRoundIntro || sess.CurrentRoundID == nil {
+		return nil
+	}
+
+	rounds, err := s.quizzes.ListRoundsByQuiz(ctx, sess.QuizID)
+	if err != nil {
+		return fmt.Errorf("failed to list rounds for round intro: %w", err)
+	}
+
+	for i, r := range rounds {
+		if r.ID == *sess.CurrentRoundID {
+			state.CurrentRound = &RoundInfo{
+				Title:   r.Title,
+				Summary: r.Summary,
+				Number:  i + 1,
+				Total:   len(rounds),
+			}
+
+			break
+		}
 	}
 
 	return nil

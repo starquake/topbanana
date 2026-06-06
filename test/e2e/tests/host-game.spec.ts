@@ -112,10 +112,18 @@ test('host TV shows the live question, answered order, and the reveal', async ({
     await expect(page.locator('[data-player-row]')).toHaveCount(2);
 
     // Host starts the game now; the runner moves the session into the first
-    // question. The TV swaps from the lobby to the question view off the SSE
-    // tick. (round_intro is a brief hold; the question view is what we wait
-    // for.)
+    // round's intro, then the first question. The TV swaps phases off the SSE
+    // tick.
     await page.getByRole('button', { name: 'Start now' }).click();
+
+    // Round intro (#748): the TV names the round about to start. The seeded
+    // quiz lands every question in the default round titled "Round 1", so the
+    // title shows it and the eyebrow reads "Round 1 of 1" - never the old
+    // generic "Next round" wording.
+    const introView = page.locator('[data-phase-intro]');
+    await expect(introView).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('[data-round-title]')).toHaveText('Round 1');
+    await expect(page.locator('[data-round-eyebrow]')).toHaveText('Round 1 of 1');
 
     const questionView = page.locator('[data-phase-question]');
     await expect(questionView).toBeVisible({ timeout: 15_000 });

@@ -129,7 +129,11 @@ func (s *ShellHandlers) render(w http.ResponseWriter, r *http.Request, name stri
 		"ogImage":     func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
 		"envTitleTag": envtag.Get,
 	}
-	t, err := template.New(name).Funcs(funcs).ParseFS(s.fsys(), name)
+	// partials/round_intro.html holds the {{define "round-intro-card"}} partial
+	// shared by index.html (solo) and join.html (live). Parsing it alongside every
+	// shell keeps both able to invoke the partial; a missing or renamed file
+	// fails loudly here rather than rendering a blank card.
+	t, err := template.New(name).Funcs(funcs).ParseFS(s.fsys(), name, "partials/round_intro.html")
 	if err != nil {
 		s.logger.ErrorContext(r.Context(), "parse shell template", slog.Any("err", err), slog.String("template", name))
 		http.Error(w, "internal error", http.StatusInternalServerError)

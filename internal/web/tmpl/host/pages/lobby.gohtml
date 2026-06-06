@@ -91,18 +91,23 @@
             </section>
         </div>
 
-        {{/* ----- Round intro: a brief between-rounds hold while the runner
-             issues the first question. Kept minimal; the standings screens
-             (round_results / finished) are MP-9. ----- */}}
+        {{/* ----- Round intro: names the round about to start, mirroring the
+             solo client's round-intro card (#548, #748). The eyebrow reads
+             "Round N of M" so the first round never says "next round"; the
+             title and optional summary come from the round metadata. ----- */}}
         <div x-show="phase === 'round_intro'"
              class="flex-1 flex flex-col items-center justify-center gap-4 px-[clamp(1.5rem,4vw,4rem)] text-center"
              data-phase-intro>
-            <p class="m-0 text-text-dim text-[clamp(0.9rem,1.8vw,1.25rem)] font-semibold uppercase tracking-[0.18em]">
-                Get ready
-            </p>
-            <p class="m-0 font-display font-extrabold text-[clamp(2rem,6vw,4rem)] leading-tight">
-                Next round
-            </p>
+            <p class="m-0 text-text-dim text-[clamp(0.9rem,1.8vw,1.25rem)] font-semibold uppercase tracking-[0.18em]"
+               data-round-eyebrow
+               x-text="roundEyebrow()"></p>
+            <p class="m-0 font-display font-extrabold text-[clamp(2rem,6vw,4rem)] leading-tight"
+               data-round-title
+               x-text="roundTitle()"></p>
+            <p x-show="roundSummary()"
+               class="m-0 text-text-dim text-[clamp(1rem,2.5vw,1.75rem)] leading-snug max-w-[40ch]"
+               data-round-summary
+               x-text="roundSummary()"></p>
         </div>
 
         {{/* ----- Question + reveal: the live question, countdown bar, answer

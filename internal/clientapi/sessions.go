@@ -368,6 +368,22 @@ type sessionStateResponse struct {
 	// cumulative final standings in the finished phase. Null in every other
 	// phase. Ordered best-first, rank stamped 1-indexed.
 	Standings []sessionStandingResponse `json:"standings,omitempty"`
+	// Round describes the round the session is about to play (#748): its title,
+	// summary, and 1-indexed position, so the between-rounds screen names the
+	// round and words its heading correctly on the first round. Present only in
+	// the round_intro phase; omitted otherwise.
+	Round *sessionRoundResponse `json:"round,omitempty"`
+}
+
+// sessionRoundResponse is the round shown on the round_intro screen (#748).
+// number is 1-indexed and total is the round count, so a surface knows
+// number == 1 means the first round (no previous round) and words the
+// heading accordingly. summary is empty when the round has none.
+type sessionRoundResponse struct {
+	Title   string `json:"title"`
+	Summary string `json:"summary"`
+	Number  int    `json:"number"`
+	Total   int    `json:"total"`
 }
 
 // sessionStandingResponse is one player's place in the between-rounds /
@@ -476,6 +492,23 @@ func newSessionStateResponse(state *livesession.LobbyState) sessionStateResponse
 		StartAt:   state.Session.StartAt,
 		Question:  newSessionQuestionResponse(state),
 		Standings: newSessionStandingsResponse(state),
+		Round:     newSessionRoundResponse(state),
+	}
+}
+
+// newSessionRoundResponse projects the round_intro round onto the wire shape.
+// Returns nil outside the round_intro phase (and when the round id resolved to
+// no round), so the field is omitted from the JSON.
+func newSessionRoundResponse(state *livesession.LobbyState) *sessionRoundResponse {
+	if state.CurrentRound == nil {
+		return nil
+	}
+
+	return &sessionRoundResponse{
+		Title:   state.CurrentRound.Title,
+		Summary: state.CurrentRound.Summary,
+		Number:  state.CurrentRound.Number,
+		Total:   state.CurrentRound.Total,
 	}
 }
 
