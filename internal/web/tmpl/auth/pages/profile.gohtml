@@ -16,6 +16,10 @@
 
         <form action="/profile/display-name" method="POST" class="bg-surface border border-border-soft rounded-lg p-6">
             <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+            {{/* Carry the validated return target through the POST so the
+                 back link still points at the admin dashboard after a
+                 re-render. The handler re-validates it on the way in. */}}
+            {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
 
             <div class="form-field">
                 <label for="display_name" class="label-eyebrow">Name</label>
@@ -32,7 +36,7 @@
                  the right thumb on phones. */}}
             <div class="flex flex-row-reverse flex-wrap items-center justify-between gap-4 pt-2">
                 <button type="submit" class="btn-primary">Save</button>
-                <a href="/" class="text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">Back to home</a>
+                <a href="{{.BackHref}}" class="text-sm text-text-dim hover:text-text underline-offset-2 hover:underline">{{.BackLabel}}</a>
             </div>
         </form>
 

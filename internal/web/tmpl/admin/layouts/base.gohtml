@@ -41,9 +41,9 @@
     <script type="module" src="/assets/js/copy-prompt.js" defer></script>
     <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
 </head>
-<body class="bg-bg text-text font-sans antialiased min-h-screen leading-relaxed">
+<body class="bg-bg text-text font-sans antialiased min-h-dvh flex flex-col leading-relaxed">
 {{template "navbar" .}}
-<section class="max-w-shell mx-auto px-5 py-10">
+<section class="max-w-shell w-full mx-auto px-5 py-10 grow">
     {{template "content" .}}
 </section>
 {{/* Build stamp (#663): an unobtrusive footer on every admin page so an
@@ -51,8 +51,17 @@
      Production shows the release version; every other environment shows
      the commit. Reuses the home footer's muted utilities so no new
      Tailwind class is introduced. */}}
-<footer class="max-w-shell mx-auto px-5 py-6 w-full text-xs text-text-mute">
-    {{versionLabel}}
+<footer class="max-w-shell mx-auto px-5 py-6 w-full flex items-center justify-between gap-4 text-xs text-text-mute">
+    <span>{{versionLabel}}</span>
+    <form action="/logout" method="POST" class="inline-flex">
+        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+        <button type="submit"
+                class="inline-flex items-center min-h-[36px] px-3 py-2 border border-border rounded-sm bg-transparent text-text-dim text-xs uppercase font-semibold tracking-[0.14em]
+                       transition-colors hover:border-accent hover:text-text
+                       focus-visible:outline-none focus-visible:shadow-focus focus-visible:border-accent">
+            Log out
+        </button>
+    </form>
 </footer>
 <script>
     // Admin modals get dialog ARIA + focus management + Esc-to-close

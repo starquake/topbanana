@@ -107,6 +107,61 @@ func TestProfile_Integration(t *testing.T) {
 			t.Error(`body missing value="renamed-admin" on the displayName input after a successful rename`)
 		}
 	})
+
+	// #732: arriving from the admin chrome (?next=/admin) points the
+	// back link at the dashboard and stamps a hidden next field so the
+	// return target survives the rename POST.
+	t.Run("GET /profile?next=/admin returns to the admin dashboard", func(t *testing.T) {
+		body := profileGETURL(ctx, t, authn, srv.BaseURL+"/profile?next=%2Fadmin")
+		if !strings.Contains(body, `href="/admin"`) {
+			t.Error(`body missing href="/admin" back link`)
+		}
+		if !strings.Contains(body, "Back to admin") {
+			t.Error(`body missing "Back to admin" label`)
+		}
+		if !strings.Contains(body, `name="next" value="/admin"`) {
+			t.Error(`body missing hidden next field carrying /admin`)
+		}
+	})
+
+	// An off-allowlist next (external host, or a non-admin internal
+	// path) must not ride the back link - it falls back to home so the
+	// param cannot be turned into an open or surprise redirect.
+	t.Run("GET /profile with an unsafe next falls back to home", func(t *testing.T) {
+		for _, next := range []string{"https%3A%2F%2Fevil.example", "%2Fprofile%2Femail", "%2F%2Fevil.example"} {
+			body := profileGETURL(ctx, t, authn, srv.BaseURL+"/profile?next="+next)
+			if strings.Contains(body, "Back to admin") {
+				t.Errorf("next=%q leaked a Back to admin link", next)
+			}
+			if !strings.Contains(body, "Back to home") {
+				t.Errorf("next=%q did not fall back to the home link", next)
+			}
+		}
+	})
+}
+
+// profileGETURL fetches an arbitrary profile URL (so callers can pass a
+// ?next= query) and returns the response body. Unlike profileGET it
+// does not extract a CSRF token, since the back-link assertions only
+// read the rendered form.
+func profileGETURL(ctx context.Context, t *testing.T, client *http.Client, rawURL string) string {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("client.Do err = %v, want nil", err)
+	}
+	defer closeBodyNoError(t, resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll err = %v, want nil", err)
+	}
+
+	return string(body)
 }
 
 // profilePageSnapshot is the trio of (status, body, csrf token) the

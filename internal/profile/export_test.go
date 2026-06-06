@@ -10,3 +10,7 @@ var ValidatePasswordChangeInput = validatePasswordChangeInput
 // external test package can pin its rule table from input strings
 // without staging an HTTP request.
 var ExportValidateEmailChange = validateEmailChange
+
+// AdminNextPath exposes adminNextPath so the external test package can
+// pin the return-link allowlist (admin paths only, no open redirects).
+var AdminNextPath = adminNextPath
