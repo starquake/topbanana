@@ -165,6 +165,15 @@ test('host TV shows the live question, answered order, and the reveal', async ({
     await expect(correctOption).toHaveCount(1, { timeout: 15_000 });
     await expect(correctOption).toContainText('4');
     await expect(correctOption.locator('[data-correct-badge]')).toBeVisible();
+
+    // The answered-order badges also gain correctness at reveal: Casey picked
+    // the right option ("4") so her badge is marked correct, Dana picked a
+    // wrong one ("3") so his is marked incorrect (#734). The order stays
+    // answer order, so badge 0 is Casey and badge 1 is Dana.
+    await expect(badges.nth(0)).toHaveAttribute('data-correctness', 'correct', { timeout: 15_000 });
+    await expect(badges.nth(0).locator('[data-answered-name]')).toHaveText(casey);
+    await expect(badges.nth(1)).toHaveAttribute('data-correctness', 'incorrect');
+    await expect(badges.nth(1).locator('[data-answered-name]')).toHaveText(dana);
   } finally {
     await caseyCtx.close();
     await danaCtx.close();

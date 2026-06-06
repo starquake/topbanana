@@ -206,6 +206,12 @@ func runnerConfig(cfg *config.Config) livesession.RunnerConfig {
 	rc.RoundResultsBeat = beat
 	rc.AutoStartWindow = beat
 
+	// The reveal beat can be lengthened independently so a shrunk runner beat
+	// still leaves the revealed answer observable (e.g. in the e2e suite).
+	if cfg.SessionRevealBeat > 0 {
+		rc.RevealBeat = cfg.SessionRevealBeat
+	}
+
 	return rc
 }
 

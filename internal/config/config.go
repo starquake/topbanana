@@ -40,6 +40,10 @@ var ErrLoginCooldownNegative = errors.New("LOGIN_COOLDOWN must not be negative")
 // reveal beats and auto-start window, so a negative value is meaningless.
 var ErrSessionRunnerBeatNegative = errors.New("SESSION_RUNNER_BEAT must not be negative")
 
+// ErrSessionRevealBeatNegative is returned when SESSION_REVEAL_BEAT parses to a
+// negative duration.
+var ErrSessionRevealBeatNegative = errors.New("SESSION_REVEAL_BEAT must not be negative")
+
 // ErrSMTPConfigIncomplete is returned when SMTP env vars are partially
 // populated. SMTP is opt-in (an unconfigured instance still boots and
 // the no-op mailer kicks in), but a partial configuration is almost
@@ -157,6 +161,15 @@ type Config struct {
 	// integration suites shrink it to a few milliseconds so a hosted game
 	// marches through its phases without slowing the suite.
 	SessionRunnerBeat time.Duration
+
+	// SessionRevealBeat overrides only the post-answer reveal beat, on top of
+	// SessionRunnerBeat. Zero means "track SessionRunnerBeat". Parsed from
+	// SESSION_REVEAL_BEAT. The e2e suite shrinks SessionRunnerBeat to a few
+	// hundred ms to keep the suite fast, but that leaves the reveal phase too
+	// brief for a slow browser to observe the revealed answer before it
+	// advances; this knob keeps the reveal comfortably observable without
+	// slowing the other beats (mirrors REVEAL_DELAY for the pre-answer beat).
+	SessionRevealBeat time.Duration
 
 	// LoginCooldown is the per-IP minimum gap between POST /login attempts,
 	// passed into auth.NewLoginRateLimiter (#494). Defaults to 3s (mirrors
@@ -450,6 +463,12 @@ func parseTypedEnvVars(getenv func(string) string, c *Config) error {
 
 	if err := parseNonNegativeDuration(
 		getenv, "SESSION_RUNNER_BEAT", ErrSessionRunnerBeatNegative, &c.SessionRunnerBeat,
+	); err != nil {
+		return err
+	}
+
+	if err := parseNonNegativeDuration(
+		getenv, "SESSION_REVEAL_BEAT", ErrSessionRevealBeatNegative, &c.SessionRevealBeat,
 	); err != nil {
 		return err
 	}
