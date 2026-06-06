@@ -1,4 +1,5 @@
 import { sessionService } from '../services/SessionService.js';
+import { playerService } from '../services/PlayerService.js';
 import { runAnim } from '../util/anim.js';
 
 // JOIN_PATH_PATTERN matches /join/<code>, capturing the room code. The bare
@@ -119,6 +120,13 @@ export class JoinApp {
         // The SSE subscription handle, closed on teardown and before re-open.
         this.eventSource = null;
 
+        // The account display name to auto-join with, set once init resolves a
+        // logged-in player who has already chosen a custom name. Null for an
+        // anonymous visitor, or a logged-in player still on an auto-petname -
+        // both keep the name-entry form. When set, a known code skips the name
+        // phase and joins straight away under this name.
+        this.accountName = null;
+
         // --- In-game state (MP-7 / #684) -------------------------------------
         // Offset between the server clock and Date.now() in ms, refreshed from
         // serverNow in every state read. serverTime() applies it so the
@@ -193,6 +201,17 @@ export class JoinApp {
             }
         });
 
+        // Resolve the current player once. A logged-in player who has already
+        // chosen a custom name is auto-joined under that name, skipping the
+        // name form (the solo client treats the same isAuthenticated +
+        // hasCustomName pair as "named", #165). Best-effort: a failed fetch or
+        // an anonymous / unnamed player leaves accountName null, so the normal
+        // name-entry flow runs and joining is never blocked on this read.
+        const player = await playerService.getMe();
+        if (player && player.isAuthenticated && player.hasCustomName) {
+            this.accountName = player.displayName;
+        }
+
         const match = JOIN_PATH_PATTERN.exec(window.location.pathname);
         const urlCode = match ? decodeURIComponent(match[1]).toUpperCase() : '';
         const remembered = readRememberedSession();
@@ -209,11 +228,44 @@ export class JoinApp {
             if (resumed) return;
         }
 
-        // No resume: seed the form flow. A URL code drops the player on the
-        // name form; otherwise the enter-code form shows first.
+        // No resume: seed the form flow. With a URL code, a named player is
+        // auto-joined under their account name (skipping the name form), while
+        // anyone else lands on the name form. With no code, the enter-code
+        // form shows first.
         if (urlCode) {
             this.code = urlCode;
+            if (this.accountName) {
+                await this.autoJoin();
+                return;
+            }
             this.phase = 'name';
+        }
+    }
+
+    // autoJoin joins the current code under the player's account name, landing
+    // them straight in the lobby and skipping the name form. It shares the join
+    // path submitName uses, so a (very unlikely) display-name collision still
+    // resolves server-side. On a non-OK result it falls back to the name form
+    // so the player can recover (a notFound bounces to the code form).
+    async autoJoin() {
+        this.busy = true;
+        this.error = '';
+        try {
+            const result = await sessionService.join(this.code, this.accountName);
+            if (!result.ok) {
+                this.error = result.message;
+                this.phase = result.kind === 'notFound' ? 'code' : 'name';
+                if (result.kind === 'notFound') this.codeInput = this.code;
+                return;
+            }
+            this.myDisplayName = result.displayName;
+            this.isReady = result.isReady;
+            this.phase = 'lobby';
+            rememberSession(this.code, this.myDisplayName);
+            await this.refreshState();
+            this.subscribe();
+        } finally {
+            this.busy = false;
         }
     }
 
@@ -245,7 +297,9 @@ export class JoinApp {
         return true;
     }
 
-    // submitCode advances from the enter-code form to the name form. It does
+    // submitCode advances from the enter-code form. A named player (logged in
+    // with a custom name) is auto-joined under their account name, skipping the
+    // name form; anyone else moves to the name form. For the form path it does
     // not hit the network - the code is validated by the join attempt itself,
     // so a bad code surfaces as the same "no game found" message either way.
     submitCode() {
@@ -256,6 +310,10 @@ export class JoinApp {
         }
         this.error = '';
         this.code = trimmed;
+        if (this.accountName) {
+            void this.autoJoin();
+            return;
+        }
         this.phase = 'name';
     }
 
