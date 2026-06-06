@@ -165,6 +165,12 @@ const workerServer = (workerIndex: number) => {
       // seconds) so the synchronized-play specs advance through the phases
       // without paying the production dwell time.
       SESSION_RUNNER_BEAT: '500ms',
+      // Keep the post-answer reveal observable on slow CI browsers. The 500ms
+      // runner beat marches the phases fast, but the reveal (where the host TV
+      // lights the correct option + the correctness badges) needs a comfortable
+      // window for firefox to observe before the runner advances - mirrors
+      // REVEAL_DELAY for the pre-answer read beat (see #719).
+      SESSION_REVEAL_BEAT: '2s',
       // Disable the per-IP POST /login cooldown (#494, default 3s). The
       // suite logs in repeatedly from 127.0.0.1, so the cooldown would
       // falsely trip "Too many attempts" on back-to-back same-IP logins.
