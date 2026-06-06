@@ -97,6 +97,15 @@ const (
 	// a genuinely disconnected player ages out within this window and stops
 	// holding a question open.
 	ActiveWindow = 3 * HeartbeatInterval
+	// AbandonTimeout is how long a started (mid-game, not finished) session may
+	// go without a host heartbeat before the runner finishes it as abandoned.
+	// The host beats every HeartbeatInterval (10s) over its held SSE
+	// connection; 3 minutes is far longer than ActiveWindow (a player drop) on
+	// purpose, since finishing the room ends the game for everyone, so it
+	// tolerates a long host reconnect (laptop sleep, tab reload, network blip)
+	// before giving up. Lobbies are out of scope - only a started session is
+	// swept.
+	AbandonTimeout = 3 * time.Minute
 )
 
 // errGetSessionByCodeFmt is the wrap format every code-keyed lookup shares
@@ -126,7 +135,12 @@ type Session struct {
 	CreatedAt         time.Time
 	StartedAt         *time.Time
 	FinishedAt        *time.Time
-	Players           []*Player
+	// HostLastSeenAt is when the host last beat its held SSE connection; nil
+	// when the host has never beat. The runner's abandon sweep ages a started
+	// session from COALESCE(HostLastSeenAt, StartedAt) and finishes it once
+	// host presence is older than AbandonTimeout (MP-10).
+	HostLastSeenAt *time.Time
+	Players        []*Player
 }
 
 // Player is one roster row: a player who joined a session, with the
@@ -259,6 +273,11 @@ type Store interface {
 	// pair matches no roster row. Keyed on join code so the SSE handler need
 	// only carry the code it already gates on.
 	TouchLastSeen(ctx context.Context, joinCode string, playerID int64) error
+	// TouchHostLastSeen refreshes the host's host_last_seen_at, the
+	// host-presence heartbeat, for the session identified by join code. Returns
+	// [ErrSessionNotFound] when no session uses the code. Keyed on join code so
+	// the SSE handler need only carry the code it already gates on.
+	TouchHostLastSeen(ctx context.Context, joinCode string) error
 	// MarkPlayerLeft stamps left_at on the participant's roster row in the
 	// session identified by join code, dropping them from the live reads
 	// (roster, answered-order badges, standings). Returns [ErrNotParticipant]
@@ -618,25 +637,39 @@ func (s *Service) GetLobbyState(ctx context.Context, joinCode string, playerID i
 	return state, nil
 }
 
-// AuthorizeView resolves a join code to its canonical code and current
-// phase, gated to participants exactly like [GetLobbyState]: only the host
+// ViewAuthorization is the result of [Service.AuthorizeView]: the canonical
+// join code to subscribe under, the current phase that seeds the stream's
+// initial tick, and whether the caller is the session host. The handler beats
+// the host-presence heartbeat for the host and the participant heartbeat for a
+// roster player, so it needs IsHost to pick which (MP-10).
+type ViewAuthorization struct {
+	Code   string
+	Phase  Phase
+	IsHost bool
+}
+
+// AuthorizeView resolves a join code to its canonical code, current phase, and
+// host flag, gated to participants exactly like [GetLobbyState]: only the host
 // or a roster player passes. The SSE event handler (MP-2 / #679) calls this
 // before subscribing so a stranger who knows or guesses the code cannot
 // open an event stream and learn the session exists - it returns
 // [ErrNotParticipant] (which the handler maps to 404, same as an unknown
-// code) for a non-participant. The returned code is the canonical form to
-// subscribe under; the phase seeds the stream's initial tick.
-func (s *Service) AuthorizeView(ctx context.Context, joinCode string, playerID int64) (string, Phase, error) {
+// code) for a non-participant.
+func (s *Service) AuthorizeView(ctx context.Context, joinCode string, playerID int64) (ViewAuthorization, error) {
 	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
 	if err != nil {
-		return "", "", fmt.Errorf(errGetSessionByCodeFmt, err)
+		return ViewAuthorization{}, fmt.Errorf(errGetSessionByCodeFmt, err)
 	}
 
 	if !s.isParticipant(sess, playerID) {
-		return "", "", ErrNotParticipant
+		return ViewAuthorization{}, ErrNotParticipant
 	}
 
-	return sess.JoinCode, sess.Phase, nil
+	return ViewAuthorization{
+		Code:   sess.JoinCode,
+		Phase:  sess.Phase,
+		IsHost: sess.HostPlayerID == playerID,
+	}, nil
 }
 
 // TouchLastSeen refreshes the participant's last_seen_at heartbeat for the
@@ -648,6 +681,19 @@ func (s *Service) AuthorizeView(ctx context.Context, joinCode string, playerID i
 func (s *Service) TouchLastSeen(ctx context.Context, joinCode string, playerID int64) error {
 	if err := s.store.TouchLastSeen(ctx, normalizeJoinCode(joinCode), playerID); err != nil {
 		return fmt.Errorf("failed to touch session player last seen: %w", err)
+	}
+
+	return nil
+}
+
+// TouchHostLastSeen refreshes the host-presence heartbeat for the session
+// identified by join code. The SSE events handler calls it (in place of
+// TouchLastSeen) while the host's connection is held, so a host who
+// disconnects mid-game goes stale and the runner's abandon sweep finishes the
+// lingering session. Returns [ErrSessionNotFound] for an unknown code.
+func (s *Service) TouchHostLastSeen(ctx context.Context, joinCode string) error {
+	if err := s.store.TouchHostLastSeen(ctx, normalizeJoinCode(joinCode)); err != nil {
+		return fmt.Errorf("failed to touch session host last seen: %w", err)
 	}
 
 	return nil

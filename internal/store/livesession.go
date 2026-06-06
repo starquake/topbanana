@@ -355,6 +355,21 @@ func (s *LiveSessionStore) TouchLastSeen(ctx context.Context, joinCode string, p
 	return nil
 }
 
+// TouchHostLastSeen refreshes the host's host_last_seen_at heartbeat for the
+// session identified by join code. Returns [livesession.ErrSessionNotFound]
+// when no session uses the code.
+func (s *LiveSessionStore) TouchHostLastSeen(ctx context.Context, joinCode string) error {
+	res, err := s.q.TouchSessionHostLastSeen(ctx, joinCode)
+	if err != nil {
+		return fmt.Errorf("failed to touch session host last seen: %w", err)
+	}
+	if database.MustRowsAffected(res) == 0 {
+		return livesession.ErrSessionNotFound
+	}
+
+	return nil
+}
+
 // MarkPlayerLeft stamps left_at on the participant's roster row in the
 // session identified by join code, dropping them from the live reads
 // (roster, answered-order badges, standings). Idempotent: a second leave
@@ -514,6 +529,9 @@ func sessionFromRow(row db.Session) *livesession.Session {
 	}
 	if row.FinishedAt.Valid {
 		sess.FinishedAt = &row.FinishedAt.Time
+	}
+	if row.HostLastSeenAt.Valid {
+		sess.HostLastSeenAt = &row.HostLastSeenAt.Time
 	}
 
 	return sess

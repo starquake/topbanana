@@ -2,6 +2,7 @@ package migrations_test
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 
 	"github.com/pressly/goose/v3"
@@ -16,6 +17,72 @@ const sessionRunnerVersion = 20260606120000
 // sessionRoundResultsVersion is the MP-6 migration that rebuilds the sessions
 // parent table to add the round_results phase to the phase CHECK.
 const sessionRoundResultsVersion = 20260607120000
+
+// sessionHostLastSeenVersion is the MP-10 slice-3 migration that adds the
+// nullable host_last_seen_at column to sessions (a plain ADD COLUMN, no table
+// rebuild).
+const sessionHostLastSeenVersion = 20260608120000
+
+// TestSessionHostLastSeenMigration_Column pins the MP-10 slice-3 schema
+// (#687): host_last_seen_at exists on sessions, defaults to NULL, and accepts
+// a timestamp; the Down drops it and the re-Up adds it back. dbtest.Open
+// already ran every migration, so the live schema is what the Up produced.
+func TestSessionHostLastSeenMigration_Column(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := dbtest.Open(t)
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v", cerr)
+		}
+	})
+
+	var quizID int64
+	if err := db.QueryRowContext(
+		ctx,
+		`INSERT INTO quizzes (title, slug, description, created_by_player_id, mode)
+		 VALUES ('Live', 'live-host-seen-mig', 'd', 1, 'live') RETURNING id`,
+	).Scan(&quizID); err != nil {
+		t.Fatalf("seed quiz err = %v, want nil", err)
+	}
+	if _, err := db.ExecContext(
+		ctx,
+		`INSERT INTO sessions (id, quiz_id, host_player_id, join_code) VALUES ('sess-hs-1', ?, 1, 'HSN234')`,
+		quizID,
+	); err != nil {
+		t.Fatalf("seed session err = %v, want nil", err)
+	}
+
+	// A fresh row has NULL host_last_seen_at, and the column accepts a write.
+	var hostSeen sql.NullTime
+	if err := db.QueryRowContext(
+		ctx, "SELECT host_last_seen_at FROM sessions WHERE id = 'sess-hs-1'",
+	).Scan(&hostSeen); err != nil {
+		t.Fatalf("read host_last_seen_at err = %v, want nil", err)
+	}
+	if hostSeen.Valid {
+		t.Errorf("host_last_seen_at on a fresh row = %v, want NULL", hostSeen.Time)
+	}
+	if _, err := db.ExecContext(
+		ctx, "UPDATE sessions SET host_last_seen_at = CURRENT_TIMESTAMP WHERE id = 'sess-hs-1'",
+	); err != nil {
+		t.Errorf("set host_last_seen_at err = %v, want nil", err)
+	}
+
+	// Down drops the column; re-Up adds it back so a later write succeeds again.
+	if err := goose.DownTo(db, ".", sessionHostLastSeenVersion-1); err != nil {
+		t.Fatalf("goose.DownTo err = %v, want nil", err)
+	}
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("goose.Up after down err = %v, want nil", err)
+	}
+	if _, err := db.ExecContext(
+		ctx, "UPDATE sessions SET host_last_seen_at = CURRENT_TIMESTAMP WHERE id = 'sess-hs-1'",
+	); err != nil {
+		t.Errorf("set host_last_seen_at after re-up err = %v, want nil", err)
+	}
+}
 
 // TestSessionRoundResultsMigration_PhaseCheck pins the MP-6 schema (#683): the
 // widened phase CHECK accepts round_results, and the Down rebuild coerces a

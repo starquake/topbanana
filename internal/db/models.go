@@ -160,6 +160,7 @@ type Session struct {
 	CreatedAt         time.Time
 	StartedAt         sql.NullTime
 	FinishedAt        sql.NullTime
+	HostLastSeenAt    sql.NullTime
 }
 
 type SessionAnswer struct {

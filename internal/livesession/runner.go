@@ -209,6 +209,10 @@ func (r *Runner) advance(ctx context.Context, sessionID string, now time.Time) {
 		return
 	}
 
+	if r.abandonIfHostGone(ctx, sess, now) {
+		return
+	}
+
 	switch sess.Phase {
 	case PhaseLobby:
 		r.advanceLobby(ctx, sess, now)
@@ -427,6 +431,33 @@ func (r *Runner) issueQuestion(ctx context.Context, sess *Session, q *quiz.Quest
 	}
 	r.markPhase(sess.ID, now)
 	r.publish(sess.JoinCode, PhaseQuestion)
+}
+
+// abandonIfHostGone finishes a started, not-yet-finished session whose host
+// has not beat its heartbeat for longer than AbandonTimeout, so a room whose
+// host has dropped does not linger live forever. A lobby is out of scope (it
+// has not started, so there is nothing in flight to abandon); a finished
+// session is already terminal. The host's effective last-seen is
+// COALESCE(HostLastSeenAt, StartedAt) so a session that started but whose host
+// never beat still ages from start. Reports whether it abandoned, so the
+// caller skips the normal phase advance for this beat.
+func (r *Runner) abandonIfHostGone(ctx context.Context, sess *Session, now time.Time) bool {
+	if sess.Phase == PhaseLobby || sess.Phase == PhaseFinished {
+		return false
+	}
+	lastSeen := sess.HostLastSeenAt
+	if lastSeen == nil {
+		lastSeen = sess.StartedAt
+	}
+	if lastSeen == nil || !lastSeen.Before(now.Add(-AbandonTimeout)) {
+		return false
+	}
+
+	r.logger.InfoContext(ctx, "finishing abandoned session (host gone)",
+		slog.String(logSessionKey, sess.ID), slog.Time("hostLastSeen", *lastSeen))
+	r.finish(ctx, sess)
+
+	return true
 }
 
 // finish persists the finished transition, publishes, and drops the session's

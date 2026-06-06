@@ -131,6 +131,21 @@ func (h *runnerHarness) setLastSeen(t *testing.T, sessionID string, playerID int
 	}
 }
 
+// setHostLastSeen backdates (or clears, when at is the zero time) a session's
+// host_last_seen_at so a runner test can place the host on either side of the
+// abandon cutoff. Writes the timestamp in SQLite's CURRENT_TIMESTAMP text
+// format, matching how production stamps the column. Test-only fixture write.
+func (h *runnerHarness) setHostLastSeen(t *testing.T, sessionID string, at time.Time) {
+	t.Helper()
+	if _, err := h.db.ExecContext(
+		t.Context(),
+		"UPDATE sessions SET host_last_seen_at = ? WHERE id = ?",
+		at.UTC().Format("2006-01-02 15:04:05"), sessionID,
+	); err != nil {
+		t.Fatalf("setHostLastSeen err = %v, want nil", err)
+	}
+}
+
 func petnameFor(i int) string {
 	return "Player-" + string(rune('A'+i))
 }
@@ -471,6 +486,81 @@ func TestRunner_AllStaleRosterDoesNotEarlyClose(t *testing.T) {
 	h.tick(ctx)
 	if got, want := h.phase(t), PhaseReveal; got != want {
 		t.Fatalf("phase after timeout = %q, want %q (timeout close)", got, want)
+	}
+}
+
+// TestRunner_AbandonsHostGoneSession pins the MP-10 slice-3 sweep: a started,
+// mid-game session whose host_last_seen_at is older than AbandonTimeout is
+// finished by a runner tick, so a room whose host dropped does not linger live
+// forever.
+func TestRunner_AbandonsHostGoneSession(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	sessionID := h.sessionID(t)
+
+	// Host starts the game, then drops: their last host beat is well past the
+	// abandon cutoff.
+	if err := h.service.Start(ctx, h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+	if got, want := h.phase(t), PhaseRoundIntro; got != want {
+		t.Fatalf("phase after Start = %q, want %q", got, want)
+	}
+	h.setHostLastSeen(t, sessionID, h.clock.Now().Add(-AbandonTimeout-time.Minute))
+
+	h.tick(ctx)
+	final := h.reload(t)
+	if got, want := final.Phase, PhaseFinished; got != want {
+		t.Fatalf("phase after abandon sweep = %q, want %q", got, want)
+	}
+	if final.FinishedAt == nil {
+		t.Error("abandoned session has nil FinishedAt")
+	}
+}
+
+// TestRunner_DoesNotAbandonWithFreshHostBeat pins that a mid-game session whose
+// host beat recently is left running by the sweep.
+func TestRunner_DoesNotAbandonWithFreshHostBeat(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	sessionID := h.sessionID(t)
+
+	if err := h.service.Start(ctx, h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+	// The host beat just now, well inside the abandon window.
+	h.setHostLastSeen(t, sessionID, h.clock.Now())
+
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseRoundIntro; got != want {
+		t.Errorf("phase with fresh host beat = %q, want %q (not abandoned)", got, want)
+	}
+}
+
+// TestRunner_DoesNotAbandonLobby pins that the sweep never finishes a lobby:
+// only a started session is in scope, so a host who is slow to start (or never
+// beat) leaves the lobby intact rather than terminating it.
+func TestRunner_DoesNotAbandonLobby(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	sessionID := h.sessionID(t)
+
+	// A lobby with a long-stale host beat (and no started_at) must not be swept.
+	h.setHostLastSeen(t, sessionID, start.Add(-AbandonTimeout-time.Hour))
+
+	h.clock.advance(AbandonTimeout + time.Hour)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseLobby; got != want {
+		t.Errorf("lobby phase after sweep = %q, want %q (lobby never abandoned)", got, want)
 	}
 }
 

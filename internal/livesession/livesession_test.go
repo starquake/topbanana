@@ -195,6 +195,10 @@ func (*fakeStore) TouchLastSeen(context.Context, string, int64) error {
 	return errors.ErrUnsupported
 }
 
+func (*fakeStore) TouchHostLastSeen(context.Context, string) error {
+	return errors.ErrUnsupported
+}
+
 func (f *fakeStore) MarkPlayerLeft(context.Context, string, int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -518,25 +522,32 @@ func TestService_AuthorizeView_GatesNonParticipants(t *testing.T) {
 	store := &fakeStore{session: sess}
 	svc := NewService(store, &fakeQuiz{}, slog.Default())
 
-	// Host passes and gets the canonical code + phase back.
-	code, phase, err := svc.AuthorizeView(t.Context(), "room12", 1)
+	// Host passes and gets the canonical code + phase + host flag back.
+	view, err := svc.AuthorizeView(t.Context(), "room12", 1)
 	if err != nil {
 		t.Fatalf("AuthorizeView host err = %v, want nil", err)
 	}
-	if got, want := code, "ROOM12"; got != want {
+	if got, want := view.Code, "ROOM12"; got != want {
 		t.Errorf("AuthorizeView code = %q, want %q (canonical)", got, want)
 	}
-	if got, want := phase, PhaseLobby; got != want {
+	if got, want := view.Phase, PhaseLobby; got != want {
 		t.Errorf("AuthorizeView phase = %q, want %q", got, want)
 	}
+	if !view.IsHost {
+		t.Error("AuthorizeView host IsHost = false, want true")
+	}
 
-	// Roster player passes too.
-	if _, _, perr := svc.AuthorizeView(t.Context(), "ROOM12", 5); perr != nil {
+	// Roster player passes too, and is not flagged as the host.
+	playerView, perr := svc.AuthorizeView(t.Context(), "ROOM12", 5)
+	if perr != nil {
 		t.Errorf("AuthorizeView roster player err = %v, want nil", perr)
+	}
+	if playerView.IsHost {
+		t.Error("AuthorizeView roster player IsHost = true, want false")
 	}
 
 	// A stranger is rejected as a non-participant (handler maps to 404).
-	if _, _, serr := svc.AuthorizeView(t.Context(), "ROOM12", 999); !errors.Is(serr, ErrNotParticipant) {
+	if _, serr := svc.AuthorizeView(t.Context(), "ROOM12", 999); !errors.Is(serr, ErrNotParticipant) {
 		t.Errorf("AuthorizeView stranger err = %v, want %v", serr, ErrNotParticipant)
 	}
 }
@@ -547,7 +558,7 @@ func TestService_AuthorizeView_UnknownCode(t *testing.T) {
 	store := &fakeStore{} // nil session yields ErrSessionNotFound
 	svc := NewService(store, &fakeQuiz{}, slog.Default())
 
-	if _, _, err := svc.AuthorizeView(t.Context(), "NOPE99", 1); !errors.Is(err, ErrSessionNotFound) {
+	if _, err := svc.AuthorizeView(t.Context(), "NOPE99", 1); !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("AuthorizeView unknown code err = %v, want %v", err, ErrSessionNotFound)
 	}
 }
