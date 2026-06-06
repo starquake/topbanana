@@ -127,10 +127,16 @@ export class JoinApp {
         }
         // Closing the stream on unload avoids leaking a server-side
         // subscriber when the player navigates away or closes the tab; clearing
-        // the question timer stops a stale countdown interval from firing.
+        // the question timer stops a stale countdown interval from firing. Once
+        // the player has joined (the 'lobby' stage carries a code) we also fire
+        // a best-effort leave beacon so their row drops out of the roster,
+        // answered-order badges, and standings at once (MP-10).
         window.addEventListener('beforeunload', () => {
             this.closeStream();
             this.clearQuestionTimer();
+            if (this.phase === 'lobby' && this.code) {
+                sessionService.leave(this.code);
+            }
         });
     }
 

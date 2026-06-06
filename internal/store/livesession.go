@@ -355,6 +355,26 @@ func (s *LiveSessionStore) TouchLastSeen(ctx context.Context, joinCode string, p
 	return nil
 }
 
+// MarkPlayerLeft stamps left_at on the participant's roster row in the
+// session identified by join code, dropping them from the live reads
+// (roster, answered-order badges, standings). Idempotent: a second leave
+// matches no active row and returns [livesession.ErrNotParticipant], same as
+// a leave from a player who never joined.
+func (s *LiveSessionStore) MarkPlayerLeft(ctx context.Context, joinCode string, playerID int64) error {
+	res, err := s.q.MarkSessionPlayerLeft(ctx, db.MarkSessionPlayerLeftParams{
+		PlayerID: playerID,
+		JoinCode: joinCode,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to mark session player left: %w", err)
+	}
+	if database.MustRowsAffected(res) == 0 {
+		return livesession.ErrNotParticipant
+	}
+
+	return nil
+}
+
 // sqliteTimestampLayout matches SQLite's CURRENT_TIMESTAMP text encoding
 // ('YYYY-MM-DD HH:MM:SS'). The active-window cutoff is formatted with it so the
 // last_seen_at comparison stays a same-encoding string compare; binding a Go

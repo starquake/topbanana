@@ -96,6 +96,16 @@ export class SessionService {
         return { ok: true };
     }
 
+    // leave drops the caller from the session so their row falls out of the
+    // roster, answered-order badges, and standings at once (MP-10). It fires
+    // on tab close via navigator.sendBeacon, which the browser flushes during
+    // unload where a fetch would be cancelled. Best-effort: sendBeacon returns
+    // whether the request was queued, and a missed leave self-heals (the player
+    // ages out of the active window), so there is nothing to await or recover.
+    leave(code) {
+        return navigator.sendBeacon(`/api/sessions/${encodeURIComponent(code)}/leave`);
+    }
+
     // getState returns the authoritative lobby state, or null on a 404
     // (the session vanished, or the caller is no longer a participant). The
     // component treats null as "the lobby is gone" and surfaces it rather

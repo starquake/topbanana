@@ -259,6 +259,11 @@ type Store interface {
 	// pair matches no roster row. Keyed on join code so the SSE handler need
 	// only carry the code it already gates on.
 	TouchLastSeen(ctx context.Context, joinCode string, playerID int64) error
+	// MarkPlayerLeft stamps left_at on the participant's roster row in the
+	// session identified by join code, dropping them from the live reads
+	// (roster, answered-order badges, standings). Returns [ErrNotParticipant]
+	// when no active roster row matches, which makes a repeat leave a no-op.
+	MarkPlayerLeft(ctx context.Context, joinCode string, playerID int64) error
 	// CountActiveUnanswered returns how many roster players are still active
 	// (last_seen_at at or after since) yet have not picked for the given
 	// session question. The runner early-closes once this reaches 0.
@@ -644,6 +649,30 @@ func (s *Service) TouchLastSeen(ctx context.Context, joinCode string, playerID i
 	if err := s.store.TouchLastSeen(ctx, normalizeJoinCode(joinCode), playerID); err != nil {
 		return fmt.Errorf("failed to touch session player last seen: %w", err)
 	}
+
+	return nil
+}
+
+// Leave drops the calling player from the session identified by join code:
+// it stamps left_at so the player falls out of the live reads (roster,
+// answered-order badges, standings) and publishes a tick so the host/TV
+// surface re-GETs the now-smaller state. Distinct from heartbeat staleness,
+// which only stops a dropped player stalling a question - a left player is
+// gone from every surface immediately. Returns [ErrSessionNotFound] for an
+// unknown code and [ErrNotParticipant] when the caller holds no active roster
+// row (which also makes a repeat leave an idempotent no-op).
+func (s *Service) Leave(ctx context.Context, joinCode string, playerID int64) error {
+	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
+	if err != nil {
+		return fmt.Errorf(errGetSessionByCodeFmt, err)
+	}
+
+	if err = s.store.MarkPlayerLeft(ctx, sess.JoinCode, playerID); err != nil {
+		return fmt.Errorf("failed to mark player left: %w", err)
+	}
+
+	// The roster shrank, so signal subscribers to re-GET the smaller state.
+	s.publish(sess.JoinCode, sess.Phase)
 
 	return nil
 }
