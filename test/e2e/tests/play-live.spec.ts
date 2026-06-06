@@ -76,8 +76,8 @@ test.describe('player synchronized play', () => {
     await page.getByTestId('join-name-submit').click();
     await expect(page.getByTestId('lobby-roster').getByText(quincy)).toBeVisible();
 
-    // Host starts the game immediately (bypassing the auto-start window). The
-    // runner drives round_intro -> question on its own beat.
+    // Host starts the game; a lobby stays put until this fires. The runner
+    // then drives round_intro -> question on its own beat.
     const startResp = await host.request.post(`/api/sessions/${joinCode}/start`);
     expect(startResp.status(), `start session: ${startResp.status()} ${await startResp.text()}`).toBe(204);
 

@@ -200,8 +200,8 @@ func (s *LiveSessionStore) GetSessionByID(ctx context.Context, id string) (*live
 }
 
 // MarkStarted stamps started_at on a lobby session and reports whether it won
-// the race. The UPDATE is scoped to started_at IS NULL, so exactly one of a
-// host Start / auto-start sees a row affected.
+// the race. The UPDATE is scoped to started_at IS NULL, so a double host Start
+// sees exactly one row affected.
 func (s *LiveSessionStore) MarkStarted(ctx context.Context, sessionID string) (bool, error) {
 	res, err := s.q.StartSession(ctx, sessionID)
 	if err != nil {

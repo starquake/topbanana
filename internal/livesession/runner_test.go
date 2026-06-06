@@ -54,7 +54,6 @@ var runnerCfg = RunnerConfig{
 	RoundIntroBeat:   time.Second,
 	RevealBeat:       time.Second,
 	RoundResultsBeat: time.Second,
-	AutoStartWindow:  2 * time.Second,
 	QuestionReadBeat: time.Second,
 }
 
@@ -410,65 +409,39 @@ func TestRunner_DoesNotEarlyCloseDuringReadBeat(t *testing.T) {
 	}
 }
 
-// TestRunner_AutoStart drives the auto-start path: the lobby starts itself
-// once every joined player has been ready for the auto-start window, with no
-// host Start.
-func TestRunner_AutoStart(t *testing.T) {
+// TestRunner_LobbyWaitsForHostStart pins that a lobby never starts on its own:
+// even with every joined player ready and the clock advanced well past any
+// former auto-start window, ticks leave the session in the lobby phase. Only
+// the host's Start transitions it into the first round_intro.
+func TestRunner_LobbyWaitsForHostStart(t *testing.T) {
 	t.Parallel()
 
 	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
 	h := newRunnerHarness(t, start, [][]bool{{true}})
 	ctx := t.Context()
 
-	// Not all ready yet: a tick must not start the game.
-	h.tick(ctx)
-	if got, want := h.phase(t), PhaseLobby; got != want {
-		t.Fatalf("phase with no ready players = %q, want %q", got, want)
-	}
-
-	// Everyone readies; the window starts now (first all-ready observation).
+	// Everyone readies; the runner must still not start the game.
 	for _, pid := range h.players {
 		if err := h.service.SetReady(ctx, h.code, pid, true); err != nil {
 			t.Fatalf("SetReady err = %v, want nil", err)
 		}
 	}
-	h.tick(ctx) // observes all-ready, seeds the window; still lobby.
-	if got, want := h.phase(t), PhaseLobby; got != want {
-		t.Fatalf("phase at window start = %q, want %q (window not elapsed)", got, want)
+
+	// Tick repeatedly across a long stretch of time: the lobby stays put.
+	for range 5 {
+		h.clock.advance(time.Minute)
+		h.tick(ctx)
+		if got, want := h.phase(t), PhaseLobby; got != want {
+			t.Fatalf("phase with all ready and no host start = %q, want %q", got, want)
+		}
 	}
 
-	// Window elapses -> auto-start into round_intro.
-	h.clock.advance(runnerCfg.AutoStartWindow)
-	h.tick(ctx)
+	// The host Start transitions the lobby into the first round_intro.
+	if err := h.service.Start(ctx, h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
 	if got, want := h.phase(t), PhaseRoundIntro; got != want {
-		t.Fatalf("phase after auto-start window = %q, want %q", got, want)
-	}
-}
-
-// TestRunner_UnreadyResetsAutoStart pins that a player un-readying resets the
-// auto-start window so the game does not start under the original timer.
-func TestRunner_UnreadyResetsAutoStart(t *testing.T) {
-	t.Parallel()
-
-	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
-	h := newRunnerHarness(t, start, [][]bool{{true}})
-	ctx := t.Context()
-
-	for _, pid := range h.players {
-		if err := h.service.SetReady(ctx, h.code, pid, true); err != nil {
-			t.Fatalf("SetReady err = %v, want nil", err)
-		}
-	}
-	h.tick(ctx) // seeds the window.
-
-	// One player un-readies before the window elapses; the window must reset.
-	if err := h.service.SetReady(ctx, h.code, h.players[0], false); err != nil {
-		t.Fatalf("SetReady false err = %v, want nil", err)
-	}
-	h.clock.advance(runnerCfg.AutoStartWindow)
-	h.tick(ctx)
-	if got, want := h.phase(t), PhaseLobby; got != want {
-		t.Fatalf("phase after un-ready = %q, want %q (window reset)", got, want)
+		t.Fatalf("phase after host Start = %q, want %q", got, want)
 	}
 }
 

@@ -71,6 +71,10 @@ test.describe('player join + lobby', () => {
     const aliceRow = roster.locator('li', { hasText: alice });
     await expect(aliceRow).toHaveAttribute('data-ready', 'false');
 
+    // The lobby never starts on its own; it tells the player it is waiting for
+    // the host to start the game.
+    await expect(page.getByTestId('waiting-for-host')).toBeVisible();
+
     // Toggle ready and confirm it reflects on the player's own row.
     await page.getByTestId('ready-toggle').click();
     await expect(aliceRow).toHaveAttribute('data-ready', 'true');

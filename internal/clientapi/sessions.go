@@ -166,8 +166,8 @@ func HandleSessionReady(logger *slog.Logger, service *livesession.Service) http.
 	})
 }
 
-// HandleSessionStart is the host's override to begin the game immediately,
-// bypassing the auto-start ready window. Only the host may call it. Returns
+// HandleSessionStart begins the game on the host's request: a lobby waits in
+// the lobby phase until the host calls this. Only the host may call it. Returns
 // 204 on success, 403 when the caller is not the host, 404 for an unknown
 // code, and 204 (idempotent no-op) when the session has already started.
 func HandleSessionStart(logger *slog.Logger, service *livesession.Service) http.Handler {

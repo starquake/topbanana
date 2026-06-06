@@ -156,8 +156,8 @@ ORDER BY sp.joined_at, sp.id;
 
 -- name: ListLiveSessionIDs :many
 -- Ids of every session not yet finished, in creation order. The runner scans
--- these each beat to auto-start lobbies and advance in-flight games; finished
--- sessions are skipped so the scan stays bounded to active rooms.
+-- these each beat to advance in-flight games; finished sessions are skipped so
+-- the scan stays bounded to active rooms.
 SELECT id
 FROM sessions
 WHERE phase != 'finished'
@@ -165,8 +165,8 @@ ORDER BY created_at, id;
 
 -- name: StartSession :execresult
 -- Stamps started_at and moves the session out of the lobby. Scoped to a
--- session still in the lobby so a re-issued start (host double-click, or the
--- auto-start racing the host) is a no-op rather than resetting the clock.
+-- session still in the lobby so a re-issued start (a host double-click) is a
+-- no-op rather than resetting the clock.
 UPDATE sessions
 SET started_at = CURRENT_TIMESTAMP
 WHERE id = ?

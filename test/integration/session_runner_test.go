@@ -152,7 +152,7 @@ func TestSessionRunner_HostStartQuestionAnswerReveal(t *testing.T) {
 	player := newAnonClient(t)
 	joinSession(ctx, t, player, baseURL, code, "Solo")
 
-	// Host Start overrides the auto-start window: 204 and the runner begins.
+	// Host Start begins the game: 204 and the runner advances the lobby.
 	startSession(ctx, t, host, baseURL, code)
 
 	// The runner walks round_intro -> question. In the question phase the

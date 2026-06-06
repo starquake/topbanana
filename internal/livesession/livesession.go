@@ -47,8 +47,7 @@ var (
 
 	// ErrSessionAlreadyStarted is returned by [Service.Start] when the
 	// session has already left the lobby. Handlers treat it as an
-	// idempotent no-op (the host clicked start twice or the auto-start
-	// raced the host).
+	// idempotent no-op (the host clicked start twice).
 	ErrSessionAlreadyStarted = errors.New("session has already started")
 
 	// ErrQuestionNotOpen is returned by [Service.SubmitAnswer] when the
@@ -245,8 +244,8 @@ type Store interface {
 	GetSessionByID(ctx context.Context, id string) (*Session, error)
 	// MarkStarted stamps started_at on a session still in the lobby and
 	// reports whether it won the race (true) or the session had already
-	// started (false). Used by both the host Start and the auto-start so
-	// only one of them issues the first round.
+	// started (false), so a double host Start issues the first round only
+	// once.
 	MarkStarted(ctx context.Context, sessionID string) (bool, error)
 	// EnterRoundIntro moves the session into the round_intro phase for the
 	// given round, clearing the per-question runner columns.
@@ -530,12 +529,12 @@ func (s *Service) SetReady(ctx context.Context, joinCode string, playerID int64,
 	return nil
 }
 
-// Start is the host's override to begin the game immediately, bypassing the
-// auto-start ready window. Only the host may call it. Marks the session
-// started and hands it to the runner to enter the first round at once.
-// Returns [ErrSessionNotFound] for an unknown code, [ErrNotHost] when the
-// caller is not the host, and [ErrSessionAlreadyStarted] when the session has
-// already left the lobby (treated as an idempotent no-op by the handler).
+// Start begins the game: a lobby waits in the lobby phase until the host calls
+// this. Only the host may call it. Marks the session started and hands it to
+// the runner to enter the first round at once. Returns [ErrSessionNotFound]
+// for an unknown code, [ErrNotHost] when the caller is not the host, and
+// [ErrSessionAlreadyStarted] when the session has already left the lobby
+// (treated as an idempotent no-op by the handler).
 func (s *Service) Start(ctx context.Context, joinCode string, hostPlayerID int64) error {
 	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
 	if err != nil {
