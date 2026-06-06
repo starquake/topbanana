@@ -1272,3 +1272,64 @@ func TestLiveSessionStore_MarkPlayerLeft_ExcludesFromStandings(t *testing.T) {
 		t.Fatalf("answers after leave = %d, want %d (both, scoring read is unfiltered)", got, want)
 	}
 }
+
+// TestLiveSessionStore_SessionHasPlayer pins the reconnect/resume gate read: it
+// reports true for a player who holds a roster row, stays true after that
+// player is marked left (unlike the live roster, it is NOT filtered by
+// left_at), and reports false for a player who never joined.
+func TestLiveSessionStore_SessionHasPlayer(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	playerStore := NewPlayerStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	qz := newLiveQuiz(t, quizStore)
+
+	sess := &livesession.Session{QuizID: qz.ID, HostPlayerID: seededAdminID, JoinCode: "HASP23"}
+	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+
+	joined, err := playerStore.CreateAnonymousPlayer(t.Context(), "hasp-joined")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer joined err = %v, want nil", err)
+	}
+	stranger, err := playerStore.CreateAnonymousPlayer(t.Context(), "hasp-stranger")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer stranger err = %v, want nil", err)
+	}
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, joined.ID, "Joined"); err != nil {
+		t.Fatalf("AddPlayer err = %v, want nil", err)
+	}
+
+	has, err := sessionStore.SessionHasPlayer(t.Context(), "HASP23", joined.ID)
+	if err != nil {
+		t.Fatalf("SessionHasPlayer joined err = %v, want nil", err)
+	}
+	if !has {
+		t.Error("SessionHasPlayer joined = false, want true")
+	}
+
+	// After leaving, the row is still present (left_at stamped), so the resume
+	// gate still sees the player even though the live roster excludes them.
+	if err = sessionStore.MarkPlayerLeft(t.Context(), "HASP23", joined.ID); err != nil {
+		t.Fatalf("MarkPlayerLeft err = %v, want nil", err)
+	}
+	has, err = sessionStore.SessionHasPlayer(t.Context(), "HASP23", joined.ID)
+	if err != nil {
+		t.Fatalf("SessionHasPlayer after leave err = %v, want nil", err)
+	}
+	if !has {
+		t.Error("SessionHasPlayer after leave = false, want true (left_at is not filtered)")
+	}
+
+	// A player who never joined matches no row.
+	has, err = sessionStore.SessionHasPlayer(t.Context(), "HASP23", stranger.ID)
+	if err != nil {
+		t.Fatalf("SessionHasPlayer stranger err = %v, want nil", err)
+	}
+	if has {
+		t.Error("SessionHasPlayer stranger = true, want false (never joined)")
+	}
+}

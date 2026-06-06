@@ -14,6 +14,57 @@ const QUESTION_OPTION_TONES = ['btn-answer-tone-a', 'btn-answer-tone-b', 'btn-an
 // growing each bar from its pre-round total to its new total (ms).
 const STANDINGS_BAR_DURATION = 900;
 
+// SESSION_STORAGE_KEY holds the remembered { code, name } the player landed
+// with, so a reload or a brief drop can resume by re-joining without the player
+// re-entering the code or name (MP-10 / #687). One key; cleared when the lobby
+// is gone or on an explicit leave.
+const SESSION_STORAGE_KEY = 'topbanana.session';
+
+// rememberSession persists the join code + landed display name so a reload can
+// resume. Best-effort: a storage exception (private mode, quota) is swallowed -
+// resume is a convenience, not a correctness requirement.
+function rememberSession(code, name) {
+    try {
+        window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ code, name }));
+    } catch {
+        // localStorage may be unavailable; resume simply won't fire next load.
+    }
+}
+
+// forgetSession clears the remembered entry. Called when the lobby is gone
+// (session ended / not a participant) or on an explicit leave.
+function forgetSession() {
+    try {
+        window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch {
+        // Nothing to recover from; the stale entry self-heals on the next
+        // failed resume (a 404/409 re-clears it).
+    }
+}
+
+// readRememberedSession returns the remembered { code, name }, or null when
+// there is nothing usable stored. Guards against a malformed or partial entry.
+function readRememberedSession() {
+    let raw;
+    try {
+        raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
+    } catch {
+        return null;
+    }
+    if (!raw) return null;
+    try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.code === 'string' && typeof parsed.name === 'string'
+            && parsed.code !== '' && parsed.name !== '') {
+            return { code: parsed.code, name: parsed.name };
+        }
+    } catch {
+        // Fall through to the cleanup below.
+    }
+    forgetSession();
+    return null;
+}
+
 // JoinApp is the Alpine component behind the player join + lobby + in-game
 // surface (MP-4 / #681, MP-7 / #684). It is deliberately separate from gameApp
 // (the solo client) and from the host/TV surface: it owns only the player's
@@ -116,21 +167,24 @@ export class JoinApp {
         this.lastStandingsKey = null;
     }
 
-    // init resolves the room code from the URL. A /join/{code} deep link lands
-    // straight on the name form; the bare /join entry shows the enter-code
-    // form first.
-    init() {
-        const match = JOIN_PATH_PATTERN.exec(window.location.pathname);
-        if (match) {
-            this.code = decodeURIComponent(match[1]).toUpperCase();
-            this.phase = 'name';
-        }
+    // init resolves the room code (from a /join/{code} deep link or a
+    // remembered session) and attempts to resume before showing any form. A
+    // /join/{code} deep link otherwise lands on the name form; the bare /join
+    // entry with no remembered session shows the enter-code form first.
+    async init() {
         // Closing the stream on unload avoids leaking a server-side
         // subscriber when the player navigates away or closes the tab; clearing
         // the question timer stops a stale countdown interval from firing. Once
         // the player has joined (the 'lobby' stage carries a code) we also fire
         // a best-effort leave beacon so their row drops out of the roster,
         // answered-order badges, and standings at once (MP-10).
+        //
+        // beforeunload also fires on a reload, so a reloading player may be
+        // marked left here before the reloaded page comes back. That race is
+        // harmless: resume re-Joins, which revives the left roster row (the
+        // server's resume gate accepts a prior participant regardless of
+        // left_at). The remembered session below is what makes the reload land
+        // back in the lobby.
         window.addEventListener('beforeunload', () => {
             this.closeStream();
             this.clearQuestionTimer();
@@ -138,6 +192,57 @@ export class JoinApp {
                 sessionService.leave(this.code);
             }
         });
+
+        const match = JOIN_PATH_PATTERN.exec(window.location.pathname);
+        const urlCode = match ? decodeURIComponent(match[1]).toUpperCase() : '';
+        const remembered = readRememberedSession();
+        // Prefer the URL code (an explicit deep link) over a remembered one, but
+        // reuse the remembered name when it belongs to the same room so a reload
+        // of a deep link resumes too.
+        const resumeCode = urlCode || (remembered ? remembered.code : '');
+        const resumeName = remembered && (!urlCode || remembered.code === urlCode)
+            ? remembered.name
+            : '';
+
+        if (resumeCode && resumeName) {
+            const resumed = await this.tryResume(resumeCode, resumeName);
+            if (resumed) return;
+        }
+
+        // No resume: seed the form flow. A URL code drops the player on the
+        // name form; otherwise the enter-code form shows first.
+        if (urlCode) {
+            this.code = urlCode;
+            this.phase = 'name';
+        }
+    }
+
+    // tryResume attempts to rejoin code with the remembered name, landing the
+    // player straight in the lobby on success. A re-Join revives a prior
+    // participant's roster row (even one marked left by the unload beacon), so a
+    // reload resumes without re-entering the code or name; the server-derived
+    // countdown re-anchors on the next refreshState. On a closed lobby (409 for
+    // a never-joined player) or an unknown room (404) it clears the remembered
+    // entry and falls back to the normal flow. Returns whether resume landed.
+    async tryResume(code, name) {
+        let result;
+        try {
+            result = await sessionService.join(code, name);
+        } catch {
+            return false;
+        }
+        if (!result.ok) {
+            forgetSession();
+            return false;
+        }
+        this.code = code;
+        this.myDisplayName = result.displayName;
+        this.isReady = result.isReady;
+        this.phase = 'lobby';
+        rememberSession(this.code, this.myDisplayName);
+        await this.refreshState();
+        this.subscribe();
+        return true;
     }
 
     // submitCode advances from the enter-code form to the name form. It does
@@ -182,6 +287,9 @@ export class JoinApp {
             this.myDisplayName = result.displayName;
             this.isReady = result.isReady;
             this.phase = 'lobby';
+            // Remember the landed code + name so a reload or brief drop resumes
+            // straight into the lobby without re-entering them (MP-10 / #687).
+            rememberSession(this.code, this.myDisplayName);
             await this.refreshState();
             this.subscribe();
         } finally {
@@ -230,6 +338,9 @@ export class JoinApp {
             this.lobbyClosed = true;
             this.closeStream();
             this.clearQuestionTimer();
+            // The room is gone or we are no longer a participant, so a future
+            // load must not try to resume into it.
+            forgetSession();
             return;
         }
         this.state = state;
