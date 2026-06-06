@@ -1,15 +1,13 @@
 import { sessionService } from '../services/SessionService.js';
 import { playerService } from '../services/PlayerService.js';
 import { runAnim } from '../util/anim.js';
+import { clockOffsetFromServerNow, serverTime } from '../util/serverClock.js';
+import { optionStateClass } from '../util/answerOptions.js';
 
 // JOIN_PATH_PATTERN matches /join/<code>, capturing the room code. The bare
 // /join entry (enter-code form) has no capture group, so the component falls
 // back to the typed-code phase there.
 const JOIN_PATH_PATTERN = /^\/join\/([^/]+)\/?$/;
-
-// QUESTION_OPTION_TONES cycles the four answer-button tones over a question's
-// options, matching the solo client's per-index Kahoot-style colours.
-const QUESTION_OPTION_TONES = ['btn-answer-tone-a', 'btn-answer-tone-b', 'btn-answer-tone-c', 'btn-answer-tone-d'];
 
 // STANDINGS_BAR_DURATION is how long the between-rounds bar graph spends
 // growing each bar from its pre-round total to its new total (ms).
@@ -459,17 +457,15 @@ export class JoinApp {
     // clock rather than a skewed device clock (mirrors the solo client, #180).
     // A missing or unparseable serverNow leaves the offset untouched.
     syncClockFrom(state) {
-        if (!state || !state.serverNow) return;
-        const serverMs = new Date(state.serverNow).getTime();
-        if (!Number.isFinite(serverMs)) return;
-        this.clockOffset = serverMs - Date.now();
+        const offset = clockOffsetFromServerNow(state && state.serverNow);
+        if (offset !== null) this.clockOffset = offset;
     }
 
     // serverTime returns the current time in ms as the server sees it, using
     // the offset captured on the last state read. All countdown math goes
     // through this helper.
     serverTime() {
-        return Date.now() + this.clockOffset;
+        return serverTime(this.clockOffset);
     }
 
     // syncQuestionFromState reconciles the in-game question view with the
@@ -823,17 +819,11 @@ export class JoinApp {
     // correct option(s) light up, a wrong pick is flagged, and everything else
     // dims.
     optionStateClass(option, idx) {
-        if (this.isRevealed()) {
-            if (this.correctOptionIds().includes(option.id)) return 'btn-answer-correct';
-            if (this.pickedOptionId === option.id) return 'btn-answer-wrong';
-            return 'btn-answer-dim';
-        }
-        const tone = QUESTION_OPTION_TONES[idx % QUESTION_OPTION_TONES.length];
-        // The player's locked-in pick keeps its tone but gains a filled
-        // background + accent ring so the answered/waiting state is legible
-        // without leaking correctness. Uses existing theme-token utilities so
-        // no new CSS class is needed.
-        if (this.pickedOptionId === option.id) return `btn-answer ${tone} bg-surface-2 ring-2 ring-accent`;
-        return `btn-answer ${tone}`;
+        return optionStateClass(option, idx, {
+            revealed: this.isRevealed(),
+            correctIds: this.correctOptionIds(),
+            pickedId: this.pickedOptionId,
+            highlightPick: true,
+        });
     }
 }
