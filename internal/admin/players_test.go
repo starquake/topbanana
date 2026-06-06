@@ -41,6 +41,87 @@ func TestHandlePlayersList_RendersRows(t *testing.T) {
 	}
 }
 
+func TestHandlePlayersList_RendersRoleBadges(t *testing.T) {
+	t.Parallel()
+
+	env := newAdminEnv(t)
+	// The first credentialled registrant claims the admin slot; a host row
+	// (promoted after creation, since host is assignment-only) and a
+	// plain-player row pin the badge mapping. The badges carry the literal
+	// role word inside a <span>, so the assertions match the rendered tag
+	// rather than the bare word (which also appears as the account-type
+	// label).
+	env.seedVerifiedPlayer(t, "adminuser", "admin@example.test", auth.RoleAdmin)
+	env.seedHostPlayer(t, "hostuser", "host@example.test")
+	env.seedVerifiedPlayer(t, "playeruser", "player@example.test", auth.RolePlayer)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/players", nil)
+	HandlePlayersList(slog.New(slog.DiscardHandler), nil, env.lister).ServeHTTP(w, req)
+
+	if got, want := w.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d", got, want)
+	}
+	body := w.Body.String()
+	if got, want := body, ">admin</span>"; !strings.Contains(got, want) {
+		t.Errorf("body missing admin badge %q; body=%q", want, got)
+	}
+	if got, want := body, ">host</span>"; !strings.Contains(got, want) {
+		t.Errorf("body missing host badge %q; body=%q", want, got)
+	}
+}
+
+// TestPlayerRowBadgeFlags pins the role-to-badge-flag mapping directly:
+// admin sets only IsAdmin, host sets only IsHost, plain player sets
+// neither. A row is exactly one role, so at most one badge ever shows.
+func TestPlayerRowBadgeFlags(t *testing.T) {
+	t.Parallel()
+
+	env := newAdminEnv(t)
+	adminID := env.seedVerifiedPlayerID(t, "adminuser", "admin@example.test", auth.RoleAdmin)
+	hostID := env.seedHostPlayer(t, "hostuser", "host@example.test")
+	playerID := env.seedVerifiedPlayerID(t, "playeruser", "player@example.test", auth.RolePlayer)
+
+	ctx := t.Context()
+	listed, err := env.lister.ListPlayersByOnboardingState(ctx, auth.OnboardingStateAll, 1000, 0)
+	if err != nil {
+		t.Fatalf("ListPlayersByOnboardingState err = %v, want nil", err)
+	}
+	built, err := BuildPlayerRows(ctx, env.lister, listed)
+	if err != nil {
+		t.Fatalf("BuildPlayerRows err = %v, want nil", err)
+	}
+	rows := make(map[int64]*PlayerRow, len(built))
+	for _, r := range built {
+		rows[r.ID] = r
+	}
+
+	for _, tc := range []struct {
+		name                string
+		id                  int64
+		wantAdmin, wantHost bool
+	}{
+		{name: "admin", id: adminID, wantAdmin: true, wantHost: false},
+		{name: "host", id: hostID, wantAdmin: false, wantHost: true},
+		{name: "player", id: playerID, wantAdmin: false, wantHost: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			row := rows[tc.id]
+			if row == nil {
+				t.Fatalf("no player row for id %d", tc.id)
+			}
+			if got, want := row.IsAdmin, tc.wantAdmin; got != want {
+				t.Errorf("IsAdmin = %v, want %v", got, want)
+			}
+			if got, want := row.IsHost, tc.wantHost; got != want {
+				t.Errorf("IsHost = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 func TestHandlePlayersList_EmptyList(t *testing.T) {
 	t.Parallel()
 
