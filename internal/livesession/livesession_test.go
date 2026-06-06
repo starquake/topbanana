@@ -92,6 +92,12 @@ type fakeStore struct {
 	// can drive the replay gate without a real finished session.
 	alreadyPlayed error
 	playedResult  bool
+
+	// hasPlayerResult is what SessionHasPlayer reports, so a test can drive the
+	// reconnect/resume gate (a prior participant whose row is marked left_at is
+	// not in the live roster, yet SessionHasPlayer still sees them).
+	hasPlayerResult error
+	hasPlayer       bool
 }
 
 func (*fakeStore) Ping(context.Context) error { return nil }
@@ -133,6 +139,13 @@ func (f *fakeStore) PlayerFinishedSessionForQuiz(_ context.Context, _, _ int64) 
 	defer f.mu.Unlock()
 
 	return f.playedResult, f.alreadyPlayed
+}
+
+func (f *fakeStore) SessionHasPlayer(_ context.Context, _ string, _ int64) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.hasPlayer, f.hasPlayerResult
 }
 
 func (f *fakeStore) AddPlayer(_ context.Context, _ string, playerID int64, displayName string) (*Player, error) {
@@ -338,13 +351,15 @@ func TestService_Join_BlockedAfterFinishedPlay(t *testing.T) {
 }
 
 // TestService_Join_ClosedAfterStart pins the late-join gate: once a session
-// has left the lobby (any non-lobby phase), Join rejects with ErrLobbyClosed
-// before touching the roster - v1 has no late join.
+// has left the lobby (any non-lobby phase), Join rejects a player who never
+// held a roster row with ErrLobbyClosed before touching the roster - v1 has no
+// late join.
 func TestService_Join_ClosedAfterStart(t *testing.T) {
 	t.Parallel()
 
 	store := &fakeStore{
-		session: &Session{ID: "s1", QuizID: 7, JoinCode: "ROOM12", Phase: PhaseQuestion},
+		session:   &Session{ID: "s1", QuizID: 7, JoinCode: "ROOM12", Phase: PhaseQuestion},
+		hasPlayer: false, // never joined this session
 	}
 	svc := NewService(store, &fakeQuiz{}, slog.Default())
 
@@ -359,18 +374,24 @@ func TestService_Join_ClosedAfterStart(t *testing.T) {
 	}
 }
 
-// TestService_Join_ExistingPlayerResumesAfterStart pins the reconnect carve-out:
-// a player already on the roster may re-join once the session has left the
-// lobby (their row is revived), so a mid-game reconnect is not rejected as a
-// late join.
-func TestService_Join_ExistingPlayerResumesAfterStart(t *testing.T) {
+// TestService_Join_ResumesLeftPlayerAfterStart pins the reconnect/resume
+// carve-out: a prior participant whose row is marked left_at (so they are NOT
+// in the live roster, sess.Players) may still re-Join once the session has left
+// the lobby. The gate reads SessionHasPlayer (any row regardless of left_at),
+// and AddPlayer revives the row. This is the reload-vs-leave race: the
+// beforeunload leave beacon may mark the reloading player left, and resume must
+// still let them back in.
+func TestService_Join_ResumesLeftPlayerAfterStart(t *testing.T) {
 	t.Parallel()
 
 	store := &fakeStore{
 		session: &Session{
 			ID: "s1", QuizID: 7, JoinCode: "ROOM12", Phase: PhaseQuestion,
-			Players: []*Player{{PlayerID: 5, DisplayName: "Sam"}},
+			// Empty live roster: the player left, so they are excluded from
+			// sess.Players, yet SessionHasPlayer still sees their row.
+			Players: nil,
 		},
+		hasPlayer: true,
 	}
 	svc := NewService(store, &fakeQuiz{}, slog.Default())
 	svc.SetPublisher(&spyPublisher{})

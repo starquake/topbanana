@@ -220,6 +220,12 @@ type Store interface {
 	// row in a finished session of the given quiz. Backs the replay gate in
 	// [Service.Join].
 	PlayerFinishedSessionForQuiz(ctx context.Context, playerID, quizID int64) (bool, error)
+	// SessionHasPlayer reports whether the player has ever held a roster row in
+	// the session identified by join code, regardless of left_at. Backs the
+	// reconnect/resume gate in [Service.Join]: a prior participant (even one
+	// whose row is marked left_at) may re-Join past the lobby, but a player who
+	// never joined is rejected as a late joiner.
+	SessionHasPlayer(ctx context.Context, joinCode string, playerID int64) (bool, error)
 	// AddPlayer adds (or revives) a roster row for the player under the
 	// requested display name. Returns [ErrDisplayNameTaken] on a
 	// per-session display-name collision so the caller can fall back to a
@@ -454,19 +460,6 @@ func (s *Service) CreateSession(ctx context.Context, quizID, hostPlayerID int64)
 	return sess, nil
 }
 
-// rosterHasPlayer reports whether playerID already holds a roster row in the
-// session, so a re-join past the lobby is treated as a reconnect rather than a
-// rejected late join.
-func rosterHasPlayer(players []*Player, playerID int64) bool {
-	for _, p := range players {
-		if p.PlayerID == playerID {
-			return true
-		}
-	}
-
-	return false
-}
-
 // Join adds the player to the session identified by join code under the
 // requested display name. The display name is required; a per-session
 // collision is recovered transparently by retrying with a petname, so the
@@ -485,12 +478,21 @@ func (s *Service) Join(
 		return nil, fmt.Errorf(errGetSessionByCodeFmt, err)
 	}
 
-	// The lobby closes at start: v1 has no late join. A player already on the
-	// roster may still re-join once the session has left the lobby - that is a
-	// reconnect/resume (their row is revived), not a late join - so only a
-	// player with no existing roster row is rejected past the lobby.
-	if sess.Phase != PhaseLobby && !rosterHasPlayer(sess.Players, playerID) {
-		return nil, ErrLobbyClosed
+	// The lobby closes at start: v1 has no late join. A prior participant may
+	// still re-Join once the session has left the lobby - that is a
+	// reconnect/resume, and AddPlayer revives their row (clearing left_at). The
+	// gate checks for any roster row regardless of left_at (SessionHasPlayer),
+	// not the live roster: a player who reloaded mid-session may already be
+	// marked left_at by the beforeunload leave beacon, and must still be allowed
+	// back. Only a player who never held a row is rejected past the lobby.
+	if sess.Phase != PhaseLobby {
+		joined, hasErr := s.store.SessionHasPlayer(ctx, sess.JoinCode, playerID)
+		if hasErr != nil {
+			return nil, fmt.Errorf("failed to check prior participation: %w", hasErr)
+		}
+		if !joined {
+			return nil, ErrLobbyClosed
+		}
 	}
 
 	played, err := s.store.PlayerFinishedSessionForQuiz(ctx, playerID, sess.QuizID)

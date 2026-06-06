@@ -116,6 +116,23 @@ func (s *LiveSessionStore) PlayerFinishedSessionForQuiz(
 	return finished, nil
 }
 
+// SessionHasPlayer reports whether the player has ever held a roster row in
+// the session identified by join code, regardless of left_at. Backs the
+// reconnect/resume gate in [livesession.Service.Join].
+func (s *LiveSessionStore) SessionHasPlayer(
+	ctx context.Context, joinCode string, playerID int64,
+) (bool, error) {
+	has, err := s.q.SessionHasPlayer(ctx, db.SessionHasPlayerParams{
+		JoinCode: joinCode,
+		PlayerID: playerID,
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to check session has player: %w", err)
+	}
+
+	return has, nil
+}
+
 // AddPlayer adds (or revives on re-join) a roster row for the player under
 // the requested display name. Returns [livesession.ErrDisplayNameTaken] on
 // a per-session display-name collision so the service can fall back to a
