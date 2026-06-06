@@ -2,6 +2,7 @@ package livesession_test
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"sync"
 	"testing"
@@ -42,6 +43,7 @@ type runnerHarness struct {
 	runner  *Runner
 	clock   *fakeClock
 	store   *store.LiveSessionStore
+	db      *sql.DB
 	code    string
 	players []int64
 }
@@ -56,11 +58,15 @@ var runnerCfg = RunnerConfig{
 }
 
 // newRunnerHarness seeds a live quiz with the given rounds (each a slice of
-// option-correctness for its questions), opens a session, joins the players,
+// option-correctness for its questions), opens a session, joins two players,
 // and wires a runner over the real stores with a fake clock. The first option
-// of each question is the one players pick in these tests.
-func newRunnerHarness(t *testing.T, start time.Time, rounds [][]bool, playerCount int) *runnerHarness {
+// of each question is the one players pick in these tests. Two players is the
+// shape every runner test needs: one to drive early-close / answered-order and
+// a second to exercise the not-all-answered hold and the stale-player path.
+func newRunnerHarness(t *testing.T, start time.Time, rounds [][]bool) *runnerHarness {
 	t.Helper()
+
+	const playerCount = 2
 
 	db := dbtest.Open(t)
 	logger := slog.New(slog.DiscardHandler)
@@ -102,8 +108,26 @@ func newRunnerHarness(t *testing.T, start time.Time, rounds [][]bool, playerCoun
 		runner:  runner,
 		clock:   clock,
 		store:   sessionStore,
+		db:      db,
 		code:    sess.JoinCode,
 		players: players,
+	}
+}
+
+// setLastSeen backdates a roster player's last_seen_at so a runner test can
+// place them on either side of the active-window cutoff (a stale player is one
+// whose heartbeat stopped). Writes the timestamp in SQLite's CURRENT_TIMESTAMP
+// text format ('YYYY-MM-DD HH:MM:SS'), matching how production stamps the
+// column, so the store's same-encoding string comparison is exercised
+// faithfully. Test-only fixture write.
+func (h *runnerHarness) setLastSeen(t *testing.T, sessionID string, playerID int64, at time.Time) {
+	t.Helper()
+	if _, err := h.db.ExecContext(
+		t.Context(),
+		"UPDATE session_players SET last_seen_at = ? WHERE session_id = ? AND player_id = ?",
+		at.UTC().Format("2006-01-02 15:04:05"), sessionID, playerID,
+	); err != nil {
+		t.Fatalf("setLastSeen err = %v, want nil", err)
 	}
 }
 
@@ -190,7 +214,7 @@ func TestRunner_FullFlow(t *testing.T) {
 	t.Parallel()
 
 	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
-	h := newRunnerHarness(t, start, [][]bool{{true, true}, {true}}, 2)
+	h := newRunnerHarness(t, start, [][]bool{{true, true}, {true}})
 	ctx := t.Context()
 
 	// Host Start overrides immediately: lobby -> round_intro for round 1.
@@ -309,7 +333,7 @@ func TestRunner_AutoStart(t *testing.T) {
 	t.Parallel()
 
 	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
-	h := newRunnerHarness(t, start, [][]bool{{true}}, 2)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
 	ctx := t.Context()
 
 	// Not all ready yet: a tick must not start the game.
@@ -343,7 +367,7 @@ func TestRunner_UnreadyResetsAutoStart(t *testing.T) {
 	t.Parallel()
 
 	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
-	h := newRunnerHarness(t, start, [][]bool{{true}}, 2)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
 	ctx := t.Context()
 
 	for _, pid := range h.players {
@@ -361,6 +385,92 @@ func TestRunner_UnreadyResetsAutoStart(t *testing.T) {
 	h.tick(ctx)
 	if got, want := h.phase(t), PhaseLobby; got != want {
 		t.Fatalf("phase after un-ready = %q, want %q (window reset)", got, want)
+	}
+}
+
+// TestRunner_StalePlayerDoesNotStallEarlyClose pins the MP-10 active-player
+// rule: a session with one active player (fresh heartbeat) who answers and one
+// stale player (last_seen far in the past) who never answers closes the
+// question early once the active player has answered, rather than stalling
+// until the answer window times out. A dropped player must not hold a question
+// open.
+func TestRunner_StalePlayerDoesNotStallEarlyClose(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	active, stale := h.players[0], h.players[1]
+	sessionID := h.sessionID(t)
+
+	if err := h.service.Start(ctx, h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+	h.clock.advance(runnerCfg.RoundIntroBeat)
+	h.tick(ctx)
+	q := h.reload(t)
+	if got, want := q.Phase, PhaseQuestion; got != want {
+		t.Fatalf("phase after intro beat = %q, want %q", got, want)
+	}
+
+	// The stale player's heartbeat stopped long before the active window; the
+	// active player beat just now.
+	h.setLastSeen(t, sessionID, stale, start.Add(-time.Hour))
+	h.setLastSeen(t, sessionID, active, h.clock.Now())
+
+	// Only the active player answers, well within the window.
+	optRight := correctOptionID(ctx, t, h.service, h.code, active)
+	answerAt := h.clock.Now().Add(2 * time.Second)
+	h.clock.advance(2 * time.Second)
+	if err := h.service.SubmitAnswer(ctx, h.code, active, optRight, answerAt); err != nil {
+		t.Fatalf("SubmitAnswer err = %v, want nil", err)
+	}
+
+	// A tick now must close the question early: every ACTIVE player has answered,
+	// even though the stale player never did and the window has not expired.
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseReveal; got != want {
+		t.Fatalf("phase after active player answered = %q, want %q (early close, ignoring stale)", got, want)
+	}
+}
+
+// TestRunner_AllStaleRosterDoesNotEarlyClose pins that a roster with no active
+// player never early-closes: the question must time out instead of closing
+// instantly, preserving the empty-roster behaviour for an all-dropped room.
+func TestRunner_AllStaleRosterDoesNotEarlyClose(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	sessionID := h.sessionID(t)
+
+	if err := h.service.Start(ctx, h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+	h.clock.advance(runnerCfg.RoundIntroBeat)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseQuestion; got != want {
+		t.Fatalf("phase after intro beat = %q, want %q", got, want)
+	}
+
+	// Every player has gone stale.
+	for _, pid := range h.players {
+		h.setLastSeen(t, sessionID, pid, start.Add(-time.Hour))
+	}
+
+	// A tick before the window expires must NOT close: no active player to wait
+	// on, so it falls through to the timeout path.
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseQuestion; got != want {
+		t.Fatalf("phase with all-stale roster = %q, want %q (must not early-close)", got, want)
+	}
+
+	// Past the window, the timeout close still fires.
+	h.clock.advance(11 * time.Second)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseReveal; got != want {
+		t.Fatalf("phase after timeout = %q, want %q (timeout close)", got, want)
 	}
 }
 

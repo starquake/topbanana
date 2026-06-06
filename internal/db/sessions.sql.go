@@ -11,6 +11,70 @@ import (
 	"time"
 )
 
+const countActivePlayersForSession = `-- name: CountActivePlayersForSession :one
+SELECT count(*) AS active_count
+FROM session_players sp
+WHERE sp.session_id = ?1
+  AND sp.left_at IS NULL
+  AND sp.last_seen_at >= CAST(?2 AS TEXT)
+`
+
+type CountActivePlayersForSessionParams struct {
+	SessionID string
+	Since     string
+}
+
+// Number of roster players still active (last_seen_at within the heartbeat
+// window), excluding those who have left. Lets the runner tell an empty / all-
+// stale roster (which must time out, never early-close) from a roster with at
+// least one active player. since is the active-window cutoff the runner computes
+// from its injected clock, bound as a CURRENT_TIMESTAMP-format text string (see
+// CountActivePlayersUnansweredForQuestion for why a bound time.Time is wrong).
+func (q *Queries) CountActivePlayersForSession(ctx context.Context, arg CountActivePlayersForSessionParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countActivePlayersForSession, arg.SessionID, arg.Since)
+	var active_count int64
+	err := row.Scan(&active_count)
+	return active_count, err
+}
+
+const countActivePlayersUnansweredForQuestion = `-- name: CountActivePlayersUnansweredForQuestion :one
+SELECT count(*) AS unanswered_count
+FROM session_players sp
+WHERE sp.session_id = ?1
+  AND sp.left_at IS NULL
+  AND sp.last_seen_at >= CAST(?2 AS TEXT)
+  AND NOT EXISTS (
+      SELECT 1
+      FROM session_answers sa
+      WHERE sa.session_id = sp.session_id
+        AND sa.question_id = ?3
+        AND sa.player_id = sp.player_id
+  )
+`
+
+type CountActivePlayersUnansweredForQuestionParams struct {
+	SessionID  string
+	Since      string
+	QuestionID int64
+}
+
+// Number of roster players who are still active (last_seen_at within the
+// heartbeat window) but have not yet picked for the given session question. The
+// runner early-closes a question once this reaches 0, so a dropped player whose
+// last_seen_at has gone stale no longer holds the question open. Excludes
+// players who have left (left_at set). since is the active-window cutoff the
+// runner computes from its injected clock, bound as a CURRENT_TIMESTAMP-format
+// text string ('YYYY-MM-DD HH:MM:SS') so both sides of the comparison share the
+// encoding last_seen_at is stored in; a bound Go time.Time would arrive in a
+// different format and the cross-format string comparison would silently lie
+// (the same trap retention.sql documents).
+func (q *Queries) CountActivePlayersUnansweredForQuestion(ctx context.Context, arg CountActivePlayersUnansweredForQuestionParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countActivePlayersUnansweredForQuestion, arg.SessionID, arg.Since, arg.QuestionID)
+	var unanswered_count int64
+	err := row.Scan(&unanswered_count)
+	return unanswered_count, err
+}
+
 const countSessionAnswersForQuestion = `-- name: CountSessionAnswersForQuestion :one
 SELECT count(*) AS answer_count
 FROM session_answers
@@ -760,6 +824,27 @@ WHERE id = ?
 // auto-start racing the host) is a no-op rather than resetting the clock.
 func (q *Queries) StartSession(ctx context.Context, id string) (sql.Result, error) {
 	return q.db.ExecContext(ctx, startSession, id)
+}
+
+const touchSessionPlayerLastSeen = `-- name: TouchSessionPlayerLastSeen :execresult
+UPDATE session_players
+SET last_seen_at = CURRENT_TIMESTAMP
+WHERE player_id = ?1
+  AND session_id = (SELECT id FROM sessions WHERE join_code = ?2)
+`
+
+type TouchSessionPlayerLastSeenParams struct {
+	PlayerID int64
+	JoinCode string
+}
+
+// Refreshes a participant's last_seen_at, the active-player heartbeat. The SSE
+// events handler calls it when the connection opens and periodically while it
+// is held, so a dropped player's last_seen_at goes stale and the runner stops
+// counting them as active (MP-10). Keyed on (join_code, player_id) so the
+// handler need only carry the code it already gates on.
+func (q *Queries) TouchSessionPlayerLastSeen(ctx context.Context, arg TouchSessionPlayerLastSeenParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, touchSessionPlayerLastSeen, arg.PlayerID, arg.JoinCode)
 }
 
 const upsertSessionAnswer = `-- name: UpsertSessionAnswer :exec

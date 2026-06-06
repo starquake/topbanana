@@ -206,6 +206,54 @@ FROM session_answers
 WHERE session_id = ?
   AND question_id = ?;
 
+-- name: TouchSessionPlayerLastSeen :execresult
+-- Refreshes a participant's last_seen_at, the active-player heartbeat. The SSE
+-- events handler calls it when the connection opens and periodically while it
+-- is held, so a dropped player's last_seen_at goes stale and the runner stops
+-- counting them as active (MP-10). Keyed on (join_code, player_id) so the
+-- handler need only carry the code it already gates on.
+UPDATE session_players
+SET last_seen_at = CURRENT_TIMESTAMP
+WHERE player_id = sqlc.arg('player_id')
+  AND session_id = (SELECT id FROM sessions WHERE join_code = sqlc.arg('join_code'));
+
+-- name: CountActivePlayersUnansweredForQuestion :one
+-- Number of roster players who are still active (last_seen_at within the
+-- heartbeat window) but have not yet picked for the given session question. The
+-- runner early-closes a question once this reaches 0, so a dropped player whose
+-- last_seen_at has gone stale no longer holds the question open. Excludes
+-- players who have left (left_at set). since is the active-window cutoff the
+-- runner computes from its injected clock, bound as a CURRENT_TIMESTAMP-format
+-- text string ('YYYY-MM-DD HH:MM:SS') so both sides of the comparison share the
+-- encoding last_seen_at is stored in; a bound Go time.Time would arrive in a
+-- different format and the cross-format string comparison would silently lie
+-- (the same trap retention.sql documents).
+SELECT count(*) AS unanswered_count
+FROM session_players sp
+WHERE sp.session_id = sqlc.arg('session_id')
+  AND sp.left_at IS NULL
+  AND sp.last_seen_at >= CAST(sqlc.arg('since') AS TEXT)
+  AND NOT EXISTS (
+      SELECT 1
+      FROM session_answers sa
+      WHERE sa.session_id = sp.session_id
+        AND sa.question_id = sqlc.arg('question_id')
+        AND sa.player_id = sp.player_id
+  );
+
+-- name: CountActivePlayersForSession :one
+-- Number of roster players still active (last_seen_at within the heartbeat
+-- window), excluding those who have left. Lets the runner tell an empty / all-
+-- stale roster (which must time out, never early-close) from a roster with at
+-- least one active player. since is the active-window cutoff the runner computes
+-- from its injected clock, bound as a CURRENT_TIMESTAMP-format text string (see
+-- CountActivePlayersUnansweredForQuestion for why a bound time.Time is wrong).
+SELECT count(*) AS active_count
+FROM session_players sp
+WHERE sp.session_id = sqlc.arg('session_id')
+  AND sp.left_at IS NULL
+  AND sp.last_seen_at >= CAST(sqlc.arg('since') AS TEXT);
+
 -- name: ListSessionAnswersForQuestion :many
 -- Every pick for the given session question in answered order, joined to the
 -- chosen option's correctness. Drives scoring at close and the answered-order
