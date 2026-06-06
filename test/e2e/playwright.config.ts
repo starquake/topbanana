@@ -148,11 +148,18 @@ const workerServer = (workerIndex: number) => {
       // is written. Point it at this worker's own server so the admin
       // invite-management spec can create a pending invite.
       BASE_URL: `http://127.0.0.1:${port}`,
-      // Shrink the per-question reveal beat (#247, default 3s) so the
-      // suite isn't paying ~12s of dead time per gameplay spec. 500ms
-      // still leaves the .progress-reveal phase observable for the
-      // visibility assertion in player.spec.ts.
-      REVEAL_DELAY: '500ms',
+      // Shrink the per-question reveal beat (#247, default 3s) so the suite
+      // isn't paying ~12s of dead time per gameplay spec. This same knob also
+      // drives the live-session question read beat (#717): the live specs
+      // (host + multiple player contexts) assert the transient read-beat
+      // indicator is shown while the options are hidden, and the
+      // question-issue -> SSE tick -> fetch -> render latency across several
+      // browser contexts on a loaded CI runner can exceed a sub-second window,
+      // so the assertion must have a comfortably-observable beat. 2s keeps the
+      // suite well under the 3s production default while staying reliable on
+      // slow CI (see #712). Still leaves the solo .progress-reveal phase
+      // observable for player.spec.ts.
+      REVEAL_DELAY: '2s',
       // Shrink the live-session runner beats (round-intro, reveal, between-
       // rounds, and the lobby auto-start window all default to multiple
       // seconds) so the synchronized-play specs advance through the phases
