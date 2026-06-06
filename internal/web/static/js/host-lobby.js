@@ -234,6 +234,23 @@ function hostLobby(joinCode) {
             return match ? match.displayName : 'Player';
         },
 
+        // answerCorrectness reports whether a player's just-revealed pick was
+        // correct: true / false at reveal, null otherwise. The server stamps
+        // answers[].correct only in the reveal phase (it omits the flag before
+        // reveal so the TV cannot leak correctness early), so the answered
+        // badges turn green/red only once the answer is out.
+        answerCorrectness(playerId) {
+            if (this.phase !== 'reveal' || !this.question || !Array.isArray(this.question.answers)) {
+                return null;
+            }
+            const match = this.question.answers.find((a) => a.playerId === playerId);
+            if (!match || typeof match.correct !== 'boolean') {
+                return null;
+            }
+
+            return match.correct;
+        },
+
         // isCorrectOption reports whether the server marked the option correct.
         // The correctOptionIds list is empty until the reveal phase (the server
         // omits correctness before reveal), so the TV cannot leak the answer

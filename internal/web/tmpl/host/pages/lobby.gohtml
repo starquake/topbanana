@@ -5,9 +5,14 @@
          the phase, roster, question, and answered order live. The server
          drives every phase transition; the TV only re-renders whatever phase
          the latest state read reports (MP-3 / #680, MP-8 / #685). */}}
+    {{/* The TV is a fixed landscape screen with no scroll, so the surface is
+         pinned to the viewport height and clips rather than grows. Each phase
+         body is a flex child with min-h-0 so its lists (roster, options,
+         standings) shrink and scroll inside the frame instead of pushing the
+         header/footer off-screen (#734). */}}
     <main x-data="hostLobby({{.JoinCode | printf "%q"}})"
-          class="min-h-dvh flex flex-col">
-        <header class="flex items-center justify-between gap-4 px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1rem,2.5vh,2rem)] border-b border-border-soft">
+          class="h-dvh overflow-hidden flex flex-col">
+        <header class="shrink-0 flex items-center justify-between gap-4 px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1rem,2.5vh,2rem)] border-b border-border-soft">
             <div class="flex items-center gap-3">
                 <img src="/assets/banana.svg" alt="" class="w-9 h-9" aria-hidden="true">
                 <span class="font-display font-extrabold uppercase tracking-[0.18em] text-[clamp(1rem,2vw,1.4rem)]">Top Banana!</span>
@@ -19,7 +24,7 @@
 
         {{/* ----- Lobby phase: scan-to-join + live roster + start. ----- */}}
         <div x-show="phase === 'lobby'"
-             class="flex-1 grid gap-[clamp(1.5rem,4vw,4rem)] px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1.5rem,4vh,3rem)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] items-center">
+             class="flex-1 min-h-0 grid gap-[clamp(1.5rem,4vw,4rem)] px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1.5rem,4vh,3rem)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] items-center">
             {{/* Left: scan-to-join card with the server-rendered QR + URL. */}}
             <section aria-label="Join by phone"
                      class="flex flex-col items-center gap-[clamp(1rem,3vh,2rem)]">
@@ -30,24 +35,29 @@
                     {{/* QR is a server-rendered SVG; it scales to the box width. */}}
                     {{.QRSVG}}
                 </div>
-                <p class="m-0 text-text-mute font-mono text-[clamp(0.75rem,1.4vw,1rem)] break-all text-center max-w-[28ch]">
+                {{/* Keep the join URL on one line so it reads cleanly on the
+                     TV: nowrap plus a modest font clamp sizes it down to fit
+                     the card width rather than wrapping mid-string (#734). */}}
+                <p class="m-0 text-text-mute font-mono text-[clamp(0.7rem,1.2vw,0.95rem)] whitespace-nowrap text-center">
                     {{.JoinURL}}
                 </p>
             </section>
 
-            {{/* Right: the big room code plus the live roster. */}}
-            <section aria-label="Room" class="flex flex-col gap-[clamp(1.25rem,3vh,2.5rem)]">
-                <div>
+            {{/* Right: the big room code plus the live roster. min-h-0 lets the
+                 roster list below shrink and scroll within the frame instead of
+                 forcing the section taller than the viewport (#734). */}}
+            <section aria-label="Room" class="flex flex-col min-h-0 gap-[clamp(1.25rem,3vh,2.5rem)]">
+                <div class="shrink-0">
                     <p class="m-0 text-text-dim text-[clamp(0.9rem,1.8vw,1.25rem)] font-semibold uppercase tracking-[0.18em]">
                         Or enter code
                     </p>
-                    <p class="m-0 font-display font-extrabold tracking-[0.12em] text-accent leading-none text-[clamp(3.5rem,11vw,8rem)] tabular-nums">
+                    <p class="m-0 font-display font-extrabold tracking-[0.12em] text-accent leading-none text-[clamp(3rem,9vw,6.5rem)] tabular-nums">
                         {{.JoinCode}}
                     </p>
                 </div>
 
-                <div>
-                    <div class="flex items-baseline justify-between gap-3 mb-3">
+                <div class="flex flex-col min-h-0">
+                    <div class="flex items-baseline justify-between gap-3 mb-3 shrink-0">
                         <h2 class="m-0 font-display text-[clamp(1.1rem,2.2vw,1.6rem)] font-bold uppercase tracking-[0.12em]">
                             Players
                         </h2>
@@ -62,7 +72,7 @@
                     </p>
 
                     <ul x-show="players.length > 0"
-                        class="m-0 list-none p-0 grid gap-2 grid-cols-1 sm:grid-cols-2"
+                        class="m-0 list-none p-0 grid gap-2 grid-cols-1 sm:grid-cols-2 overflow-y-auto min-h-0"
                         role="list">
                         <template x-for="p in players" :key="p.playerId">
                             <li class="flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-surface border"
@@ -100,7 +110,7 @@
              serves both phases; reveal swaps the countdown for the
              all-answered indicator and lights the correct option(s). ----- */}}
         <div x-show="phase === 'question' || phase === 'reveal'"
-             class="flex-1 flex flex-col gap-[clamp(1rem,3vh,2.25rem)] px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1.25rem,3vh,2.5rem)]"
+             class="flex-1 min-h-0 flex flex-col gap-[clamp(1rem,3vh,2.25rem)] px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1.25rem,3vh,2.5rem)]"
              data-phase-question>
             {{/* Countdown bar, two phases (mirrors the player surface and the
                  solo game, #247): while `revealing` is true it fills 0 -> 100
@@ -115,8 +125,8 @@
                       data-countdown-bar></progress>
 
             <template x-if="question">
-                <div class="flex-1 flex flex-col gap-[clamp(1rem,3vh,2rem)]">
-                    <h2 class="m-0 font-display font-extrabold text-[clamp(1.5rem,4.5vw,3.25rem)] leading-tight text-center"
+                <div class="flex-1 min-h-0 flex flex-col gap-[clamp(1rem,3vh,2rem)]">
+                    <h2 class="m-0 shrink-0 font-display font-extrabold text-[clamp(1.4rem,3.5vw,2.75rem)] leading-tight text-center"
                         x-text="question.text"
                         data-question-text></h2>
 
@@ -134,10 +144,10 @@
                          the server leaves empty before reveal, so the answer is
                          never lit early. */}}
                     <ul x-show="phase === 'reveal' || !revealing"
-                        class="m-0 list-none p-0 grid gap-3 sm:grid-cols-2 max-w-[60rem] w-full mx-auto"
+                        class="m-0 list-none p-0 grid gap-3 sm:grid-cols-2 max-w-[60rem] w-full mx-auto overflow-y-auto min-h-0"
                         role="list">
                         <template x-for="option in question.options" :key="option.id">
-                            <li class="flex items-center gap-3 px-5 py-4 rounded-xl border text-left transition-colors"
+                            <li class="flex items-center gap-3 px-5 py-3 rounded-xl border text-left transition-colors"
                                 :class="phase === 'reveal' && isCorrectOption(option.id)
                                     ? 'bg-success/15 border-success text-success'
                                     : (phase === 'reveal'
@@ -145,7 +155,7 @@
                                         : 'bg-surface border-border-soft')"
                                 :data-correct="phase === 'reveal' && isCorrectOption(option.id) ? 'true' : 'false'"
                                 data-answer-option>
-                                <span class="font-semibold text-[clamp(1rem,2vw,1.5rem)]"
+                                <span class="font-semibold text-[clamp(1rem,1.8vw,1.4rem)]"
                                       x-text="option.text"></span>
                                 <span x-show="phase === 'reveal' && isCorrectOption(option.id)"
                                       class="ml-auto shrink-0 text-[0.7rem] font-semibold uppercase tracking-[0.12em] px-2 py-1 rounded-sm bg-success/20 text-success"
@@ -160,7 +170,7 @@
                          roster player has locked in. Hidden during the read beat
                          (the question phase while `revealing` is true). */}}
                     <div x-show="phase === 'reveal' || !revealing"
-                         class="flex flex-col items-center gap-3">
+                         class="shrink-0 flex flex-col items-center gap-3">
                         <div class="flex items-center gap-2 text-text-dim text-[clamp(0.85rem,1.6vw,1.1rem)] font-semibold uppercase tracking-[0.12em]">
                             <span x-text="`${answeredCount()} / ${players.length} answered`"
                                   data-answered-count></span>
@@ -169,12 +179,26 @@
                                   data-all-answered>All in</span>
                         </div>
 
-                        <ul class="m-0 list-none p-0 flex flex-wrap justify-center gap-2"
+                        <ul class="m-0 list-none p-0 flex flex-wrap justify-center gap-2 max-h-[28vh] overflow-y-auto"
                             role="list">
+                            {{/* At reveal the badge turns green for a correct
+                                 pick and red for a wrong one (answerCorrectness
+                                 reads answers[].correct, which the server fills
+                                 only at reveal); during the question phase it
+                                 stays neutral, showing only answer order. */}}
                             <template x-for="(playerId, index) in question.answeredPlayerIds" :key="playerId">
-                                <li class="flex items-center gap-2 px-3 py-2 rounded-full bg-surface border border-border-soft"
+                                <li class="flex items-center gap-2 px-3 py-2 rounded-full border transition-colors"
+                                    :class="answerCorrectness(playerId) === true
+                                        ? 'bg-success/15 border-success text-success'
+                                        : (answerCorrectness(playerId) === false
+                                            ? 'bg-danger/15 border-danger text-danger'
+                                            : 'bg-surface border-border-soft')"
+                                    :data-correctness="answerCorrectness(playerId) === true
+                                        ? 'correct'
+                                        : (answerCorrectness(playerId) === false ? 'incorrect' : 'none')"
                                     data-answered-badge>
-                                    <span class="font-display font-bold text-accent tabular-nums text-[clamp(0.8rem,1.5vw,1.05rem)]"
+                                    <span class="font-display font-bold tabular-nums text-[clamp(0.8rem,1.5vw,1.05rem)]"
+                                          :class="answerCorrectness(playerId) === null ? 'text-accent' : ''"
                                           x-text="index + 1"
                                           data-answered-order></span>
                                     <span class="font-semibold text-[clamp(0.85rem,1.6vw,1.1rem)] truncate max-w-[14ch]"
@@ -198,17 +222,17 @@
              is driven in host-lobby.js via anime.js with a reduced-motion /
              missing-global fallback that snaps to the final state. ----- */}}
         <div x-show="phase === 'round_results' || phase === 'finished'"
-             class="flex-1 flex flex-col gap-[clamp(1rem,3vh,2rem)] px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1.5rem,4vh,3rem)]"
+             class="flex-1 min-h-0 flex flex-col gap-[clamp(1rem,3vh,2rem)] px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1.5rem,4vh,3rem)]"
              data-phase-results>
-            <p class="m-0 font-display font-extrabold text-[clamp(2rem,6vw,4rem)] leading-tight text-center"
+            <p class="m-0 shrink-0 font-display font-extrabold text-[clamp(1.75rem,4.5vw,3.25rem)] leading-tight text-center"
                x-text="phase === 'finished' ? 'Final scores' : 'Scores so far'"></p>
 
-            <ul class="m-0 list-none p-0 flex flex-col gap-3 max-w-[60rem] w-full mx-auto"
+            <ul class="m-0 list-none p-0 flex flex-col gap-3 max-w-[60rem] w-full mx-auto overflow-y-auto min-h-0"
                 role="list"
                 data-testid="standings-bars"
                 data-standings-bars>
                 <template x-for="bar in standingsBars" :key="bar.playerId">
-                    <li class="rounded-xl border border-border-soft bg-surface px-5 py-4"
+                    <li class="rounded-xl border border-border-soft bg-surface px-5 py-3"
                         :data-rank="bar.rank"
                         :data-player-id="bar.playerId"
                         data-standings-row>
@@ -233,7 +257,7 @@
         </div>
 
         {{/* Footer: connection state + host start control (lobby only). */}}
-        <footer class="flex flex-wrap items-center justify-between gap-4 px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1rem,2.5vh,2rem)] border-t border-border-soft">
+        <footer class="shrink-0 flex flex-wrap items-center justify-between gap-4 px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1rem,2.5vh,2rem)] border-t border-border-soft">
             <p class="m-0 flex items-center gap-2 text-text-dim text-[clamp(0.8rem,1.5vw,1rem)]">
                 <span class="inline-block w-2.5 h-2.5 rounded-full"
                       :class="connected ? 'bg-success' : 'bg-warning'"
