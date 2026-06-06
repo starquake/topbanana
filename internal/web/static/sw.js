@@ -20,7 +20,7 @@ const PRECACHE_URLS = [
     '/assets/fonts/inter-latin-ext.woff2',
     '/assets/fonts/orbitron-latin.woff2',
     '/assets/js/htmx.min.js',
-    '/assets/js/share.js',
+    '/assets/js/dist/share.js',
     '/assets/js/vendor/alpine.min.js',
     '/assets/banana.svg',
     '/assets/banana-192.png',

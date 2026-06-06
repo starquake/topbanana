@@ -26,6 +26,7 @@
 @source "../../tmpl/host";
 @source "../js";
 @source "../../../client/static";
+@source "../../../../frontend/shared";
 
 /* Exclude per-agent worktrees from Tailwind v4's auto-content-detection.
  * The harness leaves `.claude/worktrees/<agent>/` checkouts behind even

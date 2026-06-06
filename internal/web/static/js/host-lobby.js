@@ -10,46 +10,19 @@
 //
 // The countdown is driven off the server answer window (question.expiresAt
 // minus the serverNow the state read carries), never the client wall clock,
-// so a skewed TV clock cannot desync the bar from the players' devices.
-//
-// The between-rounds standings bar graph (MP-9 / #685, #686) animates with
-// anime.js (vendored UMD, window.anime). runAnim wraps it with a
-// reduced-motion / missing-global fallback that snaps to the final state via
-// the complete callback, so the bars never stick at a half-grown frame -
-// mirrors the solo client's helper (GameApp.js).
+// so a skewed TV clock cannot desync the bar from the players' devices. The
+// per-question countdown and the between-rounds standings bar graph are the
+// shared player/host helpers (frontend/shared), bundled in by esbuild so the
+// host and player surfaces stay in lockstep without a cross-tree runtime fetch.
 //
 // Alpine is the vendored UMD build (window.Alpine, auto-started). This module
 // loads before it in the layout and only registers the component on the
-// alpine:init event, so there is no import - Alpine boots itself.
+// alpine:init event.
 
-// STANDINGS_BAR_DURATION is how long each bar spends growing from its
-// pre-round total to its new total (ms).
-const STANDINGS_BAR_DURATION = 900;
-
-function reducedMotion() {
-    return typeof window !== 'undefined'
-        && typeof window.matchMedia === 'function'
-        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
-
-function runAnim(targets, params) {
-    if (reducedMotion()) {
-        if (typeof params.complete === 'function') params.complete();
-        return;
-    }
-    const a = typeof window !== 'undefined' ? window.anime : null;
-    if (!a) {
-        if (typeof params.complete === 'function') params.complete();
-        return;
-    }
-    if (typeof a.animate === 'function') {
-        a.animate(targets, params);
-    } else if (typeof a === 'function') {
-        a({ targets, ...params });
-    } else if (typeof params.complete === 'function') {
-        params.complete();
-    }
-}
+import { runAnim } from '@shared/anim.js';
+import { clockOffsetFromServerNow, serverTime } from '@shared/serverClock.js';
+import { startQuestionCountdown } from '@shared/countdown.js';
+import { buildStandingsRows, animateStandingsBars } from '@shared/standings.js';
 
 function hostLobby(joinCode) {
     return {
@@ -57,10 +30,11 @@ function hostLobby(joinCode) {
         phase: 'lobby',
         players: [],
         question: null,
-        // serverClockSkew is (client wall clock - server clock) at the last
-        // state read, in milliseconds. The countdown subtracts it so it ticks
-        // off the server's view of the deadline regardless of TV clock skew.
-        serverClockSkew: 0,
+        // Offset between the server clock and Date.now() in ms, refreshed from
+        // serverNow on every state read. serverTime() applies it so the
+        // countdown ticks off the server's view of the deadline regardless of
+        // TV clock skew (#180).
+        clockOffset: 0,
         progress: 100,
         // True during the read beat [serverNow, startedAt): the question text
         // shows but the options stay hidden until the answer window opens. The
@@ -156,8 +130,8 @@ function hostLobby(joinCode) {
             this.players = Array.isArray(state.players) ? state.players : [];
             this.question = state.question ?? null;
 
-            const serverNow = state.serverNow ? Date.parse(state.serverNow) : NaN;
-            this.serverClockSkew = Number.isNaN(serverNow) ? 0 : Date.now() - serverNow;
+            const offset = clockOffsetFromServerNow(state.serverNow);
+            if (offset !== null) this.clockOffset = offset;
 
             // The countdown only runs in the question phase; every other phase
             // (including reveal, where the answer window has closed) leaves it
@@ -199,114 +173,35 @@ function hostLobby(joinCode) {
             }
             this.lastStandingsKey = key;
 
-            this.maxStandingsTotal = Math.max(1, ...standings.map((s) => s.totalScore));
             const animate = this.phase === 'round_results';
-            this.standingsBars = standings.map((s) => ({
-                playerId: s.playerId,
-                displayName: s.displayName,
-                rank: s.rank,
-                total: s.totalScore,
-                preTotal: s.totalScore - s.roundScore,
-                displayTotal: animate ? s.totalScore - s.roundScore : s.totalScore,
-            }));
+            const { rows, maxTotal } = buildStandingsRows(standings, { animate });
+            this.standingsBars = rows;
+            this.maxStandingsTotal = maxTotal;
 
             if (animate) {
-                this.animateStandings();
+                animateStandingsBars(this.standingsBars, runAnim);
             }
         },
 
-        // animateStandings grows each row's displayTotal from its pre-round
-        // total to its new total; the template binds it to both the bar width
-        // and the numeric label so the count-up and fill move together. Under
-        // reduced motion or a missing anime global runAnim snaps to the final
-        // state via complete, so no bar sticks half-grown. Rows are already in
-        // rank order, so the leaders rest on top once the growth settles.
-        animateStandings() {
-            const bars = this.standingsBars;
-            const a = typeof window !== 'undefined' ? window.anime : null;
-            const hasRound = bars.some((bar) => bar.total !== bar.preTotal);
-            if (!hasRound || !a) {
-                bars.forEach((bar) => { bar.displayTotal = bar.total; });
-
-                return;
-            }
-            bars.forEach((bar) => {
-                const proxy = { v: bar.preTotal };
-                runAnim(proxy, {
-                    v: bar.total,
-                    duration: STANDINGS_BAR_DURATION,
-                    easing: 'easeOutCubic',
-                    update: () => { bar.displayTotal = Math.round(proxy.v); },
-                    complete: () => { bar.displayTotal = bar.total; },
-                });
-            });
-        },
-
-        // serverTime estimates the server's "now" from the TV wall clock minus
-        // the measured skew, so every countdown runs on the server's view of
-        // the deadline regardless of TV clock skew.
+        // serverTime returns the current time in ms as the server sees it,
+        // using the offset captured on the last state read, so every countdown
+        // runs on the server's view of the deadline regardless of TV clock
+        // skew.
         serverTime() {
-            return Date.now() - this.serverClockSkew;
+            return serverTime(this.clockOffset);
         },
 
-        // startCountdown drives the per-question bar. Before the window opens
-        // (serverNow < startedAt) it runs the read beat, filling 0 -> 100 while
-        // the options stay hidden; at startedAt it flips to the answer-window
-        // countdown, draining 100 -> 0. Mirrors the solo game's reveal beat
-        // (#247) and the player surface.
+        // startCountdown drives the per-question bar through the shared helper:
+        // a read beat filling 0 -> 100 while options stay hidden, then an
+        // answer-window drain 100 -> 0. Both phases run on the server clock.
         startCountdown() {
-            this.stopCountdown();
-            const start = this.question.startedAt ? Date.parse(this.question.startedAt) : NaN;
-            const end = this.question.expiresAt ? Date.parse(this.question.expiresAt) : NaN;
-            if (Number.isNaN(start) || Number.isNaN(end) || end <= start) {
-                this.revealing = false;
-                this.progress = 100;
-
-                return;
-            }
-            if (this.serverTime() < start) {
-                this.startReadBeat(start, end);
-
-                return;
-            }
-            this.startAnswerCountdown(start, end);
-        },
-
-        startReadBeat(start, end) {
-            const beatStart = this.serverTime();
-            const beatTotal = start - beatStart;
-            this.revealing = true;
-            this.progress = 0;
-            const update = () => {
-                const serverNow = this.serverTime();
-                if (serverNow >= start) {
-                    this.progress = 100;
-                    this.stopCountdown();
-                    this.revealing = false;
-                    this.startAnswerCountdown(start, end);
-
-                    return;
-                }
-                this.progress = Math.max(0, Math.min(100, ((serverNow - beatStart) / beatTotal) * 100));
-            };
-            update();
-            this.timer = setInterval(update, 100);
-        },
-
-        startAnswerCountdown(start, end) {
-            this.stopCountdown();
-            this.revealing = false;
-            const total = end - start;
-            const update = () => {
-                const serverNow = this.serverTime();
-                const remaining = end - serverNow;
-                this.progress = Math.max(0, Math.min(100, (remaining / total) * 100));
-                if (this.progress <= 0) {
-                    this.stopCountdown();
-                }
-            };
-            update();
-            this.timer = setInterval(update, 100);
+            startQuestionCountdown(this.question, {
+                serverNow: () => this.serverTime(),
+                setProgress: (pct) => { this.progress = pct; },
+                setRevealing: (revealing) => { this.revealing = revealing; },
+                setTimer: (handle) => { this.timer = handle; },
+                clearTimer: () => this.stopCountdown(),
+            });
         },
 
         stopCountdown() {

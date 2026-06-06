@@ -2,10 +2,12 @@ package web_test
 
 import (
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -187,6 +189,65 @@ func TestManifestHandler_InjectsEnvTag(t *testing.T) {
 	if got, want := body, `"[staging] Top Banana!"`; !strings.Contains(got, want) {
 		t.Errorf("body missing %q", want)
 	}
+}
+
+// TestShellAssetPathsMatchPrecacheURLs pins the cache-busting invariant: the
+// SW cache version is hashed over shellAssetPaths(), so it only changes when
+// one of those files changes. If a URL is precached but not in shellAssetPaths
+// (or vice versa), a bundle rename could ship without invalidating the cache
+// and clients would keep serving the stale precached copy. shellAssetPaths is
+// the precache list normalized off the served URLs, plus sw.js (the SW hashes
+// its own source so a precache-list edit alone busts the cache).
+func TestShellAssetPathsMatchPrecacheURLs(t *testing.T) {
+	t.Parallel()
+
+	swBody, err := fs.ReadFile(web.ExportEmbeddedStaticFS(), "sw.js")
+	if err != nil {
+		t.Fatalf("ReadFile sw.js err = %v, want nil", err)
+	}
+	precache := precacheAssetPaths(t, string(swBody))
+	precache = append(precache, "sw.js")
+	slices.Sort(precache)
+
+	shell := web.ExportShellAssetPaths()
+	slices.Sort(shell)
+
+	if got, want := strings.Join(shell, ","), strings.Join(precache, ","); got != want {
+		t.Errorf(
+			"shellAssetPaths() out of sync with PRECACHE_URLS:\n  shellAssetPaths = %q\n  precache+sw.js  = %q",
+			got, want,
+		)
+	}
+}
+
+// precacheAssetPaths parses the PRECACHE_URLS array out of sw.js and normalizes
+// each entry to an embedded-FS path (drop the leading slash and the optional
+// /assets/ mount prefix) so it can be compared to shellAssetPaths().
+func precacheAssetPaths(t *testing.T, swBody string) []string {
+	t.Helper()
+
+	const marker = "PRECACHE_URLS = ["
+	_, after, ok := strings.Cut(swBody, marker)
+	if !ok {
+		t.Fatalf("sw.js does not contain %q", marker)
+	}
+	end := strings.Index(after, "]")
+	if end < 0 {
+		t.Fatal("sw.js PRECACHE_URLS array is not closed")
+	}
+
+	var paths []string
+	for entry := range strings.SplitSeq(after[:end], ",") {
+		entry = strings.Trim(strings.TrimSpace(entry), "'\"")
+		if entry == "" {
+			continue
+		}
+		entry = strings.TrimPrefix(entry, "/")
+		entry = strings.TrimPrefix(entry, "assets/")
+		paths = append(paths, entry)
+	}
+
+	return paths
 }
 
 func serveAndReadBody(t *testing.T, h http.Handler, target string) string {

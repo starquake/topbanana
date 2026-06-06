@@ -1,10 +1,10 @@
 import { quizService } from '../services/QuizService.js';
 import { gameService } from '../services/GameService.js';
 import { playerService } from '../services/PlayerService.js';
-import { runAnim } from '../util/anim.js';
-import { clockOffsetFromServerNow, serverTime } from '../util/serverClock.js';
+import { runAnim } from '@shared/anim.js';
+import { clockOffsetFromServerNow, serverTime } from '@shared/serverClock.js';
 import { optionStateClass } from '../util/answerOptions.js';
-import { openShareDialog } from '/assets/js/share.js';
+import { openShareDialog } from '@shared/share.js';
 
 // PLAY_PATH_PATTERN matches /play/<anything>-<integer>; the integer suffix
 // is the quiz ID.
