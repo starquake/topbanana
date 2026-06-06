@@ -58,6 +58,16 @@ jobs:
       with:
         go-version: "stable"
 
+    # Node for the esbuild client-bundle drift check below. `make js-check`
+    # runs `npm ci` from the committed package-lock.json, then esbuild.
+    # lts/* tracks the current Active LTS (24 as of June 2026) and rolls
+    # forward on its own, mirroring go-version "stable" above.
+    - name: Set up Node
+      uses: actions/setup-node@v6
+      with:
+        node-version: "lts/*"
+        cache: npm
+
     # Catch drift between internal/web/static/css/app.css and what
     # `make tailwind` would produce for the current templates +
     # tailwindcss binary version. Without this guard, a template
@@ -69,6 +79,14 @@ jobs:
     # needs the tailwind gap-filler.
     - name: Tailwind drift check
       run: make tailwind-check
+
+    # Catch drift between the committed player-client JS bundles
+    # (internal/client/static/js/dist/) and what `make js` would produce
+    # from the current source modules + esbuild version. Same guard shape
+    # as the tailwind check above: a client JS change without `make js`
+    # would otherwise ship a stale bundle (#721).
+    - name: JS bundle drift check
+      run: make js-check
 
     # Catch drift between internal/queries/ and the generated
     # internal/db/ layer. `sqlc vet` (in the lint job) only lints
@@ -152,7 +170,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "lts/*"
           cache: npm
           cache-dependency-path: test/e2e/package-lock.json
 

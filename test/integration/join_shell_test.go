@@ -36,7 +36,7 @@ func assertJoinShell(ctx context.Context, t *testing.T, url string) {
 	body := readAllString(t, resp.Body)
 	for _, want := range []string{
 		`x-data="joinApp" x-cloak`,
-		`/client/js/join.js`,
+		`/client/js/dist/join.js`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("%s body missing %q", url, want)

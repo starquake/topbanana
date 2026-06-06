@@ -50,7 +50,7 @@ MAILPIT_BIN     := $(BIN_DIR)/mailpit
 # migration-against-existing-data class of bug — which test-coverage's
 # fresh DB can't catch — fails locally before CI does.
 .PHONY: check
-check: lint lint-ascii sql-lint sqlc-check tailwind-check build test-coverage smoke
+check: lint lint-ascii sql-lint sqlc-check tailwind-check js-check build test-coverage smoke
 
 .PHONY: lint
 lint: $(GOLANGCI_BIN)
@@ -316,6 +316,63 @@ tailwind-check: $(TAILWIND_BIN)
 	    fi; \
 	    rm -f $$tmp; \
 	    echo "$(TAILWIND_OUTPUT) is up to date."
+
+# --- esbuild (player client JS bundles) --------------------------------------
+#
+# The player client's app JS is bundled per entry point with esbuild and the
+# minified output is committed (like app.css), so the binary embeds the
+# bundles and the distroless image needs no Node at build time. Source stays
+# as plain ES modules under internal/client/static/js/{components,services,
+# util}; only how it is delivered changes (#721).
+#
+# esbuild is a dev-only build tool, installed from the committed
+# package.json + package-lock.json into node_modules/ (gitignored). The
+# JS_DEPS sentinel reinstalls only when the lockfile changes.
+
+ESBUILD_BIN     := node_modules/.bin/esbuild
+JS_DEPS         := node_modules/.package-lock.json
+JS_SRC_DIR      := internal/client/static/js
+JS_OUT_DIR      := $(JS_SRC_DIR)/dist
+JS_ENTRIES      := $(JS_SRC_DIR)/app.js $(JS_SRC_DIR)/join.js
+
+# Alpine 3 targets modern evergreen browsers; es2020 matches the syntax the
+# source already uses (async/await, optional chaining). share.js is the one
+# cross-tree module (served from /assets/js/ by the web tree); mark it
+# external so the bundle keeps the runtime import instead of inlining a file
+# that lives outside the client tree (slice 2 territory).
+ESBUILD_FLAGS   := --bundle --minify --format=esm --target=es2020 \
+                   --external:/assets/js/share.js
+
+$(JS_DEPS): package.json package-lock.json
+	npm ci
+	@touch $@
+
+.PHONY: js
+js: $(JS_DEPS)
+	$(ESBUILD_BIN) $(JS_ENTRIES) $(ESBUILD_FLAGS) --outdir=$(JS_OUT_DIR)
+
+# Rebuild on change during development. Mirrors `make js` flags so the
+# watcher output matches what `make js` produces and never drifts from the
+# committed bundles.
+.PHONY: js-watch
+js-watch: $(JS_DEPS)
+	$(ESBUILD_BIN) $(JS_ENTRIES) $(ESBUILD_FLAGS) --outdir=$(JS_OUT_DIR) --watch
+
+# Rebuild into a temp dir and diff against the committed bundles. Wired into
+# `make check` so a client JS change without `make js` fails pre-commit
+# instead of shipping a stale bundle. Mirrors tailwind-check.
+.PHONY: js-check
+js-check: $(JS_DEPS)
+	@tmp=$$(mktemp -d) && \
+	    $(ESBUILD_BIN) $(JS_ENTRIES) $(ESBUILD_FLAGS) --outdir=$$tmp >/dev/null 2>&1 && \
+	    if ! diff -rq $$tmp $(JS_OUT_DIR) >/dev/null; then \
+	        echo "ERROR: $(JS_OUT_DIR) is out of date — run \`make js\` and commit the result."; \
+	        diff -ru $(JS_OUT_DIR) $$tmp || true; \
+	        rm -rf $$tmp; \
+	        exit 1; \
+	    fi; \
+	    rm -rf $$tmp; \
+	    echo "$(JS_OUT_DIR) is up to date."
 
 # --- golangci-lint -----------------------------------------------------------
 #

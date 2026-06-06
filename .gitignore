@@ -27,6 +27,10 @@ profile.cov
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
+# Node deps for the esbuild client-bundle pipeline. package.json +
+# package-lock.json are committed; the installed tree is not.
+node_modules/
+
 # Go workspace file
 go.work
 go.work.sum
