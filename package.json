@@ -1,0 +1,9 @@
+{
+  "name": "topbanana",
+  "private": true,
+  "description": "Build tooling for the Top Banana player client JS bundles (esbuild). Not a runtime dependency.",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "esbuild": "0.28.0"
+  }
+}
