@@ -274,14 +274,21 @@ function initSortable(root) {
 
     const shared = { name: 'questions' };
 
-    // SortableJS runs in native HTML5 drag-and-drop mode, which fires for mouse
-    // input only and does NOT engage on touchscreens (#199 keeps touch drag out
-    // of scope). Touch and keyboard users reorder via the grip handle's
-    // ArrowUp/ArrowDown keys (#731), so the rail stays visible at every
-    // breakpoint.
+    // Native HTML5 drag-and-drop (SortableJS' default) never fires on
+    // touchscreens, so on a touch-primary device switch SortableJS to its
+    // pointer-driven fallback engine - then the grip handle drags on touch too.
+    // Desktop (mouse) keeps native DnD. delay + delayOnTouchOnly make a touch
+    // press-and-hold start the drag so a tap-scroll is not hijacked. Keyboard
+    // users reorder via the handle's ArrowUp/ArrowDown keys (#731).
+    const touchPrimary = typeof window.matchMedia === 'function'
+        && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
     const common = {
         animation: ANIMATION_MS,
         onStart: captureSnapshot,
+        forceFallback: touchPrimary,
+        delay: 150,
+        delayOnTouchOnly: true,
+        fallbackTolerance: 5,
         ghostClass: 'sortable-ghost',
         chosenClass: 'sortable-chosen',
         dragClass: 'sortable-drag',
