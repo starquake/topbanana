@@ -1058,6 +1058,21 @@ export class GameApp {
         await this.nextQuestion();
     }
 
+    // roundTitle is the round-intro heading: the current round's title, or an
+    // empty string when there is no round to name. Mirrors JoinApp.roundTitle
+    // so the shared round-intro partial binds the same expression on both the
+    // solo and live surfaces.
+    roundTitle() {
+        return this.roundItem && this.roundItem.title ? this.roundItem.title : '';
+    }
+
+    // roundSummary is the optional copy beneath the round title, empty when the
+    // round has no summary so the partial's x-if skips it. Mirrors
+    // JoinApp.roundSummary.
+    roundSummary() {
+        return this.roundItem && this.roundItem.summary ? this.roundItem.summary : '';
+    }
+
     // optionStateClass returns the class string for an answer button.
     // Composes two layers:
     //   1. Answer-phase TONE — Kahoot-style per-option colour driven

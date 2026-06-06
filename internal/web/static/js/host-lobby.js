@@ -31,6 +31,11 @@ function hostLobby(joinCode) {
         phase: 'lobby',
         players: [],
         question: null,
+        // The round_intro round off the latest state read, or null outside the
+        // round_intro phase (the server carries it only there). Drives the
+        // between-rounds screen's title/summary and "Round N of M" heading
+        // (#748).
+        round: null,
         // Offset between the server clock and Date.now() in ms, refreshed from
         // serverNow on every state read. serverTime() applies it so the
         // countdown ticks off the server's view of the deadline regardless of
@@ -146,6 +151,7 @@ function hostLobby(joinCode) {
             this.phase = typeof state.phase === 'string' ? state.phase : 'lobby';
             this.players = Array.isArray(state.players) ? state.players : [];
             this.question = state.question ?? null;
+            this.round = state.round ?? null;
 
             const offset = clockOffsetFromServerNow(state.serverNow);
             if (offset !== null) this.clockOffset = offset;
@@ -325,6 +331,30 @@ function hostLobby(joinCode) {
             const ready = this.players.filter((p) => p.isReady).length;
 
             return `${ready} / ${this.players.length} ready`;
+        },
+
+        // roundEyebrow is the small heading above the round title on the
+        // round_intro screen. It reads "Round N of M" so the first round never
+        // says "next round"; it falls back to a generic "Get ready" when the
+        // server did not carry the round position (a deleted round mid-game).
+        roundEyebrow() {
+            if (this.round && this.round.number > 0 && this.round.total > 0) {
+                return `Round ${this.round.number} of ${this.round.total}`;
+            }
+
+            return 'Get ready';
+        },
+
+        // roundTitle is the round_intro heading: the round's own title, or a
+        // generic "Get ready" when no round metadata is present.
+        roundTitle() {
+            return this.round && this.round.title ? this.round.title : 'Get ready';
+        },
+
+        // roundSummary is the optional copy beneath the round title, empty when
+        // the round has no summary so the template skips it.
+        roundSummary() {
+            return this.round && this.round.summary ? this.round.summary : '';
         },
 
         async start() {

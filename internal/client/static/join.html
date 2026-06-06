@@ -187,12 +187,15 @@
                     </div>
                 </template>
 
-                <!-- Round intro: a brief "get ready" screen between rounds. -->
+                <!-- Round intro: names the round about to start, mirroring the
+                     solo client's round-intro card (#548, #748). The eyebrow
+                     reads "Round N of M" so the first round never says "next
+                     round"; the title and optional summary come from the round
+                     metadata, with a generic fallback if it is missing. -->
                 <template x-if="!lobbyClosed && state && state.phase === 'round_intro'">
                     <div class="text-center py-16" data-testid="round-intro">
-                        <p class="label-eyebrow">Get ready</p>
-                        <h2 class="mt-2 font-display text-3xl font-semibold text-text">The next round is starting</h2>
-                        <p class="mt-4 text-text-dim">Hang tight - the first question is on its way.</p>
+                        <p class="label-eyebrow" data-testid="round-intro-eyebrow" x-text="roundEyebrow()"></p>
+                        {{template "round-intro-card" .}}
                     </div>
                 </template>
 

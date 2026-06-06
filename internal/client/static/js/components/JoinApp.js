@@ -708,6 +708,38 @@ export class JoinApp {
         return this.state ? this.state.question : null;
     }
 
+    // currentRound returns the round_intro round off the authoritative state,
+    // or null outside the round_intro phase (the server carries it only there).
+    currentRound() {
+        return this.state ? this.state.round : null;
+    }
+
+    // roundEyebrow is the small heading above the round title on the round_intro
+    // screen. It reads "Round N of M" so the first round never says "next
+    // round"; it falls back to a generic "Get ready" when the server did not
+    // carry the round position (a deleted round mid-game).
+    roundEyebrow() {
+        const round = this.currentRound();
+        if (round && round.number > 0 && round.total > 0) {
+            return `Round ${round.number} of ${round.total}`;
+        }
+        return 'Get ready';
+    }
+
+    // roundTitle is the round_intro heading: the round's own title, or a
+    // generic "Get ready" when no round metadata is present.
+    roundTitle() {
+        const round = this.currentRound();
+        return round && round.title ? round.title : 'Get ready';
+    }
+
+    // roundSummary is the optional copy beneath the round title, empty when the
+    // round has no summary so the template skips it.
+    roundSummary() {
+        const round = this.currentRound();
+        return round && round.summary ? round.summary : '';
+    }
+
     // hasAnswered reports whether the player has locked in a pick for the
     // current question, gating the "answered, waiting" state.
     hasAnswered() {

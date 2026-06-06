@@ -247,9 +247,11 @@ func (*fakeStore) ListFinalStandings(context.Context, string) ([]*Standing, erro
 	return nil, errors.ErrUnsupported
 }
 
-// fakeQuiz returns the configured quiz or ErrQuizNotFound when nil.
+// fakeQuiz returns the configured quiz or ErrQuizNotFound when nil, and the
+// configured rounds (in position order) for the round_intro read.
 type fakeQuiz struct {
-	quiz *quiz.Quiz
+	quiz   *quiz.Quiz
+	rounds []*quiz.Round
 }
 
 func (f *fakeQuiz) GetQuiz(_ context.Context, _ int64) (*quiz.Quiz, error) {
@@ -258,6 +260,10 @@ func (f *fakeQuiz) GetQuiz(_ context.Context, _ int64) (*quiz.Quiz, error) {
 	}
 
 	return f.quiz, nil
+}
+
+func (f *fakeQuiz) ListRoundsByQuiz(_ context.Context, _ int64) ([]*quiz.Round, error) {
+	return f.rounds, nil
 }
 
 func TestService_CreateSession_RegeneratesOnCodeCollision(t *testing.T) {

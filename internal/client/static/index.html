@@ -475,26 +475,10 @@
                                   data-testid="round-countdown"
                                   :value="roundProgress" max="100"></progress>
 
-                        <!-- Round title in the display-font scale as the
-                             question text so the screen reads as part of
-                             the same flow. -->
-                        <h2 class="mb-4 font-display font-bold leading-[1.1] tracking-tight text-accent text-center
-                                   text-[clamp(1.4rem,4.5vw,2.4rem)]
-                                   lg:text-[clamp(2.25rem,4vw,4rem)]
-                                   2xl:text-[clamp(3rem,3.5vw,5.5rem)]"
-                            data-testid="round-title"
-                            x-text="roundItem.title"></h2>
-
-                        <!-- Round summary: optional copy beneath the title.
-                             Skipped entirely when empty (admin didn't bother)
-                             — the Continue button then stands alone. -->
-                        <template x-if="roundItem.summary">
-                            <p class="mb-6 lg:mb-10 font-display leading-snug text-text text-center
-                                      text-[clamp(1rem,3vw,1.5rem)]
-                                      lg:text-[clamp(1.25rem,2.5vw,2rem)]"
-                               data-testid="round-summary"
-                               x-text="roundItem.summary"></p>
-                        </template>
+                        <!-- Round title + optional summary: shared with the
+                             live round-intro screen (join.html). The Continue
+                             button stands alone when the summary is empty. -->
+                        {{template "round-intro-card" .}}
 
                         <!-- Retry banner mirrors the answer-submit one
                              (#179): a transient POST failure leaves the
