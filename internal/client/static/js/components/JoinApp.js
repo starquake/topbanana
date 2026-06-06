@@ -122,6 +122,10 @@ export class JoinApp {
         this.lobbyClosed = false;
         // The SSE subscription handle, closed on teardown and before re-open.
         this.eventSource = null;
+        // The bound visibility/focus handler, wired once in init. Held on the
+        // instance so a single shared reference backs all three listeners. Null
+        // until init attaches it.
+        this.onVisible = null;
 
         // The account display name to auto-join with, set once init resolves a
         // logged-in player who has already chosen a custom name. Null for an
@@ -221,6 +225,18 @@ export class JoinApp {
                 sessionService.leave(this.code);
             }
         });
+
+        // Mobile browsers commonly suspend or close the SSE connection while
+        // the tab is backgrounded, and EventSource does not always reconnect on
+        // return, so no further state reads fire and the roster goes stale. On
+        // every return to the foreground re-read state and re-open the stream
+        // if it dropped, so the roster and current phase come back (#751). One
+        // shared handler covers visibilitychange, pageshow (bfcache restore),
+        // and focus; it no-ops outside the lobby stage.
+        this.onVisible = () => this.handleVisible();
+        document.addEventListener('visibilitychange', this.onVisible);
+        window.addEventListener('pageshow', this.onVisible);
+        window.addEventListener('focus', this.onVisible);
 
         // Resolve the current player once. A logged-in player who has already
         // chosen a custom name is auto-joined under that name, skipping the
@@ -643,6 +659,29 @@ export class JoinApp {
             this.isReady = mine.isReady;
             this.myDisplayName = mine.displayName;
         }
+    }
+
+    // handleVisible recovers the live surface when the player returns to a
+    // backgrounded tab. It only acts in the lobby stage on a live (non-closed)
+    // session, and only when the page is actually visible (visibilitychange
+    // also fires on the way to hidden). It re-reads state immediately so the
+    // roster and phase repopulate, and re-subscribes only when the stream has
+    // dropped - subscribe is a no-op-ish reopen otherwise, but guarding here
+    // avoids needlessly tearing down a still-live socket.
+    handleVisible() {
+        if (document.visibilityState !== 'visible') return;
+        if (this.phase !== 'lobby' || !this.code || this.lobbyClosed) return;
+        this.refreshState();
+        if (this.streamDropped()) {
+            this.subscribe();
+        }
+    }
+
+    // streamDropped reports whether the SSE subscription is gone or closed, so
+    // a return-to-foreground only re-opens a dead socket rather than leaking a
+    // duplicate over a still-connected one.
+    streamDropped() {
+        return !this.eventSource || this.eventSource.readyState === EventSource.CLOSED;
     }
 
     // subscribe opens the SSE event channel and re-reads state on every tick.
