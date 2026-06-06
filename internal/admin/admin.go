@@ -1378,6 +1378,9 @@ func parseImportPayload(
 
 		return parsedImport{}, false
 	}
+	// The prompt asks the LLM to return the JSON in a ```json code block, so
+	// tolerate a pasted block by stripping the surrounding fences before decode.
+	jsonText = stripCodeFences(jsonText)
 
 	var payload quizImportPayload
 	dec := json.NewDecoder(strings.NewReader(jsonText))
@@ -1401,6 +1404,26 @@ func parseImportPayload(
 	}
 
 	return parsedImport{JSONText: jsonText, Quiz: qz}, true
+}
+
+// stripCodeFences removes a single surrounding Markdown fenced code block
+// (```...``` or ```json...```) from s, so JSON pasted straight from an LLM's
+// code block imports cleanly. It returns s unchanged when it is not fenced.
+func stripCodeFences(s string) string {
+	t := strings.TrimSpace(s)
+	if !strings.HasPrefix(t, "```") {
+		return s
+	}
+	nl := strings.IndexByte(t, '\n')
+	if nl < 0 {
+		return s
+	}
+	t = t[nl+1:]
+	if i := strings.LastIndex(t, "```"); i >= 0 {
+		t = t[:i]
+	}
+
+	return strings.TrimSpace(t)
 }
 
 var (

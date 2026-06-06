@@ -71,4 +71,10 @@ test('role change with notify opt-in delivers the notice email to the player', a
   expect(mail.subject).toBe('Your Top Banana! account role changed');
   expect(mail.text).toContain('An administrator changed the role on your Top Banana! account to host.');
   expect(mail.text).toContain('contact the site administrator');
+
+  // #733 - back on the players list, the now-host row carries a "host"
+  // badge next to its display-name link.
+  await page.goto('/admin/players');
+  const hostRow = page.getByRole('row').filter({ has: page.getByRole('link', { name: targetDisplayName }) });
+  await expect(hostRow.getByText('host', { exact: true })).toBeVisible();
 });

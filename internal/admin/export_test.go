@@ -26,6 +26,15 @@ var CanEditQuiz = canEditQuiz
 // exporting it from the package (#517).
 var NavSection = navSection
 
+// PlayerRow exposes the unexported per-row view model so the admin_test
+// package can pin the role-to-badge-flag mapping (IsAdmin / IsHost)
+// without rendering the template.
+type PlayerRow = playerRow
+
+// BuildPlayerRows exposes the unexported row builder so a DB-backed test
+// can assert the derived badge flags against a real listed page.
+var BuildPlayerRows = buildPlayerRows
+
 // AccountTypeLabel exposes the unexported account-type derivation used
 // by the admin players list so the per-branch table tests can pin the
 // mapping without exporting the helper from the package.
@@ -119,6 +128,10 @@ type QuizImportOptionPayload = quizImportOptionPayload
 // helper so the test package can pin the payload-to-domain mapping
 // without spinning the full HTTP handler.
 var QuizFromImportPayload = quizFromImportPayload
+
+// StripCodeFences exposes the unexported fenced-code-block stripper so the
+// test package can pin the paste-from-an-LLM-code-block tolerance.
+var StripCodeFences = stripCodeFences
 
 // ValidateQuestionForm exposes the unexported questionForm.Valid
 // behaviour so the option-count and at-least-one-correct rules can be

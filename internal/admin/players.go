@@ -29,6 +29,7 @@ type playerRow struct {
 	AccountType     string
 	OnboardingState string
 	IsAdmin         bool
+	IsHost          bool
 	CreatedAt       time.Time
 	FinishedCount   int64
 	LastFinishedAt  *time.Time
@@ -194,6 +195,7 @@ func buildPlayerRows(
 			AccountType:     accountTypeLabel(p),
 			OnboardingState: p.OnboardingState,
 			IsAdmin:         p.Role == auth.RoleAdmin,
+			IsHost:          p.Role == auth.RoleHost,
 			CreatedAt:       p.CreatedAt,
 		}
 		if s, ok := statsByID[p.ID]; ok {

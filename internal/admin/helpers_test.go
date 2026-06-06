@@ -152,6 +152,21 @@ func (e *adminEnv) seedVerifiedPlayerID(t *testing.T, displayName, email, role s
 	return id
 }
 
+// seedHostPlayer inserts a verified credentialled row and promotes it to
+// the host tier via the admin role writer. Host is in-app-assignment-only:
+// CreatePlayerWithCredentials only ever resolves to admin or player, so a
+// host row must be promoted after creation rather than requested at insert.
+func (e *adminEnv) seedHostPlayer(t *testing.T, displayName, email string) int64 {
+	t.Helper()
+
+	id := e.seedVerifiedPlayerID(t, displayName, email, auth.RolePlayer)
+	if err := e.admin.SetPlayerRole(t.Context(), id, auth.RoleHost); err != nil {
+		t.Fatalf("SetPlayerRole(%d, host) err = %v, want nil", id, err)
+	}
+
+	return id
+}
+
 // seedOAuthPlayer inserts an OAuth-only row (no password) linked to the
 // given provider, putting it in the "oauth" onboarding bucket.
 func (e *adminEnv) seedOAuthPlayer(t *testing.T, displayName, email, provider, subject string) int64 {
