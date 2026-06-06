@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/starquake/topbanana/internal/auth"
@@ -76,18 +75,16 @@ func HandleSessionCreate(logger *slog.Logger, service *livesession.Service) http
 	})
 }
 
-// HandleSessionJoin adds the calling player to a session anonymously under
-// a display name carried in the body. A per-session display-name collision
-// is resolved transparently by the service (petname fallback), so the
-// response always carries the display name the player actually landed
-// with. Returns 404 when the join code is unknown, 409 when the session has
-// already left the lobby (v1 has no late join), and 403 when the player has
-// already finished a session of the same quiz (a live quiz is played once
-// until an admin resets it).
+// HandleSessionJoin adds the calling player to a session. The join carries no
+// name (#716): the player is already named on their players row (an anonymous
+// or unnamed player claims players.display_name through the shared claim flow
+// before joining; a logged-in named player keeps their account name), so the
+// response echoes that current name straight off the context player. Returns
+// 404 when the join code is unknown, 409 when the session has already left the
+// lobby (v1 has no late join), and 403 when the player has already finished a
+// session of the same quiz (a live quiz is played once until an admin resets
+// it).
 func HandleSessionJoin(logger *slog.Logger, service *livesession.Service) http.Handler {
-	type joinRequest struct {
-		DisplayName string `json:"displayName"`
-	}
 	type joinResponse struct {
 		DisplayName string `json:"displayName"`
 		IsReady     bool   `json:"isReady"`
@@ -104,20 +101,7 @@ func HandleSessionJoin(logger *slog.Logger, service *livesession.Service) http.H
 			return
 		}
 
-		req, err := handlers.DecodeJSON[joinRequest](w, r)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-
-			return
-		}
-		displayName := strings.TrimSpace(req.DisplayName)
-		if displayName == "" {
-			http.Error(w, "display name is required", http.StatusBadRequest)
-
-			return
-		}
-
-		joined, err := service.Join(ctx, r.PathValue("code"), player.ID, displayName, auth.GeneratePetname)
+		joined, err := service.Join(ctx, r.PathValue("code"), player.ID)
 		if err != nil {
 			switch {
 			case errors.Is(err, livesession.ErrSessionNotFound):
@@ -133,7 +117,7 @@ func HandleSessionJoin(logger *slog.Logger, service *livesession.Service) http.H
 			return
 		}
 
-		res := joinResponse{DisplayName: joined.DisplayName, IsReady: joined.IsReady}
+		res := joinResponse{DisplayName: player.DisplayName, IsReady: joined.IsReady}
 		if err = handlers.EncodeJSON(w, http.StatusOK, res); err != nil {
 			logger.ErrorContext(ctx, "error encoding session join response", slog.Any("err", err))
 		}

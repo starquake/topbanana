@@ -373,9 +373,14 @@ func TestSessionRunnerMigration_PhasesAndAnswers(t *testing.T) {
 	})
 }
 
-// TestSessionsMigration_RosterUniqueness pins the session_players UNIQUE
-// constraints: one row per (session, player) and per (session,
-// display_name).
+// sessionPlayersDropDisplayNameVersion is the #716 migration that rebuilds
+// session_players to drop the display_name column and its UNIQUE (session_id,
+// display_name) constraint, keeping UNIQUE (session_id, player_id).
+const sessionPlayersDropDisplayNameVersion = 20260609120000
+
+// TestSessionsMigration_RosterUniqueness pins the surviving session_players
+// UNIQUE constraint after #716 dropped the per-session display_name: one row
+// per (session, player). display_name is no longer stored on the roster.
 func TestSessionsMigration_RosterUniqueness(t *testing.T) {
 	t.Parallel()
 
@@ -402,36 +407,28 @@ func TestSessionsMigration_RosterUniqueness(t *testing.T) {
 	); err != nil {
 		t.Fatalf("seed session err = %v, want nil", err)
 	}
-	// Two distinct joining players.
-	var p1, p2 int64
+	var p1 int64
 	if err := db.QueryRowContext(
 		ctx, `INSERT INTO players (display_name, role) VALUES ('mig-join-1', 'player') RETURNING id`,
 	).Scan(&p1); err != nil {
 		t.Fatalf("seed player 1 err = %v, want nil", err)
 	}
-	if err := db.QueryRowContext(
-		ctx, `INSERT INTO players (display_name, role) VALUES ('mig-join-2', 'player') RETURNING id`,
-	).Scan(&p2); err != nil {
-		t.Fatalf("seed player 2 err = %v, want nil", err)
-	}
 
 	if _, err := db.ExecContext(
 		ctx,
-		`INSERT INTO session_players (session_id, player_id, display_name) VALUES ('sess-roster-1', ?, 'Alice')`,
+		`INSERT INTO session_players (session_id, player_id) VALUES ('sess-roster-1', ?)`,
 		p1,
 	); err != nil {
 		t.Fatalf("seed roster row err = %v, want nil", err)
 	}
 
-	t.Run("same display_name in a session is rejected", func(t *testing.T) {
+	t.Run("session_players has no display_name column", func(t *testing.T) {
 		t.Parallel()
 		_, err := db.ExecContext(
-			ctx,
-			`INSERT INTO session_players (session_id, player_id, display_name) VALUES ('sess-roster-1', ?, 'Alice')`,
-			p2,
+			ctx, `INSERT INTO session_players (session_id, player_id, display_name) VALUES ('sess-roster-1', 99, 'X')`,
 		)
 		if err == nil {
-			t.Error("duplicate display_name err = nil, want a UNIQUE violation")
+			t.Error("insert referencing display_name err = nil, want a no-such-column error")
 		}
 	})
 
@@ -439,11 +436,100 @@ func TestSessionsMigration_RosterUniqueness(t *testing.T) {
 		t.Parallel()
 		_, err := db.ExecContext(
 			ctx,
-			`INSERT INTO session_players (session_id, player_id, display_name) VALUES ('sess-roster-1', ?, 'Alice2')`,
+			`INSERT INTO session_players (session_id, player_id) VALUES ('sess-roster-1', ?)`,
 			p1,
 		)
 		if err == nil {
 			t.Error("duplicate player err = nil, want a UNIQUE violation")
 		}
 	})
+}
+
+// TestSessionPlayersDropDisplayNameMigration_RebuildPreservesRows pins the
+// #716 child-table rebuild: a seeded roster row survives the Up with its id and
+// columns intact, display_name is gone, the (session, player) UNIQUE remains,
+// and the Down re-adds a nullable display_name so the round trip is clean.
+func TestSessionPlayersDropDisplayNameMigration_RebuildPreservesRows(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := dbtest.Open(t)
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v", cerr)
+		}
+	})
+
+	var quizID int64
+	if err := db.QueryRowContext(
+		ctx,
+		`INSERT INTO quizzes (title, slug, description, created_by_player_id, mode)
+		 VALUES ('Live', 'live-drop-name-mig', 'd', 1, 'live') RETURNING id`,
+	).Scan(&quizID); err != nil {
+		t.Fatalf("seed quiz err = %v, want nil", err)
+	}
+	if _, err := db.ExecContext(
+		ctx,
+		`INSERT INTO sessions (id, quiz_id, host_player_id, join_code) VALUES ('sess-dn-1', ?, 1, 'DNM234')`,
+		quizID,
+	); err != nil {
+		t.Fatalf("seed session err = %v, want nil", err)
+	}
+	var playerID int64
+	if err := db.QueryRowContext(
+		ctx, `INSERT INTO players (display_name, role) VALUES ('drop-name-join', 'player') RETURNING id`,
+	).Scan(&playerID); err != nil {
+		t.Fatalf("seed player err = %v, want nil", err)
+	}
+	var rosterID int64
+	if err := db.QueryRowContext(
+		ctx,
+		`INSERT INTO session_players (session_id, player_id, is_ready) VALUES ('sess-dn-1', ?, 1) RETURNING id`,
+		playerID,
+	).Scan(&rosterID); err != nil {
+		t.Fatalf("seed roster row err = %v, want nil", err)
+	}
+
+	// Down re-adds display_name (nullable, default ''); the row survives.
+	if err := goose.DownTo(db, ".", sessionPlayersDropDisplayNameVersion-1); err != nil {
+		t.Fatalf("goose.DownTo err = %v, want nil", err)
+	}
+	var (
+		downID      int64
+		downName    string
+		downIsReady int64
+	)
+	if err := db.QueryRowContext(
+		ctx, "SELECT id, display_name, is_ready FROM session_players WHERE session_id = 'sess-dn-1'",
+	).Scan(&downID, &downName, &downIsReady); err != nil {
+		t.Fatalf("read roster row after down err = %v, want nil", err)
+	}
+	if got, want := downID, rosterID; got != want {
+		t.Errorf("roster id after down = %d, want %d (id preserved)", got, want)
+	}
+	if got, want := downName, ""; got != want {
+		t.Errorf("display_name after down = %q, want %q (re-added empty)", got, want)
+	}
+	if got, want := downIsReady, int64(1); got != want {
+		t.Errorf("is_ready after down = %d, want %d (preserved)", got, want)
+	}
+
+	// Re-Up drops display_name again and keeps the row + (session, player) UNIQUE.
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("goose.Up after down err = %v, want nil", err)
+	}
+	var upID int64
+	if err := db.QueryRowContext(
+		ctx, "SELECT id FROM session_players WHERE session_id = 'sess-dn-1'",
+	).Scan(&upID); err != nil {
+		t.Fatalf("read roster row after re-up err = %v, want nil", err)
+	}
+	if got, want := upID, rosterID; got != want {
+		t.Errorf("roster id after re-up = %d, want %d (id preserved across round trip)", got, want)
+	}
+	if _, err := db.ExecContext(
+		ctx, `INSERT INTO session_players (session_id, player_id) VALUES ('sess-dn-1', ?)`, playerID,
+	); err == nil {
+		t.Error("duplicate (session, player) after re-up err = nil, want a UNIQUE violation")
+	}
 }

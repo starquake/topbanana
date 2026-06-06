@@ -143,8 +143,11 @@ type Session struct {
 	Players        []*Player
 }
 
-// Player is one roster row: a player who joined a session, with the
-// per-session display name and ready flag the lobby shows.
+// Player is one roster row: a player who joined a session, with the ready
+// flag the lobby shows. DisplayName is the player's CURRENT
+// players.display_name (#716), fanned out by the roster join rather than a
+// per-session snapshot, so a rename shows everywhere. It is empty on the bare
+// Player the AddPlayer upsert returns; only the lobby/state read populates it.
 type Player struct {
 	ID          int64
 	SessionID   string
@@ -226,11 +229,11 @@ type Store interface {
 	// whose row is marked left_at) may re-Join past the lobby, but a player who
 	// never joined is rejected as a late joiner.
 	SessionHasPlayer(ctx context.Context, joinCode string, playerID int64) (bool, error)
-	// AddPlayer adds (or revives) a roster row for the player under the
-	// requested display name. Returns [ErrDisplayNameTaken] on a
-	// per-session display-name collision so the caller can fall back to a
-	// petname.
-	AddPlayer(ctx context.Context, sessionID string, playerID int64, displayName string) (*Player, error)
+	// AddPlayer adds (or revives) a roster row for the player. The display
+	// name is no longer stored per session (#716): the roster/standings reads
+	// join players and select the current players.display_name, so a rename
+	// propagates everywhere. The returned Player carries no name.
+	AddPlayer(ctx context.Context, sessionID string, playerID int64) (*Player, error)
 	// SetReady toggles a participant's ready flag. Returns
 	// [ErrNotParticipant] when the player has no roster row in the
 	// session.
@@ -327,11 +330,6 @@ type SessionAnswer struct {
 	Correct    bool
 	Score      *int
 }
-
-// ErrDisplayNameTaken is returned by [Store.AddPlayer] when the requested
-// per-session display name collides with another roster row. The service
-// recovers by retrying with a petname.
-var ErrDisplayNameTaken = errors.New("session display name taken")
 
 // QuizReader is the slice of the quiz store the service needs: load the
 // full quiz (for mode + lobby metadata). Kept narrow so the service does
@@ -460,19 +458,18 @@ func (s *Service) CreateSession(ctx context.Context, quizID, hostPlayerID int64)
 	return sess, nil
 }
 
-// Join adds the player to the session identified by join code under the
-// requested display name. The display name is required; a per-session
-// collision is recovered transparently by retrying with a petname, so the
-// caller always lands in the lobby (decision 4 / claim-name parity). The
-// chosen display name is carried on the returned [Player]. Returns
+// Join adds the player to the session identified by join code. The player is
+// already named on their players row before joining (#716): an anonymous or
+// unnamed player claims players.display_name through the shared claim flow
+// first, and a logged-in named player keeps their account name. Join just adds
+// the roster row; the displayed name comes from the players join on the
+// roster/standings reads, so a rename propagates everywhere. Returns
 // [ErrSessionNotFound] when the code resolves to no session,
 // [ErrLobbyClosed] when the session has already left the lobby (v1 has no
 // late join), and [ErrAlreadyPlayed] when the player has already finished a
 // session of the same quiz (a live quiz is played once until an admin resets
 // it).
-func (s *Service) Join(
-	ctx context.Context, joinCode string, playerID int64, displayName string, petname func() string,
-) (*Player, error) {
+func (s *Service) Join(ctx context.Context, joinCode string, playerID int64) (*Player, error) {
 	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
 	if err != nil {
 		return nil, fmt.Errorf(errGetSessionByCodeFmt, err)
@@ -503,9 +500,9 @@ func (s *Service) Join(
 		return nil, ErrAlreadyPlayed
 	}
 
-	player, err := s.addPlayerWithPetnameFallback(ctx, sess.ID, playerID, displayName, petname)
+	player, err := s.store.AddPlayer(ctx, sess.ID, playerID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to add session player: %w", err)
 	}
 
 	// A new roster row changes the lobby, so signal subscribers to re-GET.
@@ -873,34 +870,6 @@ func (s *Service) allocateJoinCode(ctx context.Context) (string, error) {
 	}
 
 	return "", ErrJoinCodeUnavailable
-}
-
-// addPlayerWithPetnameFallback adds the player under the requested display
-// name, falling back to petnames on a per-session display-name collision
-// (mirroring the anonymous-join petname retry in EnsurePlayer) until one is
-// free or the attempt budget is exhausted.
-func (s *Service) addPlayerWithPetnameFallback(
-	ctx context.Context, sessionID string, playerID int64, displayName string, petname func() string,
-) (*Player, error) {
-	player, err := s.store.AddPlayer(ctx, sessionID, playerID, displayName)
-	if err == nil {
-		return player, nil
-	}
-	if !errors.Is(err, ErrDisplayNameTaken) {
-		return nil, fmt.Errorf("failed to add session player: %w", err)
-	}
-
-	for range joinCodeAttempts {
-		player, err = s.store.AddPlayer(ctx, sessionID, playerID, petname())
-		if err == nil {
-			return player, nil
-		}
-		if !errors.Is(err, ErrDisplayNameTaken) {
-			return nil, fmt.Errorf("failed to add session player with petname: %w", err)
-		}
-	}
-
-	return nil, fmt.Errorf("failed to add session player after petname retries: %w", err)
 }
 
 // publish fans out a session tick if a publisher is wired. The single

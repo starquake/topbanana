@@ -15,18 +15,19 @@ const QUESTION_OPTION_TONES = ['btn-answer-tone-a', 'btn-answer-tone-b', 'btn-an
 // growing each bar from its pre-round total to its new total (ms).
 const STANDINGS_BAR_DURATION = 900;
 
-// SESSION_STORAGE_KEY holds the remembered { code, name } the player landed
-// with, so a reload or a brief drop can resume by re-joining without the player
-// re-entering the code or name (MP-10 / #687). One key; cleared when the lobby
-// is gone or on an explicit leave.
+// SESSION_STORAGE_KEY holds the remembered { code } the player joined, so a
+// reload or a brief drop can resume by re-joining without the player
+// re-entering the code (MP-10 / #687). Join is nameless now (#716 - the player
+// is already named on their players row), so only the code needs remembering.
+// One key; cleared when the lobby is gone or on an explicit leave.
 const SESSION_STORAGE_KEY = 'topbanana.session';
 
-// rememberSession persists the join code + landed display name so a reload can
-// resume. Best-effort: a storage exception (private mode, quota) is swallowed -
-// resume is a convenience, not a correctness requirement.
-function rememberSession(code, name) {
+// rememberSession persists the join code so a reload can resume. Best-effort: a
+// storage exception (private mode, quota) is swallowed - resume is a
+// convenience, not a correctness requirement.
+function rememberSession(code) {
     try {
-        window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ code, name }));
+        window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ code }));
     } catch {
         // localStorage may be unavailable; resume simply won't fire next load.
     }
@@ -43,8 +44,8 @@ function forgetSession() {
     }
 }
 
-// readRememberedSession returns the remembered { code, name }, or null when
-// there is nothing usable stored. Guards against a malformed or partial entry.
+// readRememberedSession returns the remembered { code }, or null when there is
+// nothing usable stored. Guards against a malformed or partial entry.
 function readRememberedSession() {
     let raw;
     try {
@@ -55,9 +56,8 @@ function readRememberedSession() {
     if (!raw) return null;
     try {
         const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed.code === 'string' && typeof parsed.name === 'string'
-            && parsed.code !== '' && parsed.name !== '') {
-            return { code: parsed.code, name: parsed.name };
+        if (parsed && typeof parsed.code === 'string' && parsed.code !== '') {
+            return { code: parsed.code };
         }
     } catch {
         // Fall through to the cleanup below.
@@ -101,9 +101,15 @@ export class JoinApp {
         this.codeInput = '';
         // Bound to the display-name input on the 'name' phase.
         this.displayName = '';
-        // The name the player actually landed with (post collision-fallback),
-        // shown in the lobby header so they can spot their own row.
+        // The name the player joined with, shown in the lobby header. Comes
+        // from the join/state response (the player's current
+        // players.display_name), and updates on each state read so a rename
+        // reflects in the header too.
         this.myDisplayName = '';
+        // The viewer's own players.id, resolved once from /api/players/me.
+        // Used to spot their own roster row across reads, which a rename would
+        // otherwise break if the row were matched by name.
+        this.myPlayerId = null;
         // True while a join / ready request is in flight, to guard buttons.
         this.busy = false;
         // Human-readable error for the current form, cleared on retry.
@@ -210,27 +216,34 @@ export class JoinApp {
         // Resolve the current player once. A logged-in player who has already
         // chosen a custom name is auto-joined under that name, skipping the
         // name form (the solo client treats the same isAuthenticated +
-        // hasCustomName pair as "named", #165). Best-effort: a failed fetch or
-        // an anonymous / unnamed player leaves accountName null, so the normal
-        // name-entry flow runs and joining is never blocked on this read.
+        // hasCustomName pair as "named", #165). The id is kept regardless so
+        // the viewer's own roster row can be matched by id (rename-safe).
+        // Best-effort: a failed fetch or an anonymous / unnamed player leaves
+        // accountName null, so the claim-then-join flow runs and joining is
+        // never blocked on this read.
         const player = await playerService.getMe();
-        if (player && player.isAuthenticated && player.hasCustomName) {
-            this.accountName = player.displayName;
+        if (player) {
+            this.myPlayerId = player.id;
+            if (player.isAuthenticated && player.hasCustomName) {
+                this.accountName = player.displayName;
+            }
         }
 
         const match = JOIN_PATH_PATTERN.exec(window.location.pathname);
         const urlCode = match ? decodeURIComponent(match[1]).toUpperCase() : '';
         const remembered = readRememberedSession();
-        // Prefer the URL code (an explicit deep link) over a remembered one, but
-        // reuse the remembered name when it belongs to the same room so a reload
-        // of a deep link resumes too.
-        const resumeCode = urlCode || (remembered ? remembered.code : '');
-        const resumeName = remembered && (!urlCode || remembered.code === urlCode)
-            ? remembered.name
+        // Resume only from a REMEMBERED session (a room the player previously
+        // joined), never from a bare deep link on its own: a fresh /join/{code}
+        // visit by an unnamed player must still show the name form rather than
+        // silently auto-joining under their auto-petname. A deep link that
+        // matches the remembered room (or a remembered room with no deep link)
+        // resumes straight into the lobby.
+        const resumeCode = remembered && (!urlCode || remembered.code === urlCode)
+            ? remembered.code
             : '';
 
-        if (resumeCode && resumeName) {
-            const resumed = await this.tryResume(resumeCode, resumeName);
+        if (resumeCode) {
+            const resumed = await this.tryResume(resumeCode);
             if (resumed) return;
         }
 
@@ -248,44 +261,52 @@ export class JoinApp {
         }
     }
 
-    // autoJoin joins the current code under the player's account name, landing
-    // them straight in the lobby and skipping the name form. It shares the join
-    // path submitName uses, so a (very unlikely) display-name collision still
-    // resolves server-side. On a non-OK result it falls back to the name form
-    // so the player can recover (a notFound bounces to the code form).
+    // landInLobby captures the join result, switches to the lobby stage,
+    // remembers the code for resume, and opens the SSE subscription. Shared by
+    // every successful-join path (auto-join, resume, claim-then-join).
+    async landInLobby(result) {
+        this.myDisplayName = result.displayName;
+        this.isReady = result.isReady;
+        this.phase = 'lobby';
+        rememberSession(this.code);
+        await this.refreshState();
+        this.subscribe();
+    }
+
+    // autoJoin joins the current code for a logged-in named player, landing
+    // them straight in the lobby and skipping the name form. The join is
+    // nameless (#716): the player keeps their account name. On a non-OK result
+    // it falls back to the name form so the player can recover (a notFound
+    // bounces to the code form).
     async autoJoin() {
         this.busy = true;
         this.error = '';
         try {
-            const result = await sessionService.join(this.code, this.accountName);
+            const result = await sessionService.join(this.code);
             if (!result.ok) {
                 this.error = result.message;
                 this.phase = result.kind === 'notFound' ? 'code' : 'name';
                 if (result.kind === 'notFound') this.codeInput = this.code;
                 return;
             }
-            this.myDisplayName = result.displayName;
-            this.isReady = result.isReady;
-            this.phase = 'lobby';
-            rememberSession(this.code, this.myDisplayName);
-            await this.refreshState();
-            this.subscribe();
+            await this.landInLobby(result);
         } finally {
             this.busy = false;
         }
     }
 
-    // tryResume attempts to rejoin code with the remembered name, landing the
-    // player straight in the lobby on success. A re-Join revives a prior
-    // participant's roster row (even one marked left by the unload beacon), so a
-    // reload resumes without re-entering the code or name; the server-derived
-    // countdown re-anchors on the next refreshState. On a closed lobby (409 for
-    // a never-joined player) or an unknown room (404) it clears the remembered
+    // tryResume attempts to rejoin code, landing the player straight in the
+    // lobby on success. The join is nameless (#716): the player is already
+    // named on their players row. A re-Join revives a prior participant's
+    // roster row (even one marked left by the unload beacon), so a reload
+    // resumes without re-entering the code; the server-derived countdown
+    // re-anchors on the next refreshState. On a closed lobby (409 for a
+    // never-joined player) or an unknown room (404) it clears the remembered
     // entry and falls back to the normal flow. Returns whether resume landed.
-    async tryResume(code, name) {
+    async tryResume(code) {
         let result;
         try {
-            result = await sessionService.join(code, name);
+            result = await sessionService.join(code);
         } catch {
             return false;
         }
@@ -294,12 +315,7 @@ export class JoinApp {
             return false;
         }
         this.code = code;
-        this.myDisplayName = result.displayName;
-        this.isReady = result.isReady;
-        this.phase = 'lobby';
-        rememberSession(this.code, this.myDisplayName);
-        await this.refreshState();
-        this.subscribe();
+        await this.landInLobby(result);
         return true;
     }
 
@@ -323,10 +339,12 @@ export class JoinApp {
         this.phase = 'name';
     }
 
-    // submitName posts the join. On success it captures the landed display
-    // name, seeds the ready flag from the response, switches to the lobby,
-    // and opens the SSE subscription. A notFound result bounces back to the
-    // code form so the player can fix a typo.
+    // submitName claims the chosen name on the player's players row through the
+    // shared claim flow (#716), then posts the nameless join. The claim is what
+    // names an anonymous / unnamed player before they join; the join itself
+    // carries no name. On a claim collision it surfaces the error and keeps the
+    // name form so the player can pick another. A join notFound bounces back to
+    // the code form so the player can fix a typo.
     async submitName() {
         if (this.busy) return;
         const trimmed = (this.displayName || '').trim();
@@ -337,7 +355,10 @@ export class JoinApp {
         this.busy = true;
         this.error = '';
         try {
-            const result = await sessionService.join(this.code, trimmed);
+            const claim = await this.claimName(trimmed);
+            if (!claim.ok) return;
+
+            const result = await sessionService.join(this.code);
             if (!result.ok) {
                 this.error = result.message;
                 if (result.kind === 'notFound') {
@@ -348,17 +369,36 @@ export class JoinApp {
                 }
                 return;
             }
-            this.myDisplayName = result.displayName;
-            this.isReady = result.isReady;
-            this.phase = 'lobby';
-            // Remember the landed code + name so a reload or brief drop resumes
-            // straight into the lobby without re-entering them (MP-10 / #687).
-            rememberSession(this.code, this.myDisplayName);
-            await this.refreshState();
-            this.subscribe();
+            await this.landInLobby(result);
         } finally {
             this.busy = false;
         }
+    }
+
+    // claimName sets the player's players.display_name through the shared
+    // claim endpoint (PlayerService, the same call the solo client's claim
+    // modal uses). On an already_claimed drift (the player turned out to be
+    // named already) it re-reads /me and treats that name as claimed so the
+    // join proceeds. Returns { ok } and sets this.error on a recoverable
+    // failure (a taken name, an empty name). On success it caches the name as
+    // the account name so a later re-entry skips the form.
+    async claimName(name) {
+        const result = await playerService.claimName(name);
+        if (result.ok) {
+            this.accountName = result.player.displayName;
+            this.myPlayerId = result.player.id;
+            return { ok: true };
+        }
+        if (result.kind === 'already_claimed') {
+            const player = await playerService.getMe();
+            if (player) {
+                this.accountName = player.displayName;
+                this.myPlayerId = player.id;
+            }
+            return { ok: true };
+        }
+        this.error = result.message;
+        return { ok: false };
     }
 
     // toggleReady flips the viewer's ready flag optimistically, posts it, and
@@ -507,7 +547,7 @@ export class JoinApp {
             rank: s.rank,
             total: s.totalScore,
             preTotal: s.totalScore - s.roundScore,
-            isMe: s.displayName === this.myDisplayName,
+            isMe: this.ownsRow(s),
             // Start at the pre-round total when animating, otherwise land on
             // the final total straight away (finished, reduced motion).
             displayTotal: animate ? s.totalScore - s.roundScore : s.totalScore,
@@ -630,10 +670,10 @@ export class JoinApp {
     }
 
     // syncReadyFromState mirrors the viewer's own ready flag off the roster so
-    // the toggle tracks the server truth (e.g. after a reconnect resync). The
-    // viewer's row is the one whose displayName matches the landed name; the
-    // wire shape exposes playerId but not "this is you", so the name is the
-    // stable correlator on the player surface.
+    // the toggle tracks the server truth (e.g. after a reconnect resync), and
+    // refreshes the displayed name from their roster row so a rename shows in
+    // the header. The viewer's row is resolved by ownsRow (playerId when known,
+    // rename-safe).
     //
     // It skips the mirror while a request is in flight (busy): in the lobby
     // that only happens during a ready-toggle, and an SSE tick landing mid-POST
@@ -642,9 +682,10 @@ export class JoinApp {
     syncReadyFromState() {
         if (this.busy) return;
         if (!this.state || !Array.isArray(this.state.players)) return;
-        const mine = this.state.players.find((p) => p.displayName === this.myDisplayName);
+        const mine = this.state.players.find((p) => this.ownsRow(p));
         if (mine) {
             this.isReady = mine.isReady;
+            this.myDisplayName = mine.displayName;
         }
     }
 
@@ -689,7 +730,20 @@ export class JoinApp {
 
     // isMe reports whether a roster row is the viewer's own, for highlighting.
     isMe(player) {
-        return player.displayName === this.myDisplayName;
+        return this.ownsRow(player);
+    }
+
+    // ownsRow reports whether a roster/standings row belongs to the viewer.
+    // It matches by playerId (rename-safe) when the id is known, falling back
+    // to the landed name only when myPlayerId could not be resolved (a failed
+    // /api/players/me on load) so the highlight and ready mirror still work in
+    // that degraded case.
+    ownsRow(row) {
+        if (this.myPlayerId !== null) {
+            return row.playerId === this.myPlayerId;
+        }
+
+        return row.displayName === this.myDisplayName;
     }
 
     // currentQuestion returns the live question off the authoritative state, or

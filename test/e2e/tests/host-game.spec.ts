@@ -89,11 +89,20 @@ test('host TV shows the live question, answered order, and the reveal', async ({
   // Two players join from fresh anonymous contexts (each gets its own
   // anonymous player). They ready up so the host start has a non-empty,
   // all-ready roster.
+  // Player names are global on players.display_name now (#716), so use unique
+  // names to avoid colliding with a parallel spec on the worker DB.
+  const casey = `Casey-${browserName}-${Date.now()}`;
+  const dana = `Dana-${browserName}-${Date.now()}`;
   const caseyCtx = await context.browser()!.newContext({ storageState: undefined, baseURL });
   const danaCtx = await context.browser()!.newContext({ storageState: undefined, baseURL });
   try {
-    for (const [ctx, name] of [[caseyCtx, 'Casey'], [danaCtx, 'Dana']] as const) {
-      const joinResp = await ctx.request.post(`/api/sessions/${code}/join`, { data: { displayName: name } });
+    for (const [ctx, name] of [[caseyCtx, casey], [danaCtx, dana]] as const) {
+      // #716: the join carries no name. An anonymous player claims their
+      // players.display_name through the shared claim endpoint first, then
+      // joins; the roster and answered-order badges read that current name.
+      const claimResp = await ctx.request.patch('/api/players/me', { data: { displayName: name } });
+      expect(claimResp.status(), `claim ${name}: ${await claimResp.text()}`).toBe(200);
+      const joinResp = await ctx.request.post(`/api/sessions/${code}/join`);
       expect(joinResp.status(), `join ${name}: ${await joinResp.text()}`).toBe(200);
       const readyResp = await ctx.request.post(`/api/sessions/${code}/ready`, { data: { ready: true } });
       expect(readyResp.status()).toBe(204);
@@ -137,7 +146,7 @@ test('host TV shows the live question, answered order, and the reveal', async ({
     const badges = page.locator('[data-answered-badge]');
     await expect(badges).toHaveCount(1, { timeout: 10_000 });
     await expect(badges.nth(0).locator('[data-answered-order]')).toHaveText('1');
-    await expect(badges.nth(0).locator('[data-answered-name]')).toHaveText('Casey');
+    await expect(badges.nth(0).locator('[data-answered-name]')).toHaveText(casey);
 
     const danaOption = await optionIdForText(danaCtx.request, code, '3');
     const danaAns = await danaCtx.request.post(`/api/sessions/${code}/answer`, { data: { optionId: danaOption } });
@@ -145,9 +154,9 @@ test('host TV shows the live question, answered order, and the reveal', async ({
 
     // Both badges now show, in the order the picks landed: Casey then Dana.
     await expect(badges).toHaveCount(2, { timeout: 10_000 });
-    await expect(badges.nth(0).locator('[data-answered-name]')).toHaveText('Casey');
+    await expect(badges.nth(0).locator('[data-answered-name]')).toHaveText(casey);
     await expect(badges.nth(1).locator('[data-answered-order]')).toHaveText('2');
-    await expect(badges.nth(1).locator('[data-answered-name]')).toHaveText('Dana');
+    await expect(badges.nth(1).locator('[data-answered-name]')).toHaveText(dana);
 
     // With every active player answered, the runner closes the question early
     // and moves into reveal. The TV now lights the correct option ("4") and
@@ -159,5 +168,65 @@ test('host TV shows the live question, answered order, and the reveal', async ({
   } finally {
     await caseyCtx.close();
     await danaCtx.close();
+  }
+});
+
+// #716: the live surfaces show the player's CURRENT players.display_name, so a
+// rename propagates everywhere. A player joins under one name, renames their
+// players row through the shared claim endpoint, and the host TV lobby roster
+// shows the new name. The rename does not itself publish a session tick, so the
+// player toggles ready (a lobby mutation that does publish) to make the TV
+// re-GET state - the eventual-consistency the SSE side-channel gives.
+test('the host TV roster reflects a player rename', async ({
+  page,
+  context,
+  baseURL,
+  browserName,
+}) => {
+  const displayName = `e2e-rename-host-${browserName}`;
+  const quizTitle = `E2E Rename Game ${browserName}`;
+
+  await registerForPending(page, displayName);
+  markEmailVerified(displayName);
+  markAdmin(displayName);
+  await login(page, displayName);
+  await expect(page).toHaveURL(/\/admin\/quizzes$/);
+
+  await seedQuiz(page, quizTitle);
+  setQuizMode(quizTitle, 'live');
+
+  await page.goto('/admin/quizzes');
+  await page.getByRole('link', { name: quizTitle }).click();
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+  await page.getByRole('button', { name: 'Play live' }).click();
+  await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
+  const code = page.url().split('/host/')[1];
+
+  // Player names are global on players.display_name now (#716), so use unique
+  // names to avoid colliding with a parallel spec on the worker DB.
+  const before = `Before-${browserName}-${Date.now()}`;
+  const after = `Renamed-${browserName}-${Date.now()}`;
+  const playerCtx = await context.browser()!.newContext({ storageState: undefined, baseURL });
+  try {
+    const claimResp = await playerCtx.request.patch('/api/players/me', { data: { displayName: before } });
+    expect(claimResp.status(), `claim: ${await claimResp.text()}`).toBe(200);
+    const joinResp = await playerCtx.request.post(`/api/sessions/${code}/join`);
+    expect(joinResp.status(), `join: ${await joinResp.text()}`).toBe(200);
+
+    const row = page.locator('[data-player-row]');
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText(before);
+
+    // Rename the player's account, then publish a tick (ready toggle) so the
+    // TV re-reads state and picks up the new name.
+    const renameResp = await playerCtx.request.patch('/api/players/me', { data: { displayName: after } });
+    expect(renameResp.status(), `rename: ${await renameResp.text()}`).toBe(200);
+    const readyResp = await playerCtx.request.post(`/api/sessions/${code}/ready`, { data: { ready: true } });
+    expect(readyResp.status()).toBe(204);
+
+    await expect(row).toContainText(after, { timeout: 10_000 });
+    await expect(row).not.toContainText(before);
+  } finally {
+    await playerCtx.close();
   }
 });

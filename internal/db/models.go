@@ -174,12 +174,11 @@ type SessionAnswer struct {
 }
 
 type SessionPlayer struct {
-	ID          int64
-	SessionID   string
-	PlayerID    int64
-	DisplayName string
-	IsReady     int64
-	JoinedAt    time.Time
-	LastSeenAt  time.Time
-	LeftAt      sql.NullTime
+	ID         int64
+	SessionID  string
+	PlayerID   int64
+	IsReady    int64
+	JoinedAt   time.Time
+	LastSeenAt time.Time
+	LeftAt     sql.NullTime
 }

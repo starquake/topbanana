@@ -91,14 +91,18 @@ func createSession(ctx context.Context, t *testing.T, client *http.Client, baseU
 	return body.JoinCode
 }
 
-// joinSession joins a session under displayName and returns the resolved
-// display name (which may be a petname fallback on collision).
+// joinSession claims displayName on the client's players row (the shared
+// claim flow #716 routes an anonymous player through before joining), then
+// posts the nameless join and asserts the response echoes that name (the
+// player's current players.display_name).
 func joinSession(
 	ctx context.Context, t *testing.T, client *http.Client, baseURL, code, displayName string,
-) string {
+) {
 	t.Helper()
-	body := fmt.Sprintf(`{"displayName": %q}`, displayName)
-	resp := httpPostJSON(ctx, t, client, fmt.Sprintf("%s/api/sessions/%s/join", baseURL, code), body)
+	if got, want := patchPlayerDisplayName(ctx, t, client, baseURL, displayName), http.StatusOK; got != want {
+		t.Fatalf("claim display name status = %d, want %d", got, want)
+	}
+	resp := httpPostJSON(ctx, t, client, fmt.Sprintf("%s/api/sessions/%s/join", baseURL, code), "")
 	defer closeBody(t, resp.Body)
 	if got, want := resp.StatusCode, http.StatusOK; got != want {
 		t.Fatalf("join status = %d, want %d", got, want)
@@ -109,8 +113,9 @@ func joinSession(
 	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
 		t.Fatalf("decode join: %v", err)
 	}
-
-	return res.DisplayName
+	if got, want := res.DisplayName, displayName; got != want {
+		t.Errorf("join echoed displayName = %q, want %q (current players.display_name)", got, want)
+	}
 }
 
 // getSessionState reads GET /api/sessions/{code}/state on the client.
@@ -235,38 +240,47 @@ func TestSessionLobby_JoinCodeIsCaseInsensitive(t *testing.T) {
 	}
 }
 
-// TestSessionLobby_DisplayNameCollisionFallsBackToPetname pins that a
-// second joiner asking for an already-taken display name still lands in
-// the lobby under a different (petname) name.
-func TestSessionLobby_DisplayNameCollisionFallsBackToPetname(t *testing.T) {
+// TestSessionLobby_ReflectsPlayerRename pins the #716 propagation guarantee
+// end to end: a player joins, then renames their account name through the
+// shared claim endpoint, and the lobby roster the host reads shows the new
+// name (the roster joins players rather than a per-session snapshot).
+func TestSessionLobby_ReflectsPlayerRename(t *testing.T) {
 	t.Parallel()
 
 	ctx, setup := setupIntegration(t)
 	baseURL := setup.BaseURL
-	qz := seedLiveQuiz(ctx, t, setup.Stores.Quizzes, "lobby-collision")
+	qz := seedLiveQuiz(ctx, t, setup.Stores.Quizzes, "lobby-rename")
 
 	host := &http.Client{
 		Jar:           mustJar(t),
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	registerVerifyAndSignIn(ctx, t, host, baseURL, setup.DBURI, "collision-host", "collision-host-pass-123")
+	registerVerifyAndSignIn(ctx, t, host, baseURL, setup.DBURI, "rename-host", "rename-host-pass-123")
 	code := createSession(ctx, t, host, baseURL, qz.ID)
 
-	first := newAnonClient(t)
-	second := newAnonClient(t)
-	got1 := joinSession(ctx, t, first, baseURL, code, "Twins")
-	got2 := joinSession(ctx, t, second, baseURL, code, "Twins")
+	player := newAnonClient(t)
+	joinSession(ctx, t, player, baseURL, code, "Before")
 
-	if got, want := got1, "Twins"; got != want {
-		t.Errorf("first join name = %q, want %q", got, want)
+	before := getSessionState(ctx, t, host, baseURL, code)
+	if got, want := len(before.Players), 1; got != want {
+		t.Fatalf("len(players) = %d, want %d", got, want)
 	}
-	if got2 == "Twins" {
-		t.Error("second join kept the colliding name; want a petname fallback")
+	if got, want := before.Players[0].DisplayName, "Before"; got != want {
+		t.Errorf("roster DisplayName = %q, want %q", got, want)
 	}
 
-	state := getSessionState(ctx, t, first, baseURL, code)
-	if got, want := len(state.Players), 2; got != want {
-		t.Errorf("len(players) = %d, want %d (both joined despite collision)", got, want)
+	// An anonymous player can re-claim (rename) their own row via the same
+	// shared claim endpoint, since they have no credentials yet.
+	if got, want := patchPlayerDisplayName(ctx, t, player, baseURL, "After"), http.StatusOK; got != want {
+		t.Fatalf("rename status = %d, want %d", got, want)
+	}
+
+	after := getSessionState(ctx, t, host, baseURL, code)
+	if got, want := len(after.Players), 1; got != want {
+		t.Fatalf("len(players) after rename = %d, want %d", got, want)
+	}
+	if got, want := after.Players[0].DisplayName, "After"; got != want {
+		t.Errorf("roster DisplayName after rename = %q, want %q (rename must propagate)", got, want)
 	}
 }
 
@@ -296,7 +310,7 @@ func TestSessionLobby_JoinAfterStartIs409(t *testing.T) {
 
 	// A latecomer joining the now-running session is rejected with 409.
 	late := newAnonClient(t)
-	resp := httpPostJSON(ctx, t, late, fmt.Sprintf("%s/api/sessions/%s/join", baseURL, code), `{"displayName":"Late"}`)
+	resp := httpPostJSON(ctx, t, late, fmt.Sprintf("%s/api/sessions/%s/join", baseURL, code), "")
 	defer closeBody(t, resp.Body)
 	if got, want := resp.StatusCode, http.StatusConflict; got != want {
 		t.Errorf("late join status = %d, want %d", got, want)

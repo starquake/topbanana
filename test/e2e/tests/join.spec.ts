@@ -36,6 +36,9 @@ function makeQuizLive(title: string): number {
 test.describe('player join + lobby', () => {
   test('joins via typed code, enters a name, lands in the lobby, and toggles ready', async ({ page }) => {
     const quizTitle = `Live Quiz ${Date.now()}`;
+    // Player names are global on players.display_name now (#716), so a unique
+    // name avoids a collision with a parallel spec sharing the worker DB.
+    const alice = `Alice-${Date.now()}`;
 
     // Seed + host setup as the admin (storageState) in a separate browser
     // context so the player page itself stays anonymous. seedQuiz drives the
@@ -58,14 +61,14 @@ test.describe('player join + lobby', () => {
     await page.getByTestId('join-code-input').fill(joinCode.toLowerCase());
     await page.getByTestId('join-code-submit').click();
 
-    await page.getByTestId('join-name-input').fill('Alice');
+    await page.getByTestId('join-name-input').fill(alice);
     await page.getByTestId('join-name-submit').click();
 
     // Lands in the lobby: the roster shows the player, not-ready by default.
     const roster = page.getByTestId('lobby-roster');
     await expect(roster).toBeVisible();
-    await expect(roster.getByText('Alice')).toBeVisible();
-    const aliceRow = roster.locator('li', { hasText: 'Alice' });
+    await expect(roster.getByText(alice)).toBeVisible();
+    const aliceRow = roster.locator('li', { hasText: alice });
     await expect(aliceRow).toHaveAttribute('data-ready', 'false');
 
     // Toggle ready and confirm it reflects on the player's own row.
@@ -78,8 +81,8 @@ test.describe('player join + lobby', () => {
     const stateResp = await page.request.get(`/api/sessions/${joinCode}/state`);
     expect(stateResp.ok()).toBeTruthy();
     const state = await stateResp.json() as { players: { displayName: string; isReady: boolean }[] };
-    const alice = state.players.find((p) => p.displayName === 'Alice');
-    expect(alice?.isReady).toBe(true);
+    const aliceState = state.players.find((p) => p.displayName === alice);
+    expect(aliceState?.isReady).toBe(true);
 
     // Toggle back to not-ready and confirm the round-trip the other way.
     await page.getByTestId('ready-toggle').click();
@@ -90,6 +93,7 @@ test.describe('player join + lobby', () => {
 
   test('a deep-linked /join/{code} skips straight to the name form', async ({ page }) => {
     const quizTitle = `Live Deep ${Date.now()}`;
+    const bob = `Bob-${Date.now()}`;
 
     const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath() });
     const host = await hostContext.newPage();
@@ -105,9 +109,9 @@ test.describe('player join + lobby', () => {
     await expect(page.getByTestId('join-name-input')).toBeVisible();
     await expect(page.getByText(joinCode)).toBeVisible();
 
-    await page.getByTestId('join-name-input').fill('Bob');
+    await page.getByTestId('join-name-input').fill(bob);
     await page.getByTestId('join-name-submit').click();
-    await expect(page.getByTestId('lobby-roster').getByText('Bob')).toBeVisible();
+    await expect(page.getByTestId('lobby-roster').getByText(bob)).toBeVisible();
 
     await hostContext.close();
   });

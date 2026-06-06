@@ -98,7 +98,7 @@ func newRunnerHarness(t *testing.T, start time.Time, rounds [][]bool) *runnerHar
 		if err != nil {
 			t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
 		}
-		if _, err := sessionStore.AddPlayer(t.Context(), sess.ID, p.ID, petnameFor(i)); err != nil {
+		if _, err := sessionStore.AddPlayer(t.Context(), sess.ID, p.ID); err != nil {
 			t.Fatalf("AddPlayer err = %v, want nil", err)
 		}
 		players = append(players, p.ID)
@@ -145,10 +145,6 @@ func (h *runnerHarness) setHostLastSeen(t *testing.T, sessionID string, at time.
 	); err != nil {
 		t.Fatalf("setHostLastSeen err = %v, want nil", err)
 	}
-}
-
-func petnameFor(i int) string {
-	return "Player-" + string(rune('A'+i))
 }
 
 // seedRunnerQuiz authors a live quiz whose rounds carry the given questions;

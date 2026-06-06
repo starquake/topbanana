@@ -14,27 +14,21 @@ import { jsonOrThrow } from './api.js';
 // `notFound` result so the form can show "no game with that code"; ready
 // and getState rethrow via jsonOrThrow for the caller to branch on.
 export class SessionService {
-    // join adds the caller to the session under displayName. On success it
-    // returns { ok: true, displayName, isReady } - the displayName echoed
-    // back is the one the player actually landed with, since a per-session
-    // collision is resolved server-side with a petname fallback. A 404
-    // (unknown code) maps to { ok: false, kind: 'notFound' }; a 409 (the
-    // session already started, so the lobby has closed) to { ok: false,
-    // kind: 'closed' }; a 403 (the player has already played this quiz) to
-    // { ok: false, kind: 'alreadyPlayed' }; a 400 (empty name) to
-    // { ok: false, kind: 'empty' }; anything else to { ok: false, kind:
-    // 'error' }.
-    async join(code, rawDisplayName) {
-        const displayName = (rawDisplayName || '').trim();
-        if (displayName === '') {
-            return { ok: false, kind: 'empty', message: 'Please enter a name.' };
-        }
+    // join adds the caller to the session (#716: nameless - the player is
+    // already named on their players row before joining; an anonymous one
+    // claims players.display_name through the shared claim flow first). On
+    // success it returns { ok: true, displayName, isReady } where displayName
+    // is the player's current players.display_name echoed back. A 404 (unknown
+    // code) maps to { ok: false, kind: 'notFound' }; a 409 (the session already
+    // started, so the lobby has closed) to { ok: false, kind: 'closed' }; a 403
+    // (the player has already played this quiz) to { ok: false, kind:
+    // 'alreadyPlayed' }; anything else to { ok: false, kind: 'error' }.
+    async join(code) {
         let response;
         try {
             response = await fetch(`/api/sessions/${encodeURIComponent(code)}/join`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ displayName }),
             });
         } catch {
             return { ok: false, kind: 'error', message: "Couldn't join the game - try again." };
@@ -51,9 +45,6 @@ export class SessionService {
         }
         if (response.status === 403) {
             return { ok: false, kind: 'alreadyPlayed', message: "You've already played this quiz." };
-        }
-        if (response.status === 400) {
-            return { ok: false, kind: 'empty', message: 'Please enter a name.' };
         }
         return { ok: false, kind: 'error', message: "Couldn't join the game - try again." };
     }
