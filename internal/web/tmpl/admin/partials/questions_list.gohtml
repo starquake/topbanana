@@ -3,8 +3,8 @@
 
      Despite the name (kept for HTMX swap-target stability), this
      partial renders the play sequence grouped into rounds: each round
-     shows its title, its questions in quiz-wide position order, and the
-     authored round-summary text. Question reorder and round reorder both
+     shows its title, the authored round-summary text, then its questions
+     in quiz-wide position order. Question reorder and round reorder both
      swap this fragment in place.
 
      Rendered two ways:
@@ -16,20 +16,22 @@
      replaces the entire element; the new fragment must keep the id so
      subsequent swaps still find it.
 
+     Reorder is driven entirely by the drag handles (#731): owners drag the
+     grip with a mouse or focus it and press ArrowUp/ArrowDown (quiz-reorder.js
+     wires the keyboard path), so the round-select dropdown and Up/Down
+     buttons are gone.
+
      Required data: .Quiz (for CanEdit / QuizID), .Rounds (slice of
-     RoundViewData), .LastQuestionPosition (int), .MoveTargets (slice of
-     RoundMoveTarget), plus the csrfToken template func. */}}
+     RoundViewData), plus the csrfToken template func. */}}
 {{define "questions_list"}}
 {{$canEdit := .Quiz.CanEdit}}
 {{$quizID := .Quiz.ID}}
-{{$lastPos := .LastQuestionPosition}}
-{{$moveTargets := .MoveTargets}}
 <div id="questions-list" class="flex flex-col gap-6" data-quiz-id="{{$quizID}}" data-csrf="{{csrfToken}}">
     {{range .Rounds}}
         {{$round := .Round}}
         <section class="round-section" data-round="true" data-round-id="{{$round.ID}}">
             {{if $canEdit}}
-            <button type="button" class="drag-rail drag-rail-round" data-round-handle title="Drag to reorder round" aria-label="Drag to reorder round">
+            <button type="button" class="drag-rail drag-rail-round" data-round-handle title="Drag to reorder round (or focus and use arrow keys)" aria-label="Reorder round: drag, or press Up or Down arrow">
                 <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M5 3.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm0 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm0 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM12 3.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM12 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm0 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/></svg>
             </button>
             {{end}}
@@ -40,32 +42,6 @@
                 </div>
                 {{if $canEdit}}
                 <div class="flex items-center gap-1">
-                    {{if .CanMoveUp}}
-                    <form method="post"
-                          action="/admin/quizzes/{{$quizID}}/rounds/{{$round.ID}}/move/up"
-                          hx-post="/admin/quizzes/{{$quizID}}/rounds/{{$round.ID}}/move/up"
-                          hx-target="#questions-list"
-                          hx-swap="outerHTML"
-                          class="inline-flex">
-                        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                        <button type="submit" title="Move round up" aria-label="Move round up" class="icon-btn">
-                            <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M8 12a.5.5 0 0 0 .5-.5V5.707l2.146 2.147a.5.5 0 0 0 .708-.708l-3-3a.5.5 0 0 0-.708 0l-3 3a.5.5 0 1 0 .708.708L7.5 5.707V11.5a.5.5 0 0 0 .5.5z"/></svg>
-                        </button>
-                    </form>
-                    {{end}}
-                    {{if .CanMoveDown}}
-                    <form method="post"
-                          action="/admin/quizzes/{{$quizID}}/rounds/{{$round.ID}}/move/down"
-                          hx-post="/admin/quizzes/{{$quizID}}/rounds/{{$round.ID}}/move/down"
-                          hx-target="#questions-list"
-                          hx-swap="outerHTML"
-                          class="inline-flex">
-                        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                        <button type="submit" title="Move round down" aria-label="Move round down" class="icon-btn">
-                            <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M8 4a.5.5 0 0 1 .5.5v5.793l2.146-2.147a.5.5 0 0 1 .708.708l-3 3a.5.5 0 0 1-.708 0l-3-3a.5.5 0 1 1 .708-.708L7.5 10.293V4.5A.5.5 0 0 1 8 4z"/></svg>
-                        </button>
-                    </form>
-                    {{end}}
                     <a href="/admin/quizzes/{{$quizID}}/rounds/{{$round.ID}}/edit"
                        aria-label="Edit round" title="Edit round" class="icon-btn">
                         <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>
@@ -80,13 +56,19 @@
                 {{end}}
             </header>
 
+            {{if $round.Summary}}
+            <div class="mb-3 px-3 py-2 bg-surface border border-border-soft rounded-sm text-[0.9rem] text-text-dim">
+                <span class="text-[0.7rem] uppercase tracking-[0.12em] text-text-mute">Round summary</span>
+                <p class="mt-1 text-text">{{$round.Summary}}</p>
+            </div>
+            {{end}}
+
             <div class="flex flex-col gap-3" data-question-list>
                 {{range .Questions}}
                     {{$q := .}}
-                    {{$i := .Position}}
                     <article class="q-row" data-question-id="{{$q.ID}}">
                         {{if $canEdit}}
-                        <button type="button" class="drag-rail drag-rail-question" data-question-handle title="Drag to reorder question" aria-label="Drag to reorder question">
+                        <button type="button" class="drag-rail drag-rail-question" data-question-handle title="Drag to reorder question (or focus and use arrow keys)" aria-label="Reorder question: drag, or press Up or Down arrow">
                             <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M5 3.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm0 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm0 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM12 3.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM12 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm0 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/></svg>
                         </button>
                         {{end}}
@@ -110,50 +92,8 @@
                                     {{end}}
                                 </ul>
                             </details>
-                            {{if $canEdit}}
-                            {{if gt (len $moveTargets) 1}}
-                            <form method="post"
-                                  action="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/round"
-                                  class="mt-2 flex items-center gap-2">
-                                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                                <label class="text-[0.7rem] uppercase tracking-[0.12em] text-text-dim" for="move-round-{{$q.ID}}">Round</label>
-                                <select id="move-round-{{$q.ID}}" name="round_id" class="form-input form-input-compact">
-                                    {{range $moveTargets}}
-                                        <option value="{{.ID}}"{{if eq .ID $round.ID}} selected{{end}}>{{.Title}}</option>
-                                    {{end}}
-                                </select>
-                                <button type="submit" class="btn-ghost btn-compact">Move</button>
-                            </form>
-                            {{end}}
-                            {{end}}
                         </div>
                         {{if $canEdit}}
-                        <div class="q-actions">
-                            <form method="post"
-                                  action="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/move/up"
-                                  hx-post="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/move/up"
-                                  hx-target="#questions-list"
-                                  hx-swap="outerHTML"
-                                  class="inline-flex">
-                                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                                <button type="submit" title="Move up" aria-label="Move up" class="icon-btn"
-                                        {{if eq $i 1}}disabled{{end}}>
-                                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M8 12a.5.5 0 0 0 .5-.5V5.707l2.146 2.147a.5.5 0 0 0 .708-.708l-3-3a.5.5 0 0 0-.708 0l-3 3a.5.5 0 1 0 .708.708L7.5 5.707V11.5a.5.5 0 0 0 .5.5z"/></svg>
-                                </button>
-                            </form>
-                            <form method="post"
-                                  action="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/move/down"
-                                  hx-post="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/move/down"
-                                  hx-target="#questions-list"
-                                  hx-swap="outerHTML"
-                                  class="inline-flex">
-                                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                                <button type="submit" title="Move down" aria-label="Move down" class="icon-btn"
-                                        {{if eq $i $lastPos}}disabled{{end}}>
-                                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M8 4a.5.5 0 0 1 .5.5v5.793l2.146-2.147a.5.5 0 0 1 .708.708l-3 3a.5.5 0 0 1-.708 0l-3-3a.5.5 0 1 1 .708-.708L7.5 10.293V4.5A.5.5 0 0 1 8 4z"/></svg>
-                                </button>
-                            </form>
-                        </div>
                         <div class="q-actions">
                             <a href="/admin/quizzes/{{$q.QuizID}}/questions/{{$q.ID}}/edit"
                                aria-label="Edit question" title="Edit question" class="icon-btn">
@@ -173,13 +113,6 @@
                 <p class="text-text-dim text-[0.9rem] italic">No questions in this round yet.</p>
                 {{end}}
             </div>
-
-            {{if $round.Summary}}
-            <div class="mt-3 px-3 py-2 bg-surface border border-border-soft rounded-sm text-[0.9rem] text-text-dim">
-                <span class="text-[0.7rem] uppercase tracking-[0.12em] text-text-mute">Round summary</span>
-                <p class="mt-1 text-text">{{$round.Summary}}</p>
-            </div>
-            {{end}}
             </div>
         </section>
     {{end}}

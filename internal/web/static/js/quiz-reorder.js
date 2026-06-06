@@ -1,17 +1,19 @@
-// quiz-reorder.js powers drag-and-drop reordering of rounds and questions
-// on the admin quiz view (#199), layered on top of the existing Up/Down
-// buttons and the move-to-round <select>, which stay as the no-JS / touch /
-// keyboard / a11y fallback (native HTML5 DnD is desktop-mouse only). The drag
-// affordances (the grip handles and the data-*
-// hooks this module reads) only render for an owner/editor, so this module
-// self-noops for a read-only viewer.
+// quiz-reorder.js powers reordering of rounds and questions on the admin
+// quiz view. The grip handle is the single reorder affordance (#731): drag
+// it with a mouse (SortableJS native HTML5 DnD, #199), or focus it and press
+// ArrowUp/ArrowDown for the keyboard path. The Up/Down buttons and the
+// move-to-round <select> that used to be the keyboard/touch fallback are
+// gone, so the keyboard handler here is the a11y reorder path, not an extra.
+// The drag affordances (the grip handles and the data-* hooks this module
+// reads) only render for an owner/editor, so this module self-noops for a
+// read-only viewer.
 //
 // SortableJS is loaded as a classic script just before this module, exposing
-// the global Sortable. Each drop POSTs to the same form-encoded reorder
-// endpoints the fallback buttons hit and swaps in the re-rendered
-// #questions-list partial the server returns, so the authoritative order +
-// renumbered positions come from the server, not the client guess. A failed
-// POST snaps the list back to its pre-drop HTML and surfaces a small banner.
+// the global Sortable. Both drag and keyboard POST to the same form-encoded
+// /position endpoints and swap in the re-rendered #questions-list partial the
+// server returns, so the authoritative order + renumbered positions come from
+// the server, not the client guess. A failed POST snaps the list back to its
+// pre-move HTML and surfaces a small banner.
 
 const QUESTIONS_LIST_ID = 'questions-list';
 
@@ -87,11 +89,30 @@ async function postReorder(url, body, snapshotHTML) {
     }
 }
 
+// pendingFocus remembers which handle the keyboard user was on so focus can
+// follow the moved item across the server swap; without it, every arrow press
+// would drop focus back to the page and stall keyboard reordering after one
+// move. Null for drag (the mouse user is not driving from the keyboard).
+let pendingFocus = null;
+
 function swapProcessed(newRoot) {
     if (window.htmx && typeof window.htmx.process === 'function') {
         window.htmx.process(newRoot);
     }
     initSortable(newRoot);
+    restoreFocus(newRoot);
+}
+
+function restoreFocus(root) {
+    if (!pendingFocus) return;
+    const { type, id } = pendingFocus;
+    pendingFocus = null;
+    const selector =
+        type === 'round'
+            ? `section.round-section[data-round-id="${id}"] [data-round-handle]`
+            : `article.q-row[data-question-id="${id}"] [data-question-handle]`;
+    const handle = root.querySelector(selector);
+    if (handle) handle.focus();
 }
 
 function replaceList(html) {
@@ -166,22 +187,108 @@ function onQuestionEnd(evt) {
     );
 }
 
+// moveRoundByKeyboard reorders a round one slot in `direction` (-1 up, +1
+// down) and POSTs the new 1-based position. A no-op at the list edges.
+function moveRoundByKeyboard(root, handle, direction) {
+    const section = handle.closest('section.round-section');
+    if (!section) return;
+    const roundId = section.dataset.roundId;
+    const quizId = root.dataset.quizId;
+    const sections = Array.from(root.querySelectorAll('section.round-section'));
+    const index = sections.indexOf(section);
+    const newPosition = index + 1 + direction;
+    if (newPosition < 1 || newPosition > sections.length || !roundId || !quizId) return;
+
+    pendingFocus = { type: 'round', id: roundId };
+    const body = new URLSearchParams({
+        csrf_token: csrfToken(root),
+        new_position: String(newPosition),
+    });
+    postReorder(
+        `/admin/quizzes/${quizId}/rounds/${roundId}/position`,
+        body,
+        root.outerHTML,
+    );
+}
+
+// moveQuestionByKeyboard reorders a question one slot in `direction` within
+// its own round and POSTs the new 1-based position. A no-op at the round's
+// edges; cross-round moves stay drag-only.
+function moveQuestionByKeyboard(root, handle, direction) {
+    const article = handle.closest('article.q-row');
+    if (!article) return;
+    const questionId = article.dataset.questionId;
+    const quizId = root.dataset.quizId;
+    const section = article.closest('section.round-section');
+    if (!section || !questionId || !quizId) return;
+    const roundId = section.dataset.roundId;
+    const list = section.querySelector('[data-question-list]');
+    const items = list ? Array.from(list.querySelectorAll('article.q-row')) : [];
+    const index = items.indexOf(article);
+    const newPosition = index + 1 + direction;
+    if (newPosition < 1 || newPosition > items.length || !roundId) return;
+
+    pendingFocus = { type: 'question', id: questionId };
+    const body = new URLSearchParams({
+        csrf_token: csrfToken(root),
+        round_id: roundId,
+        new_position: String(newPosition),
+    });
+    postReorder(
+        `/admin/quizzes/${quizId}/questions/${questionId}/position`,
+        body,
+        root.outerHTML,
+    );
+}
+
+function onHandleKeydown(evt) {
+    if (evt.key !== 'ArrowUp' && evt.key !== 'ArrowDown') return;
+    const root = document.getElementById(QUESTIONS_LIST_ID);
+    if (!root) return;
+    const direction = evt.key === 'ArrowDown' ? 1 : -1;
+    const roundHandle = evt.target.closest('[data-round-handle]');
+    if (roundHandle) {
+        evt.preventDefault();
+        moveRoundByKeyboard(root, roundHandle, direction);
+
+        return;
+    }
+    const questionHandle = evt.target.closest('[data-question-handle]');
+    if (questionHandle) {
+        evt.preventDefault();
+        moveQuestionByKeyboard(root, questionHandle, direction);
+    }
+}
+
 function initSortable(root) {
-    if (typeof window.Sortable !== 'function') return;
     // Edit handles only render for an owner/editor; their absence means a
     // read-only viewer, so there is nothing to wire.
     if (!root.querySelector('[data-round-handle]')) return;
 
+    // The keyboard path is wired even when SortableJS failed to load, so it is
+    // attached before the early return below. Delegated on the swapped-in root,
+    // so it survives every partial swap without per-handle rebinding.
+    root.addEventListener('keydown', onHandleKeydown);
+
+    if (typeof window.Sortable !== 'function') return;
+
     const shared = { name: 'questions' };
 
-    // SortableJS runs in native HTML5 drag-and-drop mode, which fires for mouse
-    // input only and does NOT engage on touchscreens (#199 keeps touch drag out
-    // of scope). Touch, keyboard, and no-pointer users reorder via the
-    // always-present Up/Down buttons + move-to-round <select>, which stay in the
-    // markup as the fallback. The drag rails are hidden below md to match.
+    // Native HTML5 drag-and-drop (SortableJS' default) never fires on
+    // touchscreens, so on a touch-primary device switch SortableJS to its
+    // pointer-driven fallback engine - then the grip handle drags on touch too.
+    // Desktop (mouse) keeps native DnD. delay + delayOnTouchOnly make a touch
+    // press-and-hold start the drag so a tap-scroll is not hijacked. Keyboard
+    // users reorder via the handle's ArrowUp/ArrowDown keys (#731).
+    const touchPrimary = typeof window.matchMedia === 'function'
+        && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
     const common = {
         animation: ANIMATION_MS,
         onStart: captureSnapshot,
+        forceFallback: touchPrimary,
+        delay: 150,
+        delayOnTouchOnly: true,
+        fallbackTolerance: 5,
         ghostClass: 'sortable-ghost',
         chosenClass: 'sortable-chosen',
         dragClass: 'sortable-drag',

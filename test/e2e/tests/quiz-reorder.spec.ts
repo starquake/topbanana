@@ -8,20 +8,20 @@ import { adminStatePath } from '../e2e-auth';
 // quiz, so they never collide on a display name or quiz title.
 test.use({ storageState: adminStatePath() });
 
-// #199 - drag-and-drop reorder for rounds and questions on the admin quiz
-// view. SortableJS runs in its default native-HTML5-DnD mode, which fires for
-// mouse input only and does not engage on touchscreens; touch, keyboard, and
-// no-JS users reorder via the Up/Down buttons + move-to-round <select>
-// fallback. Each drop
-// POSTs to the reorder endpoint and swaps in the server-rendered
-// #questions-list partial, so the assertions key on the PERSISTED order after
-// a reload, never on intermediate drag state.
+// #199 / #731 - reorder for rounds and questions on the admin quiz view. The
+// grip handle is the only reorder affordance: pointer users drag it (SortableJS
+// native-HTML5-DnD mode, mouse-only), keyboard users focus it and press
+// ArrowUp/ArrowDown (quiz-reorder.js). Both paths POST to the /position
+// endpoint and swap in the server-rendered #questions-list partial, so the
+// assertions key on the PERSISTED order after a reload, never on intermediate
+// drag state.
 //
 // DRIVING THE DRAG: native HTML5 drag-and-drop is only reliably scriptable in
 // Firefox, via Playwright's locator.dragTo (which emits the real
 // dragstart/dragover/drop sequence). Chromium under Playwright does not
 // dispatch a usable synthetic native-DnD gesture, so the three drag specs run
-// on Firefox only; the fallback spec runs on every project. This is a
+// on Firefox only; the keyboard spec runs on every project (it drives the
+// handle with real key presses, which Chromium handles fine). This is a
 // test-harness limitation, not a product gap: the drag wiring is identical
 // across browsers, and the full drop -> POST -> partial-swap -> persisted-order
 // chain is exercised end to end on Firefox.
@@ -40,10 +40,9 @@ async function roundTitles(page: Page): Promise<string[]> {
   return page.locator('section.round-section h3').allTextContents();
 }
 
-// roundSection scopes to a section by its heading. A plain hasText filter is
-// ambiguous here: every question's move-to-round <select> lists ALL round
-// titles as <option>s, so e.g. Round Alpha's text also contains "Round Beta".
-// Filtering on the section's own <h3> heading avoids that collision.
+// roundSection scopes to a section by its own <h3> heading, which is
+// unambiguous even when one round's summary text happens to mention another
+// round's title.
 function roundSection(page: Page, title: string): Locator {
   return page
     .locator('section.round-section')
@@ -166,26 +165,29 @@ test('a failed reorder POST snaps the list back and shows an error', async ({ pa
   await expect.poll(async () => questionTexts(page)).toEqual(original);
 });
 
-test('the Up/Down and move-to-round fallbacks still reorder without drag', async ({ page, browserName }) => {
+test('the grip handle reorders questions and rounds by keyboard', async ({ page, browserName }) => {
   test.setTimeout(60_000);
-  await openQuiz(page, `E2E Reorder Fallback ${browserName}`);
+  await openQuiz(page, `E2E Reorder Keyboard ${browserName}`);
 
-  // Move Alpha Q2 up with the Up button (the htmx fallback path). It swaps
-  // the #questions-list partial in place, no drag involved.
+  // The handle is the only reorder affordance (#731), so keyboard reorder is
+  // the a11y path, not an extra. Focus Alpha Q2's grip and press ArrowUp; it
+  // POSTs to /position and swaps the server-rendered partial in place, moving
+  // Q2 ahead of Q1.
   const alphaQ2 = page.locator('article.q-row', { hasText: 'Alpha Q2' });
-  await alphaQ2.getByRole('button', { name: 'Move up' }).click();
+  await alphaQ2.locator('[data-question-handle]').focus();
+  await page.keyboard.press('ArrowUp');
   await expect.poll(async () => (await questionTexts(page)).slice(0, 2)).toEqual(['Alpha Q2', 'Alpha Q1']);
 
-  // Move Beta Q1 into Round Alpha via the move-to-round <select> fallback.
-  // This form is a plain POST that 303-redirects back to the quiz view, so
-  // wait for that navigation to settle before asserting the new grouping.
-  const betaQ1 = page.locator('article.q-row', { hasText: 'Beta Q1' });
-  await betaQ1.locator('select[name="round_id"]').selectOption({ label: 'Round Alpha' });
-  await Promise.all([
-    page.waitForURL(/\/admin\/quizzes\/\d+$/),
-    betaQ1.getByRole('button', { name: 'Move', exact: true }).click(),
-  ]);
+  await page.reload();
+  expect((await questionTexts(page)).slice(0, 2)).toEqual(['Alpha Q2', 'Alpha Q1']);
 
-  const alphaSection = roundSection(page, 'Round Alpha');
-  await expect(alphaSection.locator('.q-text', { hasText: 'Beta Q1' })).toBeVisible();
+  // Move Round Beta up past Round Alpha with its grip handle and the keyboard.
+  expect(await roundTitles(page)).toEqual(['Round Alpha', 'Round Beta']);
+  const beta = roundSection(page, 'Round Beta');
+  await beta.locator('[data-round-handle]').focus();
+  await page.keyboard.press('ArrowUp');
+  await expect.poll(async () => roundTitles(page)).toEqual(['Round Beta', 'Round Alpha']);
+
+  await page.reload();
+  expect(await roundTitles(page)).toEqual(['Round Beta', 'Round Alpha']);
 });

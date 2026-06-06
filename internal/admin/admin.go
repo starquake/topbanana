@@ -928,32 +928,16 @@ type QuizViewData struct {
 	Title   string
 	Quiz    *QuizData
 	Players []PlayerScoreData
-	// LastQuestionPosition is the highest question position in the quiz;
-	// the partial keys the move-down button's disabled state on it.
-	LastQuestionPosition int
 	// Rounds is the position-ordered round list, each carrying its own
 	// questions, for the grouped quiz view.
 	Rounds []RoundViewData
-	// MoveTargets lists every round as a move-question-into-round option;
-	// the per-question dropdown only renders when more than one exists.
-	MoveTargets []RoundMoveTarget
 }
 
-// RoundViewData is one round section on the quiz view: the round itself,
-// its questions in quiz-wide position order, and the per-round reorder
-// flags. CanMoveUp/CanMoveDown drive arrow-button visibility - the
-// store's MoveRound re-validates so the flags are UX-only, not security.
+// RoundViewData is one round section on the quiz view: the round itself
+// and its questions in quiz-wide position order.
 type RoundViewData struct {
-	Round       *RoundData
-	Questions   []*QuestionData
-	CanMoveUp   bool
-	CanMoveDown bool
-}
-
-// RoundMoveTarget is one entry in the move-question-into-round dropdown.
-type RoundMoveTarget struct {
-	ID    int64
-	Title string
+	Round     *RoundData
+	Questions []*QuestionData
 }
 
 // buildRoundView groups the quiz's questions under their rounds in
@@ -968,37 +952,14 @@ func buildRoundView(rounds []*quiz.Round, questions []*QuestionData) []RoundView
 	}
 
 	views := make([]RoundViewData, 0, len(rounds))
-	for i, rnd := range rounds {
+	for _, rnd := range rounds {
 		views = append(views, RoundViewData{
-			Round:       roundDataFromRound(rnd),
-			Questions:   byRound[rnd.ID],
-			CanMoveUp:   i > 0,
-			CanMoveDown: i < len(rounds)-1,
+			Round:     roundDataFromRound(rnd),
+			Questions: byRound[rnd.ID],
 		})
 	}
 
 	return views
-}
-
-// roundMoveTargets maps the quiz's rounds to dropdown entries.
-func roundMoveTargets(rounds []*quiz.Round) []RoundMoveTarget {
-	targets := make([]RoundMoveTarget, 0, len(rounds))
-	for _, rnd := range rounds {
-		targets = append(targets, RoundMoveTarget{ID: rnd.ID, Title: rnd.Title})
-	}
-
-	return targets
-}
-
-// lastQuestionPosition returns the highest position among the quiz's
-// questions, or 0 when the quiz has none. Questions are stored in
-// ascending position order, so the last entry carries the max.
-func lastQuestionPosition(questions []*QuestionData) int {
-	if len(questions) == 0 {
-		return 0
-	}
-
-	return questions[len(questions)-1].Position
 }
 
 // loadRounds fetches the quiz's rounds in position order. Errors are
@@ -1026,12 +987,10 @@ func loadRounds(
 
 func newQuizViewData(quizData *QuizData, players []PlayerScoreData, rounds []*quiz.Round) QuizViewData {
 	return QuizViewData{
-		Title:                "Admin Dashboard - View Quiz",
-		Quiz:                 quizData,
-		Players:              players,
-		LastQuestionPosition: lastQuestionPosition(quizData.Questions),
-		Rounds:               buildRoundView(rounds, quizData.Questions),
-		MoveTargets:          roundMoveTargets(rounds),
+		Title:   "Admin Dashboard - View Quiz",
+		Quiz:    quizData,
+		Players: players,
+		Rounds:  buildRoundView(rounds, quizData.Questions),
 	}
 }
 
@@ -1040,10 +999,8 @@ func newQuizViewData(quizData *QuizData, players []PlayerScoreData, rounds []*qu
 // and round move handlers so an HTMX swap keeps the page's scroll
 // position instead of bouncing through a 303.
 type roundsPartialData struct {
-	Quiz                 *QuizData
-	LastQuestionPosition int
-	Rounds               []RoundViewData
-	MoveTargets          []RoundMoveTarget
+	Quiz   *QuizData
+	Rounds []RoundViewData
 }
 
 // renderRoundsPartial refetches the quiz tree and emits the
@@ -1070,10 +1027,8 @@ func renderRoundsPartial(
 	quizData := quizDataFromQuiz(qz)
 	attachCanEdit(r, quizData)
 	render.RenderPartial(w, r, "questions_list", roundsPartialData{
-		Quiz:                 quizData,
-		LastQuestionPosition: lastQuestionPosition(quizData.Questions),
-		Rounds:               buildRoundView(rounds, quizData.Questions),
-		MoveTargets:          roundMoveTargets(rounds),
+		Quiz:   quizData,
+		Rounds: buildRoundView(rounds, quizData.Questions),
 	})
 }
 

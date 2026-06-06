@@ -372,23 +372,23 @@
      * .q-thumb stays defined so the resume work only flips the grid
      * back to five columns. */
     .q-row {
-        @apply relative bg-surface border border-border-soft rounded-lg p-5
+        @apply relative bg-surface border border-border-soft rounded-lg py-5 pr-5 pl-9
                grid gap-4 items-start
                grid-cols-[auto_1fr]
-               md:grid-cols-[48px_1fr_auto_auto] md:items-center md:py-4 md:pr-5 md:pl-9;
+               md:grid-cols-[48px_1fr_auto_auto] md:items-center md:py-4;
     }
-    /* Drag rails for round + question reorder (#199). A full-height grab
+    /* Drag rails for round + question reorder (#199, #731). A full-height grab
      * column on the left edge of each item (Notion/Trello style), with the
-     * grip icon vertically centred. Drag is desktop-mouse only -- native
-     * HTML5 DnD does not engage on touch -- so the rail is hidden below md;
-     * touch/keyboard hosts reorder via the always-present Up/Down buttons +
-     * move-to-round <select>. The round rail is a flex sibling on the
-     * section's outer-left edge; the question rail is absolutely positioned
-     * on each row's left edge (so it stays out of the .q-row grid flow and
-     * cannot shift the read-only column layout), inset to the right of the
-     * round rail. */
+     * grip icon vertically centred. The handle is the only reorder affordance,
+     * so it stays visible at every breakpoint: pointer users drag (native
+     * HTML5 DnD, mouse-only), touch/keyboard users focus it and press
+     * ArrowUp/ArrowDown. The round rail is a flex sibling on the section's
+     * outer-left edge; the question rail is absolutely positioned on each
+     * row's left edge (so it stays out of the .q-row grid flow and cannot
+     * shift the read-only column layout), inset to the right of the round
+     * rail. */
     .drag-rail {
-        @apply hidden md:flex items-center justify-center shrink-0
+        @apply flex items-center justify-center shrink-0
                bg-transparent border-0
                text-text-mute hover:text-text hover:bg-surface-2
                focus-visible:outline-none focus-visible:shadow-focus

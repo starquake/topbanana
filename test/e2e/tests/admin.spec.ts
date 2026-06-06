@@ -61,6 +61,16 @@ test('admin can add, edit, and delete a round on a quiz', async ({ page, browser
   await expect(page.getByRole('heading', { name: 'Picture Round' })).toBeVisible();
   await expect(page.getByText('Welcome, take a breath')).toBeVisible();
 
+  // The round summary renders above the round's question list (#731). Compare
+  // each element's vertical position within the round section.
+  const newRound = page.locator('.round-section')
+    .filter({ has: page.getByRole('heading', { name: 'Picture Round' }) });
+  const summaryBox = await newRound.getByText('Welcome, take a breath').boundingBox();
+  const questionsBox = await newRound.locator('[data-question-list]').boundingBox();
+  expect(summaryBox).not.toBeNull();
+  expect(questionsBox).not.toBeNull();
+  expect(summaryBox!.y).toBeLessThan(questionsBox!.y);
+
   // Edit the round - rename it and change the summary.
   const pictureSection = page.locator('.round-section')
     .filter({ has: page.getByRole('heading', { name: 'Picture Round' }) });
