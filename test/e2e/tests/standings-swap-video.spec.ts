@@ -1,10 +1,9 @@
 import type { APIRequestContext, BrowserContext, Page } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
 import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { importQuiz, claimAndJoin } from './helpers';
+import { importQuiz, claimAndJoin, execSqlite } from './helpers';
 
 // Motion-ON capture of the standings animation (the #729 grow + the #730 row
 // slide) so the real motion can actually be eyeballed. The standings-bargraph
@@ -41,11 +40,11 @@ function makeQuizLiveByTitle(title: string): number {
   }
   const dbFile = join(dataDir, `e2e-${test.info().parallelIndex}.db`);
   const escaped = title.replace(/'/g, "''");
-  const output = execFileSync('sqlite3', [
+  const output = execSqlite(
     dbFile,
     `UPDATE quizzes SET mode = 'live' WHERE title = '${escaped}'; SELECT id FROM quizzes WHERE title = '${escaped}';`,
-  ], { encoding: 'utf8' });
-  const id = Number.parseInt(output.trim().split('\n').pop() ?? '', 10);
+  );
+  const id = Number.parseInt(output.split('\n').pop() ?? '', 10);
   if (!Number.isInteger(id)) {
     throw new Error(`makeQuizLiveByTitle(${title}): could not resolve id from ${JSON.stringify(output)}`);
   }

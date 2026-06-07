@@ -1,10 +1,13 @@
-import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
 import type { APIRequestContext } from '@playwright/test';
 
 import type { Page } from './fixtures';
 import { test, expect } from './fixtures';
+import { execSqlite } from './sqlite';
+
+// Re-exported so specs keep a single import hub (./helpers) for test utilities.
+export { execSqlite };
 
 export const PASSWORD = 'correctbatterystaple';
 
@@ -75,11 +78,11 @@ export function markEmailVerified(displayName: string): void {
   // the single quote here instead -- standard SQL literal escaping, one
   // line, no extra round-trip through the CLI's parameter parser.
   const escapedDisplayName = displayName.replace(/'/g, "''");
-  const output = execFileSync('sqlite3', [
+  const output = execSqlite(
     dbFile,
     `UPDATE players SET email_verified_at = CURRENT_TIMESTAMP WHERE display_name = '${escapedDisplayName}'; SELECT changes();`,
-  ], { encoding: 'utf8' });
-  const changed = Number.parseInt(output.trim(), 10);
+  );
+  const changed = Number.parseInt(output, 10);
   if (changed !== 1) {
     throw new Error(`markEmailVerified(${displayName}): expected 1 row updated, got ${changed}`);
   }
@@ -105,11 +108,11 @@ function setRole(displayName: string, role: 'player' | 'host' | 'admin'): void {
   }
   const dbFile = join(dataDir, `e2e-${test.info().parallelIndex}.db`);
   const escapedDisplayName = displayName.replace(/'/g, "''");
-  const output = execFileSync('sqlite3', [
+  const output = execSqlite(
     dbFile,
     `UPDATE players SET role = '${role}' WHERE display_name = '${escapedDisplayName}'; SELECT changes();`,
-  ], { encoding: 'utf8' });
-  const changed = Number.parseInt(output.trim(), 10);
+  );
+  const changed = Number.parseInt(output, 10);
   if (changed !== 1) {
     throw new Error(`setRole(${displayName}, ${role}): expected 1 row updated, got ${changed}`);
   }
@@ -126,11 +129,11 @@ export function setQuizMode(title: string, mode: 'solo' | 'live'): void {
   }
   const dbFile = join(dataDir, `e2e-${test.info().parallelIndex}.db`);
   const escapedTitle = title.replace(/'/g, "''");
-  const output = execFileSync('sqlite3', [
+  const output = execSqlite(
     dbFile,
     `UPDATE quizzes SET mode = '${mode}' WHERE title = '${escapedTitle}'; SELECT changes();`,
-  ], { encoding: 'utf8' });
-  const changed = Number.parseInt(output.trim(), 10);
+  );
+  const changed = Number.parseInt(output, 10);
   if (changed !== 1) {
     throw new Error(`setQuizMode(${title}, ${mode}): expected 1 row updated, got ${changed}`);
   }
