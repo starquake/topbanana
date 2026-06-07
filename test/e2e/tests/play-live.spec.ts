@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { seedQuiz, QUIZ_QUESTIONS, claimAndJoin } from './helpers';
+import { seedQuiz, importQuiz, QUIZ_QUESTIONS, claimAndJoin } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' (the importer lands quizzes
 // on 'solo', and only live quizzes are hostable, MP-0 / #677) and returns its
@@ -157,6 +157,92 @@ test.describe('player synchronized play', () => {
     await expect(correctReveal).toHaveAttribute('data-correct', 'true');
     // Exactly one option is marked correct for this single-correct question.
     await expect(revealButtons.and(page.locator('[data-correct="true"]'))).toHaveCount(1);
+
+    await otherContext.close();
+    await hostContext.close();
+  });
+
+  // #755 cross-surface contract (player half): the live round-intro card names
+  // the round and words its heading correctly. A multi-round quiz with a round
+  // summary exercises all three round-intro fields the player surface shares
+  // with the TV (lobby.gohtml) and the solo client (index.html): the title, the
+  // optional summary, and an accurate "Round N of M" eyebrow that is NOT the old
+  // generic "Next round" wording on the first round. Asserting "Round 1 of 2"
+  // (not the single-round "Round 1 of 1" the sibling spec checks) pins that N/M
+  // reflects the real round position, so the first round can never read as a
+  // between-rounds screen. The TV half is pinned in host-game.spec.ts; the
+  // standings half is in standings-bargraph.spec.ts.
+  test('round intro shows the round title, summary, and an accurate Round N of M heading', async ({ page, baseURL }) => {
+    test.setTimeout(60_000);
+
+    const quizTitle = `Live Round Intro ${Date.now()}`;
+    const roundSummary = 'Warm up with the easy ones first.';
+    const robin = `Robin-${Date.now()}`;
+    const quincy = `Quincy-${Date.now()}`;
+
+    const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath(), baseURL });
+    const host = await hostContext.newPage();
+
+    // A two-round quiz, imported live: the first round carries a summary so the
+    // optional copy is exercised, and the round count is 2 so the eyebrow reads
+    // "Round 1 of 2".
+    await importQuiz(host, {
+      title: quizTitle,
+      description: 'Live round-intro contract spec',
+      rounds: [
+        {
+          title: 'Opening round',
+          summary: roundSummary,
+          questions: [
+            { text: 'What is 2+2?', options: [
+              { text: '3', correct: false },
+              { text: '4', correct: true },
+              { text: '5', correct: false },
+              { text: '6', correct: false },
+            ] },
+          ],
+        },
+        {
+          title: 'Closing round',
+          questions: [
+            { text: 'What is 3+3?', options: [
+              { text: '5', correct: false },
+              { text: '6', correct: true },
+              { text: '7', correct: false },
+              { text: '8', correct: false },
+            ] },
+          ],
+        },
+      ],
+    }, 'live');
+    // makeQuizLive re-asserts mode='live' (a no-op here) and returns the id the
+    // session opener is addressed by.
+    const quizID = makeQuizLive(quizTitle);
+
+    const createResp = await host.request.post('/api/sessions', { data: { quizId: quizID } });
+    expect(createResp.status(), `create session: ${createResp.status()} ${await createResp.text()}`).toBe(201);
+    const { joinCode } = await createResp.json() as { joinCode: string };
+
+    // A second, API-only player keeps the roster non-empty so the start is not
+    // blocked and the runner advances into the round intro.
+    const otherContext = await page.context().browser()!.newContext({ storageState: undefined, baseURL });
+    await claimAndJoin(otherContext.request, joinCode, robin);
+
+    await page.goto(`/join/${joinCode}`);
+    await page.getByTestId('join-name-input').fill(quincy);
+    await page.getByTestId('join-name-submit').click();
+    await expect(page.getByTestId('lobby-roster').getByText(quincy)).toBeVisible();
+
+    const startResp = await host.request.post(`/api/sessions/${joinCode}/start`);
+    expect(startResp.status(), `start session: ${startResp.status()} ${await startResp.text()}`).toBe(204);
+
+    // Round intro: the card names the first round, shows its summary, and the
+    // eyebrow reads "Round 1 of 2" - never "Next round" on the first round.
+    await expect(page.getByTestId('round-intro')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('round-title')).toHaveText('Opening round');
+    await expect(page.getByTestId('round-summary')).toHaveText(roundSummary);
+    await expect(page.getByTestId('round-intro-eyebrow')).toHaveText('Round 1 of 2');
+    await expect(page.getByTestId('round-intro')).not.toContainText('Next round');
 
     await otherContext.close();
     await hostContext.close();

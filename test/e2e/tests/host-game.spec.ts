@@ -8,6 +8,7 @@ import {
   login,
   seedQuiz,
   setQuizMode,
+  importQuiz,
 } from './helpers';
 
 // MP-8 (#685): the host TV in-game view. The host puts a live quiz on a TV,
@@ -245,5 +246,102 @@ test('the host TV roster reflects a player rename', async ({
     await expect(row).not.toContainText(before);
   } finally {
     await playerCtx.close();
+  }
+});
+
+// #755 cross-surface contract (TV half): the host TV round-intro names the round
+// and words its heading correctly, matching the live player surface (join.html)
+// and the solo client (index.html) field-for-field even though the TV uses its
+// own room-scale typography. A two-round quiz with a round summary exercises all
+// three round-intro fields the surfaces share: the title (data-round-title), the
+// optional summary (data-round-summary), and an accurate "Round N of M" eyebrow
+// (data-round-eyebrow) that is NOT the old generic "Next round" wording on the
+// first round. Asserting "Round 1 of 2" (not the single-round "Round 1 of 1" the
+// in-game spec above checks) pins that N/M reflects the real round position. The
+// player half is pinned in play-live.spec.ts; the standings half is in
+// standings-bargraph.spec.ts.
+test('host TV round intro shows the round title, summary, and an accurate Round N of M heading', async ({
+  page,
+  context,
+  baseURL,
+  browserName,
+}) => {
+  test.setTimeout(60_000);
+
+  const displayName = `e2e-intro-host-${browserName}`;
+  const quizTitle = `E2E Host Intro ${browserName} ${Date.now()}`;
+  const roundSummary = 'Warm up with the easy ones first.';
+
+  await registerForPending(page, displayName);
+  markEmailVerified(displayName);
+  markAdmin(displayName);
+  await login(page, displayName);
+  await expect(page).toHaveURL(/\/admin\/quizzes$/);
+
+  // A two-round quiz, imported live: the first round carries a summary so the
+  // optional copy is exercised, and the round count is 2 so the eyebrow reads
+  // "Round 1 of 2".
+  await importQuiz(page, {
+    title: quizTitle,
+    description: 'Host round-intro contract spec',
+    rounds: [
+      {
+        title: 'Opening round',
+        summary: roundSummary,
+        questions: [
+          { text: 'What is 2+2?', options: [
+            { text: '3', correct: false },
+            { text: '4', correct: true },
+            { text: '5', correct: false },
+            { text: '6', correct: false },
+          ] },
+        ],
+      },
+      {
+        title: 'Closing round',
+        questions: [
+          { text: 'What is 3+3?', options: [
+            { text: '5', correct: false },
+            { text: '6', correct: true },
+            { text: '7', correct: false },
+            { text: '8', correct: false },
+          ] },
+        ],
+      },
+    ],
+  }, 'live');
+
+  await page.goto('/admin/quizzes');
+  await page.getByRole('link', { name: quizTitle }).click();
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+  await page.getByRole('button', { name: 'Play live' }).click();
+  await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
+  const code = page.url().split('/host/')[1];
+
+  // One player joins and readies so the start has a non-empty, all-ready roster
+  // and the runner advances into the round intro.
+  const casey = `Casey-${browserName}-${Date.now()}`;
+  const caseyCtx = await context.browser()!.newContext({ storageState: undefined, baseURL });
+  try {
+    const claimResp = await caseyCtx.request.patch('/api/players/me', { data: { displayName: casey } });
+    expect(claimResp.status(), `claim ${casey}: ${await claimResp.text()}`).toBe(200);
+    const joinResp = await caseyCtx.request.post(`/api/sessions/${code}/join`);
+    expect(joinResp.status(), `join ${casey}: ${await joinResp.text()}`).toBe(200);
+    const readyResp = await caseyCtx.request.post(`/api/sessions/${code}/ready`, { data: { ready: true } });
+    expect(readyResp.status()).toBe(204);
+
+    await expect(page.locator('[data-player-row]')).toHaveCount(1);
+    await page.getByRole('button', { name: 'Start now' }).click();
+
+    // Round intro: the TV names the first round, shows its summary, and the
+    // eyebrow reads "Round 1 of 2" - never "Next round" on the first round.
+    const introView = page.locator('[data-phase-intro]');
+    await expect(introView).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('[data-round-title]')).toHaveText('Opening round');
+    await expect(page.locator('[data-round-summary]')).toHaveText(roundSummary);
+    await expect(page.locator('[data-round-eyebrow]')).toHaveText('Round 1 of 2');
+    await expect(introView).not.toContainText('Next round');
+  } finally {
+    await caseyCtx.close();
   }
 });
