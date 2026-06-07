@@ -53,6 +53,23 @@ test('host lobby shows the room code, QR, and a joined player readying up live',
   await expect(page.getByText(code, { exact: true })).toBeVisible();
   await expect(page.getByText('Waiting for players to join...')).toBeVisible();
 
+  // The header wordmark links home (#750).
+  const wordmark = page.getByRole('link', { name: 'Top Banana!' });
+  await expect(wordmark).toHaveAttribute('href', '/');
+
+  // The typed-code path is self-sufficient: the "Or enter code" block names
+  // the bare enter-code URL (host + /join, no scheme, no code) so a player who
+  // cannot scan knows where to go and type the code shown above (#750). The
+  // QR keeps the full deep link; only this guidance text shows the bare URL.
+  const entryDisplay = `${baseURL.replace(/^https?:\/\//, '')}/join`;
+  const enterCodeBlock = page.locator('[data-enter-code]');
+  await expect(enterCodeBlock).toContainText('Or enter code');
+  await expect(enterCodeBlock).toContainText(entryDisplay);
+  await expect(enterCodeBlock).toContainText('and enter the code above');
+  // Not the deep link (no /join/{code}) and no scheme in the guidance text.
+  await expect(enterCodeBlock).not.toContainText(`/join/${code}`);
+  await expect(enterCodeBlock).not.toContainText('https://');
+
   // A player joins from a fresh anonymous context via the REST API (MP-4
   // owns the join UI). The context gets its own session cookie, so the
   // server mints a distinct anonymous player for it.

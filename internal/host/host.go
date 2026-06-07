@@ -12,6 +12,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/auth"
@@ -32,13 +33,21 @@ const msgInternalError = "internal error"
 // the single place to change.
 const joinPathPrefix = "/join/"
 
+// joinEntryPath is the player-facing path that serves the enter-code form.
+// A phone that cannot scan the QR goes here and types the room code.
+const joinEntryPath = "/join"
+
 // LobbyData feeds the host lobby template.
 type LobbyData struct {
 	Title    string
 	JoinCode string
-	// JoinURL is the absolute URL the QR encodes and the page shows under
-	// the code for a manual phone entry.
+	// JoinURL is the absolute URL the QR encodes for one-tap scanning; it is
+	// the deep link that carries the room code in the path.
 	JoinURL string
+	// JoinEntryDisplay is the bare host+path of the enter-code page (no
+	// scheme), e.g. "topbanana.app/join". It is what the typed-code guidance
+	// tells a player to visit before typing the code shown on the TV.
+	JoinEntryDisplay string
 	// QRSVG is the server-rendered QR of JoinURL, injected as trusted markup.
 	QRSVG template.HTML
 	// QuizTitle is the quiz being hosted.
@@ -97,7 +106,9 @@ func (h *Handlers) Lobby(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	joinURL := absurl.BaseURL(r) + joinPathPrefix + state.Session.JoinCode
+	baseURL := absurl.BaseURL(r)
+	joinURL := baseURL + joinPathPrefix + state.Session.JoinCode
+	joinEntry := strings.TrimPrefix(strings.TrimPrefix(baseURL+joinEntryPath, "https://"), "http://")
 	svg, err := qrcode.SVG([]byte(joinURL))
 	if err != nil {
 		h.logger.ErrorContext(ctx, "error rendering join QR", slog.Any("err", err))
@@ -111,12 +122,13 @@ func (h *Handlers) Lobby(w http.ResponseWriter, r *http.Request) {
 	qrMarkup := template.HTML(svg) //nolint:gosec // server-generated SVG, no user markup.
 
 	data := LobbyData{
-		Title:         "Live lobby",
-		JoinCode:      state.Session.JoinCode,
-		JoinURL:       joinURL,
-		QRSVG:         qrMarkup,
-		QuizTitle:     state.Quiz.Title,
-		QuestionCount: len(state.Quiz.Questions),
+		Title:            "Live lobby",
+		JoinCode:         state.Session.JoinCode,
+		JoinURL:          joinURL,
+		JoinEntryDisplay: joinEntry,
+		QRSVG:            qrMarkup,
+		QuizTitle:        state.Quiz.Title,
+		QuestionCount:    len(state.Quiz.Questions),
 	}
 
 	h.render(w, r, data)

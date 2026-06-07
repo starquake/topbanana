@@ -108,7 +108,16 @@ func TestHostLobby_RendersCodeQuizAndQR(t *testing.T) {
 		t.Error("host lobby missing the server-rendered QR svg")
 	}
 	if want := hostJoinURL(baseURL, code); !strings.Contains(body, want) {
-		t.Errorf("host lobby missing join url %q", want)
+		t.Errorf("host lobby missing join url %q (the QR deep link)", want)
+	}
+	// The typed-code guidance points players at the bare enter-code URL (host
+	// + /join, no scheme, no code) rather than the deep link (#750). Assert
+	// the bare URL and the guidance text together as one fragment so the check
+	// pins the guidance line, not the scan card's deep link (which also
+	// contains the bare host+/join as a prefix substring).
+	entryDisplay := strings.TrimPrefix(strings.TrimPrefix(baseURL+"/join", "https://"), "http://")
+	if want := ">" + entryDisplay + "</span> and enter the code above"; !strings.Contains(body, want) {
+		t.Errorf("host lobby missing typed-code guidance %q", want)
 	}
 }
 
