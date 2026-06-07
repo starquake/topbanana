@@ -589,68 +589,6 @@ func (q *Queries) ListSessionPlayers(ctx context.Context, sessionID string) ([]L
 	return items, nil
 }
 
-const listSessionResultsForQuizLeaderboard = `-- name: ListSessionResultsForQuizLeaderboard :many
-SELECT sp.player_id                               AS player_id,
-       CAST(p.display_name AS TEXT)               AS display_name,
-       CAST(COALESCE(SUM(sa.score), 0) AS INTEGER) AS total_score
-FROM sessions s
-         JOIN session_players sp ON sp.session_id = s.id
-         JOIN players p ON p.id = sp.player_id
-         LEFT JOIN session_answers sa
-                   ON sa.session_id = sp.session_id AND sa.player_id = sp.player_id
-WHERE s.quiz_id = ?
-  AND s.phase = 'finished'
-GROUP BY sp.player_id, p.display_name
-`
-
-type ListSessionResultsForQuizLeaderboardRow struct {
-	PlayerID    int64
-	DisplayName string
-	TotalScore  int64
-}
-
-// One row per (player) summing their score across every FINISHED live session
-// of the given quiz, so the quiz's standard leaderboard reflects hosted games
-// alongside solo play (decision 3). A live session contributes only once it is
-// finished, so a game in progress does not pollute the board; re-finishing a
-// session changes nothing here (the phase is already 'finished'), which keeps
-// the contribution idempotent. Anchored on the roster so a player who joined
-// but never scored still surfaces at 0, matching the solo leaderboard's
-// joined-but-unanswered behaviour (#335). Scores are read straight from
-// session_answers.score (already computed at close with the same CalculateScore
-// curve solo play uses) rather than recomputed. Keyed on player_id alone (a
-// player may host or play more than one finished session of the same quiz);
-// their scores sum. display_name is the player's CURRENT players.display_name
-// (#716), joined live so a rename reflects on the quiz's standard leaderboard
-// exactly as solo play already does (games.sql joins players the same way).
-// left_at is deliberately NOT filtered here (unlike the live roster /
-// standings reads): a player who played still counts toward the quiz's
-// standard leaderboard even if they left the room before the session
-// finished (MP-10). Leaving drops a player from the in-session surfaces, not
-// from the record of having played.
-func (q *Queries) ListSessionResultsForQuizLeaderboard(ctx context.Context, quizID int64) ([]ListSessionResultsForQuizLeaderboardRow, error) {
-	rows, err := q.db.QueryContext(ctx, listSessionResultsForQuizLeaderboard, quizID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListSessionResultsForQuizLeaderboardRow
-	for rows.Next() {
-		var i ListSessionResultsForQuizLeaderboardRow
-		if err := rows.Scan(&i.PlayerID, &i.DisplayName, &i.TotalScore); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listSessionStandings = `-- name: ListSessionStandings :many
 SELECT sp.player_id                 AS player_id,
        CAST(p.display_name AS TEXT) AS display_name,

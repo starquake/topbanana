@@ -153,14 +153,13 @@ func findStanding(t *testing.T, standings []sessionStandingRes, playerID int64) 
 	return sessionStandingRes{}
 }
 
-// TestSessionRoundResults_DeltasTotalsAndLeaderboard drives a two-round hosted
+// TestSessionRoundResults_DeltasTotalsAndStandings drives a two-round hosted
 // session to completion and asserts: (a) the round_results phase exposes each
-// player's points-this-round, new cumulative total, and ranking; (b) the
-// finished phase exposes the final standings; and (c) the quiz's standard
-// leaderboard reflects the recorded per-player results once the session
-// finished. The winner (Ace) answers the correct option every question; the
-// loser (Bee) answers wrong, so the ordering is deterministic.
-func TestSessionRoundResults_DeltasTotalsAndLeaderboard(t *testing.T) {
+// player's points-this-round, new cumulative total, and ranking; and (b) the
+// finished phase exposes the final standings. The winner (Ace) answers the
+// correct option every question; the loser (Bee) answers wrong, so the ordering
+// is deterministic.
+func TestSessionRoundResults_DeltasTotalsAndStandings(t *testing.T) {
 	t.Parallel()
 
 	// A 250ms beat keeps the beat-gated phases (round_intro / reveal /
@@ -262,17 +261,6 @@ func TestSessionRoundResults_DeltasTotalsAndLeaderboard(t *testing.T) {
 	if got, want := beeFinal.TotalScore, 0; got != want {
 		t.Errorf("Bee final total = %d, want %d", got, want)
 	}
-
-	// The quiz's standard leaderboard now reflects the finished session.
-	board := getQuizLeaderboard(ctx, t, host, baseURL, qz)
-	aceBoard := findLeaderboardEntry(t, board, aceID)
-	beeBoard := findLeaderboardEntry(t, board, beeID)
-	if got, want := aceBoard.Score, aceFinal.TotalScore; got != want {
-		t.Errorf("Ace leaderboard score = %d, want %d (the recorded session total)", got, want)
-	}
-	if got, want := beeBoard.Score, beeFinal.TotalScore; got != want {
-		t.Errorf("Bee leaderboard score = %d, want %d", got, want)
-	}
 }
 
 // playerIDFromState resolves a player's underlying players.id from the roster
@@ -298,39 +286,6 @@ func playerIDFromState(
 	t.Fatalf("roster has no player named %q", displayName)
 
 	return 0
-}
-
-// getQuizLeaderboard reads GET /api/quizzes/{slug}-{id}/leaderboard.
-func getQuizLeaderboard(
-	ctx context.Context, t *testing.T, client *http.Client, baseURL string, qz *quiz.Quiz,
-) leaderboardRes {
-	t.Helper()
-	url := fmt.Sprintf("%s/api/quizzes/%s-%d/leaderboard", baseURL, qz.Slug, qz.ID)
-	resp := httpGet(ctx, t, client, url)
-	defer closeBody(t, resp.Body)
-	if got, want := resp.StatusCode, http.StatusOK; got != want {
-		t.Fatalf("leaderboard status = %d, want %d", got, want)
-	}
-	var board leaderboardRes
-	if err := json.NewDecoder(resp.Body).Decode(&board); err != nil {
-		t.Fatalf("decode leaderboard: %v", err)
-	}
-
-	return board
-}
-
-// findLeaderboardEntry returns the leaderboard entry for playerID, failing if
-// absent.
-func findLeaderboardEntry(t *testing.T, board leaderboardRes, playerID int64) leaderboardEntryRes {
-	t.Helper()
-	for _, e := range board.Entries {
-		if e.PlayerID == playerID {
-			return e
-		}
-	}
-	t.Fatalf("leaderboard missing player %d", playerID)
-
-	return leaderboardEntryRes{}
 }
 
 // seedMultiRoundLiveQuiz seeds a live quiz with two rounds (two questions then
