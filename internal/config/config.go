@@ -24,6 +24,13 @@ var ErrDBURINotSetInProduction = errors.New("DB_URI must be set in production")
 // back to an ephemeral random key so localhost runs need no configuration.
 var ErrSessionKeyRequired = errors.New("SESSION_KEY must be set")
 
+// ErrSessionKeyTooShort is returned when an explicit SESSION_KEY is set but is
+// shorter than the minimum. The same key HMAC-signs session cookies, CSRF
+// tokens, OAuth state, and signed flashes; a short, low-entropy key makes those
+// signatures offline-forgeable (an auth bypass), so a minimum length is
+// enforced rather than trusting any non-empty value (#782).
+var ErrSessionKeyTooShort = fmt.Errorf("SESSION_KEY must be at least %d bytes", sessionKeyByteLength)
+
 // ErrRevealDelayNegative is returned when REVEAL_DELAY parses to a negative
 // duration. The reveal beat sits in the future on every question, so a
 // negative value would silently break the gameplay timing contract.
@@ -619,6 +626,10 @@ func parseAdminEmails(raw string) []string {
 // sessions. See #217.
 func resolveSessionKey(envValue, appEnvironment string) (string, error) {
 	if envValue != "" {
+		if len(envValue) < sessionKeyByteLength {
+			return "", fmt.Errorf("%w (got %d)", ErrSessionKeyTooShort, len(envValue))
+		}
+
 		return envValue, nil
 	}
 	if appEnvironment != AppEnvironmentDefault {

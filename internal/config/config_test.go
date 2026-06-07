@@ -19,7 +19,7 @@ func getenvFailure(failureKey, value string) func(string) string {
 		"DB_MAX_OPEN_CONNS":    "100",
 		"DB_MAX_IDLE_CONNS":    "200",
 		"DB_CONN_MAX_LIFETIME": "10m",
-		"SESSION_KEY":          "test-session-key",
+		"SESSION_KEY":          "test-session-key-test-session-key",
 	}
 
 	return func(key string) string {
@@ -45,7 +45,7 @@ func TestParse(t *testing.T) {
 			"DB_MAX_OPEN_CONNS":    "100",
 			"DB_MAX_IDLE_CONNS":    "200",
 			"DB_CONN_MAX_LIFETIME": "10m",
-			"SESSION_KEY":          "test-session-key",
+			"SESSION_KEY":          "test-session-key-test-session-key",
 		}
 
 		getenv := func(key string) string {
@@ -192,7 +192,7 @@ func TestParse(t *testing.T) {
 				"APP_ENV":     "production",
 				"CLIENT_DIR":  "should/be/overridden",
 				"DB_URI":      "file:test.sqlite",
-				"SESSION_KEY": "test-session-key",
+				"SESSION_KEY": "test-session-key-test-session-key",
 			}
 
 			return envs[key]
@@ -213,7 +213,7 @@ func TestParse(t *testing.T) {
 		getenv := func(key string) string {
 			envs := map[string]string{
 				"APP_ENV":     "development",
-				"SESSION_KEY": "test-session-key",
+				"SESSION_KEY": "test-session-key-test-session-key",
 			}
 
 			return envs[key]
@@ -235,7 +235,7 @@ func TestParse(t *testing.T) {
 			envs := map[string]string{
 				"APP_ENV":        "development",
 				"WEB_STATIC_DIR": "internal/web/static",
-				"SESSION_KEY":    "test-session-key",
+				"SESSION_KEY":    "test-session-key-test-session-key",
 			}
 
 			return envs[key]
@@ -258,7 +258,7 @@ func TestParse(t *testing.T) {
 				"APP_ENV":        "production",
 				"WEB_STATIC_DIR": "should/be/overridden",
 				"DB_URI":         "file:test.sqlite",
-				"SESSION_KEY":    "test-session-key",
+				"SESSION_KEY":    "test-session-key-test-session-key",
 			}
 
 			return envs[key]
@@ -292,6 +292,49 @@ func TestParse(t *testing.T) {
 		}
 		if got, want := err, ErrSessionKeyRequired; !errors.Is(got, want) {
 			t.Fatalf("Parse() err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("short SESSION_KEY is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		getenv := func(key string) string {
+			envs := map[string]string{
+				"APP_ENV":     "production",
+				"DB_URI":      "file:test.sqlite",
+				"SESSION_KEY": "too-short",
+			}
+
+			return envs[key]
+		}
+
+		_, err := Parse(getenv)
+		if got, want := err, ErrSessionKeyTooShort; !errors.Is(got, want) {
+			t.Fatalf("Parse() err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("minimum-length SESSION_KEY is accepted", func(t *testing.T) {
+		t.Parallel()
+
+		// 32 ASCII bytes clears the minimum the resolver enforces.
+		key := strings.Repeat("a", 32)
+		getenv := func(k string) string {
+			envs := map[string]string{
+				"APP_ENV":     "production",
+				"DB_URI":      "file:test.sqlite",
+				"SESSION_KEY": key,
+			}
+
+			return envs[k]
+		}
+
+		c, err := Parse(getenv)
+		if err != nil {
+			t.Fatalf("Parse() err = %v, want nil", err)
+		}
+		if got, want := c.SessionKey, key; got != want {
+			t.Errorf("Parse() SessionKey = %q, want %q", got, want)
 		}
 	})
 
@@ -901,7 +944,7 @@ func TestConfig_DatabaseConfig(t *testing.T) {
 		"DB_MAX_OPEN_CONNS":    "42",
 		"DB_MAX_IDLE_CONNS":    "7",
 		"DB_CONN_MAX_LIFETIME": "90s",
-		"SESSION_KEY":          "test-session-key",
+		"SESSION_KEY":          "test-session-key-test-session-key",
 	}
 	getenv := func(key string) string { return envs[key] }
 
@@ -1251,7 +1294,7 @@ func TestParse_TrustedProxyCIDRs(t *testing.T) {
 			envs := map[string]string{
 				"APP_ENV":           "development",
 				"TRUSTED_PROXY_IPS": "127.0.0.1/32",
-				"SESSION_KEY":       "k",
+				"SESSION_KEY":       "test-session-key-test-session-key",
 			}
 
 			return envs[key]
