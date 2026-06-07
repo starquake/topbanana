@@ -23,7 +23,11 @@ import { runAnim } from '@shared/anim.js';
 import { clockOffsetFromServerNow, serverTime } from '@shared/serverClock.js';
 import { startQuestionCountdown } from '@shared/countdown.js';
 import { startStartCountdown, formatCountdown } from '@shared/startCountdown.js';
-import { buildStandingsRows, animateStandingsBars } from '@shared/standings.js';
+import {
+    buildStandingsRows,
+    animateStandingsBars,
+    applyStandingsFlip,
+} from '@shared/standings.js';
 
 function hostLobby(joinCode) {
     return {
@@ -84,6 +88,11 @@ function hostLobby(joinCode) {
         // resort fires once per round_results entry, not on every SSE tick
         // within the phase (mirrors the player surface).
         lastStandingsKey: null,
+        // The playerId order (best-first) of the last standings screen, kept
+        // across the intervening question/reveal phases so the next screen can
+        // stage its rows in this order and slide them into the new ranking (the
+        // FLIP swap, #730). Null until the first standings screen.
+        lastStandingsOrder: null,
 
         init() {
             // Pull the authoritative state once up front so the surface is
@@ -215,18 +224,21 @@ function hostLobby(joinCode) {
         // each state read. The server carries a standings array in the
         // round_results and finished phases (null elsewhere). On a genuine new
         // entry it builds the rows starting at each player's pre-round total and
-        // animates the bars growing to the new total while the numeric labels
-        // count up, then rests them in rank order. A later tick within the same
-        // phase is a no-op, so the bars don't replay on every SSE beat. The
-        // finished phase animates the last round's contribution: its standings
-        // carry the last round's roundScore so the bars grow into the final
-        // totals.
+        // grows the bars to the new total while the numeric labels count up;
+        // from the second screen on the rows also slide from their
+        // previous-screen position into the new ranking (a FLIP swap, #730) so
+        // an overtake reads as rows trading places. A later tick within the same
+        // phase is a no-op, so it doesn't replay on every SSE beat. The finished
+        // phase animates the last round's contribution: its standings carry the
+        // last round's roundScore so the bars grow into the final totals.
         syncStandings(state) {
             const standings = Array.isArray(state.standings) ? state.standings : null;
             if ((this.phase !== 'round_results' && this.phase !== 'finished') || !standings) {
                 this.standingsBars = [];
                 this.maxStandingsTotal = 1;
                 this.lastStandingsKey = null;
+                // lastStandingsOrder is kept across question/reveal so the next
+                // standings screen can slide its rows from the prior order.
 
                 return;
             }
@@ -240,12 +252,29 @@ function hostLobby(joinCode) {
 
             const animate = this.phase === 'round_results' || this.phase === 'finished';
             const { rows, maxTotal } = buildStandingsRows(standings, { animate });
-            this.standingsBars = rows;
             this.maxStandingsTotal = maxTotal;
+            const prevOrder = this.lastStandingsOrder;
+            this.lastStandingsOrder = rows.map((row) => String(row.playerId));
 
-            if (animate) {
-                animateStandingsBars(this.standingsBars, runAnim);
-            }
+            applyStandingsFlip({
+                rows,
+                prevOrder,
+                animate,
+                runAnim,
+                setBars: (next) => { this.standingsBars = next; },
+                getBars: () => this.standingsBars,
+                getContainer: () => this.standingsContainer(),
+                animateBars: animateStandingsBars,
+            });
+        },
+
+        // standingsContainer returns the rendered standings <ul>, or null before
+        // the graph is shown. Queried from document, not this.$el: syncStandings
+        // runs from the SSE/state path (not an Alpine expression), where $el does
+        // not resolve to the component root, so $el.querySelector misses the <ul>
+        // and the FLIP never measures. Only one standings surface exists per page.
+        standingsContainer() {
+            return document.querySelector('[data-standings-bars]');
         },
 
         // serverTime returns the current time in ms as the server sees it,

@@ -98,22 +98,38 @@ async function answerOnPage(page: Page, text: string): Promise<void> {
 }
 
 // readStandingsRows reads the rendered standings rows in DOM order, returning
-// each row's rank, the displayed name, and the displayed total. DOM order is
-// the on-screen order, so a best-first assertion checks both the data and the
-// sort.
-async function readStandingsRows(scope: Page): Promise<{ rank: string; name: string; total: string }[]> {
+// each row's rank, playerId, the displayed name, and the displayed total. DOM
+// order is the on-screen order, so a best-first assertion checks both the data
+// and the sort; the playerId order pins that the keyed nodes ended in the new
+// ranking (the FLIP target order).
+async function readStandingsRows(
+  scope: Page,
+): Promise<{ rank: string; playerId: string; name: string; total: string }[]> {
   const rows = scope.locator('[data-testid="standings-bars"] [data-standings-row]');
   const count = await rows.count();
-  const out: { rank: string; name: string; total: string }[] = [];
+  const out: { rank: string; playerId: string; name: string; total: string }[] = [];
   for (let i = 0; i < count; i++) {
     const row = rows.nth(i);
     out.push({
       rank: (await row.getAttribute('data-rank')) ?? '',
+      playerId: (await row.getAttribute('data-player-id')) ?? '',
       name: (await row.locator('[data-standings-name]').innerText()).trim(),
       total: (await row.locator('[data-standings-total]').innerText()).trim(),
     });
   }
   return out;
+}
+
+// standingsRowTransforms reads the inline transform on each rendered row. The
+// FLIP slides via an inline translateY that runAnim clears on complete (and
+// under reduced motion clears synchronously, in the same frame the inverse was
+// applied). Once the screen has settled no row should carry a residual
+// transform - this pins that the reduced-motion path leaves no stuck translateY.
+async function standingsRowTransforms(scope: Page): Promise<string[]> {
+  return scope.evaluate(() => {
+    const rows = document.querySelectorAll('[data-testid="standings-bars"] [data-standings-row]');
+    return Array.from(rows).map((row) => (row as HTMLElement).style.transform);
+  });
 }
 
 // readFinishedStanding reads the finished /state standing for the named player,
@@ -251,11 +267,24 @@ test('the standings bar graph shows final order and totals on the TV and player 
 
   // Finished: the terminal phase is stable. Both surfaces show the final
   // standings bar graph with Quincy first (two correct answers) and Robin
-  // second on zero. Assert the host TV and the player surface independently.
+  // second on zero. Wait for the host finished standings to render (so the
+  // server has reached the finished phase), then read the authoritative final
+  // totals the grow + slide settles the displayed bars onto.
   await expect(host.locator('[data-phase-results] [data-standings-row]').first())
     .toBeVisible({ timeout: 20_000 });
-  const tvRows = await readStandingsRows(host);
-  expect(tvRows.length).toBe(2);
+  const quincyFinal = await readFinishedStanding(host.request, joinCode, quincy);
+  const robinFinal = await readFinishedStanding(host.request, joinCode, robin);
+
+  // Wait for the grow + slide to settle so the displayed totals match the
+  // server. Under reduced motion the bars snap to their finals, but the read
+  // still races the first paint, so retry until the leader's bar reaches its
+  // final total.
+  let tvRows = await readStandingsRows(host);
+  await expect(async () => {
+    tvRows = await readStandingsRows(host);
+    expect(tvRows.length).toBe(2);
+    expect(Number(tvRows[0].total)).toBe(quincyFinal.totalScore);
+  }).toPass({ timeout: 10_000 });
   expect(tvRows[0].name).toBe(quincy);
   expect(tvRows[0].rank).toBe('1');
   expect(Number(tvRows[0].total)).toBeGreaterThan(0);
@@ -265,14 +294,34 @@ test('the standings bar graph shows final order and totals on the TV and player 
 
   await expect(page.getByTestId('finished-view').locator('[data-standings-row]').first())
     .toBeVisible({ timeout: 20_000 });
-  const playerRows = await readStandingsRows(page);
-  expect(playerRows.length).toBe(2);
+  let playerRows = await readStandingsRows(page);
+  await expect(async () => {
+    playerRows = await readStandingsRows(page);
+    expect(playerRows.length).toBe(2);
+    expect(Number(playerRows[0].total)).toBe(quincyFinal.totalScore);
+  }).toPass({ timeout: 10_000 });
   expect(playerRows[0].name).toBe(quincy);
   expect(playerRows[0].rank).toBe('1');
   expect(Number(playerRows[0].total)).toBeGreaterThan(0);
   expect(playerRows[1].name).toBe(robin);
   expect(playerRows[1].rank).toBe('2');
   expect(Number(playerRows[1].total)).toBe(0);
+
+  // The keyed rows settle in the new best-first ranking: the data-player-id
+  // order matches the rank order on both surfaces, and the two surfaces agree.
+  // The FLIP slides these same keyed rows into this order; under reduced motion
+  // (this run) they snap to it with no residual transform.
+  expect(tvRows.map((r) => r.playerId)).toEqual(playerRows.map((r) => r.playerId));
+  expect(tvRows[0].playerId).not.toBe(tvRows[1].playerId);
+  expect(Number(tvRows[0].playerId)).toBeGreaterThan(0);
+  expect(Number(tvRows[1].playerId)).toBeGreaterThan(0);
+
+  // No row carries a leftover slide transform once the screen has settled
+  // (the reduced-motion path must not strand an inverted translateY on a row).
+  const tvTransforms = await standingsRowTransforms(host);
+  for (const t of tvTransforms) expect(t === '' || t === 'none').toBe(true);
+  const playerTransforms = await standingsRowTransforms(page);
+  for (const t of playerTransforms) expect(t === '' || t === 'none').toBe(true);
 
   // #749: the last round must end on a single final-standings screen. The
   // player surface shows only finished-view (no between-rounds round-results),
@@ -288,11 +337,9 @@ test('the standings bar graph shows final order and totals on the TV and player 
   // her final total. Robin scored nothing in the last round, so roundScore stays
   // 0 (no growth). The settled DOM above (rendered under reduced motion) is the
   // reduced-motion jump-to-final path; this pins the data that drives the grow.
-  const quincyFinal = await readFinishedStanding(host.request, joinCode, quincy);
   expect(quincyFinal.totalScore).toBe(Number(tvRows[0].total));
   expect(quincyFinal.roundScore).toBeGreaterThan(0);
   expect(quincyFinal.totalScore - quincyFinal.roundScore).toBeLessThan(quincyFinal.totalScore);
-  const robinFinal = await readFinishedStanding(host.request, joinCode, robin);
   expect(robinFinal.roundScore).toBe(0);
 
   await otherContext.close();
