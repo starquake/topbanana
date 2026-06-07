@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/leaderboard"
@@ -26,22 +27,33 @@ type Realtime struct {
 	SessionHub     *livesession.Hub
 }
 
+// Mail bundles the mailer deps so they travel as one argument through
+// server.New / addRoutes. Tester is the ring-buffer wrapper around the live
+// mailer (no-op when SMTP is unconfigured); Status is the safe view the
+// diagnostics page renders so the admin can confirm wiring without exposing
+// credentials. Tasks tracks the detached email-dispatch goroutines the auth /
+// profile / admin handlers spawn so a graceful shutdown drains them before the
+// DB closes (#740); it may be nil, in which case those dispatches run
+// untracked.
+type Mail struct {
+	Tester *mailer.Tester
+	Status mailer.StatusView
+	Tasks  *bgtasks.Tracker
+}
+
 // New creates a new server. realtime carries the process-local pub/sub hubs
-// and the live-session service. mailerTester is the ring-buffer wrapper around
-// the live mailer (no-op when SMTP is unconfigured); mailerStatus is the safe
-// view the diagnostics page renders so the admin can confirm wiring without
-// exposing credentials.
+// and the live-session service. mail bundles the mailer wiring plus the
+// background-task tracker shutdown drains.
 func New(
 	logger *slog.Logger,
 	stores *store.Stores,
 	gameService *game.Service,
 	realtime Realtime,
 	cfg *config.Config,
-	mailerTester *mailer.Tester,
-	mailerStatus mailer.StatusView,
+	mail Mail,
 ) http.Handler {
 	mux := http.NewServeMux()
-	addRoutes(mux, logger, stores, gameService, realtime, cfg, mailerTester, mailerStatus)
+	addRoutes(mux, logger, stores, gameService, realtime, cfg, mail)
 	var handler http.Handler = mux
 	handler = logRequests(logger, handler)
 	// recoverPanic is the OUTERMOST wrapper so a handler panic still

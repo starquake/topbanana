@@ -46,3 +46,9 @@ type (
 	TokenSweeper      = tokenSweeper
 	ResetTokenSweeper = resetTokenSweeper
 )
+
+// RunHTTPServer exposes the unexported serve+graceful-shutdown loop so the
+// external app_test package can pin that shutdown drains the detached
+// email-dispatch tracker before returning (and thus before Run closes the DB)
+// without standing up the full server (#740).
+var RunHTTPServer = runHTTPServer

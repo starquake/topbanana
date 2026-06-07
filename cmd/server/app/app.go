@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/database"
 	"github.com/starquake/topbanana/internal/envtag"
@@ -111,17 +112,15 @@ func Run(
 		<-runnerDone
 	}()
 
-	mailerTester, mailerStatus, err := buildMailer(signalCtx, cfg, logger)
-	if err != nil {
-		return err
-	}
-
 	realtime := server.Realtime{
 		LeaderboardHub: leaderboardHub,
 		SessionService: sessionService,
 		SessionHub:     sessionHub,
 	}
-	srv := server.New(logger, stores, gameService, realtime, cfg, mailerTester, mailerStatus)
+	srv, emailTasks, err := buildServer(signalCtx, cfg, logger, stores, gameService, realtime)
+	if err != nil {
+		return err
+	}
 	if ln == nil {
 		ln, err = listener(signalCtx, cfg, logger)
 		if err != nil {
@@ -131,7 +130,30 @@ func Run(
 		logger.InfoContext(signalCtx, "listener overridden")
 	}
 
-	return runHTTPServer(ctx, signalCtx, ln, srv, logger)
+	return runHTTPServer(ctx, signalCtx, ln, srv, emailTasks, logger)
+}
+
+// buildServer constructs the mailer, the background-task tracker, and the HTTP
+// handler. It returns the tracker alongside the handler so runHTTPServer can
+// drain the detached email-dispatch goroutines the handlers spawn after the
+// HTTP server stops accepting requests and before the deferred conn.Close
+// runs, so a dispatch never writes to a closed DB on shutdown (#740, #741).
+func buildServer(
+	ctx context.Context,
+	cfg *config.Config,
+	logger *slog.Logger,
+	stores *store.Stores,
+	gameService *game.Service,
+	realtime server.Realtime,
+) (http.Handler, *bgtasks.Tracker, error) {
+	mailerTester, mailerStatus, err := buildMailer(ctx, cfg, logger)
+	if err != nil {
+		return nil, nil, err
+	}
+	emailTasks := bgtasks.New()
+	mail := server.Mail{Tester: mailerTester, Status: mailerStatus, Tasks: emailTasks}
+
+	return server.New(logger, stores, gameService, realtime, cfg, mail), emailTasks, nil
 }
 
 // newGameService builds the game service with the reveal-delay override
@@ -306,7 +328,13 @@ func runTokenSweep(
 	}
 }
 
-func runHTTPServer(ctx, signalCtx context.Context, ln net.Listener, srv http.Handler, logger *slog.Logger) error {
+func runHTTPServer(
+	ctx, signalCtx context.Context,
+	ln net.Listener,
+	srv http.Handler,
+	emailTasks *bgtasks.Tracker,
+	logger *slog.Logger,
+) error {
 	httpServer := &http.Server{
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
@@ -339,7 +367,23 @@ func runHTTPServer(ctx, signalCtx context.Context, ln net.Listener, srv http.Han
 		// use the root ctx to ensure shutdown has its own timeout even though signalCtx is already canceled
 		shutdownCtx, shutdownCancel := context.WithTimeout(ctx, shutdownTimeout)
 		defer shutdownCancel()
-		if shutdownErr := httpServer.Shutdown(shutdownCtx); shutdownErr != nil {
+		shutdownErr := httpServer.Shutdown(shutdownCtx)
+		// Drain the detached email-dispatch goroutines AFTER Shutdown stops
+		// the listener and BEFORE Run's deferred conn.Close runs, so a
+		// dispatch can't write to a closed DB (#740, #741). The bound is
+		// detached from ctx via WithoutCancel: at shutdown ctx is already
+		// cancelled (signal-driven, and the integration harness cancels the
+		// same ctx it passes to Run), so a plain WithTimeout(ctx, ...) would
+		// fire instantly and skip the wait. The dispatches carry per-send
+		// timeouts longer than shutdownTimeout, so a stuck SMTP must not pin
+		// shutdown - draining what it can within the bound and giving up is
+		// the right trade.
+		drainCtx, drainCancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
+		defer drainCancel()
+		if drainErr := emailTasks.Wait(drainCtx); drainErr != nil {
+			logger.WarnContext(ctx, "gave up waiting for background email dispatches", slog.Any("err", drainErr))
+		}
+		if shutdownErr != nil {
 			logger.ErrorContext(shutdownCtx, "error shutting down server", slog.Any("err", shutdownErr))
 
 			return fmt.Errorf("error shutting down server: %w", shutdownErr)

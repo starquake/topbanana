@@ -57,7 +57,7 @@ func postRoleWith(
 ) (*httptest.ResponseRecorder, auth.SignedFlashRead) {
 	t.Helper()
 	flash := auth.NewSignedFlash([]byte("test-key-test-key-test-key-32byt"), false, "flash", "/admin")
-	handler := HandlePlayerSetRole(slog.New(slog.DiscardHandler), env.admin, sender, mailConfigured, flash)
+	handler := HandlePlayerSetRole(slog.New(slog.DiscardHandler), env.admin, sender, mailConfigured, flash, nil)
 
 	req := httptest.NewRequestWithContext(
 		t.Context(), http.MethodPost, "/admin/players/"+strconv.FormatInt(targetID, 10)+"/role",

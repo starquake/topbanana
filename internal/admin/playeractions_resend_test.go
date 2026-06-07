@@ -22,7 +22,7 @@ func postResend(
 	t.Helper()
 	handler := HandlePlayerResendVerification(
 		slog.New(slog.DiscardHandler), env.admin, env.tokens, stubVerifyEmailSender{},
-		baseURL, limiter, newCredFlash(t),
+		baseURL, limiter, newCredFlash(t), nil,
 	)
 
 	req := httptest.NewRequestWithContext(

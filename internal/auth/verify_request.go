@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/session"
 )
@@ -64,6 +65,18 @@ func HandleVerifyEmailRequestForm(
 	})
 }
 
+// VerifyRequestDispatchDeps bundles the verify-email dispatch dependencies so
+// HandleVerifyEmailRequestSubmit stays under revive's argument limit (same
+// packaging the register / login handlers use). Tasks tracks the detached send
+// so a graceful shutdown drains it before the DB closes (#741); it may be nil,
+// in which case the dispatch runs untracked.
+type VerifyRequestDispatchDeps struct {
+	Tokens  VerifyTokenStore
+	Sender  VerifyEmailSender
+	BaseURL string
+	Tasks   *bgtasks.Tracker
+}
+
 // HandleVerifyEmailRequestSubmit handles POST /verify-email/request.
 // Account-existence-opaque: identical 303 + flash regardless of whether
 // the submitted address is registered, already verified, or unknown.
@@ -74,9 +87,7 @@ func HandleVerifyEmailRequestSubmit(
 	logger *slog.Logger,
 	players PlayerStore,
 	sessions *session.Manager,
-	tokens VerifyTokenStore,
-	sender VerifyEmailSender,
-	baseURL string,
+	dispatch VerifyRequestDispatchDeps,
 	limiter *VerifyResendLimiter,
 	flash *SignedFlash,
 ) http.Handler {
@@ -104,7 +115,7 @@ func HandleVerifyEmailRequestSubmit(
 
 		email := strings.ToLower(strings.TrimSpace(r.PostFormValue("email")))
 		if email != "" {
-			dispatchVerifyRequestIfMatch(r.Context(), logger, players, tokens, sender, baseURL, email)
+			dispatchVerifyRequestIfMatch(r.Context(), logger, players, dispatch, email)
 		}
 
 		flash.SetNotice(w, verifyRequestSuccessMsg)
@@ -122,9 +133,8 @@ func dispatchVerifyRequestIfMatch(
 	ctx context.Context,
 	logger *slog.Logger,
 	players PlayerStore,
-	tokens VerifyTokenStore,
-	sender VerifyEmailSender,
-	baseURL, email string,
+	dispatch VerifyRequestDispatchDeps,
+	email string,
 ) {
 	p, err := players.GetPlayerByEmail(ctx, email)
 	if err != nil || p.Email == "" || p.IsEmailVerified() {
@@ -133,14 +143,15 @@ func dispatchVerifyRequestIfMatch(
 	// Detached so SMTP latency is not observable from response timing -
 	// the account-existence-opaque contract depends on every request
 	// returning in roughly the same wall-clock time. The bounded timeout
-	// keeps a stuck SMTP server from pinning the goroutine.
+	// keeps a stuck SMTP server from pinning the goroutine. The send is
+	// tracked so shutdown drains it before the DB closes (#741).
 	sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), verifyEmailDispatchTimeout)
-	go func() {
+	dispatch.Tasks.Go(func() {
 		defer cancel()
-		if sendErr := SendVerifyEmail(sendCtx, tokens, sender, baseURL,
+		if sendErr := SendVerifyEmail(sendCtx, dispatch.Tokens, dispatch.Sender, dispatch.BaseURL,
 			p.Email, p.ID, time.Now().UTC()); sendErr != nil {
 			logger.WarnContext(sendCtx, "verify-email request dispatch failed",
 				slog.Int64("player_id", p.ID), slog.Any("err", sendErr))
 		}
-	}()
+	})
 }

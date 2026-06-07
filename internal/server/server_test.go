@@ -25,8 +25,7 @@ func TestNewServer(t *testing.T) {
 			SessionHub:     livesession.NewHub(),
 		},
 		&config.Config{},
-		mailer.NewTester(mailer.NewNoop()),
-		mailer.StatusView{},
+		Mail{Tester: mailer.NewTester(mailer.NewNoop())},
 	)
 
 	if srv == nil {
