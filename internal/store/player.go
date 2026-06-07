@@ -815,54 +815,6 @@ func (s *PlayerStore) ListFinishedSessionPlaysForPlayer(
 	return out, nil
 }
 
-// ResetLiveSessionPlaysForPlayerOnQuiz hard-deletes the player's
-// session_answers and session_players rows across every session of the
-// given quiz. Both statements run in one transaction; a rollback on any
-// error keeps the reset all-or-nothing. No-op if the player has no
-// participation. The replay gate (a finished roster row) clears once the
-// session_players rows are gone.
-func (s *PlayerStore) ResetLiveSessionPlaysForPlayerOnQuiz(
-	ctx context.Context, playerID, quizID int64,
-) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-
-	if err = deleteLiveSessionPlaysTx(ctx, s.q.WithTx(tx), playerID, quizID); err != nil {
-		if rbErr := tx.Rollback(); rbErr != nil {
-			return fmt.Errorf("live reset failed: %w (rollback error: %w)", err, rbErr)
-		}
-
-		return err
-	}
-
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit live reset transaction: %w", err)
-	}
-
-	return nil
-}
-
-// deleteLiveSessionPlaysTx runs the two deletes that clear a player's live
-// participation in every session of a quiz, answers first then roster rows.
-func deleteLiveSessionPlaysTx(ctx context.Context, q *db.Queries, playerID, quizID int64) error {
-	if err := q.DeleteSessionAnswersForPlayerOnQuiz(ctx, db.DeleteSessionAnswersForPlayerOnQuizParams{
-		PlayerID: playerID,
-		QuizID:   quizID,
-	}); err != nil {
-		return fmt.Errorf("failed to delete session answers: %w", err)
-	}
-	if err := q.DeleteSessionPlayersForPlayerOnQuiz(ctx, db.DeleteSessionPlayersForPlayerOnQuizParams{
-		PlayerID: playerID,
-		QuizID:   quizID,
-	}); err != nil {
-		return fmt.Errorf("failed to delete session players: %w", err)
-	}
-
-	return nil
-}
-
 // SetPlayerEmailVerifiedNow stamps email_verified_at to CURRENT_TIMESTAMP
 // even when the row is already verified. Used by the admin "Mark
 // verified" action (#450). Returns auth.ErrPlayerNotFound when the id

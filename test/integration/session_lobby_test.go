@@ -317,6 +317,51 @@ func TestSessionLobby_JoinAfterStartIs409(t *testing.T) {
 	}
 }
 
+// TestSessionLobby_ReplayAfterFinishedSession pins #768: a live quiz has no
+// one-play-per-quiz block, so a player who sat through a finished session of a
+// quiz can join a brand-new session of the same quiz. The host opens session A,
+// the player joins, the session finishes, the host opens session B of the same
+// quiz, and the player's join of B succeeds (no replay block).
+func TestSessionLobby_ReplayAfterFinishedSession(t *testing.T) {
+	t.Parallel()
+
+	ctx, setup := setupIntegration(t)
+	baseURL := setup.BaseURL
+	qz := seedLiveQuiz(ctx, t, setup.Stores.Quizzes, "lobby-replay")
+
+	host := &http.Client{
+		Jar:           mustJar(t),
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	registerVerifyAndSignIn(ctx, t, host, baseURL, setup.DBURI, "replay-host", "replay-host-pass-123")
+
+	// The player joins session A, which the host then finishes.
+	first := createSession(ctx, t, host, baseURL, qz.ID)
+	alice := newAnonClient(t)
+	joinSession(ctx, t, alice, baseURL, first, "Alice")
+
+	firstSess, err := setup.Stores.LiveSessions.GetSessionByJoinCode(ctx, first)
+	if err != nil {
+		t.Fatalf("GetSessionByJoinCode err = %v, want nil", err)
+	}
+	if err = setup.Stores.LiveSessions.Finish(ctx, firstSess.ID); err != nil {
+		t.Fatalf("Finish err = %v, want nil", err)
+	}
+
+	// The host opens a new session of the same quiz; the same player joins it
+	// without hitting any replay block. joinSession asserts the 200.
+	second := createSession(ctx, t, host, baseURL, qz.ID)
+	joinSession(ctx, t, alice, baseURL, second, "Alice")
+
+	state := getSessionState(ctx, t, alice, baseURL, second)
+	if got, want := len(state.Players), 1; got != want {
+		t.Fatalf("len(players) in new session = %d, want %d", got, want)
+	}
+	if got, want := state.Players[0].DisplayName, "Alice"; got != want {
+		t.Errorf("roster DisplayName = %q, want %q (replay must be allowed)", got, want)
+	}
+}
+
 // TestSessionLobby_JoinCodesAreUnique opens two sessions and asserts the
 // generated join codes differ.
 func TestSessionLobby_JoinCodesAreUnique(t *testing.T) {

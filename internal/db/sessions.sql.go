@@ -177,44 +177,6 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 	return i, err
 }
 
-const deleteSessionAnswersForPlayerOnQuiz = `-- name: DeleteSessionAnswersForPlayerOnQuiz :exec
-DELETE FROM session_answers
-WHERE player_id = ?1
-  AND session_id IN (SELECT id FROM sessions WHERE quiz_id = ?2)
-`
-
-type DeleteSessionAnswersForPlayerOnQuizParams struct {
-	PlayerID int64
-	QuizID   int64
-}
-
-// Hard-deletes the player's recorded picks across every session of the given
-// quiz. Run before DeleteSessionPlayersForPlayerOnQuiz so the answer rows go
-// first (session_answers has no FK to session_players, so order is not
-// enforced, but deleting children-then-roster reads cleanly).
-func (q *Queries) DeleteSessionAnswersForPlayerOnQuiz(ctx context.Context, arg DeleteSessionAnswersForPlayerOnQuizParams) error {
-	_, err := q.db.ExecContext(ctx, deleteSessionAnswersForPlayerOnQuiz, arg.PlayerID, arg.QuizID)
-	return err
-}
-
-const deleteSessionPlayersForPlayerOnQuiz = `-- name: DeleteSessionPlayersForPlayerOnQuiz :exec
-DELETE FROM session_players
-WHERE player_id = ?1
-  AND session_id IN (SELECT id FROM sessions WHERE quiz_id = ?2)
-`
-
-type DeleteSessionPlayersForPlayerOnQuizParams struct {
-	PlayerID int64
-	QuizID   int64
-}
-
-// Hard-deletes the player's roster rows across every session of the given
-// quiz, clearing the replay gate so the player can join a new session of it.
-func (q *Queries) DeleteSessionPlayersForPlayerOnQuiz(ctx context.Context, arg DeleteSessionPlayersForPlayerOnQuizParams) error {
-	_, err := q.db.ExecContext(ctx, deleteSessionPlayersForPlayerOnQuiz, arg.PlayerID, arg.QuizID)
-	return err
-}
-
 const getSession = `-- name: GetSession :one
 SELECT id, quiz_id, host_player_id, join_code, phase, current_round_id, current_question_id, question_started_at, question_expires_at, created_at, started_at, finished_at, host_last_seen_at, start_at
 FROM sessions
@@ -692,33 +654,6 @@ type MarkSessionPlayerLeftParams struct {
 // need only carry the code it already gates on.
 func (q *Queries) MarkSessionPlayerLeft(ctx context.Context, arg MarkSessionPlayerLeftParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, markSessionPlayerLeft, arg.PlayerID, arg.JoinCode)
-}
-
-const playerFinishedSessionForQuiz = `-- name: PlayerFinishedSessionForQuiz :one
-SELECT EXISTS (
-    SELECT 1
-    FROM session_players sp
-    JOIN sessions s ON s.id = sp.session_id
-    WHERE sp.player_id = ?1
-      AND s.quiz_id = ?2
-      AND s.phase = 'finished'
-) AS has_finished
-`
-
-type PlayerFinishedSessionForQuizParams struct {
-	PlayerID int64
-	QuizID   int64
-}
-
-// Reports whether the player has a roster row in a finished session of the
-// given quiz. Backs the replay gate: a live quiz may be played once, so a
-// player who already sat through a finished session of it is blocked from
-// joining a new one until an admin resets their participation.
-func (q *Queries) PlayerFinishedSessionForQuiz(ctx context.Context, arg PlayerFinishedSessionForQuizParams) (bool, error) {
-	row := q.db.QueryRowContext(ctx, playerFinishedSessionForQuiz, arg.PlayerID, arg.QuizID)
-	var has_finished bool
-	err := row.Scan(&has_finished)
-	return has_finished, err
 }
 
 const refreshSessionPlayerLastSeenAt = `-- name: RefreshSessionPlayerLastSeenAt :exec

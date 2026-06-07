@@ -24,20 +24,6 @@ WHERE join_code = ?;
 -- regenerate on collision before paying for the INSERT.
 SELECT EXISTS(SELECT 1 FROM sessions WHERE join_code = ?) AS code_exists;
 
--- name: PlayerFinishedSessionForQuiz :one
--- Reports whether the player has a roster row in a finished session of the
--- given quiz. Backs the replay gate: a live quiz may be played once, so a
--- player who already sat through a finished session of it is blocked from
--- joining a new one until an admin resets their participation.
-SELECT EXISTS (
-    SELECT 1
-    FROM session_players sp
-    JOIN sessions s ON s.id = sp.session_id
-    WHERE sp.player_id = sqlc.arg('player_id')
-      AND s.quiz_id = sqlc.arg('quiz_id')
-      AND s.phase = 'finished'
-) AS has_finished;
-
 -- name: SessionHasPlayer :one
 -- Reports whether the player has EVER held a roster row in the session
 -- identified by join code, regardless of left_at. Backs the reconnect/resume
@@ -87,22 +73,6 @@ WHERE s.phase = 'finished'
 GROUP BY s.quiz_id
 ORDER BY s.finished_at DESC, s.quiz_id DESC
 LIMIT sqlc.arg('row_limit');
-
--- name: DeleteSessionAnswersForPlayerOnQuiz :exec
--- Hard-deletes the player's recorded picks across every session of the given
--- quiz. Run before DeleteSessionPlayersForPlayerOnQuiz so the answer rows go
--- first (session_answers has no FK to session_players, so order is not
--- enforced, but deleting children-then-roster reads cleanly).
-DELETE FROM session_answers
-WHERE player_id = sqlc.arg('player_id')
-  AND session_id IN (SELECT id FROM sessions WHERE quiz_id = sqlc.arg('quiz_id'));
-
--- name: DeleteSessionPlayersForPlayerOnQuiz :exec
--- Hard-deletes the player's roster rows across every session of the given
--- quiz, clearing the replay gate so the player can join a new session of it.
-DELETE FROM session_players
-WHERE player_id = sqlc.arg('player_id')
-  AND session_id IN (SELECT id FROM sessions WHERE quiz_id = sqlc.arg('quiz_id'));
 
 -- name: UpsertSessionPlayer :one
 -- Adds a player to a session's roster, or revives an existing row on re-join

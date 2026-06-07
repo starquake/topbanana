@@ -85,11 +85,6 @@ type fakeStore struct {
 	// not-a-participant branch of Leave without a real roster row.
 	markLeftErr error
 
-	// alreadyPlayed is what PlayerFinishedSessionForQuiz reports, so a test
-	// can drive the replay gate without a real finished session.
-	alreadyPlayed error
-	playedResult  bool
-
 	// hasPlayerResult is what SessionHasPlayer reports, so a test can drive the
 	// reconnect/resume gate (a prior participant whose row is marked left_at is
 	// not in the live roster, yet SessionHasPlayer still sees them).
@@ -129,13 +124,6 @@ func (f *fakeStore) GetSessionByJoinCode(_ context.Context, _ string) (*Session,
 	}
 
 	return f.session, nil
-}
-
-func (f *fakeStore) PlayerFinishedSessionForQuiz(_ context.Context, _, _ int64) (bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	return f.playedResult, f.alreadyPlayed
 }
 
 func (f *fakeStore) SessionHasPlayer(_ context.Context, _ string, _ int64) (bool, error) {
@@ -329,25 +317,6 @@ func TestService_Join_AddsRosterRowWithoutName(t *testing.T) {
 	}
 }
 
-func TestService_Join_BlockedAfterFinishedPlay(t *testing.T) {
-	t.Parallel()
-
-	store := &fakeStore{
-		session:      &Session{ID: "s1", QuizID: 7, JoinCode: "ROOM12", Phase: PhaseLobby},
-		playedResult: true,
-	}
-	svc := NewService(store, &fakeQuiz{}, slog.Default())
-
-	_, err := svc.Join(t.Context(), "ROOM12", 5)
-	if got, want := err, ErrAlreadyPlayed; !errors.Is(got, want) {
-		t.Errorf("Join err = %v, want %v", got, want)
-	}
-	// The gate fires before the roster write, so no AddPlayer happened.
-	if got, want := len(store.addedPlayerIDs), 0; got != want {
-		t.Errorf("addedPlayerIDs len = %d, want %d (gate must precede AddPlayer)", got, want)
-	}
-}
-
 // TestService_Join_ClosedAfterStart pins the late-join gate: once a session
 // has left the lobby (any non-lobby phase), Join rejects a player who never
 // held a roster row with ErrLobbyClosed before touching the roster - v1 has no
@@ -365,8 +334,7 @@ func TestService_Join_ClosedAfterStart(t *testing.T) {
 	if got, want := err, ErrLobbyClosed; !errors.Is(got, want) {
 		t.Errorf("Join err = %v, want %v", got, want)
 	}
-	// The gate fires before the roster write, so no AddPlayer happened, and the
-	// replay gate was never consulted.
+	// The gate fires before the roster write, so no AddPlayer happened.
 	if got, want := len(store.addedPlayerIDs), 0; got != want {
 		t.Errorf("addedPlayerIDs len = %d, want %d (gate must precede AddPlayer)", got, want)
 	}

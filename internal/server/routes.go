@@ -605,12 +605,6 @@ func addAdminPlayerRoutes(
 			admin.HandlePlayerSetPassword(logger, stores.AdminPlayers, deps.flash),
 		))),
 	)
-	mux.Handle(
-		"POST /admin/players/{playerID}/live-quizzes/{quizID}/reset",
-		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
-			admin.HandlePlayerResetLiveQuiz(logger, stores.AdminPlayers, deps.flash),
-		))),
-	)
 	addAdminInviteRoutes(mux, logger, csrfMgr, csrfMW, requireAdmin, stores, deps)
 }
 
