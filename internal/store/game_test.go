@@ -1156,6 +1156,145 @@ func TestGameStore_ListParticipantsForQuizLeaderboard(t *testing.T) {
 	)
 }
 
+// sqliteDateTimeLayout matches SQLite's CURRENT_TIMESTAMP text encoding,
+// the format CreateQuestion writes started_at / expired_at in (#789).
+const sqliteDateTimeLayout = "2006-01-02 15:04:05"
+
+// TestGameStore_CreateQuestion_StoresUTCTimestampText pins the #789 encoding
+// fix: started_at and expired_at must be stored as UTC 'YYYY-MM-DD HH:MM:SS'
+// text, NOT a Go time.Time bound raw (which the driver serialises via
+// t.String() as '... -0700 MST'). The timezone-offset suffix on the raw form
+// makes the lexical staleness compare invert across a DST boundary. Anchoring
+// the question in a fixed non-UTC zone means a raw bind would leave the offset
+// suffix in the stored value and fail the equality below.
+func TestGameStore_CreateQuestion_StoresUTCTimestampText(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	testQuiz := newTestQuizzes()[0]
+	if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+		t.Fatalf("failed to create quiz: %v", err)
+	}
+
+	gameStore := NewGameStore(db, slog.Default())
+	g := &game.Game{QuizID: testQuiz.ID}
+	if err := gameStore.CreateGame(t.Context(), g); err != nil {
+		t.Fatalf("failed to create game: %v", err)
+	}
+
+	nonUTC := time.FixedZone("UTC+2", 2*60*60)
+	startedAt := time.Date(2026, 6, 7, 14, 30, 0, 0, nonUTC)
+	expiredAt := startedAt.Add(10 * time.Second)
+	gq := &game.Question{
+		GameID:     g.ID,
+		QuestionID: testQuiz.Questions[0].ID,
+		StartedAt:  startedAt,
+		ExpiredAt:  expiredAt,
+	}
+	if err := gameStore.CreateQuestion(t.Context(), gq); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Read the raw stored bytes via CAST so the driver hands back the literal
+	// text it stored rather than reparsing the DATETIME column into a
+	// time.Time.
+	var startedText, expiredText string
+	row := db.QueryRowContext(t.Context(),
+		"SELECT CAST(started_at AS TEXT), CAST(expired_at AS TEXT) FROM game_questions WHERE id = ?",
+		gq.ID,
+	)
+	if err := row.Scan(&startedText, &expiredText); err != nil {
+		t.Fatalf("failed to read back stored timestamps: %v", err)
+	}
+
+	if got, want := startedText, startedAt.UTC().Format(sqliteDateTimeLayout); got != want {
+		t.Errorf("stored started_at = %q, want %q (UTC text, not a raw time.Time bind)", got, want)
+	}
+	if got, want := expiredText, expiredAt.UTC().Format(sqliteDateTimeLayout); got != want {
+		t.Errorf("stored expired_at = %q, want %q (UTC text, not a raw time.Time bind)", got, want)
+	}
+}
+
+// TestGameStore_ListParticipantsForQuizLeaderboard_StaleBoundary pins that the
+// in-progress dot (InProgress = !IsCompleted && !IsStale) flips on the exact
+// staleBefore cutoff and that both sides of the compare share the UTC text
+// encoding (#789). A question expiring just before the cutoff is stale; the same
+// question with a cutoff just before its expiry is not.
+func TestGameStore_ListParticipantsForQuizLeaderboard_StaleBoundary(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	testQuiz := newTestQuizzes()[0]
+	if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+		t.Fatalf("failed to create quiz: %v", err)
+	}
+
+	playerStore := NewPlayerStore(db, slog.Default())
+	player, err := playerStore.CreateAnonymousPlayer(t.Context(), "anon-stale-boundary")
+	if err != nil {
+		t.Fatalf("failed to create player: %v", err)
+	}
+
+	gameStore := NewGameStore(db, slog.Default())
+	g := &game.Game{QuizID: testQuiz.ID}
+	if err = gameStore.CreateGame(t.Context(), g); err != nil {
+		t.Fatalf("failed to create game: %v", err)
+	}
+	if err = gameStore.CreateParticipant(
+		t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID, QuizID: testQuiz.ID},
+	); err != nil {
+		t.Fatalf("failed to create participant: %v", err)
+	}
+
+	// Anchor the unanswered question's expiry at a fixed instant in a non-UTC
+	// zone. Storage truncates to seconds, so pick a whole second.
+	nonUTC := time.FixedZone("UTC+2", 2*60*60)
+	expiredAt := time.Date(2026, 6, 7, 14, 30, 0, 0, nonUTC)
+	gq := &game.Question{
+		GameID:     g.ID,
+		QuestionID: testQuiz.Questions[0].ID,
+		StartedAt:  expiredAt.Add(-10 * time.Second),
+		ExpiredAt:  expiredAt,
+	}
+	if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+		t.Fatalf("failed to create game question: %v", err)
+	}
+
+	t.Run("stale when the cutoff is one second after expiry", func(t *testing.T) {
+		t.Parallel()
+		rows, lErr := gameStore.ListParticipantsForQuizLeaderboard(
+			t.Context(), testQuiz.ID, expiredAt.Add(time.Second),
+		)
+		if lErr != nil {
+			t.Fatalf("unexpected error: %v", lErr)
+		}
+		if got, want := len(rows), 1; got != want {
+			t.Fatalf("len(rows) = %d, want %d", got, want)
+		}
+		if got, want := rows[0].IsStale, true; got != want {
+			t.Errorf("rows[0].IsStale = %v, want %v (cutoff is after the expiry)", got, want)
+		}
+	})
+
+	t.Run("not stale when the cutoff is one second before expiry", func(t *testing.T) {
+		t.Parallel()
+		rows, lErr := gameStore.ListParticipantsForQuizLeaderboard(
+			t.Context(), testQuiz.ID, expiredAt.Add(-time.Second),
+		)
+		if lErr != nil {
+			t.Fatalf("unexpected error: %v", lErr)
+		}
+		if got, want := len(rows), 1; got != want {
+			t.Fatalf("len(rows) = %d, want %d", got, want)
+		}
+		if got, want := rows[0].IsStale, false; got != want {
+			t.Errorf("rows[0].IsStale = %v, want %v (cutoff predates the expiry)", got, want)
+		}
+	})
+}
+
 // TestGameStore_ListQuizIDsForPlayer_IncludesJoinedButUnanswered pins
 // the #354 fix: a player who clicked Start on a quiz but never
 // submitted an answer must surface in the fan-out list so the

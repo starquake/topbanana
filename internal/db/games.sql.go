@@ -77,17 +77,25 @@ func (q *Queries) CreateGame(ctx context.Context, arg CreateGameParams) (Game, e
 
 const createGameQuestion = `-- name: CreateGameQuestion :one
 INSERT INTO game_questions (game_id, question_id, started_at, expired_at)
-VALUES (?, ?, ?, ?)
+VALUES (?, ?, CAST(?3 AS TEXT), CAST(?4 AS TEXT))
 RETURNING id, game_id, question_id, started_at, expired_at
 `
 
 type CreateGameQuestionParams struct {
 	GameID     string
 	QuestionID int64
-	StartedAt  time.Time
-	ExpiredAt  time.Time
+	StartedAt  string
+	ExpiredAt  string
 }
 
+// started_at and expired_at are bound as CURRENT_TIMESTAMP-format text strings
+// ('YYYY-MM-DD HH:MM:SS') via the CAST, so the stored values land in the exact
+// UTC encoding the leaderboard staleness comparison in
+// ListParticipantsForQuizLeaderboard reads. Binding a Go time.Time would arrive
+// in the driver's t.String() format ('... -0700 MST'); the timezone-offset
+// suffix makes the lexical compare invert across a DST boundary and flip the
+// in-progress dot (#789). The store binds value.UTC().Format(...) so both the
+// stored column and the bound cutoff share one encoding.
 func (q *Queries) CreateGameQuestion(ctx context.Context, arg CreateGameQuestionParams) (GameQuestion, error) {
 	row := q.db.QueryRowContext(ctx, createGameQuestion,
 		arg.GameID,
@@ -682,19 +690,19 @@ SELECT gp.player_id AS player_id,
        CASE WHEN EXISTS (
               SELECT 1 FROM game_questions gq
               WHERE gq.game_id = gp.game_id
-                AND gq.expired_at < ?
+                AND gq.expired_at < CAST(?1 AS TEXT)
                 AND NOT EXISTS (SELECT 1 FROM game_answers ga WHERE ga.game_question_id = gq.id)
                 AND NOT EXISTS (SELECT 1 FROM game_questions gqn WHERE gqn.game_id = gp.game_id AND gqn.id > gq.id)
             ) THEN 1 ELSE 0 END AS is_stale
 FROM game_participants gp
          JOIN games g   ON g.id = gp.game_id
          JOIN players p ON p.id = gp.player_id
-WHERE g.quiz_id = ?
+WHERE g.quiz_id = ?2
 `
 
 type ListParticipantsForQuizLeaderboardParams struct {
-	ExpiredAt time.Time
-	QuizID    int64
+	StaleBefore string
+	QuizID      int64
 }
 
 type ListParticipantsForQuizLeaderboardRow struct {
@@ -712,8 +720,13 @@ type ListParticipantsForQuizLeaderboardRow struct {
 // Joins through `games` so the WHERE filters on games.quiz_id (NOT
 // NULL); game_participants.quiz_id is nullable in the schema, which
 // would otherwise force sqlc to infer sql.NullInt64 for the parameter.
+// stale_before is bound as a CURRENT_TIMESTAMP-format text string
+// ('YYYY-MM-DD HH:MM:SS') via the CAST so it shares the UTC encoding
+// expired_at is stored in (see CreateGameQuestion); a bound Go time.Time
+// would arrive in t.String() format whose timezone-offset suffix inverts
+// the lexical compare across a DST boundary and flips the in-progress dot (#789).
 func (q *Queries) ListParticipantsForQuizLeaderboard(ctx context.Context, arg ListParticipantsForQuizLeaderboardParams) ([]ListParticipantsForQuizLeaderboardRow, error) {
-	rows, err := q.db.QueryContext(ctx, listParticipantsForQuizLeaderboard, arg.ExpiredAt, arg.QuizID)
+	rows, err := q.db.QueryContext(ctx, listParticipantsForQuizLeaderboard, arg.StaleBefore, arg.QuizID)
 	if err != nil {
 		return nil, err
 	}
