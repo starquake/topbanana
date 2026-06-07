@@ -803,7 +803,7 @@ export class GameApp {
                 opacity: [0, 1],
                 translateY: [12, 0],
                 duration: 380,
-                easing: 'easeOutQuad',
+                ease: 'outQuad',
             });
         });
     }
@@ -819,7 +819,7 @@ export class GameApp {
                 opacity: [0, 1],
                 translateY: [12, 0],
                 duration: 380,
-                easing: 'easeOutQuad',
+                ease: 'outQuad',
             });
             const a = typeof window !== 'undefined' ? window.anime : null;
             const figures = el.querySelectorAll('[data-recap-figure]');
@@ -828,7 +828,7 @@ export class GameApp {
                 translateY: [10, 0],
                 duration: 420,
                 delay: a && typeof a.stagger === 'function' ? a.stagger(120, { start: 120 }) : 120,
-                easing: 'easeOutBack',
+                ease: 'outBack',
             });
         });
     }

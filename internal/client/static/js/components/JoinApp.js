@@ -4,7 +4,11 @@ import { runAnim } from '@shared/anim.js';
 import { clockOffsetFromServerNow, serverTime } from '@shared/serverClock.js';
 import { startQuestionCountdown } from '@shared/countdown.js';
 import { startStartCountdown, formatCountdown } from '@shared/startCountdown.js';
-import { buildStandingsRows, animateStandingsBars } from '@shared/standings.js';
+import {
+    buildStandingsRows,
+    animateStandingsBars,
+    applyStandingsFlip,
+} from '@shared/standings.js';
 import { optionStateClass } from '../util/answerOptions.js';
 
 // JOIN_PATH_PATTERN matches /join/<code>, capturing the room code. The bare
@@ -186,6 +190,12 @@ export class JoinApp {
         // key combines the phase and the current question id (the last
         // question of the round just finished) so a new round retriggers it.
         this.lastStandingsKey = null;
+        // The playerId order (best-first) of the last standings screen, kept
+        // across the intervening question/reveal phases (when the graph is
+        // cleared) so the next screen can stage its rows in this order and slide
+        // them into the new ranking - the FLIP swap (#730). Null until the first
+        // standings screen, where there is nothing to slide from.
+        this.lastStandingsOrder = null;
 
         // --- Host-armed last-call countdown (#735) ---------------------------
         // The absolute armed start deadline (ISO string) off the latest state
@@ -582,12 +592,13 @@ export class JoinApp {
     // with each state read. The server carries a standings array in the
     // round_results and finished phases (null elsewhere). On a genuine new
     // entry it builds the rows starting at each player's pre-round total and
-    // animates the bars growing to the new total while the numeric labels count
-    // up, then leaves the rows in rank order. A later tick within the same phase
-    // does not re-trigger the animation, so the bars don't replay on every SSE
-    // beat. The finished phase animates the last round's contribution: its
-    // standings carry the last round's roundScore so the bars grow into the
-    // final totals.
+    // grows the bars to the new total while the numeric labels count up; from
+    // the second screen on the rows also slide from their previous-screen
+    // position into the new ranking (a FLIP swap, #730) so an overtake reads as
+    // rows trading places. A later tick within the same phase does not
+    // re-trigger the animation, so it doesn't replay on every SSE beat. The
+    // finished phase animates the last round's contribution: its standings carry
+    // the last round's roundScore so the bars grow into the final totals.
     syncStandingsFromState() {
         const phase = this.state ? this.state.phase : null;
         const standings = this.state && Array.isArray(this.state.standings) ? this.state.standings : null;
@@ -595,6 +606,8 @@ export class JoinApp {
             this.standingsBars = [];
             this.maxStandingsTotal = 1;
             this.lastStandingsKey = null;
+            // lastStandingsOrder is kept across the question/reveal phases so the
+            // next standings screen can slide its rows from the prior order.
             return;
         }
 
@@ -611,11 +624,31 @@ export class JoinApp {
             animate,
             ownsRow: (row) => this.ownsRow(row),
         });
-        this.standingsBars = rows;
         this.maxStandingsTotal = maxTotal;
+        const prevOrder = this.lastStandingsOrder;
+        this.lastStandingsOrder = rows.map((row) => String(row.playerId));
 
-        if (!animate) return;
-        animateStandingsBars(this.standingsBars, runAnim);
+        applyStandingsFlip({
+            rows,
+            prevOrder,
+            animate,
+            runAnim,
+            setBars: (next) => { this.standingsBars = next; },
+            getBars: () => this.standingsBars,
+            getContainer: () => this.standingsContainer(),
+            animateBars: animateStandingsBars,
+        });
+    }
+
+    // standingsContainer returns the rendered standings <ul> (round_results or
+    // finished; only one is in the DOM at a time via x-if), or null before the
+    // graph is shown. Queried from document, not this.$el: syncStandingsFromState
+    // runs from the SSE/state path (not an Alpine expression), where $el does not
+    // resolve to the component root, so $el.querySelector misses the <ul> and the
+    // FLIP never measures. Only one standings surface exists per page, so the
+    // document-scoped query is unambiguous.
+    standingsContainer() {
+        return document.querySelector('[data-testid="standings-bars"]');
     }
 
     // startCountdown drives the per-question bar through the shared helper:

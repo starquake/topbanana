@@ -15,7 +15,7 @@ function reducedMotion() {
 
 // runAnim wraps anime.js (window.anime) so a missing global or a
 // reduced-motion preference never leaves a half-rendered frame. On the skip
-// path it invokes params.complete when the caller supplied one, so callers
+// path it invokes params.onComplete when the caller supplied one, so callers
 // whose targets start in a pre-state snap straight to their final value;
 // callers whose targets already sit in their final state simply omit
 // complete. Supports both the v4 animate(targets, params) form and the legacy
@@ -23,7 +23,7 @@ function reducedMotion() {
 // object to tween.
 export function runAnim(targets, params) {
     if (reducedMotion() || typeof window === 'undefined' || !window.anime) {
-        if (typeof params.complete === 'function') params.complete();
+        if (typeof params.onComplete === 'function') params.onComplete();
         return;
     }
     const a = window.anime;
@@ -31,7 +31,7 @@ export function runAnim(targets, params) {
         a.animate(targets, params);
     } else if (typeof a === 'function') {
         a({ targets, ...params });
-    } else if (typeof params.complete === 'function') {
-        params.complete();
+    } else if (typeof params.onComplete === 'function') {
+        params.onComplete();
     }
 }
