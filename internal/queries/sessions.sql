@@ -266,6 +266,21 @@ SET last_seen_at = CURRENT_TIMESTAMP
 WHERE player_id = sqlc.arg('player_id')
   AND session_id = (SELECT id FROM sessions WHERE join_code = sqlc.arg('join_code'));
 
+-- name: RefreshSessionPlayerLastSeenAt :exec
+-- Stamps a participant's last_seen_at to a bound timestamp, the answer-as-
+-- liveness refresh: recording a pick proves the player is present, so the
+-- answer write bumps last_seen_at in the same transaction (see #712). seen is
+-- bound as a CURRENT_TIMESTAMP-format text string ('YYYY-MM-DD HH:MM:SS') via
+-- the CAST, so the value lands in the exact encoding the active-window
+-- comparison in CountActivePlayersForSession reads (a bound Go time.Time would
+-- arrive in a different format and the cross-format string compare would
+-- silently lie). Bound (not CURRENT_TIMESTAMP) so a fake-clock test stays
+-- deterministic.
+UPDATE session_players
+SET last_seen_at = CAST(sqlc.arg('seen') AS TEXT)
+WHERE session_id = sqlc.arg('session_id')
+  AND player_id = sqlc.arg('player_id');
+
 -- name: TouchSessionHostLastSeen :execresult
 -- Refreshes the host's host_last_seen_at, the host-presence heartbeat. The SSE
 -- events handler calls it when the host's connection opens and periodically

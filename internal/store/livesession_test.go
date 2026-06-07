@@ -528,6 +528,50 @@ func TestLiveSessionStore_AnswersRoundTrip(t *testing.T) {
 	}
 }
 
+// TestLiveSessionStore_RecordAnswer_RefreshesLastSeen pins the answer-as-
+// liveness write (#712): recording a pick advances the player's last_seen_at to
+// the answer's timestamp, so a player who answered counts active even without a
+// held SSE heartbeat. The roster row starts backdated well before the answer.
+func TestLiveSessionStore_RecordAnswer_RefreshesLastSeen(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	playerStore := NewPlayerStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	qz := newLiveQuizWithQuestion(t, quizStore)
+	q := qz.Questions[0]
+
+	sess := &livesession.Session{QuizID: qz.ID, HostPlayerID: seededAdminID, JoinCode: "RFLS23"}
+	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+	p, err := playerStore.CreateAnonymousPlayer(t.Context(), "rfls-p1")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, p.ID); err != nil {
+		t.Fatalf("AddPlayer err = %v, want nil", err)
+	}
+
+	answeredAt := time.Date(2026, time.June, 5, 12, 0, 5, 0, time.UTC)
+	setLastSeen(t, db, sess.ID, p.ID, answeredAt.Add(-time.Hour))
+
+	if err = sessionStore.RecordAnswer(t.Context(), sess.ID, q.ID, p.ID, q.Options[0].ID, answeredAt); err != nil {
+		t.Fatalf("RecordAnswer err = %v, want nil", err)
+	}
+
+	loaded, err := sessionStore.GetSessionByJoinCode(t.Context(), "RFLS23")
+	if err != nil {
+		t.Fatalf("GetSessionByJoinCode err = %v, want nil", err)
+	}
+	const sqliteLayout = "2006-01-02 15:04:05"
+	if got, want := loaded.Players[0].LastSeenAt.UTC().Format(sqliteLayout),
+		answeredAt.UTC().Format(sqliteLayout); got != want {
+		t.Errorf("LastSeenAt after RecordAnswer = %q, want %q (advanced to the answer time)", got, want)
+	}
+}
+
 // TestLiveSessionStore_TouchLastSeen pins the heartbeat write: it refreshes a
 // participant's last_seen_at keyed on join code, and reports a non-participant
 // when no roster row matches.
