@@ -229,17 +229,25 @@ func TestSessionRoundResults_DeltasTotalsAndLeaderboard(t *testing.T) {
 	playQuestion(ctx, t, ace, bee, baseURL, code)
 
 	// finished: final standings carry the full cumulative totals, Ace first.
-	// There is no final-round round_results, so the round 2 contribution is
-	// observed here: Ace's cumulative total grew past round 1 and RoundScore is
-	// 0 in the finished phase (no single round in focus).
+	// The finished standings carry the last round's score as RoundScore so the
+	// bar graph can animate that final contribution (#729): Ace scored in round
+	// 2 (the last round), so RoundScore is the points Ace earned there and
+	// equals the cumulative growth past round 1; Bee scored nothing in round 2,
+	// so RoundScore stays 0.
 	final := waitForResultsPhase(ctx, t, ace, baseURL, code, "finished")
 	if got, want := len(final.Standings), 2; got != want {
 		t.Fatalf("final standings = %d entries, want %d", got, want)
 	}
 	aceFinal := findStanding(t, final.Standings, aceID)
 	beeFinal := findStanding(t, final.Standings, beeID)
-	if got, want := aceFinal.RoundScore, 0; got != want {
-		t.Errorf("Ace finished round score = %d, want %d (no round in focus)", got, want)
+	if aceFinal.RoundScore <= 0 {
+		t.Errorf("Ace finished round score = %d, want > 0 (last round's points)", aceFinal.RoundScore)
+	}
+	if got, want := aceFinal.RoundScore, aceFinal.TotalScore-aceCumulativeAfterR1; got != want {
+		t.Errorf("Ace finished round score = %d, want %d (cumulative growth past round 1)", got, want)
+	}
+	if got, want := beeFinal.RoundScore, 0; got != want {
+		t.Errorf("Bee finished round score = %d, want %d (scored nothing in the last round)", got, want)
 	}
 	if aceFinal.TotalScore <= aceCumulativeAfterR1 {
 		t.Errorf("Ace final total %d not greater than round 1 cumulative %d (round 2 added no points)",

@@ -14,9 +14,11 @@ export const STANDINGS_BAR_DURATION = 900;
 // buildStandingsRows maps the server standings into the rendered rows and the
 // max total used for bar widths. When animate is true each row's displayTotal
 // starts at the pre-round total (so the bars grow into the round's points);
-// otherwise it lands straight on the final total (the finished phase, where
-// roundScore is 0). ownsRow, when supplied, marks the viewer's own row (isMe)
-// for highlighting; the host surface omits it.
+// otherwise it lands straight on the final total. Both the round_results and
+// finished phases animate: the finished standings carry the last round's
+// roundScore so the bars grow into that final contribution. ownsRow, when
+// supplied, marks the viewer's own row (isMe) for highlighting; the host
+// surface omits it.
 export function buildStandingsRows(standings, { animate, ownsRow = null } = {}) {
     const maxTotal = Math.max(1, ...standings.map((s) => s.totalScore));
     const rows = standings.map((s) => ({

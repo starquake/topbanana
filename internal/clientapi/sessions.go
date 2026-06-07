@@ -388,8 +388,9 @@ type sessionRoundResponse struct {
 
 // sessionStandingResponse is one player's place in the between-rounds /
 // final ranking. roundScore is the player's points in the round that just
-// finished (0 in the finished phase, which has no single round in focus);
-// totalScore is their cumulative session score; rank is 1-indexed.
+// finished; in the finished phase it carries the last round's score so the bar
+// graph can animate that final contribution (0 for a player absent from the
+// last round). totalScore is their cumulative session score; rank is 1-indexed.
 type sessionStandingResponse struct {
 	PlayerID    int64  `json:"playerId"`
 	DisplayName string `json:"displayName"`

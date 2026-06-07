@@ -374,6 +374,85 @@ func TestRunner_FinalRoundSkipsRoundResults(t *testing.T) {
 	}
 }
 
+// TestRunner_FinishedStandingsCarryLastRoundScore pins that the finished-phase
+// standings expose each player's score in the last round as RoundScore so the
+// bar graph can animate that final contribution (#729). It drives a single-round
+// quiz to finished with one player answering correctly and the other not, then
+// asserts the answerer's finished RoundScore equals the last round's points
+// (here the whole total, since the only round is the last one) and the
+// non-answerer's stays 0.
+func TestRunner_FinishedStandingsCarryLastRoundScore(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	scorer, slacker := h.players[0], h.players[1]
+
+	if err := h.service.Start(ctx, h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+
+	// Round intro -> the single question; only the scorer answers, correctly.
+	h.clock.advance(runnerCfg.RoundIntroBeat)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseQuestion; got != want {
+		t.Fatalf("phase after intro beat = %q, want %q", got, want)
+	}
+	optRight := correctOptionID(ctx, t, h.service, h.code, scorer)
+	answerAt := h.clock.Now().Add(2 * time.Second)
+	h.clock.advance(2 * time.Second)
+	if err := h.service.SubmitAnswer(ctx, h.code, scorer, optRight, answerAt); err != nil {
+		t.Fatalf("SubmitAnswer err = %v, want nil", err)
+	}
+
+	// Timeout-close the question, then the reveal beat finishes the session.
+	h.clock.advance(11 * time.Second)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseReveal; got != want {
+		t.Fatalf("phase after question = %q, want %q", got, want)
+	}
+	h.clock.advance(runnerCfg.RevealBeat)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseFinished; got != want {
+		t.Fatalf("phase after final reveal = %q, want %q", got, want)
+	}
+
+	state, err := h.service.GetLobbyState(ctx, h.code, scorer)
+	if err != nil {
+		t.Fatalf("GetLobbyState err = %v, want nil", err)
+	}
+	scorerStanding := findRunnerStanding(t, state.Standings, scorer)
+	slackerStanding := findRunnerStanding(t, state.Standings, slacker)
+
+	if scorerStanding.RoundScore <= 0 {
+		t.Errorf("scorer finished RoundScore = %d, want > 0 (last round's points)", scorerStanding.RoundScore)
+	}
+	// The only round is the last round, so its score is the whole cumulative total.
+	if got, want := scorerStanding.RoundScore, scorerStanding.TotalScore; got != want {
+		t.Errorf("scorer finished RoundScore = %d, want %d (equals total in a single-round quiz)", got, want)
+	}
+	if got, want := slackerStanding.RoundScore, 0; got != want {
+		t.Errorf("slacker finished RoundScore = %d, want %d (scored nothing in the last round)", got, want)
+	}
+	if got, want := slackerStanding.TotalScore, 0; got != want {
+		t.Errorf("slacker finished TotalScore = %d, want %d", got, want)
+	}
+}
+
+// findRunnerStanding returns the standing for playerID, failing if absent.
+func findRunnerStanding(t *testing.T, standings []*Standing, playerID int64) *Standing {
+	t.Helper()
+	for _, s := range standings {
+		if s.PlayerID == playerID {
+			return s
+		}
+	}
+	t.Fatalf("standings missing player %d", playerID)
+
+	return nil
+}
+
 // TestRunner_QuestionReadBeatAnchorsWindow pins that issuing a question opens
 // the answer window after the read beat: StartedAt is the issue instant plus
 // the read beat and ExpiresAt is StartedAt plus the question window, so the

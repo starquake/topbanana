@@ -116,6 +116,27 @@ async function readStandingsRows(scope: Page): Promise<{ rank: string; name: str
   return out;
 }
 
+// readFinishedStanding reads the finished /state standing for the named player,
+// returning the roundScore (the last round's points, the animation fuel #729)
+// and totalScore. The bar graph animates from totalScore - roundScore up to
+// totalScore, so a non-zero roundScore is what makes the finished bars grow.
+async function readFinishedStanding(
+  request: APIRequestContext,
+  code: string,
+  displayName: string,
+): Promise<{ roundScore: number; totalScore: number }> {
+  const resp = await request.get(`/api/sessions/${code}/state`);
+  expect(resp.ok(), `state: ${resp.status()} ${await resp.text()}`).toBe(true);
+  const state = (await resp.json()) as {
+    phase: string;
+    standings: { displayName: string; roundScore: number; totalScore: number }[] | null;
+  };
+  expect(state.phase).toBe('finished');
+  const standing = (state.standings ?? []).find((s) => s.displayName === displayName);
+  expect(standing, `finished standings missing ${displayName}`).toBeTruthy();
+  return { roundScore: standing!.roundScore, totalScore: standing!.totalScore };
+}
+
 test('the standings bar graph shows final order and totals on the TV and player surfaces', async ({
   page,
   baseURL,
@@ -259,6 +280,20 @@ test('the standings bar graph shows final order and totals on the TV and player 
   await expect(page.getByTestId('round-results')).toHaveCount(0);
   await expect(host.getByText('Final scores')).toBeVisible();
   await expect(host.getByText('Scores so far')).toHaveCount(0);
+
+  // #729: the finished standings now carry the last round's score so the bar
+  // graph animates that final contribution (rather than landing statically).
+  // Quincy scored in round 2 (the last round), so her finished roundScore is the
+  // animation fuel: > 0, with a pre-round start (totalScore - roundScore) below
+  // her final total. Robin scored nothing in the last round, so roundScore stays
+  // 0 (no growth). The settled DOM above (rendered under reduced motion) is the
+  // reduced-motion jump-to-final path; this pins the data that drives the grow.
+  const quincyFinal = await readFinishedStanding(host.request, joinCode, quincy);
+  expect(quincyFinal.totalScore).toBe(Number(tvRows[0].total));
+  expect(quincyFinal.roundScore).toBeGreaterThan(0);
+  expect(quincyFinal.totalScore - quincyFinal.roundScore).toBeLessThan(quincyFinal.totalScore);
+  const robinFinal = await readFinishedStanding(host.request, joinCode, robin);
+  expect(robinFinal.roundScore).toBe(0);
 
   await otherContext.close();
   await hostContext.close();
