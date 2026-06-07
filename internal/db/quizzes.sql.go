@@ -507,6 +507,41 @@ func (q *Queries) ListQuestionIDsByQuizID(ctx context.Context, quizID int64) ([]
 	return items, nil
 }
 
+const listQuestionIDsByRoundID = `-- name: ListQuestionIDsByRoundID :many
+SELECT id
+FROM questions
+WHERE round_id = ?
+ORDER BY position
+`
+
+// Lists the question IDs attached to a round, snapshotted up front by the
+// round delete so it can clean up each question's dependent game_questions
+// and game_answers rows before dropping the round. questions.round_id has
+// ON DELETE CASCADE, but the played-game rows that reference those
+// questions do not, so the round delete must wipe them in FK order first.
+func (q *Queries) ListQuestionIDsByRoundID(ctx context.Context, roundID int64) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listQuestionIDsByRoundID, roundID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listQuestionsByQuizID = `-- name: ListQuestionsByQuizID :many
 SELECT id, quiz_id, round_id, text, position, image_url, time_limit_seconds
 FROM questions
