@@ -638,6 +638,58 @@ func TestRunner_StalePlayerDoesNotStallEarlyClose(t *testing.T) {
 	}
 }
 
+// TestRunner_AnswerCountsPlayerActiveForEarlyClose pins the answer-as-liveness
+// rule (#712): a roster player whose last_seen_at is backdated before the active
+// window - so the heartbeat alone would have them counted dropped - is counted
+// active once they answer, because recording the pick bumps their last_seen_at
+// to the answer's timestamp. With the only other player gone, that single
+// answering player is the whole active roster, so the all-answered early-close
+// fires on the next tick rather than stalling until the window times out.
+func TestRunner_AnswerCountsPlayerActiveForEarlyClose(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	answerer, gone := h.players[0], h.players[1]
+	sessionID := h.sessionID(t)
+
+	if err := h.service.Start(ctx, h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+	h.clock.advance(runnerCfg.RoundIntroBeat)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseQuestion; got != want {
+		t.Fatalf("phase after intro beat = %q, want %q", got, want)
+	}
+
+	// The other player has left, so the answerer is the entire roster the active
+	// counts can see. The answerer's heartbeat stopped long before the active
+	// window, so without the answer-as-liveness bump they would be counted
+	// dropped and the early-close would never fire.
+	if err := h.service.Leave(ctx, h.code, gone); err != nil {
+		t.Fatalf("Leave err = %v, want nil", err)
+	}
+	h.setLastSeen(t, sessionID, answerer, start.Add(-time.Hour))
+
+	// The answerer picks well within the window. Recording the pick must also
+	// stamp their last_seen_at to the answer time, dragging them back inside the
+	// active window.
+	optRight := correctOptionID(ctx, t, h.service, h.code, answerer)
+	answerAt := h.clock.Now().Add(2 * time.Second)
+	h.clock.advance(2 * time.Second)
+	if err := h.service.SubmitAnswer(ctx, h.code, answerer, optRight, answerAt); err != nil {
+		t.Fatalf("SubmitAnswer err = %v, want nil", err)
+	}
+
+	// A tick now must early-close: the lone active player has answered, so the
+	// phase advances to reveal even though the window has not expired.
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseReveal; got != want {
+		t.Fatalf("phase after answerer picked = %q, want %q (answer made them active, early close)", got, want)
+	}
+}
+
 // TestRunner_AllStaleRosterDoesNotEarlyClose pins that a roster with no active
 // player never early-closes: the question must time out instead of closing
 // instantly, preserving the empty-roster behaviour for an all-dropped room.

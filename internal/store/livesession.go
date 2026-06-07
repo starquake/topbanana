@@ -350,18 +350,29 @@ func (s *LiveSessionStore) ListFinalStandings(
 }
 
 // RecordAnswer records (or overwrites) a player's pick for the current
-// session question.
+// session question and, atomically, refreshes that player's last_seen_at to
+// the answer's timestamp. An answer is proof of liveness, so a player who just
+// picked must count as active even without a held SSE heartbeat; running both
+// writes in one transaction keeps the answer and the liveness bump from being
+// partially applied (see #712).
 func (s *LiveSessionStore) RecordAnswer(
 	ctx context.Context, sessionID string, questionID, playerID, optionID int64, answeredAt time.Time,
 ) error {
-	if err := s.q.UpsertSessionAnswer(ctx, db.UpsertSessionAnswerParams{
-		SessionID:  sessionID,
-		QuestionID: questionID,
-		PlayerID:   playerID,
-		OptionID:   optionID,
-		AnsweredAt: answeredAt,
-	}); err != nil {
-		return fmt.Errorf("failed to record session answer: %w", err)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin record answer transaction: %w", err)
+	}
+
+	if err = s.recordAnswerTx(ctx, tx, sessionID, questionID, playerID, optionID, answeredAt); err != nil {
+		if rbErr := tx.Rollback(); rbErr != nil {
+			return fmt.Errorf("record answer failed: %w (rollback error: %w)", err, rbErr)
+		}
+
+		return err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit record answer transaction: %w", err)
 	}
 
 	return nil
@@ -542,6 +553,32 @@ func (s *LiveSessionStore) listPlayers(ctx context.Context, sessionID string) ([
 	}
 
 	return players, nil
+}
+
+func (s *LiveSessionStore) recordAnswerTx(
+	ctx context.Context, tx *sql.Tx, sessionID string, questionID, playerID, optionID int64, answeredAt time.Time,
+) error {
+	q := s.q.WithTx(tx)
+
+	if err := q.UpsertSessionAnswer(ctx, db.UpsertSessionAnswerParams{
+		SessionID:  sessionID,
+		QuestionID: questionID,
+		PlayerID:   playerID,
+		OptionID:   optionID,
+		AnsweredAt: answeredAt,
+	}); err != nil {
+		return fmt.Errorf("failed to record session answer: %w", err)
+	}
+
+	if err := q.RefreshSessionPlayerLastSeenAt(ctx, db.RefreshSessionPlayerLastSeenAtParams{
+		Seen:      answeredAt.UTC().Format(sqliteTimestampLayout),
+		SessionID: sessionID,
+		PlayerID:  playerID,
+	}); err != nil {
+		return fmt.Errorf("failed to refresh session player last seen: %w", err)
+	}
+
+	return nil
 }
 
 // sessionFromRow maps a generated sessions row onto the domain type

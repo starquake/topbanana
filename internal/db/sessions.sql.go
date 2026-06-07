@@ -766,6 +766,33 @@ func (q *Queries) PlayerFinishedSessionForQuiz(ctx context.Context, arg PlayerFi
 	return has_finished, err
 }
 
+const refreshSessionPlayerLastSeenAt = `-- name: RefreshSessionPlayerLastSeenAt :exec
+UPDATE session_players
+SET last_seen_at = CAST(?1 AS TEXT)
+WHERE session_id = ?2
+  AND player_id = ?3
+`
+
+type RefreshSessionPlayerLastSeenAtParams struct {
+	Seen      string
+	SessionID string
+	PlayerID  int64
+}
+
+// Stamps a participant's last_seen_at to a bound timestamp, the answer-as-
+// liveness refresh: recording a pick proves the player is present, so the
+// answer write bumps last_seen_at in the same transaction (see #712). seen is
+// bound as a CURRENT_TIMESTAMP-format text string ('YYYY-MM-DD HH:MM:SS') via
+// the CAST, so the value lands in the exact encoding the active-window
+// comparison in CountActivePlayersForSession reads (a bound Go time.Time would
+// arrive in a different format and the cross-format string compare would
+// silently lie). Bound (not CURRENT_TIMESTAMP) so a fake-clock test stays
+// deterministic.
+func (q *Queries) RefreshSessionPlayerLastSeenAt(ctx context.Context, arg RefreshSessionPlayerLastSeenAtParams) error {
+	_, err := q.db.ExecContext(ctx, refreshSessionPlayerLastSeenAt, arg.Seen, arg.SessionID, arg.PlayerID)
+	return err
+}
+
 const sessionHasPlayer = `-- name: SessionHasPlayer :one
 SELECT EXISTS (
     SELECT 1
