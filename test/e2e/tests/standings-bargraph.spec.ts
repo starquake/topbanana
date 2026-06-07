@@ -253,6 +253,13 @@ test('the standings bar graph shows final order and totals on the TV and player 
   expect(playerRows[1].rank).toBe('2');
   expect(Number(playerRows[1].total)).toBe(0);
 
+  // #749: the last round must end on a single final-standings screen. The
+  // player surface shows only finished-view (no between-rounds round-results),
+  // and the host TV heading reads "Final scores", never "Scores so far".
+  await expect(page.getByTestId('round-results')).toHaveCount(0);
+  await expect(host.getByText('Final scores')).toBeVisible();
+  await expect(host.getByText('Scores so far')).toHaveCount(0);
+
   await otherContext.close();
   await hostContext.close();
 });

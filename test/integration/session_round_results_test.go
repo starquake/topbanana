@@ -223,27 +223,28 @@ func TestSessionRoundResults_DeltasTotalsAndLeaderboard(t *testing.T) {
 	}
 	aceCumulativeAfterR1 := aceR1.TotalScore
 
-	// Round 2 has one question; same picks.
+	// Round 2 is the final round; same picks. Its closing reveal finishes the
+	// session directly, skipping round_results, so the game ends on a single
+	// final-standings screen (#749).
 	playQuestion(ctx, t, ace, bee, baseURL, code)
 
-	// round_results after round 2: round_score is just this round's points, but
-	// the cumulative total has grown past round 1.
-	r2 := waitForResultsPhase(ctx, t, ace, baseURL, code, "round_results")
-	aceR2 := findStanding(t, r2.Standings, aceID)
-	if aceR2.RoundScore <= 0 {
-		t.Errorf("Ace round 2 score = %d, want > 0", aceR2.RoundScore)
-	}
-	if got, want := aceR2.TotalScore, aceCumulativeAfterR1+aceR2.RoundScore; got != want {
-		t.Errorf("Ace round 2 total = %d, want %d (round 1 cumulative + round 2 delta)", got, want)
-	}
-
 	// finished: final standings carry the full cumulative totals, Ace first.
+	// There is no final-round round_results, so the round 2 contribution is
+	// observed here: Ace's cumulative total grew past round 1 and RoundScore is
+	// 0 in the finished phase (no single round in focus).
 	final := waitForResultsPhase(ctx, t, ace, baseURL, code, "finished")
 	if got, want := len(final.Standings), 2; got != want {
 		t.Fatalf("final standings = %d entries, want %d", got, want)
 	}
 	aceFinal := findStanding(t, final.Standings, aceID)
 	beeFinal := findStanding(t, final.Standings, beeID)
+	if got, want := aceFinal.RoundScore, 0; got != want {
+		t.Errorf("Ace finished round score = %d, want %d (no round in focus)", got, want)
+	}
+	if aceFinal.TotalScore <= aceCumulativeAfterR1 {
+		t.Errorf("Ace final total %d not greater than round 1 cumulative %d (round 2 added no points)",
+			aceFinal.TotalScore, aceCumulativeAfterR1)
+	}
 	if got, want := aceFinal.Rank, 1; got != want {
 		t.Errorf("Ace final rank = %d, want %d", got, want)
 	}
