@@ -294,11 +294,13 @@ WHERE join_code = sqlc.arg('join_code');
 
 -- name: MarkSessionPlayerLeft :execresult
 -- Marks the participant as having left the session identified by join code,
--- stamping left_at so the live reads (roster, answered-order badges,
--- standings) drop them immediately. Scoped to left_at IS NULL so a second
--- leave is a no-op rather than re-stamping the timestamp; the execresult lets
--- the store map zero rows affected to "not an active participant". Keyed on
--- join code so the handler need only carry the code it already gates on.
+-- stamping left_at so the live presence reads (roster, answered-order badges)
+-- drop them immediately. The standings deliberately keep a left player who has
+-- already answered, so their score stays on the board across a TV refresh
+-- (#766). Scoped to left_at IS NULL so a second leave is a no-op rather than
+-- re-stamping the timestamp; the execresult lets the store map zero rows
+-- affected to "not an active participant". Keyed on join code so the handler
+-- need only carry the code it already gates on.
 UPDATE session_players
 SET left_at = CURRENT_TIMESTAMP
 WHERE player_id = sqlc.arg('player_id')
@@ -392,7 +394,12 @@ WHERE id = ?;
 -- "score still NULL" into 0. display_name is the player's CURRENT
 -- players.display_name (#716), joined live so a rename shows in the standings.
 -- Ordered by total_score desc, then display_name so ranking is stable across
--- reads.
+-- reads. A player belongs in the standings if they are still present
+-- (left_at IS NULL) OR have actually played (recorded at least one session
+-- answer): the standings are a stable record of everyone who played, so a player
+-- who answered and then closed their browser keeps their score on the board
+-- across a TV refresh (#766). Someone who left during the lobby/intro without
+-- ever answering never played and so does not appear.
 SELECT sp.player_id                 AS player_id,
        CAST(p.display_name AS TEXT) AS display_name,
        CAST(COALESCE(SUM(CASE WHEN q.round_id = sqlc.arg('round_id') THEN sa.score END), 0) AS INTEGER) AS round_score,
@@ -403,7 +410,9 @@ FROM session_players sp
                    ON sa.session_id = sp.session_id AND sa.player_id = sp.player_id
          LEFT JOIN questions q ON q.id = sa.question_id
 WHERE sp.session_id = sqlc.arg('session_id')
-  AND sp.left_at IS NULL
+  AND (sp.left_at IS NULL
+       OR EXISTS (SELECT 1 FROM session_answers sa2
+                  WHERE sa2.session_id = sp.session_id AND sa2.player_id = sp.player_id))
 GROUP BY sp.player_id, p.display_name
 ORDER BY total_score DESC, p.display_name;
 
@@ -412,7 +421,13 @@ ORDER BY total_score DESC, p.display_name;
 -- session, anchored on the roster so non-answerers appear at 0. display_name is
 -- the player's CURRENT players.display_name (#716), joined live so a rename
 -- shows in the final standings. Same ordering as ListSessionStandings; used at
--- the finished phase, where there is no "current round" to break out.
+-- the finished phase, where there is no "current round" to break out. A player
+-- belongs in the final standings if they are still present (left_at IS NULL) OR
+-- have actually played (recorded at least one session answer): the finished
+-- board is a stable record of everyone who played, so a player who answered and
+-- then closed their browser keeps their score across a TV refresh (#766).
+-- Someone who left during the lobby/intro without ever answering never played
+-- and so does not appear.
 SELECT sp.player_id                              AS player_id,
        CAST(p.display_name AS TEXT)              AS display_name,
        CAST(COALESCE(SUM(sa.score), 0) AS INTEGER) AS total_score
@@ -421,6 +436,8 @@ FROM session_players sp
          LEFT JOIN session_answers sa
                    ON sa.session_id = sp.session_id AND sa.player_id = sp.player_id
 WHERE sp.session_id = sqlc.arg('session_id')
-  AND sp.left_at IS NULL
+  AND (sp.left_at IS NULL
+       OR EXISTS (SELECT 1 FROM session_answers sa2
+                  WHERE sa2.session_id = sp.session_id AND sa2.player_id = sp.player_id))
 GROUP BY sp.player_id, p.display_name
 ORDER BY total_score DESC, p.display_name;
