@@ -581,13 +581,13 @@ export class JoinApp {
     // syncStandingsFromState reconciles the between-rounds / final bar graph
     // with each state read. The server carries a standings array in the
     // round_results and finished phases (null elsewhere). On a genuine new
-    // round_results entry it builds the rows starting at each player's
-    // pre-round total and animates the bars growing to the new total while
-    // the numeric labels count up, then leaves the rows in rank order. A
-    // later tick within the same phase does not re-trigger the animation, so
-    // the bars don't replay on every SSE beat. The finished phase reuses the
-    // same rows but skips the grow animation (roundScore is 0 there - there
-    // is no single round in focus), landing straight on the final totals.
+    // entry it builds the rows starting at each player's pre-round total and
+    // animates the bars growing to the new total while the numeric labels count
+    // up, then leaves the rows in rank order. A later tick within the same phase
+    // does not re-trigger the animation, so the bars don't replay on every SSE
+    // beat. The finished phase animates the last round's contribution: its
+    // standings carry the last round's roundScore so the bars grow into the
+    // final totals.
     syncStandingsFromState() {
         const phase = this.state ? this.state.phase : null;
         const standings = this.state && Array.isArray(this.state.standings) ? this.state.standings : null;
@@ -606,7 +606,7 @@ export class JoinApp {
         if (key === this.lastStandingsKey) return;
         this.lastStandingsKey = key;
 
-        const animate = phase === 'round_results';
+        const animate = phase === 'round_results' || phase === 'finished';
         const { rows, maxTotal } = buildStandingsRows(standings, {
             animate,
             ownsRow: (row) => this.ownsRow(row),

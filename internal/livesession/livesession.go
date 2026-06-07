@@ -199,8 +199,9 @@ type LobbyState struct {
 	// Standings carries the per-player ranking the bar graph (MP-9) consumes.
 	// Populated in the round_results phase (with each player's points-this-round
 	// alongside the running total) and in the finished phase (final standings,
-	// where RoundScore is 0 since no single round is in focus). Nil in every
-	// other phase. Ordered best-first, rank stamped 1-indexed.
+	// where RoundScore carries the last round's score so the bar graph can
+	// animate that final contribution). Nil in every other phase. Ordered
+	// best-first, rank stamped 1-indexed.
 	Standings []*Standing
 	// CurrentRound describes the round the session is about to play: its title,
 	// summary, and position so the between-rounds screen names the round and can
@@ -223,10 +224,11 @@ type RoundInfo struct {
 
 // Standing is one player's place in the session ranking shown between rounds
 // (round_results) and at the end (finished). RoundScore is the points the
-// player earned in the round that just finished (0 in the finished phase, which
-// has no single round in focus); TotalScore is their cumulative session score.
-// Rank is 1-indexed over the full roster, ties broken by display name so the
-// ordering is stable across reads.
+// player earned in the round that just finished; in the finished phase it
+// carries the last round's score so the bar graph can animate that final
+// contribution (0 for a player absent from the last round). TotalScore is their
+// cumulative session score. Rank is 1-indexed over the full roster, ties broken
+// by display name so the ordering is stable across reads.
 type Standing struct {
 	PlayerID    int64
 	DisplayName string
@@ -358,7 +360,8 @@ type Store interface {
 	ListRoundStandings(ctx context.Context, sessionID string, roundID int64) ([]*Standing, error)
 	// ListFinalStandings returns one row per roster player with their
 	// cumulative session total, ordered best-first. Used to populate the
-	// finished state. RoundScore on each returned Standing is 0.
+	// finished state. RoundScore on each returned Standing is 0; the service
+	// overlays the last round's score for the finished bar graph animation.
 	ListFinalStandings(ctx context.Context, sessionID string) ([]*Standing, error)
 }
 
@@ -899,9 +902,13 @@ func (s *Service) populateInGame(ctx context.Context, state *LobbyState) error {
 // populateStandings fills Standings with the per-player ranking the bar graph
 // consumes: the round delta + running total in the round_results phase (keyed
 // on the round that just finished), and the cumulative final standings in the
-// finished phase. Leaves Standings nil in every other phase, which has no
-// ranking to show. Ranks are stamped 1-indexed over the store's best-first
-// ordering.
+// finished phase. The finished standings carry each player's score in the last
+// round as RoundScore so the finished bar graph can animate the last round's
+// contribution (preTotal = TotalScore - RoundScore), matching the
+// between-rounds screen; players absent from the last round keep RoundScore 0
+// and so do not grow. Ranking stays by cumulative total in both phases. Leaves
+// Standings nil in every other phase, which has no ranking to show. Ranks are
+// stamped 1-indexed over the store's best-first ordering.
 func (s *Service) populateStandings(ctx context.Context, state *LobbyState) error {
 	sess := state.Session
 	switch {
@@ -912,9 +919,9 @@ func (s *Service) populateStandings(ctx context.Context, state *LobbyState) erro
 		}
 		state.Standings = rankStandings(standings)
 	case sess.Phase == PhaseFinished:
-		standings, err := s.store.ListFinalStandings(ctx, sess.ID)
+		standings, err := s.finishedStandings(ctx, sess)
 		if err != nil {
-			return fmt.Errorf("failed to list final standings for state: %w", err)
+			return err
 		}
 		state.Standings = rankStandings(standings)
 	default:
@@ -922,6 +929,42 @@ func (s *Service) populateStandings(ctx context.Context, state *LobbyState) erro
 	}
 
 	return nil
+}
+
+// finishedStandings returns the final standings ordered best-first by
+// cumulative total, with each player's last-round score overlaid onto
+// RoundScore so the finished bar graph can animate the last round's
+// contribution. When the quiz has no rounds the final standings are returned
+// unchanged (RoundScore 0).
+func (s *Service) finishedStandings(ctx context.Context, sess *Session) ([]*Standing, error) {
+	standings, err := s.store.ListFinalStandings(ctx, sess.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list final standings for state: %w", err)
+	}
+
+	rounds, err := s.quizzes.ListRoundsByQuiz(ctx, sess.QuizID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list rounds for final standings: %w", err)
+	}
+	if len(rounds) == 0 {
+		return standings, nil
+	}
+
+	lastRoundID := rounds[len(rounds)-1].ID
+	lastRound, err := s.store.ListRoundStandings(ctx, sess.ID, lastRoundID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list last round standings for state: %w", err)
+	}
+
+	lastRoundScore := make(map[int64]int, len(lastRound))
+	for _, st := range lastRound {
+		lastRoundScore[st.PlayerID] = st.RoundScore
+	}
+	for _, st := range standings {
+		st.RoundScore = lastRoundScore[st.PlayerID]
+	}
+
+	return standings, nil
 }
 
 // populateRoundIntro fills CurrentRound with the round the session is about to
