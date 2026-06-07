@@ -7,6 +7,7 @@ import (
 
 	"github.com/starquake/topbanana/internal/admin"
 	"github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/client"
 	"github.com/starquake/topbanana/internal/clientapi"
 	"github.com/starquake/topbanana/internal/config"
@@ -30,21 +31,20 @@ func addRoutes(
 	gameService *game.Service,
 	realtime Realtime,
 	cfg *config.Config,
-	mailerTester *mailer.Tester,
-	mailerStatus mailer.StatusView,
+	mail Mail,
 ) {
 	sessions := session.New([]byte(cfg.SessionKey), cfg.SecureCookies())
 	csrfMgr := csrf.New([]byte(cfg.SessionKey), cfg.SecureCookies())
 
 	emailDeps := adminEmailDeps{
-		tester:            mailerTester,
-		status:            mailerStatus,
+		tester:            mail.Tester,
+		status:            mail.Status,
 		flash:             admin.NewEmailFlash([]byte(cfg.SessionKey), cfg.SecureCookies()),
 		trustedProxyCIDRs: cfg.TrustedProxyCIDRs,
 	}
 	playerDeps := adminPlayerDeps{
 		tokens: stores.VerifyTokens,
-		sender: mailerTester,
+		sender: mail.Tester,
 		flash: auth.NewSignedFlash(
 			[]byte(cfg.SessionKey), cfg.SecureCookies(),
 			admin.PlayerDetailFlashCookieName, admin.PlayerDetailFlashCookiePath,
@@ -54,12 +54,13 @@ func addRoutes(
 			admin.InviteFlashCookieName, admin.InviteFlashCookiePath,
 		),
 		baseURL:        cfg.BaseURL,
-		mailConfigured: mailerStatus.Configured,
+		mailConfigured: mail.Status.Configured,
+		tasks:          mail.Tasks,
 	}
 
-	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mailerTester)
+	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
 	addAdminRoutes(mux, logger, stores, gameService, sessions, csrfMgr, emailDeps, playerDeps)
-	addProfileRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mailerTester)
+	addProfileRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
 	addAPIRoutes(mux, logger, stores, gameService, realtime, sessions)
 	addHostRoutes(mux, logger, stores, sessions, csrfMgr, realtime.SessionService)
 
@@ -121,7 +122,7 @@ func addEmailFlowRoutes(
 	sessions *session.Manager,
 	csrfMgr *csrf.Manager,
 	cfg *config.Config,
-	mailerTester *mailer.Tester,
+	mail Mail,
 ) {
 	csrfMW := csrfMgr.Middleware
 
@@ -141,7 +142,7 @@ func addEmailFlowRoutes(
 		logger, csrfMgr, stores.Players, sessions, verifyFlash,
 	))
 	mux.Handle("POST /verify-email/resend", admin.MaxFormSizeMiddleware(csrfMW(auth.HandleVerifyResend(
-		logger, stores.Players, sessions, stores.VerifyTokens, mailerTester,
+		logger, stores.Players, sessions, stores.VerifyTokens, mail.Tester,
 		cfg.BaseURL, resendLimiter, verifyFlash,
 	))))
 
@@ -155,28 +156,18 @@ func addEmailFlowRoutes(
 	))
 	mux.Handle("POST /verify-email/request", admin.MaxFormSizeMiddleware(
 		csrfMW(auth.HandleVerifyEmailRequestSubmit(
-			logger, stores.Players, sessions, stores.VerifyTokens, mailerTester,
-			cfg.BaseURL, verifyRequestLimiter, verifyRequestFlash,
+			logger, stores.Players, sessions,
+			auth.VerifyRequestDispatchDeps{
+				Tokens:  stores.VerifyTokens,
+				Sender:  mail.Tester,
+				BaseURL: cfg.BaseURL,
+				Tasks:   mail.Tasks,
+			},
+			verifyRequestLimiter, verifyRequestFlash,
 		)),
 	))
 
-	forgotFlash := auth.NewSignedFlash(
-		[]byte(cfg.SessionKey), cfg.SecureCookies(),
-		auth.ForgotFlashCookieName, auth.ForgotFlashCookiePath,
-	)
-	forgotLimiter := auth.NewVerifyResendLimiter(auth.ForgotPasswordCooldown(), cfg.TrustedProxyCIDRs)
-	mux.Handle("GET /forgot-password", auth.HandleForgotForm(
-		logger, csrfMgr, stores.Players, sessions, forgotFlash,
-	))
-	mux.Handle("POST /forgot-password", admin.MaxFormSizeMiddleware(csrfMW(auth.HandleForgotSubmit(
-		logger, stores.Players, sessions, stores.ResetTokens, mailerTester,
-		cfg.BaseURL, forgotLimiter, forgotFlash,
-	))))
-
-	mux.Handle("GET /reset-password", auth.HandleResetForm(logger, csrfMgr, stores.ResetTokens))
-	mux.Handle("POST /reset-password", admin.MaxFormSizeMiddleware(csrfMW(
-		auth.HandleResetSubmit(logger, csrfMgr, stores.ResetTokens, sessions, stores.Players),
-	)))
+	addPasswordResetRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
 
 	mux.Handle("GET /accept-invite", auth.HandleAcceptInviteForm(logger, csrfMgr, stores.Invites))
 	mux.Handle("POST /accept-invite", admin.MaxFormSizeMiddleware(csrfMW(
@@ -186,6 +177,46 @@ func addEmailFlowRoutes(
 			Sessions: sessions,
 			Games:    stores.GameMigrator,
 		}),
+	)))
+}
+
+// addPasswordResetRoutes registers the forgot-password + reset-password pair.
+// Split out of addEmailFlowRoutes so that function stays under revive's
+// function-length cap; the forgot flow's detached reset-email dispatch is
+// bundled into ForgotDispatchDeps so a graceful shutdown drains it before the
+// DB closes (#740).
+func addPasswordResetRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	stores *store.Stores,
+	sessions *session.Manager,
+	csrfMgr *csrf.Manager,
+	cfg *config.Config,
+	mail Mail,
+) {
+	csrfMW := csrfMgr.Middleware
+	forgotFlash := auth.NewSignedFlash(
+		[]byte(cfg.SessionKey), cfg.SecureCookies(),
+		auth.ForgotFlashCookieName, auth.ForgotFlashCookiePath,
+	)
+	forgotLimiter := auth.NewVerifyResendLimiter(auth.ForgotPasswordCooldown(), cfg.TrustedProxyCIDRs)
+	mux.Handle("GET /forgot-password", auth.HandleForgotForm(
+		logger, csrfMgr, stores.Players, sessions, forgotFlash,
+	))
+	mux.Handle("POST /forgot-password", admin.MaxFormSizeMiddleware(csrfMW(auth.HandleForgotSubmit(
+		logger, stores.Players, sessions,
+		auth.ForgotDispatchDeps{
+			Tokens:  stores.ResetTokens,
+			Sender:  mail.Tester,
+			BaseURL: cfg.BaseURL,
+			Tasks:   mail.Tasks,
+		},
+		forgotLimiter, forgotFlash,
+	))))
+
+	mux.Handle("GET /reset-password", auth.HandleResetForm(logger, csrfMgr, stores.ResetTokens))
+	mux.Handle("POST /reset-password", admin.MaxFormSizeMiddleware(csrfMW(
+		auth.HandleResetSubmit(logger, csrfMgr, stores.ResetTokens, sessions, stores.Players),
 	)))
 }
 
@@ -222,7 +253,7 @@ func addAuthRoutes(
 	sessions *session.Manager,
 	csrfMgr *csrf.Manager,
 	cfg *config.Config,
-	mailerTester *mailer.Tester,
+	mail Mail,
 ) {
 	csrfMW := csrfMgr.Middleware
 	googleEnabled := cfg.GoogleLoginEnabled()
@@ -236,9 +267,10 @@ func addAuthRoutes(
 				auth.RegisterDeps{
 					AdminEmails:   cfg.AdminEmails,
 					GoogleEnabled: googleEnabled,
-					Mailer:        mailerTester,
+					Mailer:        mail.Tester,
 					Tokens:        stores.VerifyTokens,
 					BaseURL:       cfg.BaseURL,
+					Tasks:         mail.Tasks,
 				},
 			)),
 		)
@@ -262,18 +294,19 @@ func addAuthRoutes(
 				Sessions:            sessions,
 				Games:               stores.GameMigrator,
 				Limiter:             loginLimiter,
-				Mailer:              mailerTester,
+				Mailer:              mail.Tester,
 				Tokens:              stores.VerifyTokens,
 				ResendLimiter:       loginResendLimiter,
 				BaseURL:             cfg.BaseURL,
 				RegistrationEnabled: cfg.RegistrationEnabled,
 				GoogleEnabled:       googleEnabled,
+				Tasks:               mail.Tasks,
 			},
 		)),
 	)
 	mux.Handle("POST /logout", csrfMW(auth.HandleLogout(sessions)))
 
-	addEmailFlowRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mailerTester)
+	addEmailFlowRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
 
 	if googleEnabled {
 		googleAuth := auth.NewGoogleAuthenticator(auth.GoogleConfig{
@@ -315,7 +348,7 @@ func addProfileRoutes(
 	sessions *session.Manager,
 	csrfMgr *csrf.Manager,
 	cfg *config.Config,
-	sender auth.VerifyEmailSender,
+	mail Mail,
 ) {
 	csrfMW := csrfMgr.Middleware
 	requireAuthn := func(h http.Handler) http.Handler {
@@ -347,9 +380,10 @@ func addProfileRoutes(
 			csrfMW(requireAuthn(profile.HandleProfileEmailChange(logger, profile.EmailChangeDeps{
 				Players: stores.Players,
 				Tokens:  stores.VerifyTokens,
-				Sender:  sender,
+				Sender:  mail.Tester,
 				Flash:   emailFlash,
 				BaseURL: cfg.BaseURL,
+				Tasks:   mail.Tasks,
 			}))),
 		),
 	)
@@ -385,6 +419,9 @@ type adminPlayerDeps struct {
 	// handler only claims a notification email was sent when one could
 	// actually leave the box.
 	mailConfigured bool
+	// tasks tracks the detached resend / role-change-notice dispatches so a
+	// graceful shutdown drains them before the DB closes (#740).
+	tasks *bgtasks.Tracker
 }
 
 func addAdminRoutes(
@@ -538,7 +575,7 @@ func addAdminPlayerRoutes(
 		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
 			admin.HandlePlayerResendVerification(
 				logger, stores.AdminPlayers, deps.tokens, deps.sender,
-				deps.baseURL, resendLimiter, deps.flash,
+				deps.baseURL, resendLimiter, deps.flash, deps.tasks,
 			),
 		))),
 	)
@@ -551,7 +588,9 @@ func addAdminPlayerRoutes(
 	mux.Handle(
 		"POST /admin/players/{playerID}/role",
 		admin.MaxFormSizeMiddleware(csrfMW(requireAdmin(
-			admin.HandlePlayerSetRole(logger, stores.AdminPlayers, deps.sender, deps.mailConfigured, deps.flash),
+			admin.HandlePlayerSetRole(
+				logger, stores.AdminPlayers, deps.sender, deps.mailConfigured, deps.flash, deps.tasks,
+			),
 		))),
 	)
 	mux.Handle(

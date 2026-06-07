@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/starquake/topbanana/internal/absurl"
+	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/envtag"
 	"github.com/starquake/topbanana/internal/mailer"
@@ -121,6 +122,10 @@ type RegisterDeps struct {
 	Mailer        VerifyEmailSender
 	Tokens        VerifyTokenStore
 	BaseURL       string
+	// Tasks tracks the detached verify-email dispatch so a graceful
+	// shutdown drains it before the DB closes (#740). Nil in unit tests,
+	// which then run the dispatch untracked.
+	Tasks *bgtasks.Tracker
 }
 
 // HandleRegisterSubmit handles POST /register. When the caller already
@@ -290,11 +295,11 @@ func dispatchVerifyEmail(
 		return
 	}
 	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), verifyEmailDispatchTimeout)
-	go func() {
+	deps.Tasks.Go(func() {
 		defer cancel()
 		SendVerifyEmailBestEffort(bg, logger, deps.Tokens, deps.Mailer,
 			deps.BaseURL, recipient, playerID, time.Now().UTC())
-	}()
+	})
 }
 
 // dispatchRegisterExisting notifies the owner of an already-registered address
@@ -313,7 +318,7 @@ func dispatchRegisterExisting(
 		return
 	}
 	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), verifyEmailDispatchTimeout)
-	go func() {
+	deps.Tasks.Go(func() {
 		defer cancel()
 		msg := mailer.Message{
 			To:      recipient,
@@ -326,7 +331,7 @@ func dispatchRegisterExisting(
 		if err := deps.Mailer.Send(bg, msg); err != nil {
 			logger.WarnContext(bg, "register-existing notice failed", slog.Any("err", err))
 		}
-	}()
+	})
 }
 
 // claimOrCreatePlayer upgrades an anonymous session row via ClaimPlayer
@@ -470,6 +475,10 @@ type LoginDeps struct {
 	BaseURL             string
 	RegistrationEnabled bool
 	GoogleEnabled       bool
+	// Tasks tracks the detached verify-email resend so a graceful
+	// shutdown drains it before the DB closes (#740). Nil in unit tests,
+	// which then run the dispatch untracked.
+	Tasks *bgtasks.Tracker
 }
 
 // HandleLoginSubmit returns a handler for POST /login. It verifies the
@@ -680,11 +689,11 @@ func dispatchVerifyResend(
 		return
 	}
 	bg, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), verifyEmailDispatchTimeout)
-	go func() {
+	deps.Tasks.Go(func() {
 		defer cancel()
 		SendVerifyEmailBestEffort(bg, logger, deps.Tokens, deps.Mailer,
 			deps.BaseURL, player.Email, player.ID, time.Now().UTC())
-	}()
+	})
 }
 
 // renderLoginRateLimited re-renders the login form with the

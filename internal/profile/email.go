@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/mailer"
 )
@@ -88,6 +89,10 @@ type EmailChangeDeps struct {
 	Sender  auth.VerifyEmailSender
 	Flash   *auth.SignedFlash
 	BaseURL string
+	// Tasks tracks the detached email-change dispatch so a graceful
+	// shutdown drains it before the DB closes (#740). Nil in unit tests,
+	// which then run the dispatch untracked.
+	Tasks *bgtasks.Tracker
 }
 
 // HandleProfileEmailChange returns the [http.Handler] for POST
@@ -221,7 +226,7 @@ func dispatchEmailChangeIfFree(
 	}
 
 	sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), emailDispatchTimeout)
-	go func() {
+	deps.Tasks.Go(func() {
 		defer cancel()
 		if sendErr := auth.SendVerifyEmailWithPending(
 			sendCtx, deps.Tokens, deps.Sender, deps.BaseURL,
@@ -231,7 +236,7 @@ func dispatchEmailChangeIfFree(
 				slog.Int64("player_id", playerID), slog.Any("err", sendErr))
 		}
 		notifyOldAddressOfChange(sendCtx, logger, deps.Sender, playerID, oldEmail, newEmail)
-	}()
+	})
 }
 
 // notifyOldAddressOfChange sends a best-effort notice to the account's

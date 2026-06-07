@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/mailer"
@@ -74,6 +75,7 @@ func HandlePlayerResendVerification(
 	baseURL string,
 	limiter *PerTargetLimiter,
 	flash *auth.SignedFlash,
+	tasks *bgtasks.Tracker,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		playerID, ok := handlers.ParseIDFromPath(w, r, logger, "playerID")
@@ -106,7 +108,7 @@ func HandlePlayerResendVerification(
 		}
 
 		if !dispatchAdminResendVerification(
-			r.Context(), logger, tokens, sender, baseURL, detail.Email, playerID,
+			r.Context(), logger, tokens, sender, baseURL, detail.Email, playerID, tasks,
 		) {
 			flash.SetError(w, "Email sending is not configured; no verification email was sent.", 0)
 			redirectToPlayerDetail(w, r, playerID)
@@ -331,6 +333,7 @@ func HandlePlayerSetRole(
 	sender auth.VerifyEmailSender,
 	mailConfigured bool,
 	flash *auth.SignedFlash,
+	tasks *bgtasks.Tracker,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		playerID, ok := handlers.ParseIDFromPath(w, r, logger, "playerID")
@@ -385,7 +388,7 @@ func HandlePlayerSetRole(
 			map[string]string{"from": from, "to": desired})
 
 		notice := roleChangeNotice(desired) +
-			maybeNotifyRoleChange(r, logger, sender, mailConfigured, detail, desired, playerID)
+			maybeNotifyRoleChange(r, logger, sender, mailConfigured, detail, desired, playerID, tasks)
 		flash.SetNotice(w, notice)
 		redirectToPlayerDetail(w, r, playerID)
 	})
@@ -451,6 +454,7 @@ func maybeNotifyRoleChange(
 	detail *auth.PlayerDetail,
 	desired string,
 	playerID int64,
+	tasks *bgtasks.Tracker,
 ) string {
 	if r.PostFormValue("notify_email") == "" {
 		return ""
@@ -461,7 +465,7 @@ func maybeNotifyRoleChange(
 	if detail.Email == "" || detail.EmailVerifiedAt == nil {
 		return " The player has no verified email, so no notification was sent."
 	}
-	dispatchRoleChangeNotice(r.Context(), logger, sender, detail.Email, desired, playerID)
+	dispatchRoleChangeNotice(r.Context(), logger, sender, detail.Email, desired, playerID, tasks)
 
 	return " A notification email was sent to the player."
 }
@@ -478,6 +482,7 @@ func dispatchRoleChangeNotice(
 	sender auth.VerifyEmailSender,
 	recipient, role string,
 	playerID int64,
+	tasks *bgtasks.Tracker,
 ) {
 	msg := mailer.Message{
 		To:      recipient,
@@ -487,13 +492,13 @@ func dispatchRoleChangeNotice(
 		Kind: mailer.KindRoleChangeNotice,
 	}
 	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), mailer.SendTimeout+15*time.Second)
-	go func() {
+	tasks.Go(func() {
 		defer cancel()
 		if err := sender.Send(bg, msg); err != nil {
 			logger.WarnContext(bg, "role change notice dispatch failed",
 				slog.Int64("player_id", playerID), slog.Any("err", err))
 		}
-	}()
+	})
 }
 
 // playerCreatePageData backs the playernew.gohtml template.
@@ -698,6 +703,7 @@ func dispatchAdminResendVerification(
 	sender auth.VerifyEmailSender,
 	baseURL, recipient string,
 	playerID int64,
+	tasks *bgtasks.Tracker,
 ) bool {
 	if tokens == nil || sender == nil {
 		return false
@@ -709,11 +715,11 @@ func dispatchAdminResendVerification(
 		return false
 	}
 	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), mailer.SendTimeout+15*time.Second)
-	go func() {
+	tasks.Go(func() {
 		defer cancel()
 		auth.SendVerifyEmailBestEffort(bg, logger, tokens, sender,
 			baseURL, recipient, playerID, time.Now().UTC())
-	}()
+	})
 
 	return true
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/session"
 )
@@ -72,6 +73,18 @@ func HandleForgotForm(
 	})
 }
 
+// ForgotDispatchDeps bundles the reset-email dispatch dependencies so
+// HandleForgotSubmit stays under revive's argument limit (same packaging the
+// register / login handlers use). Tasks tracks the detached send so a graceful
+// shutdown drains it before the DB closes (#740); it may be nil, in which case
+// the dispatch runs untracked.
+type ForgotDispatchDeps struct {
+	Tokens  ResetTokenStore
+	Sender  VerifyEmailSender
+	BaseURL string
+	Tasks   *bgtasks.Tracker
+}
+
 // HandleForgotSubmit handles POST /forgot-password. Always responds
 // the same way regardless of whether a matching account exists, so an
 // attacker cannot enumerate registered emails by parsing the response.
@@ -83,9 +96,7 @@ func HandleForgotSubmit(
 	logger *slog.Logger,
 	players PlayerStore,
 	sessions *session.Manager,
-	tokens ResetTokenStore,
-	sender VerifyEmailSender,
-	baseURL string,
+	dispatch ForgotDispatchDeps,
 	limiter *VerifyResendLimiter,
 	flash *SignedFlash,
 ) http.Handler {
@@ -113,7 +124,7 @@ func HandleForgotSubmit(
 
 		identifier := strings.TrimSpace(r.PostFormValue("identifier"))
 		if identifier != "" {
-			dispatchForgotIfMatch(r.Context(), logger, players, tokens, sender, baseURL, identifier)
+			dispatchForgotIfMatch(r.Context(), logger, players, dispatch, identifier)
 		}
 
 		// Always flash the same success message - never reveal whether
@@ -132,9 +143,8 @@ func dispatchForgotIfMatch(
 	ctx context.Context,
 	logger *slog.Logger,
 	players PlayerStore,
-	tokens ResetTokenStore,
-	sender VerifyEmailSender,
-	baseURL, identifier string,
+	dispatch ForgotDispatchDeps,
+	identifier string,
 ) {
 	p, ok := resolveForgotIdentifier(ctx, players, identifier)
 	if !ok || p.Email == "" {
@@ -144,16 +154,17 @@ func dispatchForgotIfMatch(
 	// timing - account-existence-opaqueness depends on every request
 	// returning in roughly the same wall-clock time. The detached
 	// context inherits cancellation safety only; it cannot be aborted
-	// by the client closing their tab.
+	// by the client closing their tab. The send is tracked so shutdown
+	// drains it before the DB closes (#740).
 	sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), verifyEmailDispatchTimeout)
-	go func() {
+	dispatch.Tasks.Go(func() {
 		defer cancel()
-		if err := SendResetEmail(sendCtx, tokens, sender, baseURL,
+		if err := SendResetEmail(sendCtx, dispatch.Tokens, dispatch.Sender, dispatch.BaseURL,
 			p.Email, p.ID, time.Now().UTC()); err != nil {
 			logger.WarnContext(sendCtx, "forgot-password dispatch failed",
 				slog.Int64("player_id", p.ID), slog.Any("err", err))
 		}
-	}()
+	})
 }
 
 // resolveForgotIdentifier returns the player matching identifier

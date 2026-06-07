@@ -188,8 +188,9 @@ func runForgotPOST(
 	sessions := session.New([]byte("k"), true)
 	flash := NewSignedFlash([]byte("k"), true, ForgotFlashCookieName, ForgotFlashCookiePath)
 	handler := HandleForgotSubmit(
-		discardLogger(), players, sessions, tokens, sender,
-		"https://topbanana.example", limiter, flash,
+		discardLogger(), players, sessions,
+		ForgotDispatchDeps{Tokens: tokens, Sender: sender, BaseURL: "https://topbanana.example"},
+		limiter, flash,
 	)
 
 	form := url.Values{"identifier": {identifier}}

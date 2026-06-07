@@ -51,7 +51,7 @@ func newRouter(t *testing.T, db *sql.DB, cfg *config.Config) *http.ServeMux {
 	}
 	ExportAddRoutes(
 		mux, logger, stores, gameSvc, realtime, cfg,
-		mailer.NewTester(mailer.NewNoop()), mailer.StatusView{},
+		Mail{Tester: mailer.NewTester(mailer.NewNoop())},
 	)
 
 	return mux

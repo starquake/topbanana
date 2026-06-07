@@ -65,7 +65,7 @@ func TestDispatchAdminResendVerification_BoolContract(t *testing.T) {
 			t.Parallel()
 
 			got := DispatchAdminResendVerification(
-				t.Context(), slog.Default(), tc.tokens, tc.sender, tc.baseURL, "to@example.test", testAdminID,
+				t.Context(), slog.Default(), tc.tokens, tc.sender, tc.baseURL, "to@example.test", testAdminID, nil,
 			)
 			if want := tc.wantResult; got != want {
 				t.Errorf("DispatchAdminResendVerification = %v, want %v", got, want)
