@@ -325,20 +325,52 @@ func TestRunner_FullFlow(t *testing.T) {
 		t.Fatalf("phase after round 2 question = %q, want %q", got, want)
 	}
 
-	// The last round also shows round_results before the session finishes.
+	// The last round's reveal finishes the session directly, skipping
+	// round_results, so the game ends on a single final-standings screen.
 	h.clock.advance(runnerCfg.RevealBeat)
-	h.tick(ctx)
-	if got, want := h.phase(t), PhaseRoundResults; got != want {
-		t.Fatalf("phase after round 2 reveal = %q, want %q (final round results)", got, want)
-	}
-	h.clock.advance(runnerCfg.RoundResultsBeat)
 	h.tick(ctx)
 	final := h.reload(t)
 	if got, want := final.Phase, PhaseFinished; got != want {
-		t.Fatalf("final phase = %q, want %q", got, want)
+		t.Fatalf("phase after final round reveal = %q, want %q (skips round_results)", got, want)
 	}
 	if final.FinishedAt == nil {
 		t.Error("finished session has nil FinishedAt")
+	}
+}
+
+// TestRunner_FinalRoundSkipsRoundResults pins that the last round transitions
+// from its closing reveal straight to finished, never showing the between-rounds
+// round_results screen, so the game ends on a single final-standings screen
+// (#749). A single-round quiz isolates the final-round path.
+func TestRunner_FinalRoundSkipsRoundResults(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+
+	if err := h.service.Start(ctx, h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+
+	// Round intro -> the single question -> timeout reveal.
+	h.clock.advance(runnerCfg.RoundIntroBeat)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseQuestion; got != want {
+		t.Fatalf("phase after intro beat = %q, want %q", got, want)
+	}
+	h.clock.advance(11 * time.Second)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseReveal; got != want {
+		t.Fatalf("phase after question = %q, want %q", got, want)
+	}
+
+	// The reveal beat elapses on the only round: the runner finishes directly,
+	// never entering round_results.
+	h.clock.advance(runnerCfg.RevealBeat)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseFinished; got != want {
+		t.Fatalf("phase after final round reveal = %q, want %q (no round_results)", got, want)
 	}
 }
 

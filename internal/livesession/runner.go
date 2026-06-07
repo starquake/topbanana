@@ -309,7 +309,9 @@ func (r *Runner) advanceQuestion(ctx context.Context, sess *Session, now time.Ti
 
 // advanceReveal moves to the next question once the reveal beat has elapsed,
 // or - when the revealed question was the last of its round - into the
-// between-rounds round_results screen.
+// between-rounds round_results screen. The final round skips round_results and
+// finishes directly, so the game ends on a single final-standings screen rather
+// than showing "Scores so far" back-to-back with "Final scores".
 func (r *Runner) advanceReveal(ctx context.Context, sess *Session, now time.Time) {
 	if now.Sub(r.phaseEnteredAt(sess.ID, now)) < r.cfg.RevealBeat {
 		return
@@ -322,6 +324,11 @@ func (r *Runner) advanceReveal(ctx context.Context, sess *Session, now time.Time
 	next, ok := plan.nextQuestionInRound(sess.CurrentRoundID, sess.CurrentQuestionID)
 	if ok {
 		r.issueQuestion(ctx, sess, next, now)
+
+		return
+	}
+	if _, hasNext := plan.nextRound(sess.CurrentRoundID); !hasNext {
+		r.finish(ctx, sess)
 
 		return
 	}
