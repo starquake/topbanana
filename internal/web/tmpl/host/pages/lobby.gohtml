@@ -257,9 +257,10 @@
                                   x-text="bar.displayTotal"
                                   data-standings-total></span>
                         </div>
-                        <progress class="block w-full h-3 bg-border-soft rounded-full overflow-hidden appearance-none [&::-webkit-progress-bar]:bg-border-soft [&::-webkit-progress-value]:bg-accent [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear [&::-moz-progress-bar]:bg-accent [&::-moz-progress-bar]:rounded-full"
-                                  :value="bar.displayTotal" :max="maxStandingsTotal"
-                                  aria-hidden="true"></progress>
+                        <div class="block w-full h-3 bg-border-soft rounded-full overflow-hidden" aria-hidden="true">
+                            <div class="h-full bg-accent rounded-full transition-[width] duration-100 ease-linear"
+                                 :style="`width: ${maxStandingsTotal > 0 ? Math.min(100, (bar.displayTotal / maxStandingsTotal) * 100) : 0}%`"></div>
+                        </div>
                     </li>
                 </template>
             </ul>
