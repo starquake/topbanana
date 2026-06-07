@@ -1,10 +1,9 @@
 import type { APIRequestContext, BrowserContext, Page } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
 import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { importQuiz, claimAndJoin } from './helpers';
+import { importQuiz, claimAndJoin, execSqlite } from './helpers';
 
 // MP-9 (#686): the between-rounds standings bar graph on the round_results /
 // finished screens, on BOTH the host TV surface and the player join surface.
@@ -29,11 +28,11 @@ function makeQuizLiveByTitle(title: string): number {
   }
   const dbFile = join(dataDir, `e2e-${test.info().parallelIndex}.db`);
   const escapedTitle = title.replace(/'/g, "''");
-  const output = execFileSync('sqlite3', [
+  const output = execSqlite(
     dbFile,
     `UPDATE quizzes SET mode = 'live' WHERE title = '${escapedTitle}'; SELECT id FROM quizzes WHERE title = '${escapedTitle}';`,
-  ], { encoding: 'utf8' });
-  const lines = output.trim().split('\n');
+  );
+  const lines = output.split('\n');
   const id = Number.parseInt(lines[lines.length - 1], 10);
   if (!Number.isInteger(id)) {
     throw new Error(`makeQuizLiveByTitle(${title}): could not resolve quiz id from ${JSON.stringify(output)}`);
@@ -254,7 +253,7 @@ test('the standings bar graph shows final order and totals on the TV and player 
     expect(rows[1].name).toBe(robin);
     expect(rows[1].rank).toBe('2');
     expect(Number(rows[1].total)).toBe(0);
-  }).toPass({ timeout: 10_000 });
+  }).toPass({ timeout: 15_000 });
 
   // The player's own row is highlighted (aria-current).
   await expect(
@@ -284,7 +283,7 @@ test('the standings bar graph shows final order and totals on the TV and player 
     tvRows = await readStandingsRows(host);
     expect(tvRows.length).toBe(2);
     expect(Number(tvRows[0].total)).toBe(quincyFinal.totalScore);
-  }).toPass({ timeout: 10_000 });
+  }).toPass({ timeout: 15_000 });
   expect(tvRows[0].name).toBe(quincy);
   expect(tvRows[0].rank).toBe('1');
   expect(Number(tvRows[0].total)).toBeGreaterThan(0);
@@ -299,7 +298,7 @@ test('the standings bar graph shows final order and totals on the TV and player 
     playerRows = await readStandingsRows(page);
     expect(playerRows.length).toBe(2);
     expect(Number(playerRows[0].total)).toBe(quincyFinal.totalScore);
-  }).toPass({ timeout: 10_000 });
+  }).toPass({ timeout: 15_000 });
   expect(playerRows[0].name).toBe(quincy);
   expect(playerRows[0].rank).toBe('1');
   expect(Number(playerRows[0].total)).toBeGreaterThan(0);

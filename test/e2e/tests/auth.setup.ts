@@ -1,9 +1,8 @@
 import { test as setup, expect } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
 import { adminStatePath, SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD, SEED_ADMIN_PASSWORD_HASH } from '../e2e-auth';
-import { csrfTokenPattern } from './helpers';
+import { csrfTokenPattern, execSqlite } from './helpers';
 
 // Logs the seed admin (players.id = 1) in through the real /login flow and
 // saves the cookie jar as the shared storageState the admin specs reuse, so the
@@ -24,10 +23,10 @@ setup('authenticate the shared admin', async ({ request }) => {
   // SEED_ADMIN_PASSWORD_HASH is a fixed bcrypt constant (chars [./A-Za-z0-9$],
   // no quotes), so it is safe to interpolate directly - unlike the
   // user-derived values in markEmailVerified/setRole, it needs no escaping.
-  execFileSync('sqlite3', [
+  execSqlite(
     join(dataDir, 'e2e-0.db'),
     `UPDATE players SET role = 'admin', password_hash = '${SEED_ADMIN_PASSWORD_HASH}' WHERE id = 1;`,
-  ]);
+  );
 
   // GET the login form to seed the CSRF cookie on the request jar and read the
   // matching hidden token.

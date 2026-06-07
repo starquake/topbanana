@@ -5,10 +5,10 @@
 // instead of '@playwright/test' so the per-worker baseURL is wired
 // automatically — no per-test setup required.
 import { test as base } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
 import { SEED_ADMIN_PASSWORD_HASH } from '../e2e-auth';
+import { execSqlite } from './sqlite';
 
 // playwright.config.ts discovers a free port per worker and publishes
 // the list as TOPBANANA_E2E_PORTS (comma-separated, indexed by worker).
@@ -38,10 +38,9 @@ export const test = base.extend<{}, { seedAdminTopTier: void }>({
     }
     const dbFile = join(dataDir, `e2e-${workerInfo.parallelIndex}.db`);
     // Fixed bcrypt constant (no quotes), so safe to interpolate without escaping.
-    execFileSync(
-      'sqlite3',
-      [dbFile, `UPDATE players SET role = 'admin', password_hash = '${SEED_ADMIN_PASSWORD_HASH}' WHERE id = 1;`],
-      { encoding: 'utf8' },
+    execSqlite(
+      dbFile,
+      `UPDATE players SET role = 'admin', password_hash = '${SEED_ADMIN_PASSWORD_HASH}' WHERE id = 1;`,
     );
     await use();
   }, { scope: 'worker', auto: true }],

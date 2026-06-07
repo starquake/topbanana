@@ -1,10 +1,9 @@
-import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
 import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
 import type { Page } from './fixtures';
-import { seedQuiz, registerForPending, login, markEmailVerified } from './helpers';
+import { seedQuiz, registerForPending, login, markEmailVerified, execSqlite } from './helpers';
 
 // A logged-in player who has chosen a custom name skips the name-entry form on
 // the live-session join surface: they auto-join under their account name and
@@ -25,11 +24,11 @@ function makeQuizLive(title: string): number {
   }
   const dbFile = join(dataDir, `e2e-${test.info().parallelIndex}.db`);
   const escapedTitle = title.replace(/'/g, "''");
-  const output = execFileSync('sqlite3', [
+  const output = execSqlite(
     dbFile,
     `UPDATE quizzes SET mode = 'live' WHERE title = '${escapedTitle}'; SELECT id FROM quizzes WHERE title = '${escapedTitle}';`,
-  ], { encoding: 'utf8' });
-  const lines = output.trim().split('\n');
+  );
+  const lines = output.split('\n');
   const id = Number.parseInt(lines[lines.length - 1], 10);
   if (!Number.isInteger(id)) {
     throw new Error(`makeQuizLive(${title}): could not resolve quiz id from sqlite output ${JSON.stringify(output)}`);

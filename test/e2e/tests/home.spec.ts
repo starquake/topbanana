@@ -1,6 +1,6 @@
-import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { test, expect } from './fixtures';
+import { execSqlite } from './helpers';
 
 // Wipe games and the rows that hang off them on this worker's SQLite
 // file so the home page renders empty-state HTML for the
@@ -20,7 +20,7 @@ test.beforeEach(({}, testInfo) => {
   const dataDir = process.env.TOPBANANA_E2E_DATA_DIR;
   if (!dataDir) return;
   const dbFile = join(dataDir, `e2e-${testInfo.parallelIndex}.db`);
-  execFileSync('sqlite3', [
+  execSqlite(
     dbFile,
     [
       'DELETE FROM game_answers;',
@@ -28,7 +28,7 @@ test.beforeEach(({}, testInfo) => {
       'DELETE FROM game_participants;',
       'DELETE FROM games;',
     ].join(' '),
-  ]);
+  );
 });
 
 // #285 — the body used `min-h-screen` (100vh), which on mobile
