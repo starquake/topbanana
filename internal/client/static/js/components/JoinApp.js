@@ -799,10 +799,12 @@ export class JoinApp {
     }
 
     // roundTitle is the round_intro heading: the round's own title, or a
-    // generic "Get ready" when no round metadata is present.
+    // generic "Next round" when no round metadata is present. The fallback
+    // differs from roundEyebrow's "Get ready" so the two lines never stack the
+    // same words when round metadata is missing.
     roundTitle() {
         const round = this.currentRound();
-        return round && round.title ? round.title : 'Get ready';
+        return round && round.title ? round.title : 'Next round';
     }
 
     // roundSummary is the optional copy beneath the round title, empty when the
