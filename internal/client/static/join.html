@@ -50,13 +50,7 @@
              enter-code form on a /join/{code} deep link before init() runs. */}}
         <div x-data="joinApp" x-cloak>
             <h1 class="mb-10 font-display font-extrabold text-2xl tracking-wide uppercase">
-                <a href="/" aria-label="Top Banana!"
-                   class="inline-flex items-center text-text no-underline hover:text-text">
-                    <span class="w-7 h-7 mr-3 text-accent drop-shadow-[0_0_8px_rgba(255,210,63,0.45)] inline-flex shrink-0" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M4 13c3.5-2 8-2 10 2a5.5 5.5 0 0 1 8 5"/><path d="M5.15 17.89c5.52-1.52 8.65-6.89 7-12C11.55 4 11.5 2 13 2c3.22 0 5 5.5 5 8 0 6.5-4.2 12-10.49 12C5.11 22 2 22 2 20c0-1.5 1.14-1.55 3.15-2.11Z"/></svg>
-                    </span>
-                    <span aria-hidden="true">Top<span class="text-accent">Banana</span>!</span>
-                </a>
+                {{template "brand-mark" .}}
             </h1>
 
             <!-- Enter-code phase: typed-code form for a PC join (no QR). -->
@@ -283,32 +277,7 @@
                     <div data-testid="round-results">
                         <p class="label-eyebrow">Round complete</p>
                         <h2 class="mt-2 mb-6 font-display text-3xl font-semibold text-text">Scores are in</h2>
-                        <ul class="flex flex-col gap-2" data-testid="standings-bars">
-                            <template x-for="bar in standingsBars" :key="bar.playerId">
-                                <li class="rounded-md border bg-surface px-4 py-3"
-                                    :class="bar.isMe ? 'border-accent-line' : 'border-border-soft'"
-                                    :data-rank="bar.rank"
-                                    :data-player-id="bar.playerId"
-                                    :aria-current="bar.isMe ? 'true' : null"
-                                    data-standings-row>
-                                    <div class="flex items-baseline justify-between gap-3 mb-2">
-                                        <span class="flex items-center gap-2 min-w-0">
-                                            <span class="font-display font-bold text-accent tabular-nums shrink-0"
-                                                  x-text="bar.rank"></span>
-                                            <span class="truncate" x-text="bar.displayName" data-standings-name></span>
-                                            <template x-if="bar.isMe">
-                                                <span class="hud-chip shrink-0">You</span>
-                                            </template>
-                                        </span>
-                                        <span class="font-display font-bold tabular-nums shrink-0"
-                                              x-text="bar.displayTotal" data-standings-total></span>
-                                    </div>
-                                    <progress class="block w-full h-2 bg-border rounded-full overflow-hidden appearance-none [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:bg-accent [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear [&::-moz-progress-bar]:bg-accent [&::-moz-progress-bar]:rounded-full"
-                                              :value="bar.displayTotal" :max="maxStandingsTotal"
-                                              aria-hidden="true"></progress>
-                                </li>
-                            </template>
-                        </ul>
+                        {{template "standings-bars" .}}
                         <p class="mt-6 text-text-dim">The next round is coming up.</p>
                     </div>
                 </template>
@@ -321,32 +290,7 @@
                     <div data-testid="finished-view">
                         <p class="label-eyebrow">Game over</p>
                         <h2 class="mt-2 mb-6 font-display text-3xl font-semibold text-text">Final standings</h2>
-                        <ul class="flex flex-col gap-2" data-testid="standings-bars">
-                            <template x-for="bar in standingsBars" :key="bar.playerId">
-                                <li class="rounded-md border bg-surface px-4 py-3"
-                                    :class="bar.isMe ? 'border-accent-line' : 'border-border-soft'"
-                                    :data-rank="bar.rank"
-                                    :data-player-id="bar.playerId"
-                                    :aria-current="bar.isMe ? 'true' : null"
-                                    data-standings-row>
-                                    <div class="flex items-baseline justify-between gap-3 mb-2">
-                                        <span class="flex items-center gap-2 min-w-0">
-                                            <span class="font-display font-bold text-accent tabular-nums shrink-0"
-                                                  x-text="bar.rank"></span>
-                                            <span class="truncate" x-text="bar.displayName" data-standings-name></span>
-                                            <template x-if="bar.isMe">
-                                                <span class="hud-chip shrink-0">You</span>
-                                            </template>
-                                        </span>
-                                        <span class="font-display font-bold tabular-nums shrink-0"
-                                              x-text="bar.displayTotal" data-standings-total></span>
-                                    </div>
-                                    <progress class="block w-full h-2 bg-border rounded-full overflow-hidden appearance-none [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:bg-accent [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear [&::-moz-progress-bar]:bg-accent [&::-moz-progress-bar]:rounded-full"
-                                              :value="bar.displayTotal" :max="maxStandingsTotal"
-                                              aria-hidden="true"></progress>
-                                </li>
-                            </template>
-                        </ul>
+                        {{template "standings-bars" .}}
                         <p class="mt-6 text-text-dim">Thanks for playing!</p>
                     </div>
                 </template>

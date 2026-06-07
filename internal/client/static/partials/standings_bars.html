@@ -1,0 +1,28 @@
+{{define "standings-bars"}}
+<ul class="flex flex-col gap-2" data-testid="standings-bars">
+    <template x-for="bar in standingsBars" :key="bar.playerId">
+        <li class="rounded-md border bg-surface px-4 py-3"
+            :class="bar.isMe ? 'border-accent-line' : 'border-border-soft'"
+            :data-rank="bar.rank"
+            :data-player-id="bar.playerId"
+            :aria-current="bar.isMe ? 'true' : null"
+            data-standings-row>
+            <div class="flex items-baseline justify-between gap-3 mb-2">
+                <span class="flex items-center gap-2 min-w-0">
+                    <span class="font-display font-bold text-accent tabular-nums shrink-0"
+                          x-text="bar.rank"></span>
+                    <span class="truncate" x-text="bar.displayName" data-standings-name></span>
+                    <template x-if="bar.isMe">
+                        <span class="hud-chip shrink-0">You</span>
+                    </template>
+                </span>
+                <span class="font-display font-bold tabular-nums shrink-0"
+                      x-text="bar.displayTotal" data-standings-total></span>
+            </div>
+            <progress class="block w-full h-2 bg-border rounded-full overflow-hidden appearance-none [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:bg-accent [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear [&::-moz-progress-bar]:bg-accent [&::-moz-progress-bar]:rounded-full"
+                  :value="bar.displayTotal" :max="maxStandingsTotal"
+                  aria-hidden="true"></progress>
+        </li>
+    </template>
+</ul>
+{{end}}
