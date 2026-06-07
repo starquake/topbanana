@@ -18,7 +18,7 @@ Styling uses **Tailwind CSS v4**, configured CSS-first (there is no `tailwind.co
 ### Where things live (`_tailwind.css`)
 
 - `@import "tailwindcss/..."` pulls in the preflight, theme, and utilities layers.
-- `@source` lines list the directories Tailwind scans for class names (the admin/auth/home templates, web JS, and the client static tree). A new template directory must be added here or its classes get purged from the build.
+- `@source` lines list the **only** directories Tailwind scans for class names (the admin/auth/home/host templates, web JS, the client static tree, and `frontend/shared`). Automatic detection is off (`source(none)` on the utilities import), so docs / tests / mockups never leak phantom utilities into `app.css` -- but a new template or JS directory must be added here or its classes get purged.
 - `@theme` defines the design tokens as CSS variables -- colours (`--color-bg`, `--color-surface`, `--color-accent`, `--color-cyan`, `--color-danger`, ...) and fonts (`--font-sans` Inter, `--font-display` Orbitron, `--font-mono`). Each token emits matching utilities, so `--color-accent` gives `bg-accent`, `text-accent`, `border-accent`.
 - `@layer base` / `@layer components` hold base element styles and reusable component classes assembled with `@apply`.
 
@@ -34,13 +34,21 @@ Styling uses **Tailwind CSS v4**, configured CSS-first (there is no `tailwind.co
 
 ## Application JS: esbuild bundles
 
-App JS is bundled per entry point with **esbuild**; the built, minified bundles are committed (like `app.css`). The source stays plain ES modules under `js/` (`components/`, `services/`, `util/`). This reverses the old "no bundler / no npm for application JS" rule (#295) for the **player client tree** (#721, slice 1).
+App JS is bundled per entry point with **esbuild**; the built, minified bundles are committed (like `app.css`). The source stays plain ES modules under `js/` (`components/`, `services/`, `util/`). This reversed the old "no bundler / no npm for application JS" rule (#295), via #721.
 
 - esbuild is a dev-only build tool declared in the root `package.json` + `package-lock.json` (separate from `test/e2e`'s Playwright deps). Nothing new ships at runtime.
 - `make js` rebuilds the client bundles; `make js-watch` rebuilds on change; `make js-check` (wired into `make check`, like `tailwind-check`) fails when the committed bundles drift from the source. **Rebuild and commit the bundles whenever you change client JS** or CI flags drift.
 - The committed bundles are embedded in the Go binary, so the distroless image needs no Node.
-- Slice 1 covers the player client tree (`internal/client/static/js/`) only: the entries `app.js` and `join.js` bundle their imported `components`/`services`/`util` modules. The one cross-tree module (`/assets/js/share.js`, served by the web tree) stays an **external runtime import** - it is not inlined until slice 2 adds the web/host tree and shared modules.
+- Both trees are bundled: the player client (`internal/client/static/js/`, entries `app.js` / `join.js`) and the web/host tree (`internal/web/static/js/`, entries `host-lobby.js` / `share.js`). Cross-tree shared modules live in `frontend/shared/` and are inlined into each tree's bundles via the `@shared/` import alias.
 - Vendored libraries (Alpine, anime.js) stay separate `<script>` tags referenced via `window.*` globals; the bundle does not include them.
+
+### Animation (anime.js v4)
+
+All animation goes through the shared `runAnim` wrapper (`frontend/shared/anim.js`), which no-ops to the final state under `prefers-reduced-motion` or a missing global. anime.js is **v4**: a v3-style parameter is silently ignored and the animation just snaps to its end, so use the v4 names.
+
+- `ease`, not v3 `easing`; ease names drop the prefix (`outQuad`, not `easeOutQuad`).
+- `on`-prefixed callbacks: `onUpdate` / `onComplete` / `onBegin`, not `update` / `complete` / `begin`.
+- Pass `onComplete` so `runAnim`'s reduced-motion skip path can land the final state.
 
 ## What to avoid
 

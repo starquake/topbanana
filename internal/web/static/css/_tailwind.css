@@ -15,10 +15,13 @@
 
 @import "tailwindcss/preflight.css" layer(base);
 @import "tailwindcss/theme.css" layer(theme);
-@import "tailwindcss/utilities.css" layer(utilities);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
 
-/* Scan every surface so utility classes used in any of them survive
- * tree-shaking. Paths are relative to this file at
+/* Automatic source detection is OFF (source(none) on the utilities import
+ * above): Tailwind scans ONLY the surfaces listed here, so docs, tests,
+ * mockups, and stale .claude worktrees can't leak phantom utilities into
+ * app.css (#386). List every surface that uses utility classes here, or its
+ * classes get purged. Paths are relative to this file at
  * internal/web/static/css/_tailwind.css. */
 @source "../../tmpl/admin";
 @source "../../tmpl/auth";
@@ -27,13 +30,6 @@
 @source "../js";
 @source "../../../client/static";
 @source "../../../../frontend/shared";
-
-/* Exclude per-agent worktrees from Tailwind v4's auto-content-detection.
- * The harness leaves `.claude/worktrees/<agent>/` checkouts behind even
- * after agents complete, and Tailwind v4 walks them despite .gitignore —
- * which inflates app.css with utilities only referenced inside those
- * stale checkouts and fails tailwind-check in CI (#386). */
-@source not "../../../../.claude/worktrees/**";
 
 @theme {
     /* Palette — same tokens as mockups/admin-redesign-tailwind/quiz-list.html. */
