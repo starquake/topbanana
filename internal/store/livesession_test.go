@@ -1275,13 +1275,15 @@ func TestLiveSessionStore_MarkPlayerLeft_NotParticipant(t *testing.T) {
 	}
 }
 
-// TestLiveSessionStore_MarkPlayerLeft_ExcludesFromStandings pins MP-10 on the
-// standings reads: a left player drops out of both the round and final
-// standings, while the stayer's scores are unchanged. ListAnswers, which also
-// backs scoring at close, deliberately still returns the left player's pick so
-// their score is recorded and counts toward the quiz leaderboard (decision 3);
-// the answered-order badges drop left players at the display layer instead.
-func TestLiveSessionStore_MarkPlayerLeft_ExcludesFromStandings(t *testing.T) {
+// TestLiveSessionStore_MarkPlayerLeft_KeepsPlayedInStandings pins #766: the
+// standings are a stable record of everyone who played, so a player who answered
+// and then left (closed their browser) keeps their score on both the round and
+// final boards across a TV refresh, while their score is unchanged. A player who
+// left without ever answering never played and so drops off. ListAnswers, which
+// also backs scoring at close, deliberately still returns the left player's pick
+// so their score is recorded (MP-10 decision 3); the answered-order badges drop
+// left players at the display layer instead.
+func TestLiveSessionStore_MarkPlayerLeft_KeepsPlayedInStandings(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.Open(t)
@@ -1302,56 +1304,79 @@ func TestLiveSessionStore_MarkPlayerLeft_ExcludesFromStandings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAnonymousPlayer stayer err = %v, want nil", err)
 	}
-	leaver, err := playerStore.CreateAnonymousPlayer(t.Context(), "lstn-go")
+	// playedLeaver answered before leaving; lobbyLeaver left without answering.
+	playedLeaver, err := playerStore.CreateAnonymousPlayer(t.Context(), "lstn-played")
 	if err != nil {
-		t.Fatalf("CreateAnonymousPlayer leaver err = %v, want nil", err)
+		t.Fatalf("CreateAnonymousPlayer playedLeaver err = %v, want nil", err)
+	}
+	lobbyLeaver, err := playerStore.CreateAnonymousPlayer(t.Context(), "lstn-lobby")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer lobbyLeaver err = %v, want nil", err)
 	}
 	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, stayer.ID); err != nil {
 		t.Fatalf("AddPlayer stayer err = %v, want nil", err)
 	}
-	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, leaver.ID); err != nil {
-		t.Fatalf("AddPlayer leaver err = %v, want nil", err)
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, playedLeaver.ID); err != nil {
+		t.Fatalf("AddPlayer playedLeaver err = %v, want nil", err)
+	}
+	if _, err = sessionStore.AddPlayer(t.Context(), sess.ID, lobbyLeaver.ID); err != nil {
+		t.Fatalf("AddPlayer lobbyLeaver err = %v, want nil", err)
 	}
 
-	// Both answer and score round-1 question 1; the leaver out-scores the stayer.
+	// Stayer and playedLeaver both answer and score round-1 question 1; the
+	// playedLeaver out-scores the stayer. lobbyLeaver never answers.
 	scoreAnswer(t, sessionStore, sess.ID, r1q1.ID, stayer.ID, r1q1.Options[0].ID, at, 100)
-	scoreAnswer(t, sessionStore, sess.ID, r1q1.ID, leaver.ID, r1q1.Options[0].ID, at, 200)
+	scoreAnswer(t, sessionStore, sess.ID, r1q1.ID, playedLeaver.ID, r1q1.Options[0].ID, at, 200)
 
-	if err = sessionStore.MarkPlayerLeft(t.Context(), "LSTN23", leaver.ID); err != nil {
-		t.Fatalf("MarkPlayerLeft err = %v, want nil", err)
+	if err = sessionStore.MarkPlayerLeft(t.Context(), "LSTN23", playedLeaver.ID); err != nil {
+		t.Fatalf("MarkPlayerLeft playedLeaver err = %v, want nil", err)
+	}
+	if err = sessionStore.MarkPlayerLeft(t.Context(), "LSTN23", lobbyLeaver.ID); err != nil {
+		t.Fatalf("MarkPlayerLeft lobbyLeaver err = %v, want nil", err)
 	}
 
 	roundStandings, err := sessionStore.ListRoundStandings(t.Context(), sess.ID, round1)
 	if err != nil {
 		t.Fatalf("ListRoundStandings err = %v, want nil", err)
 	}
-	if got, want := len(roundStandings), 1; got != want {
-		t.Fatalf("round standings after leave = %d, want %d (only the stayer)", got, want)
+	// The stayer and the player who answered before leaving both appear; the
+	// player who left without answering does not.
+	if got, want := len(roundStandings), 2; got != want {
+		t.Fatalf("round standings after leave = %d, want %d (stayer + played leaver)", got, want)
 	}
-	if got, want := roundStandings[0].PlayerID, stayer.ID; got != want {
-		t.Errorf("round standings player = %d, want %d (the stayer)", got, want)
+	if got, want := roundStandings[0].PlayerID, playedLeaver.ID; got != want {
+		t.Errorf("round standings leader = %d, want %d (the played leaver, top score)", got, want)
+	}
+	if got, want := roundStandings[0].RoundScore, 200; got != want {
+		t.Errorf("played leaver round score = %d, want %d (score survives the leave)", got, want)
+	}
+	if got, want := roundStandings[1].PlayerID, stayer.ID; got != want {
+		t.Errorf("round standings runner-up = %d, want %d (the stayer)", got, want)
 	}
 
 	finalStandings, err := sessionStore.ListFinalStandings(t.Context(), sess.ID)
 	if err != nil {
 		t.Fatalf("ListFinalStandings err = %v, want nil", err)
 	}
-	if got, want := len(finalStandings), 1; got != want {
-		t.Fatalf("final standings after leave = %d, want %d (only the stayer)", got, want)
+	if got, want := len(finalStandings), 2; got != want {
+		t.Fatalf("final standings after leave = %d, want %d (stayer + played leaver)", got, want)
 	}
-	if got, want := finalStandings[0].PlayerID, stayer.ID; got != want {
-		t.Errorf("final standings player = %d, want %d (the stayer)", got, want)
+	if got, want := finalStandings[0].PlayerID, playedLeaver.ID; got != want {
+		t.Errorf("final standings leader = %d, want %d (the played leaver)", got, want)
+	}
+	if got, want := finalStandings[0].TotalScore, 200; got != want {
+		t.Errorf("played leaver final total = %d, want %d (score survives the leave)", got, want)
 	}
 
 	// ListAnswers also backs scoring at close, so it must NOT drop the left
-	// player: their recorded pick stays readable so the runner's score (and
-	// thus their quiz-leaderboard contribution) survives a mid-question leave.
+	// player: their recorded pick stays readable so the runner's score survives a
+	// mid-question leave (the stayer's and the played leaver's, two picks).
 	answers, err := sessionStore.ListAnswers(t.Context(), sess.ID, r1q1.ID)
 	if err != nil {
 		t.Fatalf("ListAnswers err = %v, want nil", err)
 	}
 	if got, want := len(answers), 2; got != want {
-		t.Fatalf("answers after leave = %d, want %d (both, scoring read is unfiltered)", got, want)
+		t.Fatalf("answers after leave = %d, want %d (both pickers, scoring read is unfiltered)", got, want)
 	}
 }
 
