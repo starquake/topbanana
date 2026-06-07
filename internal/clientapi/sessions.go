@@ -80,10 +80,8 @@ func HandleSessionCreate(logger *slog.Logger, service *livesession.Service) http
 // or unnamed player claims players.display_name through the shared claim flow
 // before joining; a logged-in named player keeps their account name), so the
 // response echoes that current name straight off the context player. Returns
-// 404 when the join code is unknown, 409 when the session has already left the
-// lobby (v1 has no late join), and 403 when the player has already finished a
-// session of the same quiz (a live quiz is played once until an admin resets
-// it).
+// 404 when the join code is unknown and 409 when the session has already left
+// the lobby (v1 has no late join).
 func HandleSessionJoin(logger *slog.Logger, service *livesession.Service) http.Handler {
 	type joinResponse struct {
 		DisplayName string `json:"displayName"`
@@ -108,8 +106,6 @@ func HandleSessionJoin(logger *slog.Logger, service *livesession.Service) http.H
 				http.NotFound(w, r)
 			case errors.Is(err, livesession.ErrLobbyClosed):
 				http.Error(w, "this game has already started", http.StatusConflict)
-			case errors.Is(err, livesession.ErrAlreadyPlayed):
-				http.Error(w, "you have already played this quiz", http.StatusForbidden)
 			default:
 				writeInternalError(w, r, logger, "error joining session", err)
 			}

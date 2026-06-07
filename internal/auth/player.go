@@ -331,11 +331,6 @@ type AdminPlayerStore interface {
 	ListFinishedSessionPlaysForPlayer(
 		ctx context.Context, playerID, limit int64,
 	) ([]*FinishedSessionPlay, error)
-	// ResetLiveSessionPlaysForPlayerOnQuiz hard-deletes the player's
-	// session_answers and session_players rows across every session of the
-	// given quiz, clearing the replay gate so the player can join a new
-	// session of it.
-	ResetLiveSessionPlaysForPlayerOnQuiz(ctx context.Context, playerID, quizID int64) error
 	// SetPlayerEmailVerifiedNow stamps email_verified_at to the
 	// current wall-clock time. Idempotent against an already-verified
 	// row (the timestamp is refreshed). Returns ErrPlayerNotFound when

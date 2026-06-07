@@ -56,12 +56,6 @@ var (
 	// part of the current question, or the answer window has closed.
 	ErrQuestionNotOpen = errors.New("no question is open for answers")
 
-	// ErrAlreadyPlayed is returned by [Service.Join] when the player has
-	// already sat through a finished session of the quiz. A live quiz may
-	// be played once; an admin reset clears the participation so the player
-	// can join again. Handlers map it to 403.
-	ErrAlreadyPlayed = errors.New("player has already played this quiz")
-
 	// ErrLobbyClosed is returned by [Service.Join] when the session has
 	// already left the lobby: the lobby closes at start and v1 has no
 	// late join. Handlers map it to 409.
@@ -256,10 +250,6 @@ type Store interface {
 	// lobby roster populated. Returns [ErrSessionNotFound] when no session
 	// uses the code.
 	GetSessionByJoinCode(ctx context.Context, joinCode string) (*Session, error)
-	// PlayerFinishedSessionForQuiz reports whether the player has a roster
-	// row in a finished session of the given quiz. Backs the replay gate in
-	// [Service.Join].
-	PlayerFinishedSessionForQuiz(ctx context.Context, playerID, quizID int64) (bool, error)
 	// SessionHasPlayer reports whether the player has ever held a roster row in
 	// the session identified by join code, regardless of left_at. Backs the
 	// reconnect/resume gate in [Service.Join]: a prior participant (even one
@@ -526,11 +516,9 @@ func (s *Service) CreateSession(ctx context.Context, quizID, hostPlayerID int64)
 // first, and a logged-in named player keeps their account name. Join just adds
 // the roster row; the displayed name comes from the players join on the
 // roster/standings reads, so a rename propagates everywhere. Returns
-// [ErrSessionNotFound] when the code resolves to no session,
+// [ErrSessionNotFound] when the code resolves to no session and
 // [ErrLobbyClosed] when the session has already left the lobby (v1 has no
-// late join), and [ErrAlreadyPlayed] when the player has already finished a
-// session of the same quiz (a live quiz is played once until an admin resets
-// it).
+// late join).
 func (s *Service) Join(ctx context.Context, joinCode string, playerID int64) (*Player, error) {
 	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
 	if err != nil {
@@ -552,14 +540,6 @@ func (s *Service) Join(ctx context.Context, joinCode string, playerID int64) (*P
 		if !joined {
 			return nil, ErrLobbyClosed
 		}
-	}
-
-	played, err := s.store.PlayerFinishedSessionForQuiz(ctx, playerID, sess.QuizID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check prior play: %w", err)
-	}
-	if played {
-		return nil, ErrAlreadyPlayed
 	}
 
 	player, err := s.store.AddPlayer(ctx, sess.ID, playerID)

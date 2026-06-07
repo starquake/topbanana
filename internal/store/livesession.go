@@ -100,22 +100,6 @@ func (s *LiveSessionStore) GetSessionByJoinCode(
 	return sess, nil
 }
 
-// PlayerFinishedSessionForQuiz reports whether the player has a roster row
-// in a finished session of the given quiz.
-func (s *LiveSessionStore) PlayerFinishedSessionForQuiz(
-	ctx context.Context, playerID, quizID int64,
-) (bool, error) {
-	finished, err := s.q.PlayerFinishedSessionForQuiz(ctx, db.PlayerFinishedSessionForQuizParams{
-		PlayerID: playerID,
-		QuizID:   quizID,
-	})
-	if err != nil {
-		return false, fmt.Errorf("failed to check player finished session for quiz: %w", err)
-	}
-
-	return finished, nil
-}
-
 // SessionHasPlayer reports whether the player has ever held a roster row in
 // the session identified by join code, regardless of left_at. Backs the
 // reconnect/resume gate in [livesession.Service.Join].
