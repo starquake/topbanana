@@ -236,7 +236,18 @@ func (r *Runner) advance(ctx context.Context, sessionID string, now time.Time) {
 // leaves the lobby into its first round, the same transition host "Start now"
 // drives. A lobby with no armed countdown (start_at nil) is a no-op - the host
 // controls the start; the runner never auto-starts on its own.
+//
+// A session already marked started (started_at set) but still in the lobby is
+// the abandoned-Begin state (#781): host "Start now" won MarkStarted, then the
+// detached first-round transition failed before it could run. The runner heals
+// it on the next tick by entering the first round directly, since the session
+// is already started.
 func (r *Runner) advanceLobby(ctx context.Context, sess *Session, now time.Time) {
+	if sess.StartedAt != nil {
+		r.enterFirstRound(ctx, sess, now)
+
+		return
+	}
 	if sess.StartAt == nil || now.Before(*sess.StartAt) {
 		return
 	}

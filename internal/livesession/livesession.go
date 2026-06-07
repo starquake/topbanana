@@ -115,6 +115,13 @@ const (
 	AbandonTimeout = 3 * time.Minute
 )
 
+// beginTimeout bounds the detached first-round transition [Service.Start]
+// hands to the runner. The transition runs on a context derived from
+// [context.WithoutCancel] so a host disconnect ending the HTTP request cannot
+// abandon it mid-flight and strand the session started-but-still-in-lobby
+// (#781); this caps the detached work so it cannot run unbounded.
+const beginTimeout = 10 * time.Second
+
 // errGetSessionByCodeFmt is the wrap format every code-keyed lookup shares
 // when GetSessionByJoinCode fails, so the wrapped sentinel
 // ([ErrSessionNotFound]) still surfaces to callers via [errors.Is].
@@ -597,7 +604,12 @@ func (s *Service) Start(ctx context.Context, joinCode string, hostPlayerID int64
 	}
 
 	if s.advancer != nil {
-		s.advancer.Begin(ctx, sess.ID)
+		// Detach from the request context so a host disconnect cannot cancel
+		// the first-round transition and leave the session started-but-still-in-
+		// lobby. The runner's next tick is the backstop if this still fails.
+		beginCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), beginTimeout)
+		defer cancel()
+		s.advancer.Begin(beginCtx, sess.ID)
 	}
 
 	return nil

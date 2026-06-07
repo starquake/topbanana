@@ -592,6 +592,46 @@ func TestRunner_CancelStartStopsCountdown(t *testing.T) {
 	}
 }
 
+// TestRunner_RecoversStartedSessionStuckInLobby pins the #781 self-heal: a
+// session marked started (started_at set) but still in the lobby - the state
+// left behind when host "Start now" won MarkStarted but the detached
+// first-round transition was abandoned (host disconnect) before it ran - is
+// advanced into round_intro on the next runner tick, with no armed countdown
+// and without the runner having won MarkStarted itself.
+func TestRunner_RecoversStartedSessionStuckInLobby(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	sessionID := h.sessionID(t)
+
+	// Reproduce the stuck state directly: stamp started_at (phase stays lobby),
+	// the same row MarkStarted leaves behind, then skip Begin to mimic the
+	// abandoned first-round transition.
+	won, err := h.store.MarkStarted(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("MarkStarted err = %v, want nil", err)
+	}
+	if !won {
+		t.Fatal("MarkStarted won = false, want true (a fresh lobby starts)")
+	}
+	stuck := h.reload(t)
+	if got, want := stuck.Phase, PhaseLobby; got != want {
+		t.Fatalf("phase after MarkStarted = %q, want %q (stuck in lobby)", got, want)
+	}
+	if stuck.StartedAt == nil {
+		t.Fatal("StartedAt after MarkStarted = nil, want a timestamp")
+	}
+
+	// The next tick heals it into the first round's intro, independent of any
+	// armed countdown.
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseRoundIntro; got != want {
+		t.Fatalf("phase after recovery tick = %q, want %q", got, want)
+	}
+}
+
 // TestRunner_StalePlayerDoesNotStallEarlyClose pins the MP-10 active-player
 // rule: a session with one active player (fresh heartbeat) who answers and one
 // stale player (last_seen far in the past) who never answers closes the
