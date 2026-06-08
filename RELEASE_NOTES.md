@@ -2,6 +2,33 @@
 
 What changed in each released version of Top Banana! The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.6.3 — 2026-06-08
+
+Top Banana now runs live hosted quizzes, where a host opens a session and players answer each question together, with standings shown between rounds.
+
+### Players
+- A live quiz is joined by scanning the QR code or entering the room code on the host's screen.
+- All players answer each question at the same time; a short get-ready beat precedes the answers, then the correct option and the order in which players answered are revealed.
+- Standings appear between rounds and on a final screen, shown as a bar graph that animates as scores change.
+- A reload, a dropped connection, or switching away from the tab returns the player to the current question or the lobby.
+- A logged-in player who has set a display name joins under that name without the name-entry step.
+- Each live game is its own session: its scores stay with that session, do not change a quiz's solo leaderboard, and a quiz can be hosted again for new players.
+
+### Hosts
+- A live session presents on a shared screen with the room code, QR code, live roster, the current question, answered order, and standings.
+- Quizzes have a solo or live play mode, set when a quiz is created or imported.
+- The host can start a last-call countdown that begins the game when it ends.
+- The quiz authoring screen has a clearer layout and reorder controls; the admin area links to the host's profile, with log out moved to the footer.
+- Deleting a round of a quiz that has already been played now works.
+
+### Visual / chrome
+- Standings bars animate as scores grow and rows change rank, and render correctly at a score of zero on every platform.
+- The host screen's join URL is easier to read, and question results are announced to screen readers.
+
+### Behind the scenes
+- A private quiz's title and description no longer appear on its public share-link preview.
+- The server requires a sufficiently long SESSION_KEY and checks the database connection settings at startup.
+
 ## v2026.6.2 — 2026-06-04
 
 The site fonts now appear on the first visit instead of only after a refresh.
