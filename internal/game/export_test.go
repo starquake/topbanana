@@ -1,6 +1,11 @@
 package game
 
-import "github.com/starquake/topbanana/internal/quiz"
+import (
+	"context"
+	"time"
+
+	"github.com/starquake/topbanana/internal/quiz"
+)
 
 // Test-only re-exports of internal helpers (#: blackbox-test sweep
 // against the "prefer dot-import blackbox tests" rule in the
@@ -53,3 +58,19 @@ const (
 	ExportSlotKindQuestion      = slotKindQuestion
 	ExportSlotKindRoundBoundary = slotKindRoundBoundary
 )
+
+// ExportIntroBoundaryWindow drives buildRoundBoundaryItem on the intro
+// phase, which returns before touching the stores, and returns the
+// resulting StartedAt/ExpiredAt so a test can assert the boundary window
+// is always positive, even when the quiz default time limit is zero.
+func ExportIntroBoundaryWindow(qz *quiz.Quiz) (startedAt, expiredAt time.Time) {
+	svc := &Service{}
+	item, err := svc.buildRoundBoundaryItem(
+		context.Background(), &Game{}, qz, 0, &quiz.Round{}, RoundPhaseIntro,
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	return item.StartedAt, item.ExpiredAt
+}
