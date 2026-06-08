@@ -22,6 +22,11 @@ env:
 jobs:
   deploy-staging:
     runs-on: ubuntu-latest
+    # Read-only token: the runner resolves + verifies the image digest
+    # and the host pulls by it; nothing here writes packages.
+    permissions:
+      contents: read
+      packages: read
     if: (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging')
     environment:
       name: staging
@@ -42,6 +47,50 @@ jobs:
           source: "deployments/demo/docker-compose.staging.yml"
           target: "~/topbanana-staging"
           strip_components: 2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log into registry ${{ env.REGISTRY }}
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: 'v2.2.4'
+
+      # Resolve the mutable :edge tag to the immutable digest the host
+      # pulls. CI publishes :edge only from main's docker-build, so it
+      # points at this commit's tested, signed image. Pinning the deploy
+      # to the digest means a later tag move cannot swap the running bytes.
+      - name: Resolve image digest
+        id: digest
+        env:
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:edge
+        run: |
+          set -euo pipefail
+          DIGEST="$(docker buildx imagetools inspect "$IMAGE_REF" --format '{{.Manifest.Digest}}')"
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "ERROR: could not resolve a digest for ${IMAGE_REF} (got '${DIGEST}')" >&2
+            exit 1
+          fi
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      # Reject the deploy unless the digest carries a valid keyless
+      # signature from this repo's CI workflow on main. docker-build
+      # signs the digest there; the signature binds to the digest, so a
+      # forged or untrusted image fails here before the host pulls it.
+      - name: Verify image signature
+        env:
+          IMAGE_DIGEST_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.digest.outputs.digest }}
+        run: |
+          cosign verify "$IMAGE_DIGEST_REF" \
+            --certificate-identity-regexp '^https://github\.com/starquake/topbanana/\.github/workflows/ci\.yml@refs/heads/main$' \
+            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 
       - name: Deploy to staging server
         uses: appleboy/ssh-action@v1.2.5
@@ -78,7 +127,7 @@ jobs:
           # backfills.
           ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
           IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          IMAGE_TAG: edge
+          IMAGE_DIGEST: ${{ steps.digest.outputs.digest }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
         with:
@@ -90,7 +139,7 @@ jobs:
           # bakes in a blank, which the compose ${VAR:?…} guard then
           # rejects on boot. Keep this list in lockstep with the env block
           # above and the .env heredoc below.
-          envs: SESSION_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URL,SMTP_HOST,SMTP_PORT,SMTP_USERNAME,SMTP_PASSWORD,SMTP_FROM,SMTP_TLS,BASE_URL,REGISTRATION_ENABLED,ADMIN_EMAILS,IMAGE_NAME,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR
+          envs: SESSION_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URL,SMTP_HOST,SMTP_PORT,SMTP_USERNAME,SMTP_PASSWORD,SMTP_FROM,SMTP_TLS,BASE_URL,REGISTRATION_ENABLED,ADMIN_EMAILS,IMAGE_NAME,IMAGE_DIGEST,GITHUB_TOKEN,GITHUB_ACTOR
           script: |
             set -e
             if [ -z "$SESSION_KEY" ]; then
@@ -121,7 +170,7 @@ jobs:
             REGISTRATION_ENABLED='${REGISTRATION_ENABLED}'
             ADMIN_EMAILS='${ADMIN_EMAILS}'
             IMAGE_NAME='${IMAGE_NAME}'
-            IMAGE_TAG='${IMAGE_TAG}'
+            IMAGE_DIGEST='${IMAGE_DIGEST}'
             EOF
             mv -f docker-compose.staging.yml docker-compose.yml
             echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
@@ -145,6 +194,11 @@ jobs:
 
   deploy-production:
     runs-on: ubuntu-latest
+    # Read-only token: the runner resolves + verifies the image digest
+    # and the host pulls by it; nothing here writes packages.
+    permissions:
+      contents: read
+      packages: read
     if: (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.environment == 'production')
     environment:
       name: production
@@ -175,6 +229,51 @@ jobs:
           source: "deployments/demo/docker-compose.production.yml"
           target: "~/topbanana-production"
           strip_components: 2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log into registry ${{ env.REGISTRY }}
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: 'v2.2.4'
+
+      # Resolve the release tag to the immutable digest the host pulls.
+      # The version tag is created by promote retagging the tested,
+      # signed sha-<commit> image from main, so the digest is the same
+      # one CI signed. Pinning the deploy to it means a later tag move
+      # cannot swap the running bytes.
+      - name: Resolve image digest
+        id: digest
+        env:
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          DIGEST="$(docker buildx imagetools inspect "$IMAGE_REF" --format '{{.Manifest.Digest}}')"
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "ERROR: could not resolve a digest for ${IMAGE_REF} (got '${DIGEST}')" >&2
+            exit 1
+          fi
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      # Reject the deploy unless the digest carries a valid keyless
+      # signature from this repo's CI workflow on main. docker-build
+      # signs the digest there; the signature binds to the digest, so a
+      # forged or untrusted image fails here before the host pulls it.
+      - name: Verify image signature
+        env:
+          IMAGE_DIGEST_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.digest.outputs.digest }}
+        run: |
+          cosign verify "$IMAGE_DIGEST_REF" \
+            --certificate-identity-regexp '^https://github\.com/starquake/topbanana/\.github/workflows/ci\.yml@refs/heads/main$' \
+            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 
       - name: Deploy to production server
         uses: appleboy/ssh-action@v1.2.5
@@ -211,7 +310,7 @@ jobs:
           # backfills.
           ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
           IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          IMAGE_TAG: ${{ steps.tag.outputs.tag }}
+          IMAGE_DIGEST: ${{ steps.digest.outputs.digest }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
         with:
@@ -223,7 +322,7 @@ jobs:
           # bakes in a blank, which the compose ${VAR:?…} guard then
           # rejects on boot. Keep this list in lockstep with the env block
           # above and the .env heredoc below.
-          envs: SESSION_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URL,SMTP_HOST,SMTP_PORT,SMTP_USERNAME,SMTP_PASSWORD,SMTP_FROM,SMTP_TLS,BASE_URL,REGISTRATION_ENABLED,ADMIN_EMAILS,IMAGE_NAME,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR
+          envs: SESSION_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URL,SMTP_HOST,SMTP_PORT,SMTP_USERNAME,SMTP_PASSWORD,SMTP_FROM,SMTP_TLS,BASE_URL,REGISTRATION_ENABLED,ADMIN_EMAILS,IMAGE_NAME,IMAGE_DIGEST,GITHUB_TOKEN,GITHUB_ACTOR
           script: |
             set -e
             if [ -z "$SESSION_KEY" ]; then
@@ -254,7 +353,7 @@ jobs:
             REGISTRATION_ENABLED='${REGISTRATION_ENABLED}'
             ADMIN_EMAILS='${ADMIN_EMAILS}'
             IMAGE_NAME='${IMAGE_NAME}'
-            IMAGE_TAG='${IMAGE_TAG}'
+            IMAGE_DIGEST='${IMAGE_DIGEST}'
             EOF
             mv -f docker-compose.production.yml docker-compose.yml
             echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
