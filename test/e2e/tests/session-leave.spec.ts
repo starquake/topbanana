@@ -1,3 +1,6 @@
+import { join } from 'node:path';
+
+import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
 import {
   registerForPending,
@@ -7,7 +10,29 @@ import {
   seedQuiz,
   setQuizMode,
   claimAndJoin,
+  execSqlite,
 } from './helpers';
+
+// makeQuizLive flips a seeded quiz to mode='live' and returns its id, mirroring
+// the sqlite3 shortcut the other live specs use.
+function makeQuizLive(title: string): number {
+  const dataDir = process.env.TOPBANANA_E2E_DATA_DIR;
+  if (!dataDir) {
+    throw new Error('TOPBANANA_E2E_DATA_DIR is not set; cannot mark a quiz live');
+  }
+  const dbFile = join(dataDir, `e2e-${test.info().parallelIndex}.db`);
+  const escapedTitle = title.replace(/'/g, "''");
+  const output = execSqlite(
+    dbFile,
+    `UPDATE quizzes SET mode = 'live' WHERE title = '${escapedTitle}'; SELECT id FROM quizzes WHERE title = '${escapedTitle}';`,
+  );
+  const lines = output.split('\n');
+  const id = Number.parseInt(lines[lines.length - 1], 10);
+  if (!Number.isInteger(id)) {
+    throw new Error(`makeQuizLive(${title}): could not resolve quiz id from sqlite output ${JSON.stringify(output)}`);
+  }
+  return id;
+}
 
 // MP-10 (#687): when a player leaves, their row drops out of the live roster
 // on the host/TV surface at once. Two players join from separate anonymous
@@ -67,4 +92,59 @@ test('a player leaving drops out of the host roster live', async ({
     await aliceContext.close();
     await bobContext.close();
   }
+});
+
+// #794: the leave beacon must fire on pagehide, not only beforeunload, because
+// beforeunload is unreliable on mobile (a backgrounded tab the OS discards
+// never raises it). A player joins via the page, then pagehide is dispatched;
+// the component must sendBeacon to the leave endpoint. The guard against a
+// double-send is pinned by dispatching pagehide twice and asserting the beacon
+// went out exactly once.
+test('the leave beacon fires once on pagehide', async ({ page, baseURL }) => {
+  test.setTimeout(60_000);
+
+  const quizTitle = `Leave Pagehide ${Date.now()}`;
+  const dana = `Dana-${Date.now()}`;
+
+  // Spy on navigator.sendBeacon before any page script runs, recording every
+  // URL it is called with so the test can assert the leave went out (and only
+  // once). Keep the real send so the server-side leave still happens.
+  await page.addInitScript(() => {
+    const calls: string[] = [];
+    (window as unknown as { __beacons: string[] }).__beacons = calls;
+    const real = navigator.sendBeacon ? navigator.sendBeacon.bind(navigator) : null;
+    navigator.sendBeacon = (url: string | URL, data?: BodyInit | null) => {
+      calls.push(String(url));
+      return real ? real(url, data ?? null) : true;
+    };
+  });
+
+  const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath(), baseURL });
+  const host = await hostContext.newPage();
+  await seedQuiz(host, quizTitle);
+  const quizID = makeQuizLive(quizTitle);
+  const createResp = await host.request.post('/api/sessions', { data: { quizId: quizID } });
+  expect(createResp.status(), `create session: ${createResp.status()} ${await createResp.text()}`).toBe(201);
+  const { joinCode } = await createResp.json() as { joinCode: string };
+
+  await page.goto(`/join/${joinCode}`);
+  await page.getByTestId('join-name-input').fill(dana);
+  await page.getByTestId('join-name-submit').click();
+  await expect(page.getByTestId('lobby-roster').getByText(dana)).toBeVisible();
+
+  // Dispatch pagehide twice. The leave beacon must fire exactly once: the
+  // component's leftSent guard collapses the second event so the server gets a
+  // single (idempotent) leave.
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event('pagehide'));
+    window.dispatchEvent(new Event('pagehide'));
+  });
+
+  const beacons = await page.evaluate(
+    () => (window as unknown as { __beacons: string[] }).__beacons,
+  );
+  const leaveBeacons = beacons.filter((url) => url.includes(`/api/sessions/${joinCode}/leave`));
+  expect(leaveBeacons).toHaveLength(1);
+
+  await hostContext.close();
 });

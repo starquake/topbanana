@@ -29,6 +29,13 @@ import {
     applyStandingsFlip,
 } from '@shared/standings.js';
 
+// STATE_FAILURE_LIMIT is how many consecutive GET /state failures the host TV
+// tolerates before surfacing the "Connection problem, retrying..." banner
+// (#795). Mirrors the player lobby's threshold so both surfaces read the same.
+// The TV keeps refreshing off every SSE tick underneath; the banner just tells
+// the host why the screen looks frozen. Cleared on the next good read.
+const STATE_FAILURE_LIMIT = 3;
+
 function hostLobby(joinCode) {
     return {
         joinCode,
@@ -53,6 +60,15 @@ function hostLobby(joinCode) {
         // reveal beat (#247).
         revealing: false,
         connected: false,
+        // Surfaces a "Connection problem, retrying..." banner once GET /state
+        // has failed STATE_FAILURE_LIMIT times in a row (#795). Distinct from
+        // connected, which tracks the SSE channel: a failing state read with a
+        // live stream still freezes the TV, so this covers that gap. Cleared on
+        // the next good read.
+        connectionTrouble: false,
+        // Running count of consecutive GET /state failures, reset to 0 on any
+        // success.
+        stateFailures: 0,
         starting: false,
         startMessage: '',
         source: null,
@@ -146,13 +162,34 @@ function hostLobby(joinCode) {
                     { headers: { Accept: 'application/json' } },
                 );
                 if (!response.ok) {
+                    // A 404 means the session is gone; it is not a connection
+                    // fault, so it does not feed the trouble banner. Any other
+                    // status is a server-side error worth counting.
+                    if (response.status !== 404) {
+                        this.noteStateFailure();
+                    }
                     return;
                 }
                 const state = await response.json();
+                // A good read clears the failure budget and the banner.
+                this.stateFailures = 0;
+                this.connectionTrouble = false;
                 this.applyState(state);
             } catch (err) {
-                // A transient fetch failure is non-fatal: the next tick (or
-                // EventSource reconnect) drives another refresh.
+                // A transient fetch failure (network drop) is non-fatal: the
+                // next tick (or EventSource reconnect) drives another refresh.
+                // After several in a row the banner tells the host why the
+                // screen looks frozen.
+                this.noteStateFailure();
+            }
+        },
+
+        // noteStateFailure records one consecutive GET /state failure and
+        // flips the trouble banner on once the run reaches STATE_FAILURE_LIMIT.
+        noteStateFailure() {
+            this.stateFailures += 1;
+            if (this.stateFailures >= STATE_FAILURE_LIMIT) {
+                this.connectionTrouble = true;
             }
         },
 

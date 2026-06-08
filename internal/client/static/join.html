@@ -60,6 +60,11 @@
                 <form @submit.prevent="submitCode()" class="flex flex-col gap-4">
                     <div>
                         <label class="label-eyebrow" for="join-code">Room code</label>
+                        <!-- maxlength must track the server room-code length
+                             (joinCodeLength=6 in internal/livesession/joincode.go).
+                             If the server mints longer codes this hard limit
+                             would silently truncate a pasted code; bump it in
+                             lockstep. -->
                         <input id="join-code" type="text"
                                class="form-input font-mono uppercase tracking-[0.3em] text-center text-xl"
                                maxlength="6" autocomplete="off" autocapitalize="characters"
@@ -107,6 +112,18 @@
                 <template x-if="lobbyClosed">
                     <div class="feedback-banner feedback-danger mb-6" role="alert" data-testid="lobby-closed">
                         This game is no longer available.
+                    </div>
+                </template>
+
+                <!-- Connection-trouble banner (#795): after several consecutive
+                     non-404 state reads fail the player sees why the roster
+                     looks frozen, while the component keeps retrying off every
+                     SSE tick and foreground return. Cleared on the next good
+                     read. A 404 flips lobbyClosed instead, so this never stacks
+                     with the closed banner above. -->
+                <template x-if="!lobbyClosed && connectionTrouble">
+                    <div class="feedback-banner feedback-danger mb-6" role="status" data-testid="connection-trouble">
+                        Connection problem, retrying...
                     </div>
                 </template>
 

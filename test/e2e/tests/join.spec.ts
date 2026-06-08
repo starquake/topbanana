@@ -127,4 +127,41 @@ test.describe('player join + lobby', () => {
 
     await hostContext.close();
   });
+
+  // #793: a player who reaches the name form, then submits after the host has
+  // already started the game, gets a 409 closed on join. They must land on the
+  // terminal "this game is no longer available" view, not sit on the dead name
+  // form with an error under it.
+  test('submitting the name after the game has started shows the closed view', async ({ page }) => {
+    const quizTitle = `Live Closed ${Date.now()}`;
+    const cara = `Cara-${Date.now()}`;
+
+    const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath() });
+    const host = await hostContext.newPage();
+    await seedQuiz(host, quizTitle);
+    const quizID = makeQuizLive(quizTitle);
+    const createResp = await host.request.post('/api/sessions', { data: { quizId: quizID } });
+    expect(createResp.status()).toBe(201);
+    const { joinCode } = await createResp.json() as { joinCode: string };
+
+    // The player reaches the name form via the deep link but has not joined yet.
+    await page.goto(`/join/${joinCode}`);
+    await expect(page.getByTestId('join-name-input')).toBeVisible();
+    await page.getByTestId('join-name-input').fill(cara);
+
+    // The host starts the session (no players required), closing the lobby to
+    // any new join. v1 has no late join, so the pending player's join now 409s.
+    const startResp = await host.request.post(`/api/sessions/${joinCode}/start`);
+    expect(startResp.status(), `start session: ${startResp.status()} ${await startResp.text()}`).toBe(204);
+
+    // Submitting now routes to the terminal closed view rather than leaving an
+    // error under the name form.
+    await page.getByTestId('join-name-submit').click();
+    await expect(page.getByTestId('lobby-closed')).toBeVisible();
+    await expect(page.getByTestId('lobby-closed')).toContainText('no longer available');
+    // The name form is gone (the lobby stage is showing the closed banner).
+    await expect(page.getByTestId('join-name-input')).toBeHidden();
+
+    await hostContext.close();
+  });
 });
