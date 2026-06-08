@@ -389,6 +389,10 @@ func (p *spyPublisher) Publish(code string, phase Phase) Tick {
 	return Tick{Version: uint64(len(p.codes)), Phase: phase}
 }
 
+// Forget satisfies Publisher; the service never calls it (only the runner does
+// at finish), so the spy need only record nothing here.
+func (*spyPublisher) Forget(_ string) {}
+
 func TestService_Join_PublishesTick(t *testing.T) {
 	t.Parallel()
 

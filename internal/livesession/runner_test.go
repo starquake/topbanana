@@ -43,6 +43,7 @@ type runnerHarness struct {
 	runner  *Runner
 	clock   *fakeClock
 	store   *store.LiveSessionStore
+	hub     *Hub
 	db      *sql.DB
 	code    string
 	players []int64
@@ -113,6 +114,7 @@ func newRunnerHarness(t *testing.T, start time.Time, rounds [][]bool) *runnerHar
 		runner:  runner,
 		clock:   clock,
 		store:   sessionStore,
+		hub:     hub,
 		db:      db,
 		code:    sess.JoinCode,
 		players: players,
@@ -371,6 +373,43 @@ func TestRunner_FinalRoundSkipsRoundResults(t *testing.T) {
 	h.tick(ctx)
 	if got, want := h.phase(t), PhaseFinished; got != want {
 		t.Fatalf("phase after final round reveal = %q, want %q (no round_results)", got, want)
+	}
+}
+
+// TestRunner_FinishForgetsHubVersion pins the #791 leak fix: once the runner
+// finishes a session, the hub drops its version entry so it does not live for
+// the process lifetime. While the session is running the entry exists (Publish
+// created it); after finish it is gone.
+func TestRunner_FinishForgetsHubVersion(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+
+	// Host Start publishes the first tick, so the hub now holds a version entry.
+	if err := h.service.Start(ctx, h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+	if got, want := ExportHubHasVersion(h.hub, h.code), true; got != want {
+		t.Fatalf("has version while running = %v, want %v", got, want)
+	}
+
+	// Drive the single round to finished: intro beat -> question -> timeout
+	// reveal -> finish.
+	h.clock.advance(runnerCfg.RoundIntroBeat)
+	h.tick(ctx)
+	h.clock.advance(11 * time.Second)
+	h.tick(ctx)
+	h.clock.advance(runnerCfg.RevealBeat)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseFinished; got != want {
+		t.Fatalf("phase after final reveal = %q, want %q", got, want)
+	}
+
+	// The finished session is forgotten: the version entry is evicted.
+	if got, want := ExportHubHasVersion(h.hub, h.code), false; got != want {
+		t.Errorf("has version after finish = %v, want %v (entry must be evicted)", got, want)
 	}
 }
 
