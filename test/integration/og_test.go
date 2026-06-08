@@ -195,6 +195,70 @@ func TestOGMetadata_LiveQuiz(t *testing.T) {
 	})
 }
 
+// TestOGMetadata_PrivateQuiz pins the #783 share-card tightening: a
+// /play/{slug} link for a private quiz must fall back to the sitewide
+// default OG card so an anonymous link-preview scraper cannot read the
+// quiz's title/description. The share card is unauthenticated with no
+// viewer context, so a private quiz never gets a rich card. A public quiz
+// still surfaces its own title/description.
+func TestOGMetadata_PrivateQuiz(t *testing.T) {
+	t.Parallel()
+
+	ctx, setup := setupIntegration(t)
+	baseURL := setup.BaseURL
+
+	privateQz := &quiz.Quiz{
+		Title:             "Confidential Private Quiz",
+		Slug:              "confidential-private-quiz",
+		Description:       "Title and description that must stay behind sign-in.",
+		CreatedByPlayerID: seededAdminID,
+		Visibility:        quiz.VisibilityPrivate,
+		Mode:              quiz.ModeSolo,
+	}
+	if err := setup.Stores.Quizzes.CreateQuiz(ctx, privateQz); err != nil {
+		t.Fatalf("CreateQuiz private err = %v, want nil", err)
+	}
+
+	publicQz := &quiz.Quiz{
+		Title:             "Open Public Quiz",
+		Slug:              "open-public-quiz",
+		Description:       "Listed and safe to preview.",
+		CreatedByPlayerID: seededAdminID,
+		Visibility:        quiz.VisibilityPublic,
+		Mode:              quiz.ModeSolo,
+	}
+	if err := setup.Stores.Quizzes.CreateQuiz(ctx, publicQz); err != nil {
+		t.Fatalf("CreateQuiz public err = %v, want nil", err)
+	}
+
+	t.Run("private quiz play link serves the default OG card", func(t *testing.T) {
+		t.Parallel()
+		assertSitewideOG(ctx, t, fmt.Sprintf("%s/play/%s-%d", baseURL, privateQz.Slug, privateQz.ID), baseURL)
+
+		body := getBody(ctx, t, fmt.Sprintf("%s/play/%s-%d", baseURL, privateQz.Slug, privateQz.ID))
+		if strings.Contains(body, privateQz.Title) {
+			t.Errorf("private quiz play card leaked title %q", privateQz.Title)
+		}
+		if strings.Contains(body, privateQz.Description) {
+			t.Errorf("private quiz play card leaked description %q", privateQz.Description)
+		}
+	})
+
+	t.Run("public quiz play link still injects its title and description", func(t *testing.T) {
+		t.Parallel()
+		body := getBody(ctx, t, fmt.Sprintf("%s/play/%s-%d", baseURL, publicQz.Slug, publicQz.ID))
+
+		wantTitle := fmt.Sprintf(`<meta property="og:title" content="%s - Top Banana!">`, publicQz.Title)
+		if !strings.Contains(body, wantTitle) {
+			t.Errorf("public quiz play card missing og:title %q", wantTitle)
+		}
+		wantDesc := fmt.Sprintf(`<meta property="og:description" content="%s">`, publicQz.Description)
+		if !strings.Contains(body, wantDesc) {
+			t.Errorf("public quiz play card missing og:description %q", wantDesc)
+		}
+	})
+}
+
 // assertSitewideOG fetches the URL and verifies the sitewide Open Graph
 // defaults are present in the response body. baseURL is the absolute
 // scheme://host the server is listening on; the og:image assertion uses
