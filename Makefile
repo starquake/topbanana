@@ -249,10 +249,10 @@ seed-dev:
 # first use (which is gitignored via build/) and reused on subsequent runs.
 #
 # v4 dropped tailwind.config.js — configuration now lives in CSS via the
-# @theme directive in internal/web/static/css/_tailwind.css. The leading
-# underscore tells go:embed to skip the file (the same convention Go uses
-# for test helpers), so the source CSS is not shipped in the binary even
-# though it sits next to the generated output.
+# @theme directive in frontend/web/css/tailwind.css. The source lives under
+# frontend/ (alongside the JS source), not in the served internal/*/static
+# trees, so the embed never ships it; only the generated output below is
+# committed and embedded.
 #
 # The generated output (internal/web/static/css/app.css) IS committed,
 # so the binary only has to exist on machines that intend to regenerate it.
@@ -260,7 +260,7 @@ seed-dev:
 
 TAILWIND_VERSION    := v4.3.0
 TAILWIND_BIN        := $(BIN_DIR)/tailwindcss-v4
-TAILWIND_INPUT      := internal/web/static/css/_tailwind.css
+TAILWIND_INPUT      := frontend/web/css/tailwind.css
 TAILWIND_OUTPUT     := internal/web/static/css/app.css
 
 # Pick the right asset for the current host. The release page ships
@@ -322,12 +322,12 @@ tailwind-check: $(TAILWIND_BIN)
 # Both the player client and the web/host app JS are bundled per entry point
 # with esbuild and the minified output is committed (like app.css), so the
 # binary embeds the bundles and the distroless image needs no Node at build
-# time. Source stays as plain ES modules; only how it is delivered changes
-# (#721). The genuinely-duplicated client logic (server clock, the per-question
-# countdown, the standings bar graph, the share dialog) lives once in
-# frontend/shared and is inlined into each tree's bundle through the @shared
-# alias, so neither bundle fetches a module from the other tree at runtime
-# (#721, slice 2).
+# time. Source stays as plain ES modules under frontend/{client,web}; only the
+# bundled output lands in the served internal/*/static trees (#721). The
+# genuinely-duplicated client logic (server clock, the per-question countdown,
+# the standings bar graph, the share dialog) lives once in frontend/shared and
+# is inlined into each tree's bundle through the @shared alias, so neither
+# bundle fetches a module from the other tree at runtime (#721, slice 2).
 #
 # esbuild is a dev-only build tool, installed from the committed
 # package.json + package-lock.json into node_modules/ (gitignored). The
@@ -336,13 +336,20 @@ tailwind-check: $(TAILWIND_BIN)
 ESBUILD_BIN     := node_modules/.bin/esbuild
 JS_DEPS         := node_modules/.package-lock.json
 
-JS_CLIENT_DIR   := internal/client/static/js
-JS_CLIENT_OUT   := $(JS_CLIENT_DIR)/dist
-JS_CLIENT_ENTRIES := $(JS_CLIENT_DIR)/app.js $(JS_CLIENT_DIR)/join.js
+# Source lives under frontend/; the bundles are emitted into the served
+# internal/*/static/js/dist trees and committed.
+JS_CLIENT_SRC   := frontend/client
+JS_CLIENT_OUT   := internal/client/static/js/dist
+JS_CLIENT_ENTRIES := $(JS_CLIENT_SRC)/app.js $(JS_CLIENT_SRC)/join.js
 
-JS_WEB_DIR      := internal/web/static/js
-JS_WEB_OUT      := $(JS_WEB_DIR)/dist
-JS_WEB_ENTRIES  := $(JS_WEB_DIR)/host-lobby.js $(JS_WEB_DIR)/share.js
+JS_WEB_SRC      := frontend/web
+JS_WEB_OUT      := internal/web/static/js/dist
+# host-lobby + share are the live-game / share bundles; the rest are small
+# standalone admin/auth page scripts that are bundled (minified) too, so the
+# served js tree holds only built output and never un-minified source (#756).
+JS_WEB_ENTRIES  := $(JS_WEB_SRC)/host-lobby.js $(JS_WEB_SRC)/share.js \
+                   $(JS_WEB_SRC)/cooldown.js $(JS_WEB_SRC)/copy-prompt.js \
+                   $(JS_WEB_SRC)/password-length.js $(JS_WEB_SRC)/quiz-reorder.js
 
 # Alpine 3 targets modern evergreen browsers; es2020 matches the syntax the
 # source already uses (async/await, optional chaining). The @shared alias
@@ -360,13 +367,18 @@ js: $(JS_DEPS)
 	$(ESBUILD_BIN) $(JS_CLIENT_ENTRIES) $(ESBUILD_FLAGS) --outdir=$(JS_CLIENT_OUT)
 	$(ESBUILD_BIN) $(JS_WEB_ENTRIES) $(ESBUILD_FLAGS) --outdir=$(JS_WEB_OUT)
 
-# Rebuild on change during development. Mirrors `make js` flags so the
-# watcher output matches what `make js` produces and never drifts from the
-# committed bundles. Watches both trees in one invocation.
-.PHONY: js-watch
-js-watch: $(JS_DEPS)
-	$(ESBUILD_BIN) $(JS_CLIENT_ENTRIES) $(JS_WEB_ENTRIES) $(ESBUILD_FLAGS) \
-	    --outbase=internal --outdir=internal --watch
+# Rebuild on change during development. One target per long-running watcher
+# (the client and web bundles write to different served dist dirs, so they
+# can't share a single esbuild invocation). Each mirrors `make js` flags so
+# the watcher output matches what `make js` produces and never drifts from the
+# committed bundles.
+.PHONY: js-watch-client
+js-watch-client: $(JS_DEPS)
+	$(ESBUILD_BIN) $(JS_CLIENT_ENTRIES) $(ESBUILD_FLAGS) --outdir=$(JS_CLIENT_OUT) --watch
+
+.PHONY: js-watch-web
+js-watch-web: $(JS_DEPS)
+	$(ESBUILD_BIN) $(JS_WEB_ENTRIES) $(ESBUILD_FLAGS) --outdir=$(JS_WEB_OUT) --watch
 
 # Rebuild each tree into a temp dir and diff against the committed bundles.
 # Wired into `make check` so a JS change without `make js` fails pre-commit

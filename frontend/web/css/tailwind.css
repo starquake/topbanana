@@ -22,14 +22,16 @@
  * mockups, and stale .claude worktrees can't leak phantom utilities into
  * app.css (#386). List every surface that uses utility classes here, or its
  * classes get purged. Paths are relative to this file at
- * internal/web/static/css/_tailwind.css. */
-@source "../../tmpl/admin";
-@source "../../tmpl/auth";
-@source "../../tmpl/home";
-@source "../../tmpl/host";
-@source "../js";
-@source "../../../client/static";
-@source "../../../../frontend/shared";
+ * frontend/web/css/tailwind.css. */
+@source "../../../internal/web/tmpl/admin";
+@source "../../../internal/web/tmpl/auth";
+@source "../../../internal/web/tmpl/home";
+@source "../../../internal/web/tmpl/host";
+@source "../../../internal/web/static/js";
+@source "../../../internal/client/static";
+@source "../*.js";
+@source "../../client";
+@source "../../shared";
 
 @theme {
     /* Palette — same tokens as mockups/admin-redesign-tailwind/quiz-list.html. */
