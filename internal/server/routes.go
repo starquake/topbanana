@@ -290,8 +290,8 @@ func addAuthRoutes(
 		mux.Handle(
 			"GET /login/google/callback",
 			auth.HandleGoogleCallback(
-				logger, googleAuth, csrfMgr, stores.OAuth, stores.Players, sessions, stores.GameMigrator,
-				cfg.RegistrationEnabled,
+				logger, googleAuth, csrfMgr, stores.OAuth, stores.Players, stores.AdminPlayers, sessions,
+				stores.GameMigrator, cfg.AdminEmails, cfg.RegistrationEnabled,
 			),
 		)
 	} else {

@@ -151,10 +151,11 @@ type Config struct {
 
 	SessionKey string
 
-	// AdminEmails is the list of email addresses that are promoted to admin on registration.
-	// Parsed from the comma-separated ADMIN_EMAILS env var. Match against the verified
-	// email keeps admin status pinned to the identity we already authenticate, not the
-	// display name a player can change.
+	// AdminEmails is the allowlist of email addresses promoted to admin once the
+	// address is proven verified (at email-verify-token consume or OAuth callback),
+	// not at registration. Parsed from the comma-separated ADMIN_EMAILS env var.
+	// Matching against the verified email keeps admin status pinned to the identity
+	// we already authenticate, not the display name a player can change.
 	AdminEmails []string
 
 	// RegistrationEnabled gates the /register routes. Defaults to false so registration is

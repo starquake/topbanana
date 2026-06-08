@@ -158,14 +158,26 @@ func HandleGoogleLogin(logger *slog.Logger, authn *GoogleAuthenticator) http.Han
 //
 // The find-or-link decision lives in linkOrCreateGooglePlayer; this
 // handler is just the request-shaped wrapper around it.
+//
+// adminEmails is the ADMIN_EMAILS allowlist; once the callback has a
+// verified, persisted player it promotes that player to admin when the
+// now-proven address matches an entry (#824), mirroring the verify-token
+// path. Google attests the address on every callback (the unverified
+// branch is already refused), so this upholds the "admin only on a
+// verified address" invariant. roles is the narrow setter used for that
+// promotion.
+//
+//nolint:revive // argument-limit: the callback genuinely needs every collaborator threaded in; the success tail is already split into finalizeGoogleSignIn (with its deps bundled), so the remaining list is the irreducible request-shaped surface.
 func HandleGoogleCallback(
 	logger *slog.Logger,
 	authn *GoogleAuthenticator,
 	csrfMgr *csrf.Manager,
 	identities OAuthIdentityStore,
 	players PlayerStore,
+	roles RoleSetter,
 	sessions *session.Manager,
 	games AnonymousGameMigrator,
+	adminEmails []string,
 	registrationEnabled bool,
 ) http.Handler {
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
@@ -230,15 +242,70 @@ func HandleGoogleCallback(
 			return
 		}
 
-		sessions.Set(w, player.ID, player.SessionVersion)
-		migrateGamesAfterSignIn(r.Context(), logger, players, games, sessionPlayerID, player.ID)
-		target := next
-		if target == "" {
-			target = landingPathFor(player.Role)
-		}
-		//nolint:gosec // G710: target is either landingPathFor (constant) or a SafeNextPath-validated relative path returned by readGoogleNext.
-		http.Redirect(w, r, target, http.StatusSeeOther)
+		finalizeGoogleSignIn(w, r, googleSignInDeps{
+			logger:      logger,
+			players:     players,
+			roles:       roles,
+			sessions:    sessions,
+			games:       games,
+			adminEmails: adminEmails,
+		}, player, sessionPlayerID, next)
 	})
+}
+
+// googleSignInDeps groups the collaborators finalizeGoogleSignIn needs.
+// Bundling them keeps the helper under revive's argument-count cap
+// without flattening the call site into a long positional list, the same
+// packaging the verify handler uses for verifyOutcome.
+type googleSignInDeps struct {
+	logger      *slog.Logger
+	players     PlayerStore
+	roles       RoleSetter
+	sessions    *session.Manager
+	games       AnonymousGameMigrator
+	adminEmails []string
+}
+
+// finalizeGoogleSignIn runs the success tail of the callback once a
+// verified, persisted player is in hand: best-effort admin promotion on
+// the now-proven address, the session cookie, anonymous-game migration,
+// and the redirect to the validated next path or the role landing. Split
+// out of HandleGoogleCallback so the constructor stays under revive's
+// function-length cap.
+//
+// Promotion mirrors the verify-token path (#824) and is idempotent: the
+// helper skips when the row is already admin or the email is not on the
+// allowlist, and logs+swallows any failure, so a promotion error never
+// blocks the login.
+func finalizeGoogleSignIn(
+	w http.ResponseWriter,
+	r *http.Request,
+	deps googleSignInDeps,
+	player *Player,
+	sessionPlayerID *int64,
+	next string,
+) {
+	promoteVerifiedAdminIfAllowlisted(
+		r.Context(), deps.logger, deps.players, deps.roles, deps.adminEmails, player.ID,
+	)
+
+	deps.sessions.Set(w, player.ID, player.SessionVersion)
+	migrateGamesAfterSignIn(r.Context(), deps.logger, deps.players, deps.games, sessionPlayerID, player.ID)
+	target := next
+	if target == "" {
+		// Resolve the landing from the freshly persisted role: the promotion
+		// above may have just changed it, and `player` was read before that.
+		// Mirrors the verify-token path's postVerifyLanding so a just-promoted
+		// admin reaches /admin instead of the player home. A read failure
+		// falls back to the pre-promotion role.
+		role := player.Role
+		if fresh, err := deps.players.GetPlayerByID(r.Context(), player.ID); err == nil {
+			role = fresh.Role
+		}
+		target = landingPathFor(role)
+	}
+	//nolint:gosec // G710: target is either landingPathFor (constant) or a SafeNextPath-validated relative path returned by readGoogleNext.
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 // validateCallbackRequest walks the cheap up-front checks on a

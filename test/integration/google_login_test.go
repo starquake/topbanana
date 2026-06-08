@@ -329,6 +329,106 @@ func TestGoogleLogin_CallbackRejectsStateMismatch(t *testing.T) {
 	}
 }
 
+// TestGoogleLogin_CallbackAllowlistedEmail_PromotesToAdmin pins the
+// OAuth half of #824: a Google sign-in whose verified email is on the
+// ADMIN_EMAILS allowlist is promoted to admin at the callback, the same
+// way the verify-token path promotes. A credentialled player is seeded
+// first so the subject is not the bootstrap first-registrant, which
+// would auto-promote it regardless and mask the allowlist path.
+func TestGoogleLogin_CallbackAllowlistedEmail_PromotesToAdmin(t *testing.T) {
+	t.Parallel()
+
+	mock := newGoogleMock(t)
+	mock.email = "allow@example.test"
+	mock.emailVerified = true
+
+	ctx, srv := startGoogleServerEnv(t, mock, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+		"ADMIN_EMAILS":         mock.email,
+	})
+	seedCredentialledPlayer(t, srv.DBURI, "bootstrap-admin", "bootstrap@example.test")
+
+	finalResp := driveGoogleFlow(ctx, t, authClient(t), srv.BaseURL, mock)
+	if got, want := finalResp.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("callback status = %d, want %d (location=%q)", got, want, finalResp.Location)
+	}
+	// A just-promoted admin lands on the admin surface: finalizeGoogleSignIn
+	// resolves the landing from the post-promotion role (mirroring the
+	// verify-token path), not the role read before promotion.
+	if got, want := finalResp.Location, "/admin/quizzes"; got != want {
+		t.Errorf("callback Location = %q, want %q (admin landing after promotion)", got, want)
+	}
+	role, _ := lookupPlayerRoleByEmail(t, srv.DBURI, mock.email)
+	if got, want := role, "admin"; got != want {
+		t.Errorf("role after Google sign-in = %q, want %q", got, want)
+	}
+}
+
+// TestGoogleLogin_CallbackNotAllowlisted_StaysPlayer pins the negative
+// case for #824: a Google sign-in absent from the allowlist keeps the
+// player role. A credentialled player is seeded first so the subject is
+// not the bootstrap first-registrant.
+func TestGoogleLogin_CallbackNotAllowlisted_StaysPlayer(t *testing.T) {
+	t.Parallel()
+
+	mock := newGoogleMock(t)
+	mock.email = "plain@example.test"
+	mock.emailVerified = true
+
+	ctx, srv := startGoogleServerEnv(t, mock, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+		"ADMIN_EMAILS":         "someone-else@example.test",
+	})
+	seedCredentialledPlayer(t, srv.DBURI, "bootstrap-admin", "bootstrap@example.test")
+
+	finalResp := driveGoogleFlow(ctx, t, authClient(t), srv.BaseURL, mock)
+	if got, want := finalResp.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("callback status = %d, want %d (location=%q)", got, want, finalResp.Location)
+	}
+	if got, want := finalResp.Location, "/"; got != want {
+		t.Errorf("callback Location = %q, want %q (player landing)", got, want)
+	}
+
+	role, _ := lookupPlayerRoleByEmail(t, srv.DBURI, mock.email)
+	if got, want := role, "player"; got != want {
+		t.Errorf("role after Google sign-in = %q, want %q", got, want)
+	}
+}
+
+// TestGoogleLogin_CallbackAlreadyAdminAllowlisted_NoOp pins the
+// idempotent skip in #824: a Google sign-in that links by email onto a
+// row already at admin must not rewrite the role. The seed leaves
+// role_changed_at NULL; an unwanted SetPlayerRole would stamp it, so the
+// still-NULL timestamp proves the promotion skipped the write.
+func TestGoogleLogin_CallbackAlreadyAdminAllowlisted_NoOp(t *testing.T) {
+	t.Parallel()
+
+	mock := newGoogleMock(t)
+	mock.email = "already-admin@example.test"
+	mock.emailVerified = true
+
+	ctx, srv := startGoogleServerEnv(t, mock, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+		"ADMIN_EMAILS":         mock.email,
+	})
+	seedAdminPlayerWithEmail(t, srv.DBURI, "already-admin", mock.email)
+
+	finalResp := driveGoogleFlow(ctx, t, authClient(t), srv.BaseURL, mock)
+	if got, want := finalResp.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("callback status = %d, want %d (location=%q)", got, want, finalResp.Location)
+	}
+	// Linked onto the existing admin row by email; no duplicate created.
+	requireDBRowCounts(t, srv.DBURI, mock.email, 1, 1)
+
+	role, roleChangedAt := lookupPlayerRoleByEmail(t, srv.DBURI, mock.email)
+	if got, want := role, "admin"; got != want {
+		t.Errorf("role after Google sign-in = %q, want %q (unchanged)", got, want)
+	}
+	if roleChangedAt.Valid {
+		t.Errorf("role_changed_at = %q, want NULL (no spurious role write)", roleChangedAt.String)
+	}
+}
+
 // driveGoogleFlow walks the GET /login/google -> mock auth ->
 // callback dance and returns the snapshot of the final callback
 // response. The body is drained + closed inside this helper so the
@@ -532,6 +632,98 @@ func seedPlayerWithEmail(t *testing.T, dbURI, displayName, email string) {
 	); err != nil {
 		t.Fatalf("seed insert err = %v, want nil", err)
 	}
+}
+
+// seedCredentialledPlayer inserts a row that carries a password_hash so
+// the OAuth bootstrap CASE (NOT EXISTS password OR identity) no longer
+// fires for the next Google sign-in. The allowlist-promotion tests seed
+// one of these first so the subject under test is not auto-promoted to
+// admin by the first-registrant rule, which would mask the allowlist
+// path.
+func seedCredentialledPlayer(t *testing.T, dbURI, displayName, email string) {
+	t.Helper()
+
+	db, err := sql.Open("sqlite", dbURI)
+	if err != nil {
+		t.Fatalf("sql.Open err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v, want nil", cerr)
+		}
+	})
+
+	if _, err := db.ExecContext(t.Context(),
+		`INSERT INTO players (display_name, email, password_hash, role, display_name_claimed)
+		 VALUES (?, ?, 'seed-hash', 'player', 1)`,
+		displayName, email,
+	); err != nil {
+		t.Fatalf("seed credentialled insert err = %v, want nil", err)
+	}
+}
+
+// seedAdminPlayerWithEmail inserts an already-admin row with the given
+// email so the already-admin no-op test has a row Google links onto by
+// email. role_changed_at is left NULL so the test can assert promotion
+// did not write it (an idempotent skip touches neither the role nor the
+// timestamp).
+func seedAdminPlayerWithEmail(t *testing.T, dbURI, displayName, email string) {
+	t.Helper()
+
+	db, err := sql.Open("sqlite", dbURI)
+	if err != nil {
+		t.Fatalf("sql.Open err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v, want nil", cerr)
+		}
+	})
+
+	if _, err := db.ExecContext(t.Context(),
+		`INSERT INTO players (display_name, email, role, display_name_claimed) VALUES (?, ?, 'admin', 1)`,
+		displayName, email,
+	); err != nil {
+		t.Fatalf("seed admin insert err = %v, want nil", err)
+	}
+}
+
+// lookupPlayerRoleByEmail returns the role + role_changed_at for the
+// single players row matching email. Fails when zero or more than one
+// row matches so the caller's assertion stays unambiguous.
+func lookupPlayerRoleByEmail(t *testing.T, dbURI, email string) (string, sql.NullString) {
+	t.Helper()
+
+	db, err := sql.Open("sqlite", dbURI)
+	if err != nil {
+		t.Fatalf("sql.Open err = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v, want nil", cerr)
+		}
+	})
+
+	var (
+		role          string
+		roleChangedAt sql.NullString
+		count         int
+	)
+	if scanErr := db.QueryRowContext(t.Context(),
+		`SELECT COUNT(*) FROM players WHERE email = ?`, email,
+	).Scan(&count); scanErr != nil {
+		t.Fatalf("count players by email %q err = %v, want nil", email, scanErr)
+	}
+	if got, want := count, 1; got != want {
+		t.Fatalf("players row count for email %q = %d, want %d", email, got, want)
+	}
+	if scanErr := db.QueryRowContext(t.Context(),
+		`SELECT role, role_changed_at FROM players WHERE email = ?`, email,
+	).Scan(&role, &roleChangedAt); scanErr != nil {
+		t.Fatalf("lookup role by email %q err = %v, want nil", email, scanErr)
+	}
+
+	return role, roleChangedAt
 }
 
 // startGoogleServer boots the app server with Google OAuth env vars
