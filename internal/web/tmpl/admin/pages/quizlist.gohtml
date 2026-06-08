@@ -53,7 +53,18 @@
                         <p class="mb-4 text-text-dim text-sm leading-relaxed line-clamp-2">{{.Description}}</p>
                     </div>
                     <footer class="flex items-center justify-between px-5 py-3.5 border-t border-border-soft text-text-dim text-sm">
-                        <span><strong class="text-text font-semibold mr-1">{{.QuestionCount}}</strong>&nbsp;questions</span>
+                        <div class="flex items-center gap-2.5">
+                            <span><strong class="text-text font-semibold mr-1">{{.QuestionCount}}</strong>&nbsp;questions</span>
+                            {{/* Play-mode badge (#829): a live quiz is hosted-only,
+                                 a solo quiz is self-paced. Grouped with the question
+                                 count so the card footer reads as one at-a-glance
+                                 metadata strip. */}}
+                            {{if eq .Mode "live"}}
+                                <span class="pill pill-live">Live</span>
+                            {{else}}
+                                <span class="pill">Solo</span>
+                            {{end}}
+                        </div>
                         {{/* CanEdit is resolved server-side from the
                              session player + creator (see admin.go's
                              attachCanEdit). Templates never compute
