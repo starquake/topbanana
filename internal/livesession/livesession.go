@@ -390,8 +390,13 @@ type QuizReader interface {
 // successful lobby mutation (join, ready) so subscribers re-GET
 // /api/sessions/{code}/state. The returned Tick is ignored by the service;
 // the SSE handler is the consumer.
+//
+// Forget releases a session's version bookkeeping once it is terminal; the
+// runner calls it after the final Publish so a finished session does not pin
+// its version entry for the process lifetime.
 type Publisher interface {
 	Publish(code string, phase Phase) Tick
+	Forget(code string)
 }
 
 // Advancer is the seam through which [Service.Start] hands a freshly

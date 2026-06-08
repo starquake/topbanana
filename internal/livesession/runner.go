@@ -478,7 +478,8 @@ func (r *Runner) abandonIfHostGone(ctx context.Context, sess *Session, now time.
 }
 
 // finish persists the finished transition, publishes, and drops the session's
-// in-memory bookkeeping.
+// in-memory bookkeeping (its phase clock and, since the session is terminal,
+// its publisher version entry).
 func (r *Runner) finish(ctx context.Context, sess *Session) {
 	if err := r.store.Finish(ctx, sess.ID); err != nil {
 		r.logger.WarnContext(
@@ -492,6 +493,9 @@ func (r *Runner) finish(ctx context.Context, sess *Session) {
 	}
 	r.forget(sess.ID)
 	r.publish(sess.JoinCode, PhaseFinished)
+	// Evict the version entry only after the finished tick is published, so
+	// that tick still carries the last real version.
+	r.forgetPublished(sess.JoinCode)
 }
 
 // scoreQuestion computes and writes the score for every pick on the current
@@ -599,6 +603,16 @@ func (r *Runner) publish(code string, phase Phase) {
 	r.publisher.Publish(code, phase)
 }
 
+// forgetPublished releases the publisher's version bookkeeping for a terminal
+// session. Same nil-publisher guard as publish: tests that drive the runner
+// without a publisher skip it.
+func (r *Runner) forgetPublished(code string) {
+	if r.publisher == nil {
+		return
+	}
+	r.publisher.Forget(code)
+}
+
 // markPhase stamps when the session entered its current beat-gated phase.
 func (r *Runner) markPhase(sessionID string, now time.Time) {
 	r.mu.Lock()
@@ -641,6 +655,11 @@ type questionPlan struct {
 // questions in quiz-wide play order already (across rounds), so grouping by
 // round id while preserving that order yields per-round play order, and the
 // first time each round id is seen fixes round play order.
+//
+// The plan is derived from questions, so a round with no questions never
+// appears and its intro is never shown in a live session. This is intentional
+// (#803): a live round with nothing to ask would be a dead beat, unlike the
+// solo path which can show an empty round's intro.
 func newQuestionPlan(qz *quiz.Quiz) questionPlan {
 	plan := questionPlan{questionsByRnd: make(map[int64][]*quiz.Question)}
 	seen := make(map[int64]struct{})

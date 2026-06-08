@@ -86,6 +86,24 @@ func (h *Hub) Subscribe(code string) (<-chan Tick, uint64, func()) {
 	return ch, version, unsubscribe
 }
 
+// Forget drops the session's version counter once it has reached a terminal
+// state and no client can produce more ticks for it. Without this a code's
+// versions entry would live for the whole process lifetime, since unsubscribe
+// only clears subs. Safe for concurrent use: it runs under the hub mutex, the
+// same lock Publish and Subscribe take.
+//
+// Eviction is safe at finish: a client that reconnects after Forget
+// re-subscribes (recreating the entry) and Subscribe hands it version 0, which
+// is sane for a finished session that emits no further ticks. The runner calls
+// Forget only after the final Publish, so the finished tick still carries the
+// last real version.
+func (h *Hub) Forget(code string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	delete(h.versions, code)
+}
+
 // Publish bumps the session's version counter, then fires a non-blocking
 // tick carrying the new version and the given phase to every active
 // subscriber of the code. Returns the published Tick. If a subscriber's

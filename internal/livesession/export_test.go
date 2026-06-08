@@ -22,6 +22,19 @@ func ExportHubSubscriberCount(h *Hub, code string) int {
 	return len(h.subs[code])
 }
 
+// ExportHubHasVersion reports whether the hub still holds a version entry for
+// the given code, so a test can assert that a terminal session is forgotten
+// (the entry evicted) rather than pinned for the process lifetime. Test-only;
+// not part of the production API.
+func ExportHubHasVersion(h *Hub, code string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	_, ok := h.versions[code]
+
+	return ok
+}
+
 // ExportRunnerTick drives one runner scan at the given instant, so a test can
 // advance a session through its phases off a controlled clock without waiting
 // on the beat ticker. Test-only.

@@ -62,6 +62,44 @@ func TestHub_VersionIsMonotonicPerSession(t *testing.T) {
 	}
 }
 
+func TestHub_ForgetDropsVersionEntry(t *testing.T) {
+	t.Parallel()
+
+	// A finished session is forgotten so its versions entry does not live for
+	// the process lifetime. Publish, then Forget, then assert the entry is gone
+	// and a fresh subscriber sees version 0 again (the entry was recreated, not
+	// resurrected at the old count).
+	h := NewHub()
+	h.Publish("ROOM01", PhaseFinished)
+	if got, want := ExportHubHasVersion(h, "ROOM01"), true; got != want {
+		t.Fatalf("has version after publish = %v, want %v", got, want)
+	}
+
+	h.Forget("ROOM01")
+	if got, want := ExportHubHasVersion(h, "ROOM01"), false; got != want {
+		t.Errorf("has version after Forget = %v, want %v (entry must be evicted)", got, want)
+	}
+
+	// A client reconnecting after Forget re-subscribes; the contract is a sane
+	// version (0), not the old count.
+	_, version, unsub := h.Subscribe("ROOM01")
+	defer unsub()
+	if got, want := version, uint64(0); got != want {
+		t.Errorf("version after Forget+Subscribe = %d, want %d", got, want)
+	}
+}
+
+func TestHub_ForgetUnknownCodeIsNoOp(t *testing.T) {
+	t.Parallel()
+
+	// Forgetting a code that was never published must not panic.
+	h := NewHub()
+	h.Forget("ROOM01")
+	if got, want := ExportHubHasVersion(h, "ROOM01"), false; got != want {
+		t.Errorf("has version for unknown code = %v, want %v", got, want)
+	}
+}
+
 func TestHub_ScopedByCode(t *testing.T) {
 	t.Parallel()
 
