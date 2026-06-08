@@ -61,7 +61,7 @@ func addRoutes(
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
 	addAdminRoutes(mux, logger, stores, gameService, sessions, csrfMgr, emailDeps, playerDeps)
 	addProfileRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
-	addAPIRoutes(mux, logger, stores, gameService, realtime, sessions)
+	addAPIRoutes(mux, logger, stores, gameService, realtime, sessions, cfg)
 	addHostRoutes(mux, logger, stores, sessions, csrfMgr, realtime.SessionService)
 
 	// Client
@@ -752,16 +752,17 @@ func addAdminRoundRoutes(
 
 // addAPIRoutes registers the JSON API routes consumed by the game client.
 // API routes use the same session cookie as the rest of the app. CSRF
-// protection is provided entirely by SameSite=Lax on the session cookie
-// (see internal/session/session.go). Removing or weakening SameSite
-// requires adding an Origin / Sec-Fetch-Site check on unsafe methods.
+// protection has two layers: SameSite=Lax on the session cookie (see
+// internal/session/session.go) and a same-origin guard on unsafe methods
+// (sameOriginCheck) that rejects a cross-site Origin / Sec-Fetch-Site.
 //
 // Every route is wrapped in EnsurePlayer so a cookieless visitor is silently
 // upgraded to an anonymous players row before the handler runs. This means
 // HandleCreateGame and HandleAnswerPost can safely read the player off the
-// request context. The static /client/* assets are intentionally not wrapped
-// - loading the SPA shell should not create a row; the first /api/ call
-// does.
+// request context. The same-origin guard runs outermost so a cross-site
+// mutating request is rejected before any players row is minted. The static
+// /client/* assets are intentionally not wrapped - loading the SPA shell
+// should not create a row; the first /api/ call does.
 func addAPIRoutes(
 	mux *http.ServeMux,
 	logger *slog.Logger,
@@ -769,9 +770,11 @@ func addAPIRoutes(
 	gameService *game.Service,
 	realtime Realtime,
 	sessions *session.Manager,
+	cfg *config.Config,
 ) {
+	expectedOrigin := originFromBaseURL(cfg.BaseURL)
 	ensurePlayer := func(h http.Handler) http.Handler {
-		return auth.EnsurePlayer(h, stores.Players, sessions, logger)
+		return sameOriginCheck(expectedOrigin, auth.EnsurePlayer(h, stores.Players, sessions, logger))
 	}
 
 	mux.Handle("GET /api/players/me", ensurePlayer(clientapi.HandlePlayerGetMe(logger)))
