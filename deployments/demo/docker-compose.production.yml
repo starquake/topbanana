@@ -1,6 +1,9 @@
 services:
   topbanana-production:
-    image: ${IMAGE_NAME}:${IMAGE_TAG:-latest}
+    # Pinned to an immutable digest, not a tag: deploy.yml resolves the
+    # release tag to its digest, verifies the cosign signature, and writes
+    # IMAGE_DIGEST into .env. The guard fails the boot loudly if it is unset.
+    image: ${IMAGE_NAME}@${IMAGE_DIGEST:?IMAGE_DIGEST must be set in .env or environment}
     container_name: topbanana-production
     environment:
       - APP_ENV=production
