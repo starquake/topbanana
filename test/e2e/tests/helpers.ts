@@ -34,8 +34,14 @@ export async function registerAdmin(page: Page, displayName: string): Promise<vo
   // home.spec.ts uses to wipe games) rather than clicking the emailed
   // link: this is the setup shortcut for the many specs that just need a
   // signed-in admin. The real link round-trip is covered on its own in
-  // email-roundtrip.spec.ts. Then log in to land on the admin dashboard.
+  // email-roundtrip.spec.ts.
   markEmailVerified(displayName);
+  // Stamp the admin role directly too. Admin promotion for an ADMIN_EMAILS
+  // address now happens when the verify token is consumed via the endpoint
+  // (#785); this direct email_verified_at stamp bypasses that endpoint, so the
+  // role would otherwise never be granted. Set it explicitly rather than
+  // relying on the register-time promotion the shortcut no longer triggers.
+  markAdmin(displayName);
   await login(page, displayName);
   await expect(page).toHaveURL(/\/admin\/quizzes$/);
 }

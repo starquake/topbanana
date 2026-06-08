@@ -127,7 +127,7 @@ func addEmailFlowRoutes(
 	csrfMW := csrfMgr.Middleware
 
 	mux.Handle("GET /verify-email", auth.HandleVerifyEmail(
-		logger, csrfMgr, stores.VerifyTokens, stores.Players, sessions,
+		logger, csrfMgr, stores.VerifyTokens, stores.Players, stores.AdminPlayers, sessions, cfg.AdminEmails,
 	))
 
 	verifyFlash := auth.NewSignedFlash(
@@ -265,7 +265,6 @@ func addAuthRoutes(
 			csrfMW(auth.HandleRegisterSubmit(
 				logger, csrfMgr, stores.Players, sessions,
 				auth.RegisterDeps{
-					AdminEmails:   cfg.AdminEmails,
 					GoogleEnabled: googleEnabled,
 					Mailer:        mail.Tester,
 					Tokens:        stores.VerifyTokens,
@@ -275,36 +274,7 @@ func addAuthRoutes(
 			)),
 		)
 	}
-	loginLimiter := auth.NewLoginRateLimiter(cfg.LoginCooldown, cfg.TrustedProxyCIDRs)
-	// loginResendLimiter is a dedicated per-IP cooldown for the
-	// verify-email send the login handler issues on an unverified-but-
-	// correct credential attempt (#492). Separate from the resend
-	// limiter on the verify-email/pending form so a stampede on one
-	// path cannot starve the other.
-	loginResendLimiter := auth.NewVerifyResendLimiter(auth.VerifyResendCooldown(), cfg.TrustedProxyCIDRs)
-	mux.Handle(
-		"GET /login",
-		auth.HandleLoginForm(logger, csrfMgr, stores.Players, sessions, cfg.RegistrationEnabled, googleEnabled),
-	)
-	mux.Handle(
-		"POST /login",
-		csrfMW(auth.HandleLoginSubmit(
-			logger, csrfMgr, auth.LoginDeps{
-				Players:             stores.Players,
-				Sessions:            sessions,
-				Games:               stores.GameMigrator,
-				Limiter:             loginLimiter,
-				Mailer:              mail.Tester,
-				Tokens:              stores.VerifyTokens,
-				ResendLimiter:       loginResendLimiter,
-				BaseURL:             cfg.BaseURL,
-				RegistrationEnabled: cfg.RegistrationEnabled,
-				GoogleEnabled:       googleEnabled,
-				Tasks:               mail.Tasks,
-			},
-		)),
-	)
-	mux.Handle("POST /logout", csrfMW(auth.HandleLogout(sessions)))
+	addLoginRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail, googleEnabled)
 
 	addEmailFlowRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
 
@@ -329,6 +299,56 @@ func addAuthRoutes(
 			"google sign-in disabled (set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URL to enable)",
 		)
 	}
+}
+
+// addLoginRoutes registers GET/POST /login and POST /logout with the
+// two-tier login throttle (#494/#786). Split out of addAuthRoutes so
+// that function stays under revive's function-length cap. loginLimiter
+// is the per-IP gap; accountLoginLimiter is the per-account backoff that
+// the per-IP limiter cannot provide once an attacker rotates source
+// addresses against one account. loginResendLimiter is a dedicated per-IP
+// cooldown for the verify-email send the login handler issues on an
+// unverified-but-correct attempt (#492), separate from the
+// verify-email/pending resend so a stampede on one path cannot starve
+// the other.
+func addLoginRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	stores *store.Stores,
+	sessions *session.Manager,
+	csrfMgr *csrf.Manager,
+	cfg *config.Config,
+	mail Mail,
+	googleEnabled bool,
+) {
+	csrfMW := csrfMgr.Middleware
+	loginLimiter := auth.NewLoginRateLimiter(cfg.LoginCooldown, cfg.TrustedProxyCIDRs)
+	accountLoginLimiter := auth.NewAccountLoginLimiter(auth.AccountLoginThreshold(), auth.AccountLoginCooldown())
+	loginResendLimiter := auth.NewVerifyResendLimiter(auth.VerifyResendCooldown(), cfg.TrustedProxyCIDRs)
+	mux.Handle(
+		"GET /login",
+		auth.HandleLoginForm(logger, csrfMgr, stores.Players, sessions, cfg.RegistrationEnabled, googleEnabled),
+	)
+	mux.Handle(
+		"POST /login",
+		csrfMW(auth.HandleLoginSubmit(
+			logger, csrfMgr, auth.LoginDeps{
+				Players:             stores.Players,
+				Sessions:            sessions,
+				Games:               stores.GameMigrator,
+				Limiter:             loginLimiter,
+				AccountLimiter:      accountLoginLimiter,
+				Mailer:              mail.Tester,
+				Tokens:              stores.VerifyTokens,
+				ResendLimiter:       loginResendLimiter,
+				BaseURL:             cfg.BaseURL,
+				RegistrationEnabled: cfg.RegistrationEnabled,
+				GoogleEnabled:       googleEnabled,
+				Tasks:               mail.Tasks,
+			},
+		)),
+	)
+	mux.Handle("POST /logout", csrfMW(auth.HandleLogout(sessions)))
 }
 
 // addProfileRoutes registers the per-player profile page (#410) and

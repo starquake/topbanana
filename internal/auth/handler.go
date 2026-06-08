@@ -7,7 +7,6 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -117,7 +116,6 @@ func HandleRegisterForm(
 // zero values and SendVerifyEmailBestEffort logs a warning instead of
 // sending, which is the right behaviour for unit tests.
 type RegisterDeps struct {
-	AdminEmails   []string
 	GoogleEnabled bool
 	Mailer        VerifyEmailSender
 	Tokens        VerifyTokenStore
@@ -131,11 +129,13 @@ type RegisterDeps struct {
 // HandleRegisterSubmit handles POST /register. When the caller already
 // has an anonymous session row, the handler upgrades that row via
 // ClaimPlayer so the visitor's game history follows them; if the row
-// was concurrently claimed it falls back to CreatePlayer. Emails in
-// deps.AdminEmails are promoted to admin; the first password-bearing
-// registrant is atomically promoted by the store (see CreatePlayer).
-// On success the handler dispatches a verification email best-effort
-// so an SMTP outage does not block the signup.
+// was concurrently claimed it falls back to CreatePlayer. Registrants
+// are always created as plain players: the ADMIN_EMAILS allowlist is
+// consulted at email-verify time (#785), not here, so admin is never
+// stamped on an unproven address. The first password-bearing registrant
+// is still atomically promoted by the store (see CreatePlayer). On
+// success the handler dispatches a verification email best-effort so an
+// SMTP outage does not block the signup.
 func HandleRegisterSubmit(
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
@@ -173,11 +173,12 @@ func HandleRegisterSubmit(
 			return
 		}
 
-		role := RolePlayer
-		if slices.Contains(deps.AdminEmails, input.CleanedEmail) {
-			role = RoleAdmin
-		}
-
+		// Do NOT promote to admin based on the submitted email here: the
+		// address is unproven at registration. The ADMIN_EMAILS allowlist
+		// is consulted at email-verify time instead (#785), once the
+		// address is proven. The store's own "first password-bearing
+		// registrant becomes admin" rule (CreatePlayer/ClaimPlayer) is a
+		// separate bootstrap concern and stays.
 		hashed, err := HashPassword(password)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error hashing password", slog.Any("err", err))
@@ -189,7 +190,7 @@ func HandleRegisterSubmit(
 		renderers := registerRenderers{form: render, pending: pending, sessions: sessions}
 
 		player, err := claimOrCreatePlayer(
-			r, players, sessions, input.CleanedDisplayName, input.CleanedEmail, hashed, role,
+			r, players, sessions, input.CleanedDisplayName, input.CleanedEmail, hashed, RolePlayer,
 		)
 		if err != nil {
 			handleRegisterError(w, r, logger, renderers, deps, input, err)
@@ -461,14 +462,18 @@ func redirectIfSignedIn(
 // player attempts to log in (#492). Mailer / Tokens / BaseURL together
 // cover the verify-email side; ResendLimiter is the per-IP cooldown
 // shared with the public resend form, so a hot bucket on the login
-// branch cannot starve the user-driven resend and vice versa. The
-// bundle exists so HandleLoginSubmit stays under revive's argument
-// limit as the dep set grows.
+// branch cannot starve the user-driven resend and vice versa. Limiter
+// is the per-IP gap; AccountLimiter is the per-account backoff (#786),
+// folded into the invalid-credentials path so a cooled-down account
+// stays indistinguishable from a wrong password. The bundle exists so
+// HandleLoginSubmit stays under revive's argument limit as the dep set
+// grows.
 type LoginDeps struct {
 	Players             PlayerStore
 	Sessions            *session.Manager
 	Games               AnonymousGameMigrator
 	Limiter             *LoginRateLimiter
+	AccountLimiter      *AccountLoginLimiter
 	Mailer              VerifyEmailSender
 	Tokens              VerifyTokenStore
 	ResendLimiter       *VerifyResendLimiter
@@ -547,31 +552,101 @@ func HandleLoginSubmit(
 			return
 		}
 
-		player, ok := authenticateLogin(logger, formCfg, w, r, deps.Players, dummyHash, email, password)
+		creds := loginCreds{
+			email:          email,
+			password:       password,
+			dummyHash:      dummyHash,
+			accountLimiter: deps.AccountLimiter,
+		}
+		player, ok := authenticateLogin(logger, formCfg, w, r, deps.Players, creds)
 		if !ok {
 			return
 		}
 
-		// Credentials are correct but the account email is unverified
-		// (#492): refuse the sign-in, re-render the login form with a
-		// banner that names the address, and dispatch a fresh verify
-		// link best-effort. The login limiter was already stamped above,
-		// so this branch counts toward the per-IP cap just like a
-		// wrong-password attempt.
-		if !player.IsEmailVerified() {
-			renderUnverifiedLogin(logger, formCfg, deps, w, r, player)
-
-			return
-		}
-
-		var priorSessionPlayerID *int64
-		if id, ok := deps.Sessions.PlayerID(r); ok {
-			priorSessionPlayerID = &id
-		}
-		deps.Sessions.Set(w, player.ID, player.SessionVersion)
-		migrateGamesAfterSignIn(r.Context(), logger, deps.Players, deps.Games, priorSessionPlayerID, player.ID)
-		redirectAfterLogin(w, r, player.Role)
+		completeLogin(logger, formCfg, deps, w, r, player, email)
 	})
+}
+
+// completeLogin finishes a credential-valid login: it applies the
+// per-account cooldown gate (#786), refuses an unverified account (#492),
+// or sets the session and redirects. Split out of HandleLoginSubmit so
+// that constructor stays under revive's function-length limit.
+func completeLogin(
+	logger *slog.Logger,
+	formCfg loginFormCfg,
+	deps LoginDeps,
+	w http.ResponseWriter,
+	r *http.Request,
+	player *Player,
+	email string,
+) {
+	// Per-account backoff (#786): once an account has crossed the
+	// failure threshold, refuse even a correct password until the
+	// cooldown elapses, and render the SAME generic invalid-credentials
+	// response a wrong password gets. This denies a brute-force the
+	// chance to land a correct guess mid-spray without ever signalling
+	// that the account is throttled or that it exists.
+	if registerAccountFailureIfCooledDown(deps.AccountLimiter, email) {
+		renderInvalidCredentials(formCfg, w, r, email)
+
+		return
+	}
+
+	// Credentials are correct and the account is not cooled down, so
+	// clear its failure streak (a user who finally typed the right
+	// password is not penalised for earlier typos).
+	clearAccountFailures(deps.AccountLimiter, email)
+
+	// Credentials are correct but the account email is unverified
+	// (#492): refuse the sign-in, re-render the login form with a
+	// generic "check your email" banner, and dispatch a fresh verify
+	// link best-effort. The banner names no address and does not confirm
+	// the password (#787).
+	if !player.IsEmailVerified() {
+		renderUnverifiedLogin(logger, formCfg, deps, w, r, player, email)
+
+		return
+	}
+
+	var priorSessionPlayerID *int64
+	if id, ok := deps.Sessions.PlayerID(r); ok {
+		priorSessionPlayerID = &id
+	}
+	deps.Sessions.Set(w, player.ID, player.SessionVersion)
+	migrateGamesAfterSignIn(r.Context(), logger, deps.Players, deps.Games, priorSessionPlayerID, player.ID)
+	redirectAfterLogin(w, r, player.Role)
+}
+
+// registerAccountFailureIfCooledDown reports whether account is in the
+// per-account cooldown (#786) and, if so, records the current attempt as
+// another failure so a brute-force that keeps guessing keeps extending
+// the window. Nil limiter (unit tests that don't wire it) is never in
+// cooldown.
+func registerAccountFailureIfCooledDown(limiter *AccountLoginLimiter, account string) bool {
+	if limiter == nil || !limiter.InCooldown(account) {
+		return false
+	}
+	limiter.RegisterFailure(account)
+
+	return true
+}
+
+// clearAccountFailures resets account's failure streak after a genuine
+// credential match. Nil limiter is a no-op.
+func clearAccountFailures(limiter *AccountLoginLimiter, account string) {
+	if limiter == nil {
+		return
+	}
+	limiter.RegisterSuccess(account)
+}
+
+// recordAccountFailure records one failed login for account (#786). Nil
+// limiter is a no-op.
+func recordAccountFailure(limiter *AccountLoginLimiter, account string) {
+	if limiter == nil {
+		return
+	}
+	limiter.RegisterFailure(account)
 }
 
 // loginFormCfg bundles the per-handler login form render config so
@@ -583,28 +658,42 @@ type loginFormCfg struct {
 	googleEnabled       bool
 }
 
+// loginCreds bundles the per-attempt credential inputs so
+// authenticateLogin stays under revive's argument-limit once the
+// dummy-hash and per-account limiter are threaded through it.
+type loginCreds struct {
+	email          string
+	password       string
+	dummyHash      func() string
+	accountLimiter *AccountLoginLimiter
+}
+
 // authenticateLogin runs the lookup-then-bcrypt half of the login
 // flow. Returns (player, true) on a valid match; writes the response
 // itself and returns (nil, false) on every miss/error path so the
 // caller can early-return. Extracted from HandleLoginSubmit so that
 // handler stays under revive's function-length limit once the rate
 // limiter check is wired in front of it (#494).
+//
+// Each credential-mismatch branch records a per-account failure (#786)
+// so a focused brute-force trips the account cooldown; the internal-
+// error branch does not, since a DB hiccup is not the user's fault.
 func authenticateLogin(
 	logger *slog.Logger,
 	cfg loginFormCfg,
 	w http.ResponseWriter,
 	r *http.Request,
 	players PlayerStore,
-	dummyHash func() string,
-	email, password string,
+	creds loginCreds,
 ) (*Player, bool) {
-	player, err := players.GetPlayerByEmail(r.Context(), email)
+	player, err := players.GetPlayerByEmail(r.Context(), creds.email)
 	if err != nil {
 		if errors.Is(err, ErrPlayerNotFound) {
 			// Equalise timing with the valid-email path so an attacker
 			// cannot enumerate emails by response time.
-			_ = CheckPassword(dummyHash(), password)
-			renderInvalidCredentials(cfg, w, r, email)
+			_ = CheckPassword(creds.dummyHash(), creds.password)
+			recordAccountFailure(creds.accountLimiter, creds.email)
+			renderInvalidCredentials(cfg, w, r, creds.email)
 
 			return nil, false
 		}
@@ -617,14 +706,16 @@ func authenticateLogin(
 	if player.PasswordHash == "" {
 		// Legacy seed admin with no hash on file. Run the dummy compare
 		// to keep timing consistent.
-		_ = CheckPassword(dummyHash(), password)
-		renderInvalidCredentials(cfg, w, r, email)
+		_ = CheckPassword(creds.dummyHash(), creds.password)
+		recordAccountFailure(creds.accountLimiter, creds.email)
+		renderInvalidCredentials(cfg, w, r, creds.email)
 
 		return nil, false
 	}
 
-	if err := CheckPassword(player.PasswordHash, password); err != nil {
-		renderInvalidCredentials(cfg, w, r, email)
+	if err := CheckPassword(player.PasswordHash, creds.password); err != nil {
+		recordAccountFailure(creds.accountLimiter, creds.email)
+		renderInvalidCredentials(cfg, w, r, creds.email)
 
 		return nil, false
 	}
@@ -632,18 +723,21 @@ func authenticateLogin(
 	return player, true
 }
 
-// renderUnverifiedLogin re-renders the login form with the
-// "please verify your email" banner naming the resolved address, and
-// fires a fresh verify-email send through the per-IP resend limiter.
-// Status stays 200 OK so an unverified visitor who reloads sees the
-// form again without the browser flagging a 4xx (the response shape
-// mirrors the verify-email/request flow's success render).
+// renderUnverifiedLogin re-renders the login form with a generic
+// "check your email" banner and fires a fresh verify-email send through
+// the per-IP resend limiter. Status stays 200 OK so an unverified
+// visitor who reloads sees the form again without the browser flagging a
+// 4xx (the response shape mirrors the verify-email/request flow's
+// success render).
 //
-// Telling the visitor "we resent the link to <email>" leaks that the
-// credentials were correct - an enumeration oracle. Accepted as the
-// UX cost: a generic "invalid email or password" here would make
-// unverified-but-correct logins feel like wrong-password to a real
-// user. Decided in #492.
+// The banner deliberately names no address and does not confirm the
+// password was right. Echoing the address ("we resent the link to
+// <email>") only happens when credentials are correct, so it would leak
+// both account existence and password correctness - an enumeration /
+// password oracle. The generic wording (#787, reversing the #492
+// address echo) keeps an unverified-but-correct attempt indistinguishable
+// from a wrong-password one. The submitted email is preserved in the
+// field only so a real user does not have to retype it.
 func renderUnverifiedLogin(
 	logger *slog.Logger,
 	cfg loginFormCfg,
@@ -651,12 +745,13 @@ func renderUnverifiedLogin(
 	w http.ResponseWriter,
 	r *http.Request,
 	player *Player,
+	email string,
 ) {
 	dispatchVerifyResend(r, logger, deps, player)
 	cfg.render.render(w, r, http.StatusOK, formData{
 		Title:        "Log in",
-		Email:        player.Email,
-		Message:      "Please verify your email - we just resent the link to " + player.Email + ".",
+		Email:        email,
+		Message:      "Check your email to finish signing in.",
 		ShowRegister: cfg.registrationEnabled,
 		ShowGoogle:   cfg.googleEnabled,
 		Next:         SafeNextPath(r.PostFormValue("next")),

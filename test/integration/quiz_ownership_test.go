@@ -131,14 +131,18 @@ func TestQuizOwnership_Integration(t *testing.T) {
 }
 
 // registerAdminClient builds a cookie-jar HTTP client, registers the
-// supplied displayName through the public /register form (which promotes
-// to admin via ADMIN_EMAILS), stamps email_verified_at, and mints a
-// session cookie onto the jar so follow-up admin requests pass both the
-// auth middleware and the #111 PR3 verified-email gate. After the #574
-// hard gate, register no longer hands out a session, so the cookie is
-// minted directly (startServer signs with the default testSessionKey).
-// Minting also sidesteps the per-IP login cooldown that several
-// back-to-back logins would trip.
+// supplied displayName through the public /register form, proves the
+// email through the real /verify-email link, and mints a session cookie
+// onto the jar so follow-up admin requests pass both the auth middleware
+// and the #111 PR3 verified-email gate. Verifying through the link (not a
+// direct DB stamp) is what fires the verify-time ADMIN_EMAILS promotion
+// (#785), so an allowlisted account becomes admin even when it is not the
+// first registrant. The first registrant is promoted by the store's
+// first-credentialled-registrant rule regardless, so the link verify is a
+// no-op promotion for them. After the #574 hard gate, register no longer
+// hands out a session, so the cookie is minted directly (startServer
+// signs with the default testSessionKey). Minting also sidesteps the
+// per-IP login cooldown that several back-to-back logins would trip.
 func registerAdminClient(ctx context.Context, t *testing.T, baseURL, dbURI, displayName string) *http.Client {
 	t.Helper()
 	jar, err := cookiejar.New(nil)
@@ -153,7 +157,7 @@ func registerAdminClient(ctx context.Context, t *testing.T, baseURL, dbURI, disp
 	}
 
 	registerForPending(ctx, t, client, baseURL, displayName, "integration-pass-123")
-	verifyPlayerEmail(ctx, t, dbURI, displayName)
+	verifyPlayerEmailViaLink(ctx, t, baseURL, dbURI, displayName)
 	mintSessionCookie(ctx, t, client, baseURL, dbURI, displayName)
 
 	return client

@@ -172,3 +172,202 @@ func postLogin(t *testing.T, handler http.Handler, displayName, password string)
 
 	return rec
 }
+
+// TestHandleLoginSubmit_AccountCooldown_RejectsCorrectPassword pins the
+// #786 contract end to end: after the threshold of failures for one
+// account, even the correct password is refused, and the refusal is the
+// SAME generic 401 invalid-credentials response a wrong password gets -
+// no "locked" signal, no status change. The per-IP limiter is given a
+// zero window so it never fires and the per-account path is what gates.
+func TestHandleLoginSubmit_AccountCooldown_RejectsCorrectPassword(t *testing.T) {
+	t.Parallel()
+
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	hash, err := HashPassword("correctbattery")
+	if err != nil {
+		t.Fatalf("HashPassword err = %v, want nil", err)
+	}
+	if _, err := players.CreatePlayer(t.Context(), "alice", "alice@example.test", hash, RoleAdmin); err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+	markVerified(t, players, "alice")
+
+	accountLimiter := NewAccountLoginLimiter(3, time.Minute)
+	handler := HandleLoginSubmit(discardLogger(), nil, LoginDeps{
+		Players:        players,
+		Sessions:       session.New([]byte("k"), true),
+		Limiter:        NewLoginRateLimiter(0, nil),
+		AccountLimiter: accountLimiter,
+	})
+
+	// Three wrong-password attempts trip the per-account cooldown; each
+	// is the ordinary 401.
+	for i := range 3 {
+		rec := postLoginEmail(t, handler, "alice@example.test", "wrong-password")
+		if got, want := rec.Code, http.StatusUnauthorized; got != want {
+			t.Fatalf("attempt %d status = %d, want %d", i+1, got, want)
+		}
+	}
+
+	// The correct password now arrives, but the account is cooled down:
+	// refused with the identical generic 401, no session cookie.
+	rec := postLoginEmail(t, handler, "alice@example.test", "correctbattery")
+	if got, want := rec.Code, http.StatusUnauthorized; got != want {
+		t.Fatalf("correct-password-during-cooldown status = %d, want %d (must read as wrong password)", got, want)
+	}
+	if got, want := rec.Body.String(), "Invalid email or password."; !strings.Contains(got, want) {
+		t.Errorf("body should be the generic invalid-credentials banner; got %.300q", got)
+	}
+	if dontWant := "locked"; strings.Contains(strings.ToLower(rec.Body.String()), dontWant) {
+		t.Errorf("body leaks a lock signal %q; got %.300q", dontWant, rec.Body.String())
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == session.CookieName && c.Value != "" {
+			t.Errorf("session cookie set during account cooldown: %+v", c)
+		}
+	}
+}
+
+// TestHandleLoginSubmit_AccountCooldown_OtherAccountUnaffected pins that
+// the per-account cooldown is scoped to the hammered account: a
+// different account with correct credentials still signs in while the
+// first is locked.
+func TestHandleLoginSubmit_AccountCooldown_OtherAccountUnaffected(t *testing.T) {
+	t.Parallel()
+
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	hash, err := HashPassword("correctbattery")
+	if err != nil {
+		t.Fatalf("HashPassword err = %v, want nil", err)
+	}
+	for _, name := range []string{"alice", "bob"} {
+		if _, err := players.CreatePlayer(t.Context(), name, name+"@example.test", hash, RolePlayer); err != nil {
+			t.Fatalf("CreatePlayer %q err = %v, want nil", name, err)
+		}
+		markVerified(t, players, name)
+	}
+
+	accountLimiter := NewAccountLoginLimiter(3, time.Minute)
+	handler := HandleLoginSubmit(discardLogger(), nil, LoginDeps{
+		Players:        players,
+		Sessions:       session.New([]byte("k"), true),
+		Limiter:        NewLoginRateLimiter(0, nil),
+		AccountLimiter: accountLimiter,
+	})
+
+	for range 3 {
+		postLoginEmail(t, handler, "alice@example.test", "wrong-password")
+	}
+	// Alice is now cooled down; bob's correct credentials still admit.
+	rec := postLoginEmail(t, handler, "bob@example.test", "correctbattery")
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Errorf("bob login status = %d, want %d (other account must be unaffected)", got, want)
+	}
+}
+
+// postLoginEmail POSTs /login with the email field the handler actually
+// reads (distinct from postLogin, which posts a displayName field for
+// the wrong-credentials rate-limit cases).
+func postLoginEmail(t *testing.T, handler http.Handler, email, password string) *httptest.ResponseRecorder {
+	t.Helper()
+	form := url.Values{"email": {email}, "password": {password}}
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, "/login", strings.NewReader(form.Encode()),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	return rec
+}
+
+// TestAccountLoginLimiter_TripsAfterThreshold pins #786: the limiter
+// reports no cooldown until the failure count reaches the threshold,
+// then reports a cooldown.
+func TestAccountLoginLimiter_TripsAfterThreshold(t *testing.T) {
+	t.Parallel()
+
+	limiter := NewAccountLoginLimiter(3, time.Minute)
+	if limiter.InCooldown("alice@example.test") {
+		t.Fatal("InCooldown before any failure = true, want false")
+	}
+	for i := range 2 {
+		limiter.RegisterFailure("alice@example.test")
+		if limiter.InCooldown("alice@example.test") {
+			t.Fatalf("InCooldown after %d failures = true, want false (threshold 3)", i+1)
+		}
+	}
+	limiter.RegisterFailure("alice@example.test")
+	if !limiter.InCooldown("alice@example.test") {
+		t.Error("InCooldown after reaching threshold = false, want true")
+	}
+}
+
+// TestAccountLoginLimiter_PerAccount pins that the failure streak is
+// keyed on the account: hammering one account never cools down another.
+func TestAccountLoginLimiter_PerAccount(t *testing.T) {
+	t.Parallel()
+
+	limiter := NewAccountLoginLimiter(3, time.Minute)
+	for range 3 {
+		limiter.RegisterFailure("alice@example.test")
+	}
+	if !limiter.InCooldown("alice@example.test") {
+		t.Fatal("alice InCooldown = false, want true")
+	}
+	if limiter.InCooldown("bob@example.test") {
+		t.Error("bob InCooldown = true, want false (limiter is per-account)")
+	}
+}
+
+// TestAccountLoginLimiter_SuccessClears pins that a genuine sign-in
+// resets the streak so earlier typos do not penalise the user.
+func TestAccountLoginLimiter_SuccessClears(t *testing.T) {
+	t.Parallel()
+
+	limiter := NewAccountLoginLimiter(3, time.Minute)
+	limiter.RegisterFailure("alice@example.test")
+	limiter.RegisterFailure("alice@example.test")
+	limiter.RegisterSuccess("alice@example.test")
+	limiter.RegisterFailure("alice@example.test")
+	if limiter.InCooldown("alice@example.test") {
+		t.Error("InCooldown after success reset + 1 failure = true, want false")
+	}
+}
+
+// TestAccountLoginLimiter_PrunesAfterCooldown pins that an aged-out
+// streak is forgotten: once the cooldown window elapses past the last
+// failure, the account is no longer in cooldown and its entry prunes.
+// Uses the injected clock so no real time passes.
+func TestAccountLoginLimiter_PrunesAfterCooldown(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+	limiter := NewAccountLoginLimiterWithClock(3, 15*time.Minute, clock)
+
+	for range 3 {
+		limiter.RegisterFailure("alice@example.test")
+	}
+	if !limiter.InCooldown("alice@example.test") {
+		t.Fatal("InCooldown right after threshold = false, want true")
+	}
+
+	now = now.Add(16 * time.Minute)
+	if limiter.InCooldown("alice@example.test") {
+		t.Error("InCooldown after cooldown elapsed = true, want false (entry should prune)")
+	}
+}
+
+// TestAccountLoginLimiter_BlankAccountIgnored pins that a blank
+// submitted email never trips a cooldown: an empty identifier cannot
+// name a real row, so counting failures on "" would be meaningless.
+func TestAccountLoginLimiter_BlankAccountIgnored(t *testing.T) {
+	t.Parallel()
+
+	limiter := NewAccountLoginLimiter(1, time.Minute)
+	limiter.RegisterFailure("")
+	if limiter.InCooldown("") {
+		t.Error("InCooldown for blank account = true, want false")
+	}
+}

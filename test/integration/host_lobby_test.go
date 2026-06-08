@@ -247,9 +247,12 @@ func TestHostLobby_Authz(t *testing.T) {
 	// against the same server. ADMIN_EMAILS promotes them to admin so they
 	// clear the RequireGameHost gate - the point of the check is that even a
 	// legitimate host gets 404 on a session they do not own, not that a plain
-	// player is gated. The foreign host is registered + minted in the parent
-	// body (before the parallel subtests) so its DB writes are serialized and
-	// it sidesteps the per-IP login cooldown.
+	// player is gated. The promotion now happens at verify time (#785), so
+	// the foreign host proves its email through the real /verify-email link
+	// (registerVerifyViaLinkAndMint) rather than a direct DB stamp. It is
+	// registered + minted in the parent body (before the parallel subtests)
+	// so its DB writes are serialized and it sidesteps the per-IP login
+	// cooldown.
 	const foreignEmail = "host-authz-other@example.test"
 	ctx, setup := setupIntegrationWithEnv(t, map[string]string{"ADMIN_EMAILS": foreignEmail})
 	baseURL := setup.BaseURL
@@ -266,7 +269,7 @@ func TestHostLobby_Authz(t *testing.T) {
 		Jar:           mustJar(t),
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	registerVerifyAndMint(ctx, t, foreign, baseURL, setup.DBURI, "host-authz-other", "host-authz-other-123")
+	registerVerifyViaLinkAndMint(ctx, t, foreign, baseURL, setup.DBURI, "host-authz-other", "host-authz-other-123")
 
 	t.Run("anonymous visitor is redirected to login", func(t *testing.T) {
 		t.Parallel()

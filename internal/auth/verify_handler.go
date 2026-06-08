@@ -1,13 +1,25 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/session"
 )
+
+// RoleSetter promotes a player to a role at email-verify time. The
+// concrete store.PlayerStore satisfies it via SetPlayerRole; the narrow
+// interface lives here so the verify handler can stamp the admin role
+// without importing internal/store.
+type RoleSetter interface {
+	// SetPlayerRole sets the role on the row identified by id. Returns
+	// ErrPlayerNotFound when no row matches.
+	SetPlayerRole(ctx context.Context, playerID int64, role string) error
+}
 
 // verifyEmailPageData is the payload the verify-email page renders.
 // ShowContinue gates the "Continue" CTA: the success and already-used
@@ -29,6 +41,11 @@ type verifyEmailPageData struct {
 // clients prefetching the link cannot keep the user from completing
 // verification in a fresh browser window.
 //
+// adminEmails is the ADMIN_EMAILS allowlist; on a fresh verify the
+// handler stamps the admin role when the now-proven address matches an
+// entry (#785). Registration deliberately leaves the role at player so
+// admin is never granted on an unverified address.
+//
 // The success branch covers both the register-time verify (the
 // historical case) and the in-session email-change consume (#497).
 // The store layer chooses which side effect runs based on the token
@@ -43,7 +60,9 @@ func HandleVerifyEmail(
 	csrfMgr *csrf.Manager,
 	tokens VerifyTokenStore,
 	players PlayerStore,
+	roles RoleSetter,
 	sessions *session.Manager,
+	adminEmails []string,
 ) http.Handler {
 	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/verify_email.gohtml")
 
@@ -65,6 +84,9 @@ func HandleVerifyEmail(
 		}
 
 		ownerID, err := tokens.ConsumeVerifyToken(r.Context(), HashVerifyToken(raw))
+		if err == nil {
+			promoteVerifiedAdminIfAllowlisted(r.Context(), logger, players, roles, adminEmails, ownerID)
+		}
 		landing := postVerifyLanding(w, r, players, sessions, ownerID)
 		renderVerifyOutcome(w, r, logger, render, verifyOutcome{
 			logger:   logger,
@@ -75,6 +97,44 @@ func HandleVerifyEmail(
 			err:      err,
 		})
 	})
+}
+
+// promoteVerifiedAdminIfAllowlisted stamps the admin role on the player
+// whose verify token just consumed, when the now-proven email matches
+// the ADMIN_EMAILS allowlist (#785). The check runs against the freshly
+// verified address, not the address submitted at registration, so admin
+// is only ever granted on an address the user controls.
+//
+// Best-effort: a lookup or role-write failure is logged and the verify
+// flow still renders success. The player keeps their current (player)
+// role and an operator can promote them by hand or the next verify hits
+// the same path. A row already at admin is left untouched so the write
+// is skipped on the common already-promoted re-verify.
+func promoteVerifiedAdminIfAllowlisted(
+	ctx context.Context,
+	logger *slog.Logger,
+	players PlayerStore,
+	roles RoleSetter,
+	adminEmails []string,
+	ownerID int64,
+) {
+	if ownerID == 0 || len(adminEmails) == 0 {
+		return
+	}
+	p, err := players.GetPlayerByID(ctx, ownerID)
+	if err != nil {
+		logger.WarnContext(ctx, "verify admin promotion: player lookup failed",
+			slog.Int64("player_id", ownerID), slog.Any("err", err))
+
+		return
+	}
+	if p.Role == RoleAdmin || !slices.Contains(adminEmails, p.Email) {
+		return
+	}
+	if err := roles.SetPlayerRole(ctx, ownerID, RoleAdmin); err != nil {
+		logger.WarnContext(ctx, "verify admin promotion: set role failed",
+			slog.Int64("player_id", ownerID), slog.Any("err", err))
+	}
 }
 
 // verifyOutcome groups the consume-result plumbing renderVerifyOutcome
