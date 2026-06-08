@@ -47,6 +47,10 @@ type Store interface {
 	CreateQuiz(ctx context.Context, qz *Quiz) error
 	// UpdateQuiz updates a quiz.
 	UpdateQuiz(ctx context.Context, qz *Quiz) error
+	// SetQuizMode flips just the play mode of a quiz between ModeSolo and
+	// ModeLive without touching its questions (#830). Returns ErrInvalidMode
+	// when mode is neither, and ErrQuizNotFound when no row matches the id.
+	SetQuizMode(ctx context.Context, id int64, mode string) error
 	// ListQuestions returns all questions for a quiz by its ID.
 	ListQuestions(ctx context.Context, quizID int64) ([]*Question, error)
 	// GetQuestion returns a question with options, by its question ID.
@@ -164,6 +168,9 @@ var (
 	// ErrInvalidDirection is returned by SwapQuestionPositions when the
 	// supplied direction is neither "up" nor "down".
 	ErrInvalidDirection = errors.New("invalid direction")
+	// ErrInvalidMode is returned by SetQuizMode when the supplied mode is
+	// neither ModeSolo nor ModeLive (#830).
+	ErrInvalidMode = errors.New("invalid play mode")
 	// ErrCreatorRequired is returned by CreateQuiz when the caller did
 	// not set Quiz.CreatedByPlayerID. The column is NOT NULL at the DB
 	// level (#281, migration 20260520200000); the sentinel lets handler

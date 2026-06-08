@@ -842,3 +842,22 @@ func (q *Queries) UpdateQuiz(ctx context.Context, arg UpdateQuizParams) (sql.Res
 		arg.ID,
 	)
 }
+
+const updateQuizMode = `-- name: UpdateQuizMode :execresult
+UPDATE quizzes
+SET mode       = ?,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = ?
+`
+
+type UpdateQuizModeParams struct {
+	Mode string
+	ID   int64
+}
+
+// Flips just the play mode without touching the question tree, so the
+// solo/live toggle (#830) cannot clobber a concurrent question edit the way
+// the full UpdateQuiz would.
+func (q *Queries) UpdateQuizMode(ctx context.Context, arg UpdateQuizModeParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, updateQuizMode, arg.Mode, arg.ID)
+}

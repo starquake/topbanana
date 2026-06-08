@@ -369,6 +369,86 @@ func TestHandleQuizView_ErrorHandling(t *testing.T) {
 	})
 }
 
+func TestHandleQuizSetMode(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+
+	t.Run("flips solo to live", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+		qz := env.seedQuiz(t, ownedQuiz("Quiz One", "quiz-one"))
+
+		handler := HandleQuizSetMode(logger, nil, env.quizzes)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/1/mode/live", nil)
+		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
+		req.SetPathValue("mode", quiz.ModeLive)
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, withTestAdmin(req))
+
+		if got, want := rr.Code, http.StatusSeeOther; got != want {
+			t.Fatalf("status = %d, want %d", got, want)
+		}
+		if got, want := rr.Header().Get("Location"), "/admin/quizzes/"+strconv.FormatInt(qz.ID, 10); got != want {
+			t.Errorf("Location = %q, want %q", got, want)
+		}
+
+		updated, err := env.quizzes.GetQuiz(t.Context(), qz.ID)
+		if err != nil {
+			t.Fatalf("GetQuiz err = %v, want nil", err)
+		}
+		if got, want := updated.Mode, quiz.ModeLive; got != want {
+			t.Errorf("Mode = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("rejects an invalid mode without persisting it", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+		qz := env.seedQuiz(t, ownedQuiz("Quiz One", "quiz-one"))
+
+		handler := HandleQuizSetMode(logger, nil, env.quizzes)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/1/mode/sideways", nil)
+		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
+		req.SetPathValue("mode", "sideways")
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, withTestAdmin(req))
+
+		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Fatalf("status = %d, want %d", got, want)
+		}
+		updated, err := env.quizzes.GetQuiz(t.Context(), qz.ID)
+		if err != nil {
+			t.Fatalf("GetQuiz err = %v, want nil", err)
+		}
+		if got, want := updated.Mode, quiz.ModeSolo; got != want {
+			t.Errorf("Mode = %q, want %q (unchanged)", got, want)
+		}
+	})
+
+	t.Run("missing quiz renders 404", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+
+		handler := HandleQuizSetMode(logger, nil, env.quizzes)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/admin/quizzes/999/mode/live", nil)
+		req.SetPathValue("quizID", "999")
+		req.SetPathValue("mode", quiz.ModeLive)
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, withTestAdmin(req))
+
+		if got, want := rr.Code, http.StatusNotFound; got != want {
+			t.Fatalf("status = %d, want %d", got, want)
+		}
+	})
+}
+
 func TestHandleQuizEdit(t *testing.T) {
 	t.Parallel()
 

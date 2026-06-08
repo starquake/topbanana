@@ -115,6 +115,15 @@ SET title              = ?,
     updated_at         = CURRENT_TIMESTAMP
 WHERE id = ?;
 
+-- name: UpdateQuizMode :execresult
+-- Flips just the play mode without touching the question tree, so the
+-- solo/live toggle (#830) cannot clobber a concurrent question edit the way
+-- the full UpdateQuiz would.
+UPDATE quizzes
+SET mode       = ?,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = ?;
+
 -- name: DeleteQuiz :execresult
 DELETE
 FROM quizzes

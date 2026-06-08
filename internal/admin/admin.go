@@ -1758,6 +1758,47 @@ func HandleQuestionEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 	})
 }
 
+// HandleQuizSetMode flips a quiz between solo and live without going through
+// the edit form (#830). The target mode is the {mode} path segment, mirroring
+// the {direction} segment on the question-move route; only the quiz owner (or
+// an admin) may change it. On success it redirects back to the quiz view so
+// the re-rendered page reflects the new mode.
+func HandleQuizSetMode(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var ok bool
+
+		var quizID int64
+		if quizID, ok = handlers.ParseIDFromPath(w, r, logger, "quizID"); !ok {
+			return
+		}
+
+		if _, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
+			return
+		}
+
+		mode := r.PathValue("mode")
+		if !quiz.IsValidMode(mode) {
+			render400(w, r, logger, csrfMgr, "invalid play mode")
+
+			return
+		}
+
+		if err := quizStore.SetQuizMode(r.Context(), quizID, mode); err != nil {
+			if errors.Is(err, quiz.ErrQuizNotFound) {
+				render404(w, r, logger, csrfMgr)
+
+				return
+			}
+			logger.ErrorContext(r.Context(), "error setting quiz mode", slog.Any("err", err))
+			render500(w, r, logger, csrfMgr)
+
+			return
+		}
+
+		http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(quizID, 10), http.StatusSeeOther)
+	})
+}
+
 // HandleQuizDelete deletes a quiz and all its questions and options.
 func HandleQuizDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
