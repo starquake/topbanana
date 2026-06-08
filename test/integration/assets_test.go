@@ -11,7 +11,7 @@ import (
 // the route at /assets/ is mounted, the embedded FS sees the generated
 // app.css, and the file contains utilities that prove Tailwind scanned
 // the right templates. If anyone moves the source file or breaks the
-// @source paths in _tailwind.css, the regenerated CSS would still serve
+// @source paths in frontend/web/css/tailwind.css, the regenerated CSS would still serve
 // (200 OK) but lose its custom utilities — only a class-presence check
 // catches that.
 func TestAssets_Integration(t *testing.T) {

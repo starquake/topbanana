@@ -203,7 +203,7 @@ Trigger animations inside `requestAnimationFrame` so the element is laid out fir
 runAnim('[data-feedback]', { scale: [0.9, 1.06, 1], duration: 560, easing: 'easeOutBack' });
 ```
 
-Simple fades use Alpine `x-transition` + Tailwind classes; reserve anime.js for keyframed or spring-like motion. The reduced-motion guards in both `runAnim` and `_tailwind.css` must stay intact.
+Simple fades use Alpine `x-transition` + Tailwind classes; reserve anime.js for keyframed or spring-like motion. The reduced-motion guards in both `runAnim` and `frontend/web/css/tailwind.css` must stay intact.
 
 ## Forms and labels
 
