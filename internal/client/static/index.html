@@ -607,7 +607,7 @@
                  class="splash-overlay"
                  :class="splash === 'correct' ? 'splash-correct' : splash === 'wrong' ? 'splash-wrong' : 'splash-timeout'"
                  style="display: none">
-                <p class="splash-text"
+                <p class="splash-text" role="status" aria-live="assertive"
                    x-text="splash === 'correct' ? 'Correct!' : splash === 'wrong' ? 'Wrong!' : 'Time out!'"></p>
             </div>
 
