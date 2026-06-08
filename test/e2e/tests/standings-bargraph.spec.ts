@@ -18,6 +18,15 @@ import { importQuiz, claimAndJoin, execSqlite } from './helpers';
 // web-first matchers, and the terminal finished phase (stable) is asserted in
 // full on both surfaces.
 
+// SSE-driven standings settle only after the runner advances a phase and the
+// tick reaches the client. Under the full parallel e2e run the CI box is
+// saturated, so that round-trip occasionally takes far longer than the
+// happy-path sub-second. These waits are retrying matchers (toPass / web-first
+// toBeVisible) that resolve the instant the condition holds, so a generous
+// budget is free on the happy path and only spends time on a genuine failure -
+// headroom for worst-case contention, not a fixed wait (#811).
+const STANDINGS_SETTLE_TIMEOUT = 30_000;
+
 // makeQuizLiveByTitle flips a quiz to mode='live' (the importer lands quizzes
 // on 'solo', and only live quizzes are hostable) and returns its id. Mirrors
 // the sqlite3 shortcut the other live-session specs use.
@@ -243,7 +252,7 @@ test('the standings bar graph shows final order and totals on the TV and player 
   // did not). The window is brief, so use retrying matchers; reduced motion
   // means the final state is rendered on the first paint.
   await expect(page.locator('[data-testid="round-results"] [data-standings-row]').first())
-    .toBeVisible({ timeout: 15_000 });
+    .toBeVisible({ timeout: STANDINGS_SETTLE_TIMEOUT });
   await expect(async () => {
     const rows = await readStandingsRows(page);
     expect(rows.length).toBe(2);
@@ -253,7 +262,7 @@ test('the standings bar graph shows final order and totals on the TV and player 
     expect(rows[1].name).toBe(robin);
     expect(rows[1].rank).toBe('2');
     expect(Number(rows[1].total)).toBe(0);
-  }).toPass({ timeout: 15_000 });
+  }).toPass({ timeout: STANDINGS_SETTLE_TIMEOUT });
 
   // The player's own row is highlighted (aria-current).
   await expect(
@@ -270,7 +279,7 @@ test('the standings bar graph shows final order and totals on the TV and player 
   // server has reached the finished phase), then read the authoritative final
   // totals the grow + slide settles the displayed bars onto.
   await expect(host.locator('[data-phase-results] [data-standings-row]').first())
-    .toBeVisible({ timeout: 20_000 });
+    .toBeVisible({ timeout: STANDINGS_SETTLE_TIMEOUT });
   const quincyFinal = await readFinishedStanding(host.request, joinCode, quincy);
   const robinFinal = await readFinishedStanding(host.request, joinCode, robin);
 
@@ -283,7 +292,7 @@ test('the standings bar graph shows final order and totals on the TV and player 
     tvRows = await readStandingsRows(host);
     expect(tvRows.length).toBe(2);
     expect(Number(tvRows[0].total)).toBe(quincyFinal.totalScore);
-  }).toPass({ timeout: 15_000 });
+  }).toPass({ timeout: STANDINGS_SETTLE_TIMEOUT });
   expect(tvRows[0].name).toBe(quincy);
   expect(tvRows[0].rank).toBe('1');
   expect(Number(tvRows[0].total)).toBeGreaterThan(0);
@@ -292,13 +301,13 @@ test('the standings bar graph shows final order and totals on the TV and player 
   expect(Number(tvRows[1].total)).toBe(0);
 
   await expect(page.getByTestId('finished-view').locator('[data-standings-row]').first())
-    .toBeVisible({ timeout: 20_000 });
+    .toBeVisible({ timeout: STANDINGS_SETTLE_TIMEOUT });
   let playerRows = await readStandingsRows(page);
   await expect(async () => {
     playerRows = await readStandingsRows(page);
     expect(playerRows.length).toBe(2);
     expect(Number(playerRows[0].total)).toBe(quincyFinal.totalScore);
-  }).toPass({ timeout: 15_000 });
+  }).toPass({ timeout: STANDINGS_SETTLE_TIMEOUT });
   expect(playerRows[0].name).toBe(quincy);
   expect(playerRows[0].rank).toBe('1');
   expect(Number(playerRows[0].total)).toBeGreaterThan(0);
