@@ -496,6 +496,10 @@ func addAdminRoutes(
 		csrfMW(requireGameHost(admin.HandleQuizSave(logger, csrfMgr, stores.Quizzes))),
 	)
 	mux.Handle(
+		"POST /admin/quizzes/{quizID}/mode/{mode}",
+		csrfMW(requireGameHost(admin.HandleQuizSetMode(logger, csrfMgr, stores.Quizzes))),
+	)
+	mux.Handle(
 		"POST /admin/quizzes/{quizID}/delete",
 		csrfMW(requireGameHost(admin.HandleQuizDelete(logger, csrfMgr, stores.Quizzes))),
 	)
@@ -503,6 +507,23 @@ func addAdminRoutes(
 		"POST /admin/quizzes/{quizID}/players/{playerID}/reset",
 		csrfMW(requireGameHost(admin.HandleResetGameForPlayer(logger, csrfMgr, stores.Quizzes, gameService))),
 	)
+
+	addAdminQuestionRoutes(mux, logger, stores, csrfMW, requireGameHost, csrfMgr)
+	addAdminRoundRoutes(mux, logger, stores, csrfMW, requireGameHost, csrfMgr)
+}
+
+// addAdminQuestionRoutes registers the question CRUD + reorder routes
+// (#16). Split out of addAdminRoutes so that function stays under revive's
+// function-length cap; the block is structurally identical to the rounds
+// block in addAdminRoundRoutes.
+func addAdminQuestionRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	stores *store.Stores,
+	csrfMW func(http.Handler) http.Handler,
+	requireGameHost func(http.Handler) http.Handler,
+	csrfMgr *csrf.Manager,
+) {
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}/questions/new",
 		requireGameHost(admin.HandleQuestionCreate(logger, csrfMgr, stores.Quizzes)),
@@ -527,8 +548,6 @@ func addAdminRoutes(
 		"POST /admin/quizzes/{quizID}/questions/{questionID}/move/{direction}",
 		csrfMW(requireGameHost(admin.HandleQuestionMove(logger, csrfMgr, stores.Quizzes))),
 	)
-
-	addAdminRoundRoutes(mux, logger, stores, csrfMW, requireGameHost, csrfMgr)
 }
 
 // addAdminSettingsRoutes registers the Admin settings page (#320/#538): the

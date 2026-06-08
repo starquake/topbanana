@@ -992,6 +992,80 @@ func TestQuizStore_UpdateQuiz(t *testing.T) {
 	}
 }
 
+// modeOf reads a quiz's persisted play mode, failing the test if the read
+// errors. Keeps the SetQuizMode assertions free of repeated GetQuiz plumbing.
+func modeOf(t *testing.T, s *QuizStore, id int64) string {
+	t.Helper()
+
+	qz, err := s.GetQuiz(t.Context(), id)
+	if err != nil {
+		t.Fatalf("GetQuiz(%d) err = %v, want nil", id, err)
+	}
+
+	return qz.Mode
+}
+
+func TestQuizStore_SetQuizMode(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+
+	t.Run("flips solo to live and back", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, logger)
+
+		qz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), qz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+
+		if err := quizStore.SetQuizMode(t.Context(), qz.ID, quiz.ModeLive); err != nil {
+			t.Fatalf("SetQuizMode(live) err = %v, want nil", err)
+		}
+		if got, want := modeOf(t, quizStore, qz.ID), quiz.ModeLive; got != want {
+			t.Errorf("Mode = %q, want %q", got, want)
+		}
+
+		if err := quizStore.SetQuizMode(t.Context(), qz.ID, quiz.ModeSolo); err != nil {
+			t.Fatalf("SetQuizMode(solo) err = %v, want nil", err)
+		}
+		if got, want := modeOf(t, quizStore, qz.ID), quiz.ModeSolo; got != want {
+			t.Errorf("Mode = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("rejects an unknown mode", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, logger)
+
+		qz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), qz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+
+		err := quizStore.SetQuizMode(t.Context(), qz.ID, "sideways")
+		if got, want := err, quiz.ErrInvalidMode; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("missing quiz returns ErrQuizNotFound", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, logger)
+
+		err := quizStore.SetQuizMode(t.Context(), 9999, quiz.ModeLive)
+		if got, want := err, quiz.ErrQuizNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+}
+
 func TestQuizStore_UpdateQuiz_ErrorHandling(t *testing.T) {
 	t.Parallel()
 

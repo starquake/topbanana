@@ -208,6 +208,25 @@ func (s *QuizStore) UpdateQuiz(ctx context.Context, qz *quiz.Quiz) error {
 	return nil
 }
 
+// SetQuizMode flips just the quiz's play mode (#830). It validates the mode
+// up front so an invalid value never reaches the DB CHECK constraint, and
+// maps a no-op update (id gone) to ErrQuizNotFound.
+func (s *QuizStore) SetQuizMode(ctx context.Context, id int64, mode string) error {
+	if !quiz.IsValidMode(mode) {
+		return fmt.Errorf("%w: %q", quiz.ErrInvalidMode, mode)
+	}
+
+	res, err := s.q.UpdateQuizMode(ctx, db.UpdateQuizModeParams{Mode: mode, ID: id})
+	if err != nil {
+		return fmt.Errorf("failed to update quiz mode: %w", err)
+	}
+	if database.MustRowsAffected(res) == 0 {
+		return quiz.ErrQuizNotFound
+	}
+
+	return nil
+}
+
 // ListQuestions retrieves a list of questions for the specified quiz ID, including their options, from the data store.
 func (s *QuizStore) ListQuestions(ctx context.Context, quizID int64) ([]*quiz.Question, error) {
 	rows, err := s.q.ListQuestionsByQuizID(ctx, quizID)
