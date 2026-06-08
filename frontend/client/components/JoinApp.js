@@ -485,6 +485,19 @@ export class JoinApp {
         forgetSession();
     }
 
+    // joinAnother lets the player leave a finished game's standings and start a
+    // fresh join straight away, instead of being stuck on the final standings
+    // until the server tears the session down (#828). It forgets the remembered
+    // session so the reloaded entry does not resume back into these standings,
+    // then navigates to the bare /join code-entry form. A full navigation
+    // (rather than an in-place phase reset) is the clean reset: it guarantees no
+    // stale in-game state leaks into the next session, and the pagehide leave
+    // beacon tears the old live surface down on the way out.
+    joinAnother() {
+        forgetSession();
+        window.location.assign('/join');
+    }
+
     // claimName sets the player's players.display_name through the shared
     // claim endpoint (PlayerService, the same call the solo client's claim
     // modal uses). On an already_claimed drift (the player turned out to be

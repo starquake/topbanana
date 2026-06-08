@@ -309,6 +309,16 @@
                         <h2 class="mt-2 mb-6 font-display text-3xl font-semibold text-text">Final standings</h2>
                         {{template "standings-bars" .}}
                         <p class="mt-6 text-text-dim">Thanks for playing!</p>
+                        {{/* #828: let the player start a fresh join without
+                             waiting for the host to tear this finished session
+                             down. The standings stay readable above; this just
+                             returns them to the code-entry form. */}}
+                        <button type="button"
+                                class="btn-primary mt-6"
+                                @click="joinAnother()"
+                                data-testid="join-another">
+                            Join another quiz
+                        </button>
                     </div>
                 </template>
 
