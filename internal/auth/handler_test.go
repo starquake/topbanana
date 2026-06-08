@@ -164,11 +164,17 @@ func TestHandleRegisterSubmit_SecondUser_DefaultsToPlayer(t *testing.T) {
 	}
 }
 
-func TestHandleRegisterSubmit_AdminEmailsEnv_PromotesToAdmin(t *testing.T) {
+// TestHandleRegisterSubmit_AdminEmail_StaysPlayerUntilVerified pins #785:
+// registration must NOT promote to admin off the submitted (unverified)
+// email even when it is on the allowlist. The address is unproven here,
+// so the registrant lands as a plain player; the verify-consume path is
+// the only place the admin role is stamped.
+func TestHandleRegisterSubmit_AdminEmail_StaysPlayerUntilVerified(t *testing.T) {
 	t.Parallel()
 
 	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
-	// Pre-seed first user so the count > 0 and the env var path is exercised.
+	// Pre-seed a credentialled user so the store's first-registrant admin
+	// rule does not fire for carol and confound the allowlist check.
 	if _, err := players.CreatePlayer(t.Context(), "first", "first@example.test", "h", RolePlayer); err != nil {
 		t.Fatalf("CreatePlayer err = %v, want nil", err)
 	}
@@ -178,7 +184,7 @@ func TestHandleRegisterSubmit_AdminEmailsEnv_PromotesToAdmin(t *testing.T) {
 		nil,
 		players,
 		session.New([]byte("k"), true),
-		RegisterDeps{AdminEmails: []string{"alice@example.test", "carol@example.test"}},
+		RegisterDeps{},
 	)
 	rec := postForm(t, handler, "/register", url.Values{
 		"display_name":     {"carol"},
@@ -193,8 +199,8 @@ func TestHandleRegisterSubmit_AdminEmailsEnv_PromotesToAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPlayerByDisplayName err = %v, want nil", err)
 	}
-	if got, want := p.Role, RoleAdmin; got != want {
-		t.Errorf("Role = %q, want %q", got, want)
+	if got, want := p.Role, RolePlayer; got != want {
+		t.Errorf("Role = %q, want %q (admin must not be granted on an unverified email)", got, want)
 	}
 }
 
@@ -1122,10 +1128,14 @@ func TestHandleLogout_ClearsCookieAndRedirects(t *testing.T) {
 	}
 }
 
-// TestHandleLoginSubmit_UnverifiedEmail_RefusesAndResends pins #492:
-// valid credentials against a row whose email_verified_at is NULL must
-// re-render the login form (no 303 to landing, no session cookie set)
-// and trigger a fresh verify-email send through the wired-in mailer.
+// TestHandleLoginSubmit_UnverifiedEmail_RefusesAndResends pins #492 +
+// #787: valid credentials against a row whose email_verified_at is NULL
+// must re-render the login form (no 303 to landing, no session cookie
+// set) and trigger a fresh verify-email send through the wired-in
+// mailer. The banner is the generic "check your email" message that
+// names no address and does not confirm the password (#787), so an
+// unverified-but-correct attempt is indistinguishable from a
+// wrong-password one.
 func TestHandleLoginSubmit_UnverifiedEmail_RefusesAndResends(t *testing.T) {
 	t.Parallel()
 
@@ -1160,11 +1170,14 @@ func TestHandleLoginSubmit_UnverifiedEmail_RefusesAndResends(t *testing.T) {
 		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if want := "verify your email"; !strings.Contains(body, want) {
-		t.Errorf("body missing verify-email banner; body=%.300q", body)
+	if want := "Check your email to finish signing in."; !strings.Contains(body, want) {
+		t.Errorf("body missing generic check-email banner; body=%.300q", body)
 	}
-	if want := "unv@example.test"; !strings.Contains(body, want) {
-		t.Errorf("body missing recipient address; body=%.300q", body)
+	// The banner must NOT echo the address or otherwise confirm the
+	// credentials were correct (#787); doing so would make this an
+	// account-existence + password oracle.
+	if dontWant := "resent the link to"; strings.Contains(body, dontWant) {
+		t.Errorf("body leaks credential-correct confirmation %q; body=%.300q", dontWant, body)
 	}
 	for _, c := range rec.Result().Cookies() {
 		if c.Name == session.CookieName && c.Value != "" {

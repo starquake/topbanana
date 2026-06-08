@@ -205,6 +205,55 @@ func registerVerifyAndMint(
 	mintSessionCookie(ctx, t, client, baseURL, dbURI, displayName)
 }
 
+// registerVerifyViaLinkAndMint is registerVerifyAndMint's
+// real-verify-flow variant: it proves the email through GET /verify-email
+// (verifyPlayerEmailViaLink) instead of a direct DB stamp, so the
+// verify-time ADMIN_EMAILS promotion (#785) actually fires. Use it when
+// the account must end up an admin via the allowlist rather than the
+// first-registrant rule.
+func registerVerifyViaLinkAndMint(
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, dbURI, displayName, password string,
+) {
+	t.Helper()
+
+	registerForPending(ctx, t, client, baseURL, displayName, password)
+	verifyPlayerEmailViaLink(ctx, t, baseURL, dbURI, displayName)
+	mintSessionCookie(ctx, t, client, baseURL, dbURI, displayName)
+}
+
+// verifyPlayerEmailViaLink proves the named player's email through the
+// real GET /verify-email endpoint rather than a direct DB stamp. Mints a
+// verify token, consumes it over HTTP, and asserts the 200. Use this
+// (not verifyPlayerEmail) when the test depends on the verify-time side
+// effects the endpoint applies - notably the ADMIN_EMAILS promotion
+// (#785), which a direct DB stamp bypasses.
+func verifyPlayerEmailViaLink(
+	ctx context.Context, t *testing.T, baseURL, dbURI, displayName string,
+) {
+	t.Helper()
+
+	dbConn, stores := openStores(t, dbURI)
+	defer dbConn.Close() //nolint:errcheck // cleanup.
+
+	player, err := stores.Players.GetPlayerByDisplayName(ctx, displayName)
+	if err != nil {
+		t.Fatalf("verifyPlayerEmailViaLink GetPlayerByDisplayName err = %v, want nil", err)
+	}
+	raw, hash, err := auth.GenerateVerifyToken()
+	if err != nil {
+		t.Fatalf("verifyPlayerEmailViaLink GenerateVerifyToken err = %v, want nil", err)
+	}
+	if err := stores.VerifyTokens.CreateVerifyToken(ctx, hash, player.ID, futureHour(), ""); err != nil {
+		t.Fatalf("verifyPlayerEmailViaLink CreateVerifyToken err = %v, want nil", err)
+	}
+
+	resp := httpGet(ctx, t, authClient(t), baseURL+"/verify-email?"+url.Values{"token": {raw}}.Encode())
+	defer closeBody(t, resp.Body)
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("verifyPlayerEmailViaLink verify status = %d, want %d", got, want)
+	}
+}
+
 // registerAndMint registers displayName and mints a session cookie onto
 // client's jar WITHOUT stamping email_verified_at, leaving the player
 // signed in but unverified. Use it when a test needs a signed-in row

@@ -104,7 +104,9 @@ func TestHandleVerifyEmail_MismatchedSessionClears(t *testing.T) {
 	sessions.Set(rec, sessionPlayer.ID, sessionPlayer.SessionVersion)
 	cookie := rec.Result().Cookies()[0]
 
-	handler := HandleVerifyEmail(discardLogger(), nil, stores.VerifyTokens, stores.Players, sessions)
+	handler := HandleVerifyEmail(
+		discardLogger(), nil, stores.VerifyTokens, stores.Players, stores.AdminPlayers, sessions, nil,
+	)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/verify-email?token="+raw, nil)
 	req.AddCookie(cookie)
 	out := httptest.NewRecorder()
@@ -146,7 +148,9 @@ func TestHandleVerifyEmail_MatchingSessionKeepsLanding(t *testing.T) {
 	sessions.Set(rec, player.ID, player.SessionVersion)
 	cookie := rec.Result().Cookies()[0]
 
-	handler := HandleVerifyEmail(discardLogger(), nil, stores.VerifyTokens, stores.Players, sessions)
+	handler := HandleVerifyEmail(
+		discardLogger(), nil, stores.VerifyTokens, stores.Players, stores.AdminPlayers, sessions, nil,
+	)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/verify-email?token="+raw, nil)
 	req.AddCookie(cookie)
 	out := httptest.NewRecorder()
@@ -160,12 +164,88 @@ func TestHandleVerifyEmail_MatchingSessionKeepsLanding(t *testing.T) {
 	}
 }
 
+// TestHandleVerifyEmail_AllowlistedEmail_PromotesToAdmin pins the
+// verify-time half of #785: a registrant whose now-proven email is on
+// the ADMIN_EMAILS allowlist is stamped admin only after consuming the
+// verify token, not at registration.
+func TestHandleVerifyEmail_AllowlistedEmail_PromotesToAdmin(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	stores := store.New(db, discardLogger())
+	// Seed a credentialled player first so the store's first-registrant
+	// admin rule does not auto-promote alice and mask the allowlist path.
+	createVerifyPlayer(t, stores.Players, "first", "first@example.test", RolePlayer)
+	player := createVerifyPlayer(t, stores.Players, "alice", "alice@example.test", RolePlayer)
+	if got, want := player.Role, RolePlayer; got != want {
+		t.Fatalf("seed player Role = %q, want %q (must start as plain player)", got, want)
+	}
+	raw := seedVerifyToken(t, stores.VerifyTokens, player.ID, time.Now().Add(time.Hour))
+
+	rec := runVerifyEmailWithAdminEmails(t, db, raw, []string{"alice@example.test"})
+	if got, want := rec.Code, http.StatusOK; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+
+	promoted, err := stores.Players.GetPlayerByID(t.Context(), player.ID)
+	if err != nil {
+		t.Fatalf("GetPlayerByID err = %v, want nil", err)
+	}
+	if got, want := promoted.Role, RoleAdmin; got != want {
+		t.Errorf("Role after verify = %q, want %q", got, want)
+	}
+}
+
+// TestHandleVerifyEmail_NotAllowlisted_StaysPlayer pins the negative
+// case for #785: a registrant absent from the allowlist keeps the
+// player role after verifying.
+func TestHandleVerifyEmail_NotAllowlisted_StaysPlayer(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	stores := store.New(db, discardLogger())
+	// Seed a credentialled player first so bob is not the first-registrant
+	// the store would auto-promote to admin.
+	createVerifyPlayer(t, stores.Players, "first", "first@example.test", RolePlayer)
+	player := createVerifyPlayer(t, stores.Players, "bob", "bob@example.test", RolePlayer)
+	if got, want := player.Role, RolePlayer; got != want {
+		t.Fatalf("seed player Role = %q, want %q (must start as plain player)", got, want)
+	}
+	raw := seedVerifyToken(t, stores.VerifyTokens, player.ID, time.Now().Add(time.Hour))
+
+	rec := runVerifyEmailWithAdminEmails(t, db, raw, []string{"alice@example.test"})
+	if got, want := rec.Code, http.StatusOK; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+
+	after, err := stores.Players.GetPlayerByID(t.Context(), player.ID)
+	if err != nil {
+		t.Fatalf("GetPlayerByID err = %v, want nil", err)
+	}
+	if got, want := after.Role, RolePlayer; got != want {
+		t.Errorf("Role after verify = %q, want %q", got, want)
+	}
+}
+
 func runVerifyEmail(t *testing.T, db *sql.DB, raw string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	return runVerifyEmailWithAdminEmails(t, db, raw, nil)
+}
+
+// runVerifyEmailWithAdminEmails drives the verify handler with the given
+// ADMIN_EMAILS allowlist so the #785 promotion path can be exercised; a
+// nil allowlist is the no-promotion default the other cases use.
+func runVerifyEmailWithAdminEmails(
+	t *testing.T, db *sql.DB, raw string, adminEmails []string,
+) *httptest.ResponseRecorder {
 	t.Helper()
 
 	stores := store.New(db, discardLogger())
 	sessions := session.New([]byte("test-key-32-bytes-test-key-32byt"), true)
-	handler := HandleVerifyEmail(discardLogger(), nil, stores.VerifyTokens, stores.Players, sessions)
+	handler := HandleVerifyEmail(
+		discardLogger(), nil, stores.VerifyTokens, stores.Players, stores.AdminPlayers, sessions, adminEmails,
+	)
 
 	target := "/verify-email"
 	if raw != "" {

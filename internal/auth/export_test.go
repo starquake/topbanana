@@ -105,6 +105,11 @@ var (
 // the per-IP cool-down without sleeping (#494).
 var NewLoginRateLimiterWithClock = newLoginRateLimiterWithClock
 
+// NewAccountLoginLimiterWithClock exposes the internal clock-injected
+// per-account limiter constructor so the external auth_test package can
+// pin the cooldown expiry and prune without sleeping (#786).
+var NewAccountLoginLimiterWithClock = newAccountLoginLimiterWithClock
+
 // ValidateAcceptInviteInput exposes validateAcceptInviteInput so the
 // external test package can pin the display-name + password rule table
 // from input strings without staging an HTTP request.

@@ -80,11 +80,14 @@ func TestLogin_UnverifiedEmail_BlocksAndResends(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadAll err = %v, want nil", err)
 	}
-	if got, want := string(body), "verify your email"; !strings.Contains(got, want) {
-		t.Errorf("body missing verify banner; body=%.300q", got)
+	if got, want := string(body), "Check your email to finish signing in."; !strings.Contains(got, want) {
+		t.Errorf("body missing generic check-email banner; body=%.300q", got)
 	}
-	if got, want := string(body), displayName+"@example.test"; !strings.Contains(got, want) {
-		t.Errorf("body missing recipient address; body=%.300q", got)
+	// The banner must not confirm the credentials were correct (#787):
+	// an unverified-but-correct attempt has to read the same as a
+	// wrong-password one, so no "we resent the link to <address>" echo.
+	if dontWant := "resent the link to"; strings.Contains(string(body), dontWant) {
+		t.Errorf("body leaks credential-correct confirmation %q; body=%.300q", dontWant, string(body))
 	}
 	for _, c := range resp.Cookies() {
 		if c.Name == session.CookieName && c.Value != "" {
