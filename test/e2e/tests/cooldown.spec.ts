@@ -39,24 +39,29 @@ test('forgot-password cooldown button counts down and re-enables', async ({ page
   // submit could not be clicked (disabled button + frozen virtual clock) - the
   // #643 flake. Instead: submit once, then submit again only if the button is
   // still enabled. Either path lands on the disabled state.
-  await page.locator('input[name=identifier]').fill('nobody@example.test');
-  await submit.click();
-  await page.waitForURL(/\/forgot-password$/);
-  await expect(submit).toBeVisible();
+  // Submit until the per-IP cooldown rejects us and the button renders
+  // disabled. The 60s bucket is shared across this spec's retries (and, locally,
+  // the other browser project), so the number of submits needed to trip it is
+  // not fixed: a clear bucket needs two (the first arms it, the second is
+  // rejected); an already-armed bucket trips on the first. The old one-shot
+  // `if (await submit.isEnabled())` decided whether to resubmit from a single
+  // read of the transitional post-redirect button state, which misread under
+  // load and left the button enabled where the assertion expected disabled
+  // (#818). Poll instead: resubmit whenever the button is enabled and stop once
+  // it is disabled. The frozen virtual clock keeps it disabled once tripped, so
+  // this converges.
+  await expect(async () => {
+    if (await submit.isEnabled()) {
+      await page.locator('input[name=identifier]').fill('nobody@example.test');
+      await submit.click();
+      await page.waitForURL(/\/forgot-password$/);
+    }
+    await expect(submit).toBeDisabled({ timeout: 1_000 });
+  }).toPass({ timeout: 30_000 });
 
-  if (await submit.isEnabled()) {
-    // Bucket was clear: the first submit was allowed (success notice, button
-    // still enabled). Submit again inside the window to trip the limiter.
-    await page.locator('input[name=identifier]').fill('nobody@example.test');
-    await submit.click();
-    await page.waitForURL(/\/forgot-password$/);
-  }
-
-  // The stable locator always resolves, so these state assertions auto-wait
-  // through the redirect and cooldown.js's relabel. Tolerate any countdown
-  // value rather than the exact "Wait 60s" frame: a contaminating prior run
-  // leaves a smaller remaining count, and the exact frame is racy under load.
-  await expect(submit).toBeDisabled({ timeout: 15_000 });
+  // The button shows the live countdown label. Tolerate any value rather than
+  // the exact "Wait 60s" frame: a contaminating prior run leaves a smaller
+  // remaining count, and the exact frame is racy under load.
   await expect(submit).toHaveText(/^Wait \d+s$/, { timeout: 15_000 });
 
   // Advance past the full 60s cooldown without real waiting. runFor
