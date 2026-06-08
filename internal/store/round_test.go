@@ -5,8 +5,10 @@ import (
 	"log/slog"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/starquake/topbanana/internal/dbtest"
+	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/quiz"
 	. "github.com/starquake/topbanana/internal/store"
 )
@@ -424,6 +426,104 @@ func TestQuizStore_DeleteRound(t *testing.T) {
 		if got, want := err, quiz.ErrQuestionNotFound; !errors.Is(got, want) {
 			t.Errorf("err = %v, want %v", got, want)
 		}
+	})
+
+	t.Run("wipes played game_questions and game_answers for the round's questions", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		qz := newTestQuizForGroups(t, quizStore)
+
+		round := &quiz.Round{QuizID: qz.ID, Position: 1, Title: "Round 2"}
+		if err := quizStore.CreateRound(t.Context(), round); err != nil {
+			t.Fatalf("CreateRound err = %v", err)
+		}
+		qs := &quiz.Question{
+			QuizID:   qz.ID,
+			RoundID:  round.ID,
+			Text:     "Q",
+			Position: 1,
+			Options:  []*quiz.Option{{Text: "A", Correct: true}},
+		}
+		if err := quizStore.CreateQuestion(t.Context(), qs); err != nil {
+			t.Fatalf("CreateQuestion err = %v", err)
+		}
+
+		playerStore := NewPlayerStore(db, slog.Default())
+		player, err := playerStore.CreateAnonymousPlayer(t.Context(), "anon-round-delete")
+		if err != nil {
+			t.Fatalf("CreateAnonymousPlayer err = %v", err)
+		}
+
+		// Stand up a played game so the round's question is referenced by
+		// game_questions.question_id and game_answers.option_id, neither of
+		// which has ON DELETE CASCADE. Without the FK cleanup, DeleteRound
+		// would fail with FOREIGN KEY constraint failed (787) here (#788).
+		gameStore := NewGameStore(db, slog.Default())
+		g := &game.Game{QuizID: qz.ID}
+		if err = gameStore.CreateGame(t.Context(), g); err != nil {
+			t.Fatalf("CreateGame err = %v", err)
+		}
+		if err = gameStore.CreateParticipant(
+			t.Context(), &game.Participant{GameID: g.ID, PlayerID: player.ID, QuizID: qz.ID},
+		); err != nil {
+			t.Fatalf("CreateParticipant err = %v", err)
+		}
+
+		now := time.Now().UTC().Truncate(time.Second)
+		gq := &game.Question{
+			GameID:     g.ID,
+			QuestionID: qs.ID,
+			StartedAt:  now,
+			ExpiredAt:  now.Add(10 * time.Second),
+		}
+		if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+			t.Fatalf("CreateQuestion (game) err = %v", err)
+		}
+		if err = gameStore.CreateAnswer(t.Context(), &game.Answer{
+			GameID:     g.ID,
+			PlayerID:   player.ID,
+			QuestionID: gq.ID,
+			OptionID:   qs.Options[0].ID,
+		}); err != nil {
+			t.Fatalf("CreateAnswer err = %v", err)
+		}
+
+		if err = quizStore.DeleteRound(t.Context(), round.ID); err != nil {
+			t.Fatalf("DeleteRound err = %v, want nil", err)
+		}
+
+		_, err = quizStore.GetRound(t.Context(), round.ID)
+		if got, want := err, quiz.ErrRoundNotFound; !errors.Is(got, want) {
+			t.Errorf("GetRound err = %v, want %v", got, want)
+		}
+
+		_, err = quizStore.GetQuestion(t.Context(), qs.ID)
+		if got, want := err, quiz.ErrQuestionNotFound; !errors.Is(got, want) {
+			t.Errorf("GetQuestion err = %v, want %v", got, want)
+		}
+
+		assertCount := func(label, sqlStr string, arg any, want int) {
+			t.Helper()
+			var got int
+			if scanErr := db.QueryRowContext(t.Context(), sqlStr, arg).Scan(&got); scanErr != nil {
+				t.Fatalf("scan %s err = %v", label, scanErr)
+			}
+			if got != want {
+				t.Errorf("%s count = %d, want %d", label, got, want)
+			}
+		}
+
+		assertCount("game_questions for deleted question",
+			`SELECT COUNT(*) FROM game_questions WHERE question_id = ?`, qs.ID, 0)
+		assertCount("game_answers for deleted question's game_question",
+			`SELECT COUNT(*) FROM game_answers WHERE game_question_id = ?`, gq.ID, 0)
+
+		// The game itself and its participant survive the round delete.
+		assertCount("games", `SELECT COUNT(*) FROM games WHERE id = ?`, g.ID, 1)
+		assertCount("game_participants",
+			`SELECT COUNT(*) FROM game_participants WHERE game_id = ?`, g.ID, 1)
 	})
 }
 

@@ -121,10 +121,35 @@ func (s *QuizStore) UpdateRound(ctx context.Context, g *quiz.Round) error {
 	return nil
 }
 
-// DeleteRound removes a round by ID (#444). The round's questions cascade
-// via the ON DELETE CASCADE on questions.round_id.
+// DeleteRound removes a round and its questions by ID (#444). The round's
+// questions would cascade via the ON DELETE CASCADE on questions.round_id,
+// but game_questions.question_id and game_answers.option_id reference those
+// questions without ON DELETE CASCADE, so a played round's bare delete trips
+// FOREIGN KEY constraint failed (787). Run inside a transaction and clean up
+// each question's dependent game_questions / game_answers rows via
+// execDeleteQuestion before dropping the round (#788).
 func (s *QuizStore) DeleteRound(ctx context.Context, id int64) error {
-	res, err := s.q.DeleteRound(ctx, id)
+	if err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		return s.deleteRoundTx(ctx, q, id)
+	}); err != nil {
+		return fmt.Errorf("failed to delete round: %w", err)
+	}
+
+	return nil
+}
+
+// deleteRoundTx is the transactional body of DeleteRound. Pulled out so the
+// sentinel error is not wrapped on the way out.
+func (s *QuizStore) deleteRoundTx(ctx context.Context, q *db.Queries, id int64) error {
+	questionIDs, err := q.ListQuestionIDsByRoundID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to list question IDs for round %d: %w", id, err)
+	}
+	if err = s.execDeleteQuestions(ctx, q, questionIDs); err != nil {
+		return err
+	}
+
+	res, err := q.DeleteRound(ctx, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete round: %w", err)
 	}

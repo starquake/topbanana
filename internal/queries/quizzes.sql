@@ -138,6 +138,17 @@ FROM questions
 WHERE quiz_id = ?
 ORDER BY position;
 
+-- name: ListQuestionIDsByRoundID :many
+-- Lists the question IDs attached to a round, snapshotted up front by the
+-- round delete so it can clean up each question's dependent game_questions
+-- and game_answers rows before dropping the round. questions.round_id has
+-- ON DELETE CASCADE, but the played-game rows that reference those
+-- questions do not, so the round delete must wipe them in FK order first.
+SELECT id
+FROM questions
+WHERE round_id = ?
+ORDER BY position;
+
 -- name: CreateQuestion :one
 INSERT INTO questions (quiz_id, round_id, text, position, image_url, time_limit_seconds)
 VALUES (?, ?, ?, ?, ?, ?)
