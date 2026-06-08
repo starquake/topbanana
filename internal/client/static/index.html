@@ -169,6 +169,15 @@
                  the leaderboard stays directly under the CTA on
                  revisits — see the CTA comment above. -->
             <div x-show="!gameId">
+                {{/* Stale / hidden deep link (#802): the URL matched
+                     /play/{slug-id} but the id resolved to no available
+                     quiz, so note it above the picker instead of dropping
+                     the player onto the generic picker with no explanation. */}}
+                <template x-if="deepLinkUnavailable">
+                    <div class="feedback-banner feedback-danger mb-6" role="status" data-testid="deep-link-unavailable">
+                        That quiz isn't available.
+                    </div>
+                </template>
                 {{/* No quiz pre-selected (the bare /client/ entry,
                      not a /play/{slug-id} deep link) — surface the
                      /quizzes browse page as the only affordance.
@@ -484,8 +493,14 @@
                             Couldn't continue — please try again.
                         </div>
 
+                        <!-- The round card auto-advances when its countdown
+                             bar drains, but that window is a full question
+                             duration, which is a long wait. Make Continue a
+                             prominent, full-width target so a player who has
+                             read the recap can move on at once rather than
+                             waiting out the bar (#804). -->
                         <button type="button"
-                                class="btn-primary"
+                                class="btn-primary w-full text-sm min-h-[56px]"
                                 :class="{ 'mt-auto': !roundContinueError }"
                                 :disabled="continuingRound"
                                 data-testid="round-continue"
@@ -570,8 +585,14 @@
                             Couldn't continue — please try again.
                         </div>
 
+                        <!-- The round card auto-advances when its countdown
+                             bar drains, but that window is a full question
+                             duration, which is a long wait. Make Continue a
+                             prominent, full-width target so a player who has
+                             read the recap can move on at once rather than
+                             waiting out the bar (#804). -->
                         <button type="button"
-                                class="btn-primary"
+                                class="btn-primary w-full text-sm min-h-[56px]"
                                 :class="{ 'mt-auto': !roundContinueError }"
                                 :disabled="continuingRound"
                                 data-testid="round-continue"

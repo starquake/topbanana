@@ -271,11 +271,23 @@
              countdown is armed every surface shows "Starting in M:SS" off the
              server clock; the host can still start now (skip) or cancel it. */}}
         <footer class="shrink-0 flex flex-wrap items-center justify-between gap-4 px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1rem,2.5vh,2rem)] border-t border-border-soft">
+            {{/* Connection-trouble note (#795): after several consecutive
+                 GET /state failures the host sees why the screen looks frozen,
+                 while the TV keeps retrying off every SSE tick. Cleared on the
+                 next good read. Distinct from the SSE "Live / Reconnecting"
+                 dot, which only tracks the event channel. */}}
             <p class="m-0 flex items-center gap-2 text-text-dim text-[clamp(0.8rem,1.5vw,1rem)]">
-                <span class="inline-block w-2.5 h-2.5 rounded-full"
-                      :class="connected ? 'bg-success' : 'bg-warning'"
-                      aria-hidden="true"></span>
-                <span x-text="connected ? 'Live' : 'Reconnecting...'"></span>
+                <template x-if="connectionTrouble">
+                    <span class="text-warning" role="status" data-connection-trouble>Connection problem, retrying...</span>
+                </template>
+                <template x-if="!connectionTrouble">
+                    <span class="flex items-center gap-2">
+                        <span class="inline-block w-2.5 h-2.5 rounded-full"
+                              :class="connected ? 'bg-success' : 'bg-warning'"
+                              aria-hidden="true"></span>
+                        <span x-text="connected ? 'Live' : 'Reconnecting...'"></span>
+                    </span>
+                </template>
             </p>
 
             {{/* Armed: the live countdown, with Start now (skip) + Cancel. */}}
@@ -286,7 +298,7 @@
                    x-text="startCountdownLabel()"
                    role="status"
                    data-start-countdown-label></p>
-                <form method="post" :action="'/host/' + joinCode + '/start'" @submit.prevent="start()">
+                <form method="post" :action="'/host/' + encodeURIComponent(joinCode) + '/start'" @submit.prevent="start()">
                     <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                     <button type="submit"
                             class="inline-flex items-center justify-center gap-2 min-h-[52px] px-6 rounded-lg bg-accent text-bg font-display font-extrabold text-[clamp(0.9rem,1.7vw,1.15rem)] uppercase tracking-[0.12em] border-0 transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
@@ -303,7 +315,7 @@
             {{/* Not armed: Start now + Start in 60s. */}}
             <div x-show="phase === 'lobby' && !armed()"
                  class="flex flex-wrap items-center gap-4">
-                <form method="post" :action="'/host/' + joinCode + '/start'" @submit.prevent="start()">
+                <form method="post" :action="'/host/' + encodeURIComponent(joinCode) + '/start'" @submit.prevent="start()">
                     <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                     <button type="submit"
                             class="inline-flex items-center justify-center gap-2 min-h-[52px] px-8 rounded-lg bg-accent text-bg font-display font-extrabold text-[clamp(0.9rem,1.7vw,1.15rem)] uppercase tracking-[0.12em] border-0 transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"

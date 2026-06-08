@@ -74,6 +74,12 @@ export class GameApp {
         // is hidden in that case so the player just sees a description and
         // a Start button. Stays null on /client/, where the dropdown shows.
         this.deepLinkedQuiz = null;
+        // True when the URL matched the /play/<slug>-<id> pattern but the id
+        // resolved to no quiz in the loaded list (deleted, hidden, or a stale
+        // link). Surfaces a "That quiz isn't available" note above the picker
+        // instead of silently dropping the player onto the generic picker
+        // (#802). Reset whenever a real quiz is picked.
+        this.deepLinkUnavailable = false;
         // Gates the deep-link title/description so it only paints once
         // checkAlreadyPlayed has resolved the start state. Without it the
         // header renders optimistically on a deep link, then vanishes when
@@ -184,6 +190,12 @@ export class GameApp {
         if (deepLinked) {
             this.deepLinkedQuiz = deepLinked;
             this.selectedQuizId = deepLinked.id;
+        } else if (this.hasDeepLinkPath()) {
+            // The URL is a /play/<slug>-<id> deep link but the id matched no
+            // quiz in the loaded list (deleted, hidden, or a stale link).
+            // Note it above the picker rather than dropping the player onto
+            // the generic picker with no explanation (#802).
+            this.deepLinkUnavailable = true;
         }
         // No auto-default to quizzes[0] (#284): the in-page picker was
         // replaced by a link to /quizzes, so /client/ without a deep
@@ -352,6 +364,14 @@ export class GameApp {
         return this.quizzes.find(q => q.id === id) || null;
     }
 
+    // hasDeepLinkPath reports whether the current URL is a /play/<slug>-<id>
+    // deep link, regardless of whether that id resolves to a loaded quiz. Used
+    // to tell a stale/hidden deep link (note "not available") apart from a bare
+    // /client/ visit (show the picker quietly).
+    hasDeepLinkPath() {
+        return PLAY_PATH_PATTERN.test(window.location.pathname);
+    }
+
     // slugIdFor returns the `${slug}-${id}` form for the selected quiz, or
     // null when no matching quiz exists in this.quizzes.
     slugIdFor(quizId) {
@@ -445,6 +465,9 @@ export class GameApp {
         this.startError = null;
 
         const slugId = this.slugIdFor(this.selectedQuizId);
+        // A real quiz is selected, so any "deep link unavailable" note from a
+        // stale URL no longer applies (#802).
+        if (slugId) this.deepLinkUnavailable = false;
         // Only tear down the prior leaderboard view when the selected
         // quiz actually changed. checkAlreadyPlayed is also re-entered
         // from startGame() for the same quiz; closing + reopening the
@@ -571,9 +594,16 @@ export class GameApp {
             // Re-fetch /me so the player's claim status is current.
             // Could in principle have flipped since page load (rare,
             // but cheap to verify and keeps the UI honest if they
-            // logged in mid-quiz from a second tab).
-            const fresh = await playerService.getMe();
-            if (fresh) this.player = fresh;
+            // logged in mid-quiz from a second tab). getMe already
+            // swallows its own errors and returns null, but wrap the
+            // await defensively so a future change there can never
+            // leave the player stuck short of the finished view.
+            try {
+                const fresh = await playerService.getMe();
+                if (fresh) this.player = fresh;
+            } catch (err) {
+                console.warn('finish /me refresh failed', err);
+            }
             // Render the leaderboard first so the player sees their
             // row populated immediately; then open the claim modal on
             // top — but only if the player has not already chosen a

@@ -75,4 +75,31 @@ test.describe('deep-linked play start screen', () => {
       browseLink.click(),
     ]);
   });
+
+  // #802: a /play/{slug}-{id} deep link whose id resolves to no available quiz
+  // (deleted, hidden, or a stale link) must NOT silently fall back to the
+  // generic picker. It surfaces a "That quiz isn't available" note above the
+  // picker so the visitor understands why their link did nothing, while still
+  // offering the browse affordance to recover.
+  test('an invalid play deep link notes that the quiz is unavailable', async ({ page }) => {
+    test.setTimeout(30_000);
+
+    await page.context().clearCookies();
+
+    // A high id that does not match any seeded quiz. The path matches the
+    // /play/<slug>-<id> pattern, so the SPA treats it as a deep link, but the
+    // id resolves to nothing in the loaded list.
+    await page.goto('/play/missing-quiz-999999999');
+
+    // The unavailable note shows above the picker; the generic browse
+    // affordance stays so the visitor can still reach the catalog.
+    await expect(page.getByTestId('deep-link-unavailable')).toBeVisible();
+    await expect(page.getByTestId('deep-link-unavailable')).toContainText("isn't available");
+    await expect(page.getByRole('link', { name: 'Browse all quizzes' })).toBeVisible();
+    // No deep-link start screen: the quiz title/description header is absent,
+    // and with no quiz selected the Start button stays disabled (it cannot
+    // start a quiz that does not exist).
+    await expect(page.locator('[data-testid="deep-link-header"]')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Start Game' })).toBeDisabled();
+  });
 });

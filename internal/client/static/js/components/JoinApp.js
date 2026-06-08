@@ -16,6 +16,15 @@ import { optionStateClass } from '../util/answerOptions.js';
 // back to the typed-code phase there.
 const JOIN_PATH_PATTERN = /^\/join\/([^/]+)\/?$/;
 
+// STATE_FAILURE_LIMIT is how many consecutive non-404 GET /state failures the
+// player lobby tolerates before surfacing the "Connection problem, retrying..."
+// banner (#795). The component keeps polling underneath; the banner just tells
+// the player why the roster looks frozen. A single blip stays silent; three in
+// a row (each one an SSE tick or a foreground re-read apart) reads as a real
+// outage. A 404 is not counted here - it is the room-gone signal that flips
+// lobbyClosed instead.
+const STATE_FAILURE_LIMIT = 3;
+
 // SESSION_STORAGE_KEY holds the remembered { code } the player joined, so a
 // reload or a brief drop can resume by re-joining without the player
 // re-entering the code (MP-10 / #687). Join is nameless now (#716 - the player
@@ -207,6 +216,42 @@ export class JoinApp {
         // Interval handle for the start countdown, cleared before each new one
         // and on teardown.
         this.startTimer = null;
+
+        // --- Connection-health banner (#795) --------------------------------
+        // Surfaces a "Connection problem, retrying..." banner once GET /state
+        // has failed STATE_FAILURE_LIMIT times in a row with a non-404 error
+        // (a network drop or a 5xx), so the player knows why a stale roster
+        // isn't updating. Cleared on the next successful read. A 404 is the
+        // distinct room-gone signal and flips lobbyClosed instead.
+        this.connectionTrouble = false;
+        // Running count of consecutive non-404 GET /state failures, reset to 0
+        // on any success.
+        this.stateFailures = 0;
+
+        // --- Leave beacon (#794) --------------------------------------------
+        // Guards against a duplicate leave: beforeunload and pagehide can both
+        // fire on the same teardown, and the beacon should go out once. Reset
+        // when the player lands back in a lobby (a bfcache restore re-Joins),
+        // so a later genuine exit still sends.
+        this.leftSent = false;
+
+        // --- Screen Wake Lock (QoL 2 / #760) --------------------------------
+        // Held WakeLockSentinel that keeps the player's screen awake during a
+        // live game, or null when none is held. Acquired off the user gesture
+        // that lands them in the lobby and re-acquired on return to the
+        // foreground (the OS auto-releases it when the page hides). Released on
+        // the finished phase, when the lobby is gone, and on teardown.
+        this.wakeLock = null;
+        // True while a wake lock is held or a request is in flight, guarding
+        // against a double-acquire. A plain boolean rather than a truthiness
+        // check on this.wakeLock because Alpine wraps reactive object fields in
+        // a Proxy, so an identity check (sentinel === this.wakeLock) inside the
+        // release handler would never match - the boolean sidesteps that.
+        this.wakeLockHeld = false;
+        // Monotonic id bumped on each acquire so a sentinel's release handler
+        // only clears the held flag when it is still the current one (a stale
+        // late release for a superseded sentinel is ignored).
+        this.wakeLockGen = 0;
     }
 
     // init resolves the room code (from a /join/{code} deep link or a
@@ -214,27 +259,25 @@ export class JoinApp {
     // /join/{code} deep link otherwise lands on the name form; the bare /join
     // entry with no remembered session shows the enter-code form first.
     async init() {
-        // Closing the stream on unload avoids leaking a server-side
-        // subscriber when the player navigates away or closes the tab; clearing
-        // the question timer stops a stale countdown interval from firing. Once
-        // the player has joined (the 'lobby' stage carries a code) we also fire
-        // a best-effort leave beacon so their row drops out of the roster,
-        // answered-order badges, and standings at once (MP-10).
+        // Fire the leave beacon on every event that can signal the player is
+        // going away. beforeunload alone is unreliable on mobile - a tab the OS
+        // discards in the background, or a swipe-away on iOS Safari, often never
+        // raises it (#794). pagehide fires on bfcache navigation and tab close
+        // where beforeunload may not, and visibilitychange(hidden) covers the
+        // app-switch / lock-screen case. sendBeacon is idempotent server-side
+        // and the client guards against a duplicate send within one teardown,
+        // so wiring all three is safe.
         //
-        // beforeunload also fires on a reload, so a reloading player may be
-        // marked left here before the reloaded page comes back. That race is
+        // The leave also tears down the stream and timers so a backgrounded tab
+        // does not leak a server-side subscriber or a stale countdown interval.
+        // beforeunload/pagehide also fire on a reload, so a reloading player may
+        // be marked left before the reloaded page comes back. That race is
         // harmless: resume re-Joins, which revives the left roster row (the
         // server's resume gate accepts a prior participant regardless of
         // left_at). The remembered session below is what makes the reload land
         // back in the lobby.
-        window.addEventListener('beforeunload', () => {
-            this.closeStream();
-            this.clearQuestionTimer();
-            this.clearStartTimer();
-            if (this.phase === 'lobby' && this.code) {
-                sessionService.leave(this.code);
-            }
-        });
+        window.addEventListener('beforeunload', () => this.sendLeave());
+        window.addEventListener('pagehide', () => this.sendLeave());
 
         // Mobile browsers commonly suspend or close the SSE connection while
         // the tab is backgrounded, and EventSource does not always reconnect on
@@ -242,8 +285,12 @@ export class JoinApp {
         // every return to the foreground re-read state and re-open the stream
         // if it dropped, so the roster and current phase come back (#751). One
         // shared handler covers visibilitychange, pageshow (bfcache restore),
-        // and focus; it no-ops outside the lobby stage.
-        this.onVisible = () => this.handleVisible();
+        // and focus; it no-ops outside the lobby stage. pageshow forwards its
+        // event so a bfcache restore (persisted=true) can re-Join: pagehide
+        // fired the leave beacon on the way out, so the player's roster row was
+        // marked left and a plain state read would 404 - the restore must
+        // revive it.
+        this.onVisible = (event) => this.handleVisible(event);
         document.addEventListener('visibilitychange', this.onVisible);
         window.addEventListener('pageshow', this.onVisible);
         window.addEventListener('focus', this.onVisible);
@@ -298,12 +345,17 @@ export class JoinApp {
 
     // landInLobby captures the join result, switches to the lobby stage,
     // remembers the code for resume, and opens the SSE subscription. Shared by
-    // every successful-join path (auto-join, resume, claim-then-join).
+    // every successful-join path (auto-join, resume, claim-then-join). Joining
+    // and resuming both run off a user gesture (the join/ready tap, or the
+    // reload that re-runs init), so this is the point to take the screen wake
+    // lock that keeps the player's phone awake through a live game (#760).
     async landInLobby(result) {
         this.myDisplayName = result.displayName;
         this.isReady = result.isReady;
         this.phase = 'lobby';
+        this.leftSent = false;
         rememberSession(this.code);
+        this.acquireWakeLock();
         await this.refreshState();
         this.subscribe();
     }
@@ -311,14 +363,19 @@ export class JoinApp {
     // autoJoin joins the current code for a logged-in named player, landing
     // them straight in the lobby and skipping the name form. The join is
     // nameless (#716): the player keeps their account name. On a non-OK result
-    // it falls back to the name form so the player can recover (a notFound
-    // bounces to the code form).
+    // it falls back to a recoverable surface: a notFound bounces to the code
+    // form, a closed (the game already started) routes to the terminal closed
+    // view (#793), and anything else lands on the name form.
     async autoJoin() {
         this.busy = true;
         this.error = '';
         try {
             const result = await sessionService.join(this.code);
             if (!result.ok) {
+                if (result.kind === 'closed') {
+                    this.enterClosedState();
+                    return;
+                }
                 this.error = result.message;
                 this.phase = result.kind === 'notFound' ? 'code' : 'name';
                 if (result.kind === 'notFound') this.codeInput = this.code;
@@ -379,7 +436,9 @@ export class JoinApp {
     // names an anonymous / unnamed player before they join; the join itself
     // carries no name. On a claim collision it surfaces the error and keeps the
     // name form so the player can pick another. A join notFound bounces back to
-    // the code form so the player can fix a typo.
+    // the code form so the player can fix a typo; a join closed (the game has
+    // already started, so the lobby is gone) routes to the terminal closed view
+    // rather than stranding an error under the dead name form (#793).
     async submitName() {
         if (this.busy) return;
         const trimmed = (this.displayName || '').trim();
@@ -395,6 +454,10 @@ export class JoinApp {
 
             const result = await sessionService.join(this.code);
             if (!result.ok) {
+                if (result.kind === 'closed') {
+                    this.enterClosedState();
+                    return;
+                }
                 this.error = result.message;
                 if (result.kind === 'notFound') {
                     // Send them back to fix the code rather than retyping a
@@ -408,6 +471,18 @@ export class JoinApp {
         } finally {
             this.busy = false;
         }
+    }
+
+    // enterClosedState routes the player to the terminal "this game is no
+    // longer available" view (#793). It is the same lobbyClosed surface a
+    // mid-game session-gone read lands on: the lobby stage with the closed
+    // banner and nothing else. No stream is opened and the remembered session
+    // is cleared so a reload does not bounce back into a dead room.
+    enterClosedState() {
+        this.phase = 'lobby';
+        this.lobbyClosed = true;
+        this.error = '';
+        forgetSession();
     }
 
     // claimName sets the player's players.display_name through the shared
@@ -459,22 +534,30 @@ export class JoinApp {
         await this.refreshState();
     }
 
-    // refreshState performs the authoritative read. A null result means the
-    // session is gone or the viewer is no longer a participant; the component
-    // flips lobbyClosed and tears down the stream so the UI stops polling a
-    // dead room.
+    // refreshState performs the authoritative read. A null result (404) means
+    // the session is gone or the viewer is no longer a participant; the
+    // component flips lobbyClosed and tears down the stream so the UI stops
+    // polling a dead room. A thrown read (network drop, 5xx) leaves the prior
+    // roster on screen and, after STATE_FAILURE_LIMIT in a row, surfaces the
+    // connection-trouble banner (#795) while the next tick keeps retrying.
     async refreshState() {
         let state;
         try {
             state = await sessionService.getState(this.code);
         } catch {
             // A transient read failure leaves the prior roster on screen; the
-            // next tick (or a reconnect) retries. Don't tear the lobby down
-            // on a single blip.
+            // next tick (or a reconnect) retries. Don't tear the lobby down on
+            // a single blip, but after several in a row tell the player why the
+            // roster looks frozen.
+            this.stateFailures += 1;
+            if (this.stateFailures >= STATE_FAILURE_LIMIT) {
+                this.connectionTrouble = true;
+            }
             return;
         }
         if (state === null) {
             this.lobbyClosed = true;
+            this.releaseWakeLock();
             this.closeStream();
             this.clearQuestionTimer();
             this.clearStartTimer();
@@ -483,12 +566,21 @@ export class JoinApp {
             forgetSession();
             return;
         }
+        // A good read clears the failure budget and the trouble banner.
+        this.stateFailures = 0;
+        this.connectionTrouble = false;
         this.state = state;
         this.syncClockFrom(state);
         this.syncReadyFromState();
         this.syncQuestionFromState();
         this.syncStartCountdownFromState();
         this.syncStandingsFromState();
+        // The game is over: drop the wake lock so the phone can sleep again.
+        // The standings screen is the last thing the player reads; no answer
+        // window keeps the screen busy past here.
+        if (state.phase === 'finished') {
+            this.releaseWakeLock();
+        }
     }
 
     // syncStartCountdownFromState reconciles the host-armed last-call countdown
@@ -698,16 +790,45 @@ export class JoinApp {
     // backgrounded tab. It only acts in the lobby stage on a live (non-closed)
     // session, and only when the page is actually visible (visibilitychange
     // also fires on the way to hidden). It re-reads state immediately so the
-    // roster and phase repopulate, and re-subscribes only when the stream has
-    // dropped - subscribe is a no-op-ish reopen otherwise, but guarding here
-    // avoids needlessly tearing down a still-live socket.
-    handleVisible() {
+    // roster and phase repopulate, re-subscribes only when the stream has
+    // dropped (subscribe is a no-op-ish reopen otherwise, but guarding here
+    // avoids needlessly tearing down a still-live socket), and re-acquires the
+    // screen wake lock the OS auto-released while the tab was hidden (#760).
+    //
+    // A bfcache restore (pageshow with persisted=true) is special: pagehide
+    // already fired the leave beacon, so the player's roster row is marked
+    // left and a plain state read would 404 into the closed view. Re-Join
+    // instead, which revives the row, then let landInLobby reseed the stream
+    // and wake lock.
+    handleVisible(event) {
         if (document.visibilityState !== 'visible') return;
-        if (this.phase !== 'lobby' || !this.code || this.lobbyClosed) return;
+        if (this.phase !== 'lobby' || !this.code) return;
+        if (event && event.type === 'pageshow' && event.persisted) {
+            this.resumeAfterRestore();
+            return;
+        }
+        if (this.lobbyClosed) return;
         this.refreshState();
         if (this.streamDropped()) {
             this.subscribe();
         }
+        this.acquireWakeLock();
+    }
+
+    // resumeAfterRestore re-Joins after a bfcache restore. pagehide already
+    // fired the leave beacon on the way out, marking the player's roster row
+    // left, so a plain state read would 404 into the closed view; re-Join
+    // revives the row instead. If the re-Join does not land (a genuinely ended
+    // session, or a transient network blip) it falls back to a normal state
+    // read, which distinguishes the two: a 404 flips the terminal closed view,
+    // while a transient failure leaves the roster and retries on the next tick.
+    async resumeAfterRestore() {
+        this.lobbyClosed = false;
+        const resumed = await this.tryResume(this.code);
+        if (resumed) return;
+        await this.refreshState();
+        if (this.streamDropped()) this.subscribe();
+        this.acquireWakeLock();
     }
 
     // streamDropped reports whether the SSE subscription is gone or closed, so
@@ -747,6 +868,80 @@ export class JoinApp {
         if (this.eventSource) {
             this.eventSource.close();
             this.eventSource = null;
+        }
+    }
+
+    // sendLeave tears the live surface down and fires the best-effort leave
+    // beacon so the player's row drops out of the roster, answered-order
+    // badges, and standings at once (MP-10 / #687). Wired to beforeunload and
+    // pagehide because beforeunload alone is unreliable on mobile - the OS can
+    // discard a backgrounded tab without raising it, and pagehide fires on
+    // bfcache navigation where beforeunload may not (#794). The leftSent guard
+    // keeps the two from double-firing on one teardown; the server leave is
+    // idempotent anyway, but the guard avoids a redundant beacon. It is
+    // deliberately NOT wired to visibilitychange(hidden): that fires on every
+    // app-switch the player means to return from, and the leave would strand
+    // them out of the lobby on their way back.
+    sendLeave() {
+        this.closeStream();
+        this.clearQuestionTimer();
+        this.clearStartTimer();
+        this.releaseWakeLock();
+        if (this.phase === 'lobby' && this.code && !this.leftSent) {
+            this.leftSent = true;
+            sessionService.leave(this.code);
+        }
+    }
+
+    // acquireWakeLock requests a screen wake lock so the player's phone does
+    // not dim or sleep through a live game (#760). Progressive enhancement:
+    // feature-detected, secure-context only (the API is unavailable on plain
+    // HTTP), and any rejection (denied, unsupported, low battery) is swallowed
+    // so a missing wake lock never blocks play. The wakeLockHeld guard keeps it
+    // to at most one in-flight/held lock; the OS releases the lock when the
+    // page hides, and the release handler clears the guard so handleVisible can
+    // re-acquire on return. The generation id ensures a stale release event for
+    // a superseded sentinel does not clear a newer one's guard.
+    acquireWakeLock() {
+        if (typeof navigator === 'undefined' || !('wakeLock' in navigator)) return;
+        if (this.wakeLockHeld) return;
+        this.wakeLockHeld = true;
+        const gen = ++this.wakeLockGen;
+        navigator.wakeLock.request('screen').then((sentinel) => {
+            // A release (deliberate or game-over) may have raced in before the
+            // request resolved; if the generation moved on, drop this sentinel.
+            if (gen !== this.wakeLockGen) {
+                sentinel.release().catch(() => {});
+                return;
+            }
+            this.wakeLock = sentinel;
+            sentinel.addEventListener('release', () => {
+                if (gen === this.wakeLockGen) {
+                    this.wakeLock = null;
+                    this.wakeLockHeld = false;
+                }
+            });
+        }).catch(() => {
+            // Denied / unsupported / battery saver: play continues without it.
+            if (gen === this.wakeLockGen) this.wakeLockHeld = false;
+        });
+    }
+
+    // releaseWakeLock drops a held screen wake lock and clears the guard.
+    // Safe to call when none is held. Called when the game finishes, when the
+    // lobby is gone, and on teardown. Bumping the generation first invalidates
+    // any in-flight request so a lock that resolves after this is released at
+    // once. release() returns a promise; a rejection is swallowed since there
+    // is nothing to recover.
+    releaseWakeLock() {
+        this.wakeLockGen += 1;
+        this.wakeLockHeld = false;
+        const sentinel = this.wakeLock;
+        this.wakeLock = null;
+        if (sentinel) {
+            sentinel.release().catch(() => {
+                // Already released by the OS; nothing to do.
+            });
         }
     }
 
