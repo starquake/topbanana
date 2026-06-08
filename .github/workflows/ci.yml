@@ -53,6 +53,11 @@ jobs:
     steps:
     - uses: actions/checkout@v6
 
+    - name: Cache build tools
+      uses: ./.github/actions/cache-tools
+      with:
+        scope: build
+
     - name: Set up Go
       uses: actions/setup-go@v6
       with:
@@ -161,6 +166,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+
+      - name: Cache build tools
+        uses: ./.github/actions/cache-tools
+        with:
+          scope: e2e
 
       - name: Set up Go
         uses: actions/setup-go@v6
