@@ -1224,6 +1224,14 @@ func ScoreAnswer(
 	}
 
 	answerWindow := expiredAt.Sub(startedAt)
+	if answerWindow <= 0 {
+		// A zero-or-negative window would divide by zero below (+Inf/NaN,
+		// and int(NaN) is implementation-defined). Unreachable on the
+		// in-tree callers, but ScoreAnswer is exported and reused via the
+		// Scorer interface, so award a correct in-window pick full points.
+		return maxPoints
+	}
+
 	duration := max(
 		// Defensive clamp: a hand-crafted client could POST an answer
 		// before startedAt (which sits in the future due to the reveal
@@ -1431,7 +1439,7 @@ func (s *Service) buildRoundBoundaryItem(
 		Total:     len(qz.Questions),
 		Phase:     phase,
 		StartedAt: startedAt,
-		ExpiredAt: startedAt.Add(time.Duration(qz.TimeLimitSeconds) * time.Second),
+		ExpiredAt: startedAt.Add(resolveAnswerWindow(nil, qz)),
 	}
 	if phase != RoundPhaseResults {
 		return item, nil
