@@ -7,8 +7,9 @@
 -- retention window ago". The window in days is a caller-supplied integer,
 -- but the cutoff is computed in SQL (datetime('now', '-<days> days')) so
 -- both sides of the comparison are SQLite text in the CURRENT_TIMESTAMP
--- encoding rows are minted with; a bound Go time.Time would arrive
--- RFC3339-encoded and the cross-format comparison would silently lie. A
+-- encoding rows are minted with; a bound Go time.Time would arrive in the
+-- driver's time.Time.String() text encoding and the cross-format
+-- comparison would silently lie. A
 -- guest with a finished game is kept regardless of age so the sweep never
 -- erases a leaderboard score (#626); "finished" is every question of the
 -- quiz issued as a game_question, the same finisher predicate the

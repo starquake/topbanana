@@ -377,9 +377,10 @@ LIMIT 1;
 -- in the same transaction, plus pending_email so the caller can branch on
 -- the in-session email-change variant (#497) without a second round trip.
 -- The caller passes the wall clock as 'now' so both sides of the
--- expires_at comparison use the same RFC3339 encoding the modernc/sqlite
--- driver writes - mixing time.Time with CURRENT_TIMESTAMP produces strings
--- of different lengths and the lexicographic comparison silently lies.
+-- expires_at comparison use the same time.Time.String() text encoding the
+-- modernc/sqlite driver writes - mixing time.Time with CURRENT_TIMESTAMP
+-- produces strings of different lengths and the lexicographic comparison
+-- silently lies.
 -- sql.ErrNoRows means the token was consumed, expired, or never existed;
 -- the caller maps that to a single user-facing "this link is no longer
 -- valid" response.
@@ -418,7 +419,8 @@ LIMIT 1;
 -- not expired. Returns the player_id so the caller can stamp the new
 -- password_hash + bump session_version in the same transaction. The
 -- caller passes 'now' on both sides so the comparison runs in the
--- driver's RFC3339 encoding (same gotcha email_verify_tokens dodged).
+-- driver's time.Time.String() text encoding (same gotcha
+-- email_verify_tokens dodged).
 -- sql.ErrNoRows means consumed, expired, or never existed; the caller
 -- maps that to a single user-facing "link is no longer valid" response.
 UPDATE password_reset_tokens

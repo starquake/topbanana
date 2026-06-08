@@ -13,11 +13,11 @@ import (
 
 // CreateInvite inserts a row in invites with the given email, token hash,
 // optional note, audit actor, and absolute expiry (#318). expiresAt is
-// normalised to UTC so the driver's RFC3339 encoding lines up
-// lexicographically with the UTC clock the consume/sweep paths read -
-// mixing offsets between insert and read silently breaks the string
-// comparison. An invitedByPlayerID of 0 stores NULL (deleted/unknown
-// actor); an empty note stores NULL.
+// normalised to UTC so the driver's [time.Time.String] text encoding
+// lines up lexicographically with the UTC clock the consume/sweep paths
+// read - mixing offsets between insert and read silently breaks the
+// string comparison. An invitedByPlayerID of 0 stores NULL
+// (deleted/unknown actor); an empty note stores NULL.
 func (s *PlayerStore) CreateInvite(
 	ctx context.Context, email, tokenHash, note string, invitedByPlayerID int64, expiresAt time.Time,
 ) error {

@@ -311,9 +311,10 @@ func (s *PlayerStore) MarkPlayerEmailVerifiedIfNew(ctx context.Context, playerID
 
 // CreateVerifyToken inserts a row in email_verify_tokens with the given
 // hash, player id, and absolute expiry. expiresAt is normalised to UTC
-// so the driver's RFC3339 encoding lines up lexicographically with the
-// UTC clock the consume/sweep paths read - mixing offsets between
-// insert and read silently breaks the string comparison.
+// so the driver's [time.Time.String] text encoding lines up
+// lexicographically with the UTC clock the consume/sweep paths read -
+// mixing offsets between insert and read silently breaks the string
+// comparison.
 //
 // pendingEmail carries the new address an in-session email-change
 // request (#497) wants to switch to; "" mints a register/resend row
@@ -456,8 +457,8 @@ func classifyVerifyTokenMiss(ctx context.Context, q *db.Queries, tokenHash strin
 
 // DeleteExpiredVerifyTokens drops expired rows from email_verify_tokens.
 // UTC across all sites that read or write expires_at so the driver's
-// RFC3339 encoding stays lexicographically comparable regardless of the
-// host time zone.
+// [time.Time.String] text encoding stays lexicographically comparable
+// regardless of the host time zone.
 func (s *PlayerStore) DeleteExpiredVerifyTokens(ctx context.Context) error {
 	if err := s.q.DeleteExpiredEmailVerifyTokens(ctx, time.Now().UTC()); err != nil {
 		return fmt.Errorf("failed to delete expired verify tokens: %w", err)
@@ -468,9 +469,10 @@ func (s *PlayerStore) DeleteExpiredVerifyTokens(ctx context.Context) error {
 
 // CreateResetToken inserts a row in password_reset_tokens with the
 // given hash, player id, and absolute expiry. expiresAt is normalised
-// to UTC so the driver's RFC3339 encoding lines up lexicographically
-// with the UTC clock the consume/sweep paths read - mixing offsets
-// between insert and read silently breaks the string comparison.
+// to UTC so the driver's [time.Time.String] text encoding lines up
+// lexicographically with the UTC clock the consume/sweep paths read -
+// mixing offsets between insert and read silently breaks the string
+// comparison.
 func (s *PlayerStore) CreateResetToken(
 	ctx context.Context, tokenHash string, playerID int64, expiresAt time.Time,
 ) error {
@@ -985,17 +987,14 @@ func (s *PlayerStore) ListAdminAuditForTarget(
 	return out, nil
 }
 
-// parseSQLiteTimestamp accepts the two formats modernc.org/sqlite can
-// return for an aggregate over a DATETIME column ("YYYY-MM-DD
-// HH:MM:SS" if the column was written via SQLite helpers, RFC3339 if
-// written via [time.Time]). An unparseable value falls through to nil
-// so a single malformed row does not fail the whole admin list page.
+// parseSQLiteTimestamp parses the bare SQLite datetime format
+// ("YYYY-MM-DD HH:MM:SS") that modernc.org/sqlite returns for an
+// aggregate over a DATETIME column whose values were written by
+// CURRENT_TIMESTAMP. An unparseable value falls through to nil so a
+// single malformed row does not fail the whole admin list page.
 func parseSQLiteTimestamp(raw string) *time.Time {
 	const sqliteDateTime = "2006-01-02 15:04:05"
 	if t, err := time.Parse(sqliteDateTime, raw); err == nil {
-		return &t
-	}
-	if t, err := time.Parse(time.RFC3339, raw); err == nil {
 		return &t
 	}
 

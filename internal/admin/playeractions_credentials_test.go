@@ -212,6 +212,51 @@ func TestHandlePlayerSetPassword_TooShortRejectedNoMutation(t *testing.T) {
 	}
 }
 
+func TestHandlePlayerSetEmail_OversizedFormRejectedWith400(t *testing.T) {
+	t.Parallel()
+
+	env := newAdminEnv(t)
+	target := env.seedPlayer(t, "before")
+
+	handler := HandlePlayerSetEmail(slog.New(slog.DiscardHandler), env.admin, newCredFlash(t))
+
+	// A well-formed email body that MaxFormSizeMiddleware caps before the
+	// handler reads it. Wrapping the body in a tiny MaxBytesReader trips
+	// ParseForm the same way an oversized submission does, so the values
+	// come back empty and the handler must answer 400 rather than the
+	// misleading "Enter a valid email address." validation flash.
+	form := url.Values{"email": {"new@example.test"}}
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, "/admin/players/"+strconv.FormatInt(target, 10)+"/email",
+		strings.NewReader(form.Encode()),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("playerID", strconv.FormatInt(target, 10))
+	req = req.WithContext(auth.WithPlayer(req.Context(), &auth.Player{ID: testAdminID, Role: auth.RoleAdmin}))
+
+	rec := httptest.NewRecorder()
+	req.Body = http.MaxBytesReader(rec, req.Body, 1)
+	handler.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusBadRequest; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := rec.Body.String(), "Enter a valid email address."; strings.Contains(got, want) {
+		t.Errorf("body = %q, must not contain the validation message %q", got, want)
+	}
+	// The oversized request must not mutate the target or audit anything.
+	detail, err := env.admin.GetPlayerDetail(t.Context(), target)
+	if err != nil {
+		t.Fatalf("GetPlayerDetail err = %v, want nil", err)
+	}
+	if got := detail.Email; got != "" {
+		t.Errorf("email = %q, want empty (no mutation on a rejected form)", got)
+	}
+	if got, want := len(env.auditEntries(t, target)), 0; got != want {
+		t.Errorf("audit entries = %d, want %d on a rejected form", got, want)
+	}
+}
+
 // newPlayerInputRequest builds a POST request carrying the create-player
 // form fields as a urlencoded body. httptest.NewRequest is banned by the
 // noctx linter, so the request is built with a context.
