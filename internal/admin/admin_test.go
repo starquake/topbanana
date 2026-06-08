@@ -210,6 +210,38 @@ func TestHandleQuizList_RendersNavbarLogout(t *testing.T) {
 	}
 }
 
+func TestHandleQuizList_RendersPlayModeBadges(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+	env := newAdminEnv(t)
+
+	env.seedQuiz(t, ownedQuiz("Self-paced Quiz", "solo-quiz"))
+	live := ownedQuiz("Hosted Quiz", "live-quiz")
+	live.Mode = quiz.ModeLive
+	env.seedQuiz(t, live)
+
+	handler := HandleQuizList(logger, nil, env.quizzes)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, withTestAdmin(req))
+
+	if got, want := rr.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d", got, want)
+	}
+
+	// The live quiz card carries the accent-dot pill, the solo quiz card the
+	// default pill. Pin the class and label together so a restyle that drops
+	// the play-mode badge (#829) fails here.
+	body := rr.Body.String()
+	if got, want := body, `class="pill pill-live">Live`; !strings.Contains(got, want) {
+		t.Errorf("body = %q, should contain live badge %q", got, want)
+	}
+	if got, want := body, `class="pill">Solo`; !strings.Contains(got, want) {
+		t.Errorf("body = %q, should contain solo badge %q", got, want)
+	}
+}
+
 func TestHandleQuizList_ErrorHandling(t *testing.T) {
 	t.Parallel()
 

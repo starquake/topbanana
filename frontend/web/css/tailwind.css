@@ -363,6 +363,12 @@
     .pill-public {
         @apply before:bg-cyan;
     }
+    /* Play-mode badge for the manage-quizzes list (#829): live quizzes are
+     * hosted-only, so the dot recolours to accent to set them apart from the
+     * default (solo) pill. */
+    .pill-live {
+        @apply before:bg-accent;
+    }
 
     /* Question rows. Two-up grid on mobile (position stacked above body),
      * full four-column grid from md upward (position + body + two
