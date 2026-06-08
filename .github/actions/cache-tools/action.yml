@@ -1,0 +1,30 @@
+name: Cache build tools
+description: >
+  Cache the pinned tool binaries in build/bin (golangci-lint, sqlc, mailpit,
+  Tailwind) so CI does not re-download them from the GitHub releases CDN on
+  every run. Keyed on the tool versions only, so a version bump misses cleanly
+  (the binaries live at version-agnostic paths, so reusing a stale cache would
+  silently run the wrong version - hence no restore-keys).
+
+inputs:
+  scope:
+    description: >
+      Per-job cache scope. Each job downloads only the tools it uses, so a
+      shared key would freeze the cache at the first job's subset; the scope
+      keeps each job's build/bin separate.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Compute tool-version cache key
+      id: toolvers
+      shell: bash
+      run: |
+        hash=$(grep -E '^(GOLANGCI|SQLC|MAILPIT|TAILWIND)_VERSION' Makefile \
+          | sort | sha256sum | cut -d' ' -f1)
+        echo "hash=$hash" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@v5
+      with:
+        path: build/bin
+        key: tools-${{ inputs.scope }}-${{ runner.os }}-${{ steps.toolvers.outputs.hash }}

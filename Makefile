@@ -286,7 +286,7 @@ endif
 $(TAILWIND_BIN):
 	@mkdir -p $(BIN_DIR)
 	@echo "Downloading Tailwind CLI $(TAILWIND_VERSION) ($(TAILWIND_ASSET))..."
-	curl -sSfL -o $@ \
+	curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o $@ \
 	    https://github.com/tailwindlabs/tailwindcss/releases/download/$(TAILWIND_VERSION)/$(TAILWIND_ASSET)
 	chmod +x $@
 
@@ -428,7 +428,7 @@ $(GOLANGCI_BIN):
 	@mkdir -p $(BIN_DIR)
 	@echo "Downloading golangci-lint $(GOLANGCI_VERSION) ($(GOLANGCI_ASSET))..."
 	@tmp=$$(mktemp -d) && \
-	    curl -sSfL -o $$tmp/golangci.tar.gz \
+	    curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o $$tmp/golangci.tar.gz \
 	        https://github.com/golangci/golangci-lint/releases/download/$(GOLANGCI_VERSION)/$(GOLANGCI_TARBALL) && \
 	    tar -xzf $$tmp/golangci.tar.gz -C $$tmp && \
 	    mv $$tmp/$(GOLANGCI_DIR)/golangci-lint $@ && \
@@ -467,7 +467,7 @@ $(SQLC_BIN):
 	@mkdir -p $(BIN_DIR)
 	@echo "Downloading sqlc $(SQLC_VERSION) ($(SQLC_ASSET))..."
 	@tmp=$$(mktemp -d) && \
-	    curl -sSfL -o $$tmp/sqlc.tar.gz \
+	    curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o $$tmp/sqlc.tar.gz \
 	        https://github.com/sqlc-dev/sqlc/releases/download/$(SQLC_VERSION)/$(SQLC_TARBALL) && \
 	    tar -xzf $$tmp/sqlc.tar.gz -C $$tmp && \
 	    mv $$tmp/sqlc $@ && \
@@ -502,7 +502,7 @@ $(MAILPIT_BIN):
 	@mkdir -p $(BIN_DIR)
 	@echo "Downloading mailpit $(MAILPIT_VERSION) ($(MAILPIT_ASSET))..."
 	@tmp=$$(mktemp -d) && \
-	    curl -sSfL -o $$tmp/mailpit.tar.gz \
+	    curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o $$tmp/mailpit.tar.gz \
 	        https://github.com/axllent/mailpit/releases/download/$(MAILPIT_VERSION)/$(MAILPIT_TARBALL) && \
 	    tar -xzf $$tmp/mailpit.tar.gz -C $$tmp && \
 	    mv $$tmp/mailpit $@ && \
