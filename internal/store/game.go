@@ -240,7 +240,11 @@ func execCreateGameAndParticipant(
 	return nil
 }
 
-// CreateQuestion saves a new game question in the database and updates the provided Question object with generated values.
+// CreateQuestion saves a new game question in the database and updates the
+// provided Question object with generated values. started_at and expired_at are
+// formatted as UTC CURRENT_TIMESTAMP-format text so the stored column shares the
+// encoding the leaderboard staleness cutoff compares against (#789); see
+// [sqliteTimestampLayout].
 func (s *GameStore) CreateQuestion(ctx context.Context, gq *game.Question) error {
 	var err error
 	row, err := s.q.CreateGameQuestion(
@@ -248,8 +252,8 @@ func (s *GameStore) CreateQuestion(ctx context.Context, gq *game.Question) error
 		db.CreateGameQuestionParams{
 			GameID:     gq.GameID,
 			QuestionID: gq.QuestionID,
-			StartedAt:  gq.StartedAt,
-			ExpiredAt:  gq.ExpiredAt,
+			StartedAt:  gq.StartedAt.UTC().Format(sqliteTimestampLayout),
+			ExpiredAt:  gq.ExpiredAt.UTC().Format(sqliteTimestampLayout),
 		},
 	)
 	if err != nil {
@@ -364,12 +368,15 @@ func (s *GameStore) ListAnswersForQuizLeaderboard(
 // ListParticipantsForQuizLeaderboard returns one row per player joined
 // to the quiz, flagged with IsCompleted and IsStale (#336). Pass
 // [time.Now]-stalePeriod for staleBefore. Canonical entry set per #335.
+// staleBefore is formatted as UTC CURRENT_TIMESTAMP-format text so the
+// comparison against the stored expired_at stays a same-encoding string
+// compare (#789); see [sqliteTimestampLayout].
 func (s *GameStore) ListParticipantsForQuizLeaderboard(
 	ctx context.Context, quizID int64, staleBefore time.Time,
 ) ([]*game.LeaderboardParticipant, error) {
 	rows, err := s.q.ListParticipantsForQuizLeaderboard(ctx, db.ListParticipantsForQuizLeaderboardParams{
-		ExpiredAt: staleBefore,
-		QuizID:    quizID,
+		StaleBefore: staleBefore.UTC().Format(sqliteTimestampLayout),
+		QuizID:      quizID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list leaderboard participants for quiz %d: %w", quizID, err)

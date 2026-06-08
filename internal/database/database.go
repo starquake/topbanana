@@ -4,7 +4,10 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +16,28 @@ import (
 	"github.com/starquake/topbanana/internal/db"
 	"github.com/starquake/topbanana/internal/migrations"
 )
+
+// sqliteDriverName is the registered modernc.org/sqlite driver name. Pragma
+// validation in [Open] only applies to this driver.
+const sqliteDriverName = "sqlite"
+
+// ErrMissingSQLitePragma is returned by [Open] when a sqlite DB_URI is missing
+// one of the pragmas the application relies on for correct behaviour. SQLite
+// pragmas are per-connection, so they have to ride in the DSN (which the driver
+// applies to every pooled connection); a one-off PRAGMA exec on the pool would
+// only configure a single connection. Validating the DSN at startup turns a
+// silent "FK enforcement off, no busy-timeout" footgun into a clear boot
+// failure (#790).
+var ErrMissingSQLitePragma = errors.New("DB_URI is missing a required SQLite pragma")
+
+// requiredSQLitePragmas names the pragmas a sqlite DB_URI must carry. These are
+// matched against the prefix of each _pragma DSN value (e.g. the value
+// "foreign_keys(1)" satisfies "foreign_keys"), mirroring how the driver itself
+// reads them. foreign_keys keeps referential integrity enforced; busy_timeout
+// stops concurrent writers from failing immediately with SQLITE_BUSY.
+//
+//nolint:gochecknoglobals // an immutable lookup table, not mutable package state.
+var requiredSQLitePragmas = []string{"foreign_keys", "busy_timeout"}
 
 // migrateMu serialises Migrate calls. goose's package-level state (the
 // migration registry built lazily from BaseFS) is not safe under concurrent
@@ -53,13 +78,22 @@ func SetupGoose() {
 	})
 }
 
-// Open opens a database connection.
+// Open opens a database connection. For the sqlite driver it first validates
+// that the DSN carries the pragmas the application depends on (see
+// [validateSQLitePragmas]); an operator who overrides DB_URI without them gets a
+// clear boot failure instead of silently losing FK enforcement (#790).
 func Open(
 	_ context.Context,
 	driver, uri string,
 	dbMaxOpenConns, dbMaxIdleConns int,
 	dbConnMaxLifetime time.Duration,
 ) (*sql.DB, error) {
+	if driver == sqliteDriverName {
+		if err := validateSQLitePragmas(uri); err != nil {
+			return nil, err
+		}
+	}
+
 	var err error
 	var conn *sql.DB
 	conn, err = sql.Open(driver, uri)
@@ -72,6 +106,47 @@ func Open(
 	conn.SetConnMaxLifetime(dbConnMaxLifetime)
 
 	return conn, nil
+}
+
+// validateSQLitePragmas fails fast when a sqlite DSN omits a pragma in
+// [requiredSQLitePragmas]. The query string after the first '?' is parsed the
+// same way the driver does (url.ParseQuery, _pragma values prefix-matched
+// case-insensitively), so a DSN that satisfies this check carries exactly the
+// pragmas the driver will apply to every connection. Augmenting the operator's
+// DSN instead would be surprising; a clear error naming the missing pragma lets
+// them fix their own configuration (#790).
+func validateSQLitePragmas(uri string) error {
+	rawQuery := ""
+	if _, after, found := strings.Cut(uri, "?"); found {
+		rawQuery = after
+	}
+	values, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return fmt.Errorf("parsing DB_URI query string: %w", err)
+	}
+
+	pragmas := values["_pragma"]
+	for _, required := range requiredSQLitePragmas {
+		if !hasPragma(pragmas, required) {
+			return fmt.Errorf("%w: %q (add _pragma=%s(...) to DB_URI)", ErrMissingSQLitePragma, required, required)
+		}
+	}
+
+	return nil
+}
+
+// hasPragma reports whether any _pragma DSN value names the given pragma,
+// matching on the prefix before the '(' so "foreign_keys(1)" satisfies
+// "foreign_keys". Comparison is case-insensitive and ignores surrounding
+// whitespace, mirroring the driver's own pragma handling.
+func hasPragma(pragmas []string, name string) bool {
+	for _, p := range pragmas {
+		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(p)), name) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Migrate runs database migrations against conn. Safe for concurrent callers:
