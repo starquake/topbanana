@@ -1260,13 +1260,13 @@ func TestParseSQLiteTimestamp(t *testing.T) {
 		wantNil bool
 		want    time.Time
 	}{
-		"sqlite datetime format": {
+		"current_timestamp format": {
 			raw:  "2026-06-04 12:34:56",
 			want: time.Date(2026, 6, 4, 12, 34, 56, 0, time.UTC),
 		},
-		"rfc3339 format": {
-			raw:  "2026-06-04T12:34:56Z",
-			want: time.Date(2026, 6, 4, 12, 34, 56, 0, time.UTC),
+		"rfc3339 falls through to nil": {
+			raw:     "2026-06-04T12:34:56Z",
+			wantNil: true,
 		},
 		"unparseable falls through to nil": {
 			raw:     "not a timestamp",

@@ -267,7 +267,8 @@ func assertRetention(ctx context.Context, t *testing.T, db *sql.DB, s retentionS
 
 // The at argument is a trusted SQLite datetime expression (a test constant),
 // inlined into the statement so created_at evaluates server-side to a
-// CURRENT_TIMESTAMP-shaped string rather than a bound RFC3339 value.
+// CURRENT_TIMESTAMP-shaped string rather than a value bound in the driver's
+// time.Time.String() text encoding.
 func insertQuiz(ctx context.Context, t *testing.T, db *sql.DB, slug, at string, ownerID int64) int64 {
 	t.Helper()
 	res, err := db.ExecContext(ctx,

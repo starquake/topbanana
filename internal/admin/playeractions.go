@@ -140,6 +140,9 @@ func HandlePlayerSetEmail(
 		if !ok {
 			return
 		}
+		if !parseActionForm(w, r, logger, "set-email") {
+			return
+		}
 
 		email := strings.ToLower(strings.TrimSpace(r.PostFormValue("email")))
 		if !auth.LooksLikeEmail(email) {
@@ -185,6 +188,9 @@ func HandlePlayerSetDisplayName(
 		if !ok {
 			return
 		}
+		if !parseActionForm(w, r, logger, "set-display-name") {
+			return
+		}
 
 		name := strings.TrimSpace(r.PostFormValue("display_name"))
 
@@ -224,6 +230,9 @@ func HandlePlayerSetPassword(
 		}
 		actor, ok := requireAdminActor(w, r)
 		if !ok {
+			return
+		}
+		if !parseActionForm(w, r, logger, "set-password") {
 			return
 		}
 
@@ -300,6 +309,9 @@ func HandlePlayerSetRole(
 		if !ok {
 			return
 		}
+		if !parseActionForm(w, r, logger, "set-role") {
+			return
+		}
 
 		desired := r.PostFormValue("role")
 		if !roleIsValid(desired) {
@@ -327,16 +339,7 @@ func HandlePlayerSetRole(
 			return
 		}
 
-		if err := store.SetPlayerRole(r.Context(), playerID, desired); err != nil {
-			if errors.Is(err, auth.ErrPlayerNotFound) {
-				http.NotFound(w, r)
-
-				return
-			}
-			logger.ErrorContext(r.Context(), "error setting player role", slog.Any("err", err))
-			flash.SetError(w, "Could not update role. Try again.", 0)
-			redirectToPlayerDetail(w, r, playerID)
-
+		if !writeRoleChange(w, r, logger, store, flash, playerID, desired) {
 			return
 		}
 
@@ -374,6 +377,28 @@ func guardLastAdmin(
 	}
 
 	return true
+}
+
+// writeRoleChange persists the role and maps a write failure onto its
+// response: a missing target is a 404, any other store error a flashed
+// retry + 303. Returns true only when the role was written.
+func writeRoleChange(
+	w http.ResponseWriter, r *http.Request, logger *slog.Logger,
+	store auth.AdminPlayerStore, flash *auth.SignedFlash, playerID int64, desired string,
+) bool {
+	err := store.SetPlayerRole(r.Context(), playerID, desired)
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, auth.ErrPlayerNotFound):
+		http.NotFound(w, r)
+	default:
+		logger.ErrorContext(r.Context(), "error setting player role", slog.Any("err", err))
+		flash.SetError(w, "Could not update role. Try again.", 0)
+		redirectToPlayerDetail(w, r, playerID)
+	}
+
+	return false
 }
 
 // roleLabel maps a role constant to its human word, so the success
@@ -622,6 +647,23 @@ func requireAdminActor(w http.ResponseWriter, r *http.Request) (*auth.Player, bo
 	}
 
 	return p, true
+}
+
+// parseActionForm parses the POST body of a player Set* action, returning
+// false (after answering 400) when MaxFormSizeMiddleware's MaxBytesReader
+// has tripped. Without this, the lazy PostFormValue parse would swallow
+// the error and hand the handler empty values, surfacing a misleading
+// validation flash instead of the real "body too large" failure. action
+// names the handler in the log line.
+func parseActionForm(w http.ResponseWriter, r *http.Request, logger *slog.Logger, action string) bool {
+	if err := r.ParseForm(); err != nil {
+		logger.InfoContext(r.Context(), action+" form parse failed", slog.Any("err", err))
+		http.Error(w, "Form was malformed or too large.", http.StatusBadRequest)
+
+		return false
+	}
+
+	return true
 }
 
 // loadActionTarget fetches the target player's detail row. A missing

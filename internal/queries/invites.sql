@@ -19,9 +19,9 @@ VALUES (
 -- pending (not accepted, not revoked) and not expired. Used by the
 -- GET /accept-invite preflight to short-circuit the form render for dead
 -- links, and re-checked by POST. The caller passes 'now' so both sides of the
--- expires_at comparison use the driver's RFC3339 encoding (mixing time.Time
--- with CURRENT_TIMESTAMP produces strings of different lengths and the
--- lexicographic comparison silently lies). sql.ErrNoRows means consumed,
+-- expires_at comparison use the driver's time.Time.String() text encoding
+-- (mixing time.Time with CURRENT_TIMESTAMP produces strings of different
+-- lengths and the lexicographic comparison silently lies). sql.ErrNoRows means consumed,
 -- revoked, expired, or never existed; the caller maps that to a single
 -- user-facing "invite link is no longer valid" response.
 SELECT id, email, invited_by_player_id
@@ -49,7 +49,7 @@ RETURNING id;
 -- Housekeeping for the startup + periodic sweep. Drops every still-pending
 -- invite whose link has expired so the table does not grow without bound.
 -- Accepted and revoked rows are kept as an audit trail. The caller passes
--- 'now' so the comparison runs in the driver's RFC3339 encoding.
+-- 'now' so the comparison runs in the driver's time.Time.String() text encoding.
 DELETE FROM invites
 WHERE status = 'pending'
   AND expires_at <= sqlc.arg('now');
