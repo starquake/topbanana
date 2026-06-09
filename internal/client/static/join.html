@@ -329,56 +329,75 @@
                     </div>
                 </template>
 
-                <!-- Between-rounds standings (MP-9 / #686). Each player is a
-                     horizontal bar whose width maps to their cumulative total
-                     against the leader's. On entering the phase the bars grow
-                     from each player's pre-round total to their new total while
-                     the numeric label counts up, then rest in rank order
-                     (best-first). The viewer's own row is highlighted. The
-                     animation is driven in JoinApp via anime.js with a
-                     reduced-motion / no-global fallback that snaps to the final
-                     state. -->
-                <template x-if="!lobbyClosed && state && state.phase === 'round_results'">
-                    <div data-testid="round-results">
-                        <p class="label-eyebrow">Round complete</p>
-                        <h2 class="mt-2 mb-6 font-display text-3xl font-semibold text-text">Scores are in</h2>
-                        {{template "standings-bars" .}}
-                        <p class="mt-6 text-text-dim">The next round is coming up.</p>
-                    </div>
-                </template>
+                <!-- Between-rounds / end-of-game standings (MP-9 / #686). Each
+                     player is a horizontal bar whose width maps to their
+                     cumulative total against the leader's. On entering a
+                     standings phase the bars grow from each player's pre-round
+                     total to their new total while the numeric label counts up,
+                     then rest in rank order (best-first); from the second screen
+                     on the rows also slide into the new ranking (a FLIP swap,
+                     #730). The viewer's own row is highlighted. The animation is
+                     driven in JoinApp via anime.js with a reduced-motion /
+                     no-global fallback that snaps to the final state.
 
-                <!-- Intermission (#836): the game is over but the room stays
-                     alive. The same standings bar graph shows the final totals
-                     of the game that just ended, and the player stays joined -
-                     no re-join, no "join another quiz" button. When the host
-                     starts the next quiz the server phase walks intermission ->
-                     lobby -> round_intro -> question and the view follows off
-                     the SSE -> GET state loop, carrying the player into game 2
-                     without re-entering a code. -->
-                <template x-if="!lobbyClosed && state && state.phase === 'intermission'">
-                    <div data-testid="intermission-view">
-                        <p class="label-eyebrow">Game over</p>
-                        <h2 class="mt-2 mb-6 font-display text-3xl font-semibold text-text">Final standings</h2>
-                        {{template "standings-bars" .}}
+                     The standings <ul> stays mounted across round_results,
+                     intermission, and finished (one always-present block gated by
+                     x-show), so the FLIP always measures real rows and never has
+                     to poll for a fresh x-if mount (#773). The per-phase headings
+                     and footer copy wrap it as x-if blocks so each screen keeps
+                     its own wording - and so the round_results marker is absent
+                     (not just hidden) on the final screen, which is the #749
+                     single-final-screen guarantee. -->
+                <div x-show="!lobbyClosed && showsStandings()">
+                    <!-- round_results: a between-rounds screen, more to come. -->
+                    <template x-if="state && state.phase === 'round_results'">
+                        <div data-testid="round-results">
+                            <p class="label-eyebrow">Round complete</p>
+                            <h2 class="mt-2 mb-6 font-display text-3xl font-semibold text-text">Scores are in</h2>
+                        </div>
+                    </template>
+
+                    <!-- Intermission (#836): the game is over but the room stays
+                         alive. The same standings bar graph shows the final
+                         totals of the game that just ended, and the player stays
+                         joined - no re-join, no "join another quiz" button. When
+                         the host starts the next quiz the server phase walks
+                         intermission -> lobby -> round_intro -> question and the
+                         view follows off the SSE -> GET state loop, carrying the
+                         player into game 2 without re-entering a code. -->
+                    <template x-if="state && state.phase === 'intermission'">
+                        <div data-testid="intermission-view">
+                            <p class="label-eyebrow">Game over</p>
+                            <h2 class="mt-2 mb-6 font-display text-3xl font-semibold text-text">Final standings</h2>
+                        </div>
+                    </template>
+
+                    <!-- Finished: the room is terminally closed (the host
+                         abandoned it). The same standings bar graph shows the
+                         final totals; finished carries roundScore=0, so there is
+                         no round delta to add - the bars render at their final
+                         width straight away (no grow animation). -->
+                    <template x-if="state && state.phase === 'finished'">
+                        <div data-testid="finished-view">
+                            <p class="label-eyebrow">Game over</p>
+                            <h2 class="mt-2 mb-6 font-display text-3xl font-semibold text-text">Final standings</h2>
+                        </div>
+                    </template>
+
+                    {{template "standings-bars" .}}
+
+                    <template x-if="state && state.phase === 'round_results'">
+                        <p class="mt-6 text-text-dim">The next round is coming up.</p>
+                    </template>
+                    <template x-if="state && state.phase === 'intermission'">
                         <p class="mt-6 text-text-dim" data-testid="intermission-waiting">
                             Waiting for the host to start the next quiz...
                         </p>
-                    </div>
-                </template>
-
-                <!-- Finished: the room is terminally closed (the host abandoned
-                     it). The same standings bar graph shows the final totals;
-                     finished carries roundScore=0, so there is no round delta to
-                     add - the bars render at their final width straight away (no
-                     grow animation). -->
-                <template x-if="!lobbyClosed && state && state.phase === 'finished'">
-                    <div data-testid="finished-view">
-                        <p class="label-eyebrow">Game over</p>
-                        <h2 class="mt-2 mb-6 font-display text-3xl font-semibold text-text">Final standings</h2>
-                        {{template "standings-bars" .}}
+                    </template>
+                    <template x-if="state && state.phase === 'finished'">
                         <p class="mt-6 text-text-dim">Thanks for playing!</p>
-                    </div>
-                </template>
+                    </template>
+                </div>
 
                 <template x-if="!lobbyClosed && !state">
                     <p class="text-text-dim">Loading lobby...</p>

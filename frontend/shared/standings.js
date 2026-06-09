@@ -2,7 +2,7 @@
 // the host TV. Both build the same rows from the server standings (held in
 // rank order, best-first) and grow each bar from its pre-round total to its new
 // total while the numeric label counts up. From the second screen on, the rows
-// first remount in the previous screen's order and then slide into the new
+// first render in the previous screen's order and then slide into the new
 // best-first order (a FLIP swap, #730), so an overtake reads as two rows
 // trading places rather than snapping into order. esbuild inlines this into
 // each tree's bundle, so there is no cross-tree runtime fetch. The
@@ -130,35 +130,24 @@ export function playStandingsFlip(container, prevTops, runAnim, duration = STAND
     });
 }
 
-// whenStandingsReady runs cb once the standings <ul> and its rows are actually
-// in the DOM. The list mounts fresh via x-if when a standings phase begins, and
-// that mount lags the reactive setBars - a plain nextTick fires before the rows
-// exist, so the FLIP would measure an empty container and never slide. Poll
-// across animation frames until the rows are present, then run cb once more
-// anyway after the budget so the new order + grow still land if the graph never
-// rendered (the slide just no-ops on a missing container); this also bounds the
-// loop so it never spins forever.
-function whenStandingsReady(getContainer, cb, attempts = 20) {
-    const raf = (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function')
-        ? (fn) => window.requestAnimationFrame(fn)
-        : (fn) => setTimeout(fn, 16);
-    let left = attempts;
-    const tick = () => {
-        const c = getContainer();
-        if ((c && c.querySelector('[data-standings-row][data-player-id]')) || left <= 0) {
-            cb();
-        } else {
-            left -= 1;
-            raf(tick);
-        }
-    };
-    raf(tick);
+// nextFrame runs cb after the browser has committed a layout for pending DOM
+// changes: a reactive update made inside an Alpine $nextTick callback is applied
+// during the in-progress flush, so a nested $nextTick fires before that update
+// reaches the DOM - only the following animation frame sees it. Falls back to a
+// macrotask where requestAnimationFrame is absent (non-browser test runs).
+function nextFrame(cb) {
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(() => cb());
+        return;
+    }
+    setTimeout(cb, 16);
 }
 
 // applyStandingsFlip drives the full grow + slide for one new standings screen,
 // shared verbatim by the player and host components so the two surfaces stay in
 // lockstep. The caller supplies its reactive setter (setBars) and the matching
-// getter (getBars), a getter for the rendered <ul> (getContainer), and the
+// getter (getBars), a getter for the rendered <ul> (getContainer), an
+// after-render scheduler (afterRender, the component's $nextTick), and the
 // bar-grow runner.
 //
 // The bar grow runs against getBars(), not the raw rows: once setBars assigns
@@ -166,16 +155,25 @@ function whenStandingsReady(getContainer, cb, attempts = 20) {
 // proxy re-render the bound widths/labels - mutating the raw rows would update
 // numbers Alpine never sees.
 //
-// With a previous order it stages the rows in that order first (so each player
-// remounts where it last sat), waits for the freshly-mounted <ul>, measures
-// those positions, resorts into the new best-first order, then (one frame later,
-// so the resort has rendered) slides each row back from its old spot (the FLIP)
-// while the bars grow. Without a previous order (the first standings screen, or
-// a non-animating one) it lands straight on the new order. animateBars' and the
-// FLIP's reduced-motion / missing-global skip snap to the finals, so a
-// reduced-motion viewer sees the settled order with no residual transform.
+// The standings <ul> stays mounted across the standings phases (x-show, not
+// x-if), so its rows are present the moment Alpine renders the new x-for keys -
+// no mount poll is needed (#773). The two-stage FLIP then needs two committed
+// renders:
+//   1. Stage the rows in the previous screen's order and wait one $nextTick (the
+//      caller's afterRender) for those keys to render, then measure each row's
+//      starting position (the FLIP "First").
+//   2. Resort into the new best-first order. This setBars runs inside the
+//      $nextTick callback - i.e. during Alpine's flush - so a nested $nextTick
+//      would fire before the resort reaches the DOM. Wait one animation frame
+//      (nextFrame) instead, by which point the resorted rows are laid out, then
+//      slide each row back from its old spot (the FLIP "Last" -> "Play") while
+//      the bars grow.
+// Without a previous order (the first standings screen, or a non-animating one)
+// it lands straight on the new order. animateBars' and the FLIP's reduced-motion
+// / missing-global skip snap to the finals, so a reduced-motion viewer sees the
+// settled order with no residual transform.
 export function applyStandingsFlip({
-    rows, prevOrder, animate, runAnim, setBars, getBars, getContainer, animateBars,
+    rows, prevOrder, animate, runAnim, setBars, getBars, getContainer, afterRender, animateBars,
 }) {
     if (!animate || !prevOrder || prevOrder.length === 0) {
         setBars(rows);
@@ -185,10 +183,10 @@ export function applyStandingsFlip({
     }
 
     setBars(orderRowsBy(rows, prevOrder));
-    whenStandingsReady(getContainer, () => {
+    afterRender(() => {
         const prevTops = measureStandingsRows(getContainer());
         setBars(rows);
         animateBars(getBars(), runAnim);
-        whenStandingsReady(getContainer, () => playStandingsFlip(getContainer(), prevTops, runAnim), 5);
+        nextFrame(() => playStandingsFlip(getContainer(), prevTops, runAnim));
     });
 }
