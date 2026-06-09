@@ -24,23 +24,6 @@ WHERE join_code = ?;
 -- regenerate on collision before paying for the INSERT.
 SELECT EXISTS(SELECT 1 FROM sessions WHERE join_code = ?) AS code_exists;
 
--- name: SessionHasPlayer :one
--- Reports whether the player has EVER held a roster row in the session
--- identified by join code, regardless of left_at. Backs the reconnect/resume
--- gate in Service.Join: a prior participant - including one whose row is marked
--- left_at (e.g. a beforeunload leave beacon fired on a reload) - may re-Join
--- past the lobby, which revives their row. Deliberately NOT filtered by left_at,
--- unlike the live roster read, so a reloading player who just left can still
--- resume; a player who never joined matches nothing and is rejected as a late
--- joiner.
-SELECT EXISTS (
-    SELECT 1
-    FROM session_players sp
-    JOIN sessions s ON s.id = sp.session_id
-    WHERE s.join_code = sqlc.arg('join_code')
-      AND sp.player_id = sqlc.arg('player_id')
-) AS has_player;
-
 -- name: ListFinishedSessionPlaysForPlayer :many
 -- Finished live-quiz plays for the given player, newest-first, one row per
 -- quiz. A play is a roster row in a finished session; collapsing to one row

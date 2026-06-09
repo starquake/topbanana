@@ -105,7 +105,7 @@ func HandleSessionJoin(logger *slog.Logger, service *livesession.Service) http.H
 			case errors.Is(err, livesession.ErrSessionNotFound):
 				http.NotFound(w, r)
 			case errors.Is(err, livesession.ErrLobbyClosed):
-				http.Error(w, "this game has already started", http.StatusConflict)
+				http.Error(w, "this room is closed", http.StatusConflict)
 			default:
 				writeInternalError(w, r, logger, "error joining session", err)
 			}

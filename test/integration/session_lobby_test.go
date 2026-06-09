@@ -284,22 +284,22 @@ func TestSessionLobby_ReflectsPlayerRename(t *testing.T) {
 	}
 }
 
-// TestSessionLobby_JoinAfterStartIs409 pins the late-join gate (MP-10): once
-// the host starts the session the lobby closes, so a fresh player joining the
-// running session gets a 409 rather than landing mid-game (v1 has no late
-// join).
-func TestSessionLobby_JoinAfterStartIs409(t *testing.T) {
+// TestSessionLobby_JoinMidGameAllowed pins the open-room join (#836): the
+// lobby-only gate is gone, so a fresh player can join a running session and land
+// mid-game (they simply miss the questions already played). Only a terminally
+// finished room rejects a join, which is pinned at the service layer.
+func TestSessionLobby_JoinMidGameAllowed(t *testing.T) {
 	t.Parallel()
 
 	ctx, setup := setupIntegration(t)
 	baseURL := setup.BaseURL
-	qz := seedLiveQuiz(ctx, t, setup.Stores.Quizzes, "lobby-late-join")
+	qz := seedLiveQuiz(ctx, t, setup.Stores.Quizzes, "lobby-mid-join")
 
 	host := &http.Client{
 		Jar:           mustJar(t),
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	registerVerifyAndSignIn(ctx, t, host, baseURL, setup.DBURI, "late-join-host", "late-join-pass-123")
+	registerVerifyAndSignIn(ctx, t, host, baseURL, setup.DBURI, "mid-join-host", "mid-join-pass-123")
 
 	code := createSession(ctx, t, host, baseURL, qz.ID)
 
@@ -308,13 +308,9 @@ func TestSessionLobby_JoinAfterStartIs409(t *testing.T) {
 	joinSession(ctx, t, early, baseURL, code, "Early")
 	startSession(ctx, t, host, baseURL, code)
 
-	// A latecomer joining the now-running session is rejected with 409.
+	// A latecomer joining the now-running session is admitted (no late-join gate).
 	late := newAnonClient(t)
-	resp := httpPostJSON(ctx, t, late, fmt.Sprintf("%s/api/sessions/%s/join", baseURL, code), "")
-	defer closeBody(t, resp.Body)
-	if got, want := resp.StatusCode, http.StatusConflict; got != want {
-		t.Errorf("late join status = %d, want %d", got, want)
-	}
+	joinSession(ctx, t, late, baseURL, code, "Late")
 }
 
 // TestSessionLobby_ReplayAfterFinishedSession pins #768: a live quiz has no

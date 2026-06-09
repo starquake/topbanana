@@ -748,36 +748,6 @@ func (q *Queries) ResetSessionPlayersReady(ctx context.Context, sessionID string
 	return err
 }
 
-const sessionHasPlayer = `-- name: SessionHasPlayer :one
-SELECT EXISTS (
-    SELECT 1
-    FROM session_players sp
-    JOIN sessions s ON s.id = sp.session_id
-    WHERE s.join_code = ?1
-      AND sp.player_id = ?2
-) AS has_player
-`
-
-type SessionHasPlayerParams struct {
-	JoinCode string
-	PlayerID int64
-}
-
-// Reports whether the player has EVER held a roster row in the session
-// identified by join code, regardless of left_at. Backs the reconnect/resume
-// gate in Service.Join: a prior participant - including one whose row is marked
-// left_at (e.g. a beforeunload leave beacon fired on a reload) - may re-Join
-// past the lobby, which revives their row. Deliberately NOT filtered by left_at,
-// unlike the live roster read, so a reloading player who just left can still
-// resume; a player who never joined matches nothing and is rejected as a late
-// joiner.
-func (q *Queries) SessionHasPlayer(ctx context.Context, arg SessionHasPlayerParams) (bool, error) {
-	row := q.db.QueryRowContext(ctx, sessionHasPlayer, arg.JoinCode, arg.PlayerID)
-	var has_player bool
-	err := row.Scan(&has_player)
-	return has_player, err
-}
-
 const setSessionAnswerScore = `-- name: SetSessionAnswerScore :exec
 UPDATE session_answers
 SET score = ?1

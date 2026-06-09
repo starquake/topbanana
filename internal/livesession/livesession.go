@@ -274,12 +274,6 @@ type Store interface {
 	// lobby roster populated. Returns [ErrSessionNotFound] when no session
 	// uses the code.
 	GetSessionByJoinCode(ctx context.Context, joinCode string) (*Session, error)
-	// SessionHasPlayer reports whether the player has ever held a roster row in
-	// the session identified by join code, regardless of left_at. Backs the
-	// reconnect/resume gate in [Service.Join]: a prior participant (even one
-	// whose row is marked left_at) may re-Join past the lobby, but a player who
-	// never joined is rejected as a late joiner.
-	SessionHasPlayer(ctx context.Context, joinCode string, playerID int64) (bool, error)
 	// AddPlayer adds (or revives) a roster row for the player. The display
 	// name is no longer stored per session (#716): the roster/standings reads
 	// join players and select the current players.display_name, so a rename
@@ -570,21 +564,14 @@ func (s *Service) Join(ctx context.Context, joinCode string, playerID int64) (*P
 		return nil, fmt.Errorf(errGetSessionByCodeFmt, err)
 	}
 
-	// The lobby closes at start: v1 has no late join. A prior participant may
-	// still re-Join once the session has left the lobby - that is a
-	// reconnect/resume, and AddPlayer revives their row (clearing left_at). The
-	// gate checks for any roster row regardless of left_at (SessionHasPlayer),
-	// not the live roster: a player who reloaded mid-session may already be
-	// marked left_at by the beforeunload leave beacon, and must still be allowed
-	// back. Only a player who never held a row is rejected past the lobby.
-	if sess.Phase != PhaseLobby {
-		joined, hasErr := s.store.SessionHasPlayer(ctx, sess.JoinCode, playerID)
-		if hasErr != nil {
-			return nil, fmt.Errorf("failed to check prior participation: %w", hasErr)
-		}
-		if !joined {
-			return nil, ErrLobbyClosed
-		}
+	// A room accepts joins in every phase except the terminal finished state
+	// (#836): a latecomer joins mid-game and simply misses the questions already
+	// played, players drift in during the between-games intermission, and a
+	// prior participant re-Joining at any live phase is a reconnect/resume
+	// (AddPlayer revives their row, clearing left_at). Only a finished, closed
+	// room rejects joins.
+	if sess.Phase == PhaseFinished {
+		return nil, ErrLobbyClosed
 	}
 
 	player, err := s.store.AddPlayer(ctx, sess.ID, playerID)
