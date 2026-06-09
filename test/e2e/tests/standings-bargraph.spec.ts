@@ -140,10 +140,12 @@ async function standingsRowTransforms(scope: Page): Promise<string[]> {
   });
 }
 
-// readFinishedStanding reads the finished /state standing for the named player,
-// returning the roundScore (the last round's points, the animation fuel #729)
-// and totalScore. The bar graph animates from totalScore - roundScore up to
-// totalScore, so a non-zero roundScore is what makes the finished bars grow.
+// readFinishedStanding reads the end-of-game /state standing for the named
+// player, returning the roundScore (the last round's points, the animation fuel
+// #729) and totalScore. A game now ends in intermission (#836), the
+// between-games screen that carries the same final standings; the bar graph
+// animates from totalScore - roundScore up to totalScore, so a non-zero
+// roundScore is what makes the bars grow.
 async function readFinishedStanding(
   request: APIRequestContext,
   code: string,
@@ -155,9 +157,9 @@ async function readFinishedStanding(
     phase: string;
     standings: { displayName: string; roundScore: number; totalScore: number }[] | null;
   };
-  expect(state.phase).toBe('finished');
+  expect(state.phase).toBe('intermission');
   const standing = (state.standings ?? []).find((s) => s.displayName === displayName);
-  expect(standing, `finished standings missing ${displayName}`).toBeTruthy();
+  expect(standing, `end-of-game standings missing ${displayName}`).toBeTruthy();
   return { roundScore: standing!.roundScore, totalScore: standing!.totalScore };
 }
 
@@ -273,10 +275,11 @@ test('the standings bar graph shows final order and totals on the TV and player 
   await answerOnPage(page, '6');
   await answerOverApi(other, joinCode, '5');
 
-  // Finished: the terminal phase is stable. Both surfaces show the final
-  // standings bar graph with Quincy first (two correct answers) and Robin
-  // second on zero. Wait for the host finished standings to render (so the
-  // server has reached the finished phase), then read the authoritative final
+  // End of game: the room enters intermission (#836), the between-games screen
+  // that shows the final standings while the room stays alive. Both surfaces
+  // show the final standings bar graph with Quincy first (two correct answers)
+  // and Robin second on zero. Wait for the host end-of-game standings to render
+  // (so the server has reached intermission), then read the authoritative final
   // totals the grow + slide settles the displayed bars onto.
   await expect(host.locator('[data-phase-results] [data-standings-row]').first())
     .toBeVisible({ timeout: STANDINGS_SETTLE_TIMEOUT });
@@ -300,7 +303,7 @@ test('the standings bar graph shows final order and totals on the TV and player 
   expect(tvRows[1].rank).toBe('2');
   expect(Number(tvRows[1].total)).toBe(0);
 
-  await expect(page.getByTestId('finished-view').locator('[data-standings-row]').first())
+  await expect(page.getByTestId('intermission-view').locator('[data-standings-row]').first())
     .toBeVisible({ timeout: STANDINGS_SETTLE_TIMEOUT });
   let playerRows = await readStandingsRows(page);
   await expect(async () => {
@@ -332,13 +335,14 @@ test('the standings bar graph shows final order and totals on the TV and player 
   for (const t of playerTransforms) expect(t === '' || t === 'none').toBe(true);
 
   // #749: the last round must end on a single final-standings screen. The
-  // player surface shows only finished-view (no between-rounds round-results),
-  // and the host TV heading reads "Final scores", never "Scores so far".
+  // player surface shows only the end-of-game intermission view (no
+  // between-rounds round-results), and the host TV heading reads "Final scores",
+  // never "Scores so far".
   await expect(page.getByTestId('round-results')).toHaveCount(0);
   await expect(host.getByText('Final scores')).toBeVisible();
   await expect(host.getByText('Scores so far')).toHaveCount(0);
 
-  // #729: the finished standings now carry the last round's score so the bar
+  // #729: the end-of-game standings now carry the last round's score so the bar
   // graph animates that final contribution (rather than landing statically).
   // Quincy scored in round 2 (the last round), so her finished roundScore is the
   // animation fuel: > 0, with a pre-round start (totalScore - roundScore) below

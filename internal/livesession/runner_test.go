@@ -3,6 +3,7 @@ package livesession_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"log/slog"
 	"sync"
 	"testing"
@@ -50,13 +51,20 @@ type runnerHarness struct {
 }
 
 // runnerCfg uses tiny beats so a single clock step crosses each threshold.
+// IdleCloseTimeout is a small, explicit window so the idle-close tests can place
+// host presence on either side of it without paying the 30-minute default.
 var runnerCfg = RunnerConfig{
 	BeatInterval:     time.Millisecond,
 	RoundIntroBeat:   time.Second,
 	RevealBeat:       time.Second,
 	RoundResultsBeat: time.Second,
 	QuestionReadBeat: time.Second,
+	IdleCloseTimeout: idleCloseTimeout,
 }
+
+// idleCloseTimeout is the runner harness's idle-close window: a room whose host
+// has been gone this long AND has no active players is closed by the sweep.
+const idleCloseTimeout = 2 * time.Minute
 
 // startCountdown is the host-armed last-call window the runner harness sets on
 // the service, so ArmStart stamps a deadline this far ahead of the clock.
@@ -92,7 +100,7 @@ func newRunnerHarness(t *testing.T, start time.Time, rounds [][]bool) *runnerHar
 	service.SetAdvancer(runner)
 
 	const hostID int64 = 1 // seeded admin
-	sess := &Session{QuizID: qz.ID, HostPlayerID: hostID, JoinCode: "RUN234"}
+	sess := &Session{QuizID: quizIDPtr(qz.ID), HostPlayerID: hostID, JoinCode: "RUN234"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -140,7 +148,7 @@ func (h *runnerHarness) setLastSeen(t *testing.T, sessionID string, playerID int
 
 // setHostLastSeen backdates (or clears, when at is the zero time) a session's
 // host_last_seen_at so a runner test can place the host on either side of the
-// abandon cutoff. Writes the timestamp in SQLite's CURRENT_TIMESTAMP text
+// idle-close cutoff. Writes the timestamp in SQLite's CURRENT_TIMESTAMP text
 // format, matching how production stamps the column. Test-only fixture write.
 func (h *runnerHarness) setHostLastSeen(t *testing.T, sessionID string, at time.Time) {
 	t.Helper()
@@ -153,10 +161,33 @@ func (h *runnerHarness) setHostLastSeen(t *testing.T, sessionID string, at time.
 	}
 }
 
-// seedRunnerQuiz authors a live quiz whose rounds carry the given questions;
-// each question's options are correct per the bool slice. Every question gets
-// a 10s window inherited from the quiz default.
+// staleAllPlayers backdates every roster player's last_seen_at far before the
+// active window (relative to the harness clock), so the idle-close sweep sees no
+// active players. AddPlayer stamps last_seen_at to the real wall clock, which is
+// well after the harness's 2026-06-05 fake clock and so would otherwise count as
+// active; this drags them all back to genuinely-gone. Test-only fixture write.
+func (h *runnerHarness) staleAllPlayers(t *testing.T, sessionID string) {
+	t.Helper()
+	stale := h.clock.Now().Add(-ActiveWindow - time.Minute)
+	for _, playerID := range h.players {
+		h.setLastSeen(t, sessionID, playerID, stale)
+	}
+}
+
+// seedRunnerQuiz authors a live quiz with the default slug; the harness seeds
+// exactly one. A test that needs a second quiz in the same DB (the re-arm path)
+// uses seedRunnerQuizSlug with a distinct slug so the two do not collide on the
+// quizzes.slug UNIQUE.
 func seedRunnerQuiz(t *testing.T, quizStore *store.QuizStore, rounds [][]bool) *quiz.Quiz {
+	t.Helper()
+
+	return seedRunnerQuizSlug(t, quizStore, "runner-quiz", rounds)
+}
+
+// seedRunnerQuizSlug authors a live quiz under the given slug whose rounds carry
+// the given questions; each question's options are correct per the bool slice.
+// Every question gets a 10s window inherited from the quiz default.
+func seedRunnerQuizSlug(t *testing.T, quizStore *store.QuizStore, slug string, rounds [][]bool) *quiz.Quiz {
 	t.Helper()
 
 	authored := make([]*quiz.Round, 0, len(rounds))
@@ -179,7 +210,7 @@ func seedRunnerQuiz(t *testing.T, quizStore *store.QuizStore, rounds [][]bool) *
 
 	qz := &quiz.Quiz{
 		Title:             "Runner Quiz",
-		Slug:              "runner-quiz",
+		Slug:              slug,
 		Description:       "fixture",
 		CreatedByPlayerID: 1,
 		Mode:              quiz.ModeLive,
@@ -315,7 +346,7 @@ func TestRunner_FullFlow(t *testing.T) {
 		t.Fatalf("phase after round results = %q, want %q (next round intro)", got, want)
 	}
 
-	// Round 2 intro -> its single question -> timeout reveal -> finished.
+	// Round 2 intro -> its single question -> timeout reveal -> intermission.
 	h.clock.advance(runnerCfg.RoundIntroBeat)
 	h.tick(ctx)
 	if got, want := h.phase(t), PhaseQuestion; got != want {
@@ -327,23 +358,25 @@ func TestRunner_FullFlow(t *testing.T) {
 		t.Fatalf("phase after round 2 question = %q, want %q", got, want)
 	}
 
-	// The last round's reveal finishes the session directly, skipping
-	// round_results, so the game ends on a single final-standings screen.
+	// The last round's reveal ends the game directly into intermission (#836),
+	// skipping round_results, so the game ends on a single final-standings screen
+	// and the room stays alive for the host to arm the next quiz.
 	h.clock.advance(runnerCfg.RevealBeat)
 	h.tick(ctx)
 	final := h.reload(t)
-	if got, want := final.Phase, PhaseFinished; got != want {
+	if got, want := final.Phase, PhaseIntermission; got != want {
 		t.Fatalf("phase after final round reveal = %q, want %q (skips round_results)", got, want)
 	}
 	if final.FinishedAt == nil {
-		t.Error("finished session has nil FinishedAt")
+		t.Error("game ended at intermission has nil FinishedAt")
 	}
 }
 
 // TestRunner_FinalRoundSkipsRoundResults pins that the last round transitions
-// from its closing reveal straight to finished, never showing the between-rounds
-// round_results screen, so the game ends on a single final-standings screen
-// (#749). A single-round quiz isolates the final-round path.
+// from its closing reveal straight to intermission, never showing the
+// between-rounds round_results screen, so the game ends on a single
+// final-standings screen (#749). A single-round quiz isolates the final-round
+// path.
 func TestRunner_FinalRoundSkipsRoundResults(t *testing.T) {
 	t.Parallel()
 
@@ -367,20 +400,22 @@ func TestRunner_FinalRoundSkipsRoundResults(t *testing.T) {
 		t.Fatalf("phase after question = %q, want %q", got, want)
 	}
 
-	// The reveal beat elapses on the only round: the runner finishes directly,
-	// never entering round_results.
+	// The reveal beat elapses on the only round: the runner ends the game
+	// directly into intermission, never entering round_results.
 	h.clock.advance(runnerCfg.RevealBeat)
 	h.tick(ctx)
-	if got, want := h.phase(t), PhaseFinished; got != want {
+	if got, want := h.phase(t), PhaseIntermission; got != want {
 		t.Fatalf("phase after final round reveal = %q, want %q (no round_results)", got, want)
 	}
 }
 
-// TestRunner_FinishForgetsHubVersion pins the #791 leak fix: once the runner
-// finishes a session, the hub drops its version entry so it does not live for
-// the process lifetime. While the session is running the entry exists (Publish
-// created it); after finish it is gone.
-func TestRunner_FinishForgetsHubVersion(t *testing.T) {
+// TestRunner_IntermissionKeepsHubVersion pins that a game ending into
+// intermission keeps the room alive (#836): the hub version entry survives, so
+// SSE keeps working and the host can re-arm the next quiz. The #791 leak fix
+// (evicting the entry on a terminal finish) still holds for the idle-close path
+// - see TestRunner_IdleCloseForgetsHubVersion - but a normal game end is no
+// longer terminal.
+func TestRunner_IntermissionKeepsHubVersion(t *testing.T) {
 	t.Parallel()
 
 	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
@@ -395,31 +430,63 @@ func TestRunner_FinishForgetsHubVersion(t *testing.T) {
 		t.Fatalf("has version while running = %v, want %v", got, want)
 	}
 
-	// Drive the single round to finished: intro beat -> question -> timeout
-	// reveal -> finish.
+	// Drive the single round to intermission: intro beat -> question -> timeout
+	// reveal -> end of game.
 	h.clock.advance(runnerCfg.RoundIntroBeat)
 	h.tick(ctx)
 	h.clock.advance(11 * time.Second)
 	h.tick(ctx)
 	h.clock.advance(runnerCfg.RevealBeat)
 	h.tick(ctx)
-	if got, want := h.phase(t), PhaseFinished; got != want {
+	if got, want := h.phase(t), PhaseIntermission; got != want {
 		t.Fatalf("phase after final reveal = %q, want %q", got, want)
 	}
 
-	// The finished session is forgotten: the version entry is evicted.
+	// The room is alive between games: the version entry is kept, not evicted.
+	if got, want := ExportHubHasVersion(h.hub, h.code), true; got != want {
+		t.Errorf("has version at intermission = %v, want %v (room stays alive)", got, want)
+	}
+}
+
+// TestRunner_IdleCloseForgetsHubVersion pins that the terminal idle-close path
+// still evicts the hub version entry (#791, #836): a room gone idle (host past
+// the idle timeout AND no active players) is closed for good (finished + evict),
+// so it does not pin its version entry for the process lifetime.
+func TestRunner_IdleCloseForgetsHubVersion(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	sessionID := h.sessionID(t)
+
+	if err := h.service.Start(ctx, h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+	if got, want := ExportHubHasVersion(h.hub, h.code), true; got != want {
+		t.Fatalf("has version while running = %v, want %v", got, want)
+	}
+
+	// The host drops past the idle cutoff and every player goes stale, so the room
+	// is genuinely idle; the next tick closes it.
+	h.setHostLastSeen(t, sessionID, h.clock.Now().Add(-idleCloseTimeout-time.Minute))
+	h.staleAllPlayers(t, sessionID)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseFinished; got != want {
+		t.Fatalf("phase after idle-close sweep = %q, want %q", got, want)
+	}
 	if got, want := ExportHubHasVersion(h.hub, h.code), false; got != want {
-		t.Errorf("has version after finish = %v, want %v (entry must be evicted)", got, want)
+		t.Errorf("has version after terminal finish = %v, want %v (entry must be evicted)", got, want)
 	}
 }
 
 // TestRunner_FinishedStandingsCarryLastRoundScore pins that the finished-phase
 // standings expose each player's score in the last round as RoundScore so the
 // bar graph can animate that final contribution (#729). It drives a single-round
-// quiz to finished with one player answering correctly and the other not, then
-// asserts the answerer's finished RoundScore equals the last round's points
-// (here the whole total, since the only round is the last one) and the
-// non-answerer's stays 0.
+// quiz to intermission (the end-of-game screen, #836) with one player answering
+// correctly and the other not, then asserts the answerer's final RoundScore
+// equals the last round's points (here the whole total, since the only round is
+// the last one) and the non-answerer's stays 0.
 func TestRunner_FinishedStandingsCarryLastRoundScore(t *testing.T) {
 	t.Parallel()
 
@@ -445,7 +512,7 @@ func TestRunner_FinishedStandingsCarryLastRoundScore(t *testing.T) {
 		t.Fatalf("SubmitAnswer err = %v, want nil", err)
 	}
 
-	// Timeout-close the question, then the reveal beat finishes the session.
+	// Timeout-close the question, then the reveal beat ends the game.
 	h.clock.advance(11 * time.Second)
 	h.tick(ctx)
 	if got, want := h.phase(t), PhaseReveal; got != want {
@@ -453,7 +520,7 @@ func TestRunner_FinishedStandingsCarryLastRoundScore(t *testing.T) {
 	}
 	h.clock.advance(runnerCfg.RevealBeat)
 	h.tick(ctx)
-	if got, want := h.phase(t), PhaseFinished; got != want {
+	if got, want := h.phase(t), PhaseIntermission; got != want {
 		t.Fatalf("phase after final reveal = %q, want %q", got, want)
 	}
 
@@ -809,11 +876,10 @@ func TestRunner_AllStaleRosterDoesNotEarlyClose(t *testing.T) {
 	}
 }
 
-// TestRunner_AbandonsHostGoneSession pins the MP-10 slice-3 sweep: a started,
-// mid-game session whose host_last_seen_at is older than AbandonTimeout is
-// finished by a runner tick, so a room whose host dropped does not linger live
-// forever.
-func TestRunner_AbandonsHostGoneSession(t *testing.T) {
+// TestRunner_ClosesIdleSession pins the idle-close sweep (#836): a session whose
+// host has gone past the idle timeout AND has no active players is finished by a
+// runner tick, so a room nobody is using does not linger live forever.
+func TestRunner_ClosesIdleSession(t *testing.T) {
 	t.Parallel()
 
 	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
@@ -821,29 +887,31 @@ func TestRunner_AbandonsHostGoneSession(t *testing.T) {
 	ctx := t.Context()
 	sessionID := h.sessionID(t)
 
-	// Host starts the game, then drops: their last host beat is well past the
-	// abandon cutoff.
+	// Host starts the game, then everyone leaves: the host beat is well past the
+	// idle cutoff and every player has gone stale.
 	if err := h.service.Start(ctx, h.code, 1); err != nil {
 		t.Fatalf("Start err = %v, want nil", err)
 	}
 	if got, want := h.phase(t), PhaseRoundIntro; got != want {
 		t.Fatalf("phase after Start = %q, want %q", got, want)
 	}
-	h.setHostLastSeen(t, sessionID, h.clock.Now().Add(-AbandonTimeout-time.Minute))
+	h.setHostLastSeen(t, sessionID, h.clock.Now().Add(-idleCloseTimeout-time.Minute))
+	h.staleAllPlayers(t, sessionID)
 
 	h.tick(ctx)
 	final := h.reload(t)
 	if got, want := final.Phase, PhaseFinished; got != want {
-		t.Fatalf("phase after abandon sweep = %q, want %q", got, want)
+		t.Fatalf("phase after idle-close sweep = %q, want %q", got, want)
 	}
 	if final.FinishedAt == nil {
-		t.Error("abandoned session has nil FinishedAt")
+		t.Error("idle-closed session has nil FinishedAt")
 	}
 }
 
-// TestRunner_DoesNotAbandonWithFreshHostBeat pins that a mid-game session whose
-// host beat recently is left running by the sweep.
-func TestRunner_DoesNotAbandonWithFreshHostBeat(t *testing.T) {
+// TestRunner_DoesNotCloseWithPlayersPresent pins the core session-first rule
+// (#836): a room whose host has gone past the idle timeout is NOT closed while a
+// player is still active. Browsing away does not end a room that people are in.
+func TestRunner_DoesNotCloseWithPlayersPresent(t *testing.T) {
 	t.Parallel()
 
 	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
@@ -854,19 +922,20 @@ func TestRunner_DoesNotAbandonWithFreshHostBeat(t *testing.T) {
 	if err := h.service.Start(ctx, h.code, 1); err != nil {
 		t.Fatalf("Start err = %v, want nil", err)
 	}
-	// The host beat just now, well inside the abandon window.
-	h.setHostLastSeen(t, sessionID, h.clock.Now())
+	// Host gone well past the idle cutoff, but a player is freshly seen (active),
+	// so the room is in use and must stay open.
+	h.setHostLastSeen(t, sessionID, h.clock.Now().Add(-idleCloseTimeout-time.Minute))
+	h.setLastSeen(t, sessionID, h.players[0], h.clock.Now())
 
 	h.tick(ctx)
 	if got, want := h.phase(t), PhaseRoundIntro; got != want {
-		t.Errorf("phase with fresh host beat = %q, want %q (not abandoned)", got, want)
+		t.Errorf("phase with a player present = %q, want %q (not closed)", got, want)
 	}
 }
 
-// TestRunner_DoesNotAbandonLobby pins that the sweep never finishes a lobby:
-// only a started session is in scope, so a host who is slow to start (or never
-// beat) leaves the lobby intact rather than terminating it.
-func TestRunner_DoesNotAbandonLobby(t *testing.T) {
+// TestRunner_DoesNotCloseWithFreshHostBeat pins that a room whose host beat
+// recently is left running by the idle sweep even with no players.
+func TestRunner_DoesNotCloseWithFreshHostBeat(t *testing.T) {
 	t.Parallel()
 
 	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
@@ -874,13 +943,40 @@ func TestRunner_DoesNotAbandonLobby(t *testing.T) {
 	ctx := t.Context()
 	sessionID := h.sessionID(t)
 
-	// A lobby with a long-stale host beat (and no started_at) must not be swept.
-	h.setHostLastSeen(t, sessionID, start.Add(-AbandonTimeout-time.Hour))
+	if err := h.service.Start(ctx, h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+	// The host beat just now, well inside the idle window, even though every
+	// player has gone stale.
+	h.setHostLastSeen(t, sessionID, h.clock.Now())
+	h.staleAllPlayers(t, sessionID)
 
-	h.clock.advance(AbandonTimeout + time.Hour)
 	h.tick(ctx)
-	if got, want := h.phase(t), PhaseLobby; got != want {
-		t.Errorf("lobby phase after sweep = %q, want %q (lobby never abandoned)", got, want)
+	if got, want := h.phase(t), PhaseRoundIntro; got != want {
+		t.Errorf("phase with fresh host beat = %q, want %q (not closed)", got, want)
+	}
+}
+
+// TestRunner_ClosesIdleEmptyLobby pins that the idle sweep also closes an empty
+// staging lobby (#836): a room opened up front, never started, whose host has
+// gone past the idle timeout with no players present is swept like any other idle
+// room rather than pinned open forever.
+func TestRunner_ClosesIdleEmptyLobby(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	sessionID := h.sessionID(t)
+
+	// Never started: a lobby with a long-stale host presence and every player
+	// gone stale is genuinely idle and must be swept.
+	h.setHostLastSeen(t, sessionID, h.clock.Now().Add(-idleCloseTimeout-time.Hour))
+	h.staleAllPlayers(t, sessionID)
+
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseFinished; got != want {
+		t.Errorf("empty lobby phase after idle sweep = %q, want %q (idle lobby closed)", got, want)
 	}
 }
 
@@ -994,4 +1090,203 @@ func scoreAt(sess *Session, answeredAt time.Time) int {
 	elapsed := answeredAt.Sub(*sess.QuestionStartedAt)
 
 	return int(1000 - (elapsed.Seconds()/window.Seconds())*1000)
+}
+
+// playSingleQuestionGame drives the room's current single-round, single-question
+// game from the lobby to its end-of-game intermission, with the given player
+// answering the correct option (an empty answerers slice runs a no-answer
+// timeout game). It assumes the harness's quiz is a single round of one
+// question. Returns the final standings read at intermission. Uses t.Context()
+// throughout (like the harness's other helpers) so it shares one context.
+func (h *runnerHarness) playSingleQuestionGame(t *testing.T, answerers []int64) []*Standing {
+	t.Helper()
+	ctx := t.Context()
+
+	// Round intro -> the single question.
+	h.clock.advance(runnerCfg.RoundIntroBeat)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseQuestion; got != want {
+		t.Fatalf("phase after intro beat = %q, want %q", got, want)
+	}
+
+	if len(answerers) > 0 {
+		optRight := correctOptionID(ctx, t, h.service, h.code, answerers[0])
+		answerAt := h.clock.Now().Add(2 * time.Second)
+		h.clock.advance(2 * time.Second)
+		for _, pid := range answerers {
+			if err := h.service.SubmitAnswer(ctx, h.code, pid, optRight, answerAt); err != nil {
+				t.Fatalf("SubmitAnswer err = %v, want nil", err)
+			}
+		}
+	}
+
+	// Timeout-close the question, then the reveal beat ends the game.
+	h.clock.advance(11 * time.Second)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseReveal; got != want {
+		t.Fatalf("phase after question = %q, want %q", got, want)
+	}
+	h.clock.advance(runnerCfg.RevealBeat)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseIntermission; got != want {
+		t.Fatalf("phase after final reveal = %q, want %q", got, want)
+	}
+
+	// Read the final standings off the intermission state.
+	state, err := h.service.GetLobbyState(ctx, h.code, h.players[0])
+	if err != nil {
+		t.Fatalf("GetLobbyState err = %v, want nil", err)
+	}
+
+	return state.Standings
+}
+
+// TestRunner_RearmRunsNextGameWithResetScores drives a room through game 1 to
+// intermission, asserts the room is still alive (not terminal), then the host
+// re-arms onto a SECOND quiz and game 2 runs with its own scoring. Per-game
+// reset is the headline: game 2's standings reflect only game 2's answers, never
+// game 1's (#836).
+func TestRunner_RearmRunsNextGameWithResetScores(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	scorer, slacker := h.players[0], h.players[1]
+
+	// A second live quiz the host will arm for game 2.
+	quizStore := store.NewQuizStore(h.db, slog.New(slog.DiscardHandler))
+	game2 := seedRunnerQuizSlug(t, quizStore, "runner-quiz-g2", [][]bool{{true}})
+
+	// Game 1: only the scorer answers, correctly.
+	if err := h.service.Start(ctx, h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+	g1Standings := h.playSingleQuestionGame(t, []int64{scorer})
+	g1Scorer := findRunnerStanding(t, g1Standings, scorer)
+	if g1Scorer.TotalScore <= 0 {
+		t.Fatalf("game 1 scorer TotalScore = %d, want > 0", g1Scorer.TotalScore)
+	}
+
+	// The room is alive at intermission, NOT terminally finished, and it kept its
+	// hub version so SSE keeps working into game 2.
+	if got, want := h.phase(t), PhaseIntermission; got != want {
+		t.Fatalf("phase after game 1 = %q, want %q (room alive)", got, want)
+	}
+	if got, want := ExportHubHasVersion(h.hub, h.code), true; got != want {
+		t.Errorf("has version at intermission = %v, want %v (room alive)", got, want)
+	}
+
+	// The host re-arms onto game 2 (a different quiz): the room bumps game_seq and
+	// the runner drives straight into game 2's first round.
+	const hostID int64 = 1
+	if err := h.service.StartQuiz(ctx, h.code, hostID, game2.ID); err != nil {
+		t.Fatalf("StartQuiz err = %v, want nil", err)
+	}
+	reArmed := h.reload(t)
+	if reArmed.QuizID == nil {
+		t.Fatalf("re-armed QuizID = nil, want %d (new quiz)", game2.ID)
+	}
+	if got, want := *reArmed.QuizID, game2.ID; got != want {
+		t.Errorf("re-armed QuizID = %d, want %d (new quiz)", got, want)
+	}
+	if got, want := reArmed.GameSeq, int64(2); got != want {
+		t.Errorf("re-armed GameSeq = %d, want %d", got, want)
+	}
+	if got, want := reArmed.Phase, PhaseRoundIntro; got != want {
+		t.Fatalf("phase after re-arm = %q, want %q (game 2 driving)", got, want)
+	}
+
+	// Game 2: this time the slacker answers and the scorer does not, so the
+	// game-2 standings must invert game 1 - proof the scores reset per game.
+	g2Standings := h.playSingleQuestionGame(t, []int64{slacker})
+	g2Scorer := findRunnerStanding(t, g2Standings, scorer)
+	g2Slacker := findRunnerStanding(t, g2Standings, slacker)
+	if got, want := g2Scorer.TotalScore, 0; got != want {
+		t.Errorf("game 2 scorer TotalScore = %d, want %d (no game-1 carryover)", got, want)
+	}
+	if g2Slacker.TotalScore <= 0 {
+		t.Errorf("game 2 slacker TotalScore = %d, want > 0 (answered in game 2)", g2Slacker.TotalScore)
+	}
+}
+
+// TestRunner_RearmSameQuizResetsScores pins that re-arming onto the SAME quiz
+// still resets scores per game (#836): a player who scored in game 1 starts
+// game 2 at zero, because the new game_seq scopes the standings to game 2's
+// answers and the widened unique key lets the same picks be re-recorded.
+func TestRunner_RearmSameQuizResetsScores(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	scorer := h.players[0]
+
+	// Game 1: the scorer answers correctly and ends with points.
+	if err := h.service.Start(ctx, h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+	g1 := h.playSingleQuestionGame(t, []int64{scorer})
+	if findRunnerStanding(t, g1, scorer).TotalScore <= 0 {
+		t.Fatalf("game 1 scorer TotalScore = %d, want > 0", findRunnerStanding(t, g1, scorer).TotalScore)
+	}
+
+	// Re-arm onto the SAME quiz (the room's current quiz id).
+	const hostID int64 = 1
+	sameQuizID := h.reload(t).QuizID
+	if sameQuizID == nil {
+		t.Fatal("room QuizID = nil, want the game-1 quiz id")
+	}
+	if err := h.service.StartQuiz(ctx, h.code, hostID, *sameQuizID); err != nil {
+		t.Fatalf("StartQuiz (same quiz) err = %v, want nil", err)
+	}
+
+	// Game 2 with nobody answering: the scorer's game-2 total is 0, so game 1's
+	// points did not bleed across the re-run.
+	g2 := h.playSingleQuestionGame(t, nil)
+	if got, want := findRunnerStanding(t, g2, scorer).TotalScore, 0; got != want {
+		t.Errorf("game 2 (same quiz) scorer TotalScore = %d, want %d (per-game reset)", got, want)
+	}
+}
+
+// TestRunner_StartQuizRejectedMidGame pins that the host cannot arm a quiz while
+// a game is in flight (#836): StartQuiz only works when no game is running (an
+// empty lobby or the between-games intermission), so a mid-game call returns
+// ErrGameInFlight and the running game is untouched.
+func TestRunner_StartQuizRejectedMidGame(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+
+	quizStore := store.NewQuizStore(h.db, slog.New(slog.DiscardHandler))
+	game2 := seedRunnerQuizSlug(t, quizStore, "runner-quiz-midgame", [][]bool{{true}})
+
+	// Start the game and advance into the question phase (mid-game).
+	if err := h.service.Start(ctx, h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+	h.clock.advance(runnerCfg.RoundIntroBeat)
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseQuestion; got != want {
+		t.Fatalf("phase = %q, want %q (mid-game)", got, want)
+	}
+
+	const hostID int64 = 1
+	err := h.service.StartQuiz(ctx, h.code, hostID, game2.ID)
+	if got, want := err, ErrGameInFlight; !errors.Is(got, want) {
+		t.Errorf("StartQuiz mid-game err = %v, want %v", got, want)
+	}
+	// The running game is untouched: still on the original quiz, game_seq 1.
+	sess := h.reload(t)
+	if got, want := sess.GameSeq, int64(1); got != want {
+		t.Errorf("GameSeq after rejected re-arm = %d, want %d", got, want)
+	}
+	if sess.QuizID == nil {
+		t.Fatal("QuizID after rejected re-arm = nil, want it unchanged from the original quiz")
+	}
+	if got, notWant := *sess.QuizID, game2.ID; got == notWant {
+		t.Errorf("QuizID after rejected re-arm = %d, want it unchanged from the original quiz", got)
+	}
 }

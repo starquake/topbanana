@@ -120,6 +120,12 @@ export class JoinApp {
         // Used to spot their own roster row across reads, which a rename would
         // otherwise break if the row were matched by name.
         this.myPlayerId = null;
+        // The current player as returned by GET /api/players/me, or null until
+        // init() resolves (or when the read fails / the player is anonymous).
+        // Backs the shared header's "Signed in as {displayName}" account
+        // control, mirroring the solo client (#520). Held reactively so the
+        // header renders the name as soon as init() lands.
+        this.player = null;
         // True while a join / ready request is in flight, to guard buttons.
         this.busy = false;
         // Human-readable error for the current form, cleared on retry.
@@ -305,6 +311,7 @@ export class JoinApp {
         // never blocked on this read.
         const player = await playerService.getMe();
         if (player) {
+            this.player = player;
             this.myPlayerId = player.id;
             if (player.isAuthenticated && player.hasCustomName) {
                 this.accountName = player.displayName;
@@ -575,12 +582,23 @@ export class JoinApp {
         this.syncQuestionFromState();
         this.syncStartCountdownFromState();
         this.syncStandingsFromState();
-        // The game is over: drop the wake lock so the phone can sleep again.
-        // The standings screen is the last thing the player reads; no answer
-        // window keeps the screen busy past here.
-        if (state.phase === 'finished') {
+        this.syncWakeLockFromState(state);
+    }
+
+    // syncWakeLockFromState reconciles the screen wake lock with the game
+    // phase. An end-of-game screen (intermission, the between-games screen #836,
+    // and the terminal finished phase) has no answer window keeping the screen
+    // busy, so the lock is dropped and the phone can sleep again - the standings
+    // are the last thing the player reads on that screen. When the host re-arms
+    // (#836) and the room walks back into active play, the lock is re-acquired
+    // so the next game keeps the screen awake. The acquire runs off the same
+    // wakeLockHeld guard, so a repeat tick within a phase does not re-request.
+    syncWakeLockFromState(state) {
+        if (state.phase === 'intermission' || state.phase === 'finished') {
             this.releaseWakeLock();
+            return;
         }
+        this.acquireWakeLock();
     }
 
     // syncStartCountdownFromState reconciles the host-armed last-call countdown
@@ -623,6 +641,22 @@ export class JoinApp {
     // while the countdown is armed.
     startCountdownLabel() {
         return `Starting in ${formatCountdown(this.startRemaining)}`;
+    }
+
+    // lobbyTitle is the lobby heading: the room's quiz title once a quiz is
+    // armed, or a generic "Get ready" for an empty room (#836). The state read
+    // omits quiz for a room opened with no game picked yet, so reading
+    // state.quiz.title directly would throw and break the lobby render - this
+    // guards that case so the player sees a sane waiting lobby.
+    lobbyTitle() {
+        return this.state && this.state.quiz ? this.state.quiz.title : 'Get ready';
+    }
+
+    // lobbyHasQuiz reports whether the room has a quiz armed, so the lobby can
+    // word its waiting hint for the empty-room staging state (no quiz yet)
+    // distinctly from a room that has a game queued (#836).
+    lobbyHasQuiz() {
+        return !!(this.state && this.state.quiz);
     }
 
     // syncClockFrom recomputes clockOffset from the serverNow that travels with
@@ -680,21 +714,32 @@ export class JoinApp {
         }
     }
 
+    // showsStandings reports whether the current server phase renders the
+    // standings bar graph: the between-rounds round_results screen and the
+    // end-of-game screens - intermission (the between-games screen, #836) and
+    // the terminal finished phase.
+    showsStandings() {
+        const phase = this.state ? this.state.phase : null;
+        return phase === 'round_results' || phase === 'intermission' || phase === 'finished';
+    }
+
     // syncStandingsFromState reconciles the between-rounds / final bar graph
     // with each state read. The server carries a standings array in the
-    // round_results and finished phases (null elsewhere). On a genuine new
-    // entry it builds the rows starting at each player's pre-round total and
-    // grows the bars to the new total while the numeric labels count up; from
-    // the second screen on the rows also slide from their previous-screen
-    // position into the new ranking (a FLIP swap, #730) so an overtake reads as
-    // rows trading places. A later tick within the same phase does not
-    // re-trigger the animation, so it doesn't replay on every SSE beat. The
-    // finished phase animates the last round's contribution: its standings carry
-    // the last round's roundScore so the bars grow into the final totals.
+    // round_results phase and on the end-of-game screen - intermission (the
+    // between-games screen, #836) and the terminal finished phase (null
+    // elsewhere). On a genuine new entry it builds the rows starting at each
+    // player's pre-round total and grows the bars to the new total while the
+    // numeric labels count up; from the second screen on the rows also slide
+    // from their previous-screen position into the new ranking (a FLIP swap,
+    // #730) so an overtake reads as rows trading places. A later tick within the
+    // same phase does not re-trigger the animation, so it doesn't replay on
+    // every SSE beat. The end-of-game screen animates the last round's
+    // contribution: its standings carry the last round's roundScore so the bars
+    // grow into the final totals.
     syncStandingsFromState() {
         const phase = this.state ? this.state.phase : null;
         const standings = this.state && Array.isArray(this.state.standings) ? this.state.standings : null;
-        if ((phase !== 'round_results' && phase !== 'finished') || !standings) {
+        if (!this.showsStandings() || !standings) {
             this.standingsBars = [];
             this.maxStandingsTotal = 1;
             this.lastStandingsKey = null;
@@ -704,14 +749,15 @@ export class JoinApp {
         }
 
         // Re-key on the phase plus the question id of the round that just
-        // finished so a new round (or the transition into finished) fires the
-        // animation exactly once. A repeat tick with the same key is a no-op.
+        // finished so a new round (or the transition into the end-of-game
+        // screen) fires the animation exactly once. A repeat tick with the same
+        // key is a no-op.
         const questionId = this.state.question ? this.state.question.id : 'none';
         const key = `${phase}:${questionId}`;
         if (key === this.lastStandingsKey) return;
         this.lastStandingsKey = key;
 
-        const animate = phase === 'round_results' || phase === 'finished';
+        const animate = this.showsStandings();
         const { rows, maxTotal } = buildStandingsRows(standings, {
             animate,
             ownsRow: (row) => this.ownsRow(row),
@@ -967,6 +1013,26 @@ export class JoinApp {
         }
 
         return row.displayName === this.myDisplayName;
+    }
+
+    // isAuthenticated reports whether the player is known to the system
+    // through some credential (password, OAuth identity, or the seeded admin
+    // role). Backs the shared header's account control, which shows only for a
+    // signed-in player (#520) - the same gate the solo client uses.
+    isAuthenticated() {
+        return !!(this.player && this.player.isAuthenticated);
+    }
+
+    // inActiveQuestion reports whether a live question is on screen, so the
+    // shared header (brand + account control) can hide and give the question
+    // the full canvas - mirroring the solo client's `gameId && !finished` gate
+    // (#253). It covers the question phase and the reveal phase (the same
+    // question text, with the correct answer marked); every other screen -
+    // enter-code, name, lobby, round_intro, round_results, intermission, and
+    // finished - keeps the header.
+    inActiveQuestion() {
+        const phase = this.state ? this.state.phase : null;
+        return this.phase === 'lobby' && (phase === 'question' || phase === 'reveal');
     }
 
     // currentQuestion returns the live question off the authoritative state, or

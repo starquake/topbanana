@@ -42,12 +42,18 @@ func (s *LiveSessionStore) Ping(ctx context.Context) error {
 
 // CreateSession inserts a sessions row with a fresh xid and the
 // caller-supplied join code, populating s.ID / s.CreatedAt / s.Phase from
-// the returned row. A join_code UNIQUE collision (the loser of a probe
-// race in the service) surfaces as [livesession.ErrJoinCodeUnavailable].
+// the returned row. The room's quiz is optional (#836): a nil sess.QuizID opens
+// an empty room (quiz_id NULL, the "no game running yet" state). A join_code
+// UNIQUE collision (the loser of a probe race in the service) surfaces as
+// [livesession.ErrJoinCodeUnavailable].
 func (s *LiveSessionStore) CreateSession(ctx context.Context, sess *livesession.Session) error {
+	var quizID sql.NullInt64
+	if sess.QuizID != nil {
+		quizID = sql.NullInt64{Int64: *sess.QuizID, Valid: true}
+	}
 	row, err := s.q.CreateSession(ctx, db.CreateSessionParams{
 		ID:           xid.New().String(),
-		QuizID:       sess.QuizID,
+		QuizID:       quizID,
 		HostPlayerID: sess.HostPlayerID,
 		JoinCode:     sess.JoinCode,
 	})
@@ -100,21 +106,31 @@ func (s *LiveSessionStore) GetSessionByJoinCode(
 	return sess, nil
 }
 
-// SessionHasPlayer reports whether the player has ever held a roster row in
-// the session identified by join code, regardless of left_at. Backs the
-// reconnect/resume gate in [livesession.Service.Join].
-func (s *LiveSessionStore) SessionHasPlayer(
-	ctx context.Context, joinCode string, playerID int64,
-) (bool, error) {
-	has, err := s.q.SessionHasPlayer(ctx, db.SessionHasPlayerParams{
-		JoinCode: joinCode,
-		PlayerID: playerID,
-	})
+// GetActiveSessionForHost returns the host's most recent active (non-finished)
+// room with its roster populated, or (nil, nil) when the host has no active room
+// (#836). Absence is the normal "nothing to resume" answer, not an error, so the
+// service can offer the "Resume hosting" link only when a room comes back.
+//
+//nolint:nilnil // (nil, nil) is the deliberate "no active room" result; absence is not an error here.
+func (s *LiveSessionStore) GetActiveSessionForHost(
+	ctx context.Context, hostPlayerID int64,
+) (*livesession.Session, error) {
+	row, err := s.q.GetActiveSessionForHost(ctx, hostPlayerID)
 	if err != nil {
-		return false, fmt.Errorf("failed to check session has player: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+
+		return nil, fmt.Errorf("failed to get active session for host: %w", err)
 	}
 
-	return has, nil
+	sess := sessionFromRow(row)
+	sess.Players, err = s.listPlayers(ctx, sess.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return sess, nil
 }
 
 // AddPlayer adds (or revives on re-join) a roster row for the player. The
@@ -274,10 +290,48 @@ func (s *LiveSessionStore) EnterRoundResults(ctx context.Context, sessionID stri
 	return nil
 }
 
-// Finish ends the session.
+// Finish ends the session terminally.
 func (s *LiveSessionStore) Finish(ctx context.Context, sessionID string) error {
 	if err := s.q.SetSessionFinished(ctx, sessionID); err != nil {
 		return fmt.Errorf("failed to finish session: %w", err)
+	}
+
+	return nil
+}
+
+// Intermission ends a game without closing the room: marks it intermission and
+// clears the per-question runner columns, leaving the room alive (#836).
+func (s *LiveSessionStore) Intermission(ctx context.Context, sessionID string) error {
+	if err := s.q.SetSessionIntermission(ctx, sessionID); err != nil {
+		return fmt.Errorf("failed to move session to intermission: %w", err)
+	}
+
+	return nil
+}
+
+// RearmSession arms a quiz to play in a room whenever no game is running (#836):
+// points it at the quiz, resets to the lobby, clears the per-game runner columns
+// (game_seq bumped only from intermission), and clears every roster player's
+// ready flag, in one transaction so the re-arm and the ready reset cannot be
+// partially applied. Returns [livesession.ErrGameInFlight] when a game is already
+// running or the room is terminally finished (the RearmSession UPDATE matches no
+// row).
+func (s *LiveSessionStore) RearmSession(ctx context.Context, sessionID string, quizID int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin rearm session transaction: %w", err)
+	}
+
+	if err = s.rearmSessionTx(ctx, tx, sessionID, quizID); err != nil {
+		if rbErr := tx.Rollback(); rbErr != nil {
+			return fmt.Errorf("rearm session failed: %w (rollback error: %w)", err, rbErr)
+		}
+
+		return err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit rearm session transaction: %w", err)
 	}
 
 	return nil
@@ -565,16 +619,40 @@ func (s *LiveSessionStore) recordAnswerTx(
 	return nil
 }
 
+func (s *LiveSessionStore) rearmSessionTx(ctx context.Context, tx *sql.Tx, sessionID string, quizID int64) error {
+	q := s.q.WithTx(tx)
+
+	res, err := q.RearmSession(ctx, db.RearmSessionParams{
+		QuizID: sql.NullInt64{Int64: quizID, Valid: true},
+		ID:     sessionID,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to rearm session: %w", err)
+	}
+	if database.MustRowsAffected(res) == 0 {
+		return livesession.ErrGameInFlight
+	}
+
+	if err = q.ResetSessionPlayersReady(ctx, sessionID); err != nil {
+		return fmt.Errorf("failed to reset session players ready: %w", err)
+	}
+
+	return nil
+}
+
 // sessionFromRow maps a generated sessions row onto the domain type
 // (without the roster, which the caller fans out separately).
 func sessionFromRow(row db.Session) *livesession.Session {
 	sess := &livesession.Session{
 		ID:           row.ID,
-		QuizID:       row.QuizID,
 		HostPlayerID: row.HostPlayerID,
 		JoinCode:     row.JoinCode,
 		Phase:        livesession.Phase(row.Phase),
+		GameSeq:      row.GameSeq,
 		CreatedAt:    row.CreatedAt,
+	}
+	if row.QuizID.Valid {
+		sess.QuizID = &row.QuizID.Int64
 	}
 	if row.CurrentRoundID.Valid {
 		sess.CurrentRoundID = &row.CurrentRoundID.Int64
@@ -610,6 +688,7 @@ func applySessionRow(sess *livesession.Session, row db.Session) {
 	sess.ID = row.ID
 	sess.JoinCode = row.JoinCode
 	sess.Phase = livesession.Phase(row.Phase)
+	sess.GameSeq = row.GameSeq
 	sess.CreatedAt = row.CreatedAt
 	if row.StartedAt.Valid {
 		sess.StartedAt = &row.StartedAt.Time

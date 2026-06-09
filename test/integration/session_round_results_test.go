@@ -156,9 +156,9 @@ func findStanding(t *testing.T, standings []sessionStandingRes, playerID int64) 
 // TestSessionRoundResults_DeltasTotalsAndStandings drives a two-round hosted
 // session to completion and asserts: (a) the round_results phase exposes each
 // player's points-this-round, new cumulative total, and ranking; and (b) the
-// finished phase exposes the final standings. The winner (Ace) answers the
-// correct option every question; the loser (Bee) answers wrong, so the ordering
-// is deterministic.
+// end-of-game intermission phase (#836) exposes the final standings. The winner
+// (Ace) answers the correct option every question; the loser (Bee) answers
+// wrong, so the ordering is deterministic.
 func TestSessionRoundResults_DeltasTotalsAndStandings(t *testing.T) {
 	t.Parallel()
 
@@ -222,18 +222,18 @@ func TestSessionRoundResults_DeltasTotalsAndStandings(t *testing.T) {
 	}
 	aceCumulativeAfterR1 := aceR1.TotalScore
 
-	// Round 2 is the final round; same picks. Its closing reveal finishes the
-	// session directly, skipping round_results, so the game ends on a single
-	// final-standings screen (#749).
+	// Round 2 is the final round; same picks. Its closing reveal ends the game
+	// directly into intermission (the between-games screen, #836), skipping
+	// round_results, so the game ends on a single final-standings screen (#749).
 	playQuestion(ctx, t, ace, bee, baseURL, code)
 
-	// finished: final standings carry the full cumulative totals, Ace first.
-	// The finished standings carry the last round's score as RoundScore so the
-	// bar graph can animate that final contribution (#729): Ace scored in round
-	// 2 (the last round), so RoundScore is the points Ace earned there and
-	// equals the cumulative growth past round 1; Bee scored nothing in round 2,
-	// so RoundScore stays 0.
-	final := waitForResultsPhase(ctx, t, ace, baseURL, code, "finished")
+	// intermission: final standings carry the full cumulative totals, Ace first.
+	// The final standings carry the last round's score as RoundScore so the bar
+	// graph can animate that final contribution (#729): Ace scored in round 2
+	// (the last round), so RoundScore is the points Ace earned there and equals
+	// the cumulative growth past round 1; Bee scored nothing in round 2, so
+	// RoundScore stays 0.
+	final := waitForResultsPhase(ctx, t, ace, baseURL, code, "intermission")
 	if got, want := len(final.Standings), 2; got != want {
 		t.Fatalf("final standings = %d entries, want %d", got, want)
 	}

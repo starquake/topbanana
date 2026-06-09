@@ -149,10 +149,11 @@ type Round struct {
 
 type Session struct {
 	ID                string
-	QuizID            int64
+	QuizID            sql.NullInt64
 	HostPlayerID      int64
 	JoinCode          string
 	Phase             string
+	GameSeq           int64
 	CurrentRoundID    sql.NullInt64
 	CurrentQuestionID sql.NullInt64
 	QuestionStartedAt sql.NullTime
@@ -172,6 +173,7 @@ type SessionAnswer struct {
 	OptionID   int64
 	AnsweredAt time.Time
 	Score      sql.NullInt64
+	GameSeq    int64
 }
 
 type SessionPlayer struct {

@@ -60,16 +60,17 @@ type SessionState = {
 
 // answerOverApi waits through round_intro / the read beat for the answer window
 // to open, then resolves the option whose text matches off GET /state and POSTs
-// it. It only gives up once the question is over (round_results/finished) or the
-// deadline passes - so it can be called the instant the game starts and still
-// land the round-1 answer (unlike a one-shot check that bails during the intro).
+// it. It only gives up once the question is over (round_results, or the
+// end-of-game intermission/finished) or the deadline passes - so it can be
+// called the instant the game starts and still land the round-1 answer (unlike
+// a one-shot check that bails during the intro).
 async function answerOverApi(request: APIRequestContext, code: string, text: string): Promise<void> {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     const resp = await request.get(`/api/sessions/${code}/state`);
     if (resp.ok()) {
       const state = (await resp.json()) as SessionState;
-      if (state.phase === 'round_results' || state.phase === 'finished') return;
+      if (state.phase === 'round_results' || state.phase === 'intermission' || state.phase === 'finished') return;
       if (state.phase === 'question' && state.question) {
         const open = state.question.startedAt
           ? Date.parse(state.serverNow) >= Date.parse(state.question.startedAt)
@@ -181,11 +182,11 @@ test('standings swap video: a player row slides up to first at the finish', asyn
   await answerOnPage(page, '6');
   await answerOverApi(leaderContext.request, joinCode, '5');
 
-  // Finished (terminal, stable): the climber's row slides up to 1st while its
-  // bar grows. Assert via the authoritative /state that this was a real
+  // End of game (intermission, #836): the climber's row slides up to 1st while
+  // its bar grows. Assert via the authoritative /state that this was a real
   // overtake - the leader actually scored (so it led round 1) and the climber
   // finished ahead of it - so the recording can never be a non-swap again.
-  const finished = page.locator('[data-testid="finished-view"]');
+  const finished = page.locator('[data-testid="intermission-view"]');
   const rows = finished.locator('[data-standings-row]');
   await expect(rows.first()).toBeVisible({ timeout: 20_000 });
 
@@ -195,7 +196,7 @@ test('standings swap video: a player row slides up to first at the finish', asyn
   // slide steps the row's Y position through many. An instant snap would show
   // ~1 of each. This is the motion coverage the reduced-motion specs can't give.
   const motion = await page.evaluate(async () => {
-    const view = document.querySelector('[data-testid="finished-view"]');
+    const view = document.querySelector('[data-testid="intermission-view"]');
     const mine = () => view && view.querySelector('[data-standings-row][aria-current="true"]');
     const totals: string[] = [];
     const tops: number[] = [];
@@ -214,7 +215,7 @@ test('standings swap video: a player row slides up to first at the finish', asyn
   const stateResp = await page.request.get(`/api/sessions/${joinCode}/state`);
   expect(stateResp.ok(), `state: ${stateResp.status()} ${await stateResp.text()}`).toBeTruthy();
   const state = (await stateResp.json()) as SessionState;
-  expect(state.phase).toBe('finished');
+  expect(state.phase).toBe('intermission');
   const climberStanding = (state.standings ?? []).find((s) => s.displayName === climber);
   const leaderStanding = (state.standings ?? []).find((s) => s.displayName === leader);
   expect(climberStanding, 'climber finished standing').toBeTruthy();

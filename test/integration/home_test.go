@@ -108,6 +108,21 @@ func TestHome_Integration(t *testing.T) {
 		}
 	})
 
+	t.Run("GET / renders the Join a live game CTA in the hero", func(t *testing.T) {
+		t.Parallel()
+		body := getBody(ctx, t, baseURL+"/")
+
+		for _, want := range []string{
+			`href="/join"`,
+			"Join a live game",
+			`data-testid="home-join-live"`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("body missing %q", want)
+			}
+		}
+	})
+
 	t.Run("GET / renders Browse all link below the popular quizzes", func(t *testing.T) {
 		t.Parallel()
 		body := getBody(ctx, t, baseURL+"/")
@@ -131,6 +146,19 @@ func TestHome_Integration(t *testing.T) {
 				browseIdx,
 				lastCardIdx,
 			)
+		}
+	})
+
+	t.Run("GET / renders a Join a live game link to the join screen", func(t *testing.T) {
+		t.Parallel()
+		body := getBody(ctx, t, baseURL+"/")
+
+		// The installed PWA opens at "/" with no address bar, so the home page
+		// must offer a path to the live-game join screen (#826).
+		for _, want := range []string{`href="/join"`, "Join a live game", `data-testid="home-join-live"`} {
+			if !strings.Contains(body, want) {
+				t.Errorf("home body should contain %q (PWA needs a path to /join)", want)
+			}
 		}
 	})
 
@@ -255,11 +283,11 @@ func TestHome_Integration(t *testing.T) {
 	})
 }
 
-// TestHome_Integration_FooterAffordance covers #408: the home-page
-// footer flips between "Log in" (anonymous) and "Signed in as X · Log
-// out" (authenticated). Drives both states against a real server and
-// also verifies the rendered log-out form actually clears the session
-// via POST /logout.
+// TestHome_Integration_FooterAffordance covers #408 / #844: the home-page
+// account cluster (in the shared top bar since #844) flips between "Log
+// in" (anonymous) and "Signed in as X" + a log-out form (authenticated).
+// Drives both states against a real server and also verifies the rendered
+// log-out form actually clears the session via POST /logout.
 //
 //nolint:paralleltest,tparallel // subtests share the seeded admin and the same client jars; sequencing is intentional.
 func TestHome_Integration_FooterAffordance(t *testing.T) {

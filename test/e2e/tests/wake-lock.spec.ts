@@ -189,7 +189,7 @@ test.describe('live player screen wake lock', () => {
     await hostContext.close();
   });
 
-  test('releases the wake lock when the game finishes', async ({ page, baseURL }) => {
+  test('releases the wake lock when the game reaches the end-of-game intermission', async ({ page, baseURL }) => {
     test.setTimeout(90_000);
 
     const quizTitle = `Wake Finish ${Date.now()}`;
@@ -207,7 +207,8 @@ test.describe('live player screen wake lock', () => {
     const { joinCode } = await createResp.json() as { joinCode: string };
 
     // A second API-only player answers each question alongside the page player
-    // so the runner closes every question and the game reaches finished.
+    // so the runner closes every question and the game reaches the end-of-game
+    // intermission (#836).
     const otherContext = await page.context().browser()!.newContext({ storageState: undefined, baseURL });
     await claimAndJoin(otherContext.request, joinCode, ben);
 
@@ -247,8 +248,10 @@ test.describe('live player screen wake lock', () => {
       }
     }
 
-    // The session reaches the finished standings, and the wake lock is released.
-    await expect(page.getByTestId('finished-view')).toBeVisible({ timeout: 20_000 });
+    // The session reaches the end-of-game intermission standings (#836), and the
+    // wake lock is released: no answer window keeps the screen busy while the
+    // player waits between games.
+    await expect(page.getByTestId('intermission-view')).toBeVisible({ timeout: 20_000 });
     await expect.poll(async () => (await readWakeLock(page)).held, { timeout: 10_000 }).toBe(false);
     expect((await readWakeLock(page)).releases).toBeGreaterThanOrEqual(1);
 

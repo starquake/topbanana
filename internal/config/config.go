@@ -57,6 +57,11 @@ var ErrSessionRevealBeatNegative = errors.New("SESSION_REVEAL_BEAT must not be n
 // silently treating it as "start immediately".
 var ErrSessionStartCountdownNegative = errors.New("SESSION_START_COUNTDOWN must not be negative")
 
+// ErrSessionIdleCloseNegative is returned when SESSION_IDLE_CLOSE parses to a
+// negative duration. It is how long a room may sit idle (host gone, no active
+// players) before the runner closes it, so a negative value is meaningless.
+var ErrSessionIdleCloseNegative = errors.New("SESSION_IDLE_CLOSE must not be negative")
+
 // ErrSMTPConfigIncomplete is returned when SMTP env vars are partially
 // populated. SMTP is opt-in (an unconfigured instance still boots and
 // the no-op mailer kicks in), but a partial configuration is almost
@@ -192,6 +197,13 @@ type Config struct {
 	// shrinks it to a couple of seconds so the armed-start spec does not pay the
 	// production dwell time.
 	SessionStartCountdown time.Duration
+
+	// SessionIdleClose is how long a hosted room may sit idle - its host gone
+	// (no host heartbeat) AND no active players - before the runner closes it
+	// (#836). Zero means "use the built-in default" (30m). Parsed from the
+	// SESSION_IDLE_CLOSE env var via time.ParseDuration; the e2e/integration
+	// suites shrink it so an idle-close spec does not wait the production window.
+	SessionIdleClose time.Duration
 
 	// LoginCooldown is the per-IP minimum gap between POST /login attempts,
 	// passed into auth.NewLoginRateLimiter (#494). Defaults to 3s (mirrors
@@ -497,6 +509,12 @@ func parseTypedEnvVars(getenv func(string) string, c *Config) error {
 
 	if err := parseNonNegativeDuration(
 		getenv, "SESSION_START_COUNTDOWN", ErrSessionStartCountdownNegative, &c.SessionStartCountdown,
+	); err != nil {
+		return err
+	}
+
+	if err := parseNonNegativeDuration(
+		getenv, "SESSION_IDLE_CLOSE", ErrSessionIdleCloseNegative, &c.SessionIdleClose,
 	); err != nil {
 		return err
 	}

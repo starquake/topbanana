@@ -10,6 +10,27 @@
                 Pick a section to get started.
             </p>
         </div>
+
+        {{/* Host a session (#836): open a live room before picking a quiz. The
+             form posts to /host with no quiz_id, so the room opens empty (the
+             "no game running yet" staging state) and the host picks the first
+             quiz from the room's lobby. The per-quiz "Play live" still
+             preselects a quiz; this is the start-from-nothing entry. When the
+             host already has an open room, a "Resume hosting" link returns them
+             to it instead of opening a second one. */}}
+        <div class="flex flex-col items-stretch gap-2 md:items-end" data-host-session>
+            <form method="post" action="/host">
+                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                <button type="submit"
+                        class="inline-flex items-center justify-center gap-2 min-h-[44px] px-6 rounded-lg bg-accent text-bg font-display font-semibold uppercase tracking-tight text-sm border-0 transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus cursor-pointer"
+                        data-host-session-submit>Host a session</button>
+            </form>
+            {{if .ResumeCode}}
+                <a href="/host/{{.ResumeCode}}"
+                   class="text-sm text-text-dim hover:text-accent transition-colors text-center md:text-right"
+                   data-resume-hosting>Resume hosting &mdash; room <span class="font-mono text-text">{{.ResumeCode}}</span></a>
+            {{end}}
+        </div>
     </header>
 
     <div class="grid gap-5 grid-cols-1 md:grid-cols-3 max-w-5xl">
