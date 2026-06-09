@@ -332,10 +332,14 @@ export async function answerRemainingQuestions(page: Page, fromIndex = 0): Promi
     await expect(optionButton).toBeEnabled({ timeout: 10_000 });
     await optionButton.click();
 
+    // The quieter post-answer reveal (#767): a small verdict eyebrow
+    // carries Correct! / Not quite while the per-option highlight shows
+    // the right answer.
+    const verdict = page.getByTestId('reveal-verdict');
     if (wasCorrect) {
-      await expect(page.locator('.splash-correct')).toBeVisible();
+      await expect(verdict).toHaveText('Correct!');
     } else {
-      await expect(page.locator('.splash-wrong')).toBeVisible();
+      await expect(verdict).toHaveText('Not quite');
     }
   }
 

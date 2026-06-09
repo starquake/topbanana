@@ -36,7 +36,7 @@ const SETTLE_MS = 8_000;
 // Following questions are answered immediately (~2s feedback each). The
 // full countdown plus playthrough keeps this above the Playwright default,
 // but with import-based setup a moderate budget suffices.
-test('timing out a question shows the Time out banner and the rest of the quiz still plays through', async ({ page, browserName }) => {
+test('timing out a question shows the Time up verdict and the rest of the quiz still plays through', async ({ page, browserName }) => {
   test.setTimeout(60_000);
 
   const quizTitle = `E2E Timeout Quiz ${browserName}`;
@@ -48,7 +48,7 @@ test('timing out a question shows the Time out banner and the rest of the quiz s
   await startQuizAsAnonymous(page, quizTitle);
 
   // First question is on screen; do NOT click any option. Wait for the
-  // countdown to expire and the "Time out!" notification to appear.
+  // countdown to expire and the "Time up" verdict eyebrow to appear.
   const firstQuestion = QUIZ_QUESTIONS[0];
   await expect(page.getByRole('button', { name: firstQuestion.options[0] })).toBeVisible();
 
@@ -62,13 +62,13 @@ test('timing out a question shows the Time out banner and the rest of the quiz s
     { timeout: PROGRESS_DRAIN_BUDGET_MS },
   );
 
-  // The full-screen verdict splash (#253) carries the time-out
-  // message — `splash-timeout` is the class GameApp.showSplash
-  // applies for the timeout case. It auto-clears at ~950 ms so the
-  // assertions below check while it is still on screen.
-  const timeoutSplash = page.locator('.splash-timeout');
-  await expect(timeoutSplash).toBeVisible({ timeout: SETTLE_MS });
-  await expect(timeoutSplash).toContainText('Time out!');
+  // The quieter post-answer reveal (#767) carries the time-out
+  // verdict in the small eyebrow line: on a timeout the synthesized
+  // feedback is `timedOut`, so the eyebrow reads "Time up". It stays
+  // on screen for the whole feedback pause until the auto-advance.
+  const verdict = page.getByTestId('reveal-verdict');
+  await expect(verdict).toBeVisible({ timeout: SETTLE_MS });
+  await expect(verdict).toHaveText('Time up');
 
   // Answer buttons are gone while feedback is shown; the option that was
   // visible above must not be clickable now. Use the visibility check to

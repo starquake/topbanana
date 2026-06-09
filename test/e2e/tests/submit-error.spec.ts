@@ -69,7 +69,7 @@ test('retry banner appears when answers POST fails, and a re-click advances the 
 
   // Banner clears the instant the retry click runs (submitError = false
   // at the top of submitAnswer). The next click drives the standard
-  // feedback splash + auto-advance path.
+  // reveal + auto-advance path.
   await expect(banner).toBeHidden({ timeout: 5_000 });
 
   const secondChoice = QUIZ_QUESTIONS[1].options[0];

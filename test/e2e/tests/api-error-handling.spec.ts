@@ -50,14 +50,14 @@ test('400 on answer POST does not show the retry banner', async ({ page, browser
   const banner = page.getByRole('alert');
   await expect(banner).toBeHidden({ timeout: 3_000 });
 
-  // The catch path synthesizes a timeout-style splash so the player
-  // doesn't get stuck on a blank screen.
-  await expect(page.locator('.splash-timeout')).toBeVisible({ timeout: 3_000 });
+  // The catch path synthesizes a timed-out feedback so the player
+  // doesn't get stuck on a blank screen; the verdict eyebrow reads
+  // "Time up" (#767).
+  await expect(page.getByTestId('reveal-verdict')).toHaveText('Time up', { timeout: 3_000 });
 
-  // The game must advance to the next question (the splash auto-
-  // advances after resolveAndAdvance's pause). Long timeout because
-  // the timeout splash is intentionally held briefly before the
-  // advance fires.
+  // The game must advance to the next question (resolveAndAdvance's
+  // pause runs the reveal beat first). Long timeout because the
+  // reveal is intentionally held briefly before the advance fires.
   const secondChoice = QUIZ_QUESTIONS[1].options[0];
   await expect(page.getByRole('button', { name: secondChoice })).toBeVisible({ timeout: 15_000 });
 });
