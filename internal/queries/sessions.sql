@@ -52,8 +52,8 @@ SELECT EXISTS(SELECT 1 FROM sessions WHERE join_code = ?) AS code_exists;
 -- second round trip.
 --
 -- Rooms (#836): a session is only 'finished' once the room is terminally closed
--- (the runner ends each game in intermission and reaches finished only on
--- abandon / explicit close); s.quiz_id holds the room's LAST quiz at that point.
+-- (the runner ends each game in intermission and reaches finished only on an
+-- explicit End or idle auto-close); s.quiz_id holds the room's LAST quiz then.
 -- This read is deliberately NOT game_seq-scoped (it reads no answers, only the
 -- roster + finish time) and so reports the room's final quiz, not every quiz it
 -- cycled through. Per-game history is out of scope for this admin list.
@@ -320,9 +320,10 @@ WHERE session_id = sqlc.arg('session_id')
 -- name: TouchSessionHostLastSeen :execresult
 -- Refreshes the host's host_last_seen_at, the host-presence heartbeat. The SSE
 -- events handler calls it when the host's connection opens and periodically
--- while it is held, so a host who disconnects mid-game goes stale and the
--- runner's abandon sweep finishes the lingering session (MP-10). Keyed on
--- join_code so the handler need only carry the code it already gates on. The
+-- while it is held, so a host who disconnects lets their presence age out, which
+-- the runner's idle-close sweep reads to close a room gone idle (host away AND
+-- no active players, #836). Keyed on join_code so the handler need only carry
+-- the code it already gates on. The
 -- execresult lets the store tell a missed update (unknown code) from a hit.
 UPDATE sessions
 SET host_last_seen_at = CURRENT_TIMESTAMP

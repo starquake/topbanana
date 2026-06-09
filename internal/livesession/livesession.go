@@ -56,10 +56,10 @@ var (
 	// part of the current question, or the answer window has closed.
 	ErrQuestionNotOpen = errors.New("no question is open for answers")
 
-	// ErrLobbyClosed is returned by [Service.Join] when the session has
-	// already left the lobby: the lobby closes at start and v1 has no
-	// late join. Handlers map it to 409.
-	ErrLobbyClosed = errors.New("session lobby has closed")
+	// ErrLobbyClosed is returned by [Service.Join] when the room is
+	// terminally closed (finished). A live game accepts latecomers in any
+	// phase (#836); only a closed room rejects joins. Handlers map it to 409.
+	ErrLobbyClosed = errors.New("session room is closed")
 
 	// ErrNotInLobby is returned by [Service.ArmStart] / [Service.CancelStart]
 	// when the session has already left the lobby, so the last-call countdown
@@ -577,8 +577,8 @@ func (s *Service) CreateSession(ctx context.Context, quizID *int64, hostPlayerID
 // the roster row; the displayed name comes from the players join on the
 // roster/standings reads, so a rename propagates everywhere. Returns
 // [ErrSessionNotFound] when the code resolves to no session and
-// [ErrLobbyClosed] when the session has already left the lobby (v1 has no
-// late join).
+// [ErrLobbyClosed] only when the room is terminally closed (finished); a
+// latecomer may join a live game at any phase (#836).
 func (s *Service) Join(ctx context.Context, joinCode string, playerID int64) (*Player, error) {
 	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
 	if err != nil {

@@ -412,9 +412,9 @@ func TestRunner_FinalRoundSkipsRoundResults(t *testing.T) {
 // TestRunner_IntermissionKeepsHubVersion pins that a game ending into
 // intermission keeps the room alive (#836): the hub version entry survives, so
 // SSE keeps working and the host can re-arm the next quiz. The #791 leak fix
-// (evicting the entry on a terminal finish) still holds for the abandon path -
-// see TestRunner_AbandonForgetsHubVersion - but a normal game end is no longer
-// terminal.
+// (evicting the entry on a terminal finish) still holds for the idle-close path
+// - see TestRunner_IdleCloseForgetsHubVersion - but a normal game end is no
+// longer terminal.
 func TestRunner_IntermissionKeepsHubVersion(t *testing.T) {
 	t.Parallel()
 

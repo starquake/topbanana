@@ -82,8 +82,9 @@ func HandleSessionCreate(logger *slog.Logger, service *livesession.Service) http
 // or unnamed player claims players.display_name through the shared claim flow
 // before joining; a logged-in named player keeps their account name), so the
 // response echoes that current name straight off the context player. Returns
-// 404 when the join code is unknown and 409 when the session has already left
-// the lobby (v1 has no late join).
+// 404 when the join code is unknown and 409 when the room is closed - a
+// terminally finished room rejects joins, but a latecomer may join a live game
+// at any phase (#836).
 func HandleSessionJoin(logger *slog.Logger, service *livesession.Service) http.Handler {
 	type joinResponse struct {
 		DisplayName string `json:"displayName"`
@@ -708,13 +709,14 @@ func (s *sessionEventStreamer) run(ctx context.Context, events <-chan livesessio
 // beatPresence bumps a presence heartbeat while the SSE connection is held:
 // once immediately, then every livesession.HeartbeatInterval until ctx is
 // cancelled (the client disconnects). touch is the heartbeat the caller chose -
-// the host's host_last_seen_at (which the runner's abandon sweep reads) or a
+// the host's host_last_seen_at (which the runner's idle-close sweep reads) or a
 // roster player's own last_seen_at (which the active-player count reads). Runs
 // in its own goroutine so it does not block the stream loop; touch failures are
 // logged at debug since a transient miss is recovered by the next beat and the
 // presence simply ages out if the beats stop. Stopping on ctx cancel is what
 // lets a dropped player or host go stale so the runner reacts (stops waiting on
-// a dropped player; finishes a host-abandoned session).
+// a dropped player; idle-closes a room once the host is away AND no players
+// remain).
 func beatPresence(ctx context.Context, logger *slog.Logger, touch func(context.Context) error) {
 	beat := func() {
 		if err := touch(ctx); err != nil {
@@ -778,8 +780,8 @@ func HandleSessionEvents(logger *slog.Logger, service *livesession.Service, hub 
 		// The held connection is the presence heartbeat: bump now and on a
 		// ticker while it is open, so a disconnect (ctx cancelled) lets the
 		// presence go stale. The host beats host_last_seen_at (the runner's
-		// abandon sweep reads it); a roster player beats their own
-		// last_seen_at (the runner's active-player count reads it) (MP-10).
+		// idle-close sweep reads it); a roster player beats their own
+		// last_seen_at (the runner's active-player count reads it).
 		touch := func(ctx context.Context) error {
 			return service.TouchLastSeen(ctx, view.Code, player.ID)
 		}
