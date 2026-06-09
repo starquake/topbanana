@@ -257,20 +257,32 @@ function hostLobby(joinCode) {
             return `Starting in ${formatCountdown(this.startRemaining)}`;
         },
 
+        // showsStandings reports whether the current phase renders the
+        // standings bar graph: the between-rounds round_results screen and the
+        // end-of-game screens - intermission (the between-games screen, #836)
+        // and the terminal finished phase.
+        showsStandings() {
+            return this.phase === 'round_results'
+                || this.phase === 'intermission'
+                || this.phase === 'finished';
+        },
+
         // syncStandings reconciles the between-rounds / final bar graph with
         // each state read. The server carries a standings array in the
-        // round_results and finished phases (null elsewhere). On a genuine new
-        // entry it builds the rows starting at each player's pre-round total and
-        // grows the bars to the new total while the numeric labels count up;
-        // from the second screen on the rows also slide from their
-        // previous-screen position into the new ranking (a FLIP swap, #730) so
-        // an overtake reads as rows trading places. A later tick within the same
-        // phase is a no-op, so it doesn't replay on every SSE beat. The finished
-        // phase animates the last round's contribution: its standings carry the
-        // last round's roundScore so the bars grow into the final totals.
+        // round_results phase and on the end-of-game screen - intermission (the
+        // between-games screen, #836) and the terminal finished phase (null
+        // elsewhere). On a genuine new entry it builds the rows starting at each
+        // player's pre-round total and grows the bars to the new total while the
+        // numeric labels count up; from the second screen on the rows also slide
+        // from their previous-screen position into the new ranking (a FLIP swap,
+        // #730) so an overtake reads as rows trading places. A later tick within
+        // the same phase is a no-op, so it doesn't replay on every SSE beat. The
+        // end-of-game screen animates the last round's contribution: its
+        // standings carry the last round's roundScore so the bars grow into the
+        // final totals.
         syncStandings(state) {
             const standings = Array.isArray(state.standings) ? state.standings : null;
-            if ((this.phase !== 'round_results' && this.phase !== 'finished') || !standings) {
+            if (!this.showsStandings() || !standings) {
                 this.standingsBars = [];
                 this.maxStandingsTotal = 1;
                 this.lastStandingsKey = null;
@@ -287,7 +299,7 @@ function hostLobby(joinCode) {
             }
             this.lastStandingsKey = key;
 
-            const animate = this.phase === 'round_results' || this.phase === 'finished';
+            const animate = this.showsStandings();
             const { rows, maxTotal } = buildStandingsRows(standings, { animate });
             this.maxStandingsTotal = maxTotal;
             const prevOrder = this.lastStandingsOrder;

@@ -121,6 +121,57 @@ func TestHostLobby_RendersCodeQuizAndQR(t *testing.T) {
 	}
 }
 
+// TestHostLobby_RendersNextQuizPicker pins the intermission "Start next quiz"
+// picker (#836): the host lobby page server-renders the next-quiz form (action
+// /host/{code}/next-quiz) and lists the host's live quizzes as options. A solo
+// quiz is excluded so the picker only offers hostable quizzes. The picker is
+// only shown at intermission via x-show, but the markup is rendered at GET
+// regardless of phase, so the page body carries it.
+func TestHostLobby_RendersNextQuizPicker(t *testing.T) {
+	t.Parallel()
+
+	ctx, setup := setupIntegration(t)
+	baseURL := setup.BaseURL
+	hosted := seedLiveQuiz(ctx, t, setup.Stores.Quizzes, "host-picker-hosted")
+	otherLive := seedLiveQuiz(ctx, t, setup.Stores.Quizzes, "host-picker-other")
+	soloQz := seedSoloQuiz(ctx, t, setup.Stores.Quizzes, "host-picker-solo")
+
+	host := &http.Client{
+		Jar:           mustJar(t),
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	registerVerifyAndSignIn(ctx, t, host, baseURL, setup.DBURI, "host-picker-host", "host-picker-pass-123")
+	code := createSession(ctx, t, host, baseURL, hosted.ID)
+
+	status, body := getHostLobbyHTML(ctx, t, host, baseURL, code)
+	if got, want := status, http.StatusOK; got != want {
+		t.Fatalf("host lobby status = %d, want %d", got, want)
+	}
+	// The form action is an Alpine-bound :action (built client-side from the
+	// join code), matching the start form, so the literal path is not in the
+	// server-rendered HTML. Pin the picker by its form marker and the quiz_id
+	// select instead, which ARE server-rendered.
+	if !strings.Contains(body, "data-next-quiz-form") {
+		t.Error("host lobby missing the next-quiz picker form")
+	}
+	if !strings.Contains(body, `name="quiz_id"`) {
+		t.Error("host lobby next-quiz picker missing the quiz_id select")
+	}
+	// Both live quizzes (the one being hosted and the other) are selectable.
+	for _, qz := range []*quiz.Quiz{hosted, otherLive} {
+		if want := `value="` + strconv.FormatInt(qz.ID, 10) + `"`; !strings.Contains(body, want) {
+			t.Errorf("next-quiz picker missing live quiz option %q (%s)", want, qz.Title)
+		}
+		if !strings.Contains(body, qz.Title) {
+			t.Errorf("next-quiz picker missing live quiz title %q", qz.Title)
+		}
+	}
+	// The solo quiz is not hostable, so it must not appear as a picker option.
+	if got := `value="` + strconv.FormatInt(soloQz.ID, 10) + `"`; strings.Contains(body, got) {
+		t.Errorf("next-quiz picker should not offer solo quiz option %q", got)
+	}
+}
+
 // TestHostLobby_StateReflectsLiveJoinAndReady is the integration backbone for
 // the live TV view: the page refreshes off GET /api/sessions/{code}/state, so
 // a player joining and readying via REST (MP-4's join UI does not exist in

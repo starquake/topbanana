@@ -221,20 +221,24 @@
             </template>
         </div>
 
-        {{/* ----- Round results / finished: the standings bar graph (MP-9 /
-             #686). Each player is a horizontal bar whose width maps to their
-             cumulative total against the leader's. Entering round_results the
-             bars grow from each player's pre-round total to their new total
-             while the numeric labels count up, then rest in rank order
-             (best-first). The finished phase carries roundScore=0, so the bars
-             render at their final width straight away (no grow). The animation
-             is driven in host-lobby.js via anime.js with a reduced-motion /
-             missing-global fallback that snaps to the final state. ----- */}}
-        <div x-show="phase === 'round_results' || phase === 'finished'"
+        {{/* ----- Round results / intermission / finished: the standings bar
+             graph (MP-9 / #686). Each player is a horizontal bar whose width
+             maps to their cumulative total against the leader's. Entering
+             round_results the bars grow from each player's pre-round total to
+             their new total while the numeric labels count up, then rest in
+             rank order (best-first). The end-of-game screens (intermission, the
+             between-games screen #836, and the terminal finished phase) carry
+             roundScore for the last round so the bars animate that final
+             contribution. The animation is driven in host-lobby.js via anime.js
+             with a reduced-motion / missing-global fallback that snaps to the
+             final state. At intermission the "Start next quiz" picker appears
+             below the standings so the host can re-arm the room onto the next
+             live quiz. ----- */}}
+        <div x-show="phase === 'round_results' || phase === 'intermission' || phase === 'finished'"
              class="flex-1 min-h-0 flex flex-col gap-[clamp(1rem,3vh,2rem)] px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1.5rem,4vh,3rem)]"
              data-phase-results>
             <p class="m-0 shrink-0 font-display font-extrabold text-[clamp(1.75rem,4.5vw,3.25rem)] leading-tight text-center"
-               x-text="phase === 'finished' ? 'Final scores' : 'Scores so far'"></p>
+               x-text="phase === 'round_results' ? 'Scores so far' : 'Final scores'"></p>
 
             <ul class="m-0 list-none p-0 flex flex-col gap-3 max-w-[60rem] w-full mx-auto overflow-y-auto min-h-0"
                 role="list"
@@ -264,6 +268,48 @@
                     </li>
                 </template>
             </ul>
+
+            {{/* Intermission picker (#836): a plain server-rendered POST form
+                 that re-arms the room onto the chosen live quiz. The native
+                 submit + the 303 redirect reloads /host/{code}, which the
+                 runner drives into the next game - no JS needed for the submit.
+                 Shown only at intermission, when the host is between games. The
+                 live quizzes are server-rendered into the select at GET (static
+                 for the page's lifetime). */}}
+            <form x-show="phase === 'intermission'"
+                  method="post"
+                  :action="'/host/' + encodeURIComponent(joinCode) + '/next-quiz'"
+                  class="shrink-0 flex flex-wrap items-end justify-center gap-4 max-w-[60rem] w-full mx-auto"
+                  data-next-quiz-form>
+                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                <div class="flex flex-col gap-2 min-w-[16rem]">
+                    <label for="next-quiz-select"
+                           class="m-0 text-text-dim text-[clamp(0.8rem,1.5vw,1rem)] font-semibold uppercase tracking-[0.14em]">
+                        Start next quiz
+                    </label>
+                    {{if .LiveQuizzes}}
+                        <select id="next-quiz-select" name="quiz_id"
+                                class="min-h-[52px] px-4 rounded-lg bg-surface text-text border border-border-soft text-[clamp(0.95rem,1.7vw,1.2rem)] focus-visible:outline-none focus-visible:shadow-focus"
+                                data-next-quiz-select>
+                            {{range .LiveQuizzes}}
+                                <option value="{{.ID}}">{{.Title}}</option>
+                            {{end}}
+                        </select>
+                    {{else}}
+                        {{/* No live quizzes to offer: keep the label's target valid
+                             with a disabled read-only input rather than an empty
+                             select, and make the absence explicit. */}}
+                        <input id="next-quiz-select" type="text" readonly
+                               value="No live quizzes available"
+                               class="min-h-[52px] px-4 rounded-lg bg-surface text-text-dim border border-border-soft text-[clamp(0.95rem,1.7vw,1.2rem)]"
+                               data-next-quiz-empty>
+                    {{end}}
+                </div>
+                <button type="submit"
+                        class="inline-flex items-center justify-center gap-2 min-h-[52px] px-8 rounded-lg bg-accent text-bg font-display font-extrabold text-[clamp(0.9rem,1.7vw,1.15rem)] uppercase tracking-[0.12em] border-0 transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                        {{if not .LiveQuizzes}}disabled{{end}}
+                        data-next-quiz-submit>Start next quiz</button>
+            </form>
         </div>
 
         {{/* Footer: connection state + host start controls (lobby only). The

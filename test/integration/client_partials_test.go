@@ -9,12 +9,12 @@ import (
 
 // TestStandingsBarsPartial_SharedAcrossLiveBlocks pins #754: the standings
 // bar-graph rows are a single {{define "standings-bars"}} partial
-// (partials/standings_bars.html) reused by both the round_results and finished
-// blocks of the live player shell (join.html). Serving the shell exercises the
-// render path that parses the partial; a missing, renamed, or non-embedded
-// partial fails the parse and returns 500. The partial also depends on the
-// static/* embed recursing into the partials subdirectory, which this guards in
-// production builds.
+// (partials/standings_bars.html) reused by the round_results, intermission
+// (#836), and finished blocks of the live player shell (join.html). Serving the
+// shell exercises the render path that parses the partial; a missing, renamed,
+// or non-embedded partial fails the parse and returns 500. The partial also
+// depends on the static/* embed recursing into the partials subdirectory, which
+// this guards in production builds.
 func TestStandingsBarsPartial_SharedAcrossLiveBlocks(t *testing.T) {
 	t.Parallel()
 
@@ -36,10 +36,11 @@ func TestStandingsBarsPartial_SharedAcrossLiveBlocks(t *testing.T) {
 			t.Errorf("/join body missing %q - the shared standings-bars partial did not expand (#754)", want)
 		}
 	}
-	// The partial is invoked from both the round_results and finished blocks, so
-	// its list marker appears twice in a single shell render.
-	if got, want := strings.Count(body, `data-testid="standings-bars"`), 2; got != want {
-		t.Errorf("/join standings-bars count = %d, want %d (round_results + finished)", got, want)
+	// The partial is invoked from the round_results, intermission (#836), and
+	// finished blocks, so its list marker appears three times in a single shell
+	// render.
+	if got, want := strings.Count(body, `data-testid="standings-bars"`), 3; got != want {
+		t.Errorf("/join standings-bars count = %d, want %d (round_results + intermission + finished)", got, want)
 	}
 }
 

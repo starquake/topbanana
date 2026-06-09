@@ -910,7 +910,7 @@ func addHostRoutes(
 	}
 	csrfMW := csrfMgr.Middleware
 
-	handlers := host.NewHandlers(logger, csrfMgr, sessionService)
+	handlers := host.NewHandlers(logger, csrfMgr, sessionService, stores.Quizzes)
 
 	mux.Handle("POST /host", csrfMW(requireGameHost(http.HandlerFunc(handlers.Create))))
 	mux.Handle("GET /host/{code}", requireGameHost(http.HandlerFunc(handlers.Lobby)))
