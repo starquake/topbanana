@@ -266,10 +266,14 @@ test('the standings bar graph shows final order and totals on the TV and player 
     expect(Number(rows[1].total)).toBe(0);
   }).toPass({ timeout: STANDINGS_SETTLE_TIMEOUT });
 
-  // The player's own row is highlighted (aria-current).
+  // The player's own row is highlighted (aria-current). This settles
+  // separately from the totals above (the client tags its own row once the
+  // SSE state names it), so it gets the same generous settle timeout as the
+  // sibling assertions rather than the implicit 5s default — under CI load the
+  // highlight can lag past 5s, which flaked this assertion (#845).
   await expect(
     page.locator('[data-testid="round-results"] [data-standings-row]').first(),
-  ).toHaveAttribute('aria-current', 'true');
+  ).toHaveAttribute('aria-current', 'true', { timeout: STANDINGS_SETTLE_TIMEOUT });
 
   // Round 2: Quincy answers '6' (correct), Robin answers '5' (wrong).
   await answerOnPage(page, '6');
