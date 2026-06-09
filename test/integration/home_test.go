@@ -134,6 +134,19 @@ func TestHome_Integration(t *testing.T) {
 		}
 	})
 
+	t.Run("GET / renders a Join a live game link to the join screen", func(t *testing.T) {
+		t.Parallel()
+		body := getBody(ctx, t, baseURL+"/")
+
+		// The installed PWA opens at "/" with no address bar, so the home page
+		// must offer a path to the live-game join screen (#826).
+		for _, want := range []string{`href="/join"`, "Join a live game", `data-testid="home-join-live"`} {
+			if !strings.Contains(body, want) {
+				t.Errorf("home body should contain %q (PWA needs a path to /join)", want)
+			}
+		}
+	})
+
 	t.Run("GET / renders a share trigger per popular quiz", func(t *testing.T) {
 		t.Parallel()
 		body := getBody(ctx, t, baseURL+"/")
