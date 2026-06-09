@@ -2,7 +2,7 @@ import { join } from 'node:path';
 
 import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { seedQuiz, QUIZ_QUESTIONS, claimAndJoin, execSqlite } from './helpers';
+import { seedQuiz, QUIZ_QUESTIONS, claimAndJoin, execSqlite, endHostedSession } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' (the importer lands quizzes
 // on 'solo', and only live quizzes are hostable, MP-0 / #677) and returns its
@@ -120,6 +120,7 @@ test.describe('reconnect and resume', () => {
     await expect(page.getByTestId('reveal-view')).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId('reveal-verdict')).toHaveText('Correct!');
 
+    await endHostedSession(host, joinCode);
     await otherContext.close();
     await hostContext.close();
   });

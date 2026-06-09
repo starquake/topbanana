@@ -2,7 +2,7 @@ import { join } from 'node:path';
 
 import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { seedQuiz, importQuiz, QUIZ_QUESTIONS, claimAndJoin, execSqlite } from './helpers';
+import { seedQuiz, importQuiz, QUIZ_QUESTIONS, claimAndJoin, execSqlite, endHostedSession } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' (the importer lands quizzes
 // on 'solo', and only live quizzes are hostable, MP-0 / #677) and returns its
@@ -157,6 +157,7 @@ test.describe('player synchronized play', () => {
     // Exactly one option is marked correct for this single-correct question.
     await expect(revealButtons.and(page.locator('[data-correct="true"]'))).toHaveCount(1);
 
+    await endHostedSession(host, joinCode);
     await otherContext.close();
     await hostContext.close();
   });
@@ -243,6 +244,7 @@ test.describe('player synchronized play', () => {
     await expect(page.getByTestId('round-intro-eyebrow')).toHaveText('Round 1 of 2');
     await expect(page.getByTestId('round-intro')).not.toContainText('Next round');
 
+    await endHostedSession(host, joinCode);
     await otherContext.close();
     await hostContext.close();
   });

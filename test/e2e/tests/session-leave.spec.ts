@@ -11,6 +11,7 @@ import {
   setQuizMode,
   claimAndJoin,
   execSqlite,
+  endHostedSession,
 } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' and returns its id, mirroring
@@ -89,6 +90,9 @@ test('a player leaving drops out of the host roster live', async ({
     await expect(roster).toHaveCount(1);
     await expect(roster.first()).toContainText(bob);
   } finally {
+    // page is the host here (no separate host context), so end the room through
+    // it so the dashboard returns hostable for the next test (#850).
+    await endHostedSession(page, code);
     await aliceContext.close();
     await bobContext.close();
   }
@@ -146,5 +150,6 @@ test('the leave beacon fires once on pagehide', async ({ page, baseURL }) => {
   const leaveBeacons = beacons.filter((url) => url.includes(`/api/sessions/${joinCode}/leave`));
   expect(leaveBeacons).toHaveLength(1);
 
+  await endHostedSession(host, joinCode);
   await hostContext.close();
 });

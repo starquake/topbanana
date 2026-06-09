@@ -4,7 +4,7 @@ import type { APIRequestContext } from '@playwright/test';
 
 import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { importQuiz, claimAndJoin, csrfTokenPattern, execSqlite } from './helpers';
+import { importQuiz, claimAndJoin, csrfTokenPattern, execSqlite, endHostedSession } from './helpers';
 
 // #836 persistent live rooms: a host runs a live quiz to its between-games
 // intermission, the player sees the intermission/standings view while staying
@@ -79,6 +79,7 @@ test.describe('persistent live rooms', () => {
 
     const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath(), baseURL });
     const host = await hostContext.newPage();
+    let joinCode = '';
 
     try {
       // Two single-question live quizzes: game 1 the room opens on, game 2 the
@@ -92,7 +93,7 @@ test.describe('persistent live rooms', () => {
       // Open the room on game 1.
       const createResp = await host.request.post('/api/sessions', { data: { quizId: quiz1Id } });
       expect(createResp.status(), `create session: ${createResp.status()} ${await createResp.text()}`).toBe(201);
-      const { joinCode } = await createResp.json() as { joinCode: string };
+      ({ joinCode } = await createResp.json() as { joinCode: string });
       expect(joinCode).toMatch(/^[A-Z0-9]{6}$/);
 
       // The page-driven player joins via the deep link and lands in the lobby.
@@ -141,6 +142,7 @@ test.describe('persistent live rooms', () => {
       const game2Correct = page.getByTestId('question-options').getByRole('button', { name: 'four' });
       await expect(game2Correct).toBeEnabled();
     } finally {
+      if (joinCode) await endHostedSession(host, joinCode);
       await hostContext.close();
     }
   });
@@ -155,6 +157,7 @@ test.describe('persistent live rooms', () => {
 
     const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath(), baseURL });
     const host = await hostContext.newPage();
+    let joinCode = '';
 
     try {
       await importQuiz(host, singleQuestionDoc(quizTitle, 'Latecomer: what is 3+3?', 'six'), 'live');
@@ -162,7 +165,7 @@ test.describe('persistent live rooms', () => {
 
       const createResp = await host.request.post('/api/sessions', { data: { quizId } });
       expect(createResp.status(), `create session: ${createResp.status()} ${await createResp.text()}`).toBe(201);
-      const { joinCode } = await createResp.json() as { joinCode: string };
+      ({ joinCode } = await createResp.json() as { joinCode: string });
 
       // An early player joins via the API and readies so the game can start.
       // They deliberately do NOT answer, so the question phase stays open long
@@ -195,6 +198,7 @@ test.describe('persistent live rooms', () => {
 
       await earlyCtx.close();
     } finally {
+      if (joinCode) await endHostedSession(host, joinCode);
       await hostContext.close();
     }
   });

@@ -53,9 +53,9 @@ test('host lobby shows the room code, QR, and a joined player readying up live',
   await expect(page.getByText(code, { exact: true })).toBeVisible();
   await expect(page.getByText('Waiting for players to join...')).toBeVisible();
 
-  // The header wordmark links home (#750).
+  // The header wordmark links to the admin console (#850; was home pre-#850).
   const wordmark = page.getByRole('link', { name: 'Top Banana!' });
-  await expect(wordmark).toHaveAttribute('href', '/');
+  await expect(wordmark).toHaveAttribute('href', '/admin');
 
   // The typed-code path is self-sufficient: the "Or enter code" block names
   // the bare enter-code URL (host + /join, no scheme, no code) so a player who

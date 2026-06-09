@@ -2,7 +2,7 @@ import { join } from 'node:path';
 
 import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { seedQuiz, claimAndJoin, QUIZ_QUESTIONS, execSqlite } from './helpers';
+import { seedQuiz, claimAndJoin, QUIZ_QUESTIONS, execSqlite, endHostedSession } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' (the importer lands quizzes
 // on 'solo', and only live quizzes are hostable, MP-0 / #677) and returns its
@@ -113,6 +113,7 @@ test.describe('lobby visibility reconnect', () => {
     await expect(roster.getByText(ava)).toBeVisible();
     await expect(roster.getByText(ben)).toBeVisible();
 
+    await endHostedSession(host, joinCode);
     await cleoContext.close();
     await benContext.close();
     await hostContext.close();
@@ -210,6 +211,7 @@ test.describe('lobby visibility reconnect', () => {
     await expect(page.getByTestId('question-text')).toHaveText(QUIZ_QUESTIONS[0].text);
     await expect(page.getByTestId('lobby-view')).toHaveCount(0);
 
+    await endHostedSession(host, joinCode);
     await benContext.close();
     await hostContext.close();
   });

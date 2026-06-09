@@ -11,6 +11,7 @@ import {
   markAdmin,
   login,
   setQuizMode,
+  endHostedSession,
 } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' and returns its id, mirroring
@@ -84,6 +85,7 @@ test.describe('live client connection trouble', () => {
     await expect(page.getByTestId('connection-trouble')).toHaveCount(0, { timeout: 10_000 });
     await expect(page.getByTestId('lobby-view')).toBeVisible();
 
+    await endHostedSession(host, joinCode);
     await hostContext.close();
   });
 
@@ -144,6 +146,9 @@ test.describe('live client connection trouble', () => {
     });
     await expect(page.locator('[data-connection-trouble]')).toHaveCount(0, { timeout: 10_000 });
 
+    // page is the host here (no separate host context), so end the room through
+    // it so the dashboard returns hostable for the next test (#850).
+    await endHostedSession(page, code);
     await playerContext.close();
   });
 });

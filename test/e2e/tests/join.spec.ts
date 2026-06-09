@@ -2,7 +2,7 @@ import { join } from 'node:path';
 
 import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { seedQuiz, execSqlite, claimAndJoin } from './helpers';
+import { seedQuiz, execSqlite, claimAndJoin, endHostedSession } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' (the importer always lands
 // quizzes on 'solo', and only live quizzes are hostable, MP-0 / #677) and
@@ -100,6 +100,7 @@ test.describe('player join + lobby', () => {
     await expect(page.getByTestId('start-countdown')).toContainText('Starting in');
     await expect(page.getByTestId('waiting-hint')).toHaveCount(0);
 
+    await endHostedSession(host, joinCode);
     await hostContext.close();
   });
 
@@ -125,6 +126,7 @@ test.describe('player join + lobby', () => {
     await page.getByTestId('join-name-submit').click();
     await expect(page.getByTestId('lobby-roster').getByText(bob)).toBeVisible();
 
+    await endHostedSession(host, joinCode);
     await hostContext.close();
   });
 
@@ -178,6 +180,7 @@ test.describe('player join + lobby', () => {
     await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId('lobby-closed')).toHaveCount(0);
 
+    await endHostedSession(host, joinCode);
     await earlyContext.close();
     await hostContext.close();
   });

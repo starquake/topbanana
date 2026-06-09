@@ -1,36 +1,32 @@
 {{define "content"}}
-    {{/* The whole TV surface is one Alpine island. It hydrates from the
+    {{/* The whole big screen is one Alpine island. It hydrates from the
          server-rendered code/quiz (no flash), then host-lobby.js subscribes
          to the session SSE channel and re-GETs /state on every tick to keep
          the phase, roster, question, and answered order live. The server
-         drives every phase transition; the TV only re-renders whatever phase
-         the latest state read reports (MP-3 / #680, MP-8 / #685). */}}
-    {{/* The TV is a fixed landscape screen with no scroll, so the surface is
-         pinned to the viewport height and clips rather than grows. Each phase
-         body is a flex child with min-h-0 so its lists (roster, options,
-         standings) shrink and scroll inside the frame instead of pushing the
-         header/footer off-screen (#734). */}}
+         drives every phase transition; the big screen only re-renders whatever
+         phase the latest state read reports (MP-3 / #680, MP-8 / #685). */}}
+    {{/* The big screen is a fixed landscape display with no scroll, so the
+         surface is pinned to the viewport height and clips rather than grows.
+         Each phase body is a flex child with min-h-0 so its lists (roster,
+         options, standings) shrink and scroll inside the frame instead of
+         pushing the header/footer off-screen (#734). */}}
     <main x-data="hostLobby({{.JoinCode | printf "%q"}}, {{.HasQuiz}})"
           class="h-dvh overflow-hidden flex flex-col">
-        {{/* The TV surface deliberately does NOT carry the shared top bar
+        {{/* The big screen deliberately does NOT carry the shared top bar
              or an account cluster (#844): it is a projected, shared screen,
              not a personal session-control surface. The only navigation is
-             the home logo and a "Manage" cross-link back to the admin
-             console; session lifecycle stays the host's "End session"
-             control in the footer below. */}}
+             the home logo, which returns to the admin console; session
+             lifecycle stays the host's "End session" control in the footer
+             below. */}}
         <header class="shrink-0 flex items-center justify-between gap-4 px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1rem,2.5vh,2rem)] border-b border-border-soft">
-            <a href="/" aria-label="Top Banana!"
+            <a href="/admin" aria-label="Top Banana!"
                class="flex items-center gap-3 text-text no-underline hover:text-text">
                 <img src="/assets/banana.svg" alt="" class="w-9 h-9" aria-hidden="true">
                 <span class="font-display font-extrabold uppercase tracking-[0.18em] text-[clamp(1rem,2vw,1.4rem)]" aria-hidden="true">Top Banana!</span>
             </a>
-            <div class="flex items-center gap-[clamp(1rem,2.5vw,2rem)] min-w-0">
-                <p class="m-0 text-text-dim text-[clamp(0.85rem,1.6vw,1.1rem)] font-semibold uppercase tracking-[0.14em] truncate max-w-[40vw]">
-                    {{.QuizTitle}}
-                </p>
-                <a href="/admin"
-                   class="shrink-0 text-text-dim hover:text-text underline-offset-2 hover:underline text-[clamp(0.8rem,1.5vw,1rem)]">Manage</a>
-            </div>
+            <p class="m-0 text-text-dim text-[clamp(0.85rem,1.6vw,1.1rem)] font-semibold uppercase tracking-[0.14em] truncate max-w-[40vw]">
+                {{.QuizTitle}}
+            </p>
         </header>
 
         {{/* ----- Lobby phase: scan-to-join + live roster + start. ----- */}}
@@ -47,8 +43,9 @@
                     {{.QRSVG}}
                 </div>
                 {{/* Keep the join URL on one line so it reads cleanly on the
-                     TV: nowrap plus a modest font clamp sizes it down to fit
-                     the card width rather than wrapping mid-string (#734). */}}
+                     big screen: nowrap plus a modest font clamp sizes it down
+                     to fit the card width rather than wrapping mid-string
+                     (#734). */}}
                 <p class="m-0 text-text font-mono text-[clamp(0.7rem,1.2vw,0.95rem)] whitespace-nowrap text-center">
                     {{.JoinURL}}
                 </p>
@@ -299,9 +296,9 @@
         <footer class="shrink-0 flex flex-wrap items-center justify-between gap-4 px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1rem,2.5vh,2rem)] border-t border-border-soft">
             {{/* Connection-trouble note (#795): after several consecutive
                  GET /state failures the host sees why the screen looks frozen,
-                 while the TV keeps retrying off every SSE tick. Cleared on the
-                 next good read. Distinct from the SSE "Live / Reconnecting"
-                 dot, which only tracks the event channel. */}}
+                 while the big screen keeps retrying off every SSE tick. Cleared
+                 on the next good read. Distinct from the SSE "Live /
+                 Reconnecting" dot, which only tracks the event channel. */}}
             <p class="m-0 flex items-center gap-2 text-text-dim text-[clamp(0.8rem,1.5vw,1rem)]">
                 <template x-if="connectionTrouble">
                     <span class="text-warning" role="status" data-connection-trouble>Connection problem, retrying...</span>

@@ -1,4 +1,4 @@
-// Shared per-question countdown for the player join surface and the host TV.
+// Shared per-question countdown for the player join surface and the host big screen.
 // Both run the same two-phase bar off the server's view of the answer window:
 // a read beat that fills 0 -> 100 over [serverNow, startedAt] (options hidden),
 // then a drain 100 -> 0 over [startedAt, expiresAt]. Both phases run on the

@@ -1,6 +1,6 @@
 import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { seedQuiz, setQuizMode } from './helpers';
+import { seedQuiz, setQuizMode, endHostedSession } from './helpers';
 import type { Page } from '@playwright/test';
 
 // host-armed last-call countdown (#735): a hosted session never auto-starts.
@@ -31,7 +31,14 @@ async function openHostLobby(
   await host.goto(`/host/${joinCode}`);
   await expect(host.getByText(joinCode, { exact: true })).toBeVisible();
 
-  return { host, joinCode, close: () => hostContext.close() };
+  return {
+    host,
+    joinCode,
+    close: async () => {
+      await endHostedSession(host, joinCode);
+      await hostContext.close();
+    },
+  };
 }
 
 // quizIdFor resolves a seeded quiz's id via the admin quiz page URL so the

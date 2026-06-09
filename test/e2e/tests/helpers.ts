@@ -350,6 +350,39 @@ export async function answerRemainingQuestions(page: Page, fromIndex = 0): Promi
   await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
 }
 
+// endHostedSession ends a live session through its lobby End-session control so
+// the host's dashboard returns to a hostable state for the next test (a host
+// runs one session at a time, #850). Idempotent: a no-op if the room is already
+// finished. The End control lives under x-show and is hidden once the session
+// is finished, so this waits for the lobby's first state read to settle the
+// x-show before deciding, then only drives the control when it is visible.
+export async function endHostedSession(host: Page, joinCode: string): Promise<void> {
+  await host.goto(`/host/${joinCode}`);
+  const endBtn = host.locator('[data-end-session]');
+  if (await endBtn.count() === 0) return;
+  // Let the lobby's first GET /state land so the Alpine x-show settles to the
+  // real phase: the End control is briefly visible on the initial lobby-phase
+  // paint even for a finished room, so reading visibility before this settles
+  // would misfire. waitForResponse is bounded so a never-firing read still
+  // falls through to the visibility gate below.
+  await host
+    .waitForResponse(
+      (r) => new URL(r.url()).pathname === `/api/sessions/${joinCode}/state`,
+      { timeout: 10_000 },
+    )
+    .catch(() => undefined);
+  if (!(await endBtn.isVisible())) return;
+  host.once('dialog', (dialog) => dialog.accept());
+  await Promise.all([
+    host.waitForResponse(
+      (r) => r.request().method() === 'POST'
+        && new URL(r.url()).pathname === `/host/${joinCode}/end`,
+      { timeout: 10_000 },
+    ),
+    endBtn.click(),
+  ]);
+}
+
 // claimAndJoin drives the #716 anonymous-player join contract over the REST
 // API: it claims displayName on the request context's players row (the shared
 // claim endpoint the live join routes an unnamed player through), then posts

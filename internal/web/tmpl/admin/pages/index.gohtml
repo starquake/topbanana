@@ -11,24 +11,27 @@
             </p>
         </div>
 
-        {{/* Host a session (#836): open a live room before picking a quiz. The
-             form posts to /host with no quiz_id, so the room opens empty (the
-             "no game running yet" staging state) and the host picks the first
-             quiz from the room's lobby. The per-quiz "Play live" still
-             preselects a quiz; this is the start-from-nothing entry. When the
-             host already has an open room, a "Resume hosting" link returns them
-             to it instead of opening a second one. */}}
+        {{/* Host control (#836, #850): a host runs one session at a time, so
+             this is a single adaptive call to action. With no active room it is
+             a "Host a session" POST to /host with no quiz_id, opening an empty
+             room (the "no game running yet" staging state) for the host to pick
+             the first quiz from the room's lobby. When the host already has an
+             open room, the same slot becomes a prominent link back to it
+             instead of an entry that would open a second one. The per-quiz
+             "Play live" still preselects a quiz; this is the start-from-nothing
+             entry. */}}
         <div class="flex flex-col items-stretch gap-2 md:items-end" data-host-session>
-            <form method="post" action="/host">
-                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                <button type="submit"
-                        class="inline-flex items-center justify-center gap-2 min-h-[44px] px-6 rounded-lg bg-accent text-bg font-display font-semibold uppercase tracking-tight text-sm border-0 transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus cursor-pointer"
-                        data-host-session-submit>Host a session</button>
-            </form>
             {{if .ResumeCode}}
                 <a href="/host/{{.ResumeCode}}"
-                   class="text-sm text-text-dim hover:text-accent transition-colors text-center md:text-right"
-                   data-resume-hosting>Resume hosting &mdash; room <span class="font-mono text-text">{{.ResumeCode}}</span></a>
+                   class="inline-flex items-center justify-center gap-2 min-h-[44px] px-6 rounded-lg bg-accent text-bg font-display font-semibold uppercase tracking-tight text-sm no-underline transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus cursor-pointer"
+                   data-resume-hosting>Resume session &mdash; room <span class="font-mono">{{.ResumeCode}}</span></a>
+            {{else}}
+                <form method="post" action="/host">
+                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                    <button type="submit"
+                            class="inline-flex items-center justify-center gap-2 min-h-[44px] px-6 rounded-lg bg-accent text-bg font-display font-semibold uppercase tracking-tight text-sm border-0 transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus cursor-pointer"
+                            data-host-session-submit>Host a session</button>
+                </form>
             {{end}}
         </div>
     </header>

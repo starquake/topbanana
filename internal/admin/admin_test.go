@@ -2466,15 +2466,18 @@ func TestHandleIndex(t *testing.T) {
 			t.Errorf("body missing %q", want)
 		}
 	}
-	// With no active room the resume link is absent.
-	if got := body; strings.Contains(got, "Resume hosting") {
-		t.Errorf("body shows the resume link with no active room: %q", got)
+	// The host control is a single adaptive slot (#850): with no active room
+	// the dashboard shows the "Host a session" submit and NOT the resume link.
+	if got := body; strings.Contains(got, "data-resume-hosting") {
+		t.Errorf("body shows the resume control with no active room: %q", got)
 	}
 }
 
-// TestHandleIndex_ResumeLink pins the "Resume hosting" link (#836): when the
-// signed-in host has an active room, the dashboard links back to it; the link
-// carries the join code so the host can return to a room they browsed away from.
+// TestHandleIndex_ResumeLink pins the resume control (#836, #850): when the
+// signed-in host has an active room, the dashboard collapses the single host
+// slot to a "Resume session" link back to it; the link carries the join code so
+// the host can return to a room they browsed away from, and the "Host a session"
+// submit is replaced rather than shown alongside it.
 func TestHandleIndex_ResumeLink(t *testing.T) {
 	t.Parallel()
 
@@ -2493,13 +2496,19 @@ func TestHandleIndex_ResumeLink(t *testing.T) {
 	}
 	body := rr.Body.String()
 	for _, want := range []string{
-		"Resume hosting",
+		"Resume session",
 		`href="/host/ABC123"`,
 		"ABC123",
+		"data-resume-hosting",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)
 		}
+	}
+	// The two controls are mutually exclusive: with an active room the
+	// "Host a session" submit is gone.
+	if got := body; strings.Contains(got, "data-host-session-submit") {
+		t.Errorf("body shows the Host a session submit alongside the resume link: %q", got)
 	}
 }
 

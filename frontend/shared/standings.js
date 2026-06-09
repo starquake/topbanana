@@ -1,5 +1,5 @@
 // Shared between-rounds standings bar graph for the player join surface and
-// the host TV. Both build the same rows from the server standings (held in
+// the host big screen. Both build the same rows from the server standings (held in
 // rank order, best-first) and grow each bar from its pre-round total to its new
 // total while the numeric label counts up. From the second screen on, the rows
 // first render in the previous screen's order and then slide into the new
