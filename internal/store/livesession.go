@@ -274,10 +274,46 @@ func (s *LiveSessionStore) EnterRoundResults(ctx context.Context, sessionID stri
 	return nil
 }
 
-// Finish ends the session.
+// Finish ends the session terminally.
 func (s *LiveSessionStore) Finish(ctx context.Context, sessionID string) error {
 	if err := s.q.SetSessionFinished(ctx, sessionID); err != nil {
 		return fmt.Errorf("failed to finish session: %w", err)
+	}
+
+	return nil
+}
+
+// Intermission ends a game without closing the room: marks it intermission and
+// clears the per-question runner columns, leaving the room alive (#836).
+func (s *LiveSessionStore) Intermission(ctx context.Context, sessionID string) error {
+	if err := s.q.SetSessionIntermission(ctx, sessionID); err != nil {
+		return fmt.Errorf("failed to move session to intermission: %w", err)
+	}
+
+	return nil
+}
+
+// RearmSession starts the next game in a room: points it at the new quiz, bumps
+// game_seq, resets to the lobby, and clears every roster player's ready flag, in
+// one transaction so the re-arm and the ready reset cannot be partially applied.
+// Returns [livesession.ErrNotIntermission] when the room is not in the
+// between-games intermission phase (the RearmSession UPDATE matches no row).
+func (s *LiveSessionStore) RearmSession(ctx context.Context, sessionID string, quizID int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin rearm session transaction: %w", err)
+	}
+
+	if err = s.rearmSessionTx(ctx, tx, sessionID, quizID); err != nil {
+		if rbErr := tx.Rollback(); rbErr != nil {
+			return fmt.Errorf("rearm session failed: %w (rollback error: %w)", err, rbErr)
+		}
+
+		return err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit rearm session transaction: %w", err)
 	}
 
 	return nil
@@ -565,6 +601,24 @@ func (s *LiveSessionStore) recordAnswerTx(
 	return nil
 }
 
+func (s *LiveSessionStore) rearmSessionTx(ctx context.Context, tx *sql.Tx, sessionID string, quizID int64) error {
+	q := s.q.WithTx(tx)
+
+	res, err := q.RearmSession(ctx, db.RearmSessionParams{QuizID: quizID, ID: sessionID})
+	if err != nil {
+		return fmt.Errorf("failed to rearm session: %w", err)
+	}
+	if database.MustRowsAffected(res) == 0 {
+		return livesession.ErrNotIntermission
+	}
+
+	if err = q.ResetSessionPlayersReady(ctx, sessionID); err != nil {
+		return fmt.Errorf("failed to reset session players ready: %w", err)
+	}
+
+	return nil
+}
+
 // sessionFromRow maps a generated sessions row onto the domain type
 // (without the roster, which the caller fans out separately).
 func sessionFromRow(row db.Session) *livesession.Session {
@@ -574,6 +628,7 @@ func sessionFromRow(row db.Session) *livesession.Session {
 		HostPlayerID: row.HostPlayerID,
 		JoinCode:     row.JoinCode,
 		Phase:        livesession.Phase(row.Phase),
+		GameSeq:      row.GameSeq,
 		CreatedAt:    row.CreatedAt,
 	}
 	if row.CurrentRoundID.Valid {

@@ -533,3 +533,228 @@ func TestSessionPlayersDropDisplayNameMigration_RebuildPreservesRows(t *testing.
 		t.Error("duplicate (session, player) after re-up err = nil, want a UNIQUE violation")
 	}
 }
+
+// persistentRoomsVersion is the #836 migration that rebuilds the sessions parent
+// table (add the intermission phase + game_seq) and the session_answers child
+// table (add game_seq + widen the unique key to include it).
+const persistentRoomsVersion = 20260611120000
+
+// TestPersistentRoomsMigration_Schema pins the #836 schema: sessions accepts the
+// intermission phase and carries game_seq defaulting to 1; session_answers
+// carries game_seq and enforces one pick per (session, question, player,
+// game_seq) so the same quiz re-run in a room records a fresh pick per game.
+// dbtest.Open already ran every migration, so the live schema is what the Up
+// produced.
+func TestPersistentRoomsMigration_Schema(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := dbtest.Open(t)
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v", cerr)
+		}
+	})
+
+	var quizID int64
+	if err := db.QueryRowContext(
+		ctx,
+		`INSERT INTO quizzes (title, slug, description, created_by_player_id, mode)
+		 VALUES ('Live', 'live-rooms-mig', 'd', 1, 'live') RETURNING id`,
+	).Scan(&quizID); err != nil {
+		t.Fatalf("seed quiz err = %v, want nil", err)
+	}
+	var gameSeq int64
+	if err := db.QueryRowContext(
+		ctx,
+		`INSERT INTO sessions (id, quiz_id, host_player_id, join_code)
+		 VALUES ('sess-room-1', ?, 1, 'ROM234') RETURNING game_seq`,
+		quizID,
+	).Scan(&gameSeq); err != nil {
+		t.Fatalf("seed session err = %v, want nil", err)
+	}
+	if got, want := gameSeq, int64(1); got != want {
+		t.Errorf("game_seq default = %d, want %d", got, want)
+	}
+
+	t.Run("phase CHECK accepts intermission", func(t *testing.T) {
+		t.Parallel()
+		if _, err := db.ExecContext(
+			ctx, "UPDATE sessions SET phase = 'intermission' WHERE id = 'sess-room-1'",
+		); err != nil {
+			t.Errorf("update phase to intermission err = %v, want nil", err)
+		}
+	})
+
+	t.Run("session_answers is unique per (session, question, player, game_seq)", func(t *testing.T) {
+		t.Parallel()
+		var roundID int64
+		if err := db.QueryRowContext(
+			ctx, `INSERT INTO rounds (quiz_id, position, title) VALUES (?, 1, 'R') RETURNING id`, quizID,
+		).Scan(&roundID); err != nil {
+			t.Fatalf("seed round err = %v, want nil", err)
+		}
+		var questionID int64
+		if err := db.QueryRowContext(
+			ctx,
+			`INSERT INTO questions (quiz_id, round_id, text, position) VALUES (?, ?, 'Q', 1) RETURNING id`,
+			quizID, roundID,
+		).Scan(&questionID); err != nil {
+			t.Fatalf("seed question err = %v, want nil", err)
+		}
+		var optionID int64
+		if err := db.QueryRowContext(
+			ctx,
+			`INSERT INTO options (question_id, text, is_correct) VALUES (?, 'A', 1) RETURNING id`,
+			questionID,
+		).Scan(&optionID); err != nil {
+			t.Fatalf("seed option err = %v, want nil", err)
+		}
+		var playerID int64
+		if err := db.QueryRowContext(
+			ctx, `INSERT INTO players (display_name, role) VALUES ('room-join-1', 'player') RETURNING id`,
+		).Scan(&playerID); err != nil {
+			t.Fatalf("seed player err = %v, want nil", err)
+		}
+		// Game 1's pick.
+		if _, err := db.ExecContext(
+			ctx,
+			`INSERT INTO session_answers (session_id, question_id, player_id, option_id, game_seq)
+			 VALUES ('sess-room-1', ?, ?, ?, 1)`,
+			questionID, playerID, optionID,
+		); err != nil {
+			t.Fatalf("seed game 1 answer err = %v, want nil", err)
+		}
+		// A second pick for the same (session, question, player) in game 1 collides.
+		if _, err := db.ExecContext(
+			ctx,
+			`INSERT INTO session_answers (session_id, question_id, player_id, option_id, game_seq)
+			 VALUES ('sess-room-1', ?, ?, ?, 1)`,
+			questionID, playerID, optionID,
+		); err == nil {
+			t.Error("duplicate answer in same game err = nil, want a UNIQUE violation")
+		}
+		// The same pick in game 2 (different game_seq) is allowed: re-running the
+		// same quiz records a fresh pick per game rather than colliding.
+		if _, err := db.ExecContext(
+			ctx,
+			`INSERT INTO session_answers (session_id, question_id, player_id, option_id, game_seq)
+			 VALUES ('sess-room-1', ?, ?, ?, 2)`,
+			questionID, playerID, optionID,
+		); err != nil {
+			t.Errorf("same pick in game 2 err = %v, want nil (game_seq scopes the unique key)", err)
+		}
+	})
+}
+
+// TestPersistentRoomsMigration_DownUpRoundTrip exercises the #836 rebuild's Down
+// path (the risky one: dropping the sessions parent with foreign_keys=OFF inside
+// an explicit transaction, plus collapsing multi-game answers back to the old
+// 3-column unique key) and the re-Up afterwards, with seeded rows, so a broken
+// rollback fails loudly here rather than in production. The Down coerces
+// intermission back to 'finished' and keeps only the current game's answers.
+func TestPersistentRoomsMigration_DownUpRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := dbtest.Open(t)
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v", cerr)
+		}
+	})
+
+	var quizID int64
+	if err := db.QueryRowContext(
+		ctx,
+		`INSERT INTO quizzes (title, slug, description, created_by_player_id, mode)
+		 VALUES ('Live', 'live-rooms-rt-mig', 'd', 1, 'live') RETURNING id`,
+	).Scan(&quizID); err != nil {
+		t.Fatalf("seed quiz err = %v, want nil", err)
+	}
+	var roundID int64
+	if err := db.QueryRowContext(
+		ctx, `INSERT INTO rounds (quiz_id, position, title) VALUES (?, 1, 'R') RETURNING id`, quizID,
+	).Scan(&roundID); err != nil {
+		t.Fatalf("seed round err = %v, want nil", err)
+	}
+	var questionID int64
+	if err := db.QueryRowContext(
+		ctx,
+		`INSERT INTO questions (quiz_id, round_id, text, position) VALUES (?, ?, 'Q', 1) RETURNING id`,
+		quizID, roundID,
+	).Scan(&questionID); err != nil {
+		t.Fatalf("seed question err = %v, want nil", err)
+	}
+	var optionID int64
+	if err := db.QueryRowContext(
+		ctx,
+		`INSERT INTO options (question_id, text, is_correct) VALUES (?, 'A', 1) RETURNING id`,
+		questionID,
+	).Scan(&optionID); err != nil {
+		t.Fatalf("seed option err = %v, want nil", err)
+	}
+	var playerID int64
+	if err := db.QueryRowContext(
+		ctx, `INSERT INTO players (display_name, role) VALUES ('rooms-rt-join', 'player') RETURNING id`,
+	).Scan(&playerID); err != nil {
+		t.Fatalf("seed player err = %v, want nil", err)
+	}
+	// A room on its second game, sitting in intermission, with a pick from each
+	// game for the same question/player.
+	if _, err := db.ExecContext(
+		ctx,
+		`INSERT INTO sessions (id, quiz_id, host_player_id, join_code, phase, game_seq)
+		 VALUES ('sess-rooms-rt', ?, 1, 'RRT234', 'intermission', 2)`,
+		quizID,
+	); err != nil {
+		t.Fatalf("seed room session err = %v, want nil", err)
+	}
+	for _, seq := range []int64{1, 2} {
+		if _, err := db.ExecContext(
+			ctx,
+			`INSERT INTO session_answers (session_id, question_id, player_id, option_id, game_seq)
+			 VALUES ('sess-rooms-rt', ?, ?, ?, ?)`,
+			questionID, playerID, optionID, seq,
+		); err != nil {
+			t.Fatalf("seed game %d answer err = %v, want nil", seq, err)
+		}
+	}
+
+	if err := goose.DownTo(db, ".", persistentRoomsVersion-1); err != nil {
+		t.Fatalf("goose.DownTo err = %v, want nil", err)
+	}
+
+	// After the rollback the session survives with intermission coerced to
+	// finished, and only the current game's (game_seq = 2) answer remains so the
+	// old 3-column unique key holds.
+	var phase string
+	if err := db.QueryRowContext(
+		ctx, "SELECT phase FROM sessions WHERE id = 'sess-rooms-rt'",
+	).Scan(&phase); err != nil {
+		t.Fatalf("read phase after down err = %v, want nil", err)
+	}
+	if got, want := phase, "finished"; got != want {
+		t.Errorf("phase after down = %q, want %q (intermission coerced to finished)", got, want)
+	}
+	var answerCount int
+	if err := db.QueryRowContext(
+		ctx, "SELECT count(*) FROM session_answers WHERE session_id = 'sess-rooms-rt'",
+	).Scan(&answerCount); err != nil {
+		t.Fatalf("count answers after down err = %v, want nil", err)
+	}
+	if got, want := answerCount, 1; got != want {
+		t.Errorf("answer count after down = %d, want %d (only the latest game survives)", got, want)
+	}
+
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("goose.Up after down err = %v, want nil", err)
+	}
+
+	// The widened CHECK is back: intermission is accepted again.
+	if _, err := db.ExecContext(
+		ctx, "UPDATE sessions SET phase = 'intermission' WHERE id = 'sess-rooms-rt'",
+	); err != nil {
+		t.Errorf("update to intermission after re-up err = %v, want nil", err)
+	}
+}

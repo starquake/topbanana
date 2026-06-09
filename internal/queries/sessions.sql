@@ -50,6 +50,13 @@ SELECT EXISTS (
 -- representative session row (not aggregated) so it stays a typed DATETIME.
 -- Joined to quizzes for the title so the detail view renders without a
 -- second round trip.
+--
+-- Rooms (#836): a session is only 'finished' once the room is terminally closed
+-- (the runner ends each game in intermission and reaches finished only on
+-- abandon / explicit close); s.quiz_id holds the room's LAST quiz at that point.
+-- This read is deliberately NOT game_seq-scoped (it reads no answers, only the
+-- roster + finish time) and so reports the room's final quiz, not every quiz it
+-- cycled through. Per-game history is out of scope for this admin list.
 SELECT
     s.quiz_id              AS quiz_id,
     CAST(q.title AS TEXT)  AS quiz_title,
@@ -205,25 +212,79 @@ SET phase               = 'finished',
     finished_at         = CURRENT_TIMESTAMP
 WHERE id = ?;
 
+-- name: SetSessionIntermission :exec
+-- Ends a game without closing the room (#836): marks it intermission (the
+-- between-games screen showing the final standings while the host arms the next
+-- quiz) and clears the per-question runner columns. finished_at is stamped so
+-- the just-ended game has a finish time, but the room stays alive - distinct
+-- from SetSessionFinished, which terminates the room.
+UPDATE sessions
+SET phase               = 'intermission',
+    current_question_id = NULL,
+    question_started_at = NULL,
+    question_expires_at = NULL,
+    finished_at         = CURRENT_TIMESTAMP
+WHERE id = ?;
+
+-- name: RearmSession :execresult
+-- Starts the next game in a persistent room (#836): points the room at a new
+-- quiz, bumps game_seq so the new game's answers are scored independently, and
+-- resets the room to the lobby with every per-game runner column cleared
+-- (current round/question, the answer window, and the start/finish timestamps).
+-- Scoped to a room sitting in intermission so re-arming a live game or a
+-- terminally finished room is a no-op; the execresult lets the store map zero
+-- rows affected to "not in intermission".
+UPDATE sessions
+SET quiz_id             = sqlc.arg('quiz_id'),
+    game_seq            = game_seq + 1,
+    phase               = 'lobby',
+    current_round_id    = NULL,
+    current_question_id = NULL,
+    question_started_at = NULL,
+    question_expires_at = NULL,
+    started_at          = NULL,
+    finished_at         = NULL,
+    start_at            = NULL
+WHERE id = sqlc.arg('id')
+  AND phase = 'intermission';
+
+-- name: ResetSessionPlayersReady :exec
+-- Clears every roster player's ready flag for a room, used when re-arming the
+-- next game (#836) so players start the new game's lobby un-readied rather than
+-- carrying their previous game's ready state.
+UPDATE session_players
+SET is_ready = 0
+WHERE session_id = ?;
+
 -- name: UpsertSessionAnswer :exec
--- Records a player's pick for the current session question. answered_at is the
+-- Records a player's pick for the current session question, tagged with the
+-- room's current game_seq (#836) so a re-run of the same quiz records a fresh
+-- pick per game rather than overwriting the previous game's. answered_at is the
 -- server timestamp the pick landed. Idempotent on (session_id, question_id,
--- player_id): a re-submit overwrites the option and timestamp rather than
--- duplicating, so a double-tap before close is the last pick rather than an
--- error. score stays NULL until the question closes.
-INSERT INTO session_answers (session_id, question_id, player_id, option_id, answered_at)
-VALUES (?, ?, ?, ?, ?)
-ON CONFLICT (session_id, question_id, player_id)
+-- player_id, game_seq): a re-submit within the same game overwrites the option
+-- and timestamp rather than duplicating, so a double-tap before close is the
+-- last pick rather than an error. score stays NULL until the question closes.
+INSERT INTO session_answers (session_id, question_id, player_id, option_id, answered_at, game_seq)
+VALUES (sqlc.arg('session_id'),
+        sqlc.arg('question_id'),
+        sqlc.arg('player_id'),
+        sqlc.arg('option_id'),
+        sqlc.arg('answered_at'),
+        (SELECT game_seq FROM sessions WHERE id = sqlc.arg('session_id')))
+ON CONFLICT (session_id, question_id, player_id, game_seq)
     DO UPDATE SET option_id   = excluded.option_id,
                   answered_at = excluded.answered_at;
 
 -- name: CountSessionAnswersForQuestion :one
--- Number of players who have picked for the given session question. The runner
--- closes a question early once this reaches the active-player count.
+-- Number of players who have picked for the given session question in the room's
+-- current game (#836). The runner closes a question early once this reaches the
+-- active-player count. Scoped to the session's current game_seq so a re-run of
+-- the same quiz does not count the previous game's picks.
 SELECT count(*) AS answer_count
-FROM session_answers
-WHERE session_id = ?
-  AND question_id = ?;
+FROM session_answers sa
+WHERE sa.session_id = sqlc.arg('session_id')
+  AND sa.question_id = sqlc.arg('question_id')
+  AND sa.game_seq = (SELECT s.game_seq FROM sessions s WHERE s.id = sqlc.arg('session_id'));
 
 -- name: TouchSessionPlayerLastSeen :execresult
 -- Refreshes a participant's last_seen_at, the active-player heartbeat. The SSE
@@ -299,6 +360,7 @@ WHERE sp.session_id = sqlc.arg('session_id')
       WHERE sa.session_id = sp.session_id
         AND sa.question_id = sqlc.arg('question_id')
         AND sa.player_id = sp.player_id
+        AND sa.game_seq = (SELECT s.game_seq FROM sessions s WHERE s.id = sp.session_id)
   );
 
 -- name: CountActivePlayersForSession :one
@@ -331,17 +393,21 @@ SELECT sa.player_id,
        o.is_correct
 FROM session_answers sa
          JOIN options o ON o.id = sa.option_id
-WHERE sa.session_id = ?
-  AND sa.question_id = ?
+WHERE sa.session_id = sqlc.arg('session_id')
+  AND sa.question_id = sqlc.arg('question_id')
+  AND sa.game_seq = (SELECT s.game_seq FROM sessions s WHERE s.id = sqlc.arg('session_id'))
 ORDER BY sa.answered_at, sa.id;
 
 -- name: SetSessionAnswerScore :exec
--- Writes the computed score for one pick at question close.
+-- Writes the computed score for one pick at question close, scoped to the room's
+-- current game (#836) so scoring a re-run does not overwrite the previous game's
+-- recorded score for the same question/player.
 UPDATE session_answers
-SET score = ?
-WHERE session_id = ?
-  AND question_id = ?
-  AND player_id = ?;
+SET score = sqlc.arg('score')
+WHERE session_id = sqlc.arg('session_id')
+  AND question_id = sqlc.arg('question_id')
+  AND player_id = sqlc.arg('player_id')
+  AND game_seq = (SELECT s.game_seq FROM sessions s WHERE s.id = sqlc.arg('session_id'));
 
 -- name: SetSessionRoundResults :exec
 -- Moves the session into the round_results phase shown after the last question
@@ -378,11 +444,13 @@ FROM session_players sp
          JOIN players p ON p.id = sp.player_id
          LEFT JOIN session_answers sa
                    ON sa.session_id = sp.session_id AND sa.player_id = sp.player_id
+                       AND sa.game_seq = (SELECT s.game_seq FROM sessions s WHERE s.id = sp.session_id)
          LEFT JOIN questions q ON q.id = sa.question_id
 WHERE sp.session_id = sqlc.arg('session_id')
   AND (sp.left_at IS NULL
        OR EXISTS (SELECT 1 FROM session_answers sa2
-                  WHERE sa2.session_id = sp.session_id AND sa2.player_id = sp.player_id))
+                  WHERE sa2.session_id = sp.session_id AND sa2.player_id = sp.player_id
+                    AND sa2.game_seq = (SELECT s.game_seq FROM sessions s WHERE s.id = sp.session_id)))
 GROUP BY sp.player_id, p.display_name
 ORDER BY total_score DESC, p.display_name;
 
@@ -405,9 +473,11 @@ FROM session_players sp
          JOIN players p ON p.id = sp.player_id
          LEFT JOIN session_answers sa
                    ON sa.session_id = sp.session_id AND sa.player_id = sp.player_id
+                       AND sa.game_seq = (SELECT s.game_seq FROM sessions s WHERE s.id = sp.session_id)
 WHERE sp.session_id = sqlc.arg('session_id')
   AND (sp.left_at IS NULL
        OR EXISTS (SELECT 1 FROM session_answers sa2
-                  WHERE sa2.session_id = sp.session_id AND sa2.player_id = sp.player_id))
+                  WHERE sa2.session_id = sp.session_id AND sa2.player_id = sp.player_id
+                    AND sa2.game_seq = (SELECT s.game_seq FROM sessions s WHERE s.id = sp.session_id)))
 GROUP BY sp.player_id, p.display_name
 ORDER BY total_score DESC, p.display_name;

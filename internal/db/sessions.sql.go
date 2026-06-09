@@ -86,6 +86,7 @@ WHERE sp.session_id = ?1
       WHERE sa.session_id = sp.session_id
         AND sa.question_id = ?3
         AND sa.player_id = sp.player_id
+        AND sa.game_seq = (SELECT s.game_seq FROM sessions s WHERE s.id = sp.session_id)
   )
 `
 
@@ -114,9 +115,10 @@ func (q *Queries) CountActivePlayersUnansweredForQuestion(ctx context.Context, a
 
 const countSessionAnswersForQuestion = `-- name: CountSessionAnswersForQuestion :one
 SELECT count(*) AS answer_count
-FROM session_answers
-WHERE session_id = ?
-  AND question_id = ?
+FROM session_answers sa
+WHERE sa.session_id = ?1
+  AND sa.question_id = ?2
+  AND sa.game_seq = (SELECT s.game_seq FROM sessions s WHERE s.id = ?1)
 `
 
 type CountSessionAnswersForQuestionParams struct {
@@ -124,8 +126,10 @@ type CountSessionAnswersForQuestionParams struct {
 	QuestionID int64
 }
 
-// Number of players who have picked for the given session question. The runner
-// closes a question early once this reaches the active-player count.
+// Number of players who have picked for the given session question in the room's
+// current game (#836). The runner closes a question early once this reaches the
+// active-player count. Scoped to the session's current game_seq so a re-run of
+// the same quiz does not count the previous game's picks.
 func (q *Queries) CountSessionAnswersForQuestion(ctx context.Context, arg CountSessionAnswersForQuestionParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countSessionAnswersForQuestion, arg.SessionID, arg.QuestionID)
 	var answer_count int64
@@ -136,7 +140,7 @@ func (q *Queries) CountSessionAnswersForQuestion(ctx context.Context, arg CountS
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (id, quiz_id, host_player_id, join_code)
 VALUES (?, ?, ?, ?)
-RETURNING id, quiz_id, host_player_id, join_code, phase, current_round_id, current_question_id, question_started_at, question_expires_at, created_at, started_at, finished_at, host_last_seen_at, start_at
+RETURNING id, quiz_id, host_player_id, join_code, phase, game_seq, current_round_id, current_question_id, question_started_at, question_expires_at, created_at, started_at, finished_at, host_last_seen_at, start_at
 `
 
 type CreateSessionParams struct {
@@ -164,6 +168,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.HostPlayerID,
 		&i.JoinCode,
 		&i.Phase,
+		&i.GameSeq,
 		&i.CurrentRoundID,
 		&i.CurrentQuestionID,
 		&i.QuestionStartedAt,
@@ -178,7 +183,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 }
 
 const getSession = `-- name: GetSession :one
-SELECT id, quiz_id, host_player_id, join_code, phase, current_round_id, current_question_id, question_started_at, question_expires_at, created_at, started_at, finished_at, host_last_seen_at, start_at
+SELECT id, quiz_id, host_player_id, join_code, phase, game_seq, current_round_id, current_question_id, question_started_at, question_expires_at, created_at, started_at, finished_at, host_last_seen_at, start_at
 FROM sessions
 WHERE id = ?
 `
@@ -192,6 +197,7 @@ func (q *Queries) GetSession(ctx context.Context, id string) (Session, error) {
 		&i.HostPlayerID,
 		&i.JoinCode,
 		&i.Phase,
+		&i.GameSeq,
 		&i.CurrentRoundID,
 		&i.CurrentQuestionID,
 		&i.QuestionStartedAt,
@@ -206,7 +212,7 @@ func (q *Queries) GetSession(ctx context.Context, id string) (Session, error) {
 }
 
 const getSessionByJoinCode = `-- name: GetSessionByJoinCode :one
-SELECT id, quiz_id, host_player_id, join_code, phase, current_round_id, current_question_id, question_started_at, question_expires_at, created_at, started_at, finished_at, host_last_seen_at, start_at
+SELECT id, quiz_id, host_player_id, join_code, phase, game_seq, current_round_id, current_question_id, question_started_at, question_expires_at, created_at, started_at, finished_at, host_last_seen_at, start_at
 FROM sessions
 WHERE join_code = ?
 `
@@ -222,6 +228,7 @@ func (q *Queries) GetSessionByJoinCode(ctx context.Context, joinCode string) (Se
 		&i.HostPlayerID,
 		&i.JoinCode,
 		&i.Phase,
+		&i.GameSeq,
 		&i.CurrentRoundID,
 		&i.CurrentQuestionID,
 		&i.QuestionStartedAt,
@@ -320,6 +327,13 @@ type ListFinishedSessionPlaysForPlayerRow struct {
 // representative session row (not aggregated) so it stays a typed DATETIME.
 // Joined to quizzes for the title so the detail view renders without a
 // second round trip.
+//
+// Rooms (#836): a session is only 'finished' once the room is terminally closed
+// (the runner ends each game in intermission and reaches finished only on
+// abandon / explicit close); s.quiz_id holds the room's LAST quiz at that point.
+// This read is deliberately NOT game_seq-scoped (it reads no answers, only the
+// roster + finish time) and so reports the room's final quiz, not every quiz it
+// cycled through. Per-game history is out of scope for this admin list.
 func (q *Queries) ListFinishedSessionPlaysForPlayer(ctx context.Context, arg ListFinishedSessionPlaysForPlayerParams) ([]ListFinishedSessionPlaysForPlayerRow, error) {
 	rows, err := q.db.QueryContext(ctx, listFinishedSessionPlaysForPlayer, arg.PlayerID, arg.RowLimit)
 	if err != nil {
@@ -384,8 +398,9 @@ SELECT sa.player_id,
        o.is_correct
 FROM session_answers sa
          JOIN options o ON o.id = sa.option_id
-WHERE sa.session_id = ?
-  AND sa.question_id = ?
+WHERE sa.session_id = ?1
+  AND sa.question_id = ?2
+  AND sa.game_seq = (SELECT s.game_seq FROM sessions s WHERE s.id = ?1)
 ORDER BY sa.answered_at, sa.id
 `
 
@@ -448,10 +463,12 @@ FROM session_players sp
          JOIN players p ON p.id = sp.player_id
          LEFT JOIN session_answers sa
                    ON sa.session_id = sp.session_id AND sa.player_id = sp.player_id
+                       AND sa.game_seq = (SELECT s.game_seq FROM sessions s WHERE s.id = sp.session_id)
 WHERE sp.session_id = ?1
   AND (sp.left_at IS NULL
        OR EXISTS (SELECT 1 FROM session_answers sa2
-                  WHERE sa2.session_id = sp.session_id AND sa2.player_id = sp.player_id))
+                  WHERE sa2.session_id = sp.session_id AND sa2.player_id = sp.player_id
+                    AND sa2.game_seq = (SELECT s.game_seq FROM sessions s WHERE s.id = sp.session_id)))
 GROUP BY sp.player_id, p.display_name
 ORDER BY total_score DESC, p.display_name
 `
@@ -568,11 +585,13 @@ FROM session_players sp
          JOIN players p ON p.id = sp.player_id
          LEFT JOIN session_answers sa
                    ON sa.session_id = sp.session_id AND sa.player_id = sp.player_id
+                       AND sa.game_seq = (SELECT s.game_seq FROM sessions s WHERE s.id = sp.session_id)
          LEFT JOIN questions q ON q.id = sa.question_id
 WHERE sp.session_id = ?2
   AND (sp.left_at IS NULL
        OR EXISTS (SELECT 1 FROM session_answers sa2
-                  WHERE sa2.session_id = sp.session_id AND sa2.player_id = sp.player_id))
+                  WHERE sa2.session_id = sp.session_id AND sa2.player_id = sp.player_id
+                    AND sa2.game_seq = (SELECT s.game_seq FROM sessions s WHERE s.id = sp.session_id)))
 GROUP BY sp.player_id, p.display_name
 ORDER BY total_score DESC, p.display_name
 `
@@ -656,6 +675,38 @@ func (q *Queries) MarkSessionPlayerLeft(ctx context.Context, arg MarkSessionPlay
 	return q.db.ExecContext(ctx, markSessionPlayerLeft, arg.PlayerID, arg.JoinCode)
 }
 
+const rearmSession = `-- name: RearmSession :execresult
+UPDATE sessions
+SET quiz_id             = ?1,
+    game_seq            = game_seq + 1,
+    phase               = 'lobby',
+    current_round_id    = NULL,
+    current_question_id = NULL,
+    question_started_at = NULL,
+    question_expires_at = NULL,
+    started_at          = NULL,
+    finished_at         = NULL,
+    start_at            = NULL
+WHERE id = ?2
+  AND phase = 'intermission'
+`
+
+type RearmSessionParams struct {
+	QuizID int64
+	ID     string
+}
+
+// Starts the next game in a persistent room (#836): points the room at a new
+// quiz, bumps game_seq so the new game's answers are scored independently, and
+// resets the room to the lobby with every per-game runner column cleared
+// (current round/question, the answer window, and the start/finish timestamps).
+// Scoped to a room sitting in intermission so re-arming a live game or a
+// terminally finished room is a no-op; the execresult lets the store map zero
+// rows affected to "not in intermission".
+func (q *Queries) RearmSession(ctx context.Context, arg RearmSessionParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, rearmSession, arg.QuizID, arg.ID)
+}
+
 const refreshSessionPlayerLastSeenAt = `-- name: RefreshSessionPlayerLastSeenAt :exec
 UPDATE session_players
 SET last_seen_at = CAST(?1 AS TEXT)
@@ -680,6 +731,20 @@ type RefreshSessionPlayerLastSeenAtParams struct {
 // deterministic.
 func (q *Queries) RefreshSessionPlayerLastSeenAt(ctx context.Context, arg RefreshSessionPlayerLastSeenAtParams) error {
 	_, err := q.db.ExecContext(ctx, refreshSessionPlayerLastSeenAt, arg.Seen, arg.SessionID, arg.PlayerID)
+	return err
+}
+
+const resetSessionPlayersReady = `-- name: ResetSessionPlayersReady :exec
+UPDATE session_players
+SET is_ready = 0
+WHERE session_id = ?
+`
+
+// Clears every roster player's ready flag for a room, used when re-arming the
+// next game (#836) so players start the new game's lobby un-readied rather than
+// carrying their previous game's ready state.
+func (q *Queries) ResetSessionPlayersReady(ctx context.Context, sessionID string) error {
+	_, err := q.db.ExecContext(ctx, resetSessionPlayersReady, sessionID)
 	return err
 }
 
@@ -715,10 +780,11 @@ func (q *Queries) SessionHasPlayer(ctx context.Context, arg SessionHasPlayerPara
 
 const setSessionAnswerScore = `-- name: SetSessionAnswerScore :exec
 UPDATE session_answers
-SET score = ?
-WHERE session_id = ?
-  AND question_id = ?
-  AND player_id = ?
+SET score = ?1
+WHERE session_id = ?2
+  AND question_id = ?3
+  AND player_id = ?4
+  AND game_seq = (SELECT s.game_seq FROM sessions s WHERE s.id = ?2)
 `
 
 type SetSessionAnswerScoreParams struct {
@@ -728,7 +794,9 @@ type SetSessionAnswerScoreParams struct {
 	PlayerID   int64
 }
 
-// Writes the computed score for one pick at question close.
+// Writes the computed score for one pick at question close, scoped to the room's
+// current game (#836) so scoring a re-run does not overwrite the previous game's
+// recorded score for the same question/player.
 func (q *Queries) SetSessionAnswerScore(ctx context.Context, arg SetSessionAnswerScoreParams) error {
 	_, err := q.db.ExecContext(ctx, setSessionAnswerScore,
 		arg.Score,
@@ -753,6 +821,26 @@ WHERE id = ?
 // columns.
 func (q *Queries) SetSessionFinished(ctx context.Context, id string) error {
 	_, err := q.db.ExecContext(ctx, setSessionFinished, id)
+	return err
+}
+
+const setSessionIntermission = `-- name: SetSessionIntermission :exec
+UPDATE sessions
+SET phase               = 'intermission',
+    current_question_id = NULL,
+    question_started_at = NULL,
+    question_expires_at = NULL,
+    finished_at         = CURRENT_TIMESTAMP
+WHERE id = ?
+`
+
+// Ends a game without closing the room (#836): marks it intermission (the
+// between-games screen showing the final standings while the host arms the next
+// quiz) and clears the per-question runner columns. finished_at is stamped so
+// the just-ended game has a finish time, but the room stays alive - distinct
+// from SetSessionFinished, which terminates the room.
+func (q *Queries) SetSessionIntermission(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, setSessionIntermission, id)
 	return err
 }
 
@@ -915,9 +1003,14 @@ func (q *Queries) TouchSessionPlayerLastSeen(ctx context.Context, arg TouchSessi
 }
 
 const upsertSessionAnswer = `-- name: UpsertSessionAnswer :exec
-INSERT INTO session_answers (session_id, question_id, player_id, option_id, answered_at)
-VALUES (?, ?, ?, ?, ?)
-ON CONFLICT (session_id, question_id, player_id)
+INSERT INTO session_answers (session_id, question_id, player_id, option_id, answered_at, game_seq)
+VALUES (?1,
+        ?2,
+        ?3,
+        ?4,
+        ?5,
+        (SELECT game_seq FROM sessions WHERE id = ?1))
+ON CONFLICT (session_id, question_id, player_id, game_seq)
     DO UPDATE SET option_id   = excluded.option_id,
                   answered_at = excluded.answered_at
 `
@@ -930,11 +1023,13 @@ type UpsertSessionAnswerParams struct {
 	AnsweredAt time.Time
 }
 
-// Records a player's pick for the current session question. answered_at is the
+// Records a player's pick for the current session question, tagged with the
+// room's current game_seq (#836) so a re-run of the same quiz records a fresh
+// pick per game rather than overwriting the previous game's. answered_at is the
 // server timestamp the pick landed. Idempotent on (session_id, question_id,
-// player_id): a re-submit overwrites the option and timestamp rather than
-// duplicating, so a double-tap before close is the last pick rather than an
-// error. score stays NULL until the question closes.
+// player_id, game_seq): a re-submit within the same game overwrites the option
+// and timestamp rather than duplicating, so a double-tap before close is the
+// last pick rather than an error. score stays NULL until the question closes.
 func (q *Queries) UpsertSessionAnswer(ctx context.Context, arg UpsertSessionAnswerParams) error {
 	_, err := q.db.ExecContext(ctx, upsertSessionAnswer,
 		arg.SessionID,

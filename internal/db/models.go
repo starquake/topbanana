@@ -153,6 +153,7 @@ type Session struct {
 	HostPlayerID      int64
 	JoinCode          string
 	Phase             string
+	GameSeq           int64
 	CurrentRoundID    sql.NullInt64
 	CurrentQuestionID sql.NullInt64
 	QuestionStartedAt sql.NullTime
@@ -172,6 +173,7 @@ type SessionAnswer struct {
 	OptionID   int64
 	AnsweredAt time.Time
 	Score      sql.NullInt64
+	GameSeq    int64
 }
 
 type SessionPlayer struct {

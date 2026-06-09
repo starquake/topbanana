@@ -93,3 +93,49 @@ func (h *Handlers) Start(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msgInternalError, http.StatusInternalServerError)
 	}
 }
+
+// NextQuiz handles POST /host/{code}/next-quiz - the host control that arms the
+// room's next game from the between-games intermission (#836). It reads the
+// posted quiz_id and asks the service to re-arm the room onto that live quiz and
+// begin it, then 303-redirects the host back to the lobby the runner drives into
+// play. A missing or non-live quiz bounces back to the lobby rather than
+// surfacing a raw error; a room not in intermission (the host double-posted or
+// a game is already in flight) is treated the same so a stale tab is harmless.
+// A foreign or unknown code both 404 so the code stays opaque to a host who does
+// not own it.
+func (h *Handlers) NextQuiz(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	player, ok := auth.PlayerFromContext(ctx)
+	if !ok {
+		h.logger.ErrorContext(ctx, "missing player on context for host next quiz")
+		http.Error(w, msgInternalError, http.StatusInternalServerError)
+
+		return
+	}
+
+	code := r.PathValue("code")
+	quizID, err := handlers.IDFromString(r.FormValue("quiz_id"))
+	if err != nil {
+		http.Error(w, "invalid quiz id", http.StatusBadRequest)
+
+		return
+	}
+
+	err = h.service.StartNextQuiz(ctx, code, player.ID, quizID)
+	switch {
+	case err == nil,
+		errors.Is(err, livesession.ErrNotIntermission),
+		errors.Is(err, quiz.ErrQuizNotFound),
+		errors.Is(err, livesession.ErrNotLiveQuiz):
+		// code is the server-minted path value, never request input, so the
+		// redirect back to the lobby is same-origin.
+		dest := "/host/" + code
+		http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // code is server-generated, not user input.
+	case errors.Is(err, livesession.ErrSessionNotFound), errors.Is(err, livesession.ErrNotHost):
+		http.NotFound(w, r)
+	default:
+		h.logger.ErrorContext(ctx, "error starting next quiz", slog.Any("err", err))
+		http.Error(w, msgInternalError, http.StatusInternalServerError)
+	}
+}
