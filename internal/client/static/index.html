@@ -2,11 +2,26 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{/* viewport-fit=cover is required for env(safe-area-inset-*) to
+         resolve to non-zero values on notched iOS devices; without it
+         the insets stay 0 and the standalone layout draws under the
+         notch / home indicator. See #826. */}}
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>{{envTitleTag}}{{.Title}}</title>
     <link rel="icon" type="image/svg+xml" href="/assets/banana.svg" sizes="any">
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/assets/banana-192.png">
+    {{/* iOS launches a home-screen icon in its own standalone window only
+         when these legacy Apple meta tags are present (it cannot honour the
+         manifest's display:standalone before 16.4). mobile-web-app-capable
+         is the standards-track equivalent Android/Chrome reads. The
+         black-translucent status bar lets the page draw under the status
+         bar so the safe-area padding (not a solid bar) clears the notch.
+         See #826. */}}
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="{{envTitleTag}}Top Banana!">
     <meta name="theme-color" content="#ffd23f">
     {{/* Open Graph / Twitter Card metadata. /client/{$} renders the
          sitewide defaults; /play/{slugID} swaps og:title and og:description
@@ -46,7 +61,11 @@
      gameplay screen never offers a tap target that's actually a
      scroll. Same fix as the home page got in #285. */}}
 <body class="bg-bg text-text font-sans antialiased min-h-dvh leading-relaxed">
-    <main class="max-w-[720px] lg:max-w-5xl mx-auto px-5 lg:px-8 py-10 sm:py-16">
+    {{/* player-shell carries the vertical/horizontal padding plus the
+         env(safe-area-inset-*) clearances for the iOS standalone PWA
+         (#826, #831); lg:[--main-px:2rem] restores the old lg:px-8
+         desktop gutter the class would otherwise flatten to px-5. */}}
+    <main class="player-shell lg:[--main-px:2rem] max-w-[720px] lg:max-w-5xl mx-auto">
         {{/* x-cloak hides the whole SPA shell until Alpine boots (the
              rule [x-cloak]{display:none} ships in app.css). Every region
              here is gated on game state that app.js resolves after boot,
@@ -55,42 +74,48 @@
              (e.g. "Browse all quizzes" before a deep-linked quiz loads)
              before the conditions evaluate (#605). */}}
         <div x-data="gameApp" x-cloak @keydown.escape.window="claimModalOpen && closeClaimModal()">
-            <!-- Brand mark: same banana SVG + Top/Banana/! pattern as the
-                 admin navbar (see internal/web/tmpl/admin/layouts/navbar.gohtml).
-                 The brand wraps an <a href="/"> so clicking the logo
-                 always returns to the public start page — the
-                 convention every visitor expects from a header logo.
-                 The aria-label sits on the <a> so role-based locators
-                 (`getByRole('link', { name: 'Top Banana!' })`) keep
-                 working; visible text is split so "Banana" can carry
-                 the accent colour.
-                 Hidden during gameplay (#253) so the question gets the
-                 whole vertical canvas — still visible on the start
-                 screen and the post-game leaderboard. -->
-            <h1 x-show="!(gameId && !finished)"
-                class="mb-10 font-display font-extrabold text-2xl tracking-wide uppercase">
-                {{template "brand-mark" .}}
-            </h1>
+            <!-- Shared player header (#844): brand mark on the left, the
+                 signed-in account control on the right, in one in-flow row.
+                 The same structure backs the live join shell (join.html) so
+                 both player surfaces echo the web top bar
+                 (internal/web/tmpl/components/topbar.gohtml). It is NOT a
+                 sticky bar: the client hides its header during active
+                 gameplay (#253) to give the question the full canvas, so the
+                 header rides in normal flow and the whole row drops out
+                 during a live question.
 
-            <!-- Signed-in account control (#520). The SPA shell
-                 carries no CSRF token, so logout can't live here; instead
-                 we link to /profile (a GET page that already has logout +
-                 account management). Visible only for authenticated
-                 players AND only outside active gameplay — mirrors the
-                 brand's `!(gameId && !finished)` gate so the question
-                 keeps the full canvas during a live game (#253), while
-                 the start screen and finished leaderboard expose the
-                 account link. Complements the anonymous-only claim CTA
-                 below; the two never show together (this gates on
-                 isAuthenticated(), the CTA on its negation). The link
-                 text deliberately differs from the claim CTA's "sign in"
-                 so claim.spec.ts's unique sign-in assertion still holds. -->
-            <template x-if="isAuthenticated() && !(gameId && !finished)">
-                <p class="mb-6 text-sm text-text-dim text-right">
-                    Signed in as
-                    <a href="/profile" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="account-profile-link" x-text="player ? player.displayName : ''"></a>
-                </p>
-            </template>
+                 The brand wraps an <a href="/"> so clicking the logo always
+                 returns to the public start page. The aria-label sits on the
+                 <a> (inside the brand-mark partial) so role-based locators
+                 (`getByRole('link', { name: 'Top Banana!' })`) keep working.
+
+                 Hidden during gameplay (#253) so the question gets the whole
+                 vertical canvas - still visible on the start screen and the
+                 post-game leaderboard. -->
+            <header x-show="!(gameId && !finished)"
+                    class="mb-10 flex items-center justify-between gap-4">
+                <h1 class="m-0 font-display font-extrabold text-2xl tracking-wide uppercase">
+                    {{template "brand-mark" .}}
+                </h1>
+
+                <!-- Signed-in account control (#520). The SPA shell carries
+                     no CSRF token, so logout can't live here; instead we link
+                     to /profile (a GET page that already has logout + account
+                     management). Visible only for authenticated players; the
+                     enclosing header already drops it during gameplay (#253),
+                     so the question keeps the full canvas. Complements the
+                     anonymous-only claim CTA below; the two never show
+                     together (this gates on isAuthenticated(), the CTA on its
+                     negation). The link text deliberately differs from the
+                     claim CTA's "sign in" so claim.spec.ts's unique sign-in
+                     assertion still holds. -->
+                <template x-if="isAuthenticated()">
+                    <p class="m-0 text-sm text-text-dim text-right">
+                        Signed in as
+                        <a href="/profile" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="account-profile-link" x-text="player ? player.displayName : ''"></a>
+                    </p>
+                </template>
+            </header>
 
             <!-- Single claim-name CTA, lifted out of the start-screen
                  and finished-leaderboard views so the leaderboard
@@ -348,7 +373,7 @@
                  here. -->
             <div x-show="gameId && !finished">
                 <template x-if="question && !roundItem">
-                    <div class="flex flex-col min-h-[calc(100svh-5rem)] sm:min-h-[calc(100svh-8rem)]">
+                    <div class="flex flex-col game-fill">
                         <!-- HUD chips: Q n/total + running score (#253). -->
                         <div class="flex justify-end gap-2 mb-4">
                             <span class="hud-chip">
@@ -450,7 +475,7 @@
                      round boundary); the Q chip hides on a position=0
                      boundary that fires before Q1. -->
                 <template x-if="roundItem && roundItem.phase === 'intro'">
-                    <div class="flex flex-col min-h-[calc(100svh-5rem)] sm:min-h-[calc(100svh-8rem)]"
+                    <div class="flex flex-col game-fill"
                          data-testid="round-intro-card"
                          x-init="$nextTick(() => animateRoundIntro($el))">
                         <div class="flex justify-end gap-2 mb-4">
@@ -519,7 +544,7 @@
                      fetches the next item. Same flex-column shell as the
                      intro and question views. -->
                 <template x-if="roundItem && roundItem.phase === 'results'">
-                    <div class="flex flex-col min-h-[calc(100svh-5rem)] sm:min-h-[calc(100svh-8rem)]"
+                    <div class="flex flex-col game-fill"
                          data-testid="round-recap-card"
                          x-init="$nextTick(() => animateRoundResults($el))">
                         <div class="flex justify-end gap-2 mb-4">

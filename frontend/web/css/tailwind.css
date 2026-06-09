@@ -23,6 +23,7 @@
  * app.css (#386). List every surface that uses utility classes here, or its
  * classes get purged. Paths are relative to this file at
  * frontend/web/css/tailwind.css. */
+@source "../../../internal/web/tmpl/components";
 @source "../../../internal/web/tmpl/admin";
 @source "../../../internal/web/tmpl/auth";
 @source "../../../internal/web/tmpl/home";
@@ -585,6 +586,55 @@
         @apply max-w-md mx-auto;
     }
 
+    /* iOS PWA safe-area handling (#826, #831). In a home-screen
+     * standalone launch the page draws under the notch / status bar and
+     * the home indicator, and Safari's bottom address bar can overlap
+     * content. .player-shell adds the four env(safe-area-inset-*) values
+     * on top of the player <main>'s own padding so content clears the
+     * notch (top), the home indicator / bottom address bar (bottom), and
+     * the landscape notch (left/right). The insets resolve to 0 on
+     * non-notched / non-standalone viewports, so this is inert on desktop
+     * and Android. viewport-fit=cover in the shell <head> is what makes
+     * the insets non-zero. */
+    .player-shell {
+        /* --main-py mirrors the player <main>'s vertical padding (py-10,
+         * then sm:py-16) so both this padding and the .game-fill column
+         * math read one source. Bumped at Tailwind's sm breakpoint
+         * (40rem / 640px). --main-px is the base horizontal padding
+         * (px-5); the solo shell bumps it at lg via an arbitrary
+         * [--main-px:2rem] utility, the join shell leaves it at the
+         * default. */
+        --main-py: 2.5rem;
+        --main-px: 1.25rem;
+        padding-top: calc(var(--main-py) + env(safe-area-inset-top));
+        padding-bottom: calc(var(--main-py) + env(safe-area-inset-bottom));
+        padding-left: calc(var(--main-px) + env(safe-area-inset-left));
+        padding-right: calc(var(--main-px) + env(safe-area-inset-right));
+    }
+    @media (min-width: 40rem) {
+        .player-shell {
+            --main-py: 4rem;
+        }
+    }
+
+    /* The in-game flex column is sized to fill the viewport minus the
+     * shell's vertical padding, so its mt-auto bottom buttons anchor to
+     * the bottom edge. The base value subtracts the player <main>'s own
+     * py (2 * --main-py); the safe-area variant additionally subtracts
+     * both vertical insets so the column still fits exactly inside the
+     * padded shell and the bottom buttons sit ABOVE the home indicator /
+     * address bar instead of being pushed under it or forcing overflow
+     * scroll (#831). 100svh tracks the small viewport so the layout is
+     * steady across mobile URL-bar collapse. */
+    .game-fill {
+        min-height: calc(
+            100svh
+            - 2 * var(--main-py)
+            - env(safe-area-inset-top)
+            - env(safe-area-inset-bottom)
+        );
+    }
+
     /* --- Player-surface components (#238). Lifted from the old
      * synthwave.css. Used only by internal/client/static/index.html;
      * named generically so admin can pick them up if a future page
@@ -753,14 +803,29 @@
     /* Leaderboard table — flat surface, striped rows, accent-tinted
      * highlight on the current player's row (driven by aria-current
      * instead of an is-* class). */
+    /* table-fixed + per-column widths keep the table inside its container
+     * on a narrow viewport: Rank/Score stay narrow and the Player column
+     * takes the remainder, wrapping a long unbroken display name instead of
+     * widening the table past the screen (#844). */
     .player-table {
-        @apply w-full bg-surface border border-border-soft rounded-md overflow-hidden;
+        @apply table-fixed w-full bg-surface border border-border-soft rounded-md overflow-hidden;
     }
     .player-table th {
         @apply px-4 py-3 text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-left border-b border-border-soft;
     }
+    .player-table th:first-child,
+    .player-table td:first-child {
+        @apply w-16;
+    }
+    .player-table th:last-child,
+    .player-table td:last-child {
+        @apply w-20;
+    }
     .player-table td {
         @apply px-4 py-3 text-text border-b border-border-soft;
+    }
+    .player-table td:nth-child(2) {
+        @apply [overflow-wrap:anywhere];
     }
     .player-table tbody tr:last-child td {
         @apply border-b-0;

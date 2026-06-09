@@ -2,11 +2,26 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{/* viewport-fit=cover is required for env(safe-area-inset-*) to
+         resolve to non-zero values on notched iOS devices; without it
+         the insets stay 0 and the standalone layout draws under the
+         notch / home indicator. See #826. */}}
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>{{envTitleTag}}{{.Title}}</title>
     <link rel="icon" type="image/svg+xml" href="/assets/banana.svg" sizes="any">
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/assets/banana-192.png">
+    {{/* iOS launches a home-screen icon in its own standalone window only
+         when these legacy Apple meta tags are present (it cannot honour the
+         manifest's display:standalone before 16.4). mobile-web-app-capable
+         is the standards-track equivalent Android/Chrome reads. The
+         black-translucent status bar lets the page draw under the status
+         bar so the safe-area padding (not a solid bar) clears the notch.
+         See #826. */}}
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="{{envTitleTag}}Top Banana!">
     <meta name="theme-color" content="#ffd23f">
     {{/* Open Graph / Twitter Card metadata. The join surface carries the
          sitewide defaults: a room code is short-lived and per-session, so a
@@ -44,14 +59,44 @@
      viewport on mobile browsers across URL-bar collapse (#308), the same
      fix the solo client and home page use. */}}
 <body class="bg-bg text-text font-sans antialiased min-h-dvh leading-relaxed">
-    <main class="max-w-[480px] mx-auto px-5 py-10 sm:py-16">
+    {{/* player-shell carries the vertical/horizontal padding plus the
+         env(safe-area-inset-*) clearances for the iOS standalone PWA
+         (#826, #831). The join shell keeps the default px-5 gutter. */}}
+    <main class="player-shell max-w-[480px] mx-auto">
         {{/* x-cloak hides the shell until Alpine boots and resolves which
              phase to paint, so the deferred-Alpine window doesn't flash the
              enter-code form on a /join/{code} deep link before init() runs. */}}
         <div x-data="joinApp" x-cloak>
-            <h1 class="mb-10 font-display font-extrabold text-2xl tracking-wide uppercase">
-                {{template "brand-mark" .}}
-            </h1>
+            <!-- Shared player header (#844): brand mark on the left, the
+                 signed-in account control on the right, in one in-flow row -
+                 the same structure the solo shell (index.html) carries so both
+                 player surfaces echo the web top bar
+                 (internal/web/tmpl/components/topbar.gohtml). It is NOT a
+                 sticky bar: like the solo client it rides in normal flow and
+                 the whole row drops out while a live question is on screen, so
+                 the question gets the full canvas (#253). inActiveQuestion()
+                 maps the solo `gameId && !finished` gate to the live phase
+                 model - it is true only in the question and reveal phases, so
+                 the header stays on the enter-code, name, lobby, round_intro,
+                 round_results, intermission, and finished screens. -->
+            <header x-show="!inActiveQuestion()"
+                    class="mb-10 flex items-center justify-between gap-4">
+                <h1 class="m-0 font-display font-extrabold text-2xl tracking-wide uppercase">
+                    {{template "brand-mark" .}}
+                </h1>
+
+                <!-- Signed-in account control (#520, #844): mirrors the solo
+                     shell. The SPA carries no CSRF token, so logout lives on
+                     /profile (a GET page with logout + account management).
+                     Visible only for authenticated players; the enclosing
+                     header already drops it during a live question (#253). -->
+                <template x-if="isAuthenticated()">
+                    <p class="m-0 text-sm text-text-dim text-right">
+                        Signed in as
+                        <a href="/profile" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="account-profile-link" x-text="player ? player.displayName : ''"></a>
+                    </p>
+                </template>
+            </header>
 
             <!-- Enter-code phase: typed-code form for a PC join (no QR). -->
             <div x-show="phase === 'code'">
@@ -132,7 +177,7 @@
                     <div data-testid="lobby-view">
                         <div class="mb-6">
                             <p class="label-eyebrow">Lobby</p>
-                            <h2 class="font-display text-2xl font-semibold text-text" x-text="state.quiz.title"></h2>
+                            <h2 class="font-display text-2xl font-semibold text-text" x-text="lobbyTitle()"></h2>
                             <p class="text-text-dim">
                                 Room <span class="font-mono text-accent" x-text="state.joinCode"></span>
                                 <span class="mx-1">&middot;</span>
@@ -180,10 +225,13 @@
                                data-testid="start-countdown"
                                x-text="startCountdownLabel()"></p>
                         </template>
+                        <!-- The hint distinguishes an empty staging room (no
+                             quiz picked yet, #836) from a room with a game
+                             queued: the former waits on the host to pick a quiz,
+                             the latter on the host to start the queued game. -->
                         <template x-if="!startArmed()">
-                            <p class="mb-3 text-center text-text-dim" data-testid="waiting-hint">
-                                Waiting for the host to start the game...
-                            </p>
+                            <p class="mb-3 text-center text-text-dim" data-testid="waiting-hint"
+                               x-text="lobbyHasQuiz() ? 'Waiting for the host to start the game...' : 'Waiting for the host to start a quiz...'"></p>
                         </template>
 
                         <button type="button"
@@ -299,10 +347,30 @@
                     </div>
                 </template>
 
-                <!-- Finished: the session is over. The same standings bar graph
-                     shows the final totals; finished carries roundScore=0, so
-                     there is no round delta to add - the bars render at their
-                     final width straight away (no grow animation). -->
+                <!-- Intermission (#836): the game is over but the room stays
+                     alive. The same standings bar graph shows the final totals
+                     of the game that just ended, and the player stays joined -
+                     no re-join, no "join another quiz" button. When the host
+                     starts the next quiz the server phase walks intermission ->
+                     lobby -> round_intro -> question and the view follows off
+                     the SSE -> GET state loop, carrying the player into game 2
+                     without re-entering a code. -->
+                <template x-if="!lobbyClosed && state && state.phase === 'intermission'">
+                    <div data-testid="intermission-view">
+                        <p class="label-eyebrow">Game over</p>
+                        <h2 class="mt-2 mb-6 font-display text-3xl font-semibold text-text">Final standings</h2>
+                        {{template "standings-bars" .}}
+                        <p class="mt-6 text-text-dim" data-testid="intermission-waiting">
+                            Waiting for the host to start the next quiz...
+                        </p>
+                    </div>
+                </template>
+
+                <!-- Finished: the room is terminally closed (the host abandoned
+                     it). The same standings bar graph shows the final totals;
+                     finished carries roundScore=0, so there is no round delta to
+                     add - the bars render at their final width straight away (no
+                     grow animation). -->
                 <template x-if="!lobbyClosed && state && state.phase === 'finished'">
                     <div data-testid="finished-view">
                         <p class="label-eyebrow">Game over</p>

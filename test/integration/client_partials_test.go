@@ -9,12 +9,12 @@ import (
 
 // TestStandingsBarsPartial_SharedAcrossLiveBlocks pins #754: the standings
 // bar-graph rows are a single {{define "standings-bars"}} partial
-// (partials/standings_bars.html) reused by both the round_results and finished
-// blocks of the live player shell (join.html). Serving the shell exercises the
-// render path that parses the partial; a missing, renamed, or non-embedded
-// partial fails the parse and returns 500. The partial also depends on the
-// static/* embed recursing into the partials subdirectory, which this guards in
-// production builds.
+// (partials/standings_bars.html) reused by the round_results, intermission
+// (#836), and finished blocks of the live player shell (join.html). Serving the
+// shell exercises the render path that parses the partial; a missing, renamed,
+// or non-embedded partial fails the parse and returns 500. The partial also
+// depends on the static/* embed recursing into the partials subdirectory, which
+// this guards in production builds.
 func TestStandingsBarsPartial_SharedAcrossLiveBlocks(t *testing.T) {
 	t.Parallel()
 
@@ -36,10 +36,11 @@ func TestStandingsBarsPartial_SharedAcrossLiveBlocks(t *testing.T) {
 			t.Errorf("/join body missing %q - the shared standings-bars partial did not expand (#754)", want)
 		}
 	}
-	// The partial is invoked from both the round_results and finished blocks, so
-	// its list marker appears twice in a single shell render.
-	if got, want := strings.Count(body, `data-testid="standings-bars"`), 2; got != want {
-		t.Errorf("/join standings-bars count = %d, want %d (round_results + finished)", got, want)
+	// The partial is invoked from the round_results, intermission (#836), and
+	// finished blocks, so its list marker appears three times in a single shell
+	// render.
+	if got, want := strings.Count(body, `data-testid="standings-bars"`), 3; got != want {
+		t.Errorf("/join standings-bars count = %d, want %d (round_results + intermission + finished)", got, want)
 	}
 }
 
@@ -73,6 +74,48 @@ func assertBrandMarkPartial(ctx context.Context, t *testing.T, url string) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("%s body missing %q - the shared brand-mark partial did not expand (#754)", url, want)
+		}
+	}
+}
+
+// TestPlayerHeader_SharedAcrossShells pins #844: the solo shell (index.html)
+// and the live player shell (join.html) carry one consistent header - the
+// brand mark plus the signed-in account control. The control gates on
+// isAuthenticated() (an Alpine expression Alpine evaluates client-side), so
+// the inert <template x-if> markup ships in the served HTML for both shells
+// regardless of viewer state; this asserts the markup is present and identical
+// across the two, which is the unification the ticket is after. The
+// browser-side visibility (anonymous never sees it; a signed-in player does
+// and the link routes to /profile) is exercised in e2e (pregame-nav.spec.ts).
+func TestPlayerHeader_SharedAcrossShells(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, nil)
+
+	for _, url := range []string{srv.BaseURL + "/client/", srv.BaseURL + "/join"} {
+		assertPlayerHeaderAccountControl(ctx, t, url)
+	}
+}
+
+func assertPlayerHeaderAccountControl(ctx context.Context, t *testing.T, url string) {
+	t.Helper()
+
+	resp := httpGet(ctx, t, http.DefaultClient, url)
+	defer closeBody(t, resp.Body)
+
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("%s status = %d, want %d", url, got, want)
+	}
+	body := readAllString(t, resp.Body)
+	for _, want := range []string{
+		`x-if="isAuthenticated()"`,
+		`Signed in as`,
+		`data-testid="account-profile-link"`,
+		`href="/profile"`,
+		`x-text="player ? player.displayName : ''"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("%s body missing %q - the shared player header account control is absent (#844)", url, want)
 		}
 	}
 }

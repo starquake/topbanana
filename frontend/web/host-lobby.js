@@ -36,11 +36,21 @@ import {
 // the host why the screen looks frozen. Cleared on the next good read.
 const STATE_FAILURE_LIMIT = 3;
 
-function hostLobby(joinCode) {
+function hostLobby(joinCode, hasQuiz) {
     return {
         joinCode,
         phase: 'lobby',
         players: [],
+        // True once a quiz is armed in the room (state.quiz present). False for
+        // an empty room (#836) - the "no game running yet" staging state, opened
+        // before any quiz is picked. The lobby shows the "Start a quiz" picker
+        // while this is false so the host can pick the first game; a room opened
+        // with a preselected quiz ("Play live") has it true and keeps the
+        // existing Start controls instead. Seeded from the server-rendered
+        // HasQuiz so a preselected lobby renders its Start controls without
+        // flashing the picker before the first state read (no-flash hydration);
+        // applyState then keeps it in sync with each read.
+        hasQuiz: !!hasQuiz,
         question: null,
         // The round_intro round off the latest state read, or null outside the
         // round_intro phase (the server carries it only there). Drives the
@@ -196,6 +206,10 @@ function hostLobby(joinCode) {
         applyState(state) {
             this.phase = typeof state.phase === 'string' ? state.phase : 'lobby';
             this.players = Array.isArray(state.players) ? state.players : [];
+            // The state read omits quiz for an empty room (#836); its presence
+            // tells "quiz armed" from the empty staging lobby so the template
+            // picks the staging picker over the Start controls.
+            this.hasQuiz = state.quiz != null;
             this.question = state.question ?? null;
             this.round = state.round ?? null;
 
@@ -257,20 +271,63 @@ function hostLobby(joinCode) {
             return `Starting in ${formatCountdown(this.startRemaining)}`;
         },
 
+        // showsStartQuizPicker reports whether the room should offer the
+        // pick-and-start-a-quiz control (#836): an empty lobby (no quiz armed)
+        // for the first game, and the between-games intermission for the next
+        // game. A lobby with a preselected quiz keeps the Start controls
+        // instead, so the picker is hidden there.
+        showsStartQuizPicker() {
+            return (this.phase === 'lobby' && !this.hasQuiz)
+                || this.phase === 'intermission';
+        },
+
+        // pickerLabel is the picker's field label: the empty-lobby first-game
+        // case reads "Start a quiz", the between-games case "Start the next
+        // quiz", so the first game never says "next".
+        pickerLabel() {
+            return this.phase === 'intermission' ? 'Start the next quiz' : 'Start a quiz';
+        },
+
+        // pickerButtonLabel mirrors pickerLabel for the submit button so the
+        // call to action matches the field label in both cases.
+        pickerButtonLabel() {
+            return this.phase === 'intermission' ? 'Start next quiz' : 'Start quiz';
+        },
+
+        // showsEndSession reports whether the host's "End session" control is
+        // available: across the live phases (lobby, intermission, in-game) so
+        // the host can cleanly close the room, but not once it is already
+        // finished (the terminal phase).
+        showsEndSession() {
+            return this.phase !== 'finished';
+        },
+
+        // showsStandings reports whether the current phase renders the
+        // standings bar graph: the between-rounds round_results screen and the
+        // end-of-game screens - intermission (the between-games screen, #836)
+        // and the terminal finished phase.
+        showsStandings() {
+            return this.phase === 'round_results'
+                || this.phase === 'intermission'
+                || this.phase === 'finished';
+        },
+
         // syncStandings reconciles the between-rounds / final bar graph with
         // each state read. The server carries a standings array in the
-        // round_results and finished phases (null elsewhere). On a genuine new
-        // entry it builds the rows starting at each player's pre-round total and
-        // grows the bars to the new total while the numeric labels count up;
-        // from the second screen on the rows also slide from their
-        // previous-screen position into the new ranking (a FLIP swap, #730) so
-        // an overtake reads as rows trading places. A later tick within the same
-        // phase is a no-op, so it doesn't replay on every SSE beat. The finished
-        // phase animates the last round's contribution: its standings carry the
-        // last round's roundScore so the bars grow into the final totals.
+        // round_results phase and on the end-of-game screen - intermission (the
+        // between-games screen, #836) and the terminal finished phase (null
+        // elsewhere). On a genuine new entry it builds the rows starting at each
+        // player's pre-round total and grows the bars to the new total while the
+        // numeric labels count up; from the second screen on the rows also slide
+        // from their previous-screen position into the new ranking (a FLIP swap,
+        // #730) so an overtake reads as rows trading places. A later tick within
+        // the same phase is a no-op, so it doesn't replay on every SSE beat. The
+        // end-of-game screen animates the last round's contribution: its
+        // standings carry the last round's roundScore so the bars grow into the
+        // final totals.
         syncStandings(state) {
             const standings = Array.isArray(state.standings) ? state.standings : null;
-            if ((this.phase !== 'round_results' && this.phase !== 'finished') || !standings) {
+            if (!this.showsStandings() || !standings) {
                 this.standingsBars = [];
                 this.maxStandingsTotal = 1;
                 this.lastStandingsKey = null;
@@ -287,7 +344,7 @@ function hostLobby(joinCode) {
             }
             this.lastStandingsKey = key;
 
-            const animate = this.phase === 'round_results' || this.phase === 'finished';
+            const animate = this.showsStandings();
             const { rows, maxTotal } = buildStandingsRows(standings, { animate });
             this.maxStandingsTotal = maxTotal;
             const prevOrder = this.lastStandingsOrder;

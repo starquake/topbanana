@@ -214,11 +214,15 @@ const runnerBeatTickDivisor = 4
 // advances quickly; otherwise those fall back to the runner's built-in
 // defaults. The question read beat tracks REVEAL_DELAY independently of
 // SESSION_RUNNER_BEAT, so the live read beat matches the solo game's pre-answer
-// beat (3s default; the e2e's 500ms shrinks both). The tick interval tracks the
-// runner beat so a shrunk beat is observed promptly without spinning the loop
-// when the beat is the default.
+// beat (3s default; the e2e's 500ms shrinks both). The idle-close timeout tracks
+// SESSION_IDLE_CLOSE independently of the beats (0 falls back to the runner's
+// 30-minute default). The tick interval tracks the runner beat so a shrunk beat
+// is observed promptly without spinning the loop when the beat is the default.
 func runnerConfig(cfg *config.Config) livesession.RunnerConfig {
-	rc := livesession.RunnerConfig{QuestionReadBeat: cfg.RevealDelay}
+	rc := livesession.RunnerConfig{
+		QuestionReadBeat: cfg.RevealDelay,
+		IdleCloseTimeout: cfg.SessionIdleClose,
+	}
 	if cfg.SessionRunnerBeat <= 0 {
 		return rc
 	}

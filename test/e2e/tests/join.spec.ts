@@ -2,7 +2,7 @@ import { join } from 'node:path';
 
 import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { seedQuiz, execSqlite } from './helpers';
+import { seedQuiz, execSqlite, claimAndJoin } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' (the importer always lands
 // quizzes on 'solo', and only live quizzes are hostable, MP-0 / #677) and
@@ -132,9 +132,10 @@ test.describe('player join + lobby', () => {
   // already started the game, gets a 409 closed on join. They must land on the
   // terminal "this game is no longer available" view, not sit on the dead name
   // form with an error under it.
-  test('submitting the name after the game has started shows the closed view', async ({ page }) => {
-    const quizTitle = `Live Closed ${Date.now()}`;
+  test('submitting the name after the game has started joins mid-game and lands in the live phase', async ({ page }) => {
+    const quizTitle = `Live Latecomer ${Date.now()}`;
     const cara = `Cara-${Date.now()}`;
+    const rex = `Rex-${Date.now()}`;
 
     const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath() });
     const host = await hostContext.newPage();
@@ -144,24 +145,40 @@ test.describe('player join + lobby', () => {
     expect(createResp.status()).toBe(201);
     const { joinCode } = await createResp.json() as { joinCode: string };
 
+    // An early API-only player joins and readies, then deliberately holds their
+    // answer so the question phase stays open for the latecomer to land in.
+    const earlyContext = await page.context().browser()!.newContext({ storageState: undefined });
+    await claimAndJoin(earlyContext.request, joinCode, rex);
+    const readyResp = await earlyContext.request.post(`/api/sessions/${joinCode}/ready`, { data: { ready: true } });
+    expect(readyResp.status()).toBe(204);
+
     // The player reaches the name form via the deep link but has not joined yet.
     await page.goto(`/join/${joinCode}`);
     await expect(page.getByTestId('join-name-input')).toBeVisible();
     await page.getByTestId('join-name-input').fill(cara);
 
-    // The host starts the session (no players required), closing the lobby to
-    // any new join. v1 has no late join, so the pending player's join now 409s.
+    // The host starts the session. Join is now allowed in every phase except
+    // finished (#836 / late-join), so a latecomer is no longer turned away once
+    // play begins.
     const startResp = await host.request.post(`/api/sessions/${joinCode}/start`);
     expect(startResp.status(), `start session: ${startResp.status()} ${await startResp.text()}`).toBe(204);
 
-    // Submitting now routes to the terminal closed view rather than leaving an
-    // error under the name form.
-    await page.getByTestId('join-name-submit').click();
-    await expect(page.getByTestId('lobby-closed')).toBeVisible();
-    await expect(page.getByTestId('lobby-closed')).toContainText('no longer available');
-    // The name form is gone (the lobby stage is showing the closed banner).
-    await expect(page.getByTestId('join-name-input')).toBeHidden();
+    // Wait until the room is in the question phase (the early player holds their
+    // answer, so it stays open).
+    await expect(async () => {
+      const resp = await earlyContext.request.get(`/api/sessions/${joinCode}/state`);
+      expect(resp.ok()).toBeTruthy();
+      const state = await resp.json() as { phase: string };
+      expect(state.phase).toBe('question');
+    }).toPass({ timeout: 15_000 });
 
+    // Submitting now joins mid-game and lands the latecomer directly in the
+    // in-flight question, not the closed view: the closed banner never appears.
+    await page.getByTestId('join-name-submit').click();
+    await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('lobby-closed')).toHaveCount(0);
+
+    await earlyContext.close();
     await hostContext.close();
   });
 });

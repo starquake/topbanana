@@ -22,6 +22,10 @@ type Store interface {
 	// share link; private quizzes are gated behind authentication at
 	// the handler layer.
 	ListPublicQuizzes(ctx context.Context) ([]*Quiz, error)
+	// ListLiveQuizzes returns the mode='live' subset of ListQuizzes (#836).
+	// Used by the host intermission picker to offer the room's next quiz;
+	// visibility is not filtered, matching CreateSession's mode='live' gate.
+	ListLiveQuizzes(ctx context.Context) ([]*Quiz, error)
 	// QuestionCountsByQuiz returns the number of questions per quiz, keyed by
 	// quiz ID. Quizzes with no questions are absent from the map; callers
 	// should treat a missing entry as 0. Used alongside ListQuizzes by the
