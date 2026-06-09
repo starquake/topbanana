@@ -120,7 +120,19 @@ function hostLobby(joinCode, hasQuiz) {
         // FLIP swap, #730). Null until the first standings screen.
         lastStandingsOrder: null,
 
+        // The component root element, captured from $root in init(). The
+        // standings FLIP measures its rows by querying down from here, since the
+        // SSE-driven syncStandings path runs outside an Alpine expression where
+        // $el does not resolve to the root. Null until init().
+        rootEl: null,
+
         init() {
+            // Capture the component root so the standings FLIP can scope its row
+            // queries to this island. $root resolves here because init() runs in
+            // Alpine context; the later SSE-driven syncStandings path does not,
+            // which is why the lookup must be cached now rather than read off $el
+            // there.
+            this.rootEl = this.$root;
             // Pull the authoritative state once up front so the surface is
             // correct even before the first tick arrives, then subscribe.
             this.refresh();
@@ -358,17 +370,18 @@ function hostLobby(joinCode, hasQuiz) {
                 setBars: (next) => { this.standingsBars = next; },
                 getBars: () => this.standingsBars,
                 getContainer: () => this.standingsContainer(),
+                afterRender: (cb) => this.$nextTick(cb),
                 animateBars: animateStandingsBars,
             });
         },
 
         // standingsContainer returns the rendered standings <ul>, or null before
-        // the graph is shown. Queried from document, not this.$el: syncStandings
-        // runs from the SSE/state path (not an Alpine expression), where $el does
-        // not resolve to the component root, so $el.querySelector misses the <ul>
-        // and the FLIP never measures. Only one standings surface exists per page.
+        // the graph is shown. Scoped to this.rootEl (captured from $root in
+        // init()), not document: the host's phase blocks use x-show, so the <ul>
+        // stays mounted and the root-scoped query lands it without assuming the
+        // page holds exactly one standings surface.
         standingsContainer() {
-            return document.querySelector('[data-standings-bars]');
+            return this.rootEl ? this.rootEl.querySelector('[data-standings-bars]') : null;
         },
 
         // serverTime returns the current time in ms as the server sees it,

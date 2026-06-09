@@ -174,7 +174,10 @@ test('standings swap video: a player row slides up to first at the finish', asyn
   await answerOnPage(page, '4');
 
   // Round 1 standings render on the climber's surface (it sits 2nd, briefly).
-  await expect(page.locator('[data-testid="round-results"] [data-standings-row]').first())
+  // The standings <ul> is no longer nested in the round-results marker (#773),
+  // so pin the screen by the marker being visible plus the shared rows showing.
+  await expect(page.getByTestId('round-results')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid="standings-bars"] [data-standings-row]').first())
     .toBeVisible({ timeout: 15_000 });
 
   // Round 2: only the climber answers correctly, overtaking the rival on the
@@ -186,8 +189,10 @@ test('standings swap video: a player row slides up to first at the finish', asyn
   // its bar grows. Assert via the authoritative /state that this was a real
   // overtake - the leader actually scored (so it led round 1) and the climber
   // finished ahead of it - so the recording can never be a non-swap again.
-  const finished = page.locator('[data-testid="intermission-view"]');
-  const rows = finished.locator('[data-standings-row]');
+  // The end-of-game standings <ul> is no longer nested in the intermission
+  // marker (#773); the shared standings-bars container holds the rows.
+  await expect(page.getByTestId('intermission-view')).toBeVisible({ timeout: 20_000 });
+  const rows = page.locator('[data-testid="standings-bars"] [data-standings-row]');
   await expect(rows.first()).toBeVisible({ timeout: 20_000 });
 
   // Empirically prove the animation actually RUNS (not an instant snap): sample
@@ -196,7 +201,7 @@ test('standings swap video: a player row slides up to first at the finish', asyn
   // slide steps the row's Y position through many. An instant snap would show
   // ~1 of each. This is the motion coverage the reduced-motion specs can't give.
   const motion = await page.evaluate(async () => {
-    const view = document.querySelector('[data-testid="intermission-view"]');
+    const view = document.querySelector('[data-testid="standings-bars"]');
     const mine = () => view && view.querySelector('[data-standings-row][aria-current="true"]');
     const totals: string[] = [];
     const tops: number[] = [];

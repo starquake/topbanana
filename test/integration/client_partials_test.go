@@ -36,11 +36,12 @@ func TestStandingsBarsPartial_SharedAcrossLiveBlocks(t *testing.T) {
 			t.Errorf("/join body missing %q - the shared standings-bars partial did not expand (#754)", want)
 		}
 	}
-	// The partial is invoked from the round_results, intermission (#836), and
-	// finished blocks, so its list marker appears three times in a single shell
-	// render.
-	if got, want := strings.Count(body, `data-testid="standings-bars"`), 3; got != want {
-		t.Errorf("/join standings-bars count = %d, want %d (round_results + intermission + finished)", got, want)
+	// Since #773 the standings <ul> is a single container kept mounted across
+	// the round_results, intermission (#836), and finished phases via x-show
+	// (rather than re-included per phase under x-if), so its list marker appears
+	// exactly once in a shell render.
+	if got, want := strings.Count(body, `data-testid="standings-bars"`), 1; got != want {
+		t.Errorf("/join standings-bars count = %d, want %d (single x-show container, #773)", got, want)
 	}
 }
 

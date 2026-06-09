@@ -252,8 +252,12 @@ test('the standings bar graph shows final order and totals on the TV and player 
 
   // Round 1 round_results: both surfaces show Quincy on top (she scored, Robin
   // did not). The window is brief, so use retrying matchers; reduced motion
-  // means the final state is rendered on the first paint.
-  await expect(page.locator('[data-testid="round-results"] [data-standings-row]').first())
+  // means the final state is rendered on the first paint. The standings <ul>
+  // now stays mounted across the standings phases and is no longer nested in the
+  // round-results marker (#773), so the round_results screen is pinned by its
+  // own marker being visible plus the shared standings rows rendering.
+  await expect(page.getByTestId('round-results')).toBeVisible({ timeout: STANDINGS_SETTLE_TIMEOUT });
+  await expect(page.locator('[data-testid="standings-bars"] [data-standings-row]').first())
     .toBeVisible({ timeout: STANDINGS_SETTLE_TIMEOUT });
   await expect(async () => {
     const rows = await readStandingsRows(page);
@@ -270,9 +274,10 @@ test('the standings bar graph shows final order and totals on the TV and player 
   // separately from the totals above (the client tags its own row once the
   // SSE state names it), so it gets the same generous settle timeout as the
   // sibling assertions rather than the implicit 5s default — under CI load the
-  // highlight can lag past 5s, which flaked this assertion (#845).
+  // highlight can lag past 5s, which flaked this assertion (#845). Quincy leads,
+  // so her row is first; it is the viewer's own row, so it carries aria-current.
   await expect(
-    page.locator('[data-testid="round-results"] [data-standings-row]').first(),
+    page.locator('[data-testid="standings-bars"] [data-standings-row]').first(),
   ).toHaveAttribute('aria-current', 'true', { timeout: STANDINGS_SETTLE_TIMEOUT });
 
   // Round 2: Quincy answers '6' (correct), Robin answers '5' (wrong).
@@ -307,7 +312,10 @@ test('the standings bar graph shows final order and totals on the TV and player 
   expect(tvRows[1].rank).toBe('2');
   expect(Number(tvRows[1].total)).toBe(0);
 
-  await expect(page.getByTestId('intermission-view').locator('[data-standings-row]').first())
+  // The end-of-game screen is the intermission marker plus the shared standings
+  // rows (the <ul> is no longer nested in the marker, #773).
+  await expect(page.getByTestId('intermission-view')).toBeVisible({ timeout: STANDINGS_SETTLE_TIMEOUT });
+  await expect(page.locator('[data-testid="standings-bars"] [data-standings-row]').first())
     .toBeVisible({ timeout: STANDINGS_SETTLE_TIMEOUT });
   let playerRows = await readStandingsRows(page);
   await expect(async () => {

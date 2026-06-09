@@ -258,6 +258,12 @@ export class JoinApp {
         // only clears the held flag when it is still the current one (a stale
         // late release for a superseded sentinel is ignored).
         this.wakeLockGen = 0;
+
+        // The component root element, captured from $root in init(). The
+        // standings FLIP measures its rows by querying down from here, since the
+        // SSE-driven syncStandingsFromState path runs outside an Alpine
+        // expression where $el does not resolve to the root. Null until init().
+        this.rootEl = null;
     }
 
     // init resolves the room code (from a /join/{code} deep link or a
@@ -265,6 +271,13 @@ export class JoinApp {
     // /join/{code} deep link otherwise lands on the name form; the bare /join
     // entry with no remembered session shows the enter-code form first.
     async init() {
+        // Capture the component root so the standings FLIP can scope its row
+        // queries to this island. $root resolves here because init() runs in
+        // Alpine context; the later SSE-driven syncStandingsFromState path does
+        // not, which is why the lookup must be cached now rather than read off
+        // $el there.
+        this.rootEl = this.$root;
+
         // Fire the leave beacon on every event that can signal the player is
         // going away. beforeunload alone is unreliable on mobile - a tab the OS
         // discards in the background, or a swipe-away on iOS Safari, often never
@@ -774,19 +787,18 @@ export class JoinApp {
             setBars: (next) => { this.standingsBars = next; },
             getBars: () => this.standingsBars,
             getContainer: () => this.standingsContainer(),
+            afterRender: (cb) => this.$nextTick(cb),
             animateBars: animateStandingsBars,
         });
     }
 
-    // standingsContainer returns the rendered standings <ul> (round_results or
-    // finished; only one is in the DOM at a time via x-if), or null before the
-    // graph is shown. Queried from document, not this.$el: syncStandingsFromState
-    // runs from the SSE/state path (not an Alpine expression), where $el does not
-    // resolve to the component root, so $el.querySelector misses the <ul> and the
-    // FLIP never measures. Only one standings surface exists per page, so the
-    // document-scoped query is unambiguous.
+    // standingsContainer returns the rendered standings <ul>, or null before the
+    // graph is shown. Scoped to this.rootEl (captured from $root in init()), not
+    // document: the single standings <ul> stays mounted across the standings
+    // phases via x-show, so the root-scoped query lands it without assuming the
+    // page holds exactly one standings surface.
     standingsContainer() {
-        return document.querySelector('[data-testid="standings-bars"]');
+        return this.rootEl ? this.rootEl.querySelector('[data-testid="standings-bars"]') : null;
     }
 
     // startCountdown drives the per-question bar through the shared helper:
