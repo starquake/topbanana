@@ -119,6 +119,17 @@ func TestHostLobby_RendersCodeQuizAndQR(t *testing.T) {
 	if want := ">" + entryDisplay + "</span> and enter the code above"; !strings.Contains(body, want) {
 		t.Errorf("host lobby missing typed-code guidance %q", want)
 	}
+	// The host can close the room from the lobby: the End session control is
+	// rendered across the live phases (#836).
+	if !strings.Contains(body, "data-end-session-form") {
+		t.Error("host lobby missing the End session control")
+	}
+	// A preselected-quiz lobby seeds the component's hasQuiz true so it renders
+	// its Start controls without flashing the staging picker before the first
+	// state read (#836 no-flash hydration).
+	if !strings.Contains(body, "hostLobby(") || !strings.Contains(body, ", true)") {
+		t.Error("host lobby should seed hasQuiz=true into the component for a preselected quiz")
+	}
 }
 
 // TestHostLobby_RendersNextQuizPicker pins the intermission "Start next quiz"

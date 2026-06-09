@@ -132,7 +132,7 @@
                     <div data-testid="lobby-view">
                         <div class="mb-6">
                             <p class="label-eyebrow">Lobby</p>
-                            <h2 class="font-display text-2xl font-semibold text-text" x-text="state.quiz.title"></h2>
+                            <h2 class="font-display text-2xl font-semibold text-text" x-text="lobbyTitle()"></h2>
                             <p class="text-text-dim">
                                 Room <span class="font-mono text-accent" x-text="state.joinCode"></span>
                                 <span class="mx-1">&middot;</span>
@@ -180,10 +180,13 @@
                                data-testid="start-countdown"
                                x-text="startCountdownLabel()"></p>
                         </template>
+                        <!-- The hint distinguishes an empty staging room (no
+                             quiz picked yet, #836) from a room with a game
+                             queued: the former waits on the host to pick a quiz,
+                             the latter on the host to start the queued game. -->
                         <template x-if="!startArmed()">
-                            <p class="mb-3 text-center text-text-dim" data-testid="waiting-hint">
-                                Waiting for the host to start the game...
-                            </p>
+                            <p class="mb-3 text-center text-text-dim" data-testid="waiting-hint"
+                               x-text="lobbyHasQuiz() ? 'Waiting for the host to start the game...' : 'Waiting for the host to start a quiz...'"></p>
                         </template>
 
                         <button type="button"

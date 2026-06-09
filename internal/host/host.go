@@ -58,6 +58,12 @@ type LobbyData struct {
 	JoinEntryDisplay string
 	// QRSVG is the server-rendered QR of JoinURL, injected as trusted markup.
 	QRSVG template.HTML
+	// HasQuiz reports whether a quiz is armed in the room (#836): false for an
+	// empty room opened with no game picked yet. It seeds the lobby component's
+	// initial hasQuiz so a preselected-quiz lobby renders its Start controls
+	// straight away rather than flashing the staging picker until the first
+	// state read lands (the page's no-flash hydration).
+	HasQuiz bool
 	// QuizTitle is the quiz being hosted.
 	QuizTitle string
 	// QuestionCount is shown as lobby metadata; the lobby never leaks
@@ -175,6 +181,7 @@ func (h *Handlers) Lobby(w http.ResponseWriter, r *http.Request) {
 	// An empty room (#836) has no quiz yet: leave the quiz metadata zero-valued so
 	// the lobby renders the staging state rather than naming a quiz.
 	if state.Quiz != nil {
+		data.HasQuiz = true
 		data.QuizTitle = state.Quiz.Title
 		data.QuestionCount = len(state.Quiz.Questions)
 	}

@@ -636,6 +636,22 @@ export class JoinApp {
         return `Starting in ${formatCountdown(this.startRemaining)}`;
     }
 
+    // lobbyTitle is the lobby heading: the room's quiz title once a quiz is
+    // armed, or a generic "Get ready" for an empty room (#836). The state read
+    // omits quiz for a room opened with no game picked yet, so reading
+    // state.quiz.title directly would throw and break the lobby render - this
+    // guards that case so the player sees a sane waiting lobby.
+    lobbyTitle() {
+        return this.state && this.state.quiz ? this.state.quiz.title : 'Get ready';
+    }
+
+    // lobbyHasQuiz reports whether the room has a quiz armed, so the lobby can
+    // word its waiting hint for the empty-room staging state (no quiz yet)
+    // distinctly from a room that has a game queued (#836).
+    lobbyHasQuiz() {
+        return !!(this.state && this.state.quiz);
+    }
+
     // syncClockFrom recomputes clockOffset from the serverNow that travels with
     // every state read, so the per-question countdown runs on the server's
     // clock rather than a skewed device clock (mirrors the solo client, #180).

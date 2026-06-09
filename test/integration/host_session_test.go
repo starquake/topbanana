@@ -56,9 +56,26 @@ func TestHostSession_CreatesEmptyRoom(t *testing.T) {
 		t.Errorf("empty room phase = %q, want %q", got, want)
 	}
 
-	// The host can load the lobby it was redirected to.
-	if status, _ := getHostLobbyHTML(ctx, t, host, baseURL, code); status != http.StatusOK {
+	// The host can load the lobby it was redirected to, and the empty room
+	// renders the staging picker (so the host can pick the first quiz from the
+	// lobby) plus the End session control (so the host can close the room).
+	status, body := getHostLobbyHTML(ctx, t, host, baseURL, code)
+	if status != http.StatusOK {
 		t.Errorf("empty-room lobby status = %d, want %d", status, http.StatusOK)
+	}
+	for _, want := range []string{
+		"data-start-quiz-picker",
+		"data-next-quiz-form",
+		"data-end-session-form",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("empty-room lobby missing %q", want)
+		}
+	}
+	// The empty room seeds the component's hasQuiz false so it renders the
+	// staging picker straight away rather than the Start controls (#836).
+	if !strings.Contains(body, "hostLobby(") || !strings.Contains(body, ", false)") {
+		t.Error("empty-room lobby should seed hasQuiz=false into the component")
 	}
 
 	// The JSON state read the host page polls must not panic on a quiz-less room:
@@ -68,12 +85,12 @@ func TestHostSession_CreatesEmptyRoom(t *testing.T) {
 	if got, want := resp.StatusCode, http.StatusOK; got != want {
 		t.Fatalf("empty-room state status = %d, want %d", got, want)
 	}
-	body, err := io.ReadAll(resp.Body)
+	stateBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read empty-room state body err = %v, want nil", err)
 	}
-	if strings.Contains(string(body), `"quiz"`) {
-		t.Errorf("empty-room state body = %s, want no quiz field (omitted for a quiz-less room)", body)
+	if strings.Contains(string(stateBody), `"quiz"`) {
+		t.Errorf("empty-room state body = %s, want no quiz field (omitted for a quiz-less room)", stateBody)
 	}
 }
 
