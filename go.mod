@@ -11,9 +11,9 @@ require (
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/tdewolff/minify/v2 v2.24.13
 	github.com/wneessen/go-mail v0.7.3
-	golang.org/x/crypto v0.52.0
+	golang.org/x/crypto v0.53.0
 	golang.org/x/oauth2 v0.36.0
-	golang.org/x/sync v0.20.0
+	golang.org/x/sync v0.21.0
 	golang.org/x/term v0.44.0
 	modernc.org/sqlite v1.52.0
 )
@@ -31,7 +31,7 @@ require (
 	github.com/tdewolff/parse/v2 v2.8.12 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
