@@ -2,6 +2,7 @@ package livesession
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -42,6 +43,13 @@ const (
 // under on every warning.
 const logSessionKey = "session"
 
+// errNoQuiz guards the runner against driving a quiz-less room (#836). A room
+// created without a quiz stays in the empty lobby until the host arms one, so the
+// gameplay advance never runs without a quiz; this is the defensive error the
+// plan load returns if it ever is reached without one, turning a nil deref into a
+// skipped beat.
+var errNoQuiz = errors.New("session has no quiz")
+
 // Clock is the runner's view of time, injectable so tests drive transitions
 // off a controlled clock instead of waiting on the wall clock.
 type Clock interface {
@@ -71,6 +79,11 @@ type RunnerConfig struct {
 	// QuestionReadBeat is how long the question text shows before the answer
 	// options open and the answer window starts.
 	QuestionReadBeat time.Duration
+	// IdleCloseTimeout is how long a room may sit with its host gone AND no
+	// active players before the runner closes it as idle (#836). Zero falls back
+	// to DefaultIdleCloseTimeout. The e2e/integration suites shrink it so an
+	// idle-close spec does not pay the 30-minute production window.
+	IdleCloseTimeout time.Duration
 }
 
 func (c RunnerConfig) withDefaults() RunnerConfig {
@@ -88,6 +101,9 @@ func (c RunnerConfig) withDefaults() RunnerConfig {
 	}
 	if c.QuestionReadBeat <= 0 {
 		c.QuestionReadBeat = defaultQuestionReadBeat
+	}
+	if c.IdleCloseTimeout <= 0 {
+		c.IdleCloseTimeout = DefaultIdleCloseTimeout
 	}
 
 	return c
@@ -178,6 +194,17 @@ func (r *Runner) Begin(ctx context.Context, sessionID string) {
 	r.enterFirstRound(ctx, sess, now)
 }
 
+// Rearm is the host "start next quiz" path (#836): after the service has
+// re-armed the room (pointed it at the new quiz, bumped game_seq, reset it to
+// the lobby, and marked it started for the new game), this drops the room's
+// stale per-game phase clock and drives it straight into the new game's first
+// round, the same transition Begin runs for a fresh start. Safe to call more
+// than once; a room not in the lobby (a double re-arm) is a no-op via Begin.
+func (r *Runner) Rearm(ctx context.Context, sessionID string) {
+	r.forget(sessionID)
+	r.Begin(ctx, sessionID)
+}
+
 // tick scans every live session once and advances each. Exported to tests as
 // Tick via export_test.
 func (r *Runner) tick(ctx context.Context, now time.Time) {
@@ -208,7 +235,7 @@ func (r *Runner) advance(ctx context.Context, sessionID string, now time.Time) {
 		return
 	}
 
-	if r.abandonIfHostGone(ctx, sess, now) {
+	if r.closeIfIdle(ctx, sess, now) {
 		return
 	}
 
@@ -223,6 +250,9 @@ func (r *Runner) advance(ctx context.Context, sessionID string, now time.Time) {
 		r.advanceReveal(ctx, sess, now)
 	case PhaseRoundResults:
 		r.advanceRoundResults(ctx, sess, now)
+	case PhaseIntermission:
+		// The room waits between games for the host to arm the next quiz; the
+		// runner drives nothing here (closeIfIdle above is the only sweep).
 	case PhaseFinished:
 		r.forget(sess.ID)
 	default:
@@ -339,7 +369,7 @@ func (r *Runner) advanceReveal(ctx context.Context, sess *Session, now time.Time
 		return
 	}
 	if _, hasNext := plan.nextRound(sess.CurrentRoundID); !hasNext {
-		r.finish(ctx, sess)
+		r.endGame(ctx, sess)
 
 		return
 	}
@@ -368,7 +398,7 @@ func (r *Runner) advanceRoundResults(ctx context.Context, sess *Session, now tim
 func (r *Runner) advanceAfterRound(ctx context.Context, sess *Session, plan questionPlan, now time.Time) {
 	nextRound, ok := plan.nextRound(sess.CurrentRoundID)
 	if !ok {
-		r.finish(ctx, sess)
+		r.endGame(ctx, sess)
 
 		return
 	}
@@ -383,8 +413,9 @@ func (r *Runner) enterFirstRound(ctx context.Context, sess *Session, now time.Ti
 	}
 	firstRound, ok := plan.firstRound()
 	if !ok {
-		// A quiz with no questions has nothing to run: finish immediately.
-		r.finish(ctx, sess)
+		// A quiz with no questions has nothing to run: end the game immediately
+		// (into intermission), so the room stays alive for the host to re-arm.
+		r.endGame(ctx, sess)
 
 		return
 	}
@@ -435,7 +466,13 @@ func (r *Runner) enterRoundResults(ctx context.Context, sess *Session, now time.
 // gets the same read time and the same full answer time.
 func (r *Runner) issueQuestion(ctx context.Context, sess *Session, q *quiz.Question, now time.Time) {
 	startedAt := now.Add(r.cfg.QuestionReadBeat)
-	expires := startedAt.Add(r.questionWindow(ctx, sess.QuizID, q))
+	// issueQuestion is only reached after loadPlan succeeded, so the room has a
+	// quiz; questionWindow falls back to the default if QuizID is somehow unset.
+	quizID := int64(0)
+	if sess.QuizID != nil {
+		quizID = *sess.QuizID
+	}
+	expires := startedAt.Add(r.questionWindow(ctx, quizID, q))
 	if err := r.store.EnterQuestion(ctx, sess.ID, q.RoundID, q.ID, startedAt, expires); err != nil {
 		r.logger.WarnContext(
 			ctx,
@@ -450,37 +487,90 @@ func (r *Runner) issueQuestion(ctx context.Context, sess *Session, q *quiz.Quest
 	r.publish(sess.JoinCode, PhaseQuestion)
 }
 
-// abandonIfHostGone finishes a started, not-yet-finished session whose host
-// has not beat its heartbeat for longer than AbandonTimeout, so a room whose
-// host has dropped does not linger live forever. A lobby is out of scope (it
-// has not started, so there is nothing in flight to abandon); a finished
-// session is already terminal. The host's effective last-seen is
-// COALESCE(HostLastSeenAt, StartedAt) so a session that started but whose host
-// never beat still ages from start. Reports whether it abandoned, so the
-// caller skips the normal phase advance for this beat.
-func (r *Runner) abandonIfHostGone(ctx context.Context, sess *Session, now time.Time) bool {
-	if sess.Phase == PhaseLobby || sess.Phase == PhaseFinished {
+// closeIfIdle terminally closes a non-finished room that has gone genuinely idle
+// (#836): its host has not beat its presence heartbeat for longer than the idle
+// timeout AND no players are still active. Hosting is session-first - a host
+// opens a room up front and may browse away for minutes - so a missing host
+// heartbeat alone no longer closes the room; only a room nobody is using is swept
+// (a room with players present, or a host who is just briefly away, stays open).
+// Every phase except the terminal finished is in scope, including the empty
+// lobby (an abandoned staging room with no players still ages out) and the
+// between-games intermission. The host's effective last-seen is
+// COALESCE(HostLastSeenAt, StartedAt, CreatedAt) so a room whose host never beat
+// still ages from when it began (or was created, for a never-started lobby).
+// Reports whether it closed, so the caller skips the normal phase advance for
+// this beat.
+func (r *Runner) closeIfIdle(ctx context.Context, sess *Session, now time.Time) bool {
+	if sess.Phase == PhaseFinished {
 		return false
 	}
-	lastSeen := sess.HostLastSeenAt
-	if lastSeen == nil {
-		lastSeen = sess.StartedAt
-	}
-	if lastSeen == nil || !lastSeen.Before(now.Add(-AbandonTimeout)) {
+	lastSeen := r.hostLastSeen(sess)
+	if !lastSeen.Before(now.Add(-r.cfg.IdleCloseTimeout)) {
 		return false
 	}
 
-	r.logger.InfoContext(ctx, "finishing abandoned session (host gone)",
-		slog.String(logSessionKey, sess.ID), slog.Time("hostLastSeen", *lastSeen))
-	r.finish(ctx, sess)
+	// A room with anyone still present is in use, not idle: the host may have
+	// browsed away but players are waiting, so it must not be closed under them.
+	active, err := r.store.CountActive(ctx, sess.ID, now.Add(-ActiveWindow))
+	if err != nil {
+		r.logger.WarnContext(ctx, "runner failed to count active players for idle close",
+			slog.String(logSessionKey, sess.ID), slog.Any("err", err))
+
+		return false
+	}
+	if active > 0 {
+		return false
+	}
+
+	r.logger.InfoContext(ctx, "closing idle session (host gone, no active players)",
+		slog.String(logSessionKey, sess.ID), slog.Time("hostLastSeen", lastSeen))
+	r.finishTerminal(ctx, sess)
 
 	return true
 }
 
-// finish persists the finished transition, publishes, and drops the session's
-// in-memory bookkeeping (its phase clock and, since the session is terminal,
-// its publisher version entry).
-func (r *Runner) finish(ctx context.Context, sess *Session) {
+// hostLastSeen is the room's effective host-presence timestamp for the idle
+// sweep: the host heartbeat, falling back to when the game started, then to when
+// the room was created (a never-started lobby has neither earlier stamp).
+func (*Runner) hostLastSeen(sess *Session) time.Time {
+	if sess.HostLastSeenAt != nil {
+		return *sess.HostLastSeenAt
+	}
+	if sess.StartedAt != nil {
+		return *sess.StartedAt
+	}
+
+	return sess.CreatedAt
+}
+
+// endGame ends a game without closing the room (#836): it persists the
+// intermission transition and publishes, leaving the session alive in memory
+// (its publisher version entry stays so SSE keeps working and the host can
+// re-arm the next quiz). The phase clock is dropped because intermission is not
+// beat-gated - the runner waits on the host, not a timer. Reached on the normal
+// game-end paths (the last reveal of the last round, or a quiz with no
+// questions).
+func (r *Runner) endGame(ctx context.Context, sess *Session) {
+	if err := r.store.Intermission(ctx, sess.ID); err != nil {
+		r.logger.WarnContext(
+			ctx,
+			"runner failed to move session to intermission",
+			slog.String(logSessionKey, sess.ID),
+			slog.Any("err", err),
+		)
+
+		return
+	}
+	r.forget(sess.ID)
+	r.publish(sess.JoinCode, PhaseIntermission)
+}
+
+// finishTerminal closes the room for good: it persists the finished transition,
+// publishes, and drops the session's in-memory bookkeeping (its phase clock and,
+// since the room is now terminal, its publisher version entry). Reached only
+// when the room is actually closed - the idle auto-close swept it (host gone and
+// no players present) or the host explicitly ended the session.
+func (r *Runner) finishTerminal(ctx context.Context, sess *Session) {
 	if err := r.store.Finish(ctx, sess.ID); err != nil {
 		r.logger.WarnContext(
 			ctx,
@@ -582,9 +672,15 @@ func (r *Runner) questionWindow(ctx context.Context, quizID int64, q *quiz.Quest
 	return defaultQuestionWindow
 }
 
-// loadPlan loads the quiz and projects it into the runner's question plan.
+// loadPlan loads the quiz and projects it into the runner's question plan. A
+// quiz-less room (#836) never leaves the empty lobby into a game, so reaching
+// here without a quiz is a defensive guard rather than a real path; it returns
+// an error so the caller's advance is a no-op rather than a nil deref.
 func (r *Runner) loadPlan(ctx context.Context, sess *Session) (questionPlan, error) {
-	qz, err := r.quizzes.GetQuiz(ctx, sess.QuizID)
+	if sess.QuizID == nil {
+		return questionPlan{}, errNoQuiz
+	}
+	qz, err := r.quizzes.GetQuiz(ctx, *sess.QuizID)
 	if err != nil {
 		r.logger.WarnContext(
 			ctx, "runner failed to load quiz", slog.String(logSessionKey, sess.ID), slog.Any("err", err),

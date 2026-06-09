@@ -2,6 +2,7 @@ package admin_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	. "github.com/starquake/topbanana/internal/admin"
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/game"
+	"github.com/starquake/topbanana/internal/livesession"
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
@@ -2434,7 +2436,7 @@ func TestHandleIndex(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.DiscardHandler)
-	handler := HandleIndex(logger, nil)
+	handler := HandleIndex(logger, nil, noActiveSessionLookup{})
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	if err != nil {
 		t.Fatalf("http.NewRequest error: %v", err)
@@ -2450,17 +2452,72 @@ func TestHandleIndex(t *testing.T) {
 	// each of the three top-level admin sections (matching the nav) so a
 	// fresh admin can discover them without typing URLs. New/Import quiz
 	// moved into the Quizzes page, so they are no longer dashboard tiles.
+	// The "Host a session" entry (#836) opens an empty live room.
 	body := rr.Body.String()
 	for _, want := range []string{
 		"Admin Dashboard",
 		`href="/admin/quizzes"`,
 		`href="/admin/players"`,
 		`href="/admin/email"`,
+		`action="/host"`,
+		"Host a session",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)
 		}
 	}
+	// With no active room the resume link is absent.
+	if got := body; strings.Contains(got, "Resume hosting") {
+		t.Errorf("body shows the resume link with no active room: %q", got)
+	}
+}
+
+// TestHandleIndex_ResumeLink pins the "Resume hosting" link (#836): when the
+// signed-in host has an active room, the dashboard links back to it; the link
+// carries the join code so the host can return to a room they browsed away from.
+func TestHandleIndex_ResumeLink(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+	handler := HandleIndex(logger, nil, activeSessionLookup{code: "ABC123"})
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+	if err != nil {
+		t.Fatalf("http.NewRequest error: %v", err)
+	}
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, withTestAdmin(req))
+
+	if got, want := rr.Code, http.StatusOK; got != want {
+		t.Errorf("got status code %v, want %v", got, want)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		"Resume hosting",
+		`href="/host/ABC123"`,
+		"ABC123",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q", want)
+		}
+	}
+}
+
+// noActiveSessionLookup is an ActiveSessionLookup that reports no active room,
+// the common case for a host who is not currently hosting.
+type noActiveSessionLookup struct{}
+
+//nolint:nilnil // (nil, nil) is the deliberate "no active room" result the dashboard handles.
+func (noActiveSessionLookup) GetActiveSessionForHost(_ context.Context, _ int64) (*livesession.Session, error) {
+	return nil, nil
+}
+
+// activeSessionLookup is an ActiveSessionLookup that reports one active room by
+// its join code, so the dashboard renders the resume link.
+type activeSessionLookup struct{ code string }
+
+func (a activeSessionLookup) GetActiveSessionForHost(_ context.Context, _ int64) (*livesession.Session, error) {
+	return &livesession.Session{JoinCode: a.code}, nil
 }
 
 func TestHandleQuizCreate(t *testing.T) {

@@ -165,6 +165,10 @@ func (stubQuizStore) ListPublicQuizzes(_ context.Context) ([]*quiz.Quiz, error) 
 	return nil, errStub
 }
 
+func (stubQuizStore) ListLiveQuizzes(_ context.Context) ([]*quiz.Quiz, error) {
+	return nil, errStub
+}
+
 func (stubQuizStore) QuestionCountsByQuiz(_ context.Context) (map[int64]int, error) {
 	return nil, errStub
 }

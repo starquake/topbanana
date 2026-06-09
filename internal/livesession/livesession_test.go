@@ -19,6 +19,10 @@ import (
 // to a confusable alphabet.
 var joinCodePattern = regexp.MustCompile(`^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$`)
 
+// quizIDPtr returns a pointer to a quiz id, for building the optional
+// CreateSession quiz argument and Session.QuizID in tests.
+func quizIDPtr(id int64) *int64 { return &id }
+
 func TestGenerateJoinCode_Shape(t *testing.T) {
 	t.Parallel()
 
@@ -84,12 +88,6 @@ type fakeStore struct {
 	// markLeftErr is what MarkPlayerLeft reports, so a test can drive the
 	// not-a-participant branch of Leave without a real roster row.
 	markLeftErr error
-
-	// hasPlayerResult is what SessionHasPlayer reports, so a test can drive the
-	// reconnect/resume gate (a prior participant whose row is marked left_at is
-	// not in the live roster, yet SessionHasPlayer still sees them).
-	hasPlayerResult error
-	hasPlayer       bool
 }
 
 func (*fakeStore) Ping(context.Context) error { return nil }
@@ -126,11 +124,12 @@ func (f *fakeStore) GetSessionByJoinCode(_ context.Context, _ string) (*Session,
 	return f.session, nil
 }
 
-func (f *fakeStore) SessionHasPlayer(_ context.Context, _ string, _ int64) (bool, error) {
+//nolint:nilnil // (nil, nil) is the "no active room" result the real store also returns.
+func (f *fakeStore) GetActiveSessionForHost(_ context.Context, _ int64) (*Session, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	return f.hasPlayer, f.hasPlayerResult
+	return f.session, nil
 }
 
 func (f *fakeStore) AddPlayer(_ context.Context, _ string, playerID int64) (*Player, error) {
@@ -187,6 +186,10 @@ func (*fakeStore) EnterReveal(context.Context, string) error { return errors.Err
 func (*fakeStore) EnterRoundResults(context.Context, string) error { return errors.ErrUnsupported }
 
 func (*fakeStore) Finish(context.Context, string) error { return errors.ErrUnsupported }
+
+func (*fakeStore) Intermission(context.Context, string) error { return errors.ErrUnsupported }
+
+func (*fakeStore) RearmSession(context.Context, string, int64) error { return errors.ErrUnsupported }
 
 func (*fakeStore) RecordAnswer(context.Context, string, int64, int64, int64, time.Time) error {
 	return errors.ErrUnsupported
@@ -271,7 +274,7 @@ func TestService_CreateSession_RegeneratesOnCodeCollision(t *testing.T) {
 	quizzes := &fakeQuiz{quiz: &quiz.Quiz{ID: 7, Mode: quiz.ModeLive}}
 	svc := ExportNewServiceWithCodeGen(store, quizzes, slog.Default(), gen, 8)
 
-	sess, err := svc.CreateSession(t.Context(), 7, 1)
+	sess, err := svc.CreateSession(t.Context(), quizIDPtr(7), 1)
 	if err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -290,7 +293,7 @@ func TestService_CreateSession_ExhaustsCodeBudget(t *testing.T) {
 	quizzes := &fakeQuiz{quiz: &quiz.Quiz{ID: 7, Mode: quiz.ModeLive}}
 	svc := ExportNewServiceWithCodeGen(store, quizzes, slog.Default(), gen, 3)
 
-	_, err := svc.CreateSession(t.Context(), 7, 1)
+	_, err := svc.CreateSession(t.Context(), quizIDPtr(7), 1)
 	if got, want := err, ErrJoinCodeUnavailable; !errors.Is(got, want) {
 		t.Errorf("CreateSession exhausted err = %v, want %v", got, want)
 	}
@@ -317,16 +320,36 @@ func TestService_Join_AddsRosterRowWithoutName(t *testing.T) {
 	}
 }
 
-// TestService_Join_ClosedAfterStart pins the late-join gate: once a session
-// has left the lobby (any non-lobby phase), Join rejects a player who never
-// held a roster row with ErrLobbyClosed before touching the roster - v1 has no
-// late join.
-func TestService_Join_ClosedAfterStart(t *testing.T) {
+// TestService_Join_AllowsLatecomerMidGame pins the open-room join (#836): a
+// player who never held a roster row may still Join while a game is in flight
+// (a non-lobby, non-finished phase) - they simply miss the questions already
+// played. The v1 lobby-only gate is gone; AddPlayer adds (or, for a returning
+// player whose row is marked left_at, revives) the roster row.
+func TestService_Join_AllowsLatecomerMidGame(t *testing.T) {
 	t.Parallel()
 
 	store := &fakeStore{
-		session:   &Session{ID: "s1", QuizID: 7, JoinCode: "ROOM12", Phase: PhaseQuestion},
-		hasPlayer: false, // never joined this session
+		session: &Session{ID: "s1", QuizID: quizIDPtr(7), JoinCode: "ROOM12", Phase: PhaseQuestion},
+	}
+	svc := NewService(store, &fakeQuiz{}, slog.Default())
+	svc.SetPublisher(&spyPublisher{})
+
+	if _, err := svc.Join(t.Context(), "ROOM12", 5); err != nil {
+		t.Fatalf("Join (mid-game latecomer) err = %v, want nil", err)
+	}
+	if got, want := len(store.addedPlayerIDs), 1; got != want {
+		t.Errorf("addedPlayerIDs len = %d, want %d (latecomer joins mid-game)", got, want)
+	}
+}
+
+// TestService_Join_RejectsFinishedRoom pins that the only closed state is the
+// terminal finished room (#836): a Join attempt there returns ErrLobbyClosed
+// before touching the roster.
+func TestService_Join_RejectsFinishedRoom(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeStore{
+		session: &Session{ID: "s1", QuizID: quizIDPtr(7), JoinCode: "ROOM12", Phase: PhaseFinished},
 	}
 	svc := NewService(store, &fakeQuiz{}, slog.Default())
 
@@ -337,36 +360,6 @@ func TestService_Join_ClosedAfterStart(t *testing.T) {
 	// The gate fires before the roster write, so no AddPlayer happened.
 	if got, want := len(store.addedPlayerIDs), 0; got != want {
 		t.Errorf("addedPlayerIDs len = %d, want %d (gate must precede AddPlayer)", got, want)
-	}
-}
-
-// TestService_Join_ResumesLeftPlayerAfterStart pins the reconnect/resume
-// carve-out: a prior participant whose row is marked left_at (so they are NOT
-// in the live roster, sess.Players) may still re-Join once the session has left
-// the lobby. The gate reads SessionHasPlayer (any row regardless of left_at),
-// and AddPlayer revives the row. This is the reload-vs-leave race: the
-// beforeunload leave beacon may mark the reloading player left, and resume must
-// still let them back in.
-func TestService_Join_ResumesLeftPlayerAfterStart(t *testing.T) {
-	t.Parallel()
-
-	store := &fakeStore{
-		session: &Session{
-			ID: "s1", QuizID: 7, JoinCode: "ROOM12", Phase: PhaseQuestion,
-			// Empty live roster: the player left, so they are excluded from
-			// sess.Players, yet SessionHasPlayer still sees their row.
-			Players: nil,
-		},
-		hasPlayer: true,
-	}
-	svc := NewService(store, &fakeQuiz{}, slog.Default())
-	svc.SetPublisher(&spyPublisher{})
-
-	if _, err := svc.Join(t.Context(), "ROOM12", 5); err != nil {
-		t.Fatalf("Join (resume) err = %v, want nil", err)
-	}
-	if got, want := len(store.addedPlayerIDs), 1; got != want {
-		t.Errorf("addedPlayerIDs len = %d, want %d (resume revives the roster row)", got, want)
 	}
 }
 

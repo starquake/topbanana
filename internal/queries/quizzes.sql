@@ -50,6 +50,27 @@ WHERE q.visibility = 'public'
   AND q.mode = 'solo'
 ORDER BY q.updated_at DESC, q.id DESC;
 
+-- name: ListLiveQuizzes :many
+-- Live-mode variant of ListQuizzes (#836). Filters to mode = 'live' so the
+-- host intermission picker only offers hostable quizzes. Visibility is left
+-- unfiltered, matching CreateSession, which gates a host on mode = 'live'
+-- alone (any live quiz is hostable, regardless of who created it).
+SELECT q.id,
+       q.title,
+       q.slug,
+       q.description,
+       q.created_at,
+       q.updated_at,
+       q.created_by_player_id,
+       q.time_limit_seconds,
+       q.visibility,
+       q.mode,
+       p.display_name AS created_by_display_name
+FROM quizzes q
+         JOIN players p ON p.id = q.created_by_player_id
+WHERE q.mode = 'live'
+ORDER BY q.updated_at DESC, q.id DESC;
+
 -- name: QuestionCountsByQuiz :many
 -- Returns one row per quiz that has at least one question. Quizzes with
 -- zero questions are absent; callers should treat a missing entry as 0.

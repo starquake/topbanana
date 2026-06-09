@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -289,6 +290,55 @@ func TestQuizStore_ListQuizzes(t *testing.T) {
 		cmpopts.EquateApproxTime(3*time.Second),
 	); diff != "" {
 		t.Errorf("quizzes diff (-got +want):\n%s", diff)
+	}
+}
+
+func TestQuizStore_ListLiveQuizzes(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.New(slog.DiscardHandler))
+
+	soloQz := &quiz.Quiz{
+		Title: "Solo One", Slug: "solo-one", Description: "x",
+		CreatedByPlayerID: seededAdminID, Mode: quiz.ModeSolo,
+	}
+	liveA := &quiz.Quiz{
+		Title: "Live A", Slug: "live-a", Description: "x",
+		CreatedByPlayerID: seededAdminID, Mode: quiz.ModeSolo,
+	}
+	liveB := &quiz.Quiz{
+		Title: "Live B", Slug: "live-b", Description: "x",
+		CreatedByPlayerID: seededAdminID, Mode: quiz.ModeSolo,
+	}
+	for _, qz := range []*quiz.Quiz{soloQz, liveA, liveB} {
+		if err := quizStore.CreateQuiz(t.Context(), qz); err != nil {
+			t.Fatalf("CreateQuiz(%s) err = %v, want nil", qz.Title, err)
+		}
+	}
+	// CreateQuiz defaults to solo regardless of the Mode field, so flip the two
+	// live quizzes explicitly.
+	for _, qz := range []*quiz.Quiz{liveA, liveB} {
+		if err := quizStore.SetQuizMode(t.Context(), qz.ID, quiz.ModeLive); err != nil {
+			t.Fatalf("SetQuizMode(%s, live) err = %v, want nil", qz.Title, err)
+		}
+	}
+
+	quizzes, err := quizStore.ListLiveQuizzes(t.Context())
+	if err != nil {
+		t.Fatalf("ListLiveQuizzes err = %v, want nil", err)
+	}
+
+	titles := make([]string, 0, len(quizzes))
+	for _, qz := range quizzes {
+		if got, want := qz.Mode, quiz.ModeLive; got != want {
+			t.Errorf("quiz %q Mode = %q, want %q", qz.Title, got, want)
+		}
+		titles = append(titles, qz.Title)
+	}
+	slices.Sort(titles)
+	if got, want := titles, []string{"Live A", "Live B"}; !slices.Equal(got, want) {
+		t.Errorf("live quiz titles = %v, want %v", got, want)
 	}
 }
 

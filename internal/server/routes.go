@@ -470,7 +470,6 @@ func addAdminRoutes(
 		return auth.RequireAdmin(auth.RequireVerifiedEmail(h), stores.Players, sessions, logger)
 	}
 
-	mux.Handle("GET /admin", requireGameHost(admin.HandleIndex(logger, csrfMgr)))
 	addAdminSettingsRoutes(mux, logger, csrfMgr, requireAdmin, stores, playerDeps)
 	mux.Handle("GET /admin/players", requireAdmin(admin.HandlePlayersList(logger, csrfMgr, stores.PlayerLister)))
 	addAdminPlayerRoutes(mux, logger, csrfMgr, csrfMW, requireAdmin, stores, playerDeps)
@@ -910,9 +909,18 @@ func addHostRoutes(
 	}
 	csrfMW := csrfMgr.Middleware
 
-	handlers := host.NewHandlers(logger, csrfMgr, sessionService)
+	handlers := host.NewHandlers(logger, csrfMgr, sessionService, stores.Quizzes)
+
+	// The admin dashboard is the host's "start hosting" home, so it lives with
+	// the host routes: it surfaces the "Host a session" entry and a "Resume
+	// hosting" link off the host's active room, which needs the live-session
+	// service this function already holds (#836). It stays host-gated like the
+	// rest of /admin.
+	mux.Handle("GET /admin", requireGameHost(admin.HandleIndex(logger, csrfMgr, sessionService)))
 
 	mux.Handle("POST /host", csrfMW(requireGameHost(http.HandlerFunc(handlers.Create))))
 	mux.Handle("GET /host/{code}", requireGameHost(http.HandlerFunc(handlers.Lobby)))
 	mux.Handle("POST /host/{code}/start", csrfMW(requireGameHost(http.HandlerFunc(handlers.Start))))
+	mux.Handle("POST /host/{code}/next-quiz", csrfMW(requireGameHost(http.HandlerFunc(handlers.NextQuiz))))
+	mux.Handle("POST /host/{code}/end", csrfMW(requireGameHost(http.HandlerFunc(handlers.End))))
 }

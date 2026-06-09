@@ -15,17 +15,19 @@ import (
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
-// HandleSessionCreate opens a hosted live session for a quiz. Host-authed:
-// the caller must hold host/admin rights (a signed-in Player gets 403),
-// and the quiz must exist and be mode='live' (MP-0 / #677). Returns 201
-// with the join code on success.
+// HandleSessionCreate opens a hosted room. Host-authed: the caller must hold
+// host/admin rights (a signed-in Player gets 403). quizId is optional (#836): an
+// omitted or null quizId opens an empty room (the "no game running yet" staging
+// state where the host picks the first quiz ad-hoc), and a present quizId
+// preselects that first quiz, which must exist and be mode='live' (MP-0 / #677).
+// Returns 201 with the join code on success.
 //
 // A non-existent quiz and a solo quiz both map to 404 so the endpoint does
 // not betray which quizzes exist or their mode to a host probing ids - it
 // stays a "no hostable quiz here" answer either way.
 func HandleSessionCreate(logger *slog.Logger, service *livesession.Service) http.Handler {
 	type createRequest struct {
-		QuizID int64 `json:"quizId"`
+		QuizID *int64 `json:"quizId"`
 	}
 	type createResponse struct {
 		JoinCode string `json:"joinCode"`
@@ -80,8 +82,9 @@ func HandleSessionCreate(logger *slog.Logger, service *livesession.Service) http
 // or unnamed player claims players.display_name through the shared claim flow
 // before joining; a logged-in named player keeps their account name), so the
 // response echoes that current name straight off the context player. Returns
-// 404 when the join code is unknown and 409 when the session has already left
-// the lobby (v1 has no late join).
+// 404 when the join code is unknown and 409 when the room is closed - a
+// terminally finished room rejects joins, but a latecomer may join a live game
+// at any phase (#836).
 func HandleSessionJoin(logger *slog.Logger, service *livesession.Service) http.Handler {
 	type joinResponse struct {
 		DisplayName string `json:"displayName"`
@@ -105,7 +108,7 @@ func HandleSessionJoin(logger *slog.Logger, service *livesession.Service) http.H
 			case errors.Is(err, livesession.ErrSessionNotFound):
 				http.NotFound(w, r)
 			case errors.Is(err, livesession.ErrLobbyClosed):
-				http.Error(w, "this game has already started", http.StatusConflict)
+				http.Error(w, "this room is closed", http.StatusConflict)
 			default:
 				writeInternalError(w, r, logger, "error joining session", err)
 			}
@@ -344,12 +347,15 @@ type sessionQuizResponse struct {
 //     technique the solo client uses) without depending on the client's
 //     wall clock.
 type sessionStateResponse struct {
-	JoinCode  string                  `json:"joinCode"`
-	Phase     string                  `json:"phase"`
-	HostID    int64                   `json:"hostId"`
-	Players   []sessionPlayerResponse `json:"players"`
-	Quiz      sessionQuizResponse     `json:"quiz"`
-	ServerNow time.Time               `json:"serverNow"`
+	JoinCode string                  `json:"joinCode"`
+	Phase    string                  `json:"phase"`
+	HostID   int64                   `json:"hostId"`
+	Players  []sessionPlayerResponse `json:"players"`
+	// Quiz is the room's current quiz, omitted for an empty room with no quiz
+	// picked yet (#836): the "no game running yet" staging state carries no quiz
+	// metadata, so the field is absent rather than a zero-valued quiz.
+	Quiz      *sessionQuizResponse `json:"quiz,omitempty"`
+	ServerNow time.Time            `json:"serverNow"`
 	// StartAt is the absolute deadline of the host's armed last-call countdown
 	// (#735), as an ISO timestamp; omitted when no countdown is armed. Every
 	// surface renders the same "Starting in M:SS" off startAt minus serverNow,
@@ -476,20 +482,31 @@ func newSessionStateResponse(state *livesession.LobbyState) sessionStateResponse
 	}
 
 	return sessionStateResponse{
-		JoinCode: state.Session.JoinCode,
-		Phase:    string(state.Session.Phase),
-		HostID:   state.Session.HostPlayerID,
-		Players:  players,
-		Quiz: sessionQuizResponse{
-			ID:            state.Quiz.ID,
-			Title:         state.Quiz.Title,
-			QuestionCount: len(state.Quiz.Questions),
-		},
+		JoinCode:  state.Session.JoinCode,
+		Phase:     string(state.Session.Phase),
+		HostID:    state.Session.HostPlayerID,
+		Players:   players,
+		Quiz:      newSessionQuizResponse(state),
 		ServerNow: time.Now().UTC(),
 		StartAt:   state.Session.StartAt,
 		Question:  newSessionQuestionResponse(state),
 		Standings: newSessionStandingsResponse(state),
 		Round:     newSessionRoundResponse(state),
+	}
+}
+
+// newSessionQuizResponse projects the room's quiz onto the wire shape, or nil for
+// an empty room with no quiz picked yet (#836), so the field is omitted from the
+// JSON rather than dereferencing a nil quiz.
+func newSessionQuizResponse(state *livesession.LobbyState) *sessionQuizResponse {
+	if state.Quiz == nil {
+		return nil
+	}
+
+	return &sessionQuizResponse{
+		ID:            state.Quiz.ID,
+		Title:         state.Quiz.Title,
+		QuestionCount: len(state.Quiz.Questions),
 	}
 }
 
@@ -692,13 +709,14 @@ func (s *sessionEventStreamer) run(ctx context.Context, events <-chan livesessio
 // beatPresence bumps a presence heartbeat while the SSE connection is held:
 // once immediately, then every livesession.HeartbeatInterval until ctx is
 // cancelled (the client disconnects). touch is the heartbeat the caller chose -
-// the host's host_last_seen_at (which the runner's abandon sweep reads) or a
+// the host's host_last_seen_at (which the runner's idle-close sweep reads) or a
 // roster player's own last_seen_at (which the active-player count reads). Runs
 // in its own goroutine so it does not block the stream loop; touch failures are
 // logged at debug since a transient miss is recovered by the next beat and the
 // presence simply ages out if the beats stop. Stopping on ctx cancel is what
 // lets a dropped player or host go stale so the runner reacts (stops waiting on
-// a dropped player; finishes a host-abandoned session).
+// a dropped player; idle-closes a room once the host is away AND no players
+// remain).
 func beatPresence(ctx context.Context, logger *slog.Logger, touch func(context.Context) error) {
 	beat := func() {
 		if err := touch(ctx); err != nil {
@@ -762,8 +780,8 @@ func HandleSessionEvents(logger *slog.Logger, service *livesession.Service, hub 
 		// The held connection is the presence heartbeat: bump now and on a
 		// ticker while it is open, so a disconnect (ctx cancelled) lets the
 		// presence go stale. The host beats host_last_seen_at (the runner's
-		// abandon sweep reads it); a roster player beats their own
-		// last_seen_at (the runner's active-player count reads it) (MP-10).
+		// idle-close sweep reads it); a roster player beats their own
+		// last_seen_at (the runner's active-player count reads it).
 		touch := func(ctx context.Context) error {
 			return service.TouchLastSeen(ctx, view.Code, player.ID)
 		}

@@ -101,6 +101,38 @@ func (s *QuizStore) ListPublicQuizzes(ctx context.Context) ([]*quiz.Quiz, error)
 	return quizzes, nil
 }
 
+// ListLiveQuizzes returns the mode='live' subset of [QuizStore.ListQuizzes]
+// (#836). Same shape, same ordering - just the rows a host can run live,
+// which the intermission picker offers as the next quiz. Visibility is not
+// filtered, matching CreateSession's host gate (mode='live' alone).
+func (s *QuizStore) ListLiveQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
+	rows, err := s.q.ListLiveQuizzes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list live quizzes: %w", err)
+	}
+
+	quizzes := make([]*quiz.Quiz, 0, len(rows))
+	for _, r := range rows {
+		qz := &quiz.Quiz{
+			ID:                r.ID,
+			Title:             r.Title,
+			Slug:              r.Slug,
+			Description:       r.Description,
+			CreatedAt:         r.CreatedAt,
+			UpdatedAt:         r.UpdatedAt,
+			CreatedByPlayerID: r.CreatedByPlayerID,
+			TimeLimitSeconds:  int(r.TimeLimitSeconds),
+			Visibility:        r.Visibility,
+			Mode:              r.Mode,
+			// INNER JOIN, see ListQuizzes (#359).
+			CreatedByDisplayName: r.CreatedByDisplayName,
+		}
+		quizzes = append(quizzes, qz)
+	}
+
+	return quizzes, nil
+}
+
 // QuestionCountsByQuiz returns the number of questions per quiz, keyed by
 // quiz ID. Quizzes with zero questions are absent from the map; callers
 // should treat a missing entry as 0. Pair with [QuizStore.ListQuizzes] when

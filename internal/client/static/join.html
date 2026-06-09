@@ -132,7 +132,7 @@
                     <div data-testid="lobby-view">
                         <div class="mb-6">
                             <p class="label-eyebrow">Lobby</p>
-                            <h2 class="font-display text-2xl font-semibold text-text" x-text="state.quiz.title"></h2>
+                            <h2 class="font-display text-2xl font-semibold text-text" x-text="lobbyTitle()"></h2>
                             <p class="text-text-dim">
                                 Room <span class="font-mono text-accent" x-text="state.joinCode"></span>
                                 <span class="mx-1">&middot;</span>
@@ -180,10 +180,13 @@
                                data-testid="start-countdown"
                                x-text="startCountdownLabel()"></p>
                         </template>
+                        <!-- The hint distinguishes an empty staging room (no
+                             quiz picked yet, #836) from a room with a game
+                             queued: the former waits on the host to pick a quiz,
+                             the latter on the host to start the queued game. -->
                         <template x-if="!startArmed()">
-                            <p class="mb-3 text-center text-text-dim" data-testid="waiting-hint">
-                                Waiting for the host to start the game...
-                            </p>
+                            <p class="mb-3 text-center text-text-dim" data-testid="waiting-hint"
+                               x-text="lobbyHasQuiz() ? 'Waiting for the host to start the game...' : 'Waiting for the host to start a quiz...'"></p>
                         </template>
 
                         <button type="button"
@@ -299,10 +302,30 @@
                     </div>
                 </template>
 
-                <!-- Finished: the session is over. The same standings bar graph
-                     shows the final totals; finished carries roundScore=0, so
-                     there is no round delta to add - the bars render at their
-                     final width straight away (no grow animation). -->
+                <!-- Intermission (#836): the game is over but the room stays
+                     alive. The same standings bar graph shows the final totals
+                     of the game that just ended, and the player stays joined -
+                     no re-join, no "join another quiz" button. When the host
+                     starts the next quiz the server phase walks intermission ->
+                     lobby -> round_intro -> question and the view follows off
+                     the SSE -> GET state loop, carrying the player into game 2
+                     without re-entering a code. -->
+                <template x-if="!lobbyClosed && state && state.phase === 'intermission'">
+                    <div data-testid="intermission-view">
+                        <p class="label-eyebrow">Game over</p>
+                        <h2 class="mt-2 mb-6 font-display text-3xl font-semibold text-text">Final standings</h2>
+                        {{template "standings-bars" .}}
+                        <p class="mt-6 text-text-dim" data-testid="intermission-waiting">
+                            Waiting for the host to start the next quiz...
+                        </p>
+                    </div>
+                </template>
+
+                <!-- Finished: the room is terminally closed (the host abandoned
+                     it). The same standings bar graph shows the final totals;
+                     finished carries roundScore=0, so there is no round delta to
+                     add - the bars render at their final width straight away (no
+                     grow animation). -->
                 <template x-if="!lobbyClosed && state && state.phase === 'finished'">
                     <div data-testid="finished-view">
                         <p class="label-eyebrow">Game over</p>

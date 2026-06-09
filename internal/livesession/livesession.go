@@ -56,10 +56,10 @@ var (
 	// part of the current question, or the answer window has closed.
 	ErrQuestionNotOpen = errors.New("no question is open for answers")
 
-	// ErrLobbyClosed is returned by [Service.Join] when the session has
-	// already left the lobby: the lobby closes at start and v1 has no
-	// late join. Handlers map it to 409.
-	ErrLobbyClosed = errors.New("session lobby has closed")
+	// ErrLobbyClosed is returned by [Service.Join] when the room is
+	// terminally closed (finished). A live game accepts latecomers in any
+	// phase (#836); only a closed room rejects joins. Handlers map it to 409.
+	ErrLobbyClosed = errors.New("session room is closed")
 
 	// ErrNotInLobby is returned by [Service.ArmStart] / [Service.CancelStart]
 	// when the session has already left the lobby, so the last-call countdown
@@ -67,6 +67,14 @@ var (
 	// treat it as an idempotent no-op (the host clicked after the game already
 	// started). Distinct from [ErrLobbyClosed], which is the player-join gate.
 	ErrNotInLobby = errors.New("session is no longer in the lobby")
+
+	// ErrGameInFlight is returned by [Service.StartQuiz] when the room already
+	// has a game running, so a new quiz cannot be armed right now (#836). A quiz
+	// can be armed only when no game is in flight: from an empty lobby that never
+	// started (the first game) or from the between-games intermission (the next
+	// game). A mid-game call, or a call on a terminally finished room, is
+	// rejected. Handlers treat it as an idempotent no-op (a stale tab re-posted).
+	ErrGameInFlight = errors.New("room already has a game running")
 )
 
 // Phase is the server-authoritative state-machine label for a session.
@@ -76,13 +84,19 @@ type Phase string
 
 // Session phases. The runner advances lobby -> round_intro -> question ->
 // reveal (repeating per question) -> round_results (after the last question
-// of a round) -> the next round's round_intro, and ends at finished.
+// of a round) -> the next round's round_intro. A game ends at intermission
+// (#836): the between-games screen where the room stays alive and the host can
+// arm the next quiz, which re-arms back to lobby for the next game. A room
+// reaches the terminal finished only when it is actually closed (idle auto-close
+// - host gone past the idle timeout AND no players present - or an explicit host
+// End session), at which point the runner evicts it.
 const (
 	PhaseLobby        Phase = "lobby"
 	PhaseRoundIntro   Phase = "round_intro"
 	PhaseQuestion     Phase = "question"
 	PhaseReveal       Phase = "reveal"
 	PhaseRoundResults Phase = "round_results"
+	PhaseIntermission Phase = "intermission"
 	PhaseFinished     Phase = "finished"
 )
 
@@ -104,15 +118,15 @@ const (
 	// The e2e suite shrinks it via SESSION_START_COUNTDOWN so a spec does not
 	// pay the production dwell time.
 	DefaultStartCountdown = 60 * time.Second
-	// AbandonTimeout is how long a started (mid-game, not finished) session may
-	// go without a host heartbeat before the runner finishes it as abandoned.
-	// The host beats every HeartbeatInterval (10s) over its held SSE
-	// connection; 3 minutes is far longer than ActiveWindow (a player drop) on
-	// purpose, since finishing the room ends the game for everyone, so it
-	// tolerates a long host reconnect (laptop sleep, tab reload, network blip)
-	// before giving up. Lobbies are out of scope - only a started session is
-	// swept.
-	AbandonTimeout = 3 * time.Minute
+	// DefaultIdleCloseTimeout is how long a room may sit with its host gone (no
+	// host heartbeat) AND no active players before the runner closes it as idle
+	// (#836). Hosting is now session-first: a host opens a room up front and may
+	// browse away for minutes, so a missing host heartbeat alone no longer closes
+	// the room - it is closed only once it is genuinely idle (host gone past this
+	// generous window and nobody present). 30 minutes is far longer than the old
+	// abandon timeout on purpose, since a room is a persistent space the host
+	// returns to; the e2e/integration suites shrink it via SESSION_IDLE_CLOSE.
+	DefaultIdleCloseTimeout = 30 * time.Minute
 )
 
 // beginTimeout bounds the detached first-round transition [Service.Start]
@@ -131,11 +145,21 @@ const errGetSessionByCodeFmt = "failed to get session by join code: %w"
 // when populated by [Store.GetSessionByJoinCode]; it is nil on the bare
 // create/get paths that do not fan out the roster.
 type Session struct {
-	ID           string
-	QuizID       int64
+	ID string
+	// QuizID is the room's current quiz, or nil when no game has been picked
+	// yet (#836): a room is opened up front with no quiz (the "no game running
+	// yet" staging state) and the host arms the first live quiz ad-hoc. It is
+	// set on every game (the preselected first quiz or a re-arm) and stays set
+	// through intermission so the between-games standings still resolve the quiz.
+	QuizID       *int64
 	HostPlayerID int64
 	JoinCode     string
 	Phase        Phase
+	// GameSeq counts which game in the room is being played, starting at 1
+	// (#836). A re-arm points the room at a new quiz and bumps it, so every
+	// per-game answer read scopes to it and a re-run of the same quiz is scored
+	// independently of the previous game.
+	GameSeq int64
 	// CurrentRoundID / CurrentQuestionID point at the question the runner
 	// is currently driving; nil in the lobby and once finished.
 	CurrentRoundID    *int64
@@ -155,9 +179,9 @@ type Session struct {
 	// surface renders the same server-clock countdown.
 	StartAt *time.Time
 	// HostLastSeenAt is when the host last beat its held SSE connection; nil
-	// when the host has never beat. The runner's abandon sweep ages a started
-	// session from COALESCE(HostLastSeenAt, StartedAt) and finishes it once
-	// host presence is older than AbandonTimeout (MP-10).
+	// when the host has never beat. The runner's idle auto-close ages a room from
+	// COALESCE(HostLastSeenAt, StartedAt) and closes it once host presence is
+	// older than the idle timeout AND no players are active (#836).
 	HostLastSeenAt *time.Time
 	Players        []*Player
 }
@@ -199,10 +223,11 @@ type LobbyState struct {
 	Revealed bool
 	// Standings carries the per-player ranking the bar graph (MP-9) consumes.
 	// Populated in the round_results phase (with each player's points-this-round
-	// alongside the running total) and in the finished phase (final standings,
-	// where RoundScore carries the last round's score so the bar graph can
-	// animate that final contribution). Nil in every other phase. Ordered
-	// best-first, rank stamped 1-indexed.
+	// alongside the running total) and on the end-of-game screen - intermission
+	// (the between-games screen, #836) and the terminal finished phase - as the
+	// final standings, where RoundScore carries the last round's score so the bar
+	// graph can animate that final contribution. Nil in every other phase.
+	// Ordered best-first, rank stamped 1-indexed.
 	Standings []*Standing
 	// CurrentRound describes the round the session is about to play: its title,
 	// summary, and position so the between-rounds screen names the round and can
@@ -257,12 +282,10 @@ type Store interface {
 	// lobby roster populated. Returns [ErrSessionNotFound] when no session
 	// uses the code.
 	GetSessionByJoinCode(ctx context.Context, joinCode string) (*Session, error)
-	// SessionHasPlayer reports whether the player has ever held a roster row in
-	// the session identified by join code, regardless of left_at. Backs the
-	// reconnect/resume gate in [Service.Join]: a prior participant (even one
-	// whose row is marked left_at) may re-Join past the lobby, but a player who
-	// never joined is rejected as a late joiner.
-	SessionHasPlayer(ctx context.Context, joinCode string, playerID int64) (bool, error)
+	// GetActiveSessionForHost returns the host's most recent active (non-finished)
+	// room, or nil when the host has no active room (#836). Backs the "Resume
+	// hosting" link so a host who browsed away can return to their open room.
+	GetActiveSessionForHost(ctx context.Context, hostPlayerID int64) (*Session, error)
 	// AddPlayer adds (or revives) a roster row for the player. The display
 	// name is no longer stored per session (#716): the roster/standings reads
 	// join players and select the current players.display_name, so a rename
@@ -308,9 +331,23 @@ type Store interface {
 	// after the last question of a round, leaving current_round_id in place so
 	// a reader knows which round just finished.
 	EnterRoundResults(ctx context.Context, sessionID string) error
-	// Finish ends the session: marks it finished and clears the
-	// per-question runner columns.
+	// Finish ends the session terminally: marks it finished and clears the
+	// per-question runner columns. Used when the room is actually closed (idle
+	// auto-close, or an explicit host End session).
 	Finish(ctx context.Context, sessionID string) error
+	// Intermission ends a game without closing the room (#836): marks it
+	// intermission (the between-games screen) and clears the per-question runner
+	// columns, leaving the room alive so the host can arm the next quiz.
+	Intermission(ctx context.Context, sessionID string) error
+	// RearmSession arms a quiz to play in a room whenever no game is running
+	// (#836): the first game from an empty lobby (a room created with no quiz)
+	// and every later game from the between-games intermission share this path.
+	// It points the room at the quiz, resets to the lobby, clears the per-game
+	// runner columns, and clears every roster player's ready flag. game_seq is
+	// bumped only when re-arming from intermission, so the first game from an
+	// empty lobby stays at 1. Returns [ErrGameInFlight] when a game is already
+	// running (mid-game) or the room is terminally finished.
+	RearmSession(ctx context.Context, sessionID string, quizID int64) error
 	// RecordAnswer records (or overwrites) a player's pick for the current
 	// session question. Idempotent on (session, question, player).
 	RecordAnswer(
@@ -409,6 +446,11 @@ type Advancer interface {
 	// lobby into its first round. Safe to call more than once for the same
 	// session; a session already past the lobby is a no-op.
 	Begin(ctx context.Context, sessionID string)
+	// Rearm drives the runner into the next game of a room (#836) after the
+	// service has re-armed it: it drops the room's stale per-game state and
+	// enters the new game's first round. Safe to call more than once; a room not
+	// in the lobby is a no-op.
+	Rearm(ctx context.Context, sessionID string)
 }
 
 // Service orchestrates the live-session use cases over the store layer and
@@ -489,19 +531,25 @@ func (s *Service) SetStartCountdown(d time.Duration) {
 	s.startCountdown = d
 }
 
-// CreateSession opens a hosted session for the given quiz on behalf of the
-// host. The route layer has already gated the caller to host/admin; this
-// method enforces the domain rules: the quiz must exist and be visible to
-// the host (any visibility - a host can view any quiz, decision 4) and
-// must be mode='live' (MP-0 / #677). Returns [quiz.ErrQuizNotFound] when
-// the quiz does not exist and [ErrNotLiveQuiz] when it is a solo quiz.
-func (s *Service) CreateSession(ctx context.Context, quizID, hostPlayerID int64) (*Session, error) {
-	qz, err := s.quizzes.GetQuiz(ctx, quizID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get quiz for session: %w", err)
-	}
-	if qz.Mode != quiz.ModeLive {
-		return nil, ErrNotLiveQuiz
+// CreateSession opens a hosted room on behalf of the host (#836). quizID is
+// optional: nil opens an empty room with no current quiz (the "no game running
+// yet" staging state, where the host picks the first live quiz ad-hoc once
+// players have joined), and a non-nil id opens a room with that quiz preselected
+// ("Play live" from a quiz). The route layer has already gated the caller to
+// host/admin; when a quiz is supplied this method enforces the domain rules: it
+// must exist and be visible to the host (any visibility - a host can view any
+// quiz, decision 4) and must be mode='live' (MP-0 / #677). Returns
+// [quiz.ErrQuizNotFound] when the supplied quiz does not exist and
+// [ErrNotLiveQuiz] when it is a solo quiz.
+func (s *Service) CreateSession(ctx context.Context, quizID *int64, hostPlayerID int64) (*Session, error) {
+	if quizID != nil {
+		qz, err := s.quizzes.GetQuiz(ctx, *quizID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get quiz for session: %w", err)
+		}
+		if qz.Mode != quiz.ModeLive {
+			return nil, ErrNotLiveQuiz
+		}
 	}
 
 	code, err := s.allocateJoinCode(ctx)
@@ -510,7 +558,7 @@ func (s *Service) CreateSession(ctx context.Context, quizID, hostPlayerID int64)
 	}
 
 	sess := &Session{
-		QuizID:       qz.ID,
+		QuizID:       quizID,
 		HostPlayerID: hostPlayerID,
 		JoinCode:     code,
 		Phase:        PhaseLobby,
@@ -529,29 +577,22 @@ func (s *Service) CreateSession(ctx context.Context, quizID, hostPlayerID int64)
 // the roster row; the displayed name comes from the players join on the
 // roster/standings reads, so a rename propagates everywhere. Returns
 // [ErrSessionNotFound] when the code resolves to no session and
-// [ErrLobbyClosed] when the session has already left the lobby (v1 has no
-// late join).
+// [ErrLobbyClosed] only when the room is terminally closed (finished); a
+// latecomer may join a live game at any phase (#836).
 func (s *Service) Join(ctx context.Context, joinCode string, playerID int64) (*Player, error) {
 	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
 	if err != nil {
 		return nil, fmt.Errorf(errGetSessionByCodeFmt, err)
 	}
 
-	// The lobby closes at start: v1 has no late join. A prior participant may
-	// still re-Join once the session has left the lobby - that is a
-	// reconnect/resume, and AddPlayer revives their row (clearing left_at). The
-	// gate checks for any roster row regardless of left_at (SessionHasPlayer),
-	// not the live roster: a player who reloaded mid-session may already be
-	// marked left_at by the beforeunload leave beacon, and must still be allowed
-	// back. Only a player who never held a row is rejected past the lobby.
-	if sess.Phase != PhaseLobby {
-		joined, hasErr := s.store.SessionHasPlayer(ctx, sess.JoinCode, playerID)
-		if hasErr != nil {
-			return nil, fmt.Errorf("failed to check prior participation: %w", hasErr)
-		}
-		if !joined {
-			return nil, ErrLobbyClosed
-		}
+	// A room accepts joins in every phase except the terminal finished state
+	// (#836): a latecomer joins mid-game and simply misses the questions already
+	// played, players drift in during the between-games intermission, and a
+	// prior participant re-Joining at any live phase is a reconnect/resume
+	// (AddPlayer revives their row, clearing left_at). Only a finished, closed
+	// room rejects joins.
+	if sess.Phase == PhaseFinished {
+		return nil, ErrLobbyClosed
 	}
 
 	player, err := s.store.AddPlayer(ctx, sess.ID, playerID)
@@ -618,6 +659,126 @@ func (s *Service) Start(ctx context.Context, joinCode string, hostPlayerID int64
 	}
 
 	return nil
+}
+
+// StartQuiz arms a quiz to play in a room and begins it immediately (#836). It
+// is the single "host picks a quiz and starts it" path, used both for the first
+// game from an empty lobby (a room opened with no quiz) and for the next game
+// from the between-games intermission. Only the host may call it, and only when
+// no game is in flight (an empty lobby that never started, or intermission), so
+// a quiz cannot be armed mid-game. The quiz must exist and be mode='live' (the
+// same gate [Service.CreateSession] applies). Re-arming bumps game_seq from
+// intermission (the previous game counted) and resets the roster's ready flags,
+// then the game begins with the same start-now semantics as [Service.Start].
+// Returns [ErrSessionNotFound] for an unknown code, [ErrNotHost] when the caller
+// is not the host, [quiz.ErrQuizNotFound] / [ErrNotLiveQuiz] for an unhostable
+// quiz, and [ErrGameInFlight] when a game is already running.
+func (s *Service) StartQuiz(ctx context.Context, joinCode string, hostPlayerID, quizID int64) error {
+	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
+	if err != nil {
+		return fmt.Errorf(errGetSessionByCodeFmt, err)
+	}
+	if sess.HostPlayerID != hostPlayerID {
+		return ErrNotHost
+	}
+	if !canArmQuiz(sess) {
+		return ErrGameInFlight
+	}
+
+	qz, err := s.quizzes.GetQuiz(ctx, quizID)
+	if err != nil {
+		return fmt.Errorf("failed to get quiz for next game: %w", err)
+	}
+	if qz.Mode != quiz.ModeLive {
+		return ErrNotLiveQuiz
+	}
+
+	// RearmSession is scoped to "no game in flight", so it is the real arbiter if
+	// the room left that state between the read above and this write (a concurrent
+	// arm or a start that raced this one); it returns ErrGameInFlight to the loser.
+	if err = s.store.RearmSession(ctx, sess.ID, qz.ID); err != nil {
+		return fmt.Errorf("failed to rearm session: %w", err)
+	}
+
+	// Mark the re-armed lobby started so the new game begins now (start-now
+	// semantics) and the idle auto-close ages host presence from this game's start.
+	if _, err = s.store.MarkStarted(ctx, sess.ID); err != nil {
+		return fmt.Errorf("failed to mark next game started: %w", err)
+	}
+
+	// A re-arm changes what every surface shows (new quiz, back to lobby), so
+	// signal subscribers to re-GET the state before the runner drives the game.
+	s.publish(sess.JoinCode, PhaseLobby)
+
+	if s.advancer != nil {
+		// Detach from the request context (same reason as Start) so a host
+		// disconnect cannot strand the re-armed game in the lobby; the runner's
+		// next tick is the backstop.
+		rearmCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), beginTimeout)
+		defer cancel()
+		s.advancer.Rearm(rearmCtx, sess.ID)
+	}
+
+	return nil
+}
+
+// canArmQuiz reports whether a quiz can be armed to play in the room right now:
+// from an empty lobby that never started (the first game) or from the
+// between-games intermission (the next game). A game in flight (any other phase,
+// or a lobby already marked started) and a terminally finished room cannot.
+// Mirrors the RearmSession query's WHERE so the service rejects early with a
+// clear error, while the scoped UPDATE stays the real arbiter against a race.
+func canArmQuiz(sess *Session) bool {
+	if sess.Phase == PhaseIntermission {
+		return true
+	}
+
+	return sess.Phase == PhaseLobby && sess.StartedAt == nil
+}
+
+// EndSession closes a room for good (#836): the host control that terminally
+// finishes the room (finished + evict) from any live phase, so a host who is
+// done can shut it down rather than leaving it for the idle auto-close. Only the
+// host may call it. An already-finished room is treated as an idempotent no-op
+// (the host double-posted or a stale tab re-ended it). Returns
+// [ErrSessionNotFound] for an unknown code and [ErrNotHost] when the caller is
+// not the host.
+func (s *Service) EndSession(ctx context.Context, joinCode string, hostPlayerID int64) error {
+	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
+	if err != nil {
+		return fmt.Errorf(errGetSessionByCodeFmt, err)
+	}
+	if sess.HostPlayerID != hostPlayerID {
+		return ErrNotHost
+	}
+	if sess.Phase == PhaseFinished {
+		return nil
+	}
+
+	if err = s.store.Finish(ctx, sess.ID); err != nil {
+		return fmt.Errorf("failed to finish session: %w", err)
+	}
+
+	// The room is now terminal; signal subscribers to re-GET so every surface
+	// lands on the finished state and the live clients tear down.
+	s.publish(sess.JoinCode, PhaseFinished)
+
+	return nil
+}
+
+// GetActiveSessionForHost returns the host's current active (non-finished) room,
+// or nil when the host has none (#836). Backs the "Resume hosting" link: a host
+// who opened a room up front and browsed away can return to it. Not gated beyond
+// the host id it is keyed on; the route layer host-gates the caller.
+//
+//nolint:nilnil // (nil, nil) is the deliberate "no active room" result; absence is not an error here.
+func (s *Service) GetActiveSessionForHost(ctx context.Context, hostPlayerID int64) (*Session, error) {
+	sess, err := s.store.GetActiveSessionForHost(ctx, hostPlayerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get active session for host: %w", err)
+	}
+
+	return sess, nil
 }
 
 // ArmStart arms the host's last-call countdown (the "Start in 60s" control):
@@ -743,12 +904,11 @@ func (s *Service) GetLobbyState(ctx context.Context, joinCode string, playerID i
 		return nil, ErrNotParticipant
 	}
 
-	qz, err := s.quizzes.GetQuiz(ctx, sess.QuizID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get quiz for lobby state: %w", err)
+	state := &LobbyState{Session: sess, Revealed: sess.Phase == PhaseReveal}
+	if state.Quiz, err = s.lobbyQuiz(ctx, sess); err != nil {
+		return nil, err
 	}
 
-	state := &LobbyState{Session: sess, Quiz: qz, Revealed: sess.Phase == PhaseReveal}
 	if err = s.populateInGame(ctx, state); err != nil {
 		return nil, err
 	}
@@ -813,9 +973,10 @@ func (s *Service) TouchLastSeen(ctx context.Context, joinCode string, playerID i
 
 // TouchHostLastSeen refreshes the host-presence heartbeat for the session
 // identified by join code. The SSE events handler calls it (in place of
-// TouchLastSeen) while the host's connection is held, so a host who
-// disconnects mid-game goes stale and the runner's abandon sweep finishes the
-// lingering session. Returns [ErrSessionNotFound] for an unknown code.
+// TouchLastSeen) while the host's connection is held, so a host who disconnects
+// and stays gone ages toward the runner's idle auto-close (which still needs the
+// room to be empty before it closes). Returns [ErrSessionNotFound] for an
+// unknown code.
 func (s *Service) TouchHostLastSeen(ctx context.Context, joinCode string) error {
 	if err := s.store.TouchHostLastSeen(ctx, normalizeJoinCode(joinCode)); err != nil {
 		return fmt.Errorf("failed to touch session host last seen: %w", err)
@@ -848,11 +1009,33 @@ func (s *Service) Leave(ctx context.Context, joinCode string, playerID int64) er
 	return nil
 }
 
+// lobbyQuiz loads the room's quiz for the lobby state, or (nil, nil) for an empty
+// room (no quiz picked yet, #836): the lobby renders the staging state and the
+// in-game / standings / round-intro populators are all no-ops in that phase.
+//
+//nolint:nilnil // (nil, nil) is the deliberate "no quiz yet" result for an empty room.
+func (s *Service) lobbyQuiz(ctx context.Context, sess *Session) (*quiz.Quiz, error) {
+	if sess.QuizID == nil {
+		return nil, nil
+	}
+	qz, err := s.quizzes.GetQuiz(ctx, *sess.QuizID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get quiz for lobby state: %w", err)
+	}
+
+	return qz, nil
+}
+
 // currentQuizQuestion loads the quiz question the session is currently
 // running. Returns [ErrQuestionNotOpen] when the current question id no
-// longer resolves against the quiz (a deleted question mid-game).
+// longer resolves against the quiz (a deleted question mid-game), and when the
+// room has no quiz (an empty room never reaches the question phase, so this is
+// the defensive no-question answer).
 func (s *Service) currentQuizQuestion(ctx context.Context, sess *Session) (*quiz.Question, error) {
-	qz, err := s.quizzes.GetQuiz(ctx, sess.QuizID)
+	if sess.QuizID == nil {
+		return nil, ErrQuestionNotOpen
+	}
+	qz, err := s.quizzes.GetQuiz(ctx, *sess.QuizID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quiz for answer: %w", err)
 	}
@@ -898,14 +1081,17 @@ func (s *Service) populateInGame(ctx context.Context, state *LobbyState) error {
 
 // populateStandings fills Standings with the per-player ranking the bar graph
 // consumes: the round delta + running total in the round_results phase (keyed
-// on the round that just finished), and the cumulative final standings in the
-// finished phase. The finished standings carry each player's score in the last
-// round as RoundScore so the finished bar graph can animate the last round's
-// contribution (preTotal = TotalScore - RoundScore), matching the
-// between-rounds screen; players absent from the last round keep RoundScore 0
-// and so do not grow. Ranking stays by cumulative total in both phases. Leaves
-// Standings nil in every other phase, which has no ranking to show. Ranks are
-// stamped 1-indexed over the store's best-first ordering.
+// on the round that just finished), and the cumulative final standings on the
+// end-of-game screen. A game now ends in intermission (#836) - the between-games
+// screen where the room waits for the host to arm the next quiz - so the final
+// standings are shown there; the terminal finished phase (a closed room) shows
+// them too. The final standings carry each player's score in the last round as
+// RoundScore so the bar graph can animate the last round's contribution
+// (preTotal = TotalScore - RoundScore), matching the between-rounds screen;
+// players absent from the last round keep RoundScore 0 and so do not grow.
+// Ranking stays by cumulative total in every phase. Leaves Standings nil in
+// every other phase, which has no ranking to show. Ranks are stamped 1-indexed
+// over the store's best-first ordering.
 func (s *Service) populateStandings(ctx context.Context, state *LobbyState) error {
 	sess := state.Session
 	switch {
@@ -915,7 +1101,7 @@ func (s *Service) populateStandings(ctx context.Context, state *LobbyState) erro
 			return fmt.Errorf("failed to list round standings for state: %w", err)
 		}
 		state.Standings = rankStandings(standings)
-	case sess.Phase == PhaseFinished:
+	case sess.Phase == PhaseIntermission, sess.Phase == PhaseFinished:
 		standings, err := s.finishedStandings(ctx, sess)
 		if err != nil {
 			return err
@@ -938,8 +1124,14 @@ func (s *Service) finishedStandings(ctx context.Context, sess *Session) ([]*Stan
 	if err != nil {
 		return nil, fmt.Errorf("failed to list final standings for state: %w", err)
 	}
+	// A room shows final standings only after a game, so a quiz is always set
+	// here; guard the deref so a quiz-less room (which has no game to score)
+	// returns the bare standings rather than panicking.
+	if sess.QuizID == nil {
+		return standings, nil
+	}
 
-	rounds, err := s.quizzes.ListRoundsByQuiz(ctx, sess.QuizID)
+	rounds, err := s.quizzes.ListRoundsByQuiz(ctx, *sess.QuizID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list rounds for final standings: %w", err)
 	}
@@ -972,11 +1164,11 @@ func (s *Service) finishedStandings(ctx context.Context, sess *Session) ([]*Stan
 // its generic copy rather than naming a stale round.
 func (s *Service) populateRoundIntro(ctx context.Context, state *LobbyState) error {
 	sess := state.Session
-	if sess.Phase != PhaseRoundIntro || sess.CurrentRoundID == nil {
+	if sess.Phase != PhaseRoundIntro || sess.CurrentRoundID == nil || sess.QuizID == nil {
 		return nil
 	}
 
-	rounds, err := s.quizzes.ListRoundsByQuiz(ctx, sess.QuizID)
+	rounds, err := s.quizzes.ListRoundsByQuiz(ctx, *sess.QuizID)
 	if err != nil {
 		return fmt.Errorf("failed to list rounds for round intro: %w", err)
 	}

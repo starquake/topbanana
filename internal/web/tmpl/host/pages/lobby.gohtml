@@ -10,7 +10,7 @@
          body is a flex child with min-h-0 so its lists (roster, options,
          standings) shrink and scroll inside the frame instead of pushing the
          header/footer off-screen (#734). */}}
-    <main x-data="hostLobby({{.JoinCode | printf "%q"}})"
+    <main x-data="hostLobby({{.JoinCode | printf "%q"}}, {{.HasQuiz}})"
           class="h-dvh overflow-hidden flex flex-col">
         <header class="shrink-0 flex items-center justify-between gap-4 px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1rem,2.5vh,2rem)] border-b border-border-soft">
             <a href="/" aria-label="Top Banana!"
@@ -221,20 +221,24 @@
             </template>
         </div>
 
-        {{/* ----- Round results / finished: the standings bar graph (MP-9 /
-             #686). Each player is a horizontal bar whose width maps to their
-             cumulative total against the leader's. Entering round_results the
-             bars grow from each player's pre-round total to their new total
-             while the numeric labels count up, then rest in rank order
-             (best-first). The finished phase carries roundScore=0, so the bars
-             render at their final width straight away (no grow). The animation
-             is driven in host-lobby.js via anime.js with a reduced-motion /
-             missing-global fallback that snaps to the final state. ----- */}}
-        <div x-show="phase === 'round_results' || phase === 'finished'"
+        {{/* ----- Round results / intermission / finished: the standings bar
+             graph (MP-9 / #686). Each player is a horizontal bar whose width
+             maps to their cumulative total against the leader's. Entering
+             round_results the bars grow from each player's pre-round total to
+             their new total while the numeric labels count up, then rest in
+             rank order (best-first). The end-of-game screens (intermission, the
+             between-games screen #836, and the terminal finished phase) carry
+             roundScore for the last round so the bars animate that final
+             contribution. The animation is driven in host-lobby.js via anime.js
+             with a reduced-motion / missing-global fallback that snaps to the
+             final state. At intermission the "Start next quiz" picker appears
+             below the standings so the host can re-arm the room onto the next
+             live quiz. ----- */}}
+        <div x-show="phase === 'round_results' || phase === 'intermission' || phase === 'finished'"
              class="flex-1 min-h-0 flex flex-col gap-[clamp(1rem,3vh,2rem)] px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1.5rem,4vh,3rem)]"
              data-phase-results>
             <p class="m-0 shrink-0 font-display font-extrabold text-[clamp(1.75rem,4.5vw,3.25rem)] leading-tight text-center"
-               x-text="phase === 'finished' ? 'Final scores' : 'Scores so far'"></p>
+               x-text="phase === 'round_results' ? 'Scores so far' : 'Final scores'"></p>
 
             <ul class="m-0 list-none p-0 flex flex-col gap-3 max-w-[60rem] w-full mx-auto overflow-y-auto min-h-0"
                 role="list"
@@ -266,6 +270,18 @@
             </ul>
         </div>
 
+        {{/* Start-quiz picker (#836): the pick-and-start-a-quiz control, rendered
+             once and shown for both staging cases - an empty lobby (the first
+             game) and the between-games intermission (the next game) - via
+             showsStartQuizPicker(). Its field/button labels are reactive so the
+             first game never says "next". A preselected-quiz lobby keeps the
+             footer Start controls instead, so this stays hidden there. */}}
+        <div x-show="showsStartQuizPicker()"
+             class="shrink-0 px-[clamp(1.5rem,4vw,4rem)] pb-[clamp(1rem,2.5vh,2rem)]"
+             data-start-quiz-picker>
+            {{template "start-quiz-picker" .}}
+        </div>
+
         {{/* Footer: connection state + host start controls (lobby only). The
              host either starts now, or arms a last-call countdown. While the
              countdown is armed every surface shows "Starting in M:SS" off the
@@ -290,8 +306,10 @@
                 </template>
             </p>
 
-            {{/* Armed: the live countdown, with Start now (skip) + Cancel. */}}
-            <div x-show="phase === 'lobby' && armed()"
+            {{/* Armed: the live countdown, with Start now (skip) + Cancel. Only
+                 when a quiz is queued (a preselected-quiz lobby); the empty room
+                 uses the staging picker above instead (#836). */}}
+            <div x-show="phase === 'lobby' && hasQuiz && armed()"
                  class="flex flex-wrap items-center gap-4"
                  data-start-countdown>
                 <p class="m-0 font-display font-extrabold text-accent text-[clamp(1.1rem,2.4vw,1.75rem)] tabular-nums"
@@ -312,8 +330,10 @@
                         data-cancel-start>Cancel</button>
             </div>
 
-            {{/* Not armed: Start now + Start in 60s. */}}
-            <div x-show="phase === 'lobby' && !armed()"
+            {{/* Not armed: Start now + Start in 60s. Only when a quiz is queued
+                 (a preselected-quiz lobby); the empty room uses the staging
+                 picker above instead (#836). */}}
+            <div x-show="phase === 'lobby' && hasQuiz && !armed()"
                  class="flex flex-wrap items-center gap-4">
                 <form method="post" :action="'/host/' + encodeURIComponent(joinCode) + '/start'" @submit.prevent="start()">
                     <input type="hidden" name="csrf_token" value="{{csrfToken}}">
@@ -331,6 +351,23 @@
                         data-arm-start>Start in 60s</button>
             </div>
 
+            {{/* End session (#836): the host control that closes the room for
+                 good. Shown across the live phases (lobby / intermission /
+                 in-game) and hidden once the room is finished. A plain
+                 server-rendered POST + 303 redirect, with a confirm guard so a
+                 stray click does not drop a live room; native submit proceeds
+                 only when the host confirms. */}}
+            <form x-show="showsEndSession()"
+                  method="post"
+                  :action="'/host/' + encodeURIComponent(joinCode) + '/end'"
+                  @submit="if (!confirm('End this session for everyone?')) $event.preventDefault()"
+                  data-end-session-form>
+                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                <button type="submit"
+                        class="inline-flex items-center justify-center gap-2 min-h-[52px] px-6 rounded-lg bg-surface text-danger font-display font-bold text-[clamp(0.9rem,1.7vw,1.15rem)] uppercase tracking-[0.12em] border border-danger/50 transition-colors hover:border-danger focus-visible:outline-none focus-visible:shadow-focus cursor-pointer"
+                        data-end-session>End session</button>
+            </form>
+
             {{/* Host-facing status line for the start controls. */}}
             <p x-show="startMessage"
                x-text="startMessage"
@@ -338,4 +375,48 @@
                role="status"></p>
         </footer>
     </main>
+{{end}}
+
+{{/* start-quiz-picker (#836): the shared pick-and-start-a-quiz control. A plain
+     server-rendered POST form that arms the room onto the chosen live quiz; the
+     native submit + the 303 redirect reloads /host/{code}, which the runner
+     drives into the game - no JS needed for the submit. It serves both the
+     empty-room lobby (the first game) and the between-games intermission (the
+     next game); the field and button labels are reactive (pickerLabel /
+     pickerButtonLabel) so the first game never says "next". The live quizzes are
+     server-rendered into the select at GET (static for the page's lifetime). */}}
+{{define "start-quiz-picker"}}
+    <form method="post"
+          :action="'/host/' + encodeURIComponent(joinCode) + '/next-quiz'"
+          class="flex flex-wrap items-end justify-center gap-4 max-w-[60rem] w-full mx-auto"
+          data-next-quiz-form>
+        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+        <div class="flex flex-col gap-2 min-w-[16rem]">
+            <label for="next-quiz-select"
+                   class="m-0 text-text-dim text-[clamp(0.8rem,1.5vw,1rem)] font-semibold uppercase tracking-[0.14em]"
+                   x-text="pickerLabel()">Start a quiz</label>
+            {{if .LiveQuizzes}}
+                <select id="next-quiz-select" name="quiz_id"
+                        class="min-h-[52px] px-4 rounded-lg bg-surface text-text border border-border-soft text-[clamp(0.95rem,1.7vw,1.2rem)] focus-visible:outline-none focus-visible:shadow-focus"
+                        data-next-quiz-select>
+                    {{range .LiveQuizzes}}
+                        <option value="{{.ID}}">{{.Title}}</option>
+                    {{end}}
+                </select>
+            {{else}}
+                {{/* No live quizzes to offer: keep the label's target valid
+                     with a disabled read-only input rather than an empty
+                     select, and make the absence explicit. */}}
+                <input id="next-quiz-select" type="text" readonly
+                       value="No live quizzes available"
+                       class="min-h-[52px] px-4 rounded-lg bg-surface text-text-dim border border-border-soft text-[clamp(0.95rem,1.7vw,1.2rem)]"
+                       data-next-quiz-empty>
+            {{end}}
+        </div>
+        <button type="submit"
+                class="inline-flex items-center justify-center gap-2 min-h-[52px] px-8 rounded-lg bg-accent text-bg font-display font-extrabold text-[clamp(0.9rem,1.7vw,1.15rem)] uppercase tracking-[0.12em] border-0 transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                {{if not .LiveQuizzes}}disabled{{end}}
+                x-text="pickerButtonLabel()"
+                data-next-quiz-submit>Start quiz</button>
+    </form>
 {{end}}
