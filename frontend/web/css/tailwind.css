@@ -585,6 +585,55 @@
         @apply max-w-md mx-auto;
     }
 
+    /* iOS PWA safe-area handling (#826, #831). In a home-screen
+     * standalone launch the page draws under the notch / status bar and
+     * the home indicator, and Safari's bottom address bar can overlap
+     * content. .player-shell adds the four env(safe-area-inset-*) values
+     * on top of the player <main>'s own padding so content clears the
+     * notch (top), the home indicator / bottom address bar (bottom), and
+     * the landscape notch (left/right). The insets resolve to 0 on
+     * non-notched / non-standalone viewports, so this is inert on desktop
+     * and Android. viewport-fit=cover in the shell <head> is what makes
+     * the insets non-zero. */
+    .player-shell {
+        /* --main-py mirrors the player <main>'s vertical padding (py-10,
+         * then sm:py-16) so both this padding and the .game-fill column
+         * math read one source. Bumped at Tailwind's sm breakpoint
+         * (40rem / 640px). --main-px is the base horizontal padding
+         * (px-5); the solo shell bumps it at lg via an arbitrary
+         * [--main-px:2rem] utility, the join shell leaves it at the
+         * default. */
+        --main-py: 2.5rem;
+        --main-px: 1.25rem;
+        padding-top: calc(var(--main-py) + env(safe-area-inset-top));
+        padding-bottom: calc(var(--main-py) + env(safe-area-inset-bottom));
+        padding-left: calc(var(--main-px) + env(safe-area-inset-left));
+        padding-right: calc(var(--main-px) + env(safe-area-inset-right));
+    }
+    @media (min-width: 40rem) {
+        .player-shell {
+            --main-py: 4rem;
+        }
+    }
+
+    /* The in-game flex column is sized to fill the viewport minus the
+     * shell's vertical padding, so its mt-auto bottom buttons anchor to
+     * the bottom edge. The base value subtracts the player <main>'s own
+     * py (2 * --main-py); the safe-area variant additionally subtracts
+     * both vertical insets so the column still fits exactly inside the
+     * padded shell and the bottom buttons sit ABOVE the home indicator /
+     * address bar instead of being pushed under it or forcing overflow
+     * scroll (#831). 100svh tracks the small viewport so the layout is
+     * steady across mobile URL-bar collapse. */
+    .game-fill {
+        min-height: calc(
+            100svh
+            - 2 * var(--main-py)
+            - env(safe-area-inset-top)
+            - env(safe-area-inset-bottom)
+        );
+    }
+
     /* --- Player-surface components (#238). Lifted from the old
      * synthwave.css. Used only by internal/client/static/index.html;
      * named generically so admin can pick them up if a future page

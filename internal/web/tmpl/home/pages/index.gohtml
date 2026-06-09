@@ -16,6 +16,14 @@
         <p class="mt-2 max-w-[55ch] text-text-dim text-[0.95rem]">
             Pick a quiz, race the clock, see who comes out on top.
         </p>
+        {{/* Joining a hosted live game needs the /join enter-code screen.
+             Surfaced here because the installed PWA opens at this page with
+             no address bar, so without this link a player has no way to reach
+             it (#826). */}}
+        <a href="/join" class="btn-primary gap-2 mt-1" data-testid="home-join-live">
+            <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M10.804 8 5 4.633v6.734zM5.696 4.41a.5.5 0 0 0-.696.46v6.266a.5.5 0 0 0 .696.46l5.453-3.133a.5.5 0 0 0 0-.866z"/><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/></svg>
+            <span>Join a live game</span>
+        </a>
     </header>
 
     <div class="grid gap-8 md:grid-cols-3">
