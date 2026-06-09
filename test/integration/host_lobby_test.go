@@ -124,6 +124,15 @@ func TestHostLobby_RendersCodeQuizAndQR(t *testing.T) {
 	if !strings.Contains(body, "data-end-session-form") {
 		t.Error("host lobby missing the End session control")
 	}
+	// The TV header carries a Manage cross-link back to the admin console
+	// (#844). The TV surface deliberately has no account cluster / log out,
+	// so the only chrome is the home logo and this link.
+	if !strings.Contains(body, `<a href="/admin"`) {
+		t.Error("host lobby header missing the Manage link to /admin")
+	}
+	if strings.Contains(body, `action="/logout"`) {
+		t.Error("host lobby should not render a log-out form (TV is a shared screen, not a session surface)")
+	}
 	// A preselected-quiz lobby seeds the component's hasQuiz true so it renders
 	// its Start controls without flashing the staging picker before the first
 	// state read (#836 no-flash hydration).

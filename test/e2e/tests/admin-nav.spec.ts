@@ -54,13 +54,14 @@ test('admin "Signed in as" links to profile and returns to the dashboard', async
   await expect(page).toHaveURL(/\/admin$/);
 });
 
-// #732 — Log out moved out of the top nav to the admin footer; it must
-// stay a working POST form reachable on every admin page.
-test('admin footer logs the user out', async ({ page }) => {
+// #844 — Log out moved from the admin footer into the shared top bar's
+// account cluster; it must stay a working POST form reachable on every
+// admin page. The footer is metadata only now.
+test('admin top bar logs the user out', async ({ page }) => {
   await page.goto('/admin/quizzes');
 
-  const footer = page.getByRole('contentinfo');
-  await footer.getByRole('button', { name: 'Log out' }).click();
+  const nav = page.getByRole('navigation', { name: 'Primary' });
+  await nav.getByRole('button', { name: 'Log out' }).click();
 
   // Logout clears the session; admin pages now bounce to /login.
   await page.goto('/admin/quizzes');

@@ -1,18 +1,11 @@
 {{define "content"}}
-    {{/* The banana icon + Top/Banana/! wordmark wrap one shared <a>
-         so clicking either piece returns to /. On the home page itself
-         the link is a no-op, but the affordance keeps the brand mark
-         consistent with the player client header where the same logo
-         deep-links back here. */}}
+    {{/* The brand logo lives in the shared top bar now (#844); the hero
+         keeps only the page title + tagline so the wordmark is not
+         duplicated. The <h1> stays the page's primary heading. */}}
     <header class="mb-10 flex flex-col items-center gap-3 text-center">
-        <a href="/" aria-label="Top Banana!" class="flex flex-col items-center gap-3 no-underline">
-            <span class="w-9 h-9 inline-flex items-center justify-center text-accent drop-shadow-[0_0_8px_rgba(255,210,63,0.45)]" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M4 13c3.5-2 8-2 10 2a5.5 5.5 0 0 1 8 5"/><path d="M5.15 17.89c5.52-1.52 8.65-6.89 7-12C11.55 4 11.5 2 13 2c3.22 0 5 5.5 5 8 0 6.5-4.2 12-10.49 12C5.11 22 2 22 2 20c0-1.5 1.14-1.55 3.15-2.11Z"/></svg>
-            </span>
-            <h1 class="m-0 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(2rem,6vw,3rem)] text-text">
-                Top<span class="text-accent font-extrabold">Banana</span>!
-            </h1>
-        </a>
+        <h1 class="m-0 font-display font-extrabold leading-none uppercase tracking-tight text-[clamp(2rem,6vw,3rem)] text-text">
+            Top<span class="text-accent font-extrabold">Banana</span>!
+        </h1>
         <p class="mt-2 max-w-[55ch] text-text-dim text-[0.95rem]">
             Pick a quiz, race the clock, see who comes out on top.
         </p>
@@ -26,7 +19,13 @@
         </a>
     </header>
 
-    <div class="grid gap-8 md:grid-cols-3">
+    {{/* grid-cols-1 at the base is load-bearing: without an explicit column,
+         below md the grid falls into an implicit auto column that grows to
+         the widest content's max-content (e.g. a long unbroken player name),
+         pushing the page wider than a narrow viewport. minmax(0,1fr) from
+         grid-cols-1 caps the column at the container so truncate/break-words
+         inside can do their job (#844). */}}
+    <div class="grid grid-cols-1 gap-8 md:grid-cols-3">
         {{/* Popular quizzes take two columns on desktop: this is the
              primary action for a visitor landing here, so it earns the
              real estate. The list collapses to a single column under md.
@@ -75,7 +74,7 @@
                                     <span class="text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-text-mute">
                                         {{.PlayCount}} {{if eq .PlayCount 1}}play{{else}}plays{{end}}
                                     </span>
-                                    <h3 class="m-0 font-display text-lg font-semibold leading-snug">
+                                    <h3 class="m-0 font-display text-lg font-semibold leading-snug break-words">
                                         <a href="{{.PlayURL}}"
                                            class="text-text group-hover:text-accent transition-colors before:absolute before:inset-0 before:content-['']">
                                             {{.Title}}
@@ -125,7 +124,7 @@
                                     <span class="text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-text-mute">
                                         {{.QuestionCount}} {{if eq .QuestionCount 1}}question{{else}}questions{{end}}
                                     </span>
-                                    <h3 class="m-0 font-display text-lg font-semibold leading-snug">
+                                    <h3 class="m-0 font-display text-lg font-semibold leading-snug break-words">
                                         <a href="{{.PlayURL}}"
                                            class="text-text group-hover:text-accent transition-colors before:absolute before:inset-0 before:content-['']">
                                             {{.Title}}
@@ -175,7 +174,11 @@
                         <li class="flex items-center justify-between gap-3 px-4 py-3">
                             <div class="flex items-center gap-3 min-w-0">
                                 <span class="font-mono text-xs text-text-mute w-5 text-right">{{add $index 1}}</span>
-                                <span class="font-medium truncate">{{$p.DisplayName}}</span>
+                                {{/* min-w-0 lets the flex item shrink so truncate
+                                     actually clips a long unbroken display name
+                                     instead of widening the row past the viewport
+                                     (#844). */}}
+                                <span class="font-medium truncate min-w-0">{{$p.DisplayName}}</span>
                             </div>
                             <span class="text-xs text-text-dim shrink-0">
                                 {{$p.FinishedCount}} {{if eq $p.FinishedCount 1}}quiz{{else}}quizzes{{end}}

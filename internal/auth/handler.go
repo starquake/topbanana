@@ -18,6 +18,7 @@ import (
 	"github.com/starquake/topbanana/internal/envtag"
 	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/session"
+	"github.com/starquake/topbanana/internal/version"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
 
@@ -967,16 +968,24 @@ func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string
 	// form, the validator, and the bcrypt cap stays impossible without
 	// touching the constants directly.
 	funcs := template.FuncMap{
-		"csrfToken":   func() string { return "" },
-		"ogImage":     func() string { return "" },
-		"envTitleTag": envtag.Get,
+		"csrfToken":      func() string { return "" },
+		"ogImage":        func() string { return "" },
+		"envTitleTag":    envtag.Get,
+		"versionLabel":   version.Label,
+		"viewerName":     func() string { return "" },
+		"isSignedIn":     func() bool { return false },
+		"isAdmin":        func() bool { return false },
+		"showSectionNav": func() bool { return false },
+		"navSection":     func() string { return "" },
+		"logoHref":       func() string { return "/" },
+		"profileHref":    func() string { return "/profile" },
 		"passwordHelp": func() string {
 			return fmt.Sprintf("Must be %d-%d characters.", MinPasswordLength, MaxPasswordLength)
 		},
 		"passwordMinLength": func() int { return MinPasswordLength },
 	}
 	layouts := template.Must(
-		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "auth/layouts/*.gohtml"),
+		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "components/*.gohtml", "auth/layouts/*.gohtml"),
 	)
 
 	return &templateRenderer{
@@ -1000,9 +1009,18 @@ func (tr *templateRenderer) render(w http.ResponseWriter, r *http.Request, statu
 		csrfToken = tr.csrf.Token(w, r)
 	}
 
+	displayName := ""
+	signedIn := false
+	if p, ok := PlayerFromContext(r.Context()); ok {
+		displayName = p.DisplayName
+		signedIn = true
+	}
+
 	t = t.Funcs(template.FuncMap{
-		"csrfToken": func() string { return csrfToken },
-		"ogImage":   func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
+		"csrfToken":  func() string { return csrfToken },
+		"ogImage":    func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
+		"viewerName": func() string { return displayName },
+		"isSignedIn": func() bool { return signedIn },
 	})
 
 	w.WriteHeader(status)

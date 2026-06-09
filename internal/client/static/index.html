@@ -74,42 +74,48 @@
              (e.g. "Browse all quizzes" before a deep-linked quiz loads)
              before the conditions evaluate (#605). */}}
         <div x-data="gameApp" x-cloak @keydown.escape.window="claimModalOpen && closeClaimModal()">
-            <!-- Brand mark: same banana SVG + Top/Banana/! pattern as the
-                 admin navbar (see internal/web/tmpl/admin/layouts/navbar.gohtml).
-                 The brand wraps an <a href="/"> so clicking the logo
-                 always returns to the public start page — the
-                 convention every visitor expects from a header logo.
-                 The aria-label sits on the <a> so role-based locators
-                 (`getByRole('link', { name: 'Top Banana!' })`) keep
-                 working; visible text is split so "Banana" can carry
-                 the accent colour.
-                 Hidden during gameplay (#253) so the question gets the
-                 whole vertical canvas — still visible on the start
-                 screen and the post-game leaderboard. -->
-            <h1 x-show="!(gameId && !finished)"
-                class="mb-10 font-display font-extrabold text-2xl tracking-wide uppercase">
-                {{template "brand-mark" .}}
-            </h1>
+            <!-- Shared player header (#844): brand mark on the left, the
+                 signed-in account control on the right, in one in-flow row.
+                 The same structure backs the live join shell (join.html) so
+                 both player surfaces echo the web top bar
+                 (internal/web/tmpl/components/topbar.gohtml). It is NOT a
+                 sticky bar: the client hides its header during active
+                 gameplay (#253) to give the question the full canvas, so the
+                 header rides in normal flow and the whole row drops out
+                 during a live question.
 
-            <!-- Signed-in account control (#520). The SPA shell
-                 carries no CSRF token, so logout can't live here; instead
-                 we link to /profile (a GET page that already has logout +
-                 account management). Visible only for authenticated
-                 players AND only outside active gameplay — mirrors the
-                 brand's `!(gameId && !finished)` gate so the question
-                 keeps the full canvas during a live game (#253), while
-                 the start screen and finished leaderboard expose the
-                 account link. Complements the anonymous-only claim CTA
-                 below; the two never show together (this gates on
-                 isAuthenticated(), the CTA on its negation). The link
-                 text deliberately differs from the claim CTA's "sign in"
-                 so claim.spec.ts's unique sign-in assertion still holds. -->
-            <template x-if="isAuthenticated() && !(gameId && !finished)">
-                <p class="mb-6 text-sm text-text-dim text-right">
-                    Signed in as
-                    <a href="/profile" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="account-profile-link" x-text="player ? player.displayName : ''"></a>
-                </p>
-            </template>
+                 The brand wraps an <a href="/"> so clicking the logo always
+                 returns to the public start page. The aria-label sits on the
+                 <a> (inside the brand-mark partial) so role-based locators
+                 (`getByRole('link', { name: 'Top Banana!' })`) keep working.
+
+                 Hidden during gameplay (#253) so the question gets the whole
+                 vertical canvas - still visible on the start screen and the
+                 post-game leaderboard. -->
+            <header x-show="!(gameId && !finished)"
+                    class="mb-10 flex items-center justify-between gap-4">
+                <h1 class="m-0 font-display font-extrabold text-2xl tracking-wide uppercase">
+                    {{template "brand-mark" .}}
+                </h1>
+
+                <!-- Signed-in account control (#520). The SPA shell carries
+                     no CSRF token, so logout can't live here; instead we link
+                     to /profile (a GET page that already has logout + account
+                     management). Visible only for authenticated players; the
+                     enclosing header already drops it during gameplay (#253),
+                     so the question keeps the full canvas. Complements the
+                     anonymous-only claim CTA below; the two never show
+                     together (this gates on isAuthenticated(), the CTA on its
+                     negation). The link text deliberately differs from the
+                     claim CTA's "sign in" so claim.spec.ts's unique sign-in
+                     assertion still holds. -->
+                <template x-if="isAuthenticated()">
+                    <p class="m-0 text-sm text-text-dim text-right">
+                        Signed in as
+                        <a href="/profile" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="account-profile-link" x-text="player ? player.displayName : ''"></a>
+                    </p>
+                </template>
+            </header>
 
             <!-- Single claim-name CTA, lifted out of the start-screen
                  and finished-leaderboard views so the leaderboard

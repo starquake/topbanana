@@ -23,6 +23,7 @@
  * app.css (#386). List every surface that uses utility classes here, or its
  * classes get purged. Paths are relative to this file at
  * frontend/web/css/tailwind.css. */
+@source "../../../internal/web/tmpl/components";
 @source "../../../internal/web/tmpl/admin";
 @source "../../../internal/web/tmpl/auth";
 @source "../../../internal/web/tmpl/home";
@@ -802,14 +803,29 @@
     /* Leaderboard table — flat surface, striped rows, accent-tinted
      * highlight on the current player's row (driven by aria-current
      * instead of an is-* class). */
+    /* table-fixed + per-column widths keep the table inside its container
+     * on a narrow viewport: Rank/Score stay narrow and the Player column
+     * takes the remainder, wrapping a long unbroken display name instead of
+     * widening the table past the screen (#844). */
     .player-table {
-        @apply w-full bg-surface border border-border-soft rounded-md overflow-hidden;
+        @apply table-fixed w-full bg-surface border border-border-soft rounded-md overflow-hidden;
     }
     .player-table th {
         @apply px-4 py-3 text-text-dim text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-left border-b border-border-soft;
     }
+    .player-table th:first-child,
+    .player-table td:first-child {
+        @apply w-16;
+    }
+    .player-table th:last-child,
+    .player-table td:last-child {
+        @apply w-20;
+    }
     .player-table td {
         @apply px-4 py-3 text-text border-b border-border-soft;
+    }
+    .player-table td:nth-child(2) {
+        @apply [overflow-wrap:anywhere];
     }
     .player-table tbody tr:last-child td {
         @apply border-b-0;

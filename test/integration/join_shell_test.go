@@ -37,6 +37,13 @@ func assertJoinShell(ctx context.Context, t *testing.T, url string) {
 	for _, want := range []string{
 		`x-data="joinApp" x-cloak`,
 		`/client/js/dist/join.js`,
+		// #844: the unified player header drops out while a live question is
+		// on screen, mirroring the solo client's `gameId && !finished` gate.
+		// JoinApp.inActiveQuestion() maps that intent to the live phase model
+		// (question + reveal). The served markup must carry the gate so the
+		// header rides in flow on every other screen and hides during a
+		// question.
+		`x-show="!inActiveQuestion()"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("%s body missing %q", url, want)
