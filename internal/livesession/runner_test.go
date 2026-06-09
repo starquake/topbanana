@@ -51,13 +51,20 @@ type runnerHarness struct {
 }
 
 // runnerCfg uses tiny beats so a single clock step crosses each threshold.
+// IdleCloseTimeout is a small, explicit window so the idle-close tests can place
+// host presence on either side of it without paying the 30-minute default.
 var runnerCfg = RunnerConfig{
 	BeatInterval:     time.Millisecond,
 	RoundIntroBeat:   time.Second,
 	RevealBeat:       time.Second,
 	RoundResultsBeat: time.Second,
 	QuestionReadBeat: time.Second,
+	IdleCloseTimeout: idleCloseTimeout,
 }
+
+// idleCloseTimeout is the runner harness's idle-close window: a room whose host
+// has been gone this long AND has no active players is closed by the sweep.
+const idleCloseTimeout = 2 * time.Minute
 
 // startCountdown is the host-armed last-call window the runner harness sets on
 // the service, so ArmStart stamps a deadline this far ahead of the clock.
@@ -93,7 +100,7 @@ func newRunnerHarness(t *testing.T, start time.Time, rounds [][]bool) *runnerHar
 	service.SetAdvancer(runner)
 
 	const hostID int64 = 1 // seeded admin
-	sess := &Session{QuizID: qz.ID, HostPlayerID: hostID, JoinCode: "RUN234"}
+	sess := &Session{QuizID: quizIDPtr(qz.ID), HostPlayerID: hostID, JoinCode: "RUN234"}
 	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -141,7 +148,7 @@ func (h *runnerHarness) setLastSeen(t *testing.T, sessionID string, playerID int
 
 // setHostLastSeen backdates (or clears, when at is the zero time) a session's
 // host_last_seen_at so a runner test can place the host on either side of the
-// abandon cutoff. Writes the timestamp in SQLite's CURRENT_TIMESTAMP text
+// idle-close cutoff. Writes the timestamp in SQLite's CURRENT_TIMESTAMP text
 // format, matching how production stamps the column. Test-only fixture write.
 func (h *runnerHarness) setHostLastSeen(t *testing.T, sessionID string, at time.Time) {
 	t.Helper()
@@ -151,6 +158,19 @@ func (h *runnerHarness) setHostLastSeen(t *testing.T, sessionID string, at time.
 		at.UTC().Format("2006-01-02 15:04:05"), sessionID,
 	); err != nil {
 		t.Fatalf("setHostLastSeen err = %v, want nil", err)
+	}
+}
+
+// staleAllPlayers backdates every roster player's last_seen_at far before the
+// active window (relative to the harness clock), so the idle-close sweep sees no
+// active players. AddPlayer stamps last_seen_at to the real wall clock, which is
+// well after the harness's 2026-06-05 fake clock and so would otherwise count as
+// active; this drags them all back to genuinely-gone. Test-only fixture write.
+func (h *runnerHarness) staleAllPlayers(t *testing.T, sessionID string) {
+	t.Helper()
+	stale := h.clock.Now().Add(-ActiveWindow - time.Minute)
+	for _, playerID := range h.players {
+		h.setLastSeen(t, sessionID, playerID, stale)
 	}
 }
 
@@ -428,11 +448,11 @@ func TestRunner_IntermissionKeepsHubVersion(t *testing.T) {
 	}
 }
 
-// TestRunner_AbandonForgetsHubVersion pins that the terminal abandon path still
-// evicts the hub version entry (#791): a room whose host has gone past the
-// abandon timeout is closed for good (finished + evict), so it does not pin its
-// version entry for the process lifetime.
-func TestRunner_AbandonForgetsHubVersion(t *testing.T) {
+// TestRunner_IdleCloseForgetsHubVersion pins that the terminal idle-close path
+// still evicts the hub version entry (#791, #836): a room gone idle (host past
+// the idle timeout AND no active players) is closed for good (finished + evict),
+// so it does not pin its version entry for the process lifetime.
+func TestRunner_IdleCloseForgetsHubVersion(t *testing.T) {
 	t.Parallel()
 
 	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
@@ -447,11 +467,13 @@ func TestRunner_AbandonForgetsHubVersion(t *testing.T) {
 		t.Fatalf("has version while running = %v, want %v", got, want)
 	}
 
-	// The host drops well past the abandon cutoff; the next tick closes the room.
-	h.setHostLastSeen(t, sessionID, h.clock.Now().Add(-AbandonTimeout-time.Minute))
+	// The host drops past the idle cutoff and every player goes stale, so the room
+	// is genuinely idle; the next tick closes it.
+	h.setHostLastSeen(t, sessionID, h.clock.Now().Add(-idleCloseTimeout-time.Minute))
+	h.staleAllPlayers(t, sessionID)
 	h.tick(ctx)
 	if got, want := h.phase(t), PhaseFinished; got != want {
-		t.Fatalf("phase after abandon sweep = %q, want %q", got, want)
+		t.Fatalf("phase after idle-close sweep = %q, want %q", got, want)
 	}
 	if got, want := ExportHubHasVersion(h.hub, h.code), false; got != want {
 		t.Errorf("has version after terminal finish = %v, want %v (entry must be evicted)", got, want)
@@ -854,11 +876,10 @@ func TestRunner_AllStaleRosterDoesNotEarlyClose(t *testing.T) {
 	}
 }
 
-// TestRunner_AbandonsHostGoneSession pins the MP-10 slice-3 sweep: a started,
-// mid-game session whose host_last_seen_at is older than AbandonTimeout is
-// finished by a runner tick, so a room whose host dropped does not linger live
-// forever.
-func TestRunner_AbandonsHostGoneSession(t *testing.T) {
+// TestRunner_ClosesIdleSession pins the idle-close sweep (#836): a session whose
+// host has gone past the idle timeout AND has no active players is finished by a
+// runner tick, so a room nobody is using does not linger live forever.
+func TestRunner_ClosesIdleSession(t *testing.T) {
 	t.Parallel()
 
 	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
@@ -866,29 +887,31 @@ func TestRunner_AbandonsHostGoneSession(t *testing.T) {
 	ctx := t.Context()
 	sessionID := h.sessionID(t)
 
-	// Host starts the game, then drops: their last host beat is well past the
-	// abandon cutoff.
+	// Host starts the game, then everyone leaves: the host beat is well past the
+	// idle cutoff and every player has gone stale.
 	if err := h.service.Start(ctx, h.code, 1); err != nil {
 		t.Fatalf("Start err = %v, want nil", err)
 	}
 	if got, want := h.phase(t), PhaseRoundIntro; got != want {
 		t.Fatalf("phase after Start = %q, want %q", got, want)
 	}
-	h.setHostLastSeen(t, sessionID, h.clock.Now().Add(-AbandonTimeout-time.Minute))
+	h.setHostLastSeen(t, sessionID, h.clock.Now().Add(-idleCloseTimeout-time.Minute))
+	h.staleAllPlayers(t, sessionID)
 
 	h.tick(ctx)
 	final := h.reload(t)
 	if got, want := final.Phase, PhaseFinished; got != want {
-		t.Fatalf("phase after abandon sweep = %q, want %q", got, want)
+		t.Fatalf("phase after idle-close sweep = %q, want %q", got, want)
 	}
 	if final.FinishedAt == nil {
-		t.Error("abandoned session has nil FinishedAt")
+		t.Error("idle-closed session has nil FinishedAt")
 	}
 }
 
-// TestRunner_DoesNotAbandonWithFreshHostBeat pins that a mid-game session whose
-// host beat recently is left running by the sweep.
-func TestRunner_DoesNotAbandonWithFreshHostBeat(t *testing.T) {
+// TestRunner_DoesNotCloseWithPlayersPresent pins the core session-first rule
+// (#836): a room whose host has gone past the idle timeout is NOT closed while a
+// player is still active. Browsing away does not end a room that people are in.
+func TestRunner_DoesNotCloseWithPlayersPresent(t *testing.T) {
 	t.Parallel()
 
 	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
@@ -899,19 +922,20 @@ func TestRunner_DoesNotAbandonWithFreshHostBeat(t *testing.T) {
 	if err := h.service.Start(ctx, h.code, 1); err != nil {
 		t.Fatalf("Start err = %v, want nil", err)
 	}
-	// The host beat just now, well inside the abandon window.
-	h.setHostLastSeen(t, sessionID, h.clock.Now())
+	// Host gone well past the idle cutoff, but a player is freshly seen (active),
+	// so the room is in use and must stay open.
+	h.setHostLastSeen(t, sessionID, h.clock.Now().Add(-idleCloseTimeout-time.Minute))
+	h.setLastSeen(t, sessionID, h.players[0], h.clock.Now())
 
 	h.tick(ctx)
 	if got, want := h.phase(t), PhaseRoundIntro; got != want {
-		t.Errorf("phase with fresh host beat = %q, want %q (not abandoned)", got, want)
+		t.Errorf("phase with a player present = %q, want %q (not closed)", got, want)
 	}
 }
 
-// TestRunner_DoesNotAbandonLobby pins that the sweep never finishes a lobby:
-// only a started session is in scope, so a host who is slow to start (or never
-// beat) leaves the lobby intact rather than terminating it.
-func TestRunner_DoesNotAbandonLobby(t *testing.T) {
+// TestRunner_DoesNotCloseWithFreshHostBeat pins that a room whose host beat
+// recently is left running by the idle sweep even with no players.
+func TestRunner_DoesNotCloseWithFreshHostBeat(t *testing.T) {
 	t.Parallel()
 
 	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
@@ -919,13 +943,40 @@ func TestRunner_DoesNotAbandonLobby(t *testing.T) {
 	ctx := t.Context()
 	sessionID := h.sessionID(t)
 
-	// A lobby with a long-stale host beat (and no started_at) must not be swept.
-	h.setHostLastSeen(t, sessionID, start.Add(-AbandonTimeout-time.Hour))
+	if err := h.service.Start(ctx, h.code, 1); err != nil {
+		t.Fatalf("Start err = %v, want nil", err)
+	}
+	// The host beat just now, well inside the idle window, even though every
+	// player has gone stale.
+	h.setHostLastSeen(t, sessionID, h.clock.Now())
+	h.staleAllPlayers(t, sessionID)
 
-	h.clock.advance(AbandonTimeout + time.Hour)
 	h.tick(ctx)
-	if got, want := h.phase(t), PhaseLobby; got != want {
-		t.Errorf("lobby phase after sweep = %q, want %q (lobby never abandoned)", got, want)
+	if got, want := h.phase(t), PhaseRoundIntro; got != want {
+		t.Errorf("phase with fresh host beat = %q, want %q (not closed)", got, want)
+	}
+}
+
+// TestRunner_ClosesIdleEmptyLobby pins that the idle sweep also closes an empty
+// staging lobby (#836): a room opened up front, never started, whose host has
+// gone past the idle timeout with no players present is swept like any other idle
+// room rather than pinned open forever.
+func TestRunner_ClosesIdleEmptyLobby(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	sessionID := h.sessionID(t)
+
+	// Never started: a lobby with a long-stale host presence and every player
+	// gone stale is genuinely idle and must be swept.
+	h.setHostLastSeen(t, sessionID, h.clock.Now().Add(-idleCloseTimeout-time.Hour))
+	h.staleAllPlayers(t, sessionID)
+
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseFinished; got != want {
+		t.Errorf("empty lobby phase after idle sweep = %q, want %q (idle lobby closed)", got, want)
 	}
 }
 
@@ -1129,11 +1180,14 @@ func TestRunner_RearmRunsNextGameWithResetScores(t *testing.T) {
 	// The host re-arms onto game 2 (a different quiz): the room bumps game_seq and
 	// the runner drives straight into game 2's first round.
 	const hostID int64 = 1
-	if err := h.service.StartNextQuiz(ctx, h.code, hostID, game2.ID); err != nil {
-		t.Fatalf("StartNextQuiz err = %v, want nil", err)
+	if err := h.service.StartQuiz(ctx, h.code, hostID, game2.ID); err != nil {
+		t.Fatalf("StartQuiz err = %v, want nil", err)
 	}
 	reArmed := h.reload(t)
-	if got, want := reArmed.QuizID, game2.ID; got != want {
+	if reArmed.QuizID == nil {
+		t.Fatalf("re-armed QuizID = nil, want %d (new quiz)", game2.ID)
+	}
+	if got, want := *reArmed.QuizID, game2.ID; got != want {
 		t.Errorf("re-armed QuizID = %d, want %d (new quiz)", got, want)
 	}
 	if got, want := reArmed.GameSeq, int64(2); got != want {
@@ -1180,8 +1234,11 @@ func TestRunner_RearmSameQuizResetsScores(t *testing.T) {
 	// Re-arm onto the SAME quiz (the room's current quiz id).
 	const hostID int64 = 1
 	sameQuizID := h.reload(t).QuizID
-	if err := h.service.StartNextQuiz(ctx, h.code, hostID, sameQuizID); err != nil {
-		t.Fatalf("StartNextQuiz (same quiz) err = %v, want nil", err)
+	if sameQuizID == nil {
+		t.Fatal("room QuizID = nil, want the game-1 quiz id")
+	}
+	if err := h.service.StartQuiz(ctx, h.code, hostID, *sameQuizID); err != nil {
+		t.Fatalf("StartQuiz (same quiz) err = %v, want nil", err)
 	}
 
 	// Game 2 with nobody answering: the scorer's game-2 total is 0, so game 1's
@@ -1192,11 +1249,11 @@ func TestRunner_RearmSameQuizResetsScores(t *testing.T) {
 	}
 }
 
-// TestRunner_StartNextQuizRejectedMidGame pins that the host cannot arm the next
-// quiz while a game is in flight (#836): StartNextQuiz only works from the
-// between-games intermission, so a mid-game call returns ErrNotIntermission and
-// the running game is untouched.
-func TestRunner_StartNextQuizRejectedMidGame(t *testing.T) {
+// TestRunner_StartQuizRejectedMidGame pins that the host cannot arm a quiz while
+// a game is in flight (#836): StartQuiz only works when no game is running (an
+// empty lobby or the between-games intermission), so a mid-game call returns
+// ErrGameInFlight and the running game is untouched.
+func TestRunner_StartQuizRejectedMidGame(t *testing.T) {
 	t.Parallel()
 
 	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
@@ -1217,16 +1274,19 @@ func TestRunner_StartNextQuizRejectedMidGame(t *testing.T) {
 	}
 
 	const hostID int64 = 1
-	err := h.service.StartNextQuiz(ctx, h.code, hostID, game2.ID)
-	if got, want := err, ErrNotIntermission; !errors.Is(got, want) {
-		t.Errorf("StartNextQuiz mid-game err = %v, want %v", got, want)
+	err := h.service.StartQuiz(ctx, h.code, hostID, game2.ID)
+	if got, want := err, ErrGameInFlight; !errors.Is(got, want) {
+		t.Errorf("StartQuiz mid-game err = %v, want %v", got, want)
 	}
 	// The running game is untouched: still on the original quiz, game_seq 1.
 	sess := h.reload(t)
 	if got, want := sess.GameSeq, int64(1); got != want {
 		t.Errorf("GameSeq after rejected re-arm = %d, want %d", got, want)
 	}
-	if got, want := sess.QuizID, game2.ID; got == want {
+	if sess.QuizID == nil {
+		t.Fatal("QuizID after rejected re-arm = nil, want it unchanged from the original quiz")
+	}
+	if got, notWant := *sess.QuizID, game2.ID; got == notWant {
 		t.Errorf("QuizID after rejected re-arm = %d, want it unchanged from the original quiz", got)
 	}
 }

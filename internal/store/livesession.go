@@ -42,12 +42,18 @@ func (s *LiveSessionStore) Ping(ctx context.Context) error {
 
 // CreateSession inserts a sessions row with a fresh xid and the
 // caller-supplied join code, populating s.ID / s.CreatedAt / s.Phase from
-// the returned row. A join_code UNIQUE collision (the loser of a probe
-// race in the service) surfaces as [livesession.ErrJoinCodeUnavailable].
+// the returned row. The room's quiz is optional (#836): a nil sess.QuizID opens
+// an empty room (quiz_id NULL, the "no game running yet" state). A join_code
+// UNIQUE collision (the loser of a probe race in the service) surfaces as
+// [livesession.ErrJoinCodeUnavailable].
 func (s *LiveSessionStore) CreateSession(ctx context.Context, sess *livesession.Session) error {
+	var quizID sql.NullInt64
+	if sess.QuizID != nil {
+		quizID = sql.NullInt64{Int64: *sess.QuizID, Valid: true}
+	}
 	row, err := s.q.CreateSession(ctx, db.CreateSessionParams{
 		ID:           xid.New().String(),
-		QuizID:       sess.QuizID,
+		QuizID:       quizID,
 		HostPlayerID: sess.HostPlayerID,
 		JoinCode:     sess.JoinCode,
 	})
@@ -89,6 +95,33 @@ func (s *LiveSessionStore) GetSessionByJoinCode(
 		}
 
 		return nil, fmt.Errorf("failed to get session by join code: %w", err)
+	}
+
+	sess := sessionFromRow(row)
+	sess.Players, err = s.listPlayers(ctx, sess.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return sess, nil
+}
+
+// GetActiveSessionForHost returns the host's most recent active (non-finished)
+// room with its roster populated, or (nil, nil) when the host has no active room
+// (#836). Absence is the normal "nothing to resume" answer, not an error, so the
+// service can offer the "Resume hosting" link only when a room comes back.
+//
+//nolint:nilnil // (nil, nil) is the deliberate "no active room" result; absence is not an error here.
+func (s *LiveSessionStore) GetActiveSessionForHost(
+	ctx context.Context, hostPlayerID int64,
+) (*livesession.Session, error) {
+	row, err := s.q.GetActiveSessionForHost(ctx, hostPlayerID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+
+		return nil, fmt.Errorf("failed to get active session for host: %w", err)
 	}
 
 	sess := sessionFromRow(row)
@@ -276,11 +309,13 @@ func (s *LiveSessionStore) Intermission(ctx context.Context, sessionID string) e
 	return nil
 }
 
-// RearmSession starts the next game in a room: points it at the new quiz, bumps
-// game_seq, resets to the lobby, and clears every roster player's ready flag, in
-// one transaction so the re-arm and the ready reset cannot be partially applied.
-// Returns [livesession.ErrNotIntermission] when the room is not in the
-// between-games intermission phase (the RearmSession UPDATE matches no row).
+// RearmSession arms a quiz to play in a room whenever no game is running (#836):
+// points it at the quiz, resets to the lobby, clears the per-game runner columns
+// (game_seq bumped only from intermission), and clears every roster player's
+// ready flag, in one transaction so the re-arm and the ready reset cannot be
+// partially applied. Returns [livesession.ErrGameInFlight] when a game is already
+// running or the room is terminally finished (the RearmSession UPDATE matches no
+// row).
 func (s *LiveSessionStore) RearmSession(ctx context.Context, sessionID string, quizID int64) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -587,12 +622,15 @@ func (s *LiveSessionStore) recordAnswerTx(
 func (s *LiveSessionStore) rearmSessionTx(ctx context.Context, tx *sql.Tx, sessionID string, quizID int64) error {
 	q := s.q.WithTx(tx)
 
-	res, err := q.RearmSession(ctx, db.RearmSessionParams{QuizID: quizID, ID: sessionID})
+	res, err := q.RearmSession(ctx, db.RearmSessionParams{
+		QuizID: sql.NullInt64{Int64: quizID, Valid: true},
+		ID:     sessionID,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to rearm session: %w", err)
 	}
 	if database.MustRowsAffected(res) == 0 {
-		return livesession.ErrNotIntermission
+		return livesession.ErrGameInFlight
 	}
 
 	if err = q.ResetSessionPlayersReady(ctx, sessionID); err != nil {
@@ -607,12 +645,14 @@ func (s *LiveSessionStore) rearmSessionTx(ctx context.Context, tx *sql.Tx, sessi
 func sessionFromRow(row db.Session) *livesession.Session {
 	sess := &livesession.Session{
 		ID:           row.ID,
-		QuizID:       row.QuizID,
 		HostPlayerID: row.HostPlayerID,
 		JoinCode:     row.JoinCode,
 		Phase:        livesession.Phase(row.Phase),
 		GameSeq:      row.GameSeq,
 		CreatedAt:    row.CreatedAt,
+	}
+	if row.QuizID.Valid {
+		sess.QuizID = &row.QuizID.Int64
 	}
 	if row.CurrentRoundID.Valid {
 		sess.CurrentRoundID = &row.CurrentRoundID.Int64
@@ -648,6 +688,7 @@ func applySessionRow(sess *livesession.Session, row db.Session) {
 	sess.ID = row.ID
 	sess.JoinCode = row.JoinCode
 	sess.Phase = livesession.Phase(row.Phase)
+	sess.GameSeq = row.GameSeq
 	sess.CreatedAt = row.CreatedAt
 	if row.StartedAt.Valid {
 		sess.StartedAt = &row.StartedAt.Time

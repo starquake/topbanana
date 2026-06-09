@@ -149,7 +149,7 @@ type Round struct {
 
 type Session struct {
 	ID                string
-	QuizID            int64
+	QuizID            sql.NullInt64
 	HostPlayerID      int64
 	JoinCode          string
 	Phase             string

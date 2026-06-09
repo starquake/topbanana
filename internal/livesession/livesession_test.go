@@ -19,6 +19,10 @@ import (
 // to a confusable alphabet.
 var joinCodePattern = regexp.MustCompile(`^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$`)
 
+// quizIDPtr returns a pointer to a quiz id, for building the optional
+// CreateSession quiz argument and Session.QuizID in tests.
+func quizIDPtr(id int64) *int64 { return &id }
+
 func TestGenerateJoinCode_Shape(t *testing.T) {
 	t.Parallel()
 
@@ -116,6 +120,14 @@ func (f *fakeStore) GetSessionByJoinCode(_ context.Context, _ string) (*Session,
 	if f.session == nil {
 		return nil, ErrSessionNotFound
 	}
+
+	return f.session, nil
+}
+
+//nolint:nilnil // (nil, nil) is the "no active room" result the real store also returns.
+func (f *fakeStore) GetActiveSessionForHost(_ context.Context, _ int64) (*Session, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
 	return f.session, nil
 }
@@ -262,7 +274,7 @@ func TestService_CreateSession_RegeneratesOnCodeCollision(t *testing.T) {
 	quizzes := &fakeQuiz{quiz: &quiz.Quiz{ID: 7, Mode: quiz.ModeLive}}
 	svc := ExportNewServiceWithCodeGen(store, quizzes, slog.Default(), gen, 8)
 
-	sess, err := svc.CreateSession(t.Context(), 7, 1)
+	sess, err := svc.CreateSession(t.Context(), quizIDPtr(7), 1)
 	if err != nil {
 		t.Fatalf("CreateSession err = %v, want nil", err)
 	}
@@ -281,7 +293,7 @@ func TestService_CreateSession_ExhaustsCodeBudget(t *testing.T) {
 	quizzes := &fakeQuiz{quiz: &quiz.Quiz{ID: 7, Mode: quiz.ModeLive}}
 	svc := ExportNewServiceWithCodeGen(store, quizzes, slog.Default(), gen, 3)
 
-	_, err := svc.CreateSession(t.Context(), 7, 1)
+	_, err := svc.CreateSession(t.Context(), quizIDPtr(7), 1)
 	if got, want := err, ErrJoinCodeUnavailable; !errors.Is(got, want) {
 		t.Errorf("CreateSession exhausted err = %v, want %v", got, want)
 	}
@@ -317,7 +329,7 @@ func TestService_Join_AllowsLatecomerMidGame(t *testing.T) {
 	t.Parallel()
 
 	store := &fakeStore{
-		session: &Session{ID: "s1", QuizID: 7, JoinCode: "ROOM12", Phase: PhaseQuestion},
+		session: &Session{ID: "s1", QuizID: quizIDPtr(7), JoinCode: "ROOM12", Phase: PhaseQuestion},
 	}
 	svc := NewService(store, &fakeQuiz{}, slog.Default())
 	svc.SetPublisher(&spyPublisher{})
@@ -337,7 +349,7 @@ func TestService_Join_RejectsFinishedRoom(t *testing.T) {
 	t.Parallel()
 
 	store := &fakeStore{
-		session: &Session{ID: "s1", QuizID: 7, JoinCode: "ROOM12", Phase: PhaseFinished},
+		session: &Session{ID: "s1", QuizID: quizIDPtr(7), JoinCode: "ROOM12", Phase: PhaseFinished},
 	}
 	svc := NewService(store, &fakeQuiz{}, slog.Default())
 

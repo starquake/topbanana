@@ -91,7 +91,10 @@ func TestHostNextQuiz_RearmsRoomOntoNewQuiz(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSessionByJoinCode err = %v, want nil", err)
 	}
-	if got, want := sess.QuizID, game2.ID; got != want {
+	if sess.QuizID == nil {
+		t.Fatalf("re-armed QuizID = nil, want %d (the new quiz)", game2.ID)
+	}
+	if got, want := *sess.QuizID, game2.ID; got != want {
 		t.Errorf("re-armed QuizID = %d, want %d (the new quiz)", got, want)
 	}
 	if got, want := sess.GameSeq, int64(2); got != want {

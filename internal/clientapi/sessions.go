@@ -15,17 +15,19 @@ import (
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
-// HandleSessionCreate opens a hosted live session for a quiz. Host-authed:
-// the caller must hold host/admin rights (a signed-in Player gets 403),
-// and the quiz must exist and be mode='live' (MP-0 / #677). Returns 201
-// with the join code on success.
+// HandleSessionCreate opens a hosted room. Host-authed: the caller must hold
+// host/admin rights (a signed-in Player gets 403). quizId is optional (#836): an
+// omitted or null quizId opens an empty room (the "no game running yet" staging
+// state where the host picks the first quiz ad-hoc), and a present quizId
+// preselects that first quiz, which must exist and be mode='live' (MP-0 / #677).
+// Returns 201 with the join code on success.
 //
 // A non-existent quiz and a solo quiz both map to 404 so the endpoint does
 // not betray which quizzes exist or their mode to a host probing ids - it
 // stays a "no hostable quiz here" answer either way.
 func HandleSessionCreate(logger *slog.Logger, service *livesession.Service) http.Handler {
 	type createRequest struct {
-		QuizID int64 `json:"quizId"`
+		QuizID *int64 `json:"quizId"`
 	}
 	type createResponse struct {
 		JoinCode string `json:"joinCode"`
@@ -344,12 +346,15 @@ type sessionQuizResponse struct {
 //     technique the solo client uses) without depending on the client's
 //     wall clock.
 type sessionStateResponse struct {
-	JoinCode  string                  `json:"joinCode"`
-	Phase     string                  `json:"phase"`
-	HostID    int64                   `json:"hostId"`
-	Players   []sessionPlayerResponse `json:"players"`
-	Quiz      sessionQuizResponse     `json:"quiz"`
-	ServerNow time.Time               `json:"serverNow"`
+	JoinCode string                  `json:"joinCode"`
+	Phase    string                  `json:"phase"`
+	HostID   int64                   `json:"hostId"`
+	Players  []sessionPlayerResponse `json:"players"`
+	// Quiz is the room's current quiz, omitted for an empty room with no quiz
+	// picked yet (#836): the "no game running yet" staging state carries no quiz
+	// metadata, so the field is absent rather than a zero-valued quiz.
+	Quiz      *sessionQuizResponse `json:"quiz,omitempty"`
+	ServerNow time.Time            `json:"serverNow"`
 	// StartAt is the absolute deadline of the host's armed last-call countdown
 	// (#735), as an ISO timestamp; omitted when no countdown is armed. Every
 	// surface renders the same "Starting in M:SS" off startAt minus serverNow,
@@ -476,20 +481,31 @@ func newSessionStateResponse(state *livesession.LobbyState) sessionStateResponse
 	}
 
 	return sessionStateResponse{
-		JoinCode: state.Session.JoinCode,
-		Phase:    string(state.Session.Phase),
-		HostID:   state.Session.HostPlayerID,
-		Players:  players,
-		Quiz: sessionQuizResponse{
-			ID:            state.Quiz.ID,
-			Title:         state.Quiz.Title,
-			QuestionCount: len(state.Quiz.Questions),
-		},
+		JoinCode:  state.Session.JoinCode,
+		Phase:     string(state.Session.Phase),
+		HostID:    state.Session.HostPlayerID,
+		Players:   players,
+		Quiz:      newSessionQuizResponse(state),
 		ServerNow: time.Now().UTC(),
 		StartAt:   state.Session.StartAt,
 		Question:  newSessionQuestionResponse(state),
 		Standings: newSessionStandingsResponse(state),
 		Round:     newSessionRoundResponse(state),
+	}
+}
+
+// newSessionQuizResponse projects the room's quiz onto the wire shape, or nil for
+// an empty room with no quiz picked yet (#836), so the field is omitted from the
+// JSON rather than dereferencing a nil quiz.
+func newSessionQuizResponse(state *livesession.LobbyState) *sessionQuizResponse {
+	if state.Quiz == nil {
+		return nil
+	}
+
+	return &sessionQuizResponse{
+		ID:            state.Quiz.ID,
+		Title:         state.Quiz.Title,
+		QuestionCount: len(state.Quiz.Questions),
 	}
 }
 

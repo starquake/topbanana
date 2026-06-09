@@ -40,6 +40,11 @@ const joinPathPrefix = "/join/"
 // A phone that cannot scan the QR goes here and types the room code.
 const joinEntryPath = "/join"
 
+// hostLobbyPathPrefix is the host TV-lobby path prefix the host POST handlers
+// redirect back to after their action; the code (server-minted, not user input)
+// is appended to form a same-origin destination.
+const hostLobbyPathPrefix = "/host/"
+
 // LobbyData feeds the host lobby template.
 type LobbyData struct {
 	Title    string
@@ -165,9 +170,13 @@ func (h *Handlers) Lobby(w http.ResponseWriter, r *http.Request) {
 		JoinURL:          joinURL,
 		JoinEntryDisplay: joinEntry,
 		QRSVG:            qrMarkup,
-		QuizTitle:        state.Quiz.Title,
-		QuestionCount:    len(state.Quiz.Questions),
 		LiveQuizzes:      liveQuizzes,
+	}
+	// An empty room (#836) has no quiz yet: leave the quiz metadata zero-valued so
+	// the lobby renders the staging state rather than naming a quiz.
+	if state.Quiz != nil {
+		data.QuizTitle = state.Quiz.Title
+		data.QuestionCount = len(state.Quiz.Questions)
 	}
 
 	h.render(w, r, data)

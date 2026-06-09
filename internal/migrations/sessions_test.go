@@ -647,6 +647,171 @@ func TestPersistentRoomsMigration_Schema(t *testing.T) {
 	})
 }
 
+// sessionQuizNullableVersion is the #836 migration that rebuilds the sessions
+// parent table to make quiz_id nullable (a room with no current quiz).
+const sessionQuizNullableVersion = 20260612120000
+
+// TestSessionQuizNullableMigration_AllowsNullQuiz pins the #836 schema: a room
+// can be created with quiz_id NULL (the "no game running yet" staging state), and
+// the FK still accepts a real quiz id. dbtest.Open already ran every migration,
+// so the live schema is what the Up produced.
+func TestSessionQuizNullableMigration_AllowsNullQuiz(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := dbtest.Open(t)
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v", cerr)
+		}
+	})
+
+	// A room with no quiz is a valid row now.
+	if _, err := db.ExecContext(
+		ctx,
+		`INSERT INTO sessions (id, host_player_id, join_code) VALUES ('sess-noquiz-1', 1, 'NOQ234')`,
+	); err != nil {
+		t.Fatalf("insert quiz-less session err = %v, want nil", err)
+	}
+	var quizID sql.NullInt64
+	if err := db.QueryRowContext(
+		ctx, "SELECT quiz_id FROM sessions WHERE id = 'sess-noquiz-1'",
+	).Scan(&quizID); err != nil {
+		t.Fatalf("read quiz_id err = %v, want nil", err)
+	}
+	if quizID.Valid {
+		t.Errorf("quiz_id on a quiz-less room = %v, want NULL", quizID.Int64)
+	}
+
+	// A room with a real quiz id still works (the FK is unchanged).
+	var seededQuizID int64
+	if err := db.QueryRowContext(
+		ctx,
+		`INSERT INTO quizzes (title, slug, description, created_by_player_id, mode)
+		 VALUES ('Live', 'quiz-nullable-mig', 'd', 1, 'live') RETURNING id`,
+	).Scan(&seededQuizID); err != nil {
+		t.Fatalf("seed quiz err = %v, want nil", err)
+	}
+	if _, err := db.ExecContext(
+		ctx,
+		`INSERT INTO sessions (id, quiz_id, host_player_id, join_code) VALUES ('sess-withquiz-1', ?, 1, 'WQZ234')`,
+		seededQuizID,
+	); err != nil {
+		t.Errorf("insert quizzed session err = %v, want nil", err)
+	}
+}
+
+// TestSessionQuizNullableMigration_DownDropsQuizlessRooms pins the lossy Down
+// (#836): the old schema required NOT NULL quiz_id, so a quiz-less room cannot
+// survive the rollback and is dropped, while a room with a quiz is preserved.
+// The re-Up accepts a NULL quiz_id again.
+func TestSessionQuizNullableMigration_DownDropsQuizlessRooms(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := dbtest.Open(t)
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v", cerr)
+		}
+	})
+
+	var quizID int64
+	if err := db.QueryRowContext(
+		ctx,
+		`INSERT INTO quizzes (title, slug, description, created_by_player_id, mode)
+		 VALUES ('Live', 'quiz-nullable-down-mig', 'd', 1, 'live') RETURNING id`,
+	).Scan(&quizID); err != nil {
+		t.Fatalf("seed quiz err = %v, want nil", err)
+	}
+	// One quiz-less room and one quizzed room.
+	if _, err := db.ExecContext(
+		ctx, `INSERT INTO sessions (id, host_player_id, join_code) VALUES ('sess-down-noquiz', 1, 'DNQ234')`,
+	); err != nil {
+		t.Fatalf("seed quiz-less session err = %v, want nil", err)
+	}
+	if _, err := db.ExecContext(
+		ctx,
+		`INSERT INTO sessions (id, quiz_id, host_player_id, join_code) VALUES ('sess-down-withquiz', ?, 1, 'DWQ234')`,
+		quizID,
+	); err != nil {
+		t.Fatalf("seed quizzed session err = %v, want nil", err)
+	}
+	// The quiz-less room has a roster row and a recorded answer: the Down runs with
+	// foreign_keys OFF, so the cascade does not fire and these child rows must be
+	// deleted explicitly, or they orphan and trip the _fk_guard. Seeding them here
+	// pins that the Down clears the children rather than aborting.
+	var roundID, questionID, optionID, playerID int64
+	if err := db.QueryRowContext(
+		ctx, `INSERT INTO rounds (quiz_id, position, title) VALUES (?, 1, 'R') RETURNING id`, quizID,
+	).Scan(&roundID); err != nil {
+		t.Fatalf("seed round err = %v, want nil", err)
+	}
+	if err := db.QueryRowContext(
+		ctx,
+		`INSERT INTO questions (quiz_id, round_id, text, position) VALUES (?, ?, 'Q', 1) RETURNING id`,
+		quizID, roundID,
+	).Scan(&questionID); err != nil {
+		t.Fatalf("seed question err = %v, want nil", err)
+	}
+	if err := db.QueryRowContext(
+		ctx, `INSERT INTO options (question_id, text, is_correct) VALUES (?, 'A', 1) RETURNING id`, questionID,
+	).Scan(&optionID); err != nil {
+		t.Fatalf("seed option err = %v, want nil", err)
+	}
+	if err := db.QueryRowContext(
+		ctx, `INSERT INTO players (display_name, role) VALUES ('down-noquiz-join', 'player') RETURNING id`,
+	).Scan(&playerID); err != nil {
+		t.Fatalf("seed player err = %v, want nil", err)
+	}
+	if _, err := db.ExecContext(
+		ctx, `INSERT INTO session_players (session_id, player_id) VALUES ('sess-down-noquiz', ?)`, playerID,
+	); err != nil {
+		t.Fatalf("seed quiz-less roster row err = %v, want nil", err)
+	}
+	if _, err := db.ExecContext(
+		ctx,
+		`INSERT INTO session_answers (session_id, question_id, player_id, option_id, game_seq)
+		 VALUES ('sess-down-noquiz', ?, ?, ?, 1)`,
+		questionID, playerID, optionID,
+	); err != nil {
+		t.Fatalf("seed quiz-less answer err = %v, want nil", err)
+	}
+
+	if err := goose.DownTo(db, ".", sessionQuizNullableVersion-1); err != nil {
+		t.Fatalf("goose.DownTo err = %v, want nil", err)
+	}
+
+	// The quiz-less room was dropped; the quizzed room survives.
+	var noquizCount, withquizCount int
+	if err := db.QueryRowContext(
+		ctx, "SELECT count(*) FROM sessions WHERE id = 'sess-down-noquiz'",
+	).Scan(&noquizCount); err != nil {
+		t.Fatalf("count quiz-less after down err = %v, want nil", err)
+	}
+	if got, want := noquizCount, 0; got != want {
+		t.Errorf("quiz-less rooms after down = %d, want %d (dropped)", got, want)
+	}
+	if err := db.QueryRowContext(
+		ctx, "SELECT count(*) FROM sessions WHERE id = 'sess-down-withquiz'",
+	).Scan(&withquizCount); err != nil {
+		t.Fatalf("count quizzed after down err = %v, want nil", err)
+	}
+	if got, want := withquizCount, 1; got != want {
+		t.Errorf("quizzed rooms after down = %d, want %d (preserved)", got, want)
+	}
+
+	// Re-Up makes quiz_id nullable again: a quiz-less room is accepted once more.
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("goose.Up after down err = %v, want nil", err)
+	}
+	if _, err := db.ExecContext(
+		ctx, `INSERT INTO sessions (id, host_player_id, join_code) VALUES ('sess-reup-noquiz', 1, 'RNQ234')`,
+	); err != nil {
+		t.Errorf("insert quiz-less session after re-up err = %v, want nil", err)
+	}
+}
+
 // TestPersistentRoomsMigration_DownUpRoundTrip exercises the #836 rebuild's Down
 // path (the risky one: dropping the sessions parent with foreign_keys=OFF inside
 // an explicit transaction, plus collapsing multi-game answers back to the old
