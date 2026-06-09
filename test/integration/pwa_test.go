@@ -130,6 +130,51 @@ func TestPWA_Integration(t *testing.T) {
 		t.Parallel()
 		assertPWAHeadMarkup(ctx, t, srv.BaseURL+"/client/")
 	})
+
+	// The player shells (solo + live) additionally carry the standalone
+	// iOS PWA meta tags and viewport-fit=cover that the web/auth layouts
+	// don't need (#826). A standalone home-screen launch and the
+	// safe-area rendering itself are iOS-Safari-specific and not
+	// reproducible in the Chromium/Firefox e2e, so pin the served markup
+	// here.
+	t.Run("solo client serves the standalone PWA meta tags", func(t *testing.T) {
+		t.Parallel()
+		assertStandalonePWAMarkup(ctx, t, srv.BaseURL+"/client/")
+	})
+
+	t.Run("join shell serves the standalone PWA meta tags", func(t *testing.T) {
+		t.Parallel()
+		assertStandalonePWAMarkup(ctx, t, srv.BaseURL+"/join")
+	})
+}
+
+// assertStandalonePWAMarkup pins the head markup an installable iOS PWA needs
+// (#826): viewport-fit=cover so env(safe-area-inset-*) resolves non-zero, the
+// Apple + standards-track standalone-capable tags, the translucent status-bar
+// style, and the app title. The safe-area .player-shell padding itself is
+// covered by the committed app.css; only its trigger lives in the head.
+func assertStandalonePWAMarkup(ctx context.Context, t *testing.T, url string) {
+	t.Helper()
+
+	resp := httpGet(ctx, t, http.DefaultClient, url)
+	defer closeBody(t, resp.Body)
+
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("%s status = %d, want %d", url, got, want)
+	}
+	body := readAllString(t, resp.Body)
+	for _, want := range []string{
+		`viewport-fit=cover`,
+		`name="apple-mobile-web-app-capable" content="yes"`,
+		`name="mobile-web-app-capable" content="yes"`,
+		`name="apple-mobile-web-app-status-bar-style" content="black-translucent"`,
+		`name="apple-mobile-web-app-title"`,
+		`class="player-shell`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("%s body missing %q", url, want)
+		}
+	}
 }
 
 func assertPWAHeadMarkup(ctx context.Context, t *testing.T, url string) {

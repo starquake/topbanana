@@ -2,11 +2,26 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{/* viewport-fit=cover is required for env(safe-area-inset-*) to
+         resolve to non-zero values on notched iOS devices; without it
+         the insets stay 0 and the standalone layout draws under the
+         notch / home indicator. See #826. */}}
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>{{envTitleTag}}{{.Title}}</title>
     <link rel="icon" type="image/svg+xml" href="/assets/banana.svg" sizes="any">
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/assets/banana-192.png">
+    {{/* iOS launches a home-screen icon in its own standalone window only
+         when these legacy Apple meta tags are present (it cannot honour the
+         manifest's display:standalone before 16.4). mobile-web-app-capable
+         is the standards-track equivalent Android/Chrome reads. The
+         black-translucent status bar lets the page draw under the status
+         bar so the safe-area padding (not a solid bar) clears the notch.
+         See #826. */}}
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="{{envTitleTag}}Top Banana!">
     <meta name="theme-color" content="#ffd23f">
     {{/* Open Graph / Twitter Card metadata. The join surface carries the
          sitewide defaults: a room code is short-lived and per-session, so a
@@ -44,7 +59,10 @@
      viewport on mobile browsers across URL-bar collapse (#308), the same
      fix the solo client and home page use. */}}
 <body class="bg-bg text-text font-sans antialiased min-h-dvh leading-relaxed">
-    <main class="max-w-[480px] mx-auto px-5 py-10 sm:py-16">
+    {{/* player-shell carries the vertical/horizontal padding plus the
+         env(safe-area-inset-*) clearances for the iOS standalone PWA
+         (#826, #831). The join shell keeps the default px-5 gutter. */}}
+    <main class="player-shell max-w-[480px] mx-auto">
         {{/* x-cloak hides the shell until Alpine boots and resolves which
              phase to paint, so the deferred-Alpine window doesn't flash the
              enter-code form on a /join/{code} deep link before init() runs. */}}
