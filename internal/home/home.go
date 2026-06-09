@@ -16,6 +16,7 @@ import (
 	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/envtag"
 	"github.com/starquake/topbanana/internal/quiz"
+	"github.com/starquake/topbanana/internal/version"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
 
@@ -153,7 +154,7 @@ func Handle(
 			data.ActivePlayers = truncate(players)
 		}
 
-		executeTemplate(w, r, logger, t, csrfToken, "render home template", data)
+		executeTemplate(w, r, logger, t, csrfToken, data.Viewer, "render home template", data)
 	})
 }
 
@@ -239,16 +240,21 @@ func HandleAllQuizzes(
 			})
 		}
 
-		executeTemplate(w, r, logger, t, csrfToken, "render all-quizzes template", data)
+		executeTemplate(w, r, logger, t, csrfToken, data.Viewer, "render all-quizzes template", data)
 	})
 }
 
 // executeTemplate clones t, binds the per-request funcs, and runs
 // base.gohtml. The clone is mandatory: concurrent renders race on the
 // shared template tree without it (#294).
+//
+// viewer drives the shared top bar's account cluster: non-nil renders
+// the signed-in identity + log out, nil renders the log-in link. The
+// home surface never knows whether the viewer is an admin, so isAdmin
+// stays false (the section nav is admin-console-only anyway).
 func executeTemplate(
 	w http.ResponseWriter, r *http.Request, logger *slog.Logger,
-	t *template.Template, csrfToken CSRFTokenFunc, errMsg string, data any,
+	t *template.Template, csrfToken CSRFTokenFunc, viewer *Viewer, errMsg string, data any,
 ) {
 	rt, cerr := t.Clone()
 	if cerr != nil {
@@ -257,8 +263,14 @@ func executeTemplate(
 
 		return
 	}
+	viewerName := ""
+	if viewer != nil {
+		viewerName = viewer.DisplayName
+	}
 	funcs := template.FuncMap{
-		"ogImage": func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
+		"ogImage":    func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
+		"viewerName": func() string { return viewerName },
+		"isSignedIn": func() bool { return viewer != nil },
 	}
 	if csrfToken != nil {
 		funcs["csrfToken"] = func() string { return csrfToken(w, r) }
@@ -293,13 +305,21 @@ func truncate[T any](rows []T) []T {
 // is registered here.
 func parseTemplate(page string) *template.Template {
 	funcs := template.FuncMap{
-		"add":         func(a, b int) int { return a + b },
-		"ogImage":     func() string { return "" },
-		"csrfToken":   func() string { return "" },
-		"envTitleTag": envtag.Get,
+		"add":            func(a, b int) int { return a + b },
+		"ogImage":        func() string { return "" },
+		"csrfToken":      func() string { return "" },
+		"envTitleTag":    envtag.Get,
+		"versionLabel":   version.Label,
+		"viewerName":     func() string { return "" },
+		"isSignedIn":     func() bool { return false },
+		"isAdmin":        func() bool { return false },
+		"showSectionNav": func() bool { return false },
+		"navSection":     func() string { return "" },
+		"logoHref":       func() string { return "/" },
+		"profileHref":    func() string { return "/profile" },
 	}
 	base := template.Must(
-		template.New("").Funcs(funcs).ParseFS(tmplFS(), "home/layouts/*.gohtml"),
+		template.New("").Funcs(funcs).ParseFS(tmplFS(), "components/*.gohtml", "home/layouts/*.gohtml"),
 	)
 
 	return template.Must(base.ParseFS(tmplFS(), page))

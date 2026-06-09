@@ -77,3 +77,45 @@ func assertBrandMarkPartial(ctx context.Context, t *testing.T, url string) {
 		}
 	}
 }
+
+// TestPlayerHeader_SharedAcrossShells pins #844: the solo shell (index.html)
+// and the live player shell (join.html) carry one consistent header - the
+// brand mark plus the signed-in account control. The control gates on
+// isAuthenticated() (an Alpine expression Alpine evaluates client-side), so
+// the inert <template x-if> markup ships in the served HTML for both shells
+// regardless of viewer state; this asserts the markup is present and identical
+// across the two, which is the unification the ticket is after. The
+// browser-side visibility (anonymous never sees it; a signed-in player does
+// and the link routes to /profile) is exercised in e2e (pregame-nav.spec.ts).
+func TestPlayerHeader_SharedAcrossShells(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, nil)
+
+	for _, url := range []string{srv.BaseURL + "/client/", srv.BaseURL + "/join"} {
+		assertPlayerHeaderAccountControl(ctx, t, url)
+	}
+}
+
+func assertPlayerHeaderAccountControl(ctx context.Context, t *testing.T, url string) {
+	t.Helper()
+
+	resp := httpGet(ctx, t, http.DefaultClient, url)
+	defer closeBody(t, resp.Body)
+
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("%s status = %d, want %d", url, got, want)
+	}
+	body := readAllString(t, resp.Body)
+	for _, want := range []string{
+		`x-if="isAuthenticated()"`,
+		`Signed in as`,
+		`data-testid="account-profile-link"`,
+		`href="/profile"`,
+		`x-text="player ? player.displayName : ''"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("%s body missing %q - the shared player header account control is absent (#844)", url, want)
+		}
+	}
+}

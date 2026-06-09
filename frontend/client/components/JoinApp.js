@@ -120,6 +120,12 @@ export class JoinApp {
         // Used to spot their own roster row across reads, which a rename would
         // otherwise break if the row were matched by name.
         this.myPlayerId = null;
+        // The current player as returned by GET /api/players/me, or null until
+        // init() resolves (or when the read fails / the player is anonymous).
+        // Backs the shared header's "Signed in as {displayName}" account
+        // control, mirroring the solo client (#520). Held reactively so the
+        // header renders the name as soon as init() lands.
+        this.player = null;
         // True while a join / ready request is in flight, to guard buttons.
         this.busy = false;
         // Human-readable error for the current form, cleared on retry.
@@ -305,6 +311,7 @@ export class JoinApp {
         // never blocked on this read.
         const player = await playerService.getMe();
         if (player) {
+            this.player = player;
             this.myPlayerId = player.id;
             if (player.isAuthenticated && player.hasCustomName) {
                 this.accountName = player.displayName;
@@ -1006,6 +1013,26 @@ export class JoinApp {
         }
 
         return row.displayName === this.myDisplayName;
+    }
+
+    // isAuthenticated reports whether the player is known to the system
+    // through some credential (password, OAuth identity, or the seeded admin
+    // role). Backs the shared header's account control, which shows only for a
+    // signed-in player (#520) - the same gate the solo client uses.
+    isAuthenticated() {
+        return !!(this.player && this.player.isAuthenticated);
+    }
+
+    // inActiveQuestion reports whether a live question is on screen, so the
+    // shared header (brand + account control) can hide and give the question
+    // the full canvas - mirroring the solo client's `gameId && !finished` gate
+    // (#253). It covers the question phase and the reveal phase (the same
+    // question text, with the correct answer marked); every other screen -
+    // enter-code, name, lobby, round_intro, round_results, intermission, and
+    // finished - keeps the header.
+    inActiveQuestion() {
+        const phase = this.state ? this.state.phase : null;
+        return this.phase === 'lobby' && (phase === 'question' || phase === 'reveal');
     }
 
     // currentQuestion returns the live question off the authoritative state, or

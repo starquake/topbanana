@@ -12,15 +12,25 @@
          header/footer off-screen (#734). */}}
     <main x-data="hostLobby({{.JoinCode | printf "%q"}}, {{.HasQuiz}})"
           class="h-dvh overflow-hidden flex flex-col">
+        {{/* The TV surface deliberately does NOT carry the shared top bar
+             or an account cluster (#844): it is a projected, shared screen,
+             not a personal session-control surface. The only navigation is
+             the home logo and a "Manage" cross-link back to the admin
+             console; session lifecycle stays the host's "End session"
+             control in the footer below. */}}
         <header class="shrink-0 flex items-center justify-between gap-4 px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1rem,2.5vh,2rem)] border-b border-border-soft">
             <a href="/" aria-label="Top Banana!"
                class="flex items-center gap-3 text-text no-underline hover:text-text">
                 <img src="/assets/banana.svg" alt="" class="w-9 h-9" aria-hidden="true">
                 <span class="font-display font-extrabold uppercase tracking-[0.18em] text-[clamp(1rem,2vw,1.4rem)]" aria-hidden="true">Top Banana!</span>
             </a>
-            <p class="m-0 text-text-dim text-[clamp(0.85rem,1.6vw,1.1rem)] font-semibold uppercase tracking-[0.14em] truncate max-w-[40vw]">
-                {{.QuizTitle}}
-            </p>
+            <div class="flex items-center gap-[clamp(1rem,2.5vw,2rem)] min-w-0">
+                <p class="m-0 text-text-dim text-[clamp(0.85rem,1.6vw,1.1rem)] font-semibold uppercase tracking-[0.14em] truncate max-w-[40vw]">
+                    {{.QuizTitle}}
+                </p>
+                <a href="/admin"
+                   class="shrink-0 text-text-dim hover:text-text underline-offset-2 hover:underline text-[clamp(0.8rem,1.5vw,1rem)]">Manage</a>
+            </div>
         </header>
 
         {{/* ----- Lobby phase: scan-to-join + live roster + start. ----- */}}

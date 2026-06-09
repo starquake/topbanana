@@ -23,6 +23,7 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/envtag"
+	"github.com/starquake/topbanana/internal/version"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
 
@@ -254,16 +255,24 @@ type templateRenderer struct {
 
 func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string) *templateRenderer {
 	funcs := template.FuncMap{
-		"csrfToken":   func() string { return "" },
-		"ogImage":     func() string { return "" },
-		"envTitleTag": envtag.Get,
+		"csrfToken":      func() string { return "" },
+		"ogImage":        func() string { return "" },
+		"envTitleTag":    envtag.Get,
+		"versionLabel":   version.Label,
+		"viewerName":     func() string { return "" },
+		"isSignedIn":     func() bool { return false },
+		"isAdmin":        func() bool { return false },
+		"showSectionNav": func() bool { return false },
+		"navSection":     func() string { return "" },
+		"logoHref":       func() string { return "/" },
+		"profileHref":    func() string { return "/profile" },
 		"passwordHelp": func() string {
 			return fmt.Sprintf("Must be %d-%d characters.", auth.MinPasswordLength, auth.MaxPasswordLength)
 		},
 		"passwordMinLength": func() int { return auth.MinPasswordLength },
 	}
 	layouts := template.Must(
-		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "auth/layouts/*.gohtml"),
+		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "components/*.gohtml", "auth/layouts/*.gohtml"),
 	)
 
 	return &templateRenderer{
@@ -295,9 +304,18 @@ func (tr *templateRenderer) renderAny(w http.ResponseWriter, r *http.Request, st
 		csrfToken = tr.csrf.Token(w, r)
 	}
 
+	displayName := ""
+	signedIn := false
+	if p, ok := auth.PlayerFromContext(r.Context()); ok {
+		displayName = p.DisplayName
+		signedIn = true
+	}
+
 	t = t.Funcs(template.FuncMap{
-		"csrfToken": func() string { return csrfToken },
-		"ogImage":   func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
+		"csrfToken":  func() string { return csrfToken },
+		"ogImage":    func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
+		"viewerName": func() string { return displayName },
+		"isSignedIn": func() bool { return signedIn },
 	})
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

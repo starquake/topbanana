@@ -58,8 +58,8 @@ func NewTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, templatePat
 // time ExecuteTemplate runs - an error page is no longer an option, so
 // failures are logged.
 //
-// The clone-and-override dance behind prepare lets the navbar template
-// call {{currentUser}} and any form call {{csrfToken}} without every
+// The clone-and-override dance behind prepare lets the shared top bar
+// call {{viewerName}} and any form call {{csrfToken}} without every
 // handler having to thread those values into its data struct.
 func (tr *TemplateRenderer) Render(w http.ResponseWriter, r *http.Request, status int, data any) {
 	t, ok := tr.prepare(w, r)
@@ -95,7 +95,7 @@ func (tr *TemplateRenderer) RenderPartial(w http.ResponseWriter, r *http.Request
 }
 
 // prepare clones the renderer's template tree and binds per-request
-// implementations of the {{currentUser}} and {{csrfToken}} funcs that
+// implementations of the {{viewerName}} and {{csrfToken}} funcs that
 // parseTemplate registered as placeholders. Returns the prepared template
 // and true on success; on Clone failure it surfaces 500 Internal Server
 // Error and returns false so the caller can early-return.
@@ -127,17 +127,20 @@ func (tr *TemplateRenderer) prepare(w http.ResponseWriter, r *http.Request) (*te
 	section := navSection(r.URL.Path)
 
 	return t.Funcs(template.FuncMap{
-		"currentUser": func() string { return displayName },
-		"csrfToken":   func() string { return csrfToken },
-		"ogImage":     func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
-		"navSection":  func() string { return section },
-		"isAdmin":     func() bool { return isAdmin },
+		"viewerName":     func() string { return displayName },
+		"isSignedIn":     func() bool { return true },
+		"showSectionNav": func() bool { return true },
+		"logoHref":       func() string { return "/admin" },
+		"csrfToken":      func() string { return csrfToken },
+		"ogImage":        func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
+		"navSection":     func() string { return section },
+		"isAdmin":        func() bool { return isAdmin },
 	}), true
 }
 
 // navSection maps a request path to the admin nav section it belongs to,
-// so the navbar can mark the active section. The empty string means the
-// overview at /admin (no inline link is active).
+// so the shared top bar can mark the active section. The empty string
+// means the overview at /admin (no inline link is active).
 func navSection(path string) string {
 	switch {
 	case strings.HasPrefix(path, "/admin/quizzes"):
@@ -357,18 +360,22 @@ func optionDataFromOptions(options []*quiz.Option) []*OptionData {
 
 // parseTemplate parses a template from the given path with layouts.
 //
-// Placeholder "currentUser", "csrfToken", and "navSection" funcs are
-// registered before parse so the navbar's {{currentUser}}/{{navSection}}
-// calls and any form's {{csrfToken}} call resolve at parse time.
-// TemplateRenderer.Render clones the parsed tree and replaces these
-// placeholders with implementations that read the request context, CSRF
-// manager, and request path, respectively.
+// Placeholder "viewerName", "csrfToken", and "navSection" funcs are
+// registered before parse so the shared top bar's
+// {{viewerName}}/{{navSection}} calls and any form's {{csrfToken}} call
+// resolve at parse time. TemplateRenderer.Render clones the parsed tree
+// and replaces these placeholders with implementations that read the
+// request context, CSRF manager, and request path, respectively.
 //
 // "humanizeTime" is a pure function of its argument, so it's registered with
 // its real implementation here - no per-request override needed.
 func parseTemplate(path string) *template.Template {
 	funcs := template.FuncMap{
-		"currentUser":       func() string { return "" },
+		"viewerName":        func() string { return "" },
+		"isSignedIn":        func() bool { return false },
+		"showSectionNav":    func() bool { return false },
+		"logoHref":          func() string { return "/admin" },
+		"profileHref":       func() string { return "/profile?next=/admin" },
 		"csrfToken":         func() string { return "" },
 		"ogImage":           func() string { return "" },
 		"navSection":        func() string { return "" },
@@ -379,7 +386,7 @@ func parseTemplate(path string) *template.Template {
 		"passwordMinLength": func() int { return auth.MinPasswordLength },
 	}
 	base := template.Must(
-		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "admin/layouts/*.gohtml"),
+		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "components/*.gohtml", "admin/layouts/*.gohtml"),
 	)
 	// Partials are pulled in alongside layouts so any page (or any
 	// HTMX-fragment handler) can {{template "name" .}} a shared block
@@ -435,7 +442,7 @@ func humanizeSince(now, t time.Time) string {
 // render400 renders the 400 error page with the given message.
 // Should be used as the final handler in the chain and probably be followed by a return.
 //
-// Error pages embed the navbar (which contains the logout form), so they need
+// Error pages embed the top bar (which contains the logout form), so they need
 // a CSRF manager to render a working {{csrfToken}}. We accept it as a
 // parameter rather than re-derive it because error renderers are spawned ad
 // hoc deep in the call stack - passing it explicitly keeps the rendering path
