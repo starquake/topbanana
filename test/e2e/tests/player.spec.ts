@@ -90,7 +90,7 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
     await optionButton.click();
 
     if (wasCorrect) {
-      await expect(page.locator('.splash-correct')).toBeVisible();
+      await expect(page.getByTestId('reveal-verdict')).toHaveText('Correct!');
       expectedSuccesses++;
       // #234 — after a correct answer, the chip MUST have grown.
       // We don't pin a specific value because CalculateScore depends
@@ -103,15 +103,15 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
       ).toBeGreaterThan(prevScore);
       prevScore = scoreAfterNum;
     } else {
-      await expect(page.locator('.splash-wrong')).toBeVisible();
+      await expect(page.getByTestId('reveal-verdict')).toHaveText('Not quite');
       // #233 — after a wrong pick the correct option(s) light up so
       // the player can learn what was right before the next question
-      // loads. The splash above auto-clears after ~950ms, so this
-      // assertion catches the underlying button-level reveal that
-      // remains for the rest of the feedback pause. Only fires on
-      // questions that actually have a correct option (the
-      // "Which animals are mammals?" fixture has correctIndices: [],
-      // i.e. no correct answers, so nothing to highlight there).
+      // loads. This assertion catches the button-level reveal that
+      // stays for the rest of the feedback pause alongside the verdict
+      // eyebrow. Only fires on questions that actually have a correct
+      // option (the "Which animals are mammals?" fixture has
+      // correctIndices: [], i.e. no correct answers, so nothing to
+      // highlight there).
       if (q.correctIndices.length > 0) {
         await expect(page.locator('.btn-answer-correct').first()).toBeVisible({ timeout: 2000 });
       }
@@ -165,7 +165,7 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   // The start-screen lockout banner (uses .feedback-banner.feedback-danger)
   // is hidden on the already-played revisit; this test only asserts the
   // gameplay screen state, so the locator below matches that
-  // start-screen instance, not the in-game splash overlay.
+  // start-screen instance.
   await expect(page.locator('.feedback-banner.feedback-danger')).toBeHidden();
   await expect(page.getByRole('button', { name: 'Start Game' })).toBeHidden();
 

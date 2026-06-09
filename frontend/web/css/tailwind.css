@@ -719,46 +719,6 @@
                disabled:opacity-40 cursor-default;
     }
 
-    /* Full-screen verdict splash (#253). Sits on top of everything
-     * for ~950ms after a submit so the player sees a clear
-     * Correct / Wrong / Time-out moment before the button-level
-     * reveal (#233) takes over for the remainder of the pause.
-     * pointer-events-none keeps clicks from being eaten while the
-     * overlay is animating in or fading out (the buttons are
-     * already disabled during feedback anyway). */
-    .splash-overlay {
-        @apply fixed inset-0 z-30 flex items-center justify-center
-               bg-bg/85 backdrop-blur-sm pointer-events-none;
-    }
-    .splash-text {
-        @apply font-display font-extrabold tracking-tight
-               text-[clamp(3rem,14vw,8rem)] leading-none;
-    }
-    .splash-correct .splash-text { @apply text-success; }
-    .splash-wrong   .splash-text { @apply text-danger; }
-    .splash-timeout .splash-text { @apply text-warning; }
-
-    /* Alpine x-transition classes for the splash (#253). Drives both
-     * fade-in and fade-out symmetrically so the verdict eases out
-     * the same way it eased in. The splash-anim base class sets the
-     * shared transition geometry; the *-enter / *-leave classes
-     * pick a different easing for each phase, matching the
-     * easeOutQuart-ish feel the prior manual anime.js call used. */
-    .splash-anim        { transition-property: opacity, transform; transition-duration: 280ms; }
-    .splash-anim-enter  { transition-timing-function: cubic-bezier(0.165, 0.84, 0.44, 1); }
-    .splash-anim-leave  { transition-timing-function: cubic-bezier(0.55, 0.085, 0.68, 0.53); }
-    .splash-anim-enter-from { opacity: 0; transform: scale(0.9); }
-    .splash-anim-enter-to   { opacity: 1; transform: scale(1); }
-    .splash-anim-leave-from { opacity: 1; transform: scale(1); }
-    .splash-anim-leave-to   { opacity: 0; transform: scale(0.95); }
-
-    /* Reduced-motion: zero out the splash transitions so the element
-     * still snaps in and out and the verdict text is visible — just
-     * without the easing. */
-    @media (prefers-reduced-motion: reduce) {
-        .splash-anim { transition-duration: 0ms; }
-    }
-
     /* Header chips for the in-game HUD (#253). Tiny rounded pills
      * sitting in the top-right of the gameplay view with the
      * question counter and running score. Lowercase tokens so they

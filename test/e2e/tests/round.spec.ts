@@ -114,18 +114,18 @@ test('round boundary cards auto-advance on their countdown and skip on Continue'
   await page.getByTestId('round-continue').click();
 
   // Q1 - answer the correct option. The generous timeout covers the
-  // per-question reveal-countdown beat (#247); the splash assertion
-  // gates the next step on the feedback pause completing.
+  // per-question reveal-countdown beat (#247); the verdict-eyebrow
+  // assertion gates the next step on the feedback pause completing.
   const q1Option = page.getByRole('button', { name: '4' });
   await expect(q1Option).toBeVisible({ timeout: 10_000 });
   await q1Option.click();
-  await expect(page.locator('.splash-correct')).toBeVisible();
+  await expect(page.getByTestId('reveal-verdict')).toHaveText('Correct!');
 
   // Q2 - answer the correct option so the round completes.
   const q2Option = page.getByRole('button', { name: 'Paris' });
   await expect(q2Option).toBeVisible({ timeout: 10_000 });
   await q2Option.click();
-  await expect(page.locator('.splash-correct')).toBeVisible();
+  await expect(page.getByTestId('reveal-verdict')).toHaveText('Correct!');
 
   // Round recap card shows after the round's last question
   // auto-advances. It carries the per-round correct count (2 of 2), a
@@ -193,12 +193,12 @@ test('round boundary cards stay visible under reduced motion', async ({ page, br
   const q1Option = page.getByRole('button', { name: '4' });
   await expect(q1Option).toBeVisible({ timeout: 10_000 });
   await q1Option.click();
-  await expect(page.locator('.splash-correct')).toBeVisible();
+  await expect(page.getByTestId('reveal-verdict')).toHaveText('Correct!');
 
   const q2Option = page.getByRole('button', { name: 'Paris' });
   await expect(q2Option).toBeVisible({ timeout: 10_000 });
   await q2Option.click();
-  await expect(page.locator('.splash-correct')).toBeVisible();
+  await expect(page.getByTestId('reveal-verdict')).toHaveText('Correct!');
 
   // Recap card and its staggered figures are fully visible with motion
   // disabled — the score, correct/total, and running total all show.

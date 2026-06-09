@@ -400,16 +400,25 @@
                                    2xl:text-[clamp(3rem,3.5vw,5.5rem)]"
                             x-text="question.text"></h2>
 
+                        <!-- Post-answer verdict eyebrow (#767). Mirrors the
+                             live surface's quieter reveal: a small eyebrow line
+                             carries Correct! / Not quite / Time up while the
+                             per-option highlight (#233) shows the right answer.
+                             Sits BELOW the question so appearing after an answer
+                             doesn't push the question down — the mt-auto buttons
+                             absorb it in the flex gap. role="status" +
+                             aria-live="assertive" so screen-reader users hear
+                             the verdict the moment it lands; empty until feedback
+                             is set, so it announces nothing during the answer
+                             window. -->
+                        <p class="label-eyebrow mb-6" role="status" aria-live="assertive"
+                           data-testid="reveal-verdict"
+                           x-show="!!feedback"
+                           x-text="feedback ? (feedback.correct ? 'Correct!' : (feedback.timedOut ? 'Time up' : 'Not quite')) : ''"></p>
+
                         <!-- Image render hidden pending #426. The API
                              still ships question.imageUrl on the wire;
                              only the visible <img> is gone. -->
-
-
-                        <!-- The inline feedback banner was removed in
-                             #253 — the verdict is now carried by the
-                             full-screen splash overlay below, and the
-                             post-pick button-level reveal (#233)
-                             remains in place after the splash fades. -->
 
                         <!-- The button container stays visible during
                              feedback so the per-option styling (correct
@@ -630,31 +639,6 @@
                 <template x-if="!question && !roundItem">
                     <p class="text-text-dim">Loading question...</p>
                 </template>
-            </div>
-
-            <!-- Full-screen verdict splash (#253). Sits above every
-                 view for a brief moment after the player submits (or
-                 the per-question timer expires). x-show + x-transition
-                 (not x-if) so Alpine handles both the fade-in AND a
-                 matching fade-out when `splash` flips back to null;
-                 an x-if would unmount instantly with no leave
-                 animation. The motion-reduce rule on .splash-overlay
-                 in _tailwind.css zeroes out the transitions for
-                 reduced-motion users, so the verdict still shows but
-                 without easing. -->
-            <div x-show="splashOn"
-                 x-transition:enter="splash-anim splash-anim-enter"
-                 x-transition:enter-start="splash-anim-enter-from"
-                 x-transition:enter-end="splash-anim-enter-to"
-                 x-transition:leave="splash-anim splash-anim-leave"
-                 x-transition:leave-start="splash-anim-leave-from"
-                 x-transition:leave-end="splash-anim-leave-to"
-                 data-splash
-                 class="splash-overlay"
-                 :class="splash === 'correct' ? 'splash-correct' : splash === 'wrong' ? 'splash-wrong' : 'splash-timeout'"
-                 style="display: none">
-                <p class="splash-text" role="status" aria-live="assertive"
-                   x-text="splash === 'correct' ? 'Correct!' : splash === 'wrong' ? 'Wrong!' : 'Time out!'"></p>
             </div>
 
             <!-- Shared claim-name modal. Mounted via x-if so each open

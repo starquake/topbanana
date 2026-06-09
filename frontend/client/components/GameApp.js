@@ -112,15 +112,6 @@ export class GameApp {
         // value drives the "Score: N" chip in the gameplay header
         // (#253). Reset when a new game starts via startGame.
         this.score = 0;
-        // Drives the full-screen verdict splash (#253). `splash` is the
-        // variant ('correct' / 'wrong' / 'timeout') and drives both the
-        // skin class and the verdict text; `splashOn` is the visibility
-        // flag x-show watches. We flip splashOn off (not splash) to
-        // start the leave transition, so the variant stays set during
-        // the fade-out and the text doesn't flicker through to the
-        // fall-through ternary branch.
-        this.splash = null;
-        this.splashOn = false;
         // True while the per-question reveal beat is still running —
         // the answer buttons stay hidden during this phase (#247).
         // The progress bar handles both phases visually: it fills
@@ -585,8 +576,6 @@ export class GameApp {
         }
         this.clearRoundTimer();
         this.revealing = false;
-        this.splash = null;
-        this.splashOn = false;
         this.submitError = false;
         const item = await gameService.getNextQuestion(this.gameId);
         if (!item) {
@@ -788,39 +777,6 @@ export class GameApp {
         }
     }
 
-    // showSplash flashes a full-screen verdict overlay (#253) for a
-    // brief hold before auto-clearing. The fade-in AND the fade-out
-    // are both driven by Alpine x-transition classes on the splash
-    // element — here we just flip `this.splash` to a variant and
-    // then back to null; Alpine animates the transitions in/out via
-    // the matching CSS classes (.splash-anim-*).
-    //
-    // Variants:
-    //   'correct'  -> success skin
-    //   'wrong'    -> danger skin
-    //   'timeout'  -> warning skin
-    //
-    // Reduced-motion users still see the verdict — the media-query
-    // override in _tailwind.css zeroes out the transitions so the
-    // element snaps in and out without easing. The button-level
-    // correctness reveal (#233) underneath stays visible for the
-    // rest of the resolveAndAdvance pause.
-    showSplash(variant) {
-        this.splash = variant;
-        this.splashOn = true;
-        // 700ms visible hold before the leave transition kicks in.
-        // Combined with the ~280ms enter and ~280ms leave the splash
-        // is gone after ~1.26s, well within the resolveAndAdvance
-        // pause (2–3s) so the button-level reveal still has time
-        // to land. Only `splashOn` flips back — `splash` stays set so
-        // the verdict text and skin remain stable through the fade-out
-        // (otherwise the ternary in x-text would fall through to
-        // 'Time out!' during leave).
-        setTimeout(() => {
-            this.splashOn = false;
-        }, 700);
-    }
-
     // animateRoundIntro plays the round intro card's entrance: a brief
     // fade + rise. The from-state (opacity 0, translateY) is supplied by
     // anime via the [from, to] array form, NOT by a CSS class — runAnim
@@ -887,20 +843,19 @@ export class GameApp {
 
     // handleTimeout fires when the per-question countdown reaches zero
     // without a submitted answer. Skips when feedback is already set
-    // (the user beat the clock), while a submit is in flight (the
-    // POST is racing the timer — let it finish and use the real
-    // result), or when a splash is already on screen (defence in
-    // depth against the verdict splash being overwritten with
-    // "Time out!" right after the player saw "Correct!"). On a real
-    // timeout it shows a "Time out!" splash and auto-advances via
+    // (the user beat the clock — `feedback` is the single source of the
+    // verdict eyebrow, so this also stops a "Time up" from overwriting a
+    // "Correct!"/"Not quite" the player already saw) or while a submit
+    // is in flight (the POST is racing the timer — let it finish and use
+    // the real result). On a real timeout it sets timed-out feedback so
+    // the eyebrow reads "Time up" and auto-advances via
     // resolveAndAdvance. No POST is issued: the server's
     // GetNextQuestion advances on the "asked" set rather than the
     // "answered" set, and a missing answer row already produces a
     // zero-score on the leaderboard.
     async handleTimeout() {
-        if (this.feedback || this.submittingAnswer || this.splashOn) return;
+        if (this.feedback || this.submittingAnswer) return;
         this.feedback = { timedOut: true, correct: false, score: 0 };
-        this.showSplash('timeout');
         await this.resolveAndAdvance();
     }
 
@@ -980,7 +935,7 @@ export class GameApp {
         // progress<=0, and queue handleTimeout — and even though
         // handleTimeout's guards normally catch the race, an
         // unlucky interleaving showed up in practice as
-        // "Correct! → Time out!" rapidly swapping in the splash.
+        // "Correct! → Time up" rapidly swapping in the verdict.
         // Clearing here eliminates the race at its source.
         if (this.timer) {
             clearInterval(this.timer);
@@ -994,7 +949,6 @@ export class GameApp {
             fb.pickedOptionId = optionId;
             this.feedback = fb;
             this.score += fb.score || 0;
-            this.showSplash(fb.correct ? 'correct' : 'wrong');
         } catch (err) {
             // POST failed. The retry banner (#179) only makes sense
             // for transient failures the player can recover from by
@@ -1020,10 +974,10 @@ export class GameApp {
                 return;
             }
             // Non-retryable: synthesize a "no answer" feedback so the
-            // splash beat + auto-advance path runs and the player
-            // doesn't get stuck on a blank, button-less screen.
+            // reveal beat + auto-advance path runs (the eyebrow reads
+            // "Time up") and the player doesn't get stuck on a blank,
+            // button-less screen.
             this.feedback = { timedOut: true, correct: false, score: 0 };
-            this.showSplash('timeout');
             await this.resolveAndAdvance();
 
             return;
@@ -1040,7 +994,7 @@ export class GameApp {
     // resolveAndAdvance waits the per-question feedback pause and then
     // tears down current-question state before fetching the next one.
     // Shared by submitAnswer and handleTimeout so both paths look the
-    // same to the user — only the feedback banner differs. Clears the
+    // same to the user — only the verdict eyebrow text differs. Clears the
     // previous question alongside the feedback so the new render swaps
     // to the "Loading question..." placeholder; without this, the
     // buttons region (gated only on `!feedback`) re-mounts for one
