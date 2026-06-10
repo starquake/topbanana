@@ -745,11 +745,10 @@ func (s *Service) StartQuiz(ctx context.Context, joinCode string, hostPlayerID, 
 // room per host (#851). It backs the quiz-view "Host live" control:
 //   - No active room -> open a new lobby armed with the quiz (host starts it
 //     when players are in), same as the prior "Play live".
-//   - Active empty staging lobby -> arm the quiz in it but stay in the lobby
-//     (reusing ArmQuiz), so the host gathers players and presses Start, the same
-//     as the no-active-room case (#863). No second room is spawned.
-//   - Active between-games intermission -> arm AND start the next game (reusing
-//     StartQuiz), the #836 between-games flow.
+//   - Active empty staging lobby OR between-games intermission -> arm the quiz
+//     in it but stay in the lobby (reusing ArmQuiz), so the host gathers players
+//     and presses Start, the same as the no-active-room case (#863, #875). No
+//     second room is spawned, and the post-game pick never auto-starts.
 //   - Active room with a game in flight -> leave it untouched and return it, so
 //     a stray pick never disrupts a running game (the end-and-restart confirm
 //     is deferred to #853).
@@ -791,16 +790,12 @@ func (s *Service) StartHosting(ctx context.Context, quizID, hostPlayerID int64) 
 	}
 
 	// An empty staging lobby and the between-games intermission both take a new
-	// quiz without spawning a second room, but they differ (#863): the empty
-	// lobby ARMS the quiz and stays in the lobby so the host gathers players and
-	// presses Start (matching the no-active-session case, which also lands on an
-	// armed lobby), while the intermission arms AND starts the next game (the
-	// #836 between-games flow). canArmQuiz guarantees active is one of these two.
-	if active.Phase == PhaseLobby {
-		err = s.ArmQuiz(ctx, active.JoinCode, hostPlayerID, quizID)
-	} else {
-		err = s.StartQuiz(ctx, active.JoinCode, hostPlayerID, quizID)
-	}
+	// quiz without spawning a second room, and both arm it and stay in the lobby
+	// so the host gathers players and presses Start (#875), matching the
+	// no-active-session case which also lands on an armed lobby. canArmQuiz
+	// guarantees active is one of these two; ArmQuiz handles both - RearmSession
+	// re-arms an intermission room back to an armed lobby with started_at cleared.
+	err = s.ArmQuiz(ctx, active.JoinCode, hostPlayerID, quizID)
 	switch {
 	case err == nil, errors.Is(err, ErrGameInFlight):
 		// ErrGameInFlight means the room raced into flight between the read above
