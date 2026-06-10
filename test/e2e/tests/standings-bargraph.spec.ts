@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { importQuiz, claimAndJoin, execSqlite } from './helpers';
+import { importQuiz, claimAndJoin, execSqlite, endHostedSession } from './helpers';
 
 // MP-9 (#686): the between-rounds standings bar graph on the round_results /
 // finished screens, on BOTH the host TV surface and the player join surface.
@@ -366,6 +366,7 @@ test('the standings bar graph shows final order and totals on the TV and player 
   expect(quincyFinal.totalScore - quincyFinal.roundScore).toBeLessThan(quincyFinal.totalScore);
   expect(robinFinal.roundScore).toBe(0);
 
+  await endHostedSession(host, joinCode);
   await otherContext.close();
   await hostContext.close();
 });

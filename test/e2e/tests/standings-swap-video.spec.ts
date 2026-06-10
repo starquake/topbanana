@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { importQuiz, claimAndJoin, execSqlite } from './helpers';
+import { importQuiz, claimAndJoin, execSqlite, endHostedSession } from './helpers';
 
 // Motion-ON capture of the standings animation (the #729 grow + the #730 row
 // slide) so the real motion can actually be eyeballed. The standings-bargraph
@@ -237,6 +237,7 @@ test('standings swap video: a player row slides up to first at the finish', asyn
   // Dwell so the recording includes the full settle.
   await page.waitForTimeout(3_000);
 
+  await endHostedSession(host, joinCode);
   await leaderContext.close();
   await hostContext.close();
 });

@@ -1,6 +1,6 @@
 import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { seedQuiz, setQuizMode } from './helpers';
+import { seedQuiz, setQuizMode, endHostedSession } from './helpers';
 import type { Page } from '@playwright/test';
 
 // session-first live hosting (#836): a host opens a live room BEFORE choosing a
@@ -28,6 +28,14 @@ async function seedLiveQuiz(host: Page, title: string, questionText: string, cor
 // it opens the admin dashboard and clicks the empty-room control, landing on the
 // host lobby. It returns the host page and the room's join code read off the
 // lobby URL. The room is empty (no quiz armed) at this point.
+//
+// The dashboard host control is a single adaptive slot (#850): with no active
+// room it is the "Host a session" submit; with one already open it becomes a
+// "Resume session" link instead. Each session-hosting spec now ends its own
+// room in cleanup (endHostedSession), so the shared seed admin's dashboard
+// stays hostable between tests and this just clicks the submit. The one
+// defensive end below covers only the rare case a prior test crashed before its
+// cleanup ran and left a stray room open.
 async function hostASession(page: Page, baseURL: string | undefined): Promise<{
   host: Page;
   joinCode: string;
@@ -37,12 +45,31 @@ async function hostASession(page: Page, baseURL: string | undefined): Promise<{
   const host = await hostContext.newPage();
 
   await host.goto('/admin');
+  // Defensive single end for a stray room a crashed prior test left open (its
+  // cleanup never ran): the dashboard then shows "Resume session" instead of the
+  // submit. End that one room, then reload so the submit is offered. Not a drain
+  // loop - one stray room is all an interrupted test can leave.
+  const resume = host.locator('[data-resume-hosting]');
+  if (await resume.count() > 0) {
+    const strayCode = (await resume.getAttribute('href'))?.split('/host/')[1] ?? '';
+    if (strayCode) await endHostedSession(host, strayCode);
+    await host.goto('/admin');
+  }
+
+  await expect(host.locator('[data-host-session-submit]')).toBeVisible();
   await host.locator('[data-host-session-submit]').click();
   await expect(host).toHaveURL(/\/host\/[A-Z0-9]{6}$/);
   const joinCode = host.url().split('/host/')[1];
   expect(joinCode).toMatch(/^[A-Z0-9]{6}$/);
 
-  return { host, joinCode, close: () => hostContext.close() };
+  return {
+    host,
+    joinCode,
+    close: async () => {
+      await endHostedSession(host, joinCode);
+      await hostContext.close();
+    },
+  };
 }
 
 // joinAsPlayer lands the anonymous page in the lobby via the deep link.

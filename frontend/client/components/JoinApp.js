@@ -78,7 +78,7 @@ function readRememberedSession() {
 
 // JoinApp is the Alpine component behind the player join + lobby + in-game
 // surface (MP-4 / #681, MP-7 / #684). It is deliberately separate from gameApp
-// (the solo client) and from the host/TV surface: it owns only the player's
+// (the solo client) and from the host big screen: it owns only the player's
 // own join form, lobby view, and synchronized question play.
 //
 // `phase` is the local join-flow stage:
@@ -217,7 +217,7 @@ export class JoinApp {
         // read while in the lobby, or null when no countdown is armed.
         this.startAt = null;
         // Whole seconds left until startAt, driven off the server clock so the
-        // player lobby and the host TV tick in lockstep.
+        // player lobby and the host big screen tick in lockstep.
         this.startRemaining = 0;
         // Interval handle for the start countdown, cleared before each new one
         // and on teardown.

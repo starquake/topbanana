@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
 import type { Page } from './fixtures';
-import { seedQuiz, registerForPending, login, markEmailVerified, execSqlite } from './helpers';
+import { seedQuiz, registerForPending, login, markEmailVerified, execSqlite, endHostedSession } from './helpers';
 
 // A logged-in player who has chosen a custom name skips the name-entry form on
 // the live-session join surface: they auto-join under their account name and
@@ -81,6 +81,7 @@ test.describe('player join name skip for named players', () => {
     const state = await stateResp.json() as { players: { displayName: string }[] };
     expect(state.players.some((p) => p.displayName === displayName)).toBe(true);
 
+    await endHostedSession(host, joinCode);
     await hostContext.close();
   });
 
@@ -110,6 +111,7 @@ test.describe('player join name skip for named players', () => {
     // assert it never became visible rather than that it is absent.
     await expect(page.getByTestId('join-name-input')).toBeHidden();
 
+    await endHostedSession(host, joinCode);
     await hostContext.close();
   });
 
@@ -127,6 +129,7 @@ test.describe('player join name skip for named players', () => {
     await expect(page.getByTestId('join-name-input')).toBeVisible();
     await expect(page.getByTestId('lobby-roster')).toHaveCount(0);
 
+    await endHostedSession(host, joinCode);
     await hostContext.close();
   });
 });

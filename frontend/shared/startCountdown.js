@@ -1,4 +1,4 @@
-// Shared host-armed last-call countdown for the host TV and the player lobby
+// Shared host-armed last-call countdown for the host big screen and the player lobby
 // (#735). Both render the same "Starting in M:SS" off the absolute start_at
 // deadline minus the server's view of "now" (a serverNow() the caller supplies
 // from its own clock-offset bookkeeping), never the device wall clock, so a

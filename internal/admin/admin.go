@@ -813,25 +813,27 @@ func storeQuestion(
 
 // ActiveSessionLookup is the slice of the live-session service the dashboard
 // needs: resolve the signed-in host's current non-finished room so the page can
-// offer a "Resume hosting" link back to it (#836). Kept narrow so the admin
-// package does not depend on the whole live-session service.
+// offer a "Resume session" link back to it (#836, #850). Kept narrow so the
+// admin package does not depend on the whole live-session service.
 type ActiveSessionLookup interface {
 	GetActiveSessionForHost(ctx context.Context, hostPlayerID int64) (*livesession.Session, error)
 }
 
 // indexData feeds the admin dashboard. ResumeCode is the join code of the
-// host's current active room, empty when they have none, so the template shows
-// the "Resume hosting" link only when there is a room to return to (#836).
+// host's current active room, empty when they have none. The single adaptive
+// host control reflects it: a "Resume session" link when set, the "Host a
+// session" entry otherwise (#836, #850).
 type indexData struct {
 	Title      string
 	ResumeCode string
 }
 
-// HandleIndex returns the index page. It surfaces the "Host a session" entry
-// (an empty-room POST to /host) and, when the signed-in host has an active room,
-// a "Resume hosting" link back to it (#836). sessions resolves that active room;
-// it may be nil for callers that do not wire the live-session service, in which
-// case the resume link is never shown.
+// HandleIndex returns the index page. Its single adaptive host control is the
+// "Host a session" entry (an empty-room POST to /host) when the signed-in host
+// has no active room, or a "Resume session" link back to it when they do (#836,
+// #850). sessions resolves that active room; it may be nil for callers that do
+// not wire the live-session service, in which case the resume link is never
+// shown.
 func HandleIndex(logger *slog.Logger, csrfMgr *csrf.Manager, sessions ActiveSessionLookup) http.Handler {
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/index.gohtml")
 

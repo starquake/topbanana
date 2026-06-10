@@ -2,7 +2,7 @@ import { join } from 'node:path';
 
 import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { seedQuiz, claimAndJoin, QUIZ_QUESTIONS, execSqlite } from './helpers';
+import { seedQuiz, claimAndJoin, QUIZ_QUESTIONS, execSqlite, endHostedSession } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' and returns its id, mirroring
 // the sqlite3 shortcut the other live specs use.
@@ -186,6 +186,7 @@ test.describe('live player screen wake lock', () => {
     expect((await readWakeLock(page)).held).toBe(true);
     expect((await readWakeLock(page)).releases).toBe(0);
 
+    await endHostedSession(host, joinCode);
     await hostContext.close();
   });
 
@@ -255,6 +256,7 @@ test.describe('live player screen wake lock', () => {
     await expect.poll(async () => (await readWakeLock(page)).held, { timeout: 10_000 }).toBe(false);
     expect((await readWakeLock(page)).releases).toBeGreaterThanOrEqual(1);
 
+    await endHostedSession(host, joinCode);
     await otherContext.close();
     await hostContext.close();
   });

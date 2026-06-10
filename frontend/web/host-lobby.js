@@ -1,16 +1,16 @@
-// host-lobby.js drives the host TV surface across every session phase
+// host-lobby.js drives the host big screen across every session phase
 // (MP-3 / #680 lobby, MP-8 / #685 in-game).
 //
 // It follows the documented session contract: an SSE tick on
 // GET /api/sessions/{code}/events is a pure "state moved" signal that carries
 // no game data, so every tick (and the initial connect) triggers a fresh
 // GET /api/sessions/{code}/state - the single authoritative read. Everything
-// the TV renders (roster, phase, question, answered order) comes only from
+// the big screen renders (roster, phase, question, answered order) comes only from
 // that read, so the UI can never drift from the server's view.
 //
 // The countdown is driven off the server answer window (question.expiresAt
 // minus the serverNow the state read carries), never the client wall clock,
-// so a skewed TV clock cannot desync the bar from the players' devices. The
+// so a skewed big-screen clock cannot desync the bar from the players' devices. The
 // per-question countdown and the between-rounds standings bar graph are the
 // shared player/host helpers (frontend/shared), bundled in by esbuild so the
 // host and player surfaces stay in lockstep without a cross-tree runtime fetch.
@@ -29,10 +29,10 @@ import {
     applyStandingsFlip,
 } from '@shared/standings.js';
 
-// STATE_FAILURE_LIMIT is how many consecutive GET /state failures the host TV
-// tolerates before surfacing the "Connection problem, retrying..." banner
+// STATE_FAILURE_LIMIT is how many consecutive GET /state failures the host big
+// screen tolerates before surfacing the "Connection problem, retrying..." banner
 // (#795). Mirrors the player lobby's threshold so both surfaces read the same.
-// The TV keeps refreshing off every SSE tick underneath; the banner just tells
+// The big screen keeps refreshing off every SSE tick underneath; the banner just tells
 // the host why the screen looks frozen. Cleared on the next good read.
 const STATE_FAILURE_LIMIT = 3;
 
@@ -60,7 +60,7 @@ function hostLobby(joinCode, hasQuiz) {
         // Offset between the server clock and Date.now() in ms, refreshed from
         // serverNow on every state read. serverTime() applies it so the
         // countdown ticks off the server's view of the deadline regardless of
-        // TV clock skew (#180).
+        // big-screen clock skew (#180).
         clockOffset: 0,
         progress: 100,
         // True during the read beat [serverNow, startedAt): the question text
@@ -73,7 +73,7 @@ function hostLobby(joinCode, hasQuiz) {
         // Surfaces a "Connection problem, retrying..." banner once GET /state
         // has failed STATE_FAILURE_LIMIT times in a row (#795). Distinct from
         // connected, which tracks the SSE channel: a failing state read with a
-        // live stream still freezes the TV, so this covers that gap. Cleared on
+        // live stream still freezes the big screen, so this covers that gap. Cleared on
         // the next good read.
         connectionTrouble: false,
         // Running count of consecutive GET /state failures, reset to 0 on any
@@ -90,7 +90,7 @@ function hostLobby(joinCode, hasQuiz) {
         // whether to show the "Starting in M:SS" line and the Cancel control.
         startAt: null,
         // Whole seconds left until startAt, driven off the server clock so the
-        // host TV and every player lobby tick in lockstep.
+        // host big screen and every player lobby tick in lockstep.
         startRemaining: 0,
         // Interval handle for the start countdown, cleared before each new one
         // and on teardown.
@@ -277,8 +277,8 @@ function hostLobby(joinCode, hasQuiz) {
             return !!this.startAt;
         },
 
-        // startCountdownLabel is the "Starting in M:SS" text the host TV shows
-        // while the countdown is armed.
+        // startCountdownLabel is the "Starting in M:SS" text the host big screen
+        // shows while the countdown is armed.
         startCountdownLabel() {
             return `Starting in ${formatCountdown(this.startRemaining)}`;
         },
@@ -386,8 +386,8 @@ function hostLobby(joinCode, hasQuiz) {
 
         // serverTime returns the current time in ms as the server sees it,
         // using the offset captured on the last state read, so every countdown
-        // runs on the server's view of the deadline regardless of TV clock
-        // skew.
+        // runs on the server's view of the deadline regardless of big-screen
+        // clock skew.
         serverTime() {
             return serverTime(this.clockOffset);
         },
@@ -438,7 +438,7 @@ function hostLobby(joinCode, hasQuiz) {
         // answerCorrectness reports whether a player's just-revealed pick was
         // correct: true / false at reveal, null otherwise. The server stamps
         // answers[].correct only in the reveal phase (it omits the flag before
-        // reveal so the TV cannot leak correctness early), so the answered
+        // reveal so the big screen cannot leak correctness early), so the answered
         // badges turn green/red only once the answer is out.
         answerCorrectness(playerId) {
             if (this.phase !== 'reveal' || !this.question || !Array.isArray(this.question.answers)) {
@@ -454,8 +454,8 @@ function hostLobby(joinCode, hasQuiz) {
 
         // isCorrectOption reports whether the server marked the option correct.
         // The correctOptionIds list is empty until the reveal phase (the server
-        // omits correctness before reveal), so the TV cannot leak the answer
-        // early.
+        // omits correctness before reveal), so the big screen cannot leak the
+        // answer early.
         isCorrectOption(optionId) {
             if (!this.question || !Array.isArray(this.question.correctOptionIds)) {
                 return false;
