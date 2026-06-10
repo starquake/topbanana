@@ -2,8 +2,38 @@ package auth
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
+
+	"github.com/starquake/topbanana/internal/session"
 )
+
+// ExportFinalizeGoogleSignIn exposes finalizeGoogleSignIn so the success
+// tail of the OAuth callback (#872 sign-in log line) can be unit-tested
+// with a capturing logger and a real store, without staging the whole
+// OIDC dance. The collaborators that the log line does not touch (games,
+// admin allowlist, prior session, next) take their dormant zero values:
+// the empty allowlist means no promotion, nil games means no migration,
+// so the helper runs straight to the session-set + log line. players
+// doubles as the RoleSetter (the concrete store satisfies both).
+func ExportFinalizeGoogleSignIn(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	players interface {
+		PlayerStore
+		RoleSetter
+	},
+	sessions *session.Manager,
+	player *Player,
+) {
+	finalizeGoogleSignIn(w, r, googleSignInDeps{
+		logger:   logger,
+		players:  players,
+		roles:    players,
+		sessions: sessions,
+	}, player, nil, "")
+}
 
 // ExportLinkOrCreateGooglePlayer is the test-only alias for the
 // unexported find-or-link decision used by HandleGoogleCallback. Lets

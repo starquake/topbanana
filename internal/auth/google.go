@@ -290,6 +290,9 @@ func finalizeGoogleSignIn(
 	)
 
 	deps.sessions.Set(w, player.ID, player.SessionVersion)
+	deps.logger.InfoContext(r.Context(), "google sign-in succeeded",
+		slog.Int64(logPlayerKey, player.ID),
+		slog.String(logEmailKey, player.Email))
 	migrateGamesAfterSignIn(r.Context(), deps.logger, deps.players, deps.games, sessionPlayerID, player.ID)
 	target := next
 	if target == "" {
