@@ -1,8 +1,7 @@
 import { join } from 'node:path';
 
-import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { seedQuiz, execSqlite, claimAndJoin, endHostedSession } from './helpers';
+import { seedQuiz, execSqlite, claimAndJoin } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' (the importer always lands
 // quizzes on 'solo', and only live quizzes are hostable, MP-0 / #677) and
@@ -28,12 +27,12 @@ function makeQuizLive(title: string): number {
   return id;
 }
 
-// The host setup (seed quiz, make it live, open a session) runs as the shared
-// admin so POST /api/sessions passes the host gate. The player join flow then
-// runs in the default anonymous context. test.use scopes the storageState to
-// this file's host-side request only; the page-driven join is anonymous.
+// The host setup (seed quiz, make it live, open a session via the hostSessions
+// fixture) runs as the shared admin so POST /api/sessions passes the host gate;
+// the fixture ends the room and closes its context on teardown. The player join
+// flow runs in the default anonymous page context.
 test.describe('player join + lobby', () => {
-  test('joins via typed code, enters a name, lands in the lobby, and toggles ready', async ({ page }) => {
+  test('joins via typed code, enters a name, lands in the lobby, and toggles ready', async ({ page, hostSessions }) => {
     const quizTitle = `Live Quiz ${Date.now()}`;
     // Player names are global on players.display_name now (#716), so a unique
     // name avoids a collision with a parallel spec sharing the worker DB.
@@ -42,17 +41,11 @@ test.describe('player join + lobby', () => {
     // Seed + host setup as the admin (storageState) in a separate browser
     // context so the player page itself stays anonymous. seedQuiz drives the
     // admin importer, which needs the admin cookie jar.
-    const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath() });
-    const host = await hostContext.newPage();
-
+    const host = await hostSessions.adminHost();
     await seedQuiz(host, quizTitle);
     const quizID = makeQuizLive(quizTitle);
 
-    const createResp = await host.request.post('/api/sessions', {
-      data: { quizId: quizID },
-    });
-    expect(createResp.status(), `create session: ${createResp.status()} ${await createResp.text()}`).toBe(201);
-    const { joinCode } = await createResp.json() as { joinCode: string };
+    const { joinCode } = await hostSessions.openViaApi(quizID);
     expect(joinCode).toMatch(/^[A-Z0-9]{6}$/);
 
     // Player flow: anonymous page, typed code -> name -> lobby. GET /join
@@ -99,22 +92,16 @@ test.describe('player join + lobby', () => {
     expect(armResp.status(), `arm-start: ${armResp.status()} ${await armResp.text()}`).toBe(204);
     await expect(page.getByTestId('start-countdown')).toContainText('Starting in');
     await expect(page.getByTestId('waiting-hint')).toHaveCount(0);
-
-    await endHostedSession(host, joinCode);
-    await hostContext.close();
   });
 
-  test('a deep-linked /join/{code} skips straight to the name form', async ({ page }) => {
+  test('a deep-linked /join/{code} skips straight to the name form', async ({ page, hostSessions }) => {
     const quizTitle = `Live Deep ${Date.now()}`;
     const bob = `Bob-${Date.now()}`;
 
-    const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath() });
-    const host = await hostContext.newPage();
+    const host = await hostSessions.adminHost();
     await seedQuiz(host, quizTitle);
     const quizID = makeQuizLive(quizTitle);
-    const createResp = await host.request.post('/api/sessions', { data: { quizId: quizID } });
-    expect(createResp.status()).toBe(201);
-    const { joinCode } = await createResp.json() as { joinCode: string };
+    const { joinCode } = await hostSessions.openViaApi(quizID);
 
     await page.goto(`/join/${joinCode}`);
     // No enter-code step: the name input is shown immediately, with the code
@@ -125,31 +112,25 @@ test.describe('player join + lobby', () => {
     await page.getByTestId('join-name-input').fill(bob);
     await page.getByTestId('join-name-submit').click();
     await expect(page.getByTestId('lobby-roster').getByText(bob)).toBeVisible();
-
-    await endHostedSession(host, joinCode);
-    await hostContext.close();
   });
 
   // #793: a player who reaches the name form, then submits after the host has
   // already started the game, gets a 409 closed on join. They must land on the
   // terminal "this game is no longer available" view, not sit on the dead name
   // form with an error under it.
-  test('submitting the name after the game has started joins mid-game and lands in the live phase', async ({ page }) => {
+  test('submitting the name after the game has started joins mid-game and lands in the live phase', async ({ page, hostSessions }) => {
     const quizTitle = `Live Latecomer ${Date.now()}`;
     const cara = `Cara-${Date.now()}`;
     const rex = `Rex-${Date.now()}`;
 
-    const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath() });
-    const host = await hostContext.newPage();
+    const host = await hostSessions.adminHost();
     await seedQuiz(host, quizTitle);
     const quizID = makeQuizLive(quizTitle);
-    const createResp = await host.request.post('/api/sessions', { data: { quizId: quizID } });
-    expect(createResp.status()).toBe(201);
-    const { joinCode } = await createResp.json() as { joinCode: string };
+    const { joinCode } = await hostSessions.openViaApi(quizID);
 
     // An early API-only player joins and readies, then deliberately holds their
     // answer so the question phase stays open for the latecomer to land in.
-    const earlyContext = await page.context().browser()!.newContext({ storageState: undefined });
+    const earlyContext = await hostSessions.newPlayerContext();
     await claimAndJoin(earlyContext.request, joinCode, rex);
     const readyResp = await earlyContext.request.post(`/api/sessions/${joinCode}/ready`, { data: { ready: true } });
     expect(readyResp.status()).toBe(204);
@@ -179,9 +160,5 @@ test.describe('player join + lobby', () => {
     await page.getByTestId('join-name-submit').click();
     await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId('lobby-closed')).toHaveCount(0);
-
-    await endHostedSession(host, joinCode);
-    await earlyContext.close();
-    await hostContext.close();
   });
 });

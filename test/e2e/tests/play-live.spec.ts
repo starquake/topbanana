@@ -1,8 +1,7 @@
 import { join } from 'node:path';
 
-import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { seedQuiz, importQuiz, QUIZ_QUESTIONS, claimAndJoin, execSqlite, endHostedSession } from './helpers';
+import { seedQuiz, importQuiz, QUIZ_QUESTIONS, claimAndJoin, execSqlite } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' (the importer lands quizzes
 // on 'solo', and only live quizzes are hostable, MP-0 / #677) and returns its
@@ -40,7 +39,7 @@ function makeQuizLive(title: string): number {
 // enough to assert the "answered, waiting" state with no correctness shown,
 // then answers via the API to trigger the close -> reveal transition.
 test.describe('player synchronized play', () => {
-  test('answers a question, waits with no correctness shown, then sees the revealed answer', async ({ page, baseURL }) => {
+  test('answers a question, waits with no correctness shown, then sees the revealed answer', async ({ page, hostSessions }) => {
     test.setTimeout(60_000);
 
     const quizTitle = `Live Play ${Date.now()}`;
@@ -51,22 +50,18 @@ test.describe('player synchronized play', () => {
 
     // Host side: seed the quiz, make it live, and open a session as the admin
     // (storageState) in its own context so the player page stays anonymous.
-    const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath(), baseURL });
-    const host = await hostContext.newPage();
-
+    const host = await hostSessions.adminHost();
     await seedQuiz(host, quizTitle);
     const quizID = makeQuizLive(quizTitle);
 
-    const createResp = await host.request.post('/api/sessions', { data: { quizId: quizID } });
-    expect(createResp.status(), `create session: ${createResp.status()} ${await createResp.text()}`).toBe(201);
-    const { joinCode } = await createResp.json() as { joinCode: string };
+    const { joinCode } = await hostSessions.openViaApi(quizID);
     expect(joinCode).toMatch(/^[A-Z0-9]{6}$/);
 
     // A second, API-only player joins from its own anonymous context (its own
     // session cookie -> a distinct anonymous player) and holds its answer so
     // the question does not early-close the instant the page player answers.
     // The join carries no name (#716): it claims players.display_name first.
-    const otherContext = await page.context().browser()!.newContext({ storageState: undefined, baseURL });
+    const otherContext = await hostSessions.newPlayerContext();
     await claimAndJoin(otherContext.request, joinCode, robin);
 
     // Player joins via the deep link and lands in the lobby.
@@ -156,10 +151,6 @@ test.describe('player synchronized play', () => {
     await expect(correctReveal).toHaveAttribute('data-correct', 'true');
     // Exactly one option is marked correct for this single-correct question.
     await expect(revealButtons.and(page.locator('[data-correct="true"]'))).toHaveCount(1);
-
-    await endHostedSession(host, joinCode);
-    await otherContext.close();
-    await hostContext.close();
   });
 
   // #755 cross-surface contract (player half): the live round-intro card names
@@ -172,7 +163,7 @@ test.describe('player synchronized play', () => {
   // reflects the real round position, so the first round can never read as a
   // between-rounds screen. The TV half is pinned in host-game.spec.ts; the
   // standings half is in standings-bargraph.spec.ts.
-  test('round intro shows the round title, summary, and an accurate Round N of M heading', async ({ page, baseURL }) => {
+  test('round intro shows the round title, summary, and an accurate Round N of M heading', async ({ page, hostSessions }) => {
     test.setTimeout(60_000);
 
     const quizTitle = `Live Round Intro ${Date.now()}`;
@@ -180,8 +171,7 @@ test.describe('player synchronized play', () => {
     const robin = `Robin-${Date.now()}`;
     const quincy = `Quincy-${Date.now()}`;
 
-    const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath(), baseURL });
-    const host = await hostContext.newPage();
+    const host = await hostSessions.adminHost();
 
     // A two-round quiz, imported live: the first round carries a summary so the
     // optional copy is exercised, and the round count is 2 so the eyebrow reads
@@ -219,13 +209,11 @@ test.describe('player synchronized play', () => {
     // session opener is addressed by.
     const quizID = makeQuizLive(quizTitle);
 
-    const createResp = await host.request.post('/api/sessions', { data: { quizId: quizID } });
-    expect(createResp.status(), `create session: ${createResp.status()} ${await createResp.text()}`).toBe(201);
-    const { joinCode } = await createResp.json() as { joinCode: string };
+    const { joinCode } = await hostSessions.openViaApi(quizID);
 
     // A second, API-only player keeps the roster non-empty so the start is not
     // blocked and the runner advances into the round intro.
-    const otherContext = await page.context().browser()!.newContext({ storageState: undefined, baseURL });
+    const otherContext = await hostSessions.newPlayerContext();
     await claimAndJoin(otherContext.request, joinCode, robin);
 
     await page.goto(`/join/${joinCode}`);
@@ -243,9 +231,5 @@ test.describe('player synchronized play', () => {
     await expect(page.getByTestId('round-summary')).toHaveText(roundSummary);
     await expect(page.getByTestId('round-intro-eyebrow')).toHaveText('Round 1 of 2');
     await expect(page.getByTestId('round-intro')).not.toContainText('Next round');
-
-    await endHostedSession(host, joinCode);
-    await otherContext.close();
-    await hostContext.close();
   });
 });

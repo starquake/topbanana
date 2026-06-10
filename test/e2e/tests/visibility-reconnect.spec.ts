@@ -1,8 +1,7 @@
 import { join } from 'node:path';
 
-import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { seedQuiz, claimAndJoin, QUIZ_QUESTIONS, execSqlite, endHostedSession } from './helpers';
+import { seedQuiz, claimAndJoin, QUIZ_QUESTIONS, execSqlite } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' (the importer lands quizzes
 // on 'solo', and only live quizzes are hostable, MP-0 / #677) and returns its
@@ -41,7 +40,7 @@ function makeQuizLive(title: string): number {
 // the visibilitychange the browser raises on return. The fix's handler re-reads
 // state and re-subscribes, so the new player appears.
 test.describe('lobby visibility reconnect', () => {
-  test('returning to a backgrounded tab repopulates a stale roster', async ({ page, baseURL }) => {
+  test('returning to a backgrounded tab repopulates a stale roster', async ({ page, hostSessions }) => {
     test.setTimeout(60_000);
 
     const quizTitle = `Visibility Live ${Date.now()}`;
@@ -53,20 +52,16 @@ test.describe('lobby visibility reconnect', () => {
 
     // Host side: seed the quiz, make it live, open a session as the admin in
     // its own context so the player page stays anonymous.
-    const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath(), baseURL });
-    const host = await hostContext.newPage();
-
+    const host = await hostSessions.adminHost();
     await seedQuiz(host, quizTitle);
     const quizID = makeQuizLive(quizTitle);
 
-    const createResp = await host.request.post('/api/sessions', { data: { quizId: quizID } });
-    expect(createResp.status(), `create session: ${createResp.status()} ${await createResp.text()}`).toBe(201);
-    const { joinCode } = await createResp.json() as { joinCode: string };
+    const { joinCode } = await hostSessions.openViaApi(quizID);
     expect(joinCode).toMatch(/^[A-Z0-9]{6}$/);
 
     // A second player (API-only, own anonymous context) is already in the lobby
     // before the page player joins, so the page roster starts with two names.
-    const benContext = await page.context().browser()!.newContext({ storageState: undefined, baseURL });
+    const benContext = await hostSessions.newPlayerContext();
     await claimAndJoin(benContext.request, joinCode, ben);
 
     // Page player joins via the deep link and lands in the lobby.
@@ -96,7 +91,7 @@ test.describe('lobby visibility reconnect', () => {
 
     // A third player joins while the stream is dead. With no SSE tick reaching
     // the page, the roster cannot learn about them - it stays stale.
-    const cleoContext = await page.context().browser()!.newContext({ storageState: undefined, baseURL });
+    const cleoContext = await hostSessions.newPlayerContext();
     await claimAndJoin(cleoContext.request, joinCode, cleo);
 
     await expect(roster.getByText(cleo)).toHaveCount(0);
@@ -112,11 +107,6 @@ test.describe('lobby visibility reconnect', () => {
     await expect(roster.getByText(cleo)).toBeVisible({ timeout: 15_000 });
     await expect(roster.getByText(ava)).toBeVisible();
     await expect(roster.getByText(ben)).toBeVisible();
-
-    await endHostedSession(host, joinCode);
-    await cleoContext.close();
-    await benContext.close();
-    await hostContext.close();
   });
 
   // #751 (same root cause): a player who backgrounds the tab in the lobby and
@@ -132,7 +122,7 @@ test.describe('lobby visibility reconnect', () => {
   // reconnects on its own) BEFORE the host starts, so the page genuinely misses
   // every transition tick and is still rendering the lobby. The
   // visibilitychange the browser raises on return then drives the recovery.
-  test('returning after the host starts advances off the lobby to the live question', async ({ page, baseURL }) => {
+  test('returning after the host starts advances off the lobby to the live question', async ({ page, hostSessions }) => {
     test.setTimeout(60_000);
 
     const quizTitle = `Visibility Start ${Date.now()}`;
@@ -143,22 +133,18 @@ test.describe('lobby visibility reconnect', () => {
 
     // Host side: seed the quiz, make it live, open a session as the admin in
     // its own context so the player page stays anonymous.
-    const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath(), baseURL });
-    const host = await hostContext.newPage();
-
+    const host = await hostSessions.adminHost();
     await seedQuiz(host, quizTitle);
     const quizID = makeQuizLive(quizTitle);
 
-    const createResp = await host.request.post('/api/sessions', { data: { quizId: quizID } });
-    expect(createResp.status(), `create session: ${createResp.status()} ${await createResp.text()}`).toBe(201);
-    const { joinCode } = await createResp.json() as { joinCode: string };
+    const { joinCode } = await hostSessions.openViaApi(quizID);
     expect(joinCode).toMatch(/^[A-Z0-9]{6}$/);
 
     // A second player (API-only, own anonymous context) keeps the question open
     // after the runner issues it: the runner early-closes only once every
     // active player has answered, and this player holds their answer, so the
     // returning page player still finds the question phase live on recovery.
-    const benContext = await page.context().browser()!.newContext({ storageState: undefined, baseURL });
+    const benContext = await hostSessions.newPlayerContext();
     await claimAndJoin(benContext.request, joinCode, ben);
 
     // Page player joins via the deep link and lands in the lobby.
@@ -210,9 +196,5 @@ test.describe('lobby visibility reconnect', () => {
     await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId('question-text')).toHaveText(QUIZ_QUESTIONS[0].text);
     await expect(page.getByTestId('lobby-view')).toHaveCount(0);
-
-    await endHostedSession(host, joinCode);
-    await benContext.close();
-    await hostContext.close();
   });
 });

@@ -1,8 +1,7 @@
 import { join } from 'node:path';
 
-import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { seedQuiz, QUIZ_QUESTIONS, claimAndJoin, execSqlite, endHostedSession } from './helpers';
+import { seedQuiz, QUIZ_QUESTIONS, claimAndJoin, execSqlite } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' (the importer lands quizzes
 // on 'solo', and only live quizzes are hostable, MP-0 / #677) and returns its
@@ -34,7 +33,7 @@ function makeQuizLive(title: string): number {
 // resume re-Joins, and the server's resume gate revives a prior participant's
 // row regardless of left_at - so the reload is harmless.
 test.describe('reconnect and resume', () => {
-  test('reloading mid-question lands back on the question and can still answer', async ({ page, baseURL }) => {
+  test('reloading mid-question lands back on the question and can still answer', async ({ page, hostSessions }) => {
     test.setTimeout(60_000);
 
     const quizTitle = `Resume Live ${Date.now()}`;
@@ -45,22 +44,18 @@ test.describe('reconnect and resume', () => {
 
     // Host side: seed the quiz, make it live, and open a session as the admin
     // (storageState) in its own context so the player page stays anonymous.
-    const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath(), baseURL });
-    const host = await hostContext.newPage();
-
+    const host = await hostSessions.adminHost();
     await seedQuiz(host, quizTitle);
     const quizID = makeQuizLive(quizTitle);
 
-    const createResp = await host.request.post('/api/sessions', { data: { quizId: quizID } });
-    expect(createResp.status(), `create session: ${createResp.status()} ${await createResp.text()}`).toBe(201);
-    const { joinCode } = await createResp.json() as { joinCode: string };
+    const { joinCode } = await hostSessions.openViaApi(quizID);
     expect(joinCode).toMatch(/^[A-Z0-9]{6}$/);
 
     // A second, API-only player joins from its own anonymous context and holds
     // its answer so the question never early-closes while the page player
     // reloads and resumes. The runner only closes once every active player has
     // answered.
-    const otherContext = await page.context().browser()!.newContext({ storageState: undefined, baseURL });
+    const otherContext = await hostSessions.newPlayerContext();
     await claimAndJoin(otherContext.request, joinCode, robin);
 
     // Player joins via the deep link and lands in the lobby (claims their name
@@ -119,10 +114,6 @@ test.describe('reconnect and resume', () => {
 
     await expect(page.getByTestId('reveal-view')).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId('reveal-verdict')).toHaveText('Correct!');
-
-    await endHostedSession(host, joinCode);
-    await otherContext.close();
-    await hostContext.close();
   });
 
   test('a fresh visitor with no remembered session sees the code-entry form', async ({ page }) => {

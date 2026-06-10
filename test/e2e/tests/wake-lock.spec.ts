@@ -1,8 +1,7 @@
 import { join } from 'node:path';
 
-import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { seedQuiz, claimAndJoin, QUIZ_QUESTIONS, execSqlite, endHostedSession } from './helpers';
+import { seedQuiz, claimAndJoin, QUIZ_QUESTIONS, execSqlite } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' and returns its id, mirroring
 // the sqlite3 shortcut the other live specs use.
@@ -137,7 +136,7 @@ function readWakeLock(page: import('./fixtures').Page): Promise<WakeLockState> {
 // API is feature-detected and best-effort, so these assertions run against a
 // stubbed navigator.wakeLock rather than the genuine OS lock.
 test.describe('live player screen wake lock', () => {
-  test('acquires the wake lock on entering the lobby and re-acquires on return to foreground', async ({ page, baseURL }) => {
+  test('acquires the wake lock on entering the lobby and re-acquires on return to foreground', async ({ page, hostSessions }) => {
     test.setTimeout(60_000);
 
     const quizTitle = `Wake Lobby ${Date.now()}`;
@@ -145,13 +144,10 @@ test.describe('live player screen wake lock', () => {
 
     await stubWakeLock(page);
 
-    const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath(), baseURL });
-    const host = await hostContext.newPage();
+    const host = await hostSessions.adminHost();
     await seedQuiz(host, quizTitle);
     const quizID = makeQuizLive(quizTitle);
-    const createResp = await host.request.post('/api/sessions', { data: { quizId: quizID } });
-    expect(createResp.status(), `create session: ${createResp.status()} ${await createResp.text()}`).toBe(201);
-    const { joinCode } = await createResp.json() as { joinCode: string };
+    const { joinCode } = await hostSessions.openViaApi(quizID);
 
     // No lock yet on the name form: the request only fires once the player has
     // entered the lobby (the join/ready gesture).
@@ -185,12 +181,9 @@ test.describe('live player screen wake lock', () => {
     await expect.poll(async () => (await readWakeLock(page)).requests).toBe(2);
     expect((await readWakeLock(page)).held).toBe(true);
     expect((await readWakeLock(page)).releases).toBe(0);
-
-    await endHostedSession(host, joinCode);
-    await hostContext.close();
   });
 
-  test('releases the wake lock when the game reaches the end-of-game intermission', async ({ page, baseURL }) => {
+  test('releases the wake lock when the game reaches the end-of-game intermission', async ({ page, hostSessions }) => {
     test.setTimeout(90_000);
 
     const quizTitle = `Wake Finish ${Date.now()}`;
@@ -199,18 +192,15 @@ test.describe('live player screen wake lock', () => {
 
     await stubWakeLock(page);
 
-    const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath(), baseURL });
-    const host = await hostContext.newPage();
+    const host = await hostSessions.adminHost();
     await seedQuiz(host, quizTitle);
     const quizID = makeQuizLive(quizTitle);
-    const createResp = await host.request.post('/api/sessions', { data: { quizId: quizID } });
-    expect(createResp.status(), `create session: ${createResp.status()} ${await createResp.text()}`).toBe(201);
-    const { joinCode } = await createResp.json() as { joinCode: string };
+    const { joinCode } = await hostSessions.openViaApi(quizID);
 
     // A second API-only player answers each question alongside the page player
     // so the runner closes every question and the game reaches the end-of-game
     // intermission (#836).
-    const otherContext = await page.context().browser()!.newContext({ storageState: undefined, baseURL });
+    const otherContext = await hostSessions.newPlayerContext();
     await claimAndJoin(otherContext.request, joinCode, ben);
 
     await page.goto(`/join/${joinCode}`);
@@ -255,9 +245,5 @@ test.describe('live player screen wake lock', () => {
     await expect(page.getByTestId('intermission-view')).toBeVisible({ timeout: 20_000 });
     await expect.poll(async () => (await readWakeLock(page)).held, { timeout: 10_000 }).toBe(false);
     expect((await readWakeLock(page)).releases).toBeGreaterThanOrEqual(1);
-
-    await endHostedSession(host, joinCode);
-    await otherContext.close();
-    await hostContext.close();
   });
 });
