@@ -29,26 +29,6 @@
             </p>
         </header>
 
-        {{/* ----- Mid-game join hint (#852): a thin one-line strip that keeps
-             the join URL + room code visible while a quiz is running, so a
-             latecomer can still join. The lobby itself keeps the full QR + code
-             card, so this is hidden there (and once the room is finished) via
-             showsJoinHint(); it stays text-only to avoid crowding the question
-             or standings below. A shrink-0 row inside the h-dvh flex column, so
-             the phase body underneath keeps its flex-1 height.
-             Gated with x-if (not x-show) on purpose: it repeats the join code,
-             and an x-show copy would sit in the DOM during the lobby phase where
-             the code already shows, so a getByText(code, exact) locator would
-             match two nodes. x-if keeps the markup out of the live DOM until a
-             quiz is running, while the server-rendered <template> still carries
-             it in the GET HTML. ----- */}}
-        <template x-if="showsJoinHint()">
-            <div class="shrink-0 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 px-[clamp(1.5rem,4vw,4rem)] py-[clamp(0.4rem,1.2vh,0.85rem)] border-b border-border-soft text-text-dim text-[clamp(0.75rem,1.4vw,1rem)]"
-                 data-join-hint>
-                <span>Join at <span class="font-mono text-text">{{.JoinEntryDisplay}}</span> with code <span class="font-mono text-accent">{{.JoinCode}}</span></span>
-            </div>
-        </template>
-
         {{/* ----- Lobby phase: scan-to-join + live roster + start. ----- */}}
         <div x-show="phase === 'lobby'"
              class="flex-1 min-h-0 grid gap-[clamp(1.5rem,4vw,4rem)] px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1.5rem,4vh,3rem)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] items-center">
@@ -180,10 +160,10 @@
                          the server leaves empty before reveal, so the answer is
                          never lit early. */}}
                     <ul x-show="phase === 'reveal' || !revealing"
-                        class="m-0 list-none p-0 grid gap-3 sm:grid-cols-2 max-w-[60rem] w-full mx-auto overflow-y-auto min-h-0"
+                        class="m-0 list-none p-0 grid gap-4 sm:grid-cols-2 max-w-[72rem] w-full mx-auto overflow-y-auto min-h-0"
                         role="list">
                         <template x-for="option in question.options" :key="option.id">
-                            <li class="flex items-center gap-3 px-5 py-3 rounded-xl border text-left transition-colors"
+                            <li class="flex items-center gap-3 px-6 py-4 rounded-xl border text-left transition-colors"
                                 :class="phase === 'reveal' && isCorrectOption(option.id)
                                     ? 'bg-success/15 border-success text-success'
                                     : (phase === 'reveal'
@@ -191,7 +171,7 @@
                                         : 'bg-surface border-border-soft')"
                                 :data-correct="phase === 'reveal' && isCorrectOption(option.id) ? 'true' : 'false'"
                                 data-answer-option>
-                                <span class="font-semibold text-[clamp(1rem,1.8vw,1.4rem)]"
+                                <span class="font-semibold text-[clamp(1.1rem,2.2vw,1.85rem)]"
                                       x-text="option.text"></span>
                                 <span x-show="phase === 'reveal' && isCorrectOption(option.id)"
                                       class="ml-auto shrink-0 text-[0.7rem] font-semibold uppercase tracking-[0.12em] px-2 py-1 rounded-sm bg-success/20 text-success"
@@ -334,6 +314,27 @@
                     </span>
                 </template>
             </p>
+
+            {{/* Mid-game join hint (#852, #864): the join URL + room code, sized
+                 large and code-forward so a latecomer reading the big screen from
+                 a distance can join. It sits in the footer between the connection
+                 status and the End session control (justify-between spreads them,
+                 so it lands in the middle). The lobby keeps the full QR + code
+                 card, so this is hidden there (and once finished) via
+                 showsJoinHint(). Gated with x-if (not x-show) on purpose: it
+                 repeats the join code, and an x-show copy would sit in the DOM
+                 during the lobby phase where the code already shows, so a
+                 getByText(code, exact) locator would match two nodes. */}}
+            <template x-if="showsJoinHint()">
+                <div class="flex flex-col items-center gap-[clamp(0.25rem,0.8vh,0.6rem)] text-center" data-join-hint>
+                    <p class="m-0 text-text-dim text-[clamp(0.85rem,1.6vw,1.15rem)]">
+                        Join at <span class="font-mono text-text">{{.JoinEntryDisplay}}</span> with code
+                    </p>
+                    <p class="m-0 font-display font-extrabold tracking-[0.12em] text-accent tabular-nums leading-none text-[clamp(2rem,6vw,4.5rem)]">
+                        {{.JoinCode}}
+                    </p>
+                </div>
+            </template>
 
             {{/* Armed: the live countdown, with Start now (skip) + Cancel. Only
                  when a quiz is queued (a preselected-quiz lobby); the empty room
