@@ -93,7 +93,7 @@ test.describe('confirm-and-restart hosting', () => {
       await expect(host).toHaveURL(/\/admin\/quizzes\/\d+$/);
       await host.getByRole('button', { name: 'Host live' }).click();
 
-      const modal = host.locator('[data-restart-modal]');
+      const modal = host.getByTestId('restart-modal');
       await expect(modal).toBeVisible();
       await expect(modal).toContainText('A live session is already running');
 
@@ -106,8 +106,8 @@ test.describe('confirm-and-restart hosting', () => {
 
       // The new room is staged on quiz B: the host can start it (the Start
       // control is present, the empty-room pick link is not).
-      await expect(host.locator('[data-start-now]')).toBeVisible({ timeout: 15_000 });
-      await expect(host.locator('[data-pick-quiz-link]')).toBeHidden();
+      await expect(host.getByTestId('start-now')).toBeVisible({ timeout: 15_000 });
+      await expect(host.getByTestId('pick-quiz-link')).toBeHidden();
     } finally {
       if (runningCode) await endHostedSession(host, runningCode);
       if (newCode) await endHostedSession(host, newCode);
@@ -136,7 +136,7 @@ test.describe('confirm-and-restart hosting', () => {
       await host.goto('/admin/quizzes');
       await host.getByRole('link', { name: quizB }).click();
       await host.getByRole('button', { name: 'Host live' }).click();
-      const modal = host.locator('[data-restart-modal]');
+      const modal = host.getByTestId('restart-modal');
       await expect(modal).toBeVisible();
       await modal.getByRole('button', { name: 'Cancel' }).click();
       await expect(modal).toBeHidden();

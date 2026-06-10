@@ -2537,7 +2537,7 @@ func TestHandleIndex(t *testing.T) {
 	}
 	// The host control is a single adaptive slot (#850): with no active room
 	// the dashboard shows the "Host a session" submit and NOT the resume link.
-	if got := body; strings.Contains(got, "data-resume-hosting") {
+	if got := body; strings.Contains(got, `data-testid="resume-hosting"`) {
 		t.Errorf("body shows the resume control with no active room: %q", got)
 	}
 }
@@ -2568,7 +2568,7 @@ func TestHandleIndex_ResumeLink(t *testing.T) {
 		"Resume session",
 		`href="/host/ABC123"`,
 		"ABC123",
-		"data-resume-hosting",
+		`data-testid="resume-hosting"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)
@@ -2576,7 +2576,7 @@ func TestHandleIndex_ResumeLink(t *testing.T) {
 	}
 	// The two controls are mutually exclusive: with an active room the
 	// "Host a session" submit is gone.
-	if got := body; strings.Contains(got, "data-host-session-submit") {
+	if got := body; strings.Contains(got, `data-testid="host-session-submit"`) {
 		t.Errorf("body shows the Host a session submit alongside the resume link: %q", got)
 	}
 }

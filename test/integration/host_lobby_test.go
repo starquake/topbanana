@@ -132,7 +132,7 @@ func TestHostLobby_RendersCodeQuizAndQR(t *testing.T) {
 	}
 	// The host can close the room from the lobby: the End session control is
 	// rendered across the live phases (#836).
-	if !strings.Contains(body, "data-end-session-form") {
+	if !strings.Contains(body, `data-testid="end-session-form"`) {
 		t.Error("host lobby missing the End session control")
 	}
 	// The big-screen brand logo itself returns to the admin console (#850):
@@ -188,7 +188,7 @@ func TestHostLobby_RendersPickQuizLink(t *testing.T) {
 		t.Fatalf("host lobby status = %d, want %d", got, want)
 	}
 	// The new list-driven flow: a link to the live-filtered quiz list.
-	if !strings.Contains(body, "data-pick-quiz-link") {
+	if !strings.Contains(body, `data-testid="pick-quiz-link"`) {
 		t.Error("host lobby missing the pick-a-live-quiz link")
 	}
 	if !strings.Contains(body, `href="/admin/quizzes?mode=live"`) {

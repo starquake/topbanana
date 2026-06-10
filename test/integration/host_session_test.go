@@ -65,9 +65,9 @@ func TestHostSession_CreatesEmptyRoom(t *testing.T) {
 		t.Errorf("empty-room lobby status = %d, want %d", status, http.StatusOK)
 	}
 	for _, want := range []string{
-		"data-pick-quiz-link",
+		`data-testid="pick-quiz-link"`,
 		`href="/admin/quizzes?mode=live"`,
-		"data-end-session-form",
+		`data-testid="end-session-form"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("empty-room lobby missing %q", want)

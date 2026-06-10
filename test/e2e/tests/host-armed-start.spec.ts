@@ -75,10 +75,10 @@ test.describe('host-armed last-call countdown', () => {
       await expect(page.getByTestId('waiting-hint')).toBeVisible();
 
       // Host arms the last-call countdown.
-      await host.locator('[data-arm-start]').click();
+      await host.getByTestId('arm-start').click();
 
       // Both surfaces show the live "Starting in M:SS" countdown.
-      await expect(host.locator('[data-start-countdown-label]')).toContainText('Starting in');
+      await expect(host.getByTestId('start-countdown-label')).toContainText('Starting in');
       await expect(page.getByTestId('start-countdown')).toContainText('Starting in');
       // While armed the static waiting hint is gone on the player surface.
       await expect(page.getByTestId('waiting-hint')).toHaveCount(0);
@@ -87,7 +87,7 @@ test.describe('host-armed last-call countdown', () => {
       // game, so the player leaves the lobby into the round intro / first
       // question and the host TV countdown controls disappear.
       await expect(page.getByTestId('lobby-view')).toHaveCount(0, { timeout: 15_000 });
-      await expect(host.locator('[data-start-countdown]')).toBeHidden();
+      await expect(host.getByTestId('start-countdown')).toBeHidden();
     } finally {
       await close();
     }
@@ -102,11 +102,11 @@ test.describe('host-armed last-call countdown', () => {
     try {
       await joinAsPlayer(page, joinCode, bob);
 
-      await host.locator('[data-arm-start]').click();
+      await host.getByTestId('arm-start').click();
       await expect(page.getByTestId('start-countdown')).toContainText('Starting in');
 
       // Start now skips the rest of the countdown; the game begins at once.
-      await host.locator('[data-skip-start]').click();
+      await host.getByTestId('skip-start').click();
       await expect(page.getByTestId('lobby-view')).toHaveCount(0, { timeout: 15_000 });
     } finally {
       await close();
@@ -122,12 +122,12 @@ test.describe('host-armed last-call countdown', () => {
     try {
       await joinAsPlayer(page, joinCode, cara);
 
-      await host.locator('[data-arm-start]').click();
+      await host.getByTestId('arm-start').click();
       await expect(page.getByTestId('start-countdown')).toContainText('Starting in');
 
       // Cancel clears the countdown: the player lobby returns to the waiting
       // hint and the game does not start.
-      await host.locator('[data-cancel-start]').click();
+      await host.getByTestId('cancel-start').click();
       await expect(page.getByTestId('start-countdown')).toHaveCount(0);
       await expect(page.getByTestId('waiting-hint')).toBeVisible();
 
