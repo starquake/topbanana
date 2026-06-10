@@ -1,4 +1,4 @@
-// host-lobby.js drives the host big screen across every session phase
+// host-bigscreen.js drives the host big screen across every session phase
 // (MP-3 / #680 lobby, MP-8 / #685 in-game).
 //
 // It follows the documented session contract: an SSE tick on
@@ -36,7 +36,7 @@ import {
 // the host why the screen looks frozen. Cleared on the next good read.
 const STATE_FAILURE_LIMIT = 3;
 
-function hostLobby(joinCode, hasQuiz) {
+function hostBigScreen(joinCode, hasQuiz) {
     return {
         joinCode,
         phase: 'lobby',
@@ -576,5 +576,5 @@ function hostLobby(joinCode, hasQuiz) {
 }
 
 document.addEventListener('alpine:init', () => {
-    window.Alpine.data('hostLobby', hostLobby);
+    window.Alpine.data('hostBigScreen', hostBigScreen);
 });

@@ -156,7 +156,7 @@ test.describe('player synchronized play', () => {
   // #755 cross-surface contract (player half): the live round-intro card names
   // the round and words its heading correctly. A multi-round quiz with a round
   // summary exercises all three round-intro fields the player surface shares
-  // with the TV (lobby.gohtml) and the solo client (index.html): the title, the
+  // with the big screen (bigscreen.gohtml) and the solo client (index.html): the title, the
   // optional summary, and an accurate "Round N of M" eyebrow that is NOT the old
   // generic "Next round" wording on the first round. Asserting "Round 1 of 2"
   // (not the single-round "Round 1 of 1" the sibling spec checks) pins that N/M

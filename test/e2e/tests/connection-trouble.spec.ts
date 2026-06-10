@@ -125,7 +125,7 @@ test.describe('live client connection trouble', () => {
     );
     for (let i = 0; i < 3; i++) {
       await page.evaluate(() => {
-        const root = document.querySelector('[x-data^="hostLobby"]');
+        const root = document.querySelector('[x-data^="hostBigScreen"]');
         const cmp = (window as unknown as { Alpine: { $data: (el: Element) => { refresh: () => Promise<void> } } }).Alpine.$data(root!);
         return cmp.refresh();
       });
@@ -136,7 +136,7 @@ test.describe('live client connection trouble', () => {
     // Restore the endpoint; the next refresh clears the banner.
     await page.unroute(`**/api/sessions/${code}/state`);
     await page.evaluate(() => {
-      const root = document.querySelector('[x-data^="hostLobby"]');
+      const root = document.querySelector('[x-data^="hostBigScreen"]');
       const cmp = (window as unknown as { Alpine: { $data: (el: Element) => { refresh: () => Promise<void> } } }).Alpine.$data(root!);
       return cmp.refresh();
     });

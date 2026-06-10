@@ -344,10 +344,10 @@ JS_CLIENT_ENTRIES := $(JS_CLIENT_SRC)/app.js $(JS_CLIENT_SRC)/join.js
 
 JS_WEB_SRC      := frontend/web
 JS_WEB_OUT      := internal/web/static/js/dist
-# host-lobby + share are the live-game / share bundles; the rest are small
+# host-bigscreen + share are the live-game / share bundles; the rest are small
 # standalone admin/auth page scripts that are bundled (minified) too, so the
 # served js tree holds only built output and never un-minified source (#756).
-JS_WEB_ENTRIES  := $(JS_WEB_SRC)/host-lobby.js $(JS_WEB_SRC)/share.js \
+JS_WEB_ENTRIES  := $(JS_WEB_SRC)/host-bigscreen.js $(JS_WEB_SRC)/share.js \
                    $(JS_WEB_SRC)/cooldown.js $(JS_WEB_SRC)/copy-prompt.js \
                    $(JS_WEB_SRC)/password-length.js $(JS_WEB_SRC)/quiz-reorder.js
 

@@ -12,7 +12,7 @@ import (
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
-// hostJoinURL returns the join URL the TV lobby's QR encodes, given the
+// hostJoinURL returns the join URL the big screen's QR encodes, given the
 // server base URL and code. Mirrors host.joinPathPrefix; kept local so the
 // test fails loudly if the host package changes the path without updating
 // the player join contract.
@@ -60,9 +60,9 @@ func seedSoloQuiz(ctx context.Context, t *testing.T, quizzes quiz.Store, slug st
 	return qz
 }
 
-// getHostLobbyHTML fetches GET /host/{code} on the (host) client and returns
+// getHostBigScreenHTML fetches GET /host/{code} on the (host) client and returns
 // the response status and body.
-func getHostLobbyHTML(
+func getHostBigScreenHTML(
 	ctx context.Context, t *testing.T, client *http.Client, baseURL, code string,
 ) (int, string) {
 	t.Helper()
@@ -70,16 +70,16 @@ func getHostLobbyHTML(
 	defer closeBody(t, resp.Body)
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatalf("read host lobby body: %v", err)
+		t.Fatalf("read host big-screen body: %v", err)
 	}
 
 	return resp.StatusCode, string(body)
 }
 
-// TestHostLobby_RendersCodeQuizAndQR drives the host flow: a host opens a
-// session, then loads the TV lobby and finds the room code, the quiz title,
+// TestHostBigScreen_RendersCodeQuizAndQR drives the host flow: a host opens a
+// session, then loads the big screen and finds the room code, the quiz title,
 // and a server-rendered QR SVG that encodes the join URL.
-func TestHostLobby_RendersCodeQuizAndQR(t *testing.T) {
+func TestHostBigScreen_RendersCodeQuizAndQR(t *testing.T) {
 	t.Parallel()
 
 	ctx, setup := setupIntegration(t)
@@ -94,21 +94,21 @@ func TestHostLobby_RendersCodeQuizAndQR(t *testing.T) {
 
 	code := createSession(ctx, t, host, baseURL, qz.ID)
 
-	status, body := getHostLobbyHTML(ctx, t, host, baseURL, code)
+	status, body := getHostBigScreenHTML(ctx, t, host, baseURL, code)
 	if got, want := status, http.StatusOK; got != want {
-		t.Fatalf("host lobby status = %d, want %d", got, want)
+		t.Fatalf("host big screen status = %d, want %d", got, want)
 	}
 	if !strings.Contains(body, code) {
-		t.Errorf("host lobby missing room code %q", code)
+		t.Errorf("host big screen missing room code %q", code)
 	}
 	if !strings.Contains(body, qz.Title) {
-		t.Errorf("host lobby missing quiz title %q", qz.Title)
+		t.Errorf("host big screen missing quiz title %q", qz.Title)
 	}
 	if !strings.Contains(body, "<svg") || !strings.Contains(body, "Join QR code") {
-		t.Error("host lobby missing the server-rendered QR svg")
+		t.Error("host big screen missing the server-rendered QR svg")
 	}
 	if want := hostJoinURL(baseURL, code); !strings.Contains(body, want) {
-		t.Errorf("host lobby missing join url %q (the QR deep link)", want)
+		t.Errorf("host big screen missing join url %q (the QR deep link)", want)
 	}
 	// The typed-code guidance points players at the bare enter-code URL (host
 	// + /join, no scheme, no code) rather than the deep link (#750). Assert
@@ -117,52 +117,53 @@ func TestHostLobby_RendersCodeQuizAndQR(t *testing.T) {
 	// contains the bare host+/join as a prefix substring).
 	entryDisplay := strings.TrimPrefix(strings.TrimPrefix(baseURL+"/join", "https://"), "http://")
 	if want := ">" + entryDisplay + "</span> and enter the code above"; !strings.Contains(body, want) {
-		t.Errorf("host lobby missing typed-code guidance %q", want)
+		t.Errorf("host big screen missing typed-code guidance %q", want)
 	}
-	// The mid-game join hint (#852) keeps the join URL + code on the big screen
-	// while a quiz is running (shown via showsJoinHint() in the in-game phases),
-	// so a latecomer reading the TV can still join. Its markup ships at GET
-	// regardless of phase; pin the strip by its hook and its distinct "with code"
-	// URL line (the lobby's typed-code guidance above uses different wording).
+	// The mid-game join hint (#852, enlarged + moved bottom-center #864) keeps the
+	// join URL + code on the big screen while a quiz is running (shown via
+	// showsJoinHint() in the in-game phases), so a latecomer reading the TV can
+	// still join. Its markup ships at GET regardless of phase; pin the strip by
+	// its hook and its distinct "with code" lead-in line (the lobby's typed-code
+	// guidance above uses different wording), with the code in a separate element.
 	if !strings.Contains(body, "data-join-hint") {
-		t.Error("host lobby missing the mid-game join hint strip (#852)")
+		t.Error("host big screen missing the mid-game join hint strip (#852)")
 	}
-	if want := ">" + entryDisplay + "</span> with code "; !strings.Contains(body, want) {
-		t.Errorf("host lobby join hint missing the join URL + code line %q", want)
+	if want := ">" + entryDisplay + "</span> with code"; !strings.Contains(body, want) {
+		t.Errorf("host big screen join hint missing the join URL lead-in line %q", want)
 	}
-	// The host can close the room from the lobby: the End session control is
+	// The host can close the room from the big screen: the End session control is
 	// rendered across the live phases (#836).
 	if !strings.Contains(body, `data-testid="end-session-form"`) {
-		t.Error("host lobby missing the End session control")
+		t.Error("host big screen missing the End session control")
 	}
 	// The big-screen brand logo itself returns to the admin console (#850):
 	// the header's only navigation is the home logo, which now points at
 	// /admin, so the separate "Manage" cross-link (#844) is gone. The big
 	// screen deliberately has no account cluster / log out.
 	if !strings.Contains(body, `<a href="/admin" aria-label="Top Banana!"`) {
-		t.Error("host lobby brand logo should link to /admin")
+		t.Error("host big screen brand logo should link to /admin")
 	}
 	if strings.Contains(body, ">Manage</a>") {
-		t.Error("host lobby header should not render the redundant Manage link (#850)")
+		t.Error("host big screen header should not render the redundant Manage link (#850)")
 	}
 	if strings.Contains(body, `action="/logout"`) {
 		t.Error(
-			"host lobby should not render a log-out form (the big screen is a shared screen, not a session surface)",
+			"host big screen should not render a log-out form (the big screen is a shared screen, not a session surface)",
 		)
 	}
 	// A preselected-quiz lobby seeds the component's hasQuiz true so it renders
 	// its Start controls without flashing the staging picker before the first
 	// state read (#836 no-flash hydration).
-	if !strings.Contains(body, "hostLobby(") || !strings.Contains(body, ", true)") {
-		t.Error("host lobby should seed hasQuiz=true into the component for a preselected quiz")
+	if !strings.Contains(body, "hostBigScreen(") || !strings.Contains(body, ", true)") {
+		t.Error("host big screen should seed hasQuiz=true into the component for a preselected quiz")
 	}
 }
 
-// TestHostLobby_RendersPickQuizLink pins the list-driven pick flow (#851): an
+// TestHostBigScreen_RendersPickQuizLink pins the list-driven pick flow (#851): an
 // empty staging room renders the "pick a live quiz" link to
 // /admin/quizzes?mode=live (where the host picks a quiz and "Host live" arms it
 // back in this room), and the old in-lobby dropdown picker is gone.
-func TestHostLobby_RendersPickQuizLink(t *testing.T) {
+func TestHostBigScreen_RendersPickQuizLink(t *testing.T) {
 	t.Parallel()
 
 	ctx, setup := setupIntegration(t)
@@ -183,32 +184,32 @@ func TestHostLobby_RendersPickQuizLink(t *testing.T) {
 		t.Fatal("empty-room create did not redirect to /host/{code}")
 	}
 
-	status, body := getHostLobbyHTML(ctx, t, host, baseURL, code)
+	status, body := getHostBigScreenHTML(ctx, t, host, baseURL, code)
 	if got, want := status, http.StatusOK; got != want {
-		t.Fatalf("host lobby status = %d, want %d", got, want)
+		t.Fatalf("host big screen status = %d, want %d", got, want)
 	}
 	// The new list-driven flow: a link to the live-filtered quiz list.
 	if !strings.Contains(body, `data-testid="pick-quiz-link"`) {
-		t.Error("host lobby missing the pick-a-live-quiz link")
+		t.Error("host big screen missing the pick-a-live-quiz link")
 	}
 	if !strings.Contains(body, `href="/admin/quizzes?mode=live"`) {
-		t.Error("host lobby pick-quiz link should point at /admin/quizzes?mode=live")
+		t.Error("host big screen pick-quiz link should point at /admin/quizzes?mode=live")
 	}
 	// The old in-lobby dropdown picker is gone.
 	for _, gone := range []string{"data-start-quiz-picker", "data-next-quiz-form", "data-next-quiz-select"} {
 		if strings.Contains(body, gone) {
-			t.Errorf("host lobby should no longer render the removed dropdown picker %q", gone)
+			t.Errorf("host big screen should no longer render the removed dropdown picker %q", gone)
 		}
 	}
 }
 
-// TestHostLobby_StateReflectsLiveJoinAndReady is the integration backbone for
-// the live TV view: the page refreshes off GET /api/sessions/{code}/state, so
+// TestHostBigScreen_StateReflectsLiveJoinAndReady is the integration backbone for
+// the live big-screen view: the page refreshes off GET /api/sessions/{code}/state, so
 // a player joining and readying via REST (MP-4's join UI does not exist in
 // this slice) must surface on the host's authoritative state read - which is
-// exactly what the lobby JS polls. The e2e test asserts the DOM updates; here
+// exactly what the big-screen JS polls. The e2e test asserts the DOM updates; here
 // we pin the data path the host page consumes.
-func TestHostLobby_StateReflectsLiveJoinAndReady(t *testing.T) {
+func TestHostBigScreen_StateReflectsLiveJoinAndReady(t *testing.T) {
 	t.Parallel()
 
 	ctx, setup := setupIntegration(t)
@@ -281,7 +282,7 @@ func TestHostLive_CreatesSessionAndRedirects(t *testing.T) {
 		t.Fatal("host live redirected to /host/ with no code")
 	}
 	// The host can load the lobby it was redirected to.
-	if status, _ := getHostLobbyHTML(ctx, t, host, baseURL, code); status != http.StatusOK {
+	if status, _ := getHostBigScreenHTML(ctx, t, host, baseURL, code); status != http.StatusOK {
 		t.Errorf("redirected lobby status = %d, want %d", status, http.StatusOK)
 	}
 }
@@ -381,11 +382,11 @@ func TestHostLive_RejectsSoloQuiz(t *testing.T) {
 	}
 }
 
-// TestHostLobby_Authz pins the host-surface access rules: an anonymous
+// TestHostBigScreen_Authz pins the host-surface access rules: an anonymous
 // visitor is bounced to login, a foreign host's session 404s, the owning host
-// can start the game (303 back to the lobby), and a foreign or unknown code
+// can start the game (303 back to the big screen), and a foreign or unknown code
 // 404s on start so the code stays opaque.
-func TestHostLobby_Authz(t *testing.T) {
+func TestHostBigScreen_Authz(t *testing.T) {
 	t.Parallel()
 
 	// A foreign host (a second host who does not own this session) registers
@@ -425,18 +426,18 @@ func TestHostLobby_Authz(t *testing.T) {
 		resp := httpGet(ctx, t, anon, baseURL+"/host/"+code)
 		defer closeBody(t, resp.Body)
 		if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
-			t.Errorf("anon host lobby status = %d, want %d", got, want)
+			t.Errorf("anon host big screen status = %d, want %d", got, want)
 		}
 		if loc := resp.Header.Get("Location"); !strings.HasPrefix(loc, "/login") {
-			t.Errorf("anon host lobby redirect = %q, want /login", loc)
+			t.Errorf("anon host big screen redirect = %q, want /login", loc)
 		}
 	})
 
-	t.Run("a foreign host cannot open another host's lobby", func(t *testing.T) {
+	t.Run("a foreign host cannot open another host's big screen", func(t *testing.T) {
 		t.Parallel()
-		status, _ := getHostLobbyHTML(ctx, t, foreign, baseURL, code)
+		status, _ := getHostBigScreenHTML(ctx, t, foreign, baseURL, code)
 		if got, want := status, http.StatusNotFound; got != want {
-			t.Errorf("foreign host lobby status = %d, want %d", got, want)
+			t.Errorf("foreign host big screen status = %d, want %d", got, want)
 		}
 	})
 
