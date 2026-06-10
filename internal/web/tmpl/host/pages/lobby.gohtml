@@ -29,6 +29,26 @@
             </p>
         </header>
 
+        {{/* ----- Mid-game join hint (#852): a thin one-line strip that keeps
+             the join URL + room code visible while a quiz is running, so a
+             latecomer can still join. The lobby itself keeps the full QR + code
+             card, so this is hidden there (and once the room is finished) via
+             showsJoinHint(); it stays text-only to avoid crowding the question
+             or standings below. A shrink-0 row inside the h-dvh flex column, so
+             the phase body underneath keeps its flex-1 height.
+             Gated with x-if (not x-show) on purpose: it repeats the join code,
+             and an x-show copy would sit in the DOM during the lobby phase where
+             the code already shows, so a getByText(code, exact) locator would
+             match two nodes. x-if keeps the markup out of the live DOM until a
+             quiz is running, while the server-rendered <template> still carries
+             it in the GET HTML. ----- */}}
+        <template x-if="showsJoinHint()">
+            <div class="shrink-0 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 px-[clamp(1.5rem,4vw,4rem)] py-[clamp(0.4rem,1.2vh,0.85rem)] border-b border-border-soft text-text-dim text-[clamp(0.75rem,1.4vw,1rem)]"
+                 data-join-hint>
+                <span>Join at <span class="font-mono text-text">{{.JoinEntryDisplay}}</span> with code <span class="font-mono text-accent">{{.JoinCode}}</span></span>
+            </div>
+        </template>
+
         {{/* ----- Lobby phase: scan-to-join + live roster + start. ----- */}}
         <div x-show="phase === 'lobby'"
              class="flex-1 min-h-0 grid gap-[clamp(1.5rem,4vw,4rem)] px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1.5rem,4vh,3rem)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] items-center">
