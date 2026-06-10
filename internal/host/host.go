@@ -8,9 +8,7 @@
 package host
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -22,7 +20,6 @@ import (
 	"github.com/starquake/topbanana/internal/envtag"
 	"github.com/starquake/topbanana/internal/livesession"
 	"github.com/starquake/topbanana/internal/qrcode"
-	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
 
@@ -69,25 +66,6 @@ type LobbyData struct {
 	// QuestionCount is shown as lobby metadata; the lobby never leaks
 	// question text (the no-spoiler guarantee).
 	QuestionCount int
-	// LiveQuizzes feeds the intermission "Start next quiz" picker (#836): the
-	// live quizzes a host can re-arm the room onto. Server-rendered at GET
-	// since the list is static for the page's lifetime; the picker is only
-	// shown once the room reaches the between-games intermission phase.
-	LiveQuizzes []LiveQuizOption
-}
-
-// LiveQuizOption is one selectable quiz in the intermission picker (#836):
-// the id the next-quiz form posts and the title shown in the option.
-type LiveQuizOption struct {
-	ID    int64
-	Title string
-}
-
-// QuizLister is the slice of the quiz store the host surface needs: list the
-// live quizzes the intermission picker offers (#836). Kept narrow so the
-// handler does not depend on the whole quiz store surface.
-type QuizLister interface {
-	ListLiveQuizzes(ctx context.Context) ([]*quiz.Quiz, error)
 }
 
 // Handlers serves the host lobby page and the host start control.
@@ -95,23 +73,19 @@ type Handlers struct {
 	logger  *slog.Logger
 	csrf    *csrf.Manager
 	service *livesession.Service
-	quizzes QuizLister
 	tmpl    *template.Template
 }
 
-// NewHandlers wires the host surface over the live-session service and the
-// quiz lister that feeds the intermission "Start next quiz" picker (#836).
+// NewHandlers wires the host surface over the live-session service.
 func NewHandlers(
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
 	service *livesession.Service,
-	quizzes QuizLister,
 ) *Handlers {
 	return &Handlers{
 		logger:  logger,
 		csrf:    csrfMgr,
 		service: service,
-		quizzes: quizzes,
 		tmpl:    parseTemplate("host/pages/lobby.gohtml"),
 	}
 }
@@ -162,21 +136,12 @@ func (h *Handlers) Lobby(w http.ResponseWriter, r *http.Request) {
 	// never from user input, so it is safe to inject as trusted HTML.
 	qrMarkup := template.HTML(svg) //nolint:gosec // server-generated SVG, no user markup.
 
-	liveQuizzes, err := h.liveQuizOptions(ctx)
-	if err != nil {
-		h.logger.ErrorContext(ctx, "error listing live quizzes for host lobby", slog.Any("err", err))
-		http.Error(w, msgInternalError, http.StatusInternalServerError)
-
-		return
-	}
-
 	data := LobbyData{
 		Title:            "Live lobby",
 		JoinCode:         state.Session.JoinCode,
 		JoinURL:          joinURL,
 		JoinEntryDisplay: joinEntry,
 		QRSVG:            qrMarkup,
-		LiveQuizzes:      liveQuizzes,
 	}
 	// An empty room (#836) has no quiz yet: leave the quiz metadata zero-valued so
 	// the lobby renders the staging state rather than naming a quiz.
@@ -187,22 +152,6 @@ func (h *Handlers) Lobby(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.render(w, r, data)
-}
-
-// liveQuizOptions loads the host's live quizzes into the picker's view shape
-// (#836). Server-rendered at GET since the list is static for the page's
-// lifetime; the template only shows it in the intermission phase.
-func (h *Handlers) liveQuizOptions(ctx context.Context) ([]LiveQuizOption, error) {
-	quizzes, err := h.quizzes.ListLiveQuizzes(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list live quizzes: %w", err)
-	}
-	options := make([]LiveQuizOption, 0, len(quizzes))
-	for _, qz := range quizzes {
-		options = append(options, LiveQuizOption{ID: qz.ID, Title: qz.Title})
-	}
-
-	return options, nil
 }
 
 // render clones the parsed tree, binds the per-request csrfToken func, and

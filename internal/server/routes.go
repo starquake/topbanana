@@ -890,7 +890,7 @@ func addSessionRoutes(
 }
 
 // addHostRoutes registers the host presentation surface (MP-3 / #680): the
-// "Play live" entry that opens a session and the TV lobby it redirects to,
+// "Host live" entry that opens a session and the TV lobby it redirects to,
 // plus the host start control. All three are host-gated (RequireGameHost)
 // and the mutating POSTs carry CSRF protection. The lobby reads live state
 // through the JSON API the page polls (SSE tick -> GET /state); the host
@@ -909,7 +909,7 @@ func addHostRoutes(
 	}
 	csrfMW := csrfMgr.Middleware
 
-	handlers := host.NewHandlers(logger, csrfMgr, sessionService, stores.Quizzes)
+	handlers := host.NewHandlers(logger, csrfMgr, sessionService)
 
 	// The admin dashboard is the host's "start hosting" home, so it lives with
 	// the host routes: it surfaces the "Host a session" entry and a "Resume

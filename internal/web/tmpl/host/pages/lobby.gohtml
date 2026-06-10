@@ -25,7 +25,7 @@
                 <span class="font-display font-extrabold uppercase tracking-[0.18em] text-[clamp(1rem,2vw,1.4rem)]" aria-hidden="true">Top Banana!</span>
             </a>
             <p class="m-0 text-text-dim text-[clamp(0.85rem,1.6vw,1.1rem)] font-semibold uppercase tracking-[0.14em] truncate max-w-[40vw]">
-                {{.QuizTitle}}
+                {{if .HasQuiz}}{{.QuizTitle}}{{else}}Pick a quiz{{end}}
             </p>
         </header>
 
@@ -238,9 +238,9 @@
              roundScore for the last round so the bars animate that final
              contribution. The animation is driven in host-lobby.js via anime.js
              with a reduced-motion / missing-global fallback that snaps to the
-             final state. At intermission the "Start next quiz" picker appears
-             below the standings so the host can re-arm the room onto the next
-             live quiz. ----- */}}
+             final state. At intermission the pick-a-live-quiz link appears below
+             the standings (#851) so the host can re-arm the room onto the next
+             live quiz from the filtered quiz list. ----- */}}
         <div x-show="phase === 'round_results' || phase === 'intermission' || phase === 'finished'"
              class="flex-1 min-h-0 flex flex-col gap-[clamp(1rem,3vh,2rem)] px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1.5rem,4vh,3rem)]"
              data-phase-results>
@@ -277,16 +277,18 @@
             </ul>
         </div>
 
-        {{/* Start-quiz picker (#836): the pick-and-start-a-quiz control, rendered
-             once and shown for both staging cases - an empty lobby (the first
-             game) and the between-games intermission (the next game) - via
-             showsStartQuizPicker(). Its field/button labels are reactive so the
-             first game never says "next". A preselected-quiz lobby keeps the
-             footer Start controls instead, so this stays hidden there. */}}
-        <div x-show="showsStartQuizPicker()"
+        {{/* Pick-a-live-quiz link (#851): the host picks a live quiz from the
+             filterable admin quiz list rather than an in-lobby dropdown. Shown
+             for both staging cases - an empty lobby (the first game) and the
+             between-games intermission (the next game) - via showsPickQuizLink().
+             The link opens /admin/quizzes?mode=live; choosing a quiz there and
+             hitting "Host live" arms it back in this same room (one room per
+             host). A preselected-quiz lobby keeps the footer Start controls
+             instead, so this stays hidden there. */}}
+        <div x-show="showsPickQuizLink()"
              class="shrink-0 px-[clamp(1.5rem,4vw,4rem)] pb-[clamp(1rem,2.5vh,2rem)]"
-             data-start-quiz-picker>
-            {{template "start-quiz-picker" .}}
+             data-pick-quiz-link>
+            <a href="/admin/quizzes?mode=live" class="btn-primary gap-2">Pick a live quiz</a>
         </div>
 
         {{/* Footer: connection state + host start controls (lobby only). The
@@ -315,7 +317,7 @@
 
             {{/* Armed: the live countdown, with Start now (skip) + Cancel. Only
                  when a quiz is queued (a preselected-quiz lobby); the empty room
-                 uses the staging picker above instead (#836). */}}
+                 uses the pick-a-live-quiz link above instead (#851). */}}
             <div x-show="phase === 'lobby' && hasQuiz && armed()"
                  class="flex flex-wrap items-center gap-4"
                  data-start-countdown>
@@ -338,8 +340,8 @@
             </div>
 
             {{/* Not armed: Start now + Start in 60s. Only when a quiz is queued
-                 (a preselected-quiz lobby); the empty room uses the staging
-                 picker above instead (#836). */}}
+                 (a preselected-quiz lobby); the empty room uses the
+                 pick-a-live-quiz link above instead (#851). */}}
             <div x-show="phase === 'lobby' && hasQuiz && !armed()"
                  class="flex flex-wrap items-center gap-4">
                 <form method="post" :action="'/host/' + encodeURIComponent(joinCode) + '/start'" @submit.prevent="start()">
@@ -382,48 +384,4 @@
                role="status"></p>
         </footer>
     </main>
-{{end}}
-
-{{/* start-quiz-picker (#836): the shared pick-and-start-a-quiz control. A plain
-     server-rendered POST form that arms the room onto the chosen live quiz; the
-     native submit + the 303 redirect reloads /host/{code}, which the runner
-     drives into the game - no JS needed for the submit. It serves both the
-     empty-room lobby (the first game) and the between-games intermission (the
-     next game); the field and button labels are reactive (pickerLabel /
-     pickerButtonLabel) so the first game never says "next". The live quizzes are
-     server-rendered into the select at GET (static for the page's lifetime). */}}
-{{define "start-quiz-picker"}}
-    <form method="post"
-          :action="'/host/' + encodeURIComponent(joinCode) + '/next-quiz'"
-          class="flex flex-wrap items-end justify-center gap-4 max-w-[60rem] w-full mx-auto"
-          data-next-quiz-form>
-        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-        <div class="flex flex-col gap-2 min-w-[16rem]">
-            <label for="next-quiz-select"
-                   class="m-0 text-text-dim text-[clamp(0.8rem,1.5vw,1rem)] font-semibold uppercase tracking-[0.14em]"
-                   x-text="pickerLabel()">Start a quiz</label>
-            {{if .LiveQuizzes}}
-                <select id="next-quiz-select" name="quiz_id"
-                        class="min-h-[52px] px-4 rounded-lg bg-surface text-text border border-border-soft text-[clamp(0.95rem,1.7vw,1.2rem)] focus-visible:outline-none focus-visible:shadow-focus"
-                        data-next-quiz-select>
-                    {{range .LiveQuizzes}}
-                        <option value="{{.ID}}">{{.Title}}</option>
-                    {{end}}
-                </select>
-            {{else}}
-                {{/* No live quizzes to offer: keep the label's target valid
-                     with a disabled read-only input rather than an empty
-                     select, and make the absence explicit. */}}
-                <input id="next-quiz-select" type="text" readonly
-                       value="No live quizzes available"
-                       class="min-h-[52px] px-4 rounded-lg bg-surface text-text-dim border border-border-soft text-[clamp(0.95rem,1.7vw,1.2rem)]"
-                       data-next-quiz-empty>
-            {{end}}
-        </div>
-        <button type="submit"
-                class="inline-flex items-center justify-center gap-2 min-h-[52px] px-8 rounded-lg bg-accent text-bg font-display font-extrabold text-[clamp(0.9rem,1.7vw,1.15rem)] uppercase tracking-[0.12em] border-0 transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                {{if not .LiveQuizzes}}disabled{{end}}
-                x-text="pickerButtonLabel()"
-                data-next-quiz-submit>Start quiz</button>
-    </form>
 {{end}}

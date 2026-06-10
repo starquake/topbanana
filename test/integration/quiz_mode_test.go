@@ -115,6 +115,57 @@ func TestQuizModeGating_Integration(t *testing.T) {
 	})
 }
 
+// TestAdminQuizListModeFilter_Integration pins the manage-quizzes mode filter
+// (#851): GET /admin/quizzes?mode=live lists only the live quiz, ?mode=solo only
+// the solo quiz, and the plain list (no mode) shows both. The host picks a live
+// quiz from this filtered list to host it.
+func TestAdminQuizListModeFilter_Integration(t *testing.T) {
+	t.Parallel()
+
+	ctx, setup := setupIntegration(t)
+	baseURL := setup.BaseURL
+
+	host := &http.Client{
+		Jar:           mustJar(t),
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	registerVerifyAndSignIn(ctx, t, host, baseURL, setup.DBURI, "list-filter-host", "list-filter-pass-123")
+
+	soloQz := seedSoloQuiz(ctx, t, setup.Stores.Quizzes, "list-filter-solo")
+	liveQz := seedLiveQuiz(ctx, t, setup.Stores.Quizzes, "list-filter-live")
+
+	assertList := func(t *testing.T, mode, wantTitle, notTitle string) {
+		t.Helper()
+		target := baseURL + "/admin/quizzes"
+		if mode != "" {
+			target += "?mode=" + mode
+		}
+		body := readBody(ctx, t, host, target)
+		if !strings.Contains(body, wantTitle) {
+			t.Errorf("mode=%q list missing %q", mode, wantTitle)
+		}
+		if notTitle != "" && strings.Contains(body, notTitle) {
+			t.Errorf("mode=%q list should not contain %q", mode, notTitle)
+		}
+	}
+
+	t.Run("live filter shows only live quizzes", func(t *testing.T) {
+		t.Parallel()
+		assertList(t, "live", liveQz.Title, soloQz.Title)
+	})
+
+	t.Run("solo filter shows only solo quizzes", func(t *testing.T) {
+		t.Parallel()
+		assertList(t, "solo", soloQz.Title, liveQz.Title)
+	})
+
+	t.Run("all (no mode) shows both", func(t *testing.T) {
+		t.Parallel()
+		assertList(t, "", liveQz.Title, "")
+		assertList(t, "", soloQz.Title, "")
+	})
+}
+
 // TestQuizModeForm_Integration pins the admin form round-trip for the
 // play mode (MP-0 / #677): creating a quiz with mode=live persists as
 // live, and editing it back to solo persists as solo. The form is the

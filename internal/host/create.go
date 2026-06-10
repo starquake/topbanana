@@ -11,14 +11,20 @@ import (
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
-// Create handles POST /host - the host-a-session entry. With no quiz_id it opens
-// an empty room (the "no game running yet" staging state where the host picks the
-// first live quiz ad-hoc); with a quiz_id it opens a room with that quiz
-// preselected (the "Play live" entry from the quiz admin page). Either way it
-// 303-redirects the host straight to the TV lobby. The route is host-gated; when
-// a quiz is supplied the service re-checks it exists and is mode='live', so a
-// non-live or missing quiz round-trips back to the quiz list rather than opening
-// a dead lobby. The host begins the first game from the lobby via the picker.
+// Create handles POST /host - the host-a-session entry, with two paths split on
+// quiz_id (#851):
+//   - No quiz_id: open an empty staging room (the session-first / dashboard
+//     "Host a session" entry), where the host picks the first live quiz ad-hoc
+//     once players have joined. This path is not one-room-aware (the dashboard UI
+//     already gates it).
+//   - With a quiz_id ("Host live" from the quiz view): orchestrate through
+//     [livesession.Service.StartHosting], which is one-room-per-host aware -
+//     it opens a new armed room, arms+starts the quiz in the host's existing
+//     empty/intermission room, or leaves a running game untouched.
+//
+// Either way it 303-redirects the host to the TV lobby. The route is host-gated;
+// a non-live or missing quiz round-trips back to the quiz list rather than
+// opening a dead lobby.
 func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -31,19 +37,42 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// quiz_id is optional: an empty field opens an empty room, a present one
-	// preselects the first quiz. Only a present-but-malformed id is a 400.
-	var quizID *int64
-	if raw := r.FormValue("quiz_id"); raw != "" {
-		id, idErr := handlers.IDFromString(raw)
-		if idErr != nil {
-			http.Error(w, "invalid quiz id", http.StatusBadRequest)
+	// hosts that quiz via StartHosting. Only a present-but-malformed id is a 400.
+	raw := r.FormValue("quiz_id")
+	if raw == "" {
+		h.createEmptyRoom(w, r, player.ID)
 
-			return
-		}
-		quizID = &id
+		return
 	}
 
-	sess, err := h.service.CreateSession(ctx, quizID, player.ID)
+	id, err := handlers.IDFromString(raw)
+	if err != nil {
+		http.Error(w, "invalid quiz id", http.StatusBadRequest)
+
+		return
+	}
+	h.hostLive(w, r, id, player.ID)
+}
+
+// createEmptyRoom opens an empty staging room (the no-quiz path) and redirects
+// the host to it. Not one-room-aware on purpose: the dashboard UI gates the
+// empty-room entry (#851).
+func (h *Handlers) createEmptyRoom(w http.ResponseWriter, r *http.Request, playerID int64) {
+	sess, err := h.service.CreateSession(r.Context(), nil, playerID)
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "error creating host session", slog.Any("err", err))
+		http.Error(w, msgInternalError, http.StatusInternalServerError)
+
+		return
+	}
+	h.redirectToLobby(w, r, sess.JoinCode)
+}
+
+// hostLive orchestrates the quiz-view "Host live" entry through StartHosting,
+// which is one-room-per-host aware, then redirects the host to the resulting
+// room. A missing or solo quiz bounces back to the quiz list (#851).
+func (h *Handlers) hostLive(w http.ResponseWriter, r *http.Request, quizID, playerID int64) {
+	sess, err := h.service.StartHosting(r.Context(), quizID, playerID)
 	if err != nil {
 		switch {
 		case errors.Is(err, quiz.ErrQuizNotFound), errors.Is(err, livesession.ErrNotLiveQuiz):
@@ -51,16 +80,20 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 			// quiz list rather than surfacing a raw error.
 			http.Redirect(w, r, "/admin/quizzes", http.StatusSeeOther)
 		default:
-			h.logger.ErrorContext(ctx, "error creating host session", slog.Any("err", err))
+			h.logger.ErrorContext(r.Context(), "error hosting live quiz", slog.Any("err", err))
 			http.Error(w, msgInternalError, http.StatusInternalServerError)
 		}
 
 		return
 	}
+	h.redirectToLobby(w, r, sess.JoinCode)
+}
 
-	// sess.JoinCode is server-minted over a fixed ambiguity-free alphabet,
-	// not request input, so this is a same-origin redirect to the new lobby.
-	dest := hostLobbyPathPrefix + sess.JoinCode
+// redirectToLobby 303-redirects the host to the TV lobby for the given code.
+// The code is server-minted over a fixed ambiguity-free alphabet, never request
+// input, so the redirect is same-origin.
+func (*Handlers) redirectToLobby(w http.ResponseWriter, r *http.Request, code string) {
+	dest := hostLobbyPathPrefix + code
 	http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // code is server-generated, not user input.
 }
 

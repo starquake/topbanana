@@ -255,6 +255,19 @@
                transition-colors cursor-pointer
                disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent;
     }
+    /* Solo / Live / All filter tabs on the manage-quizzes list (#851). A row of
+     * pill links; the active one is recoloured to accent so the current filter
+     * reads at a glance. The inactive state mirrors .btn-ghost's dim treatment. */
+    .filter-tab {
+        @apply inline-flex items-center min-h-[36px] px-3 rounded-full
+               bg-transparent text-text-dim border border-border
+               text-xs font-semibold uppercase tracking-[0.12em]
+               transition-colors hover:border-accent hover:text-text
+               focus-visible:outline-none focus-visible:shadow-focus cursor-pointer;
+    }
+    .filter-tab-active {
+        @apply text-accent border-accent;
+    }
     .form-input {
         @apply block w-full px-3 py-2 bg-surface border border-border rounded-sm text-text
                placeholder:text-text-mute

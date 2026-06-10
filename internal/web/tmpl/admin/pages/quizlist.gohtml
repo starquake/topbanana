@@ -29,6 +29,24 @@
         </div>
     </header>
 
+    {{/* Play-mode filter (#851): Solo / Live / All tabs. The active tab is
+         recoloured to accent. "All" is active when no recognised mode is set;
+         the list is already server-filtered, so each link just sets ?mode. */}}
+    <nav aria-label="Filter quizzes by play mode" class="mb-6 flex flex-wrap gap-2" data-quiz-filter>
+        <a href="/admin/quizzes?mode=solo"
+           class="filter-tab{{if eq .Mode "solo"}} filter-tab-active{{end}}"
+           {{if eq .Mode "solo"}}aria-current="page"{{end}}
+           data-quiz-filter-solo>Solo</a>
+        <a href="/admin/quizzes?mode=live"
+           class="filter-tab{{if eq .Mode "live"}} filter-tab-active{{end}}"
+           {{if eq .Mode "live"}}aria-current="page"{{end}}
+           data-quiz-filter-live>Live</a>
+        <a href="/admin/quizzes"
+           class="filter-tab{{if and (ne .Mode "solo") (ne .Mode "live")}} filter-tab-active{{end}}"
+           {{if and (ne .Mode "solo") (ne .Mode "live")}}aria-current="page"{{end}}
+           data-quiz-filter-all>All</a>
+    </nav>
+
     {{if .Quizzes}}
         <section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5" aria-label="Your quizzes">
             {{range .Quizzes}}

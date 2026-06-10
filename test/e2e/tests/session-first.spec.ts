@@ -3,14 +3,16 @@ import { test, expect } from './fixtures';
 import { seedQuiz, setQuizMode, endHostedSession } from './helpers';
 import type { Page } from '@playwright/test';
 
-// session-first live hosting (#836): a host opens a live room BEFORE choosing a
-// quiz. From the admin dashboard the host clicks "Host a session", lands on the
-// empty-room lobby (no quiz armed), a player joins and sees the staging waiting
-// hint, then the host picks the first quiz from the lobby's staging picker and
-// the game runs. A second test covers the host ending the room from the lobby.
+// session-first live hosting (#836, #851): a host opens a live room BEFORE
+// choosing a quiz. From the admin dashboard the host clicks "Host a session",
+// lands on the empty-room lobby (no quiz armed), a player joins and sees the
+// staging waiting hint, then the host follows the lobby's pick-a-live-quiz link
+// to the filtered quiz list, opens the seeded quiz, and "Host live" arms it back
+// in that same empty room (one room per host) so the game runs. A second test
+// covers the host ending the room from the lobby.
 //
 // The whole host flow is driven through the real browser (admin storageState
-// passes the host gate) so the dashboard entry, the empty-room picker, and the
+// passes the host gate) so the dashboard entry, the list-driven pick, and the
 // End session control are all exercised end-to-end; the player page stays
 // anonymous. Phase transitions are server-driven by the runner.
 
@@ -90,15 +92,14 @@ test.describe('session-first live hosting', () => {
 
     const { host, joinCode, close } = await hostASession(page, baseURL);
     try {
-      // The quiz the host will pick from the staging picker. Seeded after the
-      // room is open to prove the room can stage before a quiz exists.
+      // The quiz the host will host. Seeded via the API (the host page stays on
+      // the lobby), after the room is open, to prove the room can stage before a
+      // quiz exists. It shows up when the host follows the pick link to the
+      // live-filtered quiz list, which is fetched fresh on navigation.
       await seedLiveQuiz(host, quizTitle, 'What is 1+1?', 'two');
-      // Re-render the lobby so the freshly seeded quiz is in the picker (the
-      // options are server-rendered at GET).
-      await host.reload();
 
-      // The empty room shows the staging picker, not the Start controls.
-      await expect(host.locator('[data-start-quiz-picker]')).toBeVisible();
+      // The empty room shows the pick-a-live-quiz link, not the Start controls.
+      await expect(host.locator('[data-pick-quiz-link]')).toBeVisible();
       await expect(host.locator('[data-start-now]')).toBeHidden();
 
       // A player joins the empty room and sees the staging waiting hint (no quiz
@@ -106,11 +107,14 @@ test.describe('session-first live hosting', () => {
       await joinAsPlayer(page, joinCode, player);
       await expect(page.getByTestId('waiting-hint')).toContainText('start a quiz');
 
-      // The host picks the first quiz from the staging picker and starts it. The
-      // native form submit 303-redirects back to the lobby, which the runner
-      // drives into the first game.
-      await host.locator('[data-next-quiz-select]').selectOption({ label: quizTitle });
-      await host.locator('[data-next-quiz-submit]').click();
+      // The host follows the lobby link to the live-filtered quiz list, opens the
+      // seeded quiz, and hits "Host live". Because the host already has this empty
+      // staging room open, "Host live" arms+starts THAT room (one room per host),
+      // so the still-joined player is carried straight into the game.
+      await host.locator('[data-pick-quiz-link] a').click();
+      await expect(host).toHaveURL(/\/admin\/quizzes\?mode=live$/);
+      await host.getByRole('link', { name: quizTitle }).click();
+      await host.getByRole('button', { name: 'Host live' }).click();
 
       // The still-joined player is carried into the game without re-entering a
       // code: they reach the question and the room is no longer empty.

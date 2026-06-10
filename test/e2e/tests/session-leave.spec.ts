@@ -63,7 +63,7 @@ test('a player leaving drops out of the host roster live', async ({
   await page.goto('/admin/quizzes');
   await page.getByRole('link', { name: quizTitle }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
-  await page.getByRole('button', { name: 'Play live' }).click();
+  await page.getByRole('button', { name: 'Host live' }).click();
 
   await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
   const code = page.url().split('/host/')[1];

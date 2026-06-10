@@ -535,12 +535,12 @@ func (s *Service) SetStartCountdown(d time.Duration) {
 // optional: nil opens an empty room with no current quiz (the "no game running
 // yet" staging state, where the host picks the first live quiz ad-hoc once
 // players have joined), and a non-nil id opens a room with that quiz preselected
-// ("Play live" from a quiz). The route layer has already gated the caller to
-// host/admin; when a quiz is supplied this method enforces the domain rules: it
-// must exist and be visible to the host (any visibility - a host can view any
-// quiz, decision 4) and must be mode='live' (MP-0 / #677). Returns
-// [quiz.ErrQuizNotFound] when the supplied quiz does not exist and
-// [ErrNotLiveQuiz] when it is a solo quiz.
+// (the "Host live" entry, via [Service.StartHosting]). The route layer has
+// already gated the caller to host/admin; when a quiz is supplied this method
+// enforces the domain rules: it must exist and be visible to the host (any
+// visibility - a host can view any quiz, decision 4) and must be mode='live'
+// (MP-0 / #677). Returns [quiz.ErrQuizNotFound] when the supplied quiz does not
+// exist and [ErrNotLiveQuiz] when it is a solo quiz.
 func (s *Service) CreateSession(ctx context.Context, quizID *int64, hostPlayerID int64) (*Session, error) {
 	if quizID != nil {
 		qz, err := s.quizzes.GetQuiz(ctx, *quizID)
@@ -720,6 +720,53 @@ func (s *Service) StartQuiz(ctx context.Context, joinCode string, hostPlayerID, 
 	}
 
 	return nil
+}
+
+// StartHosting opens or reuses the host's live room for a quiz, enforcing one
+// room per host (#851). It backs the quiz-view "Host live" control:
+//   - No active room -> open a new lobby armed with the quiz (host starts it
+//     when players are in), same as the prior "Play live".
+//   - Active room that can still arm a quiz (an empty staging lobby or the
+//     between-games intermission) -> arm that quiz in the existing room and
+//     start it (reusing StartQuiz), so a second room is never spawned.
+//   - Active room with a game in flight -> leave it untouched and return it, so
+//     a stray pick never disrupts a running game (the end-and-restart confirm
+//     is deferred to #853).
+//
+// It returns the room the host should be redirected to; only its JoinCode is
+// authoritative (the redirect target). In the reuse branch the returned snapshot
+// predates StartQuiz, so its Phase/QuizID/StartedAt may lag the now-armed room -
+// callers must re-read if they need post-arm state. [quiz.ErrQuizNotFound] and
+// [ErrNotLiveQuiz] propagate so the handler can bounce an unhostable quiz to the
+// quiz list.
+func (s *Service) StartHosting(ctx context.Context, quizID, hostPlayerID int64) (*Session, error) {
+	active, err := s.store.GetActiveSessionForHost(ctx, hostPlayerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get active session for host: %w", err)
+	}
+
+	if active == nil {
+		return s.CreateSession(ctx, &quizID, hostPlayerID)
+	}
+
+	if !canArmQuiz(active) {
+		// A game is in flight: leave the running room untouched and return it so
+		// a stray pick never disrupts it. The end-and-restart confirm is #853.
+		return active, nil
+	}
+
+	// An empty staging lobby or the between-games intermission can take a new
+	// quiz: arm it in the existing room and start it, so no second room spawns.
+	err = s.StartQuiz(ctx, active.JoinCode, hostPlayerID, quizID)
+	switch {
+	case err == nil, errors.Is(err, ErrGameInFlight):
+		// ErrGameInFlight means the room raced into flight between the read above
+		// and the arm; treat it the same as "in flight, do nothing" and return
+		// the room so the host lands on it.
+		return active, nil
+	default:
+		return nil, err
+	}
 }
 
 // canArmQuiz reports whether a quiz can be armed to play in the room right now:

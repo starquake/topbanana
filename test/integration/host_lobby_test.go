@@ -147,54 +147,47 @@ func TestHostLobby_RendersCodeQuizAndQR(t *testing.T) {
 	}
 }
 
-// TestHostLobby_RendersNextQuizPicker pins the intermission "Start next quiz"
-// picker (#836): the host lobby page server-renders the next-quiz form (action
-// /host/{code}/next-quiz) and lists the host's live quizzes as options. A solo
-// quiz is excluded so the picker only offers hostable quizzes. The picker is
-// only shown at intermission via x-show, but the markup is rendered at GET
-// regardless of phase, so the page body carries it.
-func TestHostLobby_RendersNextQuizPicker(t *testing.T) {
+// TestHostLobby_RendersPickQuizLink pins the list-driven pick flow (#851): an
+// empty staging room renders the "pick a live quiz" link to
+// /admin/quizzes?mode=live (where the host picks a quiz and "Host live" arms it
+// back in this room), and the old in-lobby dropdown picker is gone.
+func TestHostLobby_RendersPickQuizLink(t *testing.T) {
 	t.Parallel()
 
 	ctx, setup := setupIntegration(t)
 	baseURL := setup.BaseURL
-	hosted := seedLiveQuiz(ctx, t, setup.Stores.Quizzes, "host-picker-hosted")
-	otherLive := seedLiveQuiz(ctx, t, setup.Stores.Quizzes, "host-picker-other")
-	soloQz := seedSoloQuiz(ctx, t, setup.Stores.Quizzes, "host-picker-solo")
 
 	host := &http.Client{
 		Jar:           mustJar(t),
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	registerVerifyAndSignIn(ctx, t, host, baseURL, setup.DBURI, "host-picker-host", "host-picker-pass-123")
-	code := createSession(ctx, t, host, baseURL, hosted.ID)
+
+	// Open an empty staging room (no quiz) so the lobby shows the pick-quiz link.
+	token := fetchCSRFToken(ctx, t, host, baseURL+"/admin/quizzes")
+	resp := httpPostForm(ctx, t, host, baseURL+"/host", url.Values{"csrf_token": {token}})
+	defer closeBody(t, resp.Body)
+	code := strings.TrimPrefix(resp.Header.Get("Location"), "/host/")
+	if code == "" {
+		t.Fatal("empty-room create did not redirect to /host/{code}")
+	}
 
 	status, body := getHostLobbyHTML(ctx, t, host, baseURL, code)
 	if got, want := status, http.StatusOK; got != want {
 		t.Fatalf("host lobby status = %d, want %d", got, want)
 	}
-	// The form action is an Alpine-bound :action (built client-side from the
-	// join code), matching the start form, so the literal path is not in the
-	// server-rendered HTML. Pin the picker by its form marker and the quiz_id
-	// select instead, which ARE server-rendered.
-	if !strings.Contains(body, "data-next-quiz-form") {
-		t.Error("host lobby missing the next-quiz picker form")
+	// The new list-driven flow: a link to the live-filtered quiz list.
+	if !strings.Contains(body, "data-pick-quiz-link") {
+		t.Error("host lobby missing the pick-a-live-quiz link")
 	}
-	if !strings.Contains(body, `name="quiz_id"`) {
-		t.Error("host lobby next-quiz picker missing the quiz_id select")
+	if !strings.Contains(body, `href="/admin/quizzes?mode=live"`) {
+		t.Error("host lobby pick-quiz link should point at /admin/quizzes?mode=live")
 	}
-	// Both live quizzes (the one being hosted and the other) are selectable.
-	for _, qz := range []*quiz.Quiz{hosted, otherLive} {
-		if want := `value="` + strconv.FormatInt(qz.ID, 10) + `"`; !strings.Contains(body, want) {
-			t.Errorf("next-quiz picker missing live quiz option %q (%s)", want, qz.Title)
+	// The old in-lobby dropdown picker is gone.
+	for _, gone := range []string{"data-start-quiz-picker", "data-next-quiz-form", "data-next-quiz-select"} {
+		if strings.Contains(body, gone) {
+			t.Errorf("host lobby should no longer render the removed dropdown picker %q", gone)
 		}
-		if !strings.Contains(body, qz.Title) {
-			t.Errorf("next-quiz picker missing live quiz title %q", qz.Title)
-		}
-	}
-	// The solo quiz is not hostable, so it must not appear as a picker option.
-	if got := `value="` + strconv.FormatInt(soloQz.ID, 10) + `"`; strings.Contains(body, got) {
-		t.Errorf("next-quiz picker should not offer solo quiz option %q", got)
 	}
 }
 
@@ -241,21 +234,21 @@ func TestHostLobby_StateReflectsLiveJoinAndReady(t *testing.T) {
 	}
 }
 
-// TestHostPlayLive_CreatesSessionAndRedirects exercises the "Play live"
-// entry: POST /host with a live quiz id opens a session and 303-redirects the
-// host to /host/{code}.
-func TestHostPlayLive_CreatesSessionAndRedirects(t *testing.T) {
+// TestHostLive_CreatesSessionAndRedirects exercises the "Host live" entry: with
+// no active room, POST /host with a live quiz id opens a session and
+// 303-redirects the host to /host/{code} (StartHosting case 1, #851).
+func TestHostLive_CreatesSessionAndRedirects(t *testing.T) {
 	t.Parallel()
 
 	ctx, setup := setupIntegration(t)
 	baseURL := setup.BaseURL
-	qz := seedLiveQuiz(ctx, t, setup.Stores.Quizzes, "host-playlive")
+	qz := seedLiveQuiz(ctx, t, setup.Stores.Quizzes, "host-hostlive")
 
 	host := &http.Client{
 		Jar:           mustJar(t),
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	registerVerifyAndSignIn(ctx, t, host, baseURL, setup.DBURI, "playlive-host", "playlive-pass-123")
+	registerVerifyAndSignIn(ctx, t, host, baseURL, setup.DBURI, "hostlive-host", "hostlive-pass-123")
 
 	// Seed the CSRF nonce on the jar from the quiz view, then post the entry.
 	token := fetchCSRFToken(ctx, t, host, baseURL+"/admin/quizzes/"+strconv.FormatInt(qz.ID, 10))
@@ -266,15 +259,15 @@ func TestHostPlayLive_CreatesSessionAndRedirects(t *testing.T) {
 	defer closeBody(t, resp.Body)
 
 	if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
-		t.Fatalf("play live status = %d, want %d", got, want)
+		t.Fatalf("host live status = %d, want %d", got, want)
 	}
 	loc := resp.Header.Get("Location")
 	if !strings.HasPrefix(loc, "/host/") {
-		t.Fatalf("play live redirect = %q, want a /host/{code} target", loc)
+		t.Fatalf("host live redirect = %q, want a /host/{code} target", loc)
 	}
 	code := strings.TrimPrefix(loc, "/host/")
 	if code == "" {
-		t.Fatal("play live redirected to /host/ with no code")
+		t.Fatal("host live redirected to /host/ with no code")
 	}
 	// The host can load the lobby it was redirected to.
 	if status, _ := getHostLobbyHTML(ctx, t, host, baseURL, code); status != http.StatusOK {
@@ -282,10 +275,63 @@ func TestHostPlayLive_CreatesSessionAndRedirects(t *testing.T) {
 	}
 }
 
-// TestHostPlayLive_RejectsSoloQuiz pins that the "Play live" entry only opens
-// live quizzes: a solo quiz id bounces back to the quiz list rather than
-// opening a dead lobby.
-func TestHostPlayLive_RejectsSoloQuiz(t *testing.T) {
+// TestHostLive_ArmsExistingEmptyRoom pins the one-room-per-host orchestration
+// (StartHosting case 2, #851): with an active empty staging room, POST /host
+// with a live quiz_id arms+starts THAT same room rather than spawning a second
+// one - the redirect goes to the existing join code and no new session is added.
+func TestHostLive_ArmsExistingEmptyRoom(t *testing.T) {
+	t.Parallel()
+
+	ctx, setup := setupIntegration(t)
+	baseURL := setup.BaseURL
+	qz := seedLiveQuiz(ctx, t, setup.Stores.Quizzes, "host-hostlive-reuse")
+
+	host := &http.Client{
+		Jar:           mustJar(t),
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	registerVerifyAndSignIn(ctx, t, host, baseURL, setup.DBURI, "hostlive-reuse-host", "hostlive-reuse-123")
+
+	// Open an empty staging room first (no quiz_id).
+	token := fetchCSRFToken(ctx, t, host, baseURL+"/admin/quizzes")
+	openResp := httpPostForm(ctx, t, host, baseURL+"/host", url.Values{"csrf_token": {token}})
+	defer closeBody(t, openResp.Body)
+	emptyCode := strings.TrimPrefix(openResp.Header.Get("Location"), "/host/")
+	if emptyCode == "" {
+		t.Fatal("empty-room create did not redirect to /host/{code}")
+	}
+
+	// Now "Host live" the quiz: it must arm the EXISTING empty room, not open a
+	// second one.
+	resp := httpPostForm(ctx, t, host, baseURL+"/host", url.Values{
+		"csrf_token": {token},
+		"quiz_id":    {strconv.FormatInt(qz.ID, 10)},
+	})
+	defer closeBody(t, resp.Body)
+	if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("host live (reuse) status = %d, want %d", got, want)
+	}
+	if got, want := resp.Header.Get("Location"), "/host/"+emptyCode; got != want {
+		t.Errorf("host live (reuse) redirect = %q, want %q (the existing room)", got, want)
+	}
+
+	// The existing room is now armed onto the picked quiz (no second room spawned).
+	sess, err := setup.Stores.LiveSessions.GetSessionByJoinCode(ctx, emptyCode)
+	if err != nil {
+		t.Fatalf("GetSessionByJoinCode err = %v, want nil", err)
+	}
+	if sess.QuizID == nil {
+		t.Fatalf("reused room QuizID = nil, want %d", qz.ID)
+	}
+	if got, want := *sess.QuizID, qz.ID; got != want {
+		t.Errorf("reused room QuizID = %d, want %d (the picked quiz)", got, want)
+	}
+}
+
+// TestHostLive_RejectsSoloQuiz pins that the "Host live" entry only opens live
+// quizzes: a solo quiz id bounces back to the quiz list rather than opening a
+// dead lobby (#851).
+func TestHostLive_RejectsSoloQuiz(t *testing.T) {
 	t.Parallel()
 
 	ctx, setup := setupIntegration(t)
@@ -306,10 +352,10 @@ func TestHostPlayLive_RejectsSoloQuiz(t *testing.T) {
 	defer closeBody(t, resp.Body)
 
 	if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
-		t.Fatalf("solo play live status = %d, want %d", got, want)
+		t.Fatalf("solo host live status = %d, want %d", got, want)
 	}
 	if got, want := resp.Header.Get("Location"), "/admin/quizzes"; got != want {
-		t.Errorf("solo play live redirect = %q, want %q", got, want)
+		t.Errorf("solo host live redirect = %q, want %q", got, want)
 	}
 }
 
