@@ -43,13 +43,13 @@ function hostLobby(joinCode, hasQuiz) {
         players: [],
         // True once a quiz is armed in the room (state.quiz present). False for
         // an empty room (#836) - the "no game running yet" staging state, opened
-        // before any quiz is picked. The lobby shows the "Start a quiz" picker
-        // while this is false so the host can pick the first game; a room opened
-        // with a preselected quiz ("Play live") has it true and keeps the
-        // existing Start controls instead. Seeded from the server-rendered
-        // HasQuiz so a preselected lobby renders its Start controls without
-        // flashing the picker before the first state read (no-flash hydration);
-        // applyState then keeps it in sync with each read.
+        // before any quiz is picked. While this is false the lobby shows the
+        // pick-a-live-quiz link (#851) so the host can pick the first game; a
+        // room opened with a preselected quiz ("Host live") has it true and
+        // keeps the existing Start controls instead. Seeded from the
+        // server-rendered HasQuiz so a preselected lobby renders its Start
+        // controls without flashing the link before the first state read
+        // (no-flash hydration); applyState then keeps it in sync with each read.
         hasQuiz: !!hasQuiz,
         question: null,
         // The round_intro round off the latest state read, or null outside the
@@ -220,7 +220,7 @@ function hostLobby(joinCode, hasQuiz) {
             this.players = Array.isArray(state.players) ? state.players : [];
             // The state read omits quiz for an empty room (#836); its presence
             // tells "quiz armed" from the empty staging lobby so the template
-            // picks the staging picker over the Start controls.
+            // shows the Start controls rather than the pick-a-live-quiz link.
             this.hasQuiz = state.quiz != null;
             this.question = state.question ?? null;
             this.round = state.round ?? null;
@@ -283,27 +283,16 @@ function hostLobby(joinCode, hasQuiz) {
             return `Starting in ${formatCountdown(this.startRemaining)}`;
         },
 
-        // showsStartQuizPicker reports whether the room should offer the
-        // pick-and-start-a-quiz control (#836): an empty lobby (no quiz armed)
-        // for the first game, and the between-games intermission for the next
-        // game. A lobby with a preselected quiz keeps the Start controls
-        // instead, so the picker is hidden there.
-        showsStartQuizPicker() {
+        // showsPickQuizLink reports whether the room should offer the link to
+        // the filtered quiz list where the host picks a live quiz (#851): an
+        // empty lobby (no quiz armed) for the first game, and the between-games
+        // intermission for the next game. The host follows the link, picks a
+        // live quiz, and "Host live" arms it back in this same room (one room
+        // per host). A lobby with a preselected quiz keeps the Start controls
+        // instead, so the link is hidden there.
+        showsPickQuizLink() {
             return (this.phase === 'lobby' && !this.hasQuiz)
                 || this.phase === 'intermission';
-        },
-
-        // pickerLabel is the picker's field label: the empty-lobby first-game
-        // case reads "Start a quiz", the between-games case "Start the next
-        // quiz", so the first game never says "next".
-        pickerLabel() {
-            return this.phase === 'intermission' ? 'Start the next quiz' : 'Start a quiz';
-        },
-
-        // pickerButtonLabel mirrors pickerLabel for the submit button so the
-        // call to action matches the field label in both cases.
-        pickerButtonLabel() {
-            return this.phase === 'intermission' ? 'Start next quiz' : 'Start quiz';
         },
 
         // showsEndSession reports whether the host's "End session" control is

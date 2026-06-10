@@ -36,12 +36,12 @@ test('host lobby shows the room code, QR, and a joined player readying up live',
   // The importer only creates solo quizzes; a live quiz is hostable.
   setQuizMode(quizTitle, 'live');
 
-  // Open the quiz view and click "Play live" to open a session. The button
+  // Open the quiz view and click "Host live" to open a session. The button
   // posts to /host and the server redirects to the TV lobby at /host/{code}.
   await page.goto('/admin/quizzes');
   await page.getByRole('link', { name: quizTitle }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
-  await page.getByRole('button', { name: 'Play live' }).click();
+  await page.getByRole('button', { name: 'Host live' }).click();
 
   await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
   const code = page.url().split('/host/')[1];

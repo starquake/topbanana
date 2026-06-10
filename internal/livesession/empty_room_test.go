@@ -9,6 +9,7 @@ import (
 	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/game"
 	. "github.com/starquake/topbanana/internal/livesession"
+	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
 )
 
@@ -125,6 +126,171 @@ func TestService_StartFirstQuizFromEmptyLobby(t *testing.T) {
 	}
 	if got, want := armed.Phase, PhaseRoundIntro; got != want {
 		t.Errorf("phase after first start = %q, want %q (game 1 driving)", got, want)
+	}
+}
+
+// TestService_StartHosting_NoActiveRoomOpensArmedLobby pins StartHosting case 1
+// (#851): with no active room for the host, it opens a NEW lobby armed with the
+// quiz (the host starts it once players are in), same as the prior "Play live".
+func TestService_StartHosting_NoActiveRoomOpensArmedLobby(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 9, 12, 0, 0, 0, time.UTC)
+	h := newEmptyRoomHarness(t, start)
+	ctx := t.Context()
+
+	const hostID int64 = 1
+	qz := seedRunnerQuizSlug(t, h.quizStore, "host-hosting-new", [][]bool{{true}})
+
+	sess, err := h.service.StartHosting(ctx, qz.ID, hostID)
+	if err != nil {
+		t.Fatalf("StartHosting (no active room) err = %v, want nil", err)
+	}
+	if sess == nil {
+		t.Fatal("StartHosting returned nil session, want a new armed lobby")
+	}
+	// A new room is opened, armed with the quiz, and still in the lobby (the
+	// host starts it when players are in - it is not started here).
+	if sess.QuizID == nil {
+		t.Fatalf("new room QuizID = nil, want %d", qz.ID)
+	}
+	if got, want := *sess.QuizID, qz.ID; got != want {
+		t.Errorf("new room QuizID = %d, want %d", got, want)
+	}
+	if got, want := sess.Phase, PhaseLobby; got != want {
+		t.Errorf("new room Phase = %q, want %q (host starts it later)", got, want)
+	}
+	if sess.StartedAt != nil {
+		t.Error("new room StartedAt should be nil (not started until the host starts it)")
+	}
+}
+
+// TestService_StartHosting_EmptyRoomArmsExistingRoom pins StartHosting case 2
+// (#851): with an active empty staging room for the host, it arms+starts the
+// quiz in THAT room (reusing StartQuiz) rather than spawning a second one, so
+// the returned session is the existing room driving the game.
+func TestService_StartHosting_EmptyRoomArmsExistingRoom(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 9, 12, 0, 0, 0, time.UTC)
+	h := newEmptyRoomHarness(t, start)
+	ctx := t.Context()
+
+	const hostID int64 = 1
+	empty, err := h.service.CreateSession(ctx, nil, hostID)
+	if err != nil {
+		t.Fatalf("CreateSession (empty) err = %v, want nil", err)
+	}
+	qz := seedRunnerQuizSlug(t, h.quizStore, "host-hosting-empty", [][]bool{{true}})
+
+	sess, err := h.service.StartHosting(ctx, qz.ID, hostID)
+	if err != nil {
+		t.Fatalf("StartHosting (empty active room) err = %v, want nil", err)
+	}
+	if sess == nil {
+		t.Fatal("StartHosting returned nil session, want the existing room")
+	}
+	// No second room: the returned session is the same room the host already had.
+	if got, want := sess.ID, empty.ID; got != want {
+		t.Errorf("StartHosting room ID = %q, want %q (same room, no second spawned)", got, want)
+	}
+
+	// That room is now armed onto the quiz and driving the first game.
+	armed, err := h.store.GetSessionByID(ctx, empty.ID)
+	if err != nil {
+		t.Fatalf("GetSessionByID err = %v, want nil", err)
+	}
+	if armed.QuizID == nil {
+		t.Fatalf("armed QuizID = nil, want %d", qz.ID)
+	}
+	if got, want := *armed.QuizID, qz.ID; got != want {
+		t.Errorf("armed QuizID = %d, want %d", got, want)
+	}
+	if got, want := armed.Phase, PhaseRoundIntro; got != want {
+		t.Errorf("armed Phase = %q, want %q (game driving in the existing room)", got, want)
+	}
+}
+
+// TestService_StartHosting_InFlightRoomLeftUntouched pins StartHosting case 3
+// (#851): with an active room whose game is already in flight, a stray pick
+// leaves it untouched and returns the running room - the picked quiz does NOT
+// arm (the end-and-restart confirm is deferred to #853).
+func TestService_StartHosting_InFlightRoomLeftUntouched(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 9, 12, 0, 0, 0, time.UTC)
+	h := newEmptyRoomHarness(t, start)
+	ctx := t.Context()
+
+	const hostID int64 = 1
+	running := seedRunnerQuizSlug(t, h.quizStore, "host-hosting-running", [][]bool{{true}})
+	sess, err := h.service.CreateSession(ctx, &running.ID, hostID)
+	if err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+	// Drive the room into flight: the first game is now running (round_intro).
+	if err = h.service.StartQuiz(ctx, sess.JoinCode, hostID, running.ID); err != nil {
+		t.Fatalf("StartQuiz err = %v, want nil", err)
+	}
+
+	// A different quiz is picked while the game runs.
+	other := seedRunnerQuizSlug(t, h.quizStore, "host-hosting-other", [][]bool{{true}})
+	got, err := h.service.StartHosting(ctx, other.ID, hostID)
+	if err != nil {
+		t.Fatalf("StartHosting (in-flight room) err = %v, want nil", err)
+	}
+	if got == nil {
+		t.Fatal("StartHosting returned nil session, want the running room")
+	}
+	if want := sess.ID; got.ID != want {
+		t.Errorf("StartHosting room ID = %q, want %q (the running room)", got.ID, want)
+	}
+
+	// The running room is untouched: it still points at the original quiz, not
+	// the stray pick.
+	still, err := h.store.GetSessionByID(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("GetSessionByID err = %v, want nil", err)
+	}
+	if still.QuizID == nil {
+		t.Fatal("running room QuizID = nil, want the original quiz")
+	}
+	if got, want := *still.QuizID, running.ID; got != want {
+		t.Errorf("running room QuizID = %d, want %d (stray pick must not re-arm)", got, want)
+	}
+}
+
+// TestService_StartHosting_RejectsSoloQuiz pins that StartHosting propagates the
+// unhostable-quiz error (#851): a solo quiz id yields ErrNotLiveQuiz so the
+// handler can bounce to the quiz list, and no room is opened.
+func TestService_StartHosting_RejectsSoloQuiz(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 9, 12, 0, 0, 0, time.UTC)
+	h := newEmptyRoomHarness(t, start)
+	ctx := t.Context()
+
+	const hostID int64 = 1
+	solo := &quiz.Quiz{
+		Title:             "Solo",
+		Slug:              "host-hosting-solo",
+		CreatedByPlayerID: hostID,
+		Mode:              quiz.ModeSolo,
+		Visibility:        quiz.VisibilityPublic,
+		Questions: []*quiz.Question{
+			{Text: "Q", Position: 1, Options: []*quiz.Option{{Text: "A", Correct: true}, {Text: "B"}}},
+		},
+	}
+	if err := h.quizStore.CreateQuiz(ctx, solo); err != nil {
+		t.Fatalf("CreateQuiz solo err = %v, want nil", err)
+	}
+
+	sess, err := h.service.StartHosting(ctx, solo.ID, hostID)
+	if got, want := err, ErrNotLiveQuiz; !errors.Is(got, want) {
+		t.Errorf("StartHosting (solo) err = %v, want %v", got, want)
+	}
+	if sess != nil {
+		t.Errorf("StartHosting (solo) session = %v, want nil (no room opened)", sess)
 	}
 }
 

@@ -869,13 +869,17 @@ func activeRoomCode(r *http.Request, logger *slog.Logger, sessions ActiveSession
 	return sess.JoinCode
 }
 
-// HandleQuizList returns the quiz list page.
+// HandleQuizList returns the quiz list page. The optional mode query param
+// filters the list by play mode (#851): "solo" or "live" keeps only quizzes of
+// that mode; anything else (including absent) shows all. The chosen mode is
+// passed to the template so it can mark the active Solo / Live / All filter tab.
 func HandleQuizList(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizlist.gohtml")
 
 	type quizListData struct {
 		Title   string
 		Quizzes []*QuizData
+		Mode    string
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -903,6 +907,12 @@ func HandleQuizList(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 			return
 		}
 
+		// Filter by play mode in Go from the single ListQuizzes read so the
+		// same handler serves solo / live / all without a second query path
+		// (#851). Only the recognised modes filter; anything else shows all.
+		mode := r.URL.Query().Get("mode")
+		quizzes = filterQuizzesByMode(quizzes, mode)
+
 		qzd := quizDataFromQuizzes(quizzes)
 		for _, qd := range qzd {
 			qd.QuestionCount = counts[qd.ID]
@@ -912,10 +922,33 @@ func HandleQuizList(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 		data := quizListData{
 			Title:   "Admin Dashboard - Quiz List",
 			Quizzes: qzd,
+			Mode:    mode,
 		}
 
 		render.Render(w, r, http.StatusOK, data)
 	})
+}
+
+// filterQuizzesByMode keeps only quizzes whose Mode matches the requested play
+// mode (#851). Only [quiz.ModeSolo] and [quiz.ModeLive] filter; any other value
+// (including "") returns the list unchanged so the "All" tab shows everything.
+// A quiz with an empty Mode is treated as solo, matching the store-layer default.
+func filterQuizzesByMode(quizzes []*quiz.Quiz, mode string) []*quiz.Quiz {
+	if mode != quiz.ModeSolo && mode != quiz.ModeLive {
+		return quizzes
+	}
+	filtered := make([]*quiz.Quiz, 0, len(quizzes))
+	for _, qz := range quizzes {
+		qm := qz.Mode
+		if qm == "" {
+			qm = quiz.ModeSolo
+		}
+		if qm == mode {
+			filtered = append(filtered, qz)
+		}
+	}
+
+	return filtered
 }
 
 // PlayerScoreData represents one row of the "Played by" table on the quiz

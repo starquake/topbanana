@@ -3,7 +3,7 @@
 -- collision-checked short code minted by the domain layer. quiz_id is nullable
 -- (#836): a room can be opened with no current quiz (the "no game running yet"
 -- staging state where the host picks the first quiz ad-hoc) or with a
--- preselected first quiz ("Play live" from a quiz). phase defaults to 'lobby'
+-- preselected first quiz (the "Host live" entry from a quiz). phase defaults to 'lobby'
 -- at the DB level. A duplicate join_code trips the UNIQUE constraint, which the
 -- store surfaces so the caller can regenerate.
 INSERT INTO sessions (id, quiz_id, host_player_id, join_code)

@@ -83,7 +83,7 @@ test('host TV shows the live question, answered order, and the reveal', async ({
   await page.goto('/admin/quizzes');
   await page.getByRole('link', { name: quizTitle }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
-  await page.getByRole('button', { name: 'Play live' }).click();
+  await page.getByRole('button', { name: 'Host live' }).click();
   await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
   const code = page.url().split('/host/')[1];
 
@@ -216,7 +216,7 @@ test('the host TV roster reflects a player rename', async ({
   await page.goto('/admin/quizzes');
   await page.getByRole('link', { name: quizTitle }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
-  await page.getByRole('button', { name: 'Play live' }).click();
+  await page.getByRole('button', { name: 'Host live' }).click();
   await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
   const code = page.url().split('/host/')[1];
 
@@ -314,7 +314,7 @@ test('host TV round intro shows the round title, summary, and an accurate Round 
   await page.goto('/admin/quizzes');
   await page.getByRole('link', { name: quizTitle }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
-  await page.getByRole('button', { name: 'Play live' }).click();
+  await page.getByRole('button', { name: 'Host live' }).click();
   await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
   const code = page.url().split('/host/')[1];
 

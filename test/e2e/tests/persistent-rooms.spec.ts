@@ -43,11 +43,11 @@ function singleQuestionDoc(title: string, questionText: string, correct: string)
   };
 }
 
-// postNextQuiz arms the room's next game via the host next-quiz control. It
-// scrapes the CSRF token from the host lobby page (the next-quiz form carries
-// the same hidden token the start form does) and posts the form with the new
-// quiz id, mirroring the native form submit. The handler 303-redirects back to
-// the lobby; maxRedirects:0 keeps the redirect visible.
+// postNextQuiz arms the room's next game via the host next-quiz endpoint. It
+// scrapes the CSRF token from the host lobby page (its start/end forms carry the
+// hidden token) and posts to /host/{code}/next-quiz with the new quiz id, the
+// re-arm API the host page uses. The handler 303-redirects back to the lobby;
+// maxRedirects:0 keeps the redirect visible.
 async function postNextQuiz(
   request: APIRequestContext,
   code: string,
