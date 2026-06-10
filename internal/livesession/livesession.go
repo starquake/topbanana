@@ -680,30 +680,9 @@ func (s *Service) Start(ctx context.Context, joinCode string, hostPlayerID int64
 // is not the host, [quiz.ErrQuizNotFound] / [ErrNotLiveQuiz] for an unhostable
 // quiz, and [ErrGameInFlight] when a game is already running.
 func (s *Service) StartQuiz(ctx context.Context, joinCode string, hostPlayerID, quizID int64) error {
-	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
+	sess, err := s.armRoomForHost(ctx, joinCode, hostPlayerID, quizID)
 	if err != nil {
-		return fmt.Errorf(errGetSessionByCodeFmt, err)
-	}
-	if sess.HostPlayerID != hostPlayerID {
-		return ErrNotHost
-	}
-	if !canArmQuiz(sess) {
-		return ErrGameInFlight
-	}
-
-	qz, err := s.quizzes.GetQuiz(ctx, quizID)
-	if err != nil {
-		return fmt.Errorf("failed to get quiz for next game: %w", err)
-	}
-	if qz.Mode != quiz.ModeLive {
-		return ErrNotLiveQuiz
-	}
-
-	// RearmSession is scoped to "no game in flight", so it is the real arbiter if
-	// the room left that state between the read above and this write (a concurrent
-	// arm or a start that raced this one); it returns ErrGameInFlight to the loser.
-	if err = s.store.RearmSession(ctx, sess.ID, qz.ID); err != nil {
-		return fmt.Errorf("failed to rearm session: %w", err)
+		return err
 	}
 
 	// Mark the re-armed lobby started so the new game begins now (start-now
@@ -732,16 +711,18 @@ func (s *Service) StartQuiz(ctx context.Context, joinCode string, hostPlayerID, 
 // room per host (#851). It backs the quiz-view "Host live" control:
 //   - No active room -> open a new lobby armed with the quiz (host starts it
 //     when players are in), same as the prior "Play live".
-//   - Active room that can still arm a quiz (an empty staging lobby or the
-//     between-games intermission) -> arm that quiz in the existing room and
-//     start it (reusing StartQuiz), so a second room is never spawned.
+//   - Active empty staging lobby -> arm the quiz in it but stay in the lobby
+//     (reusing ArmQuiz), so the host gathers players and presses Start, the same
+//     as the no-active-room case (#863). No second room is spawned.
+//   - Active between-games intermission -> arm AND start the next game (reusing
+//     StartQuiz), the #836 between-games flow.
 //   - Active room with a game in flight -> leave it untouched and return it, so
 //     a stray pick never disrupts a running game (the end-and-restart confirm
 //     is deferred to #853).
 //
 // It returns the room the host should be redirected to; only its JoinCode is
 // authoritative (the redirect target). In the reuse branch the returned snapshot
-// predates StartQuiz, so its Phase/QuizID/StartedAt may lag the now-armed room -
+// predates the arm, so its Phase/QuizID/StartedAt may lag the now-armed room -
 // callers must re-read if they need post-arm state. [quiz.ErrQuizNotFound] and
 // [ErrNotLiveQuiz] propagate so the handler can bounce an unhostable quiz to the
 // quiz list.
@@ -761,9 +742,17 @@ func (s *Service) StartHosting(ctx context.Context, quizID, hostPlayerID int64) 
 		return active, nil
 	}
 
-	// An empty staging lobby or the between-games intermission can take a new
-	// quiz: arm it in the existing room and start it, so no second room spawns.
-	err = s.StartQuiz(ctx, active.JoinCode, hostPlayerID, quizID)
+	// An empty staging lobby and the between-games intermission both take a new
+	// quiz without spawning a second room, but they differ (#863): the empty
+	// lobby ARMS the quiz and stays in the lobby so the host gathers players and
+	// presses Start (matching the no-active-session case, which also lands on an
+	// armed lobby), while the intermission arms AND starts the next game (the
+	// #836 between-games flow). canArmQuiz guarantees active is one of these two.
+	if active.Phase == PhaseLobby {
+		err = s.ArmQuiz(ctx, active.JoinCode, hostPlayerID, quizID)
+	} else {
+		err = s.StartQuiz(ctx, active.JoinCode, hostPlayerID, quizID)
+	}
 	switch {
 	case err == nil, errors.Is(err, ErrGameInFlight):
 		// ErrGameInFlight means the room raced into flight between the read above
@@ -821,6 +810,24 @@ func (s *Service) RestartHosting(ctx context.Context, quizID, hostPlayerID int64
 	// No active session now (just ended, or never any): CreateSession opens a new
 	// armed lobby hosting the picked quiz.
 	return s.CreateSession(ctx, &quizID, hostPlayerID)
+}
+
+// ArmQuiz arms a quiz to play in a room but leaves it in the lobby, not started
+// (#863): the host then begins it with the existing "Start now" control once
+// players are in, matching the no-active-session flow rather than starting the
+// game outright. Only the host may call it, and only when no game is in flight.
+// Returns the same errors as [Service.armRoomForHost].
+func (s *Service) ArmQuiz(ctx context.Context, joinCode string, hostPlayerID, quizID int64) error {
+	sess, err := s.armRoomForHost(ctx, joinCode, hostPlayerID, quizID)
+	if err != nil {
+		return err
+	}
+
+	// A newly armed quiz changes what the lobby shows (the Start controls appear),
+	// so signal subscribers to re-GET.
+	s.publish(sess.JoinCode, PhaseLobby)
+
+	return nil
 }
 
 // canArmQuiz reports whether a quiz can be armed to play in the room right now:
@@ -1108,6 +1115,44 @@ func (s *Service) Leave(ctx context.Context, joinCode string, playerID int64) er
 	s.publish(sess.JoinCode, sess.Phase)
 
 	return nil
+}
+
+// armRoomForHost validates that hostPlayerID hosts the room and that quizID is a
+// live quiz that can be armed now, then points the room at it via RearmSession
+// (which resets it to the lobby, not started) and returns the session. It does
+// not publish or start - the caller decides: [Service.ArmQuiz] stops here (the
+// room waits in the lobby), [Service.StartQuiz] marks it started. Returns
+// [ErrSessionNotFound] for an unknown code, [ErrNotHost] for a foreign host,
+// [quiz.ErrQuizNotFound] / [ErrNotLiveQuiz] for an unhostable quiz, and
+// [ErrGameInFlight] when a game is already running.
+func (s *Service) armRoomForHost(ctx context.Context, joinCode string, hostPlayerID, quizID int64) (*Session, error) {
+	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
+	if err != nil {
+		return nil, fmt.Errorf(errGetSessionByCodeFmt, err)
+	}
+	if sess.HostPlayerID != hostPlayerID {
+		return nil, ErrNotHost
+	}
+	if !canArmQuiz(sess) {
+		return nil, ErrGameInFlight
+	}
+
+	qz, err := s.quizzes.GetQuiz(ctx, quizID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get quiz to arm: %w", err)
+	}
+	if qz.Mode != quiz.ModeLive {
+		return nil, ErrNotLiveQuiz
+	}
+
+	// RearmSession is scoped to "no game in flight", so it is the real arbiter if
+	// the room left that state between the read above and this write (a concurrent
+	// arm or a start that raced this one); it returns ErrGameInFlight to the loser.
+	if err = s.store.RearmSession(ctx, sess.ID, qz.ID); err != nil {
+		return nil, fmt.Errorf("failed to arm session: %w", err)
+	}
+
+	return sess, nil
 }
 
 // lobbyQuiz loads the room's quiz for the lobby state, or (nil, nil) for an empty

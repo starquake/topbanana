@@ -60,15 +60,23 @@ test.describe('session-first live hosting', () => {
 
     // The host follows the lobby link to the live-filtered quiz list, opens the
     // seeded quiz, and hits "Host live". Because the host already has this empty
-    // staging room open, "Host live" arms+starts THAT room (one room per host),
-    // so the still-joined player is carried straight into the game.
+    // staging room open, "Host live" ARMS the quiz in that room but stays in the
+    // lobby (#863) - it does NOT auto-start - so the host starts when ready.
     await host.getByTestId('pick-quiz-link').locator('a').click();
     await expect(host).toHaveURL(/\/admin\/quizzes\?mode=live$/);
     await host.getByRole('link', { name: quizTitle }).click();
     await host.getByRole('button', { name: 'Host live' }).click();
 
-    // The still-joined player is carried into the game without re-entering a
-    // code: they reach the question and the room is no longer empty.
+    // Back on the lobby the quiz is now armed: the Start controls appear and the
+    // pick link is gone. The game has not started - the player is still waiting.
+    await expect(host).toHaveURL(/\/host\/[A-Z0-9]{6}$/);
+    await expect(host.getByTestId('start-now')).toBeVisible({ timeout: 15_000 });
+    await expect(host.getByTestId('pick-quiz-link')).toBeHidden();
+    await expect(page.getByTestId('question-view')).toBeHidden();
+
+    // The host starts the game; the still-joined player is carried into it
+    // without re-entering a code.
+    await host.getByTestId('start-now').click();
     await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId('question-text')).toHaveText('What is 1+1?');
     await expect(page.getByTestId('question-options')).toBeVisible({ timeout: 10_000 });
