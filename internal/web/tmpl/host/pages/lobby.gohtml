@@ -128,16 +128,16 @@
              title and optional summary come from the round metadata. ----- */}}
         <div x-show="phase === 'round_intro'"
              class="flex-1 flex flex-col items-center justify-center gap-4 px-[clamp(1.5rem,4vw,4rem)] text-center"
-             data-phase-intro>
+             data-testid="phase-intro">
             <p class="m-0 text-text-dim text-[clamp(0.9rem,1.8vw,1.25rem)] font-semibold uppercase tracking-[0.18em]"
-               data-round-eyebrow
+               data-testid="round-eyebrow"
                x-text="roundEyebrow()"></p>
             <p class="m-0 font-display font-extrabold text-[clamp(2rem,6vw,4rem)] leading-tight"
-               data-round-title
+               data-testid="round-title"
                x-text="roundTitle()"></p>
             <p x-show="roundSummary()"
                class="m-0 text-text-dim text-[clamp(1rem,2.5vw,1.75rem)] leading-snug max-w-[40ch]"
-               data-round-summary
+               data-testid="round-summary"
                x-text="roundSummary()"></p>
         </div>
 

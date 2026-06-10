@@ -51,6 +51,10 @@ var ErrSessionRunnerBeatNegative = errors.New("SESSION_RUNNER_BEAT must not be n
 // negative duration.
 var ErrSessionRevealBeatNegative = errors.New("SESSION_REVEAL_BEAT must not be negative")
 
+// ErrSessionRoundIntroBeatNegative is returned when SESSION_ROUND_INTRO_BEAT
+// parses to a negative duration.
+var ErrSessionRoundIntroBeatNegative = errors.New("SESSION_ROUND_INTRO_BEAT must not be negative")
+
 // ErrSessionStartCountdownNegative is returned when SESSION_START_COUNTDOWN
 // parses to a negative duration. It is the length of the host-armed last-call
 // countdown, so a negative value is meaningless; reject it rather than
@@ -189,6 +193,15 @@ type Config struct {
 	// advances; this knob keeps the reveal comfortably observable without
 	// slowing the other beats (mirrors REVEAL_DELAY for the pre-answer beat).
 	SessionRevealBeat time.Duration
+
+	// SessionRoundIntroBeat overrides only the round-intro beat, on top of
+	// SessionRunnerBeat. Zero means "track SessionRunnerBeat". Parsed from
+	// SESSION_ROUND_INTRO_BEAT. Like SessionRevealBeat, the e2e suite shrinks
+	// SessionRunnerBeat for speed, but that leaves the round-intro card (round
+	// title + "Round N of M" eyebrow) too brief for a loaded browser to observe
+	// before the phase advances; this knob keeps it observable without slowing
+	// the other beats (#859).
+	SessionRoundIntroBeat time.Duration
 
 	// SessionStartCountdown is the length of the host-armed last-call countdown
 	// (#735): the host arms "Start in 60s" and the runner starts the game when
@@ -503,6 +516,12 @@ func parseTypedEnvVars(getenv func(string) string, c *Config) error {
 
 	if err := parseNonNegativeDuration(
 		getenv, "SESSION_REVEAL_BEAT", ErrSessionRevealBeatNegative, &c.SessionRevealBeat,
+	); err != nil {
+		return err
+	}
+
+	if err := parseNonNegativeDuration(
+		getenv, "SESSION_ROUND_INTRO_BEAT", ErrSessionRoundIntroBeatNegative, &c.SessionRoundIntroBeat,
 	); err != nil {
 		return err
 	}
