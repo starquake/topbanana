@@ -42,6 +42,32 @@ const (
 	playerLandingPath = "/"
 )
 
+// Structured-log attribute keys for the authentication-outcome lines
+// (#872). Each login attempt emits one line keyed on these so a host
+// reviewing the server log can tell why a player could not sign in.
+// Email appears here on purpose: this is the operator's private server
+// log, and it is what lets a host tell which player is stuck. The HTTP
+// response stays generic, so these keys must never be echoed back to a
+// caller (no enumeration regression).
+const (
+	logEmailKey  = "email"
+	logPlayerKey = "player"
+	logRoleKey   = "role"
+	logIPKey     = "ip"
+	logReasonKey = "reason"
+	logWaitKey   = "wait"
+)
+
+// Failure-reason values for the "login failed: invalid credentials"
+// line. Server-log only (see the attribute-key comment above): the HTTP
+// response is the same generic banner for all three, so surfacing this
+// distinction to the caller would reintroduce account enumeration.
+const (
+	reasonUnknownAccount = "unknown-account"
+	reasonNoPassword     = "no-password"
+	reasonWrongPassword  = "wrong-password"
+)
+
 // landingPathFor returns the post-auth redirect target for the given
 // role. Admins land on the quiz dashboard; everyone else lands on the
 // public home page, which is the only place a non-admin player has
@@ -547,7 +573,11 @@ func HandleLoginSubmit(
 		// blocks the bcrypt compare too, and so the limiter fires whether
 		// or not the submitted email exists - same shape the dummy-hash
 		// timing equalisation already gives the credential-check path.
-		if wait, allowed := deps.Limiter.Allow(deps.Limiter.ClientIP(r)); !allowed {
+		clientIP := deps.Limiter.ClientIP(r)
+		if wait, allowed := deps.Limiter.Allow(clientIP); !allowed {
+			logger.WarnContext(r.Context(), "login blocked: rate limited",
+				slog.String(logIPKey, clientIP),
+				slog.Duration(logWaitKey, wait))
 			renderLoginRateLimited(formCfg, w, r, email, wait)
 
 			return
@@ -588,6 +618,8 @@ func completeLogin(
 	// chance to land a correct guess mid-spray without ever signalling
 	// that the account is throttled or that it exists.
 	if registerAccountFailureIfCooledDown(deps.AccountLimiter, email) {
+		logger.WarnContext(r.Context(), "login blocked: account in cooldown",
+			slog.String(logEmailKey, email))
 		renderInvalidCredentials(formCfg, w, r, email)
 
 		return
@@ -604,6 +636,9 @@ func completeLogin(
 	// link best-effort. The banner names no address and does not confirm
 	// the password (#787).
 	if !player.IsEmailVerified() {
+		logger.InfoContext(r.Context(), "login blocked: email not verified",
+			slog.Int64(logPlayerKey, player.ID),
+			slog.String(logEmailKey, email))
 		renderUnverifiedLogin(logger, formCfg, deps, w, r, player, email)
 
 		return
@@ -614,6 +649,10 @@ func completeLogin(
 		priorSessionPlayerID = &id
 	}
 	deps.Sessions.Set(w, player.ID, player.SessionVersion)
+	logger.InfoContext(r.Context(), "login succeeded",
+		slog.Int64(logPlayerKey, player.ID),
+		slog.String(logEmailKey, player.Email),
+		slog.String(logRoleKey, player.Role))
 	migrateGamesAfterSignIn(r.Context(), logger, deps.Players, deps.Games, priorSessionPlayerID, player.ID)
 	redirectAfterLogin(w, r, player.Role)
 }
@@ -694,6 +733,9 @@ func authenticateLogin(
 			// cannot enumerate emails by response time.
 			_ = CheckPassword(creds.dummyHash(), creds.password)
 			recordAccountFailure(creds.accountLimiter, creds.email)
+			logger.InfoContext(r.Context(), "login failed: invalid credentials",
+				slog.String(logEmailKey, creds.email),
+				slog.String(logReasonKey, reasonUnknownAccount))
 			renderInvalidCredentials(cfg, w, r, creds.email)
 
 			return nil, false
@@ -709,6 +751,9 @@ func authenticateLogin(
 		// to keep timing consistent.
 		_ = CheckPassword(creds.dummyHash(), creds.password)
 		recordAccountFailure(creds.accountLimiter, creds.email)
+		logger.InfoContext(r.Context(), "login failed: invalid credentials",
+			slog.String(logEmailKey, creds.email),
+			slog.String(logReasonKey, reasonNoPassword))
 		renderInvalidCredentials(cfg, w, r, creds.email)
 
 		return nil, false
@@ -716,6 +761,9 @@ func authenticateLogin(
 
 	if err := CheckPassword(player.PasswordHash, creds.password); err != nil {
 		recordAccountFailure(creds.accountLimiter, creds.email)
+		logger.InfoContext(r.Context(), "login failed: invalid credentials",
+			slog.String(logEmailKey, creds.email),
+			slog.String(logReasonKey, reasonWrongPassword))
 		renderInvalidCredentials(cfg, w, r, creds.email)
 
 		return nil, false
