@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -252,6 +253,20 @@ func (h *runnerHarness) phase(t *testing.T) Phase {
 	t.Helper()
 
 	return h.reload(t).Phase
+}
+
+// rosterIDs returns the active roster player ids for the room, sorted ascending,
+// so a multi-game test can assert the roster carried across a re-arm unchanged.
+func (h *runnerHarness) rosterIDs(t *testing.T) []int64 {
+	t.Helper()
+	sess := h.reload(t)
+	ids := make([]int64, 0, len(sess.Players))
+	for _, p := range sess.Players {
+		ids = append(ids, p.PlayerID)
+	}
+	slices.Sort(ids)
+
+	return ids
 }
 
 // TestRunner_FullFlow drives a two-round session (two questions, then one)
@@ -1281,6 +1296,209 @@ func TestService_StartHosting_IntermissionArmsAndWaits(t *testing.T) {
 	}
 	if got, want := q.GameSeq, int64(2); got != want {
 		t.Errorf("GameSeq for game 2 = %d, want %d", got, want)
+	}
+}
+
+// TestService_StartHosting_RearmBeforeStartFromIntermission pins re-arming
+// before start from the between-games intermission (#877): after game 1 ends, the
+// host picks quiz B, then changes their mind to C - both before pressing Start.
+// The room must end up armed on the LAST pick (C), waiting in the lobby and not
+// started, with the roster carried across. game_seq bumps once (the first
+// intermission re-arm) and then holds across the second lobby re-arm, so it does
+// not skip a number per change of mind.
+func TestService_StartHosting_RearmBeforeStartFromIntermission(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+
+	const hostID int64 = 1
+	quizStore := store.NewQuizStore(h.db, slog.New(slog.DiscardHandler))
+	quizB := seedRunnerQuizSlug(t, quizStore, "rearm-intermission-b", [][]bool{{true}})
+	quizC := seedRunnerQuizSlug(t, quizStore, "rearm-intermission-c", [][]bool{{true}})
+
+	wantRoster := slices.Clone(h.players)
+	slices.Sort(wantRoster)
+
+	// Play game 1 to its end-of-game intermission.
+	if err := h.service.Start(ctx, h.code, hostID); err != nil {
+		t.Fatalf("Start (game 1) err = %v, want nil", err)
+	}
+	h.playSingleQuestionGame(t, []int64{h.players[0]})
+	if got, want := h.phase(t), PhaseIntermission; got != want {
+		t.Fatalf("phase after game 1 = %q, want %q", got, want)
+	}
+
+	// The host picks B from the intermission, then changes to C - both before Start.
+	for _, qz := range []*quiz.Quiz{quizB, quizC} {
+		if _, err := h.service.StartHosting(ctx, qz.ID, hostID); err != nil {
+			t.Fatalf("StartHosting (arm %s) err = %v, want nil", qz.Slug, err)
+		}
+	}
+
+	armed := h.reload(t)
+	// Armed on the LAST pick (C), not B: re-arm reflects the latest quiz id.
+	if armed.QuizID == nil {
+		t.Fatalf("armed QuizID = nil, want %d (last pick C)", quizC.ID)
+	}
+	if got, want := *armed.QuizID, quizC.ID; got != want {
+		t.Errorf("armed QuizID = %d, want %d (last pick C, not B)", got, want)
+	}
+	// Waiting in the lobby, not started: changing the pick never auto-starts.
+	if got, want := armed.Phase, PhaseLobby; got != want {
+		t.Errorf("armed Phase = %q, want %q (armed but waiting in the lobby)", got, want)
+	}
+	if armed.StartedAt != nil {
+		t.Errorf("armed StartedAt = %v, want nil (re-arming must not start the game)", armed.StartedAt)
+	}
+	// game_seq bumped once at the first intermission re-arm and then held across
+	// the second lobby re-arm, so two picks land on game 2, not game 3.
+	if got, want := armed.GameSeq, int64(2); got != want {
+		t.Errorf("armed GameSeq = %d, want %d (one bump at intermission, lobby re-arm holds)", got, want)
+	}
+	// The roster carried across both re-arms: nobody was forced to re-join.
+	if got := h.rosterIDs(t); !slices.Equal(got, wantRoster) {
+		t.Errorf("roster after re-arms = %v, want %v (roster intact)", got, wantRoster)
+	}
+
+	// A defensive tick must not advance the waiting lobby on its own.
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseLobby; got != want {
+		t.Fatalf("phase after a tick = %q, want %q (still waiting on the host)", got, want)
+	}
+
+	// The host presses Start; only now does the last-picked game (C) run.
+	if err := h.service.Start(ctx, h.code, hostID); err != nil {
+		t.Fatalf("Start (game 2) err = %v, want nil", err)
+	}
+	if got, want := h.phase(t), PhaseRoundIntro; got != want {
+		t.Fatalf("phase after host Start = %q, want %q (game 2 driving)", got, want)
+	}
+}
+
+// TestRunner_ThreeGamesBackToBack pins the multi-quiz marathon (#877): three
+// distinct quizzes run back-to-back in one room. Per game it asserts the roster
+// carries across (players are never forced to re-join), live scores are
+// per-session and scoped to the game (a player who scored in game A starts game B
+// at zero), standings render for each game, and no per-game runner state bleeds
+// across (current question/round cleared between games). A different player
+// scores each game so the standings cannot accidentally pass by carrying a stale
+// total.
+func TestRunner_ThreeGamesBackToBack(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+	alice, bob := h.players[0], h.players[1]
+
+	const hostID int64 = 1
+	quizStore := store.NewQuizStore(h.db, slog.New(slog.DiscardHandler))
+	gameB := seedRunnerQuizSlug(t, quizStore, "marathon-b", [][]bool{{true}})
+	gameC := seedRunnerQuizSlug(t, quizStore, "marathon-c", [][]bool{{true}})
+
+	wantRoster := slices.Clone(h.players)
+	slices.Sort(wantRoster)
+
+	// Game A: alice scores, bob does not.
+	if err := h.service.Start(ctx, h.code, hostID); err != nil {
+		t.Fatalf("Start (game A) err = %v, want nil", err)
+	}
+	if got, want := h.reload(t).GameSeq, int64(1); got != want {
+		t.Fatalf("game A GameSeq = %d, want %d", got, want)
+	}
+	aStandings := h.playSingleQuestionGame(t, []int64{alice})
+	assertWinnerScoredLoserZero(t, aStandings, alice, bob, "A")
+	if got := h.rosterIDs(t); !slices.Equal(got, wantRoster) {
+		t.Errorf("game A roster = %v, want %v (roster intact)", got, wantRoster)
+	}
+
+	// Arm + start game B (a different quiz). armNextGame pins that the re-arm
+	// cleared every per-game runner column before Start, so the room enters game B
+	// with no stale question/round.
+	armNextGame(t, h, hostID, gameB.ID)
+	if got, want := h.reload(t).GameSeq, int64(2); got != want {
+		t.Errorf("game B GameSeq = %d, want %d", got, want)
+	}
+
+	// Game B: bob scores, alice does not. alice must start B at zero (per-game
+	// scope), inverting game A - proof game A's points did not carry over.
+	bStandings := h.playSingleQuestionGame(t, []int64{bob})
+	assertWinnerScoredLoserZero(t, bStandings, bob, alice, "B")
+	if got := h.rosterIDs(t); !slices.Equal(got, wantRoster) {
+		t.Errorf("game B roster = %v, want %v (roster intact)", got, wantRoster)
+	}
+
+	// Arm + start game C (a third quiz).
+	armNextGame(t, h, hostID, gameC.ID)
+	if got, want := h.reload(t).GameSeq, int64(3); got != want {
+		t.Errorf("game C GameSeq = %d, want %d", got, want)
+	}
+
+	// Game C: alice scores again; her game-C total reflects only game C, never
+	// the sum of games A and C.
+	cStandings := h.playSingleQuestionGame(t, []int64{alice})
+	assertWinnerScoredLoserZero(t, cStandings, alice, bob, "C")
+	if got := h.rosterIDs(t); !slices.Equal(got, wantRoster) {
+		t.Errorf("game C roster = %v, want %v (roster intact)", got, wantRoster)
+	}
+
+	// alice scored the same single correct answer in games A and C; the per-game
+	// scope means her game-C total equals her game-A total, not double it.
+	if got, want := findRunnerStanding(t, cStandings, alice).TotalScore,
+		findRunnerStanding(t, aStandings, alice).TotalScore; got != want {
+		t.Errorf("game C alice TotalScore = %d, want %d (per-game scope, no A+C sum)", got, want)
+	}
+}
+
+// armNextGame arms quizID from the between-games intermission and presses Start,
+// driving the room into the next game's first round_intro. It pins the
+// arm-then-start handoff the marathon test repeats per game, and that the re-arm
+// cleared the previous game's per-game runner state (current round/question)
+// before the new game starts.
+func armNextGame(t *testing.T, h *runnerHarness, hostID, quizID int64) {
+	t.Helper()
+	ctx := t.Context()
+	if got, want := h.phase(t), PhaseIntermission; got != want {
+		t.Fatalf("phase before arming next game = %q, want %q", got, want)
+	}
+	if _, err := h.service.StartHosting(ctx, quizID, hostID); err != nil {
+		t.Fatalf("StartHosting (arm next game) err = %v, want nil", err)
+	}
+	armed := h.reload(t)
+	if got, want := armed.Phase, PhaseLobby; got != want {
+		t.Fatalf("phase after arm = %q, want %q (armed, waiting on Start)", got, want)
+	}
+	// The re-arm cleared the finished game's per-game runner columns, so the next
+	// game starts with no stale question/round bleeding in.
+	if armed.CurrentQuestionID != nil {
+		t.Errorf("armed CurrentQuestionID = %v, want nil (cleared between games)", *armed.CurrentQuestionID)
+	}
+	if armed.CurrentRoundID != nil {
+		t.Errorf("armed CurrentRoundID = %v, want nil (cleared between games)", *armed.CurrentRoundID)
+	}
+	if err := h.service.Start(ctx, h.code, hostID); err != nil {
+		t.Fatalf("Start (next game) err = %v, want nil", err)
+	}
+	if got, want := h.phase(t), PhaseRoundIntro; got != want {
+		t.Fatalf("phase after Start = %q, want %q (next game driving)", got, want)
+	}
+}
+
+// assertWinnerScoredLoserZero pins a single-question game's standings: the winner
+// has a positive total and the loser zero, with both present so the standings
+// render for the whole roster. label names the game in failures.
+func assertWinnerScoredLoserZero(t *testing.T, standings []*Standing, winner, loser int64, label string) {
+	t.Helper()
+	if got, want := len(standings), 2; got != want {
+		t.Fatalf("game %s standings count = %d, want %d (both players ranked)", label, got, want)
+	}
+	if got := findRunnerStanding(t, standings, winner).TotalScore; got <= 0 {
+		t.Errorf("game %s winner TotalScore = %d, want > 0", label, got)
+	}
+	if got, want := findRunnerStanding(t, standings, loser).TotalScore, 0; got != want {
+		t.Errorf("game %s loser TotalScore = %d, want %d (no cross-game carryover)", label, got, want)
 	}
 }
 

@@ -3,6 +3,7 @@ package livesession_test
 import (
 	"errors"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
@@ -20,9 +21,10 @@ import (
 // drives straight into the first round, but the tests assert through the service
 // and store rather than stepping the runner clock directly.
 type emptyRoomHarness struct {
-	service   *Service
-	store     *store.LiveSessionStore
-	quizStore *store.QuizStore
+	service     *Service
+	store       *store.LiveSessionStore
+	quizStore   *store.QuizStore
+	playerStore *store.PlayerStore
 }
 
 // newEmptyRoomHarness builds the service/runner over real stores with a fake
@@ -34,6 +36,7 @@ func newEmptyRoomHarness(t *testing.T, start time.Time) *emptyRoomHarness {
 	logger := slog.New(slog.DiscardHandler)
 	quizStore := store.NewQuizStore(db, logger)
 	sessionStore := store.NewLiveSessionStore(db, logger)
+	playerStore := store.NewPlayerStore(db, logger)
 
 	service := NewService(sessionStore, quizStore, logger)
 	hub := NewHub()
@@ -45,10 +48,45 @@ func newEmptyRoomHarness(t *testing.T, start time.Time) *emptyRoomHarness {
 	service.SetAdvancer(runner)
 
 	return &emptyRoomHarness{
-		service:   service,
-		store:     sessionStore,
-		quizStore: quizStore,
+		service:     service,
+		store:       sessionStore,
+		quizStore:   quizStore,
+		playerStore: playerStore,
 	}
+}
+
+// joinNewPlayer creates a fresh anonymous player and joins them to the room,
+// returning the new player id. The empty-room tests build a roster ad-hoc to
+// check it survives a re-arm.
+func (h *emptyRoomHarness) joinNewPlayer(t *testing.T, joinCode, name string) int64 {
+	t.Helper()
+	ctx := t.Context()
+	p, err := h.playerStore.CreateAnonymousPlayer(ctx, name)
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	if _, err = h.service.Join(ctx, joinCode, p.ID); err != nil {
+		t.Fatalf("Join err = %v, want nil", err)
+	}
+
+	return p.ID
+}
+
+// rosterIDs returns the active roster player ids for the room, sorted ascending,
+// so a test can assert the roster carried across a re-arm unchanged.
+func (h *emptyRoomHarness) rosterIDs(t *testing.T, sessionID string) []int64 {
+	t.Helper()
+	sess, err := h.store.GetSessionByID(t.Context(), sessionID)
+	if err != nil {
+		t.Fatalf("GetSessionByID err = %v, want nil", err)
+	}
+	ids := make([]int64, 0, len(sess.Players))
+	for _, p := range sess.Players {
+		ids = append(ids, p.PlayerID)
+	}
+	slices.Sort(ids)
+
+	return ids
 }
 
 // TestService_CreateEmptyRoom pins that a host can open a room with no quiz
@@ -468,5 +506,74 @@ func TestService_GetActiveSessionForHost(t *testing.T) {
 	}
 	if gone != nil {
 		t.Errorf("active session after finish = %v, want nil", gone)
+	}
+}
+
+// TestService_StartHosting_RearmBeforeStartFromEmptyLobby pins re-arming before
+// start (#877): from an empty staging lobby with players already in, the host
+// arms quiz A, then changes their mind to B, then to C - all before pressing
+// Start. The room must end up armed on the LAST pick (C), still in the lobby and
+// not started, with no second room spawned and the roster carried across every
+// re-arm. StartHosting -> ArmQuiz -> armRoomForHost -> RearmSession is idempotent
+// and always reflects the latest quiz id.
+func TestService_StartHosting_RearmBeforeStartFromEmptyLobby(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 9, 12, 0, 0, 0, time.UTC)
+	h := newEmptyRoomHarness(t, start)
+	ctx := t.Context()
+
+	const hostID int64 = 1
+	empty, err := h.service.CreateSession(ctx, nil, hostID)
+	if err != nil {
+		t.Fatalf("CreateSession (empty) err = %v, want nil", err)
+	}
+	p1 := h.joinNewPlayer(t, empty.JoinCode, "rearm-empty-a")
+	p2 := h.joinNewPlayer(t, empty.JoinCode, "rearm-empty-b")
+	wantRoster := []int64{p1, p2}
+	slices.Sort(wantRoster)
+
+	quizA := seedRunnerQuizSlug(t, h.quizStore, "rearm-empty-a", [][]bool{{true}})
+	quizB := seedRunnerQuizSlug(t, h.quizStore, "rearm-empty-b", [][]bool{{true}})
+	quizC := seedRunnerQuizSlug(t, h.quizStore, "rearm-empty-c", [][]bool{{true}})
+
+	// The host arms A, then changes the pick to B, then to C, all before Start.
+	for _, qz := range []*quiz.Quiz{quizA, quizB, quizC} {
+		sess, hostErr := h.service.StartHosting(ctx, qz.ID, hostID)
+		if hostErr != nil {
+			t.Fatalf("StartHosting (arm %s) err = %v, want nil", qz.Slug, hostErr)
+		}
+		// No second room spawned: every pick reuses the one empty room.
+		if got, want := sess.ID, empty.ID; got != want {
+			t.Fatalf("StartHosting room ID = %q, want %q (same room, no second spawned)", got, want)
+		}
+	}
+
+	armed, err := h.store.GetSessionByID(ctx, empty.ID)
+	if err != nil {
+		t.Fatalf("GetSessionByID err = %v, want nil", err)
+	}
+	// Armed on the LAST pick (C), not A or B: re-arm reflects the latest quiz id.
+	if armed.QuizID == nil {
+		t.Fatalf("armed QuizID = nil, want %d (last pick C)", quizC.ID)
+	}
+	if got, want := *armed.QuizID, quizC.ID; got != want {
+		t.Errorf("armed QuizID = %d, want %d (last pick C, not A or B)", got, want)
+	}
+	// Still waiting in the lobby, not started: changing the pick never starts.
+	if got, want := armed.Phase, PhaseLobby; got != want {
+		t.Errorf("armed Phase = %q, want %q (armed but waiting in the lobby)", got, want)
+	}
+	if armed.StartedAt != nil {
+		t.Errorf("armed StartedAt = %v, want nil (re-arming must not start the game)", armed.StartedAt)
+	}
+	// The first game from an empty lobby never bumps game_seq, and re-arming from
+	// the lobby (not intermission) keeps it, so three lobby picks stay at 1.
+	if got, want := armed.GameSeq, int64(1); got != want {
+		t.Errorf("armed GameSeq = %d, want %d (lobby re-arms do not bump)", got, want)
+	}
+	// The roster is carried across every re-arm: nobody is dropped.
+	if got := h.rosterIDs(t, empty.ID); !slices.Equal(got, wantRoster) {
+		t.Errorf("roster after re-arms = %v, want %v (roster intact)", got, wantRoster)
 	}
 }
