@@ -1,6 +1,5 @@
 import { join } from 'node:path';
 
-import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
 import {
   registerForPending,
@@ -11,7 +10,6 @@ import {
   setQuizMode,
   claimAndJoin,
   execSqlite,
-  endHostedSession,
 } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' and returns its id, mirroring
@@ -44,8 +42,7 @@ function makeQuizLive(title: string): number {
 // exact request the beacon issues.
 test('a player leaving drops out of the host roster live', async ({
   page,
-  context,
-  baseURL,
+  hostSessions,
   browserName,
 }) => {
   const displayName = `e2e-leave-host-${browserName}`;
@@ -67,35 +64,31 @@ test('a player leaving drops out of the host roster live', async ({
 
   await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
   const code = page.url().split('/host/')[1];
+  // page is this test's own freshly-registered admin host (not the shared admin
+  // the factory opens), so register the room with the factory so teardown ends
+  // it through page and the dashboard returns hostable for the next test (#850).
+  hostSessions.track(page, code);
 
   // Player names are global on players.display_name now (#716), so use unique
   // names to avoid colliding with a parallel spec on the worker DB.
   const alice = `Alice-${browserName}-${Date.now()}`;
   const bob = `Bob-${browserName}-${Date.now()}`;
-  const aliceContext = await context.browser()!.newContext({ storageState: undefined, baseURL });
-  const bobContext = await context.browser()!.newContext({ storageState: undefined, baseURL });
-  try {
-    await claimAndJoin(aliceContext.request, code, alice);
-    await claimAndJoin(bobContext.request, code, bob);
+  const aliceContext = await hostSessions.newPlayerContext();
+  const bobContext = await hostSessions.newPlayerContext();
+  await claimAndJoin(aliceContext.request, code, alice);
+  await claimAndJoin(bobContext.request, code, bob);
 
-    // Both rows show on the TV once the join ticks land.
-    const roster = page.locator('[data-player-row]');
-    await expect(roster).toHaveCount(2);
+  // Both rows show on the TV once the join ticks land.
+  const roster = page.locator('[data-player-row]');
+  await expect(roster).toHaveCount(2);
 
-    // Alice leaves; the endpoint accepts an empty body (the sendBeacon shape).
-    const leaveResp = await aliceContext.request.post(`/api/sessions/${code}/leave`);
-    expect(leaveResp.status()).toBe(204);
+  // Alice leaves; the endpoint accepts an empty body (the sendBeacon shape).
+  const leaveResp = await aliceContext.request.post(`/api/sessions/${code}/leave`);
+  expect(leaveResp.status()).toBe(204);
 
-    // The TV roster drops to just Bob without a reload.
-    await expect(roster).toHaveCount(1);
-    await expect(roster.first()).toContainText(bob);
-  } finally {
-    // page is the host here (no separate host context), so end the room through
-    // it so the dashboard returns hostable for the next test (#850).
-    await endHostedSession(page, code);
-    await aliceContext.close();
-    await bobContext.close();
-  }
+  // The TV roster drops to just Bob without a reload.
+  await expect(roster).toHaveCount(1);
+  await expect(roster.first()).toContainText(bob);
 });
 
 // #794: the leave beacon must fire on pagehide, not only beforeunload, because
@@ -104,7 +97,7 @@ test('a player leaving drops out of the host roster live', async ({
 // the component must sendBeacon to the leave endpoint. The guard against a
 // double-send is pinned by dispatching pagehide twice and asserting the beacon
 // went out exactly once.
-test('the leave beacon fires once on pagehide', async ({ page, baseURL }) => {
+test('the leave beacon fires once on pagehide', async ({ page, hostSessions }) => {
   test.setTimeout(60_000);
 
   const quizTitle = `Leave Pagehide ${Date.now()}`;
@@ -123,13 +116,10 @@ test('the leave beacon fires once on pagehide', async ({ page, baseURL }) => {
     };
   });
 
-  const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath(), baseURL });
-  const host = await hostContext.newPage();
+  const host = await hostSessions.adminHost();
   await seedQuiz(host, quizTitle);
   const quizID = makeQuizLive(quizTitle);
-  const createResp = await host.request.post('/api/sessions', { data: { quizId: quizID } });
-  expect(createResp.status(), `create session: ${createResp.status()} ${await createResp.text()}`).toBe(201);
-  const { joinCode } = await createResp.json() as { joinCode: string };
+  const { joinCode } = await hostSessions.openViaApi(quizID);
 
   await page.goto(`/join/${joinCode}`);
   await page.getByTestId('join-name-input').fill(dana);
@@ -149,7 +139,4 @@ test('the leave beacon fires once on pagehide', async ({ page, baseURL }) => {
   );
   const leaveBeacons = beacons.filter((url) => url.includes(`/api/sessions/${joinCode}/leave`));
   expect(leaveBeacons).toHaveLength(1);
-
-  await endHostedSession(host, joinCode);
-  await hostContext.close();
 });

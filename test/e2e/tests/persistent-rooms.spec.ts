@@ -2,9 +2,8 @@ import { join } from 'node:path';
 
 import type { APIRequestContext } from '@playwright/test';
 
-import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { importQuiz, claimAndJoin, csrfTokenPattern, execSqlite, endHostedSession } from './helpers';
+import { importQuiz, claimAndJoin, csrfTokenPattern, execSqlite } from './helpers';
 
 // #836 persistent live rooms: a host runs a live quiz to its between-games
 // intermission, the player sees the intermission/standings view while staying
@@ -69,7 +68,7 @@ async function postNextQuiz(
 }
 
 test.describe('persistent live rooms', () => {
-  test('carries a still-joined player from game 1 intermission into game 2', async ({ page, baseURL }) => {
+  test('carries a still-joined player from game 1 intermission into game 2', async ({ page, hostSessions }) => {
     test.setTimeout(90_000);
 
     const stamp = Date.now();
@@ -77,77 +76,68 @@ test.describe('persistent live rooms', () => {
     const quiz2Title = `Persistent G2 ${stamp}`;
     const player = `Pat-${stamp}`;
 
-    const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath(), baseURL });
-    const host = await hostContext.newPage();
-    let joinCode = '';
+    const host = await hostSessions.adminHost();
 
-    try {
-      // Two single-question live quizzes: game 1 the room opens on, game 2 the
-      // host arms at intermission. Importing live + flipping the mode (a no-op
-      // re-assert) resolves each id off the worker DB.
-      await importQuiz(host, singleQuestionDoc(quiz1Title, 'Game 1: what is 1+1?', 'two'), 'live');
-      await importQuiz(host, singleQuestionDoc(quiz2Title, 'Game 2: what is 2+2?', 'four'), 'live');
-      const quiz1Id = makeLiveAndResolveId(quiz1Title);
-      const quiz2Id = makeLiveAndResolveId(quiz2Title);
+    // Two single-question live quizzes: game 1 the room opens on, game 2 the
+    // host arms at intermission. Importing live + flipping the mode (a no-op
+    // re-assert) resolves each id off the worker DB.
+    await importQuiz(host, singleQuestionDoc(quiz1Title, 'Game 1: what is 1+1?', 'two'), 'live');
+    await importQuiz(host, singleQuestionDoc(quiz2Title, 'Game 2: what is 2+2?', 'four'), 'live');
+    const quiz1Id = makeLiveAndResolveId(quiz1Title);
+    const quiz2Id = makeLiveAndResolveId(quiz2Title);
 
-      // Open the room on game 1.
-      const createResp = await host.request.post('/api/sessions', { data: { quizId: quiz1Id } });
-      expect(createResp.status(), `create session: ${createResp.status()} ${await createResp.text()}`).toBe(201);
-      ({ joinCode } = await createResp.json() as { joinCode: string });
-      expect(joinCode).toMatch(/^[A-Z0-9]{6}$/);
+    // Open the room on game 1.
+    const { joinCode } = await hostSessions.openViaApi(quiz1Id);
+    expect(joinCode).toMatch(/^[A-Z0-9]{6}$/);
 
-      // The page-driven player joins via the deep link and lands in the lobby.
-      await page.goto(`/join/${joinCode}`);
-      await page.getByTestId('join-name-input').fill(player);
-      await page.getByTestId('join-name-submit').click();
-      await expect(page.getByTestId('lobby-roster').getByText(player)).toBeVisible();
+    // The page-driven player joins via the deep link and lands in the lobby.
+    await page.goto(`/join/${joinCode}`);
+    await page.getByTestId('join-name-input').fill(player);
+    await page.getByTestId('join-name-submit').click();
+    await expect(page.getByTestId('lobby-roster').getByText(player)).toBeVisible();
 
-      // Host starts game 1; the runner drives round_intro -> question.
-      const startResp = await host.request.post(`/api/sessions/${joinCode}/start`);
-      expect(startResp.status(), `start: ${startResp.status()} ${await startResp.text()}`).toBe(204);
+    // Host starts game 1; the runner drives round_intro -> question.
+    const startResp = await host.request.post(`/api/sessions/${joinCode}/start`);
+    expect(startResp.status(), `start: ${startResp.status()} ${await startResp.text()}`).toBe(204);
 
-      await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 15_000 });
-      await expect(page.getByTestId('question-text')).toHaveText('Game 1: what is 1+1?');
+    await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('question-text')).toHaveText('Game 1: what is 1+1?');
 
-      // The page player answers game 1's only question via the page UI. With
-      // the single active player in, the runner closes the question, reveals,
-      // and ends the game into intermission.
-      await expect(page.getByTestId('question-options')).toBeVisible({ timeout: 10_000 });
-      await page.getByTestId('question-options').getByRole('button', { name: 'two' }).click();
-      await expect(page.getByTestId('answered-waiting')).toBeVisible();
+    // The page player answers game 1's only question via the page UI. With
+    // the single active player in, the runner closes the question, reveals,
+    // and ends the game into intermission.
+    await expect(page.getByTestId('question-options')).toBeVisible({ timeout: 10_000 });
+    await page.getByTestId('question-options').getByRole('button', { name: 'two' }).click();
+    await expect(page.getByTestId('answered-waiting')).toBeVisible();
 
-      // Game 1 ends into intermission: the player sees the intermission view
-      // (final standings + the waiting message), staying joined - no re-join,
-      // no enter-code form.
-      await expect(page.getByTestId('intermission-view')).toBeVisible({ timeout: 20_000 });
-      await expect(page.getByTestId('intermission-waiting')).toContainText('Waiting for the host');
-      await expect(page.getByTestId('standings-bars').locator('[data-standings-row]')).toHaveCount(1);
-      await expect(page.getByTestId('standings-bars').getByText(player)).toBeVisible();
-      // Still joined: the enter-code form is not shown.
-      await expect(page.getByTestId('join-code-input')).toBeHidden();
+    // Game 1 ends into intermission: the player sees the intermission view
+    // (final standings + the waiting message), staying joined - no re-join,
+    // no enter-code form.
+    await expect(page.getByTestId('intermission-view')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('intermission-waiting')).toContainText('Waiting for the host');
+    await expect(page.getByTestId('standings-bars').locator('[data-standings-row]')).toHaveCount(1);
+    await expect(page.getByTestId('standings-bars').getByText(player)).toBeVisible();
+    // Still joined: the enter-code form is not shown.
+    await expect(page.getByTestId('join-code-input')).toBeHidden();
 
-      // The host arms game 2. The room re-arms onto quiz 2 and the runner drives
-      // the new game; the player is carried in off the SSE -> GET state loop.
-      await postNextQuiz(host.request, joinCode, quiz2Id);
+    // The host arms game 2. The room re-arms onto quiz 2 and the runner drives
+    // the new game; the player is carried in off the SSE -> GET state loop.
+    await postNextQuiz(host.request, joinCode, quiz2Id);
 
-      // Game 2 plays for the still-joined player: they reach the new question
-      // without re-entering a code, and no stale game-1 state leaks (the new
-      // question text is shown, options are fresh).
-      await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 20_000 });
-      await expect(page.getByTestId('question-text')).toHaveText('Game 2: what is 2+2?');
-      await expect(page.getByTestId('question-options')).toBeVisible({ timeout: 10_000 });
-      // No stale pick from game 1: the answered/waiting state is gone and the
-      // options are tappable again.
-      await expect(page.getByTestId('answered-waiting')).toBeHidden();
-      const game2Correct = page.getByTestId('question-options').getByRole('button', { name: 'four' });
-      await expect(game2Correct).toBeEnabled();
-    } finally {
-      if (joinCode) await endHostedSession(host, joinCode);
-      await hostContext.close();
-    }
+    // Game 2 plays for the still-joined player: they reach the new question
+    // without re-entering a code, and no stale game-1 state leaks (the new
+    // question text is shown, options are fresh).
+    await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('question-text')).toHaveText('Game 2: what is 2+2?');
+    await expect(page.getByTestId('question-options')).toBeVisible({ timeout: 10_000 });
+    // No stale pick from game 1: the answered/waiting state is gone and the
+    // options are tappable again.
+    await expect(page.getByTestId('answered-waiting')).toBeHidden();
+    const game2Correct = page.getByTestId('question-options').getByRole('button', { name: 'four' });
+    await expect(game2Correct).toBeEnabled();
   });
 
-  test('a latecomer joins a live room mid-game and lands in the question', async ({ page, baseURL }) => {
+  test('a latecomer joins a live room mid-game and lands in the question', async ({ page, hostSessions }) => {
     test.setTimeout(90_000);
 
     const stamp = Date.now();
@@ -155,52 +145,41 @@ test.describe('persistent live rooms', () => {
     const early = `Early-${stamp}`;
     const late = `Late-${stamp}`;
 
-    const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath(), baseURL });
-    const host = await hostContext.newPage();
-    let joinCode = '';
+    const host = await hostSessions.adminHost();
 
-    try {
-      await importQuiz(host, singleQuestionDoc(quizTitle, 'Latecomer: what is 3+3?', 'six'), 'live');
-      const quizId = makeLiveAndResolveId(quizTitle);
+    await importQuiz(host, singleQuestionDoc(quizTitle, 'Latecomer: what is 3+3?', 'six'), 'live');
+    const quizId = makeLiveAndResolveId(quizTitle);
 
-      const createResp = await host.request.post('/api/sessions', { data: { quizId } });
-      expect(createResp.status(), `create session: ${createResp.status()} ${await createResp.text()}`).toBe(201);
-      ({ joinCode } = await createResp.json() as { joinCode: string });
+    const { joinCode } = await hostSessions.openViaApi(quizId);
 
-      // An early player joins via the API and readies so the game can start.
-      // They deliberately do NOT answer, so the question phase stays open long
-      // enough for the latecomer to land in it.
-      const earlyCtx = await page.context().browser()!.newContext({ storageState: undefined, baseURL });
-      await claimAndJoin(earlyCtx.request, joinCode, early);
-      const readyResp = await earlyCtx.request.post(`/api/sessions/${joinCode}/ready`, { data: { ready: true } });
-      expect(readyResp.status()).toBe(204);
+    // An early player joins via the API and readies so the game can start.
+    // They deliberately do NOT answer, so the question phase stays open long
+    // enough for the latecomer to land in it.
+    const earlyCtx = await hostSessions.newPlayerContext();
+    await claimAndJoin(earlyCtx.request, joinCode, early);
+    const readyResp = await earlyCtx.request.post(`/api/sessions/${joinCode}/ready`, { data: { ready: true } });
+    expect(readyResp.status()).toBe(204);
 
-      const startResp = await host.request.post(`/api/sessions/${joinCode}/start`);
-      expect(startResp.status(), `start: ${startResp.status()} ${await startResp.text()}`).toBe(204);
+    const startResp = await host.request.post(`/api/sessions/${joinCode}/start`);
+    expect(startResp.status(), `start: ${startResp.status()} ${await startResp.text()}`).toBe(204);
 
-      // Wait until the room is in the question phase (the early player holds
-      // their answer, so it stays open).
-      await expect(async () => {
-        const resp = await earlyCtx.request.get(`/api/sessions/${joinCode}/state`);
-        expect(resp.ok()).toBeTruthy();
-        const state = await resp.json() as { phase: string };
-        expect(state.phase).toBe('question');
-      }).toPass({ timeout: 15_000 });
+    // Wait until the room is in the question phase (the early player holds
+    // their answer, so it stays open).
+    await expect(async () => {
+      const resp = await earlyCtx.request.get(`/api/sessions/${joinCode}/state`);
+      expect(resp.ok()).toBeTruthy();
+      const state = await resp.json() as { phase: string };
+      expect(state.phase).toBe('question');
+    }).toPass({ timeout: 15_000 });
 
-      // The latecomer joins mid-game via the page UI: they land directly in the
-      // in-flight question phase, not a lobby, and render the question.
-      await page.goto(`/join/${joinCode}`);
-      await page.getByTestId('join-name-input').fill(late);
-      await page.getByTestId('join-name-submit').click();
+    // The latecomer joins mid-game via the page UI: they land directly in the
+    // in-flight question phase, not a lobby, and render the question.
+    await page.goto(`/join/${joinCode}`);
+    await page.getByTestId('join-name-input').fill(late);
+    await page.getByTestId('join-name-submit').click();
 
-      await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 20_000 });
-      await expect(page.getByTestId('question-text')).toHaveText('Latecomer: what is 3+3?');
-
-      await earlyCtx.close();
-    } finally {
-      if (joinCode) await endHostedSession(host, joinCode);
-      await hostContext.close();
-    }
+    await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('question-text')).toHaveText('Latecomer: what is 3+3?');
   });
 });
 

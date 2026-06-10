@@ -1,6 +1,5 @@
 import { join } from 'node:path';
 
-import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
 import {
   seedQuiz,
@@ -11,7 +10,6 @@ import {
   markAdmin,
   login,
   setQuizMode,
-  endHostedSession,
 } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' and returns its id, mirroring
@@ -41,19 +39,16 @@ function makeQuizLive(title: string): number {
 // clears on the next good read, and a 404 still flips the closed view (not the
 // trouble banner) - the existing room-gone signal is untouched.
 test.describe('live client connection trouble', () => {
-  test('player lobby surfaces the banner after repeated state failures and clears on success', async ({ page, baseURL }) => {
+  test('player lobby surfaces the banner after repeated state failures and clears on success', async ({ page, hostSessions }) => {
     test.setTimeout(60_000);
 
     const quizTitle = `Conn Player ${Date.now()}`;
     const eve = `Eve-${Date.now()}`;
 
-    const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath(), baseURL });
-    const host = await hostContext.newPage();
+    const host = await hostSessions.adminHost();
     await seedQuiz(host, quizTitle);
     const quizID = makeQuizLive(quizTitle);
-    const createResp = await host.request.post('/api/sessions', { data: { quizId: quizID } });
-    expect(createResp.status(), `create session: ${createResp.status()} ${await createResp.text()}`).toBe(201);
-    const { joinCode } = await createResp.json() as { joinCode: string };
+    const { joinCode } = await hostSessions.openViaApi(quizID);
 
     await page.goto(`/join/${joinCode}`);
     await page.getByTestId('join-name-input').fill(eve);
@@ -84,12 +79,9 @@ test.describe('live client connection trouble', () => {
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
     await expect(page.getByTestId('connection-trouble')).toHaveCount(0, { timeout: 10_000 });
     await expect(page.getByTestId('lobby-view')).toBeVisible();
-
-    await endHostedSession(host, joinCode);
-    await hostContext.close();
   });
 
-  test('host TV surfaces the banner after repeated state failures and clears on success', async ({ page, context, baseURL, browserName }) => {
+  test('host TV surfaces the banner after repeated state failures and clears on success', async ({ page, hostSessions, browserName }) => {
     test.setTimeout(60_000);
 
     const displayName = `e2e-conn-host-${browserName}-${Date.now()}`;
@@ -114,9 +106,13 @@ test.describe('live client connection trouble', () => {
     await page.getByRole('button', { name: 'Host live' }).click();
     await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
     const code = page.url().split('/host/')[1];
+    // page is this test's own freshly-registered admin host (not the shared
+    // admin the factory opens), so register the room with the factory so
+    // teardown ends it through page (#850).
+    hostSessions.track(page, code);
 
     // A player joins so the roster is populated before the failure window.
-    const playerContext = await context.browser()!.newContext({ storageState: undefined, baseURL });
+    const playerContext = await hostSessions.newPlayerContext();
     await claimAndJoin(playerContext.request, code, fred);
     await expect(page.locator('[data-player-row]')).toHaveCount(1);
     await expect(page.locator('[data-connection-trouble]')).toHaveCount(0);
@@ -145,10 +141,5 @@ test.describe('live client connection trouble', () => {
       return cmp.refresh();
     });
     await expect(page.locator('[data-connection-trouble]')).toHaveCount(0, { timeout: 10_000 });
-
-    // page is the host here (no separate host context), so end the room through
-    // it so the dashboard returns hostable for the next test (#850).
-    await endHostedSession(page, code);
-    await playerContext.close();
   });
 });

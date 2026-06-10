@@ -1,9 +1,8 @@
-import type { APIRequestContext, BrowserContext, Page } from '@playwright/test';
+import type { APIRequestContext, Page } from '@playwright/test';
 import { join } from 'node:path';
 
-import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { importQuiz, claimAndJoin, execSqlite, endHostedSession } from './helpers';
+import { importQuiz, claimAndJoin, execSqlite } from './helpers';
 
 // MP-9 (#686): the between-rounds standings bar graph on the round_results /
 // finished screens, on BOTH the host TV surface and the player join surface.
@@ -165,7 +164,7 @@ async function readFinishedStanding(
 
 test('the standings bar graph shows final order and totals on the TV and player surfaces', async ({
   page,
-  baseURL,
+  hostSessions,
   browserName,
 }) => {
   test.setTimeout(90_000);
@@ -178,13 +177,11 @@ test('the standings bar graph shows final order and totals on the TV and player 
   const robin = `Robin-${suffix}`;
 
   // Host context (shared admin) seeds a two-round quiz, makes it live, opens a
-  // session, and watches the TV. The player surface (page) stays anonymous.
-  const hostContext = await page.context().browser()!.newContext({
-    storageState: adminStatePath(),
-    baseURL,
-    reducedMotion: 'reduce',
-  });
-  const host = await hostContext.newPage();
+  // session, and watches the TV. The player surface (page) stays anonymous. The
+  // standings animation is asserted at its settled (reduced-motion) state, so
+  // the host TV runs under prefers-reduced-motion like the player page below.
+  const host = await hostSessions.adminHost();
+  await host.emulateMedia({ reducedMotion: 'reduce' });
 
   // Two rounds, one question each. The page player answers the correct option
   // every time and the API player answers a wrong one, so the page player leads
@@ -219,19 +216,14 @@ test('the standings bar graph shows final order and totals on the TV and player 
   });
   const quizID = makeQuizLiveByTitle(quizTitle);
 
-  const createResp = await host.request.post('/api/sessions', { data: { quizId: quizID } });
-  expect(createResp.status(), `create session: ${createResp.status()} ${await createResp.text()}`).toBe(201);
-  const { joinCode } = await createResp.json() as { joinCode: string };
+  const { joinCode } = await hostSessions.openViaApi(quizID);
 
   // The host opens the TV surface.
   await host.goto(`/host/${joinCode}`);
 
-  // An API-only second player joins from its own anonymous context.
-  const otherContext: BrowserContext = await page.context().browser()!.newContext({
-    storageState: undefined,
-    baseURL,
-    reducedMotion: 'reduce',
-  });
+  // An API-only second player joins from its own anonymous context. It only
+  // drives answers over the request API, so reduced motion is moot for it.
+  const otherContext = await hostSessions.newPlayerContext();
   const other = otherContext.request;
   await claimAndJoin(other, joinCode, robin);
 
@@ -365,8 +357,4 @@ test('the standings bar graph shows final order and totals on the TV and player 
   expect(quincyFinal.roundScore).toBeGreaterThan(0);
   expect(quincyFinal.totalScore - quincyFinal.roundScore).toBeLessThan(quincyFinal.totalScore);
   expect(robinFinal.roundScore).toBe(0);
-
-  await endHostedSession(host, joinCode);
-  await otherContext.close();
-  await hostContext.close();
 });

@@ -1,9 +1,8 @@
-import type { APIRequestContext, BrowserContext, Page } from '@playwright/test';
+import type { APIRequestContext, Page } from '@playwright/test';
 import { join } from 'node:path';
 
-import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import { importQuiz, claimAndJoin, execSqlite, endHostedSession } from './helpers';
+import { importQuiz, claimAndJoin, execSqlite } from './helpers';
 
 // Motion-ON capture of the standings animation (the #729 grow + the #730 row
 // slide) so the real motion can actually be eyeballed. The standings-bargraph
@@ -103,7 +102,7 @@ async function answerOnPage(page: Page, text: string): Promise<void> {
   }
 }
 
-test('standings swap video: a player row slides up to first at the finish', async ({ page, baseURL, browserName }) => {
+test('standings swap video: a player row slides up to first at the finish', async ({ page, hostSessions, browserName }) => {
   test.skip(!!process.env.CI, 'manual animation capture tool; run locally, not in CI');
   test.setTimeout(120_000);
 
@@ -114,11 +113,7 @@ test('standings swap video: a player row slides up to first at the finish', asyn
 
   // The host (shared admin) seeds a two-round quiz, makes it live, and opens a
   // session. The recorded `page` is the climber's player surface.
-  const hostContext: BrowserContext = await page.context().browser()!.newContext({
-    storageState: adminStatePath(),
-    baseURL,
-  });
-  const host = await hostContext.newPage();
+  const host = await hostSessions.adminHost();
 
   await importQuiz(host, {
     title: quizTitle,
@@ -150,12 +145,10 @@ test('standings swap video: a player row slides up to first at the finish', asyn
   });
   const quizID = makeQuizLiveByTitle(quizTitle);
 
-  const createResp = await host.request.post('/api/sessions', { data: { quizId: quizID } });
-  expect(createResp.status(), `create session: ${createResp.status()} ${await createResp.text()}`).toBe(201);
-  const { joinCode } = await createResp.json() as { joinCode: string };
+  const { joinCode } = await hostSessions.openViaApi(quizID);
 
   // The API rival joins; the recorded player joins via the deep link.
-  const leaderContext: BrowserContext = await page.context().browser()!.newContext({ storageState: undefined, baseURL });
+  const leaderContext = await hostSessions.newPlayerContext();
   await claimAndJoin(leaderContext.request, joinCode, leader);
 
   await page.goto(`/join/${joinCode}`);
@@ -236,8 +229,4 @@ test('standings swap video: a player row slides up to first at the finish', asyn
 
   // Dwell so the recording includes the full settle.
   await page.waitForTimeout(3_000);
-
-  await endHostedSession(host, joinCode);
-  await leaderContext.close();
-  await hostContext.close();
 });

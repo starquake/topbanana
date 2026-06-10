@@ -1,9 +1,8 @@
 import { join } from 'node:path';
 
-import { adminStatePath } from '../e2e-auth';
 import { test, expect } from './fixtures';
-import type { Page } from './fixtures';
-import { seedQuiz, registerForPending, login, markEmailVerified, execSqlite, endHostedSession } from './helpers';
+import type { HostSessions } from './fixtures';
+import { seedQuiz, registerForPending, login, markEmailVerified, execSqlite } from './helpers';
 
 // A logged-in player who has chosen a custom name skips the name-entry form on
 // the live-session join surface: they auto-join under their account name and
@@ -37,25 +36,22 @@ function makeQuizLive(title: string): number {
 }
 
 // hostLiveSession seeds a quiz as the admin (host), flips it live, opens a
-// session, and returns the join code.
-async function hostLiveSession(host: Page, quizTitle: string): Promise<string> {
+// session through the host-session factory, and returns the join code.
+async function hostLiveSession(hostSessions: HostSessions, quizTitle: string): Promise<string> {
+  const host = await hostSessions.adminHost();
   await seedQuiz(host, quizTitle);
   const quizID = makeQuizLive(quizTitle);
-  const createResp = await host.request.post('/api/sessions', { data: { quizId: quizID } });
-  expect(createResp.status(), `create session: ${createResp.status()} ${await createResp.text()}`).toBe(201);
-  const { joinCode } = await createResp.json() as { joinCode: string };
+  const { joinCode } = await hostSessions.openViaApi(quizID);
   expect(joinCode).toMatch(/^[A-Z0-9]{6}$/);
   return joinCode;
 }
 
 test.describe('player join name skip for named players', () => {
-  test('a logged-in player with a custom name auto-joins via deep link, skipping the name form', async ({ page, baseURL, browserName }) => {
+  test('a logged-in player with a custom name auto-joins via deep link, skipping the name form', async ({ page, hostSessions, browserName }) => {
     test.setTimeout(45_000);
     const quizTitle = `Named Join ${browserName} ${Date.now()}`;
 
-    const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath(), baseURL });
-    const host = await hostContext.newPage();
-    const joinCode = await hostLiveSession(host, quizTitle);
+    const joinCode = await hostLiveSession(hostSessions, quizTitle);
 
     // Sign in as a freshly registered player: registration claims a display
     // name, so this account has hasCustomName=true and isAuthenticated=true.
@@ -80,18 +76,13 @@ test.describe('player join name skip for named players', () => {
     expect(stateResp.ok()).toBeTruthy();
     const state = await stateResp.json() as { players: { displayName: string }[] };
     expect(state.players.some((p) => p.displayName === displayName)).toBe(true);
-
-    await endHostedSession(host, joinCode);
-    await hostContext.close();
   });
 
-  test('a logged-in named player entering the code on /join auto-joins without the name form', async ({ page, baseURL, browserName }) => {
+  test('a logged-in named player entering the code on /join auto-joins without the name form', async ({ page, hostSessions, browserName }) => {
     test.setTimeout(45_000);
     const quizTitle = `Named Code ${browserName} ${Date.now()}`;
 
-    const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath(), baseURL });
-    const host = await hostContext.newPage();
-    const joinCode = await hostLiveSession(host, quizTitle);
+    const joinCode = await hostLiveSession(hostSessions, quizTitle);
 
     const displayName = `e2e-named-code-${browserName}-${Date.now()}`;
     await registerForPending(page, displayName);
@@ -110,26 +101,18 @@ test.describe('player join name skip for named players', () => {
     // The name form lives under x-show (kept in DOM, toggled via CSS), so
     // assert it never became visible rather than that it is absent.
     await expect(page.getByTestId('join-name-input')).toBeHidden();
-
-    await endHostedSession(host, joinCode);
-    await hostContext.close();
   });
 
-  test('an anonymous visitor still sees the name form on a deep link', async ({ page, baseURL, browserName }) => {
+  test('an anonymous visitor still sees the name form on a deep link', async ({ page, hostSessions, browserName }) => {
     test.setTimeout(45_000);
     const quizTitle = `Anon Join ${browserName} ${Date.now()}`;
 
-    const hostContext = await page.context().browser()!.newContext({ storageState: adminStatePath(), baseURL });
-    const host = await hostContext.newPage();
-    const joinCode = await hostLiveSession(host, quizTitle);
+    const joinCode = await hostLiveSession(hostSessions, quizTitle);
 
     // Anonymous: no login. The name form must show on the deep link, and the
     // lobby must not appear until a name is submitted.
     await page.goto(`/join/${joinCode}`);
     await expect(page.getByTestId('join-name-input')).toBeVisible();
     await expect(page.getByTestId('lobby-roster')).toHaveCount(0);
-
-    await endHostedSession(host, joinCode);
-    await hostContext.close();
   });
 });
