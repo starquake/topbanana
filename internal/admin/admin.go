@@ -819,6 +819,14 @@ type ActiveSessionLookup interface {
 	GetActiveSessionForHost(ctx context.Context, hostPlayerID int64) (*livesession.Session, error)
 }
 
+// RunningGameLookup is the slice of the live-session service the quiz view needs
+// to gate the "Host live" confirm-and-restart prompt (#853): report whether the
+// signed-in host already has a game in flight. Kept narrow so the admin package
+// does not depend on the whole live-session service.
+type RunningGameLookup interface {
+	HostHasRunningGame(ctx context.Context, hostPlayerID int64) (bool, error)
+}
+
 // indexData feeds the admin dashboard. ResumeCode is the join code of the
 // host's current active room, empty when they have none. The single adaptive
 // host control reflects it: a "Resume session" link when set, the "Host a
@@ -969,7 +977,11 @@ type PlayerScoreData struct {
 // rather than spinning up a dedicated "list participants" service method -
 // see #145 for the rationale (and #141 for the performance ceilings).
 func HandleQuizView(
-	logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store, gameService *game.Service,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	quizStore quiz.Store,
+	gameService *game.Service,
+	runningGames RunningGameLookup,
 ) http.Handler {
 	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
 
@@ -999,8 +1011,33 @@ func HandleQuizView(
 		quizData := quizDataFromQuiz(qz)
 		attachCanEdit(r, quizData)
 		data := newQuizViewData(quizData, players, rounds)
+		data.HostHasRunningGame = hostHasRunningGame(r, logger, runningGames)
 		render.Render(w, r, http.StatusOK, data)
 	})
+}
+
+// hostHasRunningGame reports whether the signed-in host already has a game in
+// flight, so the quiz view can gate the "Host live" confirm-and-restart prompt
+// (#853). A lookup failure is logged and degraded to false rather than failing
+// the whole render: the page still serves, and the #851 in-flight no-op still
+// protects the running game server-side. Returns false when the service is not
+// wired or no player is on the context.
+func hostHasRunningGame(r *http.Request, logger *slog.Logger, runningGames RunningGameLookup) bool {
+	if runningGames == nil {
+		return false
+	}
+	player, ok := auth.PlayerFromContext(r.Context())
+	if !ok {
+		return false
+	}
+	running, err := runningGames.HostHasRunningGame(r.Context(), player.ID)
+	if err != nil {
+		logger.ErrorContext(r.Context(), "error looking up running host game", slog.Any("err", err))
+
+		return false
+	}
+
+	return running
 }
 
 // QuizViewData is the data passed to the quiz view template. Questions
@@ -1013,6 +1050,11 @@ type QuizViewData struct {
 	// Rounds is the position-ordered round list, each carrying its own
 	// questions, for the grouped quiz view.
 	Rounds []RoundViewData
+	// HostHasRunningGame gates the "Host live" confirm-and-restart prompt
+	// (#853): true when the signed-in host already has a game in flight, so the
+	// control opens a modal that ends the running session before hosting this
+	// quiz instead of submitting straight away.
+	HostHasRunningGame bool
 }
 
 // RoundViewData is one round section on the quiz view: the round itself

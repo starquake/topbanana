@@ -283,7 +283,7 @@ func TestHandleQuizView(t *testing.T) {
 		env := newAdminEnv(t)
 		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz One", "quiz-one"))
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService())
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{})
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 		rr := httptest.NewRecorder()
@@ -306,7 +306,7 @@ func TestHandleQuizView(t *testing.T) {
 
 		env := newAdminEnv(t)
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService())
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{})
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/999", nil)
 		req.SetPathValue("quizID", "999")
 		rr := httptest.NewRecorder()
@@ -322,6 +322,75 @@ func TestHandleQuizView(t *testing.T) {
 	})
 }
 
+// TestHandleQuizView_RestartModalGating pins the confirm-and-restart gating
+// (#853): on a live quiz, the restart modal and its hidden restart=true field
+// render only when the host already has a game in flight; otherwise the plain
+// Host live form has no restart field and no modal.
+func TestHandleQuizView_RestartModalGating(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+
+	seedLive := func(t *testing.T, env *adminEnv) *quiz.Quiz {
+		t.Helper()
+		live := twoQuestionQuiz("Hostable Quiz", "hostable-quiz")
+		live.Mode = quiz.ModeLive
+
+		return env.seedQuiz(t, live)
+	}
+
+	viewBody := func(t *testing.T, env *adminEnv, qz *quiz.Quiz, running RunningGameLookup) string {
+		t.Helper()
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), running)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
+		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, withTestAdmin(req))
+		if got, want := rr.Code, http.StatusOK; got != want {
+			t.Fatalf("quiz view status = %d, want %d", got, want)
+		}
+
+		return rr.Body.String()
+	}
+
+	t.Run("running game shows the restart modal and field", func(t *testing.T) {
+		t.Parallel()
+		env := newAdminEnv(t)
+		qz := seedLive(t, env)
+
+		body := viewBody(t, env, qz, runningGameLookup{running: true})
+		for _, want := range []string{
+			"modal-restart-host-" + strconv.FormatInt(qz.ID, 10),
+			`name="restart"`,
+			`value="true"`,
+			"End and start",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("running-game quiz view missing %q", want)
+			}
+		}
+	})
+
+	t.Run("no running game shows the plain form without restart", func(t *testing.T) {
+		t.Parallel()
+		env := newAdminEnv(t)
+		qz := seedLive(t, env)
+
+		body := viewBody(t, env, qz, runningGameLookup{running: false})
+		// The plain Host live form still renders, but with no restart field and no
+		// restart modal.
+		if !strings.Contains(body, "Host live") {
+			t.Error("no-running-game quiz view missing the Host live control")
+		}
+		if strings.Contains(body, `name="restart"`) {
+			t.Error("no-running-game quiz view rendered the restart hidden field")
+		}
+		if strings.Contains(body, "modal-restart-host-") {
+			t.Error("no-running-game quiz view rendered the restart modal")
+		}
+	})
+}
+
 func TestHandleQuizView_ErrorHandling(t *testing.T) {
 	t.Parallel()
 
@@ -333,7 +402,7 @@ func TestHandleQuizView_ErrorHandling(t *testing.T) {
 
 		env := newAdminEnv(t)
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService())
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{})
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/abc", nil)
 		req.SetPathValue("quizID", "abc")
 		rr := httptest.NewRecorder()
@@ -358,7 +427,7 @@ func TestHandleQuizView_ErrorHandling(t *testing.T) {
 		env.seedQuiz(t, ownedQuiz("Q", "q"))
 		env.closeStore(t)
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService())
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{})
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", "1")
 		rr := httptest.NewRecorder()
@@ -2144,7 +2213,7 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 		env.playThrough(t, qz, alice)
 		env.playThrough(t, qz, bob)
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService())
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{})
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 		rr := httptest.NewRecorder()
@@ -2194,7 +2263,7 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 		env := newAdminEnv(t)
 		qz := env.seedQuiz(t, twoQuestionQuiz("Q1", "q-1"))
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService())
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{})
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 		rr := httptest.NewRecorder()
@@ -2527,6 +2596,15 @@ type activeSessionLookup struct{ code string }
 
 func (a activeSessionLookup) GetActiveSessionForHost(_ context.Context, _ int64) (*livesession.Session, error) {
 	return &livesession.Session{JoinCode: a.code}, nil
+}
+
+// runningGameLookup is a RunningGameLookup that reports the host's running-game
+// state by a fixed bool, so the quiz view test can toggle the confirm-and-restart
+// prompt (#853) without standing up a live session.
+type runningGameLookup struct{ running bool }
+
+func (l runningGameLookup) HostHasRunningGame(_ context.Context, _ int64) (bool, error) {
+	return l.running, nil
 }
 
 func TestHandleQuizCreate(t *testing.T) {

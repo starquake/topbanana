@@ -21,6 +21,10 @@ import (
 //     [livesession.Service.StartHosting], which is one-room-per-host aware -
 //     it opens a new armed room, arms+starts the quiz in the host's existing
 //     empty/intermission room, or leaves a running game untouched.
+//   - With a quiz_id and restart=true (the confirm-and-restart path #853 when a
+//     game is already running): orchestrate through
+//     [livesession.Service.RestartHosting], which ends the host's running session
+//     and opens a fresh room hosting the picked quiz.
 //
 // Either way it 303-redirects the host to the TV lobby. The route is host-gated;
 // a non-live or missing quiz round-trips back to the quiz list rather than
@@ -48,6 +52,11 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	id, err := handlers.IDFromString(raw)
 	if err != nil {
 		http.Error(w, "invalid quiz id", http.StatusBadRequest)
+
+		return
+	}
+	if r.FormValue("restart") == "true" {
+		h.hostLiveRestart(w, r, id, player.ID)
 
 		return
 	}
@@ -81,6 +90,26 @@ func (h *Handlers) hostLive(w http.ResponseWriter, r *http.Request, quizID, play
 			http.Redirect(w, r, "/admin/quizzes", http.StatusSeeOther)
 		default:
 			h.logger.ErrorContext(r.Context(), "error hosting live quiz", slog.Any("err", err))
+			http.Error(w, msgInternalError, http.StatusInternalServerError)
+		}
+
+		return
+	}
+	h.redirectToLobby(w, r, sess.JoinCode)
+}
+
+// hostLiveRestart ends the host's running session and opens a new room hosting
+// the picked quiz (#853): the confirm-and-restart path the host took to switch
+// the live quiz. A missing or solo quiz bounces back to the quiz list and
+// nothing is ended.
+func (h *Handlers) hostLiveRestart(w http.ResponseWriter, r *http.Request, quizID, playerID int64) {
+	sess, err := h.service.RestartHosting(r.Context(), quizID, playerID)
+	if err != nil {
+		switch {
+		case errors.Is(err, quiz.ErrQuizNotFound), errors.Is(err, livesession.ErrNotLiveQuiz):
+			http.Redirect(w, r, "/admin/quizzes", http.StatusSeeOther)
+		default:
+			h.logger.ErrorContext(r.Context(), "error restarting host session", slog.Any("err", err))
 			http.Error(w, msgInternalError, http.StatusInternalServerError)
 		}
 
