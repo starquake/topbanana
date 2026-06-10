@@ -57,22 +57,22 @@ func addRoutes(
 		mailConfigured: mail.Status.Configured,
 		tasks:          mail.Tasks,
 	}
+	gameDeps := adminGameDeps{gameService: gameService, runningGames: realtime.SessionService}
 
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
-	addAdminRoutes(mux, logger, stores, gameService, sessions, csrfMgr, emailDeps, playerDeps)
+	addAdminRoutes(mux, logger, stores, gameDeps, sessions, csrfMgr, emailDeps, playerDeps)
 	addProfileRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
 	addAPIRoutes(mux, logger, stores, gameService, realtime, sessions, cfg)
 	addHostRoutes(mux, logger, stores, sessions, csrfMgr, realtime.SessionService)
 
 	// Client
-	clientHandler := client.Handler(cfg)
 	shell := client.NewShellHandlers(cfg, stores.Quizzes, logger)
 	// The SPA root and the per-quiz share URL both go through the shell
 	// handler so the index template can render Open Graph metadata. The
 	// shell route wins over the file-server fallback below because Go's
 	// mux picks the more specific pattern (`{$}` + method).
 	mux.Handle("GET /client/{$}", http.HandlerFunc(shell.Index))
-	mux.Handle("/client/", clientHandler)
+	mux.Handle("/client/", client.Handler(cfg))
 	mux.Handle("GET /play/{slugID}", http.HandlerFunc(shell.Play))
 	// Player join + lobby surface (MP-4 / #681). The bare /join is the PC
 	// enter-code entry; /join/{code} is the QR deep-link target. Both render
@@ -444,11 +444,20 @@ type adminPlayerDeps struct {
 	tasks *bgtasks.Tracker
 }
 
+// adminGameDeps bundles the game-facing deps the admin quiz routes need
+// (leaderboard reads + the running-game lookup that gates the quiz-view
+// confirm-and-restart prompt, #853) so addAdminRoutes stays inside revive's
+// 8-argument limit, matching the adminEmailDeps / adminPlayerDeps packaging.
+type adminGameDeps struct {
+	gameService  *game.Service
+	runningGames admin.RunningGameLookup
+}
+
 func addAdminRoutes(
 	mux *http.ServeMux,
 	logger *slog.Logger,
 	stores *store.Stores,
-	gameService *game.Service,
+	gameDeps adminGameDeps,
 	sessions *session.Manager,
 	csrfMgr *csrf.Manager,
 	email adminEmailDeps,
@@ -477,7 +486,9 @@ func addAdminRoutes(
 	mux.Handle("GET /admin/quizzes", requireGameHost(admin.HandleQuizList(logger, csrfMgr, stores.Quizzes)))
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}",
-		requireGameHost(admin.HandleQuizView(logger, csrfMgr, stores.Quizzes, gameService)),
+		requireGameHost(
+			admin.HandleQuizView(logger, csrfMgr, stores.Quizzes, gameDeps.gameService, gameDeps.runningGames),
+		),
 	)
 	mux.Handle("GET /admin/quizzes/new", requireGameHost(admin.HandleQuizCreate(logger, csrfMgr)))
 	mux.Handle("POST /admin/quizzes", csrfMW(requireGameHost(admin.HandleQuizSave(logger, csrfMgr, stores.Quizzes))))
@@ -504,7 +515,7 @@ func addAdminRoutes(
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/players/{playerID}/reset",
-		csrfMW(requireGameHost(admin.HandleResetGameForPlayer(logger, csrfMgr, stores.Quizzes, gameService))),
+		csrfMW(requireGameHost(admin.HandleResetGameForPlayer(logger, csrfMgr, stores.Quizzes, gameDeps.gameService))),
 	)
 
 	addAdminQuestionRoutes(mux, logger, stores, csrfMW, requireGameHost, csrfMgr)
