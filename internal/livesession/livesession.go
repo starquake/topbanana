@@ -573,6 +573,16 @@ func (s *Service) CreateSession(ctx context.Context, quizID *int64, hostPlayerID
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
+	attrs := []any{
+		slog.String(logSessionKey, sess.ID),
+		slog.String(logJoinCodeKey, sess.JoinCode),
+		slog.Int64(logHostKey, hostPlayerID),
+	}
+	if quizID != nil {
+		attrs = append(attrs, slog.Int64(logQuizKey, *quizID))
+	}
+	s.logger.InfoContext(ctx, "live session created", attrs...)
+
 	return sess, nil
 }
 
@@ -598,6 +608,10 @@ func (s *Service) Join(ctx context.Context, joinCode string, playerID int64) (*P
 	// (AddPlayer revives their row, clearing left_at). Only a finished, closed
 	// room rejects joins.
 	if sess.Phase == PhaseFinished {
+		s.logger.InfoContext(ctx, "live session join rejected: room closed",
+			slog.String(logJoinCodeKey, sess.JoinCode),
+			slog.Int64(logPlayerKey, playerID))
+
 		return nil, ErrLobbyClosed
 	}
 
@@ -608,6 +622,10 @@ func (s *Service) Join(ctx context.Context, joinCode string, playerID int64) (*P
 
 	// A new roster row changes the lobby, so signal subscribers to re-GET.
 	s.publish(sess.JoinCode, sess.Phase)
+
+	s.logger.InfoContext(ctx, "player joined live session",
+		slog.String(logJoinCodeKey, sess.JoinCode),
+		slog.Int64(logPlayerKey, playerID))
 
 	return player, nil
 }
@@ -628,6 +646,11 @@ func (s *Service) SetReady(ctx context.Context, joinCode string, playerID int64,
 	// A flipped ready flag changes the lobby, so signal subscribers to re-GET.
 	s.publish(sess.JoinCode, sess.Phase)
 
+	s.logger.DebugContext(ctx, "player ready toggled",
+		slog.String(logJoinCodeKey, sess.JoinCode),
+		slog.Int64(logPlayerKey, playerID),
+		slog.Bool(logReadyKey, ready))
+
 	return nil
 }
 
@@ -644,6 +667,8 @@ func (s *Service) Start(ctx context.Context, joinCode string, hostPlayerID int64
 		return fmt.Errorf(errGetSessionByCodeFmt, err)
 	}
 	if sess.HostPlayerID != hostPlayerID {
+		s.logNonHostAttempt(ctx, "start", sess.JoinCode, hostPlayerID)
+
 		return ErrNotHost
 	}
 
@@ -654,6 +679,10 @@ func (s *Service) Start(ctx context.Context, joinCode string, hostPlayerID int64
 	if !won {
 		return ErrSessionAlreadyStarted
 	}
+
+	s.logger.InfoContext(ctx, "live session started",
+		slog.String(logJoinCodeKey, sess.JoinCode),
+		slog.Int64(logHostKey, hostPlayerID))
 
 	if s.advancer != nil {
 		// Detach from the request context so a host disconnect cannot cancel
@@ -695,6 +724,11 @@ func (s *Service) StartQuiz(ctx context.Context, joinCode string, hostPlayerID, 
 	// signal subscribers to re-GET the state before the runner drives the game.
 	s.publish(sess.JoinCode, PhaseLobby)
 
+	s.logger.InfoContext(ctx, "live quiz started",
+		slog.String(logJoinCodeKey, sess.JoinCode),
+		slog.Int64(logQuizKey, quizID),
+		slog.Int64(logHostKey, hostPlayerID))
+
 	if s.advancer != nil {
 		// Detach from the request context (same reason as Start) so a host
 		// disconnect cannot strand the re-armed game in the lobby; the runner's
@@ -733,12 +767,26 @@ func (s *Service) StartHosting(ctx context.Context, quizID, hostPlayerID int64) 
 	}
 
 	if active == nil {
-		return s.CreateSession(ctx, &quizID, hostPlayerID)
+		var sess *Session
+		if sess, err = s.CreateSession(ctx, &quizID, hostPlayerID); err != nil {
+			return nil, err
+		}
+		s.logger.InfoContext(ctx, "host started hosting: opened new room",
+			slog.String(logJoinCodeKey, sess.JoinCode),
+			slog.Int64(logHostKey, hostPlayerID),
+			slog.Int64(logQuizKey, quizID))
+
+		return sess, nil
 	}
 
 	if !canArmQuiz(active) {
 		// A game is in flight: leave the running room untouched and return it so
 		// a stray pick never disrupts it. The end-and-restart confirm is #853.
+		s.logger.InfoContext(ctx, "host started hosting: reused running room",
+			slog.String(logJoinCodeKey, active.JoinCode),
+			slog.Int64(logHostKey, hostPlayerID),
+			slog.Int64(logQuizKey, quizID))
+
 		return active, nil
 	}
 
@@ -758,6 +806,12 @@ func (s *Service) StartHosting(ctx context.Context, quizID, hostPlayerID int64) 
 		// ErrGameInFlight means the room raced into flight between the read above
 		// and the arm; treat it the same as "in flight, do nothing" and return
 		// the room so the host lands on it.
+		s.logger.InfoContext(ctx, "host started hosting: reused active room",
+			slog.String(logJoinCodeKey, active.JoinCode),
+			slog.Int64(logHostKey, hostPlayerID),
+			slog.Int64(logQuizKey, quizID),
+			slog.String(logPhaseKey, string(active.Phase)))
+
 		return active, nil
 	default:
 		return nil, err
@@ -809,7 +863,16 @@ func (s *Service) RestartHosting(ctx context.Context, quizID, hostPlayerID int64
 
 	// No active session now (just ended, or never any): CreateSession opens a new
 	// armed lobby hosting the picked quiz.
-	return s.CreateSession(ctx, &quizID, hostPlayerID)
+	var sess *Session
+	if sess, err = s.CreateSession(ctx, &quizID, hostPlayerID); err != nil {
+		return nil, err
+	}
+	s.logger.InfoContext(ctx, "host restarted hosting: opened new room",
+		slog.String(logJoinCodeKey, sess.JoinCode),
+		slog.Int64(logHostKey, hostPlayerID),
+		slog.Int64(logQuizKey, quizID))
+
+	return sess, nil
 }
 
 // ArmQuiz arms a quiz to play in a room but leaves it in the lobby, not started
@@ -826,6 +889,11 @@ func (s *Service) ArmQuiz(ctx context.Context, joinCode string, hostPlayerID, qu
 	// A newly armed quiz changes what the lobby shows (the Start controls appear),
 	// so signal subscribers to re-GET.
 	s.publish(sess.JoinCode, PhaseLobby)
+
+	s.logger.InfoContext(ctx, "live quiz armed",
+		slog.String(logJoinCodeKey, sess.JoinCode),
+		slog.Int64(logQuizKey, quizID),
+		slog.Int64(logHostKey, hostPlayerID))
 
 	return nil
 }
@@ -857,6 +925,8 @@ func (s *Service) EndSession(ctx context.Context, joinCode string, hostPlayerID 
 		return fmt.Errorf(errGetSessionByCodeFmt, err)
 	}
 	if sess.HostPlayerID != hostPlayerID {
+		s.logNonHostAttempt(ctx, "end", sess.JoinCode, hostPlayerID)
+
 		return ErrNotHost
 	}
 	if sess.Phase == PhaseFinished {
@@ -870,6 +940,10 @@ func (s *Service) EndSession(ctx context.Context, joinCode string, hostPlayerID 
 	// The room is now terminal; signal subscribers to re-GET so every surface
 	// lands on the finished state and the live clients tear down.
 	s.publish(sess.JoinCode, PhaseFinished)
+
+	s.logger.InfoContext(ctx, "live session ended",
+		slog.String(logJoinCodeKey, sess.JoinCode),
+		slog.Int64(logHostKey, hostPlayerID))
 
 	return nil
 }
@@ -903,6 +977,8 @@ func (s *Service) ArmStart(ctx context.Context, joinCode string, hostPlayerID in
 		return fmt.Errorf(errGetSessionByCodeFmt, err)
 	}
 	if sess.HostPlayerID != hostPlayerID {
+		s.logNonHostAttempt(ctx, "armStart", sess.JoinCode, hostPlayerID)
+
 		return ErrNotHost
 	}
 
@@ -910,13 +986,19 @@ func (s *Service) ArmStart(ctx context.Context, joinCode string, hostPlayerID in
 	if countdown <= 0 {
 		countdown = DefaultStartCountdown
 	}
-	if err = s.store.ArmStart(ctx, sess.ID, now.Add(countdown)); err != nil {
+	deadline := now.Add(countdown)
+	if err = s.store.ArmStart(ctx, sess.ID, deadline); err != nil {
 		return fmt.Errorf("failed to arm session start: %w", err)
 	}
 
 	// An armed countdown changes what every surface shows, so signal
 	// subscribers to re-GET the state (which now carries the deadline).
 	s.publish(sess.JoinCode, sess.Phase)
+
+	s.logger.InfoContext(ctx, "live session start countdown armed",
+		slog.String(logJoinCodeKey, sess.JoinCode),
+		slog.Int64(logHostKey, hostPlayerID),
+		slog.Time(logDeadlineKey, deadline))
 
 	return nil
 }
@@ -932,6 +1014,8 @@ func (s *Service) CancelStart(ctx context.Context, joinCode string, hostPlayerID
 		return fmt.Errorf(errGetSessionByCodeFmt, err)
 	}
 	if sess.HostPlayerID != hostPlayerID {
+		s.logNonHostAttempt(ctx, "cancelStart", sess.JoinCode, hostPlayerID)
+
 		return ErrNotHost
 	}
 
@@ -942,6 +1026,10 @@ func (s *Service) CancelStart(ctx context.Context, joinCode string, hostPlayerID
 	// A cleared countdown changes what every surface shows, so signal
 	// subscribers to re-GET the state.
 	s.publish(sess.JoinCode, sess.Phase)
+
+	s.logger.InfoContext(ctx, "live session start countdown cancelled",
+		slog.String(logJoinCodeKey, sess.JoinCode),
+		slog.Int64(logHostKey, hostPlayerID))
 
 	return nil
 }
@@ -961,18 +1049,26 @@ func (s *Service) SubmitAnswer(
 		return fmt.Errorf(errGetSessionByCodeFmt, err)
 	}
 	if !s.isParticipant(sess, playerID) {
+		s.logger.InfoContext(ctx, "answer rejected: not a participant",
+			slog.String(logJoinCodeKey, sess.JoinCode),
+			slog.Int64(logPlayerKey, playerID))
+
 		return ErrNotParticipant
 	}
 	if sess.Phase != PhaseQuestion ||
 		sess.CurrentQuestionID == nil ||
 		sess.QuestionStartedAt == nil ||
 		sess.QuestionExpiresAt == nil {
+		s.logAnswerNotOpen(ctx, sess, playerID, "wrong-phase")
+
 		return ErrQuestionNotOpen
 	}
 	// The window opens at StartedAt (after the read beat) and closes at
 	// ExpiresAt; a pick outside [StartedAt, ExpiresAt] is rejected, so a client
 	// cannot pre-submit during the read beat.
 	if answeredAt.Before(*sess.QuestionStartedAt) || answeredAt.After(*sess.QuestionExpiresAt) {
+		s.logAnswerNotOpen(ctx, sess, playerID, "out-of-window")
+
 		return ErrQuestionNotOpen
 	}
 
@@ -981,6 +1077,8 @@ func (s *Service) SubmitAnswer(
 		return err
 	}
 	if !optionBelongsToQuestion(question, optionID) {
+		s.logAnswerNotOpen(ctx, sess, playerID, "option-mismatch")
+
 		return ErrQuestionNotOpen
 	}
 
@@ -992,6 +1090,12 @@ func (s *Service) SubmitAnswer(
 	// re-GET. The runner closes the question on the next beat if everyone has
 	// now answered.
 	s.publish(sess.JoinCode, sess.Phase)
+
+	s.logger.DebugContext(ctx, "answer accepted",
+		slog.String(logJoinCodeKey, sess.JoinCode),
+		slog.Int64(logPlayerKey, playerID),
+		slog.Int64(logQuestionKey, *sess.CurrentQuestionID),
+		slog.Int64(logOptionKey, optionID))
 
 	return nil
 }
@@ -1114,6 +1218,10 @@ func (s *Service) Leave(ctx context.Context, joinCode string, playerID int64) er
 	// The roster shrank, so signal subscribers to re-GET the smaller state.
 	s.publish(sess.JoinCode, sess.Phase)
 
+	s.logger.InfoContext(ctx, "player left live session",
+		slog.String(logJoinCodeKey, sess.JoinCode),
+		slog.Int64(logPlayerKey, playerID))
+
 	return nil
 }
 
@@ -1131,6 +1239,8 @@ func (s *Service) armRoomForHost(ctx context.Context, joinCode string, hostPlaye
 		return nil, fmt.Errorf(errGetSessionByCodeFmt, err)
 	}
 	if sess.HostPlayerID != hostPlayerID {
+		s.logNonHostAttempt(ctx, "arm", sess.JoinCode, hostPlayerID)
+
 		return nil, ErrNotHost
 	}
 	if !canArmQuiz(sess) {
@@ -1401,6 +1511,29 @@ func (s *Service) allocateJoinCode(ctx context.Context) (string, error) {
 	}
 
 	return "", ErrJoinCodeUnavailable
+}
+
+// logNonHostAttempt logs an Info line for a non-host caller trying a
+// host-gated control, naming the action and who attempted it. A host who
+// cannot start or end their room is a thing the host wants to see explained,
+// not just a bare 403 in the access log.
+func (s *Service) logNonHostAttempt(ctx context.Context, action, joinCode string, playerID int64) {
+	s.logger.InfoContext(ctx, "live session control rejected: not host",
+		slog.String("action", action),
+		slog.String(logJoinCodeKey, joinCode),
+		slog.Int64(logPlayerKey, playerID))
+}
+
+// logAnswerNotOpen logs a Debug line for an answer rejected because no question
+// is open for it, naming the reason (wrong-phase / out-of-window /
+// option-mismatch). Debug because a late tap can repeat the line per stray
+// submit, while a host who wants to know why a pick did not land still has it.
+func (s *Service) logAnswerNotOpen(ctx context.Context, sess *Session, playerID int64, reason string) {
+	s.logger.DebugContext(ctx, "answer rejected: question not open",
+		slog.String(logJoinCodeKey, sess.JoinCode),
+		slog.Int64(logPlayerKey, playerID),
+		slog.String(logPhaseKey, string(sess.Phase)),
+		slog.String(logReasonKey, reason))
 }
 
 // publish fans out a session tick if a publisher is wired. The single
