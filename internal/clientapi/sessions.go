@@ -25,7 +25,7 @@ import (
 // A non-existent quiz and a solo quiz both map to 404 so the endpoint does
 // not betray which quizzes exist or their mode to a host probing ids - it
 // stays a "no hostable quiz here" answer either way.
-func HandleSessionCreate(logger *slog.Logger, service *livesession.Service) http.Handler {
+func HandleSessionCreate(service *livesession.Service) http.Handler {
 	type createRequest struct {
 		QuizID *int64 `json:"quizId"`
 	}
@@ -35,6 +35,7 @@ func HandleSessionCreate(logger *slog.Logger, service *livesession.Service) http
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		logger := handlers.LoggerFromContext(ctx)
 
 		player, ok := auth.PlayerFromContext(ctx)
 		if !ok {
@@ -43,6 +44,7 @@ func HandleSessionCreate(logger *slog.Logger, service *livesession.Service) http
 
 			return
 		}
+		logger = logger.With(slog.Int64("player", player.ID))
 		// Host gate (decision 4): only host/admin can open a session. A
 		// signed-in Player gets a 403 - the create endpoint's existence is
 		// not secret, unlike the admin surface.
@@ -85,7 +87,7 @@ func HandleSessionCreate(logger *slog.Logger, service *livesession.Service) http
 // 404 when the join code is unknown and 409 when the room is closed - a
 // terminally finished room rejects joins, but a latecomer may join a live game
 // at any phase (#836).
-func HandleSessionJoin(logger *slog.Logger, service *livesession.Service) http.Handler {
+func HandleSessionJoin(service *livesession.Service) http.Handler {
 	type joinResponse struct {
 		DisplayName string `json:"displayName"`
 		IsReady     bool   `json:"isReady"`
@@ -93,6 +95,7 @@ func HandleSessionJoin(logger *slog.Logger, service *livesession.Service) http.H
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		logger := handlers.LoggerFromContext(ctx)
 
 		player, ok := auth.PlayerFromContext(ctx)
 		if !ok {
@@ -101,6 +104,7 @@ func HandleSessionJoin(logger *slog.Logger, service *livesession.Service) http.H
 
 			return
 		}
+		logger = logger.With(slog.Int64("player", player.ID))
 
 		joined, err := service.Join(ctx, r.PathValue("code"), player.ID)
 		if err != nil {
@@ -127,13 +131,14 @@ func HandleSessionJoin(logger *slog.Logger, service *livesession.Service) http.H
 // carries the desired state so the same endpoint marks ready and un-ready.
 // Returns 404 for an unknown code or a non-participant (the code stays
 // opaque to outsiders, mirroring the game participant gate, #272).
-func HandleSessionReady(logger *slog.Logger, service *livesession.Service) http.Handler {
+func HandleSessionReady(service *livesession.Service) http.Handler {
 	type readyRequest struct {
 		Ready bool `json:"ready"`
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		logger := handlers.LoggerFromContext(ctx)
 
 		player, ok := auth.PlayerFromContext(ctx)
 		if !ok {
@@ -142,6 +147,7 @@ func HandleSessionReady(logger *slog.Logger, service *livesession.Service) http.
 
 			return
 		}
+		logger = logger.With(slog.Int64("player", player.ID))
 
 		req, err := handlers.DecodeJSON[readyRequest](w, r)
 		if err != nil {
@@ -174,13 +180,13 @@ func HandleSessionReady(logger *slog.Logger, service *livesession.Service) http.
 // already-started game for start, an already-left lobby for arm/cancel) that
 // maps to a 204 no-op; what names the action in the log messages.
 func hostSessionAction(
-	logger *slog.Logger,
 	what string,
 	idempotent error,
 	action func(ctx context.Context, code string, playerID int64) error,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		logger := handlers.LoggerFromContext(ctx)
 
 		player, ok := auth.PlayerFromContext(ctx)
 		if !ok {
@@ -189,6 +195,7 @@ func hostSessionAction(
 
 			return
 		}
+		logger = logger.With(slog.Int64("player", player.ID))
 
 		err := action(ctx, r.PathValue("code"), player.ID)
 		switch {
@@ -209,8 +216,8 @@ func hostSessionAction(
 // it. Returns 204 on success, 403 when the caller is not the host, 404 for an
 // unknown code, and 204 (idempotent no-op) when the session has already
 // started.
-func HandleSessionStart(logger *slog.Logger, service *livesession.Service) http.Handler {
-	return hostSessionAction(logger, "start", livesession.ErrSessionAlreadyStarted, service.Start)
+func HandleSessionStart(service *livesession.Service) http.Handler {
+	return hostSessionAction("start", livesession.ErrSessionAlreadyStarted, service.Start)
 }
 
 // HandleSessionArmStart arms the host's last-call countdown (the "Start in 60s"
@@ -218,8 +225,8 @@ func HandleSessionStart(logger *slog.Logger, service *livesession.Service) http.
 // Only the host may call it. Returns 204 on success, 403 when the caller is not
 // the host, 404 for an unknown code, and 204 (idempotent no-op) when the
 // session has already left the lobby.
-func HandleSessionArmStart(logger *slog.Logger, service *livesession.Service) http.Handler {
-	return hostSessionAction(logger, "arm-start", livesession.ErrNotInLobby,
+func HandleSessionArmStart(service *livesession.Service) http.Handler {
+	return hostSessionAction("arm-start", livesession.ErrNotInLobby,
 		func(ctx context.Context, code string, playerID int64) error {
 			return service.ArmStart(ctx, code, playerID, time.Now().UTC())
 		})
@@ -230,8 +237,8 @@ func HandleSessionArmStart(logger *slog.Logger, service *livesession.Service) ht
 // Returns 204 on success, 403 when the caller is not the host, 404 for an
 // unknown code, and 204 (idempotent no-op) when the session has already left
 // the lobby.
-func HandleSessionCancelStart(logger *slog.Logger, service *livesession.Service) http.Handler {
-	return hostSessionAction(logger, "cancel-start", livesession.ErrNotInLobby, service.CancelStart)
+func HandleSessionCancelStart(service *livesession.Service) http.Handler {
+	return hostSessionAction("cancel-start", livesession.ErrNotInLobby, service.CancelStart)
 }
 
 // HandleSessionAnswer records the calling participant's pick for the session's
@@ -240,13 +247,14 @@ func HandleSessionCancelStart(logger *slog.Logger, service *livesession.Service)
 // 204 on success, 404 for an unknown code or a non-participant (the code stays
 // opaque to outsiders), and 409 when no question is currently open for
 // answers.
-func HandleSessionAnswer(logger *slog.Logger, service *livesession.Service) http.Handler {
+func HandleSessionAnswer(service *livesession.Service) http.Handler {
 	type answerRequest struct {
 		OptionID int64 `json:"optionId"`
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		logger := handlers.LoggerFromContext(ctx)
 
 		player, ok := auth.PlayerFromContext(ctx)
 		if !ok {
@@ -255,6 +263,7 @@ func HandleSessionAnswer(logger *slog.Logger, service *livesession.Service) http
 
 			return
 		}
+		logger = logger.With(slog.Int64("player", player.ID))
 
 		req, err := handlers.DecodeJSON[answerRequest](w, r)
 		if err != nil {
@@ -285,9 +294,10 @@ func HandleSessionAnswer(logger *slog.Logger, service *livesession.Service) http
 // Returns 204 on success and 404 for an unknown code, a non-participant, or a
 // repeat leave (the row is already marked left) - the code stays opaque to
 // outsiders, mirroring the other session gates.
-func HandleSessionLeave(logger *slog.Logger, service *livesession.Service) http.Handler {
+func HandleSessionLeave(service *livesession.Service) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		logger := handlers.LoggerFromContext(ctx)
 
 		player, ok := auth.PlayerFromContext(ctx)
 		if !ok {
@@ -296,6 +306,7 @@ func HandleSessionLeave(logger *slog.Logger, service *livesession.Service) http.
 
 			return
 		}
+		logger = logger.With(slog.Int64("player", player.ID))
 
 		err := service.Leave(ctx, r.PathValue("code"), player.ID)
 		switch {
@@ -439,9 +450,10 @@ type sessionQuestionResponse struct {
 // gated: only a roster player or the host may read it, so a stranger with
 // the code cannot enumerate the room. Returns 404 for an unknown code or a
 // non-participant.
-func HandleSessionState(logger *slog.Logger, service *livesession.Service) http.Handler {
+func HandleSessionState(service *livesession.Service) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		logger := handlers.LoggerFromContext(ctx)
 
 		player, ok := auth.PlayerFromContext(ctx)
 		if !ok {
@@ -450,6 +462,7 @@ func HandleSessionState(logger *slog.Logger, service *livesession.Service) http.
 
 			return
 		}
+		logger = logger.With(slog.Int64("player", player.ID))
 
 		state, err := service.GetLobbyState(ctx, r.PathValue("code"), player.ID)
 		if err != nil {
@@ -744,9 +757,10 @@ func beatPresence(ctx context.Context, logger *slog.Logger, touch func(context.C
 // no game data - each tick is {version, phase}, a signal to re-GET
 // /api/sessions/{code}/state. A reconnect re-runs the gate and resends the
 // current version, which doubles as the resync path.
-func HandleSessionEvents(logger *slog.Logger, service *livesession.Service, hub *livesession.Hub) http.Handler {
+func HandleSessionEvents(service *livesession.Service, hub *livesession.Hub) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		logger := handlers.LoggerFromContext(ctx)
 
 		player, ok := auth.PlayerFromContext(ctx)
 		if !ok {
@@ -755,6 +769,7 @@ func HandleSessionEvents(logger *slog.Logger, service *livesession.Service, hub 
 
 			return
 		}
+		logger = logger.With(slog.Int64("player", player.ID))
 
 		// Gate BEFORE any header write so a non-participant / unknown code
 		// can still be surfaced as a proper HTTP 404 rather than a half-open
