@@ -103,12 +103,14 @@ test.describe('persistent live rooms', () => {
     await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId('question-text')).toHaveText('Game 1: what is 1+1?');
 
-    // The page player answers game 1's only question via the page UI. With
-    // the single active player in, the runner closes the question, reveals,
-    // and ends the game into intermission.
+    // The page player answers game 1's only question via the page UI. With the
+    // single active player in, the runner closes the question, reveals, and ends
+    // the game into intermission immediately - so fast the transient
+    // answered-waiting hint can be skipped before it paints, which is why the
+    // test asserts the stable intermission outcome below rather than that hint
+    // (#884).
     await expect(page.getByTestId('question-options')).toBeVisible({ timeout: 10_000 });
     await page.getByTestId('question-options').getByRole('button', { name: 'two' }).click();
-    await expect(page.getByTestId('answered-waiting')).toBeVisible();
 
     // Game 1 ends into intermission: the player sees the intermission view
     // (final standings + the waiting message), staying joined - no re-join,
