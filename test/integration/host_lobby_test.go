@@ -326,7 +326,9 @@ func TestHostLive_ArmsExistingEmptyRoom(t *testing.T) {
 		t.Errorf("host live (reuse) redirect = %q, want %q (the existing room)", got, want)
 	}
 
-	// The existing room is now armed onto the picked quiz (no second room spawned).
+	// The existing room is now armed onto the picked quiz (no second room
+	// spawned) but still in the lobby, NOT started (#863): the host presses Start
+	// when players are in.
 	sess, err := setup.Stores.LiveSessions.GetSessionByJoinCode(ctx, emptyCode)
 	if err != nil {
 		t.Fatalf("GetSessionByJoinCode err = %v, want nil", err)
@@ -336,6 +338,15 @@ func TestHostLive_ArmsExistingEmptyRoom(t *testing.T) {
 	}
 	if got, want := *sess.QuizID, qz.ID; got != want {
 		t.Errorf("reused room QuizID = %d, want %d (the picked quiz)", got, want)
+	}
+	if got, want := string(sess.Phase), "lobby"; got != want {
+		t.Errorf("reused room Phase = %q, want %q (armed but waiting in the lobby, #863)", got, want)
+	}
+	if sess.StartedAt != nil {
+		t.Errorf(
+			"reused room StartedAt = %v, want nil (not started until the host presses Start, #863)",
+			sess.StartedAt,
+		)
 	}
 }
 

@@ -166,9 +166,9 @@ func TestService_StartHosting_NoActiveRoomOpensArmedLobby(t *testing.T) {
 }
 
 // TestService_StartHosting_EmptyRoomArmsExistingRoom pins StartHosting case 2
-// (#851): with an active empty staging room for the host, it arms+starts the
-// quiz in THAT room (reusing StartQuiz) rather than spawning a second one, so
-// the returned session is the existing room driving the game.
+// (#851/#863): with an active empty staging room for the host, it arms the quiz
+// in THAT room (reusing ArmQuiz) rather than spawning a second one, and leaves it
+// in the lobby - NOT started - so the host gathers players and presses Start.
 func TestService_StartHosting_EmptyRoomArmsExistingRoom(t *testing.T) {
 	t.Parallel()
 
@@ -195,7 +195,9 @@ func TestService_StartHosting_EmptyRoomArmsExistingRoom(t *testing.T) {
 		t.Errorf("StartHosting room ID = %q, want %q (same room, no second spawned)", got, want)
 	}
 
-	// That room is now armed onto the quiz and driving the first game.
+	// That room is now armed onto the quiz but STILL IN THE LOBBY, not started
+	// (#863): the host gathers players and presses Start, same as the no-active
+	// case.
 	armed, err := h.store.GetSessionByID(ctx, empty.ID)
 	if err != nil {
 		t.Fatalf("GetSessionByID err = %v, want nil", err)
@@ -206,8 +208,11 @@ func TestService_StartHosting_EmptyRoomArmsExistingRoom(t *testing.T) {
 	if got, want := *armed.QuizID, qz.ID; got != want {
 		t.Errorf("armed QuizID = %d, want %d", got, want)
 	}
-	if got, want := armed.Phase, PhaseRoundIntro; got != want {
-		t.Errorf("armed Phase = %q, want %q (game driving in the existing room)", got, want)
+	if got, want := armed.Phase, PhaseLobby; got != want {
+		t.Errorf("armed Phase = %q, want %q (armed but waiting in the lobby)", got, want)
+	}
+	if armed.StartedAt != nil {
+		t.Errorf("armed StartedAt = %v, want nil (not started until the host presses Start)", armed.StartedAt)
 	}
 }
 
@@ -291,6 +296,63 @@ func TestService_StartHosting_RejectsSoloQuiz(t *testing.T) {
 	}
 	if sess != nil {
 		t.Errorf("StartHosting (solo) session = %v, want nil (no room opened)", sess)
+	}
+}
+
+// TestService_ArmQuiz pins the arm-without-start contract (#863): ArmQuiz points
+// an empty staging room at a live quiz and leaves it in the lobby (not started),
+// and rejects a solo quiz.
+func TestService_ArmQuiz(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 9, 12, 0, 0, 0, time.UTC)
+	h := newEmptyRoomHarness(t, start)
+	ctx := t.Context()
+
+	const hostID int64 = 1
+	empty, err := h.service.CreateSession(ctx, nil, hostID)
+	if err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+	qz := seedRunnerQuizSlug(t, h.quizStore, "armquiz-live", [][]bool{{true}})
+
+	if err = h.service.ArmQuiz(ctx, empty.JoinCode, hostID, qz.ID); err != nil {
+		t.Fatalf("ArmQuiz err = %v, want nil", err)
+	}
+
+	armed, err := h.store.GetSessionByID(ctx, empty.ID)
+	if err != nil {
+		t.Fatalf("GetSessionByID err = %v, want nil", err)
+	}
+	if armed.QuizID == nil {
+		t.Fatalf("armed QuizID = nil, want %d", qz.ID)
+	}
+	if got, want := *armed.QuizID, qz.ID; got != want {
+		t.Errorf("armed QuizID = %d, want %d", got, want)
+	}
+	if got, want := armed.Phase, PhaseLobby; got != want {
+		t.Errorf("armed Phase = %q, want %q (still in the lobby)", got, want)
+	}
+	if armed.StartedAt != nil {
+		t.Errorf("armed StartedAt = %v, want nil (not started until the host presses Start)", armed.StartedAt)
+	}
+
+	// A solo quiz cannot be armed.
+	solo := &quiz.Quiz{
+		Title:             "Solo",
+		Slug:              "armquiz-solo",
+		CreatedByPlayerID: hostID,
+		Mode:              quiz.ModeSolo,
+		Visibility:        quiz.VisibilityPublic,
+		Questions: []*quiz.Question{
+			{Text: "Q", Position: 1, Options: []*quiz.Option{{Text: "A", Correct: true}, {Text: "B"}}},
+		},
+	}
+	if err = h.quizStore.CreateQuiz(ctx, solo); err != nil {
+		t.Fatalf("CreateQuiz solo err = %v, want nil", err)
+	}
+	if got, want := h.service.ArmQuiz(ctx, empty.JoinCode, hostID, solo.ID), ErrNotLiveQuiz; !errors.Is(got, want) {
+		t.Errorf("ArmQuiz (solo) err = %v, want %v", got, want)
 	}
 }
 
