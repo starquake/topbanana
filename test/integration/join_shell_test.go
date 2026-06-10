@@ -44,6 +44,12 @@ func assertJoinShell(ctx context.Context, t *testing.T, url string) {
 		// header rides in flow on every other screen and hides during a
 		// question.
 		`x-show="!inActiveQuestion()"`,
+		// #865: the name phase carries a Sign-in affordance for anonymous
+		// joiners, whose href is built with Alpine so it carries the login
+		// deep-link return (/login?next=/join/{code}) back to this same room.
+		// Both /join and /join/{code} serve this markup.
+		`data-testid="join-name-signin"`,
+		`'/login?next=' + encodeURIComponent('/join/' + code)`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("%s body missing %q", url, want)

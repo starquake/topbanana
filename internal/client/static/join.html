@@ -147,6 +147,19 @@
                             :disabled="busy"
                             x-text="busy ? 'Joining...' : 'Join game'"></button>
                 </form>
+                <!-- Sign-in affordance (#865): the login deep-link return
+                     (/login?next=/join/{code} -> 303 back) lands the player back
+                     on this room, where init() auto-joins under their account
+                     name. Anonymous-only: a signed-in player with a custom name
+                     never reaches the name form. -->
+                <template x-if="!isAuthenticated()">
+                    <p class="mt-3 text-sm text-text-dim text-right">
+                        Already have an account?
+                        <a :href="'/login?next=' + encodeURIComponent('/join/' + code)"
+                           class="text-text hover:text-accent underline-offset-2 hover:underline"
+                           data-testid="join-name-signin">Sign in</a>.
+                    </p>
+                </template>
             </div>
 
             <!-- Joined: the lobby roster through play and final standings, all
