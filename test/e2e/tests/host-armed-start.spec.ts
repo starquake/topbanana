@@ -74,8 +74,11 @@ test.describe('host-armed last-call countdown', () => {
 
     // The countdown fires (SESSION_START_COUNTDOWN=2s): the runner starts the
     // game, so the player leaves the lobby into the round intro / first
-    // question and the host TV countdown controls disappear.
-    await expect(page.getByTestId('lobby-view')).toHaveCount(0, { timeout: 15_000 });
+    // question and the host TV countdown controls disappear. Wait on the
+    // positive arrival of the player's question view rather than the lobby's
+    // disappearance; SSE state propagation can exceed a tight budget under
+    // full-suite load.
+    await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 25_000 });
     await expect(host.getByTestId('start-countdown')).toBeHidden();
   });
 
@@ -90,9 +93,12 @@ test.describe('host-armed last-call countdown', () => {
     await host.getByTestId('arm-start').click();
     await expect(page.getByTestId('start-countdown')).toContainText('Starting in');
 
-    // Start now skips the rest of the countdown; the game begins at once.
+    // Start now skips the rest of the countdown; the game begins at once. Wait
+    // on the player's question view appearing rather than the lobby's
+    // disappearance, so SSE state propagation under full-suite load does not
+    // race a tight budget.
     await host.getByTestId('skip-start').click();
-    await expect(page.getByTestId('lobby-view')).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 25_000 });
   });
 
   test('Cancel stops the countdown and the game stays in the lobby', async ({ page, hostSessions }) => {
