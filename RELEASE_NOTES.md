@@ -2,6 +2,34 @@
 
 What changed in each released version of Top Banana! The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.6.4 — 2026-06-10
+
+A host now opens one room and runs quizzes through it without players re-entering a code; the player client installs as a standalone app on iOS, and every page shares one top navigation bar.
+
+### Players
+- The player client installs as a standalone app on iOS, opening without the Safari address bar; content clears the notch, home indicator, and side insets.
+- The screen stays awake during a live game.
+- A guest at the live-game name prompt can sign in and rejoin under their account display name.
+- The sign-in message for an account that still needs to verify its email no longer repeats the email address.
+
+### Hosts
+- A host opens one room and runs quizzes through it: players join once, and the room stays open even when the host browses away.
+- The host picks each quiz from the quiz list; picking a quiz arms it in the lobby, and the host presses Start when players are ready, for the first quiz and every later one.
+- Choosing a different quiz while a game is running asks for confirmation before ending the current session.
+- The join code stays on the big screen while a quiz is running, so latecomers can still join.
+- The quiz list marks each quiz Solo or Live, adds a Solo / Live / All filter, and a button switches a quiz between the two modes without opening the edit form.
+- The hosting display, renamed from lobby to big screen, shows a larger join code and answer options sized for a shared screen.
+
+### Visual / chrome
+- Navigation is one consistent top bar across the home, sign-in, and admin pages, with the logo on the left and account controls on the right; the footer holds only the version and wordmark.
+- The solo quiz reveal replaces the full-screen Correct / Wrong splash with a small verdict line.
+
+### Behind the scenes
+- An allowlisted account is promoted to admin when its email is verified or when it signs in with Google.
+- A cooled-down sign-in attempt returns the same generic response as a wrong password, even when the password is correct.
+- Requests that change data are accepted only from Top Banana's own pages.
+- A round or question window of zero length no longer disrupts scoring.
+
 ## v2026.6.3 — 2026-06-08
 
 Top Banana now runs live hosted quizzes, where a host opens a session and players answer each question together, with standings shown between rounds.
