@@ -303,6 +303,16 @@ function hostLobby(joinCode, hasQuiz) {
             return this.phase !== 'finished';
         },
 
+        // showsJoinHint reports whether the compact join code + URL strip shows
+        // on the big screen (#852): every live phase except the lobby (which
+        // already shows the full QR + code card) and the terminal finished phase
+        // (the room is closed, no joins). A latecomer can join mid-game (the
+        // server accepts joins in every phase but finished, #836); the strip
+        // keeps the code visible so they can.
+        showsJoinHint() {
+            return this.phase !== 'lobby' && this.phase !== 'finished';
+        },
+
         // showsStandings reports whether the current phase renders the
         // standings bar graph: the between-rounds round_results screen and the
         // end-of-game screens - intermission (the between-games screen, #836)

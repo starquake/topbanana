@@ -119,6 +119,17 @@ func TestHostLobby_RendersCodeQuizAndQR(t *testing.T) {
 	if want := ">" + entryDisplay + "</span> and enter the code above"; !strings.Contains(body, want) {
 		t.Errorf("host lobby missing typed-code guidance %q", want)
 	}
+	// The mid-game join hint (#852) keeps the join URL + code on the big screen
+	// while a quiz is running (shown via showsJoinHint() in the in-game phases),
+	// so a latecomer reading the TV can still join. Its markup ships at GET
+	// regardless of phase; pin the strip by its hook and its distinct "with code"
+	// URL line (the lobby's typed-code guidance above uses different wording).
+	if !strings.Contains(body, "data-join-hint") {
+		t.Error("host lobby missing the mid-game join hint strip (#852)")
+	}
+	if want := ">" + entryDisplay + "</span> with code "; !strings.Contains(body, want) {
+		t.Errorf("host lobby join hint missing the join URL + code line %q", want)
+	}
 	// The host can close the room from the lobby: the End session control is
 	// rendered across the live phases (#836).
 	if !strings.Contains(body, "data-end-session-form") {
