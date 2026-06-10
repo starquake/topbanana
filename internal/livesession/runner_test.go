@@ -1210,6 +1210,80 @@ func TestRunner_RearmRunsNextGameWithResetScores(t *testing.T) {
 	}
 }
 
+// TestService_StartHosting_IntermissionArmsAndWaits pins StartHosting from the
+// between-games intermission (#875): after game 1 ends, the host picking a SECOND
+// quiz arms it and the room returns to the lobby WAITING - it must NOT auto-start
+// into game 2's first question. The host then presses Start, and only then does
+// game 2 run. This is the gap the bug shipped through: the intermission pick used
+// to arm-and-start, dropping still-joined players straight into round 1.
+func TestService_StartHosting_IntermissionArmsAndWaits(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newRunnerHarness(t, start, [][]bool{{true}})
+	ctx := t.Context()
+
+	const hostID int64 = 1
+	game2 := seedRunnerQuizSlug(t, store.NewQuizStore(h.db, slog.New(slog.DiscardHandler)),
+		"start-hosting-intermission-g2", [][]bool{{true}})
+
+	// Play game 1 to its end-of-game intermission.
+	if err := h.service.Start(ctx, h.code, hostID); err != nil {
+		t.Fatalf("Start (game 1) err = %v, want nil", err)
+	}
+	h.playSingleQuestionGame(t, []int64{h.players[0]})
+	if got, want := h.phase(t), PhaseIntermission; got != want {
+		t.Fatalf("phase after game 1 = %q, want %q", got, want)
+	}
+
+	// The host picks a second quiz from the intermission. StartHosting must ARM it
+	// and stay in the lobby, not start it.
+	if _, err := h.service.StartHosting(ctx, game2.ID, hostID); err != nil {
+		t.Fatalf("StartHosting (from intermission) err = %v, want nil", err)
+	}
+
+	armed := h.reload(t)
+	if armed.QuizID == nil {
+		t.Fatalf("armed QuizID = nil, want %d (game 2)", game2.ID)
+	}
+	if got, want := *armed.QuizID, game2.ID; got != want {
+		t.Errorf("armed QuizID = %d, want %d (game 2)", got, want)
+	}
+	if got, want := armed.Phase, PhaseLobby; got != want {
+		t.Errorf("armed Phase = %q, want %q (armed but waiting in the lobby, not auto-started)", got, want)
+	}
+	if armed.StartedAt != nil {
+		t.Errorf("armed StartedAt = %v, want nil (must not auto-start the picked quiz)", armed.StartedAt)
+	}
+
+	// A defensive tick must not advance the waiting lobby into a question on its
+	// own: the game waits for the host.
+	h.tick(ctx)
+	if got, want := h.phase(t), PhaseLobby; got != want {
+		t.Fatalf("phase after a tick = %q, want %q (still waiting on the host)", got, want)
+	}
+
+	// The host presses Start; only now does game 2 run, reaching its first question.
+	if err := h.service.Start(ctx, h.code, hostID); err != nil {
+		t.Fatalf("Start (game 2) err = %v, want nil", err)
+	}
+	if got, want := h.phase(t), PhaseRoundIntro; got != want {
+		t.Fatalf("phase after host Start = %q, want %q (game 2 driving)", got, want)
+	}
+	h.clock.advance(runnerCfg.RoundIntroBeat)
+	h.tick(ctx)
+	q := h.reload(t)
+	if got, want := q.Phase, PhaseQuestion; got != want {
+		t.Fatalf("phase after intro beat = %q, want %q (game 2's first question)", got, want)
+	}
+	if q.CurrentQuestionID == nil {
+		t.Error("game 2 first question CurrentQuestionID = nil, want it set")
+	}
+	if got, want := q.GameSeq, int64(2); got != want {
+		t.Errorf("GameSeq for game 2 = %d, want %d", got, want)
+	}
+}
+
 // TestRunner_RearmSameQuizResetsScores pins that re-arming onto the SAME quiz
 // still resets scores per game (#836): a player who scored in game 1 starts
 // game 2 at zero, because the new game_seq scopes the standings to game 2's
