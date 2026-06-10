@@ -28,7 +28,7 @@ func TestEmbeddedAssets_ServeOnlyBuiltOutput(t *testing.T) {
 		// Web / admin: every served script is a built bundle under dist/ or a
 		// vendored lib; the standalone admin/auth scripts are bundled too.
 		"/assets/css/app.css",
-		"/assets/js/dist/host-lobby.js",
+		"/assets/js/dist/host-bigscreen.js",
 		"/assets/js/dist/share.js",
 		"/assets/js/dist/quiz-reorder.js",
 		"/assets/js/dist/cooldown.js",
@@ -50,7 +50,7 @@ func TestEmbeddedAssets_ServeOnlyBuiltOutput(t *testing.T) {
 		// Web sources relocated to frontend/web: the esbuild entries and the
 		// now-bundled standalone scripts are no longer served at their old
 		// un-bundled paths.
-		"/assets/js/host-lobby.js",
+		"/assets/js/host-bigscreen.js",
 		"/assets/js/share.js",
 		"/assets/js/quiz-reorder.js",
 		"/assets/js/cooldown.js",

@@ -26,9 +26,9 @@ import (
 //     [livesession.Service.RestartHosting], which ends the host's running session
 //     and opens a fresh room hosting the picked quiz.
 //
-// Either way it 303-redirects the host to the TV lobby. The route is host-gated;
+// Either way it 303-redirects the host to the big screen. The route is host-gated;
 // a non-live or missing quiz round-trips back to the quiz list rather than
-// opening a dead lobby.
+// opening a dead room.
 func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -118,11 +118,11 @@ func (h *Handlers) hostLiveRestart(w http.ResponseWriter, r *http.Request, quizI
 	h.redirectToLobby(w, r, sess.JoinCode)
 }
 
-// redirectToLobby 303-redirects the host to the TV lobby for the given code.
+// redirectToLobby 303-redirects the host to the big screen for the given code.
 // The code is server-minted over a fixed ambiguity-free alphabet, never request
 // input, so the redirect is same-origin.
 func (*Handlers) redirectToLobby(w http.ResponseWriter, r *http.Request, code string) {
-	dest := hostLobbyPathPrefix + code
+	dest := hostScreenPathPrefix + code
 	http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // code is server-generated, not user input.
 }
 
@@ -151,7 +151,7 @@ func (h *Handlers) Start(w http.ResponseWriter, r *http.Request) {
 	case err == nil, errors.Is(err, livesession.ErrSessionAlreadyStarted):
 		// code is the server-minted path value, never request input, so the
 		// redirect back to the lobby is same-origin.
-		dest := hostLobbyPathPrefix + code
+		dest := hostScreenPathPrefix + code
 		http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // code is server-generated, not user input.
 	case errors.Is(err, livesession.ErrSessionNotFound), errors.Is(err, livesession.ErrNotHost):
 		http.NotFound(w, r)
@@ -198,7 +198,7 @@ func (h *Handlers) NextQuiz(w http.ResponseWriter, r *http.Request) {
 		errors.Is(err, livesession.ErrNotLiveQuiz):
 		// code is the server-minted path value, never request input, so the
 		// redirect back to the lobby is same-origin.
-		dest := hostLobbyPathPrefix + code
+		dest := hostScreenPathPrefix + code
 		http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // code is server-generated, not user input.
 	case errors.Is(err, livesession.ErrSessionNotFound), errors.Is(err, livesession.ErrNotHost):
 		http.NotFound(w, r)
@@ -231,7 +231,7 @@ func (h *Handlers) End(w http.ResponseWriter, r *http.Request) {
 	case err == nil:
 		// code is the server-minted path value, never request input, so the
 		// redirect back to the lobby is same-origin.
-		dest := hostLobbyPathPrefix + code
+		dest := hostScreenPathPrefix + code
 		http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // code is server-generated, not user input.
 	case errors.Is(err, livesession.ErrSessionNotFound), errors.Is(err, livesession.ErrNotHost):
 		http.NotFound(w, r)

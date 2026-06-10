@@ -60,7 +60,7 @@ func TestHostSession_CreatesEmptyRoom(t *testing.T) {
 	// renders the pick-a-live-quiz link (so the host goes to the filtered quiz
 	// list to pick the first quiz) plus the End session control (so the host can
 	// close the room).
-	status, body := getHostLobbyHTML(ctx, t, host, baseURL, code)
+	status, body := getHostBigScreenHTML(ctx, t, host, baseURL, code)
 	if status != http.StatusOK {
 		t.Errorf("empty-room lobby status = %d, want %d", status, http.StatusOK)
 	}
@@ -75,8 +75,8 @@ func TestHostSession_CreatesEmptyRoom(t *testing.T) {
 	}
 	// The empty room seeds the component's hasQuiz false so it renders the
 	// staging picker straight away rather than the Start controls (#836).
-	if !strings.Contains(body, "hostLobby(") || !strings.Contains(body, ", false)") {
-		t.Error("empty-room lobby should seed hasQuiz=false into the component")
+	if !strings.Contains(body, "hostBigScreen(") || !strings.Contains(body, ", false)") {
+		t.Error("empty-room big screen should seed hasQuiz=false into the component")
 	}
 
 	// The JSON state read the host page polls must not panic on a quiz-less room:

@@ -126,7 +126,7 @@ function setRole(displayName: string, role: 'player' | 'host' | 'admin'): void {
 
 // setQuizMode flips a quiz's play mode by title, shelling out to the
 // sqlite3 CLI the same way the role/verification helpers do. The admin
-// importer only creates solo quizzes (#677), so a host-lobby spec that
+// importer only creates solo quizzes (#677), so a host big-screen spec that
 // needs a live quiz seeds one solo and flips it here.
 export function setQuizMode(title: string, mode: 'solo' | 'live'): void {
   const dataDir = process.env.TOPBANANA_E2E_DATA_DIR;

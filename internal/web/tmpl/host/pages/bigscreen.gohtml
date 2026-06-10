@@ -1,6 +1,6 @@
 {{define "content"}}
     {{/* The whole big screen is one Alpine island. It hydrates from the
-         server-rendered code/quiz (no flash), then host-lobby.js subscribes
+         server-rendered code/quiz (no flash), then host-bigscreen.js subscribes
          to the session SSE channel and re-GETs /state on every tick to keep
          the phase, roster, question, and answered order live. The server
          drives every phase transition; the big screen only re-renders whatever
@@ -10,7 +10,7 @@
          Each phase body is a flex child with min-h-0 so its lists (roster,
          options, standings) shrink and scroll inside the frame instead of
          pushing the header/footer off-screen (#734). */}}
-    <main x-data="hostLobby({{.JoinCode | printf "%q"}}, {{.HasQuiz}})"
+    <main x-data="hostBigScreen({{.JoinCode | printf "%q"}}, {{.HasQuiz}})"
           class="h-dvh overflow-hidden flex flex-col">
         {{/* The big screen deliberately does NOT carry the shared top bar
              or an account cluster (#844): it is a projected, shared screen,
@@ -132,7 +132,7 @@
                  solo game, #247): while `revealing` is true it fills 0 -> 100
                  over the read beat, then drains 100 -> 0 over the answer window;
                  it sits empty at reveal. Driven off the server deadline by
-                 host-lobby.js (no client-clock dependence). motion-reduce zeroes
+                 host-bigscreen.js (no client-clock dependence). motion-reduce zeroes
                  the value transition. */}}
             <progress class="block w-full h-2 bg-border-soft rounded-full overflow-hidden appearance-none [&::-webkit-progress-bar]:bg-border-soft [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear"
                       :class="revealing ? '[&::-webkit-progress-value]:bg-cyan [&::-moz-progress-bar]:bg-cyan' : '[&::-webkit-progress-value]:bg-accent [&::-moz-progress-bar]:bg-accent'"
@@ -149,7 +149,7 @@
                     {{/* Read beat: the options and answered-order area stay
                          hidden while `revealing` is true (the question phase
                          before answers open), so the room reads the question
-                         before answers open. host-lobby.js flips `revealing`
+                         before answers open. host-bigscreen.js flips `revealing`
                          off when the read beat elapses. */}}
                     <p x-show="phase === 'question' && revealing"
                        class="text-center text-text-dim text-[clamp(1rem,2vw,1.5rem)] font-semibold uppercase tracking-[0.12em]"
@@ -236,7 +236,7 @@
              rank order (best-first). The end-of-game screens (intermission, the
              between-games screen #836, and the terminal finished phase) carry
              roundScore for the last round so the bars animate that final
-             contribution. The animation is driven in host-lobby.js via anime.js
+             contribution. The animation is driven in host-bigscreen.js via anime.js
              with a reduced-motion / missing-global fallback that snaps to the
              final state. At intermission the pick-a-live-quiz link appears below
              the standings (#851) so the host can re-arm the room onto the next

@@ -901,9 +901,9 @@ func addSessionRoutes(
 }
 
 // addHostRoutes registers the host presentation surface (MP-3 / #680): the
-// "Host live" entry that opens a session and the TV lobby it redirects to,
+// "Host live" entry that opens a session and the big screen it redirects to,
 // plus the host start control. All three are host-gated (RequireGameHost)
-// and the mutating POSTs carry CSRF protection. The lobby reads live state
+// and the mutating POSTs carry CSRF protection. The big screen reads live state
 // through the JSON API the page polls (SSE tick -> GET /state); the host
 // handlers reuse the shared session service so the page and the API see the
 // same in-memory session.
@@ -930,7 +930,7 @@ func addHostRoutes(
 	mux.Handle("GET /admin", requireGameHost(admin.HandleIndex(logger, csrfMgr, sessionService)))
 
 	mux.Handle("POST /host", csrfMW(requireGameHost(http.HandlerFunc(handlers.Create))))
-	mux.Handle("GET /host/{code}", requireGameHost(http.HandlerFunc(handlers.Lobby)))
+	mux.Handle("GET /host/{code}", requireGameHost(http.HandlerFunc(handlers.BigScreen)))
 	mux.Handle("POST /host/{code}/start", csrfMW(requireGameHost(http.HandlerFunc(handlers.Start))))
 	mux.Handle("POST /host/{code}/next-quiz", csrfMW(requireGameHost(http.HandlerFunc(handlers.NextQuiz))))
 	mux.Handle("POST /host/{code}/end", csrfMW(requireGameHost(http.HandlerFunc(handlers.End))))

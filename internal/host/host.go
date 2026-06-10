@@ -1,10 +1,10 @@
 // Package host serves the TV / presentation surface for a hosted live
-// session (MP-3 / #680): a full-screen lobby that shows the join QR and room
-// code, the live player roster with ready states, and the host start
+// session (MP-3 / #680): a full-screen big screen that shows the join QR and
+// room code, the live player roster with ready states, and the host start
 // control. The page is host-gated (RequireGameHost wraps the route) and
 // reads the authoritative lobby state through the same service the JSON API
 // uses; the live updates run off the SSE tick -> GET /api/sessions/{code}/state
-// contract, driven by host-lobby.js.
+// contract, driven by host-bigscreen.js.
 package host
 
 import (
@@ -37,13 +37,13 @@ const joinPathPrefix = "/join/"
 // A phone that cannot scan the QR goes here and types the room code.
 const joinEntryPath = "/join"
 
-// hostLobbyPathPrefix is the host TV-lobby path prefix the host POST handlers
+// hostScreenPathPrefix is the host big-screen path prefix the host POST handlers
 // redirect back to after their action; the code (server-minted, not user input)
 // is appended to form a same-origin destination.
-const hostLobbyPathPrefix = "/host/"
+const hostScreenPathPrefix = "/host/"
 
-// LobbyData feeds the host lobby template.
-type LobbyData struct {
+// BigScreenData feeds the host big-screen template.
+type BigScreenData struct {
 	Title    string
 	JoinCode string
 	// JoinURL is the absolute URL the QR encodes for one-tap scanning; it is
@@ -68,7 +68,7 @@ type LobbyData struct {
 	QuestionCount int
 }
 
-// Handlers serves the host lobby page and the host start control.
+// Handlers serves the host big-screen page and the host start control.
 type Handlers struct {
 	logger  *slog.Logger
 	csrf    *csrf.Manager
@@ -86,22 +86,22 @@ func NewHandlers(
 		logger:  logger,
 		csrf:    csrfMgr,
 		service: service,
-		tmpl:    parseTemplate("host/pages/lobby.gohtml"),
+		tmpl:    parseTemplate("host/pages/bigscreen.gohtml"),
 	}
 }
 
-// Lobby handles GET /host/{code}: it renders the TV lobby for a session the
-// caller hosts. The route is host-gated; this handler additionally enforces
-// that the caller may view the session (GetLobbyState returns
+// BigScreen handles GET /host/{code}: it renders the host big screen for a
+// session the caller hosts. The route is host-gated; this handler additionally
+// enforces that the caller may view the session (GetLobbyState returns
 // ErrNotParticipant for a host who does not own it), so one host cannot open
 // another host's room by guessing a code. An unknown code or a foreign
 // session both 404 so the code stays opaque.
-func (h *Handlers) Lobby(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) BigScreen(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	player, ok := auth.PlayerFromContext(ctx)
 	if !ok {
-		h.logger.ErrorContext(ctx, "missing player on context for host lobby")
+		h.logger.ErrorContext(ctx, "missing player on context for host big screen")
 		http.Error(w, msgInternalError, http.StatusInternalServerError)
 
 		return
@@ -115,7 +115,7 @@ func (h *Handlers) Lobby(w http.ResponseWriter, r *http.Request) {
 
 			return
 		}
-		h.logger.ErrorContext(ctx, "error loading host lobby state", slog.Any("err", err))
+		h.logger.ErrorContext(ctx, "error loading host big-screen state", slog.Any("err", err))
 		http.Error(w, msgInternalError, http.StatusInternalServerError)
 
 		return
@@ -136,7 +136,7 @@ func (h *Handlers) Lobby(w http.ResponseWriter, r *http.Request) {
 	// never from user input, so it is safe to inject as trusted HTML.
 	qrMarkup := template.HTML(svg) //nolint:gosec // server-generated SVG, no user markup.
 
-	data := LobbyData{
+	data := BigScreenData{
 		Title:            "Live lobby",
 		JoinCode:         state.Session.JoinCode,
 		JoinURL:          joinURL,
@@ -157,7 +157,7 @@ func (h *Handlers) Lobby(w http.ResponseWriter, r *http.Request) {
 // render clones the parsed tree, binds the per-request csrfToken func, and
 // executes the base layout. Headers are written only after the (header-
 // writing) csrf token call, mirroring the admin renderer.
-func (h *Handlers) render(w http.ResponseWriter, r *http.Request, data LobbyData) {
+func (h *Handlers) render(w http.ResponseWriter, r *http.Request, data BigScreenData) {
 	t, err := h.tmpl.Clone()
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "error cloning host template", slog.Any("err", err))
