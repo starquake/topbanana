@@ -121,10 +121,9 @@ test('host TV shows the live question, answered order, and the reveal', async ({
     // quiz lands every question in the default round titled "Round 1", so the
     // title shows it and the eyebrow reads "Round 1 of 1" - never the old
     // generic "Next round" wording.
-    const introView = page.locator('[data-phase-intro]');
-    await expect(introView).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('[data-round-title]')).toHaveText('Round 1');
-    await expect(page.locator('[data-round-eyebrow]')).toHaveText('Round 1 of 1');
+    await expect(page.getByTestId('phase-intro')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('round-eyebrow')).toHaveText('Round 1 of 1');
+    await expect(page.getByTestId('round-title')).toHaveText('Round 1');
 
     const questionView = page.locator('[data-phase-question]');
     await expect(questionView).toBeVisible({ timeout: 15_000 });
@@ -253,9 +252,9 @@ test('the host TV roster reflects a player rename', async ({
 // and words its heading correctly, matching the live player surface (join.html)
 // and the solo client (index.html) field-for-field even though the TV uses its
 // own room-scale typography. A two-round quiz with a round summary exercises all
-// three round-intro fields the surfaces share: the title (data-round-title), the
-// optional summary (data-round-summary), and an accurate "Round N of M" eyebrow
-// (data-round-eyebrow) that is NOT the old generic "Next round" wording on the
+// three round-intro fields the surfaces share: the title (round-title), the
+// optional summary (round-summary), and an accurate "Round N of M" eyebrow
+// (round-eyebrow) that is NOT the old generic "Next round" wording on the
 // first round. Asserting "Round 1 of 2" (not the single-round "Round 1 of 1" the
 // in-game spec above checks) pins that N/M reflects the real round position. The
 // player half is pinned in play-live.spec.ts; the standings half is in
@@ -268,7 +267,10 @@ test('host TV round intro shows the round title, summary, and an accurate Round 
 }) => {
   test.setTimeout(60_000);
 
-  const displayName = `e2e-intro-host-${browserName}`;
+  // Unique per run (timestamp): player names are global (#716), so a bare
+  // `e2e-intro-host-${browserName}` would let a CI auto-retry collide on the
+  // name from the first attempt and fail in registration (#859).
+  const displayName = `e2e-intro-host-${browserName}-${Date.now()}`;
   const quizTitle = `E2E Host Intro ${browserName} ${Date.now()}`;
   const roundSummary = 'Warm up with the easy ones first.';
 
@@ -334,13 +336,17 @@ test('host TV round intro shows the round title, summary, and an accurate Round 
     await page.getByRole('button', { name: 'Start now' }).click();
 
     // Round intro: the TV names the first round, shows its summary, and the
-    // eyebrow reads "Round 1 of 2" - never "Next round" on the first round.
-    const introView = page.locator('[data-phase-intro]');
-    await expect(introView).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('[data-round-title]')).toHaveText('Opening round');
-    await expect(page.locator('[data-round-summary]')).toHaveText(roundSummary);
-    await expect(page.locator('[data-round-eyebrow]')).toHaveText('Round 1 of 2');
-    await expect(introView).not.toContainText('Next round');
+    // eyebrow reads "Round 1 of 2" - never the "Get ready" / "Next round"
+    // fallbacks on the first round (asserting "Round 1 of 2" + "Opening round"
+    // is that no-fallback contract). Assert the eyebrow first: it gates on the
+    // round_intro screen having rendered, and the title/summary then read the
+    // same card. The round_intro screen is brief (one runner beat), widened in
+    // the e2e config so these per-element checks land inside it without racing
+    // the phase advancing (#859).
+    await expect(page.getByTestId('phase-intro')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('round-eyebrow')).toHaveText('Round 1 of 2');
+    await expect(page.getByTestId('round-title')).toHaveText('Opening round');
+    await expect(page.getByTestId('round-summary')).toHaveText(roundSummary);
   } finally {
     await caseyCtx.close();
   }

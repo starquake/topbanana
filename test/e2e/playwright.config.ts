@@ -171,6 +171,12 @@ const workerServer = (workerIndex: number) => {
       // window for firefox to observe before the runner advances - mirrors
       // REVEAL_DELAY for the pre-answer read beat (see #719).
       SESSION_REVEAL_BEAT: '2s',
+      // Keep the round-intro card observable for the same reason as the reveal
+      // beat: the 500ms runner beat is too brief for a loaded browser to read
+      // the round title + "Round N of M" eyebrow before the phase advances, so
+      // the round-intro test raced it (#859). This widens only the round-intro
+      // beat; round-results stays on the fast runner beat.
+      SESSION_ROUND_INTRO_BEAT: '2s',
       // Shrink the host-armed last-call countdown (#735, default 60s) so the
       // armed-start spec can watch it fire without a minute of dead time. The
       // host arms "Start in 60s"; with this set the runner starts the game ~2s

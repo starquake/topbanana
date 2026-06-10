@@ -238,6 +238,13 @@ func runnerConfig(cfg *config.Config) livesession.RunnerConfig {
 		rc.RevealBeat = cfg.SessionRevealBeat
 	}
 
+	// Likewise the round-intro beat: a shrunk runner beat leaves the round-intro
+	// card too brief for a loaded browser to observe before the phase advances
+	// (#859).
+	if cfg.SessionRoundIntroBeat > 0 {
+		rc.RoundIntroBeat = cfg.SessionRoundIntroBeat
+	}
+
 	return rc
 }
 
