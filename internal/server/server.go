@@ -55,12 +55,15 @@ func New(
 	mux := http.NewServeMux()
 	addRoutes(mux, logger, stores, gameService, realtime, cfg, mail)
 	var handler http.Handler = mux
-	handler = logRequests(logger, handler)
-	// recoverPanic is the OUTERMOST wrapper so a handler panic still
-	// captures the request fields logRequests would have recorded and
-	// the 500 reaches the client cleanly instead of leaking a half-
-	// written response (#346).
-	handler = recoverPanic(logger, handler)
+	handler = logRequests(handler)
+	// recoverPanic wraps logRequests so a handler panic still captures the
+	// request fields logRequests would have recorded and the 500 reaches the
+	// client cleanly instead of leaking a half-written response (#346).
+	handler = recoverPanic(handler)
+	// requestLogger is the OUTERMOST wrapper so the request-scoped logger
+	// (carrying a generated request id) is bound on the context before
+	// recoverPanic and logRequests draw their lines from it.
+	handler = requestLogger(logger, handler)
 
 	return handler
 }

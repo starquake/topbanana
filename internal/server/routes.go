@@ -860,7 +860,7 @@ func addAPIRoutes(
 	)
 	mux.Handle("GET /api/games/{gameID}/results", ensurePlayer(clientapi.HandleGameResults(logger, gameService)))
 
-	addSessionRoutes(mux, logger, realtime.SessionService, realtime.SessionHub, ensurePlayer)
+	addSessionRoutes(mux, realtime.SessionService, realtime.SessionHub, ensurePlayer)
 }
 
 // addSessionRoutes registers the hosted live-session API (MP-1 / #678,
@@ -874,29 +874,28 @@ func addAPIRoutes(
 // gate and participant gates live in the handlers and service.
 func addSessionRoutes(
 	mux *http.ServeMux,
-	logger *slog.Logger,
 	sessionService *livesession.Service,
 	sessionHub *livesession.Hub,
 	ensurePlayer func(http.Handler) http.Handler,
 ) {
-	mux.Handle("POST /api/sessions", ensurePlayer(clientapi.HandleSessionCreate(logger, sessionService)))
-	mux.Handle("POST /api/sessions/{code}/join", ensurePlayer(clientapi.HandleSessionJoin(logger, sessionService)))
-	mux.Handle("POST /api/sessions/{code}/ready", ensurePlayer(clientapi.HandleSessionReady(logger, sessionService)))
-	mux.Handle("POST /api/sessions/{code}/start", ensurePlayer(clientapi.HandleSessionStart(logger, sessionService)))
+	mux.Handle("POST /api/sessions", ensurePlayer(clientapi.HandleSessionCreate(sessionService)))
+	mux.Handle("POST /api/sessions/{code}/join", ensurePlayer(clientapi.HandleSessionJoin(sessionService)))
+	mux.Handle("POST /api/sessions/{code}/ready", ensurePlayer(clientapi.HandleSessionReady(sessionService)))
+	mux.Handle("POST /api/sessions/{code}/start", ensurePlayer(clientapi.HandleSessionStart(sessionService)))
 	mux.Handle(
 		"POST /api/sessions/{code}/arm-start",
-		ensurePlayer(clientapi.HandleSessionArmStart(logger, sessionService)),
+		ensurePlayer(clientapi.HandleSessionArmStart(sessionService)),
 	)
 	mux.Handle(
 		"POST /api/sessions/{code}/cancel-start",
-		ensurePlayer(clientapi.HandleSessionCancelStart(logger, sessionService)),
+		ensurePlayer(clientapi.HandleSessionCancelStart(sessionService)),
 	)
-	mux.Handle("POST /api/sessions/{code}/answer", ensurePlayer(clientapi.HandleSessionAnswer(logger, sessionService)))
-	mux.Handle("POST /api/sessions/{code}/leave", ensurePlayer(clientapi.HandleSessionLeave(logger, sessionService)))
-	mux.Handle("GET /api/sessions/{code}/state", ensurePlayer(clientapi.HandleSessionState(logger, sessionService)))
+	mux.Handle("POST /api/sessions/{code}/answer", ensurePlayer(clientapi.HandleSessionAnswer(sessionService)))
+	mux.Handle("POST /api/sessions/{code}/leave", ensurePlayer(clientapi.HandleSessionLeave(sessionService)))
+	mux.Handle("GET /api/sessions/{code}/state", ensurePlayer(clientapi.HandleSessionState(sessionService)))
 	mux.Handle(
 		"GET /api/sessions/{code}/events",
-		ensurePlayer(clientapi.HandleSessionEvents(logger, sessionService, sessionHub)),
+		ensurePlayer(clientapi.HandleSessionEvents(sessionService, sessionHub)),
 	)
 }
 

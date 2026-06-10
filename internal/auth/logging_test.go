@@ -20,9 +20,15 @@ import (
 // test can assert the auth layer emitted the expected login-outcome line
 // (#872) with the expected level and fields. Concurrency-safe so a handler
 // that logs from a background goroutine cannot race the assertion.
+//
+// WithAttrs accumulates the bound attrs and Handle merges them onto each
+// record, so a logger derived via slog.With surfaces its bound fields here:
+// slog.With binds attrs at the handler level (WithAttrs), not on the Record,
+// so returning the receiver unchanged would silently drop them.
 type captureHandler struct {
 	mu      *sync.Mutex
 	records *[]slog.Record
+	attrs   []slog.Attr
 }
 
 func newCaptureHandler() captureHandler {
@@ -32,15 +38,23 @@ func newCaptureHandler() captureHandler {
 func (captureHandler) Enabled(context.Context, slog.Level) bool { return true }
 
 func (h captureHandler) Handle(_ context.Context, r slog.Record) error {
+	rec := r.Clone()
+	rec.AddAttrs(h.attrs...)
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	*h.records = append(*h.records, r.Clone())
+	*h.records = append(*h.records, rec)
 
 	return nil
 }
 
-func (h captureHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
-func (h captureHandler) WithGroup(string) slog.Handler      { return h }
+func (h captureHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	h.attrs = append(append([]slog.Attr(nil), h.attrs...), attrs...)
+
+	return h
+}
+
+func (h captureHandler) WithGroup(string) slog.Handler { return h }
 
 func (h captureHandler) snapshot() []slog.Record {
 	h.mu.Lock()
@@ -297,4 +311,19 @@ func TestFinalizeGoogleSignIn_Logs_Success(t *testing.T) {
 	attrs := logs.assertLog(t, "google sign-in succeeded", slog.LevelInfo)
 	assertInt64Attr(t, attrs, "player", id)
 	assertStringAttr(t, attrs, "email", "gopher@example.test")
+}
+
+// TestCaptureHandler_SurfacesWithBoundAttrs pins that the capture handler
+// honours WithAttrs, so a logger derived via slog.With carries its bound
+// field through to the asserted record. Without the fix this fails: a no-op
+// WithAttrs drops the bound field. Guards future slog.With use in this layer.
+func TestCaptureHandler_SurfacesWithBoundAttrs(t *testing.T) {
+	t.Parallel()
+
+	logs := newCaptureHandler()
+	logger := slog.New(logs).With(slog.String("email", "bound@example.test"))
+	logger.Info("bound line")
+
+	attrs := logs.assertLog(t, "bound line", slog.LevelInfo)
+	assertStringAttr(t, attrs, "email", "bound@example.test")
 }
