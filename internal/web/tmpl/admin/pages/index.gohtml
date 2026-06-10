@@ -20,17 +20,17 @@
              back to it instead of an entry that would open a second one. The
              per-quiz "Host live" entry preselects a quiz; this is the
              start-from-nothing entry. */}}
-        <div class="flex flex-col items-stretch gap-2 md:items-end" data-host-session>
+        <div class="flex flex-col items-stretch gap-2 md:items-end" data-testid="host-session">
             {{if .ResumeCode}}
                 <a href="/host/{{.ResumeCode}}"
                    class="inline-flex items-center justify-center gap-2 min-h-[44px] px-6 rounded-lg bg-accent text-bg font-display font-semibold uppercase tracking-tight text-sm no-underline transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus cursor-pointer"
-                   data-resume-hosting>Resume session &mdash; room <span class="font-mono">{{.ResumeCode}}</span></a>
+                   data-testid="resume-hosting">Resume session &mdash; room <span class="font-mono">{{.ResumeCode}}</span></a>
             {{else}}
                 <form method="post" action="/host">
                     <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                     <button type="submit"
                             class="inline-flex items-center justify-center gap-2 min-h-[44px] px-6 rounded-lg bg-accent text-bg font-display font-semibold uppercase tracking-tight text-sm border-0 transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus cursor-pointer"
-                            data-host-session-submit>Host a session</button>
+                            data-testid="host-session-submit">Host a session</button>
                 </form>
             {{end}}
         </div>

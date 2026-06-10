@@ -51,15 +51,15 @@ async function hostASession(page: Page, baseURL: string | undefined): Promise<{
   // cleanup never ran): the dashboard then shows "Resume session" instead of the
   // submit. End that one room, then reload so the submit is offered. Not a drain
   // loop - one stray room is all an interrupted test can leave.
-  const resume = host.locator('[data-resume-hosting]');
+  const resume = host.getByTestId('resume-hosting');
   if (await resume.count() > 0) {
     const strayCode = (await resume.getAttribute('href'))?.split('/host/')[1] ?? '';
     if (strayCode) await endHostedSession(host, strayCode);
     await host.goto('/admin');
   }
 
-  await expect(host.locator('[data-host-session-submit]')).toBeVisible();
-  await host.locator('[data-host-session-submit]').click();
+  await expect(host.getByTestId('host-session-submit')).toBeVisible();
+  await host.getByTestId('host-session-submit').click();
   await expect(host).toHaveURL(/\/host\/[A-Z0-9]{6}$/);
   const joinCode = host.url().split('/host/')[1];
   expect(joinCode).toMatch(/^[A-Z0-9]{6}$/);
@@ -99,8 +99,8 @@ test.describe('session-first live hosting', () => {
       await seedLiveQuiz(host, quizTitle, 'What is 1+1?', 'two');
 
       // The empty room shows the pick-a-live-quiz link, not the Start controls.
-      await expect(host.locator('[data-pick-quiz-link]')).toBeVisible();
-      await expect(host.locator('[data-start-now]')).toBeHidden();
+      await expect(host.getByTestId('pick-quiz-link')).toBeVisible();
+      await expect(host.getByTestId('start-now')).toBeHidden();
 
       // A player joins the empty room and sees the staging waiting hint (no quiz
       // picked yet) rather than a broken screen.
@@ -111,7 +111,7 @@ test.describe('session-first live hosting', () => {
       // seeded quiz, and hits "Host live". Because the host already has this empty
       // staging room open, "Host live" arms+starts THAT room (one room per host),
       // so the still-joined player is carried straight into the game.
-      await host.locator('[data-pick-quiz-link] a').click();
+      await host.getByTestId('pick-quiz-link').locator('a').click();
       await expect(host).toHaveURL(/\/admin\/quizzes\?mode=live$/);
       await host.getByRole('link', { name: quizTitle }).click();
       await host.getByRole('button', { name: 'Host live' }).click();
@@ -144,7 +144,7 @@ test.describe('session-first live hosting', () => {
       // The End session control carries a confirm guard; accept it so the submit
       // proceeds.
       host.once('dialog', (dialog) => dialog.accept());
-      await host.locator('[data-end-session]').click();
+      await host.getByTestId('end-session').click();
 
       // The room is terminally closed: the still-joined player drops into the
       // finished view (the room ended out from under them).

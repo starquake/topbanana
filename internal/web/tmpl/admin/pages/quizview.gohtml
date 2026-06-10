@@ -156,7 +156,7 @@
              has a game in flight; the "Host live" button above opens it. Confirm
              ends the running session and opens a fresh room hosting this quiz. */}}
         {{if .HostHasRunningGame}}
-        <div id="modal-restart-host-{{.Quiz.ID}}" data-restart-modal role="dialog" aria-modal="true" aria-labelledby="modal-restart-host-{{.Quiz.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
+        <div id="modal-restart-host-{{.Quiz.ID}}" data-testid="restart-modal" role="dialog" aria-modal="true" aria-labelledby="modal-restart-host-{{.Quiz.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
             <div class="absolute inset-0" onclick="closeModal('modal-restart-host-{{.Quiz.ID}}')"></div>
             <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
                 <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">

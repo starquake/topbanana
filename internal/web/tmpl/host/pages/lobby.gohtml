@@ -307,7 +307,7 @@
              instead, so this stays hidden there. */}}
         <div x-show="showsPickQuizLink()"
              class="shrink-0 px-[clamp(1.5rem,4vw,4rem)] pb-[clamp(1rem,2.5vh,2rem)]"
-             data-pick-quiz-link>
+             data-testid="pick-quiz-link">
             <a href="/admin/quizzes?mode=live" class="btn-primary gap-2">Pick a live quiz</a>
         </div>
 
@@ -340,23 +340,23 @@
                  uses the pick-a-live-quiz link above instead (#851). */}}
             <div x-show="phase === 'lobby' && hasQuiz && armed()"
                  class="flex flex-wrap items-center gap-4"
-                 data-start-countdown>
+                 data-testid="start-countdown">
                 <p class="m-0 font-display font-extrabold text-accent text-[clamp(1.1rem,2.4vw,1.75rem)] tabular-nums"
                    x-text="startCountdownLabel()"
                    role="status"
-                   data-start-countdown-label></p>
+                   data-testid="start-countdown-label"></p>
                 <form method="post" :action="'/host/' + encodeURIComponent(joinCode) + '/start'" @submit.prevent="start()">
                     <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                     <button type="submit"
                             class="inline-flex items-center justify-center gap-2 min-h-[52px] px-6 rounded-lg bg-accent text-bg font-display font-extrabold text-[clamp(0.9rem,1.7vw,1.15rem)] uppercase tracking-[0.12em] border-0 transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                             :disabled="starting"
-                            data-skip-start>Start now</button>
+                            data-testid="skip-start">Start now</button>
                 </form>
                 <button type="button"
                         class="inline-flex items-center justify-center gap-2 min-h-[52px] px-6 rounded-lg bg-surface text-text font-display font-bold text-[clamp(0.9rem,1.7vw,1.15rem)] uppercase tracking-[0.12em] border border-border-soft transition-colors hover:border-text-dim focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                         :disabled="arming"
                         @click="cancelStart()"
-                        data-cancel-start>Cancel</button>
+                        data-testid="cancel-start">Cancel</button>
             </div>
 
             {{/* Not armed: Start now + Start in 60s. Only when a quiz is queued
@@ -369,7 +369,7 @@
                     <button type="submit"
                             class="inline-flex items-center justify-center gap-2 min-h-[52px] px-8 rounded-lg bg-accent text-bg font-display font-extrabold text-[clamp(0.9rem,1.7vw,1.15rem)] uppercase tracking-[0.12em] border-0 transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                             :disabled="starting || arming || players.length === 0"
-                            data-start-now>
+                            data-testid="start-now">
                         <span x-text="players.length === 0 ? 'Waiting for players' : 'Start now'"></span>
                     </button>
                 </form>
@@ -377,7 +377,7 @@
                         class="inline-flex items-center justify-center gap-2 min-h-[52px] px-6 rounded-lg bg-surface text-text font-display font-bold text-[clamp(0.9rem,1.7vw,1.15rem)] uppercase tracking-[0.12em] border border-border-soft transition-colors hover:border-text-dim focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                         :disabled="starting || arming || players.length === 0"
                         @click="armStart()"
-                        data-arm-start>Start in 60s</button>
+                        data-testid="arm-start">Start in 60s</button>
             </div>
 
             {{/* End session (#836): the host control that closes the room for
@@ -390,11 +390,11 @@
                   method="post"
                   :action="'/host/' + encodeURIComponent(joinCode) + '/end'"
                   @submit="if (!confirm('End this session for everyone?')) $event.preventDefault()"
-                  data-end-session-form>
+                  data-testid="end-session-form">
                 <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                 <button type="submit"
                         class="inline-flex items-center justify-center gap-2 min-h-[52px] px-6 rounded-lg bg-surface text-danger font-display font-bold text-[clamp(0.9rem,1.7vw,1.15rem)] uppercase tracking-[0.12em] border border-danger/50 transition-colors hover:border-danger focus-visible:outline-none focus-visible:shadow-focus cursor-pointer"
-                        data-end-session>End session</button>
+                        data-testid="end-session">End session</button>
             </form>
 
             {{/* Host-facing status line for the start controls. */}}

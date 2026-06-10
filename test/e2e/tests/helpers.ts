@@ -358,7 +358,7 @@ export async function answerRemainingQuestions(page: Page, fromIndex = 0): Promi
 // x-show before deciding, then only drives the control when it is visible.
 export async function endHostedSession(host: Page, joinCode: string): Promise<void> {
   await host.goto(`/host/${joinCode}`);
-  const endBtn = host.locator('[data-end-session]');
+  const endBtn = host.getByTestId('end-session');
   if (await endBtn.count() === 0) return;
   // Let the lobby's first GET /state land so the Alpine x-show settles to the
   // real phase: the End control is briefly visible on the initial lobby-phase
