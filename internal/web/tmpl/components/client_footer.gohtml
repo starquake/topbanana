@@ -2,24 +2,38 @@
      no longer carries a top bar (#893) so the wordmark, account
      cluster, and admin cross-link live down here. Admin still uses the
      metadata-only `site_footer` together with the shared `topbar`; do
-     not include this component on admin surfaces. */}}
+     not include this component on admin surfaces.
+
+     Mobile-first layout: stacked + centered with tight gaps so the
+     bottom of a long page reads as a calm footer instead of a
+     left-aligned list. From sm: up the three regions split into a
+     classic wordmark | account | version row. */}}
 {{define "client_footer"}}
-    <footer class="max-w-shell mx-auto px-5 py-6 w-full flex flex-col gap-4 text-sm text-text-dim
-                   sm:flex-row sm:items-center sm:justify-between
-                   pb-[max(theme(spacing.6),env(safe-area-inset-bottom))]">
+    <footer class="max-w-shell mx-auto px-5 pt-5 pb-[max(theme(spacing.5),env(safe-area-inset-bottom))] w-full
+                   flex flex-col items-center gap-3 text-center text-sm text-text-dim
+                   sm:flex-row sm:items-center sm:justify-between sm:text-left sm:py-6 sm:gap-4
+                   sm:pb-[max(theme(spacing.6),env(safe-area-inset-bottom))]">
         {{/* Wordmark doubles as the home link now that the topbar is gone.
              aria-label pins the accessible name "Top Banana!" so the e2e
              role locators (getByRole('link', { name: 'Top Banana!' }))
-             keep resolving. */}}
+             keep resolving. Sized down on mobile so it doesn't out-shout the
+             account cluster underneath. */}}
         <a href="/" aria-label="Top Banana!"
-           class="inline-flex items-center font-display font-semibold text-base tracking-[0.08em] uppercase text-text hover:text-text">
-            <span class="w-[20px] h-[20px] mr-[0.5rem] text-accent inline-flex shrink-0" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M4 13c3.5-2 8-2 10 2a5.5 5.5 0 0 1 8 5"/><path d="M5.15 17.89c5.52-1.52 8.65-6.89 7-12C11.55 4 11.5 2 13 2c3.22 0 5 5.5 5 8 0 6.5-4.2 12-10.49 12C5.11 22 2 22 2 20c0-1.5 1.14-1.55 3.15-2.11Z"/></svg>
+           class="inline-flex items-center font-display font-semibold text-sm tracking-[0.08em] uppercase text-text hover:text-text
+                  sm:text-base">
+            {{/* Explicit width/height attributes (#893): without them the
+                 SVG falls back to the UA default (300x150) during the brief
+                 window where the DOM has rendered but app.css hasn't applied
+                 (cold load on iOS Safari, SW-served HTML vs fresh CSS, etc.).
+                 With the attributes the banana never flashes huge; once CSS
+                 lands, the `w-full h-full` utility scales it to fit the span. */}}
+            <span class="w-[18px] h-[18px] mr-[0.45rem] text-accent inline-flex shrink-0 sm:w-[20px] sm:h-[20px] sm:mr-[0.55rem]" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M4 13c3.5-2 8-2 10 2a5.5 5.5 0 0 1 8 5"/><path d="M5.15 17.89c5.52-1.52 8.65-6.89 7-12C11.55 4 11.5 2 13 2c3.22 0 5 5.5 5 8 0 6.5-4.2 12-10.49 12C5.11 22 2 22 2 20c0-1.5 1.14-1.55 3.15-2.11Z"/></svg>
             </span>
             <span aria-hidden="true">Top<span class="text-accent font-extrabold">Banana</span>!</span>
         </a>
 
-        <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
+        <div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:justify-start sm:gap-x-5">
             {{if isSignedIn}}
                 <span class="whitespace-nowrap">Signed in as&nbsp;<a href="{{profileHref}}"
                        class="text-text font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:shadow-focus rounded-sm">{{viewerName}}</a></span>
