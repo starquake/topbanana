@@ -48,10 +48,12 @@
      short content (#285). dvh tracks the visible viewport across
      URL-bar collapse, eliminating the constant overflow. */}}
 <body class="bg-bg text-text font-sans antialiased min-h-dvh leading-relaxed flex flex-col">
-{{template "topbar" .}}
+{{/* The client surface (#893) doesn't carry the shared topbar - account
+     controls live in client_footer. Distinguishes the player site from
+     the admin console visually + structurally. */}}
 <section class="max-w-shell mx-auto px-5 py-10 w-full flex-1">
     {{template "content" .}}
 </section>
-{{template "site_footer" .}}
+{{template "client_footer" .}}
 </body>
 </html>
