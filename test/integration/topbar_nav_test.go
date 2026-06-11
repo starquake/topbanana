@@ -6,14 +6,15 @@ import (
 	"testing"
 )
 
-// brandLink is the shared top bar's brand link. Its aria-label pins the
-// accessible name "Top Banana!" that the e2e role locators depend on, so
-// the integration tests assert the exact attribute.
+// brandLink is the brand link's aria-label. Its accessible name "Top Banana!"
+// is what the e2e role locators key on, so the integration tests pin the
+// exact attribute. Used by both the admin topbar (which still has one) and
+// the client footer (which carries the brand now that the topbar is gone).
 const brandLink = `aria-label="Top Banana!"`
 
 // footerFragment returns the metadata footer slice of a rendered page so
-// the footer-only assertions do not accidentally match controls the top
-// bar carries. The site footer is the last <footer> on the page.
+// the footer-only assertions do not accidentally match controls a top bar
+// carries. The site footer is the last <footer> on the page.
 func footerFragment(t *testing.T, body string) string {
 	t.Helper()
 
@@ -25,122 +26,138 @@ func footerFragment(t *testing.T, body string) string {
 	return body[idx:]
 }
 
-// TestTopbar_HomeAnonymous pins the shared top bar on the anonymous home
-// page (#844): the brand link, a Log in link in the account cluster, the
-// Manage cross-link to /admin, and a metadata-only footer with no session
-// controls.
-func TestTopbar_HomeAnonymous(t *testing.T) {
+// bodyBeforeFooter returns the page slice that precedes the last <footer>.
+// Useful for asserting that the client surfaces (#893) carry no topbar
+// above the content — the only "Primary" nav / brand / account cluster
+// should live inside the footer.
+func bodyBeforeFooter(t *testing.T, body string) string {
+	t.Helper()
+
+	idx := strings.LastIndex(body, "<footer")
+	if idx == -1 {
+		t.Fatalf("page has no <footer> (body excerpt: %.200q)", body)
+	}
+
+	return body[:idx]
+}
+
+// TestClientChrome_HomeAnonymous pins the client footer on the anonymous
+// home page (#893): the brand wordmark, a Log in link in the account
+// cluster, and the Manage cross-link to /admin all live in the FOOTER
+// instead of a top bar. The page above the footer carries no topbar.
+func TestClientChrome_HomeAnonymous(t *testing.T) {
 	t.Parallel()
 
 	ctx, srv := startServer(t, nil)
 	body := getBody(ctx, t, srv.BaseURL+"/")
 
+	// The client surface intentionally drops the shared topbar.
+	above := bodyBeforeFooter(t, body)
+	for _, banned := range []string{
+		`aria-label="Primary"`,
+		brandLink,
+	} {
+		if strings.Contains(above, banned) {
+			t.Errorf("client home should not carry a topbar; found %q above the footer", banned)
+		}
+	}
+
+	footer := footerFragment(t, body)
 	for _, want := range []string{
 		brandLink,
-		// Anonymous account cluster: a Log in link, no signed-in identity.
 		`href="/login"`,
-		// Cross-link back to the admin console. The label stays "Manage
-		// quizzes" so the e2e role locator keeps resolving (#844).
 		`href="/admin"`,
 		"Manage quizzes",
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("home top bar missing %q", want)
+		if !strings.Contains(footer, want) {
+			t.Errorf("client home footer missing %q", want)
 		}
 	}
-	if strings.Contains(body, "Signed in as") {
-		t.Error("anonymous home should not render a signed-in identity")
+	if strings.Contains(footer, "Signed in as") {
+		t.Error("anonymous home footer should not render a signed-in identity")
 	}
-	if strings.Contains(body, `action="/logout"`) {
-		t.Error("anonymous home should not render a log-out form")
-	}
-
-	// The footer is metadata only: it names the build + brand, never the
-	// session controls (those moved into the top bar).
-	footer := footerFragment(t, body)
-	if !strings.Contains(footer, "Top Banana!") {
-		t.Error("site footer missing the Top Banana! wordmark")
-	}
-	for _, banned := range []string{`action="/logout"`, "Signed in as", `href="/login"`, `href="/admin"`} {
-		if strings.Contains(footer, banned) {
-			t.Errorf("site footer must be metadata only, but contains %q", banned)
-		}
+	if strings.Contains(footer, `action="/logout"`) {
+		t.Error("anonymous home footer should not render a log-out form")
 	}
 }
 
-// TestTopbar_HomeSignedIn pins the signed-in account cluster on the home
-// top bar: the viewer's display name links to /profile, a log-out form
-// POSTs to /logout, and the anonymous Log in link is gone. The footer
-// stays metadata only.
-func TestTopbar_HomeSignedIn(t *testing.T) {
+// TestClientChrome_HomeSignedIn pins the signed-in account cluster in the
+// home client footer: the viewer's display name links to /profile, a
+// log-out form POSTs to /logout, and the anonymous Log in link is gone.
+func TestClientChrome_HomeSignedIn(t *testing.T) {
 	t.Parallel()
 
 	ctx, srv := startServer(t, map[string]string{"REGISTRATION_ENABLED": "true"})
 
 	client := authClient(t)
-	registerAndMint(ctx, t, client, srv.BaseURL, srv.DBURI, "topbar-home-user", "correct-battery-13")
+	registerAndMint(ctx, t, client, srv.BaseURL, srv.DBURI, "client-home-user", "correct-battery-13")
 
 	snap := fetchWithClient(ctx, t, client, srv.BaseURL+"/")
 	if got, want := snap.StatusCode, http.StatusOK; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
 	}
 
-	for _, want := range []string{
-		brandLink,
-		"Signed in as",
-		"topbar-home-user",
-		`href="/profile"`,
-		`action="/logout"`,
-		// The cross-link to the console stays present while signed in.
-		"Manage quizzes",
-	} {
-		if !strings.Contains(snap.Body, want) {
-			t.Errorf("signed-in home top bar missing %q", want)
-		}
-	}
-	if strings.Contains(snap.Body, `href="/login"`) {
-		t.Error("signed-in home should not render the anonymous Log in link")
+	above := bodyBeforeFooter(t, snap.Body)
+	if strings.Contains(above, `aria-label="Primary"`) {
+		t.Error("client home should not carry a topbar above the footer")
 	}
 
 	footer := footerFragment(t, snap.Body)
-	if strings.Contains(footer, `action="/logout"`) || strings.Contains(footer, "Signed in as") {
-		t.Error("signed-in home footer must be metadata only")
+	for _, want := range []string{
+		brandLink,
+		"Signed in as",
+		"client-home-user",
+		`href="/profile"`,
+		`action="/logout"`,
+		"Manage quizzes",
+	} {
+		if !strings.Contains(footer, want) {
+			t.Errorf("signed-in client home footer missing %q", want)
+		}
+	}
+	if strings.Contains(footer, `href="/login"`) {
+		t.Error("signed-in client home footer should not render the anonymous Log in link")
 	}
 }
 
-// TestTopbar_LoginPage pins the shared top bar on an auth surface (the
-// login page): the viewer is anonymous, so the account cluster shows Log
-// in and the cross-link shows Manage. The logo points home (logoHref "/"),
-// not at /admin.
-func TestTopbar_LoginPage(t *testing.T) {
+// TestClientChrome_LoginPage pins the client footer on an auth surface
+// (the login page): the viewer is anonymous, so the account cluster shows
+// Log in and the cross-link shows Manage. The brand wordmark in the
+// footer points home.
+func TestClientChrome_LoginPage(t *testing.T) {
 	t.Parallel()
 
 	ctx, srv := startServer(t, nil)
 	body := getBody(ctx, t, srv.BaseURL+"/login")
 
+	above := bodyBeforeFooter(t, body)
+	if strings.Contains(above, `aria-label="Primary"`) {
+		t.Error("login page should not carry a topbar above the footer")
+	}
+
+	footer := footerFragment(t, body)
 	for _, want := range []string{
 		brandLink,
 		`href="/admin"`,
 		"Manage quizzes",
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("login page top bar missing %q", want)
+		if !strings.Contains(footer, want) {
+			t.Errorf("login footer missing %q", want)
 		}
 	}
-	// The brand link on an auth surface points home, not at the console.
-	if !strings.Contains(body, `href="/" aria-label="Top Banana!"`) {
-		t.Error("login page brand link should point at / (logoHref)")
+	if !strings.Contains(footer, `href="/" aria-label="Top Banana!"`) {
+		t.Error("login footer brand link should point at /")
 	}
-	if strings.Contains(body, "Signed in as") {
-		t.Error("anonymous login page should not render a signed-in identity")
+	if strings.Contains(footer, "Signed in as") {
+		t.Error("anonymous login footer should not render a signed-in identity")
 	}
 }
 
 // TestTopbar_AdminConsole pins the shared top bar on an admin page: the
 // brand link points at /admin (logoHref), the section nav is present, the
 // account cluster shows the signed-in admin plus a log-out form, and the
-// cross-link is "View site" -> /. The admin footer is metadata only - the
-// log out moved into the top bar.
+// cross-link is "View site" -> /. The admin keeps the topbar (#893 only
+// drops it on client surfaces); the admin footer stays metadata-only.
 func TestTopbar_AdminConsole(t *testing.T) {
 	t.Parallel()
 

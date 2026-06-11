@@ -1,0 +1,38 @@
+{{/* Footer for the player-facing surfaces (home + auth). The client
+     no longer carries a top bar (#893) so the wordmark, account
+     cluster, and admin cross-link live down here. Admin still uses the
+     metadata-only `site_footer` together with the shared `topbar`; do
+     not include this component on admin surfaces. */}}
+{{define "client_footer"}}
+    <footer class="max-w-shell mx-auto px-5 py-6 w-full flex flex-col gap-4 text-sm text-text-dim
+                   sm:flex-row sm:items-center sm:justify-between
+                   pb-[max(theme(spacing.6),env(safe-area-inset-bottom))]">
+        {{/* Wordmark doubles as the home link now that the topbar is gone.
+             aria-label pins the accessible name "Top Banana!" so the e2e
+             role locators (getByRole('link', { name: 'Top Banana!' }))
+             keep resolving. */}}
+        <a href="/" aria-label="Top Banana!"
+           class="inline-flex items-center font-display font-semibold text-base tracking-[0.08em] uppercase text-text hover:text-text">
+            <span class="w-[20px] h-[20px] mr-[0.5rem] text-accent inline-flex shrink-0" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M4 13c3.5-2 8-2 10 2a5.5 5.5 0 0 1 8 5"/><path d="M5.15 17.89c5.52-1.52 8.65-6.89 7-12C11.55 4 11.5 2 13 2c3.22 0 5 5.5 5 8 0 6.5-4.2 12-10.49 12C5.11 22 2 22 2 20c0-1.5 1.14-1.55 3.15-2.11Z"/></svg>
+            </span>
+            <span aria-hidden="true">Top<span class="text-accent font-extrabold">Banana</span>!</span>
+        </a>
+
+        <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
+            {{if isSignedIn}}
+                <span class="whitespace-nowrap">Signed in as&nbsp;<a href="{{profileHref}}"
+                       class="text-text font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:shadow-focus rounded-sm">{{viewerName}}</a></span>
+                <form action="/logout" method="POST" class="m-0 p-0 inline-flex">
+                    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                    <button type="submit" class="m-0 p-0 bg-transparent border-0 cursor-pointer whitespace-nowrap text-text-dim hover:text-text underline-offset-2 hover:underline">Log out</button>
+                </form>
+            {{else}}
+                <a href="/login" class="whitespace-nowrap hover:text-text underline-offset-2 hover:underline">Log in</a>
+            {{end}}
+            <a href="/admin" class="whitespace-nowrap hover:text-text underline-offset-2 hover:underline">Manage quizzes</a>
+        </div>
+
+        <span class="text-xs text-text-mute whitespace-nowrap">{{versionLabel}}</span>
+    </footer>
+{{end}}
