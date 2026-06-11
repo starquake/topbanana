@@ -365,12 +365,17 @@ type Option struct {
 // callers that need the round's questions; it is not loaded by the basic
 // round reads.
 type Round struct {
-	ID        int64
-	QuizID    int64
-	Position  int
-	Title     string
-	Summary   string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	Questions []*Question
+	ID       int64
+	QuizID   int64
+	Position int
+	Title    string
+	Summary  string
+	// BoundaryDurationSeconds is the per-round override for the
+	// round-boundary auto-advance window shared by the intro and
+	// recap/results cards. Nil means "inherit the quiz default" - the
+	// game service applies the priority chain at boundary time (#554).
+	BoundaryDurationSeconds *int
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+	Questions               []*Question
 }

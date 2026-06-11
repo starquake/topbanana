@@ -524,6 +524,11 @@ func fillRoundFromForm(
 	}
 	g.Title = r.PostFormValue("title")
 	g.Summary = r.PostFormValue("summary")
+	// Optional per-round override (#554). Blank input clears any previous
+	// override (NULL -> inherit the quiz default); a parse failure lands a
+	// zero, which roundForm.Valid rejects with an inline range error
+	// rather than silently saving a bad value.
+	g.BoundaryDurationSeconds = parseOptionalTimeLimit(r.PostFormValue("boundary_duration_seconds"))
 
 	if problems := (&roundForm{round: g}).Valid(r.Context()); len(problems) > 0 {
 		return problems, true
@@ -600,6 +605,15 @@ func (f *roundForm) Valid(_ context.Context) map[string]string {
 	problems := map[string]string{}
 	if f.round.Title == "" {
 		problems["title"] = "Give the round a name."
+	}
+	if f.round.BoundaryDurationSeconds != nil {
+		v := *f.round.BoundaryDurationSeconds
+		if v < quiz.MinTimeLimitSeconds || v > quiz.MaxTimeLimitSeconds {
+			problems["boundarydurationseconds"] = fmt.Sprintf(
+				"Round-boundary duration must be between %d and %d seconds, or blank to inherit the quiz default",
+				quiz.MinTimeLimitSeconds, quiz.MaxTimeLimitSeconds,
+			)
+		}
 	}
 
 	return problems

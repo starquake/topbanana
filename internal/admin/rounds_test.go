@@ -459,4 +459,81 @@ func TestHandleRoundSave(t *testing.T) {
 			t.Errorf("status = %d, want %d", got, want)
 		}
 	})
+
+	t.Run("persists a boundary duration from the form", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+		f := seedRoundsQuiz(t, env)
+
+		rec := postRoundSave(
+			t, env, strconv.FormatInt(f.quiz.ID, 10),
+			url.Values{"title": {"Timed Round"}, "boundary_duration_seconds": {"30"}}, adminActor,
+		)
+		if got, want := rec.Code, http.StatusSeeOther; got != want {
+			t.Fatalf("status = %d, want %d", got, want)
+		}
+
+		saved := roundByTitle(t, env, f.quiz.ID, "Timed Round")
+		if saved.BoundaryDurationSeconds == nil {
+			t.Fatal("saved.BoundaryDurationSeconds = nil, want 30")
+		}
+		if got, want := *saved.BoundaryDurationSeconds, 30; got != want {
+			t.Errorf("saved.BoundaryDurationSeconds = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("blank boundary duration inherits the quiz default", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+		f := seedRoundsQuiz(t, env)
+
+		rec := postRoundSave(
+			t, env, strconv.FormatInt(f.quiz.ID, 10),
+			url.Values{"title": {"Default Round"}, "boundary_duration_seconds": {""}}, adminActor,
+		)
+		if got, want := rec.Code, http.StatusSeeOther; got != want {
+			t.Fatalf("status = %d, want %d", got, want)
+		}
+
+		saved := roundByTitle(t, env, f.quiz.ID, "Default Round")
+		if saved.BoundaryDurationSeconds != nil {
+			t.Errorf("saved.BoundaryDurationSeconds = %v, want nil", *saved.BoundaryDurationSeconds)
+		}
+	})
+
+	t.Run("out-of-range boundary duration re-renders the form as a 400", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+		f := seedRoundsQuiz(t, env)
+
+		rec := postRoundSave(
+			t, env, strconv.FormatInt(f.quiz.ID, 10),
+			url.Values{"title": {"Bad Round"}, "boundary_duration_seconds": {"9999"}}, adminActor,
+		)
+		if got, want := rec.Code, http.StatusBadRequest; got != want {
+			t.Errorf("status = %d, want %d", got, want)
+		}
+	})
+}
+
+// roundByTitle lists the quiz's rounds and returns the one with the given
+// title, failing the test when no round matches.
+func roundByTitle(t *testing.T, env *adminEnv, quizID int64, title string) *quiz.Round {
+	t.Helper()
+
+	rounds, err := env.quizzes.ListRoundsByQuiz(t.Context(), quizID)
+	if err != nil {
+		t.Fatalf("ListRoundsByQuiz err = %v, want nil", err)
+	}
+	for _, r := range rounds {
+		if r.Title == title {
+			return r
+		}
+	}
+	t.Fatalf("no round titled %q on quiz %d", title, quizID)
+
+	return nil
 }

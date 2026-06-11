@@ -11,16 +11,17 @@ import (
 )
 
 const createRound = `-- name: CreateRound :one
-INSERT INTO rounds (quiz_id, position, title, summary)
-VALUES (?, ?, ?, ?)
-RETURNING id, quiz_id, position, title, summary, created_at, updated_at
+INSERT INTO rounds (quiz_id, position, title, summary, boundary_duration_seconds)
+VALUES (?, ?, ?, ?, ?)
+RETURNING id, quiz_id, position, title, summary, created_at, updated_at, boundary_duration_seconds
 `
 
 type CreateRoundParams struct {
-	QuizID   int64
-	Position int64
-	Title    string
-	Summary  string
+	QuizID                  int64
+	Position                int64
+	Title                   string
+	Summary                 string
+	BoundaryDurationSeconds sql.NullInt64
 }
 
 func (q *Queries) CreateRound(ctx context.Context, arg CreateRoundParams) (Round, error) {
@@ -29,6 +30,7 @@ func (q *Queries) CreateRound(ctx context.Context, arg CreateRoundParams) (Round
 		arg.Position,
 		arg.Title,
 		arg.Summary,
+		arg.BoundaryDurationSeconds,
 	)
 	var i Round
 	err := row.Scan(
@@ -39,6 +41,7 @@ func (q *Queries) CreateRound(ctx context.Context, arg CreateRoundParams) (Round
 		&i.Summary,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BoundaryDurationSeconds,
 	)
 	return i, err
 }
@@ -53,7 +56,7 @@ func (q *Queries) DeleteRound(ctx context.Context, id int64) (sql.Result, error)
 }
 
 const getDefaultRound = `-- name: GetDefaultRound :one
-SELECT id, quiz_id, position, title, summary, created_at, updated_at
+SELECT id, quiz_id, position, title, summary, created_at, updated_at, boundary_duration_seconds
 FROM rounds
 WHERE quiz_id = ?
 ORDER BY position
@@ -76,12 +79,13 @@ func (q *Queries) GetDefaultRound(ctx context.Context, quizID int64) (Round, err
 		&i.Summary,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BoundaryDurationSeconds,
 	)
 	return i, err
 }
 
 const getRound = `-- name: GetRound :one
-SELECT id, quiz_id, position, title, summary, created_at, updated_at
+SELECT id, quiz_id, position, title, summary, created_at, updated_at, boundary_duration_seconds
 FROM rounds
 WHERE id = ?
 LIMIT 1
@@ -98,12 +102,13 @@ func (q *Queries) GetRound(ctx context.Context, id int64) (Round, error) {
 		&i.Summary,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BoundaryDurationSeconds,
 	)
 	return i, err
 }
 
 const listRoundsByQuiz = `-- name: ListRoundsByQuiz :many
-SELECT id, quiz_id, position, title, summary, created_at, updated_at
+SELECT id, quiz_id, position, title, summary, created_at, updated_at, boundary_duration_seconds
 FROM rounds
 WHERE quiz_id = ?
 ORDER BY position
@@ -126,6 +131,7 @@ func (q *Queries) ListRoundsByQuiz(ctx context.Context, quizID int64) ([]Round, 
 			&i.Summary,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.BoundaryDurationSeconds,
 		); err != nil {
 			return nil, err
 		}
@@ -145,15 +151,17 @@ UPDATE rounds
 SET title      = ?,
     summary = ?,
     position   = ?,
+    boundary_duration_seconds = ?,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = ?
 `
 
 type UpdateRoundParams struct {
-	Title    string
-	Summary  string
-	Position int64
-	ID       int64
+	Title                   string
+	Summary                 string
+	Position                int64
+	BoundaryDurationSeconds sql.NullInt64
+	ID                      int64
 }
 
 func (q *Queries) UpdateRound(ctx context.Context, arg UpdateRoundParams) (sql.Result, error) {
@@ -161,6 +169,7 @@ func (q *Queries) UpdateRound(ctx context.Context, arg UpdateRoundParams) (sql.R
 		arg.Title,
 		arg.Summary,
 		arg.Position,
+		arg.BoundaryDurationSeconds,
 		arg.ID,
 	)
 }

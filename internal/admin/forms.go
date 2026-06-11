@@ -52,7 +52,17 @@ func (f *quizForm) Valid(ctx context.Context) map[string]string {
 	if q.Mode != "" && !quiz.IsValidMode(q.Mode) {
 		problems["mode"] = "Mode must be one of: solo, live"
 	}
-	for qsIndex, question := range q.Questions {
+	addQuestionProblems(ctx, problems, q.Questions)
+	addRoundProblems(ctx, problems, q.Rounds)
+
+	return problems
+}
+
+// addQuestionProblems folds each question's (and its options')
+// field-level problems into problems under the question-indexed keys the
+// admin template binds to.
+func addQuestionProblems(ctx context.Context, problems map[string]string, questions []*quiz.Question) {
+	for qsIndex, question := range questions {
 		qf := &questionForm{question: question}
 		for k, v := range qf.Valid(ctx) {
 			problems[fmt.Sprintf("questions[%d][%s]", qsIndex, k)] = v
@@ -64,8 +74,19 @@ func (f *quizForm) Valid(ctx context.Context) map[string]string {
 			}
 		}
 	}
+}
 
-	return problems
+// addRoundProblems folds each round's field-level problems into problems
+// under the round-indexed keys. The JSON-import path populates q.Rounds,
+// so this is the only gate that range-checks an imported round's
+// boundary_duration_seconds before it reaches the DB CHECK (#554).
+func addRoundProblems(ctx context.Context, problems map[string]string, rounds []*quiz.Round) {
+	for rIndex, round := range rounds {
+		rf := &roundForm{round: round}
+		for k, v := range rf.Valid(ctx) {
+			problems[fmt.Sprintf("rounds[%d][%s]", rIndex, k)] = v
+		}
+	}
 }
 
 // questionForm wraps a [quiz.Question] for the standalone

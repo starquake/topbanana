@@ -23,8 +23,8 @@ ORDER BY position
 LIMIT 1;
 
 -- name: CreateRound :one
-INSERT INTO rounds (quiz_id, position, title, summary)
-VALUES (?, ?, ?, ?)
+INSERT INTO rounds (quiz_id, position, title, summary, boundary_duration_seconds)
+VALUES (?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: UpdateRound :execresult
@@ -32,6 +32,7 @@ UPDATE rounds
 SET title      = ?,
     summary = ?,
     position   = ?,
+    boundary_duration_seconds = ?,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = ?;
 

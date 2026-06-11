@@ -68,6 +68,36 @@
             {{end}}
         </div>
 
+        {{$boundaryErr := index .FieldErrors "boundarydurationseconds"}}
+        <div class="form-field">
+            <label class="label-eyebrow" for="boundary_duration_seconds">
+                Round-boundary duration (seconds)
+                <span class="label-hint">Leave blank to inherit the quiz default ({{.Quiz.TimeLimitSeconds}}s).</span>
+            </label>
+            {{/* Quick-pick chips write into the number input below.
+                 "Inherit" clears the input so the round falls back to the
+                 quiz default at game time. */}}
+            <div class="flex flex-wrap gap-1.5 mb-2" role="group" aria-label="Quick pick">
+                <button type="button" class="preset-chip" onclick="document.getElementById('boundary_duration_seconds').value=''">Inherit</button>
+                <button type="button" class="preset-chip" onclick="document.getElementById('boundary_duration_seconds').value=3">3s</button>
+                <button type="button" class="preset-chip" onclick="document.getElementById('boundary_duration_seconds').value=6">6s</button>
+                <button type="button" class="preset-chip" onclick="document.getElementById('boundary_duration_seconds').value=8">8s</button>
+                <button type="button" class="preset-chip" onclick="document.getElementById('boundary_duration_seconds').value=10">10s</button>
+                <button type="button" class="preset-chip" onclick="document.getElementById('boundary_duration_seconds').value=12">12s</button>
+                <button type="button" class="preset-chip" onclick="document.getElementById('boundary_duration_seconds').value=15">15s</button>
+                <button type="button" class="preset-chip" onclick="document.getElementById('boundary_duration_seconds').value=20">20s</button>
+            </div>
+            <input id="boundary_duration_seconds" name="boundary_duration_seconds" type="number"
+                   min="1" max="600" step="1"
+                   value="{{.Round.BoundaryDurationSecondsValue}}"
+                   placeholder="{{.Quiz.TimeLimitSeconds}}"
+                   class="form-input max-w-[160px]{{if $boundaryErr}} form-input-error{{end}}"
+                   {{if $boundaryErr}}aria-invalid="true" aria-describedby="boundary_duration_seconds-error"{{end}}>
+            {{if $boundaryErr}}
+                <p id="boundary_duration_seconds-error" class="form-help-error" role="alert">{{$boundaryErr}}</p>
+            {{end}}
+        </div>
+
         <div class="form-actions">
             <button type="submit" name="action" value="Save" class="btn-primary">
                 Save round
