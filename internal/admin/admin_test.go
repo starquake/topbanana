@@ -232,15 +232,18 @@ func TestHandleQuizList_RendersPlayModeBadges(t *testing.T) {
 		t.Fatalf("status = %d, want %d", got, want)
 	}
 
-	// The live quiz card carries the accent-dot pill, the solo quiz card the
-	// default pill. Pin the class and label together so a restyle that drops
-	// the play-mode badge (#829) fails here.
+	// Each play-mode badge carries its own modifier class plus an inline
+	// Lucide icon before the label (#890). Match the open tag through the
+	// label so a restyle that drops either the class or the label fails
+	// here, while tolerating the SVG markup in between.
 	body := rr.Body.String()
-	if got, want := body, `class="pill pill-live">Live`; !strings.Contains(got, want) {
-		t.Errorf("body = %q, should contain live badge %q", got, want)
+	liveRe := regexp.MustCompile(`(?s)class="pill pill-live">.*?Live`)
+	if !liveRe.MatchString(body) {
+		t.Errorf("body = %q, should contain live badge matching %s", body, liveRe)
 	}
-	if got, want := body, `class="pill">Solo`; !strings.Contains(got, want) {
-		t.Errorf("body = %q, should contain solo badge %q", got, want)
+	soloRe := regexp.MustCompile(`(?s)class="pill pill-solo">.*?Solo`)
+	if !soloRe.MatchString(body) {
+		t.Errorf("body = %q, should contain solo badge matching %s", body, soloRe)
 	}
 }
 
