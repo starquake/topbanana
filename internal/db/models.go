@@ -138,13 +138,14 @@ type Quiz struct {
 }
 
 type Round struct {
-	ID        int64
-	QuizID    int64
-	Position  int64
-	Title     string
-	Summary   string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID                      int64
+	QuizID                  int64
+	Position                int64
+	Title                   string
+	Summary                 string
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+	BoundaryDurationSeconds sql.NullInt64
 }
 
 type Session struct {

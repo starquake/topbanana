@@ -141,6 +141,66 @@ func TestRoundSeenPhaseMigration_PerPhasePK(t *testing.T) {
 	}
 }
 
+// TestRoundBoundaryDurationMigration_NullableWithCheck asserts the #554
+// ADD COLUMN: rounds.boundary_duration_seconds defaults to NULL (inherit
+// the quiz default), accepts an in-range value, and the CHECK constraint
+// rejects an out-of-range one. dbtest.Open already ran the migration, so
+// the live schema is what it produced.
+func TestRoundBoundaryDurationMigration_NullableWithCheck(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := dbtest.Open(t)
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v", cerr)
+		}
+	})
+
+	quizStore := store.NewQuizStore(db, slog.Default())
+	creatorID := seedPlayer(t, db)
+	qz := &quiz.Quiz{
+		Title:             "Boundary quiz",
+		Slug:              "boundary-quiz",
+		CreatedByPlayerID: creatorID,
+		Questions: []*quiz.Question{
+			{Text: "Q1", Position: 1, Options: []*quiz.Option{{Text: "A", Correct: true}, {Text: "B"}}},
+		},
+	}
+	if err := quizStore.CreateQuiz(ctx, qz); err != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", err)
+	}
+	round, err := quizStore.GetDefaultRound(ctx, qz.ID)
+	if err != nil {
+		t.Fatalf("GetDefaultRound err = %v, want nil", err)
+	}
+
+	// The default round lands with a NULL override.
+	var dur sql.NullInt64
+	if err = db.QueryRowContext(
+		ctx, "SELECT boundary_duration_seconds FROM rounds WHERE id = ?", round.ID,
+	).Scan(&dur); err != nil {
+		t.Fatalf("scan boundary_duration_seconds err = %v, want nil", err)
+	}
+	if dur.Valid {
+		t.Errorf("default round boundary_duration_seconds = %d, want NULL", dur.Int64)
+	}
+
+	// An in-range value is accepted.
+	if _, err = db.ExecContext(
+		ctx, "UPDATE rounds SET boundary_duration_seconds = 30 WHERE id = ?", round.ID,
+	); err != nil {
+		t.Fatalf("UPDATE in-range err = %v, want nil", err)
+	}
+
+	// An out-of-range value trips the CHECK constraint.
+	if _, err = db.ExecContext(
+		ctx, "UPDATE rounds SET boundary_duration_seconds = 9999 WHERE id = ?", round.ID,
+	); err == nil {
+		t.Error("UPDATE out-of-range err = nil, want a CHECK violation")
+	}
+}
+
 // questionRoundID reads the round_id column for a question straight from
 // the DB so the test pins the migration's FK wiring without routing
 // through the store mapper.

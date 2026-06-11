@@ -988,6 +988,19 @@ func resolveAnswerWindow(q *quiz.Question, qz *quiz.Quiz) time.Duration {
 	return defaultExpiration
 }
 
+// resolveRoundBoundaryWindow picks the round-boundary auto-advance window
+// (shared by the intro and recap/results cards) from #554's priority
+// chain: the round's own boundary_duration_seconds wins; falling back to
+// the quiz default; falling back to defaultExpiration when both are unset
+// or zero.
+func resolveRoundBoundaryWindow(round *quiz.Round, qz *quiz.Quiz) time.Duration {
+	if round != nil && round.BoundaryDurationSeconds != nil && *round.BoundaryDurationSeconds > 0 {
+		return time.Duration(*round.BoundaryDurationSeconds) * time.Second
+	}
+
+	return resolveAnswerWindow(nil, qz)
+}
+
 // clampTappedAt applies the #237 trust window: the recorded answer time
 // is the client-supplied tappedAt when it falls inside [startedAt,
 // serverNow], otherwise it's serverNow. The fallback is intentionally
@@ -1439,7 +1452,7 @@ func (s *Service) buildRoundBoundaryItem(
 		Total:     len(qz.Questions),
 		Phase:     phase,
 		StartedAt: startedAt,
-		ExpiredAt: startedAt.Add(resolveAnswerWindow(nil, qz)),
+		ExpiredAt: startedAt.Add(resolveRoundBoundaryWindow(round, qz)),
 	}
 	if phase != RoundPhaseResults {
 		return item, nil

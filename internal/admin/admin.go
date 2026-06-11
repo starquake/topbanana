@@ -206,20 +206,35 @@ type QuestionData struct {
 // form. Mirrors the QuestionData/QuizData shape so the templates stay
 // symmetric with their question equivalents (#444).
 type RoundData struct {
-	ID       int64
-	QuizID   int64
-	Title    string
-	Summary  string
-	Position int
+	ID                      int64
+	QuizID                  int64
+	Title                   string
+	Summary                 string
+	Position                int
+	BoundaryDurationSeconds *int
+}
+
+// BoundaryDurationSecondsValue is the pre-formatted value bound to the
+// optional per-round boundary-duration input - empty when the round
+// inherits the quiz default (#554), so the form's <input type="number">
+// stays blank rather than rendering 0. Mirrors
+// QuestionData.TimeLimitSecondsValue.
+func (d *RoundData) BoundaryDurationSecondsValue() string {
+	if d.BoundaryDurationSeconds == nil {
+		return ""
+	}
+
+	return strconv.Itoa(*d.BoundaryDurationSeconds)
 }
 
 func roundDataFromRound(r *quiz.Round) *RoundData {
 	return &RoundData{
-		ID:       r.ID,
-		QuizID:   r.QuizID,
-		Title:    r.Title,
-		Summary:  r.Summary,
-		Position: r.Position,
+		ID:                      r.ID,
+		QuizID:                  r.QuizID,
+		Title:                   r.Title,
+		Summary:                 r.Summary,
+		Position:                r.Position,
+		BoundaryDurationSeconds: r.BoundaryDurationSeconds,
 	}
 }
 
@@ -1318,6 +1333,11 @@ type quizImportPayload struct {
 type quizImportRoundPayload struct {
 	Title   string `json:"title"`
 	Summary string `json:"summary,omitempty"`
+	// BoundaryDurationSeconds overrides the quiz default for this round's
+	// boundary auto-advance window (#554). Optional - omitted means
+	// "inherit the quiz value at game time", same as leaving the admin
+	// form's field blank.
+	BoundaryDurationSeconds *int `json:"boundaryDurationSeconds,omitempty"`
 	// Questions for this round, in play order. Required and non-empty;
 	// quiz-wide positions are assigned 1..N across all rounds (#546).
 	Questions []quizImportQuestionPayload `json:"questions"`
@@ -1375,6 +1395,7 @@ const quizImportExample = `{
     {
       "title": "Final stretch",
       "summary": "One harder question to finish.",
+      "boundaryDurationSeconds": 15,
       "questions": [
         {
           "text": "Which capital is furthest north?",
@@ -1651,10 +1672,13 @@ func fillQuizFromRounds(qz *quiz.Quiz, rounds []quizImportRoundPayload) error {
 		}
 
 		round := &quiz.Round{
-			Position:  i,
-			Title:     rIn.Title,
-			Summary:   rIn.Summary,
-			Questions: make([]*quiz.Question, 0, len(rIn.Questions)),
+			Position: i,
+			Title:    rIn.Title,
+			Summary:  rIn.Summary,
+			// nil -> "inherit the quiz default", the same semantics the
+			// admin form's blank input carries (#554).
+			BoundaryDurationSeconds: rIn.BoundaryDurationSeconds,
+			Questions:               make([]*quiz.Question, 0, len(rIn.Questions)),
 		}
 		for _, qIn := range rIn.Questions {
 			pos++

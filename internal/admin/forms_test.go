@@ -293,6 +293,42 @@ func TestQuestionForm_Valid_OptionRules(t *testing.T) {
 	}
 }
 
+// TestRoundForm_Valid_BoundaryDuration pins the #554 range check on the
+// optional per-round boundary-duration override: blank (nil) inherits,
+// in-range values pass, and out-of-range values surface keyed
+// "boundarydurationseconds".
+func TestRoundForm_Valid_BoundaryDuration(t *testing.T) {
+	t.Parallel()
+
+	intPtr := func(v int) *int { return &v }
+
+	tests := []struct {
+		name        string
+		duration    *int
+		wantProblem bool
+	}{
+		{name: "blank inherits the quiz default", duration: nil, wantProblem: false},
+		{name: "minimum is in range", duration: intPtr(quiz.MinTimeLimitSeconds), wantProblem: false},
+		{name: "maximum is in range", duration: intPtr(quiz.MaxTimeLimitSeconds), wantProblem: false},
+		{name: "mid-range is accepted", duration: intPtr(30), wantProblem: false},
+		{name: "below minimum is rejected", duration: intPtr(quiz.MinTimeLimitSeconds - 1), wantProblem: true},
+		{name: "above maximum is rejected", duration: intPtr(quiz.MaxTimeLimitSeconds + 1), wantProblem: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			round := &quiz.Round{Title: "Round 1", BoundaryDurationSeconds: tc.duration}
+			problems := ValidateRoundForm(t.Context(), round)
+			_, hasProblem := problems["boundarydurationseconds"]
+			if got, want := hasProblem, tc.wantProblem; got != want {
+				t.Errorf("boundarydurationseconds problem present = %v, want %v (problems=%v)", got, want, problems)
+			}
+		})
+	}
+}
+
 func TestParseOptionalTimeLimit(t *testing.T) {
 	t.Parallel()
 

@@ -111,6 +111,78 @@ func TestQuizFromImportPayload_MapsRounds(t *testing.T) {
 	}
 }
 
+// TestQuizFromImportPayload_MapsRoundBoundaryDuration pins the #554
+// round override: a round carrying boundaryDurationSeconds round-trips
+// the value onto Quiz.Rounds, and a round omitting it yields nil
+// (inherit the quiz default at game time).
+func TestQuizFromImportPayload_MapsRoundBoundaryDuration(t *testing.T) {
+	t.Parallel()
+
+	dur := 15
+	qz, err := admin.QuizFromImportPayload(admin.QuizImportPayload{
+		Title:       "Capitals",
+		Description: "x",
+		Rounds: []admin.QuizImportRoundPayload{
+			{
+				Title:                   "Timed",
+				BoundaryDurationSeconds: &dur,
+				Questions: []admin.QuizImportQuestionPayload{
+					{Text: "Q1", Options: []admin.QuizImportOptionPayload{{Text: "a", Correct: true}}},
+				},
+			},
+			{
+				Title: "Default",
+				Questions: []admin.QuizImportQuestionPayload{
+					{Text: "Q2", Options: []admin.QuizImportOptionPayload{{Text: "b", Correct: true}}},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("QuizFromImportPayload err = %v, want nil", err)
+	}
+
+	if got := qz.Rounds[0].BoundaryDurationSeconds; got == nil {
+		t.Fatal("rounds[0].BoundaryDurationSeconds = nil, want 15")
+	} else if want := 15; *got != want {
+		t.Errorf("rounds[0].BoundaryDurationSeconds = %d, want %d", *got, want)
+	}
+	if got := qz.Rounds[1].BoundaryDurationSeconds; got != nil {
+		t.Errorf("rounds[1].BoundaryDurationSeconds = %v, want nil", *got)
+	}
+}
+
+// TestQuizFromImportPayload_RoundBoundaryDurationRangeValidated pins the
+// #554 import gate: an imported round whose boundaryDurationSeconds falls
+// outside the 1..600 bound surfaces as a quizForm validation problem (a
+// clean inline 400) rather than tripping the DB CHECK at INSERT.
+func TestQuizFromImportPayload_RoundBoundaryDurationRangeValidated(t *testing.T) {
+	t.Parallel()
+
+	dur := 9999
+	qz, err := admin.QuizFromImportPayload(admin.QuizImportPayload{
+		Title:       "Capitals",
+		Description: "x",
+		Rounds: []admin.QuizImportRoundPayload{
+			{
+				Title:                   "Timed",
+				BoundaryDurationSeconds: &dur,
+				Questions: []admin.QuizImportQuestionPayload{
+					{Text: "Q1", Options: []admin.QuizImportOptionPayload{{Text: "a", Correct: true}}},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("QuizFromImportPayload err = %v, want nil", err)
+	}
+
+	problems := admin.ValidateQuizForm(t.Context(), qz)
+	if _, ok := problems["rounds[0][boundarydurationseconds]"]; !ok {
+		t.Errorf("problems = %v, want a rounds[0][boundarydurationseconds] key", problems)
+	}
+}
+
 // TestQuizFromImportPayload_QuestionsAndRoundsMutuallyExclusive pins the
 // validation that rejects a payload carrying both a top-level
 // questions[] and rounds[], or neither (#546).

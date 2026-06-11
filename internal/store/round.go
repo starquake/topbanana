@@ -72,10 +72,11 @@ func (s *QuizStore) GetDefaultRound(ctx context.Context, quizID int64) (*quiz.Ro
 // collision as [quiz.ErrRoundPositionTaken] (#444).
 func (s *QuizStore) CreateRound(ctx context.Context, g *quiz.Round) error {
 	row, err := s.q.CreateRound(ctx, db.CreateRoundParams{
-		QuizID:   g.QuizID,
-		Position: int64(g.Position),
-		Title:    g.Title,
-		Summary:  g.Summary,
+		QuizID:                  g.QuizID,
+		Position:                int64(g.Position),
+		Title:                   g.Title,
+		Summary:                 g.Summary,
+		BoundaryDurationSeconds: nullableTimeLimit(g.BoundaryDurationSeconds),
 	})
 	if err != nil {
 		if isRoundUniqueViolation(err) {
@@ -87,6 +88,7 @@ func (s *QuizStore) CreateRound(ctx context.Context, g *quiz.Round) error {
 	g.ID = row.ID
 	g.CreatedAt = row.CreatedAt
 	g.UpdatedAt = row.UpdatedAt
+	g.BoundaryDurationSeconds = nullableTimeLimitToPtr(row.BoundaryDurationSeconds)
 
 	return nil
 }
@@ -101,10 +103,11 @@ func (s *QuizStore) UpdateRound(ctx context.Context, g *quiz.Round) error {
 	}
 
 	res, err := s.q.UpdateRound(ctx, db.UpdateRoundParams{
-		Title:    g.Title,
-		Summary:  g.Summary,
-		Position: int64(g.Position),
-		ID:       g.ID,
+		Title:                   g.Title,
+		Summary:                 g.Summary,
+		Position:                int64(g.Position),
+		BoundaryDurationSeconds: nullableTimeLimit(g.BoundaryDurationSeconds),
+		ID:                      g.ID,
 	})
 	if err != nil {
 		if isRoundUniqueViolation(err) {
@@ -412,13 +415,14 @@ func clampIndex(position, length int) int {
 // roundFromRow maps a sqlc rounds row onto the domain type.
 func roundFromRow(r db.Round) *quiz.Round {
 	return &quiz.Round{
-		ID:        r.ID,
-		QuizID:    r.QuizID,
-		Position:  int(r.Position),
-		Title:     r.Title,
-		Summary:   r.Summary,
-		CreatedAt: r.CreatedAt,
-		UpdatedAt: r.UpdatedAt,
+		ID:                      r.ID,
+		QuizID:                  r.QuizID,
+		Position:                int(r.Position),
+		Title:                   r.Title,
+		Summary:                 r.Summary,
+		BoundaryDurationSeconds: nullableTimeLimitToPtr(r.BoundaryDurationSeconds),
+		CreatedAt:               r.CreatedAt,
+		UpdatedAt:               r.UpdatedAt,
 	}
 }
 

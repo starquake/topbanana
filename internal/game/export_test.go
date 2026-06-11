@@ -13,9 +13,10 @@ import (
 // production surface is unchanged; only the external game_test
 // package sees the Export* names.
 var (
-	ExportClampTappedAt       = clampTappedAt
-	ExportResolveAnswerWindow = resolveAnswerWindow
-	ExportDefaultExpiration   = defaultExpiration
+	ExportClampTappedAt              = clampTappedAt
+	ExportResolveAnswerWindow        = resolveAnswerWindow
+	ExportResolveRoundBoundaryWindow = resolveRoundBoundaryWindow
+	ExportDefaultExpiration          = defaultExpiration
 )
 
 // ExportRoundSlot is the test-visible projection of the unexported

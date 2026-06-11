@@ -9,11 +9,14 @@ sql:
         out: "internal/db"
         overrides:
           # sqlc's SQLite type inference defaults nullable INTEGER to
-          # interface{}; questions.time_limit_seconds (#99) is the only
-          # nullable INTEGER on the schema today and the game service
-          # treats it as a *int / sql.NullInt64. Pin it explicitly so
-          # the generated params and row structs stay strongly typed.
+          # interface{}; the store layer treats these nullable-INTEGER
+          # overrides as *int / sql.NullInt64. Pin each explicitly so the
+          # generated params and row structs stay strongly typed.
           - column: "questions.time_limit_seconds"
+            go_type:
+              import: "database/sql"
+              type: "NullInt64"
+          - column: "rounds.boundary_duration_seconds"
             go_type:
               import: "database/sql"
               type: "NullInt64"

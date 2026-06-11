@@ -181,6 +181,43 @@ func TestQuizStore_CreateRound(t *testing.T) {
 		if got, want := reloaded.Position, 1; got != want {
 			t.Errorf("reloaded.Position = %d, want %d", got, want)
 		}
+		if reloaded.BoundaryDurationSeconds != nil {
+			t.Errorf(
+				"reloaded.BoundaryDurationSeconds = %v, want nil (inherit quiz default)",
+				*reloaded.BoundaryDurationSeconds,
+			)
+		}
+	})
+
+	t.Run("round-trips an explicit boundary duration", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		qz := newTestQuizForGroups(t, quizStore)
+
+		dur := 25
+		g := &quiz.Round{QuizID: qz.ID, Position: 1, Title: "Round 2", BoundaryDurationSeconds: &dur}
+		if err := quizStore.CreateRound(t.Context(), g); err != nil {
+			t.Fatalf("CreateRound err = %v, want nil", err)
+		}
+		if g.BoundaryDurationSeconds == nil {
+			t.Fatal("g.BoundaryDurationSeconds = nil after CreateRound, want hydrated value")
+		}
+		if got, want := *g.BoundaryDurationSeconds, 25; got != want {
+			t.Errorf("g.BoundaryDurationSeconds = %d, want %d", got, want)
+		}
+
+		reloaded, err := quizStore.GetRound(t.Context(), g.ID)
+		if err != nil {
+			t.Fatalf("GetRound err = %v", err)
+		}
+		if reloaded.BoundaryDurationSeconds == nil {
+			t.Fatal("reloaded.BoundaryDurationSeconds = nil, want 25")
+		}
+		if got, want := *reloaded.BoundaryDurationSeconds, 25; got != want {
+			t.Errorf("reloaded.BoundaryDurationSeconds = %d, want %d", got, want)
+		}
 	})
 
 	t.Run("position collision returns ErrRoundPositionTaken", func(t *testing.T) {
@@ -316,6 +353,48 @@ func TestQuizStore_UpdateRound(t *testing.T) {
 		}
 		if got, want := reloaded.Position, 2; got != want {
 			t.Errorf("reloaded.Position = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("sets and clears the boundary duration", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		qz := newTestQuizForGroups(t, quizStore)
+
+		g := &quiz.Round{QuizID: qz.ID, Position: 1, Title: "Round 2"}
+		if err := quizStore.CreateRound(t.Context(), g); err != nil {
+			t.Fatalf("CreateRound err = %v", err)
+		}
+
+		dur := 42
+		g.BoundaryDurationSeconds = &dur
+		if err := quizStore.UpdateRound(t.Context(), g); err != nil {
+			t.Fatalf("UpdateRound err = %v, want nil", err)
+		}
+		reloaded, err := quizStore.GetRound(t.Context(), g.ID)
+		if err != nil {
+			t.Fatalf("GetRound err = %v", err)
+		}
+		if reloaded.BoundaryDurationSeconds == nil {
+			t.Fatal("reloaded.BoundaryDurationSeconds = nil after set, want 42")
+		}
+		if got, want := *reloaded.BoundaryDurationSeconds, 42; got != want {
+			t.Errorf("reloaded.BoundaryDurationSeconds = %d, want %d", got, want)
+		}
+
+		// Clearing the override restores "inherit the quiz default".
+		g.BoundaryDurationSeconds = nil
+		if err = quizStore.UpdateRound(t.Context(), g); err != nil {
+			t.Fatalf("UpdateRound (clear) err = %v, want nil", err)
+		}
+		cleared, err := quizStore.GetRound(t.Context(), g.ID)
+		if err != nil {
+			t.Fatalf("GetRound err = %v", err)
+		}
+		if cleared.BoundaryDurationSeconds != nil {
+			t.Errorf("cleared.BoundaryDurationSeconds = %v, want nil", *cleared.BoundaryDurationSeconds)
 		}
 	})
 

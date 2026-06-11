@@ -790,19 +790,21 @@ func (s *QuizStore) createAuthoredRounds(ctx context.Context, q *db.Queries, qz 
 		roundID := defaultRound.ID
 		if i == 0 {
 			if _, err = q.UpdateRound(ctx, db.UpdateRoundParams{
-				Title:    round.Title,
-				Summary:  round.Summary,
-				Position: defaultRound.Position,
-				ID:       defaultRound.ID,
+				Title:                   round.Title,
+				Summary:                 round.Summary,
+				Position:                defaultRound.Position,
+				BoundaryDurationSeconds: nullableTimeLimit(round.BoundaryDurationSeconds),
+				ID:                      defaultRound.ID,
 			}); err != nil {
 				return fmt.Errorf("failed to rename default round: %w", err)
 			}
 		} else {
 			row, createErr := q.CreateRound(ctx, db.CreateRoundParams{
-				QuizID:   qz.ID,
-				Position: int64(i),
-				Title:    round.Title,
-				Summary:  round.Summary,
+				QuizID:                  qz.ID,
+				Position:                int64(i),
+				Title:                   round.Title,
+				Summary:                 round.Summary,
+				BoundaryDurationSeconds: nullableTimeLimit(round.BoundaryDurationSeconds),
 			})
 			if createErr != nil {
 				return fmt.Errorf("failed to create round %q: %w", round.Title, createErr)
