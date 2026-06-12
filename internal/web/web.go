@@ -15,10 +15,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/tdewolff/minify/v2"
-	"github.com/tdewolff/minify/v2/css"
-	"github.com/tdewolff/minify/v2/js"
-
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/envtag"
 )
@@ -42,18 +38,7 @@ func Handler(cfg *config.Config) http.Handler {
 	// string, and "font/woff2" is a constant valid one.
 	_ = mime.AddExtensionType(".woff2", "font/woff2")
 
-	fileServer := http.FileServer(http.FS(resolveStaticFS(cfg)))
-
-	if cfg.IsProduction() {
-		m := minify.New()
-		m.AddFunc("text/css", css.Minify)
-		m.AddFunc("application/javascript", js.Minify)
-		m.AddFunc("text/javascript", js.Minify)
-
-		return http.StripPrefix("/assets", m.Middleware(fileServer))
-	}
-
-	return http.StripPrefix("/assets", fileServer)
+	return http.StripPrefix("/assets", http.FileServer(http.FS(resolveStaticFS(cfg))))
 }
 
 // ManifestHandler serves /manifest.webmanifest with the correct
