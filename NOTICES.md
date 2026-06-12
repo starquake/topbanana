@@ -57,9 +57,11 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ## anime.js — MIT License
 
 A copy of anime.js 4.2.0 is vendored at
-`internal/client/static/js/vendor/anime.umd.min.js` (introduced in #295,
-previously loaded from cdn.jsdelivr.net). anime.js is published under
-the MIT License:
+`internal/client/static/js/vendor/anime.umd.min.js` and
+`internal/web/static/js/vendor/anime.umd.min.js` (introduced in #295,
+previously loaded from cdn.jsdelivr.net). The committed file is now built
+from the pinned `animejs` npm package by esbuild (#897). anime.js is
+published under the MIT License:
 
 ```
 The MIT License (MIT)
@@ -88,9 +90,11 @@ THE SOFTWARE.
 ## Alpine.js — MIT License
 
 A copy of Alpine.js 3.15.12 is vendored at
-`internal/client/static/js/vendor/alpine.min.js` (introduced in #295,
-previously loaded from cdn.jsdelivr.net). Alpine.js is published under
-the MIT License:
+`internal/client/static/js/vendor/alpine.min.js` and
+`internal/web/static/js/vendor/alpine.min.js` (introduced in #295,
+previously loaded from cdn.jsdelivr.net). The committed file is now built
+from the pinned `alpinejs` npm package by esbuild (#897). Alpine.js is
+published under the MIT License:
 
 ```
 The MIT License (MIT)
@@ -122,8 +126,9 @@ A copy of SortableJS 1.15.6 is vendored at
 `internal/web/static/js/vendor/sortable.min.js` (introduced in #199). It
 powers the drag-and-drop reorder of rounds and questions on the admin quiz
 view and is loaded only on that page, self-hosted rather than from a CDN
-(following the precedent set for anime.js / Alpine.js in #295). SortableJS
-is published under the MIT License:
+(following the precedent set for anime.js / Alpine.js in #295). The
+committed file is now built from the pinned `sortablejs` npm package by
+esbuild (#897). SortableJS is published under the MIT License:
 
 ```
 The MIT License (MIT)
