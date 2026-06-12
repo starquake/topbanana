@@ -24,9 +24,10 @@ func TestEmbeddedAssets_ServeOnlyBuiltOutput(t *testing.T) {
 		"/join",
 		"/client/js/dist/app.js",
 		"/client/js/dist/join.js",
-		"/client/js/vendor/alpine.min.js",
 		// Web / admin: every served script is a built bundle under dist/ or a
-		// vendored lib; the standalone admin/auth scripts are bundled too.
+		// vendored lib; the standalone admin/auth scripts are bundled too. The
+		// player client loads Alpine + anime from this same web-served vendor
+		// dir rather than a per-client duplicate.
 		"/assets/css/app.css",
 		"/assets/js/dist/host-bigscreen.js",
 		"/assets/js/dist/share.js",
@@ -35,6 +36,8 @@ func TestEmbeddedAssets_ServeOnlyBuiltOutput(t *testing.T) {
 		"/assets/js/dist/copy-prompt.js",
 		"/assets/js/dist/password-length.js",
 		"/assets/js/htmx.min.js",
+		"/assets/js/vendor/alpine.min.js",
+		"/assets/js/vendor/anime.umd.min.js",
 		"/assets/js/vendor/sortable.min.js",
 	}
 	for _, path := range served {
@@ -47,6 +50,10 @@ func TestEmbeddedAssets_ServeOnlyBuiltOutput(t *testing.T) {
 		"/client/js/join.js",
 		"/client/js/components/GameApp.js",
 		"/client/js/services/api.js",
+		// Alpine + anime are no longer duplicated under the client tree; the
+		// client shells load the web-served copies at /assets/js/vendor/.
+		"/client/js/vendor/alpine.min.js",
+		"/client/js/vendor/anime.umd.min.js",
 		// Web sources relocated to frontend/web: the esbuild entries and the
 		// now-bundled standalone scripts are no longer served at their old
 		// un-bundled paths.

@@ -352,6 +352,22 @@ JS_WEB_ENTRIES  := $(JS_WEB_SRC)/host-bigscreen.js $(JS_WEB_SRC)/share.js \
                    $(JS_WEB_SRC)/password-length.js $(JS_WEB_SRC)/quiz-reorder.js \
                    $(JS_WEB_SRC)/home.js
 
+# Third-party libraries (Alpine, anime.js, SortableJS) are sourced from the
+# pinned npm packages (package.json) and re-emitted by esbuild as standalone
+# classic scripts at the served vendor paths the templates reference (#897).
+# Each entry under frontend/vendor imports its npm package and assigns the
+# upstream global (window.Alpine / window.anime / window.Sortable), so the
+# template <script> tags and window.* access are unchanged -- only the source of
+# the committed file moved from a hand-dropped download to the npm build. The
+# web vendor dir gets all three. The player client loads Alpine + anime too, but
+# from this same web-served copy at /assets/js/vendor/ rather than a per-client
+# duplicate, so only this one tree is built (the client shells reference the
+# /assets/ URLs; see internal/client/static/index.html and join.html).
+JS_VENDOR_SRC     := frontend/vendor
+JS_VENDOR_WEB_OUT := internal/web/static/js/vendor
+JS_VENDOR_WEB_ENTRIES := $(JS_VENDOR_SRC)/alpine.min.js \
+                   $(JS_VENDOR_SRC)/anime.umd.min.js $(JS_VENDOR_SRC)/sortable.min.js
+
 # Alpine 3 targets modern evergreen browsers; es2020 matches the syntax the
 # source already uses (async/await, optional chaining). The @shared alias
 # resolves the cross-tree modules in frontend/shared so each bundle inlines
@@ -359,14 +375,24 @@ JS_WEB_ENTRIES  := $(JS_WEB_SRC)/host-bigscreen.js $(JS_WEB_SRC)/share.js \
 ESBUILD_FLAGS   := --bundle --minify --format=esm --target=es2020 \
                    --alias:@shared=./frontend/shared
 
+# The vendor libs load as classic <script> tags (not type="module") and expose
+# window.* globals, so they bundle as self-executing IIFEs rather than ESM.
+ESBUILD_VENDOR_FLAGS := --bundle --minify --format=iife --target=es2020
+
 $(JS_DEPS): package.json package-lock.json
 	npm ci
 	@touch $@
 
 .PHONY: js
-js: $(JS_DEPS)
+js: $(JS_DEPS) js-vendor
 	$(ESBUILD_BIN) $(JS_CLIENT_ENTRIES) $(ESBUILD_FLAGS) --outdir=$(JS_CLIENT_OUT)
 	$(ESBUILD_BIN) $(JS_WEB_ENTRIES) $(ESBUILD_FLAGS) --outdir=$(JS_WEB_OUT)
+
+# Re-emit the npm-sourced vendor libs at their served paths. The committed
+# output is drift-checked by js-check, like the app bundles and app.css.
+.PHONY: js-vendor
+js-vendor: $(JS_DEPS)
+	$(ESBUILD_BIN) $(JS_VENDOR_WEB_ENTRIES) $(ESBUILD_VENDOR_FLAGS) --outdir=$(JS_VENDOR_WEB_OUT)
 
 # Rebuild on change during development. One target per long-running watcher
 # (the client and web bundles write to different served dist dirs, so they
@@ -388,14 +414,19 @@ js-watch-web: $(JS_DEPS)
 .PHONY: js-check
 js-check: $(JS_DEPS)
 	@$(MAKE) --no-print-directory js-check-one \
-	    JS_CHECK_ENTRIES="$(JS_CLIENT_ENTRIES)" JS_CHECK_OUT="$(JS_CLIENT_OUT)"
+	    JS_CHECK_ENTRIES="$(JS_CLIENT_ENTRIES)" JS_CHECK_OUT="$(JS_CLIENT_OUT)" \
+	    JS_CHECK_FLAGS="$(ESBUILD_FLAGS)"
 	@$(MAKE) --no-print-directory js-check-one \
-	    JS_CHECK_ENTRIES="$(JS_WEB_ENTRIES)" JS_CHECK_OUT="$(JS_WEB_OUT)"
+	    JS_CHECK_ENTRIES="$(JS_WEB_ENTRIES)" JS_CHECK_OUT="$(JS_WEB_OUT)" \
+	    JS_CHECK_FLAGS="$(ESBUILD_FLAGS)"
+	@$(MAKE) --no-print-directory js-check-one \
+	    JS_CHECK_ENTRIES="$(JS_VENDOR_WEB_ENTRIES)" JS_CHECK_OUT="$(JS_VENDOR_WEB_OUT)" \
+	    JS_CHECK_FLAGS="$(ESBUILD_VENDOR_FLAGS)"
 
 .PHONY: js-check-one
 js-check-one:
 	@tmp=$$(mktemp -d) && \
-	    $(ESBUILD_BIN) $(JS_CHECK_ENTRIES) $(ESBUILD_FLAGS) --outdir=$$tmp >/dev/null 2>&1 && \
+	    $(ESBUILD_BIN) $(JS_CHECK_ENTRIES) $(JS_CHECK_FLAGS) --outdir=$$tmp >/dev/null 2>&1 && \
 	    if ! diff -rq $$tmp $(JS_CHECK_OUT) >/dev/null; then \
 	        echo "ERROR: $(JS_CHECK_OUT) is out of date — run \`make js\` and commit the result."; \
 	        diff -ru $(JS_CHECK_OUT) $$tmp || true; \

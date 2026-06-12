@@ -97,7 +97,7 @@ func TestPWA_Integration(t *testing.T) {
 		// PRECACHE_URLS but not the served path would leave the SW caching a
 		// 404 forever; fetch each precache entry and require a 200 so the
 		// precache <-> served-bundle correspondence can never silently drift.
-		if got, want := len(urls), 13; got != want {
+		if got, want := len(urls), 14; got != want {
 			t.Errorf("parsed %d precache URLs, want %d - update this guard if PRECACHE_URLS changed", got, want)
 		}
 		for _, path := range urls {
