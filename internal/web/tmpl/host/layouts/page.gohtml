@@ -11,10 +11,20 @@
     <link rel="stylesheet" href="/assets/css/app.css">
 </head>
 <body class="bg-bg text-text font-sans antialiased min-h-dvh">
-    {{/* Minimal host header. Slice 3 (#889) hangs a "Session live" indicator
-         here; for now it is just the wordmark linking back to the dashboard. */}}
-    <header class="flex items-center px-6 py-4 border-b border-border-soft">
+    {{/* Minimal host header: the wordmark links back to the dashboard, and a
+         persistent "Session live" indicator (#889) appears when the host already
+         has a room open so they know they are mid-session while picking, and can
+         jump back to it. */}}
+    <header class="flex items-center justify-between gap-4 px-6 py-4 border-b border-border-soft">
         <a href="/admin" class="font-display text-lg font-bold uppercase tracking-tight text-text hover:text-accent">Top Banana</a>
+        {{if .LiveSession.Active}}
+            <a href="/host/{{.LiveSession.JoinCode}}"
+               data-testid="session-live-indicator"
+               class="inline-flex items-center gap-2 rounded-full border border-accent-line bg-surface px-3 py-1.5 text-sm text-text-dim hover:text-text hover:border-accent transition-colors">
+                <span class="w-2 h-2 rounded-full bg-cyan"></span>
+                <span>Session live{{if .LiveSession.QuizTitle}} &mdash; <span class="text-text font-medium">{{.LiveSession.QuizTitle}}</span>{{end}}</span>
+            </a>
+        {{end}}
     </header>
     {{template "content" .}}
 </body>
