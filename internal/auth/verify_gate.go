@@ -117,7 +117,7 @@ func HandleVerifyPending(
 			data.ResendWaitSeconds = fr.WaitSeconds
 			data.ResendDisabled = fr.WaitSeconds > 0
 		}
-		render.render(w, r, http.StatusOK, data)
+		render.Render(w, r, http.StatusOK, data)
 	})
 }
 

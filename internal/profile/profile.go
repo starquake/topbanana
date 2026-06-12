@@ -24,6 +24,7 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/envtag"
+	"github.com/starquake/topbanana/internal/render"
 	"github.com/starquake/topbanana/internal/version"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
@@ -81,7 +82,7 @@ func adminNextPath(raw string) string {
 // auth.RequireAuthenticated middleware mounted upstream guarantees
 // the request context carries the signed-in player.
 func HandleProfile(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
-	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/profile.gohtml")
+	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/profile.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		player, ok := auth.PlayerFromContext(r.Context())
@@ -96,7 +97,7 @@ func HandleProfile(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
 		}
 
 		backHref, backLabel, next := profileBack(r)
-		render.render(w, r, http.StatusOK, pageData{
+		renderer.render(w, r, http.StatusOK, pageData{
 			Title:       "Profile",
 			DisplayName: player.DisplayName,
 			BackHref:    backHref,
@@ -121,7 +122,7 @@ func HandleProfileDisplayName(
 	csrfMgr *csrf.Manager,
 	players auth.PlayerStore,
 ) http.Handler {
-	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/profile.gohtml")
+	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/profile.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		player, ok := auth.PlayerFromContext(r.Context())
@@ -150,7 +151,7 @@ func HandleProfileDisplayName(
 
 		updated, err := players.RenamePlayer(r.Context(), player.ID, cleaned)
 		if err != nil {
-			renderRenameError(render, logger, w, r, renameAttempt{
+			renderRenameError(renderer, logger, w, r, renameAttempt{
 				playerID:           player.ID,
 				currentDisplayName: player.DisplayName,
 				attempted:          raw,
@@ -161,7 +162,7 @@ func HandleProfileDisplayName(
 		}
 
 		backHref, backLabel := backFromNext(next)
-		render.render(w, r, http.StatusOK, pageData{
+		renderer.render(w, r, http.StatusOK, pageData{
 			Title:       "Profile",
 			DisplayName: updated.DisplayName,
 			Saved:       true,
@@ -204,7 +205,7 @@ type renameAttempt struct {
 // with the cause. The attempted name is logged for the taken case so
 // the collision target is visible.
 func renderRenameError(
-	render *templateRenderer,
+	renderer *pageRenderer,
 	logger *slog.Logger,
 	w http.ResponseWriter,
 	r *http.Request,
@@ -216,7 +217,7 @@ func renderRenameError(
 	case errors.Is(err, auth.ErrDisplayNameEmpty):
 		logger.InfoContext(r.Context(), "profile rename rejected: empty name",
 			slog.Int64("player_id", a.playerID))
-		render.render(w, r, http.StatusBadRequest, pageData{
+		renderer.render(w, r, http.StatusBadRequest, pageData{
 			Title:       "Profile",
 			DisplayName: a.currentDisplayName,
 			Message:     "Display name is required.",
@@ -227,7 +228,7 @@ func renderRenameError(
 	case errors.Is(err, auth.ErrDisplayNameTaken):
 		logger.InfoContext(r.Context(), "profile rename rejected: name taken",
 			slog.Int64("player_id", a.playerID), slog.String("attempted", a.attempted))
-		render.render(w, r, http.StatusConflict, pageData{
+		renderer.render(w, r, http.StatusConflict, pageData{
 			Title:       "Profile",
 			DisplayName: a.attempted,
 			Message:     "That name is already taken. Pick a different one.",
@@ -242,19 +243,33 @@ func renderRenameError(
 	}
 }
 
-// templateRenderer mirrors the auth package's helper of the same
-// name - parses the auth layout + the page template once and re-
-// clones per request so html/template's context-aware escaping
-// applies cleanly. csrfToken is bound per-render so the form's
-// hidden input always carries a token paired with the response's
-// nonce cookie.
-type templateRenderer struct {
-	logger *slog.Logger
-	csrf   *csrf.Manager
-	t      *template.Template
+// pageRenderer wraps a render.Renderer in a typed render method so every
+// profile call site passes a pageData, not an any. The shared renderer takes
+// any, which would let a stray-typed payload through; this thin wrapper keeps
+// the compile-time check the package relied on while reusing the shared
+// clone/csrf/execute mechanics.
+type pageRenderer struct {
+	r *render.Renderer
 }
 
-func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string) *templateRenderer {
+func (pr *pageRenderer) render(w http.ResponseWriter, r *http.Request, status int, data pageData) {
+	pr.r.Render(w, r, status, data)
+}
+
+// renderAny renders a page whose data type is not pageData (the email and
+// password pages carry their own structs). Kept distinct from render so the
+// typed wrapper stays the default call site and a stray any-typed payload at a
+// pageData call site still fails the compiler.
+func (pr *pageRenderer) renderAny(w http.ResponseWriter, r *http.Request, status int, data any) {
+	pr.r.Render(w, r, status, data)
+}
+
+// newTemplateRenderer parses the auth layout + the page template once and wraps
+// the tree in a render.Renderer (behind pageRenderer's typed render). It mirrors
+// the auth package's helper of the same name. csrfToken is bound per-render so
+// the form's hidden input always carries a token paired with the response's
+// nonce cookie.
+func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string) *pageRenderer {
 	funcs := template.FuncMap{
 		"csrfToken":      func() string { return "" },
 		"ogImage":        func() string { return "" },
@@ -278,36 +293,16 @@ func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string
 	layouts := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "components/*.gohtml", "auth/layouts/*.gohtml"),
 	)
+	t := template.Must(template.Must(layouts.Clone()).ParseFS(tmpl.FS, page))
 
-	return &templateRenderer{
-		logger: logger,
-		csrf:   csrfMgr,
-		t:      template.Must(template.Must(layouts.Clone()).ParseFS(tmpl.FS, page)),
-	}
+	return &pageRenderer{r: render.New(logger, csrfMgr, t, "base.gohtml", profilePerRequestFuncs)}
 }
 
-func (tr *templateRenderer) render(w http.ResponseWriter, r *http.Request, status int, data pageData) {
-	tr.renderAny(w, r, status, data)
-}
-
-// renderAny is the underlying render entry point shared by every page
-// in this package. Kept distinct from render so the typed wrapper
-// (above) stays the default call site and a stray any-typed payload
-// at a typed call site fails the compiler.
-func (tr *templateRenderer) renderAny(w http.ResponseWriter, r *http.Request, status int, data any) {
-	t, err := tr.t.Clone()
-	if err != nil {
-		tr.logger.ErrorContext(r.Context(), "error cloning template", slog.Any("err", err))
-		http.Error(w, "internal error", http.StatusInternalServerError)
-
-		return
-	}
-
-	csrfToken := ""
-	if tr.csrf != nil {
-		csrfToken = tr.csrf.Token(w, r)
-	}
-
+// profilePerRequestFuncs binds the profile surface's per-request template
+// funcs: the OG image URL and the viewer's display name / signed-in flag
+// resolved from the request context. render.Renderer binds csrfToken itself, so
+// it is omitted here. Matches the auth surface's per-request set.
+func profilePerRequestFuncs(r *http.Request) template.FuncMap {
 	displayName := ""
 	signedIn := false
 	if p, ok := auth.PlayerFromContext(r.Context()); ok {
@@ -315,16 +310,9 @@ func (tr *templateRenderer) renderAny(w http.ResponseWriter, r *http.Request, st
 		signedIn = true
 	}
 
-	t = t.Funcs(template.FuncMap{
-		"csrfToken":  func() string { return csrfToken },
+	return template.FuncMap{
 		"ogImage":    func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
 		"viewerName": func() string { return displayName },
 		"isSignedIn": func() bool { return signedIn },
-	})
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(status)
-	if err := t.ExecuteTemplate(w, "base.gohtml", data); err != nil {
-		tr.logger.ErrorContext(r.Context(), "error executing profile template", slog.Any("err", err))
 	}
 }

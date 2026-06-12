@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/render"
 	"github.com/starquake/topbanana/internal/session"
 )
 
@@ -27,7 +28,7 @@ type invitePageData struct {
 // to an "invite link is no longer valid" page (410) so the recipient is
 // not asked to fill in a form the POST will reject.
 func HandleAcceptInviteForm(logger *slog.Logger, csrfMgr *csrf.Manager, invites InviteStore) http.Handler {
-	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/accept_invite.gohtml")
+	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/accept_invite.gohtml")
 	invalid := newTemplateRenderer(logger, csrfMgr, "auth/pages/accept_invite_invalid.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -36,11 +37,11 @@ func HandleAcceptInviteForm(logger *slog.Logger, csrfMgr *csrf.Manager, invites 
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		raw := r.URL.Query().Get("token")
 		if !inviteLivePreflight(r, logger, invites, raw) {
-			invalid.render(w, r, http.StatusGone, invitePageData{Title: "Invite"})
+			invalid.Render(w, r, http.StatusGone, invitePageData{Title: "Invite"})
 
 			return
 		}
-		render.render(w, r, http.StatusOK, invitePageData{Title: "Accept your invite", Token: raw})
+		renderer.Render(w, r, http.StatusOK, invitePageData{Title: "Accept your invite", Token: raw})
 	})
 }
 
@@ -115,7 +116,7 @@ type AcceptInviteDeps struct {
 // real - re-burning the link is the lesser evil than locking the new
 // player out).
 func HandleAcceptInviteSubmit(logger *slog.Logger, csrfMgr *csrf.Manager, deps AcceptInviteDeps) http.Handler {
-	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/accept_invite.gohtml")
+	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/accept_invite.gohtml")
 	invalid := newTemplateRenderer(logger, csrfMgr, "auth/pages/accept_invite_invalid.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -130,7 +131,7 @@ func HandleAcceptInviteSubmit(logger *slog.Logger, csrfMgr *csrf.Manager, deps A
 		raw := r.PostFormValue("token")
 		invite, err := deps.Invites.GetLiveInvite(r.Context(), HashInviteToken(raw))
 		if err != nil {
-			invalid.render(w, r, http.StatusGone, invitePageData{Title: "Invite"})
+			invalid.Render(w, r, http.StatusGone, invitePageData{Title: "Invite"})
 
 			return
 		}
@@ -139,14 +140,14 @@ func HandleAcceptInviteSubmit(logger *slog.Logger, csrfMgr *csrf.Manager, deps A
 		password := r.PostFormValue("password")
 		confirm := r.PostFormValue("confirm")
 		if msg, ok := validateAcceptInviteInput(displayName, password, confirm); !ok {
-			render.render(w, r, http.StatusBadRequest, invitePageData{
+			renderer.Render(w, r, http.StatusBadRequest, invitePageData{
 				Title: "Accept your invite", Token: raw, DisplayName: displayName, Message: msg,
 			})
 
 			return
 		}
 
-		acceptInvite(w, r, logger, render, deps, acceptInviteForm{
+		acceptInvite(w, r, logger, renderer, deps, acceptInviteForm{
 			invite: invite, token: raw, displayName: displayName, password: password,
 		})
 	})
@@ -170,7 +171,7 @@ func acceptInvite(
 	w http.ResponseWriter,
 	r *http.Request,
 	logger *slog.Logger,
-	render *templateRenderer,
+	renderer *render.Renderer,
 	deps AcceptInviteDeps,
 	form acceptInviteForm,
 ) {
@@ -185,7 +186,7 @@ func acceptInvite(
 	player, err := deps.Players.CreatePlayer(r.Context(), form.displayName, form.invite.Email, hashed, RolePlayer)
 	if err != nil {
 		if msg, ok := acceptInviteCollisionMessage(err); ok {
-			render.render(w, r, http.StatusConflict, invitePageData{
+			renderer.Render(w, r, http.StatusConflict, invitePageData{
 				Title: "Accept your invite", Token: form.token, DisplayName: form.displayName, Message: msg,
 			})
 

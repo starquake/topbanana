@@ -22,6 +22,7 @@ import (
 	"github.com/starquake/topbanana/internal/qrcode"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/reltime"
+	"github.com/starquake/topbanana/internal/render"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
 
@@ -75,8 +76,8 @@ type Handlers struct {
 	logger    *slog.Logger
 	service   *livesession.Service
 	quizzes   quiz.Store
-	bigScreen *templateRenderer
-	quizList  *templateRenderer
+	bigScreen *render.Renderer
+	quizList  *render.Renderer
 }
 
 // NewHandlers wires the host surface over the live-session service.
@@ -87,16 +88,13 @@ func NewHandlers(
 	quizStore quiz.Store,
 ) *Handlers {
 	return &Handlers{
-		logger:    logger,
-		service:   service,
-		quizzes:   quizStore,
-		bigScreen: newTemplateRenderer(logger, csrfMgr, parseTemplate("host/pages/bigscreen.gohtml"), "base.gohtml"),
-		quizList: newTemplateRenderer(
-			logger,
-			csrfMgr,
-			parseQuizListTemplate("host/pages/quizlist.gohtml"),
-			"page.gohtml",
-		),
+		logger:  logger,
+		service: service,
+		quizzes: quizStore,
+		// The host surfaces render none of admin's top-bar / nav chrome, so
+		// they bind nothing beyond render.Renderer's own csrfToken (nil funcs).
+		bigScreen: render.New(logger, csrfMgr, parseTemplate("host/pages/bigscreen.gohtml"), "base.gohtml", nil),
+		quizList:  render.New(logger, csrfMgr, parseQuizListTemplate("host/pages/quizlist.gohtml"), "page.gohtml", nil),
 	}
 }
 
@@ -161,77 +159,7 @@ func (h *Handlers) BigScreen(w http.ResponseWriter, r *http.Request) {
 		data.QuestionCount = len(state.Quiz.Questions)
 	}
 
-	h.bigScreen.render(w, r, data)
-}
-
-// templateRenderer renders one host page. It owns the page's parsed template
-// tree and the layout name to execute, and per request clones the tree, binds
-// the csrfToken func, and writes the page. It mirrors admin's TemplateRenderer
-// but binds only csrfToken: the host surfaces render none of admin's top-bar /
-// nav chrome, so there are no per-request chrome funcs to rebind.
-//
-// The CSRF manager may be nil (the placeholder {{csrfToken}} still resolves to
-// "").
-type templateRenderer struct {
-	logger *slog.Logger
-	csrf   *csrf.Manager
-	t      *template.Template
-	layout string
-}
-
-// newTemplateRenderer wraps an already-parsed template tree and its layout name
-// in a renderer. The tree is parsed once at construction; render clones it per
-// request.
-func newTemplateRenderer(
-	logger *slog.Logger,
-	csrfMgr *csrf.Manager,
-	t *template.Template,
-	layout string,
-) *templateRenderer {
-	return &templateRenderer{logger: logger, csrf: csrfMgr, t: t, layout: layout}
-}
-
-// render renders the renderer's layout with the supplied data. It does not
-// return an error because by the time ExecuteTemplate runs the headers have
-// already been written (prepare's csrf token call sets the nonce cookie), so an
-// error page is no longer an option - failures are logged.
-//
-// The clone-and-override dance behind prepare lets a form call {{csrfToken}}
-// without the handler having to thread the token into its data struct.
-func (tr *templateRenderer) render(w http.ResponseWriter, r *http.Request, data any) {
-	t, ok := tr.prepare(w, r)
-	if !ok {
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := t.ExecuteTemplate(w, tr.layout, data); err != nil {
-		tr.logger.ErrorContext(r.Context(), "error executing host template", slog.Any("err", err))
-	}
-}
-
-// prepare clones the renderer's template tree and binds the per-request
-// csrfToken func that parse registered as a placeholder. Returns the prepared
-// template and true on success; on clone failure it surfaces 500 Internal
-// Server Error and returns false so the caller can early-return.
-//
-// The csrf.Token call writes a header (the nonce cookie), so callers must defer
-// their own header writes until after prepare returns.
-func (tr *templateRenderer) prepare(w http.ResponseWriter, r *http.Request) (*template.Template, bool) {
-	t, err := tr.t.Clone()
-	if err != nil {
-		tr.logger.ErrorContext(r.Context(), "error cloning host template", slog.Any("err", err))
-		http.Error(w, msgInternalError, http.StatusInternalServerError)
-
-		return nil, false
-	}
-
-	csrfToken := ""
-	if tr.csrf != nil {
-		csrfToken = tr.csrf.Token(w, r)
-	}
-
-	return t.Funcs(template.FuncMap{"csrfToken": func() string { return csrfToken }}), true
+	h.bigScreen.Render(w, r, http.StatusOK, data)
 }
 
 // parseTemplate parses the host layout plus the named page. Placeholder

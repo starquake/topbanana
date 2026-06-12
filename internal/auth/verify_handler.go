@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/render"
 	"github.com/starquake/topbanana/internal/session"
 )
 
@@ -64,7 +65,7 @@ func HandleVerifyEmail(
 	sessions *session.Manager,
 	adminEmails []string,
 ) http.Handler {
-	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/verify_email.gohtml")
+	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/verify_email.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Strip the raw token from any cross-origin Referer the browser
@@ -74,7 +75,7 @@ func HandleVerifyEmail(
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		raw := r.URL.Query().Get("token")
 		if raw == "" {
-			render.render(w, r, http.StatusBadRequest, verifyEmailPageData{
+			renderer.Render(w, r, http.StatusBadRequest, verifyEmailPageData{
 				Title:   "Verify email",
 				Heading: "Link is missing",
 				Message: "This verification link is missing its token. Use the link from the email exactly as it was sent.",
@@ -88,7 +89,7 @@ func HandleVerifyEmail(
 			promoteVerifiedAdminIfAllowlisted(r.Context(), logger, players, roles, adminEmails, ownerID)
 		}
 		landing := postVerifyLanding(w, r, players, sessions, ownerID)
-		renderVerifyOutcome(w, r, logger, render, verifyOutcome{
+		renderVerifyOutcome(w, r, logger, renderer, verifyOutcome{
 			logger:   logger,
 			players:  players,
 			sessions: sessions,
@@ -159,13 +160,13 @@ func renderVerifyOutcome(
 	w http.ResponseWriter,
 	r *http.Request,
 	logger *slog.Logger,
-	render *templateRenderer,
+	renderer *render.Renderer,
 	out verifyOutcome,
 ) {
 	switch {
 	case out.err == nil:
 		refreshSessionAfterVerify(w, r, out.logger, out.players, out.sessions, out.ownerID)
-		render.render(w, r, http.StatusOK, verifyEmailPageData{
+		renderer.Render(w, r, http.StatusOK, verifyEmailPageData{
 			Title:        "Email verified",
 			Heading:      "Email verified",
 			Message:      "Your email address is confirmed. You can now use everything Top Banana! has to offer.",
@@ -176,7 +177,7 @@ func renderVerifyOutcome(
 		// Read the same as the first-time success: a duplicate
 		// click (mail-client prefetch, browser reload) should not
 		// look like an error.
-		render.render(w, r, http.StatusOK, verifyEmailPageData{
+		renderer.Render(w, r, http.StatusOK, verifyEmailPageData{
 			Title:        "Email verified",
 			Heading:      "Already verified",
 			Message:      "This email address was already verified. You can carry on.",
@@ -187,13 +188,13 @@ func renderVerifyOutcome(
 		// The email-change branch raced another account that took the
 		// new address between send and click. Render a distinct page
 		// so the visitor sees why the swap did not apply.
-		render.render(w, r, http.StatusConflict, verifyEmailPageData{
+		renderer.Render(w, r, http.StatusConflict, verifyEmailPageData{
 			Title:   "Verify email",
 			Heading: "Address no longer available",
 			Message: "That email is already attached to another account. Submit the change again with a different address.",
 		})
 	case errors.Is(out.err, ErrVerifyTokenInvalid):
-		render.render(w, r, http.StatusGone, verifyEmailPageData{
+		renderer.Render(w, r, http.StatusGone, verifyEmailPageData{
 			Title:   "Verify email",
 			Heading: "Link is no longer valid",
 			Message: "This verification link has expired or was never issued. Sign in to request a fresh one.",
@@ -204,7 +205,7 @@ func renderVerifyOutcome(
 		// Render the same expired-link page rather than 500ing - the
 		// consume side already wrote consumed_at so the link cannot
 		// be replayed.
-		render.render(w, r, http.StatusGone, verifyEmailPageData{
+		renderer.Render(w, r, http.StatusGone, verifyEmailPageData{
 			Title:   "Verify email",
 			Heading: "Link is no longer valid",
 			Message: "This verification link can no longer be applied. Sign in to request a fresh one.",
