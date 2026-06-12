@@ -7,11 +7,6 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/tdewolff/minify/v2"
-	"github.com/tdewolff/minify/v2/css"
-	"github.com/tdewolff/minify/v2/html"
-	"github.com/tdewolff/minify/v2/js"
-
 	"github.com/starquake/topbanana/internal/config"
 )
 
@@ -20,7 +15,6 @@ var staticFS embed.FS
 
 // Handler returns an [http.Handler] that serves the client files.
 // If cfg.ClientDir is not empty, it serves files from that directory.
-// If cfg.isProduction is true, it minifies the files.
 func Handler(cfg *config.Config) http.Handler {
 	var fsys fs.FS
 	if cfg.ClientDir != "" {
@@ -33,17 +27,5 @@ func Handler(cfg *config.Config) http.Handler {
 		}
 	}
 
-	fileServer := http.FileServer(http.FS(fsys))
-
-	if cfg.IsProduction() {
-		m := minify.New()
-		m.AddFunc("text/html", html.Minify)
-		m.AddFunc("text/css", css.Minify)
-		m.AddFunc("application/javascript", js.Minify)
-		m.AddFunc("text/javascript", js.Minify)
-
-		return http.StripPrefix("/client", m.Middleware(fileServer))
-	}
-
-	return http.StripPrefix("/client", fileServer)
+	return http.StripPrefix("/client", http.FileServer(http.FS(fsys)))
 }
