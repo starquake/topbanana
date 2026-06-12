@@ -178,9 +178,8 @@ func parseTemplate(path string) *template.Template {
 		"csrfToken":    func() string { return "" },
 		"humanizeTime": reltime.Humanize,
 	}
-	base := template.Must(template.New("").Funcs(funcs).ParseFS(tmpl.FS, "host/layouts/*.gohtml"))
 
-	return template.Must(template.Must(base.Clone()).ParseFS(tmpl.FS, path))
+	return render.Parse(tmpl.FS, funcs, path, "host/layouts/*.gohtml")
 }
 
 // parseQuizListTemplate parses the host layouts plus the shared quiz-card
@@ -194,8 +193,6 @@ func parseQuizListTemplate(path string) *template.Template {
 		"csrfToken":    func() string { return "" },
 		"humanizeTime": reltime.Humanize,
 	}
-	base := template.Must(template.New("").Funcs(funcs).ParseFS(tmpl.FS, "host/layouts/*.gohtml"))
-	base = template.Must(base.ParseFS(tmpl.FS, "components/quiz_card.gohtml"))
 
-	return template.Must(template.Must(base.Clone()).ParseFS(tmpl.FS, path))
+	return render.Parse(tmpl.FS, funcs, path, "host/layouts/*.gohtml", "components/quiz_card.gohtml")
 }

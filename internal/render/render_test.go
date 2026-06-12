@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/starquake/topbanana/internal/csrf"
 	. "github.com/starquake/topbanana/internal/render"
@@ -114,5 +115,32 @@ func TestRender_LogsErrorOnBadData(t *testing.T) {
 
 	if got, want := buf.String(), "error executing template"; !strings.Contains(got, want) {
 		t.Errorf("log = %q, should contain %q", got, want)
+	}
+}
+
+func TestParse_ParsesGlobsAndPageWithFuncs(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		// The layout references a parse-time func and a template the page
+		// defines - a forward reference resolved at execution, so parsing the
+		// layout before the page is fine.
+		"layouts/base.gohtml": &fstest.MapFile{
+			Data: []byte(`{{define "base.gohtml"}}base[{{greeting}}|{{template "frag" .}}]{{end}}`),
+		},
+		"pages/page.gohtml": &fstest.MapFile{
+			Data: []byte(`{{define "frag"}}frag[{{.Body}}]{{end}}`),
+		},
+	}
+	funcs := template.FuncMap{"greeting": func() string { return "hi" }}
+
+	tmpl := Parse(fsys, funcs, "pages/page.gohtml", "layouts/*.gohtml")
+
+	var buf strings.Builder
+	if err := tmpl.ExecuteTemplate(&buf, "base.gohtml", struct{ Body string }{Body: "x"}); err != nil {
+		t.Fatalf("ExecuteTemplate err = %v, want nil", err)
+	}
+	if got, want := buf.String(), "base[hi|frag[x]]"; got != want {
+		t.Errorf("Parse output = %q, want %q", got, want)
 	}
 }

@@ -351,15 +351,12 @@ func parseTemplate(path string) *template.Template {
 		"humanizeTime":      reltime.Humanize,
 		"passwordMinLength": func() int { return auth.MinPasswordLength },
 	}
-	base := template.Must(
-		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "components/*.gohtml", "admin/layouts/*.gohtml"),
+	// Partials are parsed alongside layouts so any page (or any HTMX-fragment
+	// handler) can {{template "name" .}} a shared block without re-listing it.
+	return render.Parse(
+		tmpl.FS, funcs, path,
+		"components/*.gohtml", "admin/layouts/*.gohtml", "admin/partials/*.gohtml",
 	)
-	// Partials are pulled in alongside layouts so any page (or any
-	// HTMX-fragment handler) can {{template "name" .}} a shared block
-	// without re-listing it per-call site.
-	base = template.Must(base.ParseFS(tmpl.FS, "admin/partials/*.gohtml"))
-
-	return template.Must(template.Must(base.Clone()).ParseFS(tmpl.FS, path))
 }
 
 // render400 renders the 400 error page with the given message.

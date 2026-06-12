@@ -1026,11 +1026,8 @@ func parseTemplate(page string) *template.Template {
 		// does not render quiz_card, which is the only user (#889).
 		"humanizeTime": func(time.Time) string { return "" },
 	}
-	layouts := template.Must(
-		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "components/*.gohtml", "auth/layouts/*.gohtml"),
-	)
 
-	return template.Must(template.Must(layouts.Clone()).ParseFS(tmpl.FS, page))
+	return render.Parse(tmpl.FS, funcs, page, "components/*.gohtml", "auth/layouts/*.gohtml")
 }
 
 // newTemplateRenderer parses the named page and wraps the tree in a

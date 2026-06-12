@@ -7,12 +7,26 @@ package render
 
 import (
 	"html/template"
+	"io/fs"
 	"log/slog"
 	"maps"
 	"net/http"
 
 	"github.com/starquake/topbanana/internal/csrf"
 )
+
+// Parse parses the shared layout/partial globs (with funcs registered as
+// parse-time placeholders) and the page template into one tree, ready to wrap
+// in a Renderer. It is the parse half of the template plumbing every surface
+// shares: the base globs are parsed first, then cloned and the page parsed into
+// the clone so the base stays page-free. globs are passed straight to
+// [template.Template.ParseFS]; funcs must cover every func the templates
+// reference at parse time.
+func Parse(fsys fs.FS, funcs template.FuncMap, page string, globs ...string) *template.Template {
+	base := template.Must(template.New("").Funcs(funcs).ParseFS(fsys, globs...))
+
+	return template.Must(template.Must(base.Clone()).ParseFS(fsys, page))
+}
 
 // PerRequestFuncs returns the surface-specific template funcs to bind for a
 // single request (e.g. the admin top bar's viewerName / navSection / isAdmin,
