@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { seedQuiz, QUIZ_QUESTIONS } from './helpers';
+import { seedQuiz, installPlaythroughClock, QUIZ_QUESTIONS } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 // Seed the quiz as the shared admin (via the JSON importer), then clear
@@ -19,6 +19,10 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   // ---- Seed the quiz, then drop the admin cookie so play is anonymous.
   await seedQuiz(page, quizTitle);
   await page.context().clearCookies();
+  // Install Playwright's virtual clock before any navigation so the
+  // per-question reveal beat (#247) and feedback pause (#233) can be
+  // fast-forwarded by page.clock.runFor instead of paying wall time.
+  await installPlaythroughClock(page);
 
   // ---- Player flow: visit /quizzes (the public list, #284), click the
   // quiz card to land on /play/{slug-id}, then walk every question by
@@ -73,13 +77,17 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
     const choice = q.options[0];
     const wasCorrect = q.correctIndices.includes(0);
 
-    // Wait for the option button before reading the score chip so we
-    // don't sample stale state from the previous question's render. The
-    // timeout must span the prior question's feedback pause (up to 3s
-    // on a wrong pick, #233) plus this question's reveal-countdown
-    // (3s, #247) — 10s gives headroom for slow CI.
+    // Pump virtual time forward in small chunks until the option
+    // button shows up enabled. The reveal beat (#247) only ticks
+    // under virtual time, and the per-question /next fetch runs in
+    // real time, so a single fixed runFor would race the fetch -
+    // toPass retries while waiting on both.
     const optionButton = page.getByRole('button', { name: choice });
-    await expect(optionButton).toBeVisible({ timeout: 10_000 });
+    await expect(async () => {
+      await page.clock.runFor(500);
+      await expect(optionButton).toBeVisible({ timeout: 100 });
+      await expect(optionButton).toBeEnabled({ timeout: 100 });
+    }).toPass({ timeout: 10_000 });
 
     // #234 — before submitting, the running score chip must still
     // reflect only what's been scored so far. Pinning this here
@@ -119,6 +127,12 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
       // chip to its prior value before the next question loads.
       await expect(scoreChipValue).toHaveText(String(prevScore));
     }
+
+    // Feedback pause (#233): resolveAndAdvance schedules
+    // setTimeout(2s correct / 3s wrong) before nextQuestion. runFor
+    // fires the setTimeout under virtual time so the next iteration's
+    // poll picks up once the new question is wired up.
+    await page.clock.runFor(3_500);
   }
 
   // After the auto-advance from the last answer, getNextQuestion() returns

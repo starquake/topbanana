@@ -1,5 +1,10 @@
 import { test, expect } from './fixtures';
-import { seedQuiz, startQuizAsAnonymous, answerRemainingQuestions } from './helpers';
+import {
+  seedQuiz,
+  startQuizAsAnonymous,
+  answerRemainingQuestions,
+  installPlaythroughClock,
+} from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 // Seed each quiz as the shared admin via the JSON importer; the share
@@ -64,6 +69,9 @@ test('player client finish screen Copy writes title + score + URL', async ({ pag
   await seedQuiz(page, quizTitle);
 
   await page.context().clearCookies();
+  // Install the virtual clock before navigating so answerRemainingQuestions
+  // can fast-forward the per-question timers (page.clock contract).
+  await installPlaythroughClock(page);
   await page.addInitScript(() => {
     const w = window as unknown as { __copiedPayload?: string };
     w.__copiedPayload = undefined;
@@ -113,8 +121,11 @@ test('player client finish screen has a share button that includes the score', a
   await seedQuiz(page, quizTitle);
 
   // Play the quiz through as anonymous so the finish screen
-  // renders with a real `score` and `quizSlugId`.
+  // renders with a real `score` and `quizSlugId`. Install the
+  // virtual clock before navigating so the playthrough helper can
+  // fast-forward per-question timers.
   await page.context().clearCookies();
+  await installPlaythroughClock(page);
   await startQuizAsAnonymous(page, quizTitle);
   await answerRemainingQuestions(page);
 
@@ -156,8 +167,11 @@ test('share-result reads score from the leaderboard so a revisit still brags the
   await seedQuiz(page, quizTitle);
 
   // First play-through as anonymous so the score lands on the
-  // leaderboard against the auto-petname player row.
+  // leaderboard against the auto-petname player row. Install the
+  // virtual clock before navigating so the playthrough helper can
+  // fast-forward per-question timers.
   await page.context().clearCookies();
+  await installPlaythroughClock(page);
   await startQuizAsAnonymous(page, quizTitle);
   await answerRemainingQuestions(page);
 
@@ -213,9 +227,12 @@ test('home page popular-card share button opens the dialog with invitation text'
 
   // The home page only surfaces quizzes that have at least one
   // finished play in the last 30 days, so we need to seed the quiz
-  // AND play it through anonymously before the card appears.
+  // AND play it through anonymously before the card appears. Install
+  // the virtual clock before navigating so the playthrough helper can
+  // fast-forward per-question timers.
   await seedQuiz(page, quizTitle);
   await page.context().clearCookies();
+  await installPlaythroughClock(page);
   await startQuizAsAnonymous(page, quizTitle);
   await answerRemainingQuestions(page);
 

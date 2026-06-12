@@ -303,33 +303,79 @@ export async function startQuizAsAnonymous(page: Page, quizTitle: string): Promi
   await page.getByRole('button', { name: 'Start Game' }).click();
 }
 
+// FEEDBACK_PAUSE_WRONG_MS mirrors the larger arm of the per-question feedback
+// hold the solo client applies after a pick (#233): 2s after a correct pick,
+// 3s after a wrong one. Fast-forwarding by the wrong-arm value covers both.
+const FEEDBACK_PAUSE_WRONG_MS = 3_000;
+
+// CLOCK_BUFFER_MS gives a small margin over the exact beat so a tick that
+// lands fractionally short of its threshold still fires - runFor advances by
+// whole-ms increments and the client's serverTime() is derived from
+// Date.now() plus a clockOffset that's recomputed from each question's
+// serverNow, so a buffer absorbs the difference.
+const CLOCK_BUFFER_MS = 500;
+
+// playthroughClockInstall is the contract every spec calling
+// playThroughQuiz / answerRemainingQuestions must satisfy before page.goto.
+// It installs Playwright's virtual clock at the current real time so the
+// helper can fast-forward through the per-question reveal beat and feedback
+// pause without paying wall-clock time. Kept as a thin wrapper rather than
+// a hidden side-effect so the spec's clock contract is visible at its call
+// site.
+export async function installPlaythroughClock(page: Page): Promise<void> {
+  await page.clock.install();
+}
+
+// waitForOptionEnabled retries runFor + the toBeVisible / toBeEnabled
+// assertions in small chunks of virtual time until the option button is
+// visible AND enabled. The chunked retry absorbs three timing skews the
+// helper has no other way to align:
+//   1. The per-question /next fetch runs in real time, so the
+//      startRevealCountdown setInterval may not be registered yet when
+//      we first runFor.
+//   2. setInterval only ticks under virtual time, so once registered it
+//      needs a runFor to actually fire its 100ms ticks.
+//   3. resolveAndAdvance's setTimeout (the feedback pause) chains into
+//      nextQuestion -> fetch -> startRevealCountdown, all of which
+//      interleave real-time and virtual-time work.
+// Each retry pumps 500ms of virtual time and re-checks; the toPass
+// timeout caps total wall-clock at ~10s so a genuinely-stuck render
+// still fails loudly.
+async function waitForOptionEnabled(page: Page, choice: string): Promise<void> {
+  const optionButton = page.getByRole('button', { name: choice });
+  await expect(async () => {
+    await page.clock.runFor(500);
+    await expect(optionButton).toBeVisible({ timeout: 100 });
+    await expect(optionButton).toBeEnabled({ timeout: 100 });
+  }).toPass({ timeout: 10_000 });
+}
+
 // answerRemainingQuestions clicks the first option for each question starting
 // at fromIndex (default 0) and asserts the matching success/danger feedback.
 // Waits for the leaderboard at the end so the caller can pick up immediately
 // after the auto-advance from the final question. fromIndex lets timeout
 // specs skip the questions that have already been resolved (e.g. via the
 // timer-expired path).
+//
+// CONTRACT: the calling spec must call installPlaythroughClock(page) before
+// page.goto so the virtual clock is in place from the SPA's first paint. The
+// helper drives the per-question reveal-beat (#247) and feedback-pause (#233)
+// setInterval/setTimeout via page.clock.runFor instead of waiting in real
+// time, so the whole suite skips paying ~5s per question.
 export async function answerRemainingQuestions(page: Page, fromIndex = 0): Promise<void> {
   for (let i = fromIndex; i < QUIZ_QUESTIONS.length; i++) {
     const q = QUIZ_QUESTIONS[i];
     const choice = q.options[0];
     const wasCorrect = q.correctIndices.includes(0);
 
+    // Pump virtual time forward in 500ms chunks until the option
+    // button shows up and is no longer :disabled. The reveal beat
+    // (#247) only ticks under virtual time, and the per-question
+    // /next fetch is real-time, so a single runFor would race the
+    // fetch and pointlessly advance the clock before the setInterval
+    // is registered.
+    await waitForOptionEnabled(page, choice);
     const optionButton = page.getByRole('button', { name: choice });
-    // Per-question wait must cover the prior feedback pause (up to 3s
-    // on a wrong pick, #233) plus this question's reveal-countdown
-    // beat (3s, #247). The default 5s toBeVisible timeout isn't
-    // enough; 10s gives headroom for slow CI runners.
-    await expect(optionButton).toBeVisible({ timeout: 10_000 });
-    // toBeVisible passes during both the answer window AND the
-    // feedback pause (the buttons stay in DOM so the per-option
-    // reveal can paint correct/wrong/dim — #233). Under parallel
-    // load the click can land while a prior question's feedback is
-    // still active: `:disabled="!!feedback"` is truthy, the button
-    // carries btn-answer-dim, and the locator then detaches as the
-    // question advances (#432). Gate on toBeEnabled so the click
-    // happens within this question's answer window or fails fast.
-    await expect(optionButton).toBeEnabled({ timeout: 10_000 });
     await optionButton.click();
 
     // The quieter post-answer reveal (#767): a small verdict eyebrow
@@ -341,11 +387,18 @@ export async function answerRemainingQuestions(page: Page, fromIndex = 0): Promi
     } else {
       await expect(verdict).toHaveText('Not quite');
     }
+
+    // Feedback pause (#233): resolveAndAdvance schedules
+    // setTimeout(2s correct / 3s wrong) before nextQuestion. runFor
+    // fires the setTimeout under virtual time; the subsequent
+    // nextQuestion fetch is real-time, and the next iteration's
+    // waitForOptionEnabled picks up once the new question's
+    // setInterval is wired up.
+    await page.clock.runFor(FEEDBACK_PAUSE_WRONG_MS + CLOCK_BUFFER_MS);
   }
 
   // The leaderboard renders after the last answer's auto-advance hits 404
-  // on getNextQuestion. Generous timeout because the per-question feedback
-  // delay adds up.
+  // on getNextQuestion.
   await expect(page.getByRole('heading', { name: 'Game Finished!' })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
 }

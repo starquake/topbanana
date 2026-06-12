@@ -1,6 +1,6 @@
 import type { Page } from './fixtures';
 import { test, expect } from './fixtures';
-import { seedQuiz, playThroughQuiz } from './helpers';
+import { seedQuiz, playThroughQuiz, installPlaythroughClock } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 // #844 — a narrow iPhone (~320px CSS width) surfaced layout breaks: the
@@ -95,6 +95,10 @@ test.describe('solo leaderboard narrow-viewport layout (#844)', () => {
 
     await seedQuiz(page, quizTitle);
     await page.context().clearCookies();
+    // The later playthrough fast-forwards per-question timers via the
+    // virtual clock; install before any navigation so the SPA's
+    // setInterval/setTimeout calls land on it from first paint.
+    await installPlaythroughClock(page);
 
     // Claim the long name on the start screen, then play through so the
     // leaderboard row for the current player carries it.

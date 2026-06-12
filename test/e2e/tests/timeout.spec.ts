@@ -3,6 +3,7 @@ import {
   seedQuiz,
   startQuizAsAnonymous,
   answerRemainingQuestions,
+  installPlaythroughClock,
   QUIZ_QUESTIONS,
 } from './helpers';
 import { adminStatePath } from '../e2e-auth';
@@ -81,6 +82,13 @@ test('timing out a question shows the Time up verdict and the rest of the quiz s
   await expect(page.getByRole('button', { name: secondQuestion.options[0] })).toBeVisible({
     timeout: SETTLE_MS,
   });
+
+  // Install the virtual clock now (not before page.goto) so the Q1
+  // countdown above ran against the real progress bar drain - the
+  // assertion at progress=0 only stays observable when the bar
+  // ticks in wall time. From here on the helper fast-forwards
+  // per-question timers via page.clock.runFor.
+  await installPlaythroughClock(page);
 
   // Play through the remaining questions. The point of this loop is not
   // to verify scoring but to prove the game progresses past the

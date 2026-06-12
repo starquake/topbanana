@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { seedQuiz, playThroughQuiz } from './helpers';
+import { seedQuiz, playThroughQuiz, installPlaythroughClock } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 // Seed the quiz as the shared admin (via the JSON importer), then clear the
@@ -21,6 +21,10 @@ test('deep-link to an already-completed quiz never flashes the quiz header', asy
 
   await seedQuiz(page, quizTitle);
   await page.context().clearCookies();
+  // The playthrough fast-forwards per-question timers via the virtual
+  // clock; install before any navigation so the SPA's
+  // setInterval/setTimeout calls land on it from first paint.
+  await installPlaythroughClock(page);
 
   // Play the quiz to completion so the (player, quiz) pair is locked to the
   // already-completed state for the revisit below.
