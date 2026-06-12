@@ -264,12 +264,10 @@ func (pr *pageRenderer) renderAny(w http.ResponseWriter, r *http.Request, status
 	pr.r.Render(w, r, status, data)
 }
 
-// newTemplateRenderer parses the auth layout + the page template once and wraps
-// the tree in a render.Renderer (behind pageRenderer's typed render). It mirrors
-// the auth package's helper of the same name. csrfToken is bound per-render so
-// the form's hidden input always carries a token paired with the response's
-// nonce cookie.
-func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string) *pageRenderer {
+// parseTemplate parses the auth layouts plus the named page, registering the
+// profile surface's parse-time placeholder funcs (the profile pages reuse the
+// auth layouts). render rebinds the per-request funcs at execute time.
+func parseTemplate(page string) *template.Template {
 	funcs := template.FuncMap{
 		"csrfToken":      func() string { return "" },
 		"ogImage":        func() string { return "" },
@@ -293,9 +291,16 @@ func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string
 	layouts := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "components/*.gohtml", "auth/layouts/*.gohtml"),
 	)
-	t := template.Must(template.Must(layouts.Clone()).ParseFS(tmpl.FS, page))
 
-	return &pageRenderer{r: render.New(logger, csrfMgr, t, "base.gohtml", profilePerRequestFuncs)}
+	return template.Must(template.Must(layouts.Clone()).ParseFS(tmpl.FS, page))
+}
+
+// newTemplateRenderer parses the named page and wraps the tree in a
+// render.Renderer (behind pageRenderer's typed render). It mirrors the auth
+// package's helper of the same name. csrfToken is bound per render by
+// render.Renderer.
+func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string) *pageRenderer {
+	return &pageRenderer{r: render.New(logger, csrfMgr, parseTemplate(page), "base.gohtml", profilePerRequestFuncs)}
 }
 
 // profilePerRequestFuncs binds the profile surface's per-request template

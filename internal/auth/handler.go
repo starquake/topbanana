@@ -998,15 +998,10 @@ func renderInvalidCredentials(
 	})
 }
 
-// newTemplateRenderer parses the auth layouts plus the named page and wraps
-// the tree in a render.Renderer bound to the auth surface's per-request funcs.
-//
-// The CSRF manager wires the {{csrfToken}} template func: each render asks the
-// manager for the token, which sets a nonce cookie on the response when needed
-// and returns the HMAC-derived token for the form's hidden field. The
-// placeholder registered below keeps templates parseable without a manager
-// (e.g. unit tests).
-func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string) *render.Renderer {
+// parseTemplate parses the auth layouts plus the named page, registering the
+// auth surface's parse-time placeholder funcs. render rebinds the per-request
+// ones (csrfToken, ogImage, viewer) at execute time.
+func parseTemplate(page string) *template.Template {
 	// passwordHelp keeps the form's static help text bound to the
 	// MinPasswordLength/MaxPasswordLength constants - drift between the
 	// form, the validator, and the bcrypt cap stays impossible without
@@ -1034,9 +1029,16 @@ func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string
 	layouts := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "components/*.gohtml", "auth/layouts/*.gohtml"),
 	)
-	t := template.Must(template.Must(layouts.Clone()).ParseFS(tmpl.FS, page))
 
-	return render.New(logger, csrfMgr, t, "base.gohtml", authPerRequestFuncs)
+	return template.Must(template.Must(layouts.Clone()).ParseFS(tmpl.FS, page))
+}
+
+// newTemplateRenderer parses the named page and wraps the tree in a
+// render.Renderer bound to the auth surface's per-request funcs. The csrfToken
+// func is bound per render by render.Renderer (a placeholder keeps templates
+// parseable without a manager, e.g. unit tests).
+func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string) *render.Renderer {
+	return render.New(logger, csrfMgr, parseTemplate(page), "base.gohtml", authPerRequestFuncs)
 }
 
 // authPerRequestFuncs binds the auth surface's per-request template funcs: the
