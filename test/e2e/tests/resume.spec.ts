@@ -3,6 +3,7 @@ import {
   seedQuiz,
   startQuizAsAnonymous,
   answerRemainingQuestions,
+  installPlaythroughClock,
   QUIZ_QUESTIONS,
 } from './helpers';
 import { adminStatePath } from '../e2e-auth';
@@ -39,6 +40,13 @@ test('mid-game reload lands back on the question, not the start screen', async (
 
   await expect(page.getByRole('button', { name: firstChoice })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole('button', { name: 'Start Game' })).toBeHidden();
+
+  // Install the virtual clock now (not before page.goto) so the
+  // pre-reload boot path keeps real timing - page.reload would
+  // otherwise re-paint Q1 against a frozen clock and the resumed
+  // reveal beat would stall. From here on the helper fast-forwards
+  // per-question timers via runFor.
+  await installPlaythroughClock(page);
 
   // The resumed game still walks through to completion — a regression
   // where the resume path left the client in a broken state would

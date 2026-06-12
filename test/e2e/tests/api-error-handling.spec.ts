@@ -2,6 +2,7 @@ import { test, expect, Route, Request } from './fixtures';
 import {
   seedQuiz,
   startQuizAsAnonymous,
+  installPlaythroughClock,
   QUIZ_QUESTIONS,
 } from './helpers';
 import { adminStatePath } from '../e2e-auth';
@@ -24,6 +25,12 @@ test('400 on answer POST does not show the retry banner', async ({ page, browser
 
   await seedQuiz(page, quizTitle);
   await page.context().clearCookies();
+  // Install the virtual clock so the post-400 synthesized feedback
+  // pause and the next question's reveal beat advance via
+  // page.clock.runFor instead of wall time. The spec's regression
+  // intent is that the catch path's setTimeout fires (so the game
+  // advances) - the timer is preserved, just driven by virtual time.
+  await installPlaythroughClock(page);
 
   // Fail the first answers POST with a 400 (mimicking the real server
   // path for ErrOptionNotInQuestion). The point is "no banner for
@@ -40,9 +47,13 @@ test('400 on answer POST does not show the retry banner', async ({ page, browser
 
   await startQuizAsAnonymous(page, quizTitle);
 
+  // Fast-forward the per-question reveal beat (#247) so the option
+  // button mounts under virtual time rather than wall time.
+  await page.clock.runFor(2_500);
   const firstChoice = QUIZ_QUESTIONS[0].options[0];
   const firstButton = page.getByRole('button', { name: firstChoice });
   await expect(firstButton).toBeVisible({ timeout: 10_000 });
+  await expect(firstButton).toBeEnabled({ timeout: 10_000 });
   await firstButton.click();
 
   // The retry banner uses role="alert". It must NOT appear for a
@@ -53,11 +64,17 @@ test('400 on answer POST does not show the retry banner', async ({ page, browser
   // The catch path synthesizes a timed-out feedback so the player
   // doesn't get stuck on a blank screen; the verdict eyebrow reads
   // "Time up" (#767).
-  await expect(page.getByTestId('reveal-verdict')).toHaveText('Time up', { timeout: 3_000 });
+  await expect(page.getByTestId('reveal-verdict')).toHaveText('Time up');
 
-  // The game must advance to the next question (resolveAndAdvance's
-  // pause runs the reveal beat first). Long timeout because the
-  // reveal is intentionally held briefly before the advance fires.
+  // Fast-forward past the synthesized feedback pause so
+  // resolveAndAdvance's setTimeout fires and the next question fetches.
+  await page.clock.runFor(3_500);
+
+  // The game must advance to the next question - the catch path's
+  // timer fires under virtual time. Long timeout because the
+  // reveal beat for question 2 then runs (real-time fetch + virtual
+  // setInterval ticks); the second runFor covers the new beat.
+  await page.clock.runFor(2_500);
   const secondChoice = QUIZ_QUESTIONS[1].options[0];
   await expect(page.getByRole('button', { name: secondChoice })).toBeVisible({ timeout: 15_000 });
 });

@@ -1,5 +1,12 @@
 import { test, expect } from './fixtures';
-import { registerForPending, login, markEmailVerified, seedQuiz, playThroughQuiz } from './helpers';
+import {
+  registerForPending,
+  login,
+  markEmailVerified,
+  seedQuiz,
+  playThroughQuiz,
+  installPlaythroughClock,
+} from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 // Petname format: Title-cased Adjective-Adjective-Noun, e.g. "Steamy-Farty-Bear".
@@ -84,6 +91,10 @@ test.describe('claim modal over a played quiz', () => {
 
     await seedQuiz(page, quizTitle);
     await page.context().clearCookies();
+    // The playthrough fast-forwards per-question timers via the
+    // virtual clock; install before any navigation so the SPA's
+    // setInterval/setTimeout calls land on it from first paint.
+    await installPlaythroughClock(page);
 
     // Anonymous player walks the quiz. The pre-leaderboard claim card is
     // shown because the player is still on the auto-petname; once finished,
@@ -109,6 +120,10 @@ test.describe('claim modal over a played quiz', () => {
 
     await seedQuiz(page, quizTitle);
     await page.context().clearCookies();
+    // The later playthrough fast-forwards per-question timers via the
+    // virtual clock; install before any navigation so the SPA's
+    // setInterval/setTimeout calls land on it from first paint.
+    await installPlaythroughClock(page);
 
     // Visit /client/, claim a name via the start-screen modal, then play through.
     await page.goto('/client/');
