@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/envtag"
@@ -317,6 +318,9 @@ func parseTemplate(page string) *template.Template {
 		"navSection":     func() string { return "" },
 		"logoHref":       func() string { return "/" },
 		"profileHref":    func() string { return "/profile" },
+		// Placeholder so the shared components glob parses; this surface
+		// does not render quiz_card, which is the only user (#889).
+		"humanizeTime": func(time.Time) string { return "" },
 	}
 	base := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmplFS(), "components/*.gohtml", "home/layouts/*.gohtml"),

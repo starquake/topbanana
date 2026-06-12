@@ -187,7 +187,12 @@ type QuizData struct {
 	// PlayCount is the durable "times played" counter surfaced on the
 	// admin quiz list footer (#891).
 	PlayCount int64
-	Questions []*QuestionData
+	// ActionVariant selects which action cluster the shared quiz_card
+	// partial renders ("admin" Edit/Delete vs. a future host variant);
+	// html/template has no block/yield, so the card picks a named
+	// sub-template by this discriminator (#889).
+	ActionVariant string
+	Questions     []*QuestionData
 }
 
 // QuestionData is the data for a question. TimeLimitSecondsValue is the
@@ -255,6 +260,10 @@ const (
 	maxFormSize = 1 << 20 // 1 MB
 )
 
+// actionVariantAdmin selects the Edit/Delete action cluster in the shared
+// quiz_card partial. The host variant lands with the host UI work (#889).
+const actionVariantAdmin = "admin"
+
 // canEditQuiz is the single source of truth for the creator-or-Admin edit rule
 // (#281/#538): the session player must be present and must either be the quiz's
 // creator OR an Admin (who may edit, delete, and reset scores on any quiz). A
@@ -309,6 +318,7 @@ func quizDataFromQuiz(qz *quiz.Quiz) *QuizData {
 		Mode:                 mode,
 		ModeOptions:          quiz.ModeValues(),
 		PlayCount:            qz.PlayCount,
+		ActionVariant:        actionVariantAdmin,
 		Questions:            questionDataFromQuestions(qz.Questions),
 	}
 }
