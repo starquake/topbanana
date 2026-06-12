@@ -50,6 +50,60 @@ test('player client start screen has a share button that opens the dialog with i
   );
 });
 
+// #892 — the Copy fallback writes the same brag-text payload the share
+// intent builds (quiz title + player score + link), not just the bare
+// URL. We don't read navigator.clipboard.readText: clipboard-read
+// permission is not grantable in Firefox (see import-copy.spec.ts).
+// Instead, stub navigator.clipboard.writeText before the page evaluates
+// share.js so the Copy click lands in the stub and we can read back the
+// captured payload.
+test('player client finish screen Copy writes title + score + URL', async ({ page, browserName }) => {
+  test.setTimeout(45_000);
+  const quizTitle = `E2E Share Copy Quiz ${browserName}`;
+
+  await seedQuiz(page, quizTitle);
+
+  await page.context().clearCookies();
+  await page.addInitScript(() => {
+    const w = window as unknown as { __copiedPayload?: string };
+    w.__copiedPayload = undefined;
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          w.__copiedPayload = text;
+        },
+      },
+    });
+  });
+  await startQuizAsAnonymous(page, quizTitle);
+  await answerRemainingQuestions(page);
+
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[role="dialog"]')).toBeHidden();
+
+  // Capture the player's score off the leaderboard row so the
+  // assertion pins the exact number.
+  const myRow = page.locator('table.player-table tbody tr[aria-current="true"]');
+  await expect(myRow).toBeVisible();
+  const scoreText = await myRow.locator('td').nth(2).textContent();
+  const score = (scoreText ?? '').trim();
+  expect(score).not.toBe('');
+
+  await page.getByRole('button', { name: 'Share result' }).click();
+  const dialog = page.locator('dialog.share-dialog');
+  await expect(dialog).toBeVisible();
+
+  await dialog.locator('[data-share-copy]').click();
+  await expect(dialog.locator('[data-share-feedback]')).toContainText('Link copied');
+
+  const copied = await page.evaluate(() => (window as unknown as { __copiedPayload?: string }).__copiedPayload);
+  expect(copied).toBeDefined();
+  expect(copied).toContain(`I scored ${score} on ${quizTitle}`);
+  // Link stays at the end so chat clients still auto-unfurl (#892).
+  expect(copied).toMatch(/\/play\/[a-z0-9-]+-[a-z0-9]+$/);
+});
+
 test('player client finish screen has a share button that includes the score', async ({ page, browserName }) => {
   // A full anonymous playthrough still spans four questions of feedback;
   // keep a moderate budget for slow CI runners. Setup is one import.
