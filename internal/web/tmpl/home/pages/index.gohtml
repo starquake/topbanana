@@ -12,11 +12,35 @@
         {{/* Joining a hosted live game needs the /join enter-code screen.
              Surfaced here because the installed PWA opens at this page with
              no address bar, so without this link a player has no way to reach
-             it (#826). */}}
-        <a href="/join" class="btn-primary gap-2 mt-1" data-testid="home-join-live">
-            <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M10.804 8 5 4.633v6.734zM5.696 4.41a.5.5 0 0 0-.696.46v6.266a.5.5 0 0 0 .696.46l5.453-3.133a.5.5 0 0 0 0-.866z"/><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/></svg>
-            <span>Join a live game</span>
-        </a>
+             it (#826).
+
+             Resume / exit affordance (#888): when JoinApp wrote a remembered
+             session to localStorage on a successful join, the Alpine island
+             below flips the CTA to "Resume session" deep-linking back into
+             /join/{code} (init() lands the player straight in the lobby) and
+             surfaces an "or exit" link that clears the entry and posts leave.
+             The default "Join a live game" entry is rendered server-side so a
+             JS-off visitor still has a way in; once Alpine boots and resolves
+             the remembered code, x-show flips visibility between the two.
+             x-cloak is on the Resume branch ONLY so JS-off visitors never see
+             a flash of "Resume" — the Join branch needs no cloak because it
+             is the SSR-rendered default. */}}
+        <div x-data="resumeSessionCta()" class="flex flex-col items-center gap-2 mt-1">
+            <a href="/join" class="btn-primary gap-2" data-testid="home-join-live" x-show="!resumeCode">
+                <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M10.804 8 5 4.633v6.734zM5.696 4.41a.5.5 0 0 0-.696.46v6.266a.5.5 0 0 0 .696.46l5.453-3.133a.5.5 0 0 0 0-.866z"/><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/></svg>
+                <span>Join a live game</span>
+            </a>
+            <div x-show="resumeCode" x-cloak class="flex flex-col items-center gap-2">
+                <a :href="'/join/' + resumeCode" class="btn-primary gap-2" data-testid="home-resume-session">
+                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M10.804 8 5 4.633v6.734zM5.696 4.41a.5.5 0 0 0-.696.46v6.266a.5.5 0 0 0 .696.46l5.453-3.133a.5.5 0 0 0 0-.866z"/><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/></svg>
+                    <span>Resume session</span>
+                </a>
+                <button type="button"
+                        class="bg-transparent border-0 p-0 text-sm text-text-dim underline-offset-2 hover:text-text hover:underline cursor-pointer"
+                        data-testid="home-exit-session"
+                        @click="exit()">or exit session</button>
+            </div>
+        </div>
     </header>
 
     {{/* grid-cols-1 at the base is load-bearing: without an explicit column,

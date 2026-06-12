@@ -234,6 +234,15 @@ export class JoinApp {
         // on any success.
         this.stateFailures = 0;
 
+        // --- Exit-session confirm (#888) ------------------------------------
+        // exitConfirmOpen drives the destructive-confirm modal the lobby's
+        // Exit-session link opens. Modeled on the host's #853 confirm-and-
+        // restart pattern: a one-shot Alpine flag, closed on cancel /
+        // backdrop / explicit confirm. exiting guards the confirm button
+        // while the explicit leave POST is in flight.
+        this.exitConfirmOpen = false;
+        this.exiting = false;
+
         // --- Leave beacon (#794) --------------------------------------------
         // Guards against a duplicate leave: beforeunload and pagehide can both
         // fire on the same teardown, and the beacon should go out once. Reset
@@ -949,6 +958,38 @@ export class JoinApp {
             this.leftSent = true;
             sessionService.leave(this.code);
         }
+    }
+
+    // exitSession is the explicit-exit handler the #888 modal triggers. It
+    // mirrors sendLeave but runs from a deliberate user gesture rather than a
+    // page-unload event, so it uses fetch (with keepalive so a fast follow-up
+    // navigation still flushes) instead of sendBeacon, awaits the result, and
+    // then routes the player to the bare /join entry-code screen. The remembered
+    // session is cleared so the next visit shows the enter-code form rather than
+    // auto-resuming back into the dead row. leftSent is flipped so the unload
+    // beacon does not also fire while the page navigates away.
+    async exitSession() {
+        if (this.exiting) return;
+        this.exiting = true;
+        this.closeStream();
+        this.clearQuestionTimer();
+        this.clearStartTimer();
+        this.releaseWakeLock();
+        forgetSession();
+        const code = this.code;
+        this.leftSent = true;
+        try {
+            await fetch(`/api/sessions/${encodeURIComponent(code)}/leave`, {
+                method: 'POST',
+                keepalive: true,
+            });
+        } catch {
+            // Server-side leave is best-effort: a transient failure still
+            // exits the surface, and the row ages out of the active window
+            // server-side, so there is nothing to retry here.
+        }
+        this.exitConfirmOpen = false;
+        window.location.assign('/join');
     }
 
     // acquireWakeLock requests a screen wake lock so the player's phone does

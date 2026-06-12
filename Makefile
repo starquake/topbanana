@@ -349,7 +349,8 @@ JS_WEB_OUT      := internal/web/static/js/dist
 # served js tree holds only built output and never un-minified source (#756).
 JS_WEB_ENTRIES  := $(JS_WEB_SRC)/host-bigscreen.js $(JS_WEB_SRC)/share.js \
                    $(JS_WEB_SRC)/cooldown.js $(JS_WEB_SRC)/copy-prompt.js \
-                   $(JS_WEB_SRC)/password-length.js $(JS_WEB_SRC)/quiz-reorder.js
+                   $(JS_WEB_SRC)/password-length.js $(JS_WEB_SRC)/quiz-reorder.js \
+                   $(JS_WEB_SRC)/home.js
 
 # Alpine 3 targets modern evergreen browsers; es2020 matches the syntax the
 # source already uses (async/await, optional chaining). The @shared alias

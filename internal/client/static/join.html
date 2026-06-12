@@ -188,10 +188,16 @@
                 <!-- Lobby roster + ready toggle. -->
                 <template x-if="!lobbyClosed && state && state.phase === 'lobby'">
                     <div data-testid="lobby-view">
+                        <!-- Quiz name is the visual anchor of the lobby (#888):
+                             prominent h1-scale title on top, room + signed-in
+                             clarifiers underneath. clamp keeps it readable on a
+                             narrow phone while letting it scale up on tablet
+                             without an extra breakpoint. -->
                         <div class="mb-6">
-                            <p class="label-eyebrow">Lobby</p>
-                            <h2 class="font-display text-2xl font-semibold text-text" x-text="lobbyTitle()"></h2>
-                            <p class="text-text-dim">
+                            <h2 class="m-0 font-display font-extrabold leading-tight tracking-tight text-text break-words text-[clamp(1.75rem,7vw,2.5rem)]"
+                                data-testid="lobby-quiz-title"
+                                x-text="lobbyTitle()"></h2>
+                            <p class="mt-2 text-text-dim">
                                 Room <span class="font-mono text-accent" x-text="state.joinCode"></span>
                                 <span class="mx-1">&middot;</span>
                                 Playing as <span class="text-text" x-text="myDisplayName"></span>
@@ -256,6 +262,17 @@
                             <span x-show="!isReady">I'm ready</span>
                             <span x-show="isReady">Not ready</span>
                         </button>
+
+                        <!-- Exit session (#888). Quiet text link so it doesn't
+                             compete with the ready CTA, but a real way out of
+                             a session the player joined by mistake or wants to
+                             drop. The confirm modal below guards the tap. -->
+                        <div class="mt-6 text-center">
+                            <button type="button"
+                                    class="bg-transparent border-0 p-0 text-sm text-text-dim underline-offset-2 hover:text-text hover:underline cursor-pointer"
+                                    data-testid="exit-session-open"
+                                    @click="exitConfirmOpen = true">Exit session</button>
+                        </div>
                     </div>
                 </template>
 
@@ -415,6 +432,46 @@
                 <template x-if="!lobbyClosed && !state">
                     <p class="text-text-dim">Loading lobby...</p>
                 </template>
+
+                <!-- Exit-session confirm modal (#888). Same destructive-confirm
+                     shape as the host's #853 restart modal: overlay + centered
+                     card + Cancel / destructive primary. Mounted in the joined
+                     stage so it is reachable from every in-session screen, but
+                     only the lobby surfaces the Exit affordance today. -->
+                <div x-show="exitConfirmOpen"
+                     x-cloak
+                     class="fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4"
+                     role="dialog"
+                     aria-modal="true"
+                     aria-labelledby="exit-session-title"
+                     data-testid="exit-session-modal">
+                    <div class="absolute inset-0" @click="exitConfirmOpen = false"></div>
+                    <div class="relative w-full max-w-[420px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
+                        <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
+                            <p id="exit-session-title" class="m-0 font-display text-sm font-semibold uppercase tracking-[0.14em]">Exit session?</p>
+                            <button type="button"
+                                    aria-label="close"
+                                    class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer"
+                                    @click="exitConfirmOpen = false">&times;</button>
+                        </header>
+                        <section class="px-6 py-5 text-[0.95rem]">
+                            You will drop out of the lobby and your roster row will be removed. You can rejoin with the same code.
+                        </section>
+                        <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
+                            <button type="button"
+                                    class="btn-ghost"
+                                    @click="exitConfirmOpen = false">Cancel</button>
+                            <button type="button"
+                                    class="btn-danger"
+                                    data-testid="exit-session-confirm"
+                                    :disabled="exiting"
+                                    @click="exitSession()">
+                                <span x-show="!exiting">Exit session</span>
+                                <span x-show="exiting">Exiting...</span>
+                            </button>
+                        </footer>
+                    </div>
+                </div>
             </div>
         </div>
     </main>

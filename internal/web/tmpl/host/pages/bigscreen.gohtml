@@ -38,8 +38,10 @@
                 <p class="m-0 text-text-dim text-[clamp(0.9rem,1.8vw,1.25rem)] font-semibold uppercase tracking-[0.18em]">
                     Scan to join
                 </p>
-                <div class="bg-white rounded-2xl p-[clamp(1rem,2vw,1.75rem)] shadow-2xl w-[clamp(13rem,28vw,22rem)]">
-                    {{/* QR is a server-rendered SVG; it scales to the box width. */}}
+                <div class="bg-white rounded-2xl p-[clamp(1rem,2vw,1.75rem)] shadow-2xl w-[clamp(16rem,36vw,30rem)]" data-testid="bigscreen-qr">
+                    {{/* QR is a server-rendered SVG; it scales to the box width.
+                         Bumped from the original clamp(13rem,28vw,22rem) so the
+                         code reads cleanly from across a real room (#888). */}}
                     {{.QRSVG}}
                 </div>
                 {{/* Keep the join URL on one line so it reads cleanly on the
