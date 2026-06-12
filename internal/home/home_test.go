@@ -102,7 +102,7 @@ func finishGameFor(t *testing.T, games game.Store, playerID int64, qz *quiz.Quiz
 			QuestionID: qs.ID,
 			StartedAt:  now,
 			ExpiredAt:  now.Add(10 * time.Second),
-		}); err != nil {
+		}, false); err != nil {
 			t.Fatalf("CreateQuestion err = %v, want nil", err)
 		}
 	}

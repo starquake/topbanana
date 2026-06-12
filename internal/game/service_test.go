@@ -674,7 +674,7 @@ func TestService_GetNextQuestion(t *testing.T) {
 			t.Fatalf("failed to create participant: %v", err)
 		}
 
-		err = gameStore.CreateQuestion(ctx, &Question{GameID: testGame.ID, QuestionID: testQuiz.Questions[0].ID})
+		err = gameStore.CreateQuestion(ctx, &Question{GameID: testGame.ID, QuestionID: testQuiz.Questions[0].ID}, false)
 		if err != nil {
 			t.Fatalf("failed to create game question: %v", err)
 		}
@@ -846,7 +846,7 @@ func TestService_GetNextQuestion(t *testing.T) {
 			StartedAt:  past,
 			ExpiredAt:  past.Add(10 * time.Second),
 		}
-		if err := gameStore.CreateQuestion(ctx, expired); err != nil {
+		if err := gameStore.CreateQuestion(ctx, expired, false); err != nil {
 			t.Fatalf("CreateQuestion err = %v, want nil", err)
 		}
 
@@ -1007,7 +1007,7 @@ func TestService_GetNext(t *testing.T) {
 		// remaining item is the round's results boundary.
 		for _, q := range testQuiz.Questions {
 			if err := gameStore.CreateQuestion(
-				ctx, &Question{GameID: testGame.ID, QuestionID: q.ID},
+				ctx, &Question{GameID: testGame.ID, QuestionID: q.ID}, false,
 			); err != nil {
 				t.Fatalf("CreateQuestion err = %v, want nil", err)
 			}
@@ -1111,7 +1111,7 @@ func TestService_GetNext(t *testing.T) {
 		}
 		for _, q := range testQuiz.Questions {
 			if err := gameStore.CreateQuestion(
-				ctx, &Question{GameID: testGame.ID, QuestionID: q.ID},
+				ctx, &Question{GameID: testGame.ID, QuestionID: q.ID}, false,
 			); err != nil {
 				t.Fatalf("CreateQuestion err = %v, want nil", err)
 			}

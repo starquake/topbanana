@@ -318,7 +318,12 @@ type Store interface {
 	CreateGameAndParticipant(ctx context.Context, g *Game, p *Participant) error
 	StartGame(ctx context.Context, id string) error
 	CreateParticipant(ctx context.Context, p *Participant) error
-	CreateQuestion(ctx context.Context, gq *Question) error
+	// CreateQuestion records the issuance of a quiz question to a game.
+	// When completesGame is true, the same transaction bumps
+	// quizzes.play_count for the quiz that owns this game (#891), so the
+	// durable hit counter cannot drift from the games-become-completed
+	// transition that fires alongside the final question.
+	CreateQuestion(ctx context.Context, gq *Question, completesGame bool) error
 	CreateAnswer(ctx context.Context, a *Answer) error
 	// ListAnswersForQuizLeaderboard returns one row per game_answer for
 	// every game (finished or in-progress) of the given quiz, joined with
@@ -692,11 +697,19 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string, playerID i
 		Position: len(g.Questions) + 1,
 		Total:    len(qz.Questions),
 	}
-	if err = s.store.CreateQuestion(ctx, gq); err != nil {
+	if err = s.store.CreateQuestion(ctx, gq, completesGame(gq)); err != nil {
 		return nil, fmt.Errorf("failed to record game question: %w", err)
 	}
 
 	return gq, nil
+}
+
+// completesGame reports whether gq is the question whose insertion flips
+// [Game.IsCompleted] to true - the last question of the quiz. The caller's
+// not-yet-asked gate guarantees one insert per completion, so the store's
+// play_count bump (#891) keyed on this fires exactly once per game.
+func completesGame(gq *Question) bool {
+	return gq.Total > 0 && gq.Position >= gq.Total
 }
 
 // GetNext returns the next item in the play sequence. The resume path
@@ -1343,7 +1356,7 @@ func (s *Service) issueQuestion(
 		Position:     askedCount + 1,
 		Total:        len(qz.Questions),
 	}
-	if err := s.store.CreateQuestion(ctx, gq); err != nil {
+	if err := s.store.CreateQuestion(ctx, gq, completesGame(gq)); err != nil {
 		return nil, fmt.Errorf("failed to record game question: %w", err)
 	}
 

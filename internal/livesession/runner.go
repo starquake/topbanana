@@ -431,7 +431,10 @@ func (r *Runner) enterFirstRound(ctx context.Context, sess *Session, now time.Ti
 	if !ok {
 		// A quiz with no questions has nothing to run: end the game immediately
 		// (into intermission), so the room stays alive for the host to re-arm.
-		r.endGame(ctx, sess)
+		// Passing bumpQuizPlayCount=0 here keeps the durable "times played"
+		// counter honest: this path runs before any question ever appears, so
+		// the quiz was not actually played and must not score a hit (#891).
+		r.endEmptyGame(ctx, sess)
 
 		return
 	}
@@ -567,7 +570,34 @@ func (*Runner) hostLastSeen(sess *Session) time.Time {
 // game-end paths (the last reveal of the last round, or a quiz with no
 // questions).
 func (r *Runner) endGame(ctx context.Context, sess *Session) {
-	if err := r.store.Intermission(ctx, sess.ID); err != nil {
+	// endGame is the natural-completion path (last reveal of the last
+	// round), so this is the moment a play of the room's current quiz
+	// counts for the durable "times played" counter (#891). A quiz-less
+	// room cannot reach endGame, but the nil-check keeps the store API
+	// honest if a future caller hits this from an unusual phase. The
+	// empty-quiz "play" that runs no questions goes through endEmptyGame
+	// instead so the counter is not bumped for a never-played game.
+	if err := r.store.Intermission(ctx, sess.ID, sess.QuizID != nil); err != nil {
+		r.logger.WarnContext(
+			ctx,
+			"runner failed to move session to intermission",
+			slog.String(logSessionKey, sess.ID),
+			slog.Any("err", err),
+		)
+
+		return
+	}
+	r.forget(sess.ID)
+	r.publish(sess.JoinCode, PhaseIntermission)
+}
+
+// endEmptyGame is the empty-quiz variant of [endGame]: the room is armed at a
+// quiz with no questions, so it transitions straight to intermission without
+// ever issuing a question. The "times played" counter (#891) deliberately
+// skips this case - no game was actually played here - so the bump argument
+// stays false.
+func (r *Runner) endEmptyGame(ctx context.Context, sess *Session) {
+	if err := r.store.Intermission(ctx, sess.ID, false); err != nil {
 		r.logger.WarnContext(
 			ctx,
 			"runner failed to move session to intermission",

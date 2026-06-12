@@ -60,6 +60,7 @@ func (s *QuizStore) ListQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 			TimeLimitSeconds:  int(r.TimeLimitSeconds),
 			Visibility:        r.Visibility,
 			Mode:              r.Mode,
+			PlayCount:         r.PlayCount,
 			// INNER JOIN on players makes this a plain string (#359);
 			// the FK guarantees a creator row exists.
 			CreatedByDisplayName: r.CreatedByDisplayName,
@@ -92,6 +93,7 @@ func (s *QuizStore) ListPublicQuizzes(ctx context.Context) ([]*quiz.Quiz, error)
 			TimeLimitSeconds:  int(r.TimeLimitSeconds),
 			Visibility:        r.Visibility,
 			Mode:              r.Mode,
+			PlayCount:         r.PlayCount,
 			// INNER JOIN, see ListQuizzes (#359).
 			CreatedByDisplayName: r.CreatedByDisplayName,
 		}
@@ -124,6 +126,7 @@ func (s *QuizStore) ListLiveQuizzes(ctx context.Context) ([]*quiz.Quiz, error) {
 			TimeLimitSeconds:  int(r.TimeLimitSeconds),
 			Visibility:        r.Visibility,
 			Mode:              r.Mode,
+			PlayCount:         r.PlayCount,
 			// INNER JOIN, see ListQuizzes (#359).
 			CreatedByDisplayName: r.CreatedByDisplayName,
 		}
@@ -187,6 +190,7 @@ func (s *QuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 		TimeLimitSeconds:  int(row.TimeLimitSeconds),
 		Visibility:        row.Visibility,
 		Mode:              row.Mode,
+		PlayCount:         row.PlayCount,
 		// INNER JOIN, see ListQuizzes (#359).
 		CreatedByDisplayName: row.CreatedByDisplayName,
 	}
@@ -740,6 +744,7 @@ func (s *QuizStore) execCreateQuiz(ctx context.Context, q *db.Queries, qz *quiz.
 	qz.TimeLimitSeconds = int(row.TimeLimitSeconds)
 	qz.Visibility = row.Visibility
 	qz.Mode = row.Mode
+	qz.PlayCount = row.PlayCount
 
 	// Every quiz needs a default round (#444): questions.round_id is NOT
 	// NULL and execCreateQuestion resolves it via GetDefaultRound.

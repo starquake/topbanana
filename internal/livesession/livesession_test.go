@@ -187,7 +187,9 @@ func (*fakeStore) EnterRoundResults(context.Context, string) error { return erro
 
 func (*fakeStore) Finish(context.Context, string) error { return errors.ErrUnsupported }
 
-func (*fakeStore) Intermission(context.Context, string) error { return errors.ErrUnsupported }
+func (*fakeStore) Intermission(context.Context, string, bool) error {
+	return errors.ErrUnsupported
+}
 
 func (*fakeStore) RearmSession(context.Context, string, int64) error { return errors.ErrUnsupported }
 

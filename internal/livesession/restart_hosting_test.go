@@ -82,7 +82,7 @@ func TestService_HostHasRunningGame_FalseWhenStaging(t *testing.T) {
 		if err = h.service.StartQuiz(ctx, sess.JoinCode, hostID, qz.ID); err != nil {
 			t.Fatalf("StartQuiz err = %v, want nil", err)
 		}
-		if err = h.store.Intermission(ctx, sess.ID); err != nil {
+		if err = h.store.Intermission(ctx, sess.ID, false); err != nil {
 			t.Fatalf("Intermission err = %v, want nil", err)
 		}
 		if got, want := runningGame(t, h), false; got != want {

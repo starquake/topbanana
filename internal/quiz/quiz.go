@@ -316,7 +316,14 @@ type Quiz struct {
 	// never solo-playable. A zero value (empty string) is treated as
 	// ModeSolo by the store layer so existing fixtures and the
 	// JSON-import path don't need to repeat the default.
-	Mode      string
+	Mode string
+	// PlayCount is the durable hit counter on the quiz row (#891): bumped
+	// once when a play of the quiz completes (the solo path bumps when the
+	// final game_questions row is issued, since that is the moment
+	// Game.IsCompleted flips true; the live path bumps when the runner moves
+	// the session to intermission) and never decremented, so the surfaced
+	// "times played" number survives any later retention sweep of old games.
+	PlayCount int64
 	Questions []*Question
 	// Rounds, when non-empty, tells the create path to author the quiz's
 	// rounds explicitly instead of dropping every question in the single

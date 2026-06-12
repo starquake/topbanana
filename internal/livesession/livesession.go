@@ -343,8 +343,12 @@ type Store interface {
 	Finish(ctx context.Context, sessionID string) error
 	// Intermission ends a game without closing the room (#836): marks it
 	// intermission (the between-games screen) and clears the per-question runner
-	// columns, leaving the room alive so the host can arm the next quiz.
-	Intermission(ctx context.Context, sessionID string) error
+	// columns, leaving the room alive so the host can arm the next quiz. When
+	// bumpPlayCount is true, the same transaction also bumps
+	// quizzes.play_count for the quiz this session is playing (#891), so the
+	// durable "times played" counter cannot drift from the natural game-end
+	// transition.
+	Intermission(ctx context.Context, sessionID string, bumpPlayCount bool) error
 	// RearmSession arms a quiz to play in a room whenever no game is running
 	// (#836): the first game from an empty lobby (a room created with no quiz)
 	// and every later game from the between-games intermission share this path.

@@ -1268,3 +1268,93 @@ func TestLiveSessionStore_MarkPlayerLeft_KeepsPlayedInStandings(t *testing.T) {
 		t.Fatalf("answers after leave = %d, want %d (both pickers, scoring read is unfiltered)", got, want)
 	}
 }
+
+// TestLiveSessionStore_Intermission_BumpsQuizPlayCount pins the #891 atomic
+// behaviour: passing bumpQuizPlayCount=quizID to Intermission both moves the
+// session to intermission and increments quizzes.play_count in the same
+// transaction.
+func TestLiveSessionStore_Intermission_BumpsQuizPlayCount(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+
+	qz := newLiveQuizWithQuestion(t, quizStore)
+	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "INT001"}
+	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+
+	if err := sessionStore.Intermission(t.Context(), sess.ID, true); err != nil {
+		t.Fatalf("Intermission err = %v, want nil", err)
+	}
+
+	sessAfter, err := sessionStore.GetSessionByID(t.Context(), sess.ID)
+	if err != nil {
+		t.Fatalf("GetSessionByID err = %v, want nil", err)
+	}
+	if got, want := sessAfter.Phase, livesession.PhaseIntermission; got != want {
+		t.Errorf("phase = %q, want %q", got, want)
+	}
+	if got, want := readQuizPlayCount(t, db, qz.ID), int64(1); got != want {
+		t.Errorf("play_count = %d, want %d", got, want)
+	}
+}
+
+// TestLiveSessionStore_Intermission_SkipsBumpWhenFalse pins the #891 escape
+// hatch: passing bumpPlayCount=false (a runner that reached endGame without a
+// quiz id) moves the phase without touching the counter, so the column stays
+// honest on the "no game just played" path through the runner.
+func TestLiveSessionStore_Intermission_SkipsBumpWhenFalse(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+
+	qz := newLiveQuizWithQuestion(t, quizStore)
+	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "INT002"}
+	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+
+	if err := sessionStore.Intermission(t.Context(), sess.ID, false); err != nil {
+		t.Fatalf("Intermission err = %v, want nil", err)
+	}
+
+	if got, want := readQuizPlayCount(t, db, qz.ID), int64(0); got != want {
+		t.Errorf("play_count after no-bump intermission = %d, want %d", got, want)
+	}
+}
+
+// TestLiveSessionStore_Intermission_RepeatCallDoesNotDoubleBump pins the SQL
+// guard on SetSessionIntermission (#891): a second Intermission call against a
+// session already in intermission matches no row, so the counter does not
+// move a second time even if the caller forgets to gate on the phase. The
+// dispatcher already protects today's single call site, but the store-side
+// guard is the durable backstop.
+func TestLiveSessionStore_Intermission_RepeatCallDoesNotDoubleBump(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+
+	qz := newLiveQuizWithQuestion(t, quizStore)
+	sess := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "INT003"}
+	if err := sessionStore.CreateSession(t.Context(), sess); err != nil {
+		t.Fatalf("CreateSession err = %v, want nil", err)
+	}
+
+	if err := sessionStore.Intermission(t.Context(), sess.ID, true); err != nil {
+		t.Fatalf("first Intermission err = %v, want nil", err)
+	}
+	if err := sessionStore.Intermission(t.Context(), sess.ID, true); err != nil {
+		t.Fatalf("second Intermission err = %v, want nil", err)
+	}
+
+	if got, want := readQuizPlayCount(t, db, qz.ID), int64(1); got != want {
+		t.Errorf("play_count after repeat intermission = %d, want %d (no double-bump)", got, want)
+	}
+}

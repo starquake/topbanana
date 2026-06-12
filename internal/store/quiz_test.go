@@ -1823,7 +1823,7 @@ func TestQuizStore_DeleteQuiz(t *testing.T) {
 			StartedAt:  now,
 			ExpiredAt:  now.Add(10 * time.Second),
 		}
-		if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+		if err = gameStore.CreateQuestion(t.Context(), gq, false); err != nil {
 			t.Fatalf("failed to create game question: %v", err)
 		}
 		if err = gameStore.CreateAnswer(t.Context(), &game.Answer{
@@ -1947,7 +1947,7 @@ func TestQuizStore_DeleteQuestion(t *testing.T) {
 			StartedAt:  now,
 			ExpiredAt:  now.Add(10 * time.Second),
 		}
-		if err = gameStore.CreateQuestion(t.Context(), gq0); err != nil {
+		if err = gameStore.CreateQuestion(t.Context(), gq0, false); err != nil {
 			t.Fatalf("failed to create game question 0: %v", err)
 		}
 		if err = gameStore.CreateAnswer(t.Context(), &game.Answer{
@@ -1965,7 +1965,7 @@ func TestQuizStore_DeleteQuestion(t *testing.T) {
 			StartedAt:  now,
 			ExpiredAt:  now.Add(10 * time.Second),
 		}
-		if err = gameStore.CreateQuestion(t.Context(), gq1); err != nil {
+		if err = gameStore.CreateQuestion(t.Context(), gq1, false); err != nil {
 			t.Fatalf("failed to create game question 1: %v", err)
 		}
 		if err = gameStore.CreateAnswer(t.Context(), &game.Answer{

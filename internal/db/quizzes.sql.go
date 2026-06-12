@@ -12,6 +12,35 @@ import (
 	"time"
 )
 
+const bumpQuizPlayCountForGame = `-- name: BumpQuizPlayCountForGame :exec
+UPDATE quizzes
+SET play_count = play_count + 1
+WHERE quizzes.id = (SELECT quiz_id FROM games WHERE games.id = ?)
+`
+
+// Increments the durable hit counter (#891) for the quiz that owns this solo
+// game. Resolves the quiz from the game id so the caller only signals "this
+// play completed" without threading the quiz id. Never decremented; the CHECK
+// on quizzes.play_count keeps it non-negative.
+func (q *Queries) BumpQuizPlayCountForGame(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, bumpQuizPlayCountForGame, id)
+	return err
+}
+
+const bumpQuizPlayCountForSession = `-- name: BumpQuizPlayCountForSession :exec
+UPDATE quizzes
+SET play_count = play_count + 1
+WHERE quizzes.id = (SELECT quiz_id FROM sessions WHERE sessions.id = ?)
+`
+
+// Increments the durable hit counter (#891) for the quiz a live session is
+// playing. Resolves the quiz from the session id. A session with a NULL
+// quiz_id (a quiz-less room) matches no quiz row, so the bump is a safe no-op.
+func (q *Queries) BumpQuizPlayCountForSession(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, bumpQuizPlayCountForSession, id)
+	return err
+}
+
 const createOption = `-- name: CreateOption :one
 INSERT INTO options (question_id, text, is_correct)
 VALUES (?, ?, ?)
@@ -76,7 +105,7 @@ func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) 
 const createQuiz = `-- name: CreateQuiz :one
 INSERT INTO quizzes (title, slug, description, created_by_player_id, time_limit_seconds, visibility, mode, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-RETURNING id, title, slug, description, created_at, updated_at, created_by_player_id, time_limit_seconds, visibility, mode
+RETURNING id, title, slug, description, created_at, updated_at, created_by_player_id, time_limit_seconds, visibility, mode, play_count
 `
 
 type CreateQuizParams struct {
@@ -115,6 +144,7 @@ func (q *Queries) CreateQuiz(ctx context.Context, arg CreateQuizParams) (Quiz, e
 		&i.TimeLimitSeconds,
 		&i.Visibility,
 		&i.Mode,
+		&i.PlayCount,
 	)
 	return i, err
 }
@@ -243,6 +273,7 @@ SELECT q.id,
        q.time_limit_seconds,
        q.visibility,
        q.mode,
+       q.play_count,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
@@ -261,6 +292,7 @@ type GetQuizRow struct {
 	TimeLimitSeconds     int64
 	Visibility           string
 	Mode                 string
+	PlayCount            int64
 	CreatedByDisplayName string
 }
 
@@ -281,6 +313,7 @@ func (q *Queries) GetQuiz(ctx context.Context, id int64) (GetQuizRow, error) {
 		&i.TimeLimitSeconds,
 		&i.Visibility,
 		&i.Mode,
+		&i.PlayCount,
 		&i.CreatedByDisplayName,
 	)
 	return i, err
@@ -314,6 +347,7 @@ SELECT q.id,
        q.time_limit_seconds,
        q.visibility,
        q.mode,
+       q.play_count,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
@@ -332,6 +366,7 @@ type ListLiveQuizzesRow struct {
 	TimeLimitSeconds     int64
 	Visibility           string
 	Mode                 string
+	PlayCount            int64
 	CreatedByDisplayName string
 }
 
@@ -359,6 +394,7 @@ func (q *Queries) ListLiveQuizzes(ctx context.Context) ([]ListLiveQuizzesRow, er
 			&i.TimeLimitSeconds,
 			&i.Visibility,
 			&i.Mode,
+			&i.PlayCount,
 			&i.CreatedByDisplayName,
 		); err != nil {
 			return nil, err
@@ -486,6 +522,7 @@ SELECT q.id,
        q.time_limit_seconds,
        q.visibility,
        q.mode,
+       q.play_count,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
@@ -505,6 +542,7 @@ type ListPublicQuizzesRow struct {
 	TimeLimitSeconds     int64
 	Visibility           string
 	Mode                 string
+	PlayCount            int64
 	CreatedByDisplayName string
 }
 
@@ -533,6 +571,7 @@ func (q *Queries) ListPublicQuizzes(ctx context.Context) ([]ListPublicQuizzesRow
 			&i.TimeLimitSeconds,
 			&i.Visibility,
 			&i.Mode,
+			&i.PlayCount,
 			&i.CreatedByDisplayName,
 		); err != nil {
 			return nil, err
@@ -662,6 +701,7 @@ SELECT q.id,
        q.time_limit_seconds,
        q.visibility,
        q.mode,
+       q.play_count,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
@@ -679,6 +719,7 @@ type ListQuizzesRow struct {
 	TimeLimitSeconds     int64
 	Visibility           string
 	Mode                 string
+	PlayCount            int64
 	CreatedByDisplayName string
 }
 
@@ -715,6 +756,7 @@ func (q *Queries) ListQuizzes(ctx context.Context) ([]ListQuizzesRow, error) {
 			&i.TimeLimitSeconds,
 			&i.Visibility,
 			&i.Mode,
+			&i.PlayCount,
 			&i.CreatedByDisplayName,
 		); err != nil {
 			return nil, err
