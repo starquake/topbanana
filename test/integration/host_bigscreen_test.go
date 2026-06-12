@@ -159,10 +159,10 @@ func TestHostBigScreen_RendersCodeQuizAndQR(t *testing.T) {
 	}
 }
 
-// TestHostBigScreen_RendersPickQuizLink pins the list-driven pick flow (#851): an
-// empty staging room renders the "pick a live quiz" link to
-// /admin/quizzes?mode=live (where the host picks a quiz and "Host live" arms it
-// back in this room), and the old in-lobby dropdown picker is gone.
+// TestHostBigScreen_RendersPickQuizLink pins the list-driven pick flow (#851,
+// #889): an empty staging room renders the "pick a live quiz" link to
+// /host/quizzes (where the host picks a quiz and "Host this" arms it back in
+// this room), and the old in-lobby dropdown picker is gone.
 func TestHostBigScreen_RendersPickQuizLink(t *testing.T) {
 	t.Parallel()
 
@@ -188,12 +188,12 @@ func TestHostBigScreen_RendersPickQuizLink(t *testing.T) {
 	if got, want := status, http.StatusOK; got != want {
 		t.Fatalf("host big screen status = %d, want %d", got, want)
 	}
-	// The new list-driven flow: a link to the live-filtered quiz list.
+	// The new list-driven flow: a link to the host quiz list.
 	if !strings.Contains(body, `data-testid="pick-quiz-link"`) {
 		t.Error("host big screen missing the pick-a-live-quiz link")
 	}
-	if !strings.Contains(body, `href="/admin/quizzes?mode=live"`) {
-		t.Error("host big screen pick-quiz link should point at /admin/quizzes?mode=live")
+	if !strings.Contains(body, `href="/host/quizzes"`) {
+		t.Error("host big screen pick-quiz link should point at /host/quizzes")
 	}
 	// The old in-lobby dropdown picker is gone.
 	for _, gone := range []string{"data-start-quiz-picker", "data-next-quiz-form", "data-next-quiz-select"} {

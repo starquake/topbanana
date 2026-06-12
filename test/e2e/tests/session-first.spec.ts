@@ -58,14 +58,14 @@ test.describe('session-first live hosting', () => {
     await joinAsPlayer(page, joinCode, player);
     await expect(page.getByTestId('waiting-hint')).toContainText('start a quiz');
 
-    // The host follows the lobby link to the live-filtered quiz list, opens the
-    // seeded quiz, and hits "Host live". Because the host already has this empty
-    // staging room open, "Host live" ARMS the quiz in that room but stays in the
+    // The host follows the lobby link to the host quiz list and hits "Host this"
+    // on the seeded quiz card (#889). Because the host already has this empty
+    // staging room open, "Host this" ARMS the quiz in that room but stays in the
     // lobby (#863) - it does NOT auto-start - so the host starts when ready.
     await host.getByTestId('pick-quiz-link').locator('a').click();
-    await expect(host).toHaveURL(/\/admin\/quizzes\?mode=live$/);
-    await host.getByRole('link', { name: quizTitle }).click();
-    await host.getByRole('button', { name: 'Host live' }).click();
+    await expect(host).toHaveURL(/\/host\/quizzes$/);
+    const quizCard = host.locator('article').filter({ hasText: quizTitle });
+    await quizCard.getByRole('button', { name: 'Host this' }).click();
 
     // Back on the lobby the quiz is now armed: the Start controls appear and the
     // pick link is gone. The game has not started - the player is still waiting.

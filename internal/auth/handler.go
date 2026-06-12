@@ -17,6 +17,7 @@ import (
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/envtag"
 	"github.com/starquake/topbanana/internal/mailer"
+	"github.com/starquake/topbanana/internal/render"
 	"github.com/starquake/topbanana/internal/session"
 	"github.com/starquake/topbanana/internal/version"
 	"github.com/starquake/topbanana/internal/web/tmpl"
@@ -122,7 +123,7 @@ func HandleRegisterForm(
 	sessions *session.Manager,
 	googleEnabled bool,
 ) http.Handler {
-	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/register.gohtml")
+	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/register.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Registration doesn't carry next today (out of scope per #449);
@@ -131,7 +132,7 @@ func HandleRegisterForm(
 		if redirectIfSignedIn(w, r, players, sessions, "") {
 			return
 		}
-		render.render(w, r, http.StatusOK, formData{Title: "Register", ShowGoogle: googleEnabled})
+		renderer.Render(w, r, http.StatusOK, formData{Title: "Register", ShowGoogle: googleEnabled})
 	})
 }
 
@@ -170,7 +171,7 @@ func HandleRegisterSubmit(
 	sessions *session.Manager,
 	deps RegisterDeps,
 ) http.Handler {
-	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/register.gohtml")
+	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/register.gohtml")
 	pending := newTemplateRenderer(logger, csrfMgr, "auth/pages/register_pending.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -189,7 +190,7 @@ func HandleRegisterSubmit(
 
 		input := validateRegisterInput(rawDisplayName, rawEmail, password, passwordConfirm)
 		if !input.OK {
-			render.render(w, r, http.StatusBadRequest, formData{
+			renderer.Render(w, r, http.StatusBadRequest, formData{
 				Title:       "Register",
 				DisplayName: input.CleanedDisplayName,
 				Email:       input.CleanedEmail,
@@ -214,7 +215,7 @@ func HandleRegisterSubmit(
 			return
 		}
 
-		renderers := registerRenderers{form: render, pending: pending, sessions: sessions}
+		renderers := registerRenderers{form: renderer, pending: pending, sessions: sessions}
 
 		player, err := claimOrCreatePlayer(
 			r, players, sessions, input.CleanedDisplayName, input.CleanedEmail, hashed, RolePlayer,
@@ -234,8 +235,8 @@ func HandleRegisterSubmit(
 // session manager so the error/pending helpers stay under revive's
 // argument-count cap.
 type registerRenderers struct {
-	form     *templateRenderer
-	pending  *templateRenderer
+	form     *render.Renderer
+	pending  *render.Renderer
 	sessions *session.Manager
 }
 
@@ -246,7 +247,7 @@ type registerRenderers struct {
 // cannot leave the unverified account signed in.
 func (rr registerRenderers) renderPending(w http.ResponseWriter, r *http.Request, email string) {
 	rr.sessions.Clear(w)
-	rr.pending.render(w, r, http.StatusOK, registerPendingData{
+	rr.pending.Render(w, r, http.StatusOK, registerPendingData{
 		Title: "Verify your email",
 		Email: email,
 	})
@@ -271,7 +272,7 @@ func handleRegisterError(
 		dispatchRegisterExisting(r.Context(), logger, deps, input.CleanedEmail)
 		renderers.renderPending(w, r, input.CleanedEmail)
 	case errors.Is(err, ErrDisplayNameTaken):
-		renderers.form.render(w, r, http.StatusConflict, formData{
+		renderers.form.Render(w, r, http.StatusConflict, formData{
 			Title:       "Register",
 			DisplayName: input.CleanedDisplayName,
 			Email:       input.CleanedEmail,
@@ -432,14 +433,14 @@ func HandleLoginForm(
 	sessions *session.Manager,
 	registrationEnabled, googleEnabled bool,
 ) http.Handler {
-	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
+	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		next := SafeNextPath(r.URL.Query().Get("next"))
 		if redirectIfSignedIn(w, r, players, sessions, next) {
 			return
 		}
-		render.render(w, r, http.StatusOK, formData{
+		renderer.Render(w, r, http.StatusOK, formData{
 			Title:        "Log in",
 			ShowRegister: registrationEnabled,
 			ShowGoogle:   googleEnabled,
@@ -534,9 +535,9 @@ func HandleLoginSubmit(
 	csrfMgr *csrf.Manager,
 	deps LoginDeps,
 ) http.Handler {
-	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
+	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
 	formCfg := loginFormCfg{
-		render:              render,
+		render:              renderer,
 		registrationEnabled: deps.RegistrationEnabled,
 		googleEnabled:       deps.GoogleEnabled,
 	}
@@ -693,7 +694,7 @@ func recordAccountFailure(limiter *AccountLoginLimiter, account string) {
 // the inner helpers (authenticateLogin, renderInvalidCredentials,
 // renderLoginRateLimited) stay under revive's argument-limit.
 type loginFormCfg struct {
-	render              *templateRenderer
+	render              *render.Renderer
 	registrationEnabled bool
 	googleEnabled       bool
 }
@@ -797,7 +798,7 @@ func renderUnverifiedLogin(
 	email string,
 ) {
 	dispatchVerifyResend(r, logger, deps, player)
-	cfg.render.render(w, r, http.StatusOK, formData{
+	cfg.render.Render(w, r, http.StatusOK, formData{
 		Title:        "Log in",
 		Email:        email,
 		Message:      "Check your email to finish signing in.",
@@ -857,7 +858,7 @@ func renderLoginRateLimited(
 	// limiter.
 	seconds := int((wait + time.Second - 1) / time.Second)
 	w.Header().Set("Retry-After", strconv.Itoa(seconds))
-	cfg.render.render(w, r, http.StatusTooManyRequests, formData{
+	cfg.render.Render(w, r, http.StatusTooManyRequests, formData{
 		Title:        "Log in",
 		Email:        email,
 		Message:      "Too many attempts. Try again in a moment.",
@@ -985,7 +986,7 @@ func renderInvalidCredentials(
 	r *http.Request,
 	email string,
 ) {
-	cfg.render.render(w, r, http.StatusUnauthorized, formData{
+	cfg.render.Render(w, r, http.StatusUnauthorized, formData{
 		Title:        "Log in",
 		Email:        email,
 		Message:      "Invalid email or password.",
@@ -997,20 +998,10 @@ func renderInvalidCredentials(
 	})
 }
 
-// templateRenderer renders a template combined with the auth layouts.
-//
-// The CSRF manager wires the {{csrfToken}} template func: each render asks the
-// manager for the token, which sets a nonce cookie on the response when needed
-// and returns the HMAC-derived token for the form's hidden field. The
-// placeholder registered in newTemplateRenderer keeps templates parseable
-// without a manager (e.g. unit tests).
-type templateRenderer struct {
-	logger *slog.Logger
-	csrf   *csrf.Manager
-	t      *template.Template
-}
-
-func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string) *templateRenderer {
+// parseTemplate parses the auth layouts plus the named page, registering the
+// auth surface's parse-time placeholder funcs. render rebinds the per-request
+// ones (csrfToken, ogImage, viewer) at execute time.
+func parseTemplate(page string) *template.Template {
 	// passwordHelp keeps the form's static help text bound to the
 	// MinPasswordLength/MaxPasswordLength constants - drift between the
 	// form, the validator, and the bcrypt cap stays impossible without
@@ -1035,31 +1026,23 @@ func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string
 		// does not render quiz_card, which is the only user (#889).
 		"humanizeTime": func(time.Time) string { return "" },
 	}
-	layouts := template.Must(
-		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "components/*.gohtml", "auth/layouts/*.gohtml"),
-	)
 
-	return &templateRenderer{
-		logger: logger,
-		csrf:   csrfMgr,
-		t:      template.Must(template.Must(layouts.Clone()).ParseFS(tmpl.FS, page)),
-	}
+	return render.Parse(tmpl.FS, funcs, page, "components/*.gohtml", "auth/layouts/*.gohtml")
 }
 
-func (tr *templateRenderer) render(w http.ResponseWriter, r *http.Request, status int, data any) {
-	t, err := tr.t.Clone()
-	if err != nil {
-		tr.logger.ErrorContext(r.Context(), "error cloning template", slog.Any("err", err))
-		http.Error(w, "internal error", http.StatusInternalServerError)
+// newTemplateRenderer parses the named page and wraps the tree in a
+// render.Renderer bound to the auth surface's per-request funcs. The csrfToken
+// func is bound per render by render.Renderer (a placeholder keeps templates
+// parseable without a manager, e.g. unit tests).
+func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string) *render.Renderer {
+	return render.New(logger, csrfMgr, parseTemplate(page), "base.gohtml", authPerRequestFuncs)
+}
 
-		return
-	}
-
-	csrfToken := ""
-	if tr.csrf != nil {
-		csrfToken = tr.csrf.Token(w, r)
-	}
-
+// authPerRequestFuncs binds the auth surface's per-request template funcs: the
+// OG image URL and the viewer's display name / signed-in flag resolved from the
+// request context. render.Renderer binds csrfToken itself, so it is omitted
+// here.
+func authPerRequestFuncs(r *http.Request) template.FuncMap {
 	displayName := ""
 	signedIn := false
 	if p, ok := PlayerFromContext(r.Context()); ok {
@@ -1067,15 +1050,9 @@ func (tr *templateRenderer) render(w http.ResponseWriter, r *http.Request, statu
 		signedIn = true
 	}
 
-	t = t.Funcs(template.FuncMap{
-		"csrfToken":  func() string { return csrfToken },
+	return template.FuncMap{
 		"ogImage":    func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
 		"viewerName": func() string { return displayName },
 		"isSignedIn": func() bool { return signedIn },
-	})
-
-	w.WriteHeader(status)
-	if err := t.ExecuteTemplate(w, "base.gohtml", data); err != nil {
-		tr.logger.ErrorContext(r.Context(), "error executing template", slog.Any("err", err))
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/render"
 	"github.com/starquake/topbanana/internal/session"
 )
 
@@ -180,7 +181,7 @@ func HandleGoogleCallback(
 	adminEmails []string,
 	registrationEnabled bool,
 ) http.Handler {
-	render := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
+	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/login.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Read the next cookie BEFORE clearing the state pair so a
@@ -192,7 +193,7 @@ func HandleGoogleCallback(
 		http.SetCookie(w, googleNextCookie("", authn.cfg.SecureCookies, -1))
 
 		if msg, ok := validateCallbackRequest(authn.stateKey, r); !ok {
-			renderGoogleError(render, w, r, msg, registrationEnabled)
+			renderGoogleError(renderer, w, r, msg, registrationEnabled)
 
 			return
 		}
@@ -204,7 +205,7 @@ func HandleGoogleCallback(
 			return
 		}
 		if result.UserMessage != "" {
-			renderGoogleError(render, w, r, result.UserMessage, registrationEnabled)
+			renderGoogleError(renderer, w, r, result.UserMessage, registrationEnabled)
 
 			return
 		}
@@ -220,7 +221,7 @@ func HandleGoogleCallback(
 			if !errors.Is(err, ErrRegistrationDisabled) {
 				logger.ErrorContext(r.Context(), "error linking google player", slog.Any("err", err))
 			}
-			renderGoogleError(render, w, r, googleLinkErrorMessage(err), registrationEnabled)
+			renderGoogleError(renderer, w, r, googleLinkErrorMessage(err), registrationEnabled)
 
 			return
 		}
@@ -235,7 +236,7 @@ func HandleGoogleCallback(
 		if !player.IsEmailVerified() {
 			logger.WarnContext(r.Context(), "google sign-in blocked: email_verified_at not stamped",
 				slog.Int64("player_id", player.ID))
-			renderGoogleError(render, w, r,
+			renderGoogleError(renderer, w, r,
 				"Sign-in blocked: your email is not verified. Try requesting a verification link.",
 				registrationEnabled)
 
@@ -876,13 +877,13 @@ func googleLinkErrorMessage(err error) string {
 // invalid-credentials flow - a recoverable form, not an HTTP error
 // page.
 func renderGoogleError(
-	render *templateRenderer,
+	renderer *render.Renderer,
 	w http.ResponseWriter,
 	r *http.Request,
 	message string,
 	registrationEnabled bool,
 ) {
-	render.render(w, r, http.StatusUnauthorized, formData{
+	renderer.Render(w, r, http.StatusUnauthorized, formData{
 		Title:        "Log in",
 		Message:      message,
 		ShowRegister: registrationEnabled,

@@ -279,18 +279,18 @@
             </ul>
         </div>
 
-        {{/* Pick-a-live-quiz link (#851): the host picks a live quiz from the
-             filterable admin quiz list rather than an in-lobby dropdown. Shown
-             for both staging cases - an empty lobby (the first game) and the
-             between-games intermission (the next game) - via showsPickQuizLink().
-             The link opens /admin/quizzes?mode=live; choosing a quiz there and
-             hitting "Host live" arms it back in this same room (one room per
-             host). A preselected-quiz lobby keeps the footer Start controls
-             instead, so this stays hidden there. */}}
+        {{/* Pick-a-live-quiz link (#851, #889): the host picks a live quiz from
+             the host quiz list rather than an in-lobby dropdown. Shown for both
+             staging cases - an empty lobby (the first game) and the between-games
+             intermission (the next game) - via showsPickQuizLink(). The link
+             opens /host/quizzes; choosing a quiz there and hitting "Host this"
+             arms it back in this same room (one room per host). A preselected-quiz
+             lobby keeps the footer Start controls instead, so this stays hidden
+             there. */}}
         <div x-show="showsPickQuizLink()"
              class="shrink-0 px-[clamp(1.5rem,4vw,4rem)] pb-[clamp(1rem,2.5vh,2rem)]"
              data-testid="pick-quiz-link">
-            <a href="/admin/quizzes?mode=live" class="btn-primary gap-2">Pick a live quiz</a>
+            <a href="/host/quizzes" class="btn-primary gap-2">Pick a live quiz</a>
         </div>
 
         {{/* Footer: connection state + host start controls (lobby only). The

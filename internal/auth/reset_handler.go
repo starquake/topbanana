@@ -36,11 +36,11 @@ func HandleResetForm(
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		raw := r.URL.Query().Get("token")
 		if !resetTokenLivePreflight(r, logger, tokens, raw) {
-			invalid.render(w, r, http.StatusGone, resetPageData{Title: "Reset link"})
+			invalid.Render(w, r, http.StatusGone, resetPageData{Title: "Reset link"})
 
 			return
 		}
-		render.render(w, r, http.StatusOK, resetPageData{Title: "Set a new password", Token: raw})
+		render.Render(w, r, http.StatusOK, resetPageData{Title: "Set a new password", Token: raw})
 	})
 }
 
@@ -99,7 +99,7 @@ func HandleResetSubmit(
 		password := r.PostFormValue("password")
 		confirm := r.PostFormValue("confirm")
 		if msg, ok := validateResetInput(password, confirm); !ok {
-			render.render(w, r, http.StatusBadRequest, resetPageData{
+			render.Render(w, r, http.StatusBadRequest, resetPageData{
 				Title: "Set a new password", Token: raw, Message: msg,
 			})
 
@@ -119,7 +119,7 @@ func HandleResetSubmit(
 		case err == nil:
 			autoLoginAfterReset(w, r, logger, sessions, players, playerID)
 		case errors.Is(err, ErrResetTokenInvalid):
-			invalid.render(w, r, http.StatusGone, resetPageData{Title: "Reset link"})
+			invalid.Render(w, r, http.StatusGone, resetPageData{Title: "Reset link"})
 		default:
 			logger.ErrorContext(r.Context(), "reset-password consume failed", slog.Any("err", err))
 			http.Error(w, "internal error", http.StatusInternalServerError)

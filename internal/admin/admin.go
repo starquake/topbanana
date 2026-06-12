@@ -24,6 +24,8 @@ import (
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/livesession"
 	"github.com/starquake/topbanana/internal/quiz"
+	"github.com/starquake/topbanana/internal/reltime"
+	"github.com/starquake/topbanana/internal/render"
 	"github.com/starquake/topbanana/internal/version"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
@@ -33,85 +35,25 @@ type Validator interface {
 	Valid(ctx context.Context) map[string]string
 }
 
-// TemplateRenderer renders templates using the given logger and template path.
-type TemplateRenderer struct {
-	logger *slog.Logger
-	csrf   *csrf.Manager
-	t      *template.Template
-}
+// baseLayout is the template name every admin page (and error page) executes.
+const baseLayout = "base.gohtml"
 
-// NewTemplateRenderer creates a new TemplateRenderer with the given logger,
-// CSRF manager, and template path. It parses the template on creation.
+// NewTemplateRenderer creates a renderer for the admin surface with the given
+// logger, CSRF manager, and template path. It parses the template on creation.
 //
 // The CSRF manager may be nil for callers that render error pages without an
 // embedded form (the placeholder {{csrfToken}} func still resolves to "").
-func NewTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, templatePath string) *TemplateRenderer {
-	return &TemplateRenderer{
-		logger: logger,
-		csrf:   csrfMgr,
-		t:      parseTemplate(templatePath),
-	}
+func NewTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, templatePath string) *render.Renderer {
+	return render.New(logger, csrfMgr, parseTemplate(templatePath), baseLayout, adminPerRequestFuncs)
 }
 
-// Render renders the full base layout with the supplied data. It does not
-// return an error because the headers have already been written by the
-// time ExecuteTemplate runs - an error page is no longer an option, so
-// failures are logged.
-//
-// The clone-and-override dance behind prepare lets the shared top bar
-// call {{viewerName}} and any form call {{csrfToken}} without every
-// handler having to thread those values into its data struct.
-func (tr *TemplateRenderer) Render(w http.ResponseWriter, r *http.Request, status int, data any) {
-	t, ok := tr.prepare(w, r)
-	if !ok {
-		return
-	}
-
-	w.WriteHeader(status)
-	if err := t.ExecuteTemplate(w, "base.gohtml", data); err != nil {
-		tr.logger.ErrorContext(r.Context(), "error executing template", slog.Any("err", err))
-	}
-}
-
-// RenderPartial executes a named template (typically a partial from
-// admin/partials/) instead of the full base layout. Used by HTMX-aware
-// handlers that want to return only the fragment that needs swapping.
-func (tr *TemplateRenderer) RenderPartial(w http.ResponseWriter, r *http.Request, name string, data any) {
-	t, ok := tr.prepare(w, r)
-	if !ok {
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	if err := t.ExecuteTemplate(w, name, data); err != nil {
-		tr.logger.ErrorContext(
-			r.Context(),
-			"error executing partial template",
-			slog.String("name", name),
-			slog.Any("err", err),
-		)
-	}
-}
-
-// prepare clones the renderer's template tree and binds per-request
-// implementations of the {{viewerName}} and {{csrfToken}} funcs that
-// parseTemplate registered as placeholders. Returns the prepared template
-// and true on success; on Clone failure it surfaces 500 Internal Server
-// Error and returns false so the caller can early-return.
-//
-// The csrf.Token call must run before any WriteHeader because setting the
-// nonce cookie is a header write - callers must defer their own header
-// writes until after prepare returns.
-func (tr *TemplateRenderer) prepare(w http.ResponseWriter, r *http.Request) (*template.Template, bool) {
-	t, err := tr.t.Clone()
-	if err != nil {
-		tr.logger.ErrorContext(r.Context(), "error cloning template", slog.Any("err", err))
-		http.Error(w, "internal error", http.StatusInternalServerError)
-
-		return nil, false
-	}
-
+// adminPerRequestFuncs binds the admin top bar's per-request template funcs:
+// the viewer's display name and admin flag (from the request context), the
+// signed-in / section-nav flags the admin chrome always renders with, the
+// admin logo href, the OG image URL, and the active nav section derived from
+// the request path. render.Renderer binds csrfToken itself, so it is omitted
+// here.
+func adminPerRequestFuncs(r *http.Request) template.FuncMap {
 	displayName := ""
 	isAdmin := false
 	if p, ok := auth.PlayerFromContext(r.Context()); ok {
@@ -119,23 +61,17 @@ func (tr *TemplateRenderer) prepare(w http.ResponseWriter, r *http.Request) (*te
 		isAdmin = p.IsAdmin()
 	}
 
-	csrfToken := ""
-	if tr.csrf != nil {
-		csrfToken = tr.csrf.Token(w, r)
-	}
-
 	section := navSection(r.URL.Path)
 
-	return t.Funcs(template.FuncMap{
+	return template.FuncMap{
 		"viewerName":     func() string { return displayName },
 		"isSignedIn":     func() bool { return true },
 		"showSectionNav": func() bool { return true },
 		"logoHref":       func() string { return "/admin" },
-		"csrfToken":      func() string { return csrfToken },
 		"ogImage":        func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
 		"navSection":     func() string { return section },
 		"isAdmin":        func() bool { return isAdmin },
-	}), true
+	}
 }
 
 // navSection maps a request path to the admin nav section it belongs to,
@@ -392,9 +328,10 @@ func optionDataFromOptions(options []*quiz.Option) []*OptionData {
 // Placeholder "viewerName", "csrfToken", and "navSection" funcs are
 // registered before parse so the shared top bar's
 // {{viewerName}}/{{navSection}} calls and any form's {{csrfToken}} call
-// resolve at parse time. TemplateRenderer.Render clones the parsed tree
-// and replaces these placeholders with implementations that read the
-// request context, CSRF manager, and request path, respectively.
+// resolve at parse time. render.Renderer clones the parsed tree per request
+// and replaces these placeholders (via adminPerRequestFuncs and the renderer's
+// own csrfToken binding) with implementations that read the request context,
+// CSRF manager, and request path, respectively.
 //
 // "humanizeTime" is a pure function of its argument, so it's registered with
 // its real implementation here - no per-request override needed.
@@ -411,61 +348,15 @@ func parseTemplate(path string) *template.Template {
 		"isAdmin":           func() bool { return false },
 		"envTitleTag":       envtag.Get,
 		"versionLabel":      version.Label,
-		"humanizeTime":      humanizeTime,
+		"humanizeTime":      reltime.Humanize,
 		"passwordMinLength": func() int { return auth.MinPasswordLength },
 	}
-	base := template.Must(
-		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "components/*.gohtml", "admin/layouts/*.gohtml"),
+	// Partials are parsed alongside layouts so any page (or any HTMX-fragment
+	// handler) can {{template "name" .}} a shared block without re-listing it.
+	return render.Parse(
+		tmpl.FS, funcs, path,
+		"components/*.gohtml", "admin/layouts/*.gohtml", "admin/partials/*.gohtml",
 	)
-	// Partials are pulled in alongside layouts so any page (or any
-	// HTMX-fragment handler) can {{template "name" .}} a shared block
-	// without re-listing it per-call site.
-	base = template.Must(base.ParseFS(tmpl.FS, "admin/partials/*.gohtml"))
-
-	return template.Must(template.Must(base.Clone()).ParseFS(tmpl.FS, path))
-}
-
-// hoursPerDay is the bucket size for switching humanizeTime from hours to days.
-const hoursPerDay = 24
-
-// humanizeTime returns a coarse relative-time string for t (e.g. "3 hr ago").
-// It rounds down to the largest matching bucket and uses absolute zero-handling
-// for "just now" so a freshly written record renders sensibly.
-func humanizeTime(t time.Time) string {
-	return humanizeSince(time.Now(), t)
-}
-
-// humanizeSince is the pure relative-time formatter, with the reference
-// "now" passed in rather than read from the clock. Splitting it out keeps
-// the formatting deterministic and testable: a test passes a fixed now
-// instead of racing [time.Now] against scheduling jitter (#666).
-func humanizeSince(now, t time.Time) string {
-	d := now.Sub(t)
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		m := int(d.Minutes())
-		if m == 1 {
-			return "1 min ago"
-		}
-
-		return fmt.Sprintf("%d min ago", m)
-	case d < hoursPerDay*time.Hour:
-		h := int(d.Hours())
-		if h == 1 {
-			return "1 hr ago"
-		}
-
-		return fmt.Sprintf("%d hr ago", h)
-	default:
-		days := int(d.Hours() / hoursPerDay)
-		if days == 1 {
-			return "1 day ago"
-		}
-
-		return fmt.Sprintf("%d days ago", days)
-	}
 }
 
 // render400 renders the 400 error page with the given message.
@@ -477,7 +368,13 @@ func humanizeSince(now, t time.Time) string {
 // hoc deep in the call stack - passing it explicitly keeps the rendering path
 // honest about its dependencies.
 func render400(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrfMgr *csrf.Manager, msg string) {
-	render := &TemplateRenderer{logger: logger, csrf: csrfMgr, t: parseTemplate("admin/errors/400.gohtml")}
+	renderer := render.New(
+		logger,
+		csrfMgr,
+		parseTemplate("admin/errors/400.gohtml"),
+		baseLayout,
+		adminPerRequestFuncs,
+	)
 	data := struct {
 		Title   string
 		Message string
@@ -485,14 +382,20 @@ func render400(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrf
 		Title:   "Error",
 		Message: msg,
 	}
-	render.Render(w, r, http.StatusBadRequest, data)
+	renderer.Render(w, r, http.StatusBadRequest, data)
 }
 
 // render404 renders the 404 error page.
 // Should be used as the final handler in the chain and probably be followed by a return.
 func render404(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrfMgr *csrf.Manager) {
-	render := &TemplateRenderer{logger: logger, csrf: csrfMgr, t: parseTemplate("admin/errors/404.gohtml")}
-	render.Render(w, r, http.StatusNotFound, nil)
+	renderer := render.New(
+		logger,
+		csrfMgr,
+		parseTemplate("admin/errors/404.gohtml"),
+		baseLayout,
+		adminPerRequestFuncs,
+	)
+	renderer.Render(w, r, http.StatusNotFound, nil)
 }
 
 // render403 renders the 403 error page with a message that names the
@@ -500,7 +403,13 @@ func render404(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrf
 // requireQuizOwner so a wrong-owner attempt surfaces a clear "not your
 // quiz, ask <name> to make the change" instead of a generic 403.
 func render403(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrfMgr *csrf.Manager, msg string) {
-	render := &TemplateRenderer{logger: logger, csrf: csrfMgr, t: parseTemplate("admin/errors/403.gohtml")}
+	renderer := render.New(
+		logger,
+		csrfMgr,
+		parseTemplate("admin/errors/403.gohtml"),
+		baseLayout,
+		adminPerRequestFuncs,
+	)
 	data := struct {
 		Title   string
 		Message string
@@ -508,14 +417,20 @@ func render403(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrf
 		Title:   "Forbidden",
 		Message: msg,
 	}
-	render.Render(w, r, http.StatusForbidden, data)
+	renderer.Render(w, r, http.StatusForbidden, data)
 }
 
 // render500 renders the 500 error page.
 // Should be used as the final handler in the chain and probably be followed by a return.
 func render500(w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrfMgr *csrf.Manager) {
-	render := &TemplateRenderer{logger: logger, csrf: csrfMgr, t: parseTemplate("admin/errors/500.gohtml")}
-	render.Render(w, r, http.StatusInternalServerError, nil)
+	renderer := render.New(
+		logger,
+		csrfMgr,
+		parseTemplate("admin/errors/500.gohtml"),
+		baseLayout,
+		adminPerRequestFuncs,
+	)
+	renderer.Render(w, r, http.StatusInternalServerError, nil)
 }
 
 // requireQuizOwner loads the quiz and gates the request on the session
@@ -872,12 +787,12 @@ type indexData struct {
 // not wire the live-session service, in which case the resume link is never
 // shown.
 func HandleIndex(logger *slog.Logger, csrfMgr *csrf.Manager, sessions ActiveSessionLookup) http.Handler {
-	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/index.gohtml")
+	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/index.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data := indexData{Title: "Admin Dashboard"}
 		data.ResumeCode = activeRoomCode(r, logger, sessions)
-		render.Render(w, r, http.StatusOK, data)
+		renderer.Render(w, r, http.StatusOK, data)
 	})
 }
 
@@ -911,7 +826,7 @@ func activeRoomCode(r *http.Request, logger *slog.Logger, sessions ActiveSession
 // that mode; anything else (including absent) shows all. The chosen mode is
 // passed to the template so it can mark the active Solo / Live / All filter tab.
 func HandleQuizList(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
-	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizlist.gohtml")
+	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizlist.gohtml")
 
 	type quizListData struct {
 		Title   string
@@ -962,7 +877,7 @@ func HandleQuizList(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 			Mode:    mode,
 		}
 
-		render.Render(w, r, http.StatusOK, data)
+		renderer.Render(w, r, http.StatusOK, data)
 	})
 }
 
@@ -1012,7 +927,7 @@ func HandleQuizView(
 	gameService *game.Service,
 	runningGames RunningGameLookup,
 ) http.Handler {
-	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
+	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
@@ -1041,7 +956,7 @@ func HandleQuizView(
 		attachCanEdit(r, quizData)
 		data := newQuizViewData(quizData, players, rounds)
 		data.HostHasRunningGame = hostHasRunningGame(r, logger, runningGames)
-		render.Render(w, r, http.StatusOK, data)
+		renderer.Render(w, r, http.StatusOK, data)
 	})
 }
 
@@ -1165,7 +1080,7 @@ func renderRoundsPartial(
 	r *http.Request,
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
-	render *TemplateRenderer,
+	renderer *render.Renderer,
 	quizStore quiz.Store,
 	quizID int64,
 ) {
@@ -1179,7 +1094,7 @@ func renderRoundsPartial(
 	}
 	quizData := quizDataFromQuiz(qz)
 	attachCanEdit(r, quizData)
-	render.RenderPartial(w, r, "questions_list", roundsPartialData{
+	renderer.RenderPartial(w, r, "questions_list", roundsPartialData{
 		Quiz:   quizData,
 		Rounds: buildRoundView(rounds, quizData.Questions),
 	})
@@ -1278,14 +1193,14 @@ func HandleResetGameForPlayer(
 
 // HandleQuizCreate creates a quiz.
 func HandleQuizCreate(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
-	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizform.gohtml")
+	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizform.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Pre-fill the time-limit input with the project-wide default
 		// so the form is a valid submission without the author having
 		// to touch the new field; the HTML5 number input with
 		// min=1/max=600 would otherwise reject the zero-value (#99).
-		render.Render(w, r, http.StatusOK, quizFormData{
+		renderer.Render(w, r, http.StatusOK, quizFormData{
 			Title: quizFormCreateTitle,
 			Quiz: &QuizData{
 				TimeLimitSeconds:  quiz.DefaultTimeLimitSeconds,
@@ -1300,7 +1215,7 @@ func HandleQuizCreate(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
 
 // HandleQuizEdit handles the display of the quiz edit page in the admin dashboard.
 func HandleQuizEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
-	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizform.gohtml")
+	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizform.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
@@ -1316,7 +1231,7 @@ func HandleQuizEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 		if qz, ok = requireQuizOwner(w, r, logger, csrfMgr, quizStore, quizID); !ok {
 			return
 		}
-		render.Render(w, r, http.StatusOK, quizFormData{
+		renderer.Render(w, r, http.StatusOK, quizFormData{
 			Title: quizFormEditTitle,
 			Quiz:  quizDataFromQuiz(qz),
 		})
@@ -1446,10 +1361,10 @@ type quizImportPageData struct {
 // on a fresh GET; the POST handler re-renders this template with the
 // submitted JSON intact when validation fails.
 func HandleQuizImportForm(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
-	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizimport.gohtml")
+	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizimport.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		render.Render(w, r, http.StatusOK, quizImportPageData{
+		renderer.Render(w, r, http.StatusOK, quizImportPageData{
 			Title:       "Admin Dashboard - Import Quiz",
 			Example:     quizImportExample,
 			ModeOptions: quiz.ModeValues(),
@@ -1463,10 +1378,10 @@ func HandleQuizImportForm(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handl
 // quiz form. Validation errors re-render the form with the submitted JSON
 // preserved so the admin can fix the payload without re-pasting.
 func HandleQuizImportSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
-	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizimport.gohtml")
+	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizimport.gohtml")
 
 	renderStatus := func(w http.ResponseWriter, r *http.Request, status int, jsonText, mode, msg string) {
-		render.Render(w, r, status, quizImportPageData{
+		renderer.Render(w, r, status, quizImportPageData{
 			Title:       "Admin Dashboard - Import Quiz",
 			JSON:        jsonText,
 			Example:     quizImportExample,
@@ -1813,7 +1728,7 @@ func HandleQuizSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 func renderQuizSaveError(
 	w http.ResponseWriter, r *http.Request,
 	logger *slog.Logger, csrfMgr *csrf.Manager,
-	formRenderer *TemplateRenderer,
+	formRenderer *render.Renderer,
 	qz *quiz.Quiz, pageTitle string, err error,
 ) {
 	if errors.Is(err, quiz.ErrSlugTaken) {
@@ -1851,7 +1766,7 @@ type questionFormData struct {
 
 // HandleQuestionCreate creates a question.
 func HandleQuestionCreate(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
-	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/questionform.gohtml")
+	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/questionform.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
@@ -1868,7 +1783,7 @@ func HandleQuestionCreate(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 			return
 		}
 
-		render.Render(w, r, http.StatusOK, questionFormData{
+		renderer.Render(w, r, http.StatusOK, questionFormData{
 			Title:    "Admin Dashboard - Question Create",
 			Quiz:     quizDataFromQuiz(qz),
 			Question: &QuestionData{},
@@ -1878,7 +1793,7 @@ func HandleQuestionCreate(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 
 // HandleQuestionEdit handles the display of the question edit page in the admin dashboard.
 func HandleQuestionEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
-	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/questionform.gohtml")
+	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/questionform.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
@@ -1912,7 +1827,7 @@ func HandleQuestionEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 			}
 		}
 
-		render.Render(w, r, http.StatusOK, questionFormData{
+		renderer.Render(w, r, http.StatusOK, questionFormData{
 			Title:    "Admin Dashboard - Question Edit",
 			Quiz:     quizDataFromQuiz(qz),
 			Question: questionDataFromQuestion(qs),
@@ -2040,7 +1955,7 @@ func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 	// the quiz-view template tree because parseTemplate loads every
 	// admin/partials/*.gohtml alongside any page template, so the partial
 	// is in scope for ExecuteTemplate by name.
-	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
+	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
@@ -2070,7 +1985,7 @@ func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 		}
 
 		if isHX {
-			renderRoundsPartial(w, r, logger, csrfMgr, render, quizStore, quizID)
+			renderRoundsPartial(w, r, logger, csrfMgr, renderer, quizStore, quizID)
 
 			return
 		}
@@ -2205,7 +2120,7 @@ func loadQuestionForSave(
 func renderQuestionForm(
 	w http.ResponseWriter,
 	r *http.Request,
-	renderer *TemplateRenderer,
+	renderer *render.Renderer,
 	qctx *questionSaveCtx,
 	fieldErrors map[string]string,
 ) {

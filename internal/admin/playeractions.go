@@ -16,6 +16,7 @@ import (
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/mailer"
+	"github.com/starquake/topbanana/internal/render"
 )
 
 // HandlePlayerMarkVerified handles POST /admin/players/{playerID}/verify.
@@ -492,10 +493,10 @@ type playerCreatePageData struct {
 
 // HandlePlayerCreateForm renders GET /admin/players/new.
 func HandlePlayerCreateForm(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handler {
-	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/playernew.gohtml")
+	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/playernew.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		render.Render(w, r, http.StatusOK, playerCreatePageData{
+		renderer.Render(w, r, http.StatusOK, playerCreatePageData{
 			Title: "Admin Dashboard - New Player",
 		})
 	})
@@ -512,7 +513,7 @@ func HandlePlayerCreateSubmit(
 	store auth.AdminPlayerStore,
 	flash *auth.SignedFlash,
 ) http.Handler {
-	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/playernew.gohtml")
+	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/playernew.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		actor, ok := requireAdminActor(w, r)
@@ -522,7 +523,7 @@ func HandlePlayerCreateSubmit(
 		r.Body = http.MaxBytesReader(w, r.Body, maxFormSize)
 		if err := r.ParseForm(); err != nil {
 			logger.InfoContext(r.Context(), "create-player form parse failed", slog.Any("err", err))
-			render.Render(w, r, http.StatusBadRequest, playerCreatePageData{
+			renderer.Render(w, r, http.StatusBadRequest, playerCreatePageData{
 				Title: "Admin Dashboard - New Player",
 				Error: "Form was malformed or too large.",
 			})
@@ -532,7 +533,7 @@ func HandlePlayerCreateSubmit(
 
 		input := newPlayerInput(r)
 		if input.errMsg != "" {
-			render.Render(w, r, http.StatusBadRequest, playerCreatePageData{
+			renderer.Render(w, r, http.StatusBadRequest, playerCreatePageData{
 				Title:       "Admin Dashboard - New Player",
 				DisplayName: input.DisplayName, Email: input.Email,
 				Error: input.errMsg,
@@ -544,7 +545,7 @@ func HandlePlayerCreateSubmit(
 		hash, err := auth.HashPassword(input.Password)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "error hashing password for admin-create", slog.Any("err", err))
-			render.Render(w, r, http.StatusInternalServerError, playerCreatePageData{
+			renderer.Render(w, r, http.StatusInternalServerError, playerCreatePageData{
 				Title:       "Admin Dashboard - New Player",
 				DisplayName: input.DisplayName, Email: input.Email,
 				Error: "Could not create player. Try again.",
@@ -555,7 +556,7 @@ func HandlePlayerCreateSubmit(
 
 		player, err := store.CreatePlayerByAdmin(r.Context(), input.DisplayName, input.Email, hash)
 		if err != nil {
-			renderCreatePlayerError(w, r, render, input, err)
+			renderCreatePlayerError(w, r, renderer, input, err)
 
 			return
 		}
@@ -611,7 +612,7 @@ func newPlayerInput(r *http.Request) newPlayerCreateInput {
 // renderer's perspective; the caller logs the underlying err
 // separately for ops.
 func renderCreatePlayerError(
-	w http.ResponseWriter, r *http.Request, render *TemplateRenderer, in newPlayerCreateInput, err error,
+	w http.ResponseWriter, r *http.Request, renderer *render.Renderer, in newPlayerCreateInput, err error,
 ) {
 	status := http.StatusInternalServerError
 	msg := "Could not create player. Try again."
@@ -625,7 +626,7 @@ func renderCreatePlayerError(
 	default:
 		// Fall through to the generic 500 message; err is logged by the caller.
 	}
-	render.Render(w, r, status, playerCreatePageData{
+	renderer.Render(w, r, status, playerCreatePageData{
 		Title:       "Admin Dashboard - New Player",
 		DisplayName: in.DisplayName, Email: in.Email,
 		Error: msg,

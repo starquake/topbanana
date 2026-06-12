@@ -20,6 +20,9 @@ import (
 	"github.com/starquake/topbanana/internal/envtag"
 	"github.com/starquake/topbanana/internal/livesession"
 	"github.com/starquake/topbanana/internal/qrcode"
+	"github.com/starquake/topbanana/internal/quiz"
+	"github.com/starquake/topbanana/internal/reltime"
+	"github.com/starquake/topbanana/internal/render"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
 
@@ -70,10 +73,11 @@ type BigScreenData struct {
 
 // Handlers serves the host big-screen page and the host start control.
 type Handlers struct {
-	logger  *slog.Logger
-	csrf    *csrf.Manager
-	service *livesession.Service
-	tmpl    *template.Template
+	logger    *slog.Logger
+	service   *livesession.Service
+	quizzes   quiz.Store
+	bigScreen *render.Renderer
+	quizList  *render.Renderer
 }
 
 // NewHandlers wires the host surface over the live-session service.
@@ -81,12 +85,16 @@ func NewHandlers(
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
 	service *livesession.Service,
+	quizStore quiz.Store,
 ) *Handlers {
 	return &Handlers{
 		logger:  logger,
-		csrf:    csrfMgr,
 		service: service,
-		tmpl:    parseTemplate("host/pages/bigscreen.gohtml"),
+		quizzes: quizStore,
+		// The host surfaces render none of admin's top-bar / nav chrome, so
+		// they bind nothing beyond render.Renderer's own csrfToken (nil funcs).
+		bigScreen: render.New(logger, csrfMgr, parseTemplate("host/pages/bigscreen.gohtml"), "base.gohtml", nil),
+		quizList:  render.New(logger, csrfMgr, parseQuizListTemplate("host/pages/quizlist.gohtml"), "page.gohtml", nil),
 	}
 }
 
@@ -151,43 +159,40 @@ func (h *Handlers) BigScreen(w http.ResponseWriter, r *http.Request) {
 		data.QuestionCount = len(state.Quiz.Questions)
 	}
 
-	h.render(w, r, data)
-}
-
-// render clones the parsed tree, binds the per-request csrfToken func, and
-// executes the base layout. Headers are written only after the (header-
-// writing) csrf token call, mirroring the admin renderer.
-func (h *Handlers) render(w http.ResponseWriter, r *http.Request, data BigScreenData) {
-	t, err := h.tmpl.Clone()
-	if err != nil {
-		h.logger.ErrorContext(r.Context(), "error cloning host template", slog.Any("err", err))
-		http.Error(w, msgInternalError, http.StatusInternalServerError)
-
-		return
-	}
-
-	csrfToken := ""
-	if h.csrf != nil {
-		csrfToken = h.csrf.Token(w, r)
-	}
-	t = t.Funcs(template.FuncMap{"csrfToken": func() string { return csrfToken }})
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := t.ExecuteTemplate(w, "base.gohtml", data); err != nil {
-		h.logger.ErrorContext(r.Context(), "error executing host template", slog.Any("err", err))
-	}
+	h.bigScreen.Render(w, r, http.StatusOK, data)
 }
 
 // parseTemplate parses the host layout plus the named page. Placeholder
 // funcs are registered before parse so the layout's {{envTitleTag}} and the
 // page's {{csrfToken}} resolve at parse time; render rebinds csrfToken per
 // request.
+//
+// The host/layouts/*.gohtml glob pulls in every host layout (base.gohtml and
+// page.gohtml), so this FuncMap must register every func any host layout uses
+// and stay in sync with parseQuizListTemplate's - else adding a func to one
+// layout panics the other tree at parse. humanizeTime is registered here for
+// that reason even though bigscreen does not call it.
 func parseTemplate(path string) *template.Template {
 	funcs := template.FuncMap{
-		"envTitleTag": envtag.Get,
-		"csrfToken":   func() string { return "" },
+		"envTitleTag":  envtag.Get,
+		"csrfToken":    func() string { return "" },
+		"humanizeTime": reltime.Humanize,
 	}
-	base := template.Must(template.New("").Funcs(funcs).ParseFS(tmpl.FS, "host/layouts/*.gohtml"))
 
-	return template.Must(template.Must(base.Clone()).ParseFS(tmpl.FS, path))
+	return render.Parse(tmpl.FS, funcs, path, "host/layouts/*.gohtml")
+}
+
+// parseQuizListTemplate parses the host layouts plus the shared quiz-card
+// partial and the named page. It registers the same funcs as parseTemplate
+// (the shared quiz_card partial calls humanizeTime). Only the quiz_card partial
+// is parsed (not the whole components/ glob): the footer and topbar partials
+// reference funcs (isSignedIn, isAdmin) this page does not provide.
+func parseQuizListTemplate(path string) *template.Template {
+	funcs := template.FuncMap{
+		"envTitleTag":  envtag.Get,
+		"csrfToken":    func() string { return "" },
+		"humanizeTime": reltime.Humanize,
+	}
+
+	return render.Parse(tmpl.FS, funcs, path, "host/layouts/*.gohtml", "components/quiz_card.gohtml")
 }

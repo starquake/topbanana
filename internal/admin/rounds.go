@@ -11,6 +11,7 @@ import (
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/quiz"
+	"github.com/starquake/topbanana/internal/render"
 )
 
 // roundFormData backs roundform.gohtml. FieldErrors is set when
@@ -29,7 +30,7 @@ type roundFormData struct {
 // HandleRoundCreate renders the new-round form. Owner-gated so a
 // non-creator never sees the editor for a quiz they cannot save.
 func HandleRoundCreate(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
-	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/roundform.gohtml")
+	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/roundform.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		quizID, ok := handlers.ParseIDFromPath(w, r, logger, "quizID")
@@ -42,7 +43,7 @@ func HandleRoundCreate(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qui
 			return
 		}
 
-		render.Render(w, r, http.StatusOK, roundFormData{
+		renderer.Render(w, r, http.StatusOK, roundFormData{
 			Title: "Admin Dashboard - Round Create",
 			Quiz:  quizDataFromQuiz(qz),
 			Round: &RoundData{QuizID: qz.ID},
@@ -53,7 +54,7 @@ func HandleRoundCreate(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qui
 // HandleRoundEdit renders the edit form for an existing round,
 // pre-filling its title and round-summary text.
 func HandleRoundEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
-	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/roundform.gohtml")
+	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/roundform.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		quizID, ok := handlers.ParseIDFromPath(w, r, logger, "quizID")
@@ -75,7 +76,7 @@ func HandleRoundEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.
 			return
 		}
 
-		render.Render(w, r, http.StatusOK, roundFormData{
+		renderer.Render(w, r, http.StatusOK, roundFormData{
 			Title: "Admin Dashboard - Round Edit",
 			Quiz:  quizDataFromQuiz(qz),
 			Round: roundDataFromRound(g),
@@ -135,7 +136,7 @@ func HandleRoundSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.
 // eligibility; the template hides the arrow in advance so a successful
 // request is the common case.
 func HandleRoundMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
-	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
+	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		quizID, ok := handlers.ParseIDFromPath(w, r, logger, "quizID")
@@ -169,7 +170,7 @@ func HandleRoundMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.
 		}
 
 		if isHX {
-			renderRoundsPartial(w, r, logger, csrfMgr, render, quizStore, quizID)
+			renderRoundsPartial(w, r, logger, csrfMgr, renderer, quizStore, quizID)
 
 			return
 		}
@@ -205,7 +206,7 @@ func renderRoundMoveError(
 // truth; the store clamps an out-of-range slot rather than erroring, so a
 // stale drop still settles on a valid order.
 func HandleRoundPosition(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
-	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
+	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		quizID, ok := handlers.ParseIDFromPath(w, r, logger, "quizID")
@@ -237,7 +238,7 @@ func HandleRoundPosition(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore q
 			return
 		}
 
-		renderRoundsPartial(w, r, logger, csrfMgr, render, quizStore, quizID)
+		renderRoundsPartial(w, r, logger, csrfMgr, renderer, quizStore, quizID)
 	})
 }
 
@@ -247,7 +248,7 @@ func HandleRoundPosition(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore q
 // one). On success it re-renders the questions_list partial. A cross-quiz
 // question or round id surfaces as 404 to keep ids opaque (#339).
 func HandleQuestionPosition(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
-	render := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
+	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		quizID, ok := handlers.ParseIDFromPath(w, r, logger, "quizID")
@@ -287,7 +288,7 @@ func HandleQuestionPosition(logger *slog.Logger, csrfMgr *csrf.Manager, quizStor
 			return
 		}
 
-		renderRoundsPartial(w, r, logger, csrfMgr, render, quizStore, quizID)
+		renderRoundsPartial(w, r, logger, csrfMgr, renderer, quizStore, quizID)
 	})
 }
 
@@ -482,7 +483,7 @@ func nextRoundPosition(
 func renderRoundForm(
 	w http.ResponseWriter,
 	r *http.Request,
-	renderer *TemplateRenderer,
+	renderer *render.Renderer,
 	gctx *roundSaveCtx,
 	fieldErrors map[string]string,
 	formError string,

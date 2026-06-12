@@ -69,7 +69,7 @@ func HandleForgotForm(
 			data.SubmitWaitSecs = fr.WaitSeconds
 			data.SubmitDisabled = fr.WaitSeconds > 0
 		}
-		render.render(w, r, http.StatusOK, data)
+		render.Render(w, r, http.StatusOK, data)
 	})
 }
 
