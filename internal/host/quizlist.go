@@ -78,7 +78,7 @@ func (h *Handlers) QuizList(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	h.render(w, r, h.quizListTmpl, "page.gohtml", quizListData{
+	h.quizList.render(w, r, quizListData{
 		Title:   "Host a quiz",
 		Quizzes: cards,
 	})
