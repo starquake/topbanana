@@ -65,9 +65,10 @@ const NETWORKS = [
     },
 ];
 
-// joinTextAndURL keeps the WhatsApp pre-fill consistent with the admin
-// quizview share button (text + ': ' + url) — wa.me does not take a
-// separate url field, so the message body has to carry the link.
+// joinTextAndURL composes the single-string payload for channels that
+// cannot carry the URL separately from the body — the WhatsApp
+// pre-fill (wa.me has no url field) and the Copy fallback (one
+// clipboard string, link last so chat clients still auto-unfurl).
 function joinTextAndURL(text, url) {
     if (!text) return url;
 
@@ -204,7 +205,7 @@ function wireDialog(dialog, { title, text, url }) {
     if (copyBtn) {
         copyBtn.addEventListener('click', async () => {
             try {
-                await navigator.clipboard.writeText(url);
+                await navigator.clipboard.writeText(joinTextAndURL(text, url));
                 flashFeedback(dialog, 'Link copied to clipboard.');
             } catch (_err) {
                 flashFeedback(dialog, 'Could not copy — select the link above and copy manually.');
