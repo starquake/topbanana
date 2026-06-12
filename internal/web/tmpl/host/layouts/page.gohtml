@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{envTitleTag}}{{.Title}} - Top Banana!</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/banana.svg" sizes="any">
+    <meta name="theme-color" content="#0a0a0f">
+    <link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/assets/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/assets/css/app.css">
+</head>
+<body class="bg-bg text-text font-sans antialiased min-h-dvh">
+    {{/* Minimal host header. Slice 3 (#889) hangs a "Session live" indicator
+         here; for now it is just the wordmark linking back to the dashboard. */}}
+    <header class="flex items-center px-6 py-4 border-b border-border-soft">
+        <a href="/admin" class="font-display text-lg font-bold uppercase tracking-tight text-text hover:text-accent">Top Banana</a>
+    </header>
+    {{template "content" .}}
+</body>
+</html>

@@ -927,7 +927,7 @@ func addHostRoutes(
 	}
 	csrfMW := csrfMgr.Middleware
 
-	handlers := host.NewHandlers(logger, csrfMgr, sessionService)
+	handlers := host.NewHandlers(logger, csrfMgr, sessionService, stores.Quizzes)
 
 	// The admin dashboard is the host's "start hosting" home, so it lives with
 	// the host routes: it surfaces the "Host a session" entry and a "Resume
@@ -937,6 +937,7 @@ func addHostRoutes(
 	mux.Handle("GET /admin", requireGameHost(admin.HandleIndex(logger, csrfMgr, sessionService)))
 
 	mux.Handle("POST /host", csrfMW(requireGameHost(http.HandlerFunc(handlers.Create))))
+	mux.Handle("GET /host/quizzes", requireGameHost(http.HandlerFunc(handlers.QuizList)))
 	mux.Handle("GET /host/{code}", requireGameHost(http.HandlerFunc(handlers.BigScreen)))
 	mux.Handle("POST /host/{code}/start", csrfMW(requireGameHost(http.HandlerFunc(handlers.Start))))
 	mux.Handle("POST /host/{code}/next-quiz", csrfMW(requireGameHost(http.HandlerFunc(handlers.NextQuiz))))

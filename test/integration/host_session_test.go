@@ -57,8 +57,8 @@ func TestHostSession_CreatesEmptyRoom(t *testing.T) {
 	}
 
 	// The host can load the lobby it was redirected to, and the empty room
-	// renders the pick-a-live-quiz link (so the host goes to the filtered quiz
-	// list to pick the first quiz) plus the End session control (so the host can
+	// renders the pick-a-live-quiz link (so the host goes to the host quiz list
+	// to pick the first quiz) plus the End session control (so the host can
 	// close the room).
 	status, body := getHostBigScreenHTML(ctx, t, host, baseURL, code)
 	if status != http.StatusOK {
@@ -66,7 +66,7 @@ func TestHostSession_CreatesEmptyRoom(t *testing.T) {
 	}
 	for _, want := range []string{
 		`data-testid="pick-quiz-link"`,
-		`href="/admin/quizzes?mode=live"`,
+		`href="/host/quizzes"`,
 		`data-testid="end-session-form"`,
 	} {
 		if !strings.Contains(body, want) {

@@ -13,14 +13,21 @@
                 <time title="{{.UpdatedAt.Format "2006-01-02 15:04"}}">{{humanizeTime .UpdatedAt}}</time>
             </div>
             <h3 class="mb-2 font-display text-lg leading-[1.25] font-semibold">
-                {{/* Stretched link — the ::before pseudo covers the whole article so
-                     clicking anywhere on the card navigates to the quiz view. Footer
-                     action buttons sit on `relative z-10` to stay independently
-                     clickable above the pseudo. */}}
-                <a href="/admin/quizzes/{{.ID}}"
-                   class="text-text hover:text-accent before:absolute before:inset-0 before:content-['']">
+                {{if eq .ActionVariant "host"}}
+                    {{/* Host variant: the card is a picker, not an editor. The only
+                         action is "Host this", so the title is plain text - the host
+                         must never be sent into admin editing by clicking the card. */}}
                     {{.Title}}
-                </a>
+                {{else}}
+                    {{/* Stretched link — the ::before pseudo covers the whole article so
+                         clicking anywhere on the card navigates to the quiz view. Footer
+                         action buttons sit on `relative z-10` to stay independently
+                         clickable above the pseudo. */}}
+                    <a href="/admin/quizzes/{{.ID}}"
+                       class="text-text hover:text-accent before:absolute before:inset-0 before:content-['']">
+                        {{.Title}}
+                    </a>
+                {{end}}
             </h3>
             <code class="inline-block mb-3.5 px-2 py-0.5 rounded-sm font-mono text-[0.72rem] text-cyan bg-cyan-soft">/play/{{.Slug}}-{{.ID}}</code>
             <p class="mb-4 text-text-dim text-sm leading-relaxed line-clamp-2">{{.Description}}</p>
@@ -81,9 +88,17 @@
     {{end}}
 {{end}}
 
-{{/* quiz_card_actions_host is a placeholder for the host surface's action
-     cluster, filled in with the host UI work (#889, slice 2). html/template
-     resolves every {{template}} reference at parse time, including the
-     unreachable branch in quiz_card, so this define must exist now even though
-     no surface sets ActionVariant "host" yet. */}}
-{{define "quiz_card_actions_host"}}{{end}}
+{{/* quiz_card_actions_host is the host surface's action cluster (#889): a
+     single "Host this" submit that posts quiz_id to /host. /host routes through
+     the one-room-aware StartHosting, so it arms the quiz in the host's room
+     (creating one if needed). The cluster sits on `relative z-10` to stay
+     clickable above the card body. */}}
+{{define "quiz_card_actions_host"}}
+    <div class="relative z-10 flex items-center gap-1">
+        <form method="post" action="/host" class="inline-flex">
+            <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+            <input type="hidden" name="quiz_id" value="{{.ID}}">
+            <button type="submit" class="btn-primary">Host this</button>
+        </form>
+    </div>
+{{end}}
