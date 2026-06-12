@@ -557,7 +557,7 @@ func TestQuizStore_DeleteRound(t *testing.T) {
 			StartedAt:  now,
 			ExpiredAt:  now.Add(10 * time.Second),
 		}
-		if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+		if err = gameStore.CreateQuestion(t.Context(), gq, false); err != nil {
 			t.Fatalf("CreateQuestion (game) err = %v", err)
 		}
 		if err = gameStore.CreateAnswer(t.Context(), &game.Answer{

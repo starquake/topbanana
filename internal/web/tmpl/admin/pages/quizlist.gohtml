@@ -73,6 +73,15 @@
                     <footer class="flex items-center justify-between px-5 py-3.5 border-t border-border-soft text-text-dim text-sm">
                         <div class="flex items-center gap-2.5">
                             <span><strong class="text-text font-semibold mr-1">{{.QuestionCount}}</strong>&nbsp;questions</span>
+                            {{/* Times-played counter (#891): bumped once each time a
+                                 game of this quiz completes; never decremented. The
+                                 Lucide play-circle icon labels the figure without
+                                 needing a "plays" word. */}}
+                            <span class="inline-flex items-center gap-1" title="Times played">
+                                <svg viewBox="0 0 24 24" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+                                <strong class="text-text font-semibold">{{.PlayCount}}</strong>
+                                <span class="sr-only">times played</span>
+                            </span>
                             {{/* Play-mode badge (#829, #890): a live quiz is hosted-only,
                                  a solo quiz is self-paced. Inline Lucide icons
                                  (users / user) replace the dot so the mode reads at

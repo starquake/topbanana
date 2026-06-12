@@ -466,7 +466,7 @@ func finishGameInt(t *testing.T, games game.Store, playerID int64, q *quiz.Quiz)
 			StartedAt:  now,
 			ExpiredAt:  now.Add(10 * time.Second),
 		}
-		if err := games.CreateQuestion(ctx, gq); err != nil {
+		if err := games.CreateQuestion(ctx, gq, false); err != nil {
 			t.Fatalf("CreateQuestion err = %v, want nil", err)
 		}
 	}

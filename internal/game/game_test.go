@@ -55,10 +55,10 @@ func (stubStore) CreateGame(_ context.Context, _ *Game) error { return errStub }
 func (stubStore) CreateGameAndParticipant(_ context.Context, _ *Game, _ *Participant) error {
 	return errStub
 }
-func (stubStore) StartGame(_ context.Context, _ string) error               { return errStub }
-func (stubStore) CreateParticipant(_ context.Context, _ *Participant) error { return errStub }
-func (stubStore) CreateQuestion(_ context.Context, _ *Question) error       { return errStub }
-func (stubStore) CreateAnswer(_ context.Context, _ *Answer) error           { return errStub }
+func (stubStore) StartGame(_ context.Context, _ string) error                 { return errStub }
+func (stubStore) CreateParticipant(_ context.Context, _ *Participant) error   { return errStub }
+func (stubStore) CreateQuestion(_ context.Context, _ *Question, _ bool) error { return errStub }
+func (stubStore) CreateAnswer(_ context.Context, _ *Answer) error             { return errStub }
 
 func (s stubStore) ListAnswersForQuizLeaderboard(
 	ctx context.Context, quizID int64,

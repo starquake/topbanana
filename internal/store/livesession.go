@@ -300,9 +300,31 @@ func (s *LiveSessionStore) Finish(ctx context.Context, sessionID string) error {
 }
 
 // Intermission ends a game without closing the room: marks it intermission and
-// clears the per-question runner columns, leaving the room alive (#836).
-func (s *LiveSessionStore) Intermission(ctx context.Context, sessionID string) error {
-	if err := s.q.SetSessionIntermission(ctx, sessionID); err != nil {
+// clears the per-question runner columns, leaving the room alive (#836). When
+// bumpPlayCount is true AND the session actually transitioned (it was
+// not already in intermission or finished), the same transaction also bumps
+// quizzes.play_count for the quiz this session is playing (#891), so the durable
+// "times played" counter rides the same commit as the natural game-end
+// transition and an accidental repeat call from a terminal phase cannot
+// double-bump.
+//
+//nolint:revive // bumpPlayCount signals whether this game-end should count as a play (a play-count bump input), not a behavioural mode switch.
+func (s *LiveSessionStore) Intermission(ctx context.Context, sessionID string, bumpPlayCount bool) error {
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		res, ierr := q.SetSessionIntermission(ctx, sessionID)
+		if ierr != nil {
+			return fmt.Errorf("set session intermission: %w", ierr)
+		}
+		transitioned := database.MustRowsAffected(res) > 0
+		if bumpPlayCount && transitioned {
+			if berr := q.BumpQuizPlayCountForSession(ctx, sessionID); berr != nil {
+				return fmt.Errorf("bump quiz play count: %w", berr)
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
 		return fmt.Errorf("failed to move session to intermission: %w", err)
 	}
 

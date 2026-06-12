@@ -22,6 +22,7 @@ SELECT q.id,
        q.time_limit_seconds,
        q.visibility,
        q.mode,
+       q.play_count,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
@@ -43,6 +44,7 @@ SELECT q.id,
        q.time_limit_seconds,
        q.visibility,
        q.mode,
+       q.play_count,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
@@ -65,6 +67,7 @@ SELECT q.id,
        q.time_limit_seconds,
        q.visibility,
        q.mode,
+       q.play_count,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
@@ -94,6 +97,7 @@ SELECT q.id,
        q.time_limit_seconds,
        q.visibility,
        q.mode,
+       q.play_count,
        p.display_name AS created_by_display_name
 FROM quizzes q
          JOIN players p ON p.id = q.created_by_player_id
@@ -265,3 +269,20 @@ WHERE id = ?;
 -- name: DeleteOption :execresult
 DELETE FROM options
 WHERE id = ?;
+
+-- name: BumpQuizPlayCountForGame :exec
+-- Increments the durable hit counter (#891) for the quiz that owns this solo
+-- game. Resolves the quiz from the game id so the caller only signals "this
+-- play completed" without threading the quiz id. Never decremented; the CHECK
+-- on quizzes.play_count keeps it non-negative.
+UPDATE quizzes
+SET play_count = play_count + 1
+WHERE quizzes.id = (SELECT quiz_id FROM games WHERE games.id = ?);
+
+-- name: BumpQuizPlayCountForSession :exec
+-- Increments the durable hit counter (#891) for the quiz a live session is
+-- playing. Resolves the quiz from the session id. A session with a NULL
+-- quiz_id (a quiz-less room) matches no quiz row, so the bump is a safe no-op.
+UPDATE quizzes
+SET play_count = play_count + 1
+WHERE quizzes.id = (SELECT quiz_id FROM sessions WHERE sessions.id = ?);

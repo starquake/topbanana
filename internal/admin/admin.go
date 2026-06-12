@@ -184,7 +184,10 @@ type QuizData struct {
 	// ModeOptions feeds the admin form's play-mode selector (MP-0 /
 	// #677) - pulled straight from the domain constants.
 	ModeOptions []string
-	Questions   []*QuestionData
+	// PlayCount is the durable "times played" counter surfaced on the
+	// admin quiz list footer (#891).
+	PlayCount int64
+	Questions []*QuestionData
 }
 
 // QuestionData is the data for a question. TimeLimitSecondsValue is the
@@ -305,6 +308,7 @@ func quizDataFromQuiz(qz *quiz.Quiz) *QuizData {
 		VisibilityOptions:    quiz.VisibilityValues(),
 		Mode:                 mode,
 		ModeOptions:          quiz.ModeValues(),
+		PlayCount:            qz.PlayCount,
 		Questions:            questionDataFromQuestions(qz.Questions),
 	}
 }

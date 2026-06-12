@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"database/sql"
 	"errors"
 	"log/slog"
 	"strings"
@@ -265,11 +266,105 @@ func TestGameStore_CreateQuestion(t *testing.T) {
 			StartedAt:  now,
 			ExpiredAt:  now.Add(10 * time.Second),
 		}
-		if err := gameStore.CreateQuestion(t.Context(), gq); err != nil {
+		if err := gameStore.CreateQuestion(t.Context(), gq, false); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if gq.ID == 0 {
 			t.Error("gq.ID is 0, want non-zero")
+		}
+	})
+
+	t.Run("completesGame=false does not move the counter", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		g := &game.Game{QuizID: testQuiz.ID}
+		if err := gameStore.CreateGame(t.Context(), g); err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+
+		now := time.Now()
+		gq := &game.Question{
+			GameID:     g.ID,
+			QuestionID: testQuiz.Questions[0].ID,
+			StartedAt:  now,
+			ExpiredAt:  now.Add(10 * time.Second),
+		}
+		if err := gameStore.CreateQuestion(t.Context(), gq, false); err != nil {
+			t.Fatalf("CreateQuestion err = %v, want nil", err)
+		}
+
+		if got, want := readQuizPlayCount(t, db, testQuiz.ID), int64(0); got != want {
+			t.Errorf("play_count after no-bump call = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("completesGame on the final question moves the counter exactly once", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		g := &game.Game{QuizID: testQuiz.ID}
+		if err := gameStore.CreateGame(t.Context(), g); err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+
+		now := time.Now()
+		for i, q := range testQuiz.Questions {
+			gq := &game.Question{
+				GameID:     g.ID,
+				QuestionID: q.ID,
+				StartedAt:  now,
+				ExpiredAt:  now.Add(10 * time.Second),
+			}
+			final := i == len(testQuiz.Questions)-1
+			if err := gameStore.CreateQuestion(t.Context(), gq, final); err != nil {
+				t.Fatalf("CreateQuestion err = %v, want nil", err)
+			}
+		}
+
+		if got, want := readQuizPlayCount(t, db, testQuiz.ID), int64(1); got != want {
+			t.Errorf("play_count after completed game = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("bump rolls back when the question insert fails", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+
+		gameStore := NewGameStore(db, slog.Default())
+		// No CreateGame: the FK on game_questions.game_id will reject the
+		// insert, the bump rides the same transaction, so play_count must
+		// stay at zero.
+		now := time.Now()
+		gq := &game.Question{
+			GameID:     "missing-game-id",
+			QuestionID: testQuiz.Questions[0].ID,
+			StartedAt:  now,
+			ExpiredAt:  now.Add(10 * time.Second),
+		}
+		err := gameStore.CreateQuestion(t.Context(), gq, true)
+		if err == nil {
+			t.Fatal("CreateQuestion err = nil, want a FK violation")
+		}
+		if got, want := readQuizPlayCount(t, db, testQuiz.ID), int64(0); got != want {
+			t.Errorf("play_count after failed insert = %d, want %d (bump must roll back)", got, want)
 		}
 	})
 }
@@ -299,7 +394,7 @@ func TestGameStore_CreateAnswer(t *testing.T) {
 			StartedAt:  now,
 			ExpiredAt:  now.Add(10 * time.Second),
 		}
-		if err := gameStore.CreateQuestion(t.Context(), gq); err != nil {
+		if err := gameStore.CreateQuestion(t.Context(), gq, false); err != nil {
 			t.Fatalf("failed to create game question: %v", err)
 		}
 
@@ -349,7 +444,7 @@ func TestGameStore_CreateAnswer(t *testing.T) {
 			StartedAt:  now,
 			ExpiredAt:  now.Add(10 * time.Second),
 		}
-		if err := gameStore.CreateQuestion(t.Context(), gq); err != nil {
+		if err := gameStore.CreateQuestion(t.Context(), gq, false); err != nil {
 			t.Fatalf("failed to create game question: %v", err)
 		}
 
@@ -499,7 +594,7 @@ func TestGameStore_DeleteGamesForPlayerOnQuiz(t *testing.T) {
 			StartedAt:  now,
 			ExpiredAt:  now.Add(10 * time.Second),
 		}
-		if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+		if err = gameStore.CreateQuestion(t.Context(), gq, false); err != nil {
 			t.Fatalf("failed to create game question: %v", err)
 		}
 		if err = gameStore.CreateAnswer(t.Context(), &game.Answer{
@@ -650,7 +745,7 @@ func TestGameStore_DeleteGamesForPlayerOnQuiz(t *testing.T) {
 			StartedAt:  now,
 			ExpiredAt:  now.Add(10 * time.Second),
 		}
-		if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+		if err = gameStore.CreateQuestion(t.Context(), gq, false); err != nil {
 			t.Fatalf("failed to create game question: %v", err)
 		}
 		if err = gameStore.CreateAnswer(t.Context(), &game.Answer{
@@ -753,7 +848,7 @@ func TestGameStore_ListAnswersForQuizLeaderboard(t *testing.T) {
 				StartedAt:  now,
 				ExpiredAt:  now.Add(10 * time.Second),
 			}
-			if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+			if err = gameStore.CreateQuestion(t.Context(), gq, false); err != nil {
 				t.Fatalf("failed to create game question %d: %v", i, err)
 			}
 			gameQuestions[i] = gq
@@ -824,7 +919,7 @@ func TestGameStore_ListAnswersForQuizLeaderboard(t *testing.T) {
 			StartedAt:  now,
 			ExpiredAt:  now.Add(10 * time.Second),
 		}
-		if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+		if err = gameStore.CreateQuestion(t.Context(), gq, false); err != nil {
 			t.Fatalf("failed to create game question: %v", err)
 		}
 		if err = gameStore.CreateAnswer(t.Context(), &game.Answer{
@@ -901,7 +996,7 @@ func TestGameStore_ListAnswersForQuizLeaderboard(t *testing.T) {
 				StartedAt:  now,
 				ExpiredAt:  now.Add(10 * time.Second),
 			}
-			if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+			if err = gameStore.CreateQuestion(t.Context(), gq, false); err != nil {
 				t.Fatalf("failed to create question %d for game B: %v", i, err)
 			}
 			gameQuestionsB[i] = gq
@@ -1016,7 +1111,7 @@ func TestGameStore_ListParticipantsForQuizLeaderboard(t *testing.T) {
 				StartedAt:  now,
 				ExpiredAt:  now.Add(10 * time.Second),
 			}
-			if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+			if err = gameStore.CreateQuestion(t.Context(), gq, false); err != nil {
 				t.Fatalf("failed to create game question: %v", err)
 			}
 		}
@@ -1122,7 +1217,7 @@ func TestGameStore_ListParticipantsForQuizLeaderboard(t *testing.T) {
 				StartedAt:  past.Add(-10 * time.Second),
 				ExpiredAt:  past,
 			}
-			if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+			if err = gameStore.CreateQuestion(t.Context(), gq, false); err != nil {
 				t.Fatalf("failed to create game question: %v", err)
 			}
 
@@ -1192,7 +1287,7 @@ func TestGameStore_CreateQuestion_StoresUTCTimestampText(t *testing.T) {
 		StartedAt:  startedAt,
 		ExpiredAt:  expiredAt,
 	}
-	if err := gameStore.CreateQuestion(t.Context(), gq); err != nil {
+	if err := gameStore.CreateQuestion(t.Context(), gq, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1258,7 +1353,7 @@ func TestGameStore_ListParticipantsForQuizLeaderboard_StaleBoundary(t *testing.T
 		StartedAt:  expiredAt.Add(-10 * time.Second),
 		ExpiredAt:  expiredAt,
 	}
-	if err = gameStore.CreateQuestion(t.Context(), gq); err != nil {
+	if err = gameStore.CreateQuestion(t.Context(), gq, false); err != nil {
 		t.Fatalf("failed to create game question: %v", err)
 	}
 
@@ -1430,4 +1525,18 @@ func TestGameStore_ListAnswersByGameQuestionID_UsesIndex(t *testing.T) {
 	if got, want := joined, "game_answers_game_question_id_idx"; !strings.Contains(got, want) {
 		t.Errorf("EXPLAIN QUERY PLAN output should contain %q; got:\n%s", want, got)
 	}
+}
+
+// readQuizPlayCount reads the durable hit counter off the quizzes row so the
+// bump tests pin behaviour against the column the admin list reads.
+func readQuizPlayCount(t *testing.T, db *sql.DB, quizID int64) int64 {
+	t.Helper()
+	var n int64
+	if err := db.QueryRowContext(
+		t.Context(), "SELECT play_count FROM quizzes WHERE id = ?", quizID,
+	).Scan(&n); err != nil {
+		t.Fatalf("read play_count err = %v, want nil", err)
+	}
+
+	return n
 }

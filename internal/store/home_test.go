@@ -28,7 +28,7 @@ func finishGame(t *testing.T, gs *GameStore, g *game.Game, q *quiz.Quiz) {
 			StartedAt:  now,
 			ExpiredAt:  now.Add(10 * time.Second),
 		}
-		if err := gs.CreateQuestion(t.Context(), gq); err != nil {
+		if err := gs.CreateQuestion(t.Context(), gq, false); err != nil {
 			t.Fatalf("finishGame CreateQuestion err = %v, want nil", err)
 		}
 	}

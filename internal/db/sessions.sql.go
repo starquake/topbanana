@@ -840,7 +840,7 @@ func (q *Queries) SetSessionFinished(ctx context.Context, id string) error {
 	return err
 }
 
-const setSessionIntermission = `-- name: SetSessionIntermission :exec
+const setSessionIntermission = `-- name: SetSessionIntermission :execresult
 UPDATE sessions
 SET phase               = 'intermission',
     current_question_id = NULL,
@@ -848,16 +848,19 @@ SET phase               = 'intermission',
     question_expires_at = NULL,
     finished_at         = CURRENT_TIMESTAMP
 WHERE id = ?
+  AND phase NOT IN ('intermission', 'finished')
 `
 
 // Ends a game without closing the room (#836): marks it intermission (the
 // between-games screen showing the final standings while the host arms the next
 // quiz) and clears the per-question runner columns. finished_at is stamped so
 // the just-ended game has a finish time, but the room stays alive - distinct
-// from SetSessionFinished, which terminates the room.
-func (q *Queries) SetSessionIntermission(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, setSessionIntermission, id)
-	return err
+// from SetSessionFinished, which terminates the room. Scoped to a non-terminal
+// phase so a second invocation against an already-intermission or finished room
+// matches no row; the store layer keys the #891 play_count bump on rows
+// affected, so an accidental repeat call cannot double-bump the counter.
+func (q *Queries) SetSessionIntermission(ctx context.Context, id string) (sql.Result, error) {
+	return q.db.ExecContext(ctx, setSessionIntermission, id)
 }
 
 const setSessionPlayerReady = `-- name: SetSessionPlayerReady :execresult

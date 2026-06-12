@@ -212,19 +212,23 @@ SET phase               = 'finished',
     finished_at         = CURRENT_TIMESTAMP
 WHERE id = ?;
 
--- name: SetSessionIntermission :exec
+-- name: SetSessionIntermission :execresult
 -- Ends a game without closing the room (#836): marks it intermission (the
 -- between-games screen showing the final standings while the host arms the next
 -- quiz) and clears the per-question runner columns. finished_at is stamped so
 -- the just-ended game has a finish time, but the room stays alive - distinct
--- from SetSessionFinished, which terminates the room.
+-- from SetSessionFinished, which terminates the room. Scoped to a non-terminal
+-- phase so a second invocation against an already-intermission or finished room
+-- matches no row; the store layer keys the #891 play_count bump on rows
+-- affected, so an accidental repeat call cannot double-bump the counter.
 UPDATE sessions
 SET phase               = 'intermission',
     current_question_id = NULL,
     question_started_at = NULL,
     question_expires_at = NULL,
     finished_at         = CURRENT_TIMESTAMP
-WHERE id = ?;
+WHERE id = ?
+  AND phase NOT IN ('intermission', 'finished');
 
 -- name: RearmSession :execresult
 -- Arms a quiz to play in a room whenever no game is running (#836): the first

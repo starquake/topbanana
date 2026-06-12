@@ -386,14 +386,15 @@ func finishGame(ctx context.Context, games game.Store, playerID int64, q *quiz.Q
 		return fmt.Errorf("create participant: %w", err)
 	}
 	now := time.Now()
-	for _, qs := range q.Questions {
+	for i, qs := range q.Questions {
 		gq := &game.Question{
 			GameID:     g.ID,
 			QuestionID: qs.ID,
 			StartedAt:  now,
 			ExpiredAt:  now.Add(answerWindowSeconds * time.Second),
 		}
-		if err := games.CreateQuestion(ctx, gq); err != nil {
+		completesGame := i == len(q.Questions)-1
+		if err := games.CreateQuestion(ctx, gq, completesGame); err != nil {
 			return fmt.Errorf("create question: %w", err)
 		}
 	}

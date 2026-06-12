@@ -244,25 +244,41 @@ func execCreateGameAndParticipant(
 // provided Question object with generated values. started_at and expired_at are
 // formatted as UTC CURRENT_TIMESTAMP-format text so the stored column shares the
 // encoding the leaderboard staleness cutoff compares against (#789); see
-// [sqliteTimestampLayout].
-func (s *GameStore) CreateQuestion(ctx context.Context, gq *game.Question) error {
-	var err error
-	row, err := s.q.CreateGameQuestion(
-		ctx,
-		db.CreateGameQuestionParams{
-			GameID:     gq.GameID,
-			QuestionID: gq.QuestionID,
-			StartedAt:  gq.StartedAt.UTC().Format(sqliteTimestampLayout),
-			ExpiredAt:  gq.ExpiredAt.UTC().Format(sqliteTimestampLayout),
-		},
-	)
+// [sqliteTimestampLayout]. When completesGame is true, the same transaction
+// also bumps quizzes.play_count for the quiz that owns this game (#891), so the
+// counter cannot drift from the "game just became completed" transition that
+// fires alongside the final question.
+//
+//nolint:revive // completesGame signals whether this insert completes the game (a play-count bump input), not a behavioural mode switch.
+func (s *GameStore) CreateQuestion(ctx context.Context, gq *game.Question, completesGame bool) error {
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		row, qerr := q.CreateGameQuestion(
+			ctx,
+			db.CreateGameQuestionParams{
+				GameID:     gq.GameID,
+				QuestionID: gq.QuestionID,
+				StartedAt:  gq.StartedAt.UTC().Format(sqliteTimestampLayout),
+				ExpiredAt:  gq.ExpiredAt.UTC().Format(sqliteTimestampLayout),
+			},
+		)
+		if qerr != nil {
+			return fmt.Errorf("create game question: %w", qerr)
+		}
+		gq.ID = row.ID
+		gq.StartedAt = row.StartedAt
+		gq.ExpiredAt = row.ExpiredAt
+
+		if completesGame {
+			if berr := q.BumpQuizPlayCountForGame(ctx, gq.GameID); berr != nil {
+				return fmt.Errorf("bump quiz play count: %w", berr)
+			}
+		}
+
+		return nil
+	})
 	if err != nil {
 		return fmt.Errorf("failed to create game question: %w", err)
 	}
-
-	gq.ID = row.ID
-	gq.StartedAt = row.StartedAt
-	gq.ExpiredAt = row.ExpiredAt
 
 	return nil
 }
