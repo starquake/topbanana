@@ -46,7 +46,14 @@ type testServer struct {
 // extraEnv is merged on top of the default getenv (HOST=localhost,
 // PORT=0, DB_URI=<tmpdb>) so tests can opt in to flags like
 // REGISTRATION_ENABLED without redoing the rest of the boilerplate.
-func startServer(t *testing.T, extraEnv map[string]string) (context.Context, testServer) {
+//
+// runOpts are forwarded to [app.Run] for values that have no env-var
+// hook: the HTTP server's WriteTimeout and the SSE handlers' heartbeat
+// intervals, which the heartbeat regression tests shrink so the
+// assertion runs inside a sub-second window.
+func startServer(
+	t *testing.T, extraEnv map[string]string, runOpts ...app.Option,
+) (context.Context, testServer) {
 	t.Helper()
 
 	if testing.Short() {
@@ -97,7 +104,7 @@ func startServer(t *testing.T, extraEnv map[string]string) (context.Context, tes
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- app.Run(ctx, getenv, stdout, ln)
+		errCh <- app.Run(ctx, getenv, stdout, ln, runOpts...)
 	}()
 
 	// Coverage instrumentation (make test-coverage, the CI build job) plus

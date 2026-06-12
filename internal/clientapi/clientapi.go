@@ -418,12 +418,13 @@ func HandleQuizLeaderboard(logger *slog.Logger, service *game.Service) http.Hand
 // leaderboard stream. Methods on this type keep helper signatures
 // small instead of threading six parameters through each call.
 type leaderboardStreamer struct {
-	w        http.ResponseWriter
-	rc       *http.ResponseController
-	logger   *slog.Logger
-	service  *game.Service
-	quizID   int64
-	playerID int64
+	w                 http.ResponseWriter
+	rc                *http.ResponseController
+	logger            *slog.Logger
+	service           *game.Service
+	quizID            int64
+	playerID          int64
+	heartbeatInterval time.Duration
 }
 
 // writeEvent writes the given leaderboard response as a single SSE
@@ -465,24 +466,47 @@ func (s *leaderboardStreamer) writeHeartbeat() bool {
 	return true
 }
 
-// leaderboardHeartbeatInterval is how often the SSE handler emits a
-// no-op comment frame to keep the connection alive when the hub is
+// DefaultLeaderboardHeartbeatInterval is how often the SSE handler emits
+// a no-op comment frame to keep the connection alive when the hub is
 // quiet. The HTTP server's WriteTimeout no longer kills the response
 // (the handler clears its own write deadline), so this only exists as
 // insurance against intermediate proxy / NAT / mobile-carrier idle
 // timeouts that aren't visible during local-dev testing - nginx
 // defaults to 60s, HAProxy ~50s, mobile NATs sometimes 30s. 25s lands
 // comfortably inside all of those without the keep-alive cost of a
-// 10s tick.
-const leaderboardHeartbeatInterval = 25 * time.Second
+// 10s tick. Production wiring (internal/server/routes.go) passes this
+// value; the heartbeat regression tests pass a shorter interval.
+const DefaultLeaderboardHeartbeatInterval = 25 * time.Second
+
+// clampHeartbeat falls back to fallback when d is non-positive, so a
+// caller that builds the wiring struct without the field does not panic
+// at [time.NewTicker] inside the SSE handler.
+func clampHeartbeat(d, fallback time.Duration) time.Duration {
+	if d <= 0 {
+		return fallback
+	}
+
+	return d
+}
 
 // HandleQuizLeaderboardStream pushes leaderboard snapshots over SSE.
 // On every hub tick the handler re-fetches and emits one full snapshot,
 // not a delta - so a slow client coalesces multiple commits into one
 // repaint via the per-subscriber buffer of 1.
+//
+// heartbeatInterval is the gap between no-op SSE comment frames written
+// on an otherwise idle stream; production passes
+// [DefaultLeaderboardHeartbeatInterval] and the heartbeat regression
+// test shrinks it so the assertion runs in milliseconds, not seconds.
+// A zero or negative value falls back to the default so a caller that
+// constructs the wiring struct without the field does not panic at
+// [time.NewTicker].
 func HandleQuizLeaderboardStream(
 	logger *slog.Logger, service *game.Service, hub *leaderboard.Hub,
+	heartbeatInterval time.Duration,
 ) http.Handler {
+	heartbeatInterval = clampHeartbeat(heartbeatInterval, DefaultLeaderboardHeartbeatInterval)
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
@@ -540,12 +564,13 @@ func HandleQuizLeaderboardStream(
 		}
 
 		streamer := &leaderboardStreamer{
-			w:        w,
-			rc:       rc,
-			logger:   logger,
-			service:  service,
-			quizID:   quizID,
-			playerID: player.ID,
+			w:                 w,
+			rc:                rc,
+			logger:            logger,
+			service:           service,
+			quizID:            quizID,
+			playerID:          player.ID,
+			heartbeatInterval: heartbeatInterval,
 		}
 
 		if !streamer.writeEvent(ctx, res) {
@@ -564,10 +589,10 @@ func HandleQuizLeaderboardStream(
 // initial-snapshot path, which can surface the error cleanly.
 //
 // The heartbeat ticker emits a no-op SSE comment frame every
-// leaderboardHeartbeatInterval to keep the connection warm; without
-// it Firefox closes idle streams after ~30s with NS_ERROR_PARTIAL_TRANSFER.
+// s.heartbeatInterval to keep the connection warm; without it Firefox
+// closes idle streams after ~30s with NS_ERROR_PARTIAL_TRANSFER.
 func (s *leaderboardStreamer) run(ctx context.Context, events <-chan struct{}) {
-	heartbeat := time.NewTicker(leaderboardHeartbeatInterval)
+	heartbeat := time.NewTicker(s.heartbeatInterval)
 	defer heartbeat.Stop()
 
 	for {

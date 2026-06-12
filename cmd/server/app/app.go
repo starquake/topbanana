@@ -18,6 +18,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/starquake/topbanana/internal/bgtasks"
+	"github.com/starquake/topbanana/internal/clientapi"
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/database"
 	"github.com/starquake/topbanana/internal/envtag"
@@ -31,9 +32,9 @@ import (
 )
 
 const (
-	readHeaderTimeout = 5 * time.Second
-	readTimeout       = 10 * time.Second
-	writeTimeout      = 10 * time.Second
+	readHeaderTimeout   = 5 * time.Second
+	readTimeout         = 10 * time.Second
+	defaultWriteTimeout = 10 * time.Second
 	// idleTimeout caps how long a keep-alive connection can sit unused before the
 	// server closes it. Without this, idle connections behind a pooled proxy or
 	// CDN linger indefinitely and leak file descriptors. 120s is the conventional
@@ -51,13 +52,98 @@ const (
 	tokenSweepInterval = time.Hour
 )
 
+// Option configures a [Run] invocation. Used by integration tests to
+// override values that have no env-var hook (the HTTP server's write
+// timeout and the SSE handlers' heartbeat intervals, used by the SSE
+// heartbeat regression tests to keep the assertion inside a sub-second
+// window without leaning on the production 10s / 25s defaults). No
+// production caller passes options.
+type Option func(*options)
+
+type options struct {
+	writeTimeout                  time.Duration
+	leaderboardHeartbeatInterval  time.Duration
+	sessionEventHeartbeatInterval time.Duration
+}
+
+// WithWriteTimeout overrides the HTTP server's WriteTimeout. The SSE
+// heartbeat regression tests shrink it so the assertion that the stream
+// stays alive past WriteTimeout AND past one heartbeat tick runs in a
+// sub-second window. Zero or negative values are ignored.
+func WithWriteTimeout(d time.Duration) Option {
+	return func(o *options) {
+		if d > 0 {
+			o.writeTimeout = d
+		}
+	}
+}
+
+// WithLeaderboardHeartbeatInterval overrides the heartbeat interval for
+// the leaderboard SSE stream. The heartbeat regression test shrinks it so
+// the "at least one heartbeat fired" assertion runs in milliseconds. Zero
+// or negative values are ignored.
+func WithLeaderboardHeartbeatInterval(d time.Duration) Option {
+	return func(o *options) {
+		if d > 0 {
+			o.leaderboardHeartbeatInterval = d
+		}
+	}
+}
+
+// WithSessionEventHeartbeatInterval overrides the heartbeat interval for
+// the session-events SSE stream. The heartbeat regression test shrinks it
+// so the "at least one heartbeat fired" assertion runs in milliseconds.
+// Zero or negative values are ignored.
+func WithSessionEventHeartbeatInterval(d time.Duration) Option {
+	return func(o *options) {
+		if d > 0 {
+			o.sessionEventHeartbeatInterval = d
+		}
+	}
+}
+
+// newRealtime bundles the process-local pub/sub deps and the resolved
+// streaming-timer settings into a [server.Realtime] for [server.New].
+func newRealtime(
+	leaderboardHub *leaderboard.Hub,
+	sessionService *livesession.Service,
+	sessionHub *livesession.Hub,
+	o options,
+) server.Realtime {
+	return server.Realtime{
+		LeaderboardHub:                leaderboardHub,
+		SessionService:                sessionService,
+		SessionHub:                    sessionHub,
+		LeaderboardHeartbeatInterval:  o.leaderboardHeartbeatInterval,
+		SessionEventHeartbeatInterval: o.sessionEventHeartbeatInterval,
+	}
+}
+
+// resolveOptions builds the [Run] options struct from defaults plus any
+// caller-supplied overrides.
+func resolveOptions(opts []Option) options {
+	o := options{
+		writeTimeout:                  defaultWriteTimeout,
+		leaderboardHeartbeatInterval:  clientapi.DefaultLeaderboardHeartbeatInterval,
+		sessionEventHeartbeatInterval: clientapi.DefaultSessionEventHeartbeatInterval,
+	}
+	for _, opt := range opts {
+		opt(&o)
+	}
+
+	return o
+}
+
 // Run starts the application server, connects to the database, runs migrations, and listens for incoming requests.
 func Run(
 	ctx context.Context,
 	getenv func(string) string,
 	stdout io.Writer,
 	ln net.Listener,
+	opts ...Option,
 ) error {
+	o := resolveOptions(opts)
+
 	var err error
 	// SIGTERM is what Docker / k8s send on container stop; without it
 	// the graceful-shutdown path (httpServer.Shutdown + DB close) never
@@ -112,11 +198,7 @@ func Run(
 		<-runnerDone
 	}()
 
-	realtime := server.Realtime{
-		LeaderboardHub: leaderboardHub,
-		SessionService: sessionService,
-		SessionHub:     sessionHub,
-	}
+	realtime := newRealtime(leaderboardHub, sessionService, sessionHub, o)
 	srv, emailTasks, err := buildServer(signalCtx, cfg, logger, stores, gameService, realtime)
 	if err != nil {
 		return err
@@ -130,7 +212,7 @@ func Run(
 		logger.InfoContext(signalCtx, "listener overridden")
 	}
 
-	return runHTTPServer(ctx, signalCtx, ln, srv, emailTasks, logger)
+	return runHTTPServer(ctx, signalCtx, ln, srv, emailTasks, logger, o.writeTimeout)
 }
 
 // buildServer constructs the mailer, the background-task tracker, and the HTTP
@@ -345,6 +427,7 @@ func runHTTPServer(
 	srv http.Handler,
 	emailTasks *bgtasks.Tracker,
 	logger *slog.Logger,
+	writeTimeout time.Duration,
 ) error {
 	httpServer := &http.Server{
 		ReadHeaderTimeout: readHeaderTimeout,
