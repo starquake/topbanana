@@ -359,16 +359,14 @@ JS_WEB_ENTRIES  := $(JS_WEB_SRC)/host-bigscreen.js $(JS_WEB_SRC)/share.js \
 # upstream global (window.Alpine / window.anime / window.Sortable), so the
 # template <script> tags and window.* access are unchanged -- only the source of
 # the committed file moved from a hand-dropped download to the npm build. The
-# web vendor dir gets all three; the player client only loads Alpine + anime,
-# so its vendor dir gets just those two (the URL prefixes differ per surface, so
-# the two trees keep separate copies; deduping onto one URL is a follow-up).
+# web vendor dir gets all three. The player client loads Alpine + anime too, but
+# from this same web-served copy at /assets/js/vendor/ rather than a per-client
+# duplicate, so only this one tree is built (the client shells reference the
+# /assets/ URLs; see internal/client/static/index.html and join.html).
 JS_VENDOR_SRC     := frontend/vendor
 JS_VENDOR_WEB_OUT := internal/web/static/js/vendor
-JS_VENDOR_CLIENT_OUT := internal/client/static/js/vendor
 JS_VENDOR_WEB_ENTRIES := $(JS_VENDOR_SRC)/alpine.min.js \
                    $(JS_VENDOR_SRC)/anime.umd.min.js $(JS_VENDOR_SRC)/sortable.min.js
-JS_VENDOR_CLIENT_ENTRIES := $(JS_VENDOR_SRC)/alpine.min.js \
-                   $(JS_VENDOR_SRC)/anime.umd.min.js
 
 # Alpine 3 targets modern evergreen browsers; es2020 matches the syntax the
 # source already uses (async/await, optional chaining). The @shared alias
@@ -395,7 +393,6 @@ js: $(JS_DEPS) js-vendor
 .PHONY: js-vendor
 js-vendor: $(JS_DEPS)
 	$(ESBUILD_BIN) $(JS_VENDOR_WEB_ENTRIES) $(ESBUILD_VENDOR_FLAGS) --outdir=$(JS_VENDOR_WEB_OUT)
-	$(ESBUILD_BIN) $(JS_VENDOR_CLIENT_ENTRIES) $(ESBUILD_VENDOR_FLAGS) --outdir=$(JS_VENDOR_CLIENT_OUT)
 
 # Rebuild on change during development. One target per long-running watcher
 # (the client and web bundles write to different served dist dirs, so they
@@ -424,9 +421,6 @@ js-check: $(JS_DEPS)
 	    JS_CHECK_FLAGS="$(ESBUILD_FLAGS)"
 	@$(MAKE) --no-print-directory js-check-one \
 	    JS_CHECK_ENTRIES="$(JS_VENDOR_WEB_ENTRIES)" JS_CHECK_OUT="$(JS_VENDOR_WEB_OUT)" \
-	    JS_CHECK_FLAGS="$(ESBUILD_VENDOR_FLAGS)"
-	@$(MAKE) --no-print-directory js-check-one \
-	    JS_CHECK_ENTRIES="$(JS_VENDOR_CLIENT_ENTRIES)" JS_CHECK_OUT="$(JS_VENDOR_CLIENT_OUT)" \
 	    JS_CHECK_FLAGS="$(ESBUILD_VENDOR_FLAGS)"
 
 .PHONY: js-check-one

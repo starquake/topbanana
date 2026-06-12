@@ -44,15 +44,18 @@
     <link rel="preload" href="/assets/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="/assets/css/app.css">
     {{/* anime.js (4.2.0, MIT) powers the between-rounds standings bar graph
-         (MP-9 / #686). It is the same vendored, self-hosted build the solo
-         client loads (#295); JoinApp's runAnim wrapper keeps a reduced-motion
+         (MP-9 / #686). It is the same vendored, self-hosted build (#295) the
+         solo client loads; JoinApp's runAnim wrapper keeps a reduced-motion
          and missing-global fallback so the bars snap to their final state when
          it is absent. Alpine.js (vendored, self-hosted) drives the rest of the
          join + lobby surface, whose other motion is Alpine x-transition +
-         Tailwind and respects prefers-reduced-motion via app.css. */}}
-    <script src="/client/js/vendor/anime.umd.min.js"></script>
+         Tailwind and respects prefers-reduced-motion via app.css. Both load
+         from the single web-served copy at /assets/js/vendor/ (the same bytes
+         the admin/home pages use) so navigating between surfaces reuses one
+         cache entry rather than re-downloading a per-client duplicate. */}}
+    <script src="/assets/js/vendor/anime.umd.min.js"></script>
     <script type="module" src="/client/js/dist/join.js"></script>
-    <script defer src="/client/js/vendor/alpine.min.js"></script>
+    <script defer src="/assets/js/vendor/alpine.min.js"></script>
     <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
 </head>
 {{/* min-h-dvh (not min-h-screen / 100vh) so the body tracks the visible

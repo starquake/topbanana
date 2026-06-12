@@ -57,9 +57,9 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ## anime.js — MIT License
 
 A copy of anime.js 4.2.0 is vendored at
-`internal/client/static/js/vendor/anime.umd.min.js` and
 `internal/web/static/js/vendor/anime.umd.min.js` (introduced in #295,
-previously loaded from cdn.jsdelivr.net). The committed file is now built
+previously loaded from cdn.jsdelivr.net). The player client loads this same
+web-served copy, so there is one served file. The committed file is now built
 from the pinned `animejs` npm package by esbuild (#897). anime.js is
 published under the MIT License:
 
@@ -90,9 +90,9 @@ THE SOFTWARE.
 ## Alpine.js — MIT License
 
 A copy of Alpine.js 3.15.12 is vendored at
-`internal/client/static/js/vendor/alpine.min.js` and
 `internal/web/static/js/vendor/alpine.min.js` (introduced in #295,
-previously loaded from cdn.jsdelivr.net). The committed file is now built
+previously loaded from cdn.jsdelivr.net). The player client loads this same
+web-served copy, so there is one served file. The committed file is now built
 from the pinned `alpinejs` npm package by esbuild (#897). Alpine.js is
 published under the MIT License:
 
