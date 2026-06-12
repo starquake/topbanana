@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/auth"
@@ -270,6 +271,9 @@ func newTemplateRenderer(logger *slog.Logger, csrfMgr *csrf.Manager, page string
 			return fmt.Sprintf("Must be %d-%d characters.", auth.MinPasswordLength, auth.MaxPasswordLength)
 		},
 		"passwordMinLength": func() int { return auth.MinPasswordLength },
+		// Placeholder so the shared components glob parses; this surface
+		// does not render quiz_card, which is the only user (#889).
+		"humanizeTime": func(time.Time) string { return "" },
 	}
 	layouts := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmpl.FS, "components/*.gohtml", "auth/layouts/*.gohtml"),
