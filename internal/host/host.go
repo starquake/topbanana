@@ -9,12 +9,10 @@ package host
 
 import (
 	"errors"
-	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/auth"
@@ -23,6 +21,7 @@ import (
 	"github.com/starquake/topbanana/internal/livesession"
 	"github.com/starquake/topbanana/internal/qrcode"
 	"github.com/starquake/topbanana/internal/quiz"
+	"github.com/starquake/topbanana/internal/reltime"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
 
@@ -200,7 +199,7 @@ func parseTemplate(path string) *template.Template {
 	funcs := template.FuncMap{
 		"envTitleTag":  envtag.Get,
 		"csrfToken":    func() string { return "" },
-		"humanizeTime": humanizeTime,
+		"humanizeTime": reltime.Humanize,
 	}
 	base := template.Must(template.New("").Funcs(funcs).ParseFS(tmpl.FS, "host/layouts/*.gohtml"))
 
@@ -208,54 +207,18 @@ func parseTemplate(path string) *template.Template {
 }
 
 // parseQuizListTemplate parses the host layouts plus the shared quiz-card
-// partial and the named page. Unlike parseTemplate it also registers
-// humanizeTime, because the shared quiz_card partial calls it. Only the
-// quiz_card partial is parsed (not the whole components/ glob): the footer and
-// topbar partials reference funcs (isSignedIn, isAdmin) this page does not
-// provide.
+// partial and the named page. It registers the same funcs as parseTemplate
+// (the shared quiz_card partial calls humanizeTime). Only the quiz_card partial
+// is parsed (not the whole components/ glob): the footer and topbar partials
+// reference funcs (isSignedIn, isAdmin) this page does not provide.
 func parseQuizListTemplate(path string) *template.Template {
 	funcs := template.FuncMap{
 		"envTitleTag":  envtag.Get,
 		"csrfToken":    func() string { return "" },
-		"humanizeTime": humanizeTime,
+		"humanizeTime": reltime.Humanize,
 	}
 	base := template.Must(template.New("").Funcs(funcs).ParseFS(tmpl.FS, "host/layouts/*.gohtml"))
 	base = template.Must(base.ParseFS(tmpl.FS, "components/quiz_card.gohtml"))
 
 	return template.Must(template.Must(base.Clone()).ParseFS(tmpl.FS, path))
-}
-
-// hoursPerDay is the bucket size for switching humanizeTime from hours to days.
-const hoursPerDay = 24
-
-// humanizeTime returns a coarse relative-time string for t (e.g. "3 hr ago").
-// It mirrors the admin package's unexported humanizeTime; centralizing the
-// shared template funcs is a future cleanup.
-func humanizeTime(t time.Time) string {
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		m := int(d.Minutes())
-		if m == 1 {
-			return "1 min ago"
-		}
-
-		return fmt.Sprintf("%d min ago", m)
-	case d < hoursPerDay*time.Hour:
-		h := int(d.Hours())
-		if h == 1 {
-			return "1 hr ago"
-		}
-
-		return fmt.Sprintf("%d hr ago", h)
-	default:
-		days := int(d.Hours() / hoursPerDay)
-		if days == 1 {
-			return "1 day ago"
-		}
-
-		return fmt.Sprintf("%d days ago", days)
-	}
 }

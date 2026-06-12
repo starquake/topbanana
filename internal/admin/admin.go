@@ -24,6 +24,7 @@ import (
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/livesession"
 	"github.com/starquake/topbanana/internal/quiz"
+	"github.com/starquake/topbanana/internal/reltime"
 	"github.com/starquake/topbanana/internal/version"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
@@ -411,7 +412,7 @@ func parseTemplate(path string) *template.Template {
 		"isAdmin":           func() bool { return false },
 		"envTitleTag":       envtag.Get,
 		"versionLabel":      version.Label,
-		"humanizeTime":      humanizeTime,
+		"humanizeTime":      reltime.Humanize,
 		"passwordMinLength": func() int { return auth.MinPasswordLength },
 	}
 	base := template.Must(
@@ -423,49 +424,6 @@ func parseTemplate(path string) *template.Template {
 	base = template.Must(base.ParseFS(tmpl.FS, "admin/partials/*.gohtml"))
 
 	return template.Must(template.Must(base.Clone()).ParseFS(tmpl.FS, path))
-}
-
-// hoursPerDay is the bucket size for switching humanizeTime from hours to days.
-const hoursPerDay = 24
-
-// humanizeTime returns a coarse relative-time string for t (e.g. "3 hr ago").
-// It rounds down to the largest matching bucket and uses absolute zero-handling
-// for "just now" so a freshly written record renders sensibly.
-func humanizeTime(t time.Time) string {
-	return humanizeSince(time.Now(), t)
-}
-
-// humanizeSince is the pure relative-time formatter, with the reference
-// "now" passed in rather than read from the clock. Splitting it out keeps
-// the formatting deterministic and testable: a test passes a fixed now
-// instead of racing [time.Now] against scheduling jitter (#666).
-func humanizeSince(now, t time.Time) string {
-	d := now.Sub(t)
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		m := int(d.Minutes())
-		if m == 1 {
-			return "1 min ago"
-		}
-
-		return fmt.Sprintf("%d min ago", m)
-	case d < hoursPerDay*time.Hour:
-		h := int(d.Hours())
-		if h == 1 {
-			return "1 hr ago"
-		}
-
-		return fmt.Sprintf("%d hr ago", h)
-	default:
-		days := int(d.Hours() / hoursPerDay)
-		if days == 1 {
-			return "1 day ago"
-		}
-
-		return fmt.Sprintf("%d days ago", days)
-	}
 }
 
 // render400 renders the 400 error page with the given message.
