@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/starquake/topbanana/cmd/server/app"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
 )
@@ -212,25 +213,34 @@ func TestLeaderboardStream_Integration(t *testing.T) {
 // TestLeaderboardStream_HeartbeatKeepsConnectionAlivePastWriteTimeout
 // pins the #244 follow-up that disables the per-request write deadline
 // on the SSE handler and emits a periodic comment heartbeat. Before the
-// fix, the HTTP server's 10s WriteTimeout would kill every leaderboard
-// stream at exactly 10.003s — silent (no error to the client beyond
-// NS_ERROR_PARTIAL_TRANSFER in the browser) but fatal to anything that
-// expected the stream to stay open while no answers were committing.
+// fix, the HTTP server's WriteTimeout would kill every leaderboard
+// stream as soon as the deadline elapsed — silent (no error to the client
+// beyond NS_ERROR_PARTIAL_TRANSFER in the browser) but fatal to anything
+// that expected the stream to stay open while no answers were committing.
 //
 // The test opens a stream against a fresh quiz with no players, waits
-// past the 10s WriteTimeout AND past one heartbeat tick (25s), and
-// asserts:
+// past the WriteTimeout AND past several heartbeat ticks, and asserts:
 //   - the connection is still alive at the end of the window (no
 //     premature EOF — proves the WriteTimeout fix),
 //   - at least one heartbeat comment (`:` line) arrived after the
 //     initial snapshot (proves the heartbeat is firing).
 //
-// 27s wall-clock makes this one of the slower integration tests, but
-// it runs in parallel so the suite's critical path doesn't grow.
+// The HTTP server's WriteTimeout and the SSE handler's heartbeat
+// interval are injected via [app.Option], so this regression runs in
+// milliseconds instead of leaning on the production 10s / 25s defaults.
 func TestLeaderboardStream_HeartbeatKeepsConnectionAlivePastWriteTimeout(t *testing.T) {
 	t.Parallel()
 
-	ctx, srv := startServer(t, nil)
+	const (
+		heartbeatInterval = 100 * time.Millisecond
+		writeTimeout      = 200 * time.Millisecond
+		window            = 1500 * time.Millisecond
+	)
+
+	ctx, srv := startServer(t, nil,
+		app.WithWriteTimeout(writeTimeout),
+		app.WithLeaderboardHeartbeatInterval(heartbeatInterval),
+	)
 
 	db, err := sql.Open("sqlite", srv.DBURI)
 	if err != nil {
@@ -260,11 +270,6 @@ func TestLeaderboardStream_HeartbeatKeepsConnectionAlivePastWriteTimeout(t *test
 		t.Fatalf("CreateQuiz err = %v, want nil", cerr)
 	}
 
-	// 27s is past the 10s WriteTimeout AND past the 25s heartbeat
-	// interval, so a working server emits at least one heartbeat
-	// inside the window. The request context cancels at the end, which
-	// unblocks the scanner loop below.
-	const window = 27 * time.Second
 	streamCtx, streamCancel := context.WithTimeout(ctx, window)
 	defer streamCancel()
 
@@ -291,9 +296,9 @@ func TestLeaderboardStream_HeartbeatKeepsConnectionAlivePastWriteTimeout(t *test
 	}
 
 	// Drain lines as they arrive. heartbeatLines counts SSE comment
-	// frames (lines beginning with ":"); a single one past the 10s
-	// mark proves the WriteTimeout fix is in place AND the heartbeat
-	// is firing.
+	// frames (lines beginning with ":"); a single one past the
+	// WriteTimeout mark proves the WriteTimeout fix is in place AND the
+	// heartbeat is firing.
 	scanner := bufio.NewScanner(streamResp.Body)
 	var heartbeatLines int
 	var sawInitialData bool
@@ -313,11 +318,11 @@ func TestLeaderboardStream_HeartbeatKeepsConnectionAlivePastWriteTimeout(t *test
 	if !sawInitialData {
 		t.Fatal("never received the initial-snapshot SSE event")
 	}
-	// The scanner only exits when the context cancels (after `window`)
-	// or the server closes the body. If we got out in well under the
-	// window, the server closed early — WriteTimeout still bites.
-	if elapsed < window-2*time.Second {
-		t.Fatalf("stream closed after %v, want stream to stay open the full %v window", elapsed, window)
+	// Stream must stay open well past the WriteTimeout - if the handler
+	// did not clear the per-request deadline, the loop would exit at
+	// ~writeTimeout, far short of the window.
+	if elapsed < writeTimeout*4 {
+		t.Fatalf("stream closed after %v, want stream to stay open well past WriteTimeout (%v)", elapsed, writeTimeout)
 	}
 	if heartbeatLines == 0 {
 		t.Errorf("got 0 heartbeat (`:` ...) lines in %v, want at least 1", window)

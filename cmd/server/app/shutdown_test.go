@@ -66,6 +66,7 @@ func TestRunHTTPServer_DrainsEmailTasksBeforeReturning(t *testing.T) {
 			http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
 			tasks,
 			slog.New(slog.DiscardHandler),
+			10*time.Second,
 		)
 	}()
 

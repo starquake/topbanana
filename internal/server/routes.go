@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/starquake/topbanana/internal/admin"
 	"github.com/starquake/topbanana/internal/auth"
@@ -839,7 +840,10 @@ func addAPIRoutes(
 	)
 	mux.Handle(
 		"GET /api/quizzes/{slugID}/leaderboard/stream",
-		ensurePlayer(clientapi.HandleQuizLeaderboardStream(logger, gameService, realtime.LeaderboardHub)),
+		ensurePlayer(clientapi.HandleQuizLeaderboardStream(
+			logger, gameService, realtime.LeaderboardHub,
+			realtime.LeaderboardHeartbeatInterval,
+		)),
 	)
 	mux.Handle(
 		"GET /api/quizzes/{slugID}/my-game",
@@ -860,7 +864,10 @@ func addAPIRoutes(
 	)
 	mux.Handle("GET /api/games/{gameID}/results", ensurePlayer(clientapi.HandleGameResults(logger, gameService)))
 
-	addSessionRoutes(mux, realtime.SessionService, realtime.SessionHub, ensurePlayer)
+	addSessionRoutes(
+		mux, realtime.SessionService, realtime.SessionHub,
+		realtime.SessionEventHeartbeatInterval, ensurePlayer,
+	)
 }
 
 // addSessionRoutes registers the hosted live-session API (MP-1 / #678,
@@ -876,6 +883,7 @@ func addSessionRoutes(
 	mux *http.ServeMux,
 	sessionService *livesession.Service,
 	sessionHub *livesession.Hub,
+	heartbeatInterval time.Duration,
 	ensurePlayer func(http.Handler) http.Handler,
 ) {
 	mux.Handle("POST /api/sessions", ensurePlayer(clientapi.HandleSessionCreate(sessionService)))
@@ -895,7 +903,7 @@ func addSessionRoutes(
 	mux.Handle("GET /api/sessions/{code}/state", ensurePlayer(clientapi.HandleSessionState(sessionService)))
 	mux.Handle(
 		"GET /api/sessions/{code}/events",
-		ensurePlayer(clientapi.HandleSessionEvents(sessionService, sessionHub)),
+		ensurePlayer(clientapi.HandleSessionEvents(sessionService, sessionHub, heartbeatInterval)),
 	)
 }
 

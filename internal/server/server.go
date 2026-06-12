@@ -4,6 +4,7 @@ package server
 import (
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/config"
@@ -21,10 +22,19 @@ import (
 // service via SetLeaderboardPublisher). SessionService + SessionHub are the
 // hosted live-session service and its SSE tick hub; the same instances the
 // runner goroutine publishes through (MP-5 / #682).
+//
+// LeaderboardHeartbeatInterval and SessionEventHeartbeatInterval are how
+// often the two SSE handlers emit a no-op comment frame on an otherwise
+// idle stream. Production wiring passes
+// [clientapi.DefaultLeaderboardHeartbeatInterval] and
+// [clientapi.DefaultSessionEventHeartbeatInterval]; the heartbeat
+// regression tests shrink them so the assertion runs in milliseconds.
 type Realtime struct {
-	LeaderboardHub *leaderboard.Hub
-	SessionService *livesession.Service
-	SessionHub     *livesession.Hub
+	LeaderboardHub                *leaderboard.Hub
+	SessionService                *livesession.Service
+	SessionHub                    *livesession.Hub
+	LeaderboardHeartbeatInterval  time.Duration
+	SessionEventHeartbeatInterval time.Duration
 }
 
 // Mail bundles the mailer deps so they travel as one argument through

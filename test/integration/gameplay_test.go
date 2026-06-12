@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/starquake/topbanana/cmd/server/app"
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
@@ -241,13 +242,19 @@ func setupIntegration(t *testing.T) (context.Context, integrationSetup) {
 // same server (LOGIN_COOLDOWN=0 disables the per-IP login cooldown, the same
 // knob the e2e suite uses) or shrink the session runner beats
 // (SESSION_RUNNER_BEAT) while still getting a store.Stores for direct seeding.
-func setupIntegrationWithEnv(t *testing.T, extraEnv map[string]string) (context.Context, integrationSetup) {
+//
+// runOpts are forwarded to [app.Run] for values that have no env-var hook
+// (the HTTP server's WriteTimeout and the SSE handlers' heartbeat intervals,
+// used by the SSE heartbeat regression test).
+func setupIntegrationWithEnv(
+	t *testing.T, extraEnv map[string]string, runOpts ...app.Option,
+) (context.Context, integrationSetup) {
 	t.Helper()
 
 	env := map[string]string{"REGISTRATION_ENABLED": "true"}
 	maps.Copy(env, extraEnv)
 
-	ctx, srv := startServer(t, env)
+	ctx, srv := startServer(t, env, runOpts...)
 
 	db, err := sql.Open("sqlite", srv.DBURI)
 	if err != nil {

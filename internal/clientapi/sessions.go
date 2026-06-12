@@ -639,21 +639,23 @@ type sessionEventResponse struct {
 	Phase   string `json:"phase"`
 }
 
-// sessionEventHeartbeatInterval is how often the session SSE handler emits
-// a no-op comment frame to keep the connection alive when the session is
-// quiet. Same value and rationale as the leaderboard stream
-// (leaderboardHeartbeatInterval): 25s lands inside common proxy / NAT /
-// mobile-carrier idle timeouts without the keep-alive cost of a faster
-// tick.
-const sessionEventHeartbeatInterval = 25 * time.Second
+// DefaultSessionEventHeartbeatInterval is how often the session SSE handler
+// emits a no-op comment frame to keep the connection alive when the session
+// is quiet. Same value and rationale as the leaderboard stream
+// ([DefaultLeaderboardHeartbeatInterval]): 25s lands inside common proxy /
+// NAT / mobile-carrier idle timeouts without the keep-alive cost of a
+// faster tick. Production wiring (internal/server/routes.go) passes this
+// value; the heartbeat regression test passes a shorter interval.
+const DefaultSessionEventHeartbeatInterval = 25 * time.Second
 
 // sessionEventStreamer bundles the per-request dependencies of the session
 // SSE stream. Mirrors leaderboardStreamer so the two share the same flush /
 // heartbeat / write-deadline handling.
 type sessionEventStreamer struct {
-	w      http.ResponseWriter
-	rc     *http.ResponseController
-	logger *slog.Logger
+	w                 http.ResponseWriter
+	rc                *http.ResponseController
+	logger            *slog.Logger
+	heartbeatInterval time.Duration
 }
 
 // writeTick writes one tick as a single SSE `data:` frame and flushes.
@@ -694,10 +696,10 @@ func (s *sessionEventStreamer) writeHeartbeat() bool {
 
 // run drains the hub channel and writes one SSE frame per tick until the
 // client disconnects or the channel closes. The heartbeat ticker emits a
-// no-op comment frame every sessionEventHeartbeatInterval to keep an idle
-// connection warm.
+// no-op comment frame every s.heartbeatInterval to keep an idle connection
+// warm.
 func (s *sessionEventStreamer) run(ctx context.Context, events <-chan livesession.Tick) {
-	heartbeat := time.NewTicker(sessionEventHeartbeatInterval)
+	heartbeat := time.NewTicker(s.heartbeatInterval)
 	defer heartbeat.Stop()
 
 	for {
@@ -757,7 +759,18 @@ func beatPresence(ctx context.Context, logger *slog.Logger, touch func(context.C
 // no game data - each tick is {version, phase}, a signal to re-GET
 // /api/sessions/{code}/state. A reconnect re-runs the gate and resends the
 // current version, which doubles as the resync path.
-func HandleSessionEvents(service *livesession.Service, hub *livesession.Hub) http.Handler {
+//
+// heartbeatInterval is the gap between no-op SSE comment frames written on
+// an otherwise idle stream; production passes
+// [DefaultSessionEventHeartbeatInterval] and the heartbeat regression test
+// shrinks it so the assertion runs in milliseconds, not seconds. A zero
+// or negative value falls back to the default so a caller that constructs
+// the wiring struct without the field does not panic at [time.NewTicker].
+func HandleSessionEvents(
+	service *livesession.Service, hub *livesession.Hub, heartbeatInterval time.Duration,
+) http.Handler {
+	heartbeatInterval = clampHeartbeat(heartbeatInterval, DefaultSessionEventHeartbeatInterval)
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		logger := handlers.LoggerFromContext(ctx)
@@ -820,7 +833,7 @@ func HandleSessionEvents(service *livesession.Service, hub *livesession.Hub) htt
 			logger.WarnContext(ctx, "could not clear SSE write deadline", slog.Any("err", derr))
 		}
 
-		streamer := &sessionEventStreamer{w: w, rc: rc, logger: logger}
+		streamer := &sessionEventStreamer{w: w, rc: rc, logger: logger, heartbeatInterval: heartbeatInterval}
 
 		if !streamer.writeTick(ctx, livesession.Tick{Version: version, Phase: view.Phase}) {
 			return

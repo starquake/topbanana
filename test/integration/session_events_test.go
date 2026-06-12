@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/starquake/topbanana/cmd/server/app"
 )
 
 // sessionTickPayload mirrors the JSON shape of one SSE tick on the session
@@ -254,15 +256,29 @@ func TestSessionEvents_NonParticipantRejected(t *testing.T) {
 }
 
 // TestSessionEvents_HeartbeatOnIdleStream pins that an idle event stream
-// emits keep-alive comment frames past the HTTP server's 10s WriteTimeout,
-// the same fix the leaderboard stream relies on. It opens a stream against
-// a session with no further mutations, holds it past the 10s WriteTimeout
-// AND past one 25s heartbeat tick, and asserts the connection stayed open
-// and at least one heartbeat comment arrived.
+// emits keep-alive comment frames, the same fix the leaderboard stream
+// relies on. It opens a stream against a session with no further mutations,
+// holds it past several heartbeat ticks, and asserts the connection stayed
+// open and at least one heartbeat comment arrived.
+//
+// The SSE handler's heartbeat interval is injected via [app.Option] so this
+// regression runs in milliseconds instead of leaning on the production 25s
+// default. The HTTP-server-WriteTimeout half of the regression is pinned by
+// the leaderboard sister test (which has no auth dance and so can run with
+// a tight WriteTimeout); the session events handler uses the same
+// SetWriteDeadline(time.Time{}) pattern so a single tight-WriteTimeout
+// witness covers both handlers.
 func TestSessionEvents_HeartbeatOnIdleStream(t *testing.T) {
 	t.Parallel()
 
-	ctx, setup := setupIntegration(t)
+	const (
+		heartbeatInterval = 100 * time.Millisecond
+		window            = 500 * time.Millisecond
+	)
+
+	ctx, setup := setupIntegrationWithEnv(t, nil,
+		app.WithSessionEventHeartbeatInterval(heartbeatInterval),
+	)
 	baseURL := setup.BaseURL
 
 	qz := seedLiveQuiz(ctx, t, setup.Stores.Quizzes, "events-heartbeat")
@@ -277,9 +293,6 @@ func TestSessionEvents_HeartbeatOnIdleStream(t *testing.T) {
 	alice := newAnonClient(t)
 	joinSession(ctx, t, alice, baseURL, code, "Alice")
 
-	// 27s is past the 10s WriteTimeout AND past the 25s heartbeat interval,
-	// so a working server emits at least one heartbeat inside the window.
-	const window = 27 * time.Second
 	streamCtx, streamCancel := context.WithTimeout(ctx, window)
 	defer streamCancel()
 
@@ -307,7 +320,7 @@ func TestSessionEvents_HeartbeatOnIdleStream(t *testing.T) {
 	if !sawInitialData {
 		t.Fatal("never received the initial-tick SSE event")
 	}
-	if elapsed < window-2*time.Second {
+	if elapsed < window-100*time.Millisecond {
 		t.Fatalf("stream closed after %v, want it to stay open the full %v window", elapsed, window)
 	}
 	if heartbeatLines == 0 {
