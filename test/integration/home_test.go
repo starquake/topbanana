@@ -322,6 +322,20 @@ func TestHome_Integration_FooterAffordance(t *testing.T) {
 		}
 	})
 
+	// The discreet admin link in the home footer deep-links a logged-out
+	// visitor into the login flow: GET /admin 303s to /login carrying the
+	// original URI as ?next= so they return to /admin after signing in
+	// (#449).
+	t.Run("anonymous GET /admin redirects to login carrying next", func(t *testing.T) {
+		snap := fetchWithClient(ctx, t, authClient(t), srv.BaseURL+"/admin")
+		if got, want := snap.StatusCode, http.StatusSeeOther; got != want {
+			t.Fatalf("status = %d, want %d", got, want)
+		}
+		if got, want := snap.Location, "/login?next=%2Fadmin"; got != want {
+			t.Errorf("Location = %q, want %q", got, want)
+		}
+	})
+
 	t.Run("authenticated request renders displayName and log-out form", func(t *testing.T) {
 		snap := fetchWithClient(ctx, t, regClient, srv.BaseURL+"/")
 		if got, want := snap.StatusCode, http.StatusOK; got != want {

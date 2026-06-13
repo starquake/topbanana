@@ -78,6 +78,104 @@ func TestAuthRedirect_PerRole(t *testing.T) {
 	})
 }
 
+// TestAuthRedirect_NextRoundTrip pins the #449 deep-link-after-login
+// round-trip: a logged-out admin who hits a protected URL bounces to
+// /login?next=<encoded>, signs in carrying that next, and lands on the
+// deep link instead of the role landing (/admin/quizzes). Without the
+// next round-trip the admin would land on the dashboard and have to
+// re-navigate by hand.
+func TestAuthRedirect_NextRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+	})
+	baseURL := srv.BaseURL
+
+	// Register + verify an admin and sign in so the logout below has a
+	// live session to clear.
+	client := authClient(t)
+	registerVerifyAndSignIn(ctx, t, client, baseURL, srv.DBURI, "next-admin", "next-admin-pass-123")
+
+	// Log out: the home page carries the log-out form, so POST /logout
+	// with its CSRF token. The handler 303s to /login and clears the
+	// session cookie.
+	logout := postLogoutFromHome(ctx, t, client, baseURL)
+	if got, want := logout.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("logout status = %d, want %d", got, want)
+	}
+	if got, want := logout.Location, "/login"; got != want {
+		t.Errorf("logout Location = %q, want %q", got, want)
+	}
+
+	// GET a protected admin URL while logged out: RequireAdmin 303s to
+	// /login carrying the original URI as ?next= (#449).
+	deepLink := fetchWithClient(ctx, t, client, baseURL+"/admin/email")
+	if got, want := deepLink.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("protected GET status = %d, want %d", got, want)
+	}
+	if got, want := deepLink.Location, "/login?next=%2Fadmin%2Femail"; got != want {
+		t.Errorf("protected GET Location = %q, want %q", got, want)
+	}
+
+	// registerVerifyAndSignIn already logged in once from this localhost
+	// peer, so sleep past the per-IP login cool-down (#494) before the
+	// second login or it 429s.
+	time.Sleep(auth.LoginCooldown() + 100*time.Millisecond)
+
+	// Submit the login form carrying that next. The handler honours the
+	// posted next over the role landing, so the redirect lands on the
+	// deep link (/admin/email), NOT /admin/quizzes. This is the headline
+	// #449 assertion.
+	location := loginForRedirectWithNext(
+		ctx, t, client, baseURL, "next-admin", "next-admin-pass-123", "/admin/email",
+	)
+	if got, want := location, "/admin/email"; got != want {
+		t.Errorf("login-with-next Location = %q, want %q (must land on the deep link, not the role landing)", got, want)
+	}
+}
+
+// loginForRedirectWithNext runs the GET-CSRF + POST-form login dance
+// with a hidden next field set, returning the 303 Location. It primes
+// the CSRF nonce cookie from GET /login?next=<encoded> (the same URL the
+// RequireAdmin bounce sends the visitor to) so the posted token + nonce
+// pair matches, then POSTs email + password + next.
+func loginForRedirectWithNext(
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, displayName, password, next string,
+) string {
+	t.Helper()
+
+	loginURL := baseURL + "/login?" + url.Values{"next": {next}}.Encode()
+	token := fetchCSRFToken(ctx, t, client, loginURL)
+
+	form := url.Values{}
+	form.Add("email", displayName+"@example.test")
+	form.Add("password", password)
+	form.Add("csrf_token", token)
+	form.Add("next", next)
+
+	req, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, baseURL+"/login", strings.NewReader(form.Encode()),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("client.Do err = %v, want nil", err)
+	}
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("Body.Close err = %v, want nil", cerr)
+	}
+	if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("/login POST status = %d, want %d", got, want)
+	}
+
+	return resp.Header.Get("Location")
+}
+
 // testSessionKey is the fixed signing key startServer sets as the
 // default SESSION_KEY (see testmain_test.go) so tests can mint a
 // matching session cookie with mintSessionCookie. The hard
