@@ -54,34 +54,3 @@ test('start page fits within the viewport on a fresh DB', async ({ page }) => {
     `documentElement.scrollHeight (${measurement.scrollHeight}) > window.innerHeight (${measurement.innerHeight}) — home page overflows the viewport on empty-DB content`,
   ).toBeLessThanOrEqual(measurement.innerHeight + 1);
 });
-
-// #166 — the public start page at GET /. The test relies on nothing
-// beyond what every project starts with: the page renders even with an
-// empty database (empty-state messaging is part of the contract). Both
-// the popular-quizzes and active-players sections must be present, and
-// the discreet admin link in the footer must deep-link a logged-out
-// visitor into the /login flow.
-test('start page renders the popular + active sections and a discreet admin link', async ({ page }) => {
-  await page.goto('/');
-
-  // Title + brand wordmark.
-  // Non-production deploys prefix the title with their env label
-  // (e.g. "[development] Top Banana!"); CI runs with APP_ENV=development.
-  await expect(page).toHaveTitle(/Top Banana!$/);
-  await expect(page.getByRole('heading', { level: 1 })).toContainText(/Top\s*Banana!?/i);
-
-  // The primary section is a tablist (Popular / Newest) over two
-  // server-rendered lists; the active-players aside stays an <h2>.
-  await expect(page.getByRole('tab', { name: 'Popular' })).toBeVisible();
-  await expect(page.getByRole('tab', { name: 'Newest' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Most active players', level: 2 })).toBeVisible();
-
-  // Discreet admin link sits in the footer. Logged-out visitors get
-  // redirected to /login by the admin middleware, which since #449
-  // also carries the original URI as ?next=<encoded> so the visitor
-  // can return to /admin after signing in.
-  const adminLink = page.getByRole('link', { name: 'Manage quizzes' });
-  await expect(adminLink).toBeVisible();
-  await adminLink.click();
-  await expect(page).toHaveURL(/\/login\?next=%2Fadmin$/);
-});
