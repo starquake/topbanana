@@ -20,6 +20,7 @@ type quizCardData struct {
 	Description   string
 	UpdatedAt     time.Time
 	QuestionCount int
+	RoundCount    int
 	PlayCount     int64
 	Mode          string
 	ActionVariant string
@@ -80,6 +81,14 @@ func (h *Handlers) Picker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	roundCounts, err := h.quizzes.RoundCountsByQuiz(ctx)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "error loading round counts", slog.Any("err", err))
+		http.Error(w, msgInternalError, http.StatusInternalServerError)
+
+		return
+	}
+
 	running := h.hostHasRunningGame(ctx, player.ID)
 
 	cards := make([]quizCardData, 0, len(quizzes))
@@ -95,6 +104,7 @@ func (h *Handlers) Picker(w http.ResponseWriter, r *http.Request) {
 			Description:        qz.Description,
 			UpdatedAt:          qz.UpdatedAt,
 			QuestionCount:      count,
+			RoundCount:         roundCounts[qz.ID],
 			PlayCount:          qz.PlayCount,
 			Mode:               qz.Mode,
 			ActionVariant:      "host",

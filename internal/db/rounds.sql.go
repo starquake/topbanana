@@ -146,6 +146,44 @@ func (q *Queries) ListRoundsByQuiz(ctx context.Context, quizID int64) ([]Round, 
 	return items, nil
 }
 
+const roundCountsByQuiz = `-- name: RoundCountsByQuiz :many
+SELECT quiz_id, COUNT(*) AS round_count
+FROM rounds
+GROUP BY quiz_id
+`
+
+type RoundCountsByQuizRow struct {
+	QuizID     int64
+	RoundCount int64
+}
+
+// Returns one row per quiz that has at least one round. Quizzes with zero
+// rounds are absent; callers should treat a missing entry as 0. Mirrors
+// QuestionCountsByQuiz so the shared client quiz card can render a
+// "{N} rounds" figure without an N+1 per-row lookup.
+func (q *Queries) RoundCountsByQuiz(ctx context.Context) ([]RoundCountsByQuizRow, error) {
+	rows, err := q.db.QueryContext(ctx, roundCountsByQuiz)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RoundCountsByQuizRow
+	for rows.Next() {
+		var i RoundCountsByQuizRow
+		if err := rows.Scan(&i.QuizID, &i.RoundCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateRound = `-- name: UpdateRound :execresult
 UPDATE rounds
 SET title      = ?,

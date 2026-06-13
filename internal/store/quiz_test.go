@@ -383,6 +383,56 @@ func TestQuizStore_QuestionCountsByQuiz(t *testing.T) {
 	}
 }
 
+func TestQuizStore_RoundCountsByQuiz(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+
+	// CreateQuiz seeds a default round (#444), so every quiz starts with
+	// one. multiRound gets two more (three total); single keeps just the
+	// seeded default (one).
+	multiRound := &quiz.Quiz{
+		Title: "Multi round", Slug: "multi-round", Description: "x",
+		CreatedByPlayerID: seededAdminID,
+	}
+	if err := quizStore.CreateQuiz(t.Context(), multiRound); err != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", err)
+	}
+	for i, title := range []string{"Round Two", "Round Three"} {
+		if err := quizStore.CreateRound(t.Context(), &quiz.Round{
+			QuizID: multiRound.ID, Position: 10 + i, Title: title,
+		}); err != nil {
+			t.Fatalf("CreateRound err = %v, want nil", err)
+		}
+	}
+
+	single := &quiz.Quiz{
+		Title: "Single round", Slug: "single-round", Description: "y",
+		CreatedByPlayerID: seededAdminID,
+	}
+	if err := quizStore.CreateQuiz(t.Context(), single); err != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", err)
+	}
+
+	counts, err := quizStore.RoundCountsByQuiz(t.Context())
+	if err != nil {
+		t.Fatalf("RoundCountsByQuiz err = %v, want nil", err)
+	}
+
+	if got, want := counts[multiRound.ID], 3; got != want {
+		t.Errorf("counts[%d] = %d, want %d", multiRound.ID, got, want)
+	}
+	if got, want := counts[single.ID], 1; got != want {
+		t.Errorf("counts[%d] = %d, want %d", single.ID, got, want)
+	}
+	// A quiz id with no rounds row is absent from the map; callers treat
+	// the missing entry as 0.
+	if _, present := counts[multiRound.ID+9999]; present {
+		t.Error("unknown quiz id should be absent from counts")
+	}
+}
+
 func TestQuizStore_ListQuizzes_ErrorHandling(t *testing.T) {
 	t.Parallel()
 

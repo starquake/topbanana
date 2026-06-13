@@ -88,6 +88,12 @@ type Store interface {
 	// ListRoundsByQuiz returns the rounds for a quiz
 	// in ascending position order (#444).
 	ListRoundsByQuiz(ctx context.Context, quizID int64) ([]*Round, error)
+	// RoundCountsByQuiz returns the number of rounds per quiz, keyed by
+	// quiz ID. Quizzes with no rounds are absent from the map; callers
+	// should treat a missing entry as 0. Mirrors QuestionCountsByQuiz so
+	// the public all-quizzes list can render round counts without an N+1
+	// per-row lookup (#927).
+	RoundCountsByQuiz(ctx context.Context) (map[int64]int, error)
 	// GetRound returns a round by its ID. Returns
 	// ErrRoundNotFound when the row does not exist.
 	GetRound(ctx context.Context, id int64) (*Round, error)

@@ -167,14 +167,19 @@ func TestAdmin_Integration(t *testing.T) {
 
 	// Pin Tailwind classes on the quiz list. max-w-shell is a custom
 	// theme token from tailwind-src.css used by the navbar shell;
-	// bg-cyan-soft is the play-URL chip pill rendered per quiz card.
-	// Together they prove both the navbar and the per-card reskin
-	// rendered. See #213.
+	// hover:border-accent-line is on every quiz-card article. Together
+	// they prove both the navbar and the per-card reskin rendered. See
+	// #213 (#934 removed the play-URL chip the old assertion keyed on).
 	if got, want := string(body), `class="max-w-shell`; !strings.Contains(got, want) {
 		t.Errorf("string(body) should contain Tailwind shell class %q, got %q", want, got)
 	}
-	if got, want := string(body), `bg-cyan-soft`; !strings.Contains(got, want) {
+	if got, want := string(body), `hover:border-accent-line`; !strings.Contains(got, want) {
 		t.Errorf("string(body) should contain per-card Tailwind class %q, got %q", want, got)
+	}
+	// Each quiz card carries a rounds figure in its footer (rounds added to
+	// the shared quiz_card in the #927 follow-up).
+	if got, want := string(body), `&nbsp;round`; !strings.Contains(got, want) {
+		t.Errorf("string(body) should contain the per-card rounds figure %q, got %q", want, got)
 	}
 
 	// Verify quiz details
