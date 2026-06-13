@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -107,5 +108,89 @@ func TestHostQuizList_GatesAnonymous(t *testing.T) {
 	}
 	if loc := resp.Header.Get("Location"); !strings.HasPrefix(loc, "/login") {
 		t.Errorf("anon host quiz-list redirect = %q, want /login", loc)
+	}
+}
+
+// hostCreateRoom signs the host into a fresh room via POST /host (optionally
+// arming quizID) and returns the room's join code from the redirect.
+func hostCreateRoom(
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, quizID string,
+) string {
+	t.Helper()
+	form := url.Values{"csrf_token": {fetchCSRFToken(ctx, t, client, baseURL+"/admin/quizzes")}}
+	if quizID != "" {
+		form.Set("quiz_id", quizID)
+	}
+	resp := httpPostForm(ctx, t, client, baseURL+"/host", form)
+	defer closeBody(t, resp.Body)
+	if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
+		t.Fatalf("POST /host status = %d, want %d", got, want)
+	}
+	code := strings.TrimPrefix(resp.Header.Get("Location"), "/host/")
+	if code == "" {
+		t.Fatalf("POST /host redirect = %q, want /host/{code}", resp.Header.Get("Location"))
+	}
+
+	return code
+}
+
+// TestHostQuizList_LiveSessionIndicator pins the persistent "Session live"
+// header indicator (#889 slice 3): the host picker surfaces the host's active
+// room (with its armed quiz title, or none for an empty room) and links back to
+// it, and shows nothing when the host has no room. One host evolves its single
+// room across the cases (a host has at most one active room, and signing in
+// several hosts from one IP trips the login rate limiter); StartHosting is
+// one-room-aware, so arming a quiz reuses the empty room rather than opening a
+// new one.
+func TestHostQuizList_LiveSessionIndicator(t *testing.T) {
+	t.Parallel()
+
+	ctx, setup := setupIntegration(t)
+	baseURL := setup.BaseURL
+	const marker = `data-testid="session-live-indicator"`
+
+	host := &http.Client{
+		Jar:           mustJar(t),
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	registerVerifyAndSignIn(ctx, t, host, baseURL, setup.DBURI, "host-indicator", "host-indicator-pass-123")
+
+	// No room yet: no indicator.
+	if _, body := getHostQuizListHTML(ctx, t, host, baseURL); strings.Contains(body, marker) {
+		t.Error("host quiz-list shows the live-session indicator with no active room")
+	}
+
+	// Open an empty room: the indicator appears, names no quiz, and links back.
+	emptyCode := hostCreateRoom(ctx, t, host, baseURL, "")
+	_, body := getHostQuizListHTML(ctx, t, host, baseURL)
+	if !strings.Contains(body, marker) {
+		t.Fatal("host quiz-list missing the live-session indicator for an empty room")
+	}
+	if !strings.Contains(body, "Session live") {
+		t.Error("indicator missing the 'Session live' label")
+	}
+	if want := `href="/host/` + emptyCode + `"`; !strings.Contains(body, want) {
+		t.Errorf("indicator missing link %q back to the room", want)
+	}
+
+	// Arm a live quiz in the same room: the indicator now names the quiz. Scope
+	// the title check to the indicator anchor - the armed quiz also renders as a
+	// picker card, so an unscoped body match would pass even if the indicator
+	// failed to resolve the title.
+	live := seedLiveQuiz(ctx, t, setup.Stores.Quizzes, "host-indicator-quiz")
+	armedCode := hostCreateRoom(ctx, t, host, baseURL, strconv.FormatInt(live.ID, 10))
+	_, body = getHostQuizListHTML(ctx, t, host, baseURL)
+	indicator := body
+	if i := strings.Index(indicator, marker); i >= 0 {
+		indicator = indicator[i:]
+		if end := strings.Index(indicator, "</a>"); end >= 0 {
+			indicator = indicator[:end]
+		}
+	}
+	if !strings.Contains(indicator, live.Title) {
+		t.Errorf("live-session indicator missing armed quiz title %q", live.Title)
+	}
+	if want := `href="/host/` + armedCode + `"`; !strings.Contains(body, want) {
+		t.Errorf("indicator missing link %q back to the room", want)
 	}
 }

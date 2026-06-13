@@ -1,11 +1,13 @@
 package host
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/quiz"
 )
 
 // quizCardData carries exactly the fields the shared quiz_card partial reads on
@@ -23,10 +25,21 @@ type quizCardData struct {
 	ActionVariant string
 }
 
+// liveSessionView feeds the persistent "Session live" header indicator (#889):
+// when the host already has an active room, the picker shows it so the host
+// knows they are mid-session even while browsing for a quiz. QuizTitle is empty
+// for a room opened with no quiz armed yet.
+type liveSessionView struct {
+	Active    bool
+	JoinCode  string
+	QuizTitle string
+}
+
 // quizListData feeds the host quiz-list page.
 type quizListData struct {
-	Title   string
-	Quizzes []quizCardData
+	Title       string
+	Quizzes     []quizCardData
+	LiveSession liveSessionView
 }
 
 // QuizList handles GET /host/quizzes: the host picks a live quiz to run. The
@@ -36,7 +49,8 @@ type quizListData struct {
 func (h *Handlers) QuizList(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	if _, ok := auth.PlayerFromContext(ctx); !ok {
+	player, ok := auth.PlayerFromContext(ctx)
+	if !ok {
 		h.logger.ErrorContext(ctx, "missing player on context for host quiz list")
 		http.Error(w, msgInternalError, http.StatusInternalServerError)
 
@@ -79,7 +93,44 @@ func (h *Handlers) QuizList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.quizList.Render(w, r, http.StatusOK, quizListData{
-		Title:   "Host a quiz",
-		Quizzes: cards,
+		Title:       "Host a quiz",
+		Quizzes:     cards,
+		LiveSession: h.activeSessionView(ctx, player.ID, quizzes),
 	})
+}
+
+// activeSessionView resolves the host's current room for the header indicator.
+// A missing room is the common case (no indicator); a lookup error degrades to
+// no indicator rather than failing the page, since the indicator is supplementary
+// chrome. liveQuizzes is the already-loaded live set, so an armed quiz's title
+// resolves without a second query (a hosted quiz is always live).
+func (h *Handlers) activeSessionView(ctx context.Context, playerID int64, liveQuizzes []*quiz.Quiz) liveSessionView {
+	sess, err := h.service.GetActiveSessionForHost(ctx, playerID)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "error loading active host session for indicator", slog.Any("err", err))
+
+		return liveSessionView{}
+	}
+	if sess == nil {
+		return liveSessionView{}
+	}
+
+	view := liveSessionView{Active: true, JoinCode: sess.JoinCode}
+	if sess.QuizID != nil {
+		view.QuizTitle = quizTitleByID(liveQuizzes, *sess.QuizID)
+	}
+
+	return view
+}
+
+// quizTitleByID returns the title of the quiz with id in quizzes, or "" if it is
+// not present.
+func quizTitleByID(quizzes []*quiz.Quiz, id int64) string {
+	for _, qz := range quizzes {
+		if qz.ID == id {
+			return qz.Title
+		}
+	}
+
+	return ""
 }
