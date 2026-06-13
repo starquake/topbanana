@@ -1756,15 +1756,23 @@ const (
 // questionFormData backs questionform.gohtml. FieldErrors is set when
 // HandleQuestionSave re-renders the form after a domain-level
 // validation failure (#32); the per-input error message lives under
-// the lowercased form-field name (text, options).
+// the lowercased form-field name (text, options). Round is the round a
+// new question will be created in (#929) - it backs the form's hidden
+// round_id field and the breadcrumb, and is nil on the edit path where
+// the question keeps its existing round.
 type questionFormData struct {
 	Title       string
 	Quiz        *QuizData
 	Question    *QuestionData
+	Round       *RoundData
 	FieldErrors map[string]string
 }
 
-// HandleQuestionCreate creates a question.
+// HandleQuestionCreate creates a question. The round the question lands
+// in comes from the round_id query parameter set by the per-round "Add
+// question" button (#929); it must name a round of this quiz. The form
+// carries it forward as a hidden field so the POST creates the question
+// in that round rather than the quiz default.
 func HandleQuestionCreate(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
 	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/questionform.gohtml")
 
@@ -1783,12 +1791,41 @@ func HandleQuestionCreate(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 			return
 		}
 
+		rnd, ok := roundFromQuery(w, r, logger, csrfMgr, quizStore, quizID)
+		if !ok {
+			return
+		}
+
 		renderer.Render(w, r, http.StatusOK, questionFormData{
 			Title:    "Admin Dashboard - Question Create",
 			Quiz:     quizDataFromQuiz(qz),
 			Question: &QuestionData{},
+			Round:    roundDataFromRound(rnd),
 		})
 	})
+}
+
+// roundFromQuery reads the round_id query parameter and loads the named
+// round, gated on it belonging to quizID. A missing, unparseable, or
+// foreign round id renders the established 4xx (400 for a bad id, 404
+// for a foreign one via roundByID) and returns ok=false - the create
+// flow never falls back to a default round (#929).
+func roundFromQuery(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	quizStore quiz.Store,
+	quizID int64,
+) (*quiz.Round, bool) {
+	roundID, err := handlers.IDFromString(r.URL.Query().Get("round_id"))
+	if err != nil || roundID == 0 {
+		render400(w, r, logger, csrfMgr, "invalid round id")
+
+		return nil, false
+	}
+
+	return roundByID(w, r, logger, csrfMgr, quizStore, quizID, roundID)
 }
 
 // HandleQuestionEdit handles the display of the question edit page in the admin dashboard.
@@ -2034,9 +2071,13 @@ func HandleQuestionDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 // questionSaveCtx is the artefact set loadQuestionForSave returns -
 // bundled into a struct so HandleQuestionSave's signature stays under
 // revive's function-result-limit and the call site stays readable.
+// Round is the resolved target round on the create path (#929), carried
+// so a validation-failure re-render can repopulate the form's hidden
+// round_id field and breadcrumb; it is nil on the edit path.
 type questionSaveCtx struct {
 	Quiz     *quiz.Quiz
 	Question *quiz.Question
+	Round    *quiz.Round
 	IsNew    bool
 }
 
@@ -2104,7 +2145,21 @@ func loadQuestionForSave(
 		return nil, false
 	}
 	if questionID == 0 {
-		return &questionSaveCtx{Quiz: qz, Question: &quiz.Question{QuizID: qz.ID}, IsNew: true}, true
+		// A new question takes the round from the form's hidden round_id
+		// field, set by the per-round "Add question" button (#929). The
+		// round must belong to this quiz; a missing or foreign id 4xxs
+		// rather than silently defaulting.
+		rnd, roundOK := roundFromForm(w, r, logger, csrfMgr, quizStore, qz.ID)
+		if !roundOK {
+			return nil, false
+		}
+
+		return &questionSaveCtx{
+			Quiz:     qz,
+			Question: &quiz.Question{QuizID: qz.ID, RoundID: rnd.ID},
+			Round:    rnd,
+			IsNew:    true,
+		}, true
 	}
 	qs, ok := questionByID(w, r, logger, csrfMgr, quizStore, qz.ID, questionID)
 	if !ok {
@@ -2112,6 +2167,35 @@ func loadQuestionForSave(
 	}
 
 	return &questionSaveCtx{Quiz: qz, Question: qs, IsNew: false}, true
+}
+
+// roundFromForm reads the round_id POST field and loads the named round,
+// gated on it belonging to quizID. A missing, unparseable, or foreign
+// round id renders the established 4xx and returns ok=false (#929).
+// Mirrors roundFromQuery for the POST path; both go through roundByID so
+// a cross-quiz id surfaces as 404, matching HandleQuestionMoveToRound.
+func roundFromForm(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	quizStore quiz.Store,
+	quizID int64,
+) (*quiz.Round, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormSize)
+	if err := r.ParseForm(); err != nil {
+		render400(w, r, logger, csrfMgr, "error parsing form")
+
+		return nil, false
+	}
+	roundID, err := handlers.IDFromString(r.PostFormValue("round_id"))
+	if err != nil || roundID == 0 {
+		render400(w, r, logger, csrfMgr, "invalid round id")
+
+		return nil, false
+	}
+
+	return roundByID(w, r, logger, csrfMgr, quizStore, quizID, roundID)
 }
 
 // renderQuestionForm re-renders the question form after a validation
@@ -2128,10 +2212,15 @@ func renderQuestionForm(
 	if qctx.IsNew {
 		title = "Admin Dashboard - Question Create"
 	}
+	var roundData *RoundData
+	if qctx.Round != nil {
+		roundData = roundDataFromRound(qctx.Round)
+	}
 	renderer.Render(w, r, http.StatusBadRequest, questionFormData{
 		Title:       title,
 		Quiz:        quizDataFromQuiz(qctx.Quiz),
 		Question:    questionDataFromQuestion(qctx.Question),
+		Round:       roundData,
 		FieldErrors: fieldErrors,
 	})
 }

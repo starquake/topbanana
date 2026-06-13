@@ -23,6 +23,12 @@ var csrfTokenPattern = regexp.MustCompile(
 	fmt.Sprintf(`name="%s" value="([^"]+)"`, regexp.QuoteMeta(csrf.FormField)),
 )
 
+// roundIDPattern extracts the round id from a per-round "Add question"
+// link on the quiz-view page (#929). Questions are always created in a
+// specific round, so the integration flow scrapes a real round id off
+// the quiz view the same way a browser would follow the button.
+var roundIDPattern = regexp.MustCompile(`/questions/new\?round_id=(\d+)`)
+
 // fetchCSRFToken issues a GET to the given URL using the supplied client,
 // extracts the first csrf_token form value from the response body, and
 // returns it. The client's cookie jar picks up the nonce cookie as a side
@@ -204,6 +210,15 @@ func TestAdmin_Integration(t *testing.T) {
 		t.Errorf("string(body) = %q, should contain %q", got, want)
 	}
 
+	// Questions belong to a round (#929): scrape the default round's id
+	// off the quiz view's per-round "Add question" link and create the
+	// question against it, mirroring the button a host would click.
+	roundMatch := roundIDPattern.FindStringSubmatch(string(body))
+	if roundMatch == nil {
+		t.Fatalf("quiz view body has no per-round Add question link, body:\n%s", string(body))
+	}
+	roundID := roundMatch[1]
+
 	questionText := "What is the name of the famous plumber wearing red and blue?"
 	questionOption1 := "Sonic"
 	questionOption2 := "Mario"
@@ -214,11 +229,12 @@ func TestAdmin_Integration(t *testing.T) {
 		ctx,
 		t,
 		client,
-		baseURL+quizLocation+"/questions/new",
+		baseURL+quizLocation+"/questions/new?round_id="+roundID,
 	)
 
 	questionForm := url.Values{}
 	questionForm.Add("text", questionText)
+	questionForm.Add("round_id", roundID)
 	questionForm.Add("position", "10")
 	questionForm.Add("option[0].text", questionOption1)
 	questionForm.Add("option[1].text", questionOption2)
