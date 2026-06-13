@@ -1,6 +1,7 @@
 package integration_test
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -306,6 +307,119 @@ func TestEmailAdmin_TestSendOnUnconfiguredRedirectsWithFlash(t *testing.T) {
 	if strings.Contains(string(secondBody), "set SMTP_HOST") {
 		t.Error("second GET still contains the banner; flash must be one-shot")
 	}
+}
+
+// TestEmailAdmin_ConfiguredSendSucceeds pins the happy path that the
+// retired admin-email e2e spec covered: with SMTP wired to a reachable
+// catch-all (the integration analogue of the e2e suite's Mailpit), the
+// diagnostics status reads "enabled" with no "disabled (no-op)" badge,
+// a test-send 303s with a success flash naming the recipient, and that
+// flash is one-shot (a second GET drops it).
+func TestEmailAdmin_ConfiguredSendSucceeds(t *testing.T) {
+	t.Parallel()
+
+	smtp := startFakeSMTP(t)
+	ctx, srv := startServer(t, map[string]string{
+		"REGISTRATION_ENABLED": "true",
+		// BASE_URL set so the Base URL row also reads "enabled"; the e2e
+		// spec pinned that no "disabled (no-op)" badge appears anywhere on
+		// the page when the deploy is fully wired.
+		"BASE_URL":  "https://topbanana.example",
+		"SMTP_HOST": smtp.host(t),
+		"SMTP_PORT": smtp.port(t),
+		"SMTP_FROM": "noreply@topbanana.example",
+		"SMTP_TLS":  "false",
+	})
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New err = %v, want nil", err)
+	}
+	client := &http.Client{
+		Jar: jar,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	registerVerifyAndSignIn(ctx, t, client, srv.BaseURL, srv.DBURI, "htmx-admin", "htmx-admin-pass-123")
+
+	// (a) The status panel reads "enabled" and never shows the no-op badge.
+	statusBody := getEmailBody(ctx, t, client, srv.BaseURL)
+	if got, want := statusBody, "enabled"; !strings.Contains(got, want) {
+		t.Errorf("status body should contain %q; body=%q", want, got)
+	}
+	if strings.Contains(statusBody, "disabled (no-op)") {
+		t.Errorf("status body should not contain the no-op badge when SMTP is wired; body=%q", statusBody)
+	}
+
+	// (b) A test-send 303s to /admin/email; the follow-up GET renders the
+	// success banner naming the recipient.
+	csrfToken := fetchCSRFToken(ctx, t, client, srv.BaseURL+"/admin/email")
+	form := url.Values{}
+	form.Add("to", "ops@example.test")
+	form.Add("csrf_token", csrfToken)
+	postReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, srv.BaseURL+"/admin/email/test", strings.NewReader(form.Encode()),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	postResp, err := client.Do(postReq)
+	if err != nil {
+		t.Fatalf("client.Do err = %v, want nil", err)
+	}
+	if cerr := postResp.Body.Close(); cerr != nil {
+		t.Errorf("Body.Close err = %v, want nil", cerr)
+	}
+	if got, want := postResp.StatusCode, http.StatusSeeOther; got != want {
+		t.Errorf("POST status = %d, want %d", got, want)
+	}
+	if got, want := postResp.Header.Get("Location"), "/admin/email"; got != want {
+		t.Errorf("POST Location = %q, want %q", got, want)
+	}
+
+	successBody := getEmailBody(ctx, t, client, srv.BaseURL)
+	if got, want := successBody, "Test email sent to ops@example.test"; !strings.Contains(got, want) {
+		t.Errorf("GET body should contain the success banner %q; body=%q", want, successBody)
+	}
+
+	// The send actually reached the wire: the catch-all accepted the RCPT.
+	if got := smtp.recipientCount(); got < 1 {
+		t.Errorf("fake SMTP recipient count = %d, want at least 1", got)
+	}
+
+	// (c) The success flash is one-shot: a second GET drops the banner.
+	clearedBody := getEmailBody(ctx, t, client, srv.BaseURL)
+	if strings.Contains(clearedBody, "Test email sent to ops@example.test") {
+		t.Errorf("second GET still contains the success banner; flash must be one-shot; body=%q", clearedBody)
+	}
+}
+
+// getEmailBody fetches GET /admin/email as client, asserts a 200, and
+// returns the rendered HTML body.
+func getEmailBody(ctx context.Context, t *testing.T, client *http.Client, baseURL string) string {
+	t.Helper()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/admin/email", nil)
+	if err != nil {
+		t.Fatalf("NewRequest err = %v, want nil", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("client.Do err = %v, want nil", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll err = %v, want nil", err)
+	}
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Errorf("Body.Close err = %v, want nil", cerr)
+	}
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("GET /admin/email status = %d, want %d", got, want)
+	}
+
+	return string(body)
 }
 
 // TestEmailAdmin_GetOnTestRouteRedirects pins the refresh-after-send

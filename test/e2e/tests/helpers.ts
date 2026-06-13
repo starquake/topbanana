@@ -102,11 +102,6 @@ export function markAdmin(displayName: string): void {
   setRole(displayName, 'admin');
 }
 
-// markHost sets role='host' (the middle tier) for the named player.
-export function markHost(displayName: string): void {
-  setRole(displayName, 'host');
-}
-
 function setRole(displayName: string, role: 'player' | 'host' | 'admin'): void {
   const dataDir = process.env.TOPBANANA_E2E_DATA_DIR;
   if (!dataDir) {

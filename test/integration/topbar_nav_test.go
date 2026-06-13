@@ -276,6 +276,52 @@ func TestTopbar_AdminSectionsReachableAndActive(t *testing.T) {
 	}
 }
 
+// TestTopbar_HostGatedFromAdminSections pins that the Admin-only sections
+// stay hidden from a Host (#538): the rendered /admin/quizzes page carries
+// only the Quizzes link, never the Players / Email / Settings links the
+// isAdmin block gates, and a direct GET to /admin/players or /admin/email
+// is a 404 (the routes' existence stays hidden, not a 403). The first
+// credentialled registrant is auto-promoted to Admin, so the Host under
+// test is a later registrant demoted off that promotion.
+func TestTopbar_HostGatedFromAdminSections(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{"REGISTRATION_ENABLED": "true"})
+
+	// Consume the first-registrant Admin promotion with a boss, then a
+	// later registrant demoted to Host is the gate's subject.
+	registerAdminClient(ctx, t, srv.BaseURL, srv.DBURI, "topbar-host-boss")
+	host := registerAdminClient(ctx, t, srv.BaseURL, srv.DBURI, "topbar-host")
+	makeHost(ctx, t, srv.DBURI, "topbar-host")
+
+	// A Host still reaches the console and the Quizzes section.
+	quizzes := fetchWithClient(ctx, t, host, srv.BaseURL+"/admin/quizzes")
+	if got, want := quizzes.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("host GET /admin/quizzes status = %d, want %d", got, want)
+	}
+	if !strings.Contains(quizzes.Body, `href="/admin/quizzes"`) {
+		t.Error("host admin nav should still carry the Quizzes link")
+	}
+	// The Admin-only section links are absent from the rendered nav.
+	for _, banned := range []string{
+		`href="/admin/players"`,
+		`href="/admin/email"`,
+		`href="/admin/settings"`,
+	} {
+		if strings.Contains(quizzes.Body, banned) {
+			t.Errorf("host admin nav must not carry the Admin-only link %q", banned)
+		}
+	}
+
+	// The routes themselves stay hidden: a direct hit is a 404, not a 403.
+	for _, path := range []string{"/admin/players", "/admin/email"} {
+		snap := fetchWithClient(ctx, t, host, srv.BaseURL+path)
+		if got, want := snap.StatusCode, http.StatusNotFound; got != want {
+			t.Errorf("host GET %s status = %d, want %d", path, got, want)
+		}
+	}
+}
+
 // navLinkIsActive reports whether the nav link to href in body carries
 // aria-current="page". The topbar renders the attribute inline right
 // after the href (`<a href="/admin/players" aria-current="page" ...`),
