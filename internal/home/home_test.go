@@ -96,13 +96,18 @@ func finishGameFor(t *testing.T, games game.Store, playerID int64, qz *quiz.Quiz
 	}
 
 	now := time.Now()
-	for _, qs := range qz.Questions {
+	for i, qs := range qz.Questions {
+		// The final question completes the game, which bumps the durable
+		// quizzes.play_count the home cards display (#891). Pass
+		// completesGame on the last question so a seeded finished play
+		// shows up as a "1 play" on the card, matching production.
+		completesGame := i == len(qz.Questions)-1
 		if err := games.CreateQuestion(t.Context(), &game.Question{
 			GameID:     g.ID,
 			QuestionID: qs.ID,
 			StartedAt:  now,
 			ExpiredAt:  now.Add(10 * time.Second),
-		}, false); err != nil {
+		}, completesGame); err != nil {
 			t.Fatalf("CreateQuestion err = %v, want nil", err)
 		}
 	}

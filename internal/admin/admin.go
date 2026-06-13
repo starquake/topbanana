@@ -101,12 +101,16 @@ func navSection(path string) string {
 // - handlers populate it via [attachCanEdit] before rendering, and a
 // rule change lives entirely in Go.
 type QuizData struct {
-	ID                   int64
-	Title                string
-	Slug                 string
-	Description          string
-	UpdatedAt            time.Time
-	QuestionCount        int
+	ID            int64
+	Title         string
+	Slug          string
+	Description   string
+	UpdatedAt     time.Time
+	QuestionCount int
+	// RoundCount is the number of rounds, surfaced on the quiz-list card
+	// footer; set by the list handler from the RoundCountsByQuiz aggregate
+	// and 0 elsewhere (the detail view does not render the card).
+	RoundCount           int
 	CreatedByPlayerID    int64
 	CreatedByDisplayName string
 	CanEdit              bool
@@ -858,6 +862,13 @@ func HandleQuizList(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 
 			return
 		}
+		roundCounts, err := quizStore.RoundCountsByQuiz(r.Context())
+		if err != nil {
+			logger.ErrorContext(r.Context(), "error retrieving round counts from store", slog.Any("err", err))
+			render500(w, r, logger, csrfMgr)
+
+			return
+		}
 
 		// Filter by play mode in Go from the single ListQuizzes read so the
 		// same handler serves solo / live / all without a second query path
@@ -868,6 +879,7 @@ func HandleQuizList(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 		qzd := quizDataFromQuizzes(quizzes)
 		for _, qd := range qzd {
 			qd.QuestionCount = counts[qd.ID]
+			qd.RoundCount = roundCounts[qd.ID]
 			attachCanEdit(r, qd)
 		}
 

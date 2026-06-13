@@ -37,6 +37,25 @@ func (s *QuizStore) ListRoundsByQuiz(ctx context.Context, quizID int64) ([]*quiz
 	return rounds, nil
 }
 
+// RoundCountsByQuiz returns the number of rounds per quiz, keyed by quiz
+// ID. Quizzes with zero rounds are absent from the map; callers should
+// treat a missing entry as 0. Mirrors [QuizStore.QuestionCountsByQuiz] so
+// the shared client quiz card can render a "{N} rounds" figure without an
+// N+1 per-row lookup (#927).
+func (s *QuizStore) RoundCountsByQuiz(ctx context.Context) (map[int64]int, error) {
+	rows, err := s.q.RoundCountsByQuiz(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count rounds by quiz: %w", err)
+	}
+
+	counts := make(map[int64]int, len(rows))
+	for _, r := range rows {
+		counts[r.QuizID] = int(r.RoundCount)
+	}
+
+	return counts, nil
+}
+
 // GetRound returns a question round by its ID. Returns
 // [quiz.ErrRoundNotFound] when no row matches.
 func (s *QuizStore) GetRound(ctx context.Context, id int64) (*quiz.Round, error) {

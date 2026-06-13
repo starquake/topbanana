@@ -48,3 +48,12 @@ WHERE id = ?;
 -- name: DeleteRound :execresult
 DELETE FROM rounds
 WHERE id = ?;
+
+-- name: RoundCountsByQuiz :many
+-- Returns one row per quiz that has at least one round. Quizzes with zero
+-- rounds are absent; callers should treat a missing entry as 0. Mirrors
+-- QuestionCountsByQuiz so the shared client quiz card can render a
+-- "{N} rounds" figure without an N+1 per-row lookup.
+SELECT quiz_id, COUNT(*) AS round_count
+FROM rounds
+GROUP BY quiz_id;

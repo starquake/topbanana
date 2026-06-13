@@ -85,47 +85,9 @@
 
             <div id="panel-popular" role="tabpanel" aria-labelledby="tab-popular" x-show="tab==='popular'">
                 {{if .PopularQuizzes}}
-                    {{/* Stretched-link pattern (same as admin/quizlist):
-                         the play link is anchored to the title and uses a
-                         ::before pseudo-element to cover the whole card,
-                         so the card itself isn't an <a>. That keeps the
-                         share button (at z-10) clickable as a separate
-                         control without nesting interactive elements. */}}
                     <ul class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {{range .PopularQuizzes}}
-                            <li>
-                                <article class="group relative flex flex-col gap-2 h-full p-5 bg-surface border border-border-soft rounded-lg transition-colors hover:border-accent-line">
-                                    <span class="text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-text-mute">
-                                        {{.PlayCount}} {{if eq .PlayCount 1}}play{{else}}plays{{end}}
-                                    </span>
-                                    <h3 class="m-0 font-display text-lg font-semibold leading-snug break-words">
-                                        <a href="{{.PlayURL}}"
-                                           class="text-text group-hover:text-accent transition-colors before:absolute before:inset-0 before:content-['']">
-                                            {{.Title}}
-                                        </a>
-                                    </h3>
-                                    {{if .Description}}
-                                        <p class="m-0 text-sm text-text-dim line-clamp-2">{{.Description}}</p>
-                                    {{end}}
-                                    {{/* Accent-tinted pill so the share affordance reads as
-                                         a real action rather than a footer link. Sits on
-                                         z-10 above the stretched-link pseudo so the click
-                                         reaches this button, not the play URL. Anchored
-                                         left (self-start) so a tap aimed at the card's
-                                         right edge — the natural reach for the play CTA —
-                                         can't land on Share by accident. */}}
-                                    <button type="button"
-                                            data-share-trigger
-                                            data-share-path="{{.PlayURL}}"
-                                            data-share-title="{{.Title}}"
-                                            data-share-text="Play this quiz: {{.Title}}"
-                                            aria-label="Share {{.Title}}"
-                                            class="relative z-10 self-start mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-[0.1em] bg-accent-soft text-accent border border-accent-line hover:bg-accent hover:text-bg transition-colors cursor-pointer">
-                                        <svg viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5" aria-hidden="true"><path d="M13.5 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.5 2.5 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5zm-8.5 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm11 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>
-                                        <span>Share</span>
-                                    </button>
-                                </article>
-                            </li>
+                            <li>{{template "client_quiz_card" .}}</li>
                         {{end}}
                     </ul>
                 {{else}}
@@ -143,32 +105,7 @@
                 {{if .NewestQuizzes}}
                     <ul class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {{range .NewestQuizzes}}
-                            <li>
-                                <article class="group relative flex flex-col gap-2 h-full p-5 bg-surface border border-border-soft rounded-lg transition-colors hover:border-accent-line">
-                                    <span class="text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-text-mute">
-                                        {{.QuestionCount}} {{if eq .QuestionCount 1}}question{{else}}questions{{end}}
-                                    </span>
-                                    <h3 class="m-0 font-display text-lg font-semibold leading-snug break-words">
-                                        <a href="{{.PlayURL}}"
-                                           class="text-text group-hover:text-accent transition-colors before:absolute before:inset-0 before:content-['']">
-                                            {{.Title}}
-                                        </a>
-                                    </h3>
-                                    {{if .Description}}
-                                        <p class="m-0 text-sm text-text-dim line-clamp-2">{{.Description}}</p>
-                                    {{end}}
-                                    <button type="button"
-                                            data-share-trigger
-                                            data-share-path="{{.PlayURL}}"
-                                            data-share-title="{{.Title}}"
-                                            data-share-text="Play this quiz: {{.Title}}"
-                                            aria-label="Share {{.Title}}"
-                                            class="relative z-10 self-start mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-[0.1em] bg-accent-soft text-accent border border-accent-line hover:bg-accent hover:text-bg transition-colors cursor-pointer">
-                                        <svg viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5" aria-hidden="true"><path d="M13.5 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.5 2.5 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5zm-8.5 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm11 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>
-                                        <span>Share</span>
-                                    </button>
-                                </article>
-                            </li>
+                            <li>{{template "client_quiz_card" .}}</li>
                         {{end}}
                     </ul>
                 {{else}}

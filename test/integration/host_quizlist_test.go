@@ -77,6 +77,11 @@ func TestHostQuizList_ListsRunnableLiveQuizzes(t *testing.T) {
 	if !strings.Contains(body, "Host this") {
 		t.Error(`host quiz-list missing "Host this" action`)
 	}
+	// Each card carries a rounds figure alongside the question/play counts
+	// (the shared quiz_card footer; rounds added in the #927 follow-up).
+	if !strings.Contains(body, `&nbsp;round`) {
+		t.Error("host quiz-list card missing the rounds figure")
+	}
 
 	// The solo quiz and the empty live quiz are both filtered out.
 	if strings.Contains(body, solo.Title) {

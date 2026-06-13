@@ -1,6 +1,6 @@
 {{/* quiz_card renders one quiz tile. The dot is a QuizData item, so any
-     field the card needs (PlayCount, Mode, QuestionCount, CanEdit,
-     ActionVariant, ...) must live on QuizData. The footer action cluster is
+     field the card needs (PlayCount, Mode, RoundCount, QuestionCount,
+     CanEdit, ActionVariant, ...) must live on QuizData. The footer action cluster is
      parameterised by ActionVariant so other surfaces (the host UI, #889) can
      reuse the same card with their own actions; html/template has no
      block/yield, so the variant selects a named sub-template. */}}
@@ -29,11 +29,11 @@
                     </a>
                 {{end}}
             </h3>
-            <code class="inline-block mb-3.5 px-2 py-0.5 rounded-sm font-mono text-[0.72rem] text-cyan bg-cyan-soft">/play/{{.Slug}}-{{.ID}}</code>
             <p class="mb-4 text-text-dim text-sm leading-relaxed line-clamp-2">{{.Description}}</p>
         </div>
         <footer class="flex items-center justify-between px-5 py-3.5 border-t border-border-soft text-text-dim text-sm">
             <div class="flex items-center gap-2.5">
+                <span><strong class="text-text font-semibold mr-1">{{.RoundCount}}</strong>&nbsp;{{if eq .RoundCount 1}}round{{else}}rounds{{end}}</span>
                 <span><strong class="text-text font-semibold mr-1">{{.QuestionCount}}</strong>&nbsp;questions</span>
                 {{/* Times-played counter (#891): bumped once each time a
                      game of this quiz completes; never decremented. The
