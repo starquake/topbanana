@@ -49,11 +49,11 @@ type hostPickerData struct {
 	Quizzes            []quizCardData
 }
 
-// QuizList handles GET /host/quizzes: the host picks a live quiz to run. The
-// list is the runnable subset - live mode (ListLiveQuizzes) with at least one
+// Picker handles GET /host/quizzes: the host picks a live quiz to run. The list
+// is the runnable subset - live mode (ListLiveQuizzes) with at least one
 // question - so the host never lands on a quiz that cannot start. Each card's
 // only action posts quiz_id to /host, which arms the quiz in the host's room.
-func (h *Handlers) QuizList(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) Picker(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	player, ok := auth.PlayerFromContext(ctx)
@@ -102,7 +102,7 @@ func (h *Handlers) QuizList(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	h.quizList.Render(w, r, http.StatusOK, hostPickerData{
+	h.picker.Render(w, r, http.StatusOK, hostPickerData{
 		Title:              "Host a quiz",
 		LiveSession:        h.activeSessionView(ctx, player.ID, quizzes),
 		HostHasRunningGame: running,

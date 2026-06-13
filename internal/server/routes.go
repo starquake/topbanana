@@ -937,7 +937,7 @@ func addHostRoutes(
 	mux.Handle("GET /admin", requireGameHost(admin.HandleIndex(logger, csrfMgr, sessionService)))
 
 	mux.Handle("POST /host", csrfMW(requireGameHost(http.HandlerFunc(handlers.Create))))
-	mux.Handle("GET /host/quizzes", requireGameHost(http.HandlerFunc(handlers.QuizList)))
+	mux.Handle("GET /host/quizzes", requireGameHost(http.HandlerFunc(handlers.Picker)))
 	mux.Handle("GET /host/{code}", requireGameHost(http.HandlerFunc(handlers.BigScreen)))
 	mux.Handle("POST /host/{code}/start", csrfMW(requireGameHost(http.HandlerFunc(handlers.Start))))
 	mux.Handle("POST /host/{code}/next-quiz", csrfMW(requireGameHost(http.HandlerFunc(handlers.NextQuiz))))
