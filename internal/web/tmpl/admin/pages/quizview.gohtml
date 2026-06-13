@@ -152,36 +152,11 @@
             </div>
         </div>
 
-        {{/* Confirm-and-restart modal (#853). Mounted only when the host already
-             has a game in flight; the "Host live" button above opens it. Confirm
-             ends the running session and opens a fresh room hosting this quiz. */}}
-        {{if .HostHasRunningGame}}
-        <div id="modal-restart-host-{{.Quiz.ID}}" data-testid="restart-modal" role="dialog" aria-modal="true" aria-labelledby="modal-restart-host-{{.Quiz.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
-            <div class="absolute inset-0" onclick="closeModal('modal-restart-host-{{.Quiz.ID}}')"></div>
-            <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
-                <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
-                    <p id="modal-restart-host-{{.Quiz.ID}}-title" class="font-display text-sm font-semibold uppercase tracking-[0.14em]">End the current session and start a new one?</p>
-                    <button type="button" aria-label="close"
-                            onclick="closeModal('modal-restart-host-{{.Quiz.ID}}')"
-                            class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer">&times;</button>
-                </header>
-                <section class="px-6 py-5 text-[0.95rem]">
-                    A live session is already running. End it and start hosting this quiz instead?
-                </section>
-                <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
-                    <button type="button"
-                            onclick="closeModal('modal-restart-host-{{.Quiz.ID}}')"
-                            class="btn-ghost">Cancel</button>
-                    <form method="post" action="/host" class="inline-flex">
-                        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                        <input type="hidden" name="quiz_id" value="{{.Quiz.ID}}">
-                        <input type="hidden" name="restart" value="true">
-                        <button type="submit" class="btn-primary">End and start</button>
-                    </form>
-                </footer>
-            </div>
-        </div>
-        {{end}}
+        {{/* Confirm-and-restart modal (#853, shared partial #916). Mounted only
+             when the host already has a game in flight; the "Host live" button
+             above opens it. Confirm ends the running session and opens a fresh
+             room hosting this quiz. */}}
+        {{if .HostHasRunningGame}}{{template "restart_modal" .Quiz.ID}}{{end}}
 
         {{/* Delete-quiz modal */}}
         <div id="modal-delete-quiz-{{.Quiz.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-delete-quiz-{{.Quiz.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">

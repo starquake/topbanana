@@ -182,13 +182,13 @@ func parseTemplate(path string) *template.Template {
 	return render.Parse(tmpl.FS, funcs, path, "host/layouts/*.gohtml")
 }
 
-// parsePickerTemplate parses the host layouts plus the shared quiz-card and
-// modal-manager partials and the named page. It registers the same funcs as
-// parseTemplate (the shared quiz_card partial calls humanizeTime). Only the
-// quiz_card and modal_manager partials are parsed (not the whole components/
-// glob): the footer and topbar partials reference funcs (isSignedIn, isAdmin)
-// this page does not provide. modal_manager references no funcs, so it is safe
-// to add to the narrowed list.
+// parsePickerTemplate parses the host layouts plus the shared quiz-card,
+// modal-manager, and restart-modal partials and the named page. It registers
+// the same funcs as parseTemplate (the shared quiz_card partial calls
+// humanizeTime). Only those three partials are parsed (not the whole
+// components/ glob): the footer and topbar partials reference funcs
+// (isSignedIn, isAdmin) this page does not provide; the three listed here use
+// only csrfToken/humanizeTime, so they are safe to add to the narrowed list.
 func parsePickerTemplate(path string) *template.Template {
 	funcs := template.FuncMap{
 		"envTitleTag":  envtag.Get,
@@ -197,5 +197,6 @@ func parsePickerTemplate(path string) *template.Template {
 	}
 
 	return render.Parse(tmpl.FS, funcs, path,
-		"host/layouts/*.gohtml", "components/quiz_card.gohtml", "components/modal_manager.gohtml")
+		"host/layouts/*.gohtml", "components/quiz_card.gohtml",
+		"components/modal_manager.gohtml", "components/restart_modal.gohtml")
 }
