@@ -28,17 +28,17 @@ func TestEmbeddedAssets_ServeOnlyBuiltOutput(t *testing.T) {
 		// vendored lib; the standalone admin/auth scripts are bundled too. The
 		// player client loads Alpine + anime from this same web-served vendor
 		// dir rather than a per-client duplicate.
-		"/assets/css/app.css",
-		"/assets/js/dist/host-bigscreen.js",
-		"/assets/js/dist/share.js",
-		"/assets/js/dist/quiz-reorder.js",
-		"/assets/js/dist/cooldown.js",
-		"/assets/js/dist/copy-prompt.js",
-		"/assets/js/dist/password-length.js",
-		"/assets/js/htmx.min.js",
-		"/assets/js/vendor/alpine.min.js",
-		"/assets/js/vendor/anime.umd.min.js",
-		"/assets/js/vendor/sortable.min.js",
+		"/static/css/app.css",
+		"/static/js/dist/host-bigscreen.js",
+		"/static/js/dist/share.js",
+		"/static/js/dist/quiz-reorder.js",
+		"/static/js/dist/cooldown.js",
+		"/static/js/dist/copy-prompt.js",
+		"/static/js/dist/password-length.js",
+		"/static/js/htmx.min.js",
+		"/static/js/vendor/alpine.min.js",
+		"/static/js/vendor/anime.umd.min.js",
+		"/static/js/vendor/sortable.min.js",
 	}
 	for _, path := range served {
 		assertEmbedStatus(ctx, t, srv.BaseURL+path, http.StatusOK)
@@ -51,18 +51,18 @@ func TestEmbeddedAssets_ServeOnlyBuiltOutput(t *testing.T) {
 		"/client/js/components/GameApp.js",
 		"/client/js/services/api.js",
 		// Alpine + anime are no longer duplicated under the client tree; the
-		// client shells load the web-served copies at /assets/js/vendor/.
+		// client shells load the web-served copies at /static/js/vendor/.
 		"/client/js/vendor/alpine.min.js",
 		"/client/js/vendor/anime.umd.min.js",
 		// Web sources relocated to frontend/web: the esbuild entries and the
 		// now-bundled standalone scripts are no longer served at their old
 		// un-bundled paths.
-		"/assets/js/host-bigscreen.js",
-		"/assets/js/share.js",
-		"/assets/js/quiz-reorder.js",
-		"/assets/js/cooldown.js",
-		"/assets/js/copy-prompt.js",
-		"/assets/js/password-length.js",
+		"/static/js/host-bigscreen.js",
+		"/static/js/share.js",
+		"/static/js/quiz-reorder.js",
+		"/static/js/cooldown.js",
+		"/static/js/copy-prompt.js",
+		"/static/js/password-length.js",
 	}
 	for _, path := range notServed {
 		assertEmbedStatus(ctx, t, srv.BaseURL+path, http.StatusNotFound)

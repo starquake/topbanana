@@ -68,7 +68,7 @@ func adminPerRequestFuncs(r *http.Request) template.FuncMap {
 		"isSignedIn":     func() bool { return true },
 		"showSectionNav": func() bool { return true },
 		"logoHref":       func() string { return "/admin" },
-		"ogImage":        func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
+		"ogImage":        func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
 		"navSection":     func() string { return section },
 		"isAdmin":        func() bool { return isAdmin },
 	}

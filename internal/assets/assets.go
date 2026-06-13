@@ -1,8 +1,9 @@
-// Package web provides the embedded admin/auth assets and a handler that
-// serves them. Templates live alongside in internal/web/tmpl; the static
-// assets (Tailwind output) live in internal/web/static and are mounted at
-// /assets/ by the server router.
-package web
+// Package assets provides the embedded static assets and a handler that
+// serves them. The served tree (Tailwind output, fonts, vendored JS,
+// PWA icons) lives in internal/assets/static and is mounted at /static/
+// by the server router. The mount is surface-agnostic: the player client,
+// admin, host, auth, and home pages all load their assets from it.
+package assets
 
 import (
 	"crypto/sha256"
@@ -22,8 +23,8 @@ import (
 //go:embed static/*
 var staticFS embed.FS
 
-// Handler returns an [http.Handler] that serves the admin/auth static assets
-// at /assets/. Defaults to the committed [embed.FS] so production binaries
+// Handler returns an [http.Handler] that serves the static assets at
+// /static/. Defaults to the committed [embed.FS] so production binaries
 // ship self-contained. When [config.Config.WebStaticDir] is set (development
 // only - see config.Parse), the on-disk directory is served instead so a
 // `make tailwind` regen is visible on the next request without a binary
@@ -38,7 +39,7 @@ func Handler(cfg *config.Config) http.Handler {
 	// string, and "font/woff2" is a constant valid one.
 	_ = mime.AddExtensionType(".woff2", "font/woff2")
 
-	return http.StripPrefix("/assets", http.FileServer(http.FS(resolveStaticFS(cfg))))
+	return http.StripPrefix("/static", http.FileServer(http.FS(resolveStaticFS(cfg))))
 }
 
 // ManifestHandler serves /manifest.webmanifest with the correct
@@ -80,8 +81,8 @@ func ManifestHandler(cfg *config.Config) http.Handler {
 // invalidates the precache without a manual unregister.
 //
 // The SW must be served from the site root for its default scope to
-// cover every page (a SW served from /assets/sw.js can only intercept
-// fetches under /assets/).
+// cover every page (a SW served from /static/sw.js can only intercept
+// fetches under /static/).
 func ServiceWorkerHandler(cfg *config.Config) http.Handler {
 	embeddedVersion := ""
 	if cfg.WebStaticDir == "" {
@@ -116,9 +117,9 @@ func ServiceWorkerHandler(cfg *config.Config) http.Handler {
 const cacheVersionHexChars = 12
 
 // shellAssetPaths returns the list of static-asset paths (relative to
-// internal/web/static/) that determine the SW cache version. Must
+// internal/assets/static/) that determine the SW cache version. Must
 // stay in sync with PRECACHE_URLS in sw.js minus the leading
-// "/assets/" prefix.
+// "/static/" prefix.
 func shellAssetPaths() []string {
 	return []string{
 		"manifest.webmanifest",

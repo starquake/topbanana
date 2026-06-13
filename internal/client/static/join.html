@@ -8,9 +8,9 @@
          notch / home indicator. See #826. */}}
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>{{envTitleTag}}{{.Title}}</title>
-    <link rel="icon" type="image/svg+xml" href="/assets/banana.svg" sizes="any">
+    <link rel="icon" type="image/svg+xml" href="/static/banana.svg" sizes="any">
     <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="apple-touch-icon" href="/assets/banana-192.png">
+    <link rel="apple-touch-icon" href="/static/banana-192.png">
     {{/* iOS launches a home-screen icon in its own standalone window only
          when these legacy Apple meta tags are present (it cannot honour the
          manifest's display:standalone before 16.4). mobile-web-app-capable
@@ -27,7 +27,7 @@
          sitewide defaults: a room code is short-lived and per-session, so a
          shared /join link previews generic site copy rather than leaking a
          live game. og:image is absolute per the OG spec - {{ogImage}}
-         resolves to scheme://host/assets/og-image.png at render time. */}}
+         resolves to scheme://host/static/og-image.png at render time. */}}
     <meta property="og:site_name" content="Top Banana!">
     <meta property="og:title" content="{{.Title}}">
     <meta property="og:description" content="{{.Description}}">
@@ -40,9 +40,9 @@
     <meta name="twitter:title" content="{{.Title}}">
     <meta name="twitter:description" content="{{.Description}}">
     <meta name="twitter:image" content="{{ogImage}}">
-    <link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="preload" href="/assets/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="stylesheet" href="/assets/css/app.css">
+    <link rel="preload" href="/static/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/static/css/app.css">
     {{/* anime.js (4.2.0, MIT) powers the between-rounds standings bar graph
          (MP-9 / #686). It is the same vendored, self-hosted build (#295) the
          solo client loads; JoinApp's runAnim wrapper keeps a reduced-motion
@@ -50,12 +50,12 @@
          it is absent. Alpine.js (vendored, self-hosted) drives the rest of the
          join + lobby surface, whose other motion is Alpine x-transition +
          Tailwind and respects prefers-reduced-motion via app.css. Both load
-         from the single web-served copy at /assets/js/vendor/ (the same bytes
+         from the single web-served copy at /static/js/vendor/ (the same bytes
          the admin/home pages use) so navigating between surfaces reuses one
          cache entry rather than re-downloading a per-client duplicate. */}}
-    <script src="/assets/js/vendor/anime.umd.min.js"></script>
+    <script src="/static/js/vendor/anime.umd.min.js"></script>
     <script type="module" src="/client/js/dist/join.js"></script>
-    <script defer src="/assets/js/vendor/alpine.min.js"></script>
+    <script defer src="/static/js/vendor/alpine.min.js"></script>
     <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
 </head>
 {{/* min-h-dvh (not min-h-screen / 100vh) so the body tracks the visible

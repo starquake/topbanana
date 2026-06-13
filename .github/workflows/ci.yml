@@ -73,7 +73,7 @@ jobs:
         node-version: "lts/*"
         cache: npm
 
-    # Catch drift between internal/web/static/css/app.css and what
+    # Catch drift between internal/assets/static/css/app.css and what
     # `make tailwind` would produce for the current templates +
     # tailwindcss binary version. Without this guard, a template
     # change that adds a utility class can ship without the

@@ -61,14 +61,14 @@ func TestClientShell_PreloadsFonts(t *testing.T) {
 	body := readAllString(t, resp.Body)
 
 	for _, want := range []string{
-		`<link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>`,
-		`<link rel="preload" href="/assets/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>`,
+		`<link rel="preload" href="/static/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>`,
+		`<link rel="preload" href="/static/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("client shell missing font preload %q (#691)", want)
 		}
 	}
-	if banned := `rel="preload" href="/assets/fonts/inter-latin-ext.woff2"`; strings.Contains(body, banned) {
+	if banned := `rel="preload" href="/static/fonts/inter-latin-ext.woff2"`; strings.Contains(body, banned) {
 		t.Error("client shell preloads the extended-latin subset, which should not be preloaded (#691)")
 	}
 }

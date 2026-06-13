@@ -10,7 +10,7 @@ import (
 )
 
 // TestFavicon_Integration covers ticket #236 — the banana SVG is served
-// from /assets/banana.svg, and every layout (admin, auth, player)
+// from /static/banana.svg, and every layout (admin, auth, player)
 // references it via <link rel="icon">. The SVG asset check guards
 // against the file being moved or accidentally excluded from the
 // embed; the per-layout HTML checks guard against any of the three
@@ -22,9 +22,9 @@ func TestFavicon_Integration(t *testing.T) {
 		"REGISTRATION_ENABLED": "true",
 	})
 
-	t.Run("svg served at /assets/banana.svg", func(t *testing.T) {
+	t.Run("svg served at /static/banana.svg", func(t *testing.T) {
 		t.Parallel()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.BaseURL+"/assets/banana.svg", nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.BaseURL+"/static/banana.svg", nil)
 		if err != nil {
 			t.Fatalf("NewRequest err = %v, want nil", err)
 		}
@@ -117,7 +117,7 @@ func assertFaviconLink(ctx context.Context, t *testing.T, client *http.Client, u
 	if got, want := string(body), `rel="icon"`; !strings.Contains(got, want) {
 		t.Errorf("HTML missing favicon link (%q)", want)
 	}
-	if got, want := string(body), `/assets/banana.svg`; !strings.Contains(got, want) {
+	if got, want := string(body), `/static/banana.svg`; !strings.Contains(got, want) {
 		t.Errorf("HTML missing favicon href (%q)", want)
 	}
 }
