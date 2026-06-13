@@ -22,7 +22,14 @@ var (
 	ErrPromoteEmailRequired = errPromoteEmailRequired
 	// ErrPromoteEmailNotFound re-exports errPromoteEmailNotFound for tests.
 	ErrPromoteEmailNotFound = errPromoteEmailNotFound
+	// ErrEmptyMediaDir re-exports errEmptyMediaDir for tests.
+	ErrEmptyMediaDir = errEmptyMediaDir
 )
+
+// MkMediaDir exposes the pure media-directory creation helper so the external
+// app_test package can pin that it creates the directory and rejects an empty
+// path (#936) without standing up the full server or a logger.
+var MkMediaDir = mkMediaDir
 
 // RunTokenSweep exposes the unexported background-sweep loop so the
 // external app_test package can pin its tick-and-cancel behaviour

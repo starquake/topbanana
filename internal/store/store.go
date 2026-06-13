@@ -9,6 +9,7 @@ import (
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/home"
 	"github.com/starquake/topbanana/internal/livesession"
+	"github.com/starquake/topbanana/internal/media"
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
@@ -39,6 +40,7 @@ type Stores struct {
 	Home          home.Store
 	Retention     *RetentionStore
 	LiveSessions  livesession.Store
+	Media         media.Store
 }
 
 // New initializes a new Stores instance with the provided database connection.
@@ -67,5 +69,6 @@ func New(conn *sql.DB, logger *slog.Logger) *Stores {
 		Home:          NewHomeStore(conn, logger),
 		Retention:     NewRetentionStore(conn, logger),
 		LiveSessions:  NewLiveSessionStore(conn, logger),
+		Media:         NewMediaStore(conn, logger),
 	}
 }

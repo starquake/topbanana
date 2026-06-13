@@ -109,6 +109,13 @@ const (
 	// CLIENT_DIR for the player-client half.
 	WebStaticDirDefault = ""
 
+	// MediaDirDefault is the default filesystem directory for uploaded media
+	// (#936). Dev writes into ./media in the working directory; staging and
+	// production must point this at a persistent writable volume (the
+	// distroless image has no writable app FS by default) or uploads are lost
+	// on every container restart.
+	MediaDirDefault = "./media"
+
 	// HostDefault is the default host to listen on. Can be an IP address or hostname.
 	HostDefault = "localhost"
 	// PortDefault is the default port to listen on.
@@ -149,6 +156,12 @@ type Config struct {
 	DBMaxOpenConns    int
 	DBMaxIdleConns    int
 	DBConnMaxLifetime time.Duration
+
+	// MediaDir is the filesystem directory uploaded media is written under,
+	// in a per-quiz subdirectory (#936). Defaults to ./media; staging and
+	// production point it at a persistent volume since the distroless image
+	// has no writable app FS by default. Created at startup if missing.
+	MediaDir string
 
 	ClientDir string
 
@@ -413,6 +426,7 @@ func Parse(getenv func(string) string) (*Config, error) {
 	c := Config{
 		ClientDir:         ClientDirDefault,
 		WebStaticDir:      WebStaticDirDefault,
+		MediaDir:          MediaDirDefault,
 		Host:              HostDefault,
 		Port:              PortDefault,
 		DBDriver:          DBDriverDefault,
@@ -446,6 +460,9 @@ func Parse(getenv func(string) string) (*Config, error) {
 		if val := getenv("WEB_STATIC_DIR"); val != "" {
 			c.WebStaticDir = val
 		}
+	}
+	if val := getenv("MEDIA_DIR"); val != "" {
+		c.MediaDir = val
 	}
 
 	if err := c.applyDatabaseConfig(getenv); err != nil {
