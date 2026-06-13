@@ -4,6 +4,7 @@ go 1.25.7
 
 require (
 	github.com/coreos/go-oidc/v3 v3.18.0
+	github.com/deepteams/webp v1.2.4
 	github.com/google/go-cmp v0.7.0
 	github.com/gosimple/slug v1.15.0
 	github.com/pressly/goose/v3 v3.27.1
@@ -11,6 +12,7 @@ require (
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/wneessen/go-mail v0.7.3
 	golang.org/x/crypto v0.53.0
+	golang.org/x/image v0.42.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.21.0
 	golang.org/x/term v0.44.0

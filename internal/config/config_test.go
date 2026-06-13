@@ -250,6 +250,50 @@ func TestParse(t *testing.T) {
 		}
 	})
 
+	t.Run("media dir default when unset", func(t *testing.T) {
+		t.Parallel()
+
+		getenv := func(key string) string {
+			envs := map[string]string{
+				"APP_ENV":     "development",
+				"SESSION_KEY": "test-session-key-test-session-key",
+			}
+
+			return envs[key]
+		}
+
+		c, err := Parse(getenv)
+		if err != nil {
+			t.Fatalf("error parsing config: %v", err)
+		}
+		if got, want := c.MediaDir, MediaDirDefault; got != want {
+			t.Errorf("MediaDir = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("media dir read from env in every environment", func(t *testing.T) {
+		t.Parallel()
+
+		getenv := func(key string) string {
+			envs := map[string]string{
+				"APP_ENV":     "production",
+				"DB_URI":      "file:test.sqlite",
+				"MEDIA_DIR":   "/srv/media",
+				"SESSION_KEY": "test-session-key-test-session-key",
+			}
+
+			return envs[key]
+		}
+
+		c, err := Parse(getenv)
+		if err != nil {
+			t.Fatalf("error parsing config: %v", err)
+		}
+		if got, want := c.MediaDir, "/srv/media"; got != want {
+			t.Errorf("MediaDir = %q, want %q (read in production too)", got, want)
+		}
+	})
+
 	t.Run("web static dir ignored in production", func(t *testing.T) {
 		t.Parallel()
 
