@@ -23,6 +23,10 @@ type quizCardData struct {
 	PlayCount     int64
 	Mode          string
 	ActionVariant string
+	// HostHasRunningGame gates the card's action (#889): true swaps the plain
+	// "Host this" form for a "Change quiz" button that opens the confirm-and-
+	// restart modal, so a pick never silently no-ops over a running game (#851).
+	HostHasRunningGame bool
 }
 
 // liveSessionView feeds the persistent "Session live" header indicator (#889):
@@ -35,18 +39,21 @@ type liveSessionView struct {
 	QuizTitle string
 }
 
-// quizListData feeds the host quiz-list page.
-type quizListData struct {
-	Title       string
-	Quizzes     []quizCardData
-	LiveSession liveSessionView
+// hostPickerData feeds the host picker page: the header chrome (LiveSession,
+// HostHasRunningGame) sits alongside the list content (Quizzes) rather than
+// nested under a list-named struct, since the chrome is a sibling of the list.
+type hostPickerData struct {
+	Title              string
+	LiveSession        liveSessionView
+	HostHasRunningGame bool
+	Quizzes            []quizCardData
 }
 
-// QuizList handles GET /host/quizzes: the host picks a live quiz to run. The
-// list is the runnable subset - live mode (ListLiveQuizzes) with at least one
+// Picker handles GET /host/quizzes: the host picks a live quiz to run. The list
+// is the runnable subset - live mode (ListLiveQuizzes) with at least one
 // question - so the host never lands on a quiz that cannot start. Each card's
 // only action posts quiz_id to /host, which arms the quiz in the host's room.
-func (h *Handlers) QuizList(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) Picker(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	player, ok := auth.PlayerFromContext(ctx)
@@ -73,6 +80,8 @@ func (h *Handlers) QuizList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	running := h.hostHasRunningGame(ctx, player.ID)
+
 	cards := make([]quizCardData, 0, len(quizzes))
 	for _, qz := range quizzes {
 		count := counts[qz.ID]
@@ -80,22 +89,24 @@ func (h *Handlers) QuizList(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		cards = append(cards, quizCardData{
-			ID:            qz.ID,
-			Title:         qz.Title,
-			Slug:          qz.Slug,
-			Description:   qz.Description,
-			UpdatedAt:     qz.UpdatedAt,
-			QuestionCount: count,
-			PlayCount:     qz.PlayCount,
-			Mode:          qz.Mode,
-			ActionVariant: "host",
+			ID:                 qz.ID,
+			Title:              qz.Title,
+			Slug:               qz.Slug,
+			Description:        qz.Description,
+			UpdatedAt:          qz.UpdatedAt,
+			QuestionCount:      count,
+			PlayCount:          qz.PlayCount,
+			Mode:               qz.Mode,
+			ActionVariant:      "host",
+			HostHasRunningGame: running,
 		})
 	}
 
-	h.quizList.Render(w, r, http.StatusOK, quizListData{
-		Title:       "Host a quiz",
-		Quizzes:     cards,
-		LiveSession: h.activeSessionView(ctx, player.ID, quizzes),
+	h.picker.Render(w, r, http.StatusOK, hostPickerData{
+		Title:              "Host a quiz",
+		LiveSession:        h.activeSessionView(ctx, player.ID, quizzes),
+		HostHasRunningGame: running,
+		Quizzes:            cards,
 	})
 }
 
@@ -121,6 +132,22 @@ func (h *Handlers) activeSessionView(ctx context.Context, playerID int64, liveQu
 	}
 
 	return view
+}
+
+// hostHasRunningGame reports whether the host already has a game in flight, so
+// the picker can swap each card's "Host this" form for the "Change quiz"
+// confirm-and-restart prompt (#889). A lookup failure is logged and degraded to
+// false rather than failing the page: the picker still serves, and the #851
+// in-flight no-op still protects the running game server-side.
+func (h *Handlers) hostHasRunningGame(ctx context.Context, playerID int64) bool {
+	running, err := h.service.HostHasRunningGame(ctx, playerID)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "error looking up running host game for picker", slog.Any("err", err))
+
+		return false
+	}
+
+	return running
 }
 
 // quizTitleByID returns the title of the quiz with id in quizzes, or "" if it is
