@@ -83,6 +83,24 @@ func (e *adminEnv) seedQuiz(t *testing.T, qz *quiz.Quiz) *quiz.Quiz {
 	return qz
 }
 
+// defaultRoundID returns the id of the quiz's default (only, on a
+// freshly seeded quiz) round - the one CreateQuiz stamps and seeded
+// questions land in. The per-round "Add question" flow (#929) needs a
+// real round id to thread through the create form.
+func (e *adminEnv) defaultRoundID(t *testing.T, quizID int64) int64 {
+	t.Helper()
+
+	rounds, err := e.quizzes.ListRoundsByQuiz(t.Context(), quizID)
+	if err != nil {
+		t.Fatalf("ListRoundsByQuiz err = %v, want nil", err)
+	}
+	if len(rounds) == 0 {
+		t.Fatalf("quiz %d has no rounds", quizID)
+	}
+
+	return rounds[0].ID
+}
+
 // backdateQuizUpdatedAt rewrites quizzes.updated_at for the given quiz
 // so the list view's relative-time rendering ("2 hr ago") can be pinned;
 // the normal create path always stamps the current time. Raw SQL in a
