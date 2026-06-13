@@ -254,14 +254,14 @@ seed-dev:
 # trees, so the embed never ships it; only the generated output below is
 # committed and embedded.
 #
-# The generated output (internal/web/static/css/app.css) IS committed,
+# The generated output (internal/assets/static/css/app.css) IS committed,
 # so the binary only has to exist on machines that intend to regenerate it.
 # CI can call `make tailwind-check` to catch drift.
 
 TAILWIND_VERSION    := v4.3.0
 TAILWIND_BIN        := $(BIN_DIR)/tailwindcss-v4
 TAILWIND_INPUT      := frontend/web/css/tailwind.css
-TAILWIND_OUTPUT     := internal/web/static/css/app.css
+TAILWIND_OUTPUT     := internal/assets/static/css/app.css
 
 # Pick the right asset for the current host. The release page ships
 # Linux x64/arm64, macOS x64/arm64, and Windows x64 — which covers every
@@ -343,7 +343,7 @@ JS_CLIENT_OUT   := internal/client/static/js/dist
 JS_CLIENT_ENTRIES := $(JS_CLIENT_SRC)/app.js $(JS_CLIENT_SRC)/join.js
 
 JS_WEB_SRC      := frontend/web
-JS_WEB_OUT      := internal/web/static/js/dist
+JS_WEB_OUT      := internal/assets/static/js/dist
 # host-bigscreen + share are the live-game / share bundles; the rest are small
 # standalone admin/auth page scripts that are bundled (minified) too, so the
 # served js tree holds only built output and never un-minified source (#756).
@@ -360,11 +360,11 @@ JS_WEB_ENTRIES  := $(JS_WEB_SRC)/host-bigscreen.js $(JS_WEB_SRC)/share.js \
 # template <script> tags and window.* access are unchanged -- only the source of
 # the committed file moved from a hand-dropped download to the npm build. The
 # web vendor dir gets all three. The player client loads Alpine + anime too, but
-# from this same web-served copy at /assets/js/vendor/ rather than a per-client
+# from this same web-served copy at /static/js/vendor/ rather than a per-client
 # duplicate, so only this one tree is built (the client shells reference the
-# /assets/ URLs; see internal/client/static/index.html and join.html).
+# /static/ URLs; see internal/client/static/index.html and join.html).
 JS_VENDOR_SRC     := frontend/vendor
-JS_VENDOR_WEB_OUT := internal/web/static/js/vendor
+JS_VENDOR_WEB_OUT := internal/assets/static/js/vendor
 JS_VENDOR_WEB_ENTRIES := $(JS_VENDOR_SRC)/alpine.min.js \
                    $(JS_VENDOR_SRC)/anime.umd.min.js $(JS_VENDOR_SRC)/sortable.min.js
 
@@ -588,7 +588,7 @@ dev:
 	    --watch go.mod \
 	    --watch go.sum \
 	    --ignore 'internal/db/**' \
-	    --ignore 'internal/web/static/css/app.css' \
+	    --ignore 'internal/assets/static/css/app.css' \
 	    -- go run -ldflags "$(VERSION_LDFLAGS)" ./cmd/server/
 
 .PHONY: clean

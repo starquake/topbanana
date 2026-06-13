@@ -8,8 +8,8 @@
     curl -fsSL -o /tmp/og-fonts/Orbitron.ttf \
       'https://github.com/google/fonts/raw/main/ofl/orbitron/Orbitron%5Bwght%5D.ttf' && \
     FONTCONFIG_FILE=<(printf '<fontconfig><dir>/tmp/og-fonts</dir><dir>/usr/share/fonts</dir><dir>/usr/local/share/fonts</dir><cachedir>/tmp/og-fc-cache</cachedir></fontconfig>') \
-      rsvg-convert -w 1200 -h 630 internal/web/static/_og-image.svg \
-        -o internal/web/static/og-image.png
+      rsvg-convert -w 1200 -h 630 internal/assets/static/_og-image.svg \
+        -o internal/assets/static/og-image.png
 -->
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
   <rect width="1200" height="630" fill="#0a0a0f"/>

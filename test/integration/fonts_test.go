@@ -17,16 +17,16 @@ func TestSelfHostedFonts(t *testing.T) {
 	client := &http.Client{}
 
 	// One representative Inter file and one Orbitron file. The 200 guards
-	// that the embedded fonts/ tree is still served at /assets/fonts/ (an
+	// that the embedded fonts/ tree is still served at /static/fonts/ (an
 	// embed or route regression would 404 here). The content-type pins
 	// font/woff2 on the test host. Note: this does NOT prove the distroless
 	// production case - this host's /etc/mime.types already maps .woff2, so
 	// the assertion passes even without the explicit mime.AddExtensionType
-	// registration in web.go; that distroless fix is comment-guarded there,
+	// registration in assets.go; that distroless fix is comment-guarded there,
 	// not test-guarded.
 	fontFiles := []string{
-		"/assets/fonts/inter-latin.woff2",
-		"/assets/fonts/orbitron-latin.woff2",
+		"/static/fonts/inter-latin.woff2",
+		"/static/fonts/orbitron-latin.woff2",
 	}
 	for _, path := range fontFiles {
 		t.Run("served "+path, func(t *testing.T) {
@@ -88,8 +88,8 @@ func TestFontPreloadLinks(t *testing.T) {
 	baseURL := srv.BaseURL
 
 	wantLinks := []string{
-		`<link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>`,
-		`<link rel="preload" href="/assets/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>`,
+		`<link rel="preload" href="/static/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>`,
+		`<link rel="preload" href="/static/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>`,
 	}
 
 	assertPreloads := func(t *testing.T, body string) {
@@ -101,7 +101,7 @@ func TestFontPreloadLinks(t *testing.T) {
 		}
 		// The extended-latin subset must not be preloaded - it is rarely
 		// needed and preloading an unused font wastes bandwidth and warns.
-		if banned := `rel="preload" href="/assets/fonts/inter-latin-ext.woff2"`; strings.Contains(body, banned) {
+		if banned := `rel="preload" href="/static/fonts/inter-latin-ext.woff2"`; strings.Contains(body, banned) {
 			t.Errorf("body preloads the extended-latin subset (%q), which should not be preloaded (#691)", banned)
 		}
 	}

@@ -10,7 +10,7 @@ import (
 
 // TestPWA_Integration covers ticket #466 — the installable shell wires
 // up a web app manifest at /manifest.webmanifest, a service worker at
-// /sw.js (root-scoped), the maskable + plain icons under /assets/, and
+// /sw.js (root-scoped), the maskable + plain icons under /static/, and
 // every layout's <head> carries the manifest + apple-touch-icon links
 // plus the SW registration snippet.
 func TestPWA_Integration(t *testing.T) {
@@ -46,9 +46,9 @@ func TestPWA_Integration(t *testing.T) {
 			`"standalone"`,
 			`"theme_color"`,
 			`"background_color"`,
-			`/assets/banana-192.png`,
-			`/assets/banana-512.png`,
-			`/assets/banana-maskable-512.png`,
+			`/static/banana-192.png`,
+			`/static/banana-512.png`,
+			`/static/banana-maskable-512.png`,
 			`"maskable"`,
 		} {
 			if !strings.Contains(body, want) {
@@ -108,9 +108,9 @@ func TestPWA_Integration(t *testing.T) {
 	t.Run("png icons are served with image/png", func(t *testing.T) {
 		t.Parallel()
 		for _, path := range []string{
-			"/assets/banana-192.png",
-			"/assets/banana-512.png",
-			"/assets/banana-maskable-512.png",
+			"/static/banana-192.png",
+			"/static/banana-512.png",
+			"/static/banana-maskable-512.png",
 		} {
 			assertPNGAsset(ctx, t, srv.BaseURL+path)
 		}
@@ -191,7 +191,7 @@ func assertPWAHeadMarkup(ctx context.Context, t *testing.T, url string) {
 		`rel="manifest"`,
 		`href="/manifest.webmanifest"`,
 		`rel="apple-touch-icon"`,
-		`href="/assets/banana-192.png"`,
+		`href="/static/banana-192.png"`,
 		`navigator.serviceWorker.register('/sw.js')`,
 	} {
 		if !strings.Contains(body, want) {

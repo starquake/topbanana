@@ -15,19 +15,19 @@ const CACHE_NAME = 'topbanana-shell-' + CACHE_VERSION;
 
 const PRECACHE_URLS = [
     '/manifest.webmanifest',
-    '/assets/css/app.css',
-    '/assets/fonts/inter-latin.woff2',
-    '/assets/fonts/inter-latin-ext.woff2',
-    '/assets/fonts/orbitron-latin.woff2',
-    '/assets/js/htmx.min.js',
-    '/assets/js/dist/share.js',
-    '/assets/js/vendor/alpine.min.js',
-    '/assets/js/vendor/anime.umd.min.js',
-    '/assets/banana.svg',
-    '/assets/banana-192.png',
-    '/assets/banana-512.png',
-    '/assets/banana-maskable-512.png',
-    '/assets/og-image.png',
+    '/static/css/app.css',
+    '/static/fonts/inter-latin.woff2',
+    '/static/fonts/inter-latin-ext.woff2',
+    '/static/fonts/orbitron-latin.woff2',
+    '/static/js/htmx.min.js',
+    '/static/js/dist/share.js',
+    '/static/js/vendor/alpine.min.js',
+    '/static/js/vendor/anime.umd.min.js',
+    '/static/banana.svg',
+    '/static/banana-192.png',
+    '/static/banana-512.png',
+    '/static/banana-maskable-512.png',
+    '/static/og-image.png',
 ];
 
 // Paths that must always hit the network: live API responses, the

@@ -44,7 +44,7 @@ func TestVendoredClientLibraries(t *testing.T) {
 
 	t.Run("vendored anime.js is served", func(t *testing.T) {
 		t.Parallel()
-		resp := httpGet(ctx, t, client, baseURL+"/assets/js/vendor/anime.umd.min.js")
+		resp := httpGet(ctx, t, client, baseURL+"/static/js/vendor/anime.umd.min.js")
 		defer closeBody(t, resp.Body)
 		if got, want := resp.StatusCode, http.StatusOK; got != want {
 			t.Errorf("status = %d, want %d", got, want)
@@ -53,7 +53,7 @@ func TestVendoredClientLibraries(t *testing.T) {
 
 	t.Run("vendored Alpine.js is served", func(t *testing.T) {
 		t.Parallel()
-		resp := httpGet(ctx, t, client, baseURL+"/assets/js/vendor/alpine.min.js")
+		resp := httpGet(ctx, t, client, baseURL+"/static/js/vendor/alpine.min.js")
 		defer closeBody(t, resp.Body)
 		if got, want := resp.StatusCode, http.StatusOK; got != want {
 			t.Errorf("status = %d, want %d", got, want)

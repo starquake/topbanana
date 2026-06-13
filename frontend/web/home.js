@@ -8,7 +8,7 @@
 // the home page reads what the client surface wrote. Keeping the read-side
 // code here means home doesn't pull in the player-client bundle to look at
 // localStorage. esbuild bundles this to dist/home.js, served at
-// /assets/js/home.js.
+// /static/js/home.js.
 
 const SESSION_STORAGE_KEY = 'topbanana.session';
 

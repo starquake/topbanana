@@ -269,7 +269,7 @@ func executeTemplate(
 		viewerName = viewer.DisplayName
 	}
 	funcs := template.FuncMap{
-		"ogImage":    func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
+		"ogImage":    func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
 		"viewerName": func() string { return viewerName },
 		"isSignedIn": func() bool { return viewer != nil },
 	}

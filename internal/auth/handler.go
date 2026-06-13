@@ -1051,7 +1051,7 @@ func authPerRequestFuncs(r *http.Request) template.FuncMap {
 	}
 
 	return template.FuncMap{
-		"ogImage":    func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
+		"ogImage":    func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
 		"viewerName": func() string { return displayName },
 		"isSignedIn": func() bool { return signedIn },
 	}

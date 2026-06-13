@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/starquake/topbanana/internal/admin"
+	"github.com/starquake/topbanana/internal/assets"
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/client"
@@ -22,7 +23,6 @@ import (
 	"github.com/starquake/topbanana/internal/profile"
 	"github.com/starquake/topbanana/internal/session"
 	"github.com/starquake/topbanana/internal/store"
-	"github.com/starquake/topbanana/internal/web"
 )
 
 func addRoutes(
@@ -82,13 +82,13 @@ func addRoutes(
 	mux.Handle("GET /join/{$}", http.HandlerFunc(shell.Join))
 	mux.Handle("GET /join/{code}", http.HandlerFunc(shell.Join))
 
-	// Admin + auth static assets (Tailwind output, embedded in the binary).
-	mux.Handle("/assets/", web.Handler(cfg))
+	// Shared static assets, embedded in the binary. Surface-agnostic: every page loads from /static/.
+	mux.Handle("/static/", assets.Handler(cfg))
 
 	// PWA manifest + service worker. Both live at the site root so the
 	// install prompt and the SW's default scope cover every page.
-	mux.Handle("GET /manifest.webmanifest", web.ManifestHandler(cfg))
-	mux.Handle("GET /sw.js", web.ServiceWorkerHandler(cfg))
+	mux.Handle("GET /manifest.webmanifest", assets.ManifestHandler(cfg))
+	mux.Handle("GET /sw.js", assets.ServiceWorkerHandler(cfg))
 
 	// Health
 	mux.Handle("GET /healthz", health.HandleHealthz(logger, stores))

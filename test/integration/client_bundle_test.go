@@ -9,7 +9,7 @@ import (
 // TestClientBundles pins the esbuild client-bundle pipeline (#721): the player
 // shells load the bundled entry points, the bundles are served from the
 // embedded FS, and the shared share.js dialog module is inlined into the
-// bundle (slice 2) rather than fetched cross-tree from /assets/js/ at runtime.
+// bundle (slice 2) rather than fetched cross-tree from /static/js/ at runtime.
 func TestClientBundles(t *testing.T) {
 	t.Parallel()
 
@@ -49,12 +49,12 @@ func TestClientBundles(t *testing.T) {
 
 	// share.js moved into the shared source tree (frontend/shared) in slice 2
 	// and is inlined into the client bundle, so the app bundle must NOT carry a
-	// runtime import of /assets/js/share.js any more - the dialog code travels
+	// runtime import of /static/js/share.js any more - the dialog code travels
 	// inside the bundle. The inlined share-dialog markup confirms it is present.
 	t.Run("app bundle inlines share.js instead of importing it cross-tree", func(t *testing.T) {
 		t.Parallel()
 		body := getBody(ctx, t, baseURL+"/client/js/dist/app.js")
-		if banned := "/assets/js/share.js"; strings.Contains(body, banned) {
+		if banned := "/static/js/share.js"; strings.Contains(body, banned) {
 			t.Errorf(
 				"app bundle still carries the cross-tree import %q - share.js must be inlined in slice 2 (#721)",
 				banned,

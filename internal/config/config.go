@@ -102,10 +102,11 @@ const (
 	AppEnvironmentProduction = "production"
 	// ClientDirDefault specifies the default directory for the player-client static files.
 	ClientDirDefault = ""
-	// WebStaticDirDefault is the default override for the admin/auth/home static-asset
-	// directory. Empty means "serve from the embedded FS"; a development override
-	// (e.g. WEB_STATIC_DIR=internal/web/static) makes `make tailwind` regens visible
-	// without a binary restart, mirroring CLIENT_DIR for the player-client half.
+	// WebStaticDirDefault is the default override for the shared static-asset
+	// directory served at /static/. Empty means "serve from the embedded FS"; a
+	// development override (e.g. WEB_STATIC_DIR=internal/assets/static) makes
+	// `make tailwind` regens visible without a binary restart, mirroring
+	// CLIENT_DIR for the player-client half.
 	WebStaticDirDefault = ""
 
 	// HostDefault is the default host to listen on. Can be an IP address or hostname.
@@ -151,9 +152,9 @@ type Config struct {
 
 	ClientDir string
 
-	// WebStaticDir overrides the on-disk path served at /assets/ for the
-	// admin/auth/home shell. Empty means "serve from the embedded FS"
-	// (the production default); set to e.g. internal/web/static in dev
+	// WebStaticDir overrides the on-disk path served at /static/ for the
+	// shared static assets. Empty means "serve from the embedded FS"
+	// (the production default); set to e.g. internal/assets/static in dev
 	// so a `make tailwind` regen lands without a binary restart. Honoured
 	// only when AppEnvironment == "development", matching ClientDir.
 	WebStaticDir string

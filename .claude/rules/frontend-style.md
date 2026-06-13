@@ -11,14 +11,14 @@ globs:
 esbuild entry points and their modules, plus the Tailwind source -- lives under
 the top-level `frontend/` tree: `frontend/client/` (player client), `frontend/web/`
 (admin/host JS + `css/tailwind.css`), and `frontend/shared/` (cross-tree modules).
-The `internal/client/static` and `internal/web/static` trees hold **only served
+The `internal/client/static` and `internal/assets/static` trees hold **only served
 output**: the committed esbuild bundles (`js/dist/*`), the committed Tailwind
 output (`css/app.css`), vendored libs (`js/vendor/*`), raw-served scripts, HTML
 shells, partials, fonts, and images. Because the static trees are served-only,
 each is embedded with a plain `//go:embed static/*` and the source never ships in
 the binary (#756).
 
-Styling uses **Tailwind CSS v4**, configured CSS-first (there is no `tailwind.config.js`). The source is `frontend/web/css/tailwind.css`; the built, minified output `internal/web/static/css/app.css` is committed and served at `/assets/css/app.css` for both the web pages (`internal/web`) and the game client (`internal/client`).
+Styling uses **Tailwind CSS v4**, configured CSS-first (there is no `tailwind.config.js`). The source is `frontend/web/css/tailwind.css`; the built, minified output `internal/assets/static/css/app.css` is committed and served at `/static/css/app.css` for both the web pages (`internal/web`) and the game client (`internal/client`).
 
 ### Build
 
@@ -50,7 +50,7 @@ App JS is bundled per entry point with **esbuild**; the built, minified bundles 
 - esbuild is a dev-only build tool declared in the root `package.json` + `package-lock.json` (separate from `test/e2e`'s Playwright deps). Nothing new ships at runtime.
 - `make js` rebuilds both bundle trees; `make js-watch-client` / `make js-watch-web` rebuild each tree on change (one watcher per served `dist` dir); `make js-check` (wired into `make check`, like `tailwind-check`) fails when the committed bundles drift from the source. **Rebuild and commit the bundles whenever you change client JS** or CI flags drift.
 - The committed bundles are embedded in the Go binary, so the distroless image needs no Node.
-- Both trees are bundled: the player client (source `frontend/client/`, entries `app.js` / `join.js`, output `internal/client/static/js/dist/`) and the web/host tree (source `frontend/web/`, entries `host-bigscreen.js` / `share.js` plus the standalone admin/auth scripts `cooldown.js` / `copy-prompt.js` / `password-length.js` / `quiz-reorder.js`, output `internal/web/static/js/dist/`). Cross-tree shared modules live in `frontend/shared/` and are inlined into each tree's bundles via the `@shared/` import alias. The served `internal/*/static/js/` trees hold only built bundles (`dist/`) and vendored libs (`vendor/`, `htmx.min.js`) -- no un-minified source.
+- Both trees are bundled: the player client (source `frontend/client/`, entries `app.js` / `join.js`, output `internal/client/static/js/dist/`) and the web/host tree (source `frontend/web/`, entries `host-bigscreen.js` / `share.js` plus the standalone admin/auth scripts `cooldown.js` / `copy-prompt.js` / `password-length.js` / `quiz-reorder.js`, output `internal/assets/static/js/dist/`). Cross-tree shared modules live in `frontend/shared/` and are inlined into each tree's bundles via the `@shared/` import alias. The served `internal/*/static/js/` trees hold only built bundles (`dist/`) and vendored libs (`vendor/`, `htmx.min.js`) -- no un-minified source.
 - Vendored libraries (Alpine, anime.js) stay separate `<script>` tags referenced via `window.*` globals; the bundle does not include them.
 
 ### Animation (anime.js v4)
@@ -65,7 +65,7 @@ All animation goes through the shared `runAnim` wrapper (`frontend/shared/anim.j
 
 - **No bundler beyond esbuild, and no npm for runtime dependencies.** App JS is bundled with esbuild and source stays plain ES modules (see "Application JS: esbuild bundles" above); the build steps are the Tailwind CSS CLI and esbuild, both dev-only. Don't pull in a framework bundler, a runtime npm package, or a second JS toolchain.
 - No TypeScript -- plain `.js` only.
-- No third-party component library or JS framework beyond Alpine + anime.js. The one allowed exception is SortableJS (a focused drag-and-drop utility, vendored self-hosted at `internal/web/static/js/vendor/sortable.min.js`, admin-only), added deliberately for the rounds/questions reorder (#199). It is not a general framework license: reach for it only for drag-and-drop, not as a wedge to pull in more libraries.
+- No third-party component library or JS framework beyond Alpine + anime.js. The one allowed exception is SortableJS (a focused drag-and-drop utility, vendored self-hosted at `internal/assets/static/js/vendor/sortable.min.js`, admin-only), added deliberately for the rounds/questions reorder (#199). It is not a general framework license: reach for it only for drag-and-drop, not as a wedge to pull in more libraries.
 - No inline styles (`style="..."`) -- use utilities, or a `@theme` token / `@layer` component class.
 - No hand-written `.css` files. Styling changes go through `frontend/web/css/tailwind.css` (tokens, `@layer`), never a new stylesheet.
 - No reactive state added outside an Alpine component constructor (Alpine will not track it).
