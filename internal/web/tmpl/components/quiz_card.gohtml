@@ -88,17 +88,23 @@
     {{end}}
 {{end}}
 
-{{/* quiz_card_actions_host is the host surface's action cluster (#889): a
-     single "Host this" submit that posts quiz_id to /host. /host routes through
-     the one-room-aware StartHosting, so it arms the quiz in the host's room
-     (creating one if needed). The cluster sits on `relative z-10` to stay
-     clickable above the card body. */}}
+{{/* quiz_card_actions_host is the host surface's action cluster (#889). With no
+     game in flight a single "Host this" submit posts quiz_id to /host, which
+     routes through the one-room-aware StartHosting to arm the quiz in the host's
+     room (creating one if needed). When the host already has a running game the
+     plain submit would silently no-op over it (#851), so the card instead shows
+     a "Change quiz" button that opens the confirm-and-restart modal (#853). The
+     cluster sits on `relative z-10` to stay clickable above the card body. */}}
 {{define "quiz_card_actions_host"}}
     <div class="relative z-10 flex items-center gap-1">
-        <form method="post" action="/host" class="inline-flex">
-            <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-            <input type="hidden" name="quiz_id" value="{{.ID}}">
-            <button type="submit" class="btn-primary">Host this</button>
-        </form>
+        {{if .HostHasRunningGame}}
+            <button type="button" onclick="openModal('modal-restart-host-{{.ID}}')" class="btn-primary">Change quiz</button>
+        {{else}}
+            <form method="post" action="/host" class="inline-flex">
+                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                <input type="hidden" name="quiz_id" value="{{.ID}}">
+                <button type="submit" class="btn-primary">Host this</button>
+            </form>
+        {{end}}
     </div>
 {{end}}

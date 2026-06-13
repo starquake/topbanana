@@ -87,6 +87,57 @@ func TestHostQuizList_ListsRunnableLiveQuizzes(t *testing.T) {
 	}
 }
 
+// TestHostQuizList_ChangeQuizWhenRunning pins the running-game branch of the
+// host picker (#889 slice 4): with a game in flight each card swaps its plain
+// "Host this" form for a "Change quiz" button that opens the confirm-and-restart
+// modal, so a pick never silently no-ops over the running game (#851). The modal
+// posts restart=true to /host.
+func TestHostQuizList_ChangeQuizWhenRunning(t *testing.T) {
+	t.Parallel()
+
+	ctx, setup := setupIntegrationWithEnv(t, map[string]string{
+		"SESSION_RUNNER_BEAT": "250ms",
+		"REVEAL_DELAY":        "200ms",
+	})
+	baseURL := setup.BaseURL
+
+	quizA := seedRunnerLiveQuiz(ctx, t, setup.Stores.Quizzes, "host-change-a")
+	quizB := seedRunnerLiveQuiz(ctx, t, setup.Stores.Quizzes, "host-change-b")
+
+	host := &http.Client{
+		Jar:           mustJar(t),
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	registerVerifyAndSignIn(ctx, t, host, baseURL, setup.DBURI, "host-change-host", "host-change-pass-123")
+
+	// Open a room on quiz A and start it so a game is in flight.
+	codeA := createSession(ctx, t, host, baseURL, quizA.ID)
+	player := newAnonClient(t)
+	joinSession(ctx, t, player, baseURL, codeA, "Solo")
+	startSession(ctx, t, host, baseURL, codeA)
+	waitForPhase(ctx, t, player, baseURL, codeA, "round_intro")
+
+	status, body := getHostQuizListHTML(ctx, t, host, baseURL)
+	if got, want := status, http.StatusOK; got != want {
+		t.Fatalf("host quiz-list (running) status = %d, want %d", got, want)
+	}
+
+	// The running state replaces "Host this" with "Change quiz" and mounts the
+	// confirm-and-restart modal for the other quiz, posting restart=true.
+	if !strings.Contains(body, "Change quiz") {
+		t.Error(`host quiz-list (running) missing "Change quiz" action`)
+	}
+	restartModal := "modal-restart-host-" + strconv.FormatInt(quizB.ID, 10)
+	for _, want := range []string{restartModal, `name="restart"`, `value="true"`, "End and start"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("host quiz-list (running) missing %q", want)
+		}
+	}
+	if strings.Contains(body, "Host this") {
+		t.Error(`host quiz-list (running) still shows "Host this", want it replaced by "Change quiz"`)
+	}
+}
+
 // TestHostQuizList_GatesAnonymous pins the host gate on the picker: an
 // unauthenticated GET /host/quizzes is bounced to login, the same as the other
 // host GET routes (mirrors TestHostBigScreen_Authz).

@@ -182,11 +182,13 @@ func parseTemplate(path string) *template.Template {
 	return render.Parse(tmpl.FS, funcs, path, "host/layouts/*.gohtml")
 }
 
-// parseQuizListTemplate parses the host layouts plus the shared quiz-card
-// partial and the named page. It registers the same funcs as parseTemplate
-// (the shared quiz_card partial calls humanizeTime). Only the quiz_card partial
-// is parsed (not the whole components/ glob): the footer and topbar partials
-// reference funcs (isSignedIn, isAdmin) this page does not provide.
+// parseQuizListTemplate parses the host layouts plus the shared quiz-card and
+// modal-manager partials and the named page. It registers the same funcs as
+// parseTemplate (the shared quiz_card partial calls humanizeTime). Only the
+// quiz_card and modal_manager partials are parsed (not the whole components/
+// glob): the footer and topbar partials reference funcs (isSignedIn, isAdmin)
+// this page does not provide. modal_manager references no funcs, so it is safe
+// to add to the narrowed list.
 func parseQuizListTemplate(path string) *template.Template {
 	funcs := template.FuncMap{
 		"envTitleTag":  envtag.Get,
@@ -194,5 +196,6 @@ func parseQuizListTemplate(path string) *template.Template {
 		"humanizeTime": reltime.Humanize,
 	}
 
-	return render.Parse(tmpl.FS, funcs, path, "host/layouts/*.gohtml", "components/quiz_card.gohtml")
+	return render.Parse(tmpl.FS, funcs, path,
+		"host/layouts/*.gohtml", "components/quiz_card.gohtml", "components/modal_manager.gohtml")
 }
