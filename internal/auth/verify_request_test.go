@@ -9,6 +9,7 @@ import (
 	"time"
 
 	. "github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/session"
@@ -87,7 +88,7 @@ func TestHandleVerifyEmailRequestSubmit_AlwaysFlashesGenericSuccess(t *testing.T
 				t.Fatalf("CreatePlayer unverified err = %v, want nil", err)
 			}
 
-			rec := runVerifyRequestPOST(t, stores.Players, &recordingVerifyTokenStore{}, &recordingSender{},
+			rec, _ := runVerifyRequestPOST(t, stores.Players, &recordingVerifyTokenStore{}, &recordingSender{},
 				NewVerifyResendLimiter(time.Minute, nil), tc.email)
 
 			if got, want := rec.Code, http.StatusSeeOther; got != want {
@@ -112,15 +113,15 @@ func TestHandleVerifyEmailRequestSubmit_UnverifiedMatchDispatchesEmail(t *testin
 	tokens := &recordingVerifyTokenStore{}
 	sender := &recordingSender{}
 
-	rec := runVerifyRequestPOST(t, stores.Players, tokens, sender,
+	rec, tracker := runVerifyRequestPOST(t, stores.Players, tokens, sender,
 		NewVerifyResendLimiter(time.Minute, nil), "alice@example.test")
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
 	}
 
-	waitFor(t, func() bool {
-		return len(sender.Sent()) >= 1 && len(tokens.Created()) >= 1
-	})
+	if err := tracker.Wait(t.Context()); err != nil {
+		t.Fatalf("tracker.Wait err = %v, want nil", err)
+	}
 
 	sent := sender.Sent()
 	if got, want := len(sent), 1; got != want {
@@ -145,10 +146,15 @@ func TestHandleVerifyEmailRequestSubmit_AlreadyVerifiedSendsNoMail(t *testing.T)
 	tokens := &recordingVerifyTokenStore{}
 	sender := &recordingSender{}
 
-	runVerifyRequestPOST(t, stores.Players, tokens, sender,
+	_, tracker := runVerifyRequestPOST(t, stores.Players, tokens, sender,
 		NewVerifyResendLimiter(time.Minute, nil), "alice@example.test")
 
-	time.Sleep(50 * time.Millisecond)
+	// Tracker counts every dispatched goroutine. The already-verified
+	// branch returns before Tasks.Go, so Wait completes immediately and
+	// any post-Wait send would be a real bug, not a scheduling race.
+	if err := tracker.Wait(t.Context()); err != nil {
+		t.Fatalf("tracker.Wait err = %v, want nil", err)
+	}
 	if got, want := len(sender.Sent()), 0; got != want {
 		t.Errorf("sender.Sent() len = %d, want %d (already-verified must not dispatch)", got, want)
 	}
@@ -161,10 +167,15 @@ func TestHandleVerifyEmailRequestSubmit_UnknownEmailSendsNoMail(t *testing.T) {
 	tokens := &recordingVerifyTokenStore{}
 	sender := &recordingSender{}
 
-	runVerifyRequestPOST(t, stores.Players, tokens, sender,
+	_, tracker := runVerifyRequestPOST(t, stores.Players, tokens, sender,
 		NewVerifyResendLimiter(time.Minute, nil), "ghost@example.test")
 
-	time.Sleep(50 * time.Millisecond)
+	// Tracker counts every dispatched goroutine. An unknown email returns
+	// before Tasks.Go, so Wait completes immediately and any post-Wait
+	// send would be a real bug, not a scheduling race.
+	if err := tracker.Wait(t.Context()); err != nil {
+		t.Fatalf("tracker.Wait err = %v, want nil", err)
+	}
 	if got, want := len(sender.Sent()), 0; got != want {
 		t.Errorf("sender.Sent() len = %d, want %d (unknown email must not dispatch)", got, want)
 	}
@@ -183,11 +194,11 @@ func TestHandleVerifyEmailRequestSubmit_RateLimitedBlocksDispatch(t *testing.T) 
 	sender := &recordingSender{}
 	limiter := NewVerifyResendLimiter(time.Minute, nil)
 
-	first := runVerifyRequestPOST(t, stores.Players, tokens, sender, limiter, "alice@example.test")
+	first, _ := runVerifyRequestPOST(t, stores.Players, tokens, sender, limiter, "alice@example.test")
 	if got, want := first.Code, http.StatusSeeOther; got != want {
 		t.Fatalf("first status = %d, want %d", got, want)
 	}
-	second := runVerifyRequestPOST(t, stores.Players, tokens, sender, limiter, "alice@example.test")
+	second, _ := runVerifyRequestPOST(t, stores.Players, tokens, sender, limiter, "alice@example.test")
 	if got, want := second.Code, http.StatusSeeOther; got != want {
 		t.Errorf("second status = %d, want %d", got, want)
 	}
@@ -237,13 +248,14 @@ func runVerifyRequestPOST(
 	sender VerifyEmailSender,
 	limiter *VerifyResendLimiter,
 	email string,
-) *httptest.ResponseRecorder {
+) (*httptest.ResponseRecorder, *bgtasks.Tracker) {
 	t.Helper()
 	sessions := session.New([]byte("k"), true)
 	flash := NewSignedFlash([]byte("k"), true, VerifyRequestFlashCookieName, VerifyRequestFlashCookiePath)
+	tracker := bgtasks.New()
 	handler := HandleVerifyEmailRequestSubmit(
 		discardLogger(), players, sessions,
-		VerifyRequestDispatchDeps{Tokens: tokens, Sender: sender, BaseURL: "https://topbanana.example"},
+		VerifyRequestDispatchDeps{Tokens: tokens, Sender: sender, BaseURL: "https://topbanana.example", Tasks: tracker},
 		limiter, flash,
 	)
 
@@ -254,5 +266,5 @@ func runVerifyRequestPOST(
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	return rec
+	return rec, tracker
 }
