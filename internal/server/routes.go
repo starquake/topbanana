@@ -505,7 +505,9 @@ func addAdminRoutes(
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}",
 		requireGameHost(
-			admin.HandleQuizView(logger, csrfMgr, stores.Quizzes, gameDeps.gameService, gameDeps.runningGames),
+			admin.HandleQuizView(
+				logger, csrfMgr, stores.Quizzes, gameDeps.gameService, gameDeps.runningGames, stores.Media,
+			),
 		),
 	)
 	mux.Handle("GET /admin/quizzes/new", requireGameHost(admin.HandleQuizCreate(logger, csrfMgr)))

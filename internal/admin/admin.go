@@ -23,6 +23,7 @@ import (
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/livesession"
+	"github.com/starquake/topbanana/internal/media"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/reltime"
 	"github.com/starquake/topbanana/internal/render"
@@ -775,6 +776,14 @@ type RunningGameLookup interface {
 	HostHasRunningGame(ctx context.Context, hostPlayerID int64) (bool, error)
 }
 
+// MediaLister is the slice of the media store the quiz view needs to render the
+// per-quiz image library (#936 slice 3): the quiz's images, newest first. It is
+// defined consumer-side so the admin package depends only on the read it makes;
+// the concrete media store satisfies it.
+type MediaLister interface {
+	ListMediaByQuiz(ctx context.Context, quizID int64) ([]*media.Media, error)
+}
+
 // indexData feeds the admin dashboard. ResumeCode is the join code of the
 // host's current active room, empty when they have none. The single adaptive
 // host control reflects it: a "Resume session" link when set, the "Host a
@@ -938,6 +947,7 @@ func HandleQuizView(
 	quizStore quiz.Store,
 	gameService *game.Service,
 	runningGames RunningGameLookup,
+	mediaLister MediaLister,
 ) http.Handler {
 	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
 
@@ -964,9 +974,15 @@ func HandleQuizView(
 			return
 		}
 
+		images, ok := loadQuizMedia(w, r, logger, csrfMgr, mediaLister, id)
+		if !ok {
+			return
+		}
+
 		quizData := quizDataFromQuiz(qz)
 		attachCanEdit(r, quizData)
 		data := newQuizViewData(quizData, players, rounds)
+		data.Images = images
 		data.HostHasRunningGame = hostHasRunningGame(r, logger, runningGames)
 		renderer.Render(w, r, http.StatusOK, data)
 	})
@@ -1006,6 +1022,11 @@ type QuizViewData struct {
 	// Rounds is the position-ordered round list, each carrying its own
 	// questions, for the grouped quiz view.
 	Rounds []RoundViewData
+	// Images is the quiz's media library, newest first, for the thumbnail
+	// grid (#936 slice 3). The upload control and grid are gated on CanEdit
+	// in the template; the data loads regardless so an owner sees their
+	// library.
+	Images []MediaCardData
 	// HostHasRunningGame gates the "Host live" confirm-and-restart prompt
 	// (#853): true when the signed-in host already has a game in flight, so the
 	// control opens a modal that ends the running session before hosting this
@@ -1063,6 +1084,57 @@ func loadRounds(
 	}
 
 	return rounds, true
+}
+
+// MediaCardData is one tile in the quiz view's image library grid (#936 slice
+// 3). It carries only what the template renders: the media id, used to build the
+// /media/{id} and /media/{id}/thumb URLs, plus the stored dimensions so the
+// thumbnail reserves its aspect ratio. The full presentation type keeps the
+// template free of the domain media.Media struct.
+type MediaCardData struct {
+	ID     int64
+	Width  int
+	Height int
+}
+
+func mediaCardDataFromMedia(items []*media.Media) []MediaCardData {
+	cards := make([]MediaCardData, 0, len(items))
+	for _, m := range items {
+		cards = append(cards, MediaCardData{
+			ID:     m.ID,
+			Width:  m.Width,
+			Height: m.Height,
+		})
+	}
+
+	return cards
+}
+
+// loadQuizMedia fetches the quiz's image library, newest first. A nil lister
+// (callers that do not wire the media store) yields an empty grid rather than a
+// failure. A lookup error is a 500: the library is part of the same admin view
+// that already loaded the quiz tree, so hiding the failure behind an empty grid
+// would mask it.
+func loadQuizMedia(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	mediaLister MediaLister,
+	quizID int64,
+) ([]MediaCardData, bool) {
+	if mediaLister == nil {
+		return nil, true
+	}
+	items, err := mediaLister.ListMediaByQuiz(r.Context(), quizID)
+	if err != nil {
+		logger.ErrorContext(r.Context(), "error listing media for quiz view", slog.Any("err", err))
+		render500(w, r, logger, csrfMgr)
+
+		return nil, false
+	}
+
+	return mediaCardDataFromMedia(items), true
 }
 
 func newQuizViewData(quizData *QuizData, players []PlayerScoreData, rounds []*quiz.Round) QuizViewData {
