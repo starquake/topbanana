@@ -351,8 +351,11 @@
                                 </template>
                             </div>
 
+                            <!-- Announced for screen-reader users only; the
+                                 disabled tone-filled buttons already convey the
+                                 answered state visually. -->
                             <template x-if="hasAnswered()">
-                                <p class="mt-6 text-center text-text-dim" role="status" data-testid="answered-waiting">
+                                <p class="sr-only" role="status" data-testid="answered-waiting">
                                     Answer locked in - waiting for everyone else...
                                 </p>
                             </template>
