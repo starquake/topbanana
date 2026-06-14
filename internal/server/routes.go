@@ -580,6 +580,19 @@ func addMediaRoutes(
 		))),
 	)
 
+	// The delete POST is an ordinary urlencoded form (only a csrf_token), not a
+	// multipart upload, so it uses the normal CSRF/form path - no
+	// MaxMultipartFormMiddleware. The handler adds the per-quiz creator-or-admin
+	// edit gate plus the IDOR guard that the media belongs to {quizID}; the same
+	// gate makes this the admin image-moderation path (an admin can edit, hence
+	// delete from, any quiz).
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/media/{mediaID}/delete",
+		csrfMgr.Middleware(requireGameHost(
+			mediahttp.HandleMediaDelete(logger, svc, stores.Quizzes),
+		)),
+	)
+
 	// The serve routes resolve the viewer from the session WITHOUT minting a
 	// player row or setting a cookie (unlike EnsurePlayer): a media response is
 	// cacheable, so it must not carry a Set-Cookie. The private-quiz gate only

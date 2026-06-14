@@ -34,6 +34,9 @@ type MediaService interface {
 	Store(ctx context.Context, quizID, createdBy int64, r io.Reader) (*media.Media, error)
 	// Get returns the media row for id, or media.ErrMediaNotFound.
 	Get(ctx context.Context, id int64) (*media.Media, error)
+	// Delete removes the media row and unlinks its files. Returns
+	// media.ErrMediaNotFound when the id does not name a row.
+	Delete(ctx context.Context, id int64) error
 	// Open opens a stored media file for reading by its root-relative path. The
 	// caller closes the returned file.
 	Open(relPath string) (*os.File, error)
