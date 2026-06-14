@@ -3,6 +3,7 @@ package store_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -1644,10 +1645,23 @@ func TestQuizStore_UpdateQuestion_ErrorHandling(t *testing.T) {
 	})
 }
 
-func TestQuizStore_ImageURL(t *testing.T) {
+// seedQuizMedia creates a media row in the given quiz's library and returns its
+// id, so a question test can attach a real, same-quiz image (#937).
+func seedQuizMedia(t *testing.T, db *sql.DB, quizID int64) int64 {
+	t.Helper()
+
+	created, err := NewMediaStore(db, slog.Default()).CreateMedia(t.Context(), newMediaRow(quizID))
+	if err != nil {
+		t.Fatalf("CreateMedia err = %v, want nil", err)
+	}
+
+	return created.ID
+}
+
+func TestQuizStore_MediaID(t *testing.T) {
 	t.Parallel()
 
-	t.Run("create question persists image_url", func(t *testing.T) {
+	t.Run("create question persists media_id", func(t *testing.T) {
 		t.Parallel()
 
 		db := dbtest.Open(t)
@@ -1657,12 +1671,13 @@ func TestQuizStore_ImageURL(t *testing.T) {
 		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
 			t.Fatalf("failed to create quiz: %v", err)
 		}
+		mediaID := seedQuizMedia(t, db, testQuiz.ID)
 
 		q := &quiz.Question{
 			QuizID:   testQuiz.ID,
 			Text:     "What is shown in the image?",
 			Position: 99,
-			ImageURL: "https://example.com/image.png",
+			MediaID:  &mediaID,
 			Options:  []*quiz.Option{{Text: "A cat", Correct: true}},
 		}
 		if err := quizStore.CreateQuestion(t.Context(), q); err != nil {
@@ -1673,12 +1688,15 @@ func TestQuizStore_ImageURL(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to get question: %v", err)
 		}
-		if got, want := qs.ImageURL, q.ImageURL; got != want {
-			t.Errorf("GetQuestion ImageURL = %q, want %q", got, want)
+		if qs.MediaID == nil {
+			t.Fatalf("GetQuestion MediaID = nil, want %d", mediaID)
+		}
+		if got, want := *qs.MediaID, mediaID; got != want {
+			t.Errorf("GetQuestion MediaID = %d, want %d", got, want)
 		}
 	})
 
-	t.Run("update question persists image_url", func(t *testing.T) {
+	t.Run("update question persists and clears media_id", func(t *testing.T) {
 		t.Parallel()
 
 		db := dbtest.Open(t)
@@ -1688,17 +1706,18 @@ func TestQuizStore_ImageURL(t *testing.T) {
 		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
 			t.Fatalf("failed to create quiz: %v", err)
 		}
+		mediaID := seedQuizMedia(t, db, testQuiz.ID)
 
 		original := testQuiz.Questions[0]
-		updated := &quiz.Question{
+		attached := &quiz.Question{
 			ID:       original.ID,
 			QuizID:   testQuiz.ID,
 			Text:     original.Text,
 			Position: original.Position,
-			ImageURL: "https://example.com/updated.png",
+			MediaID:  &mediaID,
 			Options:  original.Options,
 		}
-		if err := quizStore.UpdateQuestion(t.Context(), updated); err != nil {
+		if err := quizStore.UpdateQuestion(t.Context(), attached); err != nil {
 			t.Fatalf("failed to update question: %v", err)
 		}
 
@@ -1706,21 +1725,47 @@ func TestQuizStore_ImageURL(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to get question: %v", err)
 		}
-		if got, want := qs.ImageURL, updated.ImageURL; got != want {
-			t.Errorf("GetQuestion ImageURL = %q, want %q", got, want)
+		if qs.MediaID == nil || *qs.MediaID != mediaID {
+			t.Fatalf("GetQuestion MediaID = %v, want %d", qs.MediaID, mediaID)
+		}
+
+		// A nil MediaID on a later save clears the attachment (NULL).
+		detached := &quiz.Question{
+			ID:       original.ID,
+			QuizID:   testQuiz.ID,
+			Text:     original.Text,
+			Position: original.Position,
+			MediaID:  nil,
+			Options:  original.Options,
+		}
+		if err = quizStore.UpdateQuestion(t.Context(), detached); err != nil {
+			t.Fatalf("failed to update question: %v", err)
+		}
+		qs, err = quizStore.GetQuestion(t.Context(), original.ID)
+		if err != nil {
+			t.Fatalf("failed to get question: %v", err)
+		}
+		if qs.MediaID != nil {
+			t.Errorf("GetQuestion MediaID = %v, want nil after detach", *qs.MediaID)
 		}
 	})
 
-	t.Run("list questions includes image_url", func(t *testing.T) {
+	t.Run("list questions includes media_id", func(t *testing.T) {
 		t.Parallel()
 
 		db := dbtest.Open(t)
 		quizStore := NewQuizStore(db, slog.Default())
 
 		testQuiz := newTestQuizzes()[0]
-		testQuiz.Questions[0].ImageURL = "https://example.com/list.png"
 		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
 			t.Fatalf("failed to create quiz: %v", err)
+		}
+		mediaID := seedQuizMedia(t, db, testQuiz.ID)
+
+		target := testQuiz.Questions[0]
+		target.MediaID = &mediaID
+		if err := quizStore.UpdateQuestion(t.Context(), target); err != nil {
+			t.Fatalf("failed to update question: %v", err)
 		}
 
 		questions, err := quizStore.ListQuestions(t.Context(), testQuiz.ID)
@@ -1730,15 +1775,47 @@ func TestQuizStore_ImageURL(t *testing.T) {
 
 		var found bool
 		for _, q := range questions {
-			if q.ID == testQuiz.Questions[0].ID {
+			if q.ID == target.ID {
 				found = true
-				if got, want := q.ImageURL, testQuiz.Questions[0].ImageURL; got != want {
-					t.Errorf("ListQuestions ImageURL = %q, want %q", got, want)
+				if q.MediaID == nil || *q.MediaID != mediaID {
+					t.Errorf("ListQuestions MediaID = %v, want %d", q.MediaID, mediaID)
 				}
 			}
 		}
 		if !found {
 			t.Error("question not found in ListQuestions result")
+		}
+	})
+
+	t.Run("deleting attached media clears the question's media_id", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		mediaStore := NewMediaStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+		mediaID := seedQuizMedia(t, db, testQuiz.ID)
+
+		target := testQuiz.Questions[0]
+		target.MediaID = &mediaID
+		if err := quizStore.UpdateQuestion(t.Context(), target); err != nil {
+			t.Fatalf("failed to update question: %v", err)
+		}
+
+		if err := mediaStore.DeleteMedia(t.Context(), mediaID); err != nil {
+			t.Fatalf("DeleteMedia err = %v, want nil", err)
+		}
+
+		qs, err := quizStore.GetQuestion(t.Context(), target.ID)
+		if err != nil {
+			t.Fatalf("GetQuestion err = %v, want nil (question must survive media delete)", err)
+		}
+		if qs.MediaID != nil {
+			t.Errorf("GetQuestion MediaID = %v, want nil after image delete (ON DELETE SET NULL)", *qs.MediaID)
 		}
 	})
 }

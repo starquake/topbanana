@@ -419,9 +419,10 @@
                            x-show="!!feedback"
                            x-text="feedback ? (feedback.correct ? 'Correct!' : (feedback.timedOut ? 'Time up' : 'Not quite')) : ''"></p>
 
-                        <!-- Image render hidden pending #426. The API
-                             still ships question.imageUrl on the wire;
-                             only the visible <img> is gone. -->
+                        <!-- No question image is rendered yet. A question now
+                             references an uploaded library image by media_id
+                             (#937), but the client API does not ship it and the
+                             play screen does not render it; that is #938. -->
 
                         <!-- The button container stays visible during
                              feedback so the per-option styling (correct

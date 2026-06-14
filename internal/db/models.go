@@ -135,8 +135,8 @@ type Question struct {
 	RoundID          int64
 	Text             string
 	Position         int64
-	ImageUrl         string
 	TimeLimitSeconds sql.NullInt64
+	MediaID          sql.NullInt64
 }
 
 type Quiz struct {

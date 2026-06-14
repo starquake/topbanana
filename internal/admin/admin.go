@@ -141,11 +141,14 @@ type QuizData struct {
 // input - empty when the question inherits the quiz default (#99), so
 // the form's <input type="number"> stays blank rather than rendering 0.
 type QuestionData struct {
-	ID                    int64
-	QuizID                int64
-	RoundID               int64
-	Text                  string
-	ImageURL              string
+	ID      int64
+	QuizID  int64
+	RoundID int64
+	Text    string
+	// MediaID is the id of the attached library image, or 0 when none is
+	// attached (#937). The picker pre-checks the radio whose value equals
+	// it; 0 leaves the "None" radio checked.
+	MediaID               int64
 	Position              int
 	TimeLimitSecondsValue string
 	Options               []*OptionData
@@ -279,12 +282,17 @@ func questionDataFromQuestion(q *quiz.Question) *QuestionData {
 		timeLimit = strconv.Itoa(*q.TimeLimitSeconds)
 	}
 
+	var mediaID int64
+	if q.MediaID != nil {
+		mediaID = *q.MediaID
+	}
+
 	return &QuestionData{
 		ID:                    q.ID,
 		QuizID:                q.QuizID,
 		RoundID:               q.RoundID,
 		Text:                  q.Text,
-		ImageURL:              q.ImageURL,
+		MediaID:               mediaID,
 		Position:              q.Position,
 		TimeLimitSecondsValue: timeLimit,
 		Options:               optionDataFromOptions(q.Options),
@@ -637,6 +645,47 @@ func parseOptionalTimeLimit(raw string) *int {
 	return &n
 }
 
+// Field-error messages for the question image picker (#937). Hoisted to
+// package constants so the duplicated strings live in one place.
+const (
+	errMediaPickInvalid  = "Pick an image from this quiz's library, or choose None."
+	errMediaNotInLibrary = "That image is not in this quiz's library."
+	errMediaVerifyFailed = "Could not verify the selected image. Try again."
+)
+
+// resolveQuestionMedia interprets the optional media_id picker input (#937).
+// Blank or "0" -> (nil, "") meaning "no image attached" (NULL). A non-empty
+// value must parse and must name an image in quizID's own library; a missing,
+// foreign, or unparseable id yields a field-error message so the save handler
+// re-renders the form rather than persisting a cross-quiz reference. A store
+// failure also surfaces as a message so the caller never silently drops the
+// attachment.
+func resolveQuestionMedia(
+	ctx context.Context, mediaStore QuestionMediaStore, quizID int64, raw string,
+) (*int64, string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "0" {
+		return nil, ""
+	}
+	id, err := handlers.IDFromString(raw)
+	if err != nil || id == 0 || mediaStore == nil {
+		return nil, errMediaPickInvalid
+	}
+	m, err := mediaStore.GetMedia(ctx, id)
+	if err != nil {
+		if errors.Is(err, media.ErrMediaNotFound) {
+			return nil, errMediaNotInLibrary
+		}
+
+		return nil, errMediaVerifyFailed
+	}
+	if m.QuizID != quizID {
+		return nil, errMediaNotInLibrary
+	}
+
+	return &id, ""
+}
+
 // fillQuestionFromForm fills the question fields from the form values.
 // On a parse error it renders a 400 page directly and returns
 // (nil, false); the caller should just return. On a validation error
@@ -649,6 +698,7 @@ func fillQuestionFromForm(
 	r *http.Request,
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
+	mediaStore QuestionMediaStore,
 	qs *quiz.Question,
 ) (map[string]string, bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxFormSize)
@@ -662,7 +712,14 @@ func fillQuestionFromForm(
 	}
 
 	qs.Text = r.PostFormValue("text")
-	qs.ImageURL = r.PostFormValue("image_url")
+	// Image picker (#937). An empty/absent media_id means "no image"
+	// (NULL); a non-empty value must name an image in this question's own
+	// quiz library, validated below.
+	mediaID, mediaErr := resolveQuestionMedia(r.Context(), mediaStore, qs.QuizID, r.PostFormValue("media_id"))
+	if mediaErr != "" {
+		return map[string]string{"media": mediaErr}, true
+	}
+	qs.MediaID = mediaID
 	// Optional per-question override (#99). Blank input clears any
 	// previous override (NULL -> inherit the quiz default); a parse
 	// failure lands a zero, which Question.Valid rejects with an
@@ -782,6 +839,16 @@ type RunningGameLookup interface {
 // the concrete media store satisfies it.
 type MediaLister interface {
 	ListMediaByQuiz(ctx context.Context, quizID int64) ([]*media.Media, error)
+}
+
+// QuestionMediaStore is the slice of the media store the question editor needs
+// (#937): list a quiz's library to render the image picker, and get a single
+// media row to validate that an attached image belongs to the question's own
+// quiz before persisting it. Defined consumer-side; the concrete media store
+// satisfies it.
+type QuestionMediaStore interface {
+	ListMediaByQuiz(ctx context.Context, quizID int64) ([]*media.Media, error)
+	GetMedia(ctx context.Context, id int64) (*media.Media, error)
 }
 
 // indexData feeds the admin dashboard. ResumeCode is the join code of the
@@ -1357,8 +1424,7 @@ type quizImportRoundPayload struct {
 }
 
 type quizImportQuestionPayload struct {
-	Text     string `json:"text"`
-	ImageURL string `json:"imageUrl,omitempty"`
+	Text string `json:"text"`
 	// TimeLimitSeconds overrides the quiz default for this question
 	// (#99). Optional - omitted means "inherit the quiz value at
 	// game time", same as leaving the admin form's field blank.
@@ -1706,11 +1772,12 @@ func fillQuizFromRounds(qz *quiz.Quiz, rounds []quizImportRoundPayload) error {
 }
 
 // questionFromImportPayload maps one import question onto the domain
-// type at the given quiz-wide position.
+// type at the given quiz-wide position. Imported questions never carry an
+// image: the JSON import cannot reference uploaded media (which is keyed by a
+// per-quiz media id, not a URL), so MediaID stays nil (#937).
 func questionFromImportPayload(qIn quizImportQuestionPayload, position int) *quiz.Question {
 	qs := &quiz.Question{
 		Text:     qIn.Text,
-		ImageURL: qIn.ImageURL,
 		Position: position,
 		// nil -> "inherit the quiz default", the same semantics
 		// the admin form's blank input carries (#99).
@@ -1845,10 +1912,15 @@ const (
 // round_id field and the breadcrumb, and is nil on the edit path where
 // the question keeps its existing round.
 type questionFormData struct {
-	Title       string
-	Quiz        *QuizData
-	Question    *QuestionData
-	Round       *RoundData
+	Title    string
+	Quiz     *QuizData
+	Question *QuestionData
+	Round    *RoundData
+	// Library is the question's own quiz image library, newest first, for
+	// the image-picker grid (#937). Empty when the quiz has no images yet,
+	// which the template renders as an upload-first hint instead of a
+	// picker.
+	Library     []MediaCardData
 	FieldErrors map[string]string
 }
 
@@ -1857,7 +1929,9 @@ type questionFormData struct {
 // question" button (#929); it must name a round of this quiz. The form
 // carries it forward as a hidden field so the POST creates the question
 // in that round rather than the quiz default.
-func HandleQuestionCreate(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+func HandleQuestionCreate(
+	logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store, mediaStore QuestionMediaStore,
+) http.Handler {
 	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/questionform.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1880,13 +1954,45 @@ func HandleQuestionCreate(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 			return
 		}
 
+		library, ok := loadQuestionLibrary(w, r, logger, csrfMgr, mediaStore, quizID)
+		if !ok {
+			return
+		}
+
 		renderer.Render(w, r, http.StatusOK, questionFormData{
 			Title:    "Admin Dashboard - Question Create",
 			Quiz:     quizDataFromQuiz(qz),
 			Question: &QuestionData{},
 			Round:    roundDataFromRound(rnd),
+			Library:  library,
 		})
 	})
+}
+
+// loadQuestionLibrary fetches the quiz's image library for the question
+// editor's picker (#937), newest first. A nil store (callers that do not wire
+// media) yields an empty picker rather than a failure; a lookup error is a 500,
+// matching loadQuizMedia, since the library is part of the same editor page.
+func loadQuestionLibrary(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	mediaStore QuestionMediaStore,
+	quizID int64,
+) ([]MediaCardData, bool) {
+	if mediaStore == nil {
+		return nil, true
+	}
+	items, err := mediaStore.ListMediaByQuiz(r.Context(), quizID)
+	if err != nil {
+		logger.ErrorContext(r.Context(), "error listing media for question editor", slog.Any("err", err))
+		render500(w, r, logger, csrfMgr)
+
+		return nil, false
+	}
+
+	return mediaCardDataFromMedia(items), true
 }
 
 // roundFromQuery reads the round_id query parameter and loads the named
@@ -1913,7 +2019,9 @@ func roundFromQuery(
 }
 
 // HandleQuestionEdit handles the display of the question edit page in the admin dashboard.
-func HandleQuestionEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+func HandleQuestionEdit(
+	logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store, mediaStore QuestionMediaStore,
+) http.Handler {
 	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/questionform.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1948,10 +2056,16 @@ func HandleQuestionEdit(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 			}
 		}
 
+		library, ok := loadQuestionLibrary(w, r, logger, csrfMgr, mediaStore, quizID)
+		if !ok {
+			return
+		}
+
 		renderer.Render(w, r, http.StatusOK, questionFormData{
 			Title:    "Admin Dashboard - Question Edit",
 			Quiz:     quizDataFromQuiz(qz),
 			Question: questionDataFromQuestion(qs),
+			Library:  library,
 		})
 	})
 }
@@ -2166,7 +2280,9 @@ type questionSaveCtx struct {
 }
 
 // HandleQuestionSave saves a question.
-func HandleQuestionSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
+func HandleQuestionSave(
+	logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store, mediaStore QuestionMediaStore,
+) http.Handler {
 	formRenderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/questionform.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2175,12 +2291,12 @@ func HandleQuestionSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 			return
 		}
 
-		fieldErrors, ok := fillQuestionFromForm(w, r, logger, csrfMgr, qctx.Question)
+		fieldErrors, ok := fillQuestionFromForm(w, r, logger, csrfMgr, mediaStore, qctx.Question)
 		if !ok {
 			return
 		}
 		if len(fieldErrors) > 0 {
-			renderQuestionForm(w, r, formRenderer, qctx, fieldErrors)
+			renderQuestionForm(w, r, logger, csrfMgr, formRenderer, mediaStore, qctx, fieldErrors)
 
 			return
 		}
@@ -2288,7 +2404,10 @@ func roundFromForm(
 func renderQuestionForm(
 	w http.ResponseWriter,
 	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
 	renderer *render.Renderer,
+	mediaStore QuestionMediaStore,
 	qctx *questionSaveCtx,
 	fieldErrors map[string]string,
 ) {
@@ -2300,11 +2419,18 @@ func renderQuestionForm(
 	if qctx.Round != nil {
 		roundData = roundDataFromRound(qctx.Round)
 	}
+	// Reload the picker library so the re-rendered form still shows the
+	// thumbnails. A 500 here already wrote the response.
+	library, ok := loadQuestionLibrary(w, r, logger, csrfMgr, mediaStore, qctx.Quiz.ID)
+	if !ok {
+		return
+	}
 	renderer.Render(w, r, http.StatusBadRequest, questionFormData{
 		Title:       title,
 		Quiz:        quizDataFromQuiz(qctx.Quiz),
 		Question:    questionDataFromQuestion(qctx.Question),
 		Round:       roundData,
+		Library:     library,
 		FieldErrors: fieldErrors,
 	})
 }

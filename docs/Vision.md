@@ -35,7 +35,7 @@ Phase 1 has landed and a chunk of Phase 1.5 too. The doc below describes the run
 
 - `players (id, display_name UNIQUE, email UNIQUE, password_hash, role, display_name_claimed, created_at)` — `email` and `password_hash` are nullable so anonymous play works without inventing either. `display_name_claimed` flips to 1 when the player explicitly picks a name (register flow or PATCH `/api/players/me`).
 - `quizzes (id, title, slug UNIQUE, description, created_at, updated_at)`.
-- `questions (id, quiz_id, text, position, image_url)`. Per-question time limit (`time_limit_seconds`) is still hardcoded at 10s in the service (open ticket #99).
+- `questions (id, quiz_id, text, position, media_id)`. `media_id` references an uploaded image in the quiz's library (#937); the legacy free-text `image_url` was dropped when uploads landed.
 - `options (id, question_id, text, is_correct)`.
 - `games (id VARCHAR(20), quiz_id, created_at, started_at)` — `id` is an xid (unguessable).
 - `game_participants (id, game_id, player_id, quiz_id, joined_at)` — `quiz_id` is denormalised from the parent game so a UNIQUE INDEX on `(player_id, quiz_id)` can enforce one attempt per player per quiz at the DB level.
