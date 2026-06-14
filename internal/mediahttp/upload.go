@@ -53,9 +53,8 @@ type QuizEditLookup interface {
 // admin to any (the same creator-or-admin rule the admin question/quiz
 // mutations apply via requireQuizOwner). A non-owner host gets a 403; a missing
 // quiz a 404. Pipeline rejections (too large, empty, unsupported) map to 400;
-// other failures to 500. On success it redirects 303 to the quiz view - the
-// library UI that would render the new image lands in a later slice (#936
-// slice 3).
+// other failures to 500. On success it redirects 303 back to the quiz view's
+// images section so the page does not jump to the top.
 //
 // The caller is expected to front this handler with MaxMultipartFormMiddleware
 // so the body is capped and the multipart form is parsed before the CSRF
@@ -101,9 +100,9 @@ func HandleMediaUpload(logger *slog.Logger, svc MediaService, quizzes QuizEditLo
 			return
 		}
 
-		// quizID is an int64 parsed from the path, so the formatted target is a
-		// fixed-shape internal admin path with no caller-controlled segment.
-		dest := fmt.Sprintf("/admin/quizzes/%d", quizID)
+		// The #images fragment scrolls the quiz view back to the library section
+		// the host just uploaded into, instead of jumping to the page top.
+		dest := fmt.Sprintf("/admin/quizzes/%d", quizID) + "#images"
 		http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // dest is built from an int64 id, not user input
 	})
 }

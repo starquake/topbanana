@@ -42,7 +42,9 @@ async function authorQuizWithImageQuestion(page: Page, quizTitle: string): Promi
     buffer: PNG_SAMPLE,
   });
   await page.getByRole('button', { name: /upload/i }).click();
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+  // The upload redirect carries an #images fragment so the host keeps their
+  // scroll position on the library section.
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+(#images)?$/);
   const libraryThumb = page.locator('img[alt^="Quiz image"]').first();
   await expect(libraryThumb).toBeVisible();
 

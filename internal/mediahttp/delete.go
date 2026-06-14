@@ -23,7 +23,8 @@ import (
 // row whose quiz is not the gated {quizID} yields 404 (an IDOR guard so the
 // owner of quiz A cannot delete quiz B's image by posting to A's path with B's
 // media id). A non-owner non-admin gets 403; a missing quiz or a missing /
-// foreign media id a 404. On success it redirects 303 to the quiz view.
+// foreign media id a 404. On success it redirects 303 back to the quiz view's
+// images section so the page does not jump to the top.
 func HandleMediaDelete(logger *slog.Logger, svc MediaService, quizzes QuizEditLookup) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		quizID, ok := handlers.ParseIDFromPath(w, r, logger, "quizID")
@@ -85,9 +86,9 @@ func HandleMediaDelete(logger *slog.Logger, svc MediaService, quizzes QuizEditLo
 			return
 		}
 
-		// quizID is an int64 parsed from the path, so the formatted target is a
-		// fixed-shape internal admin path with no caller-controlled segment.
-		dest := fmt.Sprintf("/admin/quizzes/%d", quizID)
+		// The #images fragment scrolls the quiz view back to the library section
+		// the host just edited, instead of jumping to the page top.
+		dest := fmt.Sprintf("/admin/quizzes/%d", quizID) + "#images"
 		http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // dest is built from an int64 id, not user input
 	})
 }

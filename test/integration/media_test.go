@@ -366,7 +366,8 @@ func latestMediaID(ctx context.Context, t *testing.T, stores *store.Stores, quiz
 }
 
 // uploadImage posts a multipart image to the quiz's media endpoint and asserts
-// the 303-to-quiz-view redirect (slice 2 has no library UI to land on).
+// the 303-to-quiz-view redirect lands on the images section anchor so the host
+// keeps their scroll position.
 func uploadImage(
 	ctx context.Context, t *testing.T, client *http.Client, baseURL string, quizID int64, name string, data []byte,
 ) {
@@ -383,7 +384,7 @@ func uploadImage(
 		rb, _ := io.ReadAll(resp.Body)
 		t.Fatalf("upload status = %d, want %d; body=%q", got, want, rb)
 	}
-	if got, want := resp.Header.Get("Location"), fmt.Sprintf("/admin/quizzes/%d", quizID); got != want {
+	if got, want := resp.Header.Get("Location"), fmt.Sprintf("/admin/quizzes/%d#images", quizID); got != want {
 		t.Errorf("upload redirect Location = %q, want %q", got, want)
 	}
 }
