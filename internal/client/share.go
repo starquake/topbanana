@@ -134,13 +134,11 @@ func (s *ShellHandlers) render(w http.ResponseWriter, r *http.Request, name stri
 	}
 	// partials/ holds the {{define}} blocks shared between index.html (solo) and
 	// join.html (live): round_intro.html ("round-intro-card"), standings_bars.html
-	// ("standings-bars"), brand_mark.html ("brand-mark"), and question_image.html
-	// ("question-image"). Parsing them alongside every shell keeps both able to
-	// invoke the partials; a missing or renamed file fails loudly here rather than
-	// rendering a blank surface.
+	// ("standings-bars"), and brand_mark.html ("brand-mark"). Parsing them alongside
+	// every shell keeps both able to invoke the partials; a missing or renamed file
+	// fails loudly here rather than rendering a blank surface.
 	t, err := template.New(name).Funcs(funcs).ParseFS(s.fsys(), name,
-		"partials/round_intro.html", "partials/standings_bars.html", "partials/brand_mark.html",
-		"partials/question_image.html")
+		"partials/round_intro.html", "partials/standings_bars.html", "partials/brand_mark.html")
 	if err != nil {
 		s.logger.ErrorContext(r.Context(), "parse shell template", slog.Any("err", err), slog.String("template", name))
 		http.Error(w, "internal error", http.StatusInternalServerError)

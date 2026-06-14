@@ -418,8 +418,12 @@
                              also anchors the buttons to the bottom, so no mt-auto is
                              needed below. -->
                         <div class="flex-1 min-h-0 flex items-center justify-center">
-                            <template x-if="currentQuestion() && currentQuestion().imageUrl">
-                                {{template "question-image" .}}
+                            <template x-if="question.imageUrl">
+                                <img :src="question.imageUrl" alt="" loading="lazy"
+                                     data-testid="question-image"
+                                     x-show="!imageError"
+                                     @error="imageError = true"
+                                     class="block mx-auto w-auto max-w-full max-h-[18vh] lg:max-h-[36vh] object-contain rounded-lg">
                             </template>
                         </div>
 

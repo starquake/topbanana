@@ -258,13 +258,6 @@ export class GameApp {
         return !!(this.player && this.player.hasCustomName);
     }
 
-    // currentQuestion returns the question on screen, or null. Mirrors
-    // JoinApp.currentQuestion() so the shared question-image partial calls the
-    // same method on both surfaces (the live surface holds it under state).
-    currentQuestion() {
-        return this.question;
-    }
-
     // isAnonymous reports whether the current player has no password set
     // (anonymous in the credential sense). Distinct from hasCustomName:
     // a player who claims a display name without registering stays
