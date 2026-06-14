@@ -437,6 +437,7 @@ type sessionQuestionResponse struct {
 	ID                int64                   `json:"id"`
 	RoundID           int64                   `json:"roundId"`
 	Text              string                  `json:"text"`
+	ImageURL          string                  `json:"imageUrl,omitempty"`
 	Options           []sessionOptionResponse `json:"options"`
 	StartedAt         *time.Time              `json:"startedAt,omitempty"`
 	ExpiresAt         *time.Time              `json:"expiresAt,omitempty"`
@@ -610,6 +611,7 @@ func newSessionQuestionResponse(state *livesession.LobbyState) *sessionQuestionR
 		ID:                q.ID,
 		RoundID:           q.RoundID,
 		Text:              q.Text,
+		ImageURL:          mediaURL(q.MediaID),
 		Options:           options,
 		AnsweredPlayerIDs: answeredIDs,
 		Answers:           answers,

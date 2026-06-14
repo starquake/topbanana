@@ -52,6 +52,14 @@ function hostBigScreen(joinCode, hasQuiz) {
         // (no-flash hydration); applyState then keeps it in sync with each read.
         hasQuiz: !!hasQuiz,
         question: null,
+        // Hides the question image when its fetch fails. Reset only on a genuine
+        // question change in applyState so a stale hide can't carry into the next
+        // question; it persists across the same question's question -> reveal so
+        // the picture stays hidden once flagged.
+        imageError: false,
+        // The id of the question currently on screen, so applyState can tell a
+        // genuine question change (reset imageError) from a same-question tick.
+        lastQuestionId: null,
         // The round_intro round off the latest state read, or null outside the
         // round_intro phase (the server carries it only there). Drives the
         // between-rounds screen's title/summary and "Round N of M" heading
@@ -223,6 +231,11 @@ function hostBigScreen(joinCode, hasQuiz) {
             // shows the Start controls rather than the pick-a-live-quiz link.
             this.hasQuiz = state.quiz != null;
             this.question = state.question ?? null;
+            const questionId = this.question ? this.question.id : null;
+            if (questionId !== this.lastQuestionId) {
+                this.lastQuestionId = questionId;
+                this.imageError = false;
+            }
             this.round = state.round ?? null;
 
             const offset = clockOffsetFromServerNow(state.serverNow);
