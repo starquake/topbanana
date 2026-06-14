@@ -619,19 +619,19 @@ func addAdminQuestionRoutes(
 ) {
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}/questions/new",
-		requireGameHost(admin.HandleQuestionCreate(logger, csrfMgr, stores.Quizzes)),
+		requireGameHost(admin.HandleQuestionCreate(logger, csrfMgr, stores.Quizzes, stores.Media)),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/questions",
-		csrfMW(requireGameHost(admin.HandleQuestionSave(logger, csrfMgr, stores.Quizzes))),
+		csrfMW(requireGameHost(admin.HandleQuestionSave(logger, csrfMgr, stores.Quizzes, stores.Media))),
 	)
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}/questions/{questionID}/edit",
-		requireGameHost(admin.HandleQuestionEdit(logger, csrfMgr, stores.Quizzes)),
+		requireGameHost(admin.HandleQuestionEdit(logger, csrfMgr, stores.Quizzes, stores.Media)),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/questions/{questionID}",
-		csrfMW(requireGameHost(admin.HandleQuestionSave(logger, csrfMgr, stores.Quizzes))),
+		csrfMW(requireGameHost(admin.HandleQuestionSave(logger, csrfMgr, stores.Quizzes, stores.Media))),
 	)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/questions/{questionID}/delete",

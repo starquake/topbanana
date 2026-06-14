@@ -191,7 +191,6 @@ type quizGetOptionResponse struct {
 type quizGetQuestionResponse struct {
 	ID       int64                   `json:"id"`
 	Text     string                  `json:"text"`
-	ImageURL string                  `json:"imageUrl"`
 	Position int                     `json:"position"`
 	Options  []quizGetOptionResponse `json:"options"`
 }
@@ -218,7 +217,6 @@ func quizGetQuestions(qz *quiz.Quiz) []quizGetQuestionResponse {
 		questions = append(questions, quizGetQuestionResponse{
 			ID:       qs.ID,
 			Text:     qs.Text,
-			ImageURL: qs.ImageURL,
 			Position: qs.Position,
 			Options:  opts,
 		})
@@ -800,7 +798,6 @@ type nextQuestionResponse struct {
 	Type      string               `json:"type"`
 	ID        int64                `json:"id"`
 	Text      string               `json:"text"`
-	ImageURL  string               `json:"imageUrl"`
 	Options   []nextOptionResponse `json:"options"`
 	StartedAt time.Time            `json:"startedAt"`
 	ExpiredAt time.Time            `json:"expiredAt"`
@@ -958,7 +955,6 @@ func writeQuestionItem(
 		Type:      string(game.ItemTypeQuestion),
 		ID:        gq.QuizQuestion.ID,
 		Text:      gq.QuizQuestion.Text,
-		ImageURL:  gq.QuizQuestion.ImageURL,
 		Options:   resOptions,
 		StartedAt: gq.StartedAt,
 		ExpiredAt: gq.ExpiredAt,

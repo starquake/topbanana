@@ -10,6 +10,7 @@ import (
 	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/leaderboard"
+	"github.com/starquake/topbanana/internal/media"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
 )
@@ -22,6 +23,7 @@ type adminEnv struct {
 	logger  *slog.Logger
 	db      *sql.DB
 	quizzes quiz.Store
+	media   media.Store
 	games   game.Store
 	players auth.PlayerStore
 	oauth   auth.OAuthIdentityStore
@@ -48,6 +50,7 @@ func newAdminEnv(t *testing.T) *adminEnv {
 		logger:  logger,
 		db:      conn,
 		quizzes: stores.Quizzes,
+		media:   stores.Media,
 		games:   stores.Games,
 		players: stores.Players,
 		oauth:   stores.OAuth,
@@ -99,6 +102,31 @@ func (e *adminEnv) defaultRoundID(t *testing.T, quizID int64) int64 {
 	}
 
 	return rounds[0].ID
+}
+
+// seedMedia inserts an image row into the given quiz's library via the real
+// media store and returns its id, so a question test can attach a same-quiz
+// image (#937).
+func (e *adminEnv) seedMedia(t *testing.T, quizID int64) int64 {
+	t.Helper()
+
+	m, err := e.media.CreateMedia(t.Context(), &media.Media{
+		QuizID:            quizID,
+		Type:              media.TypeImage,
+		MIME:              "image/webp",
+		Path:              "p.webp",
+		ThumbPath:         "p-thumb.webp",
+		Width:             640,
+		Height:            480,
+		SizeBytes:         1234,
+		SHA256:            "deadbeef",
+		CreatedByPlayerID: testAdminID,
+	})
+	if err != nil {
+		t.Fatalf("CreateMedia err = %v, want nil", err)
+	}
+
+	return m.ID
 }
 
 // backdateQuizUpdatedAt rewrites quizzes.updated_at for the given quiz

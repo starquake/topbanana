@@ -283,7 +283,7 @@ func (s *QuizStore) ListQuestions(ctx context.Context, quizID int64) ([]*quiz.Qu
 			RoundID:          r.RoundID,
 			Text:             r.Text,
 			Position:         int(r.Position),
-			ImageURL:         r.ImageUrl,
+			MediaID:          nullableInt64ToPtr(r.MediaID),
 			TimeLimitSeconds: nullableTimeLimitToPtr(r.TimeLimitSeconds),
 		}
 
@@ -316,7 +316,7 @@ func (s *QuizStore) GetQuestion(ctx context.Context, id int64) (*quiz.Question, 
 		RoundID:          row.RoundID,
 		Text:             row.Text,
 		Position:         int(row.Position),
-		ImageURL:         row.ImageUrl,
+		MediaID:          nullableInt64ToPtr(row.MediaID),
 		TimeLimitSeconds: nullableTimeLimitToPtr(row.TimeLimitSeconds),
 	}
 
@@ -940,7 +940,7 @@ func (s *QuizStore) execCreateQuestion(ctx context.Context, q *db.Queries, qs *q
 		RoundID:          qs.RoundID,
 		Text:             qs.Text,
 		Position:         int64(qs.Position),
-		ImageUrl:         qs.ImageURL,
+		MediaID:          nullableInt64(qs.MediaID),
 		TimeLimitSeconds: nullableTimeLimit(qs.TimeLimitSeconds),
 	})
 	if err != nil {
@@ -971,7 +971,7 @@ func (s *QuizStore) execUpdateQuestion(ctx context.Context, q *db.Queries, qs *q
 	res, err := q.UpdateQuestion(ctx, db.UpdateQuestionParams{
 		Text:             qs.Text,
 		Position:         int64(qs.Position),
-		ImageUrl:         qs.ImageURL,
+		MediaID:          nullableInt64(qs.MediaID),
 		TimeLimitSeconds: nullableTimeLimit(qs.TimeLimitSeconds),
 		ID:               qs.ID,
 	})
@@ -1230,6 +1230,28 @@ func nullableTimeLimitToPtr(v sql.NullInt64) *int {
 		return nil
 	}
 	out := int(v.Int64)
+
+	return &out
+}
+
+// nullableInt64 packs a *int64 into the [sql.NullInt64] the sqlc-generated
+// params expect for questions.media_id. nil -> NULL, which means "no image
+// attached" (#937).
+func nullableInt64(v *int64) sql.NullInt64 {
+	if v == nil {
+		return sql.NullInt64{}
+	}
+
+	return sql.NullInt64{Int64: *v, Valid: true}
+}
+
+// nullableInt64ToPtr is the inverse of nullableInt64, used when hydrating
+// Question.MediaID from sqlc RETURNING / SELECT rows.
+func nullableInt64ToPtr(v sql.NullInt64) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	out := v.Int64
 
 	return &out
 }

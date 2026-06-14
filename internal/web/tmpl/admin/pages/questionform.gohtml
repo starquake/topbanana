@@ -47,9 +47,52 @@
             {{end}}
         </div>
 
-        {{/* Image input hidden pending #426. The handler still accepts an
-             image_url POST value, so existing rows keep their value
-             through edits; only the input is gone. */}}
+        {{/* Image picker (#937): attach one of this quiz's uploaded library
+             images to the question, or None. When the quiz has no images yet,
+             show a hint linking to the quiz view to upload first. Server-side
+             validation re-checks that the chosen id belongs to this quiz. */}}
+        {{$mediaErr := index .FieldErrors "media"}}
+        <fieldset class="form-field border-0 p-0 m-0 min-w-0">
+            <legend class="label-eyebrow p-0">Image</legend>
+            {{if $mediaErr}}
+                <p id="media-error" class="form-help-error" role="alert">{{$mediaErr}}</p>
+            {{end}}
+            {{if .Library}}
+                <div class="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5"
+                     role="radiogroup" aria-label="Attach an image"
+                     {{if $mediaErr}}aria-describedby="media-error"{{end}}>
+                    <label class="group relative flex aspect-square cursor-pointer items-center justify-center rounded-lg border border-border-soft bg-surface text-center text-xs text-text-dim has-[:checked]:border-accent has-[:checked]:text-text has-[:focus-visible]:shadow-focus">
+                        <input type="radio" name="media_id" value="" class="sr-only"
+                               {{if eq .Question.MediaID 0}}checked{{end}}>
+                        None
+                    </label>
+                    {{range .Library}}
+                        <label class="group relative block aspect-square cursor-pointer overflow-hidden rounded-lg border border-border-soft bg-surface has-[:checked]:border-accent has-[:focus-visible]:shadow-focus">
+                            <input type="radio" name="media_id" value="{{.ID}}" class="sr-only peer"
+                                   {{if eq $.Question.MediaID .ID}}checked{{end}}>
+                            <img src="/media/{{.ID}}/thumb"
+                                 alt="Quiz image {{.ID}}"
+                                 loading="lazy"
+                                 width="{{.Width}}" height="{{.Height}}"
+                                 class="h-full w-full object-cover">
+                            <span aria-hidden="true"
+                                  class="pointer-events-none absolute inset-0 hidden items-center justify-center bg-accent/20 peer-checked:flex">
+                                <span class="flex h-7 w-7 items-center justify-center rounded-full bg-accent text-bg">
+                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M13.5 4.5 6 12 2.5 8.5l1-1L6 10l6.5-6.5z"/></svg>
+                                </span>
+                            </span>
+                        </label>
+                    {{end}}
+                </div>
+            {{else}}
+                <input type="hidden" name="media_id" value="">
+                <p class="text-text-dim text-[0.95rem]">
+                    No images in this quiz's library yet.
+                    <a href="/admin/quizzes/{{.Quiz.ID}}" class="text-accent underline">Upload images on the quiz page first</a>
+                    to attach one here.
+                </p>
+            {{end}}
+        </fieldset>
 
         {{$optionsErr := index .FieldErrors "options"}}
         <div class="form-field">

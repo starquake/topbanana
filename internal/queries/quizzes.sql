@@ -184,7 +184,7 @@ WHERE round_id = ?
 ORDER BY position;
 
 -- name: CreateQuestion :one
-INSERT INTO questions (quiz_id, round_id, text, position, image_url, time_limit_seconds)
+INSERT INTO questions (quiz_id, round_id, text, position, media_id, time_limit_seconds)
 VALUES (?, ?, ?, ?, ?, ?)
 RETURNING *;
 
@@ -192,7 +192,7 @@ RETURNING *;
 UPDATE questions
 SET text               = ?,
     position           = ?,
-    image_url          = ?,
+    media_id           = ?,
     time_limit_seconds = ?
 WHERE id = ?;
 
