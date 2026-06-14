@@ -676,7 +676,7 @@
     .btn-answer {
         @apply w-full
                min-h-[44px] sm:min-h-14 lg:min-h-32 2xl:min-h-40
-               px-5 py-3 lg:px-8 lg:py-6 2xl:px-10 2xl:py-8
+               px-5 py-2 lg:px-8 lg:py-6 2xl:px-10 2xl:py-8
                text-left justify-start inline-flex items-center
                bg-surface text-text border border-border rounded-sm
                font-medium text-[0.95rem] lg:text-3xl 2xl:text-4xl
@@ -708,7 +708,7 @@
     .btn-answer-correct {
         @apply w-full
                min-h-[44px] sm:min-h-14 lg:min-h-32 2xl:min-h-40
-               px-5 py-3 lg:px-8 lg:py-6 2xl:px-10 2xl:py-8
+               px-5 py-2 lg:px-8 lg:py-6 2xl:px-10 2xl:py-8
                text-left justify-start inline-flex items-center
                bg-success text-bg border-2 border-success rounded-sm
                font-semibold text-[0.95rem] lg:text-3xl 2xl:text-4xl
@@ -717,7 +717,7 @@
     .btn-answer-wrong {
         @apply w-full
                min-h-[44px] sm:min-h-14 lg:min-h-32 2xl:min-h-40
-               px-5 py-3 lg:px-8 lg:py-6 2xl:px-10 2xl:py-8
+               px-5 py-2 lg:px-8 lg:py-6 2xl:px-10 2xl:py-8
                text-left justify-start inline-flex items-center
                bg-danger text-bg border-2 border-danger rounded-sm
                font-semibold text-[0.95rem] lg:text-3xl 2xl:text-4xl
@@ -726,7 +726,7 @@
     .btn-answer-dim {
         @apply w-full
                min-h-[44px] sm:min-h-14 lg:min-h-32 2xl:min-h-40
-               px-5 py-3 lg:px-8 lg:py-6 2xl:px-10 2xl:py-8
+               px-5 py-2 lg:px-8 lg:py-6 2xl:px-10 2xl:py-8
                text-left justify-start inline-flex items-center
                bg-surface text-text-dim border border-border rounded-sm
                font-medium text-[0.95rem] lg:text-3xl 2xl:text-4xl opacity-40

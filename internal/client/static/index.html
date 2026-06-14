@@ -378,7 +378,7 @@
                 <template x-if="question && !roundItem">
                     <div class="flex flex-col game-fill">
                         <!-- HUD chips: Q n/total + running score (#253). -->
-                        <div class="flex justify-end gap-2 mb-4">
+                        <div class="flex justify-end gap-2 mb-2 lg:mb-4">
                             <span class="hud-chip">
                                 Q <span class="hud-chip-value" x-text="question.position"></span>/<span class="hud-chip-value" x-text="question.total"></span>
                             </span>
@@ -393,11 +393,11 @@
                              answer window. JS drives :value via :progress;
                              :class swaps the value colour between
                              phases. One element, continuous visual. -->
-                        <progress class="progress block w-full h-[3px] bg-border rounded-full overflow-hidden mb-6 [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear"
+                        <progress class="progress block w-full h-[3px] bg-border rounded-full overflow-hidden mb-4 lg:mb-6 [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear"
                                   :class="revealing ? 'progress-reveal' : 'progress-answer'"
                                   :value="progress" max="100"></progress>
 
-                        <h2 class="mb-6 lg:mb-10 font-display font-bold leading-[1.1] tracking-tight text-text
+                        <h2 class="mb-4 lg:mb-10 font-display font-bold leading-[1.1] tracking-tight text-text
                                    text-[clamp(1.4rem,4.5vw,2.4rem)]
                                    lg:text-[clamp(2.25rem,4vw,4rem)]
                                    2xl:text-[clamp(3rem,3.5vw,5.5rem)]"
@@ -428,7 +428,7 @@
                                  data-testid="question-image"
                                  x-show="!imageError"
                                  @error="imageError = true"
-                                 class="block mx-auto mb-6 lg:mb-8 w-auto max-w-full max-h-[28vh] lg:max-h-[36vh] object-contain rounded-lg">
+                                 class="block mx-auto mb-4 lg:mb-8 w-auto max-w-full max-h-[18vh] lg:max-h-[36vh] object-contain rounded-lg">
                         </template>
 
                         <!-- The button container stays visible during
@@ -498,7 +498,7 @@
                     <div class="flex flex-col game-fill"
                          data-testid="round-intro-card"
                          x-init="$nextTick(() => animateRoundIntro($el))">
-                        <div class="flex justify-end gap-2 mb-4">
+                        <div class="flex justify-end gap-2 mb-2 lg:mb-4">
                             <template x-if="lastQuestionPosition > 0">
                                 <span class="hud-chip">
                                     Q <span class="hud-chip-value" x-text="lastQuestionPosition"></span>/<span class="hud-chip-value" x-text="roundItem.total"></span>
@@ -567,7 +567,7 @@
                     <div class="flex flex-col game-fill"
                          data-testid="round-recap-card"
                          x-init="$nextTick(() => animateRoundResults($el))">
-                        <div class="flex justify-end gap-2 mb-4">
+                        <div class="flex justify-end gap-2 mb-2 lg:mb-4">
                             <template x-if="lastQuestionPosition > 0">
                                 <span class="hud-chip">
                                     Q <span class="hud-chip-value" x-text="lastQuestionPosition"></span>/<span class="hud-chip-value" x-text="roundItem.total"></span>
