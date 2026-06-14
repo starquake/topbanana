@@ -19,6 +19,7 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/livesession"
+	"github.com/starquake/topbanana/internal/media"
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
@@ -286,7 +287,7 @@ func TestHandleQuizView(t *testing.T) {
 		env := newAdminEnv(t)
 		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz One", "quiz-one"))
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{})
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{})
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 		rr := httptest.NewRecorder()
@@ -309,7 +310,7 @@ func TestHandleQuizView(t *testing.T) {
 
 		env := newAdminEnv(t)
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{})
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{})
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/999", nil)
 		req.SetPathValue("quizID", "999")
 		rr := httptest.NewRecorder()
@@ -344,7 +345,7 @@ func TestHandleQuizView_RestartModalGating(t *testing.T) {
 
 	viewBody := func(t *testing.T, env *adminEnv, qz *quiz.Quiz, running RunningGameLookup) string {
 		t.Helper()
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), running)
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), running, mediaLister{})
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 		rr := httptest.NewRecorder()
@@ -405,7 +406,7 @@ func TestHandleQuizView_ErrorHandling(t *testing.T) {
 
 		env := newAdminEnv(t)
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{})
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{})
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/abc", nil)
 		req.SetPathValue("quizID", "abc")
 		rr := httptest.NewRecorder()
@@ -430,7 +431,7 @@ func TestHandleQuizView_ErrorHandling(t *testing.T) {
 		env.seedQuiz(t, ownedQuiz("Q", "q"))
 		env.closeStore(t)
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{})
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{})
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", "1")
 		rr := httptest.NewRecorder()
@@ -2464,7 +2465,7 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 		env.playThrough(t, qz, alice)
 		env.playThrough(t, qz, bob)
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{})
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{})
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 		rr := httptest.NewRecorder()
@@ -2514,7 +2515,7 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 		env := newAdminEnv(t)
 		qz := env.seedQuiz(t, twoQuestionQuiz("Q1", "q-1"))
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{})
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{})
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 		rr := httptest.NewRecorder()
@@ -2856,6 +2857,16 @@ type runningGameLookup struct{ running bool }
 
 func (l runningGameLookup) HostHasRunningGame(_ context.Context, _ int64) (bool, error) {
 	return l.running, nil
+}
+
+// mediaLister is a MediaLister stub for the quiz-view unit tests, returning the
+// configured library (nil for an empty grid). The rich render of the upload
+// control + thumbnail grid is pinned end-to-end in test/integration; these unit
+// tests only need a satisfying lister so the handler runs.
+type mediaLister struct{ items []*media.Media }
+
+func (l mediaLister) ListMediaByQuiz(_ context.Context, _ int64) ([]*media.Media, error) {
+	return l.items, nil
 }
 
 func TestHandleQuizCreate(t *testing.T) {

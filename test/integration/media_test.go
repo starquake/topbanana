@@ -243,6 +243,100 @@ func TestMediaServe_Integration(t *testing.T) {
 	})
 }
 
+// TestMediaLibraryView_Integration covers the per-quiz image library on the
+// admin quiz view (#936 slice 3): the owner sees the upload control and (after
+// an upload) a thumbnail grid linking each stored image; a quiz with no media
+// shows the empty state; and a read-only viewer (a non-owner host who can open
+// the page but not edit) sees neither the upload form nor the grid.
+func TestMediaLibraryView_Integration(t *testing.T) {
+	t.Parallel()
+
+	ctx, setup := setupMedia(t, map[string]string{
+		"ADMIN_EMAILS": "library-boss@example.test",
+	})
+	baseURL := setup.BaseURL
+
+	registerAdminClient(ctx, t, baseURL, setup.DBURI, "library-boss")
+	owner := registerAdminClient(ctx, t, baseURL, setup.DBURI, "library-owner")
+	viewer := registerAdminClient(ctx, t, baseURL, setup.DBURI, "library-viewer")
+	makeHost(ctx, t, setup.DBURI, "library-owner")
+	makeHost(ctx, t, setup.DBURI, "library-viewer")
+
+	t.Run("empty quiz shows the empty state and upload form to owner", func(t *testing.T) {
+		t.Parallel()
+		quizID := createQuizAs(ctx, t, owner, baseURL, "Empty Library Quiz")
+		page := getQuizViewBody(ctx, t, owner, baseURL, quizID)
+
+		for _, want := range []string{
+			"No images yet.",
+			fmt.Sprintf(`action="/admin/quizzes/%d/media"`, quizID),
+			`enctype="multipart/form-data"`,
+			`name="image"`,
+		} {
+			if !strings.Contains(page, want) {
+				t.Errorf("owner quiz view missing %q", want)
+			}
+		}
+	})
+
+	t.Run("owner sees the uploaded thumbnail in the grid", func(t *testing.T) {
+		t.Parallel()
+		quizID := createQuizAs(ctx, t, owner, baseURL, "Library With Image Quiz")
+		uploadImage(ctx, t, owner, baseURL, quizID, "pic.png", pngBytes(t, 200, 120))
+		mediaID := latestMediaID(ctx, t, setup.Stores, quizID)
+
+		page := getQuizViewBody(ctx, t, owner, baseURL, quizID)
+		for _, want := range []string{
+			fmt.Sprintf(`src="/media/%d/thumb"`, mediaID),
+			fmt.Sprintf(`href="/media/%d"`, mediaID),
+			`enctype="multipart/form-data"`,
+		} {
+			if !strings.Contains(page, want) {
+				t.Errorf("owner quiz view missing %q", want)
+			}
+		}
+		if strings.Contains(page, "No images yet.") {
+			t.Error("owner quiz view shows empty state despite an uploaded image")
+		}
+	})
+
+	t.Run("read-only viewer sees no upload form", func(t *testing.T) {
+		t.Parallel()
+		quizID := createQuizAs(ctx, t, owner, baseURL, "Viewer Gate Quiz")
+		uploadImage(ctx, t, owner, baseURL, quizID, "pic.png", pngBytes(t, 200, 120))
+
+		page := getQuizViewBody(ctx, t, viewer, baseURL, quizID)
+		for _, unwanted := range []string{
+			fmt.Sprintf(`action="/admin/quizzes/%d/media"`, quizID),
+			`enctype="multipart/form-data"`,
+		} {
+			if strings.Contains(page, unwanted) {
+				t.Errorf("read-only viewer quiz view unexpectedly contains %q", unwanted)
+			}
+		}
+	})
+}
+
+// getQuizViewBody fetches the admin quiz view page and returns its body,
+// asserting a 200. Used by the library-view assertions, which probe the
+// rendered HTML for the upload form and thumbnail grid.
+func getQuizViewBody(
+	ctx context.Context, t *testing.T, client *http.Client, baseURL string, quizID int64,
+) string {
+	t.Helper()
+	resp := httpGet(ctx, t, client, baseURL+fmt.Sprintf("/admin/quizzes/%d", quizID))
+	defer closeBody(t, resp.Body)
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("quiz view status = %d, want %d", got, want)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read quiz view body err = %v, want nil", err)
+	}
+
+	return string(body)
+}
+
 // setupMedia boots an integration server with a per-test MEDIA_DIR (a t.TempDir
 // the framework cleans up) and a store.Stores for resolving uploaded media ids
 // directly, rather than the default ./media under the package working dir.
