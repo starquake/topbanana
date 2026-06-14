@@ -240,6 +240,14 @@ type LobbyState struct {
 	// word its heading correctly on the first round (#748). Populated only in the
 	// round_intro phase; nil in every other phase.
 	CurrentRound *RoundInfo
+	// ViewerScore is the viewing player's cumulative score for the current game,
+	// computed for the playerID passed to [Service.GetLobbyState]. It backs the
+	// live answer-pad HUD's score chip, which needs the running score during the
+	// question and reveal phases - exactly where Standings is nil - so it is
+	// populated across the in-game phases (round_intro onward) rather than read
+	// off Standings. 0 in the lobby (no game yet) and when the viewer has not
+	// scored.
+	ViewerScore int
 }
 
 // RoundInfo describes the round shown on the round_intro screen (#748): its
@@ -407,6 +415,11 @@ type Store interface {
 	// finished state. RoundScore on each returned Standing is 0; the service
 	// overlays the last round's score for the finished bar graph animation.
 	ListFinalStandings(ctx context.Context, sessionID string) ([]*Standing, error)
+	// GetSessionPlayerScore returns one player's cumulative score for the
+	// session's current game (scoped to game_seq), 0 when they have no scored
+	// answers yet. Used to populate the viewer's running score during the
+	// question and reveal phases, where Standings is not populated.
+	GetSessionPlayerScore(ctx context.Context, sessionID string, playerID int64) (int, error)
 }
 
 // SessionAnswer is one recorded pick. Correct is the chosen option's
@@ -1129,6 +1142,9 @@ func (s *Service) GetLobbyState(ctx context.Context, joinCode string, playerID i
 	if err = s.populateRoundIntro(ctx, state); err != nil {
 		return nil, err
 	}
+	if err = s.populateViewerScore(ctx, state, playerID); err != nil {
+		return nil, err
+	}
 
 	return state, nil
 }
@@ -1440,6 +1456,29 @@ func (s *Service) populateRoundIntro(ctx context.Context, state *LobbyState) err
 			break
 		}
 	}
+
+	return nil
+}
+
+// populateViewerScore fills ViewerScore with the viewing player's cumulative
+// score for the current game, the running total the live answer-pad HUD shows
+// (#956). It is computed in every in-game phase (round_intro onward) and left 0
+// in the lobby, where no game has scored yet. The host is not on the roster, so
+// their viewer score stays 0 - the HUD chip is a player-phone affordance. The
+// score is read from GetSessionPlayerScore, the same per-game answer-score
+// aggregation the standings totals use, so the HUD and the round-results board
+// agree.
+func (s *Service) populateViewerScore(ctx context.Context, state *LobbyState, playerID int64) error {
+	sess := state.Session
+	if sess.Phase == PhaseLobby {
+		return nil
+	}
+
+	score, err := s.store.GetSessionPlayerScore(ctx, sess.ID, playerID)
+	if err != nil {
+		return fmt.Errorf("failed to get viewer session score for state: %w", err)
+	}
+	state.ViewerScore = score
 
 	return nil
 }

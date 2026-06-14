@@ -386,6 +386,20 @@ type sessionStateResponse struct {
 	// round and words its heading correctly on the first round. Present only in
 	// the round_intro phase; omitted otherwise.
 	Round *sessionRoundResponse `json:"round,omitempty"`
+	// Self carries the viewing player's own per-game state - currently their
+	// running score (#956) - separate from the shared roster/quiz/question data
+	// because it is computed for the requesting player, not the room. The live
+	// answer-pad HUD reads self.score for its score chip during a question.
+	// Present in every in-game phase; omitted in the lobby, where no game has
+	// scored yet.
+	Self *sessionSelfResponse `json:"self,omitempty"`
+}
+
+// sessionSelfResponse is the viewing player's own per-game state, computed for
+// the requesting player rather than the room. score is their cumulative score
+// for the current game (#956), the running total the live answer-pad HUD shows.
+type sessionSelfResponse struct {
+	Score int `json:"score"`
 }
 
 // sessionRoundResponse is the round shown on the round_intro screen (#748).
@@ -432,12 +446,16 @@ type sessionAnswerResponse struct {
 // sessionQuestionResponse is the live question view. startedAt / expiresAt are
 // the server answer window so a client drives its countdown off expiresAt
 // minus serverNow. answeredPlayerIds is the pick order without correctness.
-// correctOptionIds is empty until reveal.
+// correctOptionIds is empty until reveal. position is the question's 1-indexed
+// place in the quiz and total is the quiz's question count, so the answer-pad
+// HUD can show a "Q position/total" chip (#956).
 type sessionQuestionResponse struct {
 	ID                int64                   `json:"id"`
 	RoundID           int64                   `json:"roundId"`
 	Text              string                  `json:"text"`
 	ImageURL          string                  `json:"imageUrl,omitempty"`
+	Position          int                     `json:"position"`
+	Total             int                     `json:"total"`
 	Options           []sessionOptionResponse `json:"options"`
 	StartedAt         *time.Time              `json:"startedAt,omitempty"`
 	ExpiresAt         *time.Time              `json:"expiresAt,omitempty"`
@@ -505,7 +523,21 @@ func newSessionStateResponse(state *livesession.LobbyState) sessionStateResponse
 		Question:  newSessionQuestionResponse(state),
 		Standings: newSessionStandingsResponse(state),
 		Round:     newSessionRoundResponse(state),
+		Self:      newSessionSelfResponse(state),
 	}
+}
+
+// newSessionSelfResponse projects the viewing player's own per-game state onto
+// the wire shape: their running score for the live answer-pad HUD (#956).
+// Returns nil in the lobby, where no game has scored yet, so the field is
+// omitted from the JSON; in-game it carries the score even at 0 so the HUD can
+// always render the chip once a game is running.
+func newSessionSelfResponse(state *livesession.LobbyState) *sessionSelfResponse {
+	if state.Session.Phase == livesession.PhaseLobby {
+		return nil
+	}
+
+	return &sessionSelfResponse{Score: state.ViewerScore}
 }
 
 // newSessionQuizResponse projects the room's quiz onto the wire shape, or nil for
@@ -560,6 +592,21 @@ func newSessionStandingsResponse(state *livesession.LobbyState) []sessionStandin
 	return standings
 }
 
+// questionPosition returns the 1-indexed place of questionID among the quiz's
+// questions (ordered by position), for the answer-pad HUD's "Q position/total"
+// chip (#956). Derived from the index within Quiz.Questions rather than the raw
+// position column so a sparse or 0-based column cannot desync the chip; a
+// question missing from the quiz (deleted mid-game) returns 0.
+func questionPosition(qz *quiz.Quiz, questionID int64) int {
+	for i, q := range qz.Questions {
+		if q.ID == questionID {
+			return i + 1
+		}
+	}
+
+	return 0
+}
+
 // newSessionQuestionResponse projects the live question view onto the wire
 // shape, enforcing the no-spoiler guarantee: correctness (per-option and
 // per-answer) is included only when state.Revealed is true.
@@ -612,6 +659,8 @@ func newSessionQuestionResponse(state *livesession.LobbyState) *sessionQuestionR
 		RoundID:           q.RoundID,
 		Text:              q.Text,
 		ImageURL:          mediaURL(q.MediaID),
+		Position:          questionPosition(state.Quiz, q.ID),
+		Total:             len(state.Quiz.Questions),
 		Options:           options,
 		AnsweredPlayerIDs: answeredIDs,
 		Answers:           answers,

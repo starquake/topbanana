@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 
 import { test, expect } from './fixtures';
-import { seedQuiz, claimAndJoin, QUIZ_QUESTIONS, execSqlite } from './helpers';
+import { seedQuiz, claimAndJoin, execSqlite } from './helpers';
 
 // makeQuizLive flips a seeded quiz to mode='live' (the importer lands quizzes
 // on 'solo', and only live quizzes are hostable, MP-0 / #677) and returns its
@@ -192,9 +192,12 @@ test.describe('lobby visibility reconnect', () => {
 
     // The player advances off the lobby to the live question (the runner has
     // already moved past round_intro by the time recovery lands; the question
-    // view is the destination). The lobby roster is gone.
+    // view is the destination). The live phone is a pure answer pad (#956); the
+    // question text now lives on the big screen, so reaching the question view
+    // (with the lobby gone) is the recovery signal. question-view is present for
+    // the whole question phase, including the read beat, so it does not depend
+    // on the answer window being open when recovery lands.
     await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId('question-text')).toHaveText(QUIZ_QUESTIONS[0].text);
     await expect(page.getByTestId('lobby-view')).toHaveCount(0);
   });
 });

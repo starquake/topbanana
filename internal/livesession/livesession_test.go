@@ -240,6 +240,10 @@ func (*fakeStore) ListFinalStandings(context.Context, string) ([]*Standing, erro
 	return nil, errors.ErrUnsupported
 }
 
+func (*fakeStore) GetSessionPlayerScore(context.Context, string, int64) (int, error) {
+	return 0, errors.ErrUnsupported
+}
+
 // fakeQuiz returns the configured quiz or ErrQuizNotFound when nil, and the
 // configured rounds (in position order) for the round_intro read.
 type fakeQuiz struct {

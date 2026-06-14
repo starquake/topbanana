@@ -310,6 +310,33 @@ func (q *Queries) GetSessionPlayer(ctx context.Context, arg GetSessionPlayerPara
 	return i, err
 }
 
+const getSessionPlayerScore = `-- name: GetSessionPlayerScore :one
+SELECT CAST(COALESCE(SUM(sa.score), 0) AS INTEGER) AS total_score
+FROM session_answers sa
+WHERE sa.session_id = ?1
+  AND sa.player_id = ?2
+  AND sa.game_seq = (SELECT s.game_seq FROM sessions s WHERE s.id = sa.session_id)
+`
+
+type GetSessionPlayerScoreParams struct {
+	SessionID string
+	PlayerID  int64
+}
+
+// One player's cumulative score for the current game in a session: the sum of
+// their scored answers, scoped to the session's current game_seq, with a NULL
+// (no scored answers yet) coalesced to 0. Backs the live answer-pad HUD, which
+// shows the viewer their running score during the question and reveal phases,
+// where Standings is not populated (#956). Uses the same per-game scoping and
+// score aggregation as ListSessionFinalStandings, narrowed to one player, so the
+// HUD score matches the standings total once the round results appear.
+func (q *Queries) GetSessionPlayerScore(ctx context.Context, arg GetSessionPlayerScoreParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getSessionPlayerScore, arg.SessionID, arg.PlayerID)
+	var total_score int64
+	err := row.Scan(&total_score)
+	return total_score, err
+}
+
 const joinCodeExists = `-- name: JoinCodeExists :one
 SELECT EXISTS(SELECT 1 FROM sessions WHERE join_code = ?) AS code_exists
 `

@@ -409,6 +409,22 @@ func (s *LiveSessionStore) ListFinalStandings(
 	return standings, nil
 }
 
+// GetSessionPlayerScore returns one player's cumulative score for the session's
+// current game (scoped to game_seq), 0 when they have no scored answers yet.
+func (s *LiveSessionStore) GetSessionPlayerScore(
+	ctx context.Context, sessionID string, playerID int64,
+) (int, error) {
+	total, err := s.q.GetSessionPlayerScore(ctx, db.GetSessionPlayerScoreParams{
+		SessionID: sessionID,
+		PlayerID:  playerID,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to get session player score: %w", err)
+	}
+
+	return int(total), nil
+}
+
 // RecordAnswer records (or overwrites) a player's pick for the current
 // session question and, atomically, refreshes that player's last_seen_at to
 // the answer's timestamp. An answer is proof of liveness, so a player who just

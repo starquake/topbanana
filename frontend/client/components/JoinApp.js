@@ -185,10 +185,6 @@ export class JoinApp {
         // Cleared on the next pick. A 409 (window closed) is not an error: the
         // player still lands in the answered/waiting state.
         this.answerError = false;
-        // Hides the question image when its fetch fails. Reset on every genuine
-        // question change in syncQuestionFromState so a stale hide can't carry
-        // into the next question (the <img> is reused across state ticks).
-        this.imageError = false;
 
         // --- Between-rounds bar graph (MP-9 / #686) -------------------------
         // Rendered rows for the round_results / finished standings bar graph.
@@ -717,7 +713,6 @@ export class JoinApp {
             this.currentQuestionId = questionId;
             this.pickedOptionId = null;
             this.answerError = false;
-            this.imageError = false;
         }
 
         // Drive the countdown only while the question is open AND the player

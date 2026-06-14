@@ -78,8 +78,10 @@ test.describe('session-first live hosting', () => {
     // without re-entering a code.
     await host.getByTestId('start-now').click();
     await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByTestId('question-text')).toHaveText('What is 1+1?');
     await expect(page.getByTestId('question-options')).toBeVisible({ timeout: 10_000 });
+    // The live phone is an answer pad (#956): the question text lives on the
+    // big screen, so the distinguishing "two" option button stands in as the
+    // "the right question reached the player" signal.
     await expect(
       page.getByTestId('question-options').getByRole('button', { name: 'two' }),
     ).toBeEnabled();

@@ -294,7 +294,20 @@
                 <!-- Question: synchronized answer window. One pick, then the
                      answered/waiting state until the runner reveals. -->
                 <template x-if="!lobbyClosed && state && state.phase === 'question' && state.question">
-                    <div data-testid="question-view">
+                    <div data-testid="question-view" class="flex flex-col game-fill">
+                        <!-- HUD chips: Q n/total + the viewer's running score
+                             (mirrors the solo game's HUD). The question position +
+                             total ship on state.question; the player's own score
+                             on state.self.score. -->
+                        <div class="flex justify-end gap-2 mb-4">
+                            <span class="hud-chip">
+                                Q <span class="hud-chip-value" x-text="state.question.position"></span>/<span class="hud-chip-value" x-text="state.question.total"></span>
+                            </span>
+                            <span class="hud-chip">
+                                Score <span class="hud-chip-value" x-text="state.self ? state.self.score : 0"></span>
+                            </span>
+                        </div>
+
                         <!-- One bar, two phases (mirrors the solo game, #247):
                              while `revealing` is true it fills 0 -> 100 in cyan
                              during the read beat, then drains 100 -> 0 in accent
@@ -303,20 +316,11 @@
                                   :class="revealing ? 'progress-reveal' : 'progress-answer'"
                                   :value="questionProgress" max="100"></progress>
 
-                        <h2 class="mb-6 font-display text-2xl font-semibold text-text"
-                            data-testid="question-text"
-                            x-text="state.question.text"></h2>
-
-                        <!-- Shown when the live question has an attached image.
-                             imageError (reset per question in
-                             syncQuestionFromState) hides a broken image. -->
-                        <template x-if="state.question.imageUrl">
-                            <img :src="state.question.imageUrl" alt="" loading="lazy"
-                                 data-testid="question-image"
-                                 x-show="!imageError"
-                                 @error="imageError = true"
-                                 class="block mx-auto mb-6 w-auto max-w-full max-h-[28vh] object-contain rounded-lg">
-                        </template>
+                        <!-- The live phone is an answer pad; the question text
+                             and any media live on the shared big screen. -->
+                        <p class="text-center text-text-dim" data-testid="big-screen-hint">
+                            Look at the big screen for the question.
+                        </p>
 
                         <template x-if="answerError">
                             <div class="feedback-banner feedback-danger mb-4" role="alert" data-testid="answer-error">
@@ -324,53 +328,58 @@
                             </div>
                         </template>
 
-                        <!-- Read beat: the options stay hidden while `revealing`
-                             is true, so the player reads the question before the
-                             answer window opens. JoinApp flips `revealing` off
-                             when the read beat elapses. -->
-                        <p x-show="revealing" class="label-eyebrow text-center" data-testid="question-read-beat">
-                            Get ready
-                        </p>
+                        <!-- The answer area is pinned to the bottom of the screen
+                             (mt-auto in the game-fill column) so the buttons sit
+                             under the player's thumb, mirroring the solo game. -->
+                        <div class="mt-auto">
+                            <!-- Read beat: the options stay hidden while `revealing`
+                                 is true, so the player reads the question (shown on
+                                 the big screen) before the answer window opens.
+                                 JoinApp flips `revealing` off when it elapses. -->
+                            <p x-show="revealing" class="label-eyebrow text-center" data-testid="question-read-beat">
+                                Get ready
+                            </p>
 
-                        <div x-show="!revealing" class="flex flex-col gap-3" data-testid="question-options">
-                            <template x-for="(option, idx) in state.question.options" :key="option.id">
-                                <button type="button"
-                                        :class="optionStateClass(option, idx)"
-                                        :data-picked="pickedOptionId === option.id ? 'true' : 'false'"
-                                        :disabled="submitting || hasAnswered()"
-                                        @click="submitAnswer(option.id)"
-                                        x-text="option.text"></button>
+                            <div x-show="!revealing" class="answer-pad" data-testid="question-options">
+                                <template x-for="(option, idx) in state.question.options" :key="option.id">
+                                    <button type="button"
+                                            :class="optionStateClass(option, idx)"
+                                            :data-picked="pickedOptionId === option.id ? 'true' : 'false'"
+                                            :disabled="submitting || hasAnswered()"
+                                            @click="submitAnswer(option.id)"
+                                            x-text="option.text"></button>
+                                </template>
+                            </div>
+
+                            <!-- Announced for screen-reader users only; the
+                                 disabled tone-filled buttons already convey the
+                                 answered state visually. -->
+                            <template x-if="hasAnswered()">
+                                <p class="sr-only" role="status" data-testid="answered-waiting">
+                                    Answer locked in - waiting for everyone else...
+                                </p>
                             </template>
                         </div>
-
-                        <template x-if="hasAnswered()">
-                            <p class="mt-6 text-center text-text-dim" role="status" data-testid="answered-waiting">
-                                Answer locked in - waiting for everyone else...
-                            </p>
-                        </template>
                     </div>
                 </template>
 
                 <!-- Reveal: the correct answer is shown, with the player's own
                      pick flagged. No live countdown runs here. -->
                 <template x-if="!lobbyClosed && state && state.phase === 'reveal' && state.question">
-                    <div data-testid="reveal-view">
-                        <p class="label-eyebrow" data-testid="reveal-verdict"
+                    <div data-testid="reveal-view" class="flex flex-col game-fill">
+                        <div class="flex justify-end gap-2 mb-4">
+                            <span class="hud-chip">
+                                Q <span class="hud-chip-value" x-text="state.question.position"></span>/<span class="hud-chip-value" x-text="state.question.total"></span>
+                            </span>
+                            <span class="hud-chip">
+                                Score <span class="hud-chip-value" x-text="state.self ? state.self.score : 0"></span>
+                            </span>
+                        </div>
+
+                        <p class="label-eyebrow mb-6" data-testid="reveal-verdict"
                            x-text="pickWasCorrect() ? 'Correct!' : (hasAnswered() ? 'Not quite' : 'Time up')"></p>
-                        <h2 class="mb-6 mt-1 font-display text-2xl font-semibold text-text"
-                            x-text="state.question.text"></h2>
 
-                        <!-- Kept visible through reveal so the picture stays with
-                             the question while the answer is shown. -->
-                        <template x-if="state.question.imageUrl">
-                            <img :src="state.question.imageUrl" alt="" loading="lazy"
-                                 data-testid="question-image"
-                                 x-show="!imageError"
-                                 @error="imageError = true"
-                                 class="block mx-auto mb-6 w-auto max-w-full max-h-[28vh] object-contain rounded-lg">
-                        </template>
-
-                        <div class="flex flex-col gap-3" data-testid="reveal-options">
+                        <div class="answer-pad mt-auto" data-testid="reveal-options">
                             <template x-for="(option, idx) in state.question.options" :key="option.id">
                                 <button type="button"
                                         :class="optionStateClass(option, idx)"
