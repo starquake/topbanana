@@ -13,7 +13,7 @@ import { optionStateClass } from '../util/answerOptions.js';
 
 // JOIN_PATH_PATTERN matches /join/<code>, capturing the room code. The bare
 // /join entry (enter-code form) has no capture group, so the component falls
-// back to the typed-code phase there.
+// back to the typed-code step there.
 const JOIN_PATH_PATTERN = /^\/join\/([^/]+)\/?$/;
 
 // STATE_FAILURE_LIMIT is how many consecutive non-404 GET /state failures the
@@ -22,7 +22,7 @@ const JOIN_PATH_PATTERN = /^\/join\/([^/]+)\/?$/;
 // the player why the roster looks frozen. A single blip stays silent; three in
 // a row (each one an SSE tick or a foreground re-read apart) reads as a real
 // outage. A 404 is not counted here - it is the room-gone signal that flips
-// lobbyClosed instead.
+// sessionClosed instead.
 const STATE_FAILURE_LIMIT = 3;
 
 // SESSION_STORAGE_KEY holds the remembered { code } the player joined, so a
@@ -81,7 +81,7 @@ function readRememberedSession() {
 // (the solo client) and from the host big screen: it owns only the player's
 // own join form, lobby view, and synchronized question play.
 //
-// `phase` is the local join-flow stage:
+// `step` is the local join-flow stage:
 //   - 'code'  : no room code yet - the PC enter-code form.
 //   - 'name'  : code known, not joined - the display-name form.
 //   - 'lobby' : joined - everything from the lobby roster through play and the
@@ -102,14 +102,14 @@ function readRememberedSession() {
 export class JoinApp {
     constructor() {
         // 'code' | 'name' | 'lobby'.
-        this.phase = 'code';
+        this.step = 'code';
         // The room code the player is joining. Upper-cased for display; the
         // server is case-insensitive, but normalizing keeps the UI tidy and
         // the deep-link target consistent.
         this.code = '';
-        // Bound to the enter-code input on the 'code' phase.
+        // Bound to the enter-code input on the 'code' step.
         this.codeInput = '';
-        // Bound to the display-name input on the 'name' phase.
+        // Bound to the display-name input on the 'name' step.
         this.displayName = '';
         // The name the player joined with, shown in the lobby header. Comes
         // from the join/state response (the player's current
@@ -138,7 +138,7 @@ export class JoinApp {
         this.isReady = false;
         // Surfaces when the lobby state is gone (session ended / not a
         // participant) so the player isn't stranded on a frozen roster.
-        this.lobbyClosed = false;
+        this.sessionClosed = false;
         // The SSE subscription handle, closed on teardown and before re-open.
         this.eventSource = null;
         // The bound visibility/focus handler, wired once in init. Held on the
@@ -150,7 +150,7 @@ export class JoinApp {
         // logged-in player who has already chosen a custom name. Null for an
         // anonymous visitor, or a logged-in player still on an auto-petname -
         // both keep the name-entry form. When set, a known code skips the name
-        // phase and joins straight away under this name.
+        // step and joins straight away under this name.
         this.accountName = null;
 
         // --- In-game state (MP-7 / #684) -------------------------------------
@@ -228,7 +228,7 @@ export class JoinApp {
         // has failed STATE_FAILURE_LIMIT times in a row with a non-404 error
         // (a network drop or a 5xx), so the player knows why a stale roster
         // isn't updating. Cleared on the next successful read. A 404 is the
-        // distinct room-gone signal and flips lobbyClosed instead.
+        // distinct room-gone signal and flips sessionClosed instead.
         this.connectionTrouble = false;
         // Running count of consecutive non-404 GET /state failures, reset to 0
         // on any success.
@@ -368,7 +368,7 @@ export class JoinApp {
                 await this.autoJoin();
                 return;
             }
-            this.phase = 'name';
+            this.step = 'name';
         }
     }
 
@@ -381,7 +381,7 @@ export class JoinApp {
     async landInLobby(result) {
         this.myDisplayName = result.displayName;
         this.isReady = result.isReady;
-        this.phase = 'lobby';
+        this.step = 'lobby';
         this.leftSent = false;
         rememberSession(this.code);
         this.acquireWakeLock();
@@ -406,7 +406,7 @@ export class JoinApp {
                     return;
                 }
                 this.error = result.message;
-                this.phase = result.kind === 'notFound' ? 'code' : 'name';
+                this.step = result.kind === 'notFound' ? 'code' : 'name';
                 if (result.kind === 'notFound') this.codeInput = this.code;
                 return;
             }
@@ -457,7 +457,7 @@ export class JoinApp {
             void this.autoJoin();
             return;
         }
-        this.phase = 'name';
+        this.step = 'name';
     }
 
     // submitName claims the chosen name on the player's players row through the
@@ -491,7 +491,7 @@ export class JoinApp {
                 if (result.kind === 'notFound') {
                     // Send them back to fix the code rather than retyping a
                     // name against a room that doesn't exist.
-                    this.phase = 'code';
+                    this.step = 'code';
                     this.codeInput = this.code;
                 }
                 return;
@@ -503,13 +503,13 @@ export class JoinApp {
     }
 
     // enterClosedState routes the player to the terminal "this game is no
-    // longer available" view (#793). It is the same lobbyClosed surface a
+    // longer available" view (#793). It is the same sessionClosed surface a
     // mid-game session-gone read lands on: the lobby stage with the closed
     // banner and nothing else. No stream is opened and the remembered session
     // is cleared so a reload does not bounce back into a dead room.
     enterClosedState() {
-        this.phase = 'lobby';
-        this.lobbyClosed = true;
+        this.step = 'lobby';
+        this.sessionClosed = true;
         this.error = '';
         forgetSession();
     }
@@ -565,7 +565,7 @@ export class JoinApp {
 
     // refreshState performs the authoritative read. A null result (404) means
     // the session is gone or the viewer is no longer a participant; the
-    // component flips lobbyClosed and tears down the stream so the UI stops
+    // component flips sessionClosed and tears down the stream so the UI stops
     // polling a dead room. A thrown read (network drop, 5xx) leaves the prior
     // roster on screen and, after STATE_FAILURE_LIMIT in a row, surfaces the
     // connection-trouble banner (#795) while the next tick keeps retrying.
@@ -585,7 +585,7 @@ export class JoinApp {
             return;
         }
         if (state === null) {
-            this.lobbyClosed = true;
+            this.sessionClosed = true;
             this.releaseWakeLock();
             this.closeStream();
             this.clearQuestionTimer();
@@ -869,12 +869,12 @@ export class JoinApp {
     // and wake lock.
     handleVisible(event) {
         if (document.visibilityState !== 'visible') return;
-        if (this.phase !== 'lobby' || !this.code) return;
+        if (this.step !== 'lobby' || !this.code) return;
         if (event && event.type === 'pageshow' && event.persisted) {
             this.resumeAfterRestore();
             return;
         }
-        if (this.lobbyClosed) return;
+        if (this.sessionClosed) return;
         this.refreshState();
         if (this.streamDropped()) {
             this.subscribe();
@@ -890,7 +890,7 @@ export class JoinApp {
     // read, which distinguishes the two: a 404 flips the terminal closed view,
     // while a transient failure leaves the roster and retries on the next tick.
     async resumeAfterRestore() {
-        this.lobbyClosed = false;
+        this.sessionClosed = false;
         const resumed = await this.tryResume(this.code);
         if (resumed) return;
         await this.refreshState();
@@ -954,7 +954,7 @@ export class JoinApp {
         this.clearQuestionTimer();
         this.clearStartTimer();
         this.releaseWakeLock();
-        if (this.phase === 'lobby' && this.code && !this.leftSent) {
+        if (this.step === 'lobby' && this.code && !this.leftSent) {
             this.leftSent = true;
             sessionService.leave(this.code);
         }
@@ -1085,7 +1085,7 @@ export class JoinApp {
     // finished - keeps the header.
     inActiveQuestion() {
         const phase = this.state ? this.state.phase : null;
-        return this.phase === 'lobby' && (phase === 'question' || phase === 'reveal');
+        return this.step === 'lobby' && (phase === 'question' || phase === 'reveal');
     }
 
     // currentQuestion returns the live question off the authoritative state, or

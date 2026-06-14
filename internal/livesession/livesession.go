@@ -1,6 +1,6 @@
 // Package livesession contains the hosted live-session domain (MP-1 /
 // #678): a host opens a session for a live quiz, players join anonymously
-// and toggle ready, and one read returns the authoritative lobby state.
+// and toggle ready, and one read returns the authoritative session state.
 //
 // It is named livesession rather than session to avoid colliding with
 // internal/session, which is the auth cookie manager - an unrelated
@@ -207,19 +207,18 @@ type Player struct {
 	LastSeenAt  time.Time
 }
 
-// LobbyState is the authoritative read returned by
-// [Service.GetLobbyState]: the session's phase, its roster, and enough
-// quiz metadata for a surface to render the lobby without a second
-// round-trip. This is the frozen DTO contract the later FE/BE phases
-// (MP-2..MP-5) build on; the JSON wire shape is pinned in the clientapi
-// handler.
+// SessionState is the authoritative read returned by
+// [Service.GetSessionState]: the session's phase, its roster, and enough
+// quiz metadata for a surface to render without a second round-trip. This
+// is the frozen DTO contract the later FE/BE phases (MP-2..MP-5) build on;
+// the JSON wire shape is pinned in the clientapi handler.
 //
 // CurrentQuestion and Answers are populated only in the gameplay phases
 // (round_intro onward); they are nil in the lobby. Correctness on the
 // question's options and on each answer is surfaced ONLY in the reveal
 // phase - before reveal the question carries option text without a correct
 // flag and the answers carry player+order only, never which pick was right.
-type LobbyState struct {
+type SessionState struct {
 	Session         *Session
 	Quiz            *quiz.Quiz
 	CurrentQuestion *quiz.Question
@@ -241,7 +240,7 @@ type LobbyState struct {
 	// round_intro phase; nil in every other phase.
 	CurrentRound *RoundInfo
 	// ViewerScore is the viewing player's cumulative score for the current game,
-	// computed for the playerID passed to [Service.GetLobbyState]. It backs the
+	// computed for the playerID passed to [Service.GetSessionState]. It backs the
 	// live answer-pad HUD's score chip, which needs the running score during the
 	// question and reveal phases - exactly where Standings is nil - so it is
 	// populated across the in-game phases (round_intro onward) rather than read
@@ -1112,13 +1111,13 @@ func (s *Service) SubmitAnswer(
 	return nil
 }
 
-// GetLobbyState returns the authoritative lobby state for the session
+// GetSessionState returns the authoritative session state for the session
 // identified by join code: the session (with its roster) plus the quiz
-// metadata the lobby renders. Participant-gated: only a player on the
+// metadata the surface renders. Participant-gated: only a player on the
 // roster (or the host) may read it, so a stranger with the code cannot
 // enumerate the room. Returns [ErrSessionNotFound] for an unknown code and
 // [ErrNotParticipant] when the caller has not joined.
-func (s *Service) GetLobbyState(ctx context.Context, joinCode string, playerID int64) (*LobbyState, error) {
+func (s *Service) GetSessionState(ctx context.Context, joinCode string, playerID int64) (*SessionState, error) {
 	sess, err := s.store.GetSessionByJoinCode(ctx, normalizeJoinCode(joinCode))
 	if err != nil {
 		return nil, fmt.Errorf(errGetSessionByCodeFmt, err)
@@ -1128,7 +1127,7 @@ func (s *Service) GetLobbyState(ctx context.Context, joinCode string, playerID i
 		return nil, ErrNotParticipant
 	}
 
-	state := &LobbyState{Session: sess, Revealed: sess.Phase == PhaseReveal}
+	state := &SessionState{Session: sess, Revealed: sess.Phase == PhaseReveal}
 	if state.Quiz, err = s.lobbyQuiz(ctx, sess); err != nil {
 		return nil, err
 	}
@@ -1161,7 +1160,7 @@ type ViewAuthorization struct {
 }
 
 // AuthorizeView resolves a join code to its canonical code, current phase, and
-// host flag, gated to participants exactly like [GetLobbyState]: only the host
+// host flag, gated to participants exactly like [GetSessionState]: only the host
 // or a roster player passes. The SSE event handler (MP-2 / #679) calls this
 // before subscribing so a stranger who knows or guesses the code cannot
 // open an event stream and learn the session exists - it returns
@@ -1280,7 +1279,7 @@ func (s *Service) armRoomForHost(ctx context.Context, joinCode string, hostPlaye
 	return sess, nil
 }
 
-// lobbyQuiz loads the room's quiz for the lobby state, or (nil, nil) for an empty
+// lobbyQuiz loads the room's quiz for the session state, or (nil, nil) for an empty
 // room (no quiz picked yet, #836): the lobby renders the staging state and the
 // in-game / standings / round-intro populators are all no-ops in that phase.
 //
@@ -1291,7 +1290,7 @@ func (s *Service) lobbyQuiz(ctx context.Context, sess *Session) (*quiz.Quiz, err
 	}
 	qz, err := s.quizzes.GetQuiz(ctx, *sess.QuizID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get quiz for lobby state: %w", err)
+		return nil, fmt.Errorf("failed to get quiz for session state: %w", err)
 	}
 
 	return qz, nil
@@ -1324,7 +1323,7 @@ func (s *Service) currentQuizQuestion(ctx context.Context, sess *Session) (*quiz
 // correctness; the handler still strips the option correct flag too. Leaves
 // the fields nil in the lobby / round_intro / finished phases, which have no
 // live question.
-func (s *Service) populateInGame(ctx context.Context, state *LobbyState) error {
+func (s *Service) populateInGame(ctx context.Context, state *SessionState) error {
 	sess := state.Session
 	if sess.CurrentQuestionID == nil {
 		return nil
@@ -1363,7 +1362,7 @@ func (s *Service) populateInGame(ctx context.Context, state *LobbyState) error {
 // Ranking stays by cumulative total in every phase. Leaves Standings nil in
 // every other phase, which has no ranking to show. Ranks are stamped 1-indexed
 // over the store's best-first ordering.
-func (s *Service) populateStandings(ctx context.Context, state *LobbyState) error {
+func (s *Service) populateStandings(ctx context.Context, state *SessionState) error {
 	sess := state.Session
 	switch {
 	case sess.Phase == PhaseRoundResults && sess.CurrentRoundID != nil:
@@ -1433,7 +1432,7 @@ func (s *Service) finishedStandings(ctx context.Context, sess *Session) ([]*Stan
 // Leaves CurrentRound nil in every other phase, and when the current round id
 // resolves to no round (a deleted round mid-game), so the surface falls back to
 // its generic copy rather than naming a stale round.
-func (s *Service) populateRoundIntro(ctx context.Context, state *LobbyState) error {
+func (s *Service) populateRoundIntro(ctx context.Context, state *SessionState) error {
 	sess := state.Session
 	if sess.Phase != PhaseRoundIntro || sess.CurrentRoundID == nil || sess.QuizID == nil {
 		return nil
@@ -1468,7 +1467,7 @@ func (s *Service) populateRoundIntro(ctx context.Context, state *LobbyState) err
 // score is read from GetSessionPlayerScore, the same per-game answer-score
 // aggregation the standings totals use, so the HUD and the round-results board
 // agree.
-func (s *Service) populateViewerScore(ctx context.Context, state *LobbyState, playerID int64) error {
+func (s *Service) populateViewerScore(ctx context.Context, state *SessionState, playerID int64) error {
 	sess := state.Session
 	if sess.Phase == PhaseLobby {
 		return nil

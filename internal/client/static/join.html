@@ -67,7 +67,7 @@
          (#826, #831). The join shell keeps the default px-5 gutter. */}}
     <main class="player-shell max-w-[480px] mx-auto">
         {{/* x-cloak hides the shell until Alpine boots and resolves which
-             phase to paint, so the deferred-Alpine window doesn't flash the
+             step to paint, so the deferred-Alpine window doesn't flash the
              enter-code form on a /join/{code} deep link before init() runs. */}}
         <div x-data="joinApp" x-cloak>
             <!-- Shared player header (#844): brand mark on the left, the
@@ -101,8 +101,8 @@
                 </template>
             </header>
 
-            <!-- Enter-code phase: typed-code form for a PC join (no QR). -->
-            <div x-show="phase === 'code'">
+            <!-- Enter-code step: typed-code form for a PC join (no QR). -->
+            <div x-show="step === 'code'">
                 <h2 class="mb-2 font-display text-2xl font-semibold text-text">Join a game</h2>
                 <p class="mb-6 text-text-dim">Enter the room code shown on the screen.</p>
                 <form @submit.prevent="submitCode()" class="flex flex-col gap-4">
@@ -127,8 +127,8 @@
                 </form>
             </div>
 
-            <!-- Name phase: pick a display name, then join. -->
-            <div x-show="phase === 'name'">
+            <!-- Name step: pick a display name, then join. -->
+            <div x-show="step === 'name'">
                 <h2 class="mb-2 font-display text-2xl font-semibold text-text">
                     Joining <span class="font-mono text-accent" x-text="code"></span>
                 </h2>
@@ -169,8 +169,8 @@
                  driven by the server phase on state.phase off the SSE -> GET
                  state loop. The runner owns phase transitions; the player only
                  submits one answer per question. -->
-            <div x-show="phase === 'lobby'">
-                <template x-if="lobbyClosed">
+            <div x-show="step === 'lobby'">
+                <template x-if="sessionClosed">
                     <div class="feedback-banner feedback-danger mb-6" role="alert" data-testid="lobby-closed">
                         This game is no longer available.
                     </div>
@@ -180,16 +180,16 @@
                      non-404 state reads fail the player sees why the roster
                      looks frozen, while the component keeps retrying off every
                      SSE tick and foreground return. Cleared on the next good
-                     read. A 404 flips lobbyClosed instead, so this never stacks
+                     read. A 404 flips sessionClosed instead, so this never stacks
                      with the closed banner above. -->
-                <template x-if="!lobbyClosed && connectionTrouble">
+                <template x-if="!sessionClosed && connectionTrouble">
                     <div class="feedback-banner feedback-danger mb-6" role="status" data-testid="connection-trouble">
                         Connection problem, retrying...
                     </div>
                 </template>
 
                 <!-- Lobby roster + ready toggle. -->
-                <template x-if="!lobbyClosed && state && state.phase === 'lobby'">
+                <template x-if="!sessionClosed && state && state.phase === 'lobby'">
                     <div data-testid="lobby-view">
                         <!-- Quiz name is the visual anchor of the lobby (#888):
                              prominent h1-scale title on top, room + signed-in
@@ -284,7 +284,7 @@
                      reads "Round N of M" so the first round never says "next
                      round"; the title and optional summary come from the round
                      metadata, with a generic fallback if it is missing. -->
-                <template x-if="!lobbyClosed && state && state.phase === 'round_intro'">
+                <template x-if="!sessionClosed && state && state.phase === 'round_intro'">
                     <div class="text-center py-16" data-testid="round-intro">
                         <p class="label-eyebrow" data-testid="round-intro-eyebrow" x-text="roundEyebrow()"></p>
                         {{template "round-intro-card" .}}
@@ -293,7 +293,7 @@
 
                 <!-- Question: synchronized answer window. One pick, then the
                      answered/waiting state until the runner reveals. -->
-                <template x-if="!lobbyClosed && state && state.phase === 'question' && state.question">
+                <template x-if="!sessionClosed && state && state.phase === 'question' && state.question">
                     <div data-testid="question-view" class="flex flex-col game-fill">
                         <!-- HUD chips: Q n/total + the viewer's running score
                              (mirrors the solo game's HUD). The question position +
@@ -365,7 +365,7 @@
 
                 <!-- Reveal: the correct answer is shown, with the player's own
                      pick flagged. No live countdown runs here. -->
-                <template x-if="!lobbyClosed && state && state.phase === 'reveal' && state.question">
+                <template x-if="!sessionClosed && state && state.phase === 'reveal' && state.question">
                     <div data-testid="reveal-view" class="flex flex-col game-fill">
                         <div class="flex justify-end gap-2 mb-4">
                             <span class="hud-chip">
@@ -411,7 +411,7 @@
                      its own wording - and so the round_results marker is absent
                      (not just hidden) on the final screen, which is the #749
                      single-final-screen guarantee. -->
-                <div x-show="!lobbyClosed && showsStandings()">
+                <div x-show="!sessionClosed && showsStandings()">
                     <!-- round_results: a between-rounds screen, more to come. -->
                     <template x-if="state && state.phase === 'round_results'">
                         <div data-testid="round-results">
@@ -462,7 +462,7 @@
                     </template>
                 </div>
 
-                <template x-if="!lobbyClosed && !state">
+                <template x-if="!sessionClosed && !state">
                     <p class="text-text-dim">Loading lobby...</p>
                 </template>
 

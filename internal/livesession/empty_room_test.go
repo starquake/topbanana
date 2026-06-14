@@ -114,11 +114,11 @@ func TestService_CreateEmptyRoom(t *testing.T) {
 		t.Errorf("empty room GameSeq = %d, want %d", got, want)
 	}
 
-	// The lobby state read works for a quiz-less room: the host is a participant,
+	// The session state read works for a quiz-less room: the host is a participant,
 	// and Quiz is nil (nothing to render yet).
-	state, err := h.service.GetLobbyState(ctx, sess.JoinCode, hostID)
+	state, err := h.service.GetSessionState(ctx, sess.JoinCode, hostID)
 	if err != nil {
-		t.Fatalf("GetLobbyState (empty room) err = %v, want nil", err)
+		t.Fatalf("GetSessionState (empty room) err = %v, want nil", err)
 	}
 	if state.Quiz != nil {
 		t.Errorf("empty room lobby Quiz = %v, want nil", state.Quiz)
