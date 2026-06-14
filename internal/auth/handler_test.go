@@ -11,6 +11,7 @@ import (
 	"time"
 
 	. "github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/mailer"
 	"github.com/starquake/topbanana/internal/session"
@@ -297,9 +298,10 @@ func TestHandleRegisterSubmit_DuplicateEmail(t *testing.T) {
 	}
 
 	sender := &recordingSender{}
+	tracker := bgtasks.New()
 	handler := HandleRegisterSubmit(
 		discardLogger(), nil, players, session.New([]byte("k"), true),
-		RegisterDeps{Mailer: sender},
+		RegisterDeps{Mailer: sender, Tasks: tracker},
 	)
 	rec := postForm(t, handler, "/register", url.Values{
 		"display_name":     {"bob"},
@@ -313,15 +315,8 @@ func TestHandleRegisterSubmit_DuplicateEmail(t *testing.T) {
 		t.Errorf("body leaked account existence; body=%.300q", got)
 	}
 
-	// The owner-notification send fires on a detached goroutine; give it
-	// up to a second to land. The mailer is the in-process recordingSender
-	// so the wait is just goroutine scheduling, not network.
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if len(sender.Sent()) > 0 {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
+	if err := tracker.Wait(t.Context()); err != nil {
+		t.Fatalf("tracker.Wait err = %v, want nil", err)
 	}
 	sent := sender.Sent()
 	if got, want := len(sent), 1; got != want {
@@ -1151,6 +1146,7 @@ func TestHandleLoginSubmit_UnverifiedEmail_RefusesAndResends(t *testing.T) {
 	tokens := &recordingVerifyTokenStore{}
 	sender := &recordingSender{}
 	sessions := session.New([]byte("k"), true)
+	tracker := bgtasks.New()
 	handler := HandleLoginSubmit(discardLogger(), nil, LoginDeps{
 		Players:       players,
 		Sessions:      sessions,
@@ -1159,6 +1155,7 @@ func TestHandleLoginSubmit_UnverifiedEmail_RefusesAndResends(t *testing.T) {
 		Tokens:        tokens,
 		ResendLimiter: NewVerifyResendLimiter(time.Minute, nil),
 		BaseURL:       "https://topbanana.example",
+		Tasks:         tracker,
 	})
 
 	rec := postForm(t, handler, "/login", url.Values{
@@ -1185,16 +1182,8 @@ func TestHandleLoginSubmit_UnverifiedEmail_RefusesAndResends(t *testing.T) {
 		}
 	}
 
-	// The resend goroutine fires off the request goroutine; give it
-	// up to a second to land before asserting. The mailer is the
-	// in-process recordingSender so the wait is just goroutine
-	// scheduling, not network.
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if len(sender.Sent()) > 0 {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
+	if err := tracker.Wait(t.Context()); err != nil {
+		t.Fatalf("tracker.Wait err = %v, want nil", err)
 	}
 	sent := sender.Sent()
 	if got, want := len(sent), 1; got != want {
@@ -1229,6 +1218,7 @@ func TestHandleLoginSubmit_VerifiedEmail_SignsIn(t *testing.T) {
 
 	tokens := &recordingVerifyTokenStore{}
 	sender := &recordingSender{}
+	tracker := bgtasks.New()
 	handler := HandleLoginSubmit(discardLogger(), nil, LoginDeps{
 		Players:       players,
 		Sessions:      session.New([]byte("k"), true),
@@ -1237,6 +1227,7 @@ func TestHandleLoginSubmit_VerifiedEmail_SignsIn(t *testing.T) {
 		Tokens:        tokens,
 		ResendLimiter: NewVerifyResendLimiter(time.Minute, nil),
 		BaseURL:       "https://topbanana.example",
+		Tasks:         tracker,
 	})
 
 	rec := postForm(t, handler, "/login", url.Values{
@@ -1247,8 +1238,12 @@ func TestHandleLoginSubmit_VerifiedEmail_SignsIn(t *testing.T) {
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
 	}
-	// Wait briefly to catch any rogue async send before asserting.
-	time.Sleep(20 * time.Millisecond)
+	// Tracker counts every dispatched goroutine. A verified login takes
+	// the redirect branch before Tasks.Go, so Wait completes immediately
+	// and any post-Wait send would be a real bug, not a scheduling race.
+	if err := tracker.Wait(t.Context()); err != nil {
+		t.Fatalf("tracker.Wait err = %v, want nil", err)
+	}
 	if got, want := len(sender.Sent()), 0; got != want {
 		t.Errorf("sender.Sent() len = %d, want %d (verified login should not resend)", got, want)
 	}

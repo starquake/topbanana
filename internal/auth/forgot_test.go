@@ -9,6 +9,7 @@ import (
 	"time"
 
 	. "github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/session"
@@ -74,7 +75,7 @@ func TestHandleForgotSubmit_AlwaysFlashesGenericSuccess(t *testing.T) {
 				t.Fatalf("CreatePlayer err = %v, want nil", err)
 			}
 
-			rec := runForgotPOST(t, stores.Players, &recordingResetTokenStore{}, &recordingSender{},
+			rec, _ := runForgotPOST(t, stores.Players, &recordingResetTokenStore{}, &recordingSender{},
 				NewVerifyResendLimiter(time.Minute, nil), tc.identifier)
 
 			if got, want := rec.Code, http.StatusSeeOther; got != want {
@@ -99,16 +100,15 @@ func TestHandleForgotSubmit_RealMatchDispatchesEmail(t *testing.T) {
 	tokens := &recordingResetTokenStore{}
 	sender := &recordingSender{}
 
-	rec := runForgotPOST(t, stores.Players, tokens, sender,
+	rec, tracker := runForgotPOST(t, stores.Players, tokens, sender,
 		NewVerifyResendLimiter(time.Minute, nil), "alice")
 	if got, want := rec.Code, http.StatusSeeOther; got != want {
 		t.Fatalf("status = %d, want %d", got, want)
 	}
 
-	// The dispatch goroutine fires async; wait briefly for it to land.
-	waitFor(t, func() bool {
-		return len(sender.Sent()) >= 1 && len(tokens.Created()) >= 1
-	})
+	if err := tracker.Wait(t.Context()); err != nil {
+		t.Fatalf("tracker.Wait err = %v, want nil", err)
+	}
 
 	sent := sender.Sent()
 	if got, want := len(sent), 1; got != want {
@@ -126,11 +126,15 @@ func TestHandleForgotSubmit_UnknownAccountSendsNoMail(t *testing.T) {
 	tokens := &recordingResetTokenStore{}
 	sender := &recordingSender{}
 
-	runForgotPOST(t, stores.Players, tokens, sender,
+	_, tracker := runForgotPOST(t, stores.Players, tokens, sender,
 		NewVerifyResendLimiter(time.Minute, nil), "ghost")
 
-	// Wait long enough that an async dispatch would have landed.
-	time.Sleep(50 * time.Millisecond)
+	// Tracker counts every dispatched goroutine. An unknown identifier
+	// must return before Tasks.Go, so Wait completes immediately and
+	// any post-Wait send would be a real bug, not a scheduling race.
+	if err := tracker.Wait(t.Context()); err != nil {
+		t.Fatalf("tracker.Wait err = %v, want nil", err)
+	}
 	if got, want := len(sender.Sent()), 0; got != want {
 		t.Errorf("sender.Sent() len = %d, want %d (unknown account must not dispatch)", got, want)
 	}
@@ -149,11 +153,11 @@ func TestHandleForgotSubmit_RateLimitedBlocksDispatch(t *testing.T) {
 	sender := &recordingSender{}
 	limiter := NewVerifyResendLimiter(time.Minute, nil)
 
-	first := runForgotPOST(t, stores.Players, tokens, sender, limiter, "alice")
+	first, _ := runForgotPOST(t, stores.Players, tokens, sender, limiter, "alice")
 	if got, want := first.Code, http.StatusSeeOther; got != want {
 		t.Fatalf("first status = %d, want %d", got, want)
 	}
-	second := runForgotPOST(t, stores.Players, tokens, sender, limiter, "alice")
+	second, _ := runForgotPOST(t, stores.Players, tokens, sender, limiter, "alice")
 	if got, want := second.Code, http.StatusSeeOther; got != want {
 		t.Errorf("second status = %d, want %d", got, want)
 	}
@@ -183,13 +187,14 @@ func runForgotPOST(
 	sender VerifyEmailSender,
 	limiter *VerifyResendLimiter,
 	identifier string,
-) *httptest.ResponseRecorder {
+) (*httptest.ResponseRecorder, *bgtasks.Tracker) {
 	t.Helper()
 	sessions := session.New([]byte("k"), true)
 	flash := NewSignedFlash([]byte("k"), true, ForgotFlashCookieName, ForgotFlashCookiePath)
+	tracker := bgtasks.New()
 	handler := HandleForgotSubmit(
 		discardLogger(), players, sessions,
-		ForgotDispatchDeps{Tokens: tokens, Sender: sender, BaseURL: "https://topbanana.example"},
+		ForgotDispatchDeps{Tokens: tokens, Sender: sender, BaseURL: "https://topbanana.example", Tasks: tracker},
 		limiter, flash,
 	)
 
@@ -200,7 +205,7 @@ func runForgotPOST(
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	return rec
+	return rec, tracker
 }
 
 func extractSessionCookie(rec *httptest.ResponseRecorder) *http.Cookie {
@@ -211,16 +216,4 @@ func extractSessionCookie(rec *httptest.ResponseRecorder) *http.Cookie {
 	}
 
 	return nil
-}
-
-func waitFor(t *testing.T, pred func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if pred() {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatal("waitFor: predicate never became true")
 }
