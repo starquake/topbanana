@@ -700,6 +700,21 @@
     .btn-answer-tone-c { @apply border-accent hover:bg-accent-soft text-accent; }
     .btn-answer-tone-d { @apply border-orange hover:bg-orange-soft text-orange; }
 
+    /* The live answer pad lays its buttons out in a 2x2 grid that mirrors the
+     * shared big screen. The taller per-tile minimum gives wrapped text room to
+     * breathe across two or three lines and matches the touch target a thumb
+     * actually reaches for on a phone. Scoped to the live wrapper so the solo
+     * client (single column on phone) keeps its tighter geometry. */
+    .answer-pad {
+        @apply grid grid-cols-2 gap-2.5;
+    }
+    .answer-pad .btn-answer,
+    .answer-pad .btn-answer-correct,
+    .answer-pad .btn-answer-wrong,
+    .answer-pad .btn-answer-dim {
+        @apply min-h-[88px] py-3 text-center justify-center;
+    }
+
     /* Per-option feedback skin (#233). Applied after the player
      * submits so the buttons reveal what was right. Filled bg
      * (vs the tone variants' bordered-only look) so the post-pick

@@ -340,7 +340,7 @@
                                 Get ready
                             </p>
 
-                            <div x-show="!revealing" class="flex flex-col gap-3" data-testid="question-options">
+                            <div x-show="!revealing" class="answer-pad" data-testid="question-options">
                                 <template x-for="(option, idx) in state.question.options" :key="option.id">
                                     <button type="button"
                                             :class="optionStateClass(option, idx)"
@@ -376,7 +376,7 @@
                         <p class="label-eyebrow mb-6" data-testid="reveal-verdict"
                            x-text="pickWasCorrect() ? 'Correct!' : (hasAnswered() ? 'Not quite' : 'Time up')"></p>
 
-                        <div class="flex flex-col gap-3 mt-auto" data-testid="reveal-options">
+                        <div class="answer-pad mt-auto" data-testid="reveal-options">
                             <template x-for="(option, idx) in state.question.options" :key="option.id">
                                 <button type="button"
                                         :class="optionStateClass(option, idx)"
