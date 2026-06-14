@@ -169,7 +169,7 @@ func deleteMedia(
 		t.Fatalf("delete status = %d, want %d; body=%q", got, want, rb)
 	}
 	if wantStatus == http.StatusSeeOther {
-		if got, want := resp.Header.Get("Location"), fmt.Sprintf("/admin/quizzes/%d", quizID); got != want {
+		if got, want := resp.Header.Get("Location"), fmt.Sprintf("/admin/quizzes/%d#images", quizID); got != want {
 			t.Errorf("delete redirect Location = %q, want %q", got, want)
 		}
 	}
