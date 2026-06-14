@@ -365,9 +365,9 @@
             <!-- Gameplay view: question, countdown, answer buttons,
                  per-question feedback.
                  The inner wrapper is a flex column with a viewport-
-                 tall minimum so the answer buttons (`mt-auto` below)
-                 anchor to the bottom of the screen instead of
-                 floating just under the question. svh keeps the
+                 tall minimum so the flex-1 image spacer below pushes
+                 the answer buttons to the bottom of the screen instead
+                 of floating just under the question. svh keeps the
                  layout steady when mobile browser chrome shows /
                  hides. The subtracted value covers the <main>'s
                  top + bottom padding (py-10 → 2 × 2.5rem;
@@ -403,76 +403,42 @@
                                    2xl:text-[clamp(3rem,3.5vw,5.5rem)]"
                             x-text="question.text"></h2>
 
-                        <!-- Post-answer verdict eyebrow (#767). Mirrors the
-                             live surface's quieter reveal: a small eyebrow line
-                             carries Correct! / Not quite / Time up while the
-                             per-option highlight (#233) shows the right answer.
-                             Sits BELOW the question so appearing after an answer
-                             doesn't push the question down — the mt-auto buttons
-                             absorb it in the flex gap. role="status" +
-                             aria-live="assertive" so screen-reader users hear
-                             the verdict the moment it lands; empty until feedback
-                             is set, so it announces nothing during the answer
-                             window. -->
-                        <p class="label-eyebrow mb-6" role="status" aria-live="assertive"
+                        <!-- Verdict for screen readers only (#767): the
+                             per-option highlight (#233) shows correct/wrong
+                             visually, so this is sr-only. It announces the result
+                             without taking layout space, so it does not shift the
+                             buttons when it appears. -->
+                        <p class="sr-only" role="status" aria-live="assertive"
                            data-testid="reveal-verdict"
                            x-show="!!feedback"
                            x-text="feedback ? (feedback.correct ? 'Correct!' : (feedback.timedOut ? 'Time up' : 'Not quite')) : ''"></p>
 
-                        <!-- Shown only when the question has an attached image,
-                             served by GET /media/{id} (its authz mirrors the play
-                             surface). imageError hides a broken image and is reset
-                             per question so a stale hide can't leak into the next. -->
-                        <template x-if="question.imageUrl">
-                            <img :src="question.imageUrl" alt="" loading="lazy"
-                                 data-testid="question-image"
-                                 x-show="!imageError"
-                                 @error="imageError = true"
-                                 class="block mx-auto mb-4 lg:mb-8 w-auto max-w-full max-h-[18vh] lg:max-h-[36vh] object-contain rounded-lg">
-                        </template>
+                        <!-- The attached image sits centered in the flexible space
+                             between the question and the buttons. The flex-1 spacer
+                             also anchors the buttons to the bottom, so no mt-auto is
+                             needed below. -->
+                        <div class="flex-1 min-h-0 flex items-center justify-center">
+                            <template x-if="currentQuestion() && currentQuestion().imageUrl">
+                                {{template "question-image" .}}
+                            </template>
+                        </div>
 
-                        <!-- The button container stays visible during
-                             feedback so the per-option styling (correct
-                             / wrong / dim) can reveal the right answer
-                             after a wrong pick — see #233. The buttons
-                             remain in the DOM; their click handlers are
-                             guarded by the feedback gate inside
-                             submitAnswer, and the disabled attribute
-                             prevents focus-and-enter activation while
-                             feedback is shown. optionStateClass picks
-                             the per-button class based on whether the
-                             option is the player's pick, one of the
-                             correct ones, or neither.
-                             Hidden during the pre-answer reveal (#247)
-                             so the player isn't tempted to click before
-                             they've actually had time to read the
-                             question.
-                             `mt-auto` keeps the buttons anchored to
-                             the bottom of the gameplay flex column so
-                             they sit consistently at the bottom of the
-                             viewport across questions, regardless of
-                             how tall the question text or image are. -->
                         <!-- Retry banner (#179): shown when the previous
                              submitAnswer POST threw and we re-armed the
-                             countdown. Sits above the buttons grid so
-                             the next click happens within the same eye
-                             line. Cleared on the next click or when
+                             countdown. Cleared on the next click or when
                              nextQuestion resets state. -->
                         <div x-show="submitError && !feedback"
                              role="alert"
-                             class="feedback-banner feedback-danger mb-3 mt-auto">
+                             class="feedback-banner feedback-danger mb-3">
                             Couldn't submit your answer — please try again.
                         </div>
 
-                        <!-- Single column on phone; 2×2 grid on landscape
-                             tablet / desktop (#253) so the buttons get
-                             bigger tiles and a Jackbox-style layout.
-                             `mt-auto` only applies when the retry banner
-                             above is hidden — otherwise the banner takes
-                             the bottom-anchoring role so the two stay
-                             grouped. -->
+                        <!-- Single column on phone; 2x2 grid on landscape
+                             tablet / desktop (#253). Hidden during the
+                             pre-answer beat (#247); buttons stay disabled
+                             during feedback so the per-option reveal (#233)
+                             can show the answer without resizing. -->
                         <div class="grid grid-cols-1 lg:grid-cols-2 gap-2.5 lg:gap-4"
-                             :class="{ 'mt-auto': !submitError || !!feedback }"
                              x-show="!revealing">
                             <template x-for="(option, idx) in question.options" :key="option.id">
                                 <button :class="optionStateClass(option, idx)"

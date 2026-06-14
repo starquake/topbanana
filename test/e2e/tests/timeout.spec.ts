@@ -63,13 +63,12 @@ test('timing out a question shows the Time up verdict and the rest of the quiz s
     { timeout: PROGRESS_DRAIN_BUDGET_MS },
   );
 
-  // The quieter post-answer reveal (#767) carries the time-out
-  // verdict in the small eyebrow line: on a timeout the synthesized
-  // feedback is `timedOut`, so the eyebrow reads "Time up". It stays
-  // on screen for the whole feedback pause until the auto-advance.
+  // The post-answer verdict (#767) is screen-reader-only on the solo surface:
+  // on a timeout the synthesized feedback is `timedOut`, so it announces "Time
+  // up" while the per-option highlight shows the answer visually. It is in the
+  // DOM (not visible) for the whole feedback pause until the auto-advance.
   const verdict = page.getByTestId('reveal-verdict');
-  await expect(verdict).toBeVisible({ timeout: SETTLE_MS });
-  await expect(verdict).toHaveText('Time up');
+  await expect(verdict).toHaveText('Time up', { timeout: SETTLE_MS });
 
   // Answer buttons are gone while feedback is shown; the option that was
   // visible above must not be clickable now. Use the visibility check to
