@@ -423,7 +423,7 @@
                                      data-testid="question-image"
                                      x-show="!imageError"
                                      @error="imageError = true"
-                                     class="block mx-auto w-auto max-w-full max-h-[18vh] lg:max-h-[36vh] object-contain rounded-lg">
+                                     class="block mx-auto w-auto max-w-full max-h-[24vh] lg:max-h-[36vh] object-contain rounded-lg">
                             </template>
                         </div>
 
@@ -437,12 +437,13 @@
                             Couldn't submit your answer — please try again.
                         </div>
 
-                        <!-- Single column on phone; 2x2 grid on landscape
-                             tablet / desktop (#253). Hidden during the
-                             pre-answer beat (#247); buttons stay disabled
-                             during feedback so the per-option reveal (#233)
-                             can show the answer without resizing. -->
-                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-2.5 lg:gap-4"
+                        <!-- 2x2 grid that matches the live answer pad and the
+                             host big screen, so the three play surfaces read as
+                             one family. Hidden during the pre-answer beat (#247);
+                             buttons stay disabled during feedback so the
+                             per-option reveal (#233) can show the answer without
+                             resizing. -->
+                        <div class="answer-pad lg:gap-4"
                              x-show="!revealing">
                             <template x-for="(option, idx) in question.options" :key="option.id">
                                 <button :class="optionStateClass(option, idx)"
