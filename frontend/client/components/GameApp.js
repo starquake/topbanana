@@ -5,6 +5,7 @@ import { runAnim } from '@shared/anim.js';
 import { clockOffsetFromServerNow, serverTime } from '@shared/serverClock.js';
 import { optionStateClass } from '../util/answerOptions.js';
 import { openShareDialog } from '@shared/share.js';
+import { preloadImage } from '@shared/preloadImage.js';
 
 // PLAY_PATH_PATTERN matches /play/<anything>-<integer>; the integer suffix
 // is the quiz ID.
@@ -607,6 +608,10 @@ export class GameApp {
         this.roundItem = null;
         this.question = item;
         if (typeof item.position === 'number') this.lastQuestionPosition = item.position;
+        // Fire-and-forget so the read beat starts immediately while the
+        // browser fetches the bytes in parallel; by the time the answer
+        // window opens, the <img> below renders from cache.
+        if (item.imageUrl) void preloadImage(item.imageUrl);
         this.startRevealCountdown();
     }
 
