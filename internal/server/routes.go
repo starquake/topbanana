@@ -20,6 +20,8 @@ import (
 	"github.com/starquake/topbanana/internal/host"
 	"github.com/starquake/topbanana/internal/livesession"
 	"github.com/starquake/topbanana/internal/mailer"
+	"github.com/starquake/topbanana/internal/media"
+	"github.com/starquake/topbanana/internal/mediahttp"
 	"github.com/starquake/topbanana/internal/profile"
 	"github.com/starquake/topbanana/internal/session"
 	"github.com/starquake/topbanana/internal/store"
@@ -62,10 +64,25 @@ func addRoutes(
 
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
 	addAdminRoutes(mux, logger, stores, gameDeps, sessions, csrfMgr, emailDeps, playerDeps)
+	addMediaRoutes(mux, logger, stores, sessions, csrfMgr, media.NewService(stores.Media, cfg.MediaDir, logger))
 	addProfileRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
 	addAPIRoutes(mux, logger, stores, gameService, realtime, sessions, cfg)
 	addHostRoutes(mux, logger, stores, sessions, csrfMgr, realtime.SessionService)
+	addClientAndPublicRoutes(mux, logger, stores, sessions, csrfMgr, cfg)
+}
 
+// addClientAndPublicRoutes registers the player SPA shell, static assets, PWA
+// manifest + service worker, health/version probes, and the public home +
+// quizzes pages. Split out of addRoutes so that function stays under revive's
+// function-length cap as the route surface grows.
+func addClientAndPublicRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	stores *store.Stores,
+	sessions *session.Manager,
+	csrfMgr *csrf.Manager,
+	cfg *config.Config,
+) {
 	// Client
 	shell := client.NewShellHandlers(cfg, stores.Quizzes, logger)
 	// The SPA root and the per-quiz share URL both go through the shell
@@ -521,6 +538,56 @@ func addAdminRoutes(
 
 	addAdminQuestionRoutes(mux, logger, stores, csrfMW, requireGameHost, csrfMgr)
 	addAdminRoundRoutes(mux, logger, stores, csrfMW, requireGameHost, csrfMgr)
+}
+
+// addMediaRoutes registers the media slice's HTTP surface (#936 slice 2): the
+// host/admin upload endpoint and the two public-entry serving endpoints.
+//
+// The upload route (POST /admin/quizzes/{quizID}/media) mirrors the admin
+// question POSTs but swaps MaxFormSizeMiddleware (1 MB, urlencoded) for
+// MaxMultipartFormMiddleware: the upload is multipart and its body must be
+// capped well above the 10 MB image limit. MaxMultipartFormMiddleware also
+// parses the multipart form so the CSRF token (a form field) is visible to
+// csrfMW, which reads it from PostForm; without that parse a multipart POST has
+// no PostForm token and would always 403. requireGameHost gates to Host/Admin;
+// the handler adds the per-quiz creator-or-admin edit gate.
+//
+// The serving routes (GET /media/{id} and GET /media/{id}/thumb) resolve the
+// viewer read-only via AuthenticatedSessionPlayer - NOT EnsurePlayer - so a
+// cacheable image response never mints a players row or attaches a Set-Cookie (a
+// Set-Cookie on a Cache-Control: public response is a shared-cache footgun). The
+// private-quiz gate only needs to know whether an authenticated viewer is
+// present. Authorization mirrors the owning quiz's own access rule, decided
+// inside the handler by the quiz's visibility: public/unlisted to anyone,
+// private to an authenticated viewer.
+func addMediaRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	stores *store.Stores,
+	sessions *session.Manager,
+	csrfMgr *csrf.Manager,
+	svc *media.Service,
+) {
+	requireGameHost := func(h http.Handler) http.Handler {
+		return auth.RequireGameHost(auth.RequireVerifiedEmail(h), stores.Players, sessions, csrfMgr, logger)
+	}
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/media",
+		mediahttp.MaxMultipartFormMiddleware(csrfMgr.Middleware(requireGameHost(
+			mediahttp.HandleMediaUpload(logger, svc, stores.Quizzes),
+		))),
+	)
+
+	// The serve routes resolve the viewer from the session WITHOUT minting a
+	// player row or setting a cookie (unlike EnsurePlayer): a media response is
+	// cacheable, so it must not carry a Set-Cookie. The private-quiz gate only
+	// needs to know whether an authenticated viewer is present, which
+	// AuthenticatedSessionPlayer answers read-only.
+	viewer := func(r *http.Request) (*auth.Player, bool) {
+		return auth.AuthenticatedSessionPlayer(r, stores.Players, sessions)
+	}
+	mux.Handle("GET /media/{id}", mediahttp.HandleMediaServe(logger, svc, stores.Quizzes, viewer))
+	mux.Handle("GET /media/{id}/thumb", mediahttp.HandleMediaThumb(logger, svc, stores.Quizzes, viewer))
 }
 
 // addAdminQuestionRoutes registers the question CRUD + reorder routes
