@@ -307,6 +307,17 @@
                             data-testid="question-text"
                             x-text="state.question.text"></h2>
 
+                        <!-- Shown when the live question has an attached image.
+                             imageError (reset per question in
+                             syncQuestionFromState) hides a broken image. -->
+                        <template x-if="state.question.imageUrl">
+                            <img :src="state.question.imageUrl" alt="" loading="lazy"
+                                 data-testid="question-image"
+                                 x-show="!imageError"
+                                 @error="imageError = true"
+                                 class="block mx-auto mb-6 w-auto max-w-full max-h-[28vh] object-contain rounded-lg">
+                        </template>
+
                         <template x-if="answerError">
                             <div class="feedback-banner feedback-danger mb-4" role="alert" data-testid="answer-error">
                                 Couldn't submit your answer - tap again to retry.
@@ -348,6 +359,16 @@
                            x-text="pickWasCorrect() ? 'Correct!' : (hasAnswered() ? 'Not quite' : 'Time up')"></p>
                         <h2 class="mb-6 mt-1 font-display text-2xl font-semibold text-text"
                             x-text="state.question.text"></h2>
+
+                        <!-- Kept visible through reveal so the picture stays with
+                             the question while the answer is shown. -->
+                        <template x-if="state.question.imageUrl">
+                            <img :src="state.question.imageUrl" alt="" loading="lazy"
+                                 data-testid="question-image"
+                                 x-show="!imageError"
+                                 @error="imageError = true"
+                                 class="block mx-auto mb-6 w-auto max-w-full max-h-[28vh] object-contain rounded-lg">
+                        </template>
 
                         <div class="flex flex-col gap-3" data-testid="reveal-options">
                             <template x-for="(option, idx) in state.question.options" :key="option.id">

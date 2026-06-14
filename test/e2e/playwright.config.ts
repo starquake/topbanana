@@ -164,6 +164,10 @@ const workerServer = (workerIndex: number) => {
       HOST: '127.0.0.1',
       PORT: String(port),
       DB_URI: `file:${dbPath}?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate`,
+      // Write uploaded media under the run-scoped data dir (global-teardown
+      // removes it) so the media-upload specs don't litter ./media in the repo
+      // root, which is where the server defaults.
+      MEDIA_DIR: join(dataDir, `media-${workerIndex}`),
       SESSION_KEY,
       REGISTRATION_ENABLED: 'true',
       // The invite flow (#318) builds an absolute accept-invite link from

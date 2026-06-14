@@ -192,6 +192,7 @@ type quizGetQuestionResponse struct {
 	ID       int64                   `json:"id"`
 	Text     string                  `json:"text"`
 	Position int                     `json:"position"`
+	ImageURL string                  `json:"imageUrl,omitempty"`
 	Options  []quizGetOptionResponse `json:"options"`
 }
 
@@ -202,6 +203,20 @@ type quizGetResponse struct {
 	Description string                    `json:"description"`
 	CreatedAt   time.Time                 `json:"createdAt"`
 	Questions   []quizGetQuestionResponse `json:"questions"`
+}
+
+// decimalBase is the radix used when formatting ids as strings.
+const decimalBase = 10
+
+// mediaURL returns the serving path for a question's attached image, or ""
+// when the question has no image (mediaID nil), which the wire structs omit
+// via omitempty.
+func mediaURL(mediaID *int64) string {
+	if mediaID == nil {
+		return ""
+	}
+
+	return "/media/" + strconv.FormatInt(*mediaID, decimalBase)
 }
 
 // quizGetQuestions maps a quiz's questions + options onto the play
@@ -218,6 +233,7 @@ func quizGetQuestions(qz *quiz.Quiz) []quizGetQuestionResponse {
 			ID:       qs.ID,
 			Text:     qs.Text,
 			Position: qs.Position,
+			ImageURL: mediaURL(qs.MediaID),
 			Options:  opts,
 		})
 	}
@@ -798,6 +814,7 @@ type nextQuestionResponse struct {
 	Type      string               `json:"type"`
 	ID        int64                `json:"id"`
 	Text      string               `json:"text"`
+	ImageURL  string               `json:"imageUrl,omitempty"`
 	Options   []nextOptionResponse `json:"options"`
 	StartedAt time.Time            `json:"startedAt"`
 	ExpiredAt time.Time            `json:"expiredAt"`
@@ -955,6 +972,7 @@ func writeQuestionItem(
 		Type:      string(game.ItemTypeQuestion),
 		ID:        gq.QuizQuestion.ID,
 		Text:      gq.QuizQuestion.Text,
+		ImageURL:  mediaURL(gq.QuizQuestion.MediaID),
 		Options:   resOptions,
 		StartedAt: gq.StartedAt,
 		ExpiredAt: gq.ExpiredAt,
@@ -1283,7 +1301,7 @@ func HandleGameResults(logger *slog.Logger, service *game.Service) http.Handler 
 		}
 		var winner string
 		if results.Winner != 0 {
-			winner = strconv.FormatInt(results.Winner, 10)
+			winner = strconv.FormatInt(results.Winner, decimalBase)
 		}
 		res := resultsResponse{
 			GameID:       gameID,

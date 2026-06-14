@@ -148,6 +148,19 @@
                         x-text="question.text"
                         data-question-text></h2>
 
+                    {{/* Question image, when one is attached. The whole block is
+                         shown in both question and reveal, so this stays with the
+                         question through the answer reveal. imageError (reset on a
+                         genuine question change in applyState) hides a broken
+                         image. */}}
+                    <template x-if="question.imageUrl">
+                        <img :src="question.imageUrl" alt="" loading="lazy"
+                             data-testid="question-image"
+                             x-show="!imageError"
+                             @error="imageError = true"
+                             class="block mx-auto shrink-0 w-auto max-w-full max-h-[clamp(8rem,30vh,18rem)] object-contain rounded-lg">
+                    </template>
+
                     {{/* Read beat: the options and answered-order area stay
                          hidden while `revealing` is true (the question phase
                          before answers open), so the room reads the question

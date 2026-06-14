@@ -419,10 +419,17 @@
                            x-show="!!feedback"
                            x-text="feedback ? (feedback.correct ? 'Correct!' : (feedback.timedOut ? 'Time up' : 'Not quite')) : ''"></p>
 
-                        <!-- No question image is rendered yet. A question now
-                             references an uploaded library image by media_id
-                             (#937), but the client API does not ship it and the
-                             play screen does not render it; that is #938. -->
+                        <!-- Shown only when the question has an attached image,
+                             served by GET /media/{id} (its authz mirrors the play
+                             surface). imageError hides a broken image and is reset
+                             per question so a stale hide can't leak into the next. -->
+                        <template x-if="question.imageUrl">
+                            <img :src="question.imageUrl" alt="" loading="lazy"
+                                 data-testid="question-image"
+                                 x-show="!imageError"
+                                 @error="imageError = true"
+                                 class="block mx-auto mb-6 lg:mb-8 w-auto max-w-full max-h-[28vh] lg:max-h-[36vh] object-contain rounded-lg">
+                        </template>
 
                         <!-- The button container stays visible during
                              feedback so the per-option styling (correct
