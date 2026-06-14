@@ -294,7 +294,7 @@
                 <!-- Question: synchronized answer window. One pick, then the
                      answered/waiting state until the runner reveals. -->
                 <template x-if="!lobbyClosed && state && state.phase === 'question' && state.question">
-                    <div data-testid="question-view">
+                    <div data-testid="question-view" class="flex flex-col game-fill">
                         <!-- One bar, two phases (mirrors the solo game, #247):
                              while `revealing` is true it fills 0 -> 100 in cyan
                              during the read beat, then drains 100 -> 0 in accent
@@ -309,41 +309,46 @@
                             </div>
                         </template>
 
-                        <!-- Read beat: the options stay hidden while `revealing`
-                             is true, so the player reads the question before the
-                             answer window opens. JoinApp flips `revealing` off
-                             when the read beat elapses. -->
-                        <p x-show="revealing" class="label-eyebrow text-center" data-testid="question-read-beat">
-                            Get ready
-                        </p>
+                        <!-- The answer area is pinned to the bottom of the screen
+                             (mt-auto in the game-fill column) so the buttons sit
+                             under the player's thumb, mirroring the solo game. -->
+                        <div class="mt-auto">
+                            <!-- Read beat: the options stay hidden while `revealing`
+                                 is true, so the player reads the question (shown on
+                                 the big screen) before the answer window opens.
+                                 JoinApp flips `revealing` off when it elapses. -->
+                            <p x-show="revealing" class="label-eyebrow text-center" data-testid="question-read-beat">
+                                Get ready
+                            </p>
 
-                        <div x-show="!revealing" class="flex flex-col gap-3" data-testid="question-options">
-                            <template x-for="(option, idx) in state.question.options" :key="option.id">
-                                <button type="button"
-                                        :class="optionStateClass(option, idx)"
-                                        :data-picked="pickedOptionId === option.id ? 'true' : 'false'"
-                                        :disabled="submitting || hasAnswered()"
-                                        @click="submitAnswer(option.id)"
-                                        x-text="option.text"></button>
+                            <div x-show="!revealing" class="flex flex-col gap-3" data-testid="question-options">
+                                <template x-for="(option, idx) in state.question.options" :key="option.id">
+                                    <button type="button"
+                                            :class="optionStateClass(option, idx)"
+                                            :data-picked="pickedOptionId === option.id ? 'true' : 'false'"
+                                            :disabled="submitting || hasAnswered()"
+                                            @click="submitAnswer(option.id)"
+                                            x-text="option.text"></button>
+                                </template>
+                            </div>
+
+                            <template x-if="hasAnswered()">
+                                <p class="mt-6 text-center text-text-dim" role="status" data-testid="answered-waiting">
+                                    Answer locked in - waiting for everyone else...
+                                </p>
                             </template>
                         </div>
-
-                        <template x-if="hasAnswered()">
-                            <p class="mt-6 text-center text-text-dim" role="status" data-testid="answered-waiting">
-                                Answer locked in - waiting for everyone else...
-                            </p>
-                        </template>
                     </div>
                 </template>
 
                 <!-- Reveal: the correct answer is shown, with the player's own
                      pick flagged. No live countdown runs here. -->
                 <template x-if="!lobbyClosed && state && state.phase === 'reveal' && state.question">
-                    <div data-testid="reveal-view">
+                    <div data-testid="reveal-view" class="flex flex-col game-fill">
                         <p class="label-eyebrow mb-6" data-testid="reveal-verdict"
                            x-text="pickWasCorrect() ? 'Correct!' : (hasAnswered() ? 'Not quite' : 'Time up')"></p>
 
-                        <div class="flex flex-col gap-3" data-testid="reveal-options">
+                        <div class="flex flex-col gap-3 mt-auto" data-testid="reveal-options">
                             <template x-for="(option, idx) in state.question.options" :key="option.id">
                                 <button type="button"
                                         :class="optionStateClass(option, idx)"
