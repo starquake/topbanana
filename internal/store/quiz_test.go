@@ -2151,10 +2151,32 @@ func TestQuizStore_DeleteQuestion(t *testing.T) {
 	})
 }
 
-// SQLite's CURRENT_TIMESTAMP has 1-second granularity, so the bump tests
-// sleep just over a second between the baseline snapshot and the mutation
-// to make sure the timestamp can advance.
-const updatedAtBumpDelay = 1100 * time.Millisecond
+// rewindQuizUpdatedAt walks a quiz's updated_at one minute backwards so
+// the bump-and-ordering tests can assert strict timestamp ordering
+// without paying for SQLite's 1-second CURRENT_TIMESTAMP granularity in
+// real wall-clock sleeps.
+func rewindQuizUpdatedAt(t *testing.T, db *sql.DB, quizID int64) time.Time {
+	t.Helper()
+
+	if _, err := db.ExecContext(
+		t.Context(),
+		`UPDATE quizzes SET updated_at = datetime(updated_at, '-60 seconds') WHERE id = ?`,
+		quizID,
+	); err != nil {
+		t.Fatalf("failed to rewind updated_at for quiz %d: %v", quizID, err)
+	}
+
+	var rewound time.Time
+	if err := db.QueryRowContext(
+		t.Context(),
+		`SELECT updated_at FROM quizzes WHERE id = ?`,
+		quizID,
+	).Scan(&rewound); err != nil {
+		t.Fatalf("failed to read rewound updated_at for quiz %d: %v", quizID, err)
+	}
+
+	return rewound
+}
 
 func TestQuizStore_UpdateQuiz_BumpsUpdatedAt(t *testing.T) {
 	t.Parallel()
@@ -2167,8 +2189,7 @@ func TestQuizStore_UpdateQuiz_BumpsUpdatedAt(t *testing.T) {
 		t.Fatalf("failed to create quiz: %v", err)
 	}
 
-	before := original.UpdatedAt
-	time.Sleep(updatedAtBumpDelay)
+	before := rewindQuizUpdatedAt(t, db, original.ID)
 
 	original.Title += " edited"
 	if err := quizStore.UpdateQuiz(t.Context(), original); err != nil {
@@ -2196,8 +2217,7 @@ func TestQuizStore_CreateQuestion_BumpsParentQuizUpdatedAt(t *testing.T) {
 		t.Fatalf("failed to create quiz: %v", err)
 	}
 
-	before := parent.UpdatedAt
-	time.Sleep(updatedAtBumpDelay)
+	before := rewindQuizUpdatedAt(t, db, parent.ID)
 
 	newQuestion := &quiz.Question{
 		QuizID:   parent.ID,
@@ -2233,8 +2253,7 @@ func TestQuizStore_UpdateQuestion_BumpsParentQuizUpdatedAt(t *testing.T) {
 		t.Fatalf("failed to create quiz: %v", err)
 	}
 
-	before := parent.UpdatedAt
-	time.Sleep(updatedAtBumpDelay)
+	before := rewindQuizUpdatedAt(t, db, parent.ID)
 
 	question := parent.Questions[0]
 	question.Text += " edited"
@@ -2263,8 +2282,7 @@ func TestQuizStore_DeleteOption_BumpsParentQuizUpdatedAt(t *testing.T) {
 		t.Fatalf("failed to create quiz: %v", err)
 	}
 
-	before := parent.UpdatedAt
-	time.Sleep(updatedAtBumpDelay)
+	before := rewindQuizUpdatedAt(t, db, parent.ID)
 
 	// Drop one option from the first question and update - this routes
 	// through UpdateQuestion, which deletes orphaned options and so should
@@ -2296,7 +2314,9 @@ func TestQuizStore_ListQuizzes_OrderedByUpdatedAtDesc(t *testing.T) {
 		t.Fatalf("failed to create first quiz: %v", err)
 	}
 
-	time.Sleep(updatedAtBumpDelay)
+	// Rewind first so the next insert wins the most-recent slot even when
+	// both rows land in the same CURRENT_TIMESTAMP second.
+	rewindQuizUpdatedAt(t, db, first.ID)
 
 	second := &quiz.Quiz{Title: "Second", Slug: "second", Description: "second", CreatedByPlayerID: seededAdminID}
 	if err := quizStore.CreateQuiz(t.Context(), second); err != nil {
@@ -2318,8 +2338,9 @@ func TestQuizStore_ListQuizzes_OrderedByUpdatedAtDesc(t *testing.T) {
 		t.Errorf("quizzes[1].Title = %q, want %q", got, want)
 	}
 
-	// Edit the older quiz and confirm it floats to the top.
-	time.Sleep(updatedAtBumpDelay)
+	// Edit the older quiz and confirm it floats to the top. Rewind second
+	// so the about-to-fire CURRENT_TIMESTAMP on first beats it.
+	rewindQuizUpdatedAt(t, db, second.ID)
 	first.Title = "First Edited"
 	if updateErr := quizStore.UpdateQuiz(t.Context(), first); updateErr != nil {
 		t.Fatalf("failed to update first quiz: %v", updateErr)
