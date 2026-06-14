@@ -250,9 +250,9 @@ func TestService_LogsLiveGameNightFlow(t *testing.T) {
 	// Drive into the question phase and submit an accepted answer.
 	h.clock.advance(runnerCfg.RoundIntroBeat)
 	h.tick(ctx)
-	state, err := h.service.GetLobbyState(ctx, h.code, h.players[0])
+	state, err := h.service.GetSessionState(ctx, h.code, h.players[0])
 	if err != nil {
-		t.Fatalf("GetLobbyState err = %v, want nil", err)
+		t.Fatalf("GetSessionState err = %v, want nil", err)
 	}
 	if state.CurrentQuestion == nil {
 		t.Fatalf("no current question after round intro beat (phase=%q)", state.Session.Phase)

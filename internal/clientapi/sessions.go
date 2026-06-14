@@ -320,7 +320,7 @@ func HandleSessionLeave(service *livesession.Service) http.Handler {
 	})
 }
 
-// sessionPlayerResponse is one roster row in the lobby state. playerId is
+// sessionPlayerResponse is one roster row in the session state. playerId is
 // the underlying players.id so a surface can correlate the host (hostId
 // below) and highlight the viewer's own row; displayName + isReady drive
 // the lobby list.
@@ -464,7 +464,7 @@ type sessionQuestionResponse struct {
 	CorrectOptionIDs  []int64                 `json:"correctOptionIds"`
 }
 
-// HandleSessionState returns the authoritative lobby state. Participant-
+// HandleSessionState returns the authoritative session state. Participant-
 // gated: only a roster player or the host may read it, so a stranger with
 // the code cannot enumerate the room. Returns 404 for an unknown code or a
 // non-participant.
@@ -482,7 +482,7 @@ func HandleSessionState(service *livesession.Service) http.Handler {
 		}
 		logger = logger.With(slog.Int64("player", player.ID))
 
-		state, err := service.GetLobbyState(ctx, r.PathValue("code"), player.ID)
+		state, err := service.GetSessionState(ctx, r.PathValue("code"), player.ID)
 		if err != nil {
 			if errors.Is(err, livesession.ErrSessionNotFound) || errors.Is(err, livesession.ErrNotParticipant) {
 				http.NotFound(w, r)
@@ -500,9 +500,9 @@ func HandleSessionState(service *livesession.Service) http.Handler {
 	})
 }
 
-// newSessionStateResponse projects the domain lobby state onto the frozen
+// newSessionStateResponse projects the domain session state onto the frozen
 // wire shape.
-func newSessionStateResponse(state *livesession.LobbyState) sessionStateResponse {
+func newSessionStateResponse(state *livesession.SessionState) sessionStateResponse {
 	players := make([]sessionPlayerResponse, 0, len(state.Session.Players))
 	for _, p := range state.Session.Players {
 		players = append(players, sessionPlayerResponse{
@@ -532,7 +532,7 @@ func newSessionStateResponse(state *livesession.LobbyState) sessionStateResponse
 // Returns nil in the lobby, where no game has scored yet, so the field is
 // omitted from the JSON; in-game it carries the score even at 0 so the HUD can
 // always render the chip once a game is running.
-func newSessionSelfResponse(state *livesession.LobbyState) *sessionSelfResponse {
+func newSessionSelfResponse(state *livesession.SessionState) *sessionSelfResponse {
 	if state.Session.Phase == livesession.PhaseLobby {
 		return nil
 	}
@@ -543,7 +543,7 @@ func newSessionSelfResponse(state *livesession.LobbyState) *sessionSelfResponse 
 // newSessionQuizResponse projects the room's quiz onto the wire shape, or nil for
 // an empty room with no quiz picked yet (#836), so the field is omitted from the
 // JSON rather than dereferencing a nil quiz.
-func newSessionQuizResponse(state *livesession.LobbyState) *sessionQuizResponse {
+func newSessionQuizResponse(state *livesession.SessionState) *sessionQuizResponse {
 	if state.Quiz == nil {
 		return nil
 	}
@@ -558,7 +558,7 @@ func newSessionQuizResponse(state *livesession.LobbyState) *sessionQuizResponse 
 // newSessionRoundResponse projects the round_intro round onto the wire shape.
 // Returns nil outside the round_intro phase (and when the round id resolved to
 // no round), so the field is omitted from the JSON.
-func newSessionRoundResponse(state *livesession.LobbyState) *sessionRoundResponse {
+func newSessionRoundResponse(state *livesession.SessionState) *sessionRoundResponse {
 	if state.CurrentRound == nil {
 		return nil
 	}
@@ -574,7 +574,7 @@ func newSessionRoundResponse(state *livesession.LobbyState) *sessionRoundRespons
 // newSessionStandingsResponse projects the domain standings onto the wire
 // shape. Returns nil outside the phases that carry standings (round_results
 // and finished), so the field is omitted from the JSON.
-func newSessionStandingsResponse(state *livesession.LobbyState) []sessionStandingResponse {
+func newSessionStandingsResponse(state *livesession.SessionState) []sessionStandingResponse {
 	if len(state.Standings) == 0 {
 		return nil
 	}
@@ -610,7 +610,7 @@ func questionPosition(qz *quiz.Quiz, questionID int64) int {
 // newSessionQuestionResponse projects the live question view onto the wire
 // shape, enforcing the no-spoiler guarantee: correctness (per-option and
 // per-answer) is included only when state.Revealed is true.
-func newSessionQuestionResponse(state *livesession.LobbyState) *sessionQuestionResponse {
+func newSessionQuestionResponse(state *livesession.SessionState) *sessionQuestionResponse {
 	if state.CurrentQuestion == nil {
 		return nil
 	}

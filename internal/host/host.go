@@ -2,7 +2,7 @@
 // session (MP-3 / #680): a full-screen big screen that shows the join QR and
 // room code, the live player roster with ready states, and the host start
 // control. The page is host-gated (RequireGameHost wraps the route) and
-// reads the authoritative lobby state through the same service the JSON API
+// reads the authoritative session state through the same service the JSON API
 // uses; the live updates run off the SSE tick -> GET /api/sessions/{code}/state
 // contract, driven by host-bigscreen.js.
 package host
@@ -100,7 +100,7 @@ func NewHandlers(
 
 // BigScreen handles GET /host/{code}: it renders the host big screen for a
 // session the caller hosts. The route is host-gated; this handler additionally
-// enforces that the caller may view the session (GetLobbyState returns
+// enforces that the caller may view the session (GetSessionState returns
 // ErrNotParticipant for a host who does not own it), so one host cannot open
 // another host's room by guessing a code. An unknown code or a foreign
 // session both 404 so the code stays opaque.
@@ -116,7 +116,7 @@ func (h *Handlers) BigScreen(w http.ResponseWriter, r *http.Request) {
 	}
 
 	code := r.PathValue("code")
-	state, err := h.service.GetLobbyState(ctx, code, player.ID)
+	state, err := h.service.GetSessionState(ctx, code, player.ID)
 	if err != nil {
 		if errors.Is(err, livesession.ErrSessionNotFound) || errors.Is(err, livesession.ErrNotParticipant) {
 			http.NotFound(w, r)

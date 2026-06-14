@@ -539,9 +539,9 @@ func TestRunner_FinishedStandingsCarryLastRoundScore(t *testing.T) {
 		t.Fatalf("phase after final reveal = %q, want %q", got, want)
 	}
 
-	state, err := h.service.GetLobbyState(ctx, h.code, scorer)
+	state, err := h.service.GetSessionState(ctx, h.code, scorer)
 	if err != nil {
-		t.Fatalf("GetLobbyState err = %v, want nil", err)
+		t.Fatalf("GetSessionState err = %v, want nil", err)
 	}
 	scorerStanding := findRunnerStanding(t, state.Standings, scorer)
 	slackerStanding := findRunnerStanding(t, state.Standings, slacker)
@@ -1018,9 +1018,9 @@ func assertQuestionWindow(t *testing.T, sess *Session, issuedAt time.Time) {
 // cross-referencing the quiz - the test knows option index 0 is correct.
 func correctOptionID(ctx context.Context, t *testing.T, service *Service, code string, viewer int64) int64 {
 	t.Helper()
-	state, err := service.GetLobbyState(ctx, code, viewer)
+	state, err := service.GetSessionState(ctx, code, viewer)
 	if err != nil {
-		t.Fatalf("GetLobbyState err = %v, want nil", err)
+		t.Fatalf("GetSessionState err = %v, want nil", err)
 	}
 	if state.CurrentQuestion == nil {
 		t.Fatal("no current question in state")
@@ -1039,9 +1039,9 @@ func assertNoCorrectnessBeforeReveal(
 	ctx context.Context, t *testing.T, service *Service, code string, players []int64,
 ) {
 	t.Helper()
-	state, err := service.GetLobbyState(ctx, code, players[0])
+	state, err := service.GetSessionState(ctx, code, players[0])
 	if err != nil {
-		t.Fatalf("GetLobbyState err = %v, want nil", err)
+		t.Fatalf("GetSessionState err = %v, want nil", err)
 	}
 	if state.Revealed {
 		t.Fatal("state reports Revealed in the question phase")
@@ -1070,9 +1070,9 @@ func assertRevealScores(
 	question *Session,
 ) {
 	t.Helper()
-	state, err := service.GetLobbyState(ctx, code, players[0])
+	state, err := service.GetSessionState(ctx, code, players[0])
 	if err != nil {
-		t.Fatalf("GetLobbyState err = %v, want nil", err)
+		t.Fatalf("GetSessionState err = %v, want nil", err)
 	}
 	if !state.Revealed {
 		t.Fatal("state does not report Revealed in the reveal phase")
@@ -1148,9 +1148,9 @@ func (h *runnerHarness) playSingleQuestionGame(t *testing.T, answerers []int64) 
 	}
 
 	// Read the final standings off the intermission state.
-	state, err := h.service.GetLobbyState(ctx, h.code, h.players[0])
+	state, err := h.service.GetSessionState(ctx, h.code, h.players[0])
 	if err != nil {
-		t.Fatalf("GetLobbyState err = %v, want nil", err)
+		t.Fatalf("GetSessionState err = %v, want nil", err)
 	}
 
 	return state.Standings

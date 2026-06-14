@@ -135,7 +135,7 @@ func TestHandleSessionState_LogLineInheritsRequestScopedFields(t *testing.T) {
 	ctx := handlers.WithLogger(t.Context(), reqLogger)
 	ctx = withPlayer(ctx, hostID)
 
-	// Close the DB so GetLobbyState fails, driving the writeInternalError
+	// Close the DB so GetSessionState fails, driving the writeInternalError
 	// branch that logs through the request-scoped, player-bound logger.
 	if cerr := env.db.Close(); cerr != nil {
 		t.Fatalf("closing test DB: %v", cerr)
