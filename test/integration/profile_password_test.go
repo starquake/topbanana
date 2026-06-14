@@ -8,9 +8,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/starquake/topbanana/internal/auth"
 )
 
 // TestProfilePassword_Integration drives the full /profile/password
@@ -24,6 +21,10 @@ func TestProfilePassword_Integration(t *testing.T) {
 
 	ctx, srv := startServer(t, map[string]string{
 		"REGISTRATION_ENABLED": "true",
+		// Shrink the per-IP login limiter (#494) so the multiple
+		// successive logins this test performs from the same localhost
+		// peer do not each wait out the 3s production cooldown.
+		"LOGIN_COOLDOWN": "1ms",
 	})
 
 	displayName := "pw-change-admin"
@@ -126,10 +127,6 @@ func TestProfilePassword_Integration(t *testing.T) {
 		// BEFORE we rotate. Its cookie carries the pre-rotation
 		// session_version stamp; the rotation must invalidate it.
 		other := authClient(t)
-		// Earlier subtests left the localhost-peer login-limiter
-		// bucket hot; let the 3s cooldown (#494) elapse before the
-		// next /login POST or this one gets served as 429.
-		time.Sleep(auth.LoginCooldown() + 100*time.Millisecond)
 		loc := loginForRedirect(ctx, t, other, srv.BaseURL, displayName, originalPassword)
 		if got, want := loc, "/admin/quizzes"; got != want {
 			t.Fatalf("second client pre-rotation login Location = %q, want %q", got, want)
@@ -171,8 +168,6 @@ func TestProfilePassword_Integration(t *testing.T) {
 		}
 
 		// Old password must no longer work.
-		// Wait out the login-limiter cooldown again before the next /login.
-		time.Sleep(auth.LoginCooldown() + 100*time.Millisecond)
 		probeOld := authClient(t)
 		token := fetchCSRFToken(ctx, t, probeOld, srv.BaseURL+"/login")
 		oldStatus := postLoginRaw(ctx, t, probeOld, srv.BaseURL, displayName, originalPassword, token)
@@ -181,7 +176,6 @@ func TestProfilePassword_Integration(t *testing.T) {
 		}
 
 		// New password must work.
-		time.Sleep(auth.LoginCooldown() + 100*time.Millisecond)
 		probeNew := authClient(t)
 		loc = loginForRedirect(ctx, t, probeNew, srv.BaseURL, displayName, updatedPassword)
 		if got, want := loc, "/admin/quizzes"; got != want {
