@@ -23,6 +23,7 @@ import { runAnim } from '@shared/anim.js';
 import { clockOffsetFromServerNow, serverTime } from '@shared/serverClock.js';
 import { startQuestionCountdown } from '@shared/countdown.js';
 import { startStartCountdown, formatCountdown } from '@shared/startCountdown.js';
+import { preloadImage } from '@shared/preloadImage.js';
 import {
     buildStandingsRows,
     animateStandingsBars,
@@ -235,6 +236,11 @@ function hostBigScreen(joinCode, hasQuiz) {
             if (questionId !== this.lastQuestionId) {
                 this.lastQuestionId = questionId;
                 this.imageError = false;
+                // Fetch the bytes during the read beat so the picture
+                // paints from cache the moment the <img> mounts.
+                if (this.question && this.question.imageUrl) {
+                    void preloadImage(this.question.imageUrl);
+                }
             }
             this.round = state.round ?? null;
 
