@@ -289,14 +289,16 @@
                 <ul class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                     {{range .Images}}
                         <li class="group relative">
-                            <a href="/media/{{.ID}}" target="_blank" rel="noopener"
-                               class="block aspect-square overflow-hidden rounded-lg border border-border-soft bg-surface hover:border-accent focus-visible:outline-none focus-visible:shadow-focus">
+                            <button type="button"
+                                    data-image-viewer-open="/media/{{.ID}}"
+                                    aria-label="View image {{.ID}} full size"
+                                    class="block w-full p-0 aspect-square overflow-hidden rounded-lg border border-border-soft bg-surface cursor-pointer hover:border-accent focus-visible:outline-none focus-visible:shadow-focus">
                                 <img src="/media/{{.ID}}/thumb"
                                      alt="Quiz image {{.ID}}"
                                      loading="lazy"
                                      width="{{.Width}}" height="{{.Height}}"
                                      class="h-full w-full object-cover">
-                            </a>
+                            </button>
                             <button type="button" aria-label="Delete image {{.ID}}"
                                     onclick="openModal('modal-delete-media-{{.ID}}')"
                                     class="absolute top-1.5 right-1.5 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border-soft bg-bg/80 text-text-dim opacity-0 transition hover:bg-danger hover:text-text focus-visible:opacity-100 focus-visible:outline-none focus-visible:shadow-focus group-hover:opacity-100">
@@ -305,6 +307,28 @@
                         </li>
                     {{end}}
                 </ul>
+
+                {{/* Single shared viewer dialog. Thumbnails carry the full-image
+                     path in data-image-viewer-open; the inline script below sets
+                     the <img> src and calls showModal(). Tailwind preflight zeroes
+                     the default <dialog> margin so translate-based centring is
+                     needed instead of the browser's `margin: auto`. */}}
+                <dialog data-testid="image-modal"
+                        data-image-viewer
+                        class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 max-w-none max-h-none w-auto h-auto bg-transparent border-0 p-0 backdrop:bg-bg/90 backdrop:backdrop-blur-sm">
+                    <div class="relative">
+                        <img data-image-viewer-img
+                             src=""
+                             alt=""
+                             class="block max-w-[90vw] max-h-[85vh] object-contain rounded-lg shadow-2xl">
+                        <button type="button"
+                                data-image-viewer-close
+                                aria-label="Close image viewer"
+                                class="absolute -top-3 -right-3 inline-flex h-9 w-9 items-center justify-center rounded-full border border-border-soft bg-surface text-text shadow-2xl cursor-pointer hover:bg-border focus-visible:outline-none focus-visible:shadow-focus">
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/></svg>
+                        </button>
+                    </div>
+                </dialog>
             {{else}}
                 <div class="border border-dashed border-border rounded-xl p-10 text-center text-text-dim">
                     No images yet.
@@ -504,6 +528,40 @@
                 });
             }
         });
+    </script>
+    <script>
+        // Image library viewer. Each thumbnail tile is a <button> carrying the
+        // full-image path in data-image-viewer-open; clicking it sets the
+        // dialog's <img> src and calls showModal(). Reset on close so the
+        // next open paints fresh.
+        (function () {
+            const dialog = document.querySelector('[data-image-viewer]');
+            if (!dialog) return;
+            const img = dialog.querySelector('[data-image-viewer-img]');
+
+            document.querySelectorAll('[data-image-viewer-open]').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    const src = btn.dataset.imageViewerOpen;
+                    if (!src || !img) return;
+                    img.src = src;
+                    dialog.showModal();
+                });
+            });
+
+            dialog.querySelectorAll('[data-image-viewer-close]').forEach(function (el) {
+                el.addEventListener('click', function () { dialog.close(); });
+            });
+
+            // A click whose event.target IS the dialog landed on the backdrop
+            // pseudo, not on any child element.
+            dialog.addEventListener('click', function (ev) {
+                if (ev.target === dialog) dialog.close();
+            });
+
+            dialog.addEventListener('close', function () {
+                if (img) img.src = '';
+            });
+        })();
     </script>
     {{/* Drag-and-drop reorder for rounds and questions (#199). Vendored
          SortableJS plus a plain ES module; both are admin-only and loaded
