@@ -593,39 +593,6 @@ func TestHandleQuestionNext(t *testing.T) {
 			t.Errorf("status code = %v, want %v", got, want)
 		}
 	})
-
-	t.Run("returns the question with imageUrl when set", func(t *testing.T) {
-		t.Parallel()
-
-		const imageURL = "https://example.com/picture.png"
-		env := newTestEnv(t)
-		qz := twoQuestionQuiz("Quiz", "quiz")
-		qz.Questions[0].ImageURL = imageURL
-		env.seedQuiz(t, qz)
-		playerID := env.seedPlayer(t, "next-image")
-
-		g, err := env.service.CreateGame(t.Context(), qz.ID, playerID)
-		if err != nil {
-			t.Fatalf("CreateGame err = %v, want nil", err)
-		}
-
-		mux := http.NewServeMux()
-		mux.Handle("GET /api/games/{gameID}/questions/next", HandleQuestionNext(env.logger, env.service))
-
-		req := httptest.NewRequestWithContext(
-			withPlayer(t.Context(), playerID), http.MethodGet,
-			fmt.Sprintf("/api/games/%s/questions/next", g.ID), nil,
-		)
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-
-		if got, want := rec.Code, http.StatusOK; got != want {
-			t.Fatalf("status code = %v, want %v", got, want)
-		}
-		if got, want := rec.Body.String(), `"imageUrl":"`+imageURL+`"`; !strings.Contains(got, want) {
-			t.Errorf("body should contain %q, got %q", want, got)
-		}
-	})
 }
 
 func TestHandleAnswerPost(t *testing.T) {

@@ -353,9 +353,15 @@ type Question struct {
 	// (#444). NOT NULL at the DB level since migration 20260530000000;
 	// the store resolves it to the quiz's default round on create when
 	// the caller leaves it zero.
-	RoundID          int64
-	Text             string
-	ImageURL         string
+	RoundID int64
+	Text    string
+	// MediaID references an uploaded image in the question's own quiz
+	// library (#937). Nil means no image attached. The referenced media
+	// row is quiz-scoped; the admin save handler validates same-quiz
+	// ownership before persisting. media.media_id ON DELETE SET NULL clears
+	// this when the image is deleted, so a moderated image leaves the
+	// question intact minus its picture (#936).
+	MediaID          *int64
 	Position         int
 	TimeLimitSeconds *int
 	Options          []*Option

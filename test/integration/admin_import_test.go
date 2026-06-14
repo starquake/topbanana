@@ -328,6 +328,34 @@ func TestAdminImport_Integration(t *testing.T) {
 		)
 	})
 
+	t.Run("rejects a per-question imageUrl field", func(t *testing.T) {
+		t.Parallel()
+		// #937: questions now reference an uploaded library image by
+		// media_id, not a free-text URL, and the import cannot point at
+		// uploaded media. The legacy imageUrl field was dropped from the
+		// wire shape, so a payload still carrying it is rejected by
+		// DisallowUnknownFields rather than silently ignored.
+		const imageURLJSON = `{
+  "title": "Import With Image URL",
+  "description": "Round-trip a legacy imageUrl through the import path.",
+  "questions": [
+    {
+      "text": "What is shown?",
+      "imageUrl": "https://example.com/image.png",
+      "options": [
+        { "text": "A cat", "correct": true  },
+        { "text": "A dog", "correct": false }
+      ]
+    }
+  ]
+}`
+		postImportRejection(
+			ctx, t, client, importURL, imageURLJSON,
+			http.StatusBadRequest,
+			[]string{"invalid JSON", `&#34;imageUrl&#34;`},
+		)
+	})
+
 	t.Run("rounds round-trip", func(t *testing.T) {
 		t.Parallel()
 		// #546: a payload with rounds[] creates those named rounds with
