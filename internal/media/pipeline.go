@@ -17,10 +17,21 @@ import (
 	_ "image/jpeg" // register the jpeg decoder with image.Decode
 	_ "image/png"  // register the png decoder with image.Decode
 	"io"
+	"sync"
 
 	"github.com/deepteams/webp"
 	"golang.org/x/image/draw"
 )
+
+// webpMu serializes every deepteams/webp codec call. v1.2.4 shares
+// unsynchronized package state across Encode/Decode, so concurrent use
+// data-races: the -race detector trips it under the parallel media tests, and
+// it is a real corruption risk for two uploads encoding at once. Decoding and
+// encoding here are upload-time paths - never hot - so serializing them costs
+// nothing in practice. Remove once the upstream race is fixed.
+//
+//nolint:gochecknoglobals // process-wide lock guarding a non-thread-safe library; must be shared across all callers.
+var webpMu sync.Mutex
 
 const (
 	// MaxUploadBytes caps the raw upload size (~10 MB). A larger upload is
@@ -103,21 +114,9 @@ func Process(r io.Reader) (*Processed, error) {
 		return nil, err
 	}
 
-	// Reject a decode bomb before the full decode allocates the pixel buffer:
-	// DecodeConfig reads only the header, so checking the declared dimensions
-	// costs nothing. PNG's max declared edge (2^31) keeps the int64 product in
-	// range, so the area multiply cannot overflow.
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(raw))
+	src, err := decodeGuarded(raw)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnsupportedImage, err)
-	}
-	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > MaxPixels {
-		return nil, ErrImageTooLarge
-	}
-
-	src, _, err := image.Decode(bytes.NewReader(raw))
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnsupportedImage, err)
+		return nil, err
 	}
 
 	full := resizeLongEdge(src, MaxLongEdge)
@@ -144,6 +143,32 @@ func Process(r io.Reader) (*Processed, error) {
 		SHA256:    hex.EncodeToString(sum[:]),
 		MIME:      MIMEWebP,
 	}, nil
+}
+
+// decodeGuarded decodes raw (jpeg, png, or webp) under webpMu so the webp
+// codec's shared state is never touched concurrently. It rejects a decode bomb
+// from the header first (DecodeConfig reads only the header; PNG's max declared
+// edge of 2^31 keeps the int64 area product in range, so it cannot overflow),
+// then decodes the full image. Returns ErrImageTooLarge for an oversized
+// declared area and ErrUnsupportedImage for undecodable bytes.
+func decodeGuarded(raw []byte) (image.Image, error) {
+	webpMu.Lock()
+	defer webpMu.Unlock()
+
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(raw))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrUnsupportedImage, err)
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > MaxPixels {
+		return nil, ErrImageTooLarge
+	}
+
+	src, _, err := image.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrUnsupportedImage, err)
+	}
+
+	return src, nil
 }
 
 // readCapped reads at most MaxUploadBytes+1 from r so the result both holds the
@@ -185,10 +210,15 @@ func resizeLongEdge(src image.Image, maxLongEdge int) image.Image {
 	return dst
 }
 
-// encodeWebP encodes img as lossy webp at webpQuality.
+// encodeWebP encodes img as lossy webp at webpQuality. The encode is serialized
+// on webpMu because the deepteams/webp codec is not safe for concurrent use.
 func encodeWebP(img image.Image) ([]byte, error) {
 	var buf bytes.Buffer
-	if err := webp.Encode(&buf, img, &webp.EncoderOptions{Quality: webpQuality}); err != nil {
+
+	webpMu.Lock()
+	err := webp.Encode(&buf, img, &webp.EncoderOptions{Quality: webpQuality})
+	webpMu.Unlock()
+	if err != nil {
 		return nil, fmt.Errorf("encoding webp: %w", err)
 	}
 
