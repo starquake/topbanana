@@ -50,12 +50,14 @@
     --color-accent-deep: #f5b800;
     --color-cyan: #66e8ff;
     --color-cyan-soft: rgba(102, 232, 255, 0.08);
-    /* Magenta is the fourth Kahoot-style answer tone (#253). The
-     * synthwave brand originally used this hue before the brand
-     * swap to accent yellow; restored here purely as an answer-tone
-     * accent, not for navigation or focus chrome. */
-    --color-magenta: #ff2d95;
-    --color-magenta-soft: rgba(255, 45, 149, 0.10);
+    /* Violet and orange are two of the four Kahoot-style answer tones
+     * (#253). They replace the earlier magenta and green tones, which
+     * read as wrong/correct before the player had even answered. Used
+     * only as answer-tone accents, not for navigation or focus chrome. */
+    --color-violet: #b388ff;
+    --color-violet-soft: rgba(179, 136, 255, 0.12);
+    --color-orange: #ff9e3d;
+    --color-orange-soft: rgba(255, 158, 61, 0.12);
     --color-danger: #ff5c5c;
     --color-success: #4ade80;
     --color-warning: #fbbf24;
@@ -676,7 +678,7 @@
     .btn-answer {
         @apply w-full
                min-h-[44px] sm:min-h-14 lg:min-h-32 2xl:min-h-40
-               px-5 py-3 lg:px-8 lg:py-6 2xl:px-10 2xl:py-8
+               px-5 py-2 lg:px-8 lg:py-6 2xl:px-10 2xl:py-8
                text-left justify-start inline-flex items-center
                bg-surface text-text border border-border rounded-sm
                font-medium text-[0.95rem] lg:text-3xl 2xl:text-4xl
@@ -693,10 +695,10 @@
      * once the player picks, so the answer's tone is only visible
      * until submission. Pairs the existing .btn-answer geometry
      * with a 2px coloured border + matching hover bg. */
-    .btn-answer-tone-a { @apply border-cyan    hover:bg-cyan-soft    text-cyan; }
-    .btn-answer-tone-b { @apply border-magenta hover:bg-magenta-soft text-magenta; }
-    .btn-answer-tone-c { @apply border-accent  hover:bg-accent-soft  text-accent; }
-    .btn-answer-tone-d { @apply border-success hover:bg-surface-2    text-success; }
+    .btn-answer-tone-a { @apply border-cyan   hover:bg-cyan-soft   text-cyan; }
+    .btn-answer-tone-b { @apply border-violet hover:bg-violet-soft text-violet; }
+    .btn-answer-tone-c { @apply border-accent hover:bg-accent-soft text-accent; }
+    .btn-answer-tone-d { @apply border-orange hover:bg-orange-soft text-orange; }
 
     /* Per-option feedback skin (#233). Applied after the player
      * submits so the buttons reveal what was right. Filled bg
@@ -708,7 +710,7 @@
     .btn-answer-correct {
         @apply w-full
                min-h-[44px] sm:min-h-14 lg:min-h-32 2xl:min-h-40
-               px-5 py-3 lg:px-8 lg:py-6 2xl:px-10 2xl:py-8
+               px-5 py-2 lg:px-8 lg:py-6 2xl:px-10 2xl:py-8
                text-left justify-start inline-flex items-center
                bg-success text-bg border-2 border-success rounded-sm
                font-semibold text-[0.95rem] lg:text-3xl 2xl:text-4xl
@@ -717,7 +719,7 @@
     .btn-answer-wrong {
         @apply w-full
                min-h-[44px] sm:min-h-14 lg:min-h-32 2xl:min-h-40
-               px-5 py-3 lg:px-8 lg:py-6 2xl:px-10 2xl:py-8
+               px-5 py-2 lg:px-8 lg:py-6 2xl:px-10 2xl:py-8
                text-left justify-start inline-flex items-center
                bg-danger text-bg border-2 border-danger rounded-sm
                font-semibold text-[0.95rem] lg:text-3xl 2xl:text-4xl
@@ -726,7 +728,7 @@
     .btn-answer-dim {
         @apply w-full
                min-h-[44px] sm:min-h-14 lg:min-h-32 2xl:min-h-40
-               px-5 py-3 lg:px-8 lg:py-6 2xl:px-10 2xl:py-8
+               px-5 py-2 lg:px-8 lg:py-6 2xl:px-10 2xl:py-8
                text-left justify-start inline-flex items-center
                bg-surface text-text-dim border border-border rounded-sm
                font-medium text-[0.95rem] lg:text-3xl 2xl:text-4xl opacity-40
