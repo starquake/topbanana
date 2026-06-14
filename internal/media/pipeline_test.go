@@ -9,9 +9,8 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"sync"
 	"testing"
-
-	"github.com/deepteams/webp"
 
 	. "github.com/starquake/topbanana/internal/media"
 )
@@ -58,8 +57,8 @@ func encodePNG(t *testing.T, img image.Image) []byte {
 func encodeWebP(t *testing.T, img image.Image) []byte {
 	t.Helper()
 	var buf bytes.Buffer
-	if err := webp.Encode(&buf, img, &webp.EncoderOptions{Quality: 80}); err != nil {
-		t.Fatalf("webp.Encode err = %v, want nil", err)
+	if err := EncodeWebPForTest(&buf, img, 80); err != nil {
+		t.Fatalf("EncodeWebPForTest err = %v, want nil", err)
 	}
 
 	return buf.Bytes()
@@ -111,7 +110,7 @@ func TestProcessRoundTrip(t *testing.T) {
 		t.Fatalf("Process err = %v, want nil", err)
 	}
 
-	fullCfg, err := webp.DecodeConfig(bytes.NewReader(got.Full))
+	fullCfg, err := DecodeWebPConfigForTest(bytes.NewReader(got.Full))
 	if err != nil {
 		t.Fatalf("DecodeConfig(Full) err = %v, want nil", err)
 	}
@@ -120,7 +119,7 @@ func TestProcessRoundTrip(t *testing.T) {
 			fullCfg.Width, fullCfg.Height, got.Width, got.Height)
 	}
 
-	fullImg, err := webp.Decode(bytes.NewReader(got.Full))
+	fullImg, err := DecodeWebPForTest(bytes.NewReader(got.Full))
 	if err != nil {
 		t.Fatalf("Decode(Full) err = %v, want nil", err)
 	}
@@ -128,7 +127,7 @@ func TestProcessRoundTrip(t *testing.T) {
 		t.Errorf("decoded Full width = %d, want %d", got, want)
 	}
 
-	thumbImg, err := webp.Decode(bytes.NewReader(got.Thumb))
+	thumbImg, err := DecodeWebPForTest(bytes.NewReader(got.Thumb))
 	if err != nil {
 		t.Fatalf("Decode(Thumb) err = %v, want nil", err)
 	}
@@ -157,7 +156,7 @@ func TestProcessDownscalesLongEdge(t *testing.T) {
 		t.Errorf("Height = %d, want %d (2:1 aspect preserved)", got.Height, MaxLongEdge/2)
 	}
 
-	thumb, err := webp.DecodeConfig(bytes.NewReader(got.Thumb))
+	thumb, err := DecodeWebPConfigForTest(bytes.NewReader(got.Thumb))
 	if err != nil {
 		t.Fatalf("DecodeConfig(Thumb) err = %v, want nil", err)
 	}
@@ -250,6 +249,30 @@ func TestProcessRejectsNonImage(t *testing.T) {
 // longEdge returns the larger of a rectangle's two dimensions.
 func longEdge(r image.Rectangle) int {
 	return max(r.Dx(), r.Dy())
+}
+
+// TestProcess_Concurrent runs many Process calls at once. The deepteams/webp
+// codec is not safe for concurrent use, so without the webpMu serialization the
+// -race detector trips here (which is how this surfaced: CI's -race build caught
+// it under the parallel media tests). With the lock the run is clean. This pins
+// that concurrent uploads stay race-free.
+func TestProcess_Concurrent(t *testing.T) {
+	t.Parallel()
+
+	inputPNG := encodePNG(t, gradient(200, 150))
+
+	const workers = 16
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			if _, err := Process(bytes.NewReader(inputPNG)); err != nil {
+				t.Errorf("Process err = %v, want nil", err)
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // pngHeader builds a valid PNG signature + IHDR chunk declaring w x h, with no
