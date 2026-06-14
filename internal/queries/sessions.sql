@@ -464,6 +464,20 @@ WHERE sp.session_id = sqlc.arg('session_id')
 GROUP BY sp.player_id, p.display_name
 ORDER BY total_score DESC, p.display_name;
 
+-- name: GetSessionPlayerScore :one
+-- One player's cumulative score for the current game in a session: the sum of
+-- their scored answers, scoped to the session's current game_seq, with a NULL
+-- (no scored answers yet) coalesced to 0. Backs the live answer-pad HUD, which
+-- shows the viewer their running score during the question and reveal phases,
+-- where Standings is not populated (#956). Uses the same per-game scoping and
+-- score aggregation as ListSessionFinalStandings, narrowed to one player, so the
+-- HUD score matches the standings total once the round results appear.
+SELECT CAST(COALESCE(SUM(sa.score), 0) AS INTEGER) AS total_score
+FROM session_answers sa
+WHERE sa.session_id = sqlc.arg('session_id')
+  AND sa.player_id = sqlc.arg('player_id')
+  AND sa.game_seq = (SELECT s.game_seq FROM sessions s WHERE s.id = sa.session_id);
+
 -- name: ListSessionFinalStandings :many
 -- Per-player final standings for a session: cumulative score across the whole
 -- session, anchored on the roster so non-answerers appear at 0. display_name is

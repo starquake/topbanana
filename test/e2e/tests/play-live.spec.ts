@@ -93,9 +93,11 @@ test.describe('player synchronized play', () => {
 
     // Answer-pad contract (#956): neither the question text nor its media is
     // duplicated on the phone during a live question - they belong on the
-    // shared big screen.
+    // shared big screen. The phone shows the HUD chips (Q n/total + score) and
+    // a hint pointing the player there instead.
     await expect(page.getByTestId('question-text')).toHaveCount(0);
     await expect(page.getByTestId('question-image')).toHaveCount(0);
+    await expect(page.getByTestId('big-screen-hint')).toBeVisible();
 
     // Read beat (#247 parity): the question shows first with the options HIDDEN
     // and a "Get ready" indicator, so the player reads before answers open.
