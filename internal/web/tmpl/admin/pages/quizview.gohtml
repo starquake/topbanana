@@ -299,11 +299,15 @@
                                      width="{{.Width}}" height="{{.Height}}"
                                      class="h-full w-full object-cover">
                             </button>
-                            {{/* Delete control: always visible on touch screens
-                                 (no hover state), fades in on hover on desktop. */}}
+                            {{/* Delete control: always visible on touch (no
+                                 hover), fades in on hover on devices that
+                                 actually hover. The hover-fade is gated on
+                                 (hover: hover) instead of a breakpoint so an
+                                 iPad - wide screen, touch only - keeps the
+                                 button visible. */}}
                             <button type="button" aria-label="Delete image {{.ID}}"
                                     onclick="openModal('modal-delete-media-{{.ID}}')"
-                                    class="absolute top-1.5 right-1.5 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border-soft bg-bg/80 text-text transition hover:bg-danger focus-visible:outline-none focus-visible:shadow-focus sm:text-text-dim sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100 sm:hover:text-text">
+                                    class="absolute top-1.5 right-1.5 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border-soft bg-bg/80 text-text transition hover:bg-danger focus-visible:outline-none focus-visible:shadow-focus [@media(hover:hover)]:text-text-dim [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100 [@media(hover:hover)]:hover:text-text">
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.5 1a.5.5 0 0 0-.5.5V2H3a.5.5 0 0 0 0 1h.5l.6 9.1a1.5 1.5 0 0 0 1.5 1.4h4.8a1.5 1.5 0 0 0 1.5-1.4L12.5 3h.5a.5.5 0 0 0 0-1h-3v-.5a.5.5 0 0 0-.5-.5h-3zM6 6a.5.5 0 0 1 1 0v5a.5.5 0 0 1-1 0V6zm3 0a.5.5 0 0 1 1 0v5a.5.5 0 0 1-1 0V6z"/></svg>
                             </button>
                         </li>
