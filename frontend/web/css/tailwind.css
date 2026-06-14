@@ -322,17 +322,6 @@
         0%, 100% { opacity: 1; }
         50%      { opacity: 0.35; }
     }
-    /* Banner shown above the leaderboard when the SSE stream has
-     * given up reconnecting (#362). Dim the table itself via
-     * .leaderboard-stale so the user reads the rows as "no longer
-     * live"; the banner carries the explicit retry affordance. */
-    .leaderboard-stale-banner {
-        @apply mb-3 flex items-center justify-between gap-3 px-3 py-2 rounded-sm
-               bg-warning/10 border border-warning/40 text-warning text-sm;
-    }
-    .leaderboard-stale {
-        @apply opacity-60;
-    }
     /* Microtype label used as field/section eyebrow. Appears on every form
      * field (question form + quiz form + auth forms) so it earns its keep. */
     .label-eyebrow {
