@@ -19,7 +19,12 @@ const (
 	connMaxLifetime = 5 * time.Minute
 )
 
-// SetupTestDB creates a temporary SQLite database for testing and returns its DSN and a cleanup function.
+// SetupTestDB returns a DSN to a per-test SQLite database file that already
+// has every migration applied, plus a cleanup that removes the file. The
+// migrated schema is built once per process via [buildTemplate] and the
+// per-test file is a byte-for-byte copy of that template, so a [database.Migrate]
+// call against the returned DSN finds nothing to run and returns in
+// sub-millisecond time. Each test still gets a fully isolated database.
 func SetupTestDB(t *testing.T) (string, func()) {
 	t.Helper()
 
@@ -27,20 +32,26 @@ func SetupTestDB(t *testing.T) (string, func()) {
 		t.Skip("integration: needs a real database")
 	}
 
+	templateOnce.Do(buildTemplate)
+	if templateErr != nil {
+		t.Fatalf("build migrated template db: %v", templateErr)
+	}
+
 	tmpDB, err := os.CreateTemp(t.TempDir(), "topbanana-test-*.sqlite")
 	if err != nil {
 		t.Fatalf("failed to create temp db: %v", err)
 	}
 	tmpDBPath := tmpDB.Name()
-	err = tmpDB.Close()
-	if err != nil {
+	if err = tmpDB.Close(); err != nil {
 		t.Fatalf("failed to close temp db: %v", err)
+	}
+	if err = os.WriteFile(tmpDBPath, templateBytes, 0o600); err != nil {
+		t.Fatalf("failed to seed temp db from template: %v", err)
 	}
 
 	cleanup := func() {
-		err = os.Remove(tmpDBPath)
-		if err != nil {
-			t.Errorf("failed to remove temp db: %s", err)
+		if rerr := os.Remove(tmpDBPath); rerr != nil {
+			t.Errorf("failed to remove temp db: %s", rerr)
 		}
 	}
 
@@ -53,12 +64,12 @@ func SetupTestDB(t *testing.T) (string, func()) {
 }
 
 // templateOnce ensures the migrated template DB is built exactly once per
-// process. templateBytes holds the migrated SQLite file contents; every Open
-// call writes a per-test copy of these bytes and opens SQLite against the
-// copy, so each test still gets a fully isolated database but the ~70
+// process. templateBytes holds the migrated SQLite file contents; SetupTestDB
+// and Open both write a per-test copy of these bytes and open SQLite against
+// the copy, so each test still gets a fully isolated database but the ~70
 // migrations only run once instead of per call site.
 //
-//nolint:gochecknoglobals // process-wide cache of the migrated test schema; shared by every Open caller by design.
+//nolint:gochecknoglobals // process-wide cache of the migrated test schema; shared by every caller by design.
 var (
 	templateOnce  sync.Once
 	templateBytes []byte
@@ -67,8 +78,8 @@ var (
 
 // buildTemplate runs every migration against a fresh on-disk SQLite database
 // and snapshots the result into templateBytes. It runs at most once per process
-// (guarded by templateOnce); any failure is stored in templateErr for Open to
-// surface on the first call site that triggered the build.
+// (guarded by templateOnce); any failure is stored in templateErr for the
+// triggering call site (SetupTestDB or Open) to surface.
 func buildTemplate() {
 	dir, err := os.MkdirTemp("", "topbanana-dbtest-template-")
 	if err != nil {
