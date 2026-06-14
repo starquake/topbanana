@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/session"
@@ -33,6 +32,11 @@ func TestAuthRedirect_PerRole(t *testing.T) {
 
 	ctx, srv := startServer(t, map[string]string{
 		"REGISTRATION_ENABLED": "true",
+		// Shrink the per-IP login limiter (#494) so back-to-back logins
+		// from the test's localhost peer do not pay the 3s production
+		// cooldown. The limiter still gates the request; the gap is
+		// just short enough to elapse before the next call.
+		"LOGIN_COOLDOWN": "1ms",
 	})
 	baseURL := srv.BaseURL
 
@@ -64,11 +68,6 @@ func TestAuthRedirect_PerRole(t *testing.T) {
 		}
 	})
 
-	// Sleep past the per-IP login cool-down (#494) so the next subtest's
-	// POST is not 429'd. The two login subtests come from the same
-	// localhost peer and so share the limiter bucket.
-	time.Sleep(auth.LoginCooldown() + 100*time.Millisecond)
-
 	t.Run("player login lands on /", func(t *testing.T) {
 		client := authClient(t)
 		location := loginForRedirect(ctx, t, client, baseURL, "redirect-player", "redirect-player-pass-123")
@@ -89,6 +88,10 @@ func TestAuthRedirect_NextRoundTrip(t *testing.T) {
 
 	ctx, srv := startServer(t, map[string]string{
 		"REGISTRATION_ENABLED": "true",
+		// Shrink the per-IP login limiter (#494) so the second login
+		// further down does not have to wait out the 3s production
+		// cooldown from the first.
+		"LOGIN_COOLDOWN": "1ms",
 	})
 	baseURL := srv.BaseURL
 
@@ -117,11 +120,6 @@ func TestAuthRedirect_NextRoundTrip(t *testing.T) {
 	if got, want := deepLink.Location, "/login?next=%2Fadmin%2Femail"; got != want {
 		t.Errorf("protected GET Location = %q, want %q", got, want)
 	}
-
-	// registerVerifyAndSignIn already logged in once from this localhost
-	// peer, so sleep past the per-IP login cool-down (#494) before the
-	// second login or it 429s.
-	time.Sleep(auth.LoginCooldown() + 100*time.Millisecond)
 
 	// Submit the login form carrying that next. The handler honours the
 	// posted next over the role landing, so the redirect lands on the
