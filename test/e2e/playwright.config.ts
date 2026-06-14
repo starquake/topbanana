@@ -6,11 +6,18 @@ import { join } from 'path';
 
 import { SESSION_KEY } from './e2e-auth';
 
-// One server + one SQLite file per Playwright worker, so the 4 workers
+// One server + one SQLite file per Playwright worker, so the workers
 // don't contend at the SQLite writer (#398). The worker count is the
 // authoritative knob; the webServer array and the per-test baseURL
-// fixture both derive from it.
-const WORKER_COUNT = 4;
+// fixture both derive from it, so it has to be known at config-load time
+// - hence an env var (E2E_WORKERS), not Playwright's --workers CLI flag,
+// which would desync the worker count from the servers/ports. Defaults to
+// 4; the CI e2e job sets E2E_WORKERS=2 to halve per-runner load - the
+// browser matrix already splits chromium/firefox across runners, so 4
+// there meant 4 browsers + 4 servers + mailpit on one runner, the
+// resource pressure behind the rare under-load teardown flakes (#909,
+// #912). A bigger runner can raise it without a code change.
+const WORKER_COUNT = Number(process.env.E2E_WORKERS) || 4;
 
 // Port assignment (#476). By default each worker server listens on an
 // OS-assigned free port, so concurrent `make test-e2e` runs - different
@@ -86,6 +93,22 @@ function discoverFreePorts(count: number): number[] {
 const dataDir = process.env.TOPBANANA_E2E_DATA_DIR ?? mkdtempSync(join(tmpdir(), 'topbanana-e2e-'));
 process.env.TOPBANANA_E2E_DATA_DIR = dataDir;
 
+// Build the server binary ONCE and run that per worker, instead of
+// `go run ./cmd/server` x WORKER_COUNT. Concurrent `go run` recompiles at
+// suite startup spike CPU + RAM and each leaves a long-lived `go` parent
+// supervising the server child; that startup pressure overlaps browser
+// launch and fed the rare under-load teardown flakes (#909, #912). Building
+// once also trims suite startup time. Guarded by the env var so the
+// per-worker config re-load reuses the binary rather than rebuilding (only
+// the main process that launches the webServers needs it). The binary lands
+// in dataDir, which global-teardown removes.
+const SERVER_BIN = process.env.TOPBANANA_E2E_SERVER_BIN ?? (() => {
+  const bin = join(dataDir, 'topbanana-e2e-server');
+  execFileSync('go', ['build', '-o', bin, './cmd/server'], { cwd: '../..', stdio: 'inherit' });
+  return bin;
+})();
+process.env.TOPBANANA_E2E_SERVER_BIN = SERVER_BIN;
+
 // Same allowlist for every per-worker server: any worker may register
 // any of the per-browser admin emails the specs use, regardless of
 // which server it lands on. Bootstrap-admin (first registrant gets the
@@ -133,7 +156,7 @@ const workerServer = (workerIndex: number) => {
   const port = WORKER_PORTS[workerIndex];
   const dbPath = join(dataDir, `e2e-${workerIndex}.db`);
   return {
-    command: 'go run ./cmd/server',
+    command: SERVER_BIN,
     cwd: '../..',
     url: `http://127.0.0.1:${port}/healthz`,
     env: {
@@ -262,7 +285,14 @@ export default defineConfig({
     { name: 'setup', testMatch: /auth\.setup\.ts/ },
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      // --disable-dev-shm-usage: under full-suite load chromium can exhaust
+      // the small /dev/shm and its target dies mid-test ("Target page,
+      // context or browser has been closed", #909), so back shared memory
+      // with /tmp instead. Harmless where /dev/shm is ample.
+      use: {
+        ...devices['Desktop Chrome'],
+        launchOptions: { args: ['--disable-dev-shm-usage'] },
+      },
       dependencies: ['setup'],
     },
     {

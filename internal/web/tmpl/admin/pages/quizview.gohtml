@@ -152,36 +152,11 @@
             </div>
         </div>
 
-        {{/* Confirm-and-restart modal (#853). Mounted only when the host already
-             has a game in flight; the "Host live" button above opens it. Confirm
-             ends the running session and opens a fresh room hosting this quiz. */}}
-        {{if .HostHasRunningGame}}
-        <div id="modal-restart-host-{{.Quiz.ID}}" data-testid="restart-modal" role="dialog" aria-modal="true" aria-labelledby="modal-restart-host-{{.Quiz.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
-            <div class="absolute inset-0" onclick="closeModal('modal-restart-host-{{.Quiz.ID}}')"></div>
-            <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
-                <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
-                    <p id="modal-restart-host-{{.Quiz.ID}}-title" class="font-display text-sm font-semibold uppercase tracking-[0.14em]">End the current session and start a new one?</p>
-                    <button type="button" aria-label="close"
-                            onclick="closeModal('modal-restart-host-{{.Quiz.ID}}')"
-                            class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer">&times;</button>
-                </header>
-                <section class="px-6 py-5 text-[0.95rem]">
-                    A live session is already running. End it and start hosting this quiz instead?
-                </section>
-                <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
-                    <button type="button"
-                            onclick="closeModal('modal-restart-host-{{.Quiz.ID}}')"
-                            class="btn-ghost">Cancel</button>
-                    <form method="post" action="/host" class="inline-flex">
-                        <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                        <input type="hidden" name="quiz_id" value="{{.Quiz.ID}}">
-                        <input type="hidden" name="restart" value="true">
-                        <button type="submit" class="btn-primary">End and start</button>
-                    </form>
-                </footer>
-            </div>
-        </div>
-        {{end}}
+        {{/* Confirm-and-restart modal (#853, shared partial #916). Mounted only
+             when the host already has a game in flight; the "Host live" button
+             above opens it. Confirm ends the running session and opens a fresh
+             room hosting this quiz. */}}
+        {{if .HostHasRunningGame}}{{template "restart_modal" .Quiz.ID}}{{end}}
 
         {{/* Delete-quiz modal */}}
         <div id="modal-delete-quiz-{{.Quiz.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-delete-quiz-{{.Quiz.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
@@ -286,11 +261,6 @@
 
             {{if $canEdit}}
             <div class="mt-6 flex flex-wrap gap-2">
-                <a href="/admin/quizzes/{{.Quiz.ID}}/questions/new"
-                   class="btn-primary gap-2">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5a.5.5 0 0 1 .5.5v5.5H14a.5.5 0 0 1 0 1H8.5V14a.5.5 0 0 1-1 0V8.5H2a.5.5 0 0 1 0-1h5.5V2a.5.5 0 0 1 .5-.5z"/></svg>
-                    <span>Add question</span>
-                </a>
                 <a href="/admin/quizzes/{{.Quiz.ID}}/rounds/new"
                    class="btn-ghost gap-2">
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5a.5.5 0 0 1 .5.5v5.5H14a.5.5 0 0 1 0 1H8.5V14a.5.5 0 0 1-1 0V8.5H2a.5.5 0 0 1 0-1h5.5V2a.5.5 0 0 1 .5-.5z"/></svg>
@@ -299,6 +269,95 @@
             </div>
             {{end}}
         </section>
+
+        {{/* Images section (#936 slice 3). The per-quiz image library: a
+             thumbnail grid plus an upload control. Gated on $canEdit so a
+             read-only viewer (a non-owner host) sees neither the grid nor the
+             upload form - only the owner or an admin manages the library. The
+             handler still validates the upload server-side; the file input's
+             accept attribute is just a picker hint. */}}
+        {{if $canEdit}}
+        <section aria-label="Images">
+            <div class="section-head">
+                <h2>Images</h2>
+                {{if .Images}}
+                    <span class="section-count">{{len .Images}} image{{if ne (len .Images) 1}}s{{end}}</span>
+                {{end}}
+            </div>
+
+            {{if .Images}}
+                <ul class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                    {{range .Images}}
+                        <li class="group relative">
+                            <a href="/media/{{.ID}}" target="_blank" rel="noopener"
+                               class="block aspect-square overflow-hidden rounded-lg border border-border-soft bg-surface hover:border-accent focus-visible:outline-none focus-visible:shadow-focus">
+                                <img src="/media/{{.ID}}/thumb"
+                                     alt="Quiz image {{.ID}}"
+                                     loading="lazy"
+                                     width="{{.Width}}" height="{{.Height}}"
+                                     class="h-full w-full object-cover">
+                            </a>
+                            <button type="button" aria-label="Delete image {{.ID}}"
+                                    onclick="openModal('modal-delete-media-{{.ID}}')"
+                                    class="absolute top-1.5 right-1.5 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border-soft bg-bg/80 text-text-dim opacity-0 transition hover:bg-danger hover:text-text focus-visible:opacity-100 focus-visible:outline-none focus-visible:shadow-focus group-hover:opacity-100">
+                                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.5 1a.5.5 0 0 0-.5.5V2H3a.5.5 0 0 0 0 1h.5l.6 9.1a1.5 1.5 0 0 0 1.5 1.4h4.8a1.5 1.5 0 0 0 1.5-1.4L12.5 3h.5a.5.5 0 0 0 0-1h-3v-.5a.5.5 0 0 0-.5-.5h-3zM6 6a.5.5 0 0 1 1 0v5a.5.5 0 0 1-1 0V6zm3 0a.5.5 0 0 1 1 0v5a.5.5 0 0 1-1 0V6z"/></svg>
+                            </button>
+                        </li>
+                    {{end}}
+                </ul>
+            {{else}}
+                <div class="border border-dashed border-border rounded-xl p-10 text-center text-text-dim">
+                    No images yet.
+                </div>
+            {{end}}
+
+            {{/* Delete-image confirm modals, one per thumbnail, mirroring the
+                 question/round delete modals above. Use $ to reach the quiz id
+                 from inside the range. The POST goes to the media delete route;
+                 the handler re-checks the creator-or-admin gate and that the
+                 image belongs to this quiz. */}}
+            {{range .Images}}
+                <div id="modal-delete-media-{{.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-delete-media-{{.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
+                    <div class="absolute inset-0" onclick="closeModal('modal-delete-media-{{.ID}}')"></div>
+                    <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
+                        <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
+                            <p id="modal-delete-media-{{.ID}}-title" class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Delete image</p>
+                            <button type="button" aria-label="close"
+                                    onclick="closeModal('modal-delete-media-{{.ID}}')"
+                                    class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer">&times;</button>
+                        </header>
+                        <section class="px-6 py-5 text-[0.95rem]">
+                            Are you sure you want to delete this image? Any questions using it will keep their text but lose the picture. This action cannot be undone.
+                        </section>
+                        <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
+                            <button type="button"
+                                    onclick="closeModal('modal-delete-media-{{.ID}}')"
+                                    class="btn-ghost">Cancel</button>
+                            <form method="post" action="/admin/quizzes/{{$.Quiz.ID}}/media/{{.ID}}/delete" class="inline-flex">
+                                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                                <button type="submit" class="btn-danger">Delete</button>
+                            </form>
+                        </footer>
+                    </div>
+                </div>
+            {{end}}
+
+            <form method="post"
+                  action="/admin/quizzes/{{.Quiz.ID}}/media"
+                  enctype="multipart/form-data"
+                  class="mt-6 flex flex-wrap items-center gap-3">
+                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                <label for="quiz-media-upload" class="text-xs uppercase tracking-[0.12em] text-text-dim">Add image</label>
+                <input type="file"
+                       id="quiz-media-upload"
+                       name="image"
+                       accept="image/jpeg,image/png,image/webp"
+                       required
+                       class="text-sm text-text-dim file:mr-3 file:cursor-pointer file:rounded-sm file:border file:border-border-soft file:bg-surface file:px-3 file:py-2 file:text-xs file:font-semibold file:uppercase file:tracking-[0.12em] file:text-text hover:file:border-accent">
+                <button type="submit" class="btn-primary">Upload</button>
+            </form>
+        </section>
+        {{end}}
 
         {{/* Players section */}}
         <section aria-label="Played by">
@@ -450,6 +509,6 @@
          SortableJS plus a plain ES module; both are admin-only and loaded
          only on this page, not in the global base layout. The module
          self-noops when the edit handles are absent (read-only viewer). */}}
-    <script src="/assets/js/vendor/sortable.min.js" defer></script>
-    <script type="module" src="/assets/js/dist/quiz-reorder.js" defer></script>
+    <script src="/static/js/vendor/sortable.min.js" defer></script>
+    <script type="module" src="/static/js/dist/quiz-reorder.js" defer></script>
 {{end}}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/starquake/topbanana/internal/admin"
+	"github.com/starquake/topbanana/internal/assets"
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/client"
@@ -19,10 +20,11 @@ import (
 	"github.com/starquake/topbanana/internal/host"
 	"github.com/starquake/topbanana/internal/livesession"
 	"github.com/starquake/topbanana/internal/mailer"
+	"github.com/starquake/topbanana/internal/media"
+	"github.com/starquake/topbanana/internal/mediahttp"
 	"github.com/starquake/topbanana/internal/profile"
 	"github.com/starquake/topbanana/internal/session"
 	"github.com/starquake/topbanana/internal/store"
-	"github.com/starquake/topbanana/internal/web"
 )
 
 func addRoutes(
@@ -62,10 +64,25 @@ func addRoutes(
 
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
 	addAdminRoutes(mux, logger, stores, gameDeps, sessions, csrfMgr, emailDeps, playerDeps)
+	addMediaRoutes(mux, logger, stores, sessions, csrfMgr, media.NewService(stores.Media, cfg.MediaDir, logger))
 	addProfileRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
 	addAPIRoutes(mux, logger, stores, gameService, realtime, sessions, cfg)
 	addHostRoutes(mux, logger, stores, sessions, csrfMgr, realtime.SessionService)
+	addClientAndPublicRoutes(mux, logger, stores, sessions, csrfMgr, cfg)
+}
 
+// addClientAndPublicRoutes registers the player SPA shell, static assets, PWA
+// manifest + service worker, health/version probes, and the public home +
+// quizzes pages. Split out of addRoutes so that function stays under revive's
+// function-length cap as the route surface grows.
+func addClientAndPublicRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	stores *store.Stores,
+	sessions *session.Manager,
+	csrfMgr *csrf.Manager,
+	cfg *config.Config,
+) {
 	// Client
 	shell := client.NewShellHandlers(cfg, stores.Quizzes, logger)
 	// The SPA root and the per-quiz share URL both go through the shell
@@ -82,13 +99,13 @@ func addRoutes(
 	mux.Handle("GET /join/{$}", http.HandlerFunc(shell.Join))
 	mux.Handle("GET /join/{code}", http.HandlerFunc(shell.Join))
 
-	// Admin + auth static assets (Tailwind output, embedded in the binary).
-	mux.Handle("/assets/", web.Handler(cfg))
+	// Shared static assets, embedded in the binary. Surface-agnostic: every page loads from /static/.
+	mux.Handle("/static/", assets.Handler(cfg))
 
 	// PWA manifest + service worker. Both live at the site root so the
 	// install prompt and the SW's default scope cover every page.
-	mux.Handle("GET /manifest.webmanifest", web.ManifestHandler(cfg))
-	mux.Handle("GET /sw.js", web.ServiceWorkerHandler(cfg))
+	mux.Handle("GET /manifest.webmanifest", assets.ManifestHandler(cfg))
+	mux.Handle("GET /sw.js", assets.ServiceWorkerHandler(cfg))
 
 	// Health
 	mux.Handle("GET /healthz", health.HandleHealthz(logger, stores))
@@ -488,7 +505,9 @@ func addAdminRoutes(
 	mux.Handle(
 		"GET /admin/quizzes/{quizID}",
 		requireGameHost(
-			admin.HandleQuizView(logger, csrfMgr, stores.Quizzes, gameDeps.gameService, gameDeps.runningGames),
+			admin.HandleQuizView(
+				logger, csrfMgr, stores.Quizzes, gameDeps.gameService, gameDeps.runningGames, stores.Media,
+			),
 		),
 	)
 	mux.Handle("GET /admin/quizzes/new", requireGameHost(admin.HandleQuizCreate(logger, csrfMgr)))
@@ -521,6 +540,69 @@ func addAdminRoutes(
 
 	addAdminQuestionRoutes(mux, logger, stores, csrfMW, requireGameHost, csrfMgr)
 	addAdminRoundRoutes(mux, logger, stores, csrfMW, requireGameHost, csrfMgr)
+}
+
+// addMediaRoutes registers the media slice's HTTP surface (#936 slice 2): the
+// host/admin upload endpoint and the two public-entry serving endpoints.
+//
+// The upload route (POST /admin/quizzes/{quizID}/media) mirrors the admin
+// question POSTs but swaps MaxFormSizeMiddleware (1 MB, urlencoded) for
+// MaxMultipartFormMiddleware: the upload is multipart and its body must be
+// capped well above the 10 MB image limit. MaxMultipartFormMiddleware also
+// parses the multipart form so the CSRF token (a form field) is visible to
+// csrfMW, which reads it from PostForm; without that parse a multipart POST has
+// no PostForm token and would always 403. requireGameHost gates to Host/Admin;
+// the handler adds the per-quiz creator-or-admin edit gate.
+//
+// The serving routes (GET /media/{id} and GET /media/{id}/thumb) resolve the
+// viewer read-only via AuthenticatedSessionPlayer - NOT EnsurePlayer - so a
+// cacheable image response never mints a players row or attaches a Set-Cookie (a
+// Set-Cookie on a Cache-Control: public response is a shared-cache footgun). The
+// private-quiz gate only needs to know whether an authenticated viewer is
+// present. Authorization mirrors the owning quiz's own access rule, decided
+// inside the handler by the quiz's visibility: public/unlisted to anyone,
+// private to an authenticated viewer.
+func addMediaRoutes(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	stores *store.Stores,
+	sessions *session.Manager,
+	csrfMgr *csrf.Manager,
+	svc *media.Service,
+) {
+	requireGameHost := func(h http.Handler) http.Handler {
+		return auth.RequireGameHost(auth.RequireVerifiedEmail(h), stores.Players, sessions, csrfMgr, logger)
+	}
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/media",
+		mediahttp.MaxMultipartFormMiddleware(csrfMgr.Middleware(requireGameHost(
+			mediahttp.HandleMediaUpload(logger, svc, stores.Quizzes),
+		))),
+	)
+
+	// The delete POST is an ordinary urlencoded form (only a csrf_token), not a
+	// multipart upload, so it uses the normal CSRF/form path - no
+	// MaxMultipartFormMiddleware. The handler adds the per-quiz creator-or-admin
+	// edit gate plus the IDOR guard that the media belongs to {quizID}; the same
+	// gate makes this the admin image-moderation path (an admin can edit, hence
+	// delete from, any quiz).
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/media/{mediaID}/delete",
+		csrfMgr.Middleware(requireGameHost(
+			mediahttp.HandleMediaDelete(logger, svc, stores.Quizzes),
+		)),
+	)
+
+	// The serve routes resolve the viewer from the session WITHOUT minting a
+	// player row or setting a cookie (unlike EnsurePlayer): a media response is
+	// cacheable, so it must not carry a Set-Cookie. The private-quiz gate only
+	// needs to know whether an authenticated viewer is present, which
+	// AuthenticatedSessionPlayer answers read-only.
+	viewer := func(r *http.Request) (*auth.Player, bool) {
+		return auth.AuthenticatedSessionPlayer(r, stores.Players, sessions)
+	}
+	mux.Handle("GET /media/{id}", mediahttp.HandleMediaServe(logger, svc, stores.Quizzes, viewer))
+	mux.Handle("GET /media/{id}/thumb", mediahttp.HandleMediaThumb(logger, svc, stores.Quizzes, viewer))
 }
 
 // addAdminQuestionRoutes registers the question CRUD + reorder routes
@@ -937,7 +1019,7 @@ func addHostRoutes(
 	mux.Handle("GET /admin", requireGameHost(admin.HandleIndex(logger, csrfMgr, sessionService)))
 
 	mux.Handle("POST /host", csrfMW(requireGameHost(http.HandlerFunc(handlers.Create))))
-	mux.Handle("GET /host/quizzes", requireGameHost(http.HandlerFunc(handlers.QuizList)))
+	mux.Handle("GET /host/quizzes", requireGameHost(http.HandlerFunc(handlers.Picker)))
 	mux.Handle("GET /host/{code}", requireGameHost(http.HandlerFunc(handlers.BigScreen)))
 	mux.Handle("POST /host/{code}/start", csrfMW(requireGameHost(http.HandlerFunc(handlers.Start))))
 	mux.Handle("POST /host/{code}/next-quiz", csrfMW(requireGameHost(http.HandlerFunc(handlers.NextQuiz))))

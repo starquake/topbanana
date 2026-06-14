@@ -8,15 +8,15 @@
          for the dark theme + tokens. Bulma was dropped in #213; the auth
          classes are scanned via the second @source directive in
          tailwind-src.css so they survive tree-shaking. */}}
-    <link rel="icon" type="image/svg+xml" href="/assets/banana.svg" sizes="any">
+    <link rel="icon" type="image/svg+xml" href="/static/banana.svg" sizes="any">
     <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="apple-touch-icon" href="/assets/banana-192.png">
+    <link rel="apple-touch-icon" href="/static/banana-192.png">
     <meta name="theme-color" content="#ffd23f">
     {{/* Open Graph / Twitter Card metadata. Sitewide defaults — the same
          card shows on every auth page. Per-quiz overrides happen on
          /play/{slugID} in the player SPA, not here. og:image is absolute
          per the OG spec (WhatsApp's parser in particular rejects relative
-         paths) — {{ogImage}} resolves to scheme://host/assets/og-image.png
+         paths) — {{ogImage}} resolves to scheme://host/static/og-image.png
          at render time (#294). */}}
     <meta property="og:site_name" content="Top Banana!">
     <meta property="og:title" content="Be the Top Banana!">
@@ -30,17 +30,17 @@
     <meta name="twitter:title" content="Be the Top Banana!">
     <meta name="twitter:description" content="Make a quiz, share the link, see who's the top banana.">
     <meta name="twitter:image" content="{{ogImage}}">
-    <link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="preload" href="/assets/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="stylesheet" href="/assets/css/app.css">
+    <link rel="preload" href="/static/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/static/css/app.css">
     {{/* cooldown.js ticks the rate-limit "Wait Ns" submit buttons down
          and re-enables them at zero. It self-noops on auth pages with no
          [data-cooldown] element, so loading it on every auth page is
          fine. */}}
-    <script type="module" src="/assets/js/dist/cooldown.js" defer></script>
+    <script type="module" src="/static/js/dist/cooldown.js" defer></script>
     {{/* password-length.js shows a live "too short" hint under new-password
          inputs. Self-noops where there is no [data-password-length]. */}}
-    <script type="module" src="/assets/js/dist/password-length.js" defer></script>
+    <script type="module" src="/static/js/dist/password-length.js" defer></script>
     <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
 </head>
 <body class="bg-bg text-text font-sans antialiased min-h-dvh leading-relaxed flex flex-col">

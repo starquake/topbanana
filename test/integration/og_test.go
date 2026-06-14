@@ -40,7 +40,7 @@ func TestOGMetadata_Integration(t *testing.T) {
 
 	t.Run("og-image asset is served as image/png", func(t *testing.T) {
 		t.Parallel()
-		resp := httpGet(ctx, t, &http.Client{}, baseURL+"/assets/og-image.png")
+		resp := httpGet(ctx, t, &http.Client{}, baseURL+"/static/og-image.png")
 		defer closeBody(t, resp.Body)
 
 		if got, want := resp.StatusCode, http.StatusOK; got != want {
@@ -287,11 +287,11 @@ func assertSitewideOG(ctx context.Context, t *testing.T, url, baseURL string) {
 	assertAbsoluteOGImage(t, body, baseURL)
 }
 
-// absoluteOGImagePattern matches `^https?://.+/assets/og-image\.png$` so
+// absoluteOGImagePattern matches `^https?://.+/static/og-image\.png$` so
 // the og:image / twitter:image meta tags must carry a fully-qualified
 // URL. Defined as a package-level regexp so the assertion can run inside
 // parallel subtests without re-compiling on each call.
-var absoluteOGImagePattern = regexp.MustCompile(`^https?://.+/assets/og-image\.png$`)
+var absoluteOGImagePattern = regexp.MustCompile(`^https?://.+/static/og-image\.png$`)
 
 // ogImageMetaPattern extracts the attribute and content of a meta tag
 // pointing at the OG/Twitter card image. Capture group 1 is the
@@ -304,7 +304,7 @@ var ogImageMetaPattern = regexp.MustCompile(
 // assertAbsoluteOGImage fails the test if any og:image / twitter:image
 // meta tag in body carries a non-absolute URL, or if the URL points at a
 // different host than the request landed on. The ticket (#294) AC is
-// "matches `^https?://.+/assets/og-image\.png$`"; the host-equality
+// "matches `^https?://.+/static/og-image\.png$`"; the host-equality
 // check is a stronger property that catches a misconfigured BaseURL
 // helper too.
 func assertAbsoluteOGImage(t *testing.T, body, baseURL string) {
@@ -314,7 +314,7 @@ func assertAbsoluteOGImage(t *testing.T, body, baseURL string) {
 	if len(matches) == 0 {
 		t.Fatal("body has no og:image / twitter:image meta tag")
 	}
-	wantPrefix := baseURL + "/assets/og-image.png"
+	wantPrefix := baseURL + "/static/og-image.png"
 	for _, m := range matches {
 		attr, url := m[1], m[2]
 		if !absoluteOGImagePattern.MatchString(url) {

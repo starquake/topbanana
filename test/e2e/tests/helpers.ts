@@ -102,11 +102,6 @@ export function markAdmin(displayName: string): void {
   setRole(displayName, 'admin');
 }
 
-// markHost sets role='host' (the middle tier) for the named player.
-export function markHost(displayName: string): void {
-  setRole(displayName, 'host');
-}
-
 function setRole(displayName: string, role: 'player' | 'host' | 'admin'): void {
   const dataDir = process.env.TOPBANANA_E2E_DATA_DIR;
   if (!dataDir) {
@@ -233,8 +228,12 @@ export async function createQuizWithQuestions(
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
   for (const [index, q] of questions.entries()) {
-    await page.getByRole('link', { name: /add question/i }).click();
-    await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/new$/);
+    // Each round carries its own "Add question" button now (#929); the
+    // imported quiz has a single default round, so the first match is it.
+    // The link targets the round-scoped create form, so the URL carries a
+    // round_id query.
+    await page.getByRole('link', { name: /add question/i }).first().click();
+    await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/new\?round_id=\d+$/);
 
     // Question text became a <textarea> in the redesign.
     await page.locator(':is(input, textarea)[name=text]').fill(q.text);

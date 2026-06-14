@@ -177,7 +177,7 @@ func TestHome_Integration(t *testing.T) {
 			`data-share-text="Play this quiz: Bananas of the World"`,
 			`data-share-path="/play/capital-cities-`,
 			`data-share-title="Capital Cities"`,
-			`<script type="module" src="/assets/js/dist/share.js"></script>`,
+			`<script type="module" src="/static/js/dist/share.js"></script>`,
 		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("body missing share-trigger marker %q", want)
@@ -185,9 +185,31 @@ func TestHome_Integration(t *testing.T) {
 		}
 	})
 
+	t.Run("GET / renders the unified client card fields", func(t *testing.T) {
+		t.Parallel()
+		body := getBody(ctx, t, baseURL+"/")
+
+		// #927: the shared client card surfaces a rounds count, the durable
+		// play count, the creator and a creation-date <time> element on
+		// every quiz tile. quiz1 has two distinct plays (alice + bob) and a
+		// single default round + question, and is created by the seeded
+		// "admin" player.
+		for _, want := range []string{
+			"1 round",
+			"1 question",
+			"2 plays",
+			"By admin",
+			`<time datetime=`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("body missing client-card field %q", want)
+			}
+		}
+	})
+
 	t.Run("share bundle asset is served", func(t *testing.T) {
 		t.Parallel()
-		resp := httpGet(ctx, t, &http.Client{}, baseURL+"/assets/js/dist/share.js")
+		resp := httpGet(ctx, t, &http.Client{}, baseURL+"/static/js/dist/share.js")
 		defer closeBody(t, resp.Body)
 
 		if got, want := resp.StatusCode, http.StatusOK; got != want {
@@ -251,7 +273,7 @@ func TestHome_Integration(t *testing.T) {
 			// newest list, which orders by created_at and ignores plays.
 			"Newly Authored",
 			`href="/play/newly-authored-`,
-			// Newest cards show a question-count pill, not a play count.
+			// The shared client card shows a question count on every tile.
 			`1 question`,
 		} {
 			if !strings.Contains(body, want) {
@@ -275,6 +297,14 @@ func TestHome_Integration(t *testing.T) {
 			"Just published — no one has played yet.",
 			`href="/play/newly-authored-`,
 			`1 question`,
+			// #927: /quizzes now uses the shared client card, which adds a
+			// share trigger (the page had none before), a rounds count, the
+			// durable play count (zero for the never-played quiz) and the
+			// creator.
+			`data-share-trigger`,
+			`1 round`,
+			`0 plays`,
+			`By admin`,
 		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("body missing %q", want)
@@ -319,6 +349,20 @@ func TestHome_Integration_FooterAffordance(t *testing.T) {
 		}
 		if strings.Contains(snap.Body, `action="/logout"`) {
 			t.Error(`body contains log-out form for anonymous visitor`)
+		}
+	})
+
+	// The discreet admin link in the home footer deep-links a logged-out
+	// visitor into the login flow: GET /admin 303s to /login carrying the
+	// original URI as ?next= so they return to /admin after signing in
+	// (#449).
+	t.Run("anonymous GET /admin redirects to login carrying next", func(t *testing.T) {
+		snap := fetchWithClient(ctx, t, authClient(t), srv.BaseURL+"/admin")
+		if got, want := snap.StatusCode, http.StatusSeeOther; got != want {
+			t.Fatalf("status = %d, want %d", got, want)
+		}
+		if got, want := snap.Location, "/login?next=%2Fadmin"; got != want {
+			t.Errorf("Location = %q, want %q", got, want)
 		}
 	})
 
@@ -459,14 +503,17 @@ func finishGameInt(t *testing.T, games game.Store, playerID int64, q *quiz.Quiz)
 		t.Fatalf("CreateParticipant err = %v, want nil", err)
 	}
 	now := time.Now()
-	for _, qs := range q.Questions {
+	for i, qs := range q.Questions {
 		gq := &game.Question{
 			GameID:     g.ID,
 			QuestionID: qs.ID,
 			StartedAt:  now,
 			ExpiredAt:  now.Add(10 * time.Second),
 		}
-		if err := games.CreateQuestion(ctx, gq, false); err != nil {
+		// The final question completes the game, bumping the durable
+		// quizzes.play_count the home cards display (#891).
+		completesGame := i == len(q.Questions)-1
+		if err := games.CreateQuestion(ctx, gq, completesGame); err != nil {
 			t.Fatalf("CreateQuestion err = %v, want nil", err)
 		}
 	}

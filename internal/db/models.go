@@ -78,6 +78,21 @@ type Invite struct {
 	AcceptedAt        sql.NullTime
 }
 
+type Medium struct {
+	ID                int64
+	QuizID            int64
+	Type              string
+	Mime              string
+	Path              string
+	ThumbPath         sql.NullString
+	Width             sql.NullInt64
+	Height            sql.NullInt64
+	SizeBytes         int64
+	Sha256            string
+	CreatedByPlayerID int64
+	CreatedAt         time.Time
+}
+
 type Option struct {
 	ID         int64
 	QuestionID int64

@@ -36,7 +36,7 @@ You are drafting end-user release notes for Top Banana and shipping the release.
 - Code-style sweeps and refactors with no behavioural change.
 - CI workflow tweaks unless they change the operator's deploy story.
 - Documentation-only PRs (`CLAUDE.md`, `docs/Vision.md`, this skill itself).
-- Generated-code regens (`internal/db/*.sql.go`, `internal/web/static/css/app.css`).
+- Generated-code regens (`internal/db/*.sql.go`, `internal/assets/static/css/app.css`).
 - Internal infra migrations (Bulma → Tailwind, htmx version bump) unless the *visible* result is a meaningful change — in which case describe the visible result, not the migration.
 
 ## Format

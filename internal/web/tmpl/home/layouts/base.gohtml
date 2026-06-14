@@ -9,9 +9,9 @@
          banana icon) stays consistent. New utility classes used in
          home/* must be picked up by `make tailwind`; the @source line
          in _tailwind.css already covers this directory. */}}
-    <link rel="icon" type="image/svg+xml" href="/assets/banana.svg" sizes="any">
+    <link rel="icon" type="image/svg+xml" href="/static/banana.svg" sizes="any">
     <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="apple-touch-icon" href="/assets/banana-192.png">
+    <link rel="apple-touch-icon" href="/static/banana-192.png">
     <meta name="theme-color" content="#ffd23f">
     <meta property="og:site_name" content="Top Banana!">
     <meta property="og:title" content="Be the Top Banana!">
@@ -25,26 +25,26 @@
     <meta name="twitter:title" content="Be the Top Banana!">
     <meta name="twitter:description" content="Make a quiz, share the link, see who's the top banana.">
     <meta name="twitter:image" content="{{ogImage}}">
-    <link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="preload" href="/assets/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="stylesheet" href="/assets/css/app.css">
+    <link rel="preload" href="/static/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/static/css/app.css">
     {{/* The share bundle auto-wires [data-share-trigger] buttons on the
          popular-quiz cards below. Loaded as a module so the
          openShareDialog export is available if other surfaces ever
          want to drive the dialog programmatically. esbuild bundle
          (#721); the dialog logic is shared with the player client. */}}
-    <script type="module" src="/assets/js/dist/share.js"></script>
+    <script type="module" src="/static/js/dist/share.js"></script>
     {{/* home.js registers the Alpine resume-session CTA (#888) so the
          "Join a live game" button flips to "Resume session" when the
          player has a remembered session in localStorage. Loaded as a
          module: both modules execute before deferred Alpine boots, so
          their alpine:init handlers are registered in time for the
          x-data="resumeSessionCta()" island to mount. */}}
-    <script type="module" src="/assets/js/dist/home.js"></script>
+    <script type="module" src="/static/js/dist/home.js"></script>
     {{/* Alpine drives the Popular / Newest tab toggle on the start page.
          Vendored + self-hosted (no CDN, per frontend-style.md); deferred
          so it boots after the DOM parses without blocking first paint. */}}
-    <script src="/assets/js/vendor/alpine.min.js" defer></script>
+    <script src="/static/js/vendor/alpine.min.js" defer></script>
     <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
 </head>
 {{/* min-h-dvh (not min-h-screen / 100vh) so the sticky-footer column

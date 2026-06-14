@@ -102,11 +102,19 @@ const (
 	AppEnvironmentProduction = "production"
 	// ClientDirDefault specifies the default directory for the player-client static files.
 	ClientDirDefault = ""
-	// WebStaticDirDefault is the default override for the admin/auth/home static-asset
-	// directory. Empty means "serve from the embedded FS"; a development override
-	// (e.g. WEB_STATIC_DIR=internal/web/static) makes `make tailwind` regens visible
-	// without a binary restart, mirroring CLIENT_DIR for the player-client half.
+	// WebStaticDirDefault is the default override for the shared static-asset
+	// directory served at /static/. Empty means "serve from the embedded FS"; a
+	// development override (e.g. WEB_STATIC_DIR=internal/assets/static) makes
+	// `make tailwind` regens visible without a binary restart, mirroring
+	// CLIENT_DIR for the player-client half.
 	WebStaticDirDefault = ""
+
+	// MediaDirDefault is the default filesystem directory for uploaded media
+	// (#936). Dev writes into ./media in the working directory; staging and
+	// production must point this at a persistent writable volume (the
+	// distroless image has no writable app FS by default) or uploads are lost
+	// on every container restart.
+	MediaDirDefault = "./media"
 
 	// HostDefault is the default host to listen on. Can be an IP address or hostname.
 	HostDefault = "localhost"
@@ -149,11 +157,17 @@ type Config struct {
 	DBMaxIdleConns    int
 	DBConnMaxLifetime time.Duration
 
+	// MediaDir is the filesystem directory uploaded media is written under,
+	// in a per-quiz subdirectory (#936). Defaults to ./media; staging and
+	// production point it at a persistent volume since the distroless image
+	// has no writable app FS by default. Created at startup if missing.
+	MediaDir string
+
 	ClientDir string
 
-	// WebStaticDir overrides the on-disk path served at /assets/ for the
-	// admin/auth/home shell. Empty means "serve from the embedded FS"
-	// (the production default); set to e.g. internal/web/static in dev
+	// WebStaticDir overrides the on-disk path served at /static/ for the
+	// shared static assets. Empty means "serve from the embedded FS"
+	// (the production default); set to e.g. internal/assets/static in dev
 	// so a `make tailwind` regen lands without a binary restart. Honoured
 	// only when AppEnvironment == "development", matching ClientDir.
 	WebStaticDir string
@@ -412,6 +426,7 @@ func Parse(getenv func(string) string) (*Config, error) {
 	c := Config{
 		ClientDir:         ClientDirDefault,
 		WebStaticDir:      WebStaticDirDefault,
+		MediaDir:          MediaDirDefault,
 		Host:              HostDefault,
 		Port:              PortDefault,
 		DBDriver:          DBDriverDefault,
@@ -445,6 +460,9 @@ func Parse(getenv func(string) string) (*Config, error) {
 		if val := getenv("WEB_STATIC_DIR"); val != "" {
 			c.WebStaticDir = val
 		}
+	}
+	if val := getenv("MEDIA_DIR"); val != "" {
+		c.MediaDir = val
 	}
 
 	if err := c.applyDatabaseConfig(getenv); err != nil {

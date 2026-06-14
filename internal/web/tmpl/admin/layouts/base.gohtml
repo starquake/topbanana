@@ -8,9 +8,9 @@
          player client (/client/) still uses Bulma directly — that surface
          is intentionally out of scope. Icons in admin templates are inline
          SVGs. */}}
-    <link rel="icon" type="image/svg+xml" href="/assets/banana.svg" sizes="any">
+    <link rel="icon" type="image/svg+xml" href="/static/banana.svg" sizes="any">
     <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="apple-touch-icon" href="/assets/banana-192.png">
+    <link rel="apple-touch-icon" href="/static/banana-192.png">
     <meta name="theme-color" content="#ffd23f">
     {{/* Open Graph / Twitter Card metadata. Admin URLs aren't shared
          externally in normal use, but having a sensible preview when they
@@ -28,17 +28,17 @@
     <meta name="twitter:title" content="Be the Top Banana!">
     <meta name="twitter:description" content="Make a quiz, share the link, see who's the top banana.">
     <meta name="twitter:image" content="{{ogImage}}">
-    <link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="preload" href="/assets/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="stylesheet" href="/assets/css/app.css">
-    <script src="/assets/js/htmx.min.js" defer></script>
+    <link rel="preload" href="/static/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/static/css/app.css">
+    <script src="/static/js/htmx.min.js" defer></script>
     {{/* password-length.js shows a live "too short" hint under the
          set-password input. Self-noops where there is no
          [data-password-length]. */}}
-    <script type="module" src="/assets/js/dist/password-length.js" defer></script>
+    <script type="module" src="/static/js/dist/password-length.js" defer></script>
     {{/* copy-prompt.js powers the Copy button on the quiz-import page.
          Self-noops where there is no [data-copy-target]. */}}
-    <script type="module" src="/assets/js/dist/copy-prompt.js" defer></script>
+    <script type="module" src="/static/js/dist/copy-prompt.js" defer></script>
     <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
 </head>
 <body class="bg-bg text-text font-sans antialiased min-h-dvh flex flex-col leading-relaxed">
@@ -49,68 +49,6 @@
 {{/* Build stamp (#663) lives in the shared metadata footer; log out moved
      into the top bar's account cluster (#844). */}}
 {{template "site_footer" .}}
-<script>
-    // Admin modals get dialog ARIA + focus management + Esc-to-close
-    // wiring at open time (#364). Templates only declare:
-    //   - the outer wrapper with id="modal-..."
-    //   - role="dialog" + aria-modal="true" + aria-labelledby="<title-id>"
-    //   - a title element carrying the referenced id
-    // Everything else (focus capture/restore, Tab cycling, Esc) lives
-    // here so all five admin modals share one behaviour.
-    const modalState = new Map();
-
-    function focusableInModal(modal) {
-        const sel = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]),'
-            + ' textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-        return Array.from(modal.querySelectorAll(sel))
-            .filter((el) => !el.closest('[aria-hidden="true"]'));
-    }
-
-    function openModal(id) {
-        const modal = document.getElementById(id);
-        if (!modal) return;
-        modal.classList.remove('hidden');
-
-        const previouslyFocused = document.activeElement;
-        const focusables = focusableInModal(modal);
-        if (focusables.length > 0) {
-            focusables[0].focus();
-        }
-
-        const onKey = (e) => {
-            if (e.key === 'Escape') {
-                e.preventDefault();
-                closeModal(id);
-                return;
-            }
-            if (e.key !== 'Tab' || focusables.length === 0) return;
-            const first = focusables[0];
-            const last = focusables[focusables.length - 1];
-            if (e.shiftKey && document.activeElement === first) {
-                e.preventDefault();
-                last.focus();
-            } else if (!e.shiftKey && document.activeElement === last) {
-                e.preventDefault();
-                first.focus();
-            }
-        };
-        document.addEventListener('keydown', onKey);
-        modalState.set(id, { onKey, previouslyFocused });
-    }
-
-    function closeModal(id) {
-        const modal = document.getElementById(id);
-        if (!modal) return;
-        modal.classList.add('hidden');
-
-        const state = modalState.get(id);
-        if (!state) return;
-        document.removeEventListener('keydown', state.onKey);
-        if (state.previouslyFocused && typeof state.previouslyFocused.focus === 'function') {
-            state.previouslyFocused.focus();
-        }
-        modalState.delete(id);
-    }
-</script>
+{{template "modal_manager" .}}
 </body>
 </html>

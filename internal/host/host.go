@@ -77,7 +77,7 @@ type Handlers struct {
 	service   *livesession.Service
 	quizzes   quiz.Store
 	bigScreen *render.Renderer
-	quizList  *render.Renderer
+	picker    *render.Renderer
 }
 
 // NewHandlers wires the host surface over the live-session service.
@@ -94,7 +94,7 @@ func NewHandlers(
 		// The host surfaces render none of admin's top-bar / nav chrome, so
 		// they bind nothing beyond render.Renderer's own csrfToken (nil funcs).
 		bigScreen: render.New(logger, csrfMgr, parseTemplate("host/pages/bigscreen.gohtml"), "base.gohtml", nil),
-		quizList:  render.New(logger, csrfMgr, parseQuizListTemplate("host/pages/quizlist.gohtml"), "page.gohtml", nil),
+		picker:    render.New(logger, csrfMgr, parsePickerTemplate("host/pages/picker.gohtml"), "page.gohtml", nil),
 	}
 }
 
@@ -169,7 +169,7 @@ func (h *Handlers) BigScreen(w http.ResponseWriter, r *http.Request) {
 //
 // The host/layouts/*.gohtml glob pulls in every host layout (base.gohtml and
 // page.gohtml), so this FuncMap must register every func any host layout uses
-// and stay in sync with parseQuizListTemplate's - else adding a func to one
+// and stay in sync with parsePickerTemplate's - else adding a func to one
 // layout panics the other tree at parse. humanizeTime is registered here for
 // that reason even though bigscreen does not call it.
 func parseTemplate(path string) *template.Template {
@@ -182,17 +182,21 @@ func parseTemplate(path string) *template.Template {
 	return render.Parse(tmpl.FS, funcs, path, "host/layouts/*.gohtml")
 }
 
-// parseQuizListTemplate parses the host layouts plus the shared quiz-card
-// partial and the named page. It registers the same funcs as parseTemplate
-// (the shared quiz_card partial calls humanizeTime). Only the quiz_card partial
-// is parsed (not the whole components/ glob): the footer and topbar partials
-// reference funcs (isSignedIn, isAdmin) this page does not provide.
-func parseQuizListTemplate(path string) *template.Template {
+// parsePickerTemplate parses the host layouts plus the shared quiz-card,
+// modal-manager, and restart-modal partials and the named page. It registers
+// the same funcs as parseTemplate (the shared quiz_card partial calls
+// humanizeTime). Only those three partials are parsed (not the whole
+// components/ glob): the footer and topbar partials reference funcs
+// (isSignedIn, isAdmin) this page does not provide; the three listed here use
+// only csrfToken/humanizeTime, so they are safe to add to the narrowed list.
+func parsePickerTemplate(path string) *template.Template {
 	funcs := template.FuncMap{
 		"envTitleTag":  envtag.Get,
 		"csrfToken":    func() string { return "" },
 		"humanizeTime": reltime.Humanize,
 	}
 
-	return render.Parse(tmpl.FS, funcs, path, "host/layouts/*.gohtml", "components/quiz_card.gohtml")
+	return render.Parse(tmpl.FS, funcs, path,
+		"host/layouts/*.gohtml", "components/quiz_card.gohtml",
+		"components/modal_manager.gohtml", "components/restart_modal.gohtml")
 }

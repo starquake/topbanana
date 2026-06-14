@@ -12,33 +12,9 @@
     </header>
 
     {{if .Quizzes}}
-        {{/* Stretched-link pattern (same as the popular cards on / and
-             admin/quizlist): the play link is anchored to the title and
-             uses a ::before pseudo-element to cover the whole card, so
-             the card itself isn't an <a>. Keeps inner controls (none
-             yet, but room for a Share button later) clickable as
-             separate affordances without nested interactive elements. */}}
         <ul class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {{range .Quizzes}}
-                <li>
-                    <article class="group relative flex flex-col gap-2 h-full p-5 bg-surface border border-border-soft rounded-lg transition-colors hover:border-accent-line">
-                        <h3 class="m-0 font-display text-lg font-semibold leading-snug">
-                            <a href="{{.PlayURL}}"
-                               class="text-text group-hover:text-accent transition-colors before:absolute before:inset-0 before:content-['']">
-                                {{.Title}}
-                            </a>
-                        </h3>
-                        {{if .Description}}
-                            <p class="m-0 text-sm text-text-dim line-clamp-2">{{.Description}}</p>
-                        {{end}}
-                        <div class="mt-auto flex items-center justify-between gap-3 pt-2 text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-text-mute">
-                            <span>{{.QuestionCount}} {{if eq .QuestionCount 1}}question{{else}}questions{{end}}</span>
-                            {{if .CreatedByDisplayName}}
-                                <span>By {{.CreatedByDisplayName}}</span>
-                            {{end}}
-                        </div>
-                    </article>
-                </li>
+                <li>{{template "client_quiz_card" .}}</li>
             {{end}}
         </ul>
     {{else}}

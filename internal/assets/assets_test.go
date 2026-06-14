@@ -1,4 +1,4 @@
-package web_test
+package assets_test
 
 import (
 	"io"
@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/starquake/topbanana/internal/assets"
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/envtag"
-	"github.com/starquake/topbanana/internal/web"
 )
 
 // TestHandler_DefaultServesEmbeddedFS pins the production default: with
@@ -22,14 +22,14 @@ import (
 func TestHandler_DefaultServesEmbeddedFS(t *testing.T) {
 	t.Parallel()
 
-	h := web.Handler(&config.Config{AppEnvironment: "development"})
+	h := assets.Handler(&config.Config{AppEnvironment: "development"})
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/assets/css/app.css", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/static/css/app.css", nil)
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 
 	if got, want := rr.Code, http.StatusOK; got != want {
-		t.Fatalf("status = %d, want %d (embedded /assets/css/app.css should always be present)", got, want)
+		t.Fatalf("status = %d, want %d (embedded /static/css/app.css should always be present)", got, want)
 	}
 	if rr.Body.Len() == 0 {
 		t.Error("body is empty; expected the embedded Tailwind output")
@@ -53,9 +53,9 @@ func TestHandler_WebStaticDirServesOnDisk(t *testing.T) {
 		t.Fatalf("WriteFile err = %v, want nil", err)
 	}
 
-	h := web.Handler(&config.Config{AppEnvironment: "development", WebStaticDir: staticDir})
+	h := assets.Handler(&config.Config{AppEnvironment: "development", WebStaticDir: staticDir})
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/assets/css/app.css", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/static/css/app.css", nil)
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 
@@ -79,7 +79,7 @@ func TestHandler_WebStaticDirServesOnDisk(t *testing.T) {
 func TestServiceWorkerHandler_SubstitutesCacheVersion(t *testing.T) {
 	t.Parallel()
 
-	h := web.ServiceWorkerHandler(&config.Config{AppEnvironment: "development"})
+	h := assets.ServiceWorkerHandler(&config.Config{AppEnvironment: "development"})
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/sw.js", nil)
 	rr := httptest.NewRecorder()
@@ -123,7 +123,7 @@ func TestServiceWorkerHandler_DevModeRecomputesVersion(t *testing.T) {
 		t.Fatalf("WriteFile app.css v1 err = %v, want nil", err)
 	}
 
-	h := web.ServiceWorkerHandler(&config.Config{AppEnvironment: "development", WebStaticDir: staticDir})
+	h := assets.ServiceWorkerHandler(&config.Config{AppEnvironment: "development", WebStaticDir: staticDir})
 
 	first := serveAndReadBody(t, h, "/sw.js")
 	if got, want := first, "__CACHE_VERSION__"; strings.Contains(got, want) {
@@ -145,7 +145,7 @@ func TestServiceWorkerHandler_DevModeRecomputesVersion(t *testing.T) {
 func TestManifestHandler_ServesManifestMime(t *testing.T) {
 	t.Parallel()
 
-	h := web.ManifestHandler(&config.Config{AppEnvironment: "development"})
+	h := assets.ManifestHandler(&config.Config{AppEnvironment: "development"})
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/manifest.webmanifest", nil)
 	rr := httptest.NewRecorder()
@@ -180,7 +180,7 @@ func TestManifestHandler_InjectsEnvTag(t *testing.T) {
 	envtag.Set("[staging] ")
 	t.Cleanup(func() { envtag.Set("") })
 
-	h := web.ManifestHandler(&config.Config{AppEnvironment: "staging"})
+	h := assets.ManifestHandler(&config.Config{AppEnvironment: "staging"})
 	body := serveAndReadBody(t, h, "/manifest.webmanifest")
 
 	if got, want := body, `"[staging] Top Banana!"`; !strings.Contains(got, want) {
@@ -201,7 +201,7 @@ func TestManifestHandler_InjectsEnvTag(t *testing.T) {
 func TestShellAssetPathsMatchPrecacheURLs(t *testing.T) {
 	t.Parallel()
 
-	swBody, err := fs.ReadFile(web.ExportEmbeddedStaticFS(), "sw.js")
+	swBody, err := fs.ReadFile(assets.ExportEmbeddedStaticFS(), "sw.js")
 	if err != nil {
 		t.Fatalf("ReadFile sw.js err = %v, want nil", err)
 	}
@@ -209,7 +209,7 @@ func TestShellAssetPathsMatchPrecacheURLs(t *testing.T) {
 	precache = append(precache, "sw.js")
 	slices.Sort(precache)
 
-	shell := web.ExportShellAssetPaths()
+	shell := assets.ExportShellAssetPaths()
 	slices.Sort(shell)
 
 	if got, want := strings.Join(shell, ","), strings.Join(precache, ","); got != want {
@@ -222,7 +222,7 @@ func TestShellAssetPathsMatchPrecacheURLs(t *testing.T) {
 
 // precacheAssetPaths parses the PRECACHE_URLS array out of sw.js and normalizes
 // each entry to an embedded-FS path (drop the leading slash and the optional
-// /assets/ mount prefix) so it can be compared to shellAssetPaths().
+// /static/ mount prefix) so it can be compared to shellAssetPaths().
 func precacheAssetPaths(t *testing.T, swBody string) []string {
 	t.Helper()
 
@@ -243,7 +243,7 @@ func precacheAssetPaths(t *testing.T, swBody string) []string {
 			continue
 		}
 		entry = strings.TrimPrefix(entry, "/")
-		entry = strings.TrimPrefix(entry, "assets/")
+		entry = strings.TrimPrefix(entry, "static/")
 		paths = append(paths, entry)
 	}
 

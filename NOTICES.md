@@ -9,8 +9,8 @@ The banana icon used in the favicon, the brand mark in the navbar and
 player client, and the Open Graph share image is the `banana` icon from
 the [Lucide icon library](https://lucide.dev). Paths appear inline in the
 admin, auth, and player templates and as standalone SVGs at
-`internal/web/static/banana.svg` and `internal/web/static/_og-image.svg`.
-The rendered `internal/web/static/og-image.png` incorporates the same paths.
+`internal/assets/static/banana.svg` and `internal/assets/static/_og-image.svg`.
+The rendered `internal/assets/static/og-image.png` incorporates the same paths.
 
 Lucide is published under the ISC License:
 
@@ -36,7 +36,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ## htmx — Zero-Clause BSD (0BSD)
 
-A copy of htmx 2.0 is vendored at `internal/web/static/js/htmx.min.js`
+A copy of htmx 2.0 is vendored at `internal/assets/static/js/htmx.min.js`
 (introduced in #223). htmx is published under the BSD Zero-Clause License:
 
 ```
@@ -57,7 +57,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ## anime.js — MIT License
 
 A copy of anime.js 4.2.0 is vendored at
-`internal/web/static/js/vendor/anime.umd.min.js` (introduced in #295,
+`internal/assets/static/js/vendor/anime.umd.min.js` (introduced in #295,
 previously loaded from cdn.jsdelivr.net). The player client loads this same
 web-served copy, so there is one served file. The committed file is now built
 from the pinned `animejs` npm package by esbuild (#897). anime.js is
@@ -90,7 +90,7 @@ THE SOFTWARE.
 ## Alpine.js — MIT License
 
 A copy of Alpine.js 3.15.12 is vendored at
-`internal/web/static/js/vendor/alpine.min.js` (introduced in #295,
+`internal/assets/static/js/vendor/alpine.min.js` (introduced in #295,
 previously loaded from cdn.jsdelivr.net). The player client loads this same
 web-served copy, so there is one served file. The committed file is now built
 from the pinned `alpinejs` npm package by esbuild (#897). Alpine.js is
@@ -123,7 +123,7 @@ THE SOFTWARE.
 ## SortableJS — MIT License
 
 A copy of SortableJS 1.15.6 is vendored at
-`internal/web/static/js/vendor/sortable.min.js` (introduced in #199). It
+`internal/assets/static/js/vendor/sortable.min.js` (introduced in #199). It
 powers the drag-and-drop reorder of rounds and questions on the admin quiz
 view and is loaded only on that page, self-hosted rather than from a CDN
 (following the precedent set for anime.js / Alpine.js in #295). The
@@ -157,7 +157,7 @@ THE SOFTWARE.
 ## Inter — SIL Open Font License 1.1 (OFL-1.1)
 
 The Inter typeface (body/sans font) is vendored under
-`internal/web/static/fonts/` as `inter-latin.woff2` and
+`internal/assets/static/fonts/` as `inter-latin.woff2` and
 `inter-latin-ext.woff2` (introduced in #599, previously loaded from
 fonts.gstatic.com via a Google Fonts CDN `<link>`; self-hosted following
 the precedent set for anime.js / Alpine.js in #295). Only the latin and
@@ -174,7 +174,7 @@ governs both fonts.
 ## Orbitron — SIL Open Font License 1.1 (OFL-1.1)
 
 The Orbitron typeface (display/heading font) is vendored under
-`internal/web/static/fonts/` as `orbitron-latin.woff2` (introduced in
+`internal/assets/static/fonts/` as `orbitron-latin.woff2` (introduced in
 #599, previously loaded from fonts.gstatic.com via a Google Fonts CDN
 `<link>`; self-hosted following the precedent set for anime.js /
 Alpine.js in #295). Only the latin subset is bundled. Orbitron is
@@ -277,7 +277,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
 ## Tailwind CSS — MIT License
 
-The utility CSS in `internal/web/static/css/app.css` is generated from
+The utility CSS in `internal/assets/static/css/app.css` is generated from
 [Tailwind CSS v4](https://tailwindcss.com). The minified output retains
 its own MIT attribution comment at the top of the file. Tailwind is
 published under the MIT License.

@@ -26,9 +26,10 @@ func NewHomeStore(conn *sql.DB, logger *slog.Logger) *HomeStore {
 	return &HomeStore{q: db.New(conn), logger: logger}
 }
 
-// ListPopularQuizzes returns the top-ranked quizzes by play count in the
-// last 30 days. The underlying query orders by play_count DESC; the
-// caller slices to the desired top-N.
+// ListPopularQuizzes returns the top-ranked quizzes by recent play
+// activity. The underlying query ranks by the 30-day finished-game count
+// (recent_play_count DESC) but each row carries the durable lifetime
+// play_count the card displays (#891/#927); the caller slices to top-N.
 func (s *HomeStore) ListPopularQuizzes(ctx context.Context) ([]*home.PopularQuiz, error) {
 	rows, err := s.q.ListPopularQuizzes(ctx)
 	if err != nil {
@@ -38,11 +39,15 @@ func (s *HomeStore) ListPopularQuizzes(ctx context.Context) ([]*home.PopularQuiz
 	out := make([]*home.PopularQuiz, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, &home.PopularQuiz{
-			ID:          r.ID,
-			Title:       r.Title,
-			Slug:        r.Slug,
-			Description: r.Description,
-			PlayCount:   int(r.PlayCount),
+			ID:                   r.ID,
+			Title:                r.Title,
+			Slug:                 r.Slug,
+			Description:          r.Description,
+			CreatedAt:            r.CreatedAt,
+			CreatedByDisplayName: r.CreatedByDisplayName,
+			PlayCount:            int(r.PlayCount),
+			RoundCount:           int(r.RoundCount),
+			QuestionCount:        int(r.QuestionCount),
 		})
 	}
 
@@ -61,11 +66,15 @@ func (s *HomeStore) ListNewestQuizzes(ctx context.Context) ([]*home.NewestQuiz, 
 	out := make([]*home.NewestQuiz, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, &home.NewestQuiz{
-			ID:            r.ID,
-			Title:         r.Title,
-			Slug:          r.Slug,
-			Description:   r.Description,
-			QuestionCount: int(r.QuestionCount),
+			ID:                   r.ID,
+			Title:                r.Title,
+			Slug:                 r.Slug,
+			Description:          r.Description,
+			CreatedAt:            r.CreatedAt,
+			CreatedByDisplayName: r.CreatedByDisplayName,
+			PlayCount:            int(r.PlayCount),
+			RoundCount:           int(r.RoundCount),
+			QuestionCount:        int(r.QuestionCount),
 		})
 	}
 

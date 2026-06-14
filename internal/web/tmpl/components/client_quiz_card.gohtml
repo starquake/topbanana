@@ -1,0 +1,68 @@
+{{/* client_quiz_card renders one quiz tile on the player-facing surfaces
+     (the home Popular/Newest tabs and the all-quizzes list). It mirrors the
+     admin quiz_card look (#927/#928): a bordered surface card with a top
+     gradient hairline, an uppercase meta row, the title, the description,
+     and a bordered footer with a rounds/questions/plays count cluster. It is
+     not a copy: the player surface drops the admin card's "Quiz #ID" line,
+     the raw /play URL chip and the bold count figures, and swaps the
+     edit/host controls for a yellow share button. It
+     stays a SEPARATE partial from quiz_card because the player surface
+     carries different data (creator + creation date, a rounds count). The dot
+     is a unified shape every home struct satisfies: ID, Title, Slug,
+     Description, CreatedByDisplayName, CreatedAt, PlayCount, RoundCount,
+     QuestionCount, plus a PlayURL method.
+
+     Stretched link: the title's ::before pseudo covers the whole article, so
+     clicking the card plays the quiz. The share button sits on relative z-10
+     to stay clickable above the pseudo. */}}
+{{define "client_quiz_card"}}
+    <article class="group relative flex flex-col h-full bg-surface border border-border-soft rounded-lg overflow-hidden transition-colors duration-200 hover:border-accent-line">
+        <div class="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-border to-transparent transition-colors group-hover:via-accent"></div>
+        <div class="flex-1 p-5 pb-2">
+            <div class="flex items-center justify-between gap-2 mb-3 text-[0.7rem] uppercase tracking-[0.16em] text-text-mute">
+                {{if .CreatedByDisplayName}}
+                    <span class="text-text-dim truncate min-w-0">By {{.CreatedByDisplayName}}</span>
+                {{else}}
+                    <span></span>
+                {{end}}
+                <time datetime="{{.CreatedAt.Format "2006-01-02T15:04:05Z07:00"}}"
+                      title="{{.CreatedAt.Format "2006-01-02 15:04"}}"
+                      class="shrink-0">{{humanizeTime .CreatedAt}}</time>
+            </div>
+            <h3 class="mb-2.5 font-display text-lg leading-[1.25] font-semibold">
+                <a href="{{.PlayURL}}"
+                   class="text-text hover:text-accent before:absolute before:inset-0 before:content-['']">
+                    {{.Title}}
+                </a>
+            </h3>
+            {{if .Description}}
+                <p class="mb-4 text-text-dim text-sm leading-relaxed line-clamp-2">{{.Description}}</p>
+            {{end}}
+        </div>
+        <footer class="flex items-center justify-between gap-3 px-5 py-3.5 border-t border-border-soft text-text-dim text-sm">
+            <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                <span>{{.RoundCount}} {{if eq .RoundCount 1}}round{{else}}rounds{{end}}</span>
+                <span>{{.QuestionCount}} {{if eq .QuestionCount 1}}question{{else}}questions{{end}}</span>
+                {{/* Times-played counter (#891), shown with the same Lucide
+                     play-circle icon the admin card uses. */}}
+                <span class="inline-flex items-center gap-1" title="Times played">
+                    <svg viewBox="0 0 24 24" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+                    {{.PlayCount}} {{if eq .PlayCount 1}}play{{else}}plays{{end}}
+                </span>
+            </div>
+            {{/* Yellow accent fill so the share affordance stands out against
+                 the muted footer. Sits on relative z-10 above the title's
+                 stretched-link pseudo so the click reaches this button. */}}
+            <button type="button"
+                    data-share-trigger
+                    data-share-path="{{.PlayURL}}"
+                    data-share-title="{{.Title}}"
+                    data-share-text="Play this quiz: {{.Title}}"
+                    aria-label="Share {{.Title}}"
+                    class="relative z-10 inline-flex items-center justify-center w-9 h-9 rounded-sm bg-accent text-bg border-0 hover:bg-accent-deep focus-visible:outline-none focus-visible:shadow-focus transition-colors cursor-pointer">
+                <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M13.5 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.5 2.5 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5zm-8.5 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm11 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>
+                <span class="sr-only">Share</span>
+            </button>
+        </footer>
+    </article>
+{{end}}

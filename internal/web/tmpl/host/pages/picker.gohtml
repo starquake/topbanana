@@ -11,6 +11,16 @@
                     {{template "quiz_card" .}}
                 {{end}}
             </section>
+
+            {{/* Confirm-and-restart modals (#853, #889). Mounted only when the
+                 host already has a game in flight; each card's "Change quiz"
+                 button opens the matching modal. Confirm ends the running
+                 session and opens a fresh room hosting the picked quiz. The
+                 page dot is hostPickerData, so .HostHasRunningGame is a
+                 page-level field; inside the range .ID is the card's. */}}
+            {{if .HostHasRunningGame}}
+                {{range .Quizzes}}{{template "restart_modal" .ID}}{{end}}
+            {{end}}
         {{else}}
             <div class="border border-dashed border-border rounded-xl p-12 text-center">
                 <h2 class="mb-2 font-display text-2xl font-bold">No live quizzes yet.</h2>

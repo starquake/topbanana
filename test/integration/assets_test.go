@@ -8,7 +8,7 @@ import (
 )
 
 // TestAssets_Integration guards the admin/auth asset pipeline end to end:
-// the route at /assets/ is mounted, the embedded FS sees the generated
+// the route at /static/ is mounted, the embedded FS sees the generated
 // app.css, and the file contains utilities that prove Tailwind scanned
 // the right templates. If anyone moves the source file or breaks the
 // @source paths in frontend/web/css/tailwind.css, the regenerated CSS would still serve
@@ -19,7 +19,7 @@ func TestAssets_Integration(t *testing.T) {
 
 	ctx, srv := startServer(t, nil)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.BaseURL+"/assets/css/app.css", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.BaseURL+"/static/css/app.css", nil)
 	if err != nil {
 		t.Fatalf("failed to build request: %v", err)
 	}

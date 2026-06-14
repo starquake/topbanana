@@ -2,6 +2,23 @@
 
 What changed in each released version of Top Banana! The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.6.5 — 2026-06-13
+
+The quiz to host is picked from the host area instead of the admin section.
+
+### Players
+- A result link copied from a finished game includes the quiz title and the player's score, not only the link.
+
+### Hosts
+- The quiz to host is picked from a list in the host area, which shows a live-session indicator when a room is already open.
+- A round boundary can be given a custom duration.
+- The quiz list shows how many times each quiz has been played.
+
+### Visual / chrome
+- The player screens drop the top bar; navigation moves to a footer.
+- Solo and live quizzes show a person or people icon on their mode badge.
+- The join QR code on the session screen is larger.
+
 ## v2026.6.4 — 2026-06-10
 
 A host now opens one room and runs quizzes through it without players re-entering a code; the player client installs as a standalone app on iOS, and every page shares one top navigation bar.

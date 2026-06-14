@@ -135,7 +135,7 @@ Top Banana! is configured through environment variables. Sensible defaults apply
 - **`PORT`** — TCP port. Defaults to `8080`.
 - **`DB_URI`** — modernc.org/sqlite connection string. Defaults to `file:topbanana.sqlite` in development; **required** in production.
 - **`CLIENT_DIR`** — development-only override that serves the player client from a directory on disk instead of the embedded FS, so HTML/JS edits hot-reload on page reload.
-- **`WEB_STATIC_DIR`** — development-only override that serves the admin/auth/home static assets (Tailwind output at `/assets/`) from a directory on disk instead of the embedded FS. Set to `internal/web/static` alongside `CLIENT_DIR=internal/client/static` for full live-reload coverage; a `make tailwind` regen then lands on the next request without a binary restart.
+- **`WEB_STATIC_DIR`** — development-only override that serves the admin/auth/home static assets (Tailwind output at `/static/`) from a directory on disk instead of the embedded FS. Set to `internal/assets/static` alongside `CLIENT_DIR=internal/client/static` for full live-reload coverage; a `make tailwind` regen then lands on the next request without a binary restart.
 
 ### Database tuning
 
@@ -159,7 +159,7 @@ Top Banana! is configured through environment variables. Sensible defaults apply
 - **`address already in use` on `:8080`** — another process holds the port. Either stop it or set `PORT` to a free one (`PORT=8081 go run ./cmd/server/`).
 - **`SESSION_KEY must be set in production`** — `APP_ENV=production` and no `SESSION_KEY`. Generate one (`openssl rand -hex 32`), set it, and restart.
 - **`database is locked` under load** — SQLite serialises writes. The compose file's connection string already enables WAL mode and a `busy_timeout`; for local dev add the same `?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)` to your `DB_URI`.
-- **`make check` reports `app.css is out of date`** — Tailwind output drifted. Run `make tailwind` and commit the regenerated `internal/web/static/css/app.css`.
+- **`make check` reports `app.css is out of date`** — Tailwind output drifted. Run `make tailwind` and commit the regenerated `internal/assets/static/css/app.css`.
 - **E2E setup** — see [`docs/e2e.md`](docs/e2e.md) for Playwright prerequisites and the `make test-e2e` workflow.
 
 ## Development

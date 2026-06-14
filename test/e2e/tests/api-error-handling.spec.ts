@@ -21,7 +21,10 @@ test.use({ storageState: adminStatePath() });
 test('400 on answer POST does not show the retry banner', async ({ page, browserName }) => {
   test.setTimeout(45_000);
 
-  const quizTitle = `E2E 287 ${browserName}`;
+  // Date.now() keeps the title unique per attempt: a Playwright retry reuses
+  // the same per-worker DB, so a fixed title would 409 on re-import (the failed
+  // attempt already seeded it) and doom the retry (#908).
+  const quizTitle = `E2E 287 ${browserName} ${Date.now()}`;
 
   await seedQuiz(page, quizTitle);
   await page.context().clearCookies();
@@ -87,7 +90,8 @@ test('400 on answer POST does not show the retry banner', async ({ page, browser
 test('409 on startGame recovers via getMyGameForQuiz', async ({ page, browserName }) => {
   test.setTimeout(30_000);
 
-  const quizTitle = `E2E 287 conflict ${browserName}`;
+  // Unique per attempt so a retry does not 409 on the seed (#908).
+  const quizTitle = `E2E 287 conflict ${browserName} ${Date.now()}`;
 
   await seedQuiz(page, quizTitle);
   await page.context().clearCookies();

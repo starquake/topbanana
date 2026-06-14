@@ -129,7 +129,7 @@ func (s *ShellHandlers) applyQuizOG(r *http.Request, id int64, data *shellData) 
 // the extra allocation is in the noise.
 func (s *ShellHandlers) render(w http.ResponseWriter, r *http.Request, name string, data shellData) {
 	funcs := template.FuncMap{
-		"ogImage":     func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
+		"ogImage":     func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
 		"envTitleTag": envtag.Get,
 	}
 	// partials/ holds the {{define}} blocks shared between index.html (solo) and

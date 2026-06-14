@@ -1,6 +1,6 @@
 {{/* quiz_card renders one quiz tile. The dot is a QuizData item, so any
-     field the card needs (PlayCount, Mode, QuestionCount, CanEdit,
-     ActionVariant, ...) must live on QuizData. The footer action cluster is
+     field the card needs (PlayCount, Mode, RoundCount, QuestionCount,
+     CanEdit, ActionVariant, ...) must live on QuizData. The footer action cluster is
      parameterised by ActionVariant so other surfaces (the host UI, #889) can
      reuse the same card with their own actions; html/template has no
      block/yield, so the variant selects a named sub-template. */}}
@@ -29,11 +29,11 @@
                     </a>
                 {{end}}
             </h3>
-            <code class="inline-block mb-3.5 px-2 py-0.5 rounded-sm font-mono text-[0.72rem] text-cyan bg-cyan-soft">/play/{{.Slug}}-{{.ID}}</code>
             <p class="mb-4 text-text-dim text-sm leading-relaxed line-clamp-2">{{.Description}}</p>
         </div>
         <footer class="flex items-center justify-between px-5 py-3.5 border-t border-border-soft text-text-dim text-sm">
             <div class="flex items-center gap-2.5">
+                <span><strong class="text-text font-semibold mr-1">{{.RoundCount}}</strong>&nbsp;{{if eq .RoundCount 1}}round{{else}}rounds{{end}}</span>
                 <span><strong class="text-text font-semibold mr-1">{{.QuestionCount}}</strong>&nbsp;questions</span>
                 {{/* Times-played counter (#891): bumped once each time a
                      game of this quiz completes; never decremented. The
@@ -88,17 +88,23 @@
     {{end}}
 {{end}}
 
-{{/* quiz_card_actions_host is the host surface's action cluster (#889): a
-     single "Host this" submit that posts quiz_id to /host. /host routes through
-     the one-room-aware StartHosting, so it arms the quiz in the host's room
-     (creating one if needed). The cluster sits on `relative z-10` to stay
-     clickable above the card body. */}}
+{{/* quiz_card_actions_host is the host surface's action cluster (#889). With no
+     game in flight a single "Host this" submit posts quiz_id to /host, which
+     routes through the one-room-aware StartHosting to arm the quiz in the host's
+     room (creating one if needed). When the host already has a running game the
+     plain submit would silently no-op over it (#851), so the card instead shows
+     a "Change quiz" button that opens the confirm-and-restart modal (#853). The
+     cluster sits on `relative z-10` to stay clickable above the card body. */}}
 {{define "quiz_card_actions_host"}}
     <div class="relative z-10 flex items-center gap-1">
-        <form method="post" action="/host" class="inline-flex">
-            <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-            <input type="hidden" name="quiz_id" value="{{.ID}}">
-            <button type="submit" class="btn-primary">Host this</button>
-        </form>
+        {{if .HostHasRunningGame}}
+            <button type="button" onclick="openModal('modal-restart-host-{{.ID}}')" class="btn-primary">Change quiz</button>
+        {{else}}
+            <form method="post" action="/host" class="inline-flex">
+                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                <input type="hidden" name="quiz_id" value="{{.ID}}">
+                <button type="submit" class="btn-primary">Host this</button>
+            </form>
+        {{end}}
     </div>
 {{end}}

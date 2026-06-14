@@ -65,6 +65,20 @@ func TestProfile_Integration(t *testing.T) {
 		if !strings.Contains(snap.body, `value="profile-admin"`) {
 			t.Error(`body missing value="profile-admin" on the displayName input`)
 		}
+		// The account section links to the change-email and
+		// change-password flows; these render regardless of role.
+		if !strings.Contains(snap.body, `href="/profile/email"`) {
+			t.Error(`body missing href="/profile/email" link`)
+		}
+		if !strings.Contains(snap.body, "Change email") {
+			t.Error(`body missing "Change email" link label`)
+		}
+		if !strings.Contains(snap.body, `href="/profile/password"`) {
+			t.Error(`body missing href="/profile/password" link`)
+		}
+		if !strings.Contains(snap.body, "Change password") {
+			t.Error(`body missing "Change password" link label`)
+		}
 	})
 
 	t.Run("POST /profile/display-name with empty value returns 400", func(t *testing.T) {

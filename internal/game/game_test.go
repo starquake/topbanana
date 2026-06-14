@@ -173,6 +173,10 @@ func (stubQuizStore) QuestionCountsByQuiz(_ context.Context) (map[int64]int, err
 	return nil, errStub
 }
 
+func (stubQuizStore) RoundCountsByQuiz(_ context.Context) (map[int64]int, error) {
+	return nil, errStub
+}
+
 func (s stubQuizStore) GetQuiz(ctx context.Context, id int64) (*quiz.Quiz, error) {
 	if s.getQuiz == nil {
 		return nil, errStub

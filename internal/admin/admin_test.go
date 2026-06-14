@@ -19,6 +19,7 @@ import (
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/livesession"
+	"github.com/starquake/topbanana/internal/media"
 	"github.com/starquake/topbanana/internal/quiz"
 )
 
@@ -286,7 +287,7 @@ func TestHandleQuizView(t *testing.T) {
 		env := newAdminEnv(t)
 		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz One", "quiz-one"))
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{})
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{})
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 		rr := httptest.NewRecorder()
@@ -309,7 +310,7 @@ func TestHandleQuizView(t *testing.T) {
 
 		env := newAdminEnv(t)
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{})
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{})
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/999", nil)
 		req.SetPathValue("quizID", "999")
 		rr := httptest.NewRecorder()
@@ -344,7 +345,7 @@ func TestHandleQuizView_RestartModalGating(t *testing.T) {
 
 	viewBody := func(t *testing.T, env *adminEnv, qz *quiz.Quiz, running RunningGameLookup) string {
 		t.Helper()
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), running)
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), running, mediaLister{})
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 		rr := httptest.NewRecorder()
@@ -405,7 +406,7 @@ func TestHandleQuizView_ErrorHandling(t *testing.T) {
 
 		env := newAdminEnv(t)
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{})
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{})
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/abc", nil)
 		req.SetPathValue("quizID", "abc")
 		rr := httptest.NewRecorder()
@@ -430,7 +431,7 @@ func TestHandleQuizView_ErrorHandling(t *testing.T) {
 		env.seedQuiz(t, ownedQuiz("Q", "q"))
 		env.closeStore(t)
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{})
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{})
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", "1")
 		rr := httptest.NewRecorder()
@@ -977,10 +978,16 @@ func TestHandleQuestionCreate(t *testing.T) {
 
 	env := newAdminEnv(t)
 	qz := env.seedQuiz(t, ownedQuiz("Quiz One", "quiz-one"))
+	roundID := env.defaultRoundID(t, qz.ID)
 
 	handler := HandleQuestionCreate(logger, nil, env.quizzes)
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1/questions/new", nil)
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/admin/quizzes/%d/questions/new?round_id=%d", qz.ID, roundID),
+		nil,
+	)
 	req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 	rr := httptest.NewRecorder()
 
@@ -1370,12 +1377,14 @@ func TestHandleQuestionSave(t *testing.T) {
 		// An existing question occupies position 1, so the handler
 		// auto-assigns the new question the next position (#16).
 		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz One", "quiz-one"))
+		roundID := env.defaultRoundID(t, qz.ID)
 
 		handler := HandleQuestionSave(logger, nil, env.quizzes)
 
 		form := url.Values{
 			"text":      {"Question Four"},
 			"image_url": {"https://example.com/image.png"},
+			"round_id":  {strconv.FormatInt(roundID, 10)},
 		}
 		options := []struct {
 			text    string
@@ -1423,6 +1432,9 @@ func TestHandleQuestionSave(t *testing.T) {
 		created := stored.Questions[2]
 		if got, want := created.Text, "Question Four"; got != want {
 			t.Errorf("created question text = %q, want %q", got, want)
+		}
+		if got, want := created.RoundID, roundID; got != want {
+			t.Errorf("created question RoundID = %d, want %d", got, want)
 		}
 		if created.Position <= stored.Questions[1].Position {
 			t.Errorf("created position = %d, want greater than %d", created.Position, stored.Questions[1].Position)
@@ -1502,6 +1514,237 @@ func TestHandleQuestionSave(t *testing.T) {
 		}
 		if got, want := len(stored.Options), 3; got != want {
 			t.Fatalf("got %d options, want %d", got, want)
+		}
+	})
+}
+
+// seedRoundID creates an extra round on the quiz and returns its id, so a
+// round-scoped create test can target a round that is NOT the quiz
+// default (which seeded questions land in) and prove the new question
+// follows the chosen round (#929).
+func seedRoundID(t *testing.T, env *adminEnv, quizID int64, position int, title string) int64 {
+	t.Helper()
+
+	rnd := &quiz.Round{QuizID: quizID, Position: position, Title: title}
+	if err := env.quizzes.CreateRound(t.Context(), rnd); err != nil {
+		t.Fatalf("CreateRound err = %v, want nil", err)
+	}
+
+	return rnd.ID
+}
+
+// TestHandleQuestionCreate_Round pins the round-scoped create form (#929):
+// the round_id query parameter must name a round of this quiz, and the
+// rendered form carries it forward as a hidden field.
+func TestHandleQuestionCreate_Round(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+
+	t.Run("renders hidden round_id for a valid round", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+		qz := env.seedQuiz(t, ownedQuiz("Quiz One", "quiz-one"))
+		roundID := seedRoundID(t, env, qz.ID, 1, "Second Round")
+
+		handler := HandleQuestionCreate(logger, nil, env.quizzes)
+		req := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			fmt.Sprintf("/admin/quizzes/%d/questions/new?round_id=%d", qz.ID, roundID),
+			nil,
+		)
+		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, withTestAdmin(req))
+
+		if got, want := rr.Code, http.StatusOK; got != want {
+			t.Fatalf("got status code %v, want %v", got, want)
+		}
+		want := fmt.Sprintf(`name="round_id" value="%d"`, roundID)
+		if got := rr.Body.String(); !strings.Contains(got, want) {
+			t.Errorf("body missing hidden field %q", want)
+		}
+	})
+
+	t.Run("missing round_id is a 400", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+		qz := env.seedQuiz(t, ownedQuiz("Quiz One", "quiz-one"))
+
+		handler := HandleQuestionCreate(logger, nil, env.quizzes)
+		req := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			fmt.Sprintf("/admin/quizzes/%d/questions/new", qz.ID),
+			nil,
+		)
+		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, withTestAdmin(req))
+
+		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Fatalf("got status code %v, want %v", got, want)
+		}
+	})
+
+	t.Run("round from another quiz is a 404", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+		qz := env.seedQuiz(t, ownedQuiz("Quiz One", "quiz-one"))
+		other := env.seedQuiz(t, ownedQuiz("Quiz Two", "quiz-two"))
+		foreignRound := env.defaultRoundID(t, other.ID)
+
+		handler := HandleQuestionCreate(logger, nil, env.quizzes)
+		req := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			fmt.Sprintf("/admin/quizzes/%d/questions/new?round_id=%d", qz.ID, foreignRound),
+			nil,
+		)
+		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, withTestAdmin(req))
+
+		if got, want := rr.Code, http.StatusNotFound; got != want {
+			t.Fatalf("got status code %v, want %v", got, want)
+		}
+	})
+}
+
+// TestHandleQuestionSave_Round pins the round-scoped create save (#929): a
+// new question lands in the round named by the hidden round_id, not the
+// quiz default; a missing or foreign round id is rejected before any
+// question is written.
+func TestHandleQuestionSave_Round(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.DiscardHandler)
+
+	newQuestionForm := func(roundID string) url.Values {
+		form := url.Values{
+			"text": {"Round-scoped question"},
+		}
+		if roundID != "" {
+			form.Set("round_id", roundID)
+		}
+		form.Add("option[0].text", "Option A")
+		form.Add("option[0].correct", "on")
+		form.Add("option[1].text", "Option B")
+
+		return form
+	}
+
+	postCreate := func(t *testing.T, env *adminEnv, quizID int64, form url.Values) *httptest.ResponseRecorder {
+		t.Helper()
+		handler := HandleQuestionSave(logger, nil, env.quizzes)
+		req := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			fmt.Sprintf("/admin/quizzes/%d/questions", quizID),
+			strings.NewReader(form.Encode()),
+		)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetPathValue("quizID", strconv.FormatInt(quizID, 10))
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, withTestAdmin(req))
+
+		return rr
+	}
+
+	t.Run("lands in the specified non-default round", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+		// twoQuestionQuiz seeds two questions in the default round; the new
+		// question targets a second round, so a default-round fallback
+		// would put it in the wrong place.
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz One", "quiz-one"))
+		defaultRound := env.defaultRoundID(t, qz.ID)
+		targetRound := seedRoundID(t, env, qz.ID, 1, "Second Round")
+
+		rr := postCreate(t, env, qz.ID, newQuestionForm(strconv.FormatInt(targetRound, 10)))
+
+		if got, want := rr.Code, http.StatusSeeOther; got != want {
+			t.Fatalf("got status code %v, want %v", got, want)
+		}
+
+		stored, err := env.quizzes.GetQuiz(t.Context(), qz.ID)
+		if err != nil {
+			t.Fatalf("GetQuiz err = %v, want nil", err)
+		}
+		var created *quiz.Question
+		for _, q := range stored.Questions {
+			if q.Text == "Round-scoped question" {
+				created = q
+
+				break
+			}
+		}
+		if created == nil {
+			t.Fatalf("created question not found among %d questions", len(stored.Questions))
+		}
+		if got, want := created.RoundID, targetRound; got != want {
+			t.Errorf("created question RoundID = %d, want %d (default round %d)", got, want, defaultRound)
+		}
+		// It is the only question in the target round, so it takes the
+		// first slot there.
+		inTarget := 0
+		for _, q := range stored.Questions {
+			if q.RoundID == targetRound {
+				inTarget++
+			}
+		}
+		if got, want := inTarget, 1; got != want {
+			t.Errorf("questions in target round = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("missing round_id is a 400 and writes nothing", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+		qz := env.seedQuiz(t, ownedQuiz("Quiz One", "quiz-one"))
+
+		rr := postCreate(t, env, qz.ID, newQuestionForm(""))
+
+		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Fatalf("got status code %v, want %v", got, want)
+		}
+		stored, err := env.quizzes.GetQuiz(t.Context(), qz.ID)
+		if err != nil {
+			t.Fatalf("GetQuiz err = %v, want nil", err)
+		}
+		if got, want := len(stored.Questions), 0; got != want {
+			t.Errorf("question count = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("foreign round_id is a 404 and writes nothing", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+		qz := env.seedQuiz(t, ownedQuiz("Quiz One", "quiz-one"))
+		other := env.seedQuiz(t, ownedQuiz("Quiz Two", "quiz-two"))
+		foreignRound := env.defaultRoundID(t, other.ID)
+
+		rr := postCreate(t, env, qz.ID, newQuestionForm(strconv.FormatInt(foreignRound, 10)))
+
+		if got, want := rr.Code, http.StatusNotFound; got != want {
+			t.Fatalf("got status code %v, want %v", got, want)
+		}
+		stored, err := env.quizzes.GetQuiz(t.Context(), qz.ID)
+		if err != nil {
+			t.Fatalf("GetQuiz err = %v, want nil", err)
+		}
+		if got, want := len(stored.Questions), 0; got != want {
+			t.Errorf("question count on target quiz = %d, want %d", got, want)
 		}
 	})
 }
@@ -1608,6 +1851,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 
 		env := newAdminEnv(t)
 		qz := env.seedQuiz(t, ownedQuiz("Quiz One", "quiz-one"))
+		roundID := env.defaultRoundID(t, qz.ID)
 
 		handler := HandleQuestionSave(logger, nil, env.quizzes)
 
@@ -1615,6 +1859,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 			"text":           {""},
 			"image_url":      {"http://example.com/image.png"},
 			"position":       {"10"},
+			"round_id":       {strconv.FormatInt(roundID, 10)},
 			"option[0].id":   {"not-an-int"},
 			"option[0].text": {"Option 1"},
 		}
@@ -1647,6 +1892,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 
 		env := newAdminEnv(t)
 		qz := env.seedQuiz(t, ownedQuiz("Quiz One", "quiz-one"))
+		roundID := env.defaultRoundID(t, qz.ID)
 
 		handler := HandleQuestionSave(logger, nil, env.quizzes)
 
@@ -1654,6 +1900,7 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 			"text":      {""},
 			"image_url": {"http://example.com/image.png"},
 			"position":  {"10"},
+			"round_id":  {strconv.FormatInt(roundID, 10)},
 		}
 
 		req := httptest.NewRequestWithContext(
@@ -1695,11 +1942,13 @@ func TestHandleQuestionSave_HandleError(t *testing.T) {
 
 		env := newAdminEnv(t)
 		qz := env.seedQuiz(t, ownedQuiz("Quiz One", "quiz-one"))
+		roundID := env.defaultRoundID(t, qz.ID)
 		env.closeStore(t)
 
 		form := url.Values{
 			"text":      {"Question One"},
 			"image_url": {"https://example.com/image.png"},
+			"round_id":  {strconv.FormatInt(roundID, 10)},
 		}
 		form.Add("option[0].text", "Option 1")
 		form.Add("option[1].text", "Option 2")
@@ -2216,7 +2465,7 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 		env.playThrough(t, qz, alice)
 		env.playThrough(t, qz, bob)
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{})
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{})
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 		rr := httptest.NewRecorder()
@@ -2266,7 +2515,7 @@ func TestHandleQuizView_RendersPlayedBy(t *testing.T) {
 		env := newAdminEnv(t)
 		qz := env.seedQuiz(t, twoQuestionQuiz("Q1", "q-1"))
 
-		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{})
+		handler := HandleQuizView(logger, nil, env.quizzes, env.newGameService(), runningGameLookup{}, mediaLister{})
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes/1", nil)
 		req.SetPathValue("quizID", strconv.FormatInt(qz.ID, 10))
 		rr := httptest.NewRecorder()
@@ -2608,6 +2857,16 @@ type runningGameLookup struct{ running bool }
 
 func (l runningGameLookup) HostHasRunningGame(_ context.Context, _ int64) (bool, error) {
 	return l.running, nil
+}
+
+// mediaLister is a MediaLister stub for the quiz-view unit tests, returning the
+// configured library (nil for an empty grid). The rich render of the upload
+// control + thumbnail grid is pinned end-to-end in test/integration; these unit
+// tests only need a satisfying lister so the handler runs.
+type mediaLister struct{ items []*media.Media }
+
+func (l mediaLister) ListMediaByQuiz(_ context.Context, _ int64) ([]*media.Media, error) {
+	return l.items, nil
 }
 
 func TestHandleQuizCreate(t *testing.T) {

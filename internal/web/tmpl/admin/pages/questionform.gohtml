@@ -7,7 +7,7 @@
         <span class="crumb-sep" aria-hidden="true">/</span>
         <a href="/admin/quizzes/{{.Quiz.ID}}">{{.Quiz.Title}}</a>
         <span class="crumb-sep" aria-hidden="true">/</span>
-        <span class="text-text" aria-current="page">{{if .Question.ID}}Question {{printf "%02d" .Question.Position}}{{else}}New question{{end}}</span>
+        <span class="text-text" aria-current="page">{{if .Question.ID}}Question {{printf "%02d" .Question.Position}}{{else}}New question{{if .Round}} in {{.Round.Title}}{{end}}{{end}}</span>
     </nav>
 
     <header class="flex flex-col md:flex-row md:items-end md:justify-between gap-6 mb-10 pb-6 border-b border-border-soft">
@@ -17,7 +17,7 @@
                 {{if .Question.ID}}
                     Question {{printf "%02d" .Question.Position}} of &ldquo;{{.Quiz.Title}}&rdquo;. Order is managed from the quiz view.
                 {{else}}
-                    Add a new question to &ldquo;{{.Quiz.Title}}&rdquo;. Use the Up/Down buttons on the quiz view to reorder.
+                    Add a new question to {{if .Round}}round &ldquo;{{.Round.Title}}&rdquo; of {{end}}&ldquo;{{.Quiz.Title}}&rdquo;. Reorder it from the quiz view.
                 {{end}}
             </p>
         </div>
@@ -32,6 +32,9 @@
             method="POST">
         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
         <input type="hidden" name="id" value="{{.Question.ID}}">
+        {{if .Round}}
+            <input type="hidden" name="round_id" value="{{.Round.ID}}">
+        {{end}}
 
         {{$textErr := index .FieldErrors "text"}}
         <div class="form-field">

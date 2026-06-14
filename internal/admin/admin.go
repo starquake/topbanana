@@ -23,6 +23,7 @@ import (
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/livesession"
+	"github.com/starquake/topbanana/internal/media"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/reltime"
 	"github.com/starquake/topbanana/internal/render"
@@ -68,7 +69,7 @@ func adminPerRequestFuncs(r *http.Request) template.FuncMap {
 		"isSignedIn":     func() bool { return true },
 		"showSectionNav": func() bool { return true },
 		"logoHref":       func() string { return "/admin" },
-		"ogImage":        func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
+		"ogImage":        func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
 		"navSection":     func() string { return section },
 		"isAdmin":        func() bool { return isAdmin },
 	}
@@ -101,12 +102,16 @@ func navSection(path string) string {
 // - handlers populate it via [attachCanEdit] before rendering, and a
 // rule change lives entirely in Go.
 type QuizData struct {
-	ID                   int64
-	Title                string
-	Slug                 string
-	Description          string
-	UpdatedAt            time.Time
-	QuestionCount        int
+	ID            int64
+	Title         string
+	Slug          string
+	Description   string
+	UpdatedAt     time.Time
+	QuestionCount int
+	// RoundCount is the number of rounds, surfaced on the quiz-list card
+	// footer; set by the list handler from the RoundCountsByQuiz aggregate
+	// and 0 elsewhere (the detail view does not render the card).
+	RoundCount           int
 	CreatedByPlayerID    int64
 	CreatedByDisplayName string
 	CanEdit              bool
@@ -771,6 +776,14 @@ type RunningGameLookup interface {
 	HostHasRunningGame(ctx context.Context, hostPlayerID int64) (bool, error)
 }
 
+// MediaLister is the slice of the media store the quiz view needs to render the
+// per-quiz image library (#936 slice 3): the quiz's images, newest first. It is
+// defined consumer-side so the admin package depends only on the read it makes;
+// the concrete media store satisfies it.
+type MediaLister interface {
+	ListMediaByQuiz(ctx context.Context, quizID int64) ([]*media.Media, error)
+}
+
 // indexData feeds the admin dashboard. ResumeCode is the join code of the
 // host's current active room, empty when they have none. The single adaptive
 // host control reflects it: a "Resume session" link when set, the "Host a
@@ -858,6 +871,13 @@ func HandleQuizList(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 
 			return
 		}
+		roundCounts, err := quizStore.RoundCountsByQuiz(r.Context())
+		if err != nil {
+			logger.ErrorContext(r.Context(), "error retrieving round counts from store", slog.Any("err", err))
+			render500(w, r, logger, csrfMgr)
+
+			return
+		}
 
 		// Filter by play mode in Go from the single ListQuizzes read so the
 		// same handler serves solo / live / all without a second query path
@@ -868,6 +888,7 @@ func HandleQuizList(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.S
 		qzd := quizDataFromQuizzes(quizzes)
 		for _, qd := range qzd {
 			qd.QuestionCount = counts[qd.ID]
+			qd.RoundCount = roundCounts[qd.ID]
 			attachCanEdit(r, qd)
 		}
 
@@ -926,6 +947,7 @@ func HandleQuizView(
 	quizStore quiz.Store,
 	gameService *game.Service,
 	runningGames RunningGameLookup,
+	mediaLister MediaLister,
 ) http.Handler {
 	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/quizview.gohtml")
 
@@ -952,9 +974,15 @@ func HandleQuizView(
 			return
 		}
 
+		images, ok := loadQuizMedia(w, r, logger, csrfMgr, mediaLister, id)
+		if !ok {
+			return
+		}
+
 		quizData := quizDataFromQuiz(qz)
 		attachCanEdit(r, quizData)
 		data := newQuizViewData(quizData, players, rounds)
+		data.Images = images
 		data.HostHasRunningGame = hostHasRunningGame(r, logger, runningGames)
 		renderer.Render(w, r, http.StatusOK, data)
 	})
@@ -994,6 +1022,11 @@ type QuizViewData struct {
 	// Rounds is the position-ordered round list, each carrying its own
 	// questions, for the grouped quiz view.
 	Rounds []RoundViewData
+	// Images is the quiz's media library, newest first, for the thumbnail
+	// grid (#936 slice 3). The upload control and grid are gated on CanEdit
+	// in the template; the data loads regardless so an owner sees their
+	// library.
+	Images []MediaCardData
 	// HostHasRunningGame gates the "Host live" confirm-and-restart prompt
 	// (#853): true when the signed-in host already has a game in flight, so the
 	// control opens a modal that ends the running session before hosting this
@@ -1051,6 +1084,57 @@ func loadRounds(
 	}
 
 	return rounds, true
+}
+
+// MediaCardData is one tile in the quiz view's image library grid (#936 slice
+// 3). It carries only what the template renders: the media id, used to build the
+// /media/{id} and /media/{id}/thumb URLs, plus the stored dimensions so the
+// thumbnail reserves its aspect ratio. The full presentation type keeps the
+// template free of the domain media.Media struct.
+type MediaCardData struct {
+	ID     int64
+	Width  int
+	Height int
+}
+
+func mediaCardDataFromMedia(items []*media.Media) []MediaCardData {
+	cards := make([]MediaCardData, 0, len(items))
+	for _, m := range items {
+		cards = append(cards, MediaCardData{
+			ID:     m.ID,
+			Width:  m.Width,
+			Height: m.Height,
+		})
+	}
+
+	return cards
+}
+
+// loadQuizMedia fetches the quiz's image library, newest first. A nil lister
+// (callers that do not wire the media store) yields an empty grid rather than a
+// failure. A lookup error is a 500: the library is part of the same admin view
+// that already loaded the quiz tree, so hiding the failure behind an empty grid
+// would mask it.
+func loadQuizMedia(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	mediaLister MediaLister,
+	quizID int64,
+) ([]MediaCardData, bool) {
+	if mediaLister == nil {
+		return nil, true
+	}
+	items, err := mediaLister.ListMediaByQuiz(r.Context(), quizID)
+	if err != nil {
+		logger.ErrorContext(r.Context(), "error listing media for quiz view", slog.Any("err", err))
+		render500(w, r, logger, csrfMgr)
+
+		return nil, false
+	}
+
+	return mediaCardDataFromMedia(items), true
 }
 
 func newQuizViewData(quizData *QuizData, players []PlayerScoreData, rounds []*quiz.Round) QuizViewData {
@@ -1756,15 +1840,23 @@ const (
 // questionFormData backs questionform.gohtml. FieldErrors is set when
 // HandleQuestionSave re-renders the form after a domain-level
 // validation failure (#32); the per-input error message lives under
-// the lowercased form-field name (text, options).
+// the lowercased form-field name (text, options). Round is the round a
+// new question will be created in (#929) - it backs the form's hidden
+// round_id field and the breadcrumb, and is nil on the edit path where
+// the question keeps its existing round.
 type questionFormData struct {
 	Title       string
 	Quiz        *QuizData
 	Question    *QuestionData
+	Round       *RoundData
 	FieldErrors map[string]string
 }
 
-// HandleQuestionCreate creates a question.
+// HandleQuestionCreate creates a question. The round the question lands
+// in comes from the round_id query parameter set by the per-round "Add
+// question" button (#929); it must name a round of this quiz. The form
+// carries it forward as a hidden field so the POST creates the question
+// in that round rather than the quiz default.
 func HandleQuestionCreate(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.Store) http.Handler {
 	renderer := NewTemplateRenderer(logger, csrfMgr, "admin/pages/questionform.gohtml")
 
@@ -1783,12 +1875,41 @@ func HandleQuestionCreate(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 			return
 		}
 
+		rnd, ok := roundFromQuery(w, r, logger, csrfMgr, quizStore, quizID)
+		if !ok {
+			return
+		}
+
 		renderer.Render(w, r, http.StatusOK, questionFormData{
 			Title:    "Admin Dashboard - Question Create",
 			Quiz:     quizDataFromQuiz(qz),
 			Question: &QuestionData{},
+			Round:    roundDataFromRound(rnd),
 		})
 	})
+}
+
+// roundFromQuery reads the round_id query parameter and loads the named
+// round, gated on it belonging to quizID. A missing, unparseable, or
+// foreign round id renders the established 4xx (400 for a bad id, 404
+// for a foreign one via roundByID) and returns ok=false - the create
+// flow never falls back to a default round (#929).
+func roundFromQuery(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	quizStore quiz.Store,
+	quizID int64,
+) (*quiz.Round, bool) {
+	roundID, err := handlers.IDFromString(r.URL.Query().Get("round_id"))
+	if err != nil || roundID == 0 {
+		render400(w, r, logger, csrfMgr, "invalid round id")
+
+		return nil, false
+	}
+
+	return roundByID(w, r, logger, csrfMgr, quizStore, quizID, roundID)
 }
 
 // HandleQuestionEdit handles the display of the question edit page in the admin dashboard.
@@ -2034,9 +2155,13 @@ func HandleQuestionDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 // questionSaveCtx is the artefact set loadQuestionForSave returns -
 // bundled into a struct so HandleQuestionSave's signature stays under
 // revive's function-result-limit and the call site stays readable.
+// Round is the resolved target round on the create path (#929), carried
+// so a validation-failure re-render can repopulate the form's hidden
+// round_id field and breadcrumb; it is nil on the edit path.
 type questionSaveCtx struct {
 	Quiz     *quiz.Quiz
 	Question *quiz.Question
+	Round    *quiz.Round
 	IsNew    bool
 }
 
@@ -2104,7 +2229,21 @@ func loadQuestionForSave(
 		return nil, false
 	}
 	if questionID == 0 {
-		return &questionSaveCtx{Quiz: qz, Question: &quiz.Question{QuizID: qz.ID}, IsNew: true}, true
+		// A new question takes the round from the form's hidden round_id
+		// field, set by the per-round "Add question" button (#929). The
+		// round must belong to this quiz; a missing or foreign id 4xxs
+		// rather than silently defaulting.
+		rnd, roundOK := roundFromForm(w, r, logger, csrfMgr, quizStore, qz.ID)
+		if !roundOK {
+			return nil, false
+		}
+
+		return &questionSaveCtx{
+			Quiz:     qz,
+			Question: &quiz.Question{QuizID: qz.ID, RoundID: rnd.ID},
+			Round:    rnd,
+			IsNew:    true,
+		}, true
 	}
 	qs, ok := questionByID(w, r, logger, csrfMgr, quizStore, qz.ID, questionID)
 	if !ok {
@@ -2112,6 +2251,35 @@ func loadQuestionForSave(
 	}
 
 	return &questionSaveCtx{Quiz: qz, Question: qs, IsNew: false}, true
+}
+
+// roundFromForm reads the round_id POST field and loads the named round,
+// gated on it belonging to quizID. A missing, unparseable, or foreign
+// round id renders the established 4xx and returns ok=false (#929).
+// Mirrors roundFromQuery for the POST path; both go through roundByID so
+// a cross-quiz id surfaces as 404, matching HandleQuestionMoveToRound.
+func roundFromForm(
+	w http.ResponseWriter,
+	r *http.Request,
+	logger *slog.Logger,
+	csrfMgr *csrf.Manager,
+	quizStore quiz.Store,
+	quizID int64,
+) (*quiz.Round, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormSize)
+	if err := r.ParseForm(); err != nil {
+		render400(w, r, logger, csrfMgr, "error parsing form")
+
+		return nil, false
+	}
+	roundID, err := handlers.IDFromString(r.PostFormValue("round_id"))
+	if err != nil || roundID == 0 {
+		render400(w, r, logger, csrfMgr, "invalid round id")
+
+		return nil, false
+	}
+
+	return roundByID(w, r, logger, csrfMgr, quizStore, quizID, roundID)
 }
 
 // renderQuestionForm re-renders the question form after a validation
@@ -2128,10 +2296,15 @@ func renderQuestionForm(
 	if qctx.IsNew {
 		title = "Admin Dashboard - Question Create"
 	}
+	var roundData *RoundData
+	if qctx.Round != nil {
+		roundData = roundDataFromRound(qctx.Round)
+	}
 	renderer.Render(w, r, http.StatusBadRequest, questionFormData{
 		Title:       title,
 		Quiz:        quizDataFromQuiz(qctx.Quiz),
 		Question:    questionDataFromQuestion(qctx.Question),
+		Round:       roundData,
 		FieldErrors: fieldErrors,
 	})
 }

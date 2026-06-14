@@ -17,6 +17,7 @@ import (
 	"github.com/starquake/topbanana/internal/absurl"
 	"github.com/starquake/topbanana/internal/envtag"
 	"github.com/starquake/topbanana/internal/quiz"
+	"github.com/starquake/topbanana/internal/reltime"
 	"github.com/starquake/topbanana/internal/version"
 	"github.com/starquake/topbanana/internal/web/tmpl"
 )
@@ -28,26 +29,35 @@ import (
 // modest so the page stays scannable on a phone.
 const maxItems = 6
 
-// PopularQuiz is one row in the "popular quizzes" list. PlayCount is the
-// number of finished games over the last 30 days; the template uses it
-// to render a "N plays" pill alongside the title.
+// PopularQuiz is one row in the "popular quizzes" list. The list is
+// ranked by recent (30-day) finished games, but PlayCount is the durable
+// lifetime counter (#891) the shared card displays, so the figure matches
+// the admin/host cards rather than the 30-day ranking key.
 type PopularQuiz struct {
-	ID          int64
-	Title       string
-	Slug        string
-	Description string
-	PlayCount   int
+	ID                   int64
+	Title                string
+	Slug                 string
+	Description          string
+	CreatedAt            time.Time
+	CreatedByDisplayName string
+	PlayCount            int
+	RoundCount           int
+	QuestionCount        int
 }
 
-// NewestQuiz is one row in the "newest quizzes" list. QuestionCount is
-// how many questions the quiz has; the template renders it as a
-// "N questions" pill in place of the popular list's play count.
+// NewestQuiz is one row in the "newest quizzes" list, ordered by creation
+// date. It carries the same field set as [PopularQuiz] so both feed the
+// shared client quiz card the same dot.
 type NewestQuiz struct {
-	ID            int64
-	Title         string
-	Slug          string
-	Description   string
-	QuestionCount int
+	ID                   int64
+	Title                string
+	Slug                 string
+	Description          string
+	CreatedAt            time.Time
+	CreatedByDisplayName string
+	PlayCount            int
+	RoundCount           int
+	QuestionCount        int
 }
 
 // PlayURL is the share-able deep link the home page card points at.
@@ -166,18 +176,24 @@ func Handle(
 type QuizLister interface {
 	ListPublicQuizzes(ctx context.Context) ([]*quiz.Quiz, error)
 	QuestionCountsByQuiz(ctx context.Context) (map[int64]int, error)
+	RoundCountsByQuiz(ctx context.Context) (map[int64]int, error)
 }
 
 // AllQuizRow is one row in the /quizzes list. Strictly a presentation
 // type - no behaviour beyond [AllQuizRow.PlayURL] - so the template
-// doesn't need to know anything about quiz.Quiz internals.
+// doesn't need to know anything about quiz.Quiz internals. Carries the
+// same field set as [PopularQuiz] so all three home lists feed the shared
+// client quiz card the same dot.
 type AllQuizRow struct {
 	ID                   int64
 	Title                string
 	Slug                 string
 	Description          string
-	QuestionCount        int
+	CreatedAt            time.Time
 	CreatedByDisplayName string
+	PlayCount            int
+	RoundCount           int
+	QuestionCount        int
 }
 
 // PlayURL is the share-able deep link the row card points at. Mirrors
@@ -223,10 +239,15 @@ func HandleAllQuizzes(
 		if err != nil {
 			logger.ErrorContext(r.Context(), "list public quizzes", slog.Any("err", err))
 		}
-		counts, err := store.QuestionCountsByQuiz(r.Context())
+		questionCounts, err := store.QuestionCountsByQuiz(r.Context())
 		if err != nil {
 			logger.ErrorContext(r.Context(), "question counts by quiz", slog.Any("err", err))
-			counts = map[int64]int{}
+			questionCounts = map[int64]int{}
+		}
+		roundCounts, err := store.RoundCountsByQuiz(r.Context())
+		if err != nil {
+			logger.ErrorContext(r.Context(), "round counts by quiz", slog.Any("err", err))
+			roundCounts = map[int64]int{}
 		}
 
 		data.Quizzes = make([]*AllQuizRow, 0, len(quizzes))
@@ -236,8 +257,11 @@ func HandleAllQuizzes(
 				Title:                qz.Title,
 				Slug:                 qz.Slug,
 				Description:          qz.Description,
-				QuestionCount:        counts[qz.ID],
+				CreatedAt:            qz.CreatedAt,
 				CreatedByDisplayName: qz.CreatedByDisplayName,
+				PlayCount:            int(qz.PlayCount),
+				RoundCount:           roundCounts[qz.ID],
+				QuestionCount:        questionCounts[qz.ID],
 			})
 		}
 
@@ -269,7 +293,7 @@ func executeTemplate(
 		viewerName = viewer.DisplayName
 	}
 	funcs := template.FuncMap{
-		"ogImage":    func() string { return absurl.BaseURL(r) + "/assets/og-image.png" },
+		"ogImage":    func() string { return absurl.BaseURL(r) + "/static/og-image.png" },
 		"viewerName": func() string { return viewerName },
 		"isSignedIn": func() bool { return viewer != nil },
 	}
@@ -318,9 +342,10 @@ func parseTemplate(page string) *template.Template {
 		"navSection":     func() string { return "" },
 		"logoHref":       func() string { return "/" },
 		"profileHref":    func() string { return "/profile" },
-		// Placeholder so the shared components glob parses; this surface
-		// does not render quiz_card, which is the only user (#889).
-		"humanizeTime": func(time.Time) string { return "" },
+		// The shared client quiz card renders each quiz's creation date as
+		// a coarse relative-time string (#927); reltime.Humanize is a pure
+		// function of its argument so it is safe to bind at parse time.
+		"humanizeTime": reltime.Humanize,
 	}
 	base := template.Must(
 		template.New("").Funcs(funcs).ParseFS(tmplFS(), "components/*.gohtml", "home/layouts/*.gohtml"),

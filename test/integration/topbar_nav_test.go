@@ -204,3 +204,139 @@ func TestTopbar_AdminConsole(t *testing.T) {
 		t.Error("admin footer must be metadata only, but still carries the log-out form")
 	}
 }
+
+// TestTopbar_AdminSectionsReachableAndActive pins the persistent admin
+// top nav (#517 / #582): the navbar links every real section (Quizzes,
+// Players, Invites, Email - Email was orphaned before #517 and Invites
+// before #582), each section page loads under its own heading, and the
+// active section carries aria-current="page" while the others do not.
+func TestTopbar_AdminSectionsReachableAndActive(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{"REGISTRATION_ENABLED": "true"})
+
+	client := authClient(t)
+	registerVerifyAndSignIn(ctx, t, client, srv.BaseURL, srv.DBURI, "sections-admin", "correct-battery-13")
+
+	// The nav links all four admin sections from any admin page.
+	quizzes := fetchWithClient(ctx, t, client, srv.BaseURL+"/admin/quizzes")
+	if got, want := quizzes.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d", got, want)
+	}
+	for _, want := range []string{
+		`href="/admin/quizzes"`,
+		`href="/admin/players"`,
+		`href="/admin/invites"`,
+		`href="/admin/email"`,
+	} {
+		if !strings.Contains(quizzes.Body, want) {
+			t.Errorf("admin top nav missing section link %q", want)
+		}
+	}
+
+	// Each section page loads (200) under its own <h1> heading. Match the
+	// closing >...</h1> form so the assertion pins the page heading and
+	// cannot be satisfied by the same word appearing as a nav-link label
+	// (the nav renders Players/Invites on every admin page).
+	sections := []struct {
+		path    string
+		heading string
+	}{
+		{"/admin/players", ">Players</h1>"},
+		{"/admin/invites", ">Invites</h1>"},
+		{"/admin/email", ">Email diagnostics</h1>"},
+	}
+	for _, s := range sections {
+		snap := fetchWithClient(ctx, t, client, srv.BaseURL+s.path)
+		if got, want := snap.StatusCode, http.StatusOK; got != want {
+			t.Errorf("GET %s status = %d, want %d", s.path, got, want)
+		}
+		if !strings.Contains(snap.Body, s.heading) {
+			t.Errorf("GET %s body missing heading %q", s.path, s.heading)
+		}
+	}
+
+	// The active section's nav link carries aria-current="page"; the
+	// others do not. The topbar renders the attribute inline next to the
+	// section's own href (see components/topbar.gohtml).
+	players := fetchWithClient(ctx, t, client, srv.BaseURL+"/admin/players")
+	if !navLinkIsActive(players.Body, "/admin/players") {
+		t.Error(`on /admin/players the Players nav link should carry aria-current="page"`)
+	}
+	if navLinkIsActive(players.Body, "/admin/quizzes") {
+		t.Error(`on /admin/players the Quizzes nav link must not carry aria-current="page"`)
+	}
+
+	invites := fetchWithClient(ctx, t, client, srv.BaseURL+"/admin/invites")
+	if !navLinkIsActive(invites.Body, "/admin/invites") {
+		t.Error(`on /admin/invites the Invites nav link should carry aria-current="page"`)
+	}
+	if navLinkIsActive(invites.Body, "/admin/players") {
+		t.Error(`on /admin/invites the Players nav link must not carry aria-current="page"`)
+	}
+}
+
+// TestTopbar_HostGatedFromAdminSections pins that the Admin-only sections
+// stay hidden from a Host (#538): the rendered /admin/quizzes page carries
+// only the Quizzes link, never the Players / Email / Settings links the
+// isAdmin block gates, and a direct GET to /admin/players or /admin/email
+// is a 404 (the routes' existence stays hidden, not a 403). The first
+// credentialled registrant is auto-promoted to Admin, so the Host under
+// test is a later registrant demoted off that promotion.
+func TestTopbar_HostGatedFromAdminSections(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{"REGISTRATION_ENABLED": "true"})
+
+	// Consume the first-registrant Admin promotion with a boss, then a
+	// later registrant demoted to Host is the gate's subject.
+	registerAdminClient(ctx, t, srv.BaseURL, srv.DBURI, "topbar-host-boss")
+	host := registerAdminClient(ctx, t, srv.BaseURL, srv.DBURI, "topbar-host")
+	makeHost(ctx, t, srv.DBURI, "topbar-host")
+
+	// A Host still reaches the console and the Quizzes section.
+	quizzes := fetchWithClient(ctx, t, host, srv.BaseURL+"/admin/quizzes")
+	if got, want := quizzes.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("host GET /admin/quizzes status = %d, want %d", got, want)
+	}
+	if !strings.Contains(quizzes.Body, `href="/admin/quizzes"`) {
+		t.Error("host admin nav should still carry the Quizzes link")
+	}
+	// The Admin-only section links are absent from the rendered nav.
+	for _, banned := range []string{
+		`href="/admin/players"`,
+		`href="/admin/email"`,
+		`href="/admin/settings"`,
+	} {
+		if strings.Contains(quizzes.Body, banned) {
+			t.Errorf("host admin nav must not carry the Admin-only link %q", banned)
+		}
+	}
+
+	// The routes themselves stay hidden: a direct hit is a 404, not a 403.
+	for _, path := range []string{"/admin/players", "/admin/email"} {
+		snap := fetchWithClient(ctx, t, host, srv.BaseURL+path)
+		if got, want := snap.StatusCode, http.StatusNotFound; got != want {
+			t.Errorf("host GET %s status = %d, want %d", path, got, want)
+		}
+	}
+}
+
+// navLinkIsActive reports whether the nav link to href in body carries
+// aria-current="page". The topbar renders the attribute inline right
+// after the href (`<a href="/admin/players" aria-current="page" ...`),
+// so a link is active iff aria-current appears before the next tag close
+// following its href.
+func navLinkIsActive(body, href string) bool {
+	needle := `href="` + href + `"`
+	_, afterHref, ok := strings.Cut(body, needle)
+	if !ok {
+		return false
+	}
+	tagTail, _, ok := strings.Cut(afterHref, ">")
+	if !ok {
+		return false
+	}
+
+	return strings.Contains(tagTail, `aria-current="page"`)
+}

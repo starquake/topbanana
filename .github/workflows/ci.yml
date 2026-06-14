@@ -73,7 +73,7 @@ jobs:
         node-version: "lts/*"
         cache: npm
 
-    # Catch drift between internal/web/static/css/app.css and what
+    # Catch drift between internal/assets/static/css/app.css and what
     # `make tailwind` would produce for the current templates +
     # tailwindcss binary version. Without this guard, a template
     # change that adds a utility class can ship without the
@@ -218,6 +218,13 @@ jobs:
       - name: Run Playwright tests
         run: npx playwright test --project=${{ matrix.browser }}
         working-directory: test/e2e
+        env:
+          # Halve the per-runner worker count vs the local default of 4: the
+          # browser matrix already splits chromium/firefox across runners, so
+          # 4 workers here meant 4 browsers + 4 servers + mailpit on one
+          # runner - the load behind the rare under-load teardown flakes
+          # (#909, #912). playwright.config.ts reads this at config load.
+          E2E_WORKERS: 2
 
       - name: Upload Playwright report
         if: failure()

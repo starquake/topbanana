@@ -21,14 +21,18 @@ import (
 func finishGame(t *testing.T, gs *GameStore, g *game.Game, q *quiz.Quiz) {
 	t.Helper()
 	now := time.Now()
-	for _, qs := range q.Questions {
+	for i, qs := range q.Questions {
 		gq := &game.Question{
 			GameID:     g.ID,
 			QuestionID: qs.ID,
 			StartedAt:  now,
 			ExpiredAt:  now.Add(10 * time.Second),
 		}
-		if err := gs.CreateQuestion(t.Context(), gq, false); err != nil {
+		// The final question completes the game, which bumps the durable
+		// quizzes.play_count once per finished game (#891) - the figure the
+		// popular-list card now displays.
+		completesGame := i == len(q.Questions)-1
+		if err := gs.CreateQuestion(t.Context(), gq, completesGame); err != nil {
 			t.Fatalf("finishGame CreateQuestion err = %v, want nil", err)
 		}
 	}
