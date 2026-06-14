@@ -288,7 +288,7 @@
             {{if .Images}}
                 <ul class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                     {{range .Images}}
-                        <li>
+                        <li class="group relative">
                             <a href="/media/{{.ID}}" target="_blank" rel="noopener"
                                class="block aspect-square overflow-hidden rounded-lg border border-border-soft bg-surface hover:border-accent focus-visible:outline-none focus-visible:shadow-focus">
                                 <img src="/media/{{.ID}}/thumb"
@@ -297,12 +297,48 @@
                                      width="{{.Width}}" height="{{.Height}}"
                                      class="h-full w-full object-cover">
                             </a>
+                            <button type="button" aria-label="Delete image {{.ID}}"
+                                    onclick="openModal('modal-delete-media-{{.ID}}')"
+                                    class="absolute top-1.5 right-1.5 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border-soft bg-bg/80 text-text-dim opacity-0 transition hover:bg-danger hover:text-text focus-visible:opacity-100 focus-visible:outline-none focus-visible:shadow-focus group-hover:opacity-100">
+                                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.5 1a.5.5 0 0 0-.5.5V2H3a.5.5 0 0 0 0 1h.5l.6 9.1a1.5 1.5 0 0 0 1.5 1.4h4.8a1.5 1.5 0 0 0 1.5-1.4L12.5 3h.5a.5.5 0 0 0 0-1h-3v-.5a.5.5 0 0 0-.5-.5h-3zM6 6a.5.5 0 0 1 1 0v5a.5.5 0 0 1-1 0V6zm3 0a.5.5 0 0 1 1 0v5a.5.5 0 0 1-1 0V6z"/></svg>
+                            </button>
                         </li>
                     {{end}}
                 </ul>
             {{else}}
                 <div class="border border-dashed border-border rounded-xl p-10 text-center text-text-dim">
                     No images yet.
+                </div>
+            {{end}}
+
+            {{/* Delete-image confirm modals, one per thumbnail, mirroring the
+                 question/round delete modals above. Use $ to reach the quiz id
+                 from inside the range. The POST goes to the media delete route;
+                 the handler re-checks the creator-or-admin gate and that the
+                 image belongs to this quiz. */}}
+            {{range .Images}}
+                <div id="modal-delete-media-{{.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-delete-media-{{.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
+                    <div class="absolute inset-0" onclick="closeModal('modal-delete-media-{{.ID}}')"></div>
+                    <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
+                        <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
+                            <p id="modal-delete-media-{{.ID}}-title" class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Delete image</p>
+                            <button type="button" aria-label="close"
+                                    onclick="closeModal('modal-delete-media-{{.ID}}')"
+                                    class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer">&times;</button>
+                        </header>
+                        <section class="px-6 py-5 text-[0.95rem]">
+                            Are you sure you want to delete this image? Any questions using it will keep their text but lose the picture. This action cannot be undone.
+                        </section>
+                        <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
+                            <button type="button"
+                                    onclick="closeModal('modal-delete-media-{{.ID}}')"
+                                    class="btn-ghost">Cancel</button>
+                            <form method="post" action="/admin/quizzes/{{$.Quiz.ID}}/media/{{.ID}}/delete" class="inline-flex">
+                                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                                <button type="submit" class="btn-danger">Delete</button>
+                            </form>
+                        </footer>
+                    </div>
                 </div>
             {{end}}
 
