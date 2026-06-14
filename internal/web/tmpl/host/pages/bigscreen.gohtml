@@ -170,26 +170,29 @@
                        class="text-center text-text-dim text-[clamp(1rem,2vw,1.5rem)] font-semibold uppercase tracking-[0.12em]"
                        data-read-beat>Get ready</p>
 
-                    {{/* Answer grid. correct/wrong colouring only appears at
-                         reveal: isCorrectOption() reads correctOptionIds, which
-                         the server leaves empty before reveal, so the answer is
-                         never lit early. */}}
+                    {{/* Answer grid. Each option carries its index-based tone
+                         (cyan / violet / yellow / orange) during the answer
+                         phase, matching the player phone's answer pad so the two
+                         surfaces map onto one another. correct/wrong colouring
+                         only appears at reveal: isCorrectOption() reads
+                         correctOptionIds, which the server leaves empty before
+                         reveal, so the answer is never lit early. */}}
                     <ul x-show="phase === 'reveal' || !revealing"
                         class="m-0 list-none p-0 grid gap-4 sm:grid-cols-2 max-w-[72rem] w-full mx-auto overflow-y-auto min-h-0"
                         role="list">
-                        <template x-for="option in question.options" :key="option.id">
+                        <template x-for="(option, idx) in question.options" :key="option.id">
                             <li class="flex items-center gap-3 px-6 py-4 rounded-xl border text-left transition-colors"
                                 :class="phase === 'reveal' && isCorrectOption(option.id)
-                                    ? 'bg-success/15 border-success text-success'
+                                    ? 'bg-success border-success text-bg'
                                     : (phase === 'reveal'
                                         ? 'bg-surface border-border-soft text-text-dim'
-                                        : 'bg-surface border-border-soft')"
+                                        : ['bg-cyan border-cyan text-bg', 'bg-violet border-violet text-bg', 'bg-accent border-accent text-bg', 'bg-orange border-orange text-bg'][idx])"
                                 :data-correct="phase === 'reveal' && isCorrectOption(option.id) ? 'true' : 'false'"
                                 data-answer-option>
                                 <span class="font-semibold text-[clamp(1.1rem,2.2vw,1.85rem)]"
                                       x-text="option.text"></span>
                                 <span x-show="phase === 'reveal' && isCorrectOption(option.id)"
-                                      class="ml-auto shrink-0 text-[0.7rem] font-semibold uppercase tracking-[0.12em] px-2 py-1 rounded-sm bg-success/20 text-success"
+                                      class="ml-auto shrink-0 text-[0.7rem] font-semibold uppercase tracking-[0.12em] px-2 py-1 rounded-sm bg-bg/20 text-bg"
                                       data-correct-badge>Correct</span>
                             </li>
                         </template>
