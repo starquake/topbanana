@@ -103,12 +103,14 @@ test.describe('join mid-game', () => {
     await late.getByTestId('join-name-submit').click();
 
     // The latecomer is carried straight into the current question (the room is
-    // already in the question phase), reaching the same question text.
+    // already in the question phase). The live phone is a pure answer pad
+    // (#956), so the question-view container - not the question text, which now
+    // lives only on the big screen - signals they reached the question phase.
     await expect(late.getByTestId('question-view')).toBeVisible({ timeout: 20_000 });
-    await expect(late.getByTestId('question-text')).toHaveText(questionText);
 
     // The answer window is open and the latecomer can answer the current
-    // question: the option button is enabled and clickable.
+    // question: the option button for this question (the distinguishing signal
+    // they reached the right question) is enabled and clickable.
     await expect(late.getByTestId('question-options')).toBeVisible({ timeout: 15_000 });
     const correctButton = late.getByTestId('question-options').getByRole('button', { name: correct });
     await expect(correctButton).toBeEnabled({ timeout: 15_000 });

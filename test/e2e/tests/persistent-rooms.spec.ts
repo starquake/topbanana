@@ -100,8 +100,13 @@ test.describe('persistent live rooms', () => {
     const startResp = await host.request.post(`/api/sessions/${joinCode}/start`);
     expect(startResp.status(), `start: ${startResp.status()} ${await startResp.text()}`).toBe(204);
 
+    // The live phone is an answer pad (#956): game 1's question text lives on
+    // the big screen, so the distinguishing "two" option button stands in as
+    // the "the player reached game 1's question" signal.
     await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId('question-text')).toHaveText('Game 1: what is 1+1?');
+    await expect(
+      page.getByTestId('question-options').getByRole('button', { name: 'two' }),
+    ).toBeVisible({ timeout: 10_000 });
 
     // The page player answers game 1's only question via the page UI. With the
     // single active player in, the runner closes the question, reveals, and ends
@@ -127,11 +132,15 @@ test.describe('persistent live rooms', () => {
     await postNextQuiz(host.request, joinCode, quiz2Id);
 
     // Game 2 plays for the still-joined player: they reach the new question
-    // without re-entering a code, and no stale game-1 state leaks (the new
-    // question text is shown, options are fresh).
+    // without re-entering a code, and no stale game-1 state leaks. The phone is
+    // an answer pad (#956), so game 2 is recognised by its distinguishing
+    // "four" option button (the question text lives on the big screen) and the
+    // options are fresh.
     await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByTestId('question-text')).toHaveText('Game 2: what is 2+2?');
     await expect(page.getByTestId('question-options')).toBeVisible({ timeout: 10_000 });
+    await expect(
+      page.getByTestId('question-options').getByRole('button', { name: 'four' }),
+    ).toBeVisible();
     // No stale pick from game 1: the answered/waiting state is gone and the
     // options are tappable again.
     await expect(page.getByTestId('answered-waiting')).toBeHidden();
@@ -180,8 +189,13 @@ test.describe('persistent live rooms', () => {
     await page.getByTestId('join-name-input').fill(late);
     await page.getByTestId('join-name-submit').click();
 
+    // The live phone is an answer pad (#956): the question text lives on the big
+    // screen, so the distinguishing "six" option button is the "the latecomer
+    // landed in the in-flight question" signal.
     await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByTestId('question-text')).toHaveText('Latecomer: what is 3+3?');
+    await expect(
+      page.getByTestId('question-options').getByRole('button', { name: 'six' }),
+    ).toBeVisible({ timeout: 10_000 });
   });
 });
 

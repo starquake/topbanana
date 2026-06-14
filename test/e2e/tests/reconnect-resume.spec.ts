@@ -71,8 +71,14 @@ test.describe('reconnect and resume', () => {
     expect(startResp.status(), `start session: ${startResp.status()} ${await startResp.text()}`).toBe(204);
 
     const firstQuestion = QUIZ_QUESTIONS[0];
+    const correctText = firstQuestion.options[firstQuestion.correctIndices[0]];
+    // The live phone is a pure answer pad (#956): the question text lives on the
+    // big screen, so the question-view container plus the distinguishing option
+    // button are the spoiler-free signals the player reached this question.
     await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId('question-text')).toHaveText(firstQuestion.text);
+    await expect(
+      page.getByTestId('question-options').getByRole('button', { name: correctText }),
+    ).toBeVisible({ timeout: 10_000 });
 
     // Reload mid-question (the drop). beforeunload fires the leave beacon; the
     // reloaded page must resume by re-Joining with the remembered name (no
@@ -80,13 +86,18 @@ test.describe('reconnect and resume', () => {
     await page.reload();
 
     // Resume lands back on the question phase - neither the enter-code nor the
-    // name form is shown (both are x-show toggled, so present-but-hidden) - with
-    // the same question text. The countdown bar re-derives from the server
-    // deadline, so it sits below 100 within the (still-open) window.
+    // name form is shown (both are x-show toggled, so present-but-hidden) - on
+    // the same question. The phone is an answer pad (#956), so the resumed
+    // question is recognised by its distinguishing option button rather than the
+    // question text (which now lives on the big screen). The countdown bar
+    // re-derives from the server deadline, so it sits below 100 within the
+    // (still-open) window.
     await expect(page.getByTestId('join-code-input')).toBeHidden();
     await expect(page.getByTestId('join-name-input')).toBeHidden();
     await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId('question-text')).toHaveText(firstQuestion.text);
+    await expect(
+      page.getByTestId('question-options').getByRole('button', { name: correctText }),
+    ).toBeVisible({ timeout: 10_000 });
 
     const progress = page.locator('[data-testid="question-view"] progress.progress');
     await expect(async () => {
@@ -96,7 +107,6 @@ test.describe('reconnect and resume', () => {
 
     // The resumed player can still answer. Pick the correct option; the
     // answered/waiting state shows with no correctness leaked.
-    const correctText = firstQuestion.options[firstQuestion.correctIndices[0]];
     await page.getByTestId('question-options').getByRole('button', { name: correctText }).click();
     await expect(page.getByTestId('answered-waiting')).toBeVisible();
 

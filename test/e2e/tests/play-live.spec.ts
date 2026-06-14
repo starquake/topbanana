@@ -84,10 +84,18 @@ test.describe('player synchronized play', () => {
     await expect(page.getByTestId('round-intro-eyebrow')).toHaveText('Round 1 of 1');
 
     // The question view appears once the runner issues the first question. The
-    // question text is the only spoiler-free signal the player gets.
+    // live phone is a pure answer pad (#956): it carries the timing/answer
+    // chrome only, so the question-view container is the spoiler-free signal
+    // that the question phase was reached - the text and any media live on the
+    // big screen, not the phone.
     const firstQuestion = QUIZ_QUESTIONS[0];
     await expect(page.getByTestId('question-view')).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId('question-text')).toHaveText(firstQuestion.text);
+
+    // Answer-pad contract (#956): neither the question text nor its media is
+    // duplicated on the phone during a live question - they belong on the
+    // shared big screen.
+    await expect(page.getByTestId('question-text')).toHaveCount(0);
+    await expect(page.getByTestId('question-image')).toHaveCount(0);
 
     // Read beat (#247 parity): the question shows first with the options HIDDEN
     // and a "Get ready" indicator, so the player reads before answers open.
