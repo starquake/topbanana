@@ -289,22 +289,54 @@
                 <ul class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                     {{range .Images}}
                         <li class="group relative">
-                            <a href="/media/{{.ID}}" target="_blank" rel="noopener"
-                               class="block aspect-square overflow-hidden rounded-lg border border-border-soft bg-surface hover:border-accent focus-visible:outline-none focus-visible:shadow-focus">
+                            <button type="button"
+                                    onclick="openImageViewer('/media/{{.ID}}')"
+                                    aria-label="View image {{.ID}} full size"
+                                    class="block w-full p-0 aspect-square overflow-hidden rounded-lg border border-border-soft bg-surface cursor-pointer hover:border-accent focus-visible:outline-none focus-visible:shadow-focus">
                                 <img src="/media/{{.ID}}/thumb"
                                      alt="Quiz image {{.ID}}"
                                      loading="lazy"
                                      width="{{.Width}}" height="{{.Height}}"
                                      class="h-full w-full object-cover">
-                            </a>
+                            </button>
+                            {{/* Delete control: always visible on touch (no
+                                 hover), fades in on hover on devices that
+                                 actually hover. The hover-fade is gated on
+                                 (hover: hover) instead of a breakpoint so an
+                                 iPad - wide screen, touch only - keeps the
+                                 button visible. */}}
                             <button type="button" aria-label="Delete image {{.ID}}"
                                     onclick="openModal('modal-delete-media-{{.ID}}')"
-                                    class="absolute top-1.5 right-1.5 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border-soft bg-bg/80 text-text-dim opacity-0 transition hover:bg-danger hover:text-text focus-visible:opacity-100 focus-visible:outline-none focus-visible:shadow-focus group-hover:opacity-100">
+                                    class="absolute top-1.5 right-1.5 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border-soft bg-bg/80 text-text transition hover:bg-danger focus-visible:outline-none focus-visible:shadow-focus [@media(hover:hover)]:text-text-dim [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100 [@media(hover:hover)]:hover:text-text">
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.5 1a.5.5 0 0 0-.5.5V2H3a.5.5 0 0 0 0 1h.5l.6 9.1a1.5 1.5 0 0 0 1.5 1.4h4.8a1.5 1.5 0 0 0 1.5-1.4L12.5 3h.5a.5.5 0 0 0 0-1h-3v-.5a.5.5 0 0 0-.5-.5h-3zM6 6a.5.5 0 0 1 1 0v5a.5.5 0 0 1-1 0V6zm3 0a.5.5 0 0 1 1 0v5a.5.5 0 0 1-1 0V6z"/></svg>
                             </button>
                         </li>
                     {{end}}
                 </ul>
+
+                {{/* Shared lightbox overlay (#950). Uses the same hidden / inset-0
+                     pattern as the delete-confirm modals below and the existing
+                     openModal / closeModal helpers from modal_manager. A backdrop
+                     click closes; the image itself is wrapped so the click does
+                     not bubble. */}}
+                <div id="image-modal-viewer"
+                     role="dialog" aria-modal="true" aria-labelledby="image-modal-viewer-title"
+                     data-testid="image-modal"
+                     class="hidden fixed inset-0 z-50 flex items-center justify-center bg-bg/90 backdrop-blur-sm p-4">
+                    <div class="absolute inset-0" onclick="closeModal('image-modal-viewer')"></div>
+                    <p id="image-modal-viewer-title" class="sr-only">Image viewer</p>
+                    <div class="relative">
+                        <img id="image-modal-viewer-img"
+                             src="" alt=""
+                             class="block max-w-[90vw] max-h-[85vh] object-contain rounded-lg shadow-2xl">
+                        <button type="button"
+                                aria-label="Close image viewer"
+                                onclick="closeModal('image-modal-viewer')"
+                                class="absolute -top-3 -right-3 inline-flex h-9 w-9 items-center justify-center rounded-full border border-border-soft bg-surface text-text shadow-2xl cursor-pointer hover:bg-border focus-visible:outline-none focus-visible:shadow-focus">
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/></svg>
+                        </button>
+                    </div>
+                </div>
             {{else}}
                 <div class="border border-dashed border-border rounded-xl p-10 text-center text-text-dim">
                     No images yet.
@@ -504,6 +536,17 @@
                 });
             }
         });
+    </script>
+    <script>
+        // Image library viewer (#950). Thumbnails call openImageViewer(src);
+        // the helper points the shared lightbox <img> at the full-size URL
+        // and reuses the admin modal manager so focus, Esc, and Tab work the
+        // same as every other admin modal.
+        function openImageViewer(src) {
+            const img = document.getElementById('image-modal-viewer-img');
+            if (img) img.src = src;
+            openModal('image-modal-viewer');
+        }
     </script>
     {{/* Drag-and-drop reorder for rounds and questions (#199). Vendored
          SortableJS plus a plain ES module; both are admin-only and loaded

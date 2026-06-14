@@ -288,7 +288,7 @@ func TestMediaLibraryView_Integration(t *testing.T) {
 		page := getQuizViewBody(ctx, t, owner, baseURL, quizID)
 		for _, want := range []string{
 			fmt.Sprintf(`src="/media/%d/thumb"`, mediaID),
-			fmt.Sprintf(`href="/media/%d"`, mediaID),
+			fmt.Sprintf(`openImageViewer('/media/%d')`, mediaID),
 			`enctype="multipart/form-data"`,
 		} {
 			if !strings.Contains(page, want) {
