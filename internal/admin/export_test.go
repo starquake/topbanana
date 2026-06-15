@@ -159,3 +159,15 @@ func NewPlayerInputResultFor(r *http.Request) NewPlayerInputResult {
 
 	return NewPlayerInputResult{DisplayName: in.DisplayName, ErrMsg: in.errMsg}
 }
+
+// ParseUploadCounts exposes the unexported query-string parser used to
+// drive the post-upload banner so the external admin_test package can pin
+// the clamp / sanitize / negative-input rules without standing up the full
+// quiz-view handler (#951).
+func ParseUploadCounts(r *http.Request) (uploaded, failed int) {
+	return parseUploadCounts(r)
+}
+
+// UploadCountCeiling is the clamp the parser applies so the test can assert
+// the boundary without hard-coding it.
+const UploadCountCeiling = uploadCountCeiling

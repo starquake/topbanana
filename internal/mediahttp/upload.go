@@ -2,12 +2,15 @@ package mediahttp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/handlers"
@@ -17,11 +20,9 @@ import (
 
 const (
 	// uploadFormField is the multipart field the images arrive under. The
-	// form posts under "images"; the handler also accepts a legacy "image"
-	// part so a scripted single-file upload built against the previous shape
-	// keeps working.
-	uploadFormField       = "images"
-	uploadFormFieldLegacy = "image"
+	// form posts under "images" (the per-file XHR module appends the same
+	// field per request).
+	uploadFormField = "images"
 
 	// maxUploadFilesPerRequest caps how many files a single upload request may
 	// carry. Defense in depth on top of the form's own size + count limits.
@@ -47,6 +48,14 @@ const (
 	// concurrent uploads does not pin large buffers; each file part is
 	// streamed to the pipeline either way.
 	multipartMemoryBytes = 1 << 20
+
+	// uploadReadDeadline bounds how long an upload's body may take to arrive
+	// over the wire. The server-wide ReadTimeout is 10 s so an ordinary
+	// request that hangs gets killed quickly; that limit kills slow uploads
+	// of legitimately large images. The middleware bumps the per-connection
+	// read deadline to this longer cap before parsing the multipart body so a
+	// 10 MB image still lands over a slow phone connection (~50 KB/s).
+	uploadReadDeadline = 5 * time.Minute
 )
 
 // QuizEditLookup is the slice of the quiz store the upload handler uses to
@@ -116,7 +125,15 @@ func HandleMediaUpload(logger *slog.Logger, svc MediaService, quizzes QuizEditLo
 			return
 		}
 
-		uploaded, failed, firstErr := storeUploadFiles(r.Context(), logger, svc, quizID, player.ID, files)
+		results := storeUploadFiles(r.Context(), logger, svc, quizID, player.ID, files)
+
+		if wantsJSON(r) {
+			writeUploadJSON(w, r, logger, results)
+
+			return
+		}
+
+		uploaded, failed, firstErr := summarize(results)
 		if uploaded == 0 {
 			// Nothing landed - surface the first file's failure directly so a
 			// single-file upload that fails returns the pipeline's 4xx
@@ -133,39 +150,55 @@ func HandleMediaUpload(logger *slog.Logger, svc MediaService, quizzes QuizEditLo
 }
 
 // collectUploadFiles returns every file part on the request under the
-// supported field names, preserving submission order. The handler reads the
-// new "images" field first, then falls back to the legacy "image" field, so a
-// scripted single-file upload built against the previous shape still works.
+// "images" field, preserving submission order.
 func collectUploadFiles(r *http.Request) []*multipart.FileHeader {
 	if r.MultipartForm == nil {
 		return nil
 	}
-	files := r.MultipartForm.File[uploadFormField]
-	if len(files) == 0 {
-		files = r.MultipartForm.File[uploadFormFieldLegacy]
-	}
 
-	return files
+	return r.MultipartForm.File[uploadFormField]
 }
 
-// storeUploadFiles streams each file through media.Service.Store and reports
-// how many succeeded and how many were skipped because the pipeline rejected
-// them. A skip is the per-file equivalent of a 400; the request still returns
-// 303 so the rest of the batch lands. Anything that is not a pipeline
-// caller-fault sentinel is logged and counted as a failure.
+// uploadResult is one file's outcome from a batch upload. Exactly one of
+// MediaID or Err is set; Filename is the client-supplied name and is included
+// on both branches for the JSON response.
+type uploadResult struct {
+	Filename string
+	MediaID  int64
+	Err      error
+}
+
+// storeUploadFiles streams each file through media.Service.Store and returns
+// a per-file outcome list. A skip (pipeline caller-fault) leaves the file's
+// Err set and still lets the rest of the batch run. Anything that is not a
+// pipeline caller-fault sentinel is logged but still treated as a per-file
+// failure rather than killing the request.
 func storeUploadFiles(
 	ctx context.Context, logger *slog.Logger, svc MediaService,
 	quizID, playerID int64, files []*multipart.FileHeader,
-) (uploaded, failed int, firstErr error) {
+) []uploadResult {
+	results := make([]uploadResult, 0, len(files))
 	for _, header := range files {
-		if err := storeOneUpload(ctx, svc, quizID, playerID, header); err != nil {
+		mediaID, err := storeOneUpload(ctx, svc, quizID, playerID, header)
+		if err != nil && !isPipelineRejection(err) {
+			logger.ErrorContext(ctx, "error storing uploaded media",
+				slog.String("filename", header.Filename), slog.Any("err", err))
+		}
+		results = append(results, uploadResult{Filename: header.Filename, MediaID: mediaID, Err: err})
+	}
+
+	return results
+}
+
+// summarize collapses a per-file result list into success/skip counts and the
+// first failure error (used to surface a single-file failure directly to the
+// host instead of bouncing through a banner).
+func summarize(results []uploadResult) (uploaded, failed int, firstErr error) {
+	for _, r := range results {
+		if r.Err != nil {
 			failed++
 			if firstErr == nil {
-				firstErr = err
-			}
-			if !isPipelineRejection(err) {
-				logger.ErrorContext(ctx, "error storing uploaded media",
-					slog.String("filename", header.Filename), slog.Any("err", err))
+				firstErr = r.Err
 			}
 
 			continue
@@ -198,14 +231,14 @@ func writeUploadError(w http.ResponseWriter, r *http.Request, logger *slog.Logge
 }
 
 // storeOneUpload opens one multipart file header, runs it through the media
-// service, and closes the file. Wrapped in a function so the per-file defer
-// stays scoped.
+// service, closes the file, and returns the new media row's id. Wrapped in a
+// function so the per-file defer stays scoped.
 func storeOneUpload(
 	ctx context.Context, svc MediaService, quizID, playerID int64, header *multipart.FileHeader,
-) (err error) {
+) (mediaID int64, err error) {
 	file, err := header.Open()
 	if err != nil {
-		return fmt.Errorf("opening upload part %q: %w", header.Filename, err)
+		return 0, fmt.Errorf("opening upload part %q: %w", header.Filename, err)
 	}
 	defer func() {
 		if cerr := file.Close(); cerr != nil && err == nil {
@@ -213,11 +246,99 @@ func storeOneUpload(
 		}
 	}()
 
-	if _, err = svc.Store(ctx, quizID, playerID, file); err != nil {
-		return fmt.Errorf("storing upload part %q: %w", header.Filename, err)
+	stored, err := svc.Store(ctx, quizID, playerID, file)
+	if err != nil {
+		return 0, fmt.Errorf("storing upload part %q: %w", header.Filename, err)
 	}
 
-	return nil
+	return stored.ID, nil
+}
+
+// wantsJSON reports whether the client signalled it would rather have the
+// upload result as JSON than via the form-redirect. The progressive-enhancement
+// JS on the quiz view sets Accept: application/json so each per-file upload
+// can render its own progress row instead of bouncing through a redirect; a
+// plain browser form submit has no JSON in its Accept header and still gets
+// the 303.
+func wantsJSON(r *http.Request) bool {
+	accept := r.Header.Get("Accept")
+	if accept == "" {
+		return false
+	}
+	for part := range strings.SplitSeq(accept, ",") {
+		mime, _, _ := strings.Cut(part, ";")
+		if strings.EqualFold(strings.TrimSpace(mime), "application/json") {
+			return true
+		}
+	}
+
+	return false
+}
+
+// uploadResultJSON is the per-file shape on the wire. Filename echoes back
+// what the client sent so a progress row can be matched up by name even when
+// the responses arrive out of order. ID and Reason are mutually exclusive: ID
+// is set on success (the new media row's id, also the URL suffix), Reason on
+// a pipeline rejection.
+type uploadResultJSON struct {
+	Filename string `json:"filename"`
+	ID       int64  `json:"id,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+// uploadResponseJSON is the wire shape of a successful upload submission. Both
+// arrays may be empty when nothing was sent (the handler rejects that earlier,
+// so in practice at least one of the two carries an entry).
+type uploadResponseJSON struct {
+	Uploaded []uploadResultJSON `json:"uploaded"`
+	Failed   []uploadResultJSON `json:"failed"`
+}
+
+// writeUploadJSON emits the per-file outcomes as JSON. The status is always
+// 200 even when every file was rejected because the request itself was valid;
+// per-file failures live in the response body.
+func writeUploadJSON(w http.ResponseWriter, r *http.Request, logger *slog.Logger, results []uploadResult) {
+	resp := uploadResponseJSON{
+		Uploaded: make([]uploadResultJSON, 0, len(results)),
+		Failed:   make([]uploadResultJSON, 0, len(results)),
+	}
+	for _, res := range results {
+		if res.Err != nil {
+			resp.Failed = append(resp.Failed, uploadResultJSON{
+				Filename: res.Filename,
+				Reason:   uploadFailureReason(res.Err),
+			})
+
+			continue
+		}
+		resp.Uploaded = append(resp.Uploaded, uploadResultJSON{
+			Filename: res.Filename,
+			ID:       res.MediaID,
+		})
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		logger.ErrorContext(r.Context(), "error encoding upload response", slog.Any("err", err))
+	}
+}
+
+// uploadFailureReason maps a per-file pipeline error to the short, host-facing
+// label that the JSON response carries. Anything that is not a known pipeline
+// rejection is reported as a generic upload error; the handler logs the
+// detail.
+func uploadFailureReason(err error) string {
+	switch {
+	case errors.Is(err, media.ErrUploadTooLarge):
+		return "file exceeds the maximum upload size"
+	case errors.Is(err, media.ErrImageTooLarge):
+		return "image dimensions exceed the maximum"
+	case errors.Is(err, media.ErrEmptyUpload):
+		return "file is empty"
+	case errors.Is(err, media.ErrUnsupportedImage):
+		return "unsupported image format (use jpg, png, or webp)"
+	default:
+		return "upload failed"
+	}
 }
 
 // buildUploadQuery returns the query suffix that tells the quiz view how to
@@ -283,6 +404,13 @@ func authorizeQuizEdit(
 func MaxMultipartFormMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, maxUploadRequestBytes)
+		// The server-wide ReadTimeout is short so an ordinary slow handler
+		// gets killed quickly. Uploads can legitimately stream for minutes on
+		// a slow phone connection though, so bump the per-connection read
+		// deadline here. If the underlying ResponseWriter does not support a
+		// deadline (unlikely under net/http) the call is a silent no-op and
+		// the request still uses the global ReadTimeout.
+		_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(uploadReadDeadline))
 		// MaxBytesReader above bounds the body, so the parse cannot exhaust
 		// memory despite gosec's G120 flag on the bare ParseMultipartForm call.
 		if err := r.ParseMultipartForm(multipartMemoryBytes); err != nil { //nolint:gosec // body capped above

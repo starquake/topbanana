@@ -209,6 +209,10 @@ Simple fades use Alpine `x-transition` + Tailwind classes; reserve anime.js for 
 
 Every `<label>` must have a `for` attribute pointing to the `id` of a form element. To display a read-only value, use a `readonly` `<input>` styled with utility classes -- not a `<p>` -- so the label has a valid target.
 
+## E2E selectors
+
+Anchor Playwright locators on stable `data-testid` attributes, not regex matches against rendered text. Prefer `page.getByTestId('upload-button')` over `page.getByRole('button', { name: /upload/i })` and over CSS attribute regexes -- the text/label can drift, the testid will not. Add the attribute to the element in the template (`data-testid="upload-button"`) and reference it from the spec. The same rule covers asserting visible state: `expect(page.getByTestId('upload-banner')).toContainText('3 images uploaded')` is fine; assertion regexes on URLs / hrefs are still allowed where the structure is the contract.
+
 ## What to avoid
 
 See the styling and constraints rules in `.claude/rules/frontend-style.md`: Tailwind v4 for CSS (built via `make tailwind`), no bundler/npm for app JS, no TypeScript, no framework beyond Alpine + anime.js, no inline styles, no hand-written CSS files, no CDN libraries, no hardcoded base URLs, no reactive state outside the constructor.

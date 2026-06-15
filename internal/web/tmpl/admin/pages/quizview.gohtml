@@ -288,7 +288,7 @@
             {{if .Images}}
                 <ul class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                     {{range .Images}}
-                        <li class="group relative">
+                        <li id="image-tile-{{.ID}}" class="group relative">
                             <button type="button"
                                     onclick="openImageViewer('/media/{{.ID}}')"
                                     aria-label="View image {{.ID}} full size"
@@ -297,7 +297,8 @@
                                      alt="Quiz image {{.ID}}"
                                      loading="lazy"
                                      width="{{.Width}}" height="{{.Height}}"
-                                     class="h-full w-full object-cover">
+                                     class="h-full w-full object-cover"
+                                     data-testid="library-thumb">
                             </button>
                             {{/* Delete control: always visible on touch (no
                                  hover), fades in on hover on devices that
@@ -365,7 +366,18 @@
                             <button type="button"
                                     onclick="closeModal('modal-delete-media-{{.ID}}')"
                                     class="btn-ghost">Cancel</button>
-                            <form method="post" action="/admin/quizzes/{{$.Quiz.ID}}/media/{{.ID}}/delete" class="inline-flex">
+                            {{/* htmx swaps the thumbnail <li> for the empty 200
+                                 the handler returns so the page stays put;
+                                 hx-on closes the modal once the swap settles.
+                                 A no-JS browser still posts the form and the
+                                 handler 303's back to the library section. */}}
+                            <form method="post"
+                                  action="/admin/quizzes/{{$.Quiz.ID}}/media/{{.ID}}/delete"
+                                  hx-post="/admin/quizzes/{{$.Quiz.ID}}/media/{{.ID}}/delete"
+                                  hx-target="#image-tile-{{.ID}}"
+                                  hx-swap="outerHTML"
+                                  hx-on::after-request="closeModal('modal-delete-media-{{.ID}}')"
+                                  class="inline-flex">
                                 <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                                 <button type="submit" class="btn-danger">Delete</button>
                             </form>
@@ -402,13 +414,21 @@
                 <label for="quiz-media-upload" class="text-xs uppercase tracking-[0.12em] text-text-dim">Add images</label>
                 <input type="file"
                        id="quiz-media-upload"
-                       name="image"
+                       name="images"
                        accept="image/jpeg,image/png,image/webp"
                        multiple
                        required
                        class="text-sm text-text-dim file:mr-3 file:cursor-pointer file:rounded-sm file:border file:border-border-soft file:bg-surface file:px-3 file:py-2 file:text-xs file:font-semibold file:uppercase file:tracking-[0.12em] file:text-text hover:file:border-accent">
-                <button type="submit" class="btn-primary">Upload</button>
+                <button type="submit" class="btn-primary" data-testid="upload-button">Upload</button>
             </form>
+
+            {{/* Auto-upload progress queue (#951). quiz-image-upload.js appends
+                 one row per picked file with a filename, status, and cancel
+                 button, and reloads the page once every row settles. Hidden
+                 when empty so a plain page visit shows no chrome. */}}
+            <ul data-image-upload-queue
+                class="mt-4 flex flex-col gap-2 empty:hidden"
+                aria-live="polite"></ul>
         </section>
         {{end}}
 
@@ -575,4 +595,5 @@
          self-noops when the edit handles are absent (read-only viewer). */}}
     <script src="/static/js/vendor/sortable.min.js" defer></script>
     <script type="module" src="/static/js/dist/quiz-reorder.js" defer></script>
+    <script type="module" src="/static/js/dist/quiz-image-upload.js" defer></script>
 {{end}}

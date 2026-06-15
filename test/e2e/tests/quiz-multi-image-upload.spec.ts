@@ -21,23 +21,23 @@ test('uploading multiple images at once adds each to the library and shows a con
   await createQuizWithQuestions(page, quizTitle, QUESTIONS);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  await page.locator('input[type="file"][name="image"]').setInputFiles([
+  // Picking three files fires one auto-upload XHR per file; the JS lands on
+  // /admin/quizzes/{id}?uploaded=3&failed=0#images so the server-rendered
+  // banner reports how many landed.
+  await page.locator('input[type="file"][name="images"]').setInputFiles([
     { name: 'first.png', mimeType: 'image/png', buffer: PNG_SAMPLE },
     { name: 'second.png', mimeType: 'image/png', buffer: PNG_SAMPLE },
     { name: 'third.png', mimeType: 'image/png', buffer: PNG_SAMPLE },
   ]);
-  await page.getByRole('button', { name: /upload/i }).click();
 
-  // The handler redirects to the quiz view with a banner-counts query and the
-  // #images fragment. The banner reports how many landed.
-  await page.waitForURL(/\/admin\/quizzes\/\d+\?uploaded=3&failed=0#images$/);
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\?uploaded=3&failed=0#images$/, { timeout: 45_000 });
 
   const banner = page.getByTestId('upload-banner');
   await expect(banner).toBeVisible();
   await expect(banner).toContainText('3 images uploaded');
 
   // The library grid now carries three thumbnails.
-  await expect(page.locator('img[alt^="Quiz image"]')).toHaveCount(3);
+  await expect(page.getByTestId('library-thumb')).toHaveCount(3);
 });
 
 test('a mix of valid and unsupported uploads partial-succeeds and surfaces the skip count', async ({ page, browserName }) => {
@@ -47,13 +47,12 @@ test('a mix of valid and unsupported uploads partial-succeeds and surfaces the s
   await createQuizWithQuestions(page, quizTitle, QUESTIONS);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  await page.locator('input[type="file"][name="image"]').setInputFiles([
+  await page.locator('input[type="file"][name="images"]').setInputFiles([
     { name: 'good.png', mimeType: 'image/png', buffer: PNG_SAMPLE },
     { name: 'bad.txt', mimeType: 'text/plain', buffer: Buffer.from('not an image') },
   ]);
-  await page.getByRole('button', { name: /upload/i }).click();
 
-  await page.waitForURL(/\/admin\/quizzes\/\d+\?uploaded=1&failed=1#images$/);
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\?uploaded=1&failed=1#images$/, { timeout: 45_000 });
 
   const banner = page.getByTestId('upload-banner');
   await expect(banner).toBeVisible();
@@ -61,5 +60,5 @@ test('a mix of valid and unsupported uploads partial-succeeds and surfaces the s
   await expect(banner).toContainText('1 skipped');
 
   // The valid file landed; the unsupported file did not.
-  await expect(page.locator('img[alt^="Quiz image"]')).toHaveCount(1);
+  await expect(page.getByTestId('library-thumb')).toHaveCount(1);
 });

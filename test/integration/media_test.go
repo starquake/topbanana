@@ -3,6 +3,7 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
@@ -158,6 +159,62 @@ func TestMediaUpload_Integration(t *testing.T) {
 		defer closeBody(t, resp.Body)
 		if got, want := resp.StatusCode, http.StatusBadRequest; got != want {
 			t.Errorf("too-many upload status = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("Accept: application/json returns the per-file outcome", func(t *testing.T) {
+		t.Parallel()
+		token := fetchCSRFToken(ctx, t, owner, baseURL+"/admin/quizzes")
+		batch := []multipartFile{
+			{field: "images", filename: "good.png", data: pngBytes(t, 80, 80)},
+			{field: "images", filename: "bad.txt", data: []byte("not an image at all")},
+		}
+		body, contentType := multipartBatch(t, batch, token)
+		req := newMultipartReq(ctx, t, baseURL+fmt.Sprintf("/admin/quizzes/%d/media", quizID), body, contentType)
+		req.Header.Set("Accept", "application/json")
+		resp, err := owner.Do(req)
+		if err != nil {
+			t.Fatalf("Do err = %v, want nil", err)
+		}
+		defer closeBody(t, resp.Body)
+		if got, want := resp.StatusCode, http.StatusOK; got != want {
+			t.Fatalf("json upload status = %d, want %d", got, want)
+		}
+		if got, want := resp.Header.Get("Content-Type"), "application/json"; !strings.HasPrefix(got, want) {
+			t.Errorf("json upload Content-Type = %q, want prefix %q", got, want)
+		}
+		type uploadedItem struct {
+			Filename string `json:"filename"`
+			ID       int64  `json:"id"`
+		}
+		type failedItem struct {
+			Filename string `json:"filename"`
+			Reason   string `json:"reason"`
+		}
+		var payload struct {
+			Uploaded []uploadedItem `json:"uploaded"`
+			Failed   []failedItem   `json:"failed"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode json err = %v, want nil", err)
+		}
+		if got, want := len(payload.Uploaded), 1; got != want {
+			t.Fatalf("uploaded len = %d, want %d", got, want)
+		}
+		if got, want := payload.Uploaded[0].Filename, "good.png"; got != want {
+			t.Errorf("uploaded[0].Filename = %q, want %q", got, want)
+		}
+		if payload.Uploaded[0].ID <= 0 {
+			t.Errorf("uploaded[0].ID = %d, want > 0", payload.Uploaded[0].ID)
+		}
+		if got, want := len(payload.Failed), 1; got != want {
+			t.Fatalf("failed len = %d, want %d", got, want)
+		}
+		if got, want := payload.Failed[0].Filename, "bad.txt"; got != want {
+			t.Errorf("failed[0].Filename = %q, want %q", got, want)
+		}
+		if payload.Failed[0].Reason == "" {
+			t.Error("failed[0].Reason is empty, want a human-readable reason")
 		}
 	})
 
@@ -344,7 +401,7 @@ func TestMediaLibraryView_Integration(t *testing.T) {
 			"No images yet.",
 			fmt.Sprintf(`action="/admin/quizzes/%d/media"`, quizID),
 			`enctype="multipart/form-data"`,
-			`name="image"`,
+			`name="images"`,
 		} {
 			if !strings.Contains(page, want) {
 				t.Errorf("owner quiz view missing %q", want)
@@ -554,13 +611,14 @@ func multipartBatch(t *testing.T, batch []multipartFile, token string) (*bytes.B
 	return &buf, mw.FormDataContentType()
 }
 
-// multipartImage builds a multipart body carrying the image under the "image"
-// field plus the csrf_token field, returning the body and its content type.
+// multipartImage builds a multipart body carrying the image under the
+// "images" field plus the csrf_token field, returning the body and its
+// content type.
 func multipartImage(t *testing.T, filename string, data []byte, token string) (*bytes.Buffer, string) {
 	t.Helper()
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
-	part, err := mw.CreateFormFile("image", filename)
+	part, err := mw.CreateFormFile("images", filename)
 	if err != nil {
 		t.Fatalf("CreateFormFile err = %v, want nil", err)
 	}

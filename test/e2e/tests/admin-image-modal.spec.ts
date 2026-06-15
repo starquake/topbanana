@@ -25,17 +25,18 @@ test('clicking a library thumbnail opens the full image in a modal', async ({ pa
   await createQuizWithQuestions(page, quizTitle, SINGLE_QUESTION);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  await page.locator('input[type="file"][name="image"]').setInputFiles({
+  // Picking a file fires the auto-upload XHR; on completion the JS reloads
+  // the quiz view so the library grid + delete modals reflect the new row.
+  await page.locator('input[type="file"][name="images"]').setInputFiles({
     name: 'pic.png',
     mimeType: 'image/png',
     buffer: PNG_SAMPLE,
   });
-  await page.getByRole('button', { name: /upload/i }).click();
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+(\?uploaded=\d+&failed=\d+)?(#images)?$/);
+  await expect(page.getByTestId('library-thumb').first()).toBeVisible({ timeout: 30_000 });
 
   // The library renders one tile; the alt carries the media id we expect the
   // full-size src to match.
-  const libraryThumb = page.locator('img[alt^="Quiz image"]').first();
+  const libraryThumb = page.getByTestId('library-thumb').first();
   await expect(libraryThumb).toBeVisible();
   const thumbAlt = (await libraryThumb.getAttribute('alt')) ?? '';
   const mediaId = thumbAlt.replace(/^Quiz image /, '');
