@@ -1,6 +1,8 @@
+import { join } from 'node:path';
+
 import { test, expect } from './fixtures';
 import type { HostSessions } from './fixtures';
-import { seedQuiz, setQuizMode } from './helpers';
+import { execSqlite, seedQuiz, setQuizMode } from './helpers';
 import type { Page } from '@playwright/test';
 
 // host-armed last-call countdown (#735): a hosted session never auto-starts.
@@ -22,7 +24,7 @@ async function openHostLobby(
   await seedQuiz(host, quizTitle);
   setQuizMode(quizTitle, 'live');
 
-  const { joinCode } = await hostSessions.openViaApi(await quizIdFor(host, quizTitle));
+  const { joinCode } = await hostSessions.openViaApi(quizIdFor(quizTitle));
   expect(joinCode).toMatch(/^[A-Z0-9]{6}$/);
 
   await host.goto(`/host/${joinCode}`);
@@ -31,15 +33,24 @@ async function openHostLobby(
   return { host, joinCode };
 }
 
-// quizIdFor resolves a seeded quiz's id via the admin quiz page URL so the
-// session create can target it without a sqlite shortcut.
-async function quizIdFor(host: Page, quizTitle: string): Promise<number> {
-  await host.goto('/admin/quizzes');
-  await host.getByRole('link', { name: quizTitle }).click();
-  await expect(host).toHaveURL(/\/admin\/quizzes\/\d+$/);
-  const id = Number.parseInt(host.url().split('/admin/quizzes/')[1], 10);
-  expect(Number.isInteger(id)).toBeTruthy();
-
+// quizIdFor resolves a seeded quiz's id by title via the same sqlite shortcut
+// the role/verify helpers use, so openViaApi can target it. Mirrors the helper
+// in join-sign-in.spec.ts and trims the admin-page navigation the prior browser
+// lookup did during setup - one fewer Playwright call during setup keeps the
+// admin host context out of the "Target page closed" race the suite saw under
+// full-suite load (#909).
+function quizIdFor(title: string): number {
+  const dataDir = process.env.TOPBANANA_E2E_DATA_DIR;
+  if (!dataDir) {
+    throw new Error('TOPBANANA_E2E_DATA_DIR is not set; cannot resolve a quiz id');
+  }
+  const dbFile = join(dataDir, `e2e-${test.info().parallelIndex}.db`);
+  const escapedTitle = title.replace(/'/g, "''");
+  const output = execSqlite(dbFile, `SELECT id FROM quizzes WHERE title = '${escapedTitle}';`);
+  const id = Number.parseInt(output, 10);
+  if (!Number.isInteger(id)) {
+    throw new Error(`quizIdFor(${title}): could not resolve quiz id from sqlite output ${JSON.stringify(output)}`);
+  }
   return id;
 }
 
