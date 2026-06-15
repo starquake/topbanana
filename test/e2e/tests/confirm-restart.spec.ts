@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures';
 import type { HostSessions } from './fixtures';
 import { importQuiz, setQuizMode, claimAndJoin } from './helpers';
-import type { Page } from '@playwright/test';
+import type { APIRequestContext, Page } from '@playwright/test';
 
 // confirm-and-restart (#853): a host already running a game on quiz A opens
 // quiz B's view and clicks "Host live". Because a game is in flight, the control
@@ -45,15 +45,23 @@ async function seedLiveQuiz(host: Page, title: string, questionText: string): Pr
 // the factory for teardown), joins one anonymous player over the API, and starts
 // the game so it is in flight. Returns the host page plus the running room's join
 // code so the test can assert the restart ends it.
+//
+// The anonymous join is driven through a plain APIRequestContext, not a browser
+// page: the spec never renders the player surface, so a full browser context
+// just for one HTTP call is wasted resource pressure - and under full-suite load
+// that extra context has been seen to die mid-call ("Target page, context or
+// browser has been closed", #912). The bare request context still hits the
+// per-worker baseURL fixture and carries its own cookie jar, so it identifies
+// as a distinct anonymous player.
 async function hostAndStart(
   hostSessions: HostSessions,
-  page: Page,
+  request: APIRequestContext,
   quizTitle: string,
 ): Promise<{ host: Page; code: string }> {
   const { host, joinCode: code } = await hostSessions.hostLive(quizTitle);
 
   // A single anonymous player joins so the host can start the game.
-  await claimAndJoin(page.request, code, `Pat-${Date.now()}`);
+  await claimAndJoin(request, code, `Pat-${Date.now()}`);
   await expect(host.locator('[data-player-row]')).toHaveCount(1);
 
   // Start now puts the game in flight. Wait for the durable question phase (the
@@ -67,7 +75,7 @@ async function hostAndStart(
 }
 
 test.describe('confirm-and-restart hosting', () => {
-  test('confirm ends the running game and lands the host on a new big screen hosting the other quiz', async ({ page, hostSessions }) => {
+  test('confirm ends the running game and lands the host on a new big screen hosting the other quiz', async ({ request, hostSessions }) => {
     test.setTimeout(90_000);
 
     const stamp = Date.now();
@@ -79,7 +87,7 @@ test.describe('confirm-and-restart hosting', () => {
     await seedLiveQuiz(host, quizB, 'What is 2+2?');
 
     // A game is running on quiz A.
-    const { code: runningCode } = await hostAndStart(hostSessions, page, quizA);
+    const { code: runningCode } = await hostAndStart(hostSessions, request, quizA);
 
     // Open quiz B's view. Because a game is in flight, "Host live" opens the
     // confirm-and-restart modal rather than submitting straight away.
@@ -108,7 +116,7 @@ test.describe('confirm-and-restart hosting', () => {
     await expect(host.getByTestId('pick-quiz-link')).toBeHidden();
   });
 
-  test('cancel leaves the modal without ending the running game', async ({ page, hostSessions }) => {
+  test('cancel leaves the modal without ending the running game', async ({ request, hostSessions }) => {
     test.setTimeout(90_000);
 
     const stamp = Date.now();
@@ -119,7 +127,7 @@ test.describe('confirm-and-restart hosting', () => {
     await seedLiveQuiz(host, quizA, 'What is 1+1?');
     await seedLiveQuiz(host, quizB, 'What is 2+2?');
 
-    const { code: runningCode } = await hostAndStart(hostSessions, page, quizA);
+    const { code: runningCode } = await hostAndStart(hostSessions, request, quizA);
 
     // Open quiz B's view and open the restart modal, then Cancel.
     await host.goto('/admin/quizzes');
