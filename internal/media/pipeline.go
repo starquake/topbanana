@@ -17,21 +17,10 @@ import (
 	_ "image/jpeg" // register the jpeg decoder with image.Decode
 	_ "image/png"  // register the png decoder with image.Decode
 	"io"
-	"sync"
 
 	"github.com/deepteams/webp"
 	"golang.org/x/image/draw"
 )
-
-// webpMu serializes every deepteams/webp codec call. v1.2.4 shares
-// unsynchronized package state across Encode/Decode, so concurrent use
-// data-races: the -race detector trips it under the parallel media tests, and
-// it is a real corruption risk for two uploads encoding at once. Decoding and
-// encoding here are upload-time paths - never hot - so serializing them costs
-// nothing in practice. Remove once the upstream race is fixed.
-//
-//nolint:gochecknoglobals // process-wide lock guarding a non-thread-safe library; must be shared across all callers.
-var webpMu sync.Mutex
 
 const (
 	// MaxUploadBytes caps the raw upload size (~10 MB). A larger upload is
@@ -145,16 +134,12 @@ func Process(r io.Reader) (*Processed, error) {
 	}, nil
 }
 
-// decodeGuarded decodes raw (jpeg, png, or webp) under webpMu so the webp
-// codec's shared state is never touched concurrently. It rejects a decode bomb
+// decodeGuarded decodes raw (jpeg, png, or webp). It rejects a decode bomb
 // from the header first (DecodeConfig reads only the header; PNG's max declared
 // edge of 2^31 keeps the int64 area product in range, so it cannot overflow),
 // then decodes the full image. Returns ErrImageTooLarge for an oversized
 // declared area and ErrUnsupportedImage for undecodable bytes.
 func decodeGuarded(raw []byte) (image.Image, error) {
-	webpMu.Lock()
-	defer webpMu.Unlock()
-
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(raw))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrUnsupportedImage, err)
@@ -210,15 +195,10 @@ func resizeLongEdge(src image.Image, maxLongEdge int) image.Image {
 	return dst
 }
 
-// encodeWebP encodes img as lossy webp at webpQuality. The encode is serialized
-// on webpMu because the deepteams/webp codec is not safe for concurrent use.
+// encodeWebP encodes img as lossy webp at webpQuality.
 func encodeWebP(img image.Image) ([]byte, error) {
 	var buf bytes.Buffer
-
-	webpMu.Lock()
-	err := webp.Encode(&buf, img, &webp.EncoderOptions{Quality: webpQuality})
-	webpMu.Unlock()
-	if err != nil {
+	if err := webp.Encode(&buf, img, &webp.EncoderOptions{Quality: webpQuality}); err != nil {
 		return nil, fmt.Errorf("encoding webp: %w", err)
 	}
 

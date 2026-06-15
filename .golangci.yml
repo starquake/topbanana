@@ -107,6 +107,13 @@ linters:
       default: all
       disable:
         - max-len
+    gomoddirectives:
+      # Transitional pin to the deepteams/webp fork that lands the
+      # gamma-table sync.Once and the encoderPool mbInfo reset (see
+      # docs/webp-determinism-fix.md). Swap for a real version bump once
+      # the upstream chain merges, then drop this allowlist entry.
+      replace-allow-list:
+        - github.com/deepteams/webp
     govet:
       enable-all: true
       disable:
