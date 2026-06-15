@@ -7,6 +7,7 @@ import (
 
 	. "github.com/starquake/topbanana/internal/admin"
 	"github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/mailer"
 )
 
@@ -64,11 +65,17 @@ func TestDispatchAdminResendVerification_BoolContract(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
+			tracker := bgtasks.New()
 			got := DispatchAdminResendVerification(
-				t.Context(), slog.Default(), tc.tokens, tc.sender, tc.baseURL, "to@example.test", testAdminID, nil,
+				t.Context(), slog.Default(), tc.tokens, tc.sender, tc.baseURL, "to@example.test", testAdminID, tracker,
 			)
 			if want := tc.wantResult; got != want {
 				t.Errorf("DispatchAdminResendVerification = %v, want %v", got, want)
+			}
+			// Join the dispatched send so t.TempDir cleanup is not racing
+			// the goroutine that still holds the DB handle (#972).
+			if err := tracker.Wait(t.Context()); err != nil {
+				t.Fatalf("tracker.Wait err = %v, want nil", err)
 			}
 		})
 	}
