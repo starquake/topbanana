@@ -22,6 +22,7 @@ import (
 	"github.com/starquake/topbanana/internal/envtag"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/handlers"
+	"github.com/starquake/topbanana/internal/htmx"
 	"github.com/starquake/topbanana/internal/livesession"
 	"github.com/starquake/topbanana/internal/media"
 	"github.com/starquake/topbanana/internal/quiz"
@@ -1056,10 +1057,14 @@ func HandleQuizView(
 	})
 }
 
-// uploadCountCeiling clamps the query-string counts so a tampered URL cannot
-// paint a misleading number. Sized comfortably above the upload handler's per-
-// request cap (#951).
-const uploadCountCeiling = 99
+// uploadCountCeiling caps the banner counts the template renders from the
+// post-upload query string so a tampered URL cannot paint "9999 images
+// uploaded" (#951). This is purely a display clamp; real upload throughput is
+// bounded by the per-request file cap in internal/mediahttp/upload.go. The JS
+// auto-upload path issues one XHR per picked file, so a single host batch can
+// legitimately push past the per-request cap - 100 is comfortably above any
+// real batch we would expect and small enough to keep a tampered URL honest.
+const uploadCountCeiling = 100
 
 // parseUploadCounts pulls the post-upload banner counts out of the URL query.
 // Both default to 0 and are clamped to uploadCountCeiling; a non-numeric or
@@ -2247,8 +2252,7 @@ func HandleQuestionMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qu
 		}
 
 		direction := r.PathValue("direction")
-		// HTMX wire header is HX-Request; Hx-Request is Go's canonical form.
-		isHX := r.Header.Get("Hx-Request") == "true"
+		isHX := htmx.IsRequest(r)
 
 		if err := quizStore.SwapQuestionPositions(r.Context(), quizID, questionID, direction); err != nil {
 			renderQuestionMoveError(w, r, logger, csrfMgr, quizID, err, isHX)

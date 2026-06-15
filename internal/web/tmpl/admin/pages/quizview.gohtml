@@ -288,6 +288,13 @@
             {{if .Images}}
                 <ul class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                     {{range .Images}}
+                        {{/* The per-image confirm modal is rendered INSIDE the
+                             tile <li> so the htmx outerHTML swap of
+                             #image-tile-{{.ID}} on a successful delete removes
+                             both the tile and the modal in one shot - no
+                             orphan dialogs accumulate as deletes pile up.
+                             Modals are fixed/inset-0 + z-40, so DOM position
+                             does not affect their stacking. */}}
                         <li id="image-tile-{{.ID}}" class="group relative">
                             <button type="button"
                                     onclick="openImageViewer('/media/{{.ID}}')"
@@ -311,6 +318,45 @@
                                     class="absolute top-1.5 right-1.5 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border-soft bg-bg/80 text-text transition hover:bg-danger focus-visible:outline-none focus-visible:shadow-focus [@media(hover:hover)]:text-text-dim [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100 [@media(hover:hover)]:hover:text-text">
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.5 1a.5.5 0 0 0-.5.5V2H3a.5.5 0 0 0 0 1h.5l.6 9.1a1.5 1.5 0 0 0 1.5 1.4h4.8a1.5 1.5 0 0 0 1.5-1.4L12.5 3h.5a.5.5 0 0 0 0-1h-3v-.5a.5.5 0 0 0-.5-.5h-3zM6 6a.5.5 0 0 1 1 0v5a.5.5 0 0 1-1 0V6zm3 0a.5.5 0 0 1 1 0v5a.5.5 0 0 1-1 0V6z"/></svg>
                             </button>
+                            <div id="modal-delete-media-{{.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-delete-media-{{.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
+                                <div class="absolute inset-0" onclick="closeModal('modal-delete-media-{{.ID}}')"></div>
+                                <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
+                                    <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
+                                        <p id="modal-delete-media-{{.ID}}-title" class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Delete image</p>
+                                        <button type="button" aria-label="close"
+                                                onclick="closeModal('modal-delete-media-{{.ID}}')"
+                                                class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer">&times;</button>
+                                    </header>
+                                    <section class="px-6 py-5 text-[0.95rem]">
+                                        Are you sure you want to delete this image? Any questions using it will keep their text but lose the picture. This action cannot be undone.
+                                    </section>
+                                    <p data-testid="delete-error" hidden class="px-6 pb-2 text-[0.85rem] text-danger" role="alert">Delete failed. Please try again.</p>
+                                    <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
+                                        <button type="button"
+                                                onclick="closeModal('modal-delete-media-{{.ID}}')"
+                                                class="btn-ghost">Cancel</button>
+                                        {{/* htmx swaps the tile (and this
+                                             modal, which now lives inside it)
+                                             for the empty 200 the handler
+                                             returns. The after-request hook
+                                             only closes the modal on a 2xx
+                                             - on a 5xx htmx skips the swap,
+                                             so we leave the modal open and
+                                             surface the inline error so the
+                                             host knows it failed (#951). */}}
+                                        <form method="post"
+                                              action="/admin/quizzes/{{$.Quiz.ID}}/media/{{.ID}}/delete"
+                                              hx-post="/admin/quizzes/{{$.Quiz.ID}}/media/{{.ID}}/delete"
+                                              hx-target="#image-tile-{{.ID}}"
+                                              hx-swap="outerHTML"
+                                              hx-on::after-request="if(event.detail.successful){closeModal('modal-delete-media-{{.ID}}')}else{this.closest('[role=dialog]').querySelector('[data-testid=delete-error]').hidden=false}"
+                                              class="inline-flex">
+                                            <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                                            <button type="submit" class="btn-danger">Delete</button>
+                                        </form>
+                                    </footer>
+                                </div>
+                            </div>
                         </li>
                     {{end}}
                 </ul>
@@ -344,54 +390,15 @@
                 </div>
             {{end}}
 
-            {{/* Delete-image confirm modals, one per thumbnail, mirroring the
-                 question/round delete modals above. Use $ to reach the quiz id
-                 from inside the range. The POST goes to the media delete route;
-                 the handler re-checks the creator-or-admin gate and that the
-                 image belongs to this quiz. */}}
-            {{range .Images}}
-                <div id="modal-delete-media-{{.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-delete-media-{{.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
-                    <div class="absolute inset-0" onclick="closeModal('modal-delete-media-{{.ID}}')"></div>
-                    <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
-                        <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
-                            <p id="modal-delete-media-{{.ID}}-title" class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Delete image</p>
-                            <button type="button" aria-label="close"
-                                    onclick="closeModal('modal-delete-media-{{.ID}}')"
-                                    class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer">&times;</button>
-                        </header>
-                        <section class="px-6 py-5 text-[0.95rem]">
-                            Are you sure you want to delete this image? Any questions using it will keep their text but lose the picture. This action cannot be undone.
-                        </section>
-                        <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
-                            <button type="button"
-                                    onclick="closeModal('modal-delete-media-{{.ID}}')"
-                                    class="btn-ghost">Cancel</button>
-                            {{/* htmx swaps the thumbnail <li> for the empty 200
-                                 the handler returns so the page stays put;
-                                 hx-on closes the modal once the swap settles.
-                                 A no-JS browser still posts the form and the
-                                 handler 303's back to the library section. */}}
-                            <form method="post"
-                                  action="/admin/quizzes/{{$.Quiz.ID}}/media/{{.ID}}/delete"
-                                  hx-post="/admin/quizzes/{{$.Quiz.ID}}/media/{{.ID}}/delete"
-                                  hx-target="#image-tile-{{.ID}}"
-                                  hx-swap="outerHTML"
-                                  hx-on::after-request="closeModal('modal-delete-media-{{.ID}}')"
-                                  class="inline-flex">
-                                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                                <button type="submit" class="btn-danger">Delete</button>
-                            </form>
-                        </footer>
-                    </div>
-                </div>
-            {{end}}
 
             {{/* Post-upload banner. The redirect after POST /media carries
                  ?uploaded=N&failed=M so the page can confirm what happened
                  without a session-flash mechanism (#951). UploadedCount and
                  FailedCount come from the URL query and stay 0 on a plain
                  visit, so the banner only paints when there is something to
-                 say. */}}
+                 say. The inline script strips the query from the URL via
+                 history.replaceState once the banner has rendered, so a
+                 refresh / Back doesn't repaint a stale count. */}}
             {{if or (gt .UploadedCount 0) (gt .FailedCount 0)}}
                 <div class="mb-4 rounded-sm border px-3 py-2 text-sm
                             {{if gt .FailedCount 0}}{{if gt .UploadedCount 0}}border-warning/40 bg-warning/10 text-warning{{else}}border-danger/40 bg-danger/10 text-danger{{end}}{{else}}border-success/40 bg-success/10 text-success{{end}}"
@@ -404,6 +411,17 @@
                         {{.FailedCount}} skipped (check the file format and size).
                     {{end}}
                 </div>
+                <script>
+                    (function () {
+                        if (!window.history || !window.history.replaceState) return;
+                        var url = new URL(window.location.href);
+                        if (!url.searchParams.has('uploaded') && !url.searchParams.has('failed')) return;
+                        url.searchParams.delete('uploaded');
+                        url.searchParams.delete('failed');
+                        var clean = url.pathname + (url.search ? url.search : '') + (url.hash || '');
+                        window.history.replaceState(window.history.state, '', clean);
+                    })();
+                </script>
             {{end}}
 
             <form method="post"

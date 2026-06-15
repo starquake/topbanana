@@ -1,9 +1,12 @@
 package mediahttp_test
 
 import (
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/starquake/topbanana/internal/media"
@@ -90,6 +93,71 @@ func TestBuildUploadQuery(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWriteUploadJSON(t *testing.T) {
+	t.Parallel()
+
+	t.Run("non-pipeline error returns 500", func(t *testing.T) {
+		t.Parallel()
+		results := []mediahttp.UploadResult{
+			{Filename: "good.png", MediaID: 42},
+			{Filename: "broken.png", Err: errors.New("disk full")},
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/upload", nil)
+		mediahttp.WriteUploadJSON(rec, req, slog.New(slog.DiscardHandler), results)
+		if got, want := rec.Code, http.StatusInternalServerError; got != want {
+			t.Errorf("writeUploadJSON(non-pipeline error) status = %d, want %d", got, want)
+		}
+		if got, want := rec.Body.String(), "internal error"; !strings.Contains(got, want) {
+			t.Errorf("writeUploadJSON(non-pipeline error) body = %q, should contain %q", got, want)
+		}
+	})
+
+	t.Run("pipeline only returns 200 json", func(t *testing.T) {
+		t.Parallel()
+		results := []mediahttp.UploadResult{
+			{Filename: "good.png", MediaID: 7},
+			{Filename: "bad.txt", Err: media.ErrUnsupportedImage},
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/upload", nil)
+		mediahttp.WriteUploadJSON(rec, req, slog.New(slog.DiscardHandler), results)
+		if got, want := rec.Code, http.StatusOK; got != want {
+			t.Fatalf("writeUploadJSON(pipeline only) status = %d, want %d", got, want)
+		}
+		if got, want := rec.Header().Get("Content-Type"), "application/json"; !strings.HasPrefix(got, want) {
+			t.Errorf("writeUploadJSON(pipeline only) Content-Type = %q, want prefix %q", got, want)
+		}
+		type uploadedItem struct {
+			Filename string `json:"filename"`
+			ID       int64  `json:"id"`
+		}
+		type failedItem struct {
+			Filename string `json:"filename"`
+			Reason   string `json:"reason"`
+		}
+		var payload struct {
+			Uploaded []uploadedItem `json:"uploaded"`
+			Failed   []failedItem   `json:"failed"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("writeUploadJSON(pipeline only) Unmarshal err = %v, want nil", err)
+		}
+		if got, want := len(payload.Uploaded), 1; got != want {
+			t.Fatalf("writeUploadJSON(pipeline only) uploaded len = %d, want %d", got, want)
+		}
+		if got, want := payload.Uploaded[0].ID, int64(7); got != want {
+			t.Errorf("writeUploadJSON(pipeline only) uploaded[0].ID = %d, want %d", got, want)
+		}
+		if got, want := len(payload.Failed), 1; got != want {
+			t.Fatalf("writeUploadJSON(pipeline only) failed len = %d, want %d", got, want)
+		}
+		if got, want := payload.Failed[0].Reason, "unsupported image"; !strings.Contains(got, want) {
+			t.Errorf("writeUploadJSON(pipeline only) failed[0].Reason = %q, should contain %q", got, want)
+		}
+	})
 }
 
 func TestSummarize(t *testing.T) {

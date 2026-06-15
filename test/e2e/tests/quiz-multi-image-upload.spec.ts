@@ -30,11 +30,15 @@ test('uploading multiple images at once adds each to the library and shows a con
     { name: 'third.png', mimeType: 'image/png', buffer: PNG_SAMPLE },
   ]);
 
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\?uploaded=3&failed=0#images$/, { timeout: 45_000 });
-
+  // The auto-upload module navigates to ?uploaded=3&failed=0#images so the
+  // banner renders; the inline cleanup script then strips the query so the
+  // URL bar settles on /admin/quizzes/{id}#images. The banner is captured by
+  // Playwright either before or after the strip - the banner contents are
+  // what matters, not the transient query.
   const banner = page.getByTestId('upload-banner');
-  await expect(banner).toBeVisible();
+  await expect(banner).toBeVisible({ timeout: 45_000 });
   await expect(banner).toContainText('3 images uploaded');
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+#images$/);
 
   // The library grid now carries three thumbnails.
   await expect(page.getByTestId('library-thumb')).toHaveCount(3);
@@ -52,12 +56,11 @@ test('a mix of valid and unsupported uploads partial-succeeds and surfaces the s
     { name: 'bad.txt', mimeType: 'text/plain', buffer: Buffer.from('not an image') },
   ]);
 
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\?uploaded=1&failed=1#images$/, { timeout: 45_000 });
-
   const banner = page.getByTestId('upload-banner');
-  await expect(banner).toBeVisible();
+  await expect(banner).toBeVisible({ timeout: 45_000 });
   await expect(banner).toContainText('1 image uploaded');
   await expect(banner).toContainText('1 skipped');
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+#images$/);
 
   // The valid file landed; the unsupported file did not.
   await expect(page.getByTestId('library-thumb')).toHaveCount(1);

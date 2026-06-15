@@ -1,6 +1,7 @@
 package mediahttp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -56,6 +57,10 @@ const (
 	// read deadline to this longer cap before parsing the multipart body so a
 	// 10 MB image still lands over a slow phone connection (~50 KB/s).
 	uploadReadDeadline = 5 * time.Minute
+
+	// internalErrorMessage is the generic 500 body text shared by every
+	// handler in this package.
+	internalErrorMessage = "internal error"
 )
 
 // QuizEditLookup is the slice of the quiz store the upload handler uses to
@@ -103,7 +108,7 @@ func HandleMediaUpload(logger *slog.Logger, svc MediaService, quizzes QuizEditLo
 			// The host gate upstream guarantees a player on the context; a
 			// missing one is a wiring bug, not a client error.
 			logger.ErrorContext(r.Context(), "media upload reached handler without a player on context")
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			http.Error(w, internalErrorMessage, http.StatusInternalServerError)
 
 			return
 		}
@@ -226,16 +231,25 @@ func writeUploadError(w http.ResponseWriter, r *http.Request, logger *slog.Logge
 		http.Error(w, "unsupported image format (use jpg, png, or webp)", http.StatusBadRequest)
 	default:
 		logger.ErrorContext(r.Context(), "error storing uploaded media", slog.Any("err", err))
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		http.Error(w, internalErrorMessage, http.StatusInternalServerError)
 	}
 }
 
 // storeOneUpload opens one multipart file header, runs it through the media
 // service, closes the file, and returns the new media row's id. Wrapped in a
 // function so the per-file defer stays scoped.
+//
+// Best-effort cancel: a client xhr.abort() after the body is in flight closes
+// the TCP connection, which cancels r.Context(). Checking ctx.Err() before the
+// (CPU-heavy) decode/re-encode skips the work for any file the client already
+// gave up on. The file pipeline itself is not context-aware, so this is the
+// only short-circuit; once Store starts there is no clean abort point.
 func storeOneUpload(
 	ctx context.Context, svc MediaService, quizID, playerID int64, header *multipart.FileHeader,
 ) (mediaID int64, err error) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return 0, fmt.Errorf("upload cancelled before store of %q: %w", header.Filename, ctxErr)
+	}
 	file, err := header.Open()
 	if err != nil {
 		return 0, fmt.Errorf("opening upload part %q: %w", header.Filename, err)
@@ -294,10 +308,26 @@ type uploadResponseJSON struct {
 	Failed   []uploadResultJSON `json:"failed"`
 }
 
-// writeUploadJSON emits the per-file outcomes as JSON. The status is always
-// 200 even when every file was rejected because the request itself was valid;
-// per-file failures live in the response body.
+// writeUploadJSON emits the per-file outcomes as JSON when every per-file
+// outcome was either a success or a pipeline (caller-fault) rejection: in that
+// shape the request itself was valid, so a 200 with per-file failures in the
+// body is the right answer. If any file errored with something that is NOT a
+// pipeline-rejection sentinel (a transient disk/encoder/db failure), the JSON
+// branch returns 500 - hiding a real server outage behind a 200 with
+// reason="upload failed" would teach hosts to blame their own files for our
+// problem.
+//
+// The full response is encoded into a buffer first so an encoder failure
+// becomes a clean 500 instead of a truncated 200.
 func writeUploadJSON(w http.ResponseWriter, r *http.Request, logger *slog.Logger, results []uploadResult) {
+	for _, res := range results {
+		if res.Err != nil && !isPipelineRejection(res.Err) {
+			http.Error(w, internalErrorMessage, http.StatusInternalServerError)
+
+			return
+		}
+	}
+
 	resp := uploadResponseJSON{
 		Uploaded: make([]uploadResultJSON, 0, len(results)),
 		Failed:   make([]uploadResultJSON, 0, len(results)),
@@ -316,9 +346,17 @@ func writeUploadJSON(w http.ResponseWriter, r *http.Request, logger *slog.Logger
 			ID:       res.MediaID,
 		})
 	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(resp); err != nil {
 		logger.ErrorContext(r.Context(), "error encoding upload response", slog.Any("err", err))
+		http.Error(w, internalErrorMessage, http.StatusInternalServerError)
+
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if _, err := w.Write(buf.Bytes()); err != nil {
+		logger.ErrorContext(r.Context(), "error writing upload response", slog.Any("err", err))
 	}
 }
 
@@ -378,7 +416,7 @@ func authorizeQuizEdit(
 			return false
 		}
 		logger.ErrorContext(r.Context(), "error loading quiz for media upload gate", slog.Any("err", err))
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		http.Error(w, internalErrorMessage, http.StatusInternalServerError)
 
 		return false
 	}

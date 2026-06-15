@@ -44,7 +44,10 @@ test('uploading an image keeps the quiz view scrolled to the library section', a
     buffer: PNG_SAMPLE,
   });
 
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\?uploaded=1&failed=0#images$/, { timeout: 30_000 });
+  // The auto-upload module lands on `?uploaded=1&failed=0#images`; the inline
+  // cleanup script strips the query and leaves the #images fragment, which
+  // is what scrolls the browser back to the library section.
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+#images$/, { timeout: 30_000 });
   await expect(page.getByTestId('library-thumb').first()).toBeVisible();
 
   // The library section is positioned below the page top, so a fragment scroll

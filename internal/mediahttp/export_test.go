@@ -22,3 +22,8 @@ type UploadResult = uploadResult
 // external mediahttp_test package can pin the uploaded/failed/firstErr
 // projection.
 var Summarize = summarize
+
+// WriteUploadJSON exposes the unexported JSON-branch writer so the test can
+// pin the "any non-pipeline error -> 500" guard added in #951 without driving
+// the full multipart pipeline.
+var WriteUploadJSON = writeUploadJSON

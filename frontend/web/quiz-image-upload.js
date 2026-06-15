@@ -2,11 +2,11 @@
 // files in the file input we fire one POST per file with Accept:
 // application/json so the server replies with a per-file outcome instead of a
 // redirect. Each row shows a progress bar driven by XHR's upload events plus a
-// cancel button (xhr.abort) so the host can drop a file mid-upload. Once every
-// row is settled and at least one file actually landed we reload the page so
-// the library grid + delete modals reflect the new entries; without JS the
-// form's submit button still posts the old multi-file multipart and gets the
-// redirect/banner flow.
+// cancel button (xhr.abort) while bytes are still in flight. Once every row in
+// a batch settles the page navigates to the same path with the post-upload
+// banner query so the server-rendered confirmation, library grid and delete
+// modals all refresh in one shot. With no JS, the form's submit button still
+// posts the multi-file multipart and gets the redirect/banner flow.
 
 (function () {
     const input = document.getElementById('quiz-media-upload');
@@ -15,26 +15,29 @@
     if (!queue) return;
     const form = input.closest('form');
     if (!form) return;
-    const submitBtn = form.querySelector('button[type="submit"]');
 
-    // The hidden submit button is the no-JS fallback. With JS we drive the
-    // uploads from the change event, so the button has nothing useful to do.
-    if (submitBtn) submitBtn.hidden = true;
+    // Match the server's per-route read deadline so a stalled connection fails
+    // client-side at the same wall time the server would close it. Without
+    // this, an XHR with no progress events sits forever and inFlight never
+    // decrements, blocking the post-batch navigate.
+    const UPLOAD_TIMEOUT_MS = 5 * 60 * 1000;
 
-    let inFlight = 0;
-    let landed = 0;
-    let skipped = 0;
+    // Counters are batch-scoped: a new file pick starts a fresh accounting so
+    // failures from a prior batch can't leak into the next navigate URL.
+    let batch = null;
 
     input.addEventListener('change', () => {
         const files = Array.from(input.files || []);
         // Reset the input so picking the same file again still fires change.
         input.value = '';
+        if (files.length === 0) return;
+        if (!batch) batch = { inFlight: 0, landed: 0, skipped: 0 };
         for (const file of files) {
-            startUpload(file);
+            startUpload(file, batch);
         }
     });
 
-    function startUpload(file) {
+    function startUpload(file, b) {
         const row = document.createElement('li');
         row.className = 'flex flex-col gap-1 rounded-sm border border-border-soft bg-surface px-3 py-2 text-sm';
         row.dataset.uploadRow = '';
@@ -72,7 +75,7 @@
 
         queue.appendChild(row);
 
-        inFlight++;
+        b.inFlight++;
 
         const body = new FormData();
         body.append('images', file);
@@ -82,6 +85,7 @@
         const xhr = new XMLHttpRequest();
         xhr.open('POST', form.action);
         xhr.setRequestHeader('Accept', 'application/json');
+        xhr.timeout = UPLOAD_TIMEOUT_MS;
         xhr.withCredentials = true;
         xhr.upload.addEventListener('progress', (event) => {
             if (!event.lengthComputable) return;
@@ -90,70 +94,103 @@
             status.textContent = pct + '%';
         });
         xhr.upload.addEventListener('load', () => {
-            // Upload bytes are in; now the server decodes, re-encodes, and writes
-            // to disk. The bar parks at 100 and the status flips to a holding
-            // message until the response arrives.
+            // Upload bytes are in; the server now decodes, re-encodes, and writes
+            // to disk. Cancel is best-effort: once bytes are sent the server may
+            // already have committed the row, so drop the cancel affordance and
+            // park the bar at 100 until the response arrives.
             bar.value = 100;
             status.textContent = 'Processing...';
+            cancelBtn.remove();
         });
         xhr.addEventListener('load', () => {
             cancelBtn.remove();
             bar.remove();
-            let json = null;
-            try {
-                json = JSON.parse(xhr.responseText);
-            } catch (_err) {
-                // fall through with json=null
-            }
-            if (xhr.status < 200 || xhr.status >= 300 || !json) {
-                finishRow(row, status, 'Failed', false);
-
-                return;
-            }
-            const uploaded = (json.uploaded || []).length > 0;
-            const reason = (json.failed && json.failed[0] && json.failed[0].reason) || 'Failed';
-            if (uploaded) {
-                landed++;
-                finishRow(row, status, 'Uploaded', true);
-            } else {
-                skipped++;
-                finishRow(row, status, reason, false);
-            }
+            handleResponse(xhr, row, status, b);
         });
         xhr.addEventListener('error', () => {
             cancelBtn.remove();
             bar.remove();
-            skipped++;
-            finishRow(row, status, 'Failed', false);
+            b.skipped++;
+            finishRow(row, status, 'Upload failed', false);
+        });
+        xhr.addEventListener('timeout', () => {
+            cancelBtn.remove();
+            bar.remove();
+            b.skipped++;
+            finishRow(row, status, 'Upload timed out', false);
         });
         xhr.addEventListener('abort', () => {
             cancelBtn.remove();
             bar.remove();
+            b.skipped++;
             finishRow(row, status, 'Cancelled', false);
         });
         xhr.addEventListener('loadend', () => {
-            inFlight--;
-            if (inFlight === 0 && landed > 0) {
-                // Mirror the no-JS form-POST redirect URL so the server-side
-                // banner + library grid re-render with the new rows AND the
-                // browser scrolls back to the library section via #images
-                // (a bare reload would land at the page top, regressing #308).
-                const params = new URLSearchParams({
-                    uploaded: String(landed),
-                    failed: String(skipped),
-                });
-                window.location.href = window.location.pathname + '?' + params + '#images';
-            }
+            b.inFlight--;
+            if (b.inFlight > 0) return;
+            // Always navigate once the batch settles - even an all-skipped batch
+            // wants the server-rendered banner. The fresh batch object on the
+            // next file pick prevents these counters from leaking forward.
+            const params = new URLSearchParams({
+                uploaded: String(b.landed),
+                failed: String(b.skipped),
+            });
+            // window.location.search clears any prior query string the page was
+            // visited with; we keep only the freshly-built upload params and
+            // the #images fragment so the browser scrolls to the library.
+            const target = window.location.pathname + '?' + params + '#images';
+            batch = null;
+            window.location.href = target;
         });
         cancelBtn.addEventListener('click', () => xhr.abort());
 
         xhr.send(body);
     }
 
+    function handleResponse(xhr, row, status, b) {
+        const isJSON = (xhr.getResponseHeader('Content-Type') || '').indexOf('application/json') === 0;
+        if (xhr.status >= 200 && xhr.status < 300 && isJSON) {
+            let json = null;
+            try {
+                json = JSON.parse(xhr.responseText);
+            } catch (_err) {
+                // fall through with json=null
+            }
+            if (json) {
+                const uploaded = (json.uploaded || []).length > 0;
+                if (uploaded) {
+                    b.landed++;
+                    finishRow(row, status, 'Uploaded', true);
+
+                    return;
+                }
+                const reason = (json.failed && json.failed[0] && json.failed[0].reason) || 'Upload failed';
+                b.skipped++;
+                finishRow(row, status, reason, false);
+
+                return;
+            }
+        }
+        // Non-2xx or plain-text body: surface whatever the server said (the
+        // MaxMultipartFormMiddleware emits a useful text/plain message for an
+        // oversized body, etc) rather than swallowing it as a generic 'Failed'.
+        const fallback = readPlainText(xhr) || 'Upload failed';
+        b.skipped++;
+        finishRow(row, status, fallback, false);
+    }
+
+    function readPlainText(xhr) {
+        const body = (xhr.responseText || '').trim();
+        if (!body) return '';
+        const firstLine = body.split('\n', 1)[0];
+
+        return firstLine.length > 140 ? firstLine.slice(0, 137) + '...' : firstLine;
+    }
+
     function finishRow(row, status, text, success) {
         status.textContent = text;
-        status.classList.remove('text-text-dim');
-        status.classList.add(success ? 'text-success' : 'text-text-dim');
+        status.classList.toggle('text-success', success);
+        status.classList.toggle('text-text-dim', !success);
         if (!success) row.classList.add('opacity-70');
     }
 })();

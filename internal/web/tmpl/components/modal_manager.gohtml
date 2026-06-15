@@ -52,14 +52,21 @@
     }
 
     function closeModal(id) {
+        // The modal element may already be gone from the DOM (e.g. an htmx
+        // outerHTML swap removed the enclosing tile, including a modal
+        // rendered inside it - #951). Cleaning up modalState's keydown
+        // listener and the focus restore is keyed on `id`, not on the DOM
+        // element, so it must run regardless of whether the modal is still
+        // present.
         const modal = document.getElementById(id);
-        if (!modal) return;
-        modal.classList.add('hidden');
+        if (modal) modal.classList.add('hidden');
 
         const state = modalState.get(id);
         if (!state) return;
         document.removeEventListener('keydown', state.onKey);
-        if (state.previouslyFocused && typeof state.previouslyFocused.focus === 'function') {
+        if (state.previouslyFocused
+            && typeof state.previouslyFocused.focus === 'function'
+            && document.contains(state.previouslyFocused)) {
             state.previouslyFocused.focus();
         }
         modalState.delete(id);

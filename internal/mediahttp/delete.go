@@ -8,6 +8,7 @@ import (
 
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/handlers"
+	"github.com/starquake/topbanana/internal/htmx"
 	"github.com/starquake/topbanana/internal/media"
 )
 
@@ -91,11 +92,11 @@ func HandleMediaDelete(logger *slog.Logger, svc MediaService, quizzes QuizEditLo
 }
 
 // writeDeleteResponse picks the post-delete response: an htmx-driven submit
-// (HX-Request: true) expects an empty 200 it can swap into the thumbnail tile;
-// a plain form submit gets a 303 to the images section so the page reloads
-// with the row gone.
+// expects an empty 200 it can swap into the thumbnail tile; a plain form
+// submit gets a 303 to the images section so the page reloads with the row
+// gone.
 func writeDeleteResponse(w http.ResponseWriter, r *http.Request, quizID int64) {
-	if r.Header.Get("Hx-Request") == "true" {
+	if htmx.IsRequest(r) {
 		w.WriteHeader(http.StatusOK)
 
 		return
