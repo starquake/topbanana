@@ -48,6 +48,47 @@ test('400 on answer POST does not show the retry banner', async ({ page, browser
     await route.continue();
   });
 
+  // Stub Q2 on the post-400 /next call so the catch path's advance
+  // lands on a fresh question instead of the server's resume-candidate
+  // path returning Q1 again (the 400 short-circuited the POST before
+  // the server saw it, so Q1's answer window is still open server-side
+  // and GetNextQuestion hands it back until expiredAt elapses in real
+  // wall time - a 14s detour that blew the 15s toBeVisible budget on
+  // chromium under load, #908). Pinning startedAt 500ms in the past
+  // also skips Q2's reveal beat: the SPA's startRevealCountdown
+  // short-circuits to startCountdown when revealStart >= startAt.
+  let nextCount = 0;
+  await page.route(/\/api\/games\/[^/]+\/questions\/next$/, async (route: Route, request: Request) => {
+    if (request.method() !== 'GET') {
+      await route.continue();
+      return;
+    }
+    nextCount++;
+    if (nextCount === 1) {
+      await route.continue();
+      return;
+    }
+    const now = new Date();
+    const startedAt = new Date(now.getTime() - 500).toISOString();
+    const expiredAt = new Date(now.getTime() + 60_000).toISOString();
+    const q2 = QUIZ_QUESTIONS[1];
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        type: 'question',
+        id: 9_001,
+        text: q2.text,
+        options: q2.options.map((text, i) => ({ id: 9_100 + i, text })),
+        startedAt,
+        expiredAt,
+        serverNow: now.toISOString(),
+        position: 2,
+        total: QUIZ_QUESTIONS.length,
+      }),
+    });
+  });
+
   await startQuizAsAnonymous(page, quizTitle);
 
   // Fast-forward the per-question reveal beat (#247) so the option
@@ -74,12 +115,11 @@ test('400 on answer POST does not show the retry banner', async ({ page, browser
   await page.clock.runFor(3_500);
 
   // The game must advance to the next question - the catch path's
-  // timer fires under virtual time. Long timeout because the
-  // reveal beat for question 2 then runs (real-time fetch + virtual
-  // setInterval ticks); the second runFor covers the new beat.
-  await page.clock.runFor(2_500);
+  // timer fires under virtual time and the /next stub above hands
+  // Q2 back with an already-elapsed reveal beat, so the buttons
+  // mount on the next render frame.
   const secondChoice = QUIZ_QUESTIONS[1].options[0];
-  await expect(page.getByRole('button', { name: secondChoice })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('button', { name: secondChoice })).toBeVisible({ timeout: 10_000 });
 });
 
 // 409 on POST /api/games used to crash startGame with SyntaxError
