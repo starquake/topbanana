@@ -17,6 +17,12 @@ export class GameApp {
         this.selectedQuizId = null;
         this.gameId = null;
         this.question = null;
+        // In-flight pre-fetch of the next item, kicked off when feedback lands
+        // so the network round trip overlaps the feedback pause. nextQuestion
+        // consumes it instead of making a fresh fetch, so the swap to the new
+        // question lands as one Alpine tick rather than going through a
+        // visible "Loading question..." gap (#982).
+        this.nextItemPromise = null;
         // Current round-boundary item shown to the player (#444). Set
         // when /next returns type=round_boundary; cleared when the player
         // clicks Continue (markRoundSeen) before fetching the next item.
@@ -521,6 +527,21 @@ export class GameApp {
         await this.nextQuestion();
     }
 
+    // prefetchNextItem kicks off the /next round trip while the feedback
+    // pause is still on screen, so by the time the pause expires the
+    // response is already in hand and nextQuestion can swap to the new
+    // question without an intermediate "Loading question..." render (#982).
+    // Idempotent: a second call while one is in flight is a no-op.
+    prefetchNextItem() {
+        if (this.nextItemPromise || !this.gameId) return;
+        this.nextItemPromise = gameService.getNextQuestion(this.gameId).catch((err) => {
+            console.warn('prefetch next item failed', err);
+            this.nextItemPromise = null;
+
+            return null;
+        });
+    }
+
     async nextQuestion() {
         if (this.timer) {
             clearInterval(this.timer);
@@ -533,8 +554,16 @@ export class GameApp {
         this.clearRoundTimer();
         this.revealing = false;
         this.submitError = false;
-        const item = await gameService.getNextQuestion(this.gameId);
+        let item;
+        if (this.nextItemPromise) {
+            item = await this.nextItemPromise;
+            this.nextItemPromise = null;
+        }
         if (!item) {
+            item = await gameService.getNextQuestion(this.gameId);
+        }
+        if (!item) {
+            this.feedback = null;
             this.finished = true;
             // Re-fetch /me so the player's claim status is current.
             // Could in principle have flipped since page load (rare,
@@ -594,6 +623,7 @@ export class GameApp {
         // clock-offset reconciliation still happens.
         if (item.type === 'round_boundary') {
             this.syncClockFrom(item);
+            this.feedback = null;
             this.roundItem = item;
             // Keep the running-score chip honest: the server hands us
             // its authoritative total on the round payload so a
@@ -605,6 +635,7 @@ export class GameApp {
         }
         this.imageError = false;
         this.syncClockFrom(item);
+        this.feedback = null;
         this.roundItem = null;
         this.question = item;
         if (typeof item.position === 'number') this.lastQuestionPosition = item.position;
@@ -752,6 +783,7 @@ export class GameApp {
     async handleTimeout() {
         if (this.feedback || this.submittingAnswer) return;
         this.feedback = { timedOut: true, correct: false, score: 0 };
+        this.prefetchNextItem();
         await this.resolveAndAdvance();
     }
 
@@ -845,6 +877,7 @@ export class GameApp {
             fb.pickedOptionId = optionId;
             this.feedback = fb;
             this.score += fb.score || 0;
+            this.prefetchNextItem();
         } catch (err) {
             // POST failed. The retry banner (#179) only makes sense
             // for transient failures the player can recover from by
@@ -874,6 +907,7 @@ export class GameApp {
             // "Time up") and the player doesn't get stuck on a blank,
             // button-less screen.
             this.feedback = { timedOut: true, correct: false, score: 0 };
+            this.prefetchNextItem();
             await this.resolveAndAdvance();
 
             return;
@@ -888,18 +922,16 @@ export class GameApp {
     }
 
     // resolveAndAdvance waits the per-question feedback pause and then
-    // tears down current-question state before fetching the next one.
-    // Shared by submitAnswer and handleTimeout so both paths look the
-    // same to the user — only the verdict eyebrow text differs. Clears the
-    // previous question alongside the feedback so the new render swaps
-    // to the "Loading question..." placeholder; without this, the
-    // buttons region (gated only on `!feedback`) re-mounts for one
-    // frame with the old question's options before nextQuestion()
-    // resolves and re-binds them.
+    // swaps to the next item. Shared by submitAnswer and handleTimeout so
+    // both paths look the same to the user; only the verdict eyebrow text
+    // differs. The next item is pre-fetched via prefetchNextItem the moment
+    // feedback lands, so nextQuestion mostly consumes a resolved promise and
+    // the swap to the new question lands as one Alpine tick. Feedback is
+    // cleared AFTER question/roundItem is set so the buttons grid never
+    // re-mounts a frame with the old question's options between
+    // feedback-clear and question-set (#233).
     async resolveAndAdvance(pauseMs = 2000) {
         await new Promise(resolve => setTimeout(resolve, pauseMs));
-        this.question = null;
-        this.feedback = null;
         await this.nextQuestion();
     }
 
