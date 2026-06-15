@@ -251,11 +251,12 @@ func longEdge(r image.Rectangle) int {
 	return max(r.Dx(), r.Dy())
 }
 
-// TestProcess_Concurrent runs many Process calls at once. The deepteams/webp
-// codec is not safe for concurrent use, so without the webpMu serialization the
-// -race detector trips here (which is how this surfaced: CI's -race build caught
-// it under the parallel media tests). With the lock the run is clean. This pins
-// that concurrent uploads stay race-free.
+// TestProcess_Concurrent runs many Process calls at once and pins that
+// concurrent uploads stay race-free. Previously the deepteams/webp codec was
+// not safe for concurrent use and the run was guarded by a package mutex; the
+// fork pinned via go.mod's replace directive lands the upstream gamma-table
+// sync.Once and the lossy encoder's per-MB reset, so the test runs without a
+// lock and the -race detector stays quiet.
 func TestProcess_Concurrent(t *testing.T) {
 	t.Parallel()
 
