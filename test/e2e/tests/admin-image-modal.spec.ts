@@ -31,7 +31,7 @@ test('clicking a library thumbnail opens the full image in a modal', async ({ pa
     buffer: PNG_SAMPLE,
   });
   await page.getByRole('button', { name: /upload/i }).click();
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+(#images)?$/);
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+(\?uploaded=\d+&failed=\d+)?(#images)?$/);
 
   // The library renders one tile; the alt carries the media id we expect the
   // full-size src to match.

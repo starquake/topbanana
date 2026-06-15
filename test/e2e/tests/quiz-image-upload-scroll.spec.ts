@@ -45,7 +45,7 @@ test('uploading an image keeps the quiz view scrolled to the library section', a
   // The redirect lands on the same path with an #images fragment; the browser
   // then scrolls to the library section. Anchor the assertion on both URL and
   // a visible library thumb so we know the upload actually succeeded.
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+#images$/);
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+(\?uploaded=\d+&failed=\d+)?#images$/);
   await expect(page.locator('img[alt^="Quiz image"]').first()).toBeVisible();
 
   // The library section is positioned below the page top, so a fragment scroll

@@ -374,16 +374,37 @@
                 </div>
             {{end}}
 
+            {{/* Post-upload banner. The redirect after POST /media carries
+                 ?uploaded=N&failed=M so the page can confirm what happened
+                 without a session-flash mechanism (#951). UploadedCount and
+                 FailedCount come from the URL query and stay 0 on a plain
+                 visit, so the banner only paints when there is something to
+                 say. */}}
+            {{if or (gt .UploadedCount 0) (gt .FailedCount 0)}}
+                <div class="mb-4 rounded-sm border px-3 py-2 text-sm
+                            {{if gt .FailedCount 0}}{{if gt .UploadedCount 0}}border-warning/40 bg-warning/10 text-warning{{else}}border-danger/40 bg-danger/10 text-danger{{end}}{{else}}border-success/40 bg-success/10 text-success{{end}}"
+                     role="status"
+                     data-testid="upload-banner">
+                    {{if gt .UploadedCount 0}}
+                        {{.UploadedCount}} image{{if ne .UploadedCount 1}}s{{end}} uploaded.
+                    {{end}}
+                    {{if gt .FailedCount 0}}
+                        {{.FailedCount}} skipped (check the file format and size).
+                    {{end}}
+                </div>
+            {{end}}
+
             <form method="post"
                   action="/admin/quizzes/{{.Quiz.ID}}/media"
                   enctype="multipart/form-data"
                   class="mt-6 flex flex-wrap items-center gap-3">
                 <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                <label for="quiz-media-upload" class="text-xs uppercase tracking-[0.12em] text-text-dim">Add image</label>
+                <label for="quiz-media-upload" class="text-xs uppercase tracking-[0.12em] text-text-dim">Add images</label>
                 <input type="file"
                        id="quiz-media-upload"
                        name="image"
                        accept="image/jpeg,image/png,image/webp"
+                       multiple
                        required
                        class="text-sm text-text-dim file:mr-3 file:cursor-pointer file:rounded-sm file:border file:border-border-soft file:bg-surface file:px-3 file:py-2 file:text-xs file:font-semibold file:uppercase file:tracking-[0.12em] file:text-text hover:file:border-accent">
                 <button type="submit" class="btn-primary">Upload</button>

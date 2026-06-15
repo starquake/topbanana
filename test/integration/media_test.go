@@ -93,6 +93,74 @@ func TestMediaUpload_Integration(t *testing.T) {
 		}
 	})
 
+	t.Run("multiple valid files upload together", func(t *testing.T) {
+		t.Parallel()
+		token := fetchCSRFToken(ctx, t, owner, baseURL+"/admin/quizzes")
+		batch := []multipartFile{
+			{field: "images", filename: "a.png", data: pngBytes(t, 80, 80)},
+			{field: "images", filename: "b.png", data: pngBytes(t, 90, 90)},
+			{field: "images", filename: "c.png", data: pngBytes(t, 100, 100)},
+		}
+		body, contentType := multipartBatch(t, batch, token)
+		req := newMultipartReq(ctx, t, baseURL+fmt.Sprintf("/admin/quizzes/%d/media", quizID), body, contentType)
+		resp, err := owner.Do(req)
+		if err != nil {
+			t.Fatalf("Do err = %v, want nil", err)
+		}
+		defer closeBody(t, resp.Body)
+		if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
+			t.Errorf("multi upload status = %d, want %d", got, want)
+		}
+		if got, want := resp.Header.Get("Location"),
+			fmt.Sprintf("/admin/quizzes/%d?uploaded=3&failed=0#images", quizID); got != want {
+			t.Errorf("multi upload redirect Location = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("partial success lands the valid files and reports the failed count", func(t *testing.T) {
+		t.Parallel()
+		token := fetchCSRFToken(ctx, t, owner, baseURL+"/admin/quizzes")
+		batch := []multipartFile{
+			{field: "images", filename: "good.png", data: pngBytes(t, 64, 64)},
+			{field: "images", filename: "bad.txt", data: []byte("not an image at all")},
+		}
+		body, contentType := multipartBatch(t, batch, token)
+		req := newMultipartReq(ctx, t, baseURL+fmt.Sprintf("/admin/quizzes/%d/media", quizID), body, contentType)
+		resp, err := owner.Do(req)
+		if err != nil {
+			t.Fatalf("Do err = %v, want nil", err)
+		}
+		defer closeBody(t, resp.Body)
+		if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
+			t.Errorf("partial upload status = %d, want %d", got, want)
+		}
+		if got, want := resp.Header.Get("Location"),
+			fmt.Sprintf("/admin/quizzes/%d?uploaded=1&failed=1#images", quizID); got != want {
+			t.Errorf("partial upload redirect Location = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("too many files is 400", func(t *testing.T) {
+		t.Parallel()
+		token := fetchCSRFToken(ctx, t, owner, baseURL+"/admin/quizzes")
+		batch := make([]multipartFile, 0, 11)
+		for i := range 11 {
+			batch = append(batch, multipartFile{
+				field: "images", filename: fmt.Sprintf("p%d.png", i), data: pngBytes(t, 32, 32),
+			})
+		}
+		body, contentType := multipartBatch(t, batch, token)
+		req := newMultipartReq(ctx, t, baseURL+fmt.Sprintf("/admin/quizzes/%d/media", quizID), body, contentType)
+		resp, err := owner.Do(req)
+		if err != nil {
+			t.Fatalf("Do err = %v, want nil", err)
+		}
+		defer closeBody(t, resp.Body)
+		if got, want := resp.StatusCode, http.StatusBadRequest; got != want {
+			t.Errorf("too-many upload status = %d, want %d", got, want)
+		}
+	})
+
 	t.Run("missing file part is 400", func(t *testing.T) {
 		t.Parallel()
 		token := fetchCSRFToken(ctx, t, owner, baseURL+"/admin/quizzes")
@@ -389,7 +457,8 @@ func uploadImage(
 		rb, _ := io.ReadAll(resp.Body)
 		t.Fatalf("upload status = %d, want %d; body=%q", got, want, rb)
 	}
-	if got, want := resp.Header.Get("Location"), fmt.Sprintf("/admin/quizzes/%d#images", quizID); got != want {
+	want := fmt.Sprintf("/admin/quizzes/%d?uploaded=1&failed=0#images", quizID)
+	if got := resp.Header.Get("Location"); got != want {
 		t.Errorf("upload redirect Location = %q, want %q", got, want)
 	}
 }
@@ -449,6 +518,40 @@ func pngBytes(t *testing.T, w, h int) []byte {
 	}
 
 	return buf.Bytes()
+}
+
+// multipartFile names one part in a multi-part upload body: the form field to
+// post it under, the filename to send, and the raw bytes.
+type multipartFile struct {
+	field    string
+	filename string
+	data     []byte
+}
+
+// multipartBatch builds a multipart body containing every file in batch (each
+// under its own field name) plus the csrf_token field. Used by the multi-file
+// upload tests to drive the upload handler the way the rendered form does.
+func multipartBatch(t *testing.T, batch []multipartFile, token string) (*bytes.Buffer, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	for _, f := range batch {
+		part, err := mw.CreateFormFile(f.field, f.filename)
+		if err != nil {
+			t.Fatalf("CreateFormFile err = %v, want nil", err)
+		}
+		if _, err := part.Write(f.data); err != nil {
+			t.Fatalf("write %q part err = %v, want nil", f.filename, err)
+		}
+	}
+	if err := mw.WriteField("csrf_token", token); err != nil {
+		t.Fatalf("WriteField err = %v, want nil", err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("multipart Close err = %v, want nil", err)
+	}
+
+	return &buf, mw.FormDataContentType()
 }
 
 // multipartImage builds a multipart body carrying the image under the "image"

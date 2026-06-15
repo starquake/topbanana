@@ -1051,8 +1051,38 @@ func HandleQuizView(
 		data := newQuizViewData(quizData, players, rounds)
 		data.Images = images
 		data.HostHasRunningGame = hostHasRunningGame(r, logger, runningGames)
+		data.UploadedCount, data.FailedCount = parseUploadCounts(r)
 		renderer.Render(w, r, http.StatusOK, data)
 	})
+}
+
+// uploadCountCeiling clamps the query-string counts so a tampered URL cannot
+// paint a misleading number. Sized comfortably above the upload handler's per-
+// request cap (#951).
+const uploadCountCeiling = 99
+
+// parseUploadCounts pulls the post-upload banner counts out of the URL query.
+// Both default to 0 and are clamped to uploadCountCeiling; a non-numeric or
+// negative value is treated as 0 so a tampered query cannot paint a banner
+// with a misleading number.
+func parseUploadCounts(r *http.Request) (uploaded, failed int) {
+	return parseUploadCount(r, "uploaded"), parseUploadCount(r, "failed")
+}
+
+func parseUploadCount(r *http.Request, name string) int {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 0
+	}
+	if n > uploadCountCeiling {
+		return uploadCountCeiling
+	}
+
+	return n
 }
 
 // hostHasRunningGame reports whether the signed-in host already has a game in
@@ -1099,6 +1129,13 @@ type QuizViewData struct {
 	// control opens a modal that ends the running session before hosting this
 	// quiz instead of submitting straight away.
 	HostHasRunningGame bool
+	// UploadedCount and FailedCount drive the post-upload banner. The upload
+	// handler redirects with ?uploaded=N&failed=M (#951) so the page can show
+	// what just happened without a session-flash mechanism. Both are 0 on a
+	// plain visit; clamped to a small ceiling so a tampered query string can
+	// not paint a misleading number.
+	UploadedCount int
+	FailedCount   int
 }
 
 // RoundViewData is one round section on the quiz view: the round itself
