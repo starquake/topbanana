@@ -37,4 +37,4 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-replace github.com/deepteams/webp => github.com/starquake/webp v0.0.0-20260615162507-8e999be13e87
+replace github.com/deepteams/webp => github.com/starquake/webp v0.0.0-20260615180040-7d874db6f3b8
