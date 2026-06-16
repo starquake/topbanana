@@ -330,21 +330,36 @@ func (s *GameStore) CreateAnswer(ctx context.Context, a *game.Answer) error {
 //
 // No-op if the player has no games for the quiz.
 func (s *GameStore) DeleteGamesForPlayerOnQuiz(ctx context.Context, playerID, quizID int64) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-
-	if err = s.deleteGamesForPlayerOnQuizTx(ctx, tx, playerID, quizID); err != nil {
-		if rbErr := tx.Rollback(); rbErr != nil {
-			return fmt.Errorf("delete games failed: %w (rollback error: %w)", err, rbErr)
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		gameIDs, lerr := q.ListGameIDsForPlayerOnQuiz(ctx, db.ListGameIDsForPlayerOnQuizParams{
+			PlayerID: playerID,
+			QuizID:   quizID,
+		})
+		if lerr != nil {
+			return fmt.Errorf("failed to list game IDs for player %d on quiz %d: %w", playerID, quizID, lerr)
 		}
 
-		return err
-	}
+		if len(gameIDs) == 0 {
+			return nil
+		}
 
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit reset transaction: %w", err)
+		if derr := q.DeleteGameAnswersByGameIDs(ctx, gameIDs); derr != nil {
+			return fmt.Errorf("failed to delete answers: %w", derr)
+		}
+		if derr := q.DeleteGameQuestionsByGameIDs(ctx, gameIDs); derr != nil {
+			return fmt.Errorf("failed to delete questions: %w", derr)
+		}
+		if derr := q.DeleteGameParticipantsByGameIDs(ctx, gameIDs); derr != nil {
+			return fmt.Errorf("failed to delete participants: %w", derr)
+		}
+		if derr := q.DeleteGamesByIDs(ctx, gameIDs); derr != nil {
+			return fmt.Errorf("failed to delete games: %w", derr)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete games for player %d on quiz %d: %w", playerID, quizID, err)
 	}
 
 	return nil
@@ -506,39 +521,6 @@ func (s *GameStore) ReattributeGames(ctx context.Context, fromPlayerID, toPlayer
 	}
 
 	return movedParticipants, nil
-}
-
-func (s *GameStore) deleteGamesForPlayerOnQuizTx(
-	ctx context.Context, tx *sql.Tx, playerID, quizID int64,
-) error {
-	q := s.q.WithTx(tx)
-
-	gameIDs, err := q.ListGameIDsForPlayerOnQuiz(ctx, db.ListGameIDsForPlayerOnQuizParams{
-		PlayerID: playerID,
-		QuizID:   quizID,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to list game IDs for player %d on quiz %d: %w", playerID, quizID, err)
-	}
-
-	if len(gameIDs) == 0 {
-		return nil
-	}
-
-	if err = q.DeleteGameAnswersByGameIDs(ctx, gameIDs); err != nil {
-		return fmt.Errorf("failed to delete answers: %w", err)
-	}
-	if err = q.DeleteGameQuestionsByGameIDs(ctx, gameIDs); err != nil {
-		return fmt.Errorf("failed to delete questions: %w", err)
-	}
-	if err = q.DeleteGameParticipantsByGameIDs(ctx, gameIDs); err != nil {
-		return fmt.Errorf("failed to delete participants: %w", err)
-	}
-	if err = q.DeleteGamesByIDs(ctx, gameIDs); err != nil {
-		return fmt.Errorf("failed to delete games: %w", err)
-	}
-
-	return nil
 }
 
 func (s *GameStore) listGameQuestions(ctx context.Context, gameID string) ([]*game.Question, error) {
