@@ -13,55 +13,11 @@ import (
 	"time"
 
 	"github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/mailer"
 	. "github.com/starquake/topbanana/internal/profile"
+	"github.com/starquake/topbanana/internal/store"
 )
-
-// emailStubStore implements auth.PlayerStore for the email-change
-// handler tests. GetPlayerByEmail reports the new address as free (the
-// dispatch path); every other method returns a sentinel so an
-// accidental call is loud.
-type emailStubStore struct{}
-
-func (*emailStubStore) GetPlayerByEmail(_ context.Context, _ string) (*auth.Player, error) {
-	return nil, auth.ErrPlayerNotFound
-}
-
-func (*emailStubStore) GetPlayerByDisplayName(_ context.Context, _ string) (*auth.Player, error) {
-	return nil, errors.ErrUnsupported
-}
-
-func (*emailStubStore) GetPlayerByID(_ context.Context, _ int64) (*auth.Player, error) {
-	return nil, errors.ErrUnsupported
-}
-
-func (*emailStubStore) CreatePlayer(_ context.Context, _, _, _, _ string) (*auth.Player, error) {
-	return nil, errors.ErrUnsupported
-}
-
-func (*emailStubStore) CreateAnonymousPlayer(_ context.Context, _ string) (*auth.Player, error) {
-	return nil, errors.ErrUnsupported
-}
-
-func (*emailStubStore) ClaimPlayer(_ context.Context, _ int64, _, _, _, _ string) (*auth.Player, error) {
-	return nil, errors.ErrUnsupported
-}
-
-func (*emailStubStore) RenamePlayer(_ context.Context, _ int64, _ string) (*auth.Player, error) {
-	return nil, errors.ErrUnsupported
-}
-
-func (*emailStubStore) SetPlayerPasswordHash(_ context.Context, _, _ string) error {
-	return errors.ErrUnsupported
-}
-
-func (*emailStubStore) ChangePlayerPassword(_ context.Context, _ int64, _ string) error {
-	return errors.ErrUnsupported
-}
-
-func (*emailStubStore) UpdatePlayerDisplayName(_ context.Context, _ int64, _ string) (*auth.Player, error) {
-	return nil, errors.ErrUnsupported
-}
 
 // emailStubTokens implements auth.VerifyTokenStore and counts the
 // tokens minted so a test can assert that a rejected change mints
@@ -135,9 +91,13 @@ func (s *emailStubSender) waitForSends(t *testing.T, n int) {
 	}
 }
 
-// emailChangeNewAddr is the new address every handler test submits;
-// the dispatch path treats it as free via emailStubStore.
-const emailChangeNewAddr = "new@example.test"
+// emailChangeOldAddr / emailChangeNewAddr are the current and target
+// addresses every handler test submits. The new address is never
+// seeded, so the real GetPlayerByEmail reports it free.
+const (
+	emailChangeOldAddr = "old@example.test"
+	emailChangeNewAddr = "new@example.test"
+)
 
 // emailChangeResult bundles everything postEmailChange surfaces so the
 // helper stays under revive's return-result cap.
@@ -149,8 +109,16 @@ type emailChangeResult struct {
 }
 
 // postEmailChange drives HandleProfileEmailChange with the given
-// player and current password against emailChangeNewAddr.
-func postEmailChange(t *testing.T, player *auth.Player, currentPassword string) emailChangeResult {
+// player and current password against emailChangeNewAddr, backed by
+// players: a real PlayerStore that holds the in-context password player
+// (when seeded) and no row for the new address, so the real
+// GetPlayerByEmail lookup for the target hits the free path.
+func postEmailChange(
+	t *testing.T,
+	players *store.PlayerStore,
+	player *auth.Player,
+	currentPassword string,
+) emailChangeResult {
 	t.Helper()
 
 	var logs strings.Builder
@@ -162,7 +130,7 @@ func postEmailChange(t *testing.T, player *auth.Player, currentPassword string) 
 		EmailChangeFlashCookieName, EmailChangeFlashCookiePath,
 	)
 	deps := EmailChangeDeps{
-		Players: &emailStubStore{},
+		Players: players,
 		Tokens:  tokens,
 		Sender:  sender,
 		Flash:   flash,
@@ -186,7 +154,11 @@ func postEmailChange(t *testing.T, player *auth.Player, currentPassword string) 
 	return emailChangeResult{sender: sender, tokens: tokens, logs: logs.String(), rec: rec}
 }
 
-func passwordPlayer(t *testing.T) *auth.Player {
+// seedPasswordPlayer creates a real PlayerStore, inserts a
+// password-bearing player at emailChangeOldAddr, and returns both. The
+// persisted row is what the handler reads from context; the new address
+// is left unseeded so the real GetPlayerByEmail lookup hits the free path.
+func seedPasswordPlayer(t *testing.T) (*store.PlayerStore, *auth.Player) {
 	t.Helper()
 
 	hash, err := auth.HashPassword("correct-battery-13")
@@ -194,13 +166,20 @@ func passwordPlayer(t *testing.T) *auth.Player {
 		t.Fatalf("HashPassword err = %v, want nil", err)
 	}
 
-	return &auth.Player{ID: 7, Email: "old@example.test", PasswordHash: hash}
+	players := store.NewPlayerStore(dbtest.Open(t), slog.New(slog.DiscardHandler))
+	player, err := players.CreatePlayer(t.Context(), "old-player", emailChangeOldAddr, hash, auth.RolePlayer)
+	if err != nil {
+		t.Fatalf("CreatePlayer err = %v, want nil", err)
+	}
+
+	return players, player
 }
 
 func TestHandleProfileEmailChange_WrongPasswordRejected(t *testing.T) {
 	t.Parallel()
 
-	res := postEmailChange(t, passwordPlayer(t), "wrong-password")
+	players, player := seedPasswordPlayer(t)
+	res := postEmailChange(t, players, player, "wrong-password")
 
 	if got, want := res.rec.Code, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)
@@ -225,7 +204,8 @@ func TestHandleProfileEmailChange_WrongPasswordRejected(t *testing.T) {
 func TestHandleProfileEmailChange_EmptyPasswordRejected(t *testing.T) {
 	t.Parallel()
 
-	res := postEmailChange(t, passwordPlayer(t), "")
+	players, player := seedPasswordPlayer(t)
+	res := postEmailChange(t, players, player, "")
 
 	if got, want := res.rec.Code, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)
@@ -247,7 +227,8 @@ func TestHandleProfileEmailChange_EmptyPasswordRejected(t *testing.T) {
 func TestHandleProfileEmailChange_CorrectPasswordDispatchesAndNotifiesOldAddress(t *testing.T) {
 	t.Parallel()
 
-	res := postEmailChange(t, passwordPlayer(t), "correct-battery-13")
+	players, player := seedPasswordPlayer(t)
+	res := postEmailChange(t, players, player, "correct-battery-13")
 
 	if got, want := res.rec.Code, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)
@@ -279,7 +260,7 @@ func TestHandleProfileEmailChange_CorrectPasswordDispatchesAndNotifiesOldAddress
 	if got, want := verifyTo, emailChangeNewAddr; got != want {
 		t.Errorf("verify mail To = %q, want new address %q", got, want)
 	}
-	if got, want := noticeTo, "old@example.test"; got != want {
+	if got, want := noticeTo, emailChangeOldAddr; got != want {
 		t.Errorf("notice mail To = %q, want old address %q", got, want)
 	}
 }
@@ -287,8 +268,11 @@ func TestHandleProfileEmailChange_CorrectPasswordDispatchesAndNotifiesOldAddress
 func TestHandleProfileEmailChange_OAuthOnlyBlocked(t *testing.T) {
 	t.Parallel()
 
-	player := &auth.Player{ID: 7, Email: "old@example.test", PasswordHash: ""}
-	res := postEmailChange(t, player, "")
+	// OAuth-only accounts are blocked before the store lookup, so an empty
+	// store is enough; the password player is intentionally not seeded.
+	players := store.NewPlayerStore(dbtest.Open(t), slog.New(slog.DiscardHandler))
+	player := &auth.Player{ID: 7, Email: emailChangeOldAddr, PasswordHash: ""}
+	res := postEmailChange(t, players, player, "")
 
 	if got, want := res.rec.Code, http.StatusSeeOther; got != want {
 		t.Errorf("status = %d, want %d", got, want)
