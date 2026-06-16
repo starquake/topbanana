@@ -23,7 +23,7 @@ const (
 	privateCacheControl = "private, no-cache"
 )
 
-// HandleMediaServe serves the full webp for GET /media/{id}. Authorization
+// HandleMediaServe serves the full jpeg for GET /media/{id}. Authorization
 // mirrors the owning quiz's own access rule: a public quiz's image is served to
 // anyone (including anonymous players mid-game), a private quiz's image only to
 // an authenticated viewer resolved by viewer (no player row is minted - the
@@ -35,7 +35,7 @@ func HandleMediaServe(
 	return serveMedia(logger, svc, quizzes, viewer, fullPath)
 }
 
-// HandleMediaThumb serves the 480px webp thumbnail for GET /media/{id}/thumb.
+// HandleMediaThumb serves the 480px jpeg thumbnail for GET /media/{id}/thumb.
 // Same authorization and caching as HandleMediaServe; it differs only in which
 // of the row's two files it streams.
 func HandleMediaThumb(

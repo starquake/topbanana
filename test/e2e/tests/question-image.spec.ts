@@ -10,7 +10,7 @@ import { adminStatePath } from '../e2e-auth';
 test.use({ storageState: adminStatePath() });
 
 // A small valid 120x80 PNG so the upload pipeline can decode and re-encode it,
-// and the served webp actually renders in the client (a broken fetch would trip
+// and the served jpeg actually renders in the client (a broken fetch would trip
 // the <img> @error handler and hide the element, defeating the assertion).
 const PNG_SAMPLE = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAHgAAABQCAIAAABd+SbeAAAAzklEQVR4nOzQURGAMADFsHcw4UhHxfqVXBX0bN+z6XZn7wgYHTE6YnTE6IjREaMjRkeMjhgdMTpidMToiNERoyNGR4yOGB0xOmJ0xOiI0RGjI0ZHjI4YHTE6YnTE6IjREaMjRkeMjhgdMTpidMToiNERoyNGR4yOGB0xOmJ0xOiI0RGjI0ZHjI4YHTE6YnTE6IjREaMjRkeMjhgdMTpidMToiNERoyNGR4yOGB0xOmJ0xOiI0RGjI0ZHjI4YHTE6YnTE6IjREaMjfwAAAP//uxwDnKDt4NgAAAAASUVORK5CYII=',

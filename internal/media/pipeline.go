@@ -18,7 +18,6 @@ import (
 	_ "image/png" // register the png decoder with image.Decode
 	"io"
 
-	_ "github.com/deepteams/webp" // register the webp decoder with image.Decode
 	"golang.org/x/image/draw"
 )
 
@@ -52,11 +51,7 @@ const (
 	jpegQuality = 75
 
 	// MIMEJPEG is the mime type every stored image carries; the pipeline
-	// always normalises to jpeg regardless of the input format. JPEG over WebP
-	// (#951): the pure-Go webp encoder doesn't match libwebp's compression
-	// efficiency, so stdlib jpeg produces meaningfully smaller files at the
-	// same nominal quality. WebP input is still accepted by the decoder via
-	// the deepteams/webp blank import above.
+	// normalises every accepted input (jpeg or png) to jpeg.
 	MIMEJPEG = "image/jpeg"
 )
 
@@ -67,7 +62,7 @@ var ErrUploadTooLarge = errors.New("upload exceeds maximum size")
 var ErrEmptyUpload = errors.New("upload is empty")
 
 // ErrUnsupportedImage is returned when the upload cannot be decoded as one of
-// the accepted formats (jpeg, png, webp).
+// the accepted formats (jpeg or png).
 var ErrUnsupportedImage = errors.New("unsupported or undecodable image")
 
 // ErrImageTooLarge is returned when the decoded image's pixel dimensions exceed
@@ -95,14 +90,14 @@ type Processed struct {
 	MIME string
 }
 
-// Process decodes the upload (jpeg, png, or webp), downscales it so its long
-// edge is at most MaxLongEdge, re-encodes it as lossy jpeg, and derives a
+// Process decodes the upload (jpeg or png), downscales it so its long edge is
+// at most MaxLongEdge, re-encodes it as lossy jpeg, and derives a
 // ThumbLongEdge jpeg thumbnail from the same decoded source. It is pure: no
 // disk or network. The reader is fully consumed.
 //
 // Returns ErrUploadTooLarge when the raw bytes exceed MaxUploadBytes,
 // ErrEmptyUpload for a zero-byte upload, and ErrUnsupportedImage when the
-// bytes are not a decodable jpeg/png/webp.
+// bytes are not a decodable jpeg or png.
 func Process(r io.Reader) (*Processed, error) {
 	raw, err := readCapped(r)
 	if err != nil {
@@ -140,7 +135,7 @@ func Process(r io.Reader) (*Processed, error) {
 	}, nil
 }
 
-// decodeGuarded decodes raw (jpeg, png, or webp). It rejects a decode bomb
+// decodeGuarded decodes raw (jpeg or png). It rejects a decode bomb
 // from the header first (DecodeConfig reads only the header; PNG's max declared
 // edge of 2^31 keeps the int64 area product in range, so it cannot overflow),
 // then decodes the full image. Returns ErrImageTooLarge for an oversized

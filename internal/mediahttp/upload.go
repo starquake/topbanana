@@ -225,7 +225,7 @@ func writeUploadError(w http.ResponseWriter, r *http.Request, logger *slog.Logge
 	case errors.Is(err, media.ErrEmptyUpload):
 		http.Error(w, "image file is empty", http.StatusBadRequest)
 	case errors.Is(err, media.ErrUnsupportedImage):
-		http.Error(w, "unsupported image format (use jpg, png, or webp)", http.StatusBadRequest)
+		http.Error(w, "unsupported image format (use jpg or png)", http.StatusBadRequest)
 	default:
 		logger.ErrorContext(r.Context(), "error storing uploaded media", slog.Any("err", err))
 		http.Error(w, internalErrorMessage, http.StatusInternalServerError)
@@ -356,7 +356,7 @@ func uploadFailureReason(err error) string {
 	case errors.Is(err, media.ErrEmptyUpload):
 		return "file is empty"
 	case errors.Is(err, media.ErrUnsupportedImage):
-		return "unsupported image format (use jpg, png, or webp)"
+		return "unsupported image format (use jpg or png)"
 	default:
 		return "upload failed"
 	}

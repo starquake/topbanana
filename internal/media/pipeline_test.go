@@ -54,18 +54,8 @@ func encodePNG(t *testing.T, img image.Image) []byte {
 	return buf.Bytes()
 }
 
-func encodeWebP(t *testing.T, img image.Image) []byte {
-	t.Helper()
-	var buf bytes.Buffer
-	if err := EncodeWebPForTest(&buf, img, 80); err != nil {
-		t.Fatalf("EncodeWebPForTest err = %v, want nil", err)
-	}
-
-	return buf.Bytes()
-}
-
-// TestProcessAcceptedFormats pins that each accepted input format (jpeg, png,
-// webp) decodes and processes into a valid jpeg full image and thumbnail.
+// TestProcessAcceptedFormats pins that each accepted input format (jpeg, png)
+// decodes and processes into a valid jpeg full image and thumbnail.
 func TestProcessAcceptedFormats(t *testing.T) {
 	t.Parallel()
 
@@ -73,7 +63,6 @@ func TestProcessAcceptedFormats(t *testing.T) {
 	cases := map[string][]byte{
 		"jpeg": encodeJPEG(t, img),
 		"png":  encodePNG(t, img),
-		"webp": encodeWebP(t, img),
 	}
 
 	for name, raw := range cases {

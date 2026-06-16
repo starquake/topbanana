@@ -57,7 +57,7 @@ func TestUploadFailureReason(t *testing.T) {
 		{
 			name: "unsupported image",
 			err:  media.ErrUnsupportedImage,
-			want: "unsupported image format (use jpg, png, or webp)",
+			want: "unsupported image format (use jpg or png)",
 		},
 		{name: "unknown error", err: errors.New("some random failure"), want: "upload failed"},
 	}

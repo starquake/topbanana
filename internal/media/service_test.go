@@ -87,7 +87,7 @@ func pngUpload(t *testing.T, w, h int) []byte {
 }
 
 // TestServiceStoreRoundTrip pins the full persist path: Store processes and
-// writes the full + thumb webp under <root>/<quizID>/ and records a row with
+// writes the full + thumb jpeg under <root>/<quizID>/ and records a row with
 // the metadata the pipeline computed and the relative paths.
 func TestServiceStoreRoundTrip(t *testing.T) {
 	t.Parallel()

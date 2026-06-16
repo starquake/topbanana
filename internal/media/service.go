@@ -30,7 +30,7 @@ const (
 	decimalBase = 10
 )
 
-// Service processes an upload through the pipeline, persists the resulting webp
+// Service processes an upload through the pipeline, persists the resulting jpeg
 // files under a per-quiz directory below root, and records a media row. It is
 // the single place that ties the pure pipeline to the filesystem and the store.
 type Service struct {
@@ -46,7 +46,7 @@ func NewService(store Store, root string, logger *slog.Logger) *Service {
 	return &Service{store: store, root: root, logger: logger}
 }
 
-// Store processes the upload into a normalised webp full image plus thumbnail,
+// Store processes the upload into a normalised jpeg full image plus thumbnail,
 // writes both under <root>/<quizID>/, inserts the media row with the relative
 // paths and metadata, and returns the stored Media. createdBy is the uploading
 // player.
