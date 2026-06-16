@@ -23,6 +23,15 @@ updates:
     schedule:
       interval: "weekly"
 
+  # esbuild under the root package.json - the dev-only build tooling for the
+  # player client + admin JS bundles (#721). Without this entry only security
+  # advisories surface a bump (Dependabot's graph-based security updates), so
+  # routine esbuild releases drift until one trips an advisory.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
   # Playwright + @types/node under test/e2e/. Keeps the browser deps moving
   # forward in step with upstream releases (relevant for security advisories
   # like the Playwright TLS-verification one we hit during #115).
