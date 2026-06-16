@@ -56,6 +56,10 @@ func NewService(store Store, root string, logger *slog.Logger) *Service {
 // stored Path / ThumbPath are relative to root so a later root remount does not
 // strand the references.
 func (s *Service) Store(ctx context.Context, quizID, createdBy int64, r io.Reader) (*Media, error) {
+	// Two ctx.Err checks around Process: the first skips Process if the
+	// cancel already arrived (Process is the CPU-heavy decode + re-encode);
+	// the second catches a cancel that arrived during Process, which is sync
+	// and doesn't observe ctx itself.
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, fmt.Errorf("upload cancelled before processing: %w", ctxErr)
 	}
