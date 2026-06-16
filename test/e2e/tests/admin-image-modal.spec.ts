@@ -75,3 +75,90 @@ test('clicking a library thumbnail opens the full image in a modal', async ({ pa
   await page.getByRole('button', { name: 'Close image viewer' }).click();
   await expect(modal).toBeHidden();
 });
+
+// #993 — the lightbox shows a loading indicator while the full-size image is on
+// the wire (the <img> is hidden until load), and swaps to an error panel on a
+// failed load instead of spinning forever.
+
+// uploadImageAndGetMediaId creates a quiz, uploads the sample PNG, and returns
+// the media id the library thumbnail mapped to. Shared by the two tests below.
+async function uploadImageAndGetMediaId(
+  page: Parameters<typeof createQuizWithQuestions>[0],
+  quizTitle: string,
+): Promise<string> {
+  await createQuizWithQuestions(page, quizTitle, SINGLE_QUESTION);
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+
+  await page.locator('input[type="file"][name="images"]').setInputFiles({
+    name: 'pic.png',
+    mimeType: 'image/png',
+    buffer: PNG_SAMPLE,
+  });
+  const libraryThumb = page.getByTestId('library-thumb').first();
+  await expect(libraryThumb).toBeVisible({ timeout: 30_000 });
+  const thumbAlt = (await libraryThumb.getAttribute('alt')) ?? '';
+  const mediaId = thumbAlt.replace(/^Quiz image /, '');
+  expect(mediaId).toMatch(/^\d+$/);
+  return mediaId;
+}
+
+test('the lightbox shows a loading indicator until the full image loads', async ({ page, browserName }) => {
+  test.setTimeout(60_000);
+
+  const mediaId = await uploadImageAndGetMediaId(page, `E2E Image Loading ${browserName}`);
+
+  const modal = page.getByTestId('image-modal');
+  const loading = page.getByTestId('image-modal-loading');
+  const modalImage = modal.locator('img').first();
+
+  // Open the viewer on a cache-busted full-size src so this is a fresh request,
+  // and read the indicator state synchronously: openImageViewer wires the
+  // load/error handlers and the <img> load event cannot have fired before this
+  // same synchronous block returns, so the indicator is provably the gap-filler
+  // shown while the image is still on the wire.
+  const stateWhileLoading = await page.evaluate((id) => {
+    (window as unknown as { openImageViewer: (src: string) => void }).openImageViewer(
+      `/media/${id}?cb=${Date.now()}`,
+    );
+    const img = document.getElementById('image-modal-viewer-img') as HTMLImageElement;
+    const loadingEl = document.getElementById('image-modal-viewer-loading') as HTMLElement;
+    return { loadingVisible: !loadingEl.hidden, imgHidden: img.style.visibility === 'hidden' };
+  }, mediaId);
+
+  // While the new src is loading, the indicator fills the gap and the <img> is
+  // hidden so the panel is never blank and never shows the previous bytes.
+  expect(stateWhileLoading.loadingVisible).toBe(true);
+  expect(stateWhileLoading.imgHidden).toBe(true);
+  await expect(modal).toBeVisible();
+
+  // Once the image paints, the indicator is removed so it doesn't sit under the
+  // image, and the image is the real bytes (naturalWidth > 0).
+  await expect(modalImage).toBeVisible();
+  await expect(loading).toBeHidden();
+  await expect
+    .poll(async () => modalImage.evaluate((img: HTMLImageElement) => img.naturalWidth))
+    .toBeGreaterThan(0);
+});
+
+test('the lightbox shows a failure message when the full image errors', async ({ page, browserName }) => {
+  test.setTimeout(60_000);
+
+  const mediaId = await uploadImageAndGetMediaId(page, `E2E Image Error ${browserName}`);
+
+  const modal = page.getByTestId('image-modal');
+  const loading = page.getByTestId('image-modal-loading');
+  const errorPanel = page.getByTestId('image-modal-error');
+
+  // Point the viewer at a media id that does not exist: the server answers 404,
+  // which never fires the <img> load event, so the indicator must give way to
+  // the error panel rather than spinning forever. Driving openImageViewer
+  // directly exercises the production error handler against a real 404.
+  const missingId = Number(mediaId) + 1_000_000;
+  await page.evaluate((id) => {
+    (window as unknown as { openImageViewer: (src: string) => void }).openImageViewer(`/media/${id}`);
+  }, missingId);
+
+  await expect(modal).toBeVisible();
+  await expect(errorPanel).toBeVisible();
+  await expect(loading).toBeHidden();
+});
