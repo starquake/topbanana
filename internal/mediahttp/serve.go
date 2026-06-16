@@ -12,14 +12,16 @@ import (
 )
 
 // publicCacheControl and privateCacheControl key the cache policy to the owning
-// quiz's visibility. Both revalidate via the stored sha256 ETag rather than
-// trusting the id-as-immutable: a public quiz's image is shareable across
-// caches, a private quiz's image must not be. We dropped `immutable` from the
-// public policy in #951 - id reuse across delete + concurrent upload could
-// briefly point a stable id at different bytes, and an immutable cache hid
-// that mismatch from the host for the full week TTL.
+// quiz's visibility. Both rely on the stored sha256 ETag for correctness; we
+// dropped `immutable` from the public policy in #951 (id reuse across delete +
+// concurrent upload could briefly point a stable id at different bytes), but
+// the AUTOINCREMENT migration in the same PR now guarantees ids are never
+// reused. A short max-age + must-revalidate gives the browser and any
+// intermediate cache a small free hit window while still revalidating against
+// the ETag once the window expires, so a corrected image propagates within
+// the TTL.
 const (
-	publicCacheControl  = "public, no-cache"
+	publicCacheControl  = "public, max-age=300, must-revalidate"
 	privateCacheControl = "private, no-cache"
 )
 

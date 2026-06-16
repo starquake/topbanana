@@ -10,6 +10,13 @@
     if (!queue) return;
     const form = input.closest('form');
     if (!form) return;
+    const submitBtn = form.querySelector('button[type="submit"]');
+
+    // Hide the form's submit button once the JS module is wired up; without
+    // this the still-clickable button would trigger HTML5 'required'
+    // validation ('Please select a file') after change clears input.value,
+    // making the host think the upload broke.
+    if (submitBtn) submitBtn.hidden = true;
 
     // Match the server's per-route read deadline so a stalled XHR can't pin
     // inFlight forever.
@@ -84,32 +91,39 @@
             const pct = Math.min(100, Math.round((event.loaded / event.total) * 100));
             bar.value = pct;
             status.textContent = pct + '%';
+            // Pull the cancel affordance as soon as bytes are visibly all in,
+            // not on the upload.load event - upload.load fires on the next
+            // tick after progress=100, and a Cancel click in that micro-window
+            // racing past a server commit produces a 'Cancelled' banner for a
+            // file that actually landed in the library.
+            if (pct >= 100 && cancelBtn.parentNode) cancelBtn.remove();
         });
         xhr.upload.addEventListener('load', () => {
-            // Bytes in; cancel is no longer reliable (server may have committed).
+            // Defensive: in case 'progress' never fired (event.lengthComputable
+            // was false), drop the cancel affordance here too.
             bar.value = 100;
             status.textContent = 'Processing...';
-            cancelBtn.remove();
+            if (cancelBtn.parentNode) cancelBtn.remove();
         });
         xhr.addEventListener('load', () => {
-            cancelBtn.remove();
+            if (cancelBtn.parentNode) cancelBtn.remove();
             bar.remove();
             handleResponse(xhr, row, status, b);
         });
         xhr.addEventListener('error', () => {
-            cancelBtn.remove();
+            if (cancelBtn.parentNode) cancelBtn.remove();
             bar.remove();
             b.skipped++;
             finishRow(row, status, 'Upload failed', false);
         });
         xhr.addEventListener('timeout', () => {
-            cancelBtn.remove();
+            if (cancelBtn.parentNode) cancelBtn.remove();
             bar.remove();
             b.skipped++;
             finishRow(row, status, 'Upload timed out', false);
         });
         xhr.addEventListener('abort', () => {
-            cancelBtn.remove();
+            if (cancelBtn.parentNode) cancelBtn.remove();
             bar.remove();
             b.cancelled++;
             finishRow(row, status, 'Cancelled', false);
@@ -129,28 +143,56 @@
         });
         cancelBtn.addEventListener('click', () => xhr.abort());
 
-        xhr.send(body);
+        // A synchronous throw from xhr.send (CSP block, browser security
+        // exception) would leak inFlight; fall through to the error path so
+        // the batch can still settle and navigate.
+        try {
+            xhr.send(body);
+        } catch (_err) {
+            if (cancelBtn.parentNode) cancelBtn.remove();
+            bar.remove();
+            b.skipped++;
+            finishRow(row, status, 'Upload failed', false);
+            // Force a microtask so the synchronous throw doesn't bypass
+            // loadend ordering; dispatching a plain abort fires both abort
+            // and loadend if the XHR is in an opened state, but the spec
+            // doesn't guarantee it for a not-yet-sent xhr. Decrement
+            // explicitly to keep the batch accounting accurate.
+            b.inFlight--;
+            if (b.inFlight === 0) {
+                const params = new URLSearchParams({
+                    uploaded: String(b.landed),
+                    failed: String(b.skipped),
+                    cancelled: String(b.cancelled),
+                });
+                const target = window.location.pathname + '?' + params + '#images';
+                batch = null;
+                window.location.href = target;
+            }
+        }
     }
 
     function handleResponse(xhr, row, status, b) {
-        const isJSON = (xhr.getResponseHeader('Content-Type') || '').indexOf('application/json') === 0;
-        if (xhr.status >= 200 && xhr.status < 300 && isJSON) {
-            let json = null;
+        // Try to parse JSON regardless of Content-Type. A misconfigured proxy
+        // that strips Content-Type would otherwise force a successful upload
+        // into the plain-text fallback and the row gets counted as failed.
+        let json = null;
+        if (xhr.status >= 200 && xhr.status < 300) {
             try { json = JSON.parse(xhr.responseText); } catch (_err) { /* json stays null */ }
-            if (json) {
-                const uploaded = (json.uploaded || []).length > 0;
-                if (uploaded) {
-                    b.landed++;
-                    finishRow(row, status, 'Uploaded', true);
-
-                    return;
-                }
-                const reason = (json.failed && json.failed[0] && json.failed[0].reason) || 'Upload failed';
-                b.skipped++;
-                finishRow(row, status, reason, false);
+        }
+        if (json && (Array.isArray(json.uploaded) || Array.isArray(json.failed))) {
+            const uploaded = (json.uploaded || []).length > 0;
+            if (uploaded) {
+                b.landed++;
+                finishRow(row, status, 'Uploaded', true);
 
                 return;
             }
+            const reason = (json.failed && json.failed[0] && json.failed[0].reason) || 'Upload failed';
+            b.skipped++;
+            finishRow(row, status, reason, false);
+
+            return;
         }
         // Surface the server's plain-text message (e.g. "invalid or oversized upload").
         const fallback = readPlainText(xhr) || 'Upload failed';

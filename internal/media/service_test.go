@@ -179,6 +179,80 @@ func TestServiceStoreCancelledBeforeProcessing(t *testing.T) {
 	}
 }
 
+// cancelOnUpdatePathsStore wraps a real Store to fire a registered cancel
+// function the moment UpdateMediaPaths is invoked, simulating a client that
+// closes the connection between CreateMedia and UpdateMediaPaths. Without
+// this, a pre-cancelled context short-circuits before any row or file is
+// created and the cleanup paths in Service.Store are never exercised.
+type cancelOnUpdatePathsStore struct {
+	Store
+
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnUpdatePathsStore) UpdateMediaPaths(ctx context.Context, id int64, path, thumbPath string) error {
+	c.cancel()
+
+	return c.Store.UpdateMediaPaths(ctx, id, path, thumbPath)
+}
+
+// TestServiceStoreCancelledMidFlightCleansUp pins the in-flight cancel
+// cleanup: when the connection drops between CreateMedia (row + files just
+// written) and UpdateMediaPaths, Store must return an error AND tear the row
+// + files back down via the cancel-immune cleanup path (#951). The vacuous
+// pre-Process variant above can't exercise this branch.
+func TestServiceStoreCancelledMidFlightCleansUp(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v", cerr)
+		}
+	})
+
+	quizID := seedQuiz(t, db, "media-svc-cancel-midflight")
+	root := t.TempDir()
+	innerStore := store.NewMediaStore(db, slog.Default())
+	ctx, cancel := context.WithCancel(t.Context())
+	wrapped := &cancelOnUpdatePathsStore{Store: innerStore, cancel: cancel}
+	svc := NewService(wrapped, root, slog.Default())
+
+	_, err := svc.Store(ctx, quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
+	if err == nil {
+		t.Fatal("Store err = nil, want non-nil (ctx was cancelled mid-flight)")
+	}
+
+	// Use a fresh ctx for verification so the cancelled ctx doesn't taint
+	// the post-conditions checks.
+	probeCtx := t.Context()
+	rows, err := svc.ListByQuiz(probeCtx, quizID)
+	if err != nil {
+		t.Fatalf("ListByQuiz err = %v, want nil", err)
+	}
+	if got, want := len(rows), 0; got != want {
+		t.Errorf("rows after mid-flight cancel = %d, want %d (cleanup branch did not delete)", got, want)
+	}
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("ReadDir err = %v, want nil", err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		sub, derr := os.ReadDir(filepath.Join(root, e.Name()))
+		if derr != nil {
+			t.Fatalf("ReadDir(%s) err = %v, want nil", e.Name(), derr)
+		}
+		if got := len(sub); got != 0 {
+			t.Errorf("files under root/%s after mid-flight cancel = %d, want 0"+
+				" (writeFiles cleanup did not remove)", e.Name(), got)
+		}
+	}
+}
+
 // TestServiceDeleteRemovesRowAndFiles pins that Delete drops the row and unlinks
 // both files.
 func TestServiceDeleteRemovesRowAndFiles(t *testing.T) {

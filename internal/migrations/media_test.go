@@ -102,7 +102,7 @@ func TestMediaMigration_NoIDReuseAfterDelete(t *testing.T) {
 	second := seedMedia(t, db, quizID)
 
 	if _, err := db.ExecContext(
-		context.Background(), "DELETE FROM media WHERE id = ?", second,
+		t.Context(), "DELETE FROM media WHERE id = ?", second,
 	); err != nil {
 		t.Fatalf("delete media err = %v, want nil", err)
 	}

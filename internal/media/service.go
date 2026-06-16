@@ -186,16 +186,38 @@ func (s *Service) Open(relPath string) (*os.File, error) {
 }
 
 // writeFiles writes the full and thumb jpeg bytes to the given root-relative
-// paths. On a failure after the first write succeeds, the first file is removed
-// so a partial write leaves nothing behind.
+// paths using a temp-then-rename pattern so a SIGKILL or crash between the
+// two writes can't leave a row pointing at a half-written or missing file.
+// Both files are written under <name>.tmp, then atomically renamed into
+// place. A failure at any step cleans up whatever has been written so a
+// failed upload leaves nothing behind.
 func (s *Service) writeFiles(processed *Processed, relFull, relThumb string) error {
-	if err := os.WriteFile(filepath.Join(s.root, relFull), processed.Full, filePerm); err != nil {
+	fullTmp := relFull + ".tmp"
+	thumbTmp := relThumb + ".tmp"
+
+	if err := os.WriteFile(filepath.Join(s.root, fullTmp), processed.Full, filePerm); err != nil {
 		return fmt.Errorf("writing full image: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(s.root, relThumb), processed.Thumb, filePerm); err != nil {
-		s.removeFile(relFull)
+	if err := os.WriteFile(filepath.Join(s.root, thumbTmp), processed.Thumb, filePerm); err != nil {
+		s.removeFile(fullTmp)
 
 		return fmt.Errorf("writing thumbnail: %w", err)
+	}
+
+	if err := os.Rename(filepath.Join(s.root, fullTmp), filepath.Join(s.root, relFull)); err != nil {
+		s.removeFile(fullTmp)
+		s.removeFile(thumbTmp)
+
+		return fmt.Errorf("publishing full image: %w", err)
+	}
+	if err := os.Rename(filepath.Join(s.root, thumbTmp), filepath.Join(s.root, relThumb)); err != nil {
+		// The full file already landed at its final name; tear it back down
+		// so the upload's invariant ("either both files exist or neither
+		// does") is preserved.
+		s.removeFile(relFull)
+		s.removeFile(thumbTmp)
+
+		return fmt.Errorf("publishing thumbnail: %w", err)
 	}
 
 	return nil

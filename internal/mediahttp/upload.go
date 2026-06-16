@@ -58,6 +58,12 @@ const (
 
 	// internalErrorMessage is the generic 500 body shared across this package.
 	internalErrorMessage = "internal error"
+
+	// httpStatusClientClosedRequest is the nginx convention for "client
+	// closed the connection before the server could write a response" - not
+	// in the IANA registry but widely used so cancelled uploads don't paint
+	// the access log as 5xx server faults.
+	httpStatusClientClosedRequest = 499
 )
 
 // QuizEditLookup is the slice of the quiz store the upload handler uses to
@@ -136,17 +142,18 @@ func HandleMediaUpload(logger *slog.Logger, svc MediaService, quizzes QuizEditLo
 		}
 
 		uploaded, failed, firstErr := summarize(results)
-		if uploaded == 0 {
-			// Nothing landed - surface the first file's failure directly so a
-			// single-file upload that fails returns the pipeline's 4xx
-			// instead of bouncing through a banner. firstErr is non-nil
-			// because failed > 0 once we know files was non-empty above.
+		// Single-file form upload that failed: surface the pipeline 4xx
+		// directly so the host sees a precise reason instead of bouncing
+		// through a banner. For multi-file batches the banner carries the
+		// per-file split, so an error page that hides the rest of the
+		// library on an all-fail batch is the wrong UX.
+		if uploaded == 0 && len(files) == 1 {
 			writeUploadError(w, r, logger, firstErr)
 
 			return
 		}
 
-		dest := fmt.Sprintf("/admin/quizzes/%d", quizID) + buildUploadQuery(uploaded, failed) + "#images"
+		dest := fmt.Sprintf("/admin/quizzes/%d", quizID) + buildUploadQuery(uploaded, failed, 0) + "#images"
 		http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // dest is built from server-side ids and counts.
 	})
 }
@@ -175,6 +182,10 @@ type uploadResult struct {
 // Err set and still lets the rest of the batch run. A [context.Canceled]
 // error means the client closed the connection mid-flight (xhr.abort) and is
 // not noise; everything else that is not a pipeline rejection is logged.
+//
+// Fail-fast on persistent server faults (disk full, db down): once a
+// non-pipeline non-cancel error fires once, every remaining file in the batch
+// would re-trip the same fault, multiplying log lines and cleanup work.
 func storeUploadFiles(
 	ctx context.Context, logger *slog.Logger, svc MediaService,
 	quizID, playerID int64, files []*multipart.FileHeader,
@@ -182,11 +193,15 @@ func storeUploadFiles(
 	results := make([]uploadResult, 0, len(files))
 	for _, header := range files {
 		mediaID, err := storeOneUpload(ctx, svc, quizID, playerID, header)
-		if err != nil && !isPipelineRejection(err) && !errors.Is(err, context.Canceled) {
+		isServerFault := err != nil && !isPipelineRejection(err) && !errors.Is(err, context.Canceled)
+		if isServerFault {
 			logger.ErrorContext(ctx, "error storing uploaded media",
 				slog.String("filename", header.Filename), slog.Any("err", err))
 		}
 		results = append(results, uploadResult{Filename: header.Filename, MediaID: mediaID, Err: err})
+		if isServerFault {
+			break
+		}
 	}
 
 	return results
@@ -212,10 +227,11 @@ func summarize(results []uploadResult) (uploaded, failed int, firstErr error) {
 }
 
 // writeUploadError maps a media.Service.Store error to an HTTP response: the
-// pipeline's caller-fault sentinels become 400 with a short message, anything
-// else is logged and returned as 500. Used when no file in the batch landed,
-// so a single-file failure surfaces directly to the host instead of becoming a
-// silent banner on a redirect.
+// pipeline's caller-fault sentinels become 400 with a short message, an
+// already-cancelled context surfaces as 499 with no log (the client closed the
+// connection, so nothing we write is delivered), anything else is logged and
+// returned as 500. Used when a single-file upload failed - so the host sees a
+// precise reason instead of bouncing through a banner.
 func writeUploadError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err error) {
 	switch {
 	case errors.Is(err, media.ErrUploadTooLarge):
@@ -226,6 +242,11 @@ func writeUploadError(w http.ResponseWriter, r *http.Request, logger *slog.Logge
 		http.Error(w, "image file is empty", http.StatusBadRequest)
 	case errors.Is(err, media.ErrUnsupportedImage):
 		http.Error(w, "unsupported image format (use jpg or png)", http.StatusBadRequest)
+	case errors.Is(err, context.Canceled):
+		// nginx-style "client closed request"; the response will not be
+		// delivered (TCP is already closed), but the status stamp keeps
+		// access-log accounting honest without painting it as a 500.
+		w.WriteHeader(httpStatusClientClosedRequest)
 	default:
 		logger.ErrorContext(r.Context(), "error storing uploaded media", slog.Any("err", err))
 		http.Error(w, internalErrorMessage, http.StatusInternalServerError)
@@ -298,19 +319,15 @@ type uploadResponseJSON struct {
 	Failed   []uploadResultJSON `json:"failed"`
 }
 
-// writeUploadJSON emits per-file outcomes as JSON. Any non-pipeline error
-// (server fault) escalates to 500 so a host doesn't blame their file for our
-// outage. Encoding to a buffer keeps an encoder failure from committing a
-// truncated 200.
+// writeUploadJSON emits per-file outcomes as JSON. Server-fault errors land in
+// failed[] alongside pipeline rejections (uploadFailureReason maps unknown
+// errors to "upload failed") so a client gets the per-file split even when
+// some files hit a transient backend issue - escalating the whole batch to a
+// 500 would hide files that already stored cleanly from a retrying client and
+// produce duplicate uploads. The handler-side log already pins the detail of
+// the server fault for operators. Encoding to a buffer keeps an encoder
+// failure from committing a truncated 200.
 func writeUploadJSON(w http.ResponseWriter, r *http.Request, logger *slog.Logger, results []uploadResult) {
-	for _, res := range results {
-		if res.Err != nil && !isPipelineRejection(res.Err) {
-			http.Error(w, internalErrorMessage, http.StatusInternalServerError)
-
-			return
-		}
-	}
-
 	resp := uploadResponseJSON{
 		Uploaded: make([]uploadResultJSON, 0, len(results)),
 		Failed:   make([]uploadResultJSON, 0, len(results)),
@@ -363,14 +380,16 @@ func uploadFailureReason(err error) string {
 }
 
 // buildUploadQuery returns the query suffix that tells the quiz view how to
-// render its post-upload banner. Empty when nothing was uploaded and nothing
-// failed (a degenerate case the handler treats as no banner needed).
-func buildUploadQuery(uploaded, failed int) string {
-	if uploaded == 0 && failed == 0 {
+// render its post-upload banner. Empty when every count is zero (a degenerate
+// case the handler treats as no banner needed).
+func buildUploadQuery(uploaded, failed, cancelled int) string {
+	if uploaded == 0 && failed == 0 && cancelled == 0 {
 		return ""
 	}
 
-	return "?uploaded=" + strconv.Itoa(uploaded) + "&failed=" + strconv.Itoa(failed)
+	return "?uploaded=" + strconv.Itoa(uploaded) +
+		"&failed=" + strconv.Itoa(failed) +
+		"&cancelled=" + strconv.Itoa(cancelled)
 }
 
 // isPipelineRejection is true for the media-pipeline caller-fault sentinels:

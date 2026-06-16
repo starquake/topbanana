@@ -74,22 +74,24 @@ func TestUploadFailureReason(t *testing.T) {
 func TestBuildUploadQuery(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name     string
-		uploaded int
-		failed   int
-		want     string
+		name      string
+		uploaded  int
+		failed    int
+		cancelled int
+		want      string
 	}{
-		{name: "nothing happened", uploaded: 0, failed: 0, want: ""},
-		{name: "single success", uploaded: 1, failed: 0, want: "?uploaded=1&failed=0"},
-		{name: "single failure", uploaded: 0, failed: 1, want: "?uploaded=0&failed=1"},
-		{name: "mixed", uploaded: 3, failed: 2, want: "?uploaded=3&failed=2"},
+		{name: "nothing happened", want: ""},
+		{name: "single success", uploaded: 1, want: "?uploaded=1&failed=0&cancelled=0"},
+		{name: "single failure", failed: 1, want: "?uploaded=0&failed=1&cancelled=0"},
+		{name: "single cancel", cancelled: 1, want: "?uploaded=0&failed=0&cancelled=1"},
+		{name: "mixed", uploaded: 3, failed: 2, cancelled: 1, want: "?uploaded=3&failed=2&cancelled=1"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got, want := mediahttp.BuildUploadQuery(tc.uploaded, tc.failed), tc.want; got != want {
-				t.Errorf("BuildUploadQuery(%d, %d) = %q, want %q",
-					tc.uploaded, tc.failed, got, want)
+			if got, want := mediahttp.BuildUploadQuery(tc.uploaded, tc.failed, tc.cancelled), tc.want; got != want {
+				t.Errorf("BuildUploadQuery(%d, %d, %d) = %q, want %q",
+					tc.uploaded, tc.failed, tc.cancelled, got, want)
 			}
 		})
 	}
@@ -98,7 +100,7 @@ func TestBuildUploadQuery(t *testing.T) {
 func TestWriteUploadJSON(t *testing.T) {
 	t.Parallel()
 
-	t.Run("non-pipeline error returns 500", func(t *testing.T) {
+	t.Run("non-pipeline error lands in failed[] with generic reason", func(t *testing.T) {
 		t.Parallel()
 		results := []mediahttp.UploadResult{
 			{Filename: "good.png", MediaID: 42},
@@ -107,11 +109,32 @@ func TestWriteUploadJSON(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/upload", nil)
 		mediahttp.WriteUploadJSON(rec, req, slog.New(slog.DiscardHandler), results)
-		if got, want := rec.Code, http.StatusInternalServerError; got != want {
-			t.Errorf("writeUploadJSON(non-pipeline error) status = %d, want %d", got, want)
+		if got, want := rec.Code, http.StatusOK; got != want {
+			t.Fatalf("writeUploadJSON(non-pipeline error) status = %d, want %d", got, want)
 		}
-		if got, want := rec.Body.String(), "internal error"; !strings.Contains(got, want) {
-			t.Errorf("writeUploadJSON(non-pipeline error) body = %q, should contain %q", got, want)
+		type uploadedItem struct {
+			Filename string `json:"filename"`
+			ID       int64  `json:"id"`
+		}
+		type failedItem struct {
+			Filename string `json:"filename"`
+			Reason   string `json:"reason"`
+		}
+		var payload struct {
+			Uploaded []uploadedItem `json:"uploaded"`
+			Failed   []failedItem   `json:"failed"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("writeUploadJSON(non-pipeline error) Unmarshal err = %v, want nil", err)
+		}
+		if got, want := len(payload.Uploaded), 1; got != want {
+			t.Errorf("writeUploadJSON(non-pipeline error) uploaded len = %d, want %d", got, want)
+		}
+		if got, want := len(payload.Failed), 1; got != want {
+			t.Fatalf("writeUploadJSON(non-pipeline error) failed len = %d, want %d", got, want)
+		}
+		if got, want := payload.Failed[0].Reason, "upload failed"; got != want {
+			t.Errorf("writeUploadJSON(non-pipeline error) failed[0].Reason = %q, want %q", got, want)
 		}
 	})
 

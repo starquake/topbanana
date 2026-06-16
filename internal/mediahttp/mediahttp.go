@@ -19,9 +19,9 @@ import (
 // request session, or (nil, false) when the request is anonymous or cookieless.
 // The serving handlers use it for the private-quiz gate WITHOUT minting a player
 // row or setting a session cookie: a media response is cacheable (public images
-// carry Cache-Control: public, immutable), so it must not attach a Set-Cookie or
-// create a row the way EnsurePlayer would - the same reason the static asset
-// routes are not EnsurePlayer-wrapped.
+// carry a public Cache-Control), so it must not attach a Set-Cookie or create a
+// row the way EnsurePlayer would - the same reason the static asset routes are
+// not EnsurePlayer-wrapped.
 type Viewer func(r *http.Request) (*auth.Player, bool)
 
 // MediaService is the slice of *media.Service the handlers use. Defined here

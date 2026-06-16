@@ -22,7 +22,14 @@
     function openModal(id) {
         const modal = document.getElementById(id);
         if (!modal) return;
+        // A second open() without an intervening close() would leak the prior
+        // keydown listener; closeModal-first guarantees one listener per id.
+        if (modalState.has(id)) closeModal(id);
         modal.classList.remove('hidden');
+
+        // Reset any inline error indicators inside the modal so a previous
+        // failed action's banner doesn't carry over into a fresh attempt.
+        modal.querySelectorAll('[data-testid$="-error"]').forEach((el) => { el.hidden = true; });
 
         const previouslyFocused = document.activeElement;
         const focusables = focusableInModal(modal);
@@ -64,6 +71,11 @@
             && typeof state.previouslyFocused.focus === 'function'
             && document.contains(state.previouslyFocused)) {
             state.previouslyFocused.focus();
+        } else if (document.body && typeof document.body.focus === 'function') {
+            // The trigger was detached (htmx swap); send focus to body so
+            // keyboard users restart from a defined landmark instead of being
+            // left with no focus target.
+            document.body.focus();
         }
         modalState.delete(id);
     }

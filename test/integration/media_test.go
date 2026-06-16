@@ -113,7 +113,7 @@ func TestMediaUpload_Integration(t *testing.T) {
 			t.Errorf("multi upload status = %d, want %d", got, want)
 		}
 		if got, want := resp.Header.Get("Location"),
-			fmt.Sprintf("/admin/quizzes/%d?uploaded=3&failed=0#images", quizID); got != want {
+			fmt.Sprintf("/admin/quizzes/%d?uploaded=3&failed=0&cancelled=0#images", quizID); got != want {
 			t.Errorf("multi upload redirect Location = %q, want %q", got, want)
 		}
 	})
@@ -136,8 +136,31 @@ func TestMediaUpload_Integration(t *testing.T) {
 			t.Errorf("partial upload status = %d, want %d", got, want)
 		}
 		if got, want := resp.Header.Get("Location"),
-			fmt.Sprintf("/admin/quizzes/%d?uploaded=1&failed=1#images", quizID); got != want {
+			fmt.Sprintf("/admin/quizzes/%d?uploaded=1&failed=1&cancelled=0#images", quizID); got != want {
 			t.Errorf("partial upload redirect Location = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("multi-file all-fail batch redirects with banner not error page", func(t *testing.T) {
+		t.Parallel()
+		token := fetchCSRFToken(ctx, t, owner, baseURL+"/admin/quizzes")
+		batch := []multipartFile{
+			{field: "images", filename: "first.txt", data: []byte("not an image at all")},
+			{field: "images", filename: "second.txt", data: []byte("still not an image")},
+		}
+		body, contentType := multipartBatch(t, batch, token)
+		req := newMultipartReq(ctx, t, baseURL+fmt.Sprintf("/admin/quizzes/%d/media", quizID), body, contentType)
+		resp, err := owner.Do(req)
+		if err != nil {
+			t.Fatalf("Do err = %v, want nil", err)
+		}
+		defer closeBody(t, resp.Body)
+		if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
+			t.Errorf("all-fail multi-file status = %d, want %d (banner, not 4xx error page)", got, want)
+		}
+		if got, want := resp.Header.Get("Location"),
+			fmt.Sprintf("/admin/quizzes/%d?uploaded=0&failed=2&cancelled=0#images", quizID); got != want {
+			t.Errorf("all-fail multi-file redirect Location = %q, want %q", got, want)
 		}
 	})
 
@@ -362,13 +385,8 @@ func TestMediaServe_Integration(t *testing.T) {
 		if got, want := resp.StatusCode, http.StatusOK; got != want {
 			t.Fatalf("owner private serve status = %d, want %d", got, want)
 		}
-		// Private bytes use no-store so they never persist in the client cache.
-		cc := resp.Header.Get("Cache-Control")
-		if !strings.Contains(cc, "private") {
-			t.Errorf("private Cache-Control = %q, want it to contain %q", cc, "private")
-		}
-		if !strings.Contains(cc, "no-store") {
-			t.Errorf("private Cache-Control = %q, want it to contain %q", cc, "no-store")
+		if got := resp.Header.Get("Cache-Control"); !strings.Contains(got, "private") {
+			t.Errorf("private Cache-Control = %q, want it to contain %q", got, "private")
 		}
 	})
 }
@@ -514,7 +532,7 @@ func uploadImage(
 		rb, _ := io.ReadAll(resp.Body)
 		t.Fatalf("upload status = %d, want %d; body=%q", got, want, rb)
 	}
-	want := fmt.Sprintf("/admin/quizzes/%d?uploaded=1&failed=0#images", quizID)
+	want := fmt.Sprintf("/admin/quizzes/%d?uploaded=1&failed=0&cancelled=0#images", quizID)
 	if got := resp.Header.Get("Location"); got != want {
 		t.Errorf("upload redirect Location = %q, want %q", got, want)
 	}
