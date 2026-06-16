@@ -108,6 +108,36 @@ func TestHandlePlayerResendVerification(t *testing.T) {
 		}
 	})
 
+	t.Run("misconfigured dispatch does not consume the window", func(t *testing.T) {
+		t.Parallel()
+
+		env := newAdminEnv(t)
+		target := env.seedCredentialledPlayer(t, "unverified", "unverified@example.test", auth.RolePlayer)
+		limiter := NewPerTargetLimiter(time.Minute)
+		id := strconv.FormatInt(target, 10)
+
+		// Empty baseURL makes dispatch report "not configured" so no mail
+		// goes out; the stamp must be rolled back (#996).
+		first := postResend(t, env, id, "", limiter)
+		if got, want := first.Code, http.StatusSeeOther; got != want {
+			t.Fatalf("first resend status = %d, want %d", got, want)
+		}
+		if got := first.Header().Get("Retry-After"); got != "" {
+			t.Fatalf("first resend Retry-After = %q, want empty (not rate limited)", got)
+		}
+
+		// A second immediate resend must still be admitted: the window was
+		// never consumed because the first send never happened. A rate-limited
+		// second call would carry a Retry-After header.
+		second := postResend(t, env, id, "", limiter)
+		if got, want := second.Code, http.StatusSeeOther; got != want {
+			t.Errorf("second resend status = %d, want %d", got, want)
+		}
+		if got := second.Header().Get("Retry-After"); got != "" {
+			t.Errorf("second resend Retry-After = %q, want empty (window not consumed by the misconfigured first)", got)
+		}
+	})
+
 	t.Run("second resend within the window is rate limited", func(t *testing.T) {
 		t.Parallel()
 

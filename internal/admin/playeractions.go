@@ -99,7 +99,8 @@ func HandlePlayerResendVerification(
 			return
 		}
 
-		if wait, allowed := limiter.Allow(playerID); !allowed {
+		wait, allowed, token := limiter.Allow(playerID)
+		if !allowed {
 			seconds := max(int((wait+time.Second-1)/time.Second), 1)
 			flash.SetError(w, "Slow down: wait a moment before resending.", seconds)
 			w.Header().Set("Retry-After", strconv.Itoa(seconds))
@@ -111,6 +112,11 @@ func HandlePlayerResendVerification(
 		if !dispatchAdminResendVerification(
 			r.Context(), logger, tokens, sender, baseURL, detail.Email, playerID, tasks,
 		) {
+			// No mail went out (email not configured), so roll the stamp
+			// back: an operator on a misconfigured instance is not throttled
+			// for a send that never happened (#996). Token-matched so a
+			// second concurrent caller's newer stamp is not clobbered.
+			limiter.Cancel(playerID, token)
 			flash.SetError(w, "Email sending is not configured; no verification email was sent.", 0)
 			redirectToPlayerDetail(w, r, playerID)
 
@@ -753,9 +759,11 @@ func newPerTargetLimiterWithClock(window time.Duration, now func() time.Time) *P
 }
 
 // Allow reports whether target may dispatch right now. On admit stamps
-// the bucket so the next call within the window is blocked; on block
-// returns the remaining wait so the caller can render it.
-func (l *PerTargetLimiter) Allow(target int64) (time.Duration, bool) {
+// the bucket so the next call within the window is blocked and returns
+// the stamp as a token; pass it to [PerTargetLimiter.Cancel] to revert
+// this specific stamp on a downstream bail-out. On block returns the
+// remaining wait so the caller can render it, and the zero-time token.
+func (l *PerTargetLimiter) Allow(target int64) (time.Duration, bool, time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -768,10 +776,25 @@ func (l *PerTargetLimiter) Allow(target int64) (time.Duration, bool) {
 	}
 	if prev, ok := l.last[target]; ok {
 		if remaining := l.window - now.Sub(prev); remaining > 0 {
-			return remaining, false
+			return remaining, false, time.Time{}
 		}
 	}
 	l.last[target] = now
 
-	return 0, true
+	return 0, true, now
+}
+
+// Cancel reverts the stamp Allow wrote for target, but only if the live
+// stamp still matches token. Matching on token keeps a slow caller from
+// clobbering a newer stamp a second concurrent caller wrote in between
+// this caller's Allow and Cancel - that newer stamp must stand so the
+// second caller's window is honoured. Idempotent: Cancel on a target
+// with no entry, or with a stale token, is a no-op.
+func (l *PerTargetLimiter) Cancel(target int64, token time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if cur, ok := l.last[target]; ok && cur.Equal(token) {
+		delete(l.last, target)
+	}
 }
