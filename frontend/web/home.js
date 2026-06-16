@@ -4,41 +4,15 @@
 // from a previous join (the localStorage entry JoinApp writes on a successful
 // join). With no remembered entry the default CTA shows.
 //
-// The remembered-session shape mirrors JoinApp.SESSION_STORAGE_KEY exactly so
-// the home page reads what the client surface wrote. Keeping the read-side
-// code here means home doesn't pull in the player-client bundle to look at
-// localStorage. esbuild bundles this to dist/home.js, served at
-// /static/js/home.js.
+// The key string and parse shape live in the shared rememberedSession module so
+// the home page reads exactly what the player client (JoinApp) wrote, from one
+// place (#1005). esbuild inlines the shared module into this bundle, emitted to
+// dist/home.js and served at /static/js/home.js.
 
-const SESSION_STORAGE_KEY = 'topbanana.session';
-
-function readRememberedCode() {
-    let raw;
-    try {
-        raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
-    } catch {
-        return '';
-    }
-    if (!raw) return '';
-    try {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed.code === 'string' && parsed.code !== '') {
-            return parsed.code;
-        }
-    } catch {
-        // Malformed entry; ignore.
-    }
-    return '';
-}
-
-function forgetRememberedSession() {
-    try {
-        window.localStorage.removeItem(SESSION_STORAGE_KEY);
-    } catch {
-        // Storage is unavailable; the entry will self-heal on a later
-        // failed resume.
-    }
-}
+import {
+    readRememberedSession,
+    forgetRememberedSession,
+} from '@shared/rememberedSession.js';
 
 // resumeSessionCta is the Alpine component registered against the home page's
 // CTA island. It exposes resumeCode (the remembered join code or empty) and
@@ -50,7 +24,8 @@ function resumeSessionCta() {
     return {
         resumeCode: '',
         init() {
-            this.resumeCode = readRememberedCode();
+            const remembered = readRememberedSession();
+            this.resumeCode = remembered ? remembered.code : '';
         },
         exit() {
             const code = this.resumeCode;
