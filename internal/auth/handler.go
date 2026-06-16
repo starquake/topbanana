@@ -38,6 +38,11 @@ const MinPasswordLength = 13
 // already knows what that means. Both check the same byte length.
 const MaxPasswordLength = 72
 
+// MaxDisplayNameLength caps a display name in runes. It is rendered to every
+// other player on leaderboards and rosters, so the length is bounded as both a
+// layout and an abuse guard. Every display-name entry point enforces this.
+const MaxDisplayNameLength = 50
+
 const (
 	adminLandingPath  = "/admin/quizzes"
 	playerLandingPath = "/"

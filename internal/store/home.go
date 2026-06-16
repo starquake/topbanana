@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log/slog"
 
 	"github.com/starquake/topbanana/internal/db"
 	"github.com/starquake/topbanana/internal/home"
@@ -14,16 +13,12 @@ import (
 // the sqlc-generated queries that aggregate plays and finishers across
 // the games + quizzes + players tables.
 type HomeStore struct {
-	q      *db.Queries
-	logger *slog.Logger
+	q *db.Queries
 }
 
-// NewHomeStore wires a HomeStore against the supplied database
-// connection. The logger is held for future error annotation; the
-// current methods return wrapped errors directly so the caller logs
-// once at the handler layer.
-func NewHomeStore(conn *sql.DB, logger *slog.Logger) *HomeStore {
-	return &HomeStore{q: db.New(conn), logger: logger}
+// NewHomeStore wires a HomeStore against the supplied database connection.
+func NewHomeStore(conn *sql.DB) *HomeStore {
+	return &HomeStore{q: db.New(conn)}
 }
 
 // ListPopularQuizzes returns the top-ranked quizzes by recent play

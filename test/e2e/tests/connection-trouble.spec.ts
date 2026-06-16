@@ -142,4 +142,52 @@ test.describe('live client connection trouble', () => {
     });
     await expect(page.locator('[data-connection-trouble]')).toHaveCount(0, { timeout: 10_000 });
   });
+
+  // A 404 on GET /state means the session was ended/deleted out from under the
+  // big screen. That is terminal, not a retryable connection fault, so it
+  // surfaces a "Session ended" signal in the footer status area instead of
+  // leaving the last phase frozen with no operator feedback.
+  test('host TV surfaces a session-ended signal when state 404s', async ({ page, hostSessions, browserName }) => {
+    test.setTimeout(60_000);
+
+    const displayName = `e2e-gone-host-${browserName}-${Date.now()}`;
+    const quizTitle = `Gone Host ${browserName} ${Date.now()}`;
+
+    await registerForPending(page, displayName);
+    markEmailVerified(displayName);
+    markAdmin(displayName);
+    await login(page, displayName);
+    await expect(page).toHaveURL(/\/admin\/quizzes$/);
+
+    await seedQuiz(page, quizTitle);
+    setQuizMode(quizTitle, 'live');
+
+    await page.goto('/admin/quizzes');
+    await page.getByRole('link', { name: quizTitle }).click();
+    await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+    await page.getByRole('button', { name: 'Host live' }).click();
+    await expect(page).toHaveURL(/\/host\/[A-Z0-9]+$/);
+    const code = page.url().split('/host/')[1];
+    hostSessions.track(page, code);
+
+    await expect(page.getByTestId('session-gone')).toHaveCount(0);
+
+    // Force GET /state to 404 (the session is gone), then drive a refresh
+    // through the Alpine component directly (the SSE onmessage path is awkward
+    // to trigger from the test), mirroring the trouble-banner specs above.
+    await page.route(`**/api/sessions/${code}/state`, (route) =>
+      route.fulfill({ status: 404, body: 'not found' }),
+    );
+    await page.evaluate(() => {
+      const root = document.querySelector('[x-data^="hostBigScreen"]');
+      const cmp = (window as unknown as { Alpine: { $data: (el: Element) => { refresh: () => Promise<void> } } }).Alpine.$data(root!);
+      return cmp.refresh();
+    });
+
+    await expect(page.getByTestId('session-gone')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('session-gone')).toContainText('Session ended');
+    // The terminal signal replaces the live/reconnecting dot and the trouble
+    // banner, not sits alongside them.
+    await expect(page.locator('[data-connection-trouble]')).toHaveCount(0);
+  });
 });

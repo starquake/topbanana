@@ -2,6 +2,7 @@
 package clientapi
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -11,9 +12,11 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/game"
@@ -301,9 +304,7 @@ const leaderboardLimit = 10
 //
 // InProgress is true when the player is still mid-quiz: Score may be a
 // running partial total (#244) or zero if the player has clicked Start
-// but not yet submitted their first answer (#335). Picked as the wire
-// name instead of Completed so the client only has to branch on a
-// positive signal to render the badge.
+// but not yet submitted their first answer (#335).
 type quizLeaderboardEntryResponse struct {
 	PlayerID        int64  `json:"playerId"`
 	DisplayName     string `json:"displayName"`
@@ -1129,11 +1130,10 @@ func HandleAnswerPost(logger *slog.Logger, service *game.Service) http.Handler {
 	})
 }
 
-// playerResponse is the JSON shape for GET and PATCH /api/players/me.
-// isAuthenticated is distinct from !isAnonymous: an OAuth-only player
-// has no password_hash (isAnonymous == true) but IS known via their
-// linked identity (isAuthenticated == true). The client gates the
-// claim-name modal on isAuthenticated.
+// playerResponse is the JSON shape for GET and PATCH /api/players/me. The three
+// flags are independent: isAnonymous (credential-less guest), isAuthenticated
+// (signed-in account), and hasCustomName (picked their own name) can mix, e.g. a
+// renamed guest is hasCustomName and still isAnonymous.
 type playerResponse struct {
 	ID              int64  `json:"id"`
 	DisplayName     string `json:"displayName"`
@@ -1210,8 +1210,16 @@ func HandlePlayerClaimName(
 
 			return
 		}
-		if strings.TrimSpace(req.DisplayName) == "" {
+		trimmed := strings.TrimSpace(req.DisplayName)
+		if trimmed == "" {
 			http.Error(w, "display name is required", http.StatusBadRequest)
+
+			return
+		}
+		if utf8.RuneCountInString(trimmed) > auth.MaxDisplayNameLength {
+			writeClaimNameError(w, r, logger,
+				http.StatusBadRequest, "display_name_too_long",
+				fmt.Sprintf("display name must be at most %d characters", auth.MaxDisplayNameLength))
 
 			return
 		}
@@ -1299,6 +1307,15 @@ func HandleGameResults(logger *slog.Logger, service *game.Service) http.Handler 
 				Score:    psVal,
 			})
 		}
+		// Map iteration is randomized; sort for a deterministic wire order
+		// (score desc, then player id asc).
+		slices.SortFunc(psr, func(a, b playerScoreResponse) int {
+			if c := cmp.Compare(b.Score, a.Score); c != 0 {
+				return c
+			}
+
+			return cmp.Compare(a.PlayerID, b.PlayerID)
+		})
 		var winner string
 		if results.Winner != 0 {
 			winner = strconv.FormatInt(results.Winner, decimalBase)

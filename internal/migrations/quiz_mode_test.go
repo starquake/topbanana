@@ -1,7 +1,6 @@
 package migrations_test
 
 import (
-	"context"
 	"log/slog"
 	"testing"
 
@@ -19,7 +18,7 @@ import (
 func TestQuizModeMigration_BackfillsSolo(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := dbtest.Open(t)
 	t.Cleanup(func() {
 		if cerr := db.Close(); cerr != nil {

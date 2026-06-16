@@ -1,7 +1,6 @@
 package migrations_test
 
 import (
-	"context"
 	"database/sql"
 	"testing"
 
@@ -67,7 +66,7 @@ func TestMediaMigration_QuizDeleteCascades(t *testing.T) {
 	keepMediaID := seedMedia(t, db, keepQuiz)
 
 	if _, err := db.ExecContext(
-		context.Background(), "DELETE FROM quizzes WHERE id = ?", doomedQuiz,
+		t.Context(), "DELETE FROM quizzes WHERE id = ?", doomedQuiz,
 	); err != nil {
 		t.Fatalf("delete quiz err = %v, want nil", err)
 	}
@@ -89,7 +88,7 @@ func seedMedia(t *testing.T, db *sql.DB, quizID int64) int64 {
 	t.Helper()
 	var id int64
 	if err := db.QueryRowContext(
-		context.Background(),
+		t.Context(),
 		`INSERT INTO media (quiz_id, mime, path, size_bytes, sha256, created_by_player_id)
 		 VALUES (?, 'image/webp', 'p.webp', 10, 'deadbeef', 1) RETURNING id`,
 		quizID,
@@ -104,7 +103,7 @@ func countMedia(t *testing.T, db *sql.DB, quizID int64) int {
 	t.Helper()
 	var n int
 	if err := db.QueryRowContext(
-		context.Background(), "SELECT count(*) FROM media WHERE quiz_id = ?", quizID,
+		t.Context(), "SELECT count(*) FROM media WHERE quiz_id = ?", quizID,
 	).Scan(&n); err != nil {
 		t.Fatalf("count media err = %v, want nil", err)
 	}
@@ -116,7 +115,7 @@ func mediaExists(t *testing.T, db *sql.DB, id int64) bool {
 	t.Helper()
 	var n int
 	if err := db.QueryRowContext(
-		context.Background(), "SELECT count(*) FROM media WHERE id = ?", id,
+		t.Context(), "SELECT count(*) FROM media WHERE id = ?", id,
 	).Scan(&n); err != nil {
 		t.Fatalf("media exists err = %v, want nil", err)
 	}
@@ -128,7 +127,7 @@ func mediaExists(t *testing.T, db *sql.DB, id int64) bool {
 func tableColumns(t *testing.T, db *sql.DB, table string) map[string]bool {
 	t.Helper()
 	rows, err := db.QueryContext(
-		context.Background(), "SELECT name FROM pragma_table_info(?)", table,
+		t.Context(), "SELECT name FROM pragma_table_info(?)", table,
 	)
 	if err != nil {
 		t.Fatalf("pragma_table_info err = %v, want nil", err)
@@ -159,7 +158,7 @@ func indexExists(t *testing.T, db *sql.DB, name string) bool {
 	t.Helper()
 	var n int
 	if err := db.QueryRowContext(
-		context.Background(),
+		t.Context(),
 		"SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = ?", name,
 	).Scan(&n); err != nil {
 		t.Fatalf("index exists err = %v, want nil", err)
@@ -172,7 +171,7 @@ func indexExists(t *testing.T, db *sql.DB, name string) bool {
 func foreignKeyTargets(t *testing.T, db *sql.DB, table string) map[string]bool {
 	t.Helper()
 	rows, err := db.QueryContext(
-		context.Background(), "SELECT \"table\" FROM pragma_foreign_key_list(?)", table,
+		t.Context(), "SELECT \"table\" FROM pragma_foreign_key_list(?)", table,
 	)
 	if err != nil {
 		t.Fatalf("pragma_foreign_key_list err = %v, want nil", err)

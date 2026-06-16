@@ -23,12 +23,20 @@ type LiveSessionStore struct {
 	q      *db.Queries
 	db     *sql.DB
 	logger *slog.Logger
+	// newID mints the session primary key; a field so a test can force a known
+	// id and exercise the PK-collision branch of CreateSession.
+	newID func() string
 }
 
 // NewLiveSessionStore initializes a LiveSessionStore with the provided
 // database connection and logger.
 func NewLiveSessionStore(conn *sql.DB, logger *slog.Logger) *LiveSessionStore {
-	return &LiveSessionStore{q: db.New(conn), db: conn, logger: logger}
+	return &LiveSessionStore{
+		q:      db.New(conn),
+		db:     conn,
+		logger: logger,
+		newID:  func() string { return xid.New().String() },
+	}
 }
 
 // Ping verifies the database connection.
@@ -52,7 +60,7 @@ func (s *LiveSessionStore) CreateSession(ctx context.Context, sess *livesession.
 		quizID = sql.NullInt64{Int64: *sess.QuizID, Valid: true}
 	}
 	row, err := s.q.CreateSession(ctx, db.CreateSessionParams{
-		ID:           xid.New().String(),
+		ID:           s.newID(),
 		QuizID:       quizID,
 		HostPlayerID: sess.HostPlayerID,
 		JoinCode:     sess.JoinCode,
@@ -60,7 +68,12 @@ func (s *LiveSessionStore) CreateSession(ctx context.Context, sess *livesession.
 	if err != nil {
 		var sqliteErr *sqlite.Error
 		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
-			return livesession.ErrJoinCodeUnavailable
+			// A bare UNIQUE violation is ambiguous (id PK or join_code). Probe
+			// the join code so an id PK collision surfaces as a real internal
+			// error instead of the join-code re-probe loop.
+			if taken, probeErr := s.q.JoinCodeExists(ctx, sess.JoinCode); probeErr == nil && taken {
+				return livesession.ErrJoinCodeUnavailable
+			}
 		}
 
 		return fmt.Errorf("failed to create session: %w", err)

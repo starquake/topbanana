@@ -1,14 +1,11 @@
-// Package profile renders the signed-in player's profile page at
-// GET /profile and handles the rename submission at POST
-// /profile/display-name (#410). The page is the future home for
-// account-level controls: email change (depends on #111), password
-// change (depends on #112), linked OAuth identities, etc. Today it
-// hosts the displayName editor only; everything else is scoped out of
-// the initial cut.
+// Package profile renders the signed-in player's profile page and the
+// account-level controls it hosts:
+//   - GET/POST /profile (display name editor, #410)
+//   - GET/POST /profile/email (email change, #111)
+//   - GET/POST /profile/password (password change, #112)
 //
-// Authorisation lives entirely in auth.RequireAuthenticated upstream
-// of the handler - both routes are mounted behind it so the handler
-// can assume a *Player is on the request context.
+// Every route is mounted behind auth.RequireAuthenticated, so the handlers can
+// assume a *Player is on the request context.
 package profile
 
 import (

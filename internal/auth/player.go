@@ -75,15 +75,17 @@ func (p *Player) IsEmailVerified() bool {
 }
 
 // IsAnonymous reports whether the player has no credentials set yet (no
-// password_hash) AND holds the default Player tier. Anonymous rows are created
-// by EnsurePlayer for visitors who arrive without a session and may later be
-// upgraded by ClaimPlayer.
+// password_hash, no email) AND holds the default Player tier.
+//
+// The email exclusion keeps an OAuth-claimed row (email set, no password) from
+// reading as anonymous: it is a real account, so migrateGamesAfterSignIn must
+// not reattribute its game history onto a different account.
 //
 // The non-player exclusion guards the seeded admin row (id=1), which has a NULL
 // password_hash but holds the Host tier after the #538 remap; it must never be
 // treated as a claimable anonymous row by HandleRegisterSubmit's claim path.
 func (p *Player) IsAnonymous() bool {
-	return p.PasswordHash == "" && p.Role == RolePlayer
+	return p.PasswordHash == "" && p.Email == "" && p.Role == RolePlayer
 }
 
 // HasCustomName reports whether the player has explicitly picked their
@@ -366,11 +368,12 @@ type AdminPlayerStore interface {
 	ListAdminAuditForTarget(
 		ctx context.Context, targetPlayerID, limit int64,
 	) ([]*AdminAuditEntry, error)
-	// RenamePlayer changes the display name on the row identified by id,
-	// regardless of password_hash / email / role. Returns ErrDisplayNameEmpty
-	// for whitespace-only input, ErrDisplayNameTaken on a UNIQUE collision, and
-	// ErrPlayerNotFound when the id does not exist.
-	RenamePlayer(ctx context.Context, playerID int64, displayName string) (*Player, error)
+	// AdminRenamePlayer changes the display name on any row, leaving
+	// display_name_claimed untouched so an admin tidying a guest's auto-petname
+	// does not promote the row to a self-claimed account. Returns
+	// ErrDisplayNameEmpty for whitespace-only input, ErrDisplayNameTaken on a
+	// UNIQUE collision, and ErrPlayerNotFound when the id does not exist.
+	AdminRenamePlayer(ctx context.Context, playerID int64, displayName string) (*Player, error)
 	// ChangePlayerPassword atomically rotates password_hash and bumps
 	// session_version on the row identified by id. The session_version bump
 	// invalidates every other live cookie for the same account the moment

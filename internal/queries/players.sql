@@ -139,9 +139,15 @@ RETURNING *;
 -- rows that already had a password_hash; later password sets via this
 -- query previously left display_name_claimed at 0, which made the seed
 -- admin (id=1) keep popping the claim-name modal in the player client.
+--
+-- session_version is bumped so the rotation invalidates every other live
+-- cookie for this account, matching ResetPlayerPassword. An operator reset
+-- is almost always a security action (compromised or lost account), so
+-- leaving old sessions alive on the previous credential would defeat it.
 UPDATE players
 SET password_hash    = sqlc.arg('password_hash'),
-    display_name_claimed = 1
+    display_name_claimed = 1,
+    session_version = session_version + 1
 WHERE email = sqlc.arg('email');
 
 -- name: GetPlayerByEmail :one
@@ -321,6 +327,23 @@ RETURNING *;
 UPDATE players
 SET display_name = sqlc.arg('display_name'),
     display_name_claimed = 1
+WHERE id = sqlc.arg('id')
+RETURNING *;
+
+-- name: AdminRenamePlayer :one
+-- Renames any player row by id from the admin player-actions surface,
+-- leaving display_name_claimed untouched. An admin tidying an anonymous
+-- guest's auto-petname must NOT flip the row to "claimed": that column
+-- tracks whether the player picked the name themselves, and a claimed
+-- row is treated as a stable account downstream (e.g. it becomes eligible
+-- for the public most-active list and stops popping the claim-name modal).
+-- Only the player's own rename (RenamePlayer above) sets the flag.
+--
+-- Returns the updated row when one was affected; the store wrapper maps
+-- sql.ErrNoRows to ErrPlayerNotFound and a UNIQUE constraint failure on
+-- players.display_name to ErrDisplayNameTaken.
+UPDATE players
+SET display_name = sqlc.arg('display_name')
 WHERE id = sqlc.arg('id')
 RETURNING *;
 

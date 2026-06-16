@@ -331,6 +331,51 @@ func TestDecodeJSON(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects unknown fields", func(t *testing.T) {
+		t.Parallel()
+		type request struct {
+			Name string `json:"name"`
+		}
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/",
+			strings.NewReader(`{"name":"test","extra":1}`))
+		w := httptest.NewRecorder()
+		_, err := DecodeJSON[request](w, r)
+		if err == nil {
+			t.Fatal("expected error for unknown field, got nil")
+		}
+		if got, want := err.Error(), "failed to decode json"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+
+	t.Run("rejects trailing data after the first value", func(t *testing.T) {
+		t.Parallel()
+		type request struct {
+			Name string `json:"name"`
+		}
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/",
+			strings.NewReader(`{"name":"a"}{"name":"b"}`))
+		w := httptest.NewRecorder()
+		_, err := DecodeJSON[request](w, r)
+		if got, want := err, ErrTrailingJSONData; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("rejects trailing junk after the first value", func(t *testing.T) {
+		t.Parallel()
+		type request struct {
+			Name string `json:"name"`
+		}
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/",
+			strings.NewReader(`{"name":"a"} garbage`))
+		w := httptest.NewRecorder()
+		_, err := DecodeJSON[request](w, r)
+		if err == nil {
+			t.Fatal("expected error for trailing junk, got nil")
+		}
+	})
+
 	t.Run("body larger than the cap surfaces a 400 via the caller", func(t *testing.T) {
 		t.Parallel()
 		type request struct {

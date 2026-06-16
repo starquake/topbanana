@@ -149,3 +149,19 @@ var ValidateAcceptInviteInput = validateAcceptInviteInput
 // the external test package can pin the create-conflict sentinel
 // mapping without staging the whole accept-invite flow.
 var AcceptInviteCollisionMessage = acceptInviteCollisionMessage
+
+// MigrateGamesAfterSignIn exposes migrateGamesAfterSignIn for the external test package.
+func MigrateGamesAfterSignIn(
+	ctx context.Context,
+	logger *slog.Logger,
+	players PlayerByIDLookup,
+	games AnonymousGameMigrator,
+	priorSessionPlayerID *int64,
+	signedInPlayerID int64,
+) {
+	migrateGamesAfterSignIn(ctx, logger, players, games, priorSessionPlayerID, signedInPlayerID)
+}
+
+// PlayerByIDLookup exposes the unexported playerByIDLookup interface so the
+// external test package can supply a stub.
+type PlayerByIDLookup = playerByIDLookup

@@ -62,6 +62,42 @@ func TestClaimName_NonAnonymousReturnsAlreadyClaimed(t *testing.T) {
 	}
 }
 
+// TestClaimName_TooLongRejected pins that the claim-name endpoint rejects an
+// over-long display name with a 400 and the display_name_too_long code.
+func TestClaimName_TooLongRejected(t *testing.T) {
+	t.Parallel()
+
+	ctx, srv := startServer(t, map[string]string{"REGISTRATION_ENABLED": "true"})
+	baseURL := srv.BaseURL
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New err = %v, want nil", err)
+	}
+	client := &http.Client{Jar: jar}
+
+	// GET /api/players/me mints an anonymous player + session cookie, so the
+	// follow-up PATCH lands on a claimable row.
+	_ = fetchPlayerMe(ctx, t, client, baseURL)
+
+	// 51 runes is one over the MaxDisplayNameLength cap.
+	tooLong := strings.Repeat("a", 51)
+	body, status := patchPlayerDisplayNameWithBody(ctx, t, client, baseURL, tooLong)
+	if got, want := status, http.StatusBadRequest; got != want {
+		t.Fatalf("PATCH status = %d, want %d (body=%q)", got, want, body)
+	}
+
+	var payload struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode body err = %v (raw=%q)", err, body)
+	}
+	if got, want := payload.Code, "display_name_too_long"; got != want {
+		t.Errorf("body.code = %q, want %q (raw=%q)", got, want, body)
+	}
+}
+
 // patchPlayerDisplayNameWithBody is patchPlayerDisplayName (in anonymous_test.go)
 // but also returns the response body so the caller can assert on the
 // structured error JSON introduced for #289.

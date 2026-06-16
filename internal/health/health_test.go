@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/starquake/topbanana/internal/dbtest"
@@ -73,7 +72,8 @@ func TestHandleHealthz_DegradedWhenDatabasePingFails(t *testing.T) {
 	if got, want := res.Status, "degraded"; got != want {
 		t.Errorf("status = %q, want %q", got, want)
 	}
-	if got, want := res.Checks["database"], "unhealthy"; !strings.Contains(got, want) {
-		t.Errorf("checks.database = %q, should contain %q", got, want)
+	// Generic status only: the raw driver error could leak the DB path / DSN.
+	if got, want := res.Checks["database"], "unhealthy"; got != want {
+		t.Errorf("checks.database = %q, want exactly %q (no leaked detail)", got, want)
 	}
 }

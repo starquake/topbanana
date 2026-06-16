@@ -24,7 +24,7 @@ func main() {
 		"",
 		"reset the password for the given email; reads the new password from stdin and exits."+
 			" The server should not be running concurrently against the same database."+
-			" Takes precedence over -check when both are supplied",
+			" Mutually exclusive with the other mode flags",
 	)
 	promoteAdminFor := flag.String(
 		"promote-admin",
@@ -44,6 +44,17 @@ func main() {
 	flag.Parse()
 
 	ctx := context.Background()
+
+	// Reject more than one mode flag: resolving by switch order would silently
+	// run a different recovery action than the operator asked for.
+	if tooManyModes(*resetPasswordFor != "", *promoteAdminFor != "", *checkOnly, *healthcheckOnly) {
+		if _, err := fmt.Fprintln(os.Stderr,
+			"error: -reset-password, -promote-admin, -check, and -healthcheck are mutually exclusive"); err != nil {
+			panic(err)
+		}
+
+		os.Exit(1)
+	}
 
 	database.SetupGoose()
 
@@ -68,4 +79,16 @@ func main() {
 
 		os.Exit(1)
 	}
+}
+
+// tooManyModes reports whether more than one mode flag is set.
+func tooManyModes(modes ...bool) bool {
+	set := 0
+	for _, m := range modes {
+		if m {
+			set++
+		}
+	}
+
+	return set > 1
 }

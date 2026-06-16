@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -48,6 +49,10 @@ const maxJSONBodySize = 64 * 1024
 
 // ErrNoSlugSeparator is returned by IDFromSlugID when the input contains no "-".
 var ErrNoSlugSeparator = errors.New("no separator found in slug")
+
+// ErrTrailingJSONData is returned by DecodeJSON when the body carries more than
+// a single JSON value.
+var ErrTrailingJSONData = errors.New("unexpected data after JSON value")
 
 // IDFromString parses an int64 ID from the given string.
 // returns 0 if the path value is empty.
@@ -135,14 +140,21 @@ func EncodeJSON[T any](w http.ResponseWriter, statusCode int, v T) error {
 	return nil
 }
 
-// DecodeJSON decodes JSON from r, capping the body at maxJSONBodySize.
-// Passing w lets [http.MaxBytesReader] signal the cap to the client when the
-// limit is exceeded; the returned error surfaces as a 400 in the caller.
+// DecodeJSON decodes a single JSON value from r, capping the body at
+// maxJSONBodySize. Passing w lets [http.MaxBytesReader] signal the cap to the
+// client; the returned error surfaces as a 400 in the caller. Unknown fields
+// and any data after the first JSON value are rejected so a malformed or
+// smuggled payload fails loudly rather than decoding partially.
 func DecodeJSON[T any](w http.ResponseWriter, r *http.Request) (T, error) {
 	var v T
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
-	if err := json.NewDecoder(r.Body).Decode(&v); err != nil {
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&v); err != nil {
 		return v, fmt.Errorf("failed to decode json: %w", err)
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return v, fmt.Errorf("%w: unexpected trailing data", ErrTrailingJSONData)
 	}
 
 	return v, nil

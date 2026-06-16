@@ -205,6 +205,40 @@ func (s *PlayerStore) RenamePlayer(
 	return playerFromRow(row), nil
 }
 
+// AdminRenamePlayer changes the display name on any row, leaving
+// display_name_claimed untouched so an admin tidying a guest's auto-petname does
+// not promote the row to a self-claimed account. Returns auth.ErrDisplayNameEmpty
+// for whitespace-only input, auth.ErrDisplayNameTaken on a UNIQUE collision, and
+// auth.ErrPlayerNotFound when no row matches the id.
+func (s *PlayerStore) AdminRenamePlayer(
+	ctx context.Context,
+	playerID int64,
+	displayName string,
+) (*auth.Player, error) {
+	cleaned := strings.TrimSpace(displayName)
+	if cleaned == "" {
+		return nil, auth.ErrDisplayNameEmpty
+	}
+
+	row, err := s.q.AdminRenamePlayer(ctx, db.AdminRenamePlayerParams{
+		DisplayName: cleaned,
+		ID:          playerID,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, auth.ErrPlayerNotFound
+		}
+		var sqliteErr *sqlite.Error
+		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+			return nil, auth.ErrDisplayNameTaken
+		}
+
+		return nil, fmt.Errorf("failed to admin-rename player: %w", err)
+	}
+
+	return playerFromRow(row), nil
+}
+
 // GetPlayerByEmail returns the player whose email matches. Returns
 // auth.ErrPlayerNotFound when no row matches. The email is wrapped in a
 // [sql.NullString] with Valid=true so a literal NULL row never matches a

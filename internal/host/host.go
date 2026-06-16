@@ -76,21 +76,27 @@ type Handlers struct {
 	logger    *slog.Logger
 	service   *livesession.Service
 	quizzes   quiz.Store
+	baseURL   string
 	bigScreen *render.Renderer
 	picker    *render.Renderer
 }
 
-// NewHandlers wires the host surface over the live-session service.
+// NewHandlers wires the host surface over the live-session service. baseURL is
+// the trusted BASE_URL used for the join QR target so a forged X-Forwarded-Host
+// cannot redirect scanning players to an attacker host; empty means dev, where
+// it falls back to the request base.
 func NewHandlers(
 	logger *slog.Logger,
 	csrfMgr *csrf.Manager,
 	service *livesession.Service,
 	quizStore quiz.Store,
+	baseURL string,
 ) *Handlers {
 	return &Handlers{
 		logger:  logger,
 		service: service,
 		quizzes: quizStore,
+		baseURL: baseURL,
 		// The host surfaces render none of admin's top-bar / nav chrome, so
 		// they bind nothing beyond render.Renderer's own csrfToken (nil funcs).
 		bigScreen: render.New(logger, csrfMgr, parseTemplate("host/pages/bigscreen.gohtml"), "base.gohtml", nil),
@@ -129,7 +135,12 @@ func (h *Handlers) BigScreen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	baseURL := absurl.BaseURL(r)
+	// Trusted base for the QR target; request base only as a dev fallback (see
+	// NewHandlers).
+	baseURL := h.baseURL
+	if baseURL == "" {
+		baseURL = absurl.BaseURL(r)
+	}
 	joinURL := baseURL + joinPathPrefix + state.Session.JoinCode
 	joinEntry := strings.TrimPrefix(strings.TrimPrefix(baseURL+joinEntryPath, "https://"), "http://")
 	svg, err := qrcode.SVG([]byte(joinURL))

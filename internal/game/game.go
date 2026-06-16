@@ -1073,8 +1073,10 @@ func (s *Service) GetResults(ctx context.Context, gameID string, playerID int64)
 		}
 	}
 
+	// Seed at 0 so an all-wrong run leaves Winner == 0 (no winner) rather than
+	// crowning a zero-score player.
 	var winner int64
-	topScore := -1
+	topScore := 0
 	for playerID, score := range plsMap {
 		if score > topScore {
 			topScore = score

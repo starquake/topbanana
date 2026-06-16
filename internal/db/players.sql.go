@@ -12,6 +12,47 @@ import (
 	"time"
 )
 
+const adminRenamePlayer = `-- name: AdminRenamePlayer :one
+UPDATE players
+SET display_name = ?1
+WHERE id = ?2
+RETURNING id, display_name, email, password_hash, role, created_at, display_name_claimed, email_verified_at, session_version, role_changed_at
+`
+
+type AdminRenamePlayerParams struct {
+	DisplayName string
+	ID          int64
+}
+
+// Renames any player row by id from the admin player-actions surface,
+// leaving display_name_claimed untouched. An admin tidying an anonymous
+// guest's auto-petname must NOT flip the row to "claimed": that column
+// tracks whether the player picked the name themselves, and a claimed
+// row is treated as a stable account downstream (e.g. it becomes eligible
+// for the public most-active list and stops popping the claim-name modal).
+// Only the player's own rename (RenamePlayer above) sets the flag.
+//
+// Returns the updated row when one was affected; the store wrapper maps
+// sql.ErrNoRows to ErrPlayerNotFound and a UNIQUE constraint failure on
+// players.display_name to ErrDisplayNameTaken.
+func (q *Queries) AdminRenamePlayer(ctx context.Context, arg AdminRenamePlayerParams) (Player, error) {
+	row := q.db.QueryRowContext(ctx, adminRenamePlayer, arg.DisplayName, arg.ID)
+	var i Player
+	err := row.Scan(
+		&i.ID,
+		&i.DisplayName,
+		&i.Email,
+		&i.PasswordHash,
+		&i.Role,
+		&i.CreatedAt,
+		&i.DisplayNameClaimed,
+		&i.EmailVerifiedAt,
+		&i.SessionVersion,
+		&i.RoleChangedAt,
+	)
+	return i, err
+}
+
 const claimPlayer = `-- name: ClaimPlayer :one
 UPDATE players
 SET display_name = ?1,
@@ -867,7 +908,8 @@ func (q *Queries) ResetPlayerPassword(ctx context.Context, arg ResetPlayerPasswo
 const setPlayerPasswordHash = `-- name: SetPlayerPasswordHash :execrows
 UPDATE players
 SET password_hash    = ?1,
-    display_name_claimed = 1
+    display_name_claimed = 1,
+    session_version = session_version + 1
 WHERE email = ?2
 `
 
@@ -889,6 +931,11 @@ type SetPlayerPasswordHashParams struct {
 // rows that already had a password_hash; later password sets via this
 // query previously left display_name_claimed at 0, which made the seed
 // admin (id=1) keep popping the claim-name modal in the player client.
+//
+// session_version is bumped so the rotation invalidates every other live
+// cookie for this account, matching ResetPlayerPassword. An operator reset
+// is almost always a security action (compromised or lost account), so
+// leaving old sessions alive on the previous credential would defeat it.
 func (q *Queries) SetPlayerPasswordHash(ctx context.Context, arg SetPlayerPasswordHashParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setPlayerPasswordHash, arg.PasswordHash, arg.Email)
 	if err != nil {

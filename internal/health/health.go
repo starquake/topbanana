@@ -2,7 +2,6 @@
 package health
 
 import (
-	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -29,8 +28,11 @@ func HandleHealthz(logger *slog.Logger, stores *store.Stores) http.HandlerFunc {
 		}
 
 		if err := stores.Quizzes.Ping(ctx); err != nil {
+			// Log the raw error (it can leak the DB path / DSN) but return a
+			// generic status to the unauthenticated caller.
+			logger.ErrorContext(ctx, "health check database ping failed", slog.Any("err", err))
 			health.Status = "degraded"
-			health.Checks["database"] = fmt.Sprintf("unhealthy: %v", err)
+			health.Checks["database"] = "unhealthy"
 			httpStatus = http.StatusServiceUnavailable
 		} else {
 			health.Checks["database"] = "healthy"

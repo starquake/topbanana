@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/starquake/topbanana/internal/auth"
 	. "github.com/starquake/topbanana/internal/clientapi"
@@ -869,6 +870,95 @@ func TestHandleGameResults(t *testing.T) {
 			t.Errorf("status code = %v, want %v", got, want)
 		}
 	})
+
+	t.Run("playerScores are sorted by score desc then player id asc", func(t *testing.T) {
+		t.Parallel()
+
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Results Order", "results-order"))
+
+		// alice scores 2000 (both correct); bob and carol tie at 1000 so the
+		// player-id tiebreak applies.
+		alice := env.seedPlayer(t, "alice-order")
+		bob := env.seedPlayer(t, "bob-order")
+		carol := env.seedPlayer(t, "carol-order")
+
+		ctx := t.Context()
+		g, err := env.service.CreateGame(ctx, qz.ID, alice)
+		if err != nil {
+			t.Fatalf("CreateGame err = %v, want nil", err)
+		}
+		for _, pid := range []int64{bob, carol} {
+			if perr := env.games.CreateParticipant(
+				ctx, &game.Participant{GameID: g.ID, PlayerID: pid, QuizID: qz.ID},
+			); perr != nil {
+				t.Fatalf("CreateParticipant(%d) err = %v, want nil", pid, perr)
+			}
+		}
+
+		for i := range 2 {
+			if _, gerr := env.service.GetNext(ctx, g.ID, alice); gerr != nil {
+				t.Fatalf("GetNext(%d) err = %v, want nil", i, gerr)
+			}
+			qID, correct := correctOptionID(t, qz, i)
+			wrong := wrongOptionID(t, qz, i)
+
+			if _, serr := env.service.SubmitAnswer(ctx, g.ID, alice, qID, correct, time.Time{}); serr != nil {
+				t.Fatalf("alice SubmitAnswer(%d) err = %v, want nil", i, serr)
+			}
+			// bob right on Q0, wrong on Q1; carol wrong on Q0, right on Q1.
+			bobOpt, carolOpt := correct, wrong
+			if i == 1 {
+				bobOpt, carolOpt = wrong, correct
+			}
+			if _, serr := env.service.SubmitAnswer(ctx, g.ID, bob, qID, bobOpt, time.Time{}); serr != nil {
+				t.Fatalf("bob SubmitAnswer(%d) err = %v, want nil", i, serr)
+			}
+			if _, serr := env.service.SubmitAnswer(ctx, g.ID, carol, qID, carolOpt, time.Time{}); serr != nil {
+				t.Fatalf("carol SubmitAnswer(%d) err = %v, want nil", i, serr)
+			}
+		}
+
+		mux := http.NewServeMux()
+		mux.Handle("GET /api/games/{gameID}/results", HandleGameResults(env.logger, env.service))
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(ctx, alice), http.MethodGet, "/api/games/"+g.ID+"/results", nil,
+		)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if got, want := rec.Code, http.StatusOK; got != want {
+			t.Fatalf("status = %d, want %d (body=%q)", got, want, rec.Body.String())
+		}
+
+		var body resultsTestResponse
+		if derr := json.NewDecoder(rec.Body).Decode(&body); derr != nil {
+			t.Fatalf("decode err = %v", derr)
+		}
+		if got, want := len(body.PlayerScores), 3; got != want {
+			t.Fatalf("len(playerScores) = %d, want %d", got, want)
+		}
+		wantOrder := []int64{alice, bob, carol}
+		for i, want := range wantOrder {
+			if got := body.PlayerScores[i].PlayerID; got != want {
+				t.Errorf("playerScores[%d].playerId = %d, want %d", i, got, want)
+			}
+		}
+		if got, want := body.PlayerScores[0].Score, 2000; got != want {
+			t.Errorf("playerScores[0].score = %d, want %d", got, want)
+		}
+	})
+}
+
+// resultsTestPlayerScore mirrors one game-results playerScores entry.
+type resultsTestPlayerScore struct {
+	PlayerID int64 `json:"playerId"`
+	Score    int   `json:"score"`
+}
+
+// resultsTestResponse is the decode target for the game-results endpoint.
+type resultsTestResponse struct {
+	PlayerScores []resultsTestPlayerScore `json:"playerScores"`
 }
 
 // leaderboardTestEntry mirrors one entry in the JSON leaderboard response;

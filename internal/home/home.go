@@ -342,9 +342,8 @@ func parseTemplate(page string) *template.Template {
 		"navSection":     func() string { return "" },
 		"logoHref":       func() string { return "/" },
 		"profileHref":    func() string { return "/profile" },
-		// The shared client quiz card renders each quiz's creation date as
-		// a coarse relative-time string (#927); reltime.Humanize is a pure
-		// function of its argument so it is safe to bind at parse time.
+		// reltime.Humanize re-reads the clock on each call, so binding it once
+		// at parse time is safe (#927).
 		"humanizeTime": reltime.Humanize,
 	}
 	base := template.Must(

@@ -25,6 +25,13 @@ func TestPlayer_IsAnonymous(t *testing.T) {
 			want: false,
 		},
 		{
+			// An OAuth-claimed row (email set, no password) is a real account,
+			// so it must not read as anonymous or the migrator would move its games.
+			name: "oauth-claimed player (email set, empty hash, player role) is not anonymous",
+			p:    Player{PasswordHash: "", Email: "user@example.com", Role: RolePlayer},
+			want: false,
+		},
+		{
 			// After the #538 remap the seed admin (id=1) holds the Host
 			// tier with a NULL password_hash; it must NOT read as a
 			// claimable anonymous row.

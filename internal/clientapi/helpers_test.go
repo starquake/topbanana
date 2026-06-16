@@ -141,6 +141,22 @@ func correctOptionID(t *testing.T, qz *quiz.Quiz, questionIndex int) (questionID
 	return 0, 0
 }
 
+// wrongOptionID returns an incorrect option id for the question at the given
+// zero-based position in the seeded quiz.
+func wrongOptionID(t *testing.T, qz *quiz.Quiz, questionIndex int) int64 {
+	t.Helper()
+
+	q := qz.Questions[questionIndex]
+	for _, o := range q.Options {
+		if !o.Correct {
+			return o.ID
+		}
+	}
+	t.Fatalf("question %d in quiz %d has no incorrect option", questionIndex, qz.ID)
+
+	return 0
+}
+
 // playCorrectly creates a game for the player and answers the first
 // `questions` questions correctly through the real service, producing
 // leaderboard answers with the deterministic maximum score: the answer
