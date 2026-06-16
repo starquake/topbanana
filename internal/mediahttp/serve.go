@@ -12,15 +12,15 @@ import (
 )
 
 // publicCacheControl and privateCacheControl key the cache policy to the owning
-// quiz's visibility. A public image is shared and immutable: the URL embeds an
-// immutable id and the ETag carries the stored webp's sha256, so the bytes never
-// change under a stable id, and a one-week max-age plus immutable lets the
-// client skip even the revalidation round-trip. A private image uses no-store
-// so the bytes never persist in any cache where a logged-out viewer could
-// surface them.
+// quiz's visibility. Both revalidate via the stored sha256 ETag rather than
+// trusting the id-as-immutable: a public quiz's image is shareable across
+// caches, a private quiz's image must not be. We dropped `immutable` from the
+// public policy in #951 - id reuse across delete + concurrent upload could
+// briefly point a stable id at different bytes, and an immutable cache hid
+// that mismatch from the host for the full week TTL.
 const (
-	publicCacheControl  = "public, max-age=604800, immutable"
-	privateCacheControl = "private, no-store"
+	publicCacheControl  = "public, no-cache"
+	privateCacheControl = "private, no-cache"
 )
 
 // HandleMediaServe serves the full webp for GET /media/{id}. Authorization

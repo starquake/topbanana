@@ -82,6 +82,41 @@ func TestMediaMigration_QuizDeleteCascades(t *testing.T) {
 	}
 }
 
+// TestMediaMigration_NoIDReuseAfterDelete pins the AUTOINCREMENT switch from
+// 20260616180000: after deleting the highest-id row, the next inserted row
+// gets a strictly higher id, not the one we just freed. Without AUTOINCREMENT
+// the deleted id would be recycled and concurrent uploads would race on the
+// reused filesystem paths (#951).
+func TestMediaMigration_NoIDReuseAfterDelete(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v", cerr)
+		}
+	})
+
+	quizID := seedQuiz(t, db, "Reuse Probe", "media-no-id-reuse")
+	first := seedMedia(t, db, quizID)
+	second := seedMedia(t, db, quizID)
+
+	if _, err := db.ExecContext(
+		context.Background(), "DELETE FROM media WHERE id = ?", second,
+	); err != nil {
+		t.Fatalf("delete media err = %v, want nil", err)
+	}
+
+	next := seedMedia(t, db, quizID)
+	if next == second {
+		t.Errorf("media id %d was recycled after delete (first = %d, deleted = %d, next = %d)",
+			next, first, second, next)
+	}
+	if next <= second {
+		t.Errorf("next media id = %d, want > %d (monotonic AUTOINCREMENT)", next, second)
+	}
+}
+
 // seedMedia inserts a minimal media row for quizID (created_by the seeded admin
 // id 1) and returns its id.
 func seedMedia(t *testing.T, db *sql.DB, quizID int64) int64 {
