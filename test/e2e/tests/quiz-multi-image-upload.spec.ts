@@ -21,20 +21,12 @@ test('uploading multiple images at once adds each to the library and shows a con
   await createQuizWithQuestions(page, quizTitle, QUESTIONS);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  // Picking three files fires one auto-upload XHR per file; the JS lands on
-  // /admin/quizzes/{id}?uploaded=3&failed=0#images so the server-rendered
-  // banner reports how many landed.
   await page.locator('input[type="file"][name="images"]').setInputFiles([
     { name: 'first.png', mimeType: 'image/png', buffer: PNG_SAMPLE },
     { name: 'second.png', mimeType: 'image/png', buffer: PNG_SAMPLE },
     { name: 'third.png', mimeType: 'image/png', buffer: PNG_SAMPLE },
   ]);
 
-  // The auto-upload module navigates to ?uploaded=3&failed=0#images so the
-  // banner renders; the inline cleanup script then strips the query so the
-  // URL bar settles on /admin/quizzes/{id}#images. The banner is captured by
-  // Playwright either before or after the strip - the banner contents are
-  // what matters, not the transient query.
   const banner = page.getByTestId('upload-banner');
   await expect(banner).toBeVisible({ timeout: 45_000 });
   await expect(banner).toContainText('3 images uploaded');

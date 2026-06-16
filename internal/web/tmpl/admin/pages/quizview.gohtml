@@ -288,13 +288,8 @@
             {{if .Images}}
                 <ul class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                     {{range .Images}}
-                        {{/* The per-image confirm modal is rendered INSIDE the
-                             tile <li> so the htmx outerHTML swap of
-                             #image-tile-{{.ID}} on a successful delete removes
-                             both the tile and the modal in one shot - no
-                             orphan dialogs accumulate as deletes pile up.
-                             Modals are fixed/inset-0 + z-40, so DOM position
-                             does not affect their stacking. */}}
+                        {{/* Modal lives inside the tile so the outerHTML swap
+                             removes both atomically (no orphan dialogs). */}}
                         <li id="image-tile-{{.ID}}" class="group relative">
                             <button type="button"
                                     onclick="openImageViewer('/media/{{.ID}}')"
@@ -307,12 +302,8 @@
                                      class="h-full w-full object-cover"
                                      data-testid="library-thumb">
                             </button>
-                            {{/* Delete control: always visible on touch (no
-                                 hover), fades in on hover on devices that
-                                 actually hover. The hover-fade is gated on
-                                 (hover: hover) instead of a breakpoint so an
-                                 iPad - wide screen, touch only - keeps the
-                                 button visible. */}}
+                            {{/* Always visible on touch; hover-fade gated on
+                                 (hover: hover) so an iPad keeps it visible. */}}
                             <button type="button" aria-label="Delete image {{.ID}}"
                                     onclick="openModal('modal-delete-media-{{.ID}}')"
                                     class="absolute top-1.5 right-1.5 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border-soft bg-bg/80 text-text transition hover:bg-danger focus-visible:outline-none focus-visible:shadow-focus [@media(hover:hover)]:text-text-dim [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100 [@media(hover:hover)]:hover:text-text">
@@ -335,15 +326,8 @@
                                         <button type="button"
                                                 onclick="closeModal('modal-delete-media-{{.ID}}')"
                                                 class="btn-ghost">Cancel</button>
-                                        {{/* htmx swaps the tile (and this
-                                             modal, which now lives inside it)
-                                             for the empty 200 the handler
-                                             returns. The after-request hook
-                                             only closes the modal on a 2xx
-                                             - on a 5xx htmx skips the swap,
-                                             so we leave the modal open and
-                                             surface the inline error so the
-                                             host knows it failed (#951). */}}
+                                        {{/* after-request gates on success: on 5xx htmx skips
+                                             the swap, so we keep the modal open + show error. */}}
                                         <form method="post"
                                               action="/admin/quizzes/{{$.Quiz.ID}}/media/{{.ID}}/delete"
                                               hx-post="/admin/quizzes/{{$.Quiz.ID}}/media/{{.ID}}/delete"
@@ -391,14 +375,9 @@
             {{end}}
 
 
-            {{/* Post-upload banner. The redirect after POST /media carries
-                 ?uploaded=N&failed=M so the page can confirm what happened
-                 without a session-flash mechanism (#951). UploadedCount and
-                 FailedCount come from the URL query and stay 0 on a plain
-                 visit, so the banner only paints when there is something to
-                 say. The inline script strips the query from the URL via
-                 history.replaceState once the banner has rendered, so a
-                 refresh / Back doesn't repaint a stale count. */}}
+            {{/* Post-upload banner. Counts come from ?uploaded=N&failed=M;
+                 inline script strips them via replaceState so a refresh
+                 doesn't repaint a stale banner (#951). */}}
             {{if or (gt .UploadedCount 0) (gt .FailedCount 0)}}
                 <div class="mb-4 rounded-sm border px-3 py-2 text-sm
                             {{if gt .FailedCount 0}}{{if gt .UploadedCount 0}}border-warning/40 bg-warning/10 text-warning{{else}}border-danger/40 bg-danger/10 text-danger{{end}}{{else}}border-success/40 bg-success/10 text-success{{end}}"
@@ -440,10 +419,8 @@
                 <button type="submit" class="btn-primary" data-testid="upload-button">Upload</button>
             </form>
 
-            {{/* Auto-upload progress queue (#951). quiz-image-upload.js appends
-                 one row per picked file with a filename, status, and cancel
-                 button, and reloads the page once every row settles. Hidden
-                 when empty so a plain page visit shows no chrome. */}}
+            {{/* Auto-upload progress queue (#951): quiz-image-upload.js
+                 appends one row per picked file. */}}
             <ul data-image-upload-queue
                 class="mt-4 flex flex-col gap-2 empty:hidden"
                 aria-live="polite"></ul>

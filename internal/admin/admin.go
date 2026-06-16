@@ -1057,13 +1057,8 @@ func HandleQuizView(
 	})
 }
 
-// uploadCountCeiling caps the banner counts the template renders from the
-// post-upload query string so a tampered URL cannot paint "9999 images
-// uploaded" (#951). This is purely a display clamp; real upload throughput is
-// bounded by the per-request file cap in internal/mediahttp/upload.go. The JS
-// auto-upload path issues one XHR per picked file, so a single host batch can
-// legitimately push past the per-request cap - 100 is comfortably above any
-// real batch we would expect and small enough to keep a tampered URL honest.
+// uploadCountCeiling clamps the banner counts so a tampered URL can't paint
+// an outrageous number (#951).
 const uploadCountCeiling = 100
 
 // parseUploadCounts pulls the post-upload banner counts out of the URL query.

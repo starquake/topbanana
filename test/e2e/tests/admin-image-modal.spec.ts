@@ -25,8 +25,6 @@ test('clicking a library thumbnail opens the full image in a modal', async ({ pa
   await createQuizWithQuestions(page, quizTitle, SINGLE_QUESTION);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  // Picking a file fires the auto-upload XHR; on completion the JS reloads
-  // the quiz view so the library grid + delete modals reflect the new row.
   await page.locator('input[type="file"][name="images"]').setInputFiles({
     name: 'pic.png',
     mimeType: 'image/png',

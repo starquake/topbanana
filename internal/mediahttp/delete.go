@@ -91,10 +91,8 @@ func HandleMediaDelete(logger *slog.Logger, svc MediaService, quizzes QuizEditLo
 	})
 }
 
-// writeDeleteResponse picks the post-delete response: an htmx-driven submit
-// expects an empty 200 it can swap into the thumbnail tile; a plain form
-// submit gets a 303 to the images section so the page reloads with the row
-// gone.
+// writeDeleteResponse: htmx gets an empty 200 for the outerHTML swap; plain
+// form submit gets the 303 to the images section.
 func writeDeleteResponse(w http.ResponseWriter, r *http.Request, quizID int64) {
 	if htmx.IsRequest(r) {
 		w.WriteHeader(http.StatusOK)

@@ -29,8 +29,6 @@ async function authorQuizWithImageQuestion(page: Page, quizTitle: string): Promi
   await createQuizWithQuestions(page, quizTitle, SINGLE_QUESTION);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  // Picking a file fires the auto-upload XHR; on completion the JS reloads
-  // the quiz view so the library grid carries the new tile.
   await page.locator('input[type="file"][name="images"]').setInputFiles({
     name: 'pic.png',
     mimeType: 'image/png',

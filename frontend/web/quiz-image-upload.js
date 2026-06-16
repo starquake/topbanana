@@ -1,12 +1,7 @@
-// Auto-upload module for the quiz library form (#951). When the host picks
-// files in the file input we fire one POST per file with Accept:
-// application/json so the server replies with a per-file outcome instead of a
-// redirect. Each row shows a progress bar driven by XHR's upload events plus a
-// cancel button (xhr.abort) while bytes are still in flight. Once every row in
-// a batch settles the page navigates to the same path with the post-upload
-// banner query so the server-rendered confirmation, library grid and delete
-// modals all refresh in one shot. With no JS, the form's submit button still
-// posts the multi-file multipart and gets the redirect/banner flow.
+// Auto-upload for the quiz library form (#951). One XHR per file with
+// Accept: application/json; on batch settle, navigate to ?uploaded=N&failed=M
+// so the server renders the banner + refreshed library. No-JS falls back to
+// the form's submit button posting the multipart.
 
 (function () {
     const input = document.getElementById('quiz-media-upload');
@@ -16,20 +11,17 @@
     const form = input.closest('form');
     if (!form) return;
 
-    // Match the server's per-route read deadline so a stalled connection fails
-    // client-side at the same wall time the server would close it. Without
-    // this, an XHR with no progress events sits forever and inFlight never
-    // decrements, blocking the post-batch navigate.
+    // Match the server's per-route read deadline so a stalled XHR can't pin
+    // inFlight forever.
     const UPLOAD_TIMEOUT_MS = 5 * 60 * 1000;
 
-    // Counters are batch-scoped: a new file pick starts a fresh accounting so
-    // failures from a prior batch can't leak into the next navigate URL.
+    // Batch-scoped counters so a prior all-fail batch can't leak into the
+    // next navigate URL.
     let batch = null;
 
     input.addEventListener('change', () => {
         const files = Array.from(input.files || []);
-        // Reset the input so picking the same file again still fires change.
-        input.value = '';
+        input.value = ''; // re-pick of the same file should still fire change
         if (files.length === 0) return;
         if (!batch) batch = { inFlight: 0, landed: 0, skipped: 0 };
         for (const file of files) {
@@ -94,10 +86,7 @@
             status.textContent = pct + '%';
         });
         xhr.upload.addEventListener('load', () => {
-            // Upload bytes are in; the server now decodes, re-encodes, and writes
-            // to disk. Cancel is best-effort: once bytes are sent the server may
-            // already have committed the row, so drop the cancel affordance and
-            // park the bar at 100 until the response arrives.
+            // Bytes in; cancel is no longer reliable (server may have committed).
             bar.value = 100;
             status.textContent = 'Processing...';
             cancelBtn.remove();
@@ -128,16 +117,11 @@
         xhr.addEventListener('loadend', () => {
             b.inFlight--;
             if (b.inFlight > 0) return;
-            // Always navigate once the batch settles - even an all-skipped batch
-            // wants the server-rendered banner. The fresh batch object on the
-            // next file pick prevents these counters from leaking forward.
+            // Navigate even on an all-skipped batch so the server renders the banner.
             const params = new URLSearchParams({
                 uploaded: String(b.landed),
                 failed: String(b.skipped),
             });
-            // window.location.search clears any prior query string the page was
-            // visited with; we keep only the freshly-built upload params and
-            // the #images fragment so the browser scrolls to the library.
             const target = window.location.pathname + '?' + params + '#images';
             batch = null;
             window.location.href = target;
@@ -151,11 +135,7 @@
         const isJSON = (xhr.getResponseHeader('Content-Type') || '').indexOf('application/json') === 0;
         if (xhr.status >= 200 && xhr.status < 300 && isJSON) {
             let json = null;
-            try {
-                json = JSON.parse(xhr.responseText);
-            } catch (_err) {
-                // fall through with json=null
-            }
+            try { json = JSON.parse(xhr.responseText); } catch (_err) { /* json stays null */ }
             if (json) {
                 const uploaded = (json.uploaded || []).length > 0;
                 if (uploaded) {
@@ -171,9 +151,7 @@
                 return;
             }
         }
-        // Non-2xx or plain-text body: surface whatever the server said (the
-        // MaxMultipartFormMiddleware emits a useful text/plain message for an
-        // oversized body, etc) rather than swallowing it as a generic 'Failed'.
+        // Surface the server's plain-text message (e.g. "invalid or oversized upload").
         const fallback = readPlainText(xhr) || 'Upload failed';
         b.skipped++;
         finishRow(row, status, fallback, false);

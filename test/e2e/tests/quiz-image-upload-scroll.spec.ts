@@ -35,18 +35,13 @@ test('uploading an image keeps the quiz view scrolled to the library section', a
   await page.evaluate(() => window.scrollTo(0, 0));
   await expect.poll(async () => page.evaluate(() => window.scrollY)).toBe(0);
 
-  // Picking a file fires the auto-upload XHR; on completion the JS navigates
-  // to the same path with the #images fragment so the browser scrolls back to
-  // the library section instead of landing at the page top.
   await page.locator('input[type="file"][name="images"]').setInputFiles({
     name: 'pic.png',
     mimeType: 'image/png',
     buffer: PNG_SAMPLE,
   });
 
-  // The auto-upload module lands on `?uploaded=1&failed=0#images`; the inline
-  // cleanup script strips the query and leaves the #images fragment, which
-  // is what scrolls the browser back to the library section.
+  // Auto-upload completes, URL settles on #images (query stripped by cleanup script).
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+#images$/, { timeout: 30_000 });
   await expect(page.getByTestId('library-thumb').first()).toBeVisible();
 

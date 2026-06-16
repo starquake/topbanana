@@ -20,9 +20,7 @@ import (
 )
 
 const (
-	// uploadFormField is the multipart field the images arrive under. The
-	// form posts under "images" (the per-file XHR module appends the same
-	// field per request).
+	// uploadFormField is the multipart field images arrive under.
 	uploadFormField = "images"
 
 	// maxUploadFilesPerRequest caps how many files a single upload request may
@@ -58,8 +56,7 @@ const (
 	// 10 MB image still lands over a slow phone connection (~50 KB/s).
 	uploadReadDeadline = 5 * time.Minute
 
-	// internalErrorMessage is the generic 500 body text shared by every
-	// handler in this package.
+	// internalErrorMessage is the generic 500 body shared across this package.
 	internalErrorMessage = "internal error"
 )
 
@@ -235,15 +232,8 @@ func writeUploadError(w http.ResponseWriter, r *http.Request, logger *slog.Logge
 	}
 }
 
-// storeOneUpload opens one multipart file header, runs it through the media
-// service, closes the file, and returns the new media row's id. Wrapped in a
-// function so the per-file defer stays scoped.
-//
-// Best-effort cancel: a client xhr.abort() after the body is in flight closes
-// the TCP connection, which cancels r.Context(). Checking ctx.Err() before the
-// (CPU-heavy) decode/re-encode skips the work for any file the client already
-// gave up on. The file pipeline itself is not context-aware, so this is the
-// only short-circuit; once Store starts there is no clean abort point.
+// storeOneUpload stores one file and returns its media id. The ctx.Err()
+// check is the only abort point: media.Service.Store is not context-aware.
 func storeOneUpload(
 	ctx context.Context, svc MediaService, quizID, playerID int64, header *multipart.FileHeader,
 ) (mediaID int64, err error) {
@@ -308,17 +298,10 @@ type uploadResponseJSON struct {
 	Failed   []uploadResultJSON `json:"failed"`
 }
 
-// writeUploadJSON emits the per-file outcomes as JSON when every per-file
-// outcome was either a success or a pipeline (caller-fault) rejection: in that
-// shape the request itself was valid, so a 200 with per-file failures in the
-// body is the right answer. If any file errored with something that is NOT a
-// pipeline-rejection sentinel (a transient disk/encoder/db failure), the JSON
-// branch returns 500 - hiding a real server outage behind a 200 with
-// reason="upload failed" would teach hosts to blame their own files for our
-// problem.
-//
-// The full response is encoded into a buffer first so an encoder failure
-// becomes a clean 500 instead of a truncated 200.
+// writeUploadJSON emits per-file outcomes as JSON. Any non-pipeline error
+// (server fault) escalates to 500 so a host doesn't blame their file for our
+// outage. Encoding to a buffer keeps an encoder failure from committing a
+// truncated 200.
 func writeUploadJSON(w http.ResponseWriter, r *http.Request, logger *slog.Logger, results []uploadResult) {
 	for _, res := range results {
 		if res.Err != nil && !isPipelineRejection(res.Err) {

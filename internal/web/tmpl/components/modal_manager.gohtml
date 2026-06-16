@@ -52,12 +52,8 @@
     }
 
     function closeModal(id) {
-        // The modal element may already be gone from the DOM (e.g. an htmx
-        // outerHTML swap removed the enclosing tile, including a modal
-        // rendered inside it - #951). Cleaning up modalState's keydown
-        // listener and the focus restore is keyed on `id`, not on the DOM
-        // element, so it must run regardless of whether the modal is still
-        // present.
+        // Modal may already be gone (htmx outerHTML swap removed it - #951);
+        // keydown + focus cleanup must run regardless.
         const modal = document.getElementById(id);
         if (modal) modal.classList.add('hidden');
 
