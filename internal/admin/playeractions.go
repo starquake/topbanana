@@ -342,11 +342,11 @@ func HandlePlayerSetRole(
 		}
 
 		removingAdmin := from == auth.RoleAdmin && desired != auth.RoleAdmin
-		if removingAdmin && !guardLastAdmin(w, r, logger, store, flash, playerID) {
-			return
-		}
-
-		if !writeRoleChange(w, r, logger, store, flash, playerID, desired) {
+		if removingAdmin {
+			if !writeAdminDemotion(w, r, logger, store, flash, playerID, desired) {
+				return
+			}
+		} else if !writeRoleChange(w, r, logger, store, flash, playerID, desired) {
 			return
 		}
 
@@ -360,30 +360,33 @@ func HandlePlayerSetRole(
 	})
 }
 
-// guardLastAdmin refuses a change that strips Admin from the only remaining
-// Admin. Called only when the change actually removes Admin; returns false
-// (after flashing + 303) when the change must be blocked, true when it may
-// proceed.
-func guardLastAdmin(
+// writeAdminDemotion persists a demotion away from Admin via the atomic
+// store guard: a missing target is flashed as "not found", the last-admin
+// refusal as "promote another first", any other store error as a flashed
+// retry. The count-and-update happen in one statement in the store, so two
+// concurrent demotions of the two remaining admins cannot both pass (#997).
+// Returns true only when the demotion was written.
+func writeAdminDemotion(
 	w http.ResponseWriter, r *http.Request, logger *slog.Logger,
-	store auth.AdminPlayerStore, flash *auth.SignedFlash, playerID int64,
+	store auth.AdminPlayerStore, flash *auth.SignedFlash, playerID int64, desired string,
 ) bool {
-	count, err := store.CountAdmins(r.Context())
-	if err != nil {
-		logger.ErrorContext(r.Context(), "error counting admins", slog.Any("err", err))
-		flash.SetError(w, "Could not update role. Try again.", 0)
-		redirectToPlayerDetail(w, r, playerID)
-
-		return false
-	}
-	if count <= 1 {
+	err := store.DemoteAdmin(r.Context(), playerID, desired)
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, auth.ErrLastAdmin):
 		flash.SetError(w, "Cannot remove the last admin - promote another first.", 0)
 		redirectToPlayerDetail(w, r, playerID)
-
-		return false
+	case errors.Is(err, auth.ErrPlayerNotFound):
+		flash.SetError(w, "Player not found.", 0)
+		redirectToPlayerDetail(w, r, playerID)
+	default:
+		logger.ErrorContext(r.Context(), "error demoting admin", slog.Any("err", err))
+		flash.SetError(w, "Could not update role. Try again.", 0)
+		redirectToPlayerDetail(w, r, playerID)
 	}
 
-	return true
+	return false
 }
 
 // writeRoleChange persists the role and maps a write failure onto its

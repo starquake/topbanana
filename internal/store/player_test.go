@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1099,6 +1100,141 @@ func TestPlayerStore_SetPlayerRole_NotFound(t *testing.T) {
 	err := ps.SetPlayerRole(t.Context(), 99999, auth.RoleAdmin)
 	if got, want := err, auth.ErrPlayerNotFound; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
+	}
+}
+
+// seedAdmin creates a fresh player and stamps the Admin role, returning its id.
+// A fresh migrated DB has no admins, so the admin count equals the number of
+// these the test creates.
+func seedAdmin(t *testing.T, ps *PlayerStore, displayName string) int64 {
+	t.Helper()
+
+	created, err := ps.CreateAnonymousPlayer(t.Context(), displayName)
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer(%q) err = %v, want nil", displayName, err)
+	}
+	if err := ps.SetPlayerRole(t.Context(), created.ID, auth.RoleAdmin); err != nil {
+		t.Fatalf("SetPlayerRole(%q, admin) err = %v, want nil", displayName, err)
+	}
+
+	return created.ID
+}
+
+// TestPlayerStore_DemoteAdmin pins the atomic last-admin guard (#997): a
+// demotion succeeds while a second admin exists, the only-admin demotion is
+// refused with ErrLastAdmin and leaves the row admin, and a missing or
+// already-non-admin row maps to ErrPlayerNotFound.
+func TestPlayerStore_DemoteAdmin(t *testing.T) {
+	t.Parallel()
+
+	t.Run("refuses the last admin and leaves the row admin", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		ps := NewPlayerStore(db, slog.Default())
+
+		only := seedAdmin(t, ps, "only-admin")
+
+		err := ps.DemoteAdmin(t.Context(), only, auth.RoleHost)
+		if got, want := err, auth.ErrLastAdmin; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+		assertRoleState(t, db, only, auth.RoleAdmin, true)
+	})
+
+	t.Run("succeeds while a second admin exists", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		ps := NewPlayerStore(db, slog.Default())
+
+		seedAdmin(t, ps, "keeper-admin")
+		target := seedAdmin(t, ps, "demote-me")
+
+		if err := ps.DemoteAdmin(t.Context(), target, auth.RoleHost); err != nil {
+			t.Fatalf("DemoteAdmin err = %v, want nil", err)
+		}
+		assertRoleState(t, db, target, auth.RoleHost, true)
+	})
+
+	t.Run("missing row maps to ErrPlayerNotFound", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		ps := NewPlayerStore(db, slog.Default())
+
+		err := ps.DemoteAdmin(t.Context(), 999999, auth.RoleHost)
+		if got, want := err, auth.ErrPlayerNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("non-admin row maps to ErrPlayerNotFound", func(t *testing.T) {
+		t.Parallel()
+		db := dbtest.Open(t)
+		ps := NewPlayerStore(db, slog.Default())
+
+		// A second admin guarantees the refusal below is the not-admin clause,
+		// not the last-admin clause.
+		seedAdmin(t, ps, "guard-admin")
+		nonAdmin, err := ps.CreateAnonymousPlayer(t.Context(), "plain-player")
+		if err != nil {
+			t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+		}
+
+		err = ps.DemoteAdmin(t.Context(), nonAdmin.ID, auth.RoleHost)
+		if got, want := err, auth.ErrPlayerNotFound; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+}
+
+// TestPlayerStore_DemoteAdmin_ConcurrentDemotionsKeepOneAdmin pins the race the
+// guard exists to close (#997): with exactly two admins, two concurrent
+// demotions must not both succeed - at least one is refused with ErrLastAdmin
+// so at least one admin always remains. The pre-fix check-then-act guard let
+// both pass and left zero admins.
+func TestPlayerStore_DemoteAdmin_ConcurrentDemotionsKeepOneAdmin(t *testing.T) {
+	t.Parallel()
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	adminA := seedAdmin(t, ps, "race-admin-a")
+	adminB := seedAdmin(t, ps, "race-admin-b")
+
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		errs    = make(map[int64]error, 2)
+		targets = []int64{adminA, adminB}
+	)
+	wg.Add(len(targets))
+	for _, id := range targets {
+		go func() {
+			defer wg.Done()
+			err := ps.DemoteAdmin(t.Context(), id, auth.RoleHost)
+			mu.Lock()
+			errs[id] = err
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+
+	// At least one demotion must be refused, and at least one admin must remain.
+	refusals := 0
+	for _, err := range errs {
+		if errors.Is(err, auth.ErrLastAdmin) {
+			refusals++
+		}
+	}
+	if refusals == 0 {
+		t.Errorf("both demotions succeeded (errs = %v); the guard must refuse at least one", errs)
+	}
+
+	var remaining int
+	row := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM players WHERE role = 'admin'")
+	if err := row.Scan(&remaining); err != nil {
+		t.Fatalf("count admins err = %v, want nil", err)
+	}
+	if remaining < 1 {
+		t.Errorf("admins remaining = %d, want >= 1 (the invariant the guard protects)", remaining)
 	}
 }
 

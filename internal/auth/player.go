@@ -37,6 +37,12 @@ var ErrDisplayNameEmpty = errors.New("displayName is empty")
 // collision (handled as a 500).
 var ErrIdentityAlreadyLinked = errors.New("identity already linked")
 
+// ErrLastAdmin is returned by DemoteAdmin when the change would strip Admin
+// from the only remaining Admin. The store enforces the invariant atomically
+// so two concurrent demotions cannot both pass and leave zero admins; the
+// handler maps this to the "promote another first" refusal.
+var ErrLastAdmin = errors.New("cannot remove the last admin")
+
 // Player represents an authenticated user (admin or player).
 type Player struct {
 	ID          int64
@@ -353,10 +359,13 @@ type AdminPlayerStore interface {
 	// RolePlayer / RoleHost / RoleAdmin; role_changed_at is stamped to the
 	// current time. Returns ErrPlayerNotFound when no row matches.
 	SetPlayerRole(ctx context.Context, playerID int64, role string) error
-	// CountAdmins returns the number of current Admins (top tier). The
-	// role-change handler uses it to refuse a change that would leave zero
-	// Admins.
-	CountAdmins(ctx context.Context) (int64, error)
+	// DemoteAdmin moves an Admin row to the supplied non-admin role, refusing
+	// the change atomically when the row is the only remaining Admin so two
+	// concurrent demotions cannot both pass and leave zero admins (#997).
+	// Returns ErrLastAdmin when the change would empty the Admin tier, and
+	// ErrPlayerNotFound when no Admin row matches the id (a missing row or a
+	// row that is no longer Admin). role must be a non-admin tier.
+	DemoteAdmin(ctx context.Context, playerID int64, role string) error
 	// InsertAdminAudit records one admin action. payload is a
 	// pre-serialised JSON blob (use "{}" when there is nothing to
 	// record).

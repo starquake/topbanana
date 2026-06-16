@@ -471,12 +471,20 @@ SET role = sqlc.arg('role'),
     role_changed_at = CURRENT_TIMESTAMP
 WHERE id = sqlc.arg('id');
 
--- name: CountAdmins :one
--- Number of current Admins (top tier). Used by the role-change guard to refuse
--- a change that would leave zero Admins.
-SELECT COUNT(*)
-FROM players
-WHERE role = 'admin';
+-- name: DemoteAdminGuarded :execrows
+-- Atomically demotes the admin row identified by id to a non-admin tier, but
+-- only while more than one admin exists. The count subquery runs in the same
+-- statement as the update, so two concurrent demotions of the two remaining
+-- admins cannot both pass the check and leave zero admins (#997). The id-must-
+-- be-admin clause means a row that is not currently admin matches zero rows;
+-- the wrapper classifies a zero-row result (not-found vs not-admin vs
+-- last-admin) inside the same transaction so the handler maps it correctly.
+UPDATE players
+SET role = sqlc.arg('role'),
+    role_changed_at = CURRENT_TIMESTAMP
+WHERE players.id = sqlc.arg('id')
+  AND players.role = 'admin'
+  AND (SELECT COUNT(*) FROM players AS admins WHERE admins.role = 'admin') > 1;
 
 -- name: ListAdmins :many
 -- Every current Admin, ordered by display_name so the admin settings page

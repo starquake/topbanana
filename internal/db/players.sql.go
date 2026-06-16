@@ -277,21 +277,6 @@ func (q *Queries) ConsumePasswordResetToken(ctx context.Context, arg ConsumePass
 	return player_id, err
 }
 
-const countAdmins = `-- name: CountAdmins :one
-SELECT COUNT(*)
-FROM players
-WHERE role = 'admin'
-`
-
-// Number of current Admins (top tier). Used by the role-change guard to refuse
-// a change that would leave zero Admins.
-func (q *Queries) CountAdmins(ctx context.Context) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countAdmins)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createAnonymousPlayer = `-- name: CreateAnonymousPlayer :one
 INSERT INTO players (display_name, role)
 VALUES (?1, 'player')
@@ -551,6 +536,35 @@ WHERE expires_at <= ?1
 func (q *Queries) DeleteExpiredPasswordResetTokens(ctx context.Context, now time.Time) error {
 	_, err := q.db.ExecContext(ctx, deleteExpiredPasswordResetTokens, now)
 	return err
+}
+
+const demoteAdminGuarded = `-- name: DemoteAdminGuarded :execrows
+UPDATE players
+SET role = ?1,
+    role_changed_at = CURRENT_TIMESTAMP
+WHERE players.id = ?2
+  AND players.role = 'admin'
+  AND (SELECT COUNT(*) FROM players AS admins WHERE admins.role = 'admin') > 1
+`
+
+type DemoteAdminGuardedParams struct {
+	Role string
+	ID   int64
+}
+
+// Atomically demotes the admin row identified by id to a non-admin tier, but
+// only while more than one admin exists. The count subquery runs in the same
+// statement as the update, so two concurrent demotions of the two remaining
+// admins cannot both pass the check and leave zero admins (#997). The id-must-
+// be-admin clause means a row that is not currently admin matches zero rows;
+// the wrapper classifies a zero-row result (not-found vs not-admin vs
+// last-admin) inside the same transaction so the handler maps it correctly.
+func (q *Queries) DemoteAdminGuarded(ctx context.Context, arg DemoteAdminGuardedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, demoteAdminGuarded, arg.Role, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const getEmailVerifyToken = `-- name: GetEmailVerifyToken :one
