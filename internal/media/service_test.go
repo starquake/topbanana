@@ -2,6 +2,7 @@ package media_test
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"errors"
 	"image"
@@ -86,7 +87,7 @@ func pngUpload(t *testing.T, w, h int) []byte {
 }
 
 // TestServiceStoreRoundTrip pins the full persist path: Store processes and
-// writes the full + thumb webp under <root>/<quizID>/ and records a row with
+// writes the full + thumb jpeg under <root>/<quizID>/ and records a row with
 // the metadata the pipeline computed and the relative paths.
 func TestServiceStoreRoundTrip(t *testing.T) {
 	t.Parallel()
@@ -104,7 +105,7 @@ func TestServiceStoreRoundTrip(t *testing.T) {
 	if got, want := m.Type, TypeImage; got != want {
 		t.Errorf("Type = %q, want %q", got, want)
 	}
-	if got, want := m.MIME, "image/webp"; got != want {
+	if got, want := m.MIME, "image/jpeg"; got != want {
 		t.Errorf("MIME = %q, want %q", got, want)
 	}
 	if got, want := m.Width, 800; got != want {
@@ -141,6 +142,114 @@ func TestServiceStoreRoundTrip(t *testing.T) {
 	}
 	if got, want := row.SHA256, m.SHA256; got != want {
 		t.Errorf("stored SHA256 = %q, want %q", got, want)
+	}
+}
+
+// TestServiceStoreCancelledBeforeProcessing pins the ctx-cancelled short-
+// circuit: a cancel that reaches the handler before Process runs returns the
+// cancel error AND leaves no row + no files behind, so the host's apparent
+// cancel matches the server-side state (#951).
+func TestServiceStoreCancelledBeforeProcessing(t *testing.T) {
+	t.Parallel()
+
+	fx := newServiceWithQuiz(t)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := fx.svc.Store(ctx, fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
+	if got, want := err, context.Canceled; !errors.Is(got, want) {
+		t.Errorf("Store err = %v, want %v", got, want)
+	}
+
+	rows, err := fx.svc.ListByQuiz(t.Context(), fx.quizID)
+	if err != nil {
+		t.Fatalf("ListByQuiz err = %v, want nil", err)
+	}
+	if got, want := len(rows), 0; got != want {
+		t.Errorf("rows after cancelled Store = %d, want %d", got, want)
+	}
+
+	entries, err := os.ReadDir(fx.root)
+	if err != nil {
+		t.Fatalf("ReadDir err = %v, want nil", err)
+	}
+	if got, want := len(entries), 0; got != want {
+		t.Errorf("files under root after cancelled Store = %d, want %d", got, want)
+	}
+}
+
+// cancelOnUpdatePathsStore wraps a real Store to fire a registered cancel
+// function the moment UpdateMediaPaths is invoked, simulating a client that
+// closes the connection between CreateMedia and UpdateMediaPaths. Without
+// this, a pre-cancelled context short-circuits before any row or file is
+// created and the cleanup paths in Service.Store are never exercised.
+type cancelOnUpdatePathsStore struct {
+	Store
+
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnUpdatePathsStore) UpdateMediaPaths(ctx context.Context, id int64, path, thumbPath string) error {
+	c.cancel()
+
+	return c.Store.UpdateMediaPaths(ctx, id, path, thumbPath)
+}
+
+// TestServiceStoreCancelledMidFlightCleansUp pins the in-flight cancel
+// cleanup: when the connection drops between CreateMedia (row + files just
+// written) and UpdateMediaPaths, Store must return an error AND tear the row
+// + files back down via the cancel-immune cleanup path (#951). The vacuous
+// pre-Process variant above can't exercise this branch.
+func TestServiceStoreCancelledMidFlightCleansUp(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v", cerr)
+		}
+	})
+
+	quizID := seedQuiz(t, db, "media-svc-cancel-midflight")
+	root := t.TempDir()
+	innerStore := store.NewMediaStore(db, slog.Default())
+	ctx, cancel := context.WithCancel(t.Context())
+	wrapped := &cancelOnUpdatePathsStore{Store: innerStore, cancel: cancel}
+	svc := NewService(wrapped, root, slog.Default())
+
+	_, err := svc.Store(ctx, quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
+	if err == nil {
+		t.Fatal("Store err = nil, want non-nil (ctx was cancelled mid-flight)")
+	}
+
+	// Use a fresh ctx for verification so the cancelled ctx doesn't taint
+	// the post-conditions checks.
+	probeCtx := t.Context()
+	rows, err := svc.ListByQuiz(probeCtx, quizID)
+	if err != nil {
+		t.Fatalf("ListByQuiz err = %v, want nil", err)
+	}
+	if got, want := len(rows), 0; got != want {
+		t.Errorf("rows after mid-flight cancel = %d, want %d (cleanup branch did not delete)", got, want)
+	}
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("ReadDir err = %v, want nil", err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		sub, derr := os.ReadDir(filepath.Join(root, e.Name()))
+		if derr != nil {
+			t.Fatalf("ReadDir(%s) err = %v, want nil", e.Name(), derr)
+		}
+		if got := len(sub); got != 0 {
+			t.Errorf("files under root/%s after mid-flight cancel = %d, want 0"+
+				" (writeFiles cleanup did not remove)", e.Name(), got)
+		}
 	}
 }
 

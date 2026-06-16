@@ -38,9 +38,9 @@ func newMediaRow(quizID int64) *media.Media {
 	return &media.Media{
 		QuizID:            quizID,
 		Type:              media.TypeImage,
-		MIME:              "image/webp",
-		Path:              "p.webp",
-		ThumbPath:         "p-thumb.webp",
+		MIME:              "image/jpeg",
+		Path:              "p.jpg",
+		ThumbPath:         "p-thumb.jpg",
 		Width:             640,
 		Height:            480,
 		SizeBytes:         1234,
@@ -78,7 +78,7 @@ func TestMediaStore_CreateGetRoundTrip(t *testing.T) {
 	if got, want := got.Height, 480; got != want {
 		t.Errorf("Height = %d, want %d", got, want)
 	}
-	if got, want := got.ThumbPath, "p-thumb.webp"; got != want {
+	if got, want := got.ThumbPath, "p-thumb.jpg"; got != want {
 		t.Errorf("ThumbPath = %q, want %q", got, want)
 	}
 	if got, want := got.SHA256, "deadbeef"; got != want {
@@ -117,7 +117,7 @@ func TestMediaStore_UpdatePathsMissing(t *testing.T) {
 
 	s, _ := newMediaStoreWithQuiz(t)
 
-	if err := s.UpdateMediaPaths(t.Context(), 999, "a.webp", "a-thumb.webp"); !errors.Is(
+	if err := s.UpdateMediaPaths(t.Context(), 999, "a.jpg", "a-thumb.jpg"); !errors.Is(
 		err, media.ErrMediaNotFound,
 	) {
 		t.Errorf("UpdateMediaPaths(missing) err = %v, want ErrMediaNotFound", err)

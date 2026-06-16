@@ -12,12 +12,12 @@ import (
 	"strings"
 )
 
-// fullSuffix and thumbSuffix name the two files a stored image writes under the
-// per-quiz directory. Both are webp; the thumb carries a distinct suffix so a
-// single media id maps to two predictable filenames.
+// fullSuffix and thumbSuffix name the two files a stored image writes under
+// the per-quiz directory. Both are jpeg; the thumb carries a distinct suffix
+// so a single media id maps to two predictable filenames.
 const (
-	fullSuffix  = ".webp"
-	thumbSuffix = "-thumb.webp"
+	fullSuffix  = ".jpg"
+	thumbSuffix = "-thumb.jpg"
 
 	// dirPerm and filePerm are the permissions for the per-quiz directories and
 	// the written files. The media root itself is created at startup; these
@@ -30,7 +30,7 @@ const (
 	decimalBase = 10
 )
 
-// Service processes an upload through the pipeline, persists the resulting webp
+// Service processes an upload through the pipeline, persists the resulting jpeg
 // files under a per-quiz directory below root, and records a media row. It is
 // the single place that ties the pure pipeline to the filesystem and the store.
 type Service struct {
@@ -46,7 +46,7 @@ func NewService(store Store, root string, logger *slog.Logger) *Service {
 	return &Service{store: store, root: root, logger: logger}
 }
 
-// Store processes the upload into a normalised webp full image plus thumbnail,
+// Store processes the upload into a normalised jpeg full image plus thumbnail,
 // writes both under <root>/<quizID>/, inserts the media row with the relative
 // paths and metadata, and returns the stored Media. createdBy is the uploading
 // player.
@@ -56,9 +56,19 @@ func NewService(store Store, root string, logger *slog.Logger) *Service {
 // stored Path / ThumbPath are relative to root so a later root remount does not
 // strand the references.
 func (s *Service) Store(ctx context.Context, quizID, createdBy int64, r io.Reader) (*Media, error) {
+	// Two ctx.Err checks around Process: the first skips Process if the
+	// cancel already arrived (Process is the CPU-heavy decode + re-encode);
+	// the second catches a cancel that arrived during Process, which is sync
+	// and doesn't observe ctx itself.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("upload cancelled before processing: %w", ctxErr)
+	}
 	processed, err := Process(r)
 	if err != nil {
 		return nil, err
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("upload cancelled after processing: %w", ctxErr)
 	}
 
 	quizDir := strconv.FormatInt(quizID, decimalBase)
@@ -89,15 +99,19 @@ func (s *Service) Store(ctx context.Context, quizID, createdBy int64, r io.Reade
 	relThumb := filepath.Join(quizDir, strconv.FormatInt(row.ID, decimalBase)+thumbSuffix)
 
 	if err = s.writeFiles(processed, relFull, relThumb); err != nil {
-		s.cleanupRow(ctx, row.ID)
+		s.cleanupRow(context.WithoutCancel(ctx), row.ID)
 
 		return nil, err
 	}
 
 	if err = s.store.UpdateMediaPaths(ctx, row.ID, relFull, relThumb); err != nil {
+		// Use a cancel-immune context for cleanup so a cancelled upload's
+		// row + files actually get removed instead of orphaning when ctx is
+		// the cause of the failure (#951).
+		cleanup := context.WithoutCancel(ctx)
 		s.removeFile(relFull)
 		s.removeFile(relThumb)
-		s.cleanupRow(ctx, row.ID)
+		s.cleanupRow(cleanup, row.ID)
 
 		return nil, fmt.Errorf("recording media paths: %w", err)
 	}
@@ -171,17 +185,39 @@ func (s *Service) Open(relPath string) (*os.File, error) {
 	return f, nil
 }
 
-// writeFiles writes the full and thumb webp bytes to the given root-relative
-// paths. On a failure after the first write succeeds, the first file is removed
-// so a partial write leaves nothing behind.
+// writeFiles writes the full and thumb jpeg bytes to the given root-relative
+// paths using a temp-then-rename pattern so a SIGKILL or crash between the
+// two writes can't leave a row pointing at a half-written or missing file.
+// Both files are written under <name>.tmp, then atomically renamed into
+// place. A failure at any step cleans up whatever has been written so a
+// failed upload leaves nothing behind.
 func (s *Service) writeFiles(processed *Processed, relFull, relThumb string) error {
-	if err := os.WriteFile(filepath.Join(s.root, relFull), processed.Full, filePerm); err != nil {
+	fullTmp := relFull + ".tmp"
+	thumbTmp := relThumb + ".tmp"
+
+	if err := os.WriteFile(filepath.Join(s.root, fullTmp), processed.Full, filePerm); err != nil {
 		return fmt.Errorf("writing full image: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(s.root, relThumb), processed.Thumb, filePerm); err != nil {
-		s.removeFile(relFull)
+	if err := os.WriteFile(filepath.Join(s.root, thumbTmp), processed.Thumb, filePerm); err != nil {
+		s.removeFile(fullTmp)
 
 		return fmt.Errorf("writing thumbnail: %w", err)
+	}
+
+	if err := os.Rename(filepath.Join(s.root, fullTmp), filepath.Join(s.root, relFull)); err != nil {
+		s.removeFile(fullTmp)
+		s.removeFile(thumbTmp)
+
+		return fmt.Errorf("publishing full image: %w", err)
+	}
+	if err := os.Rename(filepath.Join(s.root, thumbTmp), filepath.Join(s.root, relThumb)); err != nil {
+		// The full file already landed at its final name; tear it back down
+		// so the upload's invariant ("either both files exist or neither
+		// does") is preserved.
+		s.removeFile(relFull)
+		s.removeFile(thumbTmp)
+
+		return fmt.Errorf("publishing thumbnail: %w", err)
 	}
 
 	return nil

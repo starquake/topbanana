@@ -12,18 +12,20 @@ import (
 )
 
 // publicCacheControl and privateCacheControl key the cache policy to the owning
-// quiz's visibility. A public image is shared and immutable: the URL embeds an
-// immutable id and the ETag carries the stored webp's sha256, so the bytes never
-// change under a stable id, and a one-week max-age plus immutable lets the
-// client skip even the revalidation round-trip. A private image uses no-store
-// so the bytes never persist in any cache where a logged-out viewer could
-// surface them.
+// quiz's visibility. Both rely on the stored sha256 ETag for correctness; we
+// dropped `immutable` from the public policy in #951 (id reuse across delete +
+// concurrent upload could briefly point a stable id at different bytes), but
+// the AUTOINCREMENT migration in the same PR now guarantees ids are never
+// reused. A short max-age + must-revalidate gives the browser and any
+// intermediate cache a small free hit window while still revalidating against
+// the ETag once the window expires, so a corrected image propagates within
+// the TTL.
 const (
-	publicCacheControl  = "public, max-age=604800, immutable"
-	privateCacheControl = "private, no-store"
+	publicCacheControl  = "public, max-age=300, must-revalidate"
+	privateCacheControl = "private, no-cache"
 )
 
-// HandleMediaServe serves the full webp for GET /media/{id}. Authorization
+// HandleMediaServe serves the full jpeg for GET /media/{id}. Authorization
 // mirrors the owning quiz's own access rule: a public quiz's image is served to
 // anyone (including anonymous players mid-game), a private quiz's image only to
 // an authenticated viewer resolved by viewer (no player row is minted - the
@@ -35,7 +37,7 @@ func HandleMediaServe(
 	return serveMedia(logger, svc, quizzes, viewer, fullPath)
 }
 
-// HandleMediaThumb serves the 480px webp thumbnail for GET /media/{id}/thumb.
+// HandleMediaThumb serves the 480px jpeg thumbnail for GET /media/{id}/thumb.
 // Same authorization and caching as HandleMediaServe; it differs only in which
 // of the row's two files it streams.
 func HandleMediaThumb(
@@ -131,7 +133,7 @@ func authorizeMediaRead(
 
 // streamMedia opens and streams the chosen file via [http.ServeContent], which
 // handles the ETag / If-None-Match / Range dance. The Content-Type is the row's
-// stored mime, the ETag is the stored webp's sha256 (quoted, a strong
+// stored mime, the ETag is the stored image's sha256 (quoted, a strong
 // validator), and Cache-Control is keyed to visibility.
 func streamMedia(
 	w http.ResponseWriter, r *http.Request,

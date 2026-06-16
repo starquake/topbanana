@@ -36,23 +36,19 @@ async function authorQuizWithImageQuestion(page: Page, quizTitle: string): Promi
   await createQuizWithQuestions(page, quizTitle, REALISTIC);
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  await page.locator('input[type="file"][name="image"]').setInputFiles({
+  await page.locator('input[type="file"][name="images"]').setInputFiles({
     name: 'pic.png',
     mimeType: 'image/png',
     buffer: PNG_SAMPLE,
   });
-  await page.getByRole('button', { name: /upload/i }).click();
-  // The upload redirect carries an #images fragment so the host keeps their
-  // scroll position on the library section.
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+(#images)?$/);
-  const libraryThumb = page.locator('img[alt^="Quiz image"]').first();
-  await expect(libraryThumb).toBeVisible();
+  const libraryThumb = page.getByTestId('library-thumb').first();
+  await expect(libraryThumb).toBeVisible({ timeout: 30_000 });
 
   await page.getByRole('link', { name: 'Edit question' }).first().click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/\d+\/edit$/);
   const pickerThumb = page
-    .getByRole('radiogroup', { name: /attach an image/i })
-    .locator('img[alt^="Quiz image"]')
+    .getByTestId('question-image-picker')
+    .getByTestId('library-thumb')
     .first();
   await expect(pickerThumb).toBeVisible();
   await pickerThumb.click();

@@ -19,9 +19,9 @@ import (
 // request session, or (nil, false) when the request is anonymous or cookieless.
 // The serving handlers use it for the private-quiz gate WITHOUT minting a player
 // row or setting a session cookie: a media response is cacheable (public images
-// carry Cache-Control: public, immutable), so it must not attach a Set-Cookie or
-// create a row the way EnsurePlayer would - the same reason the static asset
-// routes are not EnsurePlayer-wrapped.
+// carry a public Cache-Control), so it must not attach a Set-Cookie or create a
+// row the way EnsurePlayer would - the same reason the static asset routes are
+// not EnsurePlayer-wrapped.
 type Viewer func(r *http.Request) (*auth.Player, bool)
 
 // MediaService is the slice of *media.Service the handlers use. Defined here
@@ -29,7 +29,7 @@ type Viewer func(r *http.Request) (*auth.Player, bool)
 // HTTP layer depends on the narrow surface it calls rather than the whole
 // service.
 type MediaService interface {
-	// Store processes an uploaded image through the pipeline, writes the webp
+	// Store processes an uploaded image through the pipeline, writes the jpeg
 	// full + thumbnail under the quiz directory, records a row, and returns it.
 	Store(ctx context.Context, quizID, createdBy int64, r io.Reader) (*media.Media, error)
 	// Get returns the media row for id, or media.ErrMediaNotFound.

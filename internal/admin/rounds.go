@@ -10,6 +10,7 @@ import (
 
 	"github.com/starquake/topbanana/internal/csrf"
 	"github.com/starquake/topbanana/internal/handlers"
+	"github.com/starquake/topbanana/internal/htmx"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/render"
 )
@@ -151,7 +152,7 @@ func HandleRoundMove(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz.
 			return
 		}
 		direction := r.PathValue("direction")
-		isHX := r.Header.Get("Hx-Request") == "true"
+		isHX := htmx.IsRequest(r)
 
 		// ErrRoundMoveImpossible means the target slot is gone or out of
 		// range. The arrow should already have been hidden in the UI, so

@@ -99,6 +99,38 @@ func TestMediaDelete_Integration(t *testing.T) {
 		quizID := createQuizAs(ctx, t, owner, baseURL, "Unknown Media Quiz")
 		deleteMedia(ctx, t, owner, baseURL, quizID, 999999, http.StatusNotFound)
 	})
+
+	t.Run("HX-Request returns an empty 200 instead of the 303", func(t *testing.T) {
+		t.Parallel()
+		quizID := createQuizAs(ctx, t, owner, baseURL, "HX Delete Quiz")
+		uploadImage(ctx, t, owner, baseURL, quizID, "pic.png", pngBytes(t, 200, 120))
+		mediaID := latestMediaID(ctx, t, setup.Stores, quizID)
+
+		token := fetchCSRFToken(ctx, t, owner, baseURL+"/admin/quizzes")
+		form := url.Values{"csrf_token": {token}}
+		target := baseURL + fmt.Sprintf("/admin/quizzes/%d/media/%d/delete", quizID, mediaID)
+		req := newFormReq(ctx, t, target, form)
+		req.Header.Set("Hx-Request", "true")
+		resp, err := owner.Do(req)
+		if err != nil {
+			t.Fatalf("HX delete Do err = %v, want nil", err)
+		}
+		defer closeBody(t, resp.Body)
+		if got, want := resp.StatusCode, http.StatusOK; got != want {
+			t.Fatalf("HX delete status = %d, want %d", got, want)
+		}
+		if got := resp.Header.Get("Location"); got != "" {
+			t.Errorf("HX delete Location = %q, want empty", got)
+		}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("HX delete body read err = %v, want nil", err)
+		}
+		if len(body) != 0 {
+			t.Errorf("HX delete body = %q, want empty", body)
+		}
+		assertMediaGone(ctx, t, setup.Stores, mediaID)
+	})
 }
 
 // TestMediaDeleteView_Integration covers the delete affordance in the per-quiz

@@ -288,7 +288,9 @@
             {{if .Images}}
                 <ul class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                     {{range .Images}}
-                        <li class="group relative">
+                        {{/* Modal lives inside the tile so the outerHTML swap
+                             removes both atomically (no orphan dialogs). */}}
+                        <li id="image-tile-{{.ID}}" class="group relative">
                             <button type="button"
                                     onclick="openImageViewer('/media/{{.ID}}')"
                                     aria-label="View image {{.ID}} full size"
@@ -297,19 +299,52 @@
                                      alt="Quiz image {{.ID}}"
                                      loading="lazy"
                                      width="{{.Width}}" height="{{.Height}}"
-                                     class="h-full w-full object-cover">
+                                     class="h-full w-full object-cover"
+                                     data-testid="library-thumb">
                             </button>
-                            {{/* Delete control: always visible on touch (no
-                                 hover), fades in on hover on devices that
-                                 actually hover. The hover-fade is gated on
-                                 (hover: hover) instead of a breakpoint so an
-                                 iPad - wide screen, touch only - keeps the
-                                 button visible. */}}
+                            {{/* Always visible on touch; hover-fade gated on
+                                 (hover: hover) so an iPad keeps it visible. */}}
                             <button type="button" aria-label="Delete image {{.ID}}"
                                     onclick="openModal('modal-delete-media-{{.ID}}')"
                                     class="absolute top-1.5 right-1.5 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border-soft bg-bg/80 text-text transition hover:bg-danger focus-visible:outline-none focus-visible:shadow-focus [@media(hover:hover)]:text-text-dim [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100 [@media(hover:hover)]:hover:text-text">
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.5 1a.5.5 0 0 0-.5.5V2H3a.5.5 0 0 0 0 1h.5l.6 9.1a1.5 1.5 0 0 0 1.5 1.4h4.8a1.5 1.5 0 0 0 1.5-1.4L12.5 3h.5a.5.5 0 0 0 0-1h-3v-.5a.5.5 0 0 0-.5-.5h-3zM6 6a.5.5 0 0 1 1 0v5a.5.5 0 0 1-1 0V6zm3 0a.5.5 0 0 1 1 0v5a.5.5 0 0 1-1 0V6z"/></svg>
                             </button>
+                            <div id="modal-delete-media-{{.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-delete-media-{{.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
+                                <div class="absolute inset-0" onclick="closeModal('modal-delete-media-{{.ID}}')"></div>
+                                <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
+                                    <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
+                                        <p id="modal-delete-media-{{.ID}}-title" class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Delete image</p>
+                                        <button type="button" aria-label="close"
+                                                onclick="closeModal('modal-delete-media-{{.ID}}')"
+                                                class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer">&times;</button>
+                                    </header>
+                                    <section class="flex gap-4 px-6 py-5 text-[0.95rem]">
+                                        <img src="/media/{{.ID}}/thumb"
+                                             alt="Quiz image {{.ID}}"
+                                             width="{{.Width}}" height="{{.Height}}"
+                                             class="block h-20 w-20 shrink-0 rounded-sm border border-border-soft object-cover">
+                                        <p class="m-0">Are you sure you want to delete this image? Any questions using it will keep their text but lose the picture. This action cannot be undone.</p>
+                                    </section>
+                                    <p data-testid="delete-error" hidden class="px-6 pb-2 text-[0.85rem] text-danger" role="alert">Delete failed. Please try again.</p>
+                                    <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
+                                        <button type="button"
+                                                onclick="closeModal('modal-delete-media-{{.ID}}')"
+                                                class="btn-ghost">Cancel</button>
+                                        {{/* after-request gates on success: on 5xx htmx skips
+                                             the swap, so we keep the modal open + show error. */}}
+                                        <form method="post"
+                                              action="/admin/quizzes/{{$.Quiz.ID}}/media/{{.ID}}/delete"
+                                              hx-post="/admin/quizzes/{{$.Quiz.ID}}/media/{{.ID}}/delete"
+                                              hx-target="#image-tile-{{.ID}}"
+                                              hx-swap="outerHTML"
+                                              hx-on::after-request="if(event.detail.successful){closeModal('modal-delete-media-{{.ID}}')}else{this.closest('[role=dialog]').querySelector('[data-testid=delete-error]').hidden=false}"
+                                              class="inline-flex">
+                                            <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+                                            <button type="submit" class="btn-danger">Delete</button>
+                                        </form>
+                                    </footer>
+                                </div>
+                            </div>
                         </li>
                     {{end}}
                 </ul>
@@ -329,6 +364,10 @@
                         <img id="image-modal-viewer-img"
                              src="" alt=""
                              class="block max-w-[90vw] max-h-[85vh] object-contain rounded-lg shadow-2xl">
+                        <p id="image-modal-viewer-error"
+                           data-testid="image-modal-error"
+                           hidden
+                           class="block max-w-[90vw] max-h-[85vh] px-6 py-10 text-center text-sm text-text-dim bg-surface rounded-lg shadow-2xl">Image failed to load.</p>
                         <button type="button"
                                 aria-label="Close image viewer"
                                 onclick="closeModal('image-modal-viewer')"
@@ -343,35 +382,40 @@
                 </div>
             {{end}}
 
-            {{/* Delete-image confirm modals, one per thumbnail, mirroring the
-                 question/round delete modals above. Use $ to reach the quiz id
-                 from inside the range. The POST goes to the media delete route;
-                 the handler re-checks the creator-or-admin gate and that the
-                 image belongs to this quiz. */}}
-            {{range .Images}}
-                <div id="modal-delete-media-{{.ID}}" role="dialog" aria-modal="true" aria-labelledby="modal-delete-media-{{.ID}}-title" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4">
-                    <div class="absolute inset-0" onclick="closeModal('modal-delete-media-{{.ID}}')"></div>
-                    <div class="relative w-full max-w-[480px] mx-auto bg-surface border border-accent-line rounded-lg shadow-2xl">
-                        <header class="flex items-center justify-between px-6 py-5 border-b border-border-soft">
-                            <p id="modal-delete-media-{{.ID}}-title" class="font-display text-sm font-semibold uppercase tracking-[0.14em]">Delete image</p>
-                            <button type="button" aria-label="close"
-                                    onclick="closeModal('modal-delete-media-{{.ID}}')"
-                                    class="w-6 h-6 inline-flex items-center justify-center rounded-full bg-border-soft text-text-dim border-0 hover:bg-border hover:text-text cursor-pointer">&times;</button>
-                        </header>
-                        <section class="px-6 py-5 text-[0.95rem]">
-                            Are you sure you want to delete this image? Any questions using it will keep their text but lose the picture. This action cannot be undone.
-                        </section>
-                        <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
-                            <button type="button"
-                                    onclick="closeModal('modal-delete-media-{{.ID}}')"
-                                    class="btn-ghost">Cancel</button>
-                            <form method="post" action="/admin/quizzes/{{$.Quiz.ID}}/media/{{.ID}}/delete" class="inline-flex">
-                                <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                                <button type="submit" class="btn-danger">Delete</button>
-                            </form>
-                        </footer>
-                    </div>
+
+            {{/* Post-upload banner. Counts come from
+                 ?uploaded=N&failed=M&cancelled=K; the inline script strips
+                 them via replaceState so a refresh doesn't repaint a stale
+                 banner (#951). */}}
+            {{if or (gt .UploadedCount 0) (or (gt .FailedCount 0) (gt .CancelledCount 0))}}
+                <div class="mb-4 rounded-sm border px-3 py-2 text-sm
+                            {{if or (gt .FailedCount 0) (gt .CancelledCount 0)}}{{if gt .UploadedCount 0}}border-warning/40 bg-warning/10 text-warning{{else}}border-danger/40 bg-danger/10 text-danger{{end}}{{else}}border-success/40 bg-success/10 text-success{{end}}"
+                     role="status"
+                     data-testid="upload-banner">
+                    {{if gt .UploadedCount 0}}
+                        {{.UploadedCount}} image{{if ne .UploadedCount 1}}s{{end}} uploaded.
+                    {{end}}
+                    {{if gt .FailedCount 0}}
+                        {{.FailedCount}} skipped (check the file format and size).
+                    {{end}}
+                    {{if gt .CancelledCount 0}}
+                        {{.CancelledCount}} cancelled.
+                    {{end}}
                 </div>
+                <script>
+                    (function () {
+                        if (!window.history || !window.history.replaceState) return;
+                        var url = new URL(window.location.href);
+                        if (!url.searchParams.has('uploaded')
+                            && !url.searchParams.has('failed')
+                            && !url.searchParams.has('cancelled')) return;
+                        url.searchParams.delete('uploaded');
+                        url.searchParams.delete('failed');
+                        url.searchParams.delete('cancelled');
+                        var clean = url.pathname + (url.search ? url.search : '') + (url.hash || '');
+                        window.history.replaceState(window.history.state, '', clean);
+                    })();
+                </script>
             {{end}}
 
             <form method="post"
@@ -379,15 +423,22 @@
                   enctype="multipart/form-data"
                   class="mt-6 flex flex-wrap items-center gap-3">
                 <input type="hidden" name="csrf_token" value="{{csrfToken}}">
-                <label for="quiz-media-upload" class="text-xs uppercase tracking-[0.12em] text-text-dim">Add image</label>
+                <label for="quiz-media-upload" class="text-xs uppercase tracking-[0.12em] text-text-dim">Add images</label>
                 <input type="file"
                        id="quiz-media-upload"
-                       name="image"
-                       accept="image/jpeg,image/png,image/webp"
+                       name="images"
+                       accept="image/jpeg,image/png"
+                       multiple
                        required
                        class="text-sm text-text-dim file:mr-3 file:cursor-pointer file:rounded-sm file:border file:border-border-soft file:bg-surface file:px-3 file:py-2 file:text-xs file:font-semibold file:uppercase file:tracking-[0.12em] file:text-text hover:file:border-accent">
-                <button type="submit" class="btn-primary">Upload</button>
+                <button type="submit" class="btn-primary" data-testid="upload-button">Upload</button>
             </form>
+
+            {{/* Auto-upload progress queue (#951): quiz-image-upload.js
+                 appends one row per picked file. */}}
+            <ul data-image-upload-queue
+                class="mt-4 flex flex-col gap-2 empty:hidden"
+                aria-live="polite"></ul>
         </section>
         {{end}}
 
@@ -544,7 +595,28 @@
         // same as every other admin modal.
         function openImageViewer(src) {
             const img = document.getElementById('image-modal-viewer-img');
-            if (img) img.src = src;
+            const errorEl = document.getElementById('image-modal-viewer-error');
+            if (img) {
+                // Hide the <img> while the new src loads so we don't briefly
+                // show the previous image while the new one is on the wire.
+                img.style.visibility = 'hidden';
+                img.removeAttribute('src');
+                if (errorEl) errorEl.hidden = true;
+                const onLoad = () => {
+                    img.style.visibility = '';
+                    img.removeEventListener('error', onError);
+                };
+                const onError = () => {
+                    // A 404 / network failure never fires 'load', so without
+                    // this branch the img stays visibility:hidden and the
+                    // dialog opens blank with no signal of the failure.
+                    img.removeEventListener('load', onLoad);
+                    if (errorEl) errorEl.hidden = false;
+                };
+                img.addEventListener('load', onLoad, { once: true });
+                img.addEventListener('error', onError, { once: true });
+                img.src = src;
+            }
             openModal('image-modal-viewer');
         }
     </script>
@@ -554,4 +626,5 @@
          self-noops when the edit handles are absent (read-only viewer). */}}
     <script src="/static/js/vendor/sortable.min.js" defer></script>
     <script type="module" src="/static/js/dist/quiz-reorder.js" defer></script>
+    <script type="module" src="/static/js/dist/quiz-image-upload.js" defer></script>
 {{end}}

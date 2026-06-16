@@ -117,7 +117,7 @@ lint-cross-refs:
 lint-migrations:
 	@hits=$$(grep -lE 'PRAGMA[[:space:]]+foreign_keys[[:space:]]*=[[:space:]]*OFF' \
 	    internal/migrations/*.sql 2>/dev/null \
-	    | grep -vE '20260506000000_add_player_auth_columns\.sql|20260520200000_quiz_creator\.sql|20260528100000_require_email_for_credentialled_players\.sql|20260529160000_roles_player_host_admin\.sql|20260530000000_add_rounds\.sql|20260606120000_session_runner\.sql|20260607120000_session_round_results\.sql|20260611120000_persistent_rooms\.sql|20260612120000_session_quiz_nullable\.sql' \
+	    | grep -vE '20260506000000_add_player_auth_columns\.sql|20260520200000_quiz_creator\.sql|20260528100000_require_email_for_credentialled_players\.sql|20260529160000_roles_player_host_admin\.sql|20260530000000_add_rounds\.sql|20260606120000_session_runner\.sql|20260607120000_session_round_results\.sql|20260611120000_persistent_rooms\.sql|20260612120000_session_quiz_nullable\.sql|20260616180000_media_id_autoincrement\.sql' \
 	    || true); \
 	if [ -n "$$hits" ]; then \
 	    echo "lint-migrations: the following migrations use PRAGMA foreign_keys = OFF;"; \
@@ -350,6 +350,7 @@ JS_WEB_OUT      := internal/assets/static/js/dist
 JS_WEB_ENTRIES  := $(JS_WEB_SRC)/host-bigscreen.js $(JS_WEB_SRC)/share.js \
                    $(JS_WEB_SRC)/cooldown.js $(JS_WEB_SRC)/copy-prompt.js \
                    $(JS_WEB_SRC)/password-length.js $(JS_WEB_SRC)/quiz-reorder.js \
+                   $(JS_WEB_SRC)/quiz-image-upload.js \
                    $(JS_WEB_SRC)/home.js
 
 # Third-party libraries (Alpine, anime.js, SortableJS) are sourced from the

@@ -60,6 +60,7 @@
             {{if .Library}}
                 <div class="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5"
                      role="radiogroup" aria-label="Attach an image"
+                     data-testid="question-image-picker"
                      {{if $mediaErr}}aria-describedby="media-error"{{end}}>
                     <label class="group relative flex aspect-square cursor-pointer items-center justify-center rounded-lg border border-border-soft bg-surface text-center text-xs text-text-dim has-[:checked]:border-accent has-[:checked]:text-text has-[:focus-visible]:shadow-focus">
                         <input type="radio" name="media_id" value="" class="sr-only"
@@ -74,7 +75,8 @@
                                  alt="Quiz image {{.ID}}"
                                  loading="lazy"
                                  width="{{.Width}}" height="{{.Height}}"
-                                 class="h-full w-full object-cover">
+                                 class="h-full w-full object-cover"
+                                 data-testid="library-thumb">
                             <span aria-hidden="true"
                                   class="pointer-events-none absolute inset-0 hidden items-center justify-center bg-accent/20 peer-checked:flex">
                                 <span class="flex h-7 w-7 items-center justify-center rounded-full bg-accent text-bg">

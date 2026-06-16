@@ -4,7 +4,6 @@ go 1.25.7
 
 require (
 	github.com/coreos/go-oidc/v3 v3.18.0
-	github.com/deepteams/webp v1.2.4
 	github.com/google/go-cmp v0.7.0
 	github.com/gosimple/slug v1.15.0
 	github.com/pressly/goose/v3 v3.27.1
@@ -36,5 +35,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-replace github.com/deepteams/webp => github.com/starquake/webp v0.0.0-20260615180040-7d874db6f3b8

@@ -159,3 +159,11 @@ func NewPlayerInputResultFor(r *http.Request) NewPlayerInputResult {
 
 	return NewPlayerInputResult{DisplayName: in.DisplayName, ErrMsg: in.errMsg}
 }
+
+// ParseUploadCounts exposes the unexported query-string parser for tests.
+func ParseUploadCounts(r *http.Request) (uploaded, failed, cancelled int) {
+	return parseUploadCounts(r)
+}
+
+// UploadCountCeiling exposes the unexported clamp value for tests.
+const UploadCountCeiling = uploadCountCeiling

@@ -35,18 +35,15 @@ test('uploading an image keeps the quiz view scrolled to the library section', a
   await page.evaluate(() => window.scrollTo(0, 0));
   await expect.poll(async () => page.evaluate(() => window.scrollY)).toBe(0);
 
-  await page.locator('input[type="file"][name="image"]').setInputFiles({
+  await page.locator('input[type="file"][name="images"]').setInputFiles({
     name: 'pic.png',
     mimeType: 'image/png',
     buffer: PNG_SAMPLE,
   });
-  await page.getByRole('button', { name: /upload/i }).click();
 
-  // The redirect lands on the same path with an #images fragment; the browser
-  // then scrolls to the library section. Anchor the assertion on both URL and
-  // a visible library thumb so we know the upload actually succeeded.
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+#images$/);
-  await expect(page.locator('img[alt^="Quiz image"]').first()).toBeVisible();
+  // Auto-upload completes, URL settles on #images (query stripped by cleanup script).
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+#images$/, { timeout: 30_000 });
+  await expect(page.getByTestId('library-thumb').first()).toBeVisible();
 
   // The library section is positioned below the page top, so a fragment scroll
   // moves the page down; a regression to the old no-fragment redirect would

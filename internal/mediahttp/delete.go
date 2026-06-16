@@ -8,6 +8,7 @@ import (
 
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/handlers"
+	"github.com/starquake/topbanana/internal/htmx"
 	"github.com/starquake/topbanana/internal/media"
 )
 
@@ -86,9 +87,19 @@ func HandleMediaDelete(logger *slog.Logger, svc MediaService, quizzes QuizEditLo
 			return
 		}
 
-		// The #images fragment scrolls the quiz view back to the library section
-		// the host just edited, instead of jumping to the page top.
-		dest := fmt.Sprintf("/admin/quizzes/%d", quizID) + "#images"
-		http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // dest is built from an int64 id, not user input
+		writeDeleteResponse(w, r, quizID)
 	})
+}
+
+// writeDeleteResponse: htmx gets an empty 200 for the outerHTML swap; plain
+// form submit gets the 303 to the images section.
+func writeDeleteResponse(w http.ResponseWriter, r *http.Request, quizID int64) {
+	if htmx.IsRequest(r) {
+		w.WriteHeader(http.StatusOK)
+
+		return
+	}
+
+	dest := fmt.Sprintf("/admin/quizzes/%d", quizID) + "#images"
+	http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // dest is built from an int64 id, not user input
 }

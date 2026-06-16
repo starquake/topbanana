@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/starquake/topbanana/internal/csrf"
+	"github.com/starquake/topbanana/internal/htmx"
 	"github.com/starquake/topbanana/internal/request"
 	"github.com/starquake/topbanana/internal/session"
 )
@@ -65,7 +66,7 @@ func RequireVerifiedEmail(next http.Handler) http.Handler {
 		// 303 here would inject the pending page into whatever partial
 		// target fired the request. HX-Redirect tells htmx to do a
 		// top-level navigation instead.
-		if r.Header.Get("Hx-Request") == "true" {
+		if htmx.IsRequest(r) {
 			w.Header().Set("Hx-Redirect", verifyPendingPath)
 			w.WriteHeader(http.StatusNoContent)
 

@@ -54,18 +54,8 @@ func encodePNG(t *testing.T, img image.Image) []byte {
 	return buf.Bytes()
 }
 
-func encodeWebP(t *testing.T, img image.Image) []byte {
-	t.Helper()
-	var buf bytes.Buffer
-	if err := EncodeWebPForTest(&buf, img, 80); err != nil {
-		t.Fatalf("EncodeWebPForTest err = %v, want nil", err)
-	}
-
-	return buf.Bytes()
-}
-
-// TestProcessAcceptedFormats pins that each accepted input format (jpeg, png,
-// webp) decodes and processes into a valid webp full image and thumbnail.
+// TestProcessAcceptedFormats pins that each accepted input format (jpeg, png)
+// decodes and processes into a valid jpeg full image and thumbnail.
 func TestProcessAcceptedFormats(t *testing.T) {
 	t.Parallel()
 
@@ -73,7 +63,6 @@ func TestProcessAcceptedFormats(t *testing.T) {
 	cases := map[string][]byte{
 		"jpeg": encodeJPEG(t, img),
 		"png":  encodePNG(t, img),
-		"webp": encodeWebP(t, img),
 	}
 
 	for name, raw := range cases {
@@ -84,23 +73,22 @@ func TestProcessAcceptedFormats(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Process(%s) err = %v, want nil", name, err)
 			}
-			if got, want := got.MIME, "image/webp"; got != want {
+			if got, want := got.MIME, "image/jpeg"; got != want {
 				t.Errorf("MIME = %q, want %q", got, want)
 			}
 			if len(got.Full) == 0 {
-				t.Error("Full is empty, want webp bytes")
+				t.Error("Full is empty, want jpeg bytes")
 			}
 			if len(got.Thumb) == 0 {
-				t.Error("Thumb is empty, want webp bytes")
+				t.Error("Thumb is empty, want jpeg bytes")
 			}
 		})
 	}
 }
 
-// TestProcessRoundTrip is the deepteams/webp correctness guard: the produced
-// full and thumb bytes must decode back as valid webp images at the dimensions
-// Process reports, so a misbehaving encoder is caught here rather than at serve
-// time.
+// TestProcessRoundTrip is the encoder correctness guard: the produced full and
+// thumb bytes must decode back as valid jpeg images at the dimensions Process
+// reports, so a misbehaving encoder is caught here rather than at serve time.
 func TestProcessRoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -110,7 +98,7 @@ func TestProcessRoundTrip(t *testing.T) {
 		t.Fatalf("Process err = %v, want nil", err)
 	}
 
-	fullCfg, err := DecodeWebPConfigForTest(bytes.NewReader(got.Full))
+	fullCfg, err := DecodeJPEGConfigForTest(bytes.NewReader(got.Full))
 	if err != nil {
 		t.Fatalf("DecodeConfig(Full) err = %v, want nil", err)
 	}
@@ -119,7 +107,7 @@ func TestProcessRoundTrip(t *testing.T) {
 			fullCfg.Width, fullCfg.Height, got.Width, got.Height)
 	}
 
-	fullImg, err := DecodeWebPForTest(bytes.NewReader(got.Full))
+	fullImg, err := DecodeJPEGForTest(bytes.NewReader(got.Full))
 	if err != nil {
 		t.Fatalf("Decode(Full) err = %v, want nil", err)
 	}
@@ -127,7 +115,7 @@ func TestProcessRoundTrip(t *testing.T) {
 		t.Errorf("decoded Full width = %d, want %d", got, want)
 	}
 
-	thumbImg, err := DecodeWebPForTest(bytes.NewReader(got.Thumb))
+	thumbImg, err := DecodeJPEGForTest(bytes.NewReader(got.Thumb))
 	if err != nil {
 		t.Fatalf("Decode(Thumb) err = %v, want nil", err)
 	}
@@ -156,7 +144,7 @@ func TestProcessDownscalesLongEdge(t *testing.T) {
 		t.Errorf("Height = %d, want %d (2:1 aspect preserved)", got.Height, MaxLongEdge/2)
 	}
 
-	thumb, err := DecodeWebPConfigForTest(bytes.NewReader(got.Thumb))
+	thumb, err := DecodeJPEGConfigForTest(bytes.NewReader(got.Thumb))
 	if err != nil {
 		t.Fatalf("DecodeConfig(Thumb) err = %v, want nil", err)
 	}
@@ -252,11 +240,9 @@ func longEdge(r image.Rectangle) int {
 }
 
 // TestProcess_Concurrent runs many Process calls at once and pins that
-// concurrent uploads stay race-free. Previously the deepteams/webp codec was
-// not safe for concurrent use and the run was guarded by a package mutex; the
-// fork pinned via go.mod's replace directive lands the upstream gamma-table
-// sync.Once and the lossy encoder's per-MB reset, so the test runs without a
-// lock and the -race detector stays quiet.
+// concurrent uploads stay race-free. The encoder is now stdlib image/jpeg
+// which is safe for concurrent use (each call has its own buffer); this test
+// stays in place to catch any future encoder swap that breaks that property.
 func TestProcess_Concurrent(t *testing.T) {
 	t.Parallel()
 

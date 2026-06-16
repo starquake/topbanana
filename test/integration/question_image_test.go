@@ -47,7 +47,7 @@ func attachMediaToQuestion(
 	row, err := stores.Media.CreateMedia(ctx, &media.Media{
 		QuizID:            quizID,
 		Type:              media.TypeImage,
-		MIME:              "image/webp",
+		MIME:              "image/jpeg",
 		Width:             200,
 		Height:            120,
 		SizeBytes:         1234,
