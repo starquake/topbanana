@@ -38,8 +38,10 @@ const (
 
 	// MaxLongEdge caps the stored full image's long edge in pixels. The image
 	// is only ever downscaled to this; a smaller image passes through at its
-	// native size (never upscaled).
-	MaxLongEdge = 1600
+	// native size (never upscaled). Sized for the admin lightbox at typical
+	// laptop / desktop resolutions; a higher cap inflated stored bytes
+	// without a visible quality win at that scale.
+	MaxLongEdge = 1200
 
 	// ThumbLongEdge caps the pre-generated thumbnail's long edge in pixels.
 	// Sized for a retina library grid.
@@ -47,7 +49,7 @@ const (
 
 	// webpQuality is the lossy webp encode quality for both the full image and
 	// the thumbnail.
-	webpQuality = 80
+	webpQuality = 75
 
 	// MIMEWebP is the mime type every stored image carries; the pipeline
 	// always normalises to webp regardless of the input format.
