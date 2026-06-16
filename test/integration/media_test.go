@@ -49,7 +49,7 @@ func TestMediaUpload_Integration(t *testing.T) {
 		if got, want := resp.StatusCode, http.StatusOK; got != want {
 			t.Fatalf("serve status = %d, want %d", got, want)
 		}
-		if got, want := resp.Header.Get("Content-Type"), "image/webp"; got != want {
+		if got, want := resp.Header.Get("Content-Type"), "image/jpeg"; got != want {
 			t.Errorf("Content-Type = %q, want %q", got, want)
 		}
 		if etag := resp.Header.Get("ETag"); etag == "" {
@@ -322,7 +322,7 @@ func TestMediaServe_Integration(t *testing.T) {
 		if got, want := resp.StatusCode, http.StatusOK; got != want {
 			t.Fatalf("thumb status = %d, want %d", got, want)
 		}
-		if got, want := resp.Header.Get("Content-Type"), "image/webp"; got != want {
+		if got, want := resp.Header.Get("Content-Type"), "image/jpeg"; got != want {
 			t.Errorf("thumb Content-Type = %q, want %q", got, want)
 		}
 	})

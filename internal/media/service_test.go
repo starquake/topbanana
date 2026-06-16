@@ -105,7 +105,7 @@ func TestServiceStoreRoundTrip(t *testing.T) {
 	if got, want := m.Type, TypeImage; got != want {
 		t.Errorf("Type = %q, want %q", got, want)
 	}
-	if got, want := m.MIME, "image/webp"; got != want {
+	if got, want := m.MIME, "image/jpeg"; got != want {
 		t.Errorf("MIME = %q, want %q", got, want)
 	}
 	if got, want := m.Width, 800; got != want {

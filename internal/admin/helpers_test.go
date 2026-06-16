@@ -113,9 +113,9 @@ func (e *adminEnv) seedMedia(t *testing.T, quizID int64) int64 {
 	m, err := e.media.CreateMedia(t.Context(), &media.Media{
 		QuizID:            quizID,
 		Type:              media.TypeImage,
-		MIME:              "image/webp",
-		Path:              "p.webp",
-		ThumbPath:         "p-thumb.webp",
+		MIME:              "image/jpeg",
+		Path:              "p.jpg",
+		ThumbPath:         "p-thumb.jpg",
 		Width:             640,
 		Height:            480,
 		SizeBytes:         1234,

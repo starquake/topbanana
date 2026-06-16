@@ -12,12 +12,12 @@ import (
 	"strings"
 )
 
-// fullSuffix and thumbSuffix name the two files a stored image writes under the
-// per-quiz directory. Both are webp; the thumb carries a distinct suffix so a
-// single media id maps to two predictable filenames.
+// fullSuffix and thumbSuffix name the two files a stored image writes under
+// the per-quiz directory. Both are jpeg; the thumb carries a distinct suffix
+// so a single media id maps to two predictable filenames.
 const (
-	fullSuffix  = ".webp"
-	thumbSuffix = "-thumb.webp"
+	fullSuffix  = ".jpg"
+	thumbSuffix = "-thumb.jpg"
 
 	// dirPerm and filePerm are the permissions for the per-quiz directories and
 	// the written files. The media root itself is created at startup; these
@@ -185,7 +185,7 @@ func (s *Service) Open(relPath string) (*os.File, error) {
 	return f, nil
 }
 
-// writeFiles writes the full and thumb webp bytes to the given root-relative
+// writeFiles writes the full and thumb jpeg bytes to the given root-relative
 // paths. On a failure after the first write succeeds, the first file is removed
 // so a partial write leaves nothing behind.
 func (s *Service) writeFiles(processed *Processed, relFull, relThumb string) error {

@@ -61,7 +61,7 @@ type CreateMediaParams struct {
 // Inserts a per-quiz media row (#936) and returns it with the assigned id and
 // created_at. The bytes already live on disk under the per-quiz directory; this
 // row records the relative path plus the metadata the pipeline computed
-// (dimensions, byte size, sha256 of the stored webp). thumb_path is nullable
+// (dimensions, byte size, sha256 of the stored image). thumb_path is nullable
 // because a non-image type (later) may not pre-generate a thumbnail.
 func (q *Queries) CreateMedia(ctx context.Context, arg CreateMediaParams) (Medium, error) {
 	row := q.db.QueryRowContext(ctx, createMedia,
@@ -195,7 +195,7 @@ type UpdateMediaPathsParams struct {
 }
 
 // Sets the on-disk paths of a media row after the files are written. The row is
-// inserted first to assign the id the filenames embed (<quizID>/<id>.webp), so
+// inserted first to assign the id the filenames embed (<quizID>/<id>.jpg), so
 // the paths cannot be known at insert time; this second write fills them in.
 // The caller checks RowsAffected to confirm the row still exists.
 func (q *Queries) UpdateMediaPaths(ctx context.Context, arg UpdateMediaPathsParams) (sql.Result, error) {

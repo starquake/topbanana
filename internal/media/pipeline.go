@@ -1,8 +1,8 @@
-// Package media processes uploaded images into normalised webp bytes plus
+// Package media processes uploaded images into normalised jpeg bytes plus
 // metadata, and ties that pipeline to filesystem and database persistence.
 //
 // The pipeline is pure (no disk, no DB): it takes the raw upload bytes and
-// returns the stored full-image webp, a thumbnail webp, and the metadata a
+// returns the stored full-image jpeg, a thumbnail jpeg, and the metadata a
 // media row records. The persistence half (Service) writes those bytes under
 // a per-quiz directory and inserts the row.
 package media
@@ -14,11 +14,11 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	_ "image/jpeg" // register the jpeg decoder with image.Decode
-	_ "image/png"  // register the png decoder with image.Decode
+	"image/jpeg"
+	_ "image/png" // register the png decoder with image.Decode
 	"io"
 
-	"github.com/deepteams/webp"
+	_ "github.com/deepteams/webp" // register the webp decoder with image.Decode
 	"golang.org/x/image/draw"
 )
 
@@ -47,13 +47,17 @@ const (
 	// Sized for a retina library grid.
 	ThumbLongEdge = 480
 
-	// webpQuality is the lossy webp encode quality for both the full image and
-	// the thumbnail.
-	webpQuality = 75
+	// jpegQuality is the lossy jpeg encode quality for both the full image
+	// and the thumbnail.
+	jpegQuality = 75
 
-	// MIMEWebP is the mime type every stored image carries; the pipeline
-	// always normalises to webp regardless of the input format.
-	MIMEWebP = "image/webp"
+	// MIMEJPEG is the mime type every stored image carries; the pipeline
+	// always normalises to jpeg regardless of the input format. JPEG over WebP
+	// (#951): the pure-Go webp encoder doesn't match libwebp's compression
+	// efficiency, so stdlib jpeg produces meaningfully smaller files at the
+	// same nominal quality. WebP input is still accepted by the decoder via
+	// the deepteams/webp blank import above.
+	MIMEJPEG = "image/jpeg"
 )
 
 // ErrUploadTooLarge is returned when the raw upload exceeds MaxUploadBytes.
@@ -72,12 +76,12 @@ var ErrUnsupportedImage = errors.New("unsupported or undecodable image")
 var ErrImageTooLarge = errors.New("image dimensions exceed maximum")
 
 // Processed is the output of the pipeline: the normalised full-image and
-// thumbnail webp bytes plus the metadata a media row stores. Width, Height,
+// thumbnail jpeg bytes plus the metadata a media row stores. Width, Height,
 // SizeBytes, and SHA256 describe the stored full image (Full), not the thumb.
 type Processed struct {
-	// Full is the resized, webp-encoded stored image.
+	// Full is the resized, jpeg-encoded stored image.
 	Full []byte
-	// Thumb is the smaller webp thumbnail derived from the same source.
+	// Thumb is the smaller jpeg thumbnail derived from the same source.
 	Thumb []byte
 	// Width and Height are the dimensions of the stored full image in pixels.
 	Width  int
@@ -87,13 +91,13 @@ type Processed struct {
 	// SHA256 is the lowercase-hex sha256 of Full, used for integrity checks
 	// and as the HTTP ETag when the image is served.
 	SHA256 string
-	// MIME is always MIMEWebP.
+	// MIME is always MIMEJPEG.
 	MIME string
 }
 
 // Process decodes the upload (jpeg, png, or webp), downscales it so its long
-// edge is at most MaxLongEdge, re-encodes it as lossy webp, and derives a
-// ThumbLongEdge webp thumbnail from the same decoded source. It is pure: no
+// edge is at most MaxLongEdge, re-encodes it as lossy jpeg, and derives a
+// ThumbLongEdge jpeg thumbnail from the same decoded source. It is pure: no
 // disk or network. The reader is fully consumed.
 //
 // Returns ErrUploadTooLarge when the raw bytes exceed MaxUploadBytes,
@@ -113,11 +117,11 @@ func Process(r io.Reader) (*Processed, error) {
 	full := resizeLongEdge(src, MaxLongEdge)
 	thumb := resizeLongEdge(src, ThumbLongEdge)
 
-	fullBytes, err := encodeWebP(full)
+	fullBytes, err := encodeJPEG(full)
 	if err != nil {
 		return nil, err
 	}
-	thumbBytes, err := encodeWebP(thumb)
+	thumbBytes, err := encodeJPEG(thumb)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +136,7 @@ func Process(r io.Reader) (*Processed, error) {
 		Height:    bounds.Dy(),
 		SizeBytes: len(fullBytes),
 		SHA256:    hex.EncodeToString(sum[:]),
-		MIME:      MIMEWebP,
+		MIME:      MIMEJPEG,
 	}, nil
 }
 
@@ -197,11 +201,11 @@ func resizeLongEdge(src image.Image, maxLongEdge int) image.Image {
 	return dst
 }
 
-// encodeWebP encodes img as lossy webp at webpQuality.
-func encodeWebP(img image.Image) ([]byte, error) {
+// encodeJPEG encodes img as lossy jpeg at jpegQuality.
+func encodeJPEG(img image.Image) ([]byte, error) {
 	var buf bytes.Buffer
-	if err := webp.Encode(&buf, img, &webp.EncoderOptions{Quality: webpQuality}); err != nil {
-		return nil, fmt.Errorf("encoding webp: %w", err)
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: jpegQuality}); err != nil {
+		return nil, fmt.Errorf("encoding jpeg: %w", err)
 	}
 
 	return buf.Bytes(), nil

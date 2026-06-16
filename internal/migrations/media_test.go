@@ -125,7 +125,7 @@ func seedMedia(t *testing.T, db *sql.DB, quizID int64) int64 {
 	if err := db.QueryRowContext(
 		t.Context(),
 		`INSERT INTO media (quiz_id, mime, path, size_bytes, sha256, created_by_player_id)
-		 VALUES (?, 'image/webp', 'p.webp', 10, 'deadbeef', 1) RETURNING id`,
+		 VALUES (?, 'image/jpeg', 'p.jpg', 10, 'deadbeef', 1) RETURNING id`,
 		quizID,
 	).Scan(&id); err != nil {
 		t.Fatalf("seed media err = %v, want nil", err)

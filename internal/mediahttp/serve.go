@@ -131,7 +131,7 @@ func authorizeMediaRead(
 
 // streamMedia opens and streams the chosen file via [http.ServeContent], which
 // handles the ETag / If-None-Match / Range dance. The Content-Type is the row's
-// stored mime, the ETag is the stored webp's sha256 (quoted, a strong
+// stored mime, the ETag is the stored image's sha256 (quoted, a strong
 // validator), and Cache-Control is keyed to visibility.
 func streamMedia(
 	w http.ResponseWriter, r *http.Request,
