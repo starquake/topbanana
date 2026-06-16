@@ -88,6 +88,9 @@ function hostBigScreen(joinCode, hasQuiz) {
         // Running count of consecutive GET /state failures, reset to 0 on any
         // success.
         stateFailures: 0,
+        // True once GET /state 404s: the session is gone (terminal), distinct
+        // from connectionTrouble's retryable fault, so the footer settles.
+        sessionGone: false,
         starting: false,
         startMessage: '',
         source: null,
@@ -193,10 +196,11 @@ function hostBigScreen(joinCode, hasQuiz) {
                     { headers: { Accept: 'application/json' } },
                 );
                 if (!response.ok) {
-                    // A 404 means the session is gone; it is not a connection
-                    // fault, so it does not feed the trouble banner. Any other
-                    // status is a server-side error worth counting.
-                    if (response.status !== 404) {
+                    // A 404 means the session is gone (terminal), not a
+                    // connection fault, so it does not feed the trouble banner.
+                    if (response.status === 404) {
+                        this.markSessionGone();
+                    } else {
                         this.noteStateFailure();
                     }
                     return;
@@ -222,6 +226,17 @@ function hostBigScreen(joinCode, hasQuiz) {
             if (this.stateFailures >= STATE_FAILURE_LIMIT) {
                 this.connectionTrouble = true;
             }
+        },
+
+        // Tears down the stream and countdowns so the screen settles on the
+        // closed signal instead of ticking against a session that is gone.
+        markSessionGone() {
+            if (this.sessionGone) return;
+            this.sessionGone = true;
+            this.connectionTrouble = false;
+            this.disconnect();
+            this.stopCountdown();
+            this.stopStartCountdown();
         },
 
         applyState(state) {

@@ -319,11 +319,16 @@
                  while the big screen keeps retrying off every SSE tick. Cleared
                  on the next good read. Distinct from the SSE "Live /
                  Reconnecting" dot, which only tracks the event channel. */}}
+            {{/* Session-gone (GET /state 404) is terminal, so it reads "Session
+                 ended" rather than the retry banner or the live/reconnecting dot. */}}
             <p class="m-0 flex items-center gap-2 text-text-dim text-[clamp(0.8rem,1.5vw,1rem)]">
-                <template x-if="connectionTrouble">
+                <template x-if="sessionGone">
+                    <span class="text-danger font-semibold" role="status" data-testid="session-gone">Session ended</span>
+                </template>
+                <template x-if="!sessionGone && connectionTrouble">
                     <span class="text-warning" role="status" data-connection-trouble>Connection problem, retrying...</span>
                 </template>
-                <template x-if="!connectionTrouble">
+                <template x-if="!sessionGone && !connectionTrouble">
                     <span class="flex items-center gap-2">
                         <span class="inline-block w-2.5 h-2.5 rounded-full"
                               :class="connected ? 'bg-success' : 'bg-warning'"

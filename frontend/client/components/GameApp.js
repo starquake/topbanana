@@ -751,6 +751,14 @@ export class GameApp {
         const end = new Date(this.question.expiredAt).getTime();
         const total = end - start;
 
+        // A non-positive or NaN window never crosses zero, so the interval would
+        // spin forever; resolve to the timed-out state immediately instead.
+        if (!Number.isFinite(total) || total <= 0) {
+            this.progress = 0;
+            void this.handleTimeout();
+            return;
+        }
+
         this.progress = 100;
 
         this.timer = setInterval(() => {
