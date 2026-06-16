@@ -15,11 +15,12 @@ import (
 // quiz's visibility. A public image is shared and immutable: the URL embeds an
 // immutable id and the ETag carries the stored webp's sha256, so the bytes never
 // change under a stable id, and a one-week max-age plus immutable lets the
-// client skip even the revalidation round-trip. A private image must never land
-// in a shared cache, so it is private + no revalidation skip.
+// client skip even the revalidation round-trip. A private image uses no-store
+// so the bytes never persist in any cache where a logged-out viewer could
+// surface them.
 const (
 	publicCacheControl  = "public, max-age=604800, immutable"
-	privateCacheControl = "private, no-cache"
+	privateCacheControl = "private, no-store"
 )
 
 // HandleMediaServe serves the full webp for GET /media/{id}. Authorization

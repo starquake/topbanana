@@ -67,7 +67,7 @@ func addRoutes(
 	addMediaRoutes(mux, logger, stores, sessions, csrfMgr, media.NewService(stores.Media, cfg.MediaDir, logger))
 	addProfileRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
 	addAPIRoutes(mux, logger, stores, gameService, realtime, sessions, cfg)
-	addHostRoutes(mux, logger, stores, sessions, csrfMgr, realtime.SessionService)
+	addHostRoutes(mux, logger, stores, sessions, csrfMgr, realtime.SessionService, cfg.BaseURL)
 	addClientAndPublicRoutes(mux, logger, stores, sessions, csrfMgr, cfg)
 }
 
@@ -1003,13 +1003,14 @@ func addHostRoutes(
 	sessions *session.Manager,
 	csrfMgr *csrf.Manager,
 	sessionService *livesession.Service,
+	baseURL string,
 ) {
 	requireGameHost := func(h http.Handler) http.Handler {
 		return auth.RequireGameHost(auth.RequireVerifiedEmail(h), stores.Players, sessions, csrfMgr, logger)
 	}
 	csrfMW := csrfMgr.Middleware
 
-	handlers := host.NewHandlers(logger, csrfMgr, sessionService, stores.Quizzes)
+	handlers := host.NewHandlers(logger, csrfMgr, sessionService, stores.Quizzes, baseURL)
 
 	// The admin dashboard is the host's "start hosting" home, so it lives with
 	// the host routes: it surfaces the "Host a session" entry and a "Resume

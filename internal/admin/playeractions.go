@@ -195,7 +195,7 @@ func HandlePlayerSetDisplayName(
 
 		name := strings.TrimSpace(r.PostFormValue("display_name"))
 
-		_, err := store.RenamePlayer(r.Context(), playerID, name)
+		_, err := store.AdminRenamePlayer(r.Context(), playerID, name)
 		switch {
 		case err == nil:
 			writeAudit(r.Context(), logger, store, actor.ID, playerID,
@@ -392,7 +392,9 @@ func writeRoleChange(
 	case err == nil:
 		return true
 	case errors.Is(err, auth.ErrPlayerNotFound):
-		http.NotFound(w, r)
+		// Match the other player-action handlers: flash + 303 back, not a bare 404.
+		flash.SetError(w, "Player not found.", 0)
+		redirectToPlayerDetail(w, r, playerID)
 	default:
 		logger.ErrorContext(r.Context(), "error setting player role", slog.Any("err", err))
 		flash.SetError(w, "Could not update role. Try again.", 0)

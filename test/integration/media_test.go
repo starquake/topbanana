@@ -237,8 +237,13 @@ func TestMediaServe_Integration(t *testing.T) {
 		if got, want := resp.StatusCode, http.StatusOK; got != want {
 			t.Fatalf("owner private serve status = %d, want %d", got, want)
 		}
-		if got := resp.Header.Get("Cache-Control"); !strings.Contains(got, "private") {
-			t.Errorf("private Cache-Control = %q, want it to contain %q", got, "private")
+		// Private bytes use no-store so they never persist in the client cache.
+		cc := resp.Header.Get("Cache-Control")
+		if !strings.Contains(cc, "private") {
+			t.Errorf("private Cache-Control = %q, want it to contain %q", cc, "private")
+		}
+		if !strings.Contains(cc, "no-store") {
+			t.Errorf("private Cache-Control = %q, want it to contain %q", cc, "no-store")
 		}
 	})
 }

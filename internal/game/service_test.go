@@ -541,6 +541,50 @@ func TestService_GetResults(t *testing.T) {
 		}
 	})
 
+	t.Run("sole all-wrong player is not the winner", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := dbtest.Open(t)
+
+		quizStore := store.NewQuizStore(db, slog.Default())
+		gameStore := store.NewGameStore(db, slog.Default())
+
+		testQuiz := newTestQuiz(t)
+		if err := quizStore.CreateQuiz(ctx, testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		svc := NewService(gameStore, quizStore, slog.Default())
+
+		g, err := svc.CreateGame(ctx, testQuiz.ID, 1)
+		if err != nil {
+			t.Fatalf("failed to create game: %v", err)
+		}
+
+		gq, err := svc.GetNextQuestion(ctx, g.ID, 1)
+		if err != nil {
+			t.Fatalf("failed to get next question: %v", err)
+		}
+
+		wrongOption := testQuiz.Questions[0].Options[1] // London, Correct: false
+		if _, err = svc.SubmitAnswer(ctx, g.ID, 1, gq.QuizQuestion.ID, wrongOption.ID, time.Time{}); err != nil {
+			t.Fatalf("failed to submit wrong answer: %v", err)
+		}
+
+		results, err := svc.GetResults(ctx, g.ID, 1)
+		if err != nil {
+			t.Fatalf("failed to get results: %v", err)
+		}
+
+		if got, want := results.Winner, int64(0); got != want {
+			t.Errorf("Winner = %v, want %v (a 0-score all-wrong run has no winner)", got, want)
+		}
+		if got, want := results.PlayerScores[1], 0; got != want {
+			t.Errorf("PlayerScores[1] = %v, want %v", got, want)
+		}
+	})
+
 	t.Run("skips answers whose option was deleted without panicking", func(t *testing.T) {
 		t.Parallel()
 

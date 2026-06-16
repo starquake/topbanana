@@ -925,6 +925,102 @@ func TestPlayerStore_SetPlayerPasswordHash_AlsoMarksDisplayNameClaimed(t *testin
 	}
 }
 
+// TestPlayerStore_SetPlayerPasswordHash_BumpsSessionVersion pins that the
+// operator -reset-password rotation bumps session_version, invalidating every
+// other live cookie issued on the old credential.
+func TestPlayerStore_SetPlayerPasswordHash_BumpsSessionVersion(t *testing.T) {
+	t.Parallel()
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	const email = "session-bump-test@example.test"
+	row, err := ps.CreatePlayerFromOAuth(t.Context(), "anon-session-bump", email)
+	if err != nil {
+		t.Fatalf("CreatePlayerFromOAuth err = %v, want nil", err)
+	}
+
+	before, err := ps.GetPlayerByID(t.Context(), row.ID)
+	if err != nil {
+		t.Fatalf("GetPlayerByID err = %v, want nil", err)
+	}
+
+	if setErr := ps.SetPlayerPasswordHash(t.Context(), email, "h"); setErr != nil {
+		t.Fatalf("SetPlayerPasswordHash err = %v, want nil", setErr)
+	}
+
+	after, err := ps.GetPlayerByID(t.Context(), row.ID)
+	if err != nil {
+		t.Fatalf("GetPlayerByID err = %v, want nil", err)
+	}
+	if got, want := after.SessionVersion, before.SessionVersion+1; got != want {
+		t.Errorf("SessionVersion = %d, want %d (operator reset must invalidate other sessions)", got, want)
+	}
+}
+
+// TestPlayerStore_RenamePlayer_MarksClaimed pins that the player's own
+// rename (profile self-claim path) marks the name as player-claimed.
+func TestPlayerStore_RenamePlayer_MarksClaimed(t *testing.T) {
+	t.Parallel()
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	anon, err := ps.CreateAnonymousPlayer(t.Context(), "anon-self-claim")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	if got, want := anon.HasCustomName(), false; got != want {
+		t.Fatalf("precondition HasCustomName() = %v, want %v", got, want)
+	}
+
+	updated, err := ps.RenamePlayer(t.Context(), anon.ID, "self-picked")
+	if err != nil {
+		t.Fatalf("RenamePlayer err = %v, want nil", err)
+	}
+	if got, want := updated.DisplayName, "self-picked"; got != want {
+		t.Errorf("DisplayName = %q, want %q", got, want)
+	}
+	if got, want := updated.HasCustomName(), true; got != want {
+		t.Errorf("HasCustomName() = %v, want %v (self-rename must claim the name)", got, want)
+	}
+}
+
+// TestPlayerStore_AdminRenamePlayer_LeavesClaimedUntouched pins that an admin
+// rename of a guest does not mark the name as player-claimed (the guest never
+// picked it).
+func TestPlayerStore_AdminRenamePlayer_LeavesClaimedUntouched(t *testing.T) {
+	t.Parallel()
+	db := dbtest.Open(t)
+	ps := NewPlayerStore(db, slog.Default())
+
+	anon, err := ps.CreateAnonymousPlayer(t.Context(), "anon-admin-rename")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	if got, want := anon.HasCustomName(), false; got != want {
+		t.Fatalf("precondition HasCustomName() = %v, want %v", got, want)
+	}
+
+	updated, err := ps.AdminRenamePlayer(t.Context(), anon.ID, "Tidied Name")
+	if err != nil {
+		t.Fatalf("AdminRenamePlayer err = %v, want nil", err)
+	}
+	if got, want := updated.DisplayName, "Tidied Name"; got != want {
+		t.Errorf("DisplayName = %q, want %q", got, want)
+	}
+	if got, want := updated.HasCustomName(), false; got != want {
+		t.Errorf("HasCustomName() = %v, want %v (admin rename must not claim a guest's name)", got, want)
+	}
+
+	// Persisted, not just returned by RETURNING.
+	refetched, err := ps.GetPlayerByID(t.Context(), anon.ID)
+	if err != nil {
+		t.Fatalf("GetPlayerByID err = %v, want nil", err)
+	}
+	if got, want := refetched.HasCustomName(), false; got != want {
+		t.Errorf("refetched.HasCustomName() = %v, want %v", got, want)
+	}
+}
+
 func TestPlayerStore_SetPlayerEmail_ClearsVerification(t *testing.T) {
 	t.Parallel()
 	db := dbtest.Open(t)

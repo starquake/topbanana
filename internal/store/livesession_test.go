@@ -112,6 +112,35 @@ func TestLiveSessionStore_CreateSession_DuplicateJoinCode(t *testing.T) {
 	}
 }
 
+// TestLiveSessionStore_CreateSession_IDCollisionIsNotJoinCodeUnavailable pins
+// that an id PK collision is not misreported as ErrJoinCodeUnavailable.
+func TestLiveSessionStore_CreateSession_IDCollisionIsNotJoinCodeUnavailable(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizStore := NewQuizStore(db, slog.Default())
+	sessionStore := NewLiveSessionStore(db, slog.Default())
+	qz := newLiveQuiz(t, quizStore)
+
+	sessionStore.SetSessionIDForTest("collide00000000000000")
+
+	first := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "PK1234"}
+	if err := sessionStore.CreateSession(t.Context(), first); err != nil {
+		t.Fatalf("first CreateSession err = %v, want nil", err)
+	}
+
+	// Same forced id, fresh join code: the failure is a PK collision, so it
+	// must not be ErrJoinCodeUnavailable.
+	second := &livesession.Session{QuizID: liveQuizIDPtr(qz.ID), HostPlayerID: seededAdminID, JoinCode: "PK5678"}
+	err := sessionStore.CreateSession(t.Context(), second)
+	if err == nil {
+		t.Fatal("CreateSession err = nil, want an error on id collision")
+	}
+	if errors.Is(err, livesession.ErrJoinCodeUnavailable) {
+		t.Errorf("err = %v, want a non-ErrJoinCodeUnavailable internal error on PK collision", err)
+	}
+}
+
 func TestLiveSessionStore_AddPlayer_AndRoster(t *testing.T) {
 	t.Parallel()
 

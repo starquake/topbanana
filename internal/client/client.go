@@ -3,6 +3,7 @@ package client
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
@@ -27,5 +28,33 @@ func Handler(cfg *config.Config) http.Handler {
 		}
 	}
 
-	return http.StripPrefix("/client", http.FileServer(http.FS(fsys)))
+	return http.StripPrefix("/client", http.FileServer(http.FS(noDirFS{fsys})))
+}
+
+// noDirFS wraps an [fs.FS] so [http.FileServer] returns 404 for a directory
+// instead of generating a browsable index that would list the raw template
+// fragments under static/partials/.
+type noDirFS struct {
+	fsys fs.FS
+}
+
+// Open returns [fs.ErrNotExist] for a directory and otherwise delegates.
+func (n noDirFS) Open(name string) (fs.File, error) {
+	f, err := n.fsys.Open(name)
+	if err != nil {
+		return nil, fmt.Errorf("open client asset %q: %w", name, err)
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+
+		return nil, fmt.Errorf("stat client asset %q: %w", name, err)
+	}
+	if info.IsDir() {
+		_ = f.Close()
+
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
+	}
+
+	return f, nil
 }
