@@ -23,7 +23,7 @@
         const files = Array.from(input.files || []);
         input.value = ''; // re-pick of the same file should still fire change
         if (files.length === 0) return;
-        if (!batch) batch = { inFlight: 0, landed: 0, skipped: 0 };
+        if (!batch) batch = { inFlight: 0, landed: 0, skipped: 0, cancelled: 0 };
         for (const file of files) {
             startUpload(file, batch);
         }
@@ -111,7 +111,7 @@
         xhr.addEventListener('abort', () => {
             cancelBtn.remove();
             bar.remove();
-            b.skipped++;
+            b.cancelled++;
             finishRow(row, status, 'Cancelled', false);
         });
         xhr.addEventListener('loadend', () => {
@@ -121,6 +121,7 @@
             const params = new URLSearchParams({
                 uploaded: String(b.landed),
                 failed: String(b.skipped),
+                cancelled: String(b.cancelled),
             });
             const target = window.location.pathname + '?' + params + '#images';
             batch = null;

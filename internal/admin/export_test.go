@@ -161,7 +161,7 @@ func NewPlayerInputResultFor(r *http.Request) NewPlayerInputResult {
 }
 
 // ParseUploadCounts exposes the unexported query-string parser for tests.
-func ParseUploadCounts(r *http.Request) (uploaded, failed int) {
+func ParseUploadCounts(r *http.Request) (uploaded, failed, cancelled int) {
 	return parseUploadCounts(r)
 }
 

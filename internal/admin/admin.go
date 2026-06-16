@@ -1052,7 +1052,7 @@ func HandleQuizView(
 		data := newQuizViewData(quizData, players, rounds)
 		data.Images = images
 		data.HostHasRunningGame = hostHasRunningGame(r, logger, runningGames)
-		data.UploadedCount, data.FailedCount = parseUploadCounts(r)
+		data.UploadedCount, data.FailedCount, data.CancelledCount = parseUploadCounts(r)
 		renderer.Render(w, r, http.StatusOK, data)
 	})
 }
@@ -1062,11 +1062,13 @@ func HandleQuizView(
 const uploadCountCeiling = 100
 
 // parseUploadCounts pulls the post-upload banner counts out of the URL query.
-// Both default to 0 and are clamped to uploadCountCeiling; a non-numeric or
-// negative value is treated as 0 so a tampered query cannot paint a banner
+// All three default to 0 and are clamped to uploadCountCeiling; a non-numeric
+// or negative value is treated as 0 so a tampered query cannot paint a banner
 // with a misleading number.
-func parseUploadCounts(r *http.Request) (uploaded, failed int) {
-	return parseUploadCount(r, "uploaded"), parseUploadCount(r, "failed")
+func parseUploadCounts(r *http.Request) (uploaded, failed, cancelled int) {
+	return parseUploadCount(r, "uploaded"),
+		parseUploadCount(r, "failed"),
+		parseUploadCount(r, "cancelled")
 }
 
 func parseUploadCount(r *http.Request, name string) int {
@@ -1129,13 +1131,14 @@ type QuizViewData struct {
 	// control opens a modal that ends the running session before hosting this
 	// quiz instead of submitting straight away.
 	HostHasRunningGame bool
-	// UploadedCount and FailedCount drive the post-upload banner. The upload
-	// handler redirects with ?uploaded=N&failed=M (#951) so the page can show
-	// what just happened without a session-flash mechanism. Both are 0 on a
-	// plain visit; clamped to a small ceiling so a tampered query string can
-	// not paint a misleading number.
-	UploadedCount int
-	FailedCount   int
+	// UploadedCount / FailedCount / CancelledCount drive the post-upload
+	// banner. The upload flow redirects with ?uploaded=N&failed=M&cancelled=K
+	// (#951) so the page can show what just happened without a session-flash
+	// mechanism. All three are 0 on a plain visit; clamped to a small ceiling
+	// so a tampered query can't paint a misleading number.
+	UploadedCount  int
+	FailedCount    int
+	CancelledCount int
 }
 
 // RoundViewData is one round section on the quiz view: the round itself

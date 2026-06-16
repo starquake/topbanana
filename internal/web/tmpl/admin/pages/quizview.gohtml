@@ -379,12 +379,13 @@
             {{end}}
 
 
-            {{/* Post-upload banner. Counts come from ?uploaded=N&failed=M;
-                 inline script strips them via replaceState so a refresh
-                 doesn't repaint a stale banner (#951). */}}
-            {{if or (gt .UploadedCount 0) (gt .FailedCount 0)}}
+            {{/* Post-upload banner. Counts come from
+                 ?uploaded=N&failed=M&cancelled=K; the inline script strips
+                 them via replaceState so a refresh doesn't repaint a stale
+                 banner (#951). */}}
+            {{if or (gt .UploadedCount 0) (or (gt .FailedCount 0) (gt .CancelledCount 0))}}
                 <div class="mb-4 rounded-sm border px-3 py-2 text-sm
-                            {{if gt .FailedCount 0}}{{if gt .UploadedCount 0}}border-warning/40 bg-warning/10 text-warning{{else}}border-danger/40 bg-danger/10 text-danger{{end}}{{else}}border-success/40 bg-success/10 text-success{{end}}"
+                            {{if or (gt .FailedCount 0) (gt .CancelledCount 0)}}{{if gt .UploadedCount 0}}border-warning/40 bg-warning/10 text-warning{{else}}border-danger/40 bg-danger/10 text-danger{{end}}{{else}}border-success/40 bg-success/10 text-success{{end}}"
                      role="status"
                      data-testid="upload-banner">
                     {{if gt .UploadedCount 0}}
@@ -393,14 +394,20 @@
                     {{if gt .FailedCount 0}}
                         {{.FailedCount}} skipped (check the file format and size).
                     {{end}}
+                    {{if gt .CancelledCount 0}}
+                        {{.CancelledCount}} cancelled.
+                    {{end}}
                 </div>
                 <script>
                     (function () {
                         if (!window.history || !window.history.replaceState) return;
                         var url = new URL(window.location.href);
-                        if (!url.searchParams.has('uploaded') && !url.searchParams.has('failed')) return;
+                        if (!url.searchParams.has('uploaded')
+                            && !url.searchParams.has('failed')
+                            && !url.searchParams.has('cancelled')) return;
                         url.searchParams.delete('uploaded');
                         url.searchParams.delete('failed');
+                        url.searchParams.delete('cancelled');
                         var clean = url.pathname + (url.search ? url.search : '') + (url.hash || '');
                         window.history.replaceState(window.history.state, '', clean);
                     })();
