@@ -55,9 +55,9 @@ func TestScoreAnswerZeroWindow(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := ScoreAnswer(t.Context(), logger, tc.correct, tc.startedAt, tc.expiredAt, tc.answered)
+			got := ExportScoreAnswerCurve(t.Context(), logger, tc.correct, tc.startedAt, tc.expiredAt, tc.answered)
 			if want := tc.want; got != want {
-				t.Errorf("ScoreAnswer() = %d, want %d", got, want)
+				t.Errorf("scoreAnswerCurve() = %d, want %d", got, want)
 			}
 		})
 	}
@@ -113,9 +113,9 @@ func TestScoreAnswerNormalWindow(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := ScoreAnswer(t.Context(), logger, tc.correct, startedAt, expiredAt, tc.answered)
+			got := ExportScoreAnswerCurve(t.Context(), logger, tc.correct, startedAt, expiredAt, tc.answered)
 			if want := tc.want; got != want {
-				t.Errorf("ScoreAnswer() = %d, want %d", got, want)
+				t.Errorf("scoreAnswerCurve() = %d, want %d", got, want)
 			}
 		})
 	}

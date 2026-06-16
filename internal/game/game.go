@@ -1221,24 +1221,25 @@ func finalizeLeaderboardInPlace(entries []LeaderboardEntry, currentPlayerID int6
 // CalculateScore calculates the score for a given answer.
 func (s *Service) CalculateScore(ctx context.Context, a *Answer) int {
 	// TODO: Should this be the points for answering immediately? Or within one second?
-	return ScoreAnswer(ctx, s.logger, a.Option.Correct, a.Question.StartedAt, a.Question.ExpiredAt, a.AnsweredAt)
+	return scoreAnswerCurve(ctx, s.logger, a.Option.Correct, a.Question.StartedAt, a.Question.ExpiredAt, a.AnsweredAt)
 }
 
 // ScoreAnswer scores a pick from its timing primitives, letting the
 // live-session runner (MP-5 / #682) reuse the exact CalculateScore curve via
 // the service it already holds, without building a game.Answer.
 func (s *Service) ScoreAnswer(ctx context.Context, correct bool, startedAt, expiredAt, answeredAt time.Time) int {
-	return ScoreAnswer(ctx, s.logger, correct, startedAt, expiredAt, answeredAt)
+	return scoreAnswerCurve(ctx, s.logger, correct, startedAt, expiredAt, answeredAt)
 }
 
-// ScoreAnswer is the pure scoring formula, decoupled from the [Answer]
-// struct so other domains (the live-session runner, MP-5 / #682) can reuse
-// the exact same curve without building a game.Answer. A wrong pick scores
-// zero, a pick after the window scores zero, and a correct pick scores
-// linearly from maxPoints at startedAt down to zero at expiredAt.
+// scoreAnswerCurve is the pure scoring formula, decoupled from the [Answer]
+// struct so [Service.CalculateScore] and [Service.ScoreAnswer] (the seam the
+// live-session runner reuses, MP-5 / #682) share one curve without building a
+// game.Answer. A wrong pick scores zero, a pick after the window scores zero,
+// and a correct pick scores linearly from maxPoints at startedAt down to zero
+// at expiredAt.
 //
 //nolint:revive // correct is the option's correctness (a scoring input), not a behavioural control flag.
-func ScoreAnswer(
+func scoreAnswerCurve(
 	ctx context.Context, logger *slog.Logger, correct bool, startedAt, expiredAt, answeredAt time.Time,
 ) int {
 	if !correct {
@@ -1255,8 +1256,8 @@ func ScoreAnswer(
 	if answerWindow <= 0 {
 		// A zero-or-negative window would divide by zero below (+Inf/NaN,
 		// and int(NaN) is implementation-defined). Unreachable on the
-		// in-tree callers, but ScoreAnswer is exported and reused via the
-		// Scorer interface, so award a correct in-window pick full points.
+		// in-tree callers, but this curve is reused via the Scorer
+		// interface, so award a correct in-window pick full points.
 		return maxPoints
 	}
 
