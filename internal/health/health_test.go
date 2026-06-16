@@ -3,8 +3,10 @@ package health_test
 import (
 	"encoding/json"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/starquake/topbanana/internal/dbtest"
@@ -33,6 +35,28 @@ func serveHealthz(t *testing.T, stores *store.Stores) (*httptest.ResponseRecorde
 	}
 
 	return w, res
+}
+
+func TestHandleVersion_ServesBuildStamp(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/version", nil)
+	w := httptest.NewRecorder()
+	HandleVersion(slog.New(slog.DiscardHandler))(w, req)
+
+	if got, want := w.Code, http.StatusOK; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+
+	var body map[string]json.RawMessage
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response err = %v, want nil", err)
+	}
+	for _, key := range []string{"env", "version", "commit", "date"} {
+		if _, ok := body[key]; !ok {
+			t.Errorf("response missing %q key, got keys %v", key, slices.Collect(maps.Keys(body)))
+		}
+	}
 }
 
 func TestHandleHealthz_OKWhenDatabaseHealthy(t *testing.T) {
