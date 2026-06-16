@@ -2,6 +2,7 @@ package media_test
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"errors"
 	"image"
@@ -141,6 +142,40 @@ func TestServiceStoreRoundTrip(t *testing.T) {
 	}
 	if got, want := row.SHA256, m.SHA256; got != want {
 		t.Errorf("stored SHA256 = %q, want %q", got, want)
+	}
+}
+
+// TestServiceStoreCancelledBeforeProcessing pins the ctx-cancelled short-
+// circuit: a cancel that reaches the handler before Process runs returns the
+// cancel error AND leaves no row + no files behind, so the host's apparent
+// cancel matches the server-side state (#951).
+func TestServiceStoreCancelledBeforeProcessing(t *testing.T) {
+	t.Parallel()
+
+	fx := newServiceWithQuiz(t)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := fx.svc.Store(ctx, fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
+	if got, want := err, context.Canceled; !errors.Is(got, want) {
+		t.Errorf("Store err = %v, want %v", got, want)
+	}
+
+	rows, err := fx.svc.ListByQuiz(t.Context(), fx.quizID)
+	if err != nil {
+		t.Fatalf("ListByQuiz err = %v, want nil", err)
+	}
+	if got, want := len(rows), 0; got != want {
+		t.Errorf("rows after cancelled Store = %d, want %d", got, want)
+	}
+
+	entries, err := os.ReadDir(fx.root)
+	if err != nil {
+		t.Fatalf("ReadDir err = %v, want nil", err)
+	}
+	if got, want := len(entries), 0; got != want {
+		t.Errorf("files under root after cancelled Store = %d, want %d", got, want)
 	}
 }
 

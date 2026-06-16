@@ -56,9 +56,15 @@ func NewService(store Store, root string, logger *slog.Logger) *Service {
 // stored Path / ThumbPath are relative to root so a later root remount does not
 // strand the references.
 func (s *Service) Store(ctx context.Context, quizID, createdBy int64, r io.Reader) (*Media, error) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("upload cancelled before processing: %w", ctxErr)
+	}
 	processed, err := Process(r)
 	if err != nil {
 		return nil, err
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("upload cancelled after processing: %w", ctxErr)
 	}
 
 	quizDir := strconv.FormatInt(quizID, decimalBase)
@@ -89,15 +95,19 @@ func (s *Service) Store(ctx context.Context, quizID, createdBy int64, r io.Reade
 	relThumb := filepath.Join(quizDir, strconv.FormatInt(row.ID, decimalBase)+thumbSuffix)
 
 	if err = s.writeFiles(processed, relFull, relThumb); err != nil {
-		s.cleanupRow(ctx, row.ID)
+		s.cleanupRow(context.WithoutCancel(ctx), row.ID)
 
 		return nil, err
 	}
 
 	if err = s.store.UpdateMediaPaths(ctx, row.ID, relFull, relThumb); err != nil {
+		// Use a cancel-immune context for cleanup so a cancelled upload's
+		// row + files actually get removed instead of orphaning when ctx is
+		// the cause of the failure (#951).
+		cleanup := context.WithoutCancel(ctx)
 		s.removeFile(relFull)
 		s.removeFile(relThumb)
-		s.cleanupRow(ctx, row.ID)
+		s.cleanupRow(cleanup, row.ID)
 
 		return nil, fmt.Errorf("recording media paths: %w", err)
 	}

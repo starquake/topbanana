@@ -172,9 +172,9 @@ type uploadResult struct {
 
 // storeUploadFiles streams each file through media.Service.Store and returns
 // a per-file outcome list. A skip (pipeline caller-fault) leaves the file's
-// Err set and still lets the rest of the batch run. Anything that is not a
-// pipeline caller-fault sentinel is logged but still treated as a per-file
-// failure rather than killing the request.
+// Err set and still lets the rest of the batch run. A [context.Canceled]
+// error means the client closed the connection mid-flight (xhr.abort) and is
+// not noise; everything else that is not a pipeline rejection is logged.
 func storeUploadFiles(
 	ctx context.Context, logger *slog.Logger, svc MediaService,
 	quizID, playerID int64, files []*multipart.FileHeader,
@@ -182,7 +182,7 @@ func storeUploadFiles(
 	results := make([]uploadResult, 0, len(files))
 	for _, header := range files {
 		mediaID, err := storeOneUpload(ctx, svc, quizID, playerID, header)
-		if err != nil && !isPipelineRejection(err) {
+		if err != nil && !isPipelineRejection(err) && !errors.Is(err, context.Canceled) {
 			logger.ErrorContext(ctx, "error storing uploaded media",
 				slog.String("filename", header.Filename), slog.Any("err", err))
 		}
