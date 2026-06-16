@@ -162,7 +162,7 @@ func TestHomeStore_ListPopularQuizzes(t *testing.T) {
 	t.Parallel()
 
 	seed := seedHomeDB(t)
-	hs := NewHomeStore(seed.DB, slog.Default())
+	hs := NewHomeStore(seed.DB)
 
 	rows, err := hs.ListPopularQuizzes(t.Context())
 	if err != nil {
@@ -198,7 +198,7 @@ func TestHomeStore_ListNewestQuizzes(t *testing.T) {
 	db := dbtest.Open(t)
 	logger := slog.Default()
 	quizzes := NewQuizStore(db, logger)
-	hs := NewHomeStore(db, logger)
+	hs := NewHomeStore(db)
 
 	withQuestion := func() []*quiz.Question {
 		return []*quiz.Question{
@@ -288,7 +288,7 @@ func TestHomeStore_ListMostActivePlayers(t *testing.T) {
 	t.Parallel()
 
 	seed := seedHomeDB(t)
-	hs := NewHomeStore(seed.DB, slog.Default())
+	hs := NewHomeStore(seed.DB)
 
 	rows, err := hs.ListMostActivePlayers(t.Context())
 	if err != nil {
@@ -334,7 +334,7 @@ func TestHomeStore_ListMostActivePlayers_AppliesThirtyDayWindow(t *testing.T) {
 	quizzes := NewQuizStore(db, logger)
 	games := NewGameStore(db, logger)
 	players := NewPlayerStore(db, logger)
-	hs := NewHomeStore(db, logger)
+	hs := NewHomeStore(db)
 
 	q := &quiz.Quiz{
 		Title: "T", Slug: "t", Description: "",
@@ -409,7 +409,7 @@ func TestHomeStore_ExcludesEmptyQuizFromRankings(t *testing.T) {
 	quizzes := NewQuizStore(db, logger)
 	games := NewGameStore(db, logger)
 	players := NewPlayerStore(db, logger)
-	hs := NewHomeStore(db, logger)
+	hs := NewHomeStore(db)
 
 	// Author a quiz with no questions and seed a game + participant on
 	// it. Before the fix the home queries would happily count this as a
@@ -460,7 +460,7 @@ func TestHomeStore_EmptyDB(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.Open(t)
-	hs := NewHomeStore(db, slog.Default())
+	hs := NewHomeStore(db)
 
 	quizzes, err := hs.ListPopularQuizzes(t.Context())
 	if err != nil {

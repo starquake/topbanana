@@ -66,7 +66,7 @@ func New(conn *sql.DB, logger *slog.Logger) *Stores {
 		ResetTokens:   players,
 		Invites:       players,
 		InvitePlayers: players,
-		Home:          NewHomeStore(conn, logger),
+		Home:          NewHomeStore(conn),
 		Retention:     NewRetentionStore(conn, logger),
 		LiveSessions:  NewLiveSessionStore(conn, logger),
 		Media:         NewMediaStore(conn, logger),

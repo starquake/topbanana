@@ -1,7 +1,6 @@
 package migrations_test
 
 import (
-	"context"
 	"database/sql"
 	"testing"
 
@@ -53,7 +52,7 @@ func TestQuestionMediaIDMigration_DeleteSetsNull(t *testing.T) {
 	questionID := seedQuestionWithMedia(t, db, quizID, roundID, mediaID)
 
 	if _, err := db.ExecContext(
-		context.Background(), "DELETE FROM media WHERE id = ?", mediaID,
+		t.Context(), "DELETE FROM media WHERE id = ?", mediaID,
 	); err != nil {
 		t.Fatalf("delete media err = %v, want nil", err)
 	}
@@ -61,7 +60,7 @@ func TestQuestionMediaIDMigration_DeleteSetsNull(t *testing.T) {
 	// The question must survive the image delete, with a NULL media_id.
 	var got sql.NullInt64
 	if err := db.QueryRowContext(
-		context.Background(), "SELECT media_id FROM questions WHERE id = ?", questionID,
+		t.Context(), "SELECT media_id FROM questions WHERE id = ?", questionID,
 	).Scan(&got); err != nil {
 		t.Fatalf("read question media_id err = %v, want nil (question must survive)", err)
 	}
@@ -76,7 +75,7 @@ func seedQuestionWithMedia(t *testing.T, db *sql.DB, quizID, roundID, mediaID in
 	t.Helper()
 	var id int64
 	if err := db.QueryRowContext(
-		context.Background(),
+		t.Context(),
 		`INSERT INTO questions (quiz_id, round_id, text, position, media_id)
 		 VALUES (?, ?, 'Q', 1, ?) RETURNING id`,
 		quizID, roundID, mediaID,

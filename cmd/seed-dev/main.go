@@ -23,16 +23,12 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/starquake/topbanana/internal/auth"
+	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/database"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
 )
-
-// defaultDBURI mirrors config.DBURIDefault. Duplicated here so the
-// seeder can run without depending on the full config package's
-// production-vs-dev gates.
-const defaultDBURI = "file:topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate"
 
 // seededAdminID matches the ID set by migration
 // 20260111110308_add_admin_player.sql. The seeder attributes every
@@ -103,12 +99,16 @@ func main() {
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
+	// ParseDatabase keeps the URI and its pragmas in one source of truth; it
+	// bypasses the production server gates, so it is safe here.
 	uri := *dbURI
 	if uri == "" {
-		uri = os.Getenv("DB_URI")
-	}
-	if uri == "" {
-		uri = defaultDBURI
+		dbc, err := config.ParseDatabase(os.Getenv)
+		if err != nil {
+			logger.Error("seed-dev failed to resolve DB URI", slog.Any("err", err))
+			os.Exit(1)
+		}
+		uri = dbc.URI
 	}
 
 	if err := run(logger, *fixturePath, uri, *playersFlag, *playsFlag); err != nil {

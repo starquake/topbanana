@@ -1,7 +1,6 @@
 package migrations_test
 
 import (
-	"context"
 	"database/sql"
 	"testing"
 
@@ -30,7 +29,7 @@ const sessionHostLastSeenVersion = 20260608120000
 func TestSessionHostLastSeenMigration_Column(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := dbtest.Open(t)
 	t.Cleanup(func() {
 		if cerr := db.Close(); cerr != nil {
@@ -92,7 +91,7 @@ func TestSessionHostLastSeenMigration_Column(t *testing.T) {
 func TestSessionRoundResultsMigration_PhaseCheck(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := dbtest.Open(t)
 	t.Cleanup(func() {
 		if cerr := db.Close(); cerr != nil {
@@ -152,7 +151,7 @@ func TestSessionRoundResultsMigration_PhaseCheck(t *testing.T) {
 func TestSessionRunnerMigration_DownUpRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := dbtest.Open(t)
 	t.Cleanup(func() {
 		if cerr := db.Close(); cerr != nil {
@@ -209,7 +208,7 @@ func TestSessionRunnerMigration_DownUpRoundTrip(t *testing.T) {
 func TestSessionsMigration_Constraints(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := dbtest.Open(t)
 	t.Cleanup(func() {
 		if cerr := db.Close(); cerr != nil {
@@ -287,7 +286,7 @@ func TestSessionsMigration_Constraints(t *testing.T) {
 func TestSessionRunnerMigration_PhasesAndAnswers(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := dbtest.Open(t)
 	t.Cleanup(func() {
 		if cerr := db.Close(); cerr != nil {
@@ -384,7 +383,7 @@ const sessionPlayersDropDisplayNameVersion = 20260609120000
 func TestSessionsMigration_RosterUniqueness(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := dbtest.Open(t)
 	t.Cleanup(func() {
 		if cerr := db.Close(); cerr != nil {
@@ -452,7 +451,7 @@ func TestSessionsMigration_RosterUniqueness(t *testing.T) {
 func TestSessionPlayersDropDisplayNameMigration_RebuildPreservesRows(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := dbtest.Open(t)
 	t.Cleanup(func() {
 		if cerr := db.Close(); cerr != nil {
@@ -548,7 +547,7 @@ const persistentRoomsVersion = 20260611120000
 func TestPersistentRoomsMigration_Schema(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := dbtest.Open(t)
 	t.Cleanup(func() {
 		if cerr := db.Close(); cerr != nil {
@@ -658,7 +657,7 @@ const sessionQuizNullableVersion = 20260612120000
 func TestSessionQuizNullableMigration_AllowsNullQuiz(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := dbtest.Open(t)
 	t.Cleanup(func() {
 		if cerr := db.Close(); cerr != nil {
@@ -708,7 +707,7 @@ func TestSessionQuizNullableMigration_AllowsNullQuiz(t *testing.T) {
 func TestSessionQuizNullableMigration_DownDropsQuizlessRooms(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := dbtest.Open(t)
 	t.Cleanup(func() {
 		if cerr := db.Close(); cerr != nil {
@@ -821,7 +820,7 @@ func TestSessionQuizNullableMigration_DownDropsQuizlessRooms(t *testing.T) {
 func TestPersistentRoomsMigration_DownUpRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := dbtest.Open(t)
 	t.Cleanup(func() {
 		if cerr := db.Close(); cerr != nil {

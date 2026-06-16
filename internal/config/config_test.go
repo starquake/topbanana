@@ -436,10 +436,6 @@ func TestParse(t *testing.T) {
 	})
 }
 
-func TestParse_ErrorHandling(t *testing.T) {
-	t.Parallel()
-}
-
 func TestParse_RegistrationEnabled(t *testing.T) {
 	t.Parallel()
 

@@ -1,7 +1,6 @@
 package migrations_test
 
 import (
-	"context"
 	"database/sql"
 	"log/slog"
 	"testing"
@@ -41,11 +40,11 @@ func TestRoundsMigration_BackfillsDefaultRound(t *testing.T) {
 			{Text: "Q1", Position: 1, Options: []*quiz.Option{{Text: "A", Correct: true}, {Text: "B"}}},
 		},
 	}
-	if err := quizStore.CreateQuiz(context.Background(), qz); err != nil {
+	if err := quizStore.CreateQuiz(t.Context(), qz); err != nil {
 		t.Fatalf("CreateQuiz err = %v, want nil", err)
 	}
 
-	round, err := quizStore.GetDefaultRound(context.Background(), qz.ID)
+	round, err := quizStore.GetDefaultRound(t.Context(), qz.ID)
 	if err != nil {
 		t.Fatalf("GetDefaultRound err = %v, want nil", err)
 	}
@@ -73,7 +72,7 @@ func TestRoundsMigration_BackfillsDefaultRound(t *testing.T) {
 func TestRoundSeenPhaseMigration_PerPhasePK(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := dbtest.Open(t)
 	t.Cleanup(func() {
 		if cerr := db.Close(); cerr != nil {
@@ -149,7 +148,7 @@ func TestRoundSeenPhaseMigration_PerPhasePK(t *testing.T) {
 func TestRoundBoundaryDurationMigration_NullableWithCheck(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := dbtest.Open(t)
 	t.Cleanup(func() {
 		if cerr := db.Close(); cerr != nil {
@@ -208,7 +207,7 @@ func questionRoundID(t *testing.T, db *sql.DB, questionID int64) int64 {
 	t.Helper()
 	var roundID int64
 	if err := db.QueryRowContext(
-		context.Background(),
+		t.Context(),
 		"SELECT round_id FROM questions WHERE id = ?",
 		questionID,
 	).Scan(&roundID); err != nil {
@@ -223,7 +222,7 @@ func questionRoundID(t *testing.T, db *sql.DB, questionID int64) int64 {
 func seedPlayer(t *testing.T, db *sql.DB) int64 {
 	t.Helper()
 	res, err := db.ExecContext(
-		context.Background(),
+		t.Context(),
 		"INSERT INTO players (display_name, role) VALUES ('mig-admin', 'host')",
 	)
 	if err != nil {
