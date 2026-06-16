@@ -591,7 +591,14 @@
         // same as every other admin modal.
         function openImageViewer(src) {
             const img = document.getElementById('image-modal-viewer-img');
-            if (img) img.src = src;
+            if (img) {
+                // Hide the <img> while the new src loads so we don't briefly
+                // show the previous image while the new one is on the wire.
+                img.style.visibility = 'hidden';
+                img.removeAttribute('src');
+                img.addEventListener('load', () => { img.style.visibility = ''; }, { once: true });
+                img.src = src;
+            }
             openModal('image-modal-viewer');
         }
     </script>
