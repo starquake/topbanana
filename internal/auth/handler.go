@@ -665,9 +665,10 @@ func completeLogin(
 
 // registerAccountFailureIfCooledDown reports whether account is in the
 // per-account cooldown (#786) and, if so, records the current attempt as
-// another failure so a brute-force that keeps guessing keeps extending
-// the window. Nil limiter (unit tests that don't wire it) is never in
-// cooldown.
+// another failure so a brute-force that keeps guessing keeps the window
+// alive. The limiter caps how far the window can be pushed out, so a
+// third-party spray cannot deny the owner indefinitely (#995). Nil limiter
+// (unit tests that don't wire it) is never in cooldown.
 func registerAccountFailureIfCooledDown(limiter *AccountLoginLimiter, account string) bool {
 	if limiter == nil || !limiter.InCooldown(account) {
 		return false

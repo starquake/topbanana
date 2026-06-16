@@ -140,6 +140,11 @@ var NewLoginRateLimiterWithClock = newLoginRateLimiterWithClock
 // pin the cooldown expiry and prune without sleeping (#786).
 var NewAccountLoginLimiterWithClock = newAccountLoginLimiterWithClock
 
+// AccountFailureExtensionCap exposes the per-account cooldown extension
+// cap so the external auth_test package can pin the bounded-lockout
+// invariant against the exact freeze point (#995).
+const AccountFailureExtensionCap = accountFailureExtensionCap
+
 // ValidateAcceptInviteInput exposes validateAcceptInviteInput so the
 // external test package can pin the display-name + password rule table
 // from input strings without staging an HTTP request.

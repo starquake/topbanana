@@ -43,10 +43,20 @@ const loginCooldown = 3 * time.Second
 const accountLoginThreshold = 5
 
 // accountLoginCooldown is how long an account stays in backoff after the
-// threshold is reached. Measured from the most recent failure, so a
+// threshold is reached. Measured from the most recent failure until the
+// streak reaches the extension cap (see accountFailureExtensionCap), so a
 // brute-force that keeps guessing keeps the account locked while a real
 // user who walks away is admitted again once it elapses.
 const accountLoginCooldown = 15 * time.Minute
+
+// accountFailureExtensionCap is how many failures past the threshold may
+// keep pushing the cooldown window forward. Once a streak reaches
+// threshold+cap, further failures still read as in-cooldown but no longer
+// advance the window, so a sustained spray from rotating IPs cannot deny
+// the real owner indefinitely: the lockout then expires a fixed
+// accountLoginCooldown after the last window-advancing failure. The cap is
+// a few failures wide so an ordinary brute-force is still slowed.
+const accountFailureExtensionCap = 5
 
 // AccountLoginThreshold exposes the per-account failure threshold so the
 // wiring layer (and tests) can build an [AccountLoginLimiter] with the
@@ -166,8 +176,9 @@ type AccountLoginLimiter struct {
 
 // NewAccountLoginLimiter returns a limiter that trips after threshold
 // consecutive failures for one account and holds the cooldown from the
-// most recent failure. [time.Now] is the clock; the export_test seam
-// injects a fake clock so tests fast-forward without sleeping.
+// most recent failure, up to the extension cap (see
+// accountFailureExtensionCap). [time.Now] is the clock; the export_test
+// seam injects a fake clock so tests fast-forward without sleeping.
 func NewAccountLoginLimiter(threshold int, cooldown time.Duration) *AccountLoginLimiter {
 	return newAccountLoginLimiterWithClock(threshold, cooldown, time.Now)
 }
@@ -203,7 +214,10 @@ func (l *AccountLoginLimiter) InCooldown(account string) bool {
 }
 
 // RegisterFailure records one failed attempt for account, extending the
-// cooldown window from the current time. A blank account is ignored.
+// cooldown window from the current time until the streak reaches the
+// extension cap. Past the cap the count and the window both freeze, so a
+// sustained spray cannot push the unlock time out indefinitely. A blank
+// account is ignored.
 func (l *AccountLoginLimiter) RegisterFailure(account string) {
 	if account == "" {
 		return
@@ -217,6 +231,9 @@ func (l *AccountLoginLimiter) RegisterFailure(account string) {
 	if !ok {
 		e = &accountFailures{}
 		l.entries[account] = e
+	}
+	if e.count >= l.threshold+accountFailureExtensionCap {
+		return
 	}
 	e.count++
 	e.lastSeen = now
