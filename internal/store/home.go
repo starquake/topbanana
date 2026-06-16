@@ -25,15 +25,15 @@ func NewHomeStore(conn *sql.DB) *HomeStore {
 // activity. The underlying query ranks by the 30-day finished-game count
 // (recent_play_count DESC) but each row carries the durable lifetime
 // play_count the card displays (#891/#927); the caller slices to top-N.
-func (s *HomeStore) ListPopularQuizzes(ctx context.Context) ([]*home.PopularQuiz, error) {
+func (s *HomeStore) ListPopularQuizzes(ctx context.Context) ([]*home.QuizCard, error) {
 	rows, err := s.q.ListPopularQuizzes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list popular quizzes: %w", err)
 	}
 
-	out := make([]*home.PopularQuiz, 0, len(rows))
+	out := make([]*home.QuizCard, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, &home.PopularQuiz{
+		out = append(out, &home.QuizCard{
 			ID:                   r.ID,
 			Title:                r.Title,
 			Slug:                 r.Slug,
@@ -52,15 +52,15 @@ func (s *HomeStore) ListPopularQuizzes(ctx context.Context) ([]*home.PopularQuiz
 // ListNewestQuizzes returns the most-recently-created public quizzes,
 // newest first. The underlying query orders by created_at DESC; the
 // caller slices to the desired top-N.
-func (s *HomeStore) ListNewestQuizzes(ctx context.Context) ([]*home.NewestQuiz, error) {
+func (s *HomeStore) ListNewestQuizzes(ctx context.Context) ([]*home.QuizCard, error) {
 	rows, err := s.q.ListNewestQuizzes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list newest quizzes: %w", err)
 	}
 
-	out := make([]*home.NewestQuiz, 0, len(rows))
+	out := make([]*home.QuizCard, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, &home.NewestQuiz{
+		out = append(out, &home.QuizCard{
 			ID:                   r.ID,
 			Title:                r.Title,
 			Slug:                 r.Slug,
