@@ -364,6 +364,22 @@
                         <img id="image-modal-viewer-img"
                              src="" alt=""
                              class="block max-w-[90vw] max-h-[85vh] object-contain rounded-lg shadow-2xl">
+                        {{/* Loading indicator (#993). Shown while the <img> is
+                             hidden between openImageViewer and its load event, so
+                             the modal is not a blank panel on the wire. The
+                             spinner runs under motion-safe; reduced-motion users
+                             get the "Loading..." text instead. Hidden on load and
+                             replaced by the error panel on a 404 / failure. */}}
+                        <div id="image-modal-viewer-loading"
+                             data-testid="image-modal-loading"
+                             hidden
+                             role="status"
+                             class="flex flex-col items-center justify-center gap-3 px-10 py-12 bg-surface rounded-lg shadow-2xl">
+                            <span aria-hidden="true"
+                                  class="motion-reduce:hidden inline-block h-8 w-8 rounded-full border-2 border-border-soft border-t-accent animate-spin"></span>
+                            <span class="motion-safe:hidden text-sm text-text-dim">Loading...</span>
+                            <span class="sr-only">Loading image</span>
+                        </div>
                         <p id="image-modal-viewer-error"
                            data-testid="image-modal-error"
                            hidden
@@ -596,21 +612,28 @@
         function openImageViewer(src) {
             const img = document.getElementById('image-modal-viewer-img');
             const errorEl = document.getElementById('image-modal-viewer-error');
+            const loadingEl = document.getElementById('image-modal-viewer-loading');
             if (img) {
                 // Hide the <img> while the new src loads so we don't briefly
-                // show the previous image while the new one is on the wire.
+                // show the previous image while the new one is on the wire, and
+                // fill the gap with the loading indicator (#993) so the dialog
+                // isn't a blank panel until the load event fires.
                 img.style.visibility = 'hidden';
                 img.removeAttribute('src');
                 if (errorEl) errorEl.hidden = true;
+                if (loadingEl) loadingEl.hidden = false;
                 const onLoad = () => {
                     img.style.visibility = '';
+                    if (loadingEl) loadingEl.hidden = true;
                     img.removeEventListener('error', onError);
                 };
                 const onError = () => {
                     // A 404 / network failure never fires 'load', so without
                     // this branch the img stays visibility:hidden and the
-                    // dialog opens blank with no signal of the failure.
+                    // dialog opens blank with no signal of the failure. Drop the
+                    // indicator and show the error instead of spinning forever.
                     img.removeEventListener('load', onLoad);
+                    if (loadingEl) loadingEl.hidden = true;
                     if (errorEl) errorEl.hidden = false;
                 };
                 img.addEventListener('load', onLoad, { once: true });

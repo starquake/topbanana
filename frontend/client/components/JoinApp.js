@@ -10,6 +10,11 @@ import {
     applyStandingsFlip,
 } from '@shared/standings.js';
 import { optionStateClass } from '../util/answerOptions.js';
+import {
+    SESSION_STORAGE_KEY,
+    readRememberedSession,
+    forgetRememberedSession,
+} from '@shared/rememberedSession.js';
 
 // JOIN_PATH_PATTERN matches /join/<code>, capturing the room code. The bare
 // /join entry (enter-code form) has no capture group, so the component falls
@@ -25,55 +30,17 @@ const JOIN_PATH_PATTERN = /^\/join\/([^/]+)\/?$/;
 // sessionClosed instead.
 const STATE_FAILURE_LIMIT = 3;
 
-// SESSION_STORAGE_KEY holds the remembered { code } the player joined, so a
-// reload or a brief drop can resume by re-joining without the player
-// re-entering the code (MP-10 / #687). Join is nameless now (#716 - the player
-// is already named on their players row), so only the code needs remembering.
-// One key; cleared when the lobby is gone or on an explicit leave.
-const SESSION_STORAGE_KEY = 'topbanana.session';
-
 // rememberSession persists the join code so a reload can resume. Best-effort: a
 // storage exception (private mode, quota) is swallowed - resume is a
-// convenience, not a correctness requirement.
+// convenience, not a correctness requirement. The read/forget side and the key
+// string live in the shared rememberedSession module so the home page reads the
+// same entry (#1005); only the write side stays here, since home never writes.
 function rememberSession(code) {
     try {
         window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ code }));
     } catch {
         // localStorage may be unavailable; resume simply won't fire next load.
     }
-}
-
-// forgetSession clears the remembered entry. Called when the lobby is gone
-// (session ended / not a participant) or on an explicit leave.
-function forgetSession() {
-    try {
-        window.localStorage.removeItem(SESSION_STORAGE_KEY);
-    } catch {
-        // Nothing to recover from; the stale entry self-heals on the next
-        // failed resume (a 404/409 re-clears it).
-    }
-}
-
-// readRememberedSession returns the remembered { code }, or null when there is
-// nothing usable stored. Guards against a malformed or partial entry.
-function readRememberedSession() {
-    let raw;
-    try {
-        raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
-    } catch {
-        return null;
-    }
-    if (!raw) return null;
-    try {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed.code === 'string' && parsed.code !== '') {
-            return { code: parsed.code };
-        }
-    } catch {
-        // Fall through to the cleanup below.
-    }
-    forgetSession();
-    return null;
 }
 
 // JoinApp is the Alpine component behind the player join + lobby + in-game
@@ -432,7 +399,7 @@ export class JoinApp {
             return false;
         }
         if (!result.ok) {
-            forgetSession();
+            forgetRememberedSession();
             return false;
         }
         this.code = code;
@@ -511,7 +478,7 @@ export class JoinApp {
         this.step = 'lobby';
         this.sessionClosed = true;
         this.error = '';
-        forgetSession();
+        forgetRememberedSession();
     }
 
     // claimName sets the player's players.display_name through the shared
@@ -592,7 +559,7 @@ export class JoinApp {
             this.clearStartTimer();
             // The room is gone or we are no longer a participant, so a future
             // load must not try to resume into it.
-            forgetSession();
+            forgetRememberedSession();
             return;
         }
         // A good read clears the failure budget and the trouble banner.
@@ -975,7 +942,7 @@ export class JoinApp {
         this.clearQuestionTimer();
         this.clearStartTimer();
         this.releaseWakeLock();
-        forgetSession();
+        forgetRememberedSession();
         const code = this.code;
         this.leftSent = true;
         try {
