@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/starquake/topbanana/internal/dbtest"
 	. "github.com/starquake/topbanana/internal/media"
@@ -196,6 +197,24 @@ func (c *cancelOnUpdatePathsStore) UpdateMediaPaths(ctx context.Context, id int6
 	return c.Store.UpdateMediaPaths(ctx, id, path, thumbPath)
 }
 
+// cancelAfterPathsStore wraps a real Store to fire a registered cancel function
+// the moment UpdateMediaPaths returns, simulating a client that drops the
+// connection after the row + files commit but before the ready flip -- the last
+// cancel-race window (#992). The paths land first so the row is committed, then
+// the cancel makes the MarkMediaReady step observe the cancelled context.
+type cancelAfterPathsStore struct {
+	Store
+
+	cancel context.CancelFunc
+}
+
+func (c *cancelAfterPathsStore) UpdateMediaPaths(ctx context.Context, id int64, path, thumbPath string) error {
+	err := c.Store.UpdateMediaPaths(ctx, id, path, thumbPath)
+	c.cancel()
+
+	return err
+}
+
 // TestServiceStoreCancelledMidFlightCleansUp pins the in-flight cancel
 // cleanup: when the connection drops between CreateMedia (row + files just
 // written) and UpdateMediaPaths, Store must return an error AND tear the row
@@ -251,6 +270,71 @@ func TestServiceStoreCancelledMidFlightCleansUp(t *testing.T) {
 				" (writeFiles cleanup did not remove)", e.Name(), got)
 		}
 	}
+}
+
+// TestServiceStoreCancelledAfterPathsLeavesNothing pins the last cancel-race
+// window (#992): when the connection drops after the row + files commit but
+// before the ready flip, Store must return an error AND leave nothing the host
+// can see -- no library row and no files. The cancel makes the MarkMediaReady
+// step fail, and the cleanup branch tears the still-hidden row and its files
+// back down.
+func TestServiceStoreCancelledAfterPathsLeavesNothing(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v", cerr)
+		}
+	})
+
+	quizID := seedQuiz(t, db, "media-svc-cancel-after-paths")
+	root := t.TempDir()
+	innerStore := store.NewMediaStore(db, slog.Default())
+	ctx, cancel := context.WithCancel(t.Context())
+	wrapped := &cancelAfterPathsStore{Store: innerStore, cancel: cancel}
+	svc := NewService(wrapped, root, slog.Default())
+
+	_, err := svc.Store(ctx, quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
+	if err == nil {
+		t.Fatal("Store err = nil, want non-nil (ctx cancelled after paths committed)")
+	}
+
+	probeCtx := t.Context()
+	rows, err := svc.ListByQuiz(probeCtx, quizID)
+	if err != nil {
+		t.Fatalf("ListByQuiz err = %v, want nil", err)
+	}
+	if got, want := len(rows), 0; got != want {
+		t.Errorf("library rows after late cancel = %d, want %d (row must not show)", got, want)
+	}
+
+	for _, e := range readQuizDirs(t, root) {
+		sub, derr := os.ReadDir(filepath.Join(root, e))
+		if derr != nil {
+			t.Fatalf("ReadDir(%s) err = %v, want nil", e, derr)
+		}
+		if got := len(sub); got != 0 {
+			t.Errorf("files under root/%s after late cancel = %d, want 0", e, got)
+		}
+	}
+}
+
+// readQuizDirs returns the names of the per-quiz subdirectories under root.
+func readQuizDirs(t *testing.T, root string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("ReadDir err = %v, want nil", err)
+	}
+	dirs := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			dirs = append(dirs, e.Name())
+		}
+	}
+
+	return dirs
 }
 
 // TestServiceStoreCreateMediaFailureLeavesNoDir pins that a failed media-row
@@ -424,5 +508,103 @@ func TestServiceQuizDeleteCascadesMedia(t *testing.T) {
 
 	if _, err = fx.svc.Get(t.Context(), m.ID); !errors.Is(err, ErrMediaNotFound) {
 		t.Errorf("Get after quiz delete err = %v, want ErrMediaNotFound (cascade)", err)
+	}
+}
+
+// TestServiceStoreFlipsRowReady pins that a completed Store leaves the row
+// ready: it shows in the library list, which filters not-ready rows (#992).
+func TestServiceStoreFlipsRowReady(t *testing.T) {
+	t.Parallel()
+
+	fx := newServiceWithQuiz(t)
+
+	m, err := fx.svc.Store(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 100, 100)))
+	if err != nil {
+		t.Fatalf("Store err = %v, want nil", err)
+	}
+
+	list, err := fx.svc.ListByQuiz(t.Context(), fx.quizID)
+	if err != nil {
+		t.Fatalf("ListByQuiz err = %v, want nil", err)
+	}
+	if got, want := len(list), 1; got != want {
+		t.Fatalf("list = %d rows, want %d (completed upload is ready)", got, want)
+	}
+	if got, want := list[0].ID, m.ID; got != want {
+		t.Errorf("list[0].ID = %d, want %d", got, want)
+	}
+}
+
+// seedNotReadyMedia inserts a not-ready media row for quizID with the given
+// relative paths and an explicit created_at, and writes the two files under
+// root so the sweep has something to unlink. Returns the row id. It mirrors a
+// committed-but-cancelled upload: row present, files on disk, ready = 0.
+func seedNotReadyMedia(t *testing.T, fx fixture, relFull, relThumb, createdAt string) int64 {
+	t.Helper()
+
+	for _, rel := range []string{relFull, relThumb} {
+		abs := filepath.Join(fx.root, rel)
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatalf("MkdirAll err = %v, want nil", err)
+		}
+		if err := os.WriteFile(abs, []byte("x"), 0o644); err != nil {
+			t.Fatalf("WriteFile err = %v, want nil", err)
+		}
+	}
+
+	var id int64
+	if err := fx.db.QueryRowContext(
+		t.Context(),
+		`INSERT INTO media (quiz_id, type, mime, path, thumb_path, size_bytes, sha256,
+		                    created_by_player_id, ready, created_at)
+		 VALUES (?, 'image', 'image/jpeg', ?, ?, 1, 'deadbeef', 1, 0, ?) RETURNING id`,
+		fx.quizID, relFull, relThumb, createdAt,
+	).Scan(&id); err != nil {
+		t.Fatalf("seed not-ready media err = %v, want nil", err)
+	}
+
+	return id
+}
+
+// TestServiceSweepStaleNotReadyDropsRowAndFiles pins the in-flight-upload
+// sweep: a not-ready row older than the threshold is removed along with its
+// files, while a recent not-ready row and a ready row both survive (#992).
+func TestServiceSweepStaleNotReadyDropsRowAndFiles(t *testing.T) {
+	t.Parallel()
+
+	fx := newServiceWithQuiz(t)
+
+	staleFull, staleThumb := "1/100.jpg", "1/100-thumb.jpg"
+	staleID := seedNotReadyMedia(t, fx, staleFull, staleThumb, "2000-01-01 00:00:00")
+	freshID := seedNotReadyMedia(t, fx, "1/101.jpg", "1/101-thumb.jpg",
+		time.Now().UTC().Format("2006-01-02 15:04:05"))
+	readyMedia, err := fx.svc.Store(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
+	if err != nil {
+		t.Fatalf("Store err = %v, want nil", err)
+	}
+
+	deleted, err := fx.svc.SweepStaleNotReady(t.Context())
+	if err != nil {
+		t.Fatalf("SweepStaleNotReady err = %v, want nil", err)
+	}
+	if got, want := deleted, 1; got != want {
+		t.Errorf("deleted = %d, want %d (only the stale not-ready row)", got, want)
+	}
+
+	if _, err = fx.svc.Get(t.Context(), staleID); !errors.Is(err, ErrMediaNotFound) {
+		t.Errorf("Get(stale) err = %v, want ErrMediaNotFound (swept)", err)
+	}
+	if _, err = os.Stat(filepath.Join(fx.root, staleFull)); !os.IsNotExist(err) {
+		t.Errorf("stale full file stat err = %v, want not-exist", err)
+	}
+	if _, err = os.Stat(filepath.Join(fx.root, staleThumb)); !os.IsNotExist(err) {
+		t.Errorf("stale thumb file stat err = %v, want not-exist", err)
+	}
+
+	if _, err = fx.svc.Get(t.Context(), freshID); err != nil {
+		t.Errorf("Get(fresh not-ready) err = %v, want nil (too young to sweep)", err)
+	}
+	if _, err = fx.svc.Get(t.Context(), readyMedia.ID); err != nil {
+		t.Errorf("Get(ready) err = %v, want nil (ready rows never swept)", err)
 	}
 }

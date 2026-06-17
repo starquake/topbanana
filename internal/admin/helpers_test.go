@@ -125,6 +125,11 @@ func (e *adminEnv) seedMedia(t *testing.T, quizID int64) int64 {
 	if err != nil {
 		t.Fatalf("CreateMedia err = %v, want nil", err)
 	}
+	// CreateMedia inserts not-ready (#992); flip it ready so the seeded image
+	// behaves like a finished library upload and shows in the picker.
+	if err = e.media.MarkMediaReady(t.Context(), m.ID); err != nil {
+		t.Fatalf("MarkMediaReady err = %v, want nil", err)
+	}
 
 	return m.ID
 }

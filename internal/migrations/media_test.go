@@ -117,6 +117,46 @@ func TestMediaMigration_NoIDReuseAfterDelete(t *testing.T) {
 	}
 }
 
+// TestMediaReadyMigration_ColumnAndIndex pins the #992 two-phase flag: the
+// ready column and its partial index exist, ready defaults to 1 (so pre-existing
+// rows count as ready), and the CHECK constraint rejects an out-of-range value.
+func TestMediaReadyMigration_ColumnAndIndex(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v", cerr)
+		}
+	})
+
+	if !tableColumns(t, db, "media")["ready"] {
+		t.Error("media is missing the ready column")
+	}
+	if !indexExists(t, db, "media_not_ready_idx") {
+		t.Error("media_not_ready_idx index is missing")
+	}
+
+	quizID := seedQuiz(t, db, "Ready Default", "media-ready-default")
+	id := seedMedia(t, db, quizID)
+
+	var ready int
+	if err := db.QueryRowContext(
+		t.Context(), "SELECT ready FROM media WHERE id = ?", id,
+	).Scan(&ready); err != nil {
+		t.Fatalf("select ready err = %v, want nil", err)
+	}
+	if got, want := ready, 1; got != want {
+		t.Errorf("ready default = %d, want %d", got, want)
+	}
+
+	if _, err := db.ExecContext(
+		t.Context(), "UPDATE media SET ready = 2 WHERE id = ?", id,
+	); err == nil {
+		t.Error("UPDATE ready = 2 err = nil, want a CHECK constraint violation")
+	}
+}
+
 // seedMedia inserts a minimal media row for quizID (created_by the seeded admin
 // id 1) and returns its id.
 func seedMedia(t *testing.T, db *sql.DB, quizID int64) int64 {

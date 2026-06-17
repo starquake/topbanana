@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // fullSuffix and thumbSuffix name the two files a stored image writes under
@@ -28,6 +29,14 @@ const (
 	// decimalBase is the base used to render the quiz and media ids into the
 	// per-quiz directory and filenames.
 	decimalBase = 10
+
+	// StaleNotReadyThreshold is how long a not-ready media row may linger before
+	// the sweep removes it and its files (#992). A row is not-ready only between
+	// CreateMedia and the final MarkMediaReady, a sub-second window for a
+	// completing upload; anything still not-ready past this threshold is a row
+	// whose request was cancelled mid-upload. Generous enough that a slow but
+	// live upload (large image, slow disk) is never swept out from under itself.
+	StaleNotReadyThreshold = 5 * time.Minute
 )
 
 // Service processes an upload through the pipeline, persists the resulting jpeg
@@ -51,10 +60,14 @@ func NewService(store Store, root string, logger *slog.Logger) *Service {
 // paths and metadata, and returns the stored Media. createdBy is the uploading
 // player.
 //
-// The row is inserted only after both files are on disk; if the insert fails
-// the just-written files are removed so a failed upload leaves no orphans. The
-// stored Path / ThumbPath are relative to root so a later root remount does not
-// strand the references.
+// The row is inserted not-ready, then the files are written, the paths
+// recorded, and only then the row is flipped ready (a two-phase commit, #992).
+// Until the final flip the library hides the row, so a cancel that arrives
+// after the paths commit but before the flip leaves a hidden row the sweep
+// later drops rather than a file visible in the host's library. A failure at
+// any step removes the just-written files and the row so a failed upload leaves
+// no orphans. The stored Path / ThumbPath are relative to root so a later root
+// remount does not strand the references.
 func (s *Service) Store(ctx context.Context, quizID, createdBy int64, r io.Reader) (*Media, error) {
 	// Two ctx.Err checks around Process: the first skips Process if the
 	// cancel already arrived (Process is the CPU-heavy decode + re-encode);
@@ -73,6 +86,8 @@ func (s *Service) Store(ctx context.Context, quizID, createdBy int64, r io.Reade
 
 	quizDir := strconv.FormatInt(quizID, decimalBase)
 
+	// Path / ThumbPath are left empty here and filled in by UpdateMediaPaths
+	// below, once the assigned id names the on-disk files (<quizID>/<id>.jpg).
 	row, err := s.store.CreateMedia(ctx, &Media{
 		QuizID:            quizID,
 		Type:              TypeImage,
@@ -82,45 +97,14 @@ func (s *Service) Store(ctx context.Context, quizID, createdBy int64, r io.Reade
 		SizeBytes:         int64(processed.SizeBytes),
 		SHA256:            processed.SHA256,
 		CreatedByPlayerID: createdBy,
-		// Path / ThumbPath are filled in below once the id assigns the
-		// filenames; UpdateMediaPaths writes them so the names embed the row id.
-		Path:      "",
-		ThumbPath: "",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating media row: %w", err)
 	}
 
-	// Create the per-quiz directory only after the insert succeeds, so a
-	// quiz whose first upload fails at the insert is not left with a stray
-	// empty dir (#998). On a MkdirAll failure the just-created row is removed
-	// so the upload still leaves nothing behind.
-	absDir := filepath.Join(s.root, quizDir)
-	if mkErr := os.MkdirAll(absDir, dirPerm); mkErr != nil {
-		s.cleanupRow(context.WithoutCancel(ctx), row.ID)
-
-		return nil, fmt.Errorf("creating quiz media directory: %w", mkErr)
-	}
-
-	relFull := filepath.Join(quizDir, strconv.FormatInt(row.ID, decimalBase)+fullSuffix)
-	relThumb := filepath.Join(quizDir, strconv.FormatInt(row.ID, decimalBase)+thumbSuffix)
-
-	if err = s.writeFiles(processed, relFull, relThumb); err != nil {
-		s.cleanupRow(context.WithoutCancel(ctx), row.ID)
-
+	relFull, relThumb, err := s.writeAndCommit(ctx, row.ID, quizDir, processed)
+	if err != nil {
 		return nil, err
-	}
-
-	if err = s.store.UpdateMediaPaths(ctx, row.ID, relFull, relThumb); err != nil {
-		// Use a cancel-immune context for cleanup so a cancelled upload's
-		// row + files actually get removed instead of orphaning when ctx is
-		// the cause of the failure (#951).
-		cleanup := context.WithoutCancel(ctx)
-		s.removeFile(relFull)
-		s.removeFile(relThumb)
-		s.cleanupRow(cleanup, row.ID)
-
-		return nil, fmt.Errorf("recording media paths: %w", err)
 	}
 
 	row.Path = relFull
@@ -149,6 +133,42 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 	}
 
 	return nil
+}
+
+// SweepStaleNotReady removes media rows still not-ready past
+// StaleNotReadyThreshold and unlinks their files (#992). A row stays not-ready
+// only between CreateMedia and the final MarkMediaReady; one lingering past the
+// threshold is the residue of an upload whose request was cancelled mid-flight,
+// committed but hidden from the library. Each file unlink and row delete is
+// best-effort and logged on failure so one stuck row does not abort the rest of
+// the pass; the row is retried on the next sweep. Returns the number of rows
+// deleted.
+func (s *Service) SweepStaleNotReady(ctx context.Context) (int, error) {
+	stale, err := s.store.ListStaleNotReadyMedia(ctx, StaleNotReadyThreshold)
+	if err != nil {
+		return 0, fmt.Errorf("listing stale not-ready media: %w", err)
+	}
+
+	deleted := 0
+	for _, m := range stale {
+		s.removeFile(m.Path)
+		if m.ThumbPath != "" {
+			s.removeFile(m.ThumbPath)
+		}
+		switch derr := s.store.DeleteMedia(ctx, m.ID); {
+		case derr == nil:
+			deleted++
+		case errors.Is(derr, ErrMediaNotFound):
+			// Already gone (a concurrent cancel cleanup or a prior pass): the
+			// row is dropped either way, so this is not an error, but it is not
+			// a deletion this pass made.
+		default:
+			s.logger.ErrorContext(ctx, "failed to delete stale not-ready media row",
+				slog.Int64("media_id", m.ID), slog.Any("err", derr))
+		}
+	}
+
+	return deleted, nil
 }
 
 // Get returns the media row for id, or ErrMediaNotFound. The serving slice uses
@@ -203,6 +223,54 @@ func (s *Service) Open(relPath string) (*os.File, error) {
 	return f, nil
 }
 
+// writeAndCommit creates the per-quiz directory, writes the full + thumb files,
+// records their paths on the row, and flips the row ready -- the two-phase
+// commit's file + DB work after the not-ready insert. It returns the
+// root-relative paths it wrote. A failure at any step tears the just-written
+// files and the still-hidden row back down so a failed upload leaves nothing
+// behind (#992, #998).
+func (s *Service) writeAndCommit(
+	ctx context.Context, id int64, quizDir string, processed *Processed,
+) (relFull, relThumb string, err error) {
+	// Create the per-quiz directory only after the insert succeeds, so a quiz
+	// whose first upload fails at the insert is not left with a stray empty dir
+	// (#998).
+	if mkErr := os.MkdirAll(filepath.Join(s.root, quizDir), dirPerm); mkErr != nil {
+		s.cleanupRow(context.WithoutCancel(ctx), id)
+
+		return "", "", fmt.Errorf("creating quiz media directory: %w", mkErr)
+	}
+
+	relFull = filepath.Join(quizDir, strconv.FormatInt(id, decimalBase)+fullSuffix)
+	relThumb = filepath.Join(quizDir, strconv.FormatInt(id, decimalBase)+thumbSuffix)
+
+	if err = s.writeFiles(processed, relFull, relThumb); err != nil {
+		s.cleanupRow(context.WithoutCancel(ctx), id)
+
+		return "", "", err
+	}
+
+	// Cleanup on the post-write failures runs under a cancel-immune context so a
+	// cancelled upload's row + files actually get removed instead of orphaning
+	// when ctx is the cause of the failure (#951).
+	if err = s.store.UpdateMediaPaths(ctx, id, relFull, relThumb); err != nil {
+		s.cleanupRowAndFiles(ctx, id, relFull, relThumb)
+
+		return "", "", fmt.Errorf("recording media paths: %w", err)
+	}
+
+	// Flip the row ready last, so a cancel arriving after the paths commit but
+	// before this flip leaves a hidden (not-ready) row the sweep drops rather
+	// than a file the host sees in their library (#992).
+	if err = s.store.MarkMediaReady(ctx, id); err != nil {
+		s.cleanupRowAndFiles(ctx, id, relFull, relThumb)
+
+		return "", "", fmt.Errorf("marking media ready: %w", err)
+	}
+
+	return relFull, relThumb, nil
+}
+
 // writeFiles writes the full and thumb jpeg bytes to the given root-relative
 // paths using a temp-then-rename pattern so a SIGKILL or crash between the
 // two writes can't leave a row pointing at a half-written or missing file.
@@ -239,6 +307,17 @@ func (s *Service) writeFiles(processed *Processed, relFull, relThumb string) err
 	}
 
 	return nil
+}
+
+// cleanupRowAndFiles removes both written files and the media row after a
+// post-write failure, under a cancel-immune context derived from ctx so a
+// cancelled upload (the common cause of the failure) still gets fully torn down
+// rather than orphaning a row or files (#951).
+func (s *Service) cleanupRowAndFiles(ctx context.Context, id int64, relFull, relThumb string) {
+	cleanup := context.WithoutCancel(ctx)
+	s.removeFile(relFull)
+	s.removeFile(relThumb)
+	s.cleanupRow(cleanup, id)
 }
 
 // cleanupRow deletes a just-created media row after a filesystem failure so a

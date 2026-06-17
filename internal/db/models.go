@@ -91,6 +91,7 @@ type Medium struct {
 	Sha256            string
 	CreatedByPlayerID int64
 	CreatedAt         time.Time
+	Ready             int64
 }
 
 type Option struct {

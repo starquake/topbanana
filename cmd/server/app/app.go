@@ -23,6 +23,7 @@ import (
 	"github.com/starquake/topbanana/internal/leaderboard"
 	"github.com/starquake/topbanana/internal/livesession"
 	"github.com/starquake/topbanana/internal/mailer"
+	"github.com/starquake/topbanana/internal/media"
 	"github.com/starquake/topbanana/internal/server"
 	"github.com/starquake/topbanana/internal/store"
 	"github.com/starquake/topbanana/internal/version"
@@ -170,16 +171,7 @@ func Run(
 	version.SetEnv(cfg.AppEnvironment)
 
 	stores := store.New(conn, logger)
-	sweepExpiredAtStartup(signalCtx, logger, stores)
-	// The startup sweep only fires once. Tokens minted in the hours
-	// between deploys (and their flaky-SMTP orphan rows) need a
-	// periodic broom too; the hourly tick keeps both tables bounded on
-	// long-running deploys without burning a goroutine per row (#472).
-	go runTokenSweep(
-		signalCtx, logger,
-		stores.VerifyTokens, stores.ResetTokens, stores.Invites, stores.Retention,
-		tokenSweepInterval,
-	)
+	startSweeps(signalCtx, cfg, logger, stores)
 	gameService, leaderboardHub := newGameService(cfg, logger, stores)
 	// Own the runner's context so shutdown waits for its goroutine to exit
 	// before Run returns - else it logs past test teardown under -race (#608).
@@ -346,6 +338,21 @@ type retentionSweeper interface {
 	SweepAbandonedGames(ctx context.Context, days int) error
 }
 
+// mediaSweeper is the slice of the media service the sweep calls: drop the
+// not-ready rows (and their files) left by cancelled uploads. Narrow so the
+// unit test can drive the loop without a real service.
+type mediaSweeper interface {
+	SweepStaleNotReady(ctx context.Context) (int, error)
+}
+
+// runMediaSweep drops stale not-ready media rows once, logging a failure at
+// warn so a transient error does not abort the surrounding token sweep.
+func runMediaSweep(ctx context.Context, logger *slog.Logger, mediaSweep mediaSweeper) {
+	if _, err := mediaSweep.SweepStaleNotReady(ctx); err != nil {
+		logger.WarnContext(ctx, "stale not-ready media sweep failed", slog.Any("err", err))
+	}
+}
+
 // runRetentionSweep runs both data-retention sweeps once with the configured
 // retention windows, logging each failure at warn so a transient error in one
 // does not skip the other or abort the surrounding token sweep.
@@ -358,12 +365,30 @@ func runRetentionSweep(ctx context.Context, logger *slog.Logger, retention reten
 	}
 }
 
+// startSweeps runs the one-shot startup sweep and launches the periodic
+// background sweep goroutine. The media service is constructed here for its
+// not-ready sweep; the periodic sweep shares the hourly token-sweep tick since a
+// not-ready row is the residue of a cancelled upload, hidden from the library
+// until it is dropped, so it is bounded but not urgent (#992, #472).
+func startSweeps(ctx context.Context, cfg *config.Config, logger *slog.Logger, stores *store.Stores) {
+	mediaSweep := media.NewService(stores.Media, cfg.MediaDir, logger)
+	sweepExpiredAtStartup(ctx, logger, stores, mediaSweep)
+	go runTokenSweep(
+		ctx, logger,
+		stores.VerifyTokens, stores.ResetTokens, stores.Invites, stores.Retention, mediaSweep,
+		tokenSweepInterval,
+	)
+}
+
 // sweepExpiredAtStartup runs the one-shot expiry sweep across the verify,
 // reset, and invite token tables plus the data-retention sweeps (stale
-// anonymous players and abandoned games) at boot, before the periodic
-// sweep goroutine takes over. Each failure is logged at warn and the others
-// still run; a single table's transient error must not skip the rest.
-func sweepExpiredAtStartup(ctx context.Context, logger *slog.Logger, stores *store.Stores) {
+// anonymous players and abandoned games) and the stale not-ready media sweep
+// at boot, before the periodic sweep goroutine takes over. Each failure is
+// logged at warn and the others still run; a single table's transient error
+// must not skip the rest.
+func sweepExpiredAtStartup(
+	ctx context.Context, logger *slog.Logger, stores *store.Stores, mediaSweep mediaSweeper,
+) {
 	if err := stores.VerifyTokens.DeleteExpiredVerifyTokens(ctx); err != nil {
 		logger.WarnContext(ctx, "verify-token sweep at startup failed", slog.Any("err", err))
 	}
@@ -374,15 +399,16 @@ func sweepExpiredAtStartup(ctx context.Context, logger *slog.Logger, stores *sto
 		logger.WarnContext(ctx, "invite sweep at startup failed", slog.Any("err", err))
 	}
 	runRetentionSweep(ctx, logger, stores.Retention)
+	runMediaSweep(ctx, logger, mediaSweep)
 }
 
 // runTokenSweep ticks at interval and on each iteration runs the verify,
 // reset, and invite token expiry sweeps plus the data-retention sweeps
-// (stale anonymous players and abandoned games). Returns when ctx is
-// cancelled (which is the signal-driven shutdown context, so a graceful
-// shutdown stops the sweep before the DB is closed). A sweep failure is
-// logged at warn and the loop continues; one bad tick should not silence
-// the next hour's pass.
+// (stale anonymous players and abandoned games) and the stale not-ready
+// media sweep. Returns when ctx is cancelled (which is the signal-driven
+// shutdown context, so a graceful shutdown stops the sweep before the DB is
+// closed). A sweep failure is logged at warn and the loop continues; one bad
+// tick should not silence the next hour's pass.
 func runTokenSweep(
 	ctx context.Context,
 	logger *slog.Logger,
@@ -390,6 +416,7 @@ func runTokenSweep(
 	reset resetTokenSweeper,
 	invites inviteSweeper,
 	retention retentionSweeper,
+	mediaSweep mediaSweeper,
 	interval time.Duration,
 ) {
 	ticker := time.NewTicker(interval)
@@ -409,6 +436,7 @@ func runTokenSweep(
 				logger.WarnContext(ctx, "invite periodic sweep failed", slog.Any("err", err))
 			}
 			runRetentionSweep(ctx, logger, retention)
+			runMediaSweep(ctx, logger, mediaSweep)
 		}
 	}
 }
