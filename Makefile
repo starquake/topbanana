@@ -146,6 +146,28 @@ lint-ascii:
 	    echo "lint-ascii: no non-ASCII bytes in Go or SQL sources."; \
 	fi
 
+# Advisory (#1021): flags any *_test.go that lacks a same-named *.go
+# (stdlib source/test pairing; see CLAUDE.md Testing). Exempt, as in the
+# stdlib: export_test.go, testmain_test.go, internal/migrations (which test
+# .sql, with no Go source), and any *_test.go with no Test/Benchmark/Example
+# func (test-only doubles/helpers). Exit 0; only prints offenders.
+.PHONY: lint-test-pairing
+lint-test-pairing:
+	@hits=$$(for t in $$(find internal cmd -name '*_test.go' 2>/dev/null); do \
+	    d=$$(dirname "$$t"); b=$$(basename "$$t" _test.go); \
+	    case "$$b" in export|testmain) continue;; esac; \
+	    case "$$d" in internal/migrations) continue;; esac; \
+	    [ -e "$$d/$$b.go" ] && continue; \
+	    grep -qE '^func (Test|Benchmark|Example)' "$$t" || continue; \
+	    echo "$$t"; \
+	  done); \
+	if [ -n "$$hits" ]; then \
+	    echo "lint-test-pairing: these test files have no same-named source file (see CLAUDE.md / #1021):"; \
+	    echo "$$hits" | sed 's/^/  /'; \
+	else \
+	    echo "lint-test-pairing: every test file pairs a source file."; \
+	fi
+
 .PHONY: build
 build:
 	mkdir -p $(BIN_DIR)
