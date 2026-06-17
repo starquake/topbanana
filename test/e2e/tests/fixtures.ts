@@ -46,6 +46,17 @@ export type HostSessions = {
   newPlayerContext(): Promise<BrowserContext>;
 };
 
+// waitForHostRoom waits for the big-screen room URL after a host action and
+// returns the join code. It stops at 'commit' rather than the default 'load':
+// the big screen opens an SSE EventSource as it boots, and firefox holds the
+// page 'load' event open while that stream stays connected, so a default
+// waitForURL can hang past the test budget (#1035). Callers need only the
+// committed /host/<code> URL; the page's content is awaited by later locators.
+async function waitForHostRoom(host: Page): Promise<string> {
+  await host.waitForURL(/\/host\/[A-Z0-9]{6}$/, { waitUntil: 'commit' });
+  return host.url().split('/host/')[1];
+}
+
 async function makeHostSessions(
   browser: Browser,
   baseURL: string | undefined,
@@ -94,8 +105,7 @@ async function makeHostSessions(
       const submit = host.getByTestId('host-session-submit');
       await expect(submit).toBeVisible();
       await submit.click();
-      await host.waitForURL(/\/host\/[A-Z0-9]{6}$/);
-      const joinCode = host.url().split('/host/')[1];
+      const joinCode = await waitForHostRoom(host);
       sessions.push({ host, joinCode });
       return { host, joinCode };
     },
@@ -106,8 +116,7 @@ async function makeHostSessions(
       await host.getByRole('link', { name: quizTitle }).click();
       await host.waitForURL(/\/admin\/quizzes\/\d+$/);
       await host.getByRole('button', { name: 'Host live' }).click();
-      await host.waitForURL(/\/host\/[A-Z0-9]{6}$/);
-      const joinCode = host.url().split('/host/')[1];
+      const joinCode = await waitForHostRoom(host);
       sessions.push({ host, joinCode });
       return { host, joinCode };
     },
