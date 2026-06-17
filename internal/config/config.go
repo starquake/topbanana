@@ -476,9 +476,11 @@ func (c *Config) EnvTitleTag() string {
 	}
 }
 
-// Parse parses environment variables into the config.
-func Parse(getenv func(string) string) (*Config, error) {
-	c := Config{
+// defaultConfig returns a Config seeded with the built-in defaults, before any
+// environment overrides are applied. AppEnvironment is intentionally left unset
+// so an unset APP_ENV fails secure (see Parse).
+func defaultConfig() Config {
+	return Config{
 		ClientDir:               ClientDirDefault,
 		WebStaticDir:            WebStaticDirDefault,
 		MediaDir:                MediaDirDefault,
@@ -494,6 +496,11 @@ func Parse(getenv func(string) string) (*Config, error) {
 		MediaUploadBudgetWindow: MediaUploadBudgetWindowDefault,
 		MediaQuizImageLimit:     MediaQuizImageLimitDefault,
 	}
+}
+
+// Parse parses environment variables into the config.
+func Parse(getenv func(string) string) (*Config, error) {
+	c := defaultConfig()
 	// AppEnvironment is intentionally NOT pre-initialised to the
 	// development default: an unset APP_ENV is meant to fail-secure
 	// (Secure cookies on, SESSION_KEY required) so a bare-binary boot
