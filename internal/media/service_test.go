@@ -253,6 +253,39 @@ func TestServiceStoreCancelledMidFlightCleansUp(t *testing.T) {
 	}
 }
 
+// TestServiceStoreCreateMediaFailureLeavesNoDir pins that a failed media-row
+// insert leaves no per-quiz directory on disk (#998). The directory is created
+// only after CreateMedia succeeds, so a quiz whose very first upload fails at
+// the insert step does not accumulate a stray empty dir under root. The closed
+// DB forces CreateMedia to error after Process has run.
+func TestServiceStoreCreateMediaFailureLeavesNoDir(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	quizID := seedQuiz(t, db, "media-svc-insert-fail")
+	root := t.TempDir()
+	svc := NewService(store.NewMediaStore(db, slog.Default()), root, slog.Default())
+
+	// Close the DB so the CreateMedia insert fails; Process runs first and
+	// does not touch the DB, so the failure lands exactly at the insert.
+	if err := db.Close(); err != nil {
+		t.Fatalf("db.Close err = %v, want nil", err)
+	}
+
+	_, err := svc.Store(t.Context(), quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
+	if err == nil {
+		t.Fatal("Store err = nil, want non-nil (CreateMedia ran against a closed DB)")
+	}
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("ReadDir err = %v, want nil", err)
+	}
+	if got, want := len(entries), 0; got != want {
+		t.Errorf("entries under root after failed insert = %d, want %d (no stray per-quiz dir)", got, want)
+	}
+}
+
 // TestServiceDeleteRemovesRowAndFiles pins that Delete drops the row and unlinks
 // both files.
 func TestServiceDeleteRemovesRowAndFiles(t *testing.T) {

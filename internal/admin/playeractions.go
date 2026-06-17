@@ -99,7 +99,8 @@ func HandlePlayerResendVerification(
 			return
 		}
 
-		if wait, allowed := limiter.Allow(playerID); !allowed {
+		wait, allowed, token := limiter.Allow(playerID)
+		if !allowed {
 			seconds := max(int((wait+time.Second-1)/time.Second), 1)
 			flash.SetError(w, "Slow down: wait a moment before resending.", seconds)
 			w.Header().Set("Retry-After", strconv.Itoa(seconds))
@@ -111,6 +112,11 @@ func HandlePlayerResendVerification(
 		if !dispatchAdminResendVerification(
 			r.Context(), logger, tokens, sender, baseURL, detail.Email, playerID, tasks,
 		) {
+			// No mail went out (email not configured), so roll the stamp
+			// back: an operator on a misconfigured instance is not throttled
+			// for a send that never happened (#996). Token-matched so a
+			// second concurrent caller's newer stamp is not clobbered.
+			limiter.Cancel(playerID, token)
 			flash.SetError(w, "Email sending is not configured; no verification email was sent.", 0)
 			redirectToPlayerDetail(w, r, playerID)
 
@@ -336,11 +342,11 @@ func HandlePlayerSetRole(
 		}
 
 		removingAdmin := from == auth.RoleAdmin && desired != auth.RoleAdmin
-		if removingAdmin && !guardLastAdmin(w, r, logger, store, flash, playerID) {
-			return
-		}
-
-		if !writeRoleChange(w, r, logger, store, flash, playerID, desired) {
+		if removingAdmin {
+			if !writeAdminDemotion(w, r, logger, store, flash, playerID, desired) {
+				return
+			}
+		} else if !writeRoleChange(w, r, logger, store, flash, playerID, desired) {
 			return
 		}
 
@@ -354,30 +360,33 @@ func HandlePlayerSetRole(
 	})
 }
 
-// guardLastAdmin refuses a change that strips Admin from the only remaining
-// Admin. Called only when the change actually removes Admin; returns false
-// (after flashing + 303) when the change must be blocked, true when it may
-// proceed.
-func guardLastAdmin(
+// writeAdminDemotion persists a demotion away from Admin via the atomic
+// store guard: a missing target is flashed as "not found", the last-admin
+// refusal as "promote another first", any other store error as a flashed
+// retry. The count-and-update happen in one statement in the store, so two
+// concurrent demotions of the two remaining admins cannot both pass (#997).
+// Returns true only when the demotion was written.
+func writeAdminDemotion(
 	w http.ResponseWriter, r *http.Request, logger *slog.Logger,
-	store auth.AdminPlayerStore, flash *auth.SignedFlash, playerID int64,
+	store auth.AdminPlayerStore, flash *auth.SignedFlash, playerID int64, desired string,
 ) bool {
-	count, err := store.CountAdmins(r.Context())
-	if err != nil {
-		logger.ErrorContext(r.Context(), "error counting admins", slog.Any("err", err))
-		flash.SetError(w, "Could not update role. Try again.", 0)
-		redirectToPlayerDetail(w, r, playerID)
-
-		return false
-	}
-	if count <= 1 {
+	err := store.DemoteAdmin(r.Context(), playerID, desired)
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, auth.ErrLastAdmin):
 		flash.SetError(w, "Cannot remove the last admin - promote another first.", 0)
 		redirectToPlayerDetail(w, r, playerID)
-
-		return false
+	case errors.Is(err, auth.ErrPlayerNotFound):
+		flash.SetError(w, "Player not found.", 0)
+		redirectToPlayerDetail(w, r, playerID)
+	default:
+		logger.ErrorContext(r.Context(), "error demoting admin", slog.Any("err", err))
+		flash.SetError(w, "Could not update role. Try again.", 0)
+		redirectToPlayerDetail(w, r, playerID)
 	}
 
-	return true
+	return false
 }
 
 // writeRoleChange persists the role and maps a write failure onto its
@@ -753,9 +762,11 @@ func newPerTargetLimiterWithClock(window time.Duration, now func() time.Time) *P
 }
 
 // Allow reports whether target may dispatch right now. On admit stamps
-// the bucket so the next call within the window is blocked; on block
-// returns the remaining wait so the caller can render it.
-func (l *PerTargetLimiter) Allow(target int64) (time.Duration, bool) {
+// the bucket so the next call within the window is blocked and returns
+// the stamp as a token; pass it to [PerTargetLimiter.Cancel] to revert
+// this specific stamp on a downstream bail-out. On block returns the
+// remaining wait so the caller can render it, and the zero-time token.
+func (l *PerTargetLimiter) Allow(target int64) (time.Duration, bool, time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -768,10 +779,25 @@ func (l *PerTargetLimiter) Allow(target int64) (time.Duration, bool) {
 	}
 	if prev, ok := l.last[target]; ok {
 		if remaining := l.window - now.Sub(prev); remaining > 0 {
-			return remaining, false
+			return remaining, false, time.Time{}
 		}
 	}
 	l.last[target] = now
 
-	return 0, true
+	return 0, true, now
+}
+
+// Cancel reverts the stamp Allow wrote for target, but only if the live
+// stamp still matches token. Matching on token keeps a slow caller from
+// clobbering a newer stamp a second concurrent caller wrote in between
+// this caller's Allow and Cancel - that newer stamp must stand so the
+// second caller's window is honoured. Idempotent: Cancel on a target
+// with no entry, or with a stale token, is a no-op.
+func (l *PerTargetLimiter) Cancel(target int64, token time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if cur, ok := l.last[target]; ok && cur.Equal(token) {
+		delete(l.last, target)
+	}
 }

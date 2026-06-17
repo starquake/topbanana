@@ -954,6 +954,61 @@ func (s *PlayerStore) SetPlayerRole(ctx context.Context, playerID int64, role st
 	return nil
 }
 
+// DemoteAdmin moves the Admin row identified by id to the supplied non-admin
+// role, refusing the change atomically when the row is the only remaining Admin
+// (#997). The guarded UPDATE and the admin-count test run in one statement so
+// two concurrent demotions of the two remaining admins cannot both pass and
+// leave zero admins. A zero-row result is classified inside the same
+// transaction: ErrLastAdmin when the row is still Admin (so only the
+// last-admin clause blocked it), otherwise ErrPlayerNotFound (the id matches no
+// row, or a row that is no longer Admin).
+func (s *PlayerStore) DemoteAdmin(ctx context.Context, playerID int64, role string) error {
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		rows, err := q.DemoteAdminGuarded(ctx, db.DemoteAdminGuardedParams{
+			Role: role,
+			ID:   playerID,
+		})
+		if err != nil {
+			return fmt.Errorf("query: %w", err)
+		}
+		if rows > 0 {
+			return nil
+		}
+
+		return classifyDemoteRefusal(ctx, q, playerID)
+	})
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, auth.ErrLastAdmin):
+		return auth.ErrLastAdmin
+	case errors.Is(err, auth.ErrPlayerNotFound):
+		return auth.ErrPlayerNotFound
+	default:
+		return fmt.Errorf("demote admin: %w", err)
+	}
+}
+
+// classifyDemoteRefusal explains a zero-row DemoteAdminGuarded result inside the
+// same transaction: ErrLastAdmin when the row is still Admin (so only the
+// last-admin clause blocked it), otherwise ErrPlayerNotFound (the id matches no
+// row, or a row that is no longer Admin).
+func classifyDemoteRefusal(ctx context.Context, q *db.Queries, playerID int64) error {
+	player, err := q.GetPlayer(ctx, playerID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return auth.ErrPlayerNotFound
+		}
+
+		return fmt.Errorf("classify demote refusal: %w", err)
+	}
+	if player.Role == auth.RoleAdmin {
+		return auth.ErrLastAdmin
+	}
+
+	return auth.ErrPlayerNotFound
+}
+
 // ListAdmins returns every current Admin ordered by displayName (#320/#538).
 // Empty slice when no Admin exists yet.
 func (s *PlayerStore) ListAdmins(ctx context.Context) ([]*auth.AdminEntry, error) {
@@ -977,17 +1032,6 @@ func (s *PlayerStore) ListAdmins(ctx context.Context) ([]*auth.AdminEntry, error
 	}
 
 	return out, nil
-}
-
-// CountAdmins returns the number of current Admins (top tier) (#320/#538). The
-// role-change handler uses it to refuse a change that would leave zero Admins.
-func (s *PlayerStore) CountAdmins(ctx context.Context) (int64, error) {
-	count, err := s.q.CountAdmins(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("failed to count admins: %w", err)
-	}
-
-	return count, nil
 }
 
 // ListAdminAuditForTarget returns the most-recent admin actions taken

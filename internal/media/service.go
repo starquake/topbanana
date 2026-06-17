@@ -72,10 +72,6 @@ func (s *Service) Store(ctx context.Context, quizID, createdBy int64, r io.Reade
 	}
 
 	quizDir := strconv.FormatInt(quizID, decimalBase)
-	absDir := filepath.Join(s.root, quizDir)
-	if mkErr := os.MkdirAll(absDir, dirPerm); mkErr != nil {
-		return nil, fmt.Errorf("creating quiz media directory: %w", mkErr)
-	}
 
 	row, err := s.store.CreateMedia(ctx, &Media{
 		QuizID:            quizID,
@@ -93,6 +89,17 @@ func (s *Service) Store(ctx context.Context, quizID, createdBy int64, r io.Reade
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating media row: %w", err)
+	}
+
+	// Create the per-quiz directory only after the insert succeeds, so a
+	// quiz whose first upload fails at the insert is not left with a stray
+	// empty dir (#998). On a MkdirAll failure the just-created row is removed
+	// so the upload still leaves nothing behind.
+	absDir := filepath.Join(s.root, quizDir)
+	if mkErr := os.MkdirAll(absDir, dirPerm); mkErr != nil {
+		s.cleanupRow(context.WithoutCancel(ctx), row.ID)
+
+		return nil, fmt.Errorf("creating quiz media directory: %w", mkErr)
 	}
 
 	relFull := filepath.Join(quizDir, strconv.FormatInt(row.ID, decimalBase)+fullSuffix)
