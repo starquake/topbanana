@@ -352,21 +352,26 @@ func (s *LiveSessionStore) Intermission(ctx context.Context, sessionID string, b
 // running or the room is terminally finished (the RearmSession UPDATE matches no
 // row).
 func (s *LiveSessionStore) RearmSession(ctx context.Context, sessionID string, quizID int64) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("failed to begin rearm session transaction: %w", err)
-	}
-
-	if err = s.rearmSessionTx(ctx, tx, sessionID, quizID); err != nil {
-		if rbErr := tx.Rollback(); rbErr != nil {
-			return fmt.Errorf("rearm session failed: %w (rollback error: %w)", err, rbErr)
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		res, rerr := q.RearmSession(ctx, db.RearmSessionParams{
+			QuizID: sql.NullInt64{Int64: quizID, Valid: true},
+			ID:     sessionID,
+		})
+		if rerr != nil {
+			return fmt.Errorf("failed to rearm session: %w", rerr)
+		}
+		if database.MustRowsAffected(res) == 0 {
+			return livesession.ErrGameInFlight
 		}
 
-		return err
-	}
+		if rerr = q.ResetSessionPlayersReady(ctx, sessionID); rerr != nil {
+			return fmt.Errorf("failed to reset session players ready: %w", rerr)
+		}
 
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit rearm session transaction: %w", err)
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to rearm session: %w", err)
 	}
 
 	return nil
@@ -447,21 +452,29 @@ func (s *LiveSessionStore) GetSessionPlayerScore(
 func (s *LiveSessionStore) RecordAnswer(
 	ctx context.Context, sessionID string, questionID, playerID, optionID int64, answeredAt time.Time,
 ) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("failed to begin record answer transaction: %w", err)
-	}
-
-	if err = s.recordAnswerTx(ctx, tx, sessionID, questionID, playerID, optionID, answeredAt); err != nil {
-		if rbErr := tx.Rollback(); rbErr != nil {
-			return fmt.Errorf("record answer failed: %w (rollback error: %w)", err, rbErr)
+	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
+		if uerr := q.UpsertSessionAnswer(ctx, db.UpsertSessionAnswerParams{
+			SessionID:  sessionID,
+			QuestionID: questionID,
+			PlayerID:   playerID,
+			OptionID:   optionID,
+			AnsweredAt: answeredAt,
+		}); uerr != nil {
+			return fmt.Errorf("failed to record session answer: %w", uerr)
 		}
 
-		return err
-	}
+		if rerr := q.RefreshSessionPlayerLastSeenAt(ctx, db.RefreshSessionPlayerLastSeenAtParams{
+			Seen:      answeredAt.UTC().Format(sqliteTimestampLayout),
+			SessionID: sessionID,
+			PlayerID:  playerID,
+		}); rerr != nil {
+			return fmt.Errorf("failed to refresh session player last seen: %w", rerr)
+		}
 
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit record answer transaction: %w", err)
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to record answer: %w", err)
 	}
 
 	return nil
@@ -642,53 +655,6 @@ func (s *LiveSessionStore) listPlayers(ctx context.Context, sessionID string) ([
 	}
 
 	return players, nil
-}
-
-func (s *LiveSessionStore) recordAnswerTx(
-	ctx context.Context, tx *sql.Tx, sessionID string, questionID, playerID, optionID int64, answeredAt time.Time,
-) error {
-	q := s.q.WithTx(tx)
-
-	if err := q.UpsertSessionAnswer(ctx, db.UpsertSessionAnswerParams{
-		SessionID:  sessionID,
-		QuestionID: questionID,
-		PlayerID:   playerID,
-		OptionID:   optionID,
-		AnsweredAt: answeredAt,
-	}); err != nil {
-		return fmt.Errorf("failed to record session answer: %w", err)
-	}
-
-	if err := q.RefreshSessionPlayerLastSeenAt(ctx, db.RefreshSessionPlayerLastSeenAtParams{
-		Seen:      answeredAt.UTC().Format(sqliteTimestampLayout),
-		SessionID: sessionID,
-		PlayerID:  playerID,
-	}); err != nil {
-		return fmt.Errorf("failed to refresh session player last seen: %w", err)
-	}
-
-	return nil
-}
-
-func (s *LiveSessionStore) rearmSessionTx(ctx context.Context, tx *sql.Tx, sessionID string, quizID int64) error {
-	q := s.q.WithTx(tx)
-
-	res, err := q.RearmSession(ctx, db.RearmSessionParams{
-		QuizID: sql.NullInt64{Int64: quizID, Valid: true},
-		ID:     sessionID,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to rearm session: %w", err)
-	}
-	if database.MustRowsAffected(res) == 0 {
-		return livesession.ErrGameInFlight
-	}
-
-	if err = q.ResetSessionPlayersReady(ctx, sessionID); err != nil {
-		return fmt.Errorf("failed to reset session players ready: %w", err)
-	}
-
-	return nil
 }
 
 // sessionFromRow maps a generated sessions row onto the domain type

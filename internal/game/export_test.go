@@ -17,6 +17,7 @@ var (
 	ExportResolveAnswerWindow        = resolveAnswerWindow
 	ExportResolveRoundBoundaryWindow = resolveRoundBoundaryWindow
 	ExportDefaultExpiration          = defaultExpiration
+	ExportScoreAnswerCurve           = scoreAnswerCurve
 )
 
 // ExportRoundSlot is the test-visible projection of the unexported

@@ -29,11 +29,15 @@ import (
 // modest so the page stays scannable on a phone.
 const maxItems = 6
 
-// PopularQuiz is one row in the "popular quizzes" list. The list is
-// ranked by recent (30-day) finished games, but PlayCount is the durable
-// lifetime counter (#891) the shared card displays, so the figure matches
-// the admin/host cards rather than the 30-day ranking key.
-type PopularQuiz struct {
+// QuizCard is one presentation row for any of the home surfaces: the
+// "popular" and "newest" tabs on the start page and the full /quizzes
+// catalog. They render the same client card, so they share one shape; the
+// tab/section a card belongs to is carried by which slice it lands in
+// (pageData.PopularQuizzes vs NewestQuizzes vs allQuizzesData.Quizzes), not
+// by its type. PlayCount is the durable lifetime counter (#891) the card
+// displays, so the figure matches the admin/host cards rather than any
+// ranking key the underlying query orders by.
+type QuizCard struct {
 	ID                   int64
 	Title                string
 	Slug                 string
@@ -45,26 +49,11 @@ type PopularQuiz struct {
 	QuestionCount        int
 }
 
-// NewestQuiz is one row in the "newest quizzes" list, ordered by creation
-// date. It carries the same field set as [PopularQuiz] so both feed the
-// shared client quiz card the same dot.
-type NewestQuiz struct {
-	ID                   int64
-	Title                string
-	Slug                 string
-	Description          string
-	CreatedAt            time.Time
-	CreatedByDisplayName string
-	PlayCount            int
-	RoundCount           int
-	QuestionCount        int
-}
-
-// PlayURL is the share-able deep link the home page card points at.
-// Mirrors [PopularQuiz.PlayURL] so a quiz reached from either tab picks
-// up the same share path.
-func (n NewestQuiz) PlayURL() string {
-	return fmt.Sprintf("/play/%s-%d", n.Slug, n.ID)
+// PlayURL is the share-able deep link the home page card points at, the
+// same per-quiz share path the admin list uses, so a quiz reached from any
+// home surface picks up one share path.
+func (c QuizCard) PlayURL() string {
+	return fmt.Sprintf("/play/%s-%d", c.Slug, c.ID)
 }
 
 // Viewer is the slice of the signed-in player the home layout needs to
@@ -89,12 +78,6 @@ type ViewerFunc func(r *http.Request) *Viewer
 // [ViewerFunc].
 type CSRFTokenFunc func(w http.ResponseWriter, r *http.Request) string
 
-// PlayURL is the share-able deep link the home page card points at.
-// Mirrors the per-quiz share path the admin list uses.
-func (p PopularQuiz) PlayURL() string {
-	return fmt.Sprintf("/play/%s-%d", p.Slug, p.ID)
-}
-
 // ActivePlayer is one row in the "most active players" list.
 // FinishedCount is the number of finished games the player has across
 // all quizzes; the template renders it as a coarse activity score.
@@ -108,8 +91,8 @@ type ActivePlayer struct {
 // Implemented by store.HomeStore against the real database; tests can
 // substitute a stub that returns canned rows.
 type Store interface {
-	ListPopularQuizzes(ctx context.Context) ([]*PopularQuiz, error)
-	ListNewestQuizzes(ctx context.Context) ([]*NewestQuiz, error)
+	ListPopularQuizzes(ctx context.Context) ([]*QuizCard, error)
+	ListNewestQuizzes(ctx context.Context) ([]*QuizCard, error)
 	ListMostActivePlayers(ctx context.Context) ([]*ActivePlayer, error)
 }
 
@@ -120,8 +103,8 @@ type Store interface {
 // log-out affordance only when non-nil.
 type pageData struct {
 	Title          string
-	PopularQuizzes []*PopularQuiz
-	NewestQuizzes  []*NewestQuiz
+	PopularQuizzes []*QuizCard
+	NewestQuizzes  []*QuizCard
 	ActivePlayers  []*ActivePlayer
 	Viewer         *Viewer
 }
@@ -179,37 +162,13 @@ type QuizLister interface {
 	RoundCountsByQuiz(ctx context.Context) (map[int64]int, error)
 }
 
-// AllQuizRow is one row in the /quizzes list. Strictly a presentation
-// type - no behaviour beyond [AllQuizRow.PlayURL] - so the template
-// doesn't need to know anything about quiz.Quiz internals. Carries the
-// same field set as [PopularQuiz] so all three home lists feed the shared
-// client quiz card the same dot.
-type AllQuizRow struct {
-	ID                   int64
-	Title                string
-	Slug                 string
-	Description          string
-	CreatedAt            time.Time
-	CreatedByDisplayName string
-	PlayCount            int
-	RoundCount           int
-	QuestionCount        int
-}
-
-// PlayURL is the share-able deep link the row card points at. Mirrors
-// [PopularQuiz.PlayURL] so a player landing on /quizzes vs the home
-// page picks up the same share path.
-func (a AllQuizRow) PlayURL() string {
-	return fmt.Sprintf("/play/%s-%d", a.Slug, a.ID)
-}
-
 // allQuizzesData backs all-quizzes.gohtml. The slice can be empty when
 // no quizzes exist yet - the template renders an empty-state message
 // rather than a bare page. Viewer wires the same footer affordance as
 // the home page (see [pageData.Viewer]).
 type allQuizzesData struct {
 	Title   string
-	Quizzes []*AllQuizRow
+	Quizzes []*QuizCard
 	Viewer  *Viewer
 }
 
@@ -250,9 +209,9 @@ func HandleAllQuizzes(
 			roundCounts = map[int64]int{}
 		}
 
-		data.Quizzes = make([]*AllQuizRow, 0, len(quizzes))
+		data.Quizzes = make([]*QuizCard, 0, len(quizzes))
 		for _, qz := range quizzes {
-			data.Quizzes = append(data.Quizzes, &AllQuizRow{
+			data.Quizzes = append(data.Quizzes, &QuizCard{
 				ID:                   qz.ID,
 				Title:                qz.Title,
 				Slug:                 qz.Slug,
