@@ -57,6 +57,11 @@ func attachMediaToQuestion(
 	if err != nil {
 		t.Fatalf("CreateMedia err = %v, want nil", err)
 	}
+	// CreateMedia inserts not-ready (#992); a question only attaches a library
+	// image, which is ready, so flip it to match production.
+	if err = stores.Media.MarkMediaReady(ctx, row.ID); err != nil {
+		t.Fatalf("MarkMediaReady err = %v, want nil", err)
+	}
 
 	qs, err := stores.Quizzes.GetQuestion(ctx, questionID)
 	if err != nil {

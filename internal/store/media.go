@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/starquake/topbanana/internal/db"
 	"github.com/starquake/topbanana/internal/media"
@@ -23,8 +24,8 @@ func NewMediaStore(conn *sql.DB, logger *slog.Logger) *MediaStore {
 	return &MediaStore{q: db.New(conn), logger: logger}
 }
 
-// CreateMedia inserts a media row and returns it with the assigned id and
-// created_at populated. Width and Height of 0 store NULL (a non-image type
+// CreateMedia inserts a media row not-ready and returns it with the assigned id
+// and created_at populated. Width and Height of 0 store NULL (a non-image type
 // later may have no pixel dimensions); an empty ThumbPath stores NULL.
 func (s *MediaStore) CreateMedia(ctx context.Context, m *media.Media) (*media.Media, error) {
 	row, err := s.q.CreateMedia(ctx, db.CreateMediaParams{
@@ -68,6 +69,47 @@ func (s *MediaStore) UpdateMediaPaths(ctx context.Context, id int64, path, thumb
 	return nil
 }
 
+// MarkMediaReady flips a media row ready, the final step of the two-phase
+// upload. Returns media.ErrMediaNotFound when no row matched.
+func (s *MediaStore) MarkMediaReady(ctx context.Context, id int64) error {
+	res, err := s.q.MarkMediaReady(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to mark media ready: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read media ready update result: %w", err)
+	}
+	if affected == 0 {
+		return media.ErrMediaNotFound
+	}
+
+	return nil
+}
+
+// ListStaleNotReadyMedia returns not-ready media rows older than olderThan. The
+// window is passed to SQL as whole seconds (the cutoff date is computed there),
+// so a sub-second olderThan rounds down to its second floor.
+func (s *MediaStore) ListStaleNotReadyMedia(
+	ctx context.Context, olderThan time.Duration,
+) ([]media.StaleMedia, error) {
+	rows, err := s.q.ListStaleNotReadyMedia(ctx, int64(olderThan.Seconds()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list stale not-ready media: %w", err)
+	}
+
+	items := make([]media.StaleMedia, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, media.StaleMedia{
+			ID:        row.ID,
+			Path:      row.Path,
+			ThumbPath: row.ThumbPath.String,
+		})
+	}
+
+	return items, nil
+}
+
 // GetMedia returns the media row for id, or media.ErrMediaNotFound when no row
 // matches.
 func (s *MediaStore) GetMedia(ctx context.Context, id int64) (*media.Media, error) {
@@ -83,7 +125,7 @@ func (s *MediaStore) GetMedia(ctx context.Context, id int64) (*media.Media, erro
 	return mediaFromRow(row), nil
 }
 
-// ListMediaByQuiz returns every media row for quizID, newest first.
+// ListMediaByQuiz returns every ready media row for quizID, newest first.
 func (s *MediaStore) ListMediaByQuiz(ctx context.Context, quizID int64) ([]*media.Media, error) {
 	rows, err := s.q.ListMediaByQuiz(ctx, quizID)
 	if err != nil {
@@ -116,7 +158,7 @@ func (s *MediaStore) DeleteMedia(ctx context.Context, id int64) error {
 	return nil
 }
 
-// CountMediaByQuiz returns the number of media rows for quizID.
+// CountMediaByQuiz returns the number of ready media rows for quizID.
 func (s *MediaStore) CountMediaByQuiz(ctx context.Context, quizID int64) (int64, error) {
 	n, err := s.q.CountMediaByQuiz(ctx, quizID)
 	if err != nil {

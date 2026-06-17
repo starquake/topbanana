@@ -39,25 +39,41 @@ type Media struct {
 	CreatedAt         time.Time
 }
 
+// StaleMedia is a not-ready media row the sweep is about to drop: its id plus
+// the file paths to unlink before the row is deleted. ThumbPath is empty when
+// the row never reached the path-recording step.
+type StaleMedia struct {
+	ID        int64
+	Path      string
+	ThumbPath string
+}
+
 // Store is the persistence surface the media Service needs. It is defined here
 // (the consumer) so the domain does not import the concrete store package; the
 // concrete *store.MediaStore satisfies it.
 type Store interface {
-	// CreateMedia inserts a media row and returns it with its assigned id and
-	// created_at populated. The row's Path and ThumbPath may be empty at insert
-	// time; they are filled in via UpdateMediaPaths once the assigned id names
-	// the on-disk files.
+	// CreateMedia inserts a media row not-ready and returns it with its
+	// assigned id and created_at populated. The row's Path and ThumbPath may be
+	// empty at insert time; they are filled in via UpdateMediaPaths once the
+	// assigned id names the on-disk files. MarkMediaReady flips it ready once
+	// the files are written and the paths recorded.
 	CreateMedia(ctx context.Context, m *Media) (*Media, error)
 	// UpdateMediaPaths sets the on-disk paths of a media row after its files are
 	// written. Returns ErrMediaNotFound when no row matched.
 	UpdateMediaPaths(ctx context.Context, id int64, path, thumbPath string) error
+	// MarkMediaReady flips a media row ready, the final step of the two-phase
+	// upload. Returns ErrMediaNotFound when no row matched.
+	MarkMediaReady(ctx context.Context, id int64) error
 	// GetMedia returns the media row for id, or ErrMediaNotFound.
 	GetMedia(ctx context.Context, id int64) (*Media, error)
-	// ListMediaByQuiz returns every media row for quizID, newest first.
+	// ListMediaByQuiz returns every ready media row for quizID, newest first.
 	ListMediaByQuiz(ctx context.Context, quizID int64) ([]*Media, error)
+	// ListStaleNotReadyMedia returns not-ready rows older than olderThan, the
+	// candidates the in-flight-upload sweep removes.
+	ListStaleNotReadyMedia(ctx context.Context, olderThan time.Duration) ([]StaleMedia, error)
 	// DeleteMedia removes the media row for id. Returns ErrMediaNotFound when
 	// no row matched.
 	DeleteMedia(ctx context.Context, id int64) error
-	// CountMediaByQuiz returns the number of media rows for quizID.
+	// CountMediaByQuiz returns the number of ready media rows for quizID.
 	CountMediaByQuiz(ctx context.Context, quizID int64) (int64, error)
 }

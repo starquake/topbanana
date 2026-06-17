@@ -194,6 +194,29 @@ func (s *stubRetentionSweep) LastGameDays() int {
 	return s.lastGameDays
 }
 
+// stubMediaSweep counts how many times the media sweep ran. Concurrent-safe
+// so the sweep goroutine and the test can touch it from different goroutines.
+type stubMediaSweep struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (s *stubMediaSweep) SweepStaleNotReady(context.Context) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.calls++
+
+	return 0, nil
+}
+
+func (s *stubMediaSweep) Calls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.calls
+}
+
 // TestRunTokenSweep_TicksUntilCancel pins the loop's two contracts:
 // each tick calls both DeleteExpired* methods, and a context cancel
 // returns the goroutine promptly. A short interval keeps the test
@@ -205,23 +228,27 @@ func TestRunTokenSweep_TicksUntilCancel(t *testing.T) {
 	reset := &stubResetSweep{}
 	invites := &stubInviteSweep{}
 	retention := &stubRetentionSweep{}
+	mediaSweep := &stubMediaSweep{}
 
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() {
-		RunTokenSweep(ctx, slog.New(slog.DiscardHandler), verify, reset, invites, retention, time.Millisecond)
+		RunTokenSweep(
+			ctx, slog.New(slog.DiscardHandler),
+			verify, reset, invites, retention, mediaSweep, time.Millisecond,
+		)
 		close(done)
 	}()
 
 	// Wait until at least one tick lands on each store before cancelling.
 	deadline := time.After(time.Second)
 	for verify.Calls() <= 0 || reset.Calls() <= 0 || invites.Calls() <= 0 ||
-		retention.AnonCalls() <= 0 || retention.GameCalls() <= 0 {
+		retention.AnonCalls() <= 0 || retention.GameCalls() <= 0 || mediaSweep.Calls() <= 0 {
 		select {
 		case <-deadline:
-			t.Fatalf("sweep did not tick; verify=%d reset=%d invites=%d anon=%d game=%d",
+			t.Fatalf("sweep did not tick; verify=%d reset=%d invites=%d anon=%d game=%d media=%d",
 				verify.Calls(), reset.Calls(), invites.Calls(),
-				retention.AnonCalls(), retention.GameCalls())
+				retention.AnonCalls(), retention.GameCalls(), mediaSweep.Calls())
 		case <-time.After(time.Millisecond):
 		}
 	}
@@ -248,11 +275,15 @@ func TestRunTokenSweep_ContinuesAfterError(t *testing.T) {
 		anonErr: errors.New("anon sweep failed"),
 		gameErr: errors.New("game sweep failed"),
 	}
+	mediaSweep := &stubMediaSweep{}
 
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() {
-		RunTokenSweep(ctx, slog.New(slog.DiscardHandler), verify, reset, invites, retention, time.Millisecond)
+		RunTokenSweep(
+			ctx, slog.New(slog.DiscardHandler),
+			verify, reset, invites, retention, mediaSweep, time.Millisecond,
+		)
 		close(done)
 	}()
 
