@@ -172,6 +172,17 @@ func (s *Service) ListByQuiz(ctx context.Context, quizID int64) ([]*Media, error
 	return items, nil
 }
 
+// CountByQuiz returns how many media rows a quiz has. The upload handler uses
+// it to enforce the per-quiz library ceiling before storing a new batch (#988).
+func (s *Service) CountByQuiz(ctx context.Context, quizID int64) (int64, error) {
+	n, err := s.store.CountMediaByQuiz(ctx, quizID)
+	if err != nil {
+		return 0, fmt.Errorf("counting media by quiz: %w", err)
+	}
+
+	return n, nil
+}
+
 // Open opens a stored media file for reading by its root-relative path. The
 // caller closes the returned file. The path is confined to root: a relPath that
 // would escape the media root (a traversal via "..") is rejected with

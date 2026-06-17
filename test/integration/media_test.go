@@ -13,6 +13,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -264,6 +265,111 @@ func TestMediaUpload_Integration(t *testing.T) {
 			t.Errorf("missing-file upload status = %d, want %d", got, want)
 		}
 	})
+}
+
+// TestMediaUploadBudget_Integration pins the per-host upload budget backstop
+// (#988): a burst of single-file POSTs from one host - the one-request-per-file
+// pattern the form JS uses - cannot bypass the per-request count cap, because
+// the budget charges the file count per request. Once the small budget is
+// exhausted a further upload returns 429 with a Retry-After header. Runs with
+// its own setupMedia and a tiny MEDIA_UPLOAD_BUDGET so the default generous
+// budget the other media subtests rely on stays untouched.
+func TestMediaUploadBudget_Integration(t *testing.T) {
+	t.Parallel()
+
+	const budget = 3
+	ctx, setup := setupMedia(t, map[string]string{
+		"ADMIN_EMAILS":        "budget-boss@example.test",
+		"MEDIA_UPLOAD_BUDGET": strconv.Itoa(budget),
+	})
+	baseURL := setup.BaseURL
+
+	registerAdminClient(ctx, t, baseURL, setup.DBURI, "budget-boss")
+	owner := registerAdminClient(ctx, t, baseURL, setup.DBURI, "budget-owner")
+	makeHost(ctx, t, setup.DBURI, "budget-owner")
+
+	quizID := createQuizAs(ctx, t, owner, baseURL, "Budget Quiz")
+
+	// Drive single-file POSTs one at a time. The first budget admit (303); the
+	// next must be rejected 429 once the rolling budget is spent, proving the
+	// per-file XHR pattern is charged the same as one big batch.
+	for i := range budget {
+		status, _, _ := uploadOneFile(ctx, t, owner, baseURL, quizID, fmt.Sprintf("ok%d.png", i))
+		if got, want := status, http.StatusSeeOther; got != want {
+			t.Fatalf("upload %d status = %d, want %d (within budget)", i, got, want)
+		}
+	}
+
+	status, retryAfter, _ := uploadOneFile(ctx, t, owner, baseURL, quizID, "over.png")
+	if got, want := status, http.StatusTooManyRequests; got != want {
+		t.Errorf("over-budget upload status = %d, want %d", got, want)
+	}
+	if retryAfter == "" {
+		t.Error("over-budget upload Retry-After header is empty, want a positive seconds value")
+	}
+}
+
+// TestMediaQuizImageCap_Integration pins the per-quiz library ceiling backstop
+// (#988): once a quiz holds the configured maximum number of images, the next
+// upload returns 409 with a clear message. Runs with its own setupMedia and a
+// tiny MEDIA_QUIZ_IMAGE_LIMIT (with a generous budget so the budget guard does
+// not fire first) so the default cap the other media subtests rely on stays
+// untouched.
+func TestMediaQuizImageCap_Integration(t *testing.T) {
+	t.Parallel()
+
+	const limit = 2
+	ctx, setup := setupMedia(t, map[string]string{
+		"ADMIN_EMAILS":           "cap-boss@example.test",
+		"MEDIA_QUIZ_IMAGE_LIMIT": strconv.Itoa(limit),
+		"MEDIA_UPLOAD_BUDGET":    "1000",
+	})
+	baseURL := setup.BaseURL
+
+	registerAdminClient(ctx, t, baseURL, setup.DBURI, "cap-boss")
+	owner := registerAdminClient(ctx, t, baseURL, setup.DBURI, "cap-owner")
+	makeHost(ctx, t, setup.DBURI, "cap-owner")
+
+	quizID := createQuizAs(ctx, t, owner, baseURL, "Image Cap Quiz")
+
+	for i := range limit {
+		uploadImage(ctx, t, owner, baseURL, quizID, fmt.Sprintf("img%d.png", i), pngBytes(t, 64, 64))
+	}
+
+	status, _, body := uploadOneFile(ctx, t, owner, baseURL, quizID, "one-too-many.png")
+	if got, want := status, http.StatusConflict; got != want {
+		t.Errorf("over-cap upload status = %d, want %d", got, want)
+	}
+	if got, want := string(body), "image limit"; !strings.Contains(got, want) {
+		t.Errorf("over-cap body = %q, should contain %q", got, want)
+	}
+}
+
+// uploadOneFile posts a single-image multipart upload to the quiz media
+// endpoint and returns the status code, the Retry-After header (empty when
+// absent), and the response body. It always defers the body close so the
+// bodyclose linter stays happy; the upload-backstop tests use it to drive a
+// burst of single-file POSTs and read the 429 / 409 outcome without leaking a
+// response.
+func uploadOneFile(
+	ctx context.Context, t *testing.T, client *http.Client, baseURL string, quizID int64, name string,
+) (status int, retryAfter string, body []byte) {
+	t.Helper()
+	token := fetchCSRFToken(ctx, t, client, baseURL+"/admin/quizzes")
+	reqBody, contentType := multipartImage(t, name, pngBytes(t, 48, 48), token)
+	req := newMultipartReq(ctx, t, baseURL+fmt.Sprintf("/admin/quizzes/%d/media", quizID), reqBody, contentType)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("upload %q Do err = %v, want nil", name, err)
+	}
+	defer closeBody(t, resp.Body)
+
+	read, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read upload %q body err = %v, want nil", name, err)
+	}
+
+	return resp.StatusCode, resp.Header.Get("Retry-After"), read
 }
 
 // TestMediaServe_Integration covers the serving endpoints (#936 slice 2):

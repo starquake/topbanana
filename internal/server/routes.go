@@ -64,7 +64,7 @@ func addRoutes(
 
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
 	addAdminRoutes(mux, logger, stores, gameDeps, sessions, csrfMgr, emailDeps, playerDeps)
-	addMediaRoutes(mux, logger, stores, sessions, csrfMgr, media.NewService(stores.Media, cfg.MediaDir, logger))
+	addMediaRoutes(mux, logger, stores, sessions, csrfMgr, media.NewService(stores.Media, cfg.MediaDir, logger), cfg)
 	addProfileRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
 	addAPIRoutes(mux, logger, stores, gameService, realtime, sessions, cfg)
 	addHostRoutes(mux, logger, stores, sessions, csrfMgr, realtime.SessionService, cfg.BaseURL)
@@ -554,6 +554,12 @@ func addAdminRoutes(
 // no PostForm token and would always 403. requireGameHost gates to Host/Admin;
 // the handler adds the per-quiz creator-or-admin edit gate.
 //
+// Two server-side backstops bound a single host's upload volume (#988): a
+// per-host file budget over a rolling window (the limiter is built once here so
+// it is shared across every request on the route, not per-request) and the
+// per-quiz library ceiling. Both come from config so the e2e/integration suites
+// can shrink them via env.
+//
 // The serving routes (GET /media/{id} and GET /media/{id}/thumb) resolve the
 // viewer read-only via AuthenticatedSessionPlayer - NOT EnsurePlayer - so a
 // cacheable image response never mints a players row or attaches a Set-Cookie (a
@@ -569,14 +575,16 @@ func addMediaRoutes(
 	sessions *session.Manager,
 	csrfMgr *csrf.Manager,
 	svc *media.Service,
+	cfg *config.Config,
 ) {
 	requireGameHost := func(h http.Handler) http.Handler {
 		return auth.RequireGameHost(auth.RequireVerifiedEmail(h), stores.Players, sessions, csrfMgr, logger)
 	}
+	uploadBudget := mediahttp.NewUploadBudgetLimiter(cfg.MediaUploadBudget, cfg.MediaUploadBudgetWindow)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/media",
 		mediahttp.MaxMultipartFormMiddleware(csrfMgr.Middleware(requireGameHost(
-			mediahttp.HandleMediaUpload(logger, svc, stores.Quizzes),
+			mediahttp.HandleMediaUpload(logger, svc, stores.Quizzes, uploadBudget, cfg.MediaQuizImageLimit),
 		))),
 	)
 

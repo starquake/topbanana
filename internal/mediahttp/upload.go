@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"strconv"
@@ -59,6 +60,10 @@ const (
 	// internalErrorMessage is the generic 500 body shared across this package.
 	internalErrorMessage = "internal error"
 
+	// retryAfterBase is the numeric base for rendering the Retry-After seconds
+	// value (decimal, per RFC 9110).
+	retryAfterBase = 10
+
 	// httpStatusClientClosedRequest is the nginx convention for "client
 	// closed the connection before the server could write a response" - not
 	// in the IANA registry but widely used so cancelled uploads don't paint
@@ -92,6 +97,19 @@ type QuizEditLookup interface {
 // per-request count cap, returns 400. A real server failure on store returns
 // 500.
 //
+// Two server-side backstops bound a single host's upload volume (#988), since
+// the form JS fires one request per picked file and so cannot be trusted to
+// honour the per-request count cap on its own:
+//   - quizImageLimit is the per-quiz library ceiling. A batch that would push
+//     the quiz over it is rejected 409 BEFORE any budget is charged, so a clear
+//     admin denial does not also consume the host's rate budget.
+//   - budget is a per-host file allowance over a rolling window, charging the
+//     file COUNT per request so many single-file POSTs draw down the same
+//     budget one big batch would. Over budget returns 429 with Retry-After.
+//
+// The order is: per-request count cap (400), then library-size cap (409), then
+// budget charge (429), then store - so a 409 never leaves a charge behind.
+//
 // On success it redirects 303 back to the quiz view's images section so the
 // page does not jump to the top.
 //
@@ -99,7 +117,10 @@ type QuizEditLookup interface {
 // so the body is capped and the multipart form is parsed before the CSRF
 // middleware validates the token, which for a multipart form lives in the
 // parsed PostForm.
-func HandleMediaUpload(logger *slog.Logger, svc MediaService, quizzes QuizEditLookup) http.Handler {
+func HandleMediaUpload(
+	logger *slog.Logger, svc MediaService, quizzes QuizEditLookup,
+	budget *UploadBudgetLimiter, quizImageLimit int,
+) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		quizID, ok := handlers.ParseIDFromPath(w, r, logger, "quizID")
 		if !ok {
@@ -133,6 +154,21 @@ func HandleMediaUpload(logger *slog.Logger, svc MediaService, quizzes QuizEditLo
 			return
 		}
 
+		// Library-size cap before the budget charge: a quiz that has hit its
+		// image ceiling is a clear admin denial (409), not abuse, so it must
+		// not draw down the host's rate budget. A zero limit disables the cap.
+		if !checkQuizImageLimit(w, r, logger, svc, quizID, len(files), quizImageLimit) {
+			return
+		}
+
+		// Per-host file budget over a rolling window: charges len(files) so the
+		// one-request-per-file form JS cannot bypass the per-request count cap.
+		if allowed, retryAfter := budget.Charge(player.ID, len(files)); !allowed {
+			writeRateLimited(w, retryAfter)
+
+			return
+		}
+
 		results := storeUploadFiles(r.Context(), logger, svc, quizID, player.ID, files)
 
 		if wantsJSON(r) {
@@ -156,6 +192,45 @@ func HandleMediaUpload(logger *slog.Logger, svc MediaService, quizzes QuizEditLo
 		dest := fmt.Sprintf("/admin/quizzes/%d", quizID) + buildUploadQuery(uploaded, failed, 0) + "#images"
 		http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // dest is built from server-side ids and counts.
 	})
+}
+
+// checkQuizImageLimit reports whether storing incoming more files keeps the
+// quiz at or under the per-quiz library ceiling, where incoming is the number
+// of files in this request. A limit of zero disables the
+// cap. On an over-limit batch it writes a 409 with a host-facing message and
+// returns false; a real store error is logged and surfaced as 500. Runs before
+// the budget charge so a 409 never leaves a charge behind (#988).
+func checkQuizImageLimit(
+	w http.ResponseWriter, r *http.Request, logger *slog.Logger,
+	svc MediaService, quizID int64, incoming, limit int,
+) bool {
+	if limit <= 0 {
+		return true
+	}
+	existing, err := svc.CountByQuiz(r.Context(), quizID)
+	if err != nil {
+		logger.ErrorContext(r.Context(), "error counting quiz media for library cap", slog.Any("err", err))
+		http.Error(w, internalErrorMessage, http.StatusInternalServerError)
+
+		return false
+	}
+	if existing+int64(incoming) > int64(limit) {
+		http.Error(w, fmt.Sprintf("this quiz has reached its image limit (max %d)", limit), http.StatusConflict)
+
+		return false
+	}
+
+	return true
+}
+
+// writeRateLimited writes a 429 with a Retry-After header (whole seconds,
+// rounded up, minimum 1) and a short plain-text body. Plain text on every path
+// including the JSON upload: the form JS reads the body as text on a non-2xx,
+// so the uploadResponseJSON shape is not emitted for a 429 (#988).
+func writeRateLimited(w http.ResponseWriter, retryAfter time.Duration) {
+	seconds := max(int64(math.Ceil(retryAfter.Seconds())), 1)
+	w.Header().Set("Retry-After", strconv.FormatInt(seconds, retryAfterBase))
+	http.Error(w, "upload rate limit reached, slow down", http.StatusTooManyRequests)
 }
 
 // collectUploadFiles returns every file part on the request under the

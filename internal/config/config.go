@@ -66,6 +66,22 @@ var ErrSessionStartCountdownNegative = errors.New("SESSION_START_COUNTDOWN must 
 // players) before the runner closes it, so a negative value is meaningless.
 var ErrSessionIdleCloseNegative = errors.New("SESSION_IDLE_CLOSE must not be negative")
 
+// ErrMediaUploadBudgetNegative is returned when MEDIA_UPLOAD_BUDGET parses to a
+// negative integer. It is the per-host file allowance over the rolling window,
+// so a negative value is meaningless; zero is allowed and disables the limiter
+// (every charge admits) for tests and trusted single-tenant deployments.
+var ErrMediaUploadBudgetNegative = errors.New("MEDIA_UPLOAD_BUDGET must not be negative")
+
+// ErrMediaUploadBudgetWindowNegative is returned when MEDIA_UPLOAD_BUDGET_WINDOW
+// parses to a negative duration. It is the rolling window the per-host upload
+// budget is measured over, so a negative value is meaningless.
+var ErrMediaUploadBudgetWindowNegative = errors.New("MEDIA_UPLOAD_BUDGET_WINDOW must not be negative")
+
+// ErrMediaQuizImageLimitNegative is returned when MEDIA_QUIZ_IMAGE_LIMIT parses
+// to a negative integer. It is the per-quiz library ceiling, so a negative
+// value is meaningless; zero is allowed and disables the cap.
+var ErrMediaQuizImageLimitNegative = errors.New("MEDIA_QUIZ_IMAGE_LIMIT must not be negative")
+
 // ErrSMTPConfigIncomplete is returned when SMTP env vars are partially
 // populated. SMTP is opt-in (an unconfigured instance still boots and
 // the no-op mailer kicks in), but a partial configuration is almost
@@ -138,6 +154,26 @@ const (
 	// so the value is duplicated here and the server wiring passes this
 	// field into auth.NewLoginRateLimiter.
 	LoginCooldownDefault = 3 * time.Second
+
+	// MediaUploadBudgetDefault is the default per-host file allowance over
+	// MediaUploadBudgetWindow (#988). Set generously for a real host folder
+	// upload (the per-request cap is 10 files, so this is six full batches a
+	// minute) while still bounding a runaway one-request-per-file flood. The
+	// form JS fires one request per picked file, so this charges the file count
+	// per request to keep many single-file POSTs on the same budget as one big
+	// batch.
+	MediaUploadBudgetDefault = 60
+
+	// MediaUploadBudgetWindowDefault is the default rolling window the per-host
+	// upload budget is measured over. One minute pairs with the 60-file default
+	// so a host can sustain roughly one image a second without hitting the cap.
+	MediaUploadBudgetWindowDefault = time.Minute
+
+	// MediaQuizImageLimitDefault is the default per-quiz image library ceiling
+	// (#988). Generous for a real quiz (a question typically uses one image)
+	// while bounding the disk and row growth one host can drive on a single
+	// quiz.
+	MediaQuizImageLimitDefault = 200
 
 	// sessionKeyByteLength is the length in bytes of an ephemeral session key generated for development.
 	sessionKeyByteLength = 32
@@ -238,6 +274,25 @@ type Config struct {
 	// LOGIN_COOLDOWN env var via time.ParseDuration; the e2e suite sets it
 	// to 0 to disable the limiter for rapid same-IP logins.
 	LoginCooldown time.Duration
+
+	// MediaUploadBudget is the maximum number of image files one host may upload
+	// within MediaUploadBudgetWindow, charged by file count per request so the
+	// one-request-per-file upload JS cannot bypass the per-request count cap
+	// (#988). Defaults to 60; the e2e/integration suites shrink it via
+	// MEDIA_UPLOAD_BUDGET to exercise the 429 path without a real flood. Zero
+	// disables the limiter (every upload admits).
+	MediaUploadBudget int
+
+	// MediaUploadBudgetWindow is the rolling window MediaUploadBudget is measured
+	// over. Defaults to 1 minute. Parsed from MEDIA_UPLOAD_BUDGET_WINDOW via
+	// parseNonNegativeDuration.
+	MediaUploadBudgetWindow time.Duration
+
+	// MediaQuizImageLimit is the per-quiz image library ceiling: an upload that
+	// would push a quiz's stored image count over this is rejected (#988).
+	// Defaults to 200. Parsed from MEDIA_QUIZ_IMAGE_LIMIT; the e2e/integration
+	// suites shrink it to exercise the 409 path. Zero disables the cap.
+	MediaQuizImageLimit int
 
 	// GoogleClientID, GoogleClientSecret, and GoogleRedirectURL are the
 	// Google OAuth 2.0 credentials issued in the Google Cloud Console.
@@ -424,17 +479,20 @@ func (c *Config) EnvTitleTag() string {
 // Parse parses environment variables into the config.
 func Parse(getenv func(string) string) (*Config, error) {
 	c := Config{
-		ClientDir:         ClientDirDefault,
-		WebStaticDir:      WebStaticDirDefault,
-		MediaDir:          MediaDirDefault,
-		Host:              HostDefault,
-		Port:              PortDefault,
-		DBDriver:          DBDriverDefault,
-		DBURI:             DBURIDefault,
-		DBMaxOpenConns:    DBMaxOpenConnsDefault,
-		DBMaxIdleConns:    DBMaxIdleConnsDefault,
-		DBConnMaxLifetime: DBConnMaxLifetimeDefault,
-		LoginCooldown:     LoginCooldownDefault,
+		ClientDir:               ClientDirDefault,
+		WebStaticDir:            WebStaticDirDefault,
+		MediaDir:                MediaDirDefault,
+		Host:                    HostDefault,
+		Port:                    PortDefault,
+		DBDriver:                DBDriverDefault,
+		DBURI:                   DBURIDefault,
+		DBMaxOpenConns:          DBMaxOpenConnsDefault,
+		DBMaxIdleConns:          DBMaxIdleConnsDefault,
+		DBConnMaxLifetime:       DBConnMaxLifetimeDefault,
+		LoginCooldown:           LoginCooldownDefault,
+		MediaUploadBudget:       MediaUploadBudgetDefault,
+		MediaUploadBudgetWindow: MediaUploadBudgetWindowDefault,
+		MediaQuizImageLimit:     MediaQuizImageLimitDefault,
 	}
 	// AppEnvironment is intentionally NOT pre-initialised to the
 	// development default: an unset APP_ENV is meant to fail-secure
@@ -556,7 +614,35 @@ func parseTypedEnvVars(getenv func(string) string, c *Config) error {
 		return err
 	}
 
-	return parseNonNegativeDuration(getenv, "LOGIN_COOLDOWN", ErrLoginCooldownNegative, &c.LoginCooldown)
+	if err := parseNonNegativeDuration(
+		getenv, "LOGIN_COOLDOWN", ErrLoginCooldownNegative, &c.LoginCooldown,
+	); err != nil {
+		return err
+	}
+
+	return parseMediaUploadLimits(getenv, c)
+}
+
+// parseMediaUploadLimits reads the upload-backstop env vars (#988) into c: the
+// per-host file budget and its window, plus the per-quiz library ceiling. Split
+// out of parseTypedEnvVars so that function stays within the function-length
+// limit. Each is non-negative; zero disables the corresponding guard.
+func parseMediaUploadLimits(getenv func(string) string, c *Config) error {
+	if err := parseNonNegativeInt(
+		getenv, "MEDIA_UPLOAD_BUDGET", ErrMediaUploadBudgetNegative, &c.MediaUploadBudget,
+	); err != nil {
+		return err
+	}
+
+	if err := parseNonNegativeDuration(
+		getenv, "MEDIA_UPLOAD_BUDGET_WINDOW", ErrMediaUploadBudgetWindowNegative, &c.MediaUploadBudgetWindow,
+	); err != nil {
+		return err
+	}
+
+	return parseNonNegativeInt(
+		getenv, "MEDIA_QUIZ_IMAGE_LIMIT", ErrMediaQuizImageLimitNegative, &c.MediaQuizImageLimit,
+	)
 }
 
 // parseNonNegativeDuration reads the named env var as a duration into
@@ -578,6 +664,28 @@ func parseNonNegativeDuration(
 		return fmt.Errorf("%w: %q", negativeErr, val)
 	}
 	*dst = d
+
+	return nil
+}
+
+// parseNonNegativeInt reads the named env var as an integer into dst, leaving
+// dst untouched when the var is unset. An unparseable value returns a wrapped
+// error naming the var; a negative value returns the supplied sentinel so
+// callers can match it with [errors.Is]. Zero is accepted (the media upload
+// guards treat zero as "disabled").
+func parseNonNegativeInt(getenv func(string) string, name string, negativeErr error, dst *int) error {
+	val := getenv(name)
+	if val == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		return fmt.Errorf("invalid %s: %q, err: %w", name, val, err)
+	}
+	if n < 0 {
+		return fmt.Errorf("%w: %q", negativeErr, val)
+	}
+	*dst = n
 
 	return nil
 }
