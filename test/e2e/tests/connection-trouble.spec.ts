@@ -4,6 +4,7 @@ import { test, expect } from './fixtures';
 import {
   seedQuiz,
   claimAndJoin,
+  playerRow,
   execSqlite,
   registerForPending,
   markEmailVerified,
@@ -114,7 +115,7 @@ test.describe('live client connection trouble', () => {
     // A player joins so the roster is populated before the failure window.
     const playerContext = await hostSessions.newPlayerContext();
     await claimAndJoin(playerContext.request, code, fred);
-    await expect(page.locator('[data-player-row]')).toHaveCount(1);
+    await expect(playerRow(page, fred)).toBeVisible();
     await expect(page.locator('[data-connection-trouble]')).toHaveCount(0);
 
     // Force GET /state to fail with a 500. The host refresh fires on each SSE

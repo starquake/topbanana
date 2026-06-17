@@ -1,7 +1,7 @@
 import type { APIRequestContext, Page } from '@playwright/test';
 
 import { test, expect } from './fixtures';
-import { createQuizWithQuestions, installPlaythroughClock, setQuizMode, type QuestionSpec } from './helpers';
+import { createQuizWithQuestions, installPlaythroughClock, playerRow, setQuizMode, type QuestionSpec } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
 // Seed and author as the shared admin; play anonymously after clearing the
@@ -147,9 +147,7 @@ test('the question image renders on the host bigscreen during the question and r
     const readyResp = await caseyCtx.request.post(`/api/sessions/${code}/ready`, { data: { ready: true } });
     expect(readyResp.status()).toBe(204);
 
-    // Assert by name, not count: the host's one-room-per-host reuse can carry
-    // stale rows from a prior test's room into this lobby's roster (#957).
-    await expect(page.locator('[data-player-row]').filter({ hasText: casey })).toBeVisible();
+    await expect(playerRow(page, casey)).toBeVisible();
     await page.getByRole('button', { name: 'Start now' }).click();
 
     // ---- Question phase: the TV paints the question and its attached image.

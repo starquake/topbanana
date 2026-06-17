@@ -7,6 +7,7 @@ import {
   seedQuiz,
   setQuizMode,
   claimAndJoin,
+  playerRow,
 } from './helpers';
 
 // MP-3 (#680): the host puts a live quiz on a TV and gets a lobby with the
@@ -81,10 +82,9 @@ test('host lobby shows the room code, QR, and a joined player readying up live',
     await claimAndJoin(playerContext.request, code, casey);
 
     // The TV roster updates live off the SSE tick -> GET /state refresh.
-    const roster = page.locator('[data-player-row]');
-    await expect(roster).toHaveCount(1);
-    await expect(roster.first()).toContainText(casey);
-    await expect(roster.first().locator('[data-ready-state]')).toHaveText('Not ready');
+    const caseyRow = playerRow(page, casey);
+    await expect(caseyRow).toBeVisible();
+    await expect(caseyRow.locator('[data-ready-state]')).toHaveText('Not ready');
 
     // The player readies up; the TV reflects it without a reload.
     const readyResp = await playerContext.request.post(`/api/sessions/${code}/ready`, {
@@ -92,7 +92,7 @@ test('host lobby shows the room code, QR, and a joined player readying up live',
     });
     expect(readyResp.status()).toBe(204);
 
-    await expect(roster.first().locator('[data-ready-state]')).toHaveText('Ready');
+    await expect(caseyRow.locator('[data-ready-state]')).toHaveText('Ready');
   } finally {
     await playerContext.close();
   }

@@ -2,7 +2,7 @@ import { join } from 'node:path';
 
 import type { APIRequestContext } from '@playwright/test';
 
-import type { Page } from './fixtures';
+import type { Locator, Page } from './fixtures';
 import { test, expect } from './fixtures';
 import { execSqlite } from './sqlite';
 
@@ -433,6 +433,14 @@ export async function endHostedSession(host: Page, joinCode: string): Promise<vo
     ),
     endBtn.click(),
   ]);
+}
+
+// playerRow scopes to a single host-roster row by display name. The host's
+// one-room-per-host reuse can leave stale rows from a prior test's room in the
+// roster (#957), so specs must assert a player is present by name, never with a
+// strict total [data-player-row] count.
+export function playerRow(page: Page, displayName: string): Locator {
+  return page.locator('[data-player-row]').filter({ hasText: displayName });
 }
 
 // claimAndJoin drives the #716 anonymous-player join contract over the REST
