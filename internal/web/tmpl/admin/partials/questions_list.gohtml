@@ -29,7 +29,7 @@
 <div id="questions-list" class="flex flex-col gap-6" data-quiz-id="{{$quizID}}" data-csrf="{{csrfToken}}">
     {{range .Rounds}}
         {{$round := .Round}}
-        <section class="round-section" data-round="true" data-round-id="{{$round.ID}}">
+        <section id="round-section-{{$round.ID}}" data-testid="round-section-{{$round.ID}}" class="round-section" data-round="true" data-round-id="{{$round.ID}}">
             {{if $canEdit}}
             <button type="button" class="drag-rail drag-rail-round" data-round-handle title="Drag to reorder round (or focus and use arrow keys)" aria-label="Reorder round: drag, or press Up or Down arrow">
                 <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M5 3.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm0 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm0 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM12 3.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM12 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm0 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/></svg>
@@ -66,7 +66,7 @@
             <div class="flex flex-col gap-3" data-question-list>
                 {{range .Questions}}
                     {{$q := .}}
-                    <article class="q-row" data-question-id="{{$q.ID}}">
+                    <article id="q-row-{{$q.ID}}" data-testid="q-row-{{$q.ID}}" class="q-row" data-question-id="{{$q.ID}}">
                         {{if $canEdit}}
                         <button type="button" class="drag-rail drag-rail-question" data-question-handle title="Drag to reorder question (or focus and use arrow keys)" aria-label="Reorder question: drag, or press Up or Down arrow">
                             <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M5 3.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm0 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm0 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM12 3.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM12 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm0 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/></svg>

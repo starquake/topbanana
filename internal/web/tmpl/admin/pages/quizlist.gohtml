@@ -73,11 +73,20 @@
                     <section class="px-6 py-5 text-[0.95rem]">
                         Are you sure you want to delete quiz <strong class="text-text">&#34;{{.Title}}&#34;</strong>? This will also delete all its questions and options. This action cannot be undone.
                     </section>
+                    <p data-testid="delete-error" hidden class="px-6 pb-2 text-[0.85rem] text-danger" role="alert">Delete failed. Please try again.</p>
                     <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
                         <button type="button"
                                 onclick="closeModal('modal-delete-quiz-{{.ID}}')"
                                 class="btn-ghost">Cancel</button>
-                        <form method="post" action="/admin/quizzes/{{.ID}}/delete" class="inline-flex">
+                        {{/* after-request gates on success: on 5xx htmx skips the
+                             swap, so the modal stays open and shows the error. */}}
+                        <form method="post"
+                              action="/admin/quizzes/{{.ID}}/delete"
+                              hx-post="/admin/quizzes/{{.ID}}/delete"
+                              hx-target="#quiz-card-{{.ID}}"
+                              hx-swap="outerHTML"
+                              hx-on::after-request="if(event.detail.successful){closeModal('modal-delete-quiz-{{.ID}}')}else{this.closest('[role=dialog]').querySelector('[data-testid=delete-error]').hidden=false}"
+                              class="inline-flex">
                             <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                             <button type="submit" class="btn-danger">Delete</button>
                         </form>

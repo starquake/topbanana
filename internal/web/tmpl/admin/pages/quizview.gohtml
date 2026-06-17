@@ -214,11 +214,20 @@
                             <section class="px-6 py-5 text-[0.95rem]">
                                 Are you sure you want to delete question <strong class="text-text">&#34;{{.Text}}&#34;</strong>? This will also delete all its options. This action cannot be undone.
                             </section>
+                            <p data-testid="delete-error" hidden class="px-6 pb-2 text-[0.85rem] text-danger" role="alert">Delete failed. Please try again.</p>
                             <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
                                 <button type="button"
                                         onclick="closeModal('modal-delete-question-{{.ID}}')"
                                         class="btn-ghost">Cancel</button>
-                                <form method="post" action="/admin/quizzes/{{.QuizID}}/questions/{{.ID}}/delete" class="inline-flex">
+                                {{/* after-request gates on success: on 5xx htmx skips the
+                                     swap, so the modal stays open and shows the error. */}}
+                                <form method="post"
+                                      action="/admin/quizzes/{{.QuizID}}/questions/{{.ID}}/delete"
+                                      hx-post="/admin/quizzes/{{.QuizID}}/questions/{{.ID}}/delete"
+                                      hx-target="#q-row-{{.ID}}"
+                                      hx-swap="outerHTML"
+                                      hx-on::after-request="if(event.detail.successful){closeModal('modal-delete-question-{{.ID}}')}else{this.closest('[role=dialog]').querySelector('[data-testid=delete-error]').hidden=false}"
+                                      class="inline-flex">
                                     <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                                     <button type="submit" class="btn-danger">Delete</button>
                                 </form>
@@ -240,11 +249,20 @@
                             <section class="px-6 py-5 text-[0.95rem]">
                                 Are you sure you want to delete round <strong class="text-text">&#34;{{$rnd.Title}}&#34;</strong>? Its questions will be deleted too. This action cannot be undone.
                             </section>
+                            <p data-testid="delete-error" hidden class="px-6 pb-2 text-[0.85rem] text-danger" role="alert">Delete failed. Please try again.</p>
                             <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
                                 <button type="button"
                                         onclick="closeModal('modal-delete-round-{{$rnd.ID}}')"
                                         class="btn-ghost">Cancel</button>
-                                <form method="post" action="/admin/quizzes/{{$rnd.QuizID}}/rounds/{{$rnd.ID}}/delete" class="inline-flex">
+                                {{/* after-request gates on success: on 5xx htmx skips the
+                                     swap, so the modal stays open and shows the error. */}}
+                                <form method="post"
+                                      action="/admin/quizzes/{{$rnd.QuizID}}/rounds/{{$rnd.ID}}/delete"
+                                      hx-post="/admin/quizzes/{{$rnd.QuizID}}/rounds/{{$rnd.ID}}/delete"
+                                      hx-target="#round-section-{{$rnd.ID}}"
+                                      hx-swap="outerHTML"
+                                      hx-on::after-request="if(event.detail.successful){closeModal('modal-delete-round-{{$rnd.ID}}')}else{this.closest('[role=dialog]').querySelector('[data-testid=delete-error]').hidden=false}"
+                                      class="inline-flex">
                                     <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                                     <button type="submit" class="btn-danger">Delete</button>
                                 </form>
@@ -469,7 +487,7 @@
             {{if .Players}}
                 <div class="player-list">
                     {{range .Players}}
-                        <div class="player-row">
+                        <div id="player-row-{{.PlayerID}}" data-testid="player-row-{{.PlayerID}}" class="player-row">
                             <div class="player-name">{{.DisplayName}}</div>
                             <div class="player-score tabular-nums">{{.Score}}</div>
                             <button type="button"
@@ -495,11 +513,21 @@
                             <section class="px-6 py-5 text-[0.95rem]">
                                 Are you sure you want to reset <strong class="text-text">&#34;{{.DisplayName}}&#34;</strong>'s attempt? Their game and all answers will be deleted, and they will be able to play this quiz again. This action cannot be undone.
                             </section>
+                            <p data-testid="reset-error" hidden class="px-6 pb-2 text-[0.85rem] text-danger" role="alert">Reset failed. Please try again.</p>
                             <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
                                 <button type="button"
                                         onclick="closeModal('modal-reset-player-{{.PlayerID}}')"
                                         class="btn-ghost">Cancel</button>
-                                <form method="post" action="/admin/quizzes/{{$.Quiz.ID}}/players/{{.PlayerID}}/reset" class="inline-flex">
+                                {{/* A reset deletes the player's game on this quiz, so the
+                                     row leaves the list. after-request gates on success: on
+                                     5xx htmx skips the swap, so the modal shows the error. */}}
+                                <form method="post"
+                                      action="/admin/quizzes/{{$.Quiz.ID}}/players/{{.PlayerID}}/reset"
+                                      hx-post="/admin/quizzes/{{$.Quiz.ID}}/players/{{.PlayerID}}/reset"
+                                      hx-target="#player-row-{{.PlayerID}}"
+                                      hx-swap="outerHTML"
+                                      hx-on::after-request="if(event.detail.successful){closeModal('modal-reset-player-{{.PlayerID}}')}else{this.closest('[role=dialog]').querySelector('[data-testid=reset-error]').hidden=false}"
+                                      class="inline-flex">
                                     <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                                     <button type="submit" class="btn-warning">Reset</button>
                                 </form>

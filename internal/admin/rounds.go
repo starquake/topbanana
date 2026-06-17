@@ -355,6 +355,16 @@ func HandleRoundDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore qui
 			return
 		}
 
+		// htmx removes the round section in place via an outerHTML swap;
+		// its questions ride along inside the swapped fragment because the
+		// FK cascade drops them too. A plain form post falls back to the
+		// 303 reload of the quiz view.
+		if htmx.IsRequest(r) {
+			w.WriteHeader(http.StatusOK)
+
+			return
+		}
+
 		http.Redirect(w, r, "/admin/quizzes/"+strconv.FormatInt(quizID, 10), http.StatusSeeOther)
 	})
 }
