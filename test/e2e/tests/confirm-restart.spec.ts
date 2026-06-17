@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures';
 import type { HostSessions } from './fixtures';
-import { importQuiz, setQuizMode, claimAndJoin } from './helpers';
+import { importQuiz, setQuizMode, claimAndJoin, playerRow } from './helpers';
 import type { APIRequestContext, Page } from '@playwright/test';
 
 // confirm-and-restart (#853): a host already running a game on quiz A opens
@@ -61,8 +61,9 @@ async function hostAndStart(
   const { host, joinCode: code } = await hostSessions.hostLive(quizTitle);
 
   // A single anonymous player joins so the host can start the game.
-  await claimAndJoin(request, code, `Pat-${Date.now()}`);
-  await expect(host.locator('[data-player-row]')).toHaveCount(1);
+  const player = `Pat-${Date.now()}`;
+  await claimAndJoin(request, code, player);
+  await expect(playerRow(host, player)).toBeVisible();
 
   // Start now puts the game in flight. Wait for the durable question phase (the
   // round intro is too brief to assert on reliably); with the generous window it

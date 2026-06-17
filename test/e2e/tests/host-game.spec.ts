@@ -9,6 +9,7 @@ import {
   seedQuiz,
   setQuizMode,
   importQuiz,
+  playerRow,
 } from './helpers';
 
 // MP-8 (#685): the host TV in-game view. The host puts a live quiz on a TV,
@@ -110,7 +111,8 @@ test('host TV shows the live question, answered order, and the reveal', async ({
     }
 
     // The TV roster shows both players before the start.
-    await expect(page.locator('[data-player-row]')).toHaveCount(2);
+    await expect(playerRow(page, casey)).toBeVisible();
+    await expect(playerRow(page, dana)).toBeVisible();
 
     // Host starts the game now; the runner moves the session into the first
     // round's intro, then the first question. The TV swaps phases off the SSE
@@ -230,9 +232,7 @@ test('the host TV roster reflects a player rename', async ({
     const joinResp = await playerCtx.request.post(`/api/sessions/${code}/join`);
     expect(joinResp.status(), `join: ${await joinResp.text()}`).toBe(200);
 
-    const row = page.locator('[data-player-row]');
-    await expect(row).toHaveCount(1);
-    await expect(row).toContainText(before);
+    await expect(playerRow(page, before)).toBeVisible();
 
     // Rename the player's account, then publish a tick (ready toggle) so the
     // TV re-reads state and picks up the new name.
@@ -241,8 +241,8 @@ test('the host TV roster reflects a player rename', async ({
     const readyResp = await playerCtx.request.post(`/api/sessions/${code}/ready`, { data: { ready: true } });
     expect(readyResp.status()).toBe(204);
 
-    await expect(row).toContainText(after, { timeout: 10_000 });
-    await expect(row).not.toContainText(before);
+    await expect(playerRow(page, after)).toBeVisible({ timeout: 10_000 });
+    await expect(playerRow(page, before)).toHaveCount(0);
   } finally {
     await playerCtx.close();
   }
@@ -332,7 +332,7 @@ test('host TV round intro shows the round title, summary, and an accurate Round 
     const readyResp = await caseyCtx.request.post(`/api/sessions/${code}/ready`, { data: { ready: true } });
     expect(readyResp.status()).toBe(204);
 
-    await expect(page.locator('[data-player-row]')).toHaveCount(1);
+    await expect(playerRow(page, casey)).toBeVisible();
     await page.getByRole('button', { name: 'Start now' }).click();
 
     // Round intro: the TV names the first round, shows its summary, and the
