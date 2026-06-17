@@ -4,7 +4,6 @@ package app
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,8 +13,6 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-
-	"golang.org/x/sync/errgroup"
 
 	"github.com/starquake/topbanana/internal/bgtasks"
 	"github.com/starquake/topbanana/internal/clientapi"
@@ -32,16 +29,7 @@ import (
 )
 
 const (
-	readHeaderTimeout   = 5 * time.Second
-	readTimeout         = 10 * time.Second
 	defaultWriteTimeout = 10 * time.Second
-	// idleTimeout caps how long a keep-alive connection can sit unused before the
-	// server closes it. Without this, idle connections behind a pooled proxy or
-	// CDN linger indefinitely and leak file descriptors. 120s is the conventional
-	// upper bound; long enough for legitimate keep-alive reuse, short enough to
-	// reclaim sockets from stale clients.
-	idleTimeout     = 120 * time.Second
-	shutdownTimeout = 5 * time.Second
 	// tokenSweepInterval is the wall-clock gap between background
 	// sweeps of the verify and reset token tables. The startup sweep
 	// already runs once on boot; this keeps a long-running deploy from
@@ -50,14 +38,7 @@ const (
 	// a tick past its TTL, infrequent enough that the DELETE shows up
 	// once an hour in the slow-query log.
 	tokenSweepInterval = time.Hour
-	// mediaDirPerm is the permission for the media root created at startup.
-	mediaDirPerm os.FileMode = 0o755
 )
-
-// errEmptyMediaDir is returned by ensureMediaDir when MediaDir resolves to the
-// empty string, which is a misconfiguration: uploaded media would have nowhere
-// to land.
-var errEmptyMediaDir = errors.New("media directory must not be empty")
 
 // Option configures a [Run] invocation. Used by integration tests to
 // override values that have no env-var hook (the HTTP server's write
@@ -432,79 +413,6 @@ func runTokenSweep(
 	}
 }
 
-func runHTTPServer(
-	ctx, signalCtx context.Context,
-	ln net.Listener,
-	srv http.Handler,
-	emailTasks *bgtasks.Tracker,
-	logger *slog.Logger,
-	writeTimeout time.Duration,
-) error {
-	httpServer := &http.Server{
-		ReadHeaderTimeout: readHeaderTimeout,
-		ReadTimeout:       readTimeout,
-		WriteTimeout:      writeTimeout,
-		IdleTimeout:       idleTimeout,
-		Handler:           srv,
-	}
-
-	g, gCtx := errgroup.WithContext(signalCtx)
-
-	g.Go(func() error {
-		logger.InfoContext(gCtx, "listening on "+ln.Addr().String(), slog.String("addr", ln.Addr().String()))
-		addr := ln.Addr().String()
-		logger.InfoContext(gCtx, fmt.Sprintf("visit http://%s/admin to manage quizzes", addr))
-		logger.InfoContext(gCtx, fmt.Sprintf("visit http://%s/ to play", addr))
-		httpErr := httpServer.Serve(ln)
-		if httpErr != nil && !errors.Is(httpErr, http.ErrServerClosed) {
-			msg := "error listening and serving"
-			logger.ErrorContext(signalCtx, msg, slog.Any("err", httpErr))
-
-			return fmt.Errorf("%s: %w", msg, httpErr)
-		}
-
-		return nil
-	})
-
-	g.Go(func() error {
-		<-gCtx.Done()
-		// make a new context for the Shutdown
-		// use the root ctx to ensure shutdown has its own timeout even though signalCtx is already canceled
-		shutdownCtx, shutdownCancel := context.WithTimeout(ctx, shutdownTimeout)
-		defer shutdownCancel()
-		shutdownErr := httpServer.Shutdown(shutdownCtx)
-		// Drain the detached email-dispatch goroutines AFTER Shutdown stops
-		// the listener and BEFORE Run's deferred conn.Close runs, so a
-		// dispatch can't write to a closed DB (#740, #741). The bound is
-		// detached from ctx via WithoutCancel: at shutdown ctx is already
-		// cancelled (signal-driven, and the integration harness cancels the
-		// same ctx it passes to Run), so a plain WithTimeout(ctx, ...) would
-		// fire instantly and skip the wait. The dispatches carry per-send
-		// timeouts longer than shutdownTimeout, so a stuck SMTP must not pin
-		// shutdown - draining what it can within the bound and giving up is
-		// the right trade.
-		drainCtx, drainCancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
-		defer drainCancel()
-		if drainErr := emailTasks.Wait(drainCtx); drainErr != nil {
-			logger.WarnContext(ctx, "gave up waiting for background email dispatches", slog.Any("err", drainErr))
-		}
-		if shutdownErr != nil {
-			logger.ErrorContext(shutdownCtx, "error shutting down server", slog.Any("err", shutdownErr))
-
-			return fmt.Errorf("error shutting down server: %w", shutdownErr)
-		}
-
-		return nil
-	})
-
-	err := g.Wait()
-	if err != nil {
-		return fmt.Errorf("error running server: %w", err)
-	}
-
-	return nil
-}
-
 // buildMailer constructs the mailer + status view the admin diagnostics
 // page consumes (#321). When SMTP is unconfigured we wrap the no-op
 // mailer in a Tester so the same ring buffer surfaces "tried to send
@@ -552,34 +460,6 @@ func buildMailer(
 	}
 
 	return mailer.NewTester(inner), mailer.NewStatusView(smtpCfg, true, cfg.BaseURL), nil
-}
-
-// ensureMediaDir creates the configured media directory (and any missing
-// parents) so the first upload does not race a missing root (#936). An empty
-// dir is a misconfiguration: media has nowhere to land, so fail fast rather
-// than writing into the working directory. Errors are logged here so the
-// caller stays within its function-length budget.
-func ensureMediaDir(ctx context.Context, dir string, logger *slog.Logger) error {
-	err := mkMediaDir(dir)
-	if err != nil {
-		logger.ErrorContext(ctx, "error preparing media directory", slog.Any("err", err))
-	}
-
-	return err
-}
-
-// mkMediaDir is the pure half of ensureMediaDir: it validates and creates the
-// directory without logging, so the helper's behaviour is testable without a
-// logger and the empty-dir guard stays matchable via [errors.Is].
-func mkMediaDir(dir string) error {
-	if dir == "" {
-		return errEmptyMediaDir
-	}
-	if err := os.MkdirAll(dir, mediaDirPerm); err != nil {
-		return fmt.Errorf("creating media directory %q: %w", dir, err)
-	}
-
-	return nil
 }
 
 func setupDB(signalCtx context.Context, dbc config.DatabaseConfig, logger *slog.Logger) (*sql.DB, error) {
