@@ -123,6 +123,11 @@ func startServer(
 	}
 
 	t.Cleanup(func() {
+		// Stop forwarding the server's request logs to t.Log before draining
+		// it: an in-flight request that logs during/after shutdown would
+		// otherwise call t.Log as the test completes and race the testing
+		// framework's own teardown (#1008).
+		stdout.Disable()
 		stop()
 		select {
 		case err := <-errCh:
