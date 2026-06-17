@@ -24,22 +24,29 @@ You are working on **topbanana**, a Go backend for a real-time multiplayer quiz 
 ## Architecture layers
 
 ```
-cmd/server/main.go          ← entrypoint, wires everything together
+cmd/server/                 ← entrypoint; app/ wires deps; commands.go = -check/reset-password/admin tasks
+cmd/seed-dev/               ← seeds the dev DB
 internal/config/            ← env-var config, parsed once at startup
-internal/server/            ← http.Handler factory + route registration
+internal/server/            ← http.Handler factory + route registration (routes.go)
 internal/handlers/          ← shared HTTP helpers (EncodeJSON, DecodeJSON, ParseIDFromPath)
-internal/admin/             ← HTML admin UI handlers
-internal/clientapi/         ← JSON API handlers consumed by the game client
-internal/client/            ← static file serving
-internal/health/            ← /healthz handler
-internal/game/              ← game domain: types, Service, Store interface
+internal/auth/              ← login/register/OAuth, sessions, roles, login limiter
+internal/admin/             ← HTML admin UI handlers (quizzes, players, media, invites)
+internal/clientapi/         ← JSON API handlers consumed by the player client
+internal/client/            ← player SPA shell + served static assets
+internal/web/               ← admin/host HTML templates (.gohtml)
+internal/game/              ← solo-play domain: types, Service, Store interface
+internal/livesession/       ← live host-driven play: hub, runner, session store
 internal/quiz/              ← quiz domain: types, Store interface, validation
+internal/profile/           ← account self-service (email / password change)
+internal/home/ leaderboard/ ← public home page + standings
+internal/media/ mediahttp/  ← image upload service + HTTP layer
 internal/store/             ← concrete SQLite store implementations
-internal/db/                ← sqlc-generated CRUD (do not edit by hand)
+internal/db/                ← sqlc-generated CRUD from internal/queries/*.sql (do not edit by hand)
 internal/migrations/        ← goose SQL migrations
-internal/dbtest/            ← shared test helper for in-memory SQLite DB
-internal/testutil/          ← other test helpers
-test/integration/           ← integration tests (build tag: integration)
+internal/{session,csrf,mailer,health,version,request,render}/ ← supporting infra
+internal/dbtest/            ← layer-test DB harness (the testing.Short() choke point)
+test/integration/           ← black-box integration tests (no build tag; testing.Short()-gated)
+test/e2e/                   ← Playwright browser tests
 ```
 
 ## Handler pattern
@@ -127,14 +134,14 @@ SQLite cannot drop a column, change a constraint, or `ALTER COLUMN` in place —
 
 ## Review loop
 
-After every code change, run `/review` followed by `/go-style-review` on the current branch. Fix every actionable finding. Re-run both reviews and repeat until they each report no issues to fix. Only then is the change ready to be shown to the user for sign-off.
+After every code change, run `/code-review` followed by `/go-style-review` on the current branch. Fix every actionable finding. Re-run both reviews and repeat until they each report no issues to fix. Only then is the change ready to be shown to the user for sign-off.
 
-The two reviews catch different things — `/review` covers correctness, conventions, and design; `/go-style-review` applies Google Go Style. A finding from either is in scope.
+The two reviews catch different things — `/code-review` covers correctness, conventions, and design; `/go-style-review` applies Google Go Style. A finding from either is in scope.
 
 ## Testing conventions
 
-- Unit tests use `internal/dbtest` to get an in-memory SQLite DB (already migrated).
-- Integration tests use build tag `//go:build integration` and live in `test/integration/`.
+- Layer tests get a real, migrated SQLite DB from `internal/dbtest` (`dbtest.Open` / `OpenUnmigrated`); that choke point `t.Skip`s them under `-short`. There are **no build tags** — integration tests are gated by `testing.Short()` (the build tag was removed in #652), so one `*_test.go` can hold both unit and integration tests.
+- Full-stack / black-box tests (driven through the running server) live in `test/integration/`; store/service **layer** tests live beside the code they test. See CLAUDE.md Testing for the three homes.
 - **Tests use `package <pkg>_test` with a dot import to the package under test** (`. "github.com/starquake/topbanana/internal/<pkg>"`), so call sites read like production code (`HandleFoo(...)`, not `pkg.HandleFoo(...)`). Test files only — production code uses named imports. Skip the dot import in multi-package test files (e.g. anything in `test/integration/`), where uniform named imports beat a "one dot, rest prefixed" mix.
 - **For unexported internals**, add an `export_test.go` (`package <pkg>`) that re-exports the identifier as `Export<Name>` (e.g. `var ExportNewWithClock = newWithClock`); the external `_test` file calls it directly. Keeps every test in the external package and itemises the test-only surface in one file. See `internal/server/export_test.go`, `internal/session/export_test.go`, `internal/game/export_test.go`.
 
