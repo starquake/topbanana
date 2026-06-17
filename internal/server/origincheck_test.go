@@ -64,11 +64,27 @@ func TestSameOriginCheck(t *testing.T) {
 			wantStatus:     http.StatusOK,
 		},
 		{
-			name:           "sec-fetch-site same-site allowed",
+			name:           "sec-fetch-site same-site without origin rejected",
 			method:         http.MethodPost,
 			expectedOrigin: expectedOrigin,
 			secFetchSite:   "same-site",
+			wantStatus:     http.StatusForbidden,
+		},
+		{
+			name:           "sec-fetch-site same-site with matching origin allowed",
+			method:         http.MethodPost,
+			expectedOrigin: expectedOrigin,
+			secFetchSite:   "same-site",
+			origin:         "https://quiz.example.com",
 			wantStatus:     http.StatusOK,
+		},
+		{
+			name:           "sec-fetch-site same-site with sibling-subdomain origin rejected",
+			method:         http.MethodPost,
+			expectedOrigin: expectedOrigin,
+			secFetchSite:   "same-site",
+			origin:         "https://attacker.example.com",
+			wantStatus:     http.StatusForbidden,
 		},
 		{
 			name:           "sec-fetch-site cross-site rejected",

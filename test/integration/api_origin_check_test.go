@@ -10,10 +10,13 @@ import (
 )
 
 // TestAPIOriginCheck_RejectsCrossSite pins the #784 same-origin guard on the
-// JSON API. A mutating /api/* request whose Sec-Fetch-Site is cross-site, or
-// whose Origin does not match the server, is rejected with 403 before the
-// handler runs; a same-origin request (matching Sec-Fetch-Site or Origin) and a
-// header-less request (a non-browser client) both reach the handler.
+// JSON API, hardened by #994. A mutating /api/* request whose Sec-Fetch-Site is
+// cross-site/none, or whose Origin does not match the server, is rejected with
+// 403 before the handler runs. Sec-Fetch-Site same-site is no longer trusted on
+// its own (a sibling subdomain shares the registrable domain): it passes only
+// when the Origin also matches the server. A same-origin request (via
+// Sec-Fetch-Site or a matching Origin) and a header-less request (a non-browser
+// client) both reach the handler.
 func TestAPIOriginCheck_RejectsCrossSite(t *testing.T) {
 	t.Parallel()
 
@@ -46,9 +49,17 @@ func TestAPIOriginCheck_RejectsCrossSite(t *testing.T) {
 			want:    http.StatusOK,
 		},
 		{
-			name:    "sec-fetch-site same-site allowed",
+			name:    "sec-fetch-site same-site without matching origin rejected",
 			headers: map[string]string{"Sec-Fetch-Site": "same-site"},
-			want:    http.StatusOK,
+			want:    http.StatusForbidden,
+		},
+		{
+			name: "sec-fetch-site same-site with matching origin allowed",
+			headers: map[string]string{
+				"Sec-Fetch-Site": "same-site",
+				"Origin":         baseURL,
+			},
+			want: http.StatusOK,
 		},
 		{
 			name:    "matching origin allowed",

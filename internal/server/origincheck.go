@@ -19,13 +19,18 @@ import (
 //
 // The decision order on an unsafe request is:
 //
-//  1. Sec-Fetch-Site present: allow "same-origin" and "same-site"; reject
-//     "cross-site" and "none" (a "none" navigation should never reach a
-//     state-changing fetch). Modern browsers always send this header on
-//     fetch/XHR, so it is the primary signal.
-//  2. Otherwise, if Origin is present: allow only when its scheme+host matches
+//  1. Sec-Fetch-Site present and exactly "same-origin": allow. Modern
+//     browsers always send this header on fetch/XHR, so it is the primary
+//     signal for the in-app case.
+//  2. Sec-Fetch-Site present but not "same-origin" ("same-site",
+//     "cross-site", "none"): "same-site" covers any sibling subdomain that
+//     shares the registrable domain, so it is not sufficient on its own.
+//     Fall through to the Origin/expectedOrigin exact scheme+host match and
+//     allow only when the Origin also matches; a "cross-site" / "none"
+//     request carries no matching Origin and is rejected.
+//  3. Otherwise, if Origin is present: allow only when its scheme+host matches
 //     the expected origin; reject any mismatch.
-//  3. If neither header is present: allow. Browsers send Origin on every
+//  4. If neither header is present: allow. Browsers send Origin on every
 //     state-changing cross-origin AND same-origin fetch, so a missing Origin
 //     means a non-browser API client (curl, a native app, server-to-server) -
 //     which CSRF does not apply to - or a same-origin top-level navigation that
@@ -60,13 +65,18 @@ func isSafeMethod(method string) bool {
 
 // allowedBySameOrigin applies the decision order documented on sameOriginCheck.
 func allowedBySameOrigin(r *http.Request, expectedOrigin string) bool {
-	if site := r.Header.Get("Sec-Fetch-Site"); site != "" {
-		return site == "same-origin" || site == "same-site"
+	site := r.Header.Get("Sec-Fetch-Site")
+	if site == "same-origin" {
+		return true
 	}
 
 	origin := r.Header.Get("Origin")
 	if origin == "" {
-		return true
+		// No Origin to verify: allow only the genuine no-header case (a
+		// non-browser client). A present Sec-Fetch-Site that is not
+		// same-origin (same-site / cross-site / none) without an Origin is
+		// rejected rather than trusted.
+		return site == ""
 	}
 
 	return originMatches(origin, expectedOrigin, r.Host)

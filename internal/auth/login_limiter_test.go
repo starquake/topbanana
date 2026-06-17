@@ -359,6 +359,74 @@ func TestAccountLoginLimiter_PrunesAfterCooldown(t *testing.T) {
 	}
 }
 
+// TestAccountLoginLimiter_BoundedLockout pins #995: a third party spraying
+// failed logins cannot extend the lockout indefinitely. Once the streak
+// reaches threshold+cap the window freezes, so further in-window failures
+// no longer push the unlock time out; the account unlocks a bounded
+// accountLoginCooldown after the freeze point, then a fresh streak must
+// climb from scratch before it locks again. The freeze is observable only
+// while the entry is alive, so the spray here lands inside the frozen
+// window. Uses the injected clock so no real time passes.
+func TestAccountLoginLimiter_BoundedLockout(t *testing.T) {
+	t.Parallel()
+
+	const (
+		threshold = 3
+		cooldown  = 15 * time.Minute
+		account   = "victim@example.test"
+		sprayGap  = 30 * time.Second
+		// Enough post-cap failures to span most of the frozen window
+		// without aging the (frozen) entry out of it.
+		sprayBeyond = 20
+	)
+	freezePoint := threshold + AccountFailureExtensionCap
+
+	tests := []struct {
+		name         string
+		waitFromCap  time.Duration
+		wantCooldown bool
+	}{
+		{
+			name:         "still locked just before the bounded window elapses",
+			waitFromCap:  cooldown - time.Second,
+			wantCooldown: true,
+		},
+		{
+			name:         "unlocked once the bounded window elapses",
+			waitFromCap:  cooldown + time.Second,
+			wantCooldown: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
+			clock := func() time.Time { return now }
+			limiter := NewAccountLoginLimiterWithClock(threshold, cooldown, clock)
+
+			// Drive the count to the cap so the window freezes at frozenAt.
+			for range freezePoint {
+				limiter.RegisterFailure(account)
+			}
+			frozenAt := now
+
+			// Keep spraying inside the frozen window: these post-cap
+			// failures must NOT push the unlock time past frozenAt+cooldown.
+			for range sprayBeyond {
+				now = now.Add(sprayGap)
+				limiter.RegisterFailure(account)
+			}
+
+			now = frozenAt.Add(tc.waitFromCap)
+			if got, want := limiter.InCooldown(account), tc.wantCooldown; got != want {
+				t.Errorf("InCooldown at frozenAt+%v = %t, want %t", tc.waitFromCap, got, want)
+			}
+		})
+	}
+}
+
 // TestAccountLoginLimiter_BlankAccountIgnored pins that a blank
 // submitted email never trips a cooldown: an empty identifier cannot
 // name a real row, so counting failures on "" would be meaningless.
