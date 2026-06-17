@@ -39,26 +39,6 @@ const (
 	defaultQuestionReadBeat = 3 * time.Second
 )
 
-// logSessionKey is the slog attribute key the runner logs the session id
-// under on every warning.
-const logSessionKey = "session"
-
-// slog attribute keys shared by the domain-layer log lines, so every
-// live-session log line names the same field the same way. logPhaseKey
-// matches the literal "phase" the runner already logs under.
-const (
-	logJoinCodeKey = "joinCode"
-	logPlayerKey   = "player"
-	logHostKey     = "host"
-	logQuizKey     = "quiz"
-	logPhaseKey    = "phase"
-	logQuestionKey = "question"
-	logOptionKey   = "option"
-	logReadyKey    = "ready"
-	logDeadlineKey = "deadline"
-	logReasonKey   = "reason"
-)
-
 // errNoQuiz guards the runner against driving a quiz-less room (#836). A room
 // created without a quiz stays in the empty lobby until the host arms one, so the
 // gameplay advance never runs without a quiz; this is the defensive error the
