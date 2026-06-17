@@ -1307,6 +1307,16 @@ func HandleResetGameForPlayer(
 			return
 		}
 
+		// htmx removes the player row in place via an outerHTML swap (a
+		// reset deletes the player's game on this quiz, so they drop off
+		// the played-by list); a plain form post falls back to the 303
+		// reload of the quiz view.
+		if htmx.IsRequest(r) {
+			w.WriteHeader(http.StatusOK)
+
+			return
+		}
+
 		// quizID came from ParseIDFromPath, which only returns an int64
 		// once the path value parses cleanly - formatting it back via
 		// strconv.FormatInt avoids gosec's open-redirect taint heuristic
@@ -1705,6 +1715,14 @@ func HandleQuizDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore quiz
 			return
 		}
 
+		// htmx removes the card in place via an outerHTML swap; a plain
+		// form post falls back to the 303 reload of the quiz list.
+		if htmx.IsRequest(r) {
+			w.WriteHeader(http.StatusOK)
+
+			return
+		}
+
 		http.Redirect(w, r, "/admin/quizzes", http.StatusSeeOther)
 	})
 }
@@ -1825,6 +1843,14 @@ func HandleQuestionDelete(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 		if err := quizStore.DeleteQuestion(r.Context(), questionID); err != nil {
 			logger.ErrorContext(r.Context(), "error deleting question", slog.Any("err", err))
 			render500(w, r, logger, csrfMgr)
+
+			return
+		}
+
+		// htmx removes the question row in place via an outerHTML swap; a
+		// plain form post falls back to the 303 reload of the quiz view.
+		if htmx.IsRequest(r) {
+			w.WriteHeader(http.StatusOK)
 
 			return
 		}

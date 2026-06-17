@@ -5,7 +5,7 @@
      reuse the same card with their own actions; html/template has no
      block/yield, so the variant selects a named sub-template. */}}
 {{define "quiz_card"}}
-    <article class="group relative flex flex-col h-full bg-surface border border-border-soft rounded-lg overflow-hidden transition-colors duration-200 hover:border-accent-line">
+    <article id="quiz-card-{{.ID}}" data-testid="quiz-card-{{.ID}}" class="group relative flex flex-col h-full bg-surface border border-border-soft rounded-lg overflow-hidden transition-colors duration-200 hover:border-accent-line">
         <div class="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-border to-transparent transition-colors group-hover:via-accent"></div>
         <div class="flex-1 p-5 pb-2">
             <div class="flex items-center justify-between mb-3 text-[0.7rem] uppercase tracking-[0.16em] text-text-mute">
