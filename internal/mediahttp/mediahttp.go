@@ -40,6 +40,9 @@ type MediaService interface {
 	// Open opens a stored media file for reading by its root-relative path. The
 	// caller closes the returned file.
 	Open(relPath string) (*os.File, error)
+	// CountByQuiz returns how many media rows a quiz has, so the upload handler
+	// can enforce the per-quiz library ceiling before storing a new batch.
+	CountByQuiz(ctx context.Context, quizID int64) (int64, error)
 }
 
 // QuizVisibilityLookup is the slice of the quiz store the serving handlers use

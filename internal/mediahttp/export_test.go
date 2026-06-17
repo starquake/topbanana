@@ -17,3 +17,18 @@ var Summarize = summarize
 
 // WriteUploadJSON exposes the unexported JSON writer for tests.
 var WriteUploadJSON = writeUploadJSON
+
+// NewUploadBudgetLimiterWithClock exposes the internal clock-injected upload
+// budget limiter constructor so the external mediahttp_test package can pin the
+// rolling-window math without sleeping.
+var NewUploadBudgetLimiterWithClock = newUploadBudgetLimiterWithClock
+
+// UploadBudgetLimiterEntryCount returns how many players the limiter is
+// tracking right now. Lets the unit test pin the prune-stale-entries behaviour
+// without exporting the internal map.
+func UploadBudgetLimiterEntryCount(l *UploadBudgetLimiter) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return len(l.charges)
+}
