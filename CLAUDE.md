@@ -10,6 +10,17 @@ make test-e2e         # end-to-end browser tests (Playwright; requires Node.js)
 make smoke            # validate startup against the existing dev DB (no HTTP listener)
 ```
 
+## Project layout
+
+- `cmd/server/` — binary entrypoint (`app/` wires dependencies; `commands.go` handles `-check` / reset-password / admin tasks); `cmd/seed-dev/` seeds the dev DB.
+- `internal/` — the app, grouped by domain and concern:
+  - **Domains**: `auth`, `admin`, `quiz`, `game` (solo play), `livesession` (live host-driven play), `profile`, `home`, `leaderboard`.
+  - **HTTP**: `server` (routing), `handlers` (shared helpers), `clientapi` (player JSON API), `web` (admin/host templates), `client` (player SPA shell), `media` / `mediahttp` (image uploads).
+  - **Data**: `store` (SQLite impls) over `db` (sqlc-generated — **do not edit**) from `queries/*.sql`; `migrations` (goose); `database` (open/tx helpers).
+  - **Infra**: `config`, `session`, `csrf`, `mailer`, `health`, `version`, `request`, `render`.
+- `frontend/` — build-time JS/CSS source (`client/`, `web/`, `shared/`); built bundles + Tailwind output are committed under `internal/*/static/` (served, embedded — see `.claude/rules/frontend-style.md`).
+- `test/integration/` (black-box, through the running server) and `test/e2e/` (Playwright); `internal/dbtest` is the layer-test DB choke point.
+
 ## Commits and PRs
 
 Per-change order of operations:
@@ -44,7 +55,7 @@ Every change or new feature must have tests. The command sequence to run before 
 Pick the right layer:
 
 - **Unit test** (`*_test.go` next to the code) — pure logic, no I/O.
-- **Integration test** — anything touching real I/O (server, DB, HTTP routing, embedded assets). Gated by `testing.Short()`, **not** a build tag: they `t.Skip` under `-short` via a choke point — `dbtest.Open`/`OpenUnmigrated`/`SetupTestDB` for layer tests, `startServer` for full-stack. So `make test` (`-short`) skips them; `make check` / `make test-coverage` / CI run them. **Pair each test file with a same-named source file, stdlib-style** — `foo.go` is tested by `foo_test.go`, and that one `foo_test.go` holds both its unit and integration tests; never add a topic-named `bar_test.go` with no `bar.go` — split the oversized source to match, or name the test after its source. Exempt, exactly as in the stdlib: `export_test.go`, `testmain_test.go`, test-only doubles/helpers with no `Test` funcs, and `internal/migrations/*_test.go` (they exercise `.sql`, with no Go source to pair). Tracked by #1021, which also adds an advisory `make lint-test-pairing`. Three homes:
+- **Integration test** — anything touching real I/O (server, DB, HTTP routing, embedded assets). Gated by `testing.Short()`, **not** a build tag: they `t.Skip` under `-short` via a choke point — `dbtest.Open`/`OpenUnmigrated`/`SetupTestDB` for layer tests, `startServer` for full-stack. So `make test` (`-short`) skips them; `make check` / `make test-coverage` / CI run them. **Pair each test file with a same-named source file, stdlib-style** — `foo.go` is tested by `foo_test.go`, and that one `foo_test.go` holds both its unit and integration tests; never add a topic-named `bar_test.go` with no `bar.go` — split the oversized source to match, or name the test after its source. Exempt, exactly as in the stdlib: `export_test.go`, `testmain_test.go`, test-only doubles/helpers with no `Test` funcs, and `internal/migrations/*_test.go` (they exercise `.sql`, with no Go source to pair). Tracked by #1021 (which will add an advisory `make lint-test-pairing`). Three homes:
   - **Full-stack / black-box** tests, driven through the running server (package `integration_test`), live in `test/integration/` and share its server + DB + cookie-jar harness.
   - **Layer tests** that exercise one store/service directly against a real DB (via `dbtest.Open`) live **beside the code they test** (e.g. `internal/store/`, `internal/game/`) — model: `internal/store/round_test.go`. Do not relocate these into `test/integration/`.
   - **Migration tests** live in `internal/migrations` (package `migrations_test`) — model: `internal/migrations/rounds_test.go`.
@@ -140,14 +151,12 @@ The same voice applies to commit messages and PR descriptions: short, declarativ
 
 ## Migrations
 
-Table rebuilds (the SQLite idiom for `ALTER COLUMN`, FK changes, etc.) need care with foreign keys, and which pattern to use depends on whether the rebuilt table is FK-referenced by others:
+Table rebuilds (SQLite's idiom for `ALTER COLUMN` / FK changes) pick a pattern by whether the rebuilt table is FK-referenced:
 
-- **Child table** (nothing references it): use `PRAGMA defer_foreign_keys = ON` inside goose's default transaction. It keeps FK enforcement on but postpones the check to COMMIT, so a broken rebuild fails loudly instead of leaving dangling references. Canonical: `20260520180000_unique_participant_per_player_quiz.sql`.
-- **Parent table** (other tables reference it, e.g. `players`): `defer_foreign_keys` does NOT work here — dropping the parent registers child-reference violations that the deferred check at COMMIT still trips on (verified against `modernc.org/sqlite` v1.31.x). Use `-- +goose NO TRANSACTION`, then `PRAGMA foreign_keys = OFF`, an explicit `BEGIN TRANSACTION ... COMMIT`, then `PRAGMA foreign_keys = ON`, and add the file to the `make lint-migrations` allowlist. Canonical: `20260529160000_roles_player_host_admin.sql`.
+- **Child** (nothing references it): `PRAGMA defer_foreign_keys = ON` inside goose's default transaction. Canonical: `20260520180000_unique_participant_per_player_quiz.sql`.
+- **Parent** (others reference it, e.g. `players`): `defer_foreign_keys` does NOT work — use `-- +goose NO TRANSACTION`, `PRAGMA foreign_keys = OFF`, an explicit `BEGIN TRANSACTION ... COMMIT`, then `PRAGMA foreign_keys = ON`, and add the file to the `make lint-migrations` allowlist. Canonical: `20260529160000_roles_player_host_admin.sql`.
 
-`PRAGMA foreign_key_check` is NOT a guard — it only returns violation rows and goose discards them, so a broken rebuild commits silently. To abort on a dangling reference, add the `_fk_guard` CHECK-constraint pattern before COMMIT (see `20260529160000`). The full how-to is in the `backend-dev` agent.
-
-Run `make lint-migrations` to surface any new migration using `foreign_keys = OFF` outside the allowlist. It is advisory (exit 0; only prints offenders). The allowlist (the grep filter in the Makefile target) covers the grandfathered pre-rule files plus each deliberate parent rebuild; add new parent rebuilds there.
+`PRAGMA foreign_key_check` is NOT a guard (goose discards its rows) — add the `_fk_guard` CHECK-constraint pattern before COMMIT to abort on a dangling reference. `make lint-migrations` flags new `foreign_keys = OFF` files outside the allowlist (advisory). **Full how-to — the guard SQL, the why, the canonical files — is in the `backend-dev` agent.**
 
 ## Tooling
 
