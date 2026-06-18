@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, Route, Page } from './fixtures';
 import { seedQuiz, playThroughQuiz, installPlaythroughClock } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
@@ -104,4 +104,135 @@ test('deep-link to a not-completed quiz still shows the quiz header', async ({ p
   await expect(header).toBeVisible();
   await expect(header.getByRole('heading', { name: quizTitle })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Start Game' })).toBeVisible();
+});
+
+// checkAlreadyPlayed() resolves the start state in two serial fetches:
+// GET /leaderboard, then GET /my-game (which flips `finished` for a completed
+// quiz). #676 only gated the title/description block on startStateResolved, so
+// the leaderboard table and the start-screen action cluster still painted in
+// the gap between the two fetches and then jumped when `finished` (or the
+// deep-link header) landed above them — the reopened-#675 layout shift.
+//
+// These two specs hold the second fetch (/my-game) open via route
+// interception. While it is pending, NONE of the start-state-resolved blocks
+// may be visible: the whole resolved view must paint atomically once
+// startStateResolved flips, so it appears once in its final position rather
+// than building up piecemeal. The hold makes the transition observable instead
+// of a sub-frame race.
+
+// holdMyGame intercepts GET /my-game and returns a resolver the test calls to
+// release the held response. Until then the request never completes, pinning
+// the SPA in the start-state-pending window so the assertions below are not a
+// timing race.
+async function holdMyGame(
+  page: Page,
+  body: string,
+  status = 200,
+): Promise<() => void> {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(/\/api\/quizzes\/[^/]+\/my-game$/, async (route: Route) => {
+    await gate;
+    await route.fulfill({ status, contentType: 'application/json', body });
+  });
+  return release;
+}
+
+test('deep-link to an already-completed quiz paints the leaderboard once, not before the finished header', async ({ page, browserName }) => {
+  test.setTimeout(60_000);
+
+  const quizTitle = `E2E Deeplink Hold Completed ${browserName}`;
+
+  await seedQuiz(page, quizTitle);
+  await page.context().clearCookies();
+  await installPlaythroughClock(page);
+
+  await playThroughQuiz(page, quizTitle);
+  await expect(page.getByRole('heading', { name: 'Game Finished!' })).toBeVisible();
+
+  const playUrl = new URL(page.url()).pathname;
+
+  // Hold /my-game (the completed-state probe) open for the revisit.
+  const release = await holdMyGame(page, JSON.stringify({ gameId: 'held', completed: true }));
+
+  await page.goto(playUrl, { waitUntil: 'commit' });
+
+  // Positive anchor: the anonymous claim CTA renders independent of
+  // startStateResolved (it gates only on !isAuthenticated() && !gameId), so
+  // waiting for it proves Alpine has booted and we are genuinely in the
+  // start-state-pending window — not merely observing a pre-boot blank page,
+  // which would make the "hidden" assertions below pass for the wrong reason.
+  await expect(page.getByTestId('claim-cta-name')).toBeVisible();
+
+  // While /my-game is pending, startStateResolved is false: the leaderboard,
+  // the "Game Finished!" header, and the start-screen action cluster must all
+  // stay hidden so nothing paints in a non-final position. Under the reopened
+  // #675 bug the leaderboard and Start cluster painted here (the leaderboard
+  // fetch resolves before /my-game), so these assertions fail without the fix.
+  await expect(page.locator('[data-testid="leaderboard-section"]')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Game Finished!' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Start Game' })).toBeHidden();
+  await expect(page.locator('[data-testid="deep-link-header"]')).toHaveCount(0);
+
+  // Release the probe: the resolved completed view now paints in one tick.
+  release();
+
+  await expect(page.getByRole('heading', { name: 'Game Finished!' })).toBeVisible();
+  await expect(page.locator('[data-testid="leaderboard-section"]')).toBeVisible();
+  // Structural sanity check: the finished header sits above the leaderboard.
+  const finishedBox = await page.getByRole('heading', { name: 'Game Finished!' }).boundingBox();
+  const tableBox = await page.locator('[data-testid="leaderboard-section"]').boundingBox();
+  expect(finishedBox).not.toBeNull();
+  expect(tableBox).not.toBeNull();
+  expect(finishedBox!.y).toBeLessThan(tableBox!.y);
+  await expect(page.locator('[data-testid="deep-link-header"]')).toHaveCount(0);
+});
+
+test('deep-link to a not-completed quiz paints the header and leaderboard together, not the leaderboard first', async ({ page, browserName }) => {
+  test.setTimeout(30_000);
+
+  const quizTitle = `E2E Deeplink Hold Fresh ${browserName}`;
+
+  await seedQuiz(page, quizTitle);
+  await page.context().clearCookies();
+
+  // Discover the deep link, then revisit it with /my-game held to a 404
+  // (not-completed) so the resolve transition is observable.
+  await page.goto('/quizzes');
+  await page.getByRole('link', { name: quizTitle }).click();
+  await expect(page).toHaveURL(/\/play\//);
+  const url = new URL(page.url()).pathname;
+
+  const release = await holdMyGame(page, 'null', 404);
+
+  await page.goto(url, { waitUntil: 'commit' });
+
+  // Positive anchor: the anonymous claim CTA renders independent of
+  // startStateResolved, so waiting for it proves Alpine booted and we are in
+  // the pending window before the "hidden" assertions run.
+  await expect(page.getByTestId('claim-cta-name')).toBeVisible();
+
+  // While /my-game is pending, the deep-link header, the leaderboard, and the
+  // Start cluster must all stay hidden — no piecemeal build-up. Under the bug
+  // the leaderboard painted here (its fetch resolves before /my-game).
+  await expect(page.locator('[data-testid="deep-link-header"]')).toHaveCount(0);
+  await expect(page.locator('[data-testid="leaderboard-section"]')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Start Game' })).toBeHidden();
+
+  release();
+
+  // The resolved fresh view paints the header ABOVE the leaderboard, together.
+  // The fresh quiz has no finishers, so the leaderboard renders its empty
+  // state, not a table — anchor on the section, not the table row.
+  const header = page.locator('[data-testid="deep-link-header"]');
+  await expect(header).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Start Game' })).toBeVisible();
+  await expect(page.locator('[data-testid="leaderboard-section"]')).toBeVisible();
+  const headerBox = await header.boundingBox();
+  const tableBox = await page.locator('[data-testid="leaderboard-section"]').boundingBox();
+  expect(headerBox).not.toBeNull();
+  expect(tableBox).not.toBeNull();
+  expect(headerBox!.y).toBeLessThan(tableBox!.y);
 });

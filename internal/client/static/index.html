@@ -172,7 +172,7 @@
                  finished-screen layout is header → leaderboard →
                  off-leaderboard → picker, matching what existed before
                  the start-screen leaderboard hoist (#234). -->
-            <template x-if="finished">
+            <template x-if="finished && startStateResolved">
                 <div class="mb-6 flex items-center justify-between gap-3">
                     <h2 class="m-0 font-display text-2xl font-semibold text-text-dim">Game Finished!</h2>
                     {{/* Share button for #176 — opens the dialog with
@@ -231,7 +231,7 @@
                         <p class="text-text-dim leading-relaxed" x-text="deepLinkedQuiz.description"></p>
                     </div>
                 </template>
-                <template x-if="startError && !finished">
+                <template x-if="startError && !finished && startStateResolved">
                     <div class="feedback-banner feedback-danger mb-5" x-text="startError"></div>
                 </template>
                 {{/* flex-row-reverse pushes Start Game to the right edge
@@ -241,7 +241,7 @@
                      Default justify-start packs items from the main-axis
                      start which, under row-reverse, is the visual right
                      edge — exactly the cluster we want. */}}
-                <div x-show="!finished" class="flex flex-row-reverse flex-wrap items-center gap-3">
+                <div x-show="!finished && startStateResolved" class="flex flex-row-reverse flex-wrap items-center gap-3">
                     <button class="btn-primary" @click="startGame()" :disabled="!selectedQuizId || !!startError">Start Game</button>
                     {{/* Share button for #176 — invitation form ("Play
                          this quiz: <title>"). Hidden while no quiz is
@@ -267,7 +267,7 @@
                      lands on Start Game first. Gated to the deep-link
                      start screen (not the already-played revisit, which
                      drops the Start button entirely). */}}
-                <template x-if="deepLinkedQuiz && !finished">
+                <template x-if="deepLinkedQuiz && !finished && startStateResolved">
                     <p class="mt-4 text-sm text-text-dim">
                         or
                         <a href="/quizzes" class="text-text hover:text-accent underline-offset-2 hover:underline" data-testid="browse-quizzes-link">browse all quizzes</a>
@@ -293,8 +293,8 @@
                  game id), so a bare `!gameId` check would hide the
                  results from a player who actually finished without
                  navigating away first. */}}
-            <template x-if="(!gameId || finished) && leaderboard">
-                <div class="mb-6">
+            <template x-if="(!gameId || finished) && leaderboard && startStateResolved">
+                <div class="mb-6" data-testid="leaderboard-section">
                     <h3 class="label-eyebrow mb-3">Leaderboard</h3>
                     <template x-if="leaderboard.entries.length > 0">
                         <table class="player-table">
@@ -333,7 +333,7 @@
                  set the block above takes over. Gate mirrors the
                  leaderboard template's so the fresh-finish state
                  (gameId set, finished=true) also gets the fallback. -->
-            <template x-if="(!gameId || finished) && quizSlugId && !leaderboard">
+            <template x-if="(!gameId || finished) && quizSlugId && !leaderboard && startStateResolved">
                 <p class="mb-6 text-text-dim">Loading leaderboard...</p>
             </template>
 
@@ -343,7 +343,7 @@
                  isCurrentPlayer), show the player's own rank and
                  score below the table so they don't leave the
                  screen with nothing to show. See #181. -->
-            <template x-if="finished && hasOffLeaderboardStanding()">
+            <template x-if="finished && hasOffLeaderboardStanding() && startStateResolved">
                 <article class="standing-card mb-6">
                     <p class="label-eyebrow">Your score</p>
                     <p class="text-text text-[1.05rem] leading-relaxed">
