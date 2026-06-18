@@ -36,12 +36,19 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: stable
+          # No build/module cache on the lint gate: a warm GOCACHE served
+          # stale revive analysis and let a real function-length violation
+          # pass on a PR while failing on main (#1042). A gate must be
+          # deterministic, so it runs cold even though that is slower.
+          cache: false
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           # Pinned. MUST match GOLANGCI_VERSION in the project Makefile —
           # bump them together so local `make lint` matches CI exactly.
           version: v2.12.2
+          # No golangci result cache either, for the same reason (#1042).
+          skip-cache: true
 
   build:
     if: ${{ !startsWith(github.ref, 'refs/tags/') }}
