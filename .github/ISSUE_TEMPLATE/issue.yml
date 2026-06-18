@@ -1,0 +1,23 @@
+name: Issue
+description: Report a bug or request a change
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the issue in your own words. Read CONTRIBUTING.md first.
+        Issues that are clearly unreviewed AI output -- generic, padded, or
+        inaccurate about the project -- will be closed.
+  - type: textarea
+    id: what
+    attributes:
+      label: What is wrong or missing
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it matters
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce (bugs only)
