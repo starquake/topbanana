@@ -945,9 +945,16 @@ export class GameApp {
 
     // continueRound is the Continue button's click handler on both the
     // round intro and round recap cards (#548). POSTs the seen ack for
-    // the current phase ('intro' or 'results'), clears the round, then
-    // calls nextQuestion() to load whatever comes next (the round's
-    // first question, another round boundary, or 404 → finished).
+    // the current phase ('intro' or 'results'), then calls
+    // nextQuestion() to load whatever comes next (the round's first
+    // question, another round boundary, or 404 → finished).
+    //
+    // The round card stays mounted until nextQuestion() swaps roundItem
+    // and question together in one tick. Clearing roundItem here while
+    // question still held the previous round's last question flashed
+    // that stale question for a frame (#1049). continuingRound stays
+    // true across the whole flow so a second click cannot re-enter while
+    // the round card is still on screen.
     //
     // On a network / 5xx failure the round card stays visible with a
     // retry banner — silently losing the click would strand the player
@@ -966,16 +973,13 @@ export class GameApp {
         this.roundContinueError = false;
         try {
             await gameService.markRoundSeen(this.gameId, this.roundItem.id, this.roundItem.phase);
+            await this.nextQuestion();
         } catch (err) {
             console.error('continueRound:', err);
             this.roundContinueError = true;
-
-            return;
         } finally {
             this.continuingRound = false;
         }
-        this.roundItem = null;
-        await this.nextQuestion();
     }
 
     // roundTitle is the round-intro heading: the current round's title, or an
