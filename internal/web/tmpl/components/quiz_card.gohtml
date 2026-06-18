@@ -96,14 +96,18 @@
      a "Change quiz" button that opens the confirm-and-restart modal (#853). The
      cluster sits on `relative z-10` to stay clickable above the card body. */}}
 {{define "quiz_card_actions_host"}}
+    {{/* Hosting needs the big-screen lobby, which is unusable on a phone, so
+         below md the action is a plain note instead of a button that overflows
+         the card (#1050). */}}
     <div class="relative z-10 flex items-center gap-1">
+        <span data-testid="host-needs-larger-screen-{{.ID}}" class="md:hidden text-[0.7rem] uppercase tracking-[0.12em] text-text-mute">Use a larger screen to host</span>
         {{if .HostHasRunningGame}}
-            <button type="button" onclick="openModal('modal-restart-host-{{.ID}}')" class="btn-primary">Change quiz</button>
+            <button type="button" data-testid="host-action-{{.ID}}" onclick="openModal('modal-restart-host-{{.ID}}')" class="hidden md:inline-flex btn-primary">Change quiz</button>
         {{else}}
-            <form method="post" action="/host" class="inline-flex">
+            <form method="post" action="/host" class="hidden md:inline-flex">
                 <input type="hidden" name="csrf_token" value="{{csrfToken}}">
                 <input type="hidden" name="quiz_id" value="{{.ID}}">
-                <button type="submit" class="btn-primary">Host this</button>
+                <button type="submit" data-testid="host-action-{{.ID}}" class="btn-primary">Host this</button>
             </form>
         {{end}}
     </div>
