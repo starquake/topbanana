@@ -213,3 +213,90 @@ test('round boundary cards stay visible under reduced motion', async ({ page, br
   await expect(page.getByTestId('round-score')).toBeVisible();
   await expect(page.getByTestId('round-score')).toHaveCSS('opacity', '1');
 });
+
+// twoRoundQuiz builds a quiz with two rounds (two questions, then one) and no
+// round summaries, so the questions play back-to-back with no boundary card and
+// the gameplay header chips can be read directly.
+function twoRoundQuiz(): ImportRound[] {
+  return [
+    {
+      title: 'Round 1',
+      questions: [
+        {
+          text: 'What is 2+2?',
+          options: [
+            { text: '4', correct: true },
+            { text: '3', correct: false },
+          ],
+        },
+        {
+          text: 'Capital of France?',
+          options: [
+            { text: 'Paris', correct: true },
+            { text: 'London', correct: false },
+          ],
+        },
+      ],
+    },
+    {
+      title: 'Round 2',
+      questions: [
+        {
+          text: 'Capital of Spain?',
+          options: [
+            { text: 'Madrid', correct: true },
+            { text: 'Barcelona', correct: false },
+          ],
+        },
+      ],
+    },
+  ];
+}
+
+// #1051 - the solo gameplay header shows the same information as the other
+// surfaces: the round (N of M), the question within the round (n of m), and the
+// player's running score. This drives a two-round quiz and asserts the chips
+// track the round/question placement and the score climbs as questions land.
+test('solo gameplay header shows round, question-in-round, and score', async ({ page, browserName }) => {
+  test.setTimeout(60_000);
+
+  const quizTitle = `E2E Header Chips ${browserName}`;
+  await importQuiz(page, {
+    title: quizTitle,
+    description: 'E2E header chips quiz',
+    rounds: twoRoundQuiz(),
+  });
+
+  await page.context().clearCookies();
+  await startQuiz(page, quizTitle);
+
+  const roundChip = page.getByTestId('hud-round');
+  const questionChip = page.getByTestId('hud-question');
+  const scoreChip = page.getByTestId('hud-score');
+
+  // Round 1, question 1 of 2; score starts at 0.
+  const q1Option = page.getByRole('button', { name: '4' });
+  await expect(q1Option).toBeVisible({ timeout: 10_000 });
+  await expect(roundChip).toContainText('Round 1/2');
+  await expect(questionChip).toContainText('Q 1/2');
+  await expect(scoreChip).toContainText('Score 0');
+  await q1Option.click();
+  await expect(page.getByTestId('reveal-verdict')).toHaveText('Correct!');
+
+  // Round 1, question 2 of 2; score has climbed off the first correct answer.
+  const q2Option = page.getByRole('button', { name: 'Paris' });
+  await expect(q2Option).toBeVisible({ timeout: 10_000 });
+  await expect(roundChip).toContainText('Round 1/2');
+  await expect(questionChip).toContainText('Q 2/2');
+  await expect(scoreChip).not.toContainText('Score 0');
+  await q2Option.click();
+  await expect(page.getByTestId('reveal-verdict')).toHaveText('Correct!');
+
+  // Round 2, question 1 of 1.
+  const q3Option = page.getByRole('button', { name: 'Madrid' });
+  await expect(q3Option).toBeVisible({ timeout: 10_000 });
+  await expect(roundChip).toContainText('Round 2/2');
+  await expect(questionChip).toContainText('Q 1/1');
+  await q3Option.click();
+  await expect(page.getByTestId('reveal-verdict')).toHaveText('Correct!');
+});

@@ -780,6 +780,14 @@ type nextQuestionResponse struct {
 	ServerNow time.Time            `json:"serverNow"`
 	Position  int                  `json:"position"`
 	Total     int                  `json:"total"`
+	// RoundNumber/RoundTotal place the question's round within the quiz,
+	// and RoundPosition/RoundQuestions place the question within that
+	// round, for the gameplay header's "Round N of M" heading and its
+	// per-round "Q n / m" chip.
+	RoundNumber    int `json:"roundNumber"`
+	RoundTotal     int `json:"roundTotal"`
+	RoundPosition  int `json:"roundPosition"`
+	RoundQuestions int `json:"roundQuestions"`
 }
 
 // nextRoundIntroResponse is the wire shape for the intro phase of the
@@ -928,16 +936,20 @@ func writeQuestionItem(
 	})
 
 	res := nextQuestionResponse{
-		Type:      string(game.ItemTypeQuestion),
-		ID:        gq.QuizQuestion.ID,
-		Text:      gq.QuizQuestion.Text,
-		ImageURL:  mediaURL(gq.QuizQuestion.MediaID),
-		Options:   resOptions,
-		StartedAt: gq.StartedAt,
-		ExpiredAt: gq.ExpiredAt,
-		ServerNow: time.Now().UTC(),
-		Position:  gq.Position,
-		Total:     gq.Total,
+		Type:           string(game.ItemTypeQuestion),
+		ID:             gq.QuizQuestion.ID,
+		Text:           gq.QuizQuestion.Text,
+		ImageURL:       mediaURL(gq.QuizQuestion.MediaID),
+		Options:        resOptions,
+		StartedAt:      gq.StartedAt,
+		ExpiredAt:      gq.ExpiredAt,
+		ServerNow:      time.Now().UTC(),
+		Position:       gq.Position,
+		Total:          gq.Total,
+		RoundNumber:    gq.RoundNumber,
+		RoundTotal:     gq.RoundTotal,
+		RoundPosition:  gq.RoundPosition,
+		RoundQuestions: gq.RoundQuestions,
 	}
 
 	if err := handlers.EncodeJSON(w, http.StatusOK, res); err != nil {

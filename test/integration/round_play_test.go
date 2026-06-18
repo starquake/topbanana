@@ -233,7 +233,7 @@ func TestRounds_PlayLoop(t *testing.T) {
 	postRoundSeen(ctx, t, client, baseURL, gameID, resultsItem.ID, "results")
 
 	// --- Exhausted: /next 404s ---
-	assertNextStatus(ctx, t, client, baseURL, gameID, http.StatusNotFound)
+	assertNextExhausted(ctx, t, client, baseURL, gameID)
 }
 
 // TestRounds_SeenIsIdempotent pins the #548 contract that POST
@@ -271,7 +271,7 @@ func TestRounds_SeenIsIdempotent(t *testing.T) {
 	postRoundSeen(ctx, t, client, baseURL, gameID, resultsItem.ID, "results")
 
 	// /next must be exhausted, not re-emit the results boundary.
-	assertNextStatus(ctx, t, client, baseURL, gameID, http.StatusNotFound)
+	assertNextExhausted(ctx, t, client, baseURL, gameID)
 }
 
 // TestRounds_NoSummaryShowsNoBoundary pins that a quiz whose round has
@@ -307,7 +307,113 @@ func TestRounds_NoSummaryShowsNoBoundary(t *testing.T) {
 	}
 
 	// No results boundary: straight to exhausted.
-	assertNextStatus(ctx, t, client, baseURL, gameID, http.StatusNotFound)
+	assertNextExhausted(ctx, t, client, baseURL, gameID)
+}
+
+// nextQuestionRoundRes decodes the round-placement fields the solo /next
+// question variant carries for the gameplay header (#1051).
+type nextQuestionRoundRes struct {
+	ID             int64 `json:"id"`
+	RoundNumber    int   `json:"roundNumber"`
+	RoundTotal     int   `json:"roundTotal"`
+	RoundPosition  int   `json:"roundPosition"`
+	RoundQuestions int   `json:"roundQuestions"`
+}
+
+// multiRoundSoloQuiz seeds a solo quiz with two rounds (two questions then
+// one), so the /next question header carries distinct round placement across
+// the rounds. No round summaries, so /next returns each question directly with
+// no intervening boundary card.
+func multiRoundSoloQuiz(adminID int64) *quiz.Quiz {
+	rightWrong := func(text string, pos int) *quiz.Question {
+		return &quiz.Question{
+			Text:     text,
+			Position: pos,
+			Options:  []*quiz.Option{{Text: "right", Correct: true}, {Text: "wrong"}},
+		}
+	}
+
+	return &quiz.Quiz{
+		Title:             "Multi Round Solo",
+		Slug:              "multi-round-solo",
+		CreatedByPlayerID: adminID,
+		Rounds: []*quiz.Round{
+			{Title: "Round 1", Questions: []*quiz.Question{rightWrong("Q1", 1), rightWrong("Q2", 2)}},
+			{Title: "Round 2", Questions: []*quiz.Question{rightWrong("Q3", 3)}},
+		},
+	}
+}
+
+// TestRounds_QuestionHeaderProgress pins the gameplay-header round placement
+// (#1051) the solo /next question variant carries: Round N of M plus the
+// question's position within its round and the round's question count.
+func TestRounds_QuestionHeaderProgress(t *testing.T) {
+	t.Parallel()
+
+	ctx, setup := setupIntegration(t)
+	baseURL := setup.BaseURL
+	stores := setup.Stores
+
+	adminPlayer := seedGameplayAdmin(ctx, t, baseURL, stores)
+	qz := multiRoundSoloQuiz(adminPlayer.ID)
+	if err := stores.Quizzes.CreateQuiz(ctx, qz); err != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", err)
+	}
+	// CreateQuiz authors the questions under Rounds; reload so qz.Questions is
+	// populated (with option ids) for findCorrectOption.
+	qz, err := stores.Quizzes.GetQuiz(ctx, qz.ID)
+	if err != nil {
+		t.Fatalf("GetQuiz err = %v, want nil", err)
+	}
+
+	client := playerClient(t)
+	gameID := createRoundPlayGame(ctx, t, client, baseURL, qz.ID)
+
+	wants := []nextQuestionRoundRes{
+		{RoundNumber: 1, RoundTotal: 2, RoundPosition: 1, RoundQuestions: 2},
+		{RoundNumber: 1, RoundTotal: 2, RoundPosition: 2, RoundQuestions: 2},
+		{RoundNumber: 2, RoundTotal: 2, RoundPosition: 1, RoundQuestions: 1},
+	}
+	for i, want := range wants {
+		got := answerNextQuestionRound(ctx, t, client, baseURL, gameID, qz)
+		want.ID = got.ID
+		if got != want {
+			t.Errorf("question %d round placement = %+v, want %+v", i+1, got, want)
+		}
+	}
+
+	assertNextExhausted(ctx, t, client, baseURL, gameID)
+}
+
+// answerNextQuestionRound calls /next, decodes the round-placement fields,
+// answers the question correctly to advance, and returns the placement.
+func answerNextQuestionRound(
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, gameID string, qz *quiz.Quiz,
+) nextQuestionRoundRes {
+	t.Helper()
+	resp := httpGet(ctx, t, client, fmt.Sprintf("%s/api/games/%s/questions/next", baseURL, gameID))
+	defer closeBody(t, resp.Body)
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("/next status = %d, want %d", got, want)
+	}
+	body := readAllOrFatal(t, resp)
+	if got, want := peekType(t, body), "question"; got != want {
+		t.Fatalf("/next type = %q, want %q; body=%q", got, want, body)
+	}
+	var round nextQuestionRoundRes
+	if err := json.Unmarshal(body, &round); err != nil {
+		t.Fatalf("decode /next round placement err = %v, want nil; body=%q", err, body)
+	}
+
+	optionID := findCorrectOption(t, qz, round.ID)
+	answerURL := fmt.Sprintf("%s/api/games/%s/questions/%d/answers", baseURL, gameID, round.ID)
+	answerResp := httpPostJSON(ctx, t, client, answerURL, fmt.Sprintf(`{"optionId": %d}`, optionID))
+	defer closeBody(t, answerResp.Body)
+	if got, want := answerResp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("answer status = %d, want %d", got, want)
+	}
+
+	return round
 }
 
 // answerNextCorrect calls /next, asserts the response is a question
@@ -416,16 +522,17 @@ func createRoundPlayGame(
 	return createGameRes.ID
 }
 
-// assertNextStatus calls /next and asserts the status code without
-// decoding the body. Pulled out so the "exhausted -> 404" check at the
-// tail of the play loop doesn't replicate the close-body dance.
-func assertNextStatus(
-	ctx context.Context, t *testing.T, client *http.Client, baseURL, gameID string, wantStatus int,
+// assertNextExhausted calls /next and asserts the 404 the exhausted play
+// sequence returns, without decoding the body. Pulled out so the
+// "exhausted -> 404" check at the tail of each play loop doesn't replicate the
+// close-body dance.
+func assertNextExhausted(
+	ctx context.Context, t *testing.T, client *http.Client, baseURL, gameID string,
 ) {
 	t.Helper()
 	resp := httpGet(ctx, t, client, fmt.Sprintf("%s/api/games/%s/questions/next", baseURL, gameID))
 	defer closeBody(t, resp.Body)
-	if got, want := resp.StatusCode, wantStatus; got != want {
+	if got, want := resp.StatusCode, http.StatusNotFound; got != want {
 		t.Fatalf("/next status = %d, want %d", got, want)
 	}
 }

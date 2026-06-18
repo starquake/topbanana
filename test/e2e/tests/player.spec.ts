@@ -61,11 +61,10 @@ test('admin sets up a multi-question quiz, then a player plays it through to the
   // the reveal class is on the bar pins the gate to the happy path.
   await expect(page.locator('progress.progress-reveal')).toBeVisible();
 
-  // The HUD's Score chip (#253) carries the running total. Its value
-  // sits in the second `.hud-chip` (the first is the Q n/total chip),
-  // and the digit lives in a `.hud-chip-value` span underneath. Pulled
-  // out so the loop below can re-read it after every answer (#234).
-  const scoreChipValue = page.locator('.hud-chip', { hasText: 'Score' }).locator('.hud-chip-value');
+  // The HUD's Score chip (#253) carries the running total; the digit
+  // lives in a `.hud-chip-value` span underneath. Pulled out so the loop
+  // below can re-read it after every answer (#234).
+  const scoreChipValue = page.getByTestId('hud-score').locator('.hud-chip-value');
 
   // Walk every question. We always click the first option; whether that picks
   // a correct answer is determined by the spec (correctIndices includes 0).

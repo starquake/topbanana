@@ -309,11 +309,23 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string, playerID i
 		Position: len(g.Questions) + 1,
 		Total:    len(qz.Questions),
 	}
+	applyRoundProgress(gq, qz)
 	if err = s.store.CreateQuestion(ctx, gq, completesGame(gq)); err != nil {
 		return nil, fmt.Errorf("failed to record game question: %w", err)
 	}
 
 	return gq, nil
+}
+
+// applyRoundProgress stamps the question's round placement (Round N of M, plus
+// its position within the round) onto gq from the quiz's questions, for the
+// gameplay header.
+func applyRoundProgress(gq *Question, qz *quiz.Quiz) {
+	p := quiz.QuestionRoundProgress(qz.Questions, gq.QuestionID)
+	gq.RoundNumber = p.RoundNumber
+	gq.RoundTotal = p.RoundTotal
+	gq.RoundPosition = p.RoundPosition
+	gq.RoundQuestions = p.RoundQuestions
 }
 
 // completesGame reports whether gq is the question whose insertion flips
@@ -618,6 +630,7 @@ func (s *Service) issueQuestion(
 		Position:     askedCount + 1,
 		Total:        len(qz.Questions),
 	}
+	applyRoundProgress(gq, qz)
 	if err := s.store.CreateQuestion(ctx, gq, completesGame(gq)); err != nil {
 		return nil, fmt.Errorf("failed to record game question: %w", err)
 	}

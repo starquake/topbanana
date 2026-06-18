@@ -181,6 +181,15 @@ type Question struct {
 	// game. Populated alongside Position by [Service.GetNextQuestion];
 	// zero on store-loaded Questions for the same reason as above.
 	Total int
+	// RoundNumber, RoundTotal, RoundPosition, and RoundQuestions place
+	// this question within the quiz's rounds for the gameplay header's
+	// "Round N of M" heading and per-round "Q n / m" chip. Populated
+	// alongside Position by [Service.GetNextQuestion]; zero on
+	// store-loaded Questions for the same reason as above.
+	RoundNumber    int
+	RoundTotal     int
+	RoundPosition  int
+	RoundQuestions int
 }
 
 // Answer represents an answer for a question. Answers are recorded for a specific game and player.
@@ -508,6 +517,7 @@ func resumeCandidate(g *Game, qz *quiz.Quiz) *Question {
 	resumed.QuizQuestion = qq
 	resumed.Position = len(g.Questions)
 	resumed.Total = len(qz.Questions)
+	applyRoundProgress(&resumed, qz)
 
 	return &resumed
 }

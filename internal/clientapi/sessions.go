@@ -450,12 +450,20 @@ type sessionAnswerResponse struct {
 // place in the quiz and total is the quiz's question count, so the answer-pad
 // HUD can show a "Q position/total" chip (#956).
 type sessionQuestionResponse struct {
-	ID                int64                   `json:"id"`
-	RoundID           int64                   `json:"roundId"`
-	Text              string                  `json:"text"`
-	ImageURL          string                  `json:"imageUrl,omitempty"`
-	Position          int                     `json:"position"`
-	Total             int                     `json:"total"`
+	ID       int64  `json:"id"`
+	RoundID  int64  `json:"roundId"`
+	Text     string `json:"text"`
+	ImageURL string `json:"imageUrl,omitempty"`
+	Position int    `json:"position"`
+	Total    int    `json:"total"`
+	// RoundNumber/RoundTotal place the question's round within the quiz,
+	// and RoundPosition/RoundQuestions place the question within that
+	// round, so the gameplay header can show "Round N of M" and a
+	// per-round "Q n / m" chip.
+	RoundNumber       int                     `json:"roundNumber"`
+	RoundTotal        int                     `json:"roundTotal"`
+	RoundPosition     int                     `json:"roundPosition"`
+	RoundQuestions    int                     `json:"roundQuestions"`
 	Options           []sessionOptionResponse `json:"options"`
 	StartedAt         *time.Time              `json:"startedAt,omitempty"`
 	ExpiresAt         *time.Time              `json:"expiresAt,omitempty"`
@@ -654,6 +662,7 @@ func newSessionQuestionResponse(state *livesession.SessionState) *sessionQuestio
 		}
 	}
 
+	round := quiz.QuestionRoundProgress(state.Quiz.Questions, q.ID)
 	resp := &sessionQuestionResponse{
 		ID:                q.ID,
 		RoundID:           q.RoundID,
@@ -661,6 +670,10 @@ func newSessionQuestionResponse(state *livesession.SessionState) *sessionQuestio
 		ImageURL:          mediaURL(q.MediaID),
 		Position:          questionPosition(state.Quiz, q.ID),
 		Total:             len(state.Quiz.Questions),
+		RoundNumber:       round.RoundNumber,
+		RoundTotal:        round.RoundTotal,
+		RoundPosition:     round.RoundPosition,
+		RoundQuestions:    round.RoundQuestions,
 		Options:           options,
 		AnsweredPlayerIDs: answeredIDs,
 		Answers:           answers,

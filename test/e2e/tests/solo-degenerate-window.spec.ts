@@ -58,10 +58,10 @@ test('solo countdown resolves a non-positive answer window instead of spinning',
   const verdict = page.getByTestId('reveal-verdict');
   await expect(verdict).toHaveText('Time up', { timeout: 10_000 });
 
-  // The HUD chip ("Q n/total") must advance past the first question. Every
+  // The HUD question chip ("Q n/m") must advance past the first question. Every
   // question carries the degenerate window, so reaching the second one proves
   // the guarded timeout drives the auto-advance instead of freezing the loop -
   // the exact spin-forever symptom the guard prevents.
-  const hud = page.locator('.hud-chip').first();
+  const hud = page.getByTestId('hud-question');
   await expect(hud).toContainText('Q 2/', { timeout: 15_000 });
 });

@@ -13,10 +13,14 @@ import (
 // the 1-indexed position within the quiz and the quiz's total question count
 // (#956), alongside the id/options the test drives answers off.
 type sessionHUDQuestion struct {
-	ID       int64              `json:"id"`
-	Position int                `json:"position"`
-	Total    int                `json:"total"`
-	Options  []sessionRunnerOpt `json:"options"`
+	ID             int64              `json:"id"`
+	Position       int                `json:"position"`
+	Total          int                `json:"total"`
+	RoundNumber    int                `json:"roundNumber"`
+	RoundTotal     int                `json:"roundTotal"`
+	RoundPosition  int                `json:"roundPosition"`
+	RoundQuestions int                `json:"roundQuestions"`
+	Options        []sessionRunnerOpt `json:"options"`
 }
 
 // sessionHUDSelf decodes the viewer's own per-game state: their running score
@@ -105,6 +109,20 @@ func TestSessionState_HUDPositionTotalAndSelfScore(t *testing.T) {
 	}
 	if got, want := hud.Question.Total, 3; got != want {
 		t.Errorf("question total = %d, want %d", got, want)
+	}
+	// The first question is question 1 of round 1's 2 questions, and the quiz
+	// has 2 rounds (#1051).
+	if got, want := hud.Question.RoundNumber, 1; got != want {
+		t.Errorf("question roundNumber = %d, want %d", got, want)
+	}
+	if got, want := hud.Question.RoundTotal, 2; got != want {
+		t.Errorf("question roundTotal = %d, want %d", got, want)
+	}
+	if got, want := hud.Question.RoundPosition, 1; got != want {
+		t.Errorf("question roundPosition = %d, want %d", got, want)
+	}
+	if got, want := hud.Question.RoundQuestions, 2; got != want {
+		t.Errorf("question roundQuestions = %d, want %d", got, want)
 	}
 	// Before scoring (mid-question) the viewer's running score is 0.
 	if hud.Self == nil {
