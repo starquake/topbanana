@@ -131,6 +131,12 @@ test('host TV shows the live question, answered order, and the reveal', async ({
     await expect(questionView).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('[data-question-text]')).toHaveText('What is 2+2?');
 
+    // The big-screen header shows the round and the question within the round
+    // (#1051): the seeded quiz has one round of four questions, so the first
+    // question reads Round 1/1, Q 1/4.
+    await expect(questionView.getByTestId('hud-round')).toContainText('Round 1/1');
+    await expect(questionView.getByTestId('hud-question')).toContainText('Q 1/4');
+
     // Read beat (#247 parity): the TV shows the question with the options and
     // answered-order area hidden behind a "Get ready" indicator until the
     // answer window opens, then the options appear.

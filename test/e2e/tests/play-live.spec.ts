@@ -99,6 +99,14 @@ test.describe('player synchronized play', () => {
     await expect(page.getByTestId('question-image')).toHaveCount(0);
     await expect(page.getByTestId('big-screen-hint')).toBeVisible();
 
+    // The HUD header shows the round, the question within the round, and the
+    // player's running score (#1051). The seeded quiz has one round of four
+    // questions, so the first question reads Round 1/1, Q 1/4, Score 0.
+    const questionView = page.getByTestId('question-view');
+    await expect(questionView.getByTestId('hud-round')).toContainText('Round 1/1');
+    await expect(questionView.getByTestId('hud-question')).toContainText('Q 1/4');
+    await expect(questionView.getByTestId('hud-score')).toContainText('Score 0');
+
     // Read beat (#247 parity): the question shows first with the options HIDDEN
     // and a "Get ready" indicator, so the player reads before answers open.
     await expect(page.getByTestId('question-read-beat')).toBeVisible();

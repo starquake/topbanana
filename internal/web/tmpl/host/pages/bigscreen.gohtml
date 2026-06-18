@@ -144,6 +144,19 @@
 
             <template x-if="question">
                 <div class="flex-1 min-h-0 flex flex-col gap-[clamp(1rem,3vh,2rem)]">
+                    {{/* Round N/M + Q n/m in this round, so the room sees the same
+                         placement the player phones show (#1051). No score chip:
+                         the big screen has no single viewer. */}}
+                    <div class="shrink-0 flex justify-center gap-3 text-text-dim text-[clamp(0.85rem,1.6vw,1.15rem)] font-semibold uppercase tracking-[0.12em]"
+                         data-question-progress>
+                        <span x-show="question.roundTotal > 0" data-testid="hud-round">
+                            Round <span class="text-text" x-text="question.roundNumber"></span>/<span class="text-text" x-text="question.roundTotal"></span>
+                        </span>
+                        <span data-testid="hud-question">
+                            Q <span class="text-text" x-text="question.roundQuestions > 0 ? question.roundPosition : question.position"></span>/<span class="text-text" x-text="question.roundQuestions > 0 ? question.roundQuestions : question.total"></span>
+                        </span>
+                    </div>
+
                     <h2 class="m-0 shrink-0 font-display font-extrabold text-[clamp(1.4rem,3.5vw,2.75rem)] leading-tight text-center"
                         x-text="question.text"
                         data-question-text></h2>
