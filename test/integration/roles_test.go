@@ -50,6 +50,34 @@ func TestRoles_HostGating(t *testing.T) {
 		}
 	})
 
+	// An anonymous-session visitor (a petname-only row minted by playing a
+	// quiz, not a signed-in account) is redirected to /login like a
+	// cookieless visitor, NOT shown the access-denied page (#1045).
+	t.Run("anonymous session is redirected to login, not access-denied", func(t *testing.T) {
+		t.Parallel()
+
+		anon := authClient(t)
+		// GET /api/quizzes goes through EnsurePlayer, which mints an
+		// anonymous row and installs its session cookie on the jar.
+		fetchAPIQuizzes(ctx, t, anon, baseURL)
+
+		for _, tc := range []struct {
+			url  string
+			next string
+		}{
+			{url: baseURL + "/admin", next: "/login?next=%2Fadmin"},
+			{url: baseURL + "/admin/quizzes", next: "/login?next=%2Fadmin%2Fquizzes"},
+		} {
+			snap := doGet(ctx, t, anon, tc.url)
+			if got, want := snap.StatusCode, http.StatusSeeOther; got != want {
+				t.Errorf("anonymous GET %s status = %d, want %d", tc.url, got, want)
+			}
+			if got, want := snap.Location, tc.next; got != want {
+				t.Errorf("anonymous GET %s Location = %q, want %q", tc.url, got, want)
+			}
+		}
+	})
+
 	t.Run("host manages own quiz", func(t *testing.T) {
 		t.Parallel()
 		myQuiz := createQuizAs(ctx, t, host, baseURL, "Host Own Quiz")

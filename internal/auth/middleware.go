@@ -125,8 +125,11 @@ func mintAnonymousPlayer(ctx context.Context, players PlayerStore) (*Player, err
 // own-game routes (#538). Unauthenticated requests 303 to /login; GET/HEAD
 // carry the original URI as ?next=<encoded> so the login flow can drop the
 // visitor back where they were heading, but unsafe methods drop next (the form
-// body is gone). A signed-in Player (no host rights) gets a 403 "Access
-// denied" page, because the dashboard's existence is not a secret.
+// body is gone). An anonymous-session visitor (a petname-only row minted by
+// playing a quiz) is treated as unauthenticated and redirected the same way,
+// not shown the access-denied page (#1045). A signed-in Player (no host rights)
+// gets a 403 "Access denied" page, because the dashboard's existence is not a
+// secret.
 func RequireGameHost(
 	next http.Handler,
 	players PlayerStore,
@@ -146,6 +149,12 @@ func RequireGameHost(
 			}
 			logger.ErrorContext(r.Context(), "error loading player for host check", slog.Any("err", err))
 			http.Error(w, "internal error", http.StatusInternalServerError)
+
+			return
+		}
+
+		if !player.IsAuthenticated() {
+			redirectToLoginWithNext(w, r)
 
 			return
 		}

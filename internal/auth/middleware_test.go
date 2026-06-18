@@ -109,6 +109,50 @@ func TestRequireGameHost_DeniesPlayer(t *testing.T) {
 	}
 }
 
+// TestRequireGameHost_AnonymousSession_RedirectsToLogin pins #1045: an
+// anonymous-session visitor (a petname-only row minted by playing a quiz)
+// is treated like a cookieless visitor - 303 to /login carrying ?next= -
+// instead of being shown the access-denied page meant for signed-in
+// players who lack host rights.
+func TestRequireGameHost_AnonymousSession_RedirectsToLogin(t *testing.T) {
+	t.Parallel()
+
+	players := store.NewPlayerStore(dbtest.Open(t), discardLogger())
+	anon, err := players.CreateAnonymousPlayer(t.Context(), "anon-visitor")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+	if !anon.IsAnonymous() {
+		t.Fatalf("CreateAnonymousPlayer produced a non-anonymous row: %+v", anon)
+	}
+
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Error("next should not be called for an anonymous session")
+	})
+
+	sessions := session.New([]byte("k"), true)
+	mw := RequireGameHost(next, players, sessions, nil, discardLogger())
+
+	rec := httptest.NewRecorder()
+	sessions.Set(rec, anon.ID, anon.SessionVersion)
+	cookie := rec.Result().Cookies()[0]
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/quizzes", nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+
+	if got, want := rec.Code, http.StatusSeeOther; got != want {
+		t.Errorf("status = %d, want %d", got, want)
+	}
+	if got, want := rec.Header().Get("Location"), "/login?next=%2Fadmin%2Fquizzes"; got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+	if got, dontWant := rec.Body.String(), "Access denied"; strings.Contains(got, dontWant) {
+		t.Errorf("body should not contain %q, got %q", dontWant, got)
+	}
+}
+
 func TestRequireGameHost_NoCookie_RedirectsToLogin(t *testing.T) {
 	t.Parallel()
 
