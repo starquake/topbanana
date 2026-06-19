@@ -6,7 +6,7 @@
      in the middle is admin-only ({{showSectionNav}}). */}}
 {{define "topbar"}}
     <nav class="sticky top-0 z-30 bg-bg/80 backdrop-blur-xl border-b border-border-soft" aria-label="Primary">
-        <div class="max-w-shell mx-auto px-5 py-2 flex items-center justify-between gap-4 min-h-[3.5rem]">
+        <div class="max-w-shell mx-auto px-5 py-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 min-h-[3.5rem]">
             <div class="flex items-center gap-6">
                 {{/* aria-label pins the accessible name as "Top Banana!" so role-
                      based locators (e2e: getByRole('link', { name: 'Top Banana!' }))
@@ -44,9 +44,9 @@
                     </div>
                 {{end}}
             </div>
-            <div class="flex items-center gap-3 sm:gap-4 text-sm">
+            <div class="flex shrink-0 items-center gap-3 sm:gap-4 text-sm">
                 {{if isSignedIn}}
-                    <span class="hidden sm:inline whitespace-nowrap text-text-dim">Signed in as&nbsp;<a href="{{profileHref}}"
+                    <span class="hidden lg:inline whitespace-nowrap text-text-dim">Signed in as&nbsp;<a href="{{profileHref}}"
                            class="text-text font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:shadow-focus rounded-sm">{{viewerName}}</a></span>
                     <form action="/logout" method="POST" class="m-0 p-0 inline-flex">
                         <input type="hidden" name="csrf_token" value="{{csrfToken}}">

@@ -48,7 +48,7 @@
     </nav>
 
     {{if .Quizzes}}
-        <section class="grid grid-cols-1 md:grid-cols-2 gap-5" aria-label="Your quizzes">
+        <section class="grid grid-cols-1 xl:grid-cols-2 gap-5" aria-label="Your quizzes">
             {{range .Quizzes}}
                 {{template "quiz_card" .}}
             {{end}}
