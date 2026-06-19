@@ -427,6 +427,37 @@
                             </template>
                         </div>
 
+                        <!-- Question sound (#1059). The <audio> element is hidden
+                             (no native controls); playback is driven by GameApp,
+                             which autoplays the clip via the Start-game gesture.
+                             A mute toggle and a replay control sit beside it; the
+                             replay control's label reads "Play audio" when
+                             autoplay was blocked and "Replay audio" otherwise. -->
+                        <template x-if="question.audioUrl">
+                            <div class="flex items-center justify-center gap-2 mb-3"
+                                 data-testid="question-audio-controls">
+                                <audio x-ref="questionAudio"
+                                       :src="question.audioUrl"
+                                       :muted="audioMuted"
+                                       preload="auto"
+                                       data-testid="question-audio"
+                                       class="hidden"></audio>
+                                <button type="button"
+                                        class="btn-ghost gap-2"
+                                        data-testid="audio-mute"
+                                        :aria-pressed="audioMuted ? 'true' : 'false'"
+                                        :aria-label="audioMuted ? 'Unmute audio' : 'Mute audio'"
+                                        @click="toggleMute()"
+                                        x-text="audioMuted ? 'Unmute' : 'Mute'"></button>
+                                <button type="button"
+                                        class="btn-ghost gap-2"
+                                        data-testid="audio-replay"
+                                        aria-label="Replay audio"
+                                        @click="replayAudio()"
+                                        x-text="audioBlocked ? 'Play audio' : 'Replay audio'"></button>
+                            </div>
+                        </template>
+
                         <!-- Retry banner (#179): shown when the previous
                              submitAnswer POST threw and we re-armed the
                              countdown. Cleared on the next click or when

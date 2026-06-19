@@ -454,6 +454,7 @@ type sessionQuestionResponse struct {
 	RoundID  int64  `json:"roundId"`
 	Text     string `json:"text"`
 	ImageURL string `json:"imageUrl,omitempty"`
+	AudioURL string `json:"audioUrl,omitempty"`
 	Position int    `json:"position"`
 	Total    int    `json:"total"`
 	// RoundNumber/RoundTotal place the question's round within the quiz,
@@ -668,6 +669,7 @@ func newSessionQuestionResponse(state *livesession.SessionState) *sessionQuestio
 		RoundID:           q.RoundID,
 		Text:              q.Text,
 		ImageURL:          mediaURL(q.ImageMediaID),
+		AudioURL:          mediaURL(q.AudioMediaID),
 		Position:          questionPosition(state.Quiz, q.ID),
 		Total:             len(state.Quiz.Questions),
 		RoundNumber:       round.RoundNumber,
