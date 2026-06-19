@@ -38,6 +38,7 @@ func (s *MediaStore) CreateMedia(ctx context.Context, m *media.Media) (*media.Me
 		Height:            sql.NullInt64{Int64: int64(m.Height), Valid: m.Height != 0},
 		SizeBytes:         m.SizeBytes,
 		Sha256:            m.SHA256,
+		DurationMs:        nullableInt(m.DurationMs),
 		CreatedByPlayerID: m.CreatedByPlayerID,
 	})
 	if err != nil {
@@ -169,7 +170,8 @@ func (s *MediaStore) CountMediaByQuiz(ctx context.Context, quizID int64) (int64,
 }
 
 // mediaFromRow maps a generated db.Medium row to the media.Media domain type.
-// A NULL thumb_path / width / height surfaces as the Go zero value.
+// A NULL thumb_path / width / height surfaces as the Go zero value; a NULL
+// duration_ms surfaces as a nil *int so "unknown" stays distinct from zero.
 func mediaFromRow(row db.Medium) *media.Media {
 	return &media.Media{
 		ID:                row.ID,
@@ -182,6 +184,7 @@ func mediaFromRow(row db.Medium) *media.Media {
 		Height:            int(row.Height.Int64),
 		SizeBytes:         row.SizeBytes,
 		SHA256:            row.Sha256,
+		DurationMs:        nullableIntToPtr(row.DurationMs),
 		CreatedByPlayerID: row.CreatedByPlayerID,
 		CreatedAt:         row.CreatedAt,
 	}

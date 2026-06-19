@@ -23,6 +23,11 @@ import (
 // FK created_by_player_id to it.
 const seededAdminID int64 = 1
 
+// testImageMaxBytes is a generous image cap for the shared fixture so the
+// accept-path tests are never bounded by it; the over-cap test builds its own
+// Service with a tiny cap.
+const testImageMaxBytes int64 = 10 << 20
+
 // fixture bundles a media Service with the DB, quiz id, and temp root it was
 // built over so tests can reach whichever it needs without unpacking a wide
 // tuple. The DB is exposed so a test can seed a second quiz in the same DB to
@@ -49,7 +54,13 @@ func newServiceWithQuiz(t *testing.T) fixture {
 
 	quizID := seedQuiz(t, db, "media-svc")
 	root := t.TempDir()
-	svc := NewService(store.NewMediaStore(db, slog.Default()), root, slog.Default())
+	svc := NewService(
+		store.NewMediaStore(db, slog.Default()),
+		root,
+		testImageMaxBytes,
+		testAudioMaxBytes,
+		slog.Default(),
+	)
 
 	return fixture{svc: svc, db: db, quizID: quizID, root: root}
 }
@@ -146,6 +157,29 @@ func TestServiceStoreRoundTrip(t *testing.T) {
 	}
 }
 
+// TestServiceStoreImageOverCap pins that an image upload over the configured
+// imageMaxBytes is rejected with ErrUploadTooLarge before it is stored.
+func TestServiceStoreImageOverCap(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.Open(t)
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Errorf("db.Close err = %v", cerr)
+		}
+	})
+
+	quizID := seedQuiz(t, db, "media-svc-image-overcap")
+	root := t.TempDir()
+	const tinyCap int64 = 8
+	svc := NewService(store.NewMediaStore(db, slog.Default()), root, tinyCap, testAudioMaxBytes, slog.Default())
+
+	_, err := svc.Store(t.Context(), quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
+	if got, want := err, ErrUploadTooLarge; !errors.Is(got, want) {
+		t.Errorf("Store err = %v, want %v", got, want)
+	}
+}
+
 // TestServiceStoreCancelledBeforeProcessing pins the ctx-cancelled short-
 // circuit: a cancel that reaches the handler before Process runs returns the
 // cancel error AND leaves no row + no files behind, so the host's apparent
@@ -235,7 +269,7 @@ func TestServiceStoreCancelledMidFlightCleansUp(t *testing.T) {
 	innerStore := store.NewMediaStore(db, slog.Default())
 	ctx, cancel := context.WithCancel(t.Context())
 	wrapped := &cancelOnUpdatePathsStore{Store: innerStore, cancel: cancel}
-	svc := NewService(wrapped, root, slog.Default())
+	svc := NewService(wrapped, root, testImageMaxBytes, testAudioMaxBytes, slog.Default())
 
 	_, err := svc.Store(ctx, quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
 	if err == nil {
@@ -293,7 +327,7 @@ func TestServiceStoreCancelledAfterPathsLeavesNothing(t *testing.T) {
 	innerStore := store.NewMediaStore(db, slog.Default())
 	ctx, cancel := context.WithCancel(t.Context())
 	wrapped := &cancelAfterPathsStore{Store: innerStore, cancel: cancel}
-	svc := NewService(wrapped, root, slog.Default())
+	svc := NewService(wrapped, root, testImageMaxBytes, testAudioMaxBytes, slog.Default())
 
 	_, err := svc.Store(ctx, quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
 	if err == nil {
@@ -348,7 +382,13 @@ func TestServiceStoreCreateMediaFailureLeavesNoDir(t *testing.T) {
 	db := dbtest.Open(t)
 	quizID := seedQuiz(t, db, "media-svc-insert-fail")
 	root := t.TempDir()
-	svc := NewService(store.NewMediaStore(db, slog.Default()), root, slog.Default())
+	svc := NewService(
+		store.NewMediaStore(db, slog.Default()),
+		root,
+		testImageMaxBytes,
+		testAudioMaxBytes,
+		slog.Default(),
+	)
 
 	// Close the DB so the CreateMedia insert fails; Process runs first and
 	// does not touch the DB, so the failure lands exactly at the insert.

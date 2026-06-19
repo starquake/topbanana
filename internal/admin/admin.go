@@ -125,10 +125,10 @@ type QuestionData struct {
 	QuizID  int64
 	RoundID int64
 	Text    string
-	// MediaID is the id of the attached library image, or 0 when none is
+	// ImageMediaID is the id of the attached library image, or 0 when none is
 	// attached (#937). The picker pre-checks the radio whose value equals
 	// it; 0 leaves the "None" radio checked.
-	MediaID               int64
+	ImageMediaID          int64
 	Position              int
 	TimeLimitSecondsValue string
 	Options               []*OptionData
@@ -247,8 +247,8 @@ func questionDataFromQuestion(q *quiz.Question) *QuestionData {
 	}
 
 	var mediaID int64
-	if q.MediaID != nil {
-		mediaID = *q.MediaID
+	if q.ImageMediaID != nil {
+		mediaID = *q.ImageMediaID
 	}
 
 	return &QuestionData{
@@ -256,7 +256,7 @@ func questionDataFromQuestion(q *quiz.Question) *QuestionData {
 		QuizID:                q.QuizID,
 		RoundID:               q.RoundID,
 		Text:                  q.Text,
-		MediaID:               mediaID,
+		ImageMediaID:          mediaID,
 		Position:              q.Position,
 		TimeLimitSecondsValue: timeLimit,
 		Options:               optionDataFromOptions(q.Options),
@@ -617,14 +617,14 @@ const (
 	errMediaVerifyFailed = "Could not verify the selected image. Try again."
 )
 
-// resolveQuestionMedia interprets the optional media_id picker input (#937).
-// Blank or "0" -> (nil, "") meaning "no image attached" (NULL). A non-empty
-// value must parse and must name an image in quizID's own library; a missing,
-// foreign, or unparseable id yields a field-error message so the save handler
-// re-renders the form rather than persisting a cross-quiz reference. A store
-// failure also surfaces as a message so the caller never silently drops the
-// attachment.
-func resolveQuestionMedia(
+// resolveQuestionImage interprets the optional image_media_id picker input
+// (#937). Blank or "0" -> (nil, "") meaning "no image attached" (NULL). A
+// non-empty value must parse and must name an image in quizID's own library; a
+// missing, foreign, or unparseable id yields a field-error message so the save
+// handler re-renders the form rather than persisting a cross-quiz reference. A
+// store failure also surfaces as a message so the caller never silently drops
+// the attachment.
+func resolveQuestionImage(
 	ctx context.Context, mediaStore QuestionMediaStore, quizID int64, raw string,
 ) (*int64, string) {
 	raw = strings.TrimSpace(raw)
@@ -676,14 +676,14 @@ func fillQuestionFromForm(
 	}
 
 	qs.Text = r.PostFormValue("text")
-	// Image picker (#937). An empty/absent media_id means "no image"
+	// Image picker (#937). An empty/absent image_media_id means "no image"
 	// (NULL); a non-empty value must name an image in this question's own
 	// quiz library, validated below.
-	mediaID, mediaErr := resolveQuestionMedia(r.Context(), mediaStore, qs.QuizID, r.PostFormValue("media_id"))
+	mediaID, mediaErr := resolveQuestionImage(r.Context(), mediaStore, qs.QuizID, r.PostFormValue("image_media_id"))
 	if mediaErr != "" {
 		return map[string]string{"media": mediaErr}, true
 	}
-	qs.MediaID = mediaID
+	qs.ImageMediaID = mediaID
 	// Optional per-question override (#99). Blank input clears any
 	// previous override (NULL -> inherit the quiz default); a parse
 	// failure lands a zero, which Question.Valid rejects with an

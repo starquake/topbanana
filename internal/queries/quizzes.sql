@@ -184,15 +184,16 @@ WHERE round_id = ?
 ORDER BY position;
 
 -- name: CreateQuestion :one
-INSERT INTO questions (quiz_id, round_id, text, position, media_id, time_limit_seconds)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO questions (quiz_id, round_id, text, position, image_media_id, audio_media_id, time_limit_seconds)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: UpdateQuestion :execresult
 UPDATE questions
 SET text               = ?,
     position           = ?,
-    media_id           = ?,
+    image_media_id     = ?,
+    audio_media_id     = ?,
     time_limit_seconds = ?
 WHERE id = ?;
 

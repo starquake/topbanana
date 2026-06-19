@@ -64,7 +64,15 @@ func addRoutes(
 
 	addAuthRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
 	addAdminRoutes(mux, logger, stores, gameDeps, sessions, csrfMgr, emailDeps, playerDeps)
-	addMediaRoutes(mux, logger, stores, sessions, csrfMgr, media.NewService(stores.Media, cfg.MediaDir, logger), cfg)
+	addMediaRoutes(
+		mux,
+		logger,
+		stores,
+		sessions,
+		csrfMgr,
+		media.NewService(stores.Media, cfg.MediaDir, cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes, logger),
+		cfg,
+	)
 	addProfileRoutes(mux, logger, stores, sessions, csrfMgr, cfg, mail)
 	addAPIRoutes(mux, logger, stores, gameService, realtime, sessions, cfg)
 	addHostRoutes(mux, logger, stores, sessions, csrfMgr, realtime.SessionService, cfg.BaseURL)

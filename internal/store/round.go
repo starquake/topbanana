@@ -95,7 +95,7 @@ func (s *QuizStore) CreateRound(ctx context.Context, g *quiz.Round) error {
 		Position:                int64(g.Position),
 		Title:                   g.Title,
 		Summary:                 g.Summary,
-		BoundaryDurationSeconds: nullableTimeLimit(g.BoundaryDurationSeconds),
+		BoundaryDurationSeconds: nullableInt(g.BoundaryDurationSeconds),
 	})
 	if err != nil {
 		if isRoundUniqueViolation(err) {
@@ -107,7 +107,7 @@ func (s *QuizStore) CreateRound(ctx context.Context, g *quiz.Round) error {
 	g.ID = row.ID
 	g.CreatedAt = row.CreatedAt
 	g.UpdatedAt = row.UpdatedAt
-	g.BoundaryDurationSeconds = nullableTimeLimitToPtr(row.BoundaryDurationSeconds)
+	g.BoundaryDurationSeconds = nullableIntToPtr(row.BoundaryDurationSeconds)
 
 	return nil
 }
@@ -125,7 +125,7 @@ func (s *QuizStore) UpdateRound(ctx context.Context, g *quiz.Round) error {
 		Title:                   g.Title,
 		Summary:                 g.Summary,
 		Position:                int64(g.Position),
-		BoundaryDurationSeconds: nullableTimeLimit(g.BoundaryDurationSeconds),
+		BoundaryDurationSeconds: nullableInt(g.BoundaryDurationSeconds),
 		ID:                      g.ID,
 	})
 	if err != nil {
@@ -439,7 +439,7 @@ func roundFromRow(r db.Round) *quiz.Round {
 		Position:                int(r.Position),
 		Title:                   r.Title,
 		Summary:                 r.Summary,
-		BoundaryDurationSeconds: nullableTimeLimitToPtr(r.BoundaryDurationSeconds),
+		BoundaryDurationSeconds: nullableIntToPtr(r.BoundaryDurationSeconds),
 		CreatedAt:               r.CreatedAt,
 		UpdatedAt:               r.UpdatedAt,
 	}

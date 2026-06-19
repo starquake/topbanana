@@ -37,7 +37,7 @@ type sessionImageRes struct {
 }
 
 // attachMediaToQuestion seeds a media row for the question's quiz and points the
-// question at it via MediaID, returning the new media id. The row's files are
+// question at it via ImageMediaID, returning the new media id. The row's files are
 // not written: the play endpoints only project /media/<id> from the id, so the
 // wire-field assertions never fetch the bytes.
 func attachMediaToQuestion(
@@ -67,7 +67,7 @@ func attachMediaToQuestion(
 	if err != nil {
 		t.Fatalf("GetQuestion err = %v, want nil", err)
 	}
-	qs.MediaID = &row.ID
+	qs.ImageMediaID = &row.ID
 	if err := stores.Quizzes.UpdateQuestion(ctx, qs); err != nil {
 		t.Fatalf("UpdateQuestion err = %v, want nil", err)
 	}
