@@ -23,30 +23,69 @@ make smoke            # validate startup against the existing dev DB (no HTTP li
 
 ## Commits and PRs
 
-Per-change order of operations:
+### Attribution
 
-1. Implement the change.
-2. Run the full local check suite: `make lint-fix`, `make check`, `make smoke`, `make test-e2e`. Fix anything they surface.
-3. Run the `/code-review` + `/go-style-review` loop on the diff; fix every actionable finding and re-run until both are clean. **The diff must be review-clean before push, not after.** Clear the golangci cache first (`rm -rf ~/.cache/golangci-lint`) and run the loop yourself — a warm-cache green or a dev-agent's self-reported "clean" can hide findings.
-4. Stage the files explicitly (`git add <paths>` — never `-A` or `.`), so secrets and binaries don't sneak in.
-5. Commit with a plain-language subject line. Avoid jargon; prefer simple verbs ("change", "update", "fix", "add", "remove"); start with a capital letter; single short subject line, no body or rationale paragraphs.
-6. Push the branch and open a draft PR. PR body follows "Linking a PR to a ticket" below.
-7. Ask explicitly: "Did the review look OK?" or equivalent. Wait for the user's explicit go-ahead — silence is not consent. Do not merge before sign-off; do not merge while the PR is still a Draft.
+Every PR description and every comment you post — on a PR or an issue — ends with a trailer naming you and the maintainer: `_— Claude Code, for @starquake_`. Commits stay attribution-free: no `Co-Authored-By` trailer, no generated-by footer.
 
-**No WIP commits in shipping history.** If a crash or handoff forces a checkpoint commit to make in-flight work durable, fold it back into one clean commit (`git reset --soft main`, then recommit with a plain subject) before opening the PR.
+### Commits
 
-**Sign-off does not carry.** A "looks good" covers only the diff that was on GitHub at that moment. If you make any further change after sign-off — fixing a lint issue, addressing a comment, anything — commit and push it, then ask for sign-off again on the new lines.
+- Stage files explicitly (`git add <paths>` — never `-A` or `.`) so secrets and binaries don't sneak in.
+- Plain-language subject line: simple verbs ("add", "fix", "update", "remove"), capitalized, a single short line, no body.
+- Multiple clean, self-contained commits on a branch are fine — they aid review and let the maintainer revert parts. No WIP/checkpoint commits in shipping history; fold those away (`git reset --soft main`, recommit) before handing the PR back.
+
+### Branches
+
+Start from `main` (`git pull`), then branch with dashes (not slashes), prefixed with the ticket number — e.g. `1059-add-audio`. Ask for the number if it is not given; omit the prefix when there is no ticket. Delegate non-trivial code to the right dev agent — `backend-dev` for Go under `internal/`, `cmd/`, migrations and queries; `frontend-dev` for the player client and admin templates — and use whatever agent skills fit. Give the PR URL after each piece of work.
+
+Rebasing/updating a branch: rebase **locally** onto main (`git rebase origin/main`; `git rebase -f origin/main` to re-create commits already on top) and `git push --force-with-lease` — never by merging, never via `gh pr update-branch` or auto-merge's implicit update. `main`'s ruleset requires **signed commits**; local git signs them (SSH key), but a server-side rebase re-creates them **unsigned**, leaving the PR `mergeStateStatus=BLOCKED` with every required check green. Don't `gh pr merge --admin` past it — the Claude Code classifier blocks bypassing the ruleset, and the signed local rebase is the fix.
+
+### Working a ticket the maintainer hands you (one at a time)
+
+1. Read the ticket and make a plan. Ask up front only the questions that would change the *approach*.
+2. Do the work on a ticket branch.
+3. Open a **draft PR**. Its description states you opened it, lists the plan, and puts any remaining detail questions inline.
+4. Wait for the maintainer to answer the questions on the PR.
+5. When answered, continue the work.
+6. When done, run **Self-review**.
+
+### Working tickets on your own
+
+When the maintainer points you at several tickets — a milestone, or tickets by name/subject — and asks you to work them **on your own** (and/or to **fan out**, i.e. in parallel):
+
+1. For each ticket, write a plan and post it as a **comment on that ticket**.
+2. Bundle similar tickets into one PR where it makes sense.
+3. Put any questions on the ticket as a comment. Because you are on your own, **assume the recommended answer and proceed** — and say so in the comment.
+4. Stop a ticket only if it is genuinely unclear, or a wrong guess would be expensive to undo: comment why, and move to the next ticket.
+5. Make a branch and push commits to a **draft PR**. Multiple small commits are fine — they aid review and let the maintainer revert parts.
+6. When done, run **Self-review**.
+
+### Self-review
+
+1. Run the full local suite (`make lint-fix`, `make check`, `make smoke`, `make test-e2e`), then run `/code-review`, `/go-style-review`, and — for any frontend change — `/frontend-style-review`, yourself on the diff (`git diff main...HEAD`). Clear the golangci cache first (`rm -rf ~/.cache/golangci-lint`) and run the reviews yourself — a warm-cache green or a dev-agent's self-reported "clean" can hide findings.
+2. Fix every **critical** issue.
+3. Post the **non-critical** issues on the PR. Handed one ticket: ask which to fix. On your own: fix the ones you would recommend and note what you did.
+4. Mark the PR **ready for review** (clear its draft status) and wait for the maintainer.
+
+### Merging
+
+A label-driven loop watches your (`starquake`) PRs and acts when either:
+
+- a PR is **ready for review and carries the `ready-to-merge` label** → squash-merge it; or
+- a PR has **new review comments requesting changes** → make the changes.
+
+Rules:
+
+- Never merge a PR without `ready-to-merge`, and never add that label yourself — the maintainer applies it as sign-off, and it is the only go-ahead (CI passing is not approval; an earlier PR's merge does not carry to the next).
+- If the branch is behind `main`, rebase it locally (signed) first. A **conflict-free rebase keeps the label** — no fresh sign-off needed.
+- Any **content change** removes `ready-to-merge` so the maintainer re-applies it: fixing a review comment, new work, or a rebase where you had to **resolve conflicts**.
+- Touch only `starquake`'s PRs; for anyone else's, just flag that it needs the maintainer's review.
 
 ### Linking a PR to a ticket
 
 - The commit subject and PR title stay **clean of `Closes #N` / `Fixes #N` keywords**. They describe what changed, not which ticket they reference.
-- When a PR resolves a tracked ticket, put `Closes #N` in the **PR description** (`gh pr create --body "Closes #N"`). GitHub auto-closes the issue on squash merge because it picks up the keyword from the merged commit body, which is the PR description.
+- When a PR resolves a tracked ticket, put `Closes #N` in the **PR description**; GitHub auto-closes the issue on squash merge (it reads the keyword from the merged commit body, which is the PR description). A PR that **bundles several tickets** lists each one (`Closes #A`, `Closes #B`, ...).
 - For a PR that only partially addresses a ticket, omit the keyword and close the ticket manually with a summary once all slices land.
-- A PR that has no associated ticket gets an empty body (`--body ""`); nothing else belongs there.
-
-### Creating issues
-
-When Claude files a GitHub issue, add a line to the description noting Claude created it (e.g. a trailing `_Filed by Claude Code._`). Issues are the exception to the no-AI-attribution rule: commit and PR descriptions stay free of attribution lines, but issues record who filed them.
+- A PR with no associated ticket has no `Closes` line; its description is just the Attribution trailer (plus a short plan/summary where useful).
 
 ## Testing
 
@@ -74,14 +113,6 @@ One-off scripts are reserved for genuinely interactive debugging that can't be e
 **HTTP handler tests are integration tests, not stub-driven unit tests.** Pin a handler end-to-end (router -> middleware -> handler -> store -> DB) against a real store on a `dbtest` DB, not a stub that restates what the store should return — a stub passes even when the real wiring (routing, query, serialization) is broken. The old grandfathered stub-driven handler tests were converted in #638 (reversing #30).
 
 Keep a purpose-built **fault-injection double** only where a real store genuinely cannot reproduce a case: a forced petname collision, the specific internal error string a leak test asserts is *not* exposed, a `GetX` failure on a path a real FK makes otherwise unreachable. Those are legitimate fakes (like a mailer spy or a closed DB), not tautological store stubs -- keep them, and keep their tests as untagged unit tests. For an ordinary "store errored" branch, prefer a closed DB over a double.
-
-## Workflow
-
-When starting work on a new ticket: switch to `main`, run `git pull`, then create a new branch. Branch names use dashes (not slashes) and are prefixed with the ticket number — e.g. `1-fix-bugs`. Ask for the ticket number if not provided. Omit the prefix if there is no ticket.
-When asked to update a branch, rebase it **locally** onto main (`git rebase origin/main`; use `git rebase -f origin/main` to re-create the commits when the branch is already on top) and `git push --force-with-lease` — never by merging, and never via `gh pr update-branch` or auto-merge's implicit update. `main`'s ruleset requires **signed commits** (`required_signatures`); local git signs them (SSH key), but a server-side rebase re-creates them **unsigned**, which leaves the PR `mergeStateStatus=BLOCKED` with every required check green and `--auto` waiting on it forever. Don't `gh pr merge --admin` past it — the Claude Code classifier blocks bypassing the ruleset, and the signed local rebase is the right fix.
-Never suggest merging on your own and never infer that a merge is wanted (CI passing is not approval, and an earlier PR's merge instruction does not carry to the next PR). Run `gh pr merge` only when the user explicitly asks for *this* PR — phrases like "merge it", "go ahead and merge", or "commit, push, merge" in one breath count as that ask.
-After each piece of work, provide the PR URL: `https://github.com/starquake/topbanana/compare/<branch-name>`
-When implementing review findings or other non-trivial code changes, delegate to the appropriate dev agent — `backend-dev` for Go code under `internal/`, `cmd/`, migrations and queries; `frontend-dev` for the player client and admin templates — so project conventions are consistently applied.
 
 ## CI required checks
 
