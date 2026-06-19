@@ -96,6 +96,7 @@
                  vertical canvas - still visible on the start screen and the
                  post-game leaderboard. -->
             <header x-show="!(gameId && !finished)"
+                    data-testid="player-header"
                     class="mb-10 flex items-center justify-between gap-4">
                 <h1 class="m-0 font-display font-extrabold text-2xl tracking-wide uppercase">
                     {{template "brand-mark" .}}
@@ -132,7 +133,7 @@
                  profile page (#410). The end-of-quiz modal is the
                  one-shot "auto-prompt" path and gates on
                  hasCustomName() instead — see #165. -->
-            <template x-if="!isAuthenticated() && (!gameId || finished)">
+            <template x-if="!isAuthenticated() && (!gameId || finished) && startStateResolved">
                 <article class="claim-cta mb-6">
                     {{/* Single-row layout: eyebrow + name on the left,
                          primary action on the right. flex-wrap drops
@@ -212,7 +213,7 @@
                      Replaces the Alpine <select> the SPA carried
                      pre-#284 as a placeholder for this dedicated
                      listing page. */}}
-                <div x-show="!deepLinkedQuiz" class="mb-6 flex flex-col gap-3">
+                <div x-show="!deepLinkedQuiz && startStateResolved" class="mb-6 flex flex-col gap-3">
                     <p class="text-text-dim">Pick a quiz to play:</p>
                     <a href="/quizzes" class="btn-primary self-start">Browse all quizzes</a>
                 </div>
