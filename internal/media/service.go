@@ -206,12 +206,14 @@ func (s *Service) ListByQuiz(ctx context.Context, quizID int64) ([]*Media, error
 	return items, nil
 }
 
-// CountByQuiz returns how many media rows a quiz has. The upload handler uses
-// it to enforce the per-quiz library ceiling before storing a new batch (#988).
-func (s *Service) CountByQuiz(ctx context.Context, quizID int64) (int64, error) {
-	n, err := s.store.CountMediaByQuiz(ctx, quizID)
+// CountByQuizAndType returns how many ready media rows of mediaType a quiz has.
+// Each upload route uses it to enforce a per-type library ceiling before storing
+// a new batch: an image upload counts only images and an audio upload counts only
+// audio, so the two kinds never draw down each other's cap (#988, #1059).
+func (s *Service) CountByQuizAndType(ctx context.Context, quizID int64, mediaType string) (int64, error) {
+	n, err := s.store.CountMediaByQuizAndType(ctx, quizID, mediaType)
 	if err != nil {
-		return 0, fmt.Errorf("counting media by quiz: %w", err)
+		return 0, fmt.Errorf("counting media by quiz and type: %w", err)
 	}
 
 	return n, nil

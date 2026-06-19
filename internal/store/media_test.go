@@ -51,6 +51,21 @@ func newMediaRow(quizID int64) *media.Media {
 	}
 }
 
+func newAudioMediaRow(quizID int64) *media.Media {
+	durationMs := 1500
+
+	return &media.Media{
+		QuizID:            quizID,
+		Type:              media.TypeAudio,
+		MIME:              "audio/mpeg",
+		Path:              "a.mp3",
+		SizeBytes:         2048,
+		SHA256:            "cafebabe",
+		DurationMs:        &durationMs,
+		CreatedByPlayerID: seededAdminID,
+	}
+}
+
 // TestMediaStore_CreateGetRoundTrip pins that a created row reads back with the
 // same metadata, with nullable width/height and thumb_path surviving the
 // NULL-mapping round trip.
@@ -126,15 +141,16 @@ func TestMediaStore_UpdatePathsMissing(t *testing.T) {
 	}
 }
 
-// TestMediaStore_CountByQuiz pins CountMediaByQuiz tracks ready inserts and
-// deletes. A freshly created (not-ready) row does not count until MarkMediaReady
-// flips it, so a cancelled upload never inflates the per-quiz cap (#992).
-func TestMediaStore_CountByQuiz(t *testing.T) {
+// TestMediaStore_CountByQuizAndType pins CountMediaByQuizAndType tracks ready
+// inserts and deletes. A freshly created (not-ready) row does not count until
+// MarkMediaReady flips it, so a cancelled upload never inflates the per-quiz cap
+// (#992).
+func TestMediaStore_CountByQuizAndType(t *testing.T) {
 	t.Parallel()
 
 	s, quizID := newMediaStoreWithQuiz(t)
 
-	if got, want := countOrFatal(t, s, quizID), int64(0); got != want {
+	if got, want := countOrFatal(t, s, quizID, media.TypeImage), int64(0); got != want {
 		t.Errorf("initial count = %d, want %d", got, want)
 	}
 
@@ -142,22 +158,53 @@ func TestMediaStore_CountByQuiz(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateMedia err = %v, want nil", err)
 	}
-	if got, want := countOrFatal(t, s, quizID), int64(0); got != want {
+	if got, want := countOrFatal(t, s, quizID, media.TypeImage), int64(0); got != want {
 		t.Errorf("count after not-ready insert = %d, want %d (not-ready rows excluded)", got, want)
 	}
 
 	if err = s.MarkMediaReady(t.Context(), created.ID); err != nil {
 		t.Fatalf("MarkMediaReady err = %v, want nil", err)
 	}
-	if got, want := countOrFatal(t, s, quizID), int64(1); got != want {
+	if got, want := countOrFatal(t, s, quizID, media.TypeImage), int64(1); got != want {
 		t.Errorf("count after mark ready = %d, want %d", got, want)
 	}
 
 	if err = s.DeleteMedia(t.Context(), created.ID); err != nil {
 		t.Fatalf("DeleteMedia err = %v, want nil", err)
 	}
-	if got, want := countOrFatal(t, s, quizID), int64(0); got != want {
+	if got, want := countOrFatal(t, s, quizID, media.TypeImage), int64(0); got != want {
 		t.Errorf("count after delete = %d, want %d", got, want)
+	}
+}
+
+// TestMediaStore_CountByQuizAndTypeIsTypeScoped pins that the per-type count
+// keeps image and audio ceilings independent: an audio row does not inflate the
+// image count and vice versa (#1059).
+func TestMediaStore_CountByQuizAndTypeIsTypeScoped(t *testing.T) {
+	t.Parallel()
+
+	s, quizID := newMediaStoreWithQuiz(t)
+
+	markReady := func(row *media.Media) {
+		t.Helper()
+		created, err := s.CreateMedia(t.Context(), row)
+		if err != nil {
+			t.Fatalf("CreateMedia err = %v, want nil", err)
+		}
+		if err = s.MarkMediaReady(t.Context(), created.ID); err != nil {
+			t.Fatalf("MarkMediaReady err = %v, want nil", err)
+		}
+	}
+
+	markReady(newMediaRow(quizID))
+	markReady(newAudioMediaRow(quizID))
+	markReady(newAudioMediaRow(quizID))
+
+	if got, want := countOrFatal(t, s, quizID, media.TypeImage), int64(1); got != want {
+		t.Errorf("image count = %d, want %d (audio rows excluded)", got, want)
+	}
+	if got, want := countOrFatal(t, s, quizID, media.TypeAudio), int64(2); got != want {
+		t.Errorf("audio count = %d, want %d (image row excluded)", got, want)
 	}
 }
 
@@ -297,11 +344,11 @@ func TestMediaStore_CreateRejectsUnknownQuiz(t *testing.T) {
 	}
 }
 
-func countOrFatal(t *testing.T, s *MediaStore, quizID int64) int64 {
+func countOrFatal(t *testing.T, s *MediaStore, quizID int64, mediaType string) int64 {
 	t.Helper()
-	n, err := s.CountMediaByQuiz(t.Context(), quizID)
+	n, err := s.CountMediaByQuizAndType(t.Context(), quizID, mediaType)
 	if err != nil {
-		t.Fatalf("CountMediaByQuiz err = %v, want nil", err)
+		t.Fatalf("CountMediaByQuizAndType err = %v, want nil", err)
 	}
 
 	return n

@@ -3091,3 +3091,32 @@ func TestHandleQuizCreate(t *testing.T) {
 		t.Fatalf("got: %q, should contain: %q", got, want)
 	}
 }
+
+func TestMediaCardDataDurationLabel(t *testing.T) {
+	t.Parallel()
+	ptr := func(n int) *int { return &n }
+	cases := []struct {
+		name string
+		ms   *int
+		want string
+	}{
+		{name: "nil duration", ms: nil, want: ""},
+		{name: "zero duration", ms: ptr(0), want: ""},
+		{name: "negative duration", ms: ptr(-1), want: ""},
+		{name: "under a second rounds down to 0:00", ms: ptr(400), want: "0:00"},
+		{name: "exactly one second", ms: ptr(1000), want: "0:01"},
+		{name: "pads single-digit seconds", ms: ptr(9000), want: "0:09"},
+		{name: "one minute", ms: ptr(60000), want: "1:00"},
+		{name: "minutes and seconds", ms: ptr(95000), want: "1:35"},
+		{name: "drops sub-second remainder", ms: ptr(95999), want: "1:35"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			card := MediaCardData{DurationMs: tc.ms}
+			if got, want := card.DurationLabel(), tc.want; got != want {
+				t.Errorf("DurationLabel() = %q, want %q", got, want)
+			}
+		})
+	}
+}

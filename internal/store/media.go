@@ -159,11 +159,15 @@ func (s *MediaStore) DeleteMedia(ctx context.Context, id int64) error {
 	return nil
 }
 
-// CountMediaByQuiz returns the number of ready media rows for quizID.
-func (s *MediaStore) CountMediaByQuiz(ctx context.Context, quizID int64) (int64, error) {
-	n, err := s.q.CountMediaByQuiz(ctx, quizID)
+// CountMediaByQuizAndType returns the number of ready media rows of mediaType
+// for quizID, so each upload route enforces a per-type library ceiling.
+func (s *MediaStore) CountMediaByQuizAndType(ctx context.Context, quizID int64, mediaType string) (int64, error) {
+	n, err := s.q.CountMediaByQuizAndType(ctx, db.CountMediaByQuizAndTypeParams{
+		QuizID: quizID,
+		Type:   mediaType,
+	})
 	if err != nil {
-		return 0, fmt.Errorf("failed to count media by quiz: %w", err)
+		return 0, fmt.Errorf("failed to count media by quiz and type: %w", err)
 	}
 
 	return n, nil

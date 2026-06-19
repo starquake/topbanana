@@ -32,6 +32,10 @@ type MediaService interface {
 	// Store processes an uploaded image through the pipeline, writes the jpeg
 	// full + thumbnail under the quiz directory, records a row, and returns it.
 	Store(ctx context.Context, quizID, createdBy int64, r io.Reader) (*media.Media, error)
+	// StoreAudio validates and stores an already-browser-playable audio upload
+	// as-is, recording a sound row with the caller-supplied duration, and returns
+	// it (#1059).
+	StoreAudio(ctx context.Context, quizID, createdBy int64, durationMs int, r io.Reader) (*media.Media, error)
 	// Get returns the media row for id, or media.ErrMediaNotFound.
 	Get(ctx context.Context, id int64) (*media.Media, error)
 	// Delete removes the media row and unlinks its files. Returns
@@ -40,9 +44,10 @@ type MediaService interface {
 	// Open opens a stored media file for reading by its root-relative path. The
 	// caller closes the returned file.
 	Open(relPath string) (*os.File, error)
-	// CountByQuiz returns how many media rows a quiz has, so the upload handler
-	// can enforce the per-quiz library ceiling before storing a new batch.
-	CountByQuiz(ctx context.Context, quizID int64) (int64, error)
+	// CountByQuizAndType returns how many ready media rows of mediaType a quiz
+	// has, so each upload route can enforce a per-type library ceiling before
+	// storing a new batch.
+	CountByQuizAndType(ctx context.Context, quizID int64, mediaType string) (int64, error)
 }
 
 // QuizVisibilityLookup is the slice of the quiz store the serving handlers use

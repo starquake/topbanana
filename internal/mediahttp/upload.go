@@ -155,9 +155,9 @@ func HandleMediaUpload(
 		}
 
 		// Library-size cap before the budget charge: a quiz that has hit its
-		// image ceiling is a clear admin denial (409), not abuse, so it must
+		// media ceiling is a clear admin denial (409), not abuse, so it must
 		// not draw down the host's rate budget. A zero limit disables the cap.
-		if !checkQuizImageLimit(w, r, logger, svc, quizID, len(files), quizImageLimit) {
+		if !checkQuizMediaLimit(w, r, logger, svc, quizID, len(files), quizImageLimit, media.TypeImage) {
 			return
 		}
 
@@ -194,20 +194,23 @@ func HandleMediaUpload(
 	})
 }
 
-// checkQuizImageLimit reports whether storing incoming more files keeps the
-// quiz at or under the per-quiz library ceiling, where incoming is the number
-// of files in this request. A limit of zero disables the
-// cap. On an over-limit batch it writes a 409 with a host-facing message and
+// checkQuizMediaLimit reports whether storing incoming more files keeps the
+// quiz at or under the per-quiz library ceiling for one media type, where
+// incoming is the number of files in this request. The ceiling is per-type: an
+// image upload counts only images and an audio upload counts only audio, so the
+// two kinds never draw down each other's cap (#1059). mediaType is both the type
+// counted and the noun in the host-facing 409 message ("image" or "audio"). A
+// limit of zero disables the cap. On an over-limit batch it writes a 409 and
 // returns false; a real store error is logged and surfaced as 500. Runs before
 // the budget charge so a 409 never leaves a charge behind (#988).
-func checkQuizImageLimit(
+func checkQuizMediaLimit(
 	w http.ResponseWriter, r *http.Request, logger *slog.Logger,
-	svc MediaService, quizID int64, incoming, limit int,
+	svc MediaService, quizID int64, incoming, limit int, mediaType string,
 ) bool {
 	if limit <= 0 {
 		return true
 	}
-	existing, err := svc.CountByQuiz(r.Context(), quizID)
+	existing, err := svc.CountByQuizAndType(r.Context(), quizID, mediaType)
 	if err != nil {
 		logger.ErrorContext(r.Context(), "error counting quiz media for library cap", slog.Any("err", err))
 		http.Error(w, internalErrorMessage, http.StatusInternalServerError)
@@ -215,7 +218,11 @@ func checkQuizImageLimit(
 		return false
 	}
 	if existing+int64(incoming) > int64(limit) {
-		http.Error(w, fmt.Sprintf("this quiz has reached its image limit (max %d)", limit), http.StatusConflict)
+		http.Error(
+			w,
+			fmt.Sprintf("this quiz has reached its %s limit (max %d)", mediaType, limit),
+			http.StatusConflict,
+		)
 
 		return false
 	}
