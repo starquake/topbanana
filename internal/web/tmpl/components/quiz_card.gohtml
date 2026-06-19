@@ -31,8 +31,8 @@
             </h3>
             <p class="mb-4 text-text-dim text-sm leading-relaxed line-clamp-2">{{.Description}}</p>
         </div>
-        <footer class="flex items-center justify-between px-5 py-3.5 border-t border-border-soft text-text-dim text-sm">
-            <div class="flex items-center gap-2.5">
+        <footer class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-5 py-3.5 border-t border-border-soft text-text-dim text-sm">
+            <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 min-w-0">
                 <span><strong class="text-text font-semibold mr-1">{{.RoundCount}}</strong>&nbsp;{{if eq .RoundCount 1}}round{{else}}rounds{{end}}</span>
                 <span><strong class="text-text font-semibold mr-1">{{.QuestionCount}}</strong>&nbsp;questions</span>
                 {{/* Times-played counter (#891): bumped once each time a
@@ -71,12 +71,13 @@
      a future policy change is a one-line Go edit. */}}
 {{define "quiz_card_actions_admin"}}
     {{if .CanEdit}}
-        <div class="relative z-10 flex items-center gap-1">
-            <a href="/admin/quizzes/{{.ID}}/edit" aria-label="Edit quiz" title="Edit"
+        <div class="relative z-10 ml-auto flex shrink-0 items-center gap-1">
+            <a href="/admin/quizzes/{{.ID}}/edit" data-testid="quiz-card-edit-{{.ID}}" aria-label="Edit quiz" title="Edit"
                class="icon-btn">
                 <svg viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>
             </a>
             <button type="button"
+                    data-testid="quiz-card-delete-{{.ID}}"
                     onclick="openModal('modal-delete-quiz-{{.ID}}')"
                     aria-label="Delete quiz" title="Delete"
                     class="w-9 h-9 inline-flex items-center justify-center rounded-sm bg-transparent border-0 text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:shadow-focus transition-colors cursor-pointer">
@@ -84,7 +85,7 @@
             </button>
         </div>
     {{else if .CreatedByDisplayName}}
-        <span class="text-[0.7rem] uppercase tracking-[0.12em] text-text-mute">Created by {{.CreatedByDisplayName}}</span>
+        <span class="ml-auto text-[0.7rem] uppercase tracking-[0.12em] text-text-mute">Created by {{.CreatedByDisplayName}}</span>
     {{end}}
 {{end}}
 
@@ -99,7 +100,7 @@
     {{/* Hosting needs the big-screen lobby, which is unusable on a phone, so
          below md the action is a plain note instead of a button that overflows
          the card (#1050). */}}
-    <div class="relative z-10 flex items-center gap-1">
+    <div class="relative z-10 ml-auto flex items-center gap-1">
         <span data-testid="host-needs-larger-screen-{{.ID}}" class="md:hidden text-[0.7rem] uppercase tracking-[0.12em] text-text-mute">Use a larger screen to host</span>
         {{if .HostHasRunningGame}}
             <button type="button" data-testid="host-action-{{.ID}}" onclick="openModal('modal-restart-host-{{.ID}}')" class="hidden md:inline-flex btn-primary">Change quiz</button>
