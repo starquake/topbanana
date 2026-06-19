@@ -128,7 +128,11 @@ type QuestionData struct {
 	// ImageMediaID is the id of the attached library image, or 0 when none is
 	// attached (#937). The picker pre-checks the radio whose value equals
 	// it; 0 leaves the "None" radio checked.
-	ImageMediaID          int64
+	ImageMediaID int64
+	// AudioMediaID is the id of the attached library audio, or 0 when none is
+	// attached (#1059). Separate from ImageMediaID so a question can carry both
+	// an image and audio; the audio picker pre-checks the radio matching it.
+	AudioMediaID          int64
 	Position              int
 	TimeLimitSecondsValue string
 	Options               []*OptionData
@@ -251,12 +255,18 @@ func questionDataFromQuestion(q *quiz.Question) *QuestionData {
 		mediaID = *q.ImageMediaID
 	}
 
+	var audioMediaID int64
+	if q.AudioMediaID != nil {
+		audioMediaID = *q.AudioMediaID
+	}
+
 	return &QuestionData{
 		ID:                    q.ID,
 		QuizID:                q.QuizID,
 		RoundID:               q.RoundID,
 		Text:                  q.Text,
 		ImageMediaID:          mediaID,
+		AudioMediaID:          audioMediaID,
 		Position:              q.Position,
 		TimeLimitSecondsValue: timeLimit,
 		Options:               optionDataFromOptions(q.Options),
@@ -617,15 +627,51 @@ const (
 	errMediaVerifyFailed = "Could not verify the selected image. Try again."
 )
 
+// Field-error messages for the question audio picker (#1059). Mirror the image
+// strings but name audio, kept as package constants for one source of truth.
+const (
+	errAudioPickInvalid  = "Pick audio from this quiz's library, or choose None."
+	errAudioNotInLibrary = "That audio is not in this quiz's library."
+	errAudioVerifyFailed = "Could not verify the selected audio. Try again."
+)
+
 // resolveQuestionImage interprets the optional image_media_id picker input
 // (#937). Blank or "0" -> (nil, "") meaning "no image attached" (NULL). A
-// non-empty value must parse and must name an image in quizID's own library; a
-// missing, foreign, or unparseable id yields a field-error message so the save
-// handler re-renders the form rather than persisting a cross-quiz reference. A
-// store failure also surfaces as a message so the caller never silently drops
-// the attachment.
+// non-empty value must parse and must name an image (type=image) in quizID's own
+// library; a missing, foreign, wrong-type, or unparseable id yields a field-error
+// message so the save handler re-renders the form rather than persisting a
+// cross-quiz or cross-type reference. A store failure also surfaces as a message
+// so the caller never silently drops the attachment.
 func resolveQuestionImage(
 	ctx context.Context, mediaStore QuestionMediaStore, quizID int64, raw string,
+) (*int64, string) {
+	return resolveQuestionMediaOfType(
+		ctx, mediaStore, quizID, raw, media.TypeImage,
+		errMediaPickInvalid, errMediaNotInLibrary, errMediaVerifyFailed,
+	)
+}
+
+// resolveQuestionAudio interprets the optional audio_media_id picker input
+// (#1059). It mirrors resolveQuestionImage for the audio picker: blank or "0"
+// means "no audio attached" (NULL); a non-empty value must name audio
+// (type=audio) in quizID's own library, else a field-error message.
+func resolveQuestionAudio(
+	ctx context.Context, mediaStore QuestionMediaStore, quizID int64, raw string,
+) (*int64, string) {
+	return resolveQuestionMediaOfType(
+		ctx, mediaStore, quizID, raw, media.TypeAudio,
+		errAudioPickInvalid, errAudioNotInLibrary, errAudioVerifyFailed,
+	)
+}
+
+// resolveQuestionMediaOfType is the shared body of resolveQuestionImage and
+// resolveQuestionAudio: it validates the picker input names a ready media row of
+// the wanted type in the question's own quiz, returning (id, "") on success or
+// (nil, message) on any rejection. wantType pins the media kind so the image
+// picker cannot attach audio and vice versa.
+func resolveQuestionMediaOfType(
+	ctx context.Context, mediaStore QuestionMediaStore, quizID int64, raw, wantType string,
+	errInvalid, errNotInLibrary, errVerifyFailed string,
 ) (*int64, string) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || raw == "0" {
@@ -633,18 +679,18 @@ func resolveQuestionImage(
 	}
 	id, err := handlers.IDFromString(raw)
 	if err != nil || id == 0 || mediaStore == nil {
-		return nil, errMediaPickInvalid
+		return nil, errInvalid
 	}
 	m, err := mediaStore.GetMedia(ctx, id)
 	if err != nil {
 		if errors.Is(err, media.ErrMediaNotFound) {
-			return nil, errMediaNotInLibrary
+			return nil, errNotInLibrary
 		}
 
-		return nil, errMediaVerifyFailed
+		return nil, errVerifyFailed
 	}
-	if m.QuizID != quizID {
-		return nil, errMediaNotInLibrary
+	if m.QuizID != quizID || m.Type != wantType {
+		return nil, errNotInLibrary
 	}
 
 	return &id, ""
@@ -684,6 +730,14 @@ func fillQuestionFromForm(
 		return map[string]string{"media": mediaErr}, true
 	}
 	qs.ImageMediaID = mediaID
+	// Audio picker (#1059). An empty/absent audio_media_id means "no audio"
+	// (NULL); a non-empty value must name audio in this question's own quiz
+	// library, validated below.
+	audioID, audioErr := resolveQuestionAudio(r.Context(), mediaStore, qs.QuizID, r.PostFormValue("audio_media_id"))
+	if audioErr != "" {
+		return map[string]string{"audio": audioErr}, true
+	}
+	qs.AudioMediaID = audioID
 	// Optional per-question override (#99). Blank input clears any
 	// previous override (NULL -> inherit the quiz default); a parse
 	// failure lands a zero, which Question.Valid rejects with an
@@ -1005,7 +1059,7 @@ func HandleQuizView(
 			return
 		}
 
-		images, ok := loadQuizMedia(w, r, logger, csrfMgr, mediaLister, id)
+		images, sounds, ok := loadQuizMedia(w, r, logger, csrfMgr, mediaLister, id)
 		if !ok {
 			return
 		}
@@ -1014,6 +1068,7 @@ func HandleQuizView(
 		attachCanEdit(r, quizData)
 		data := newQuizViewData(quizData, players, rounds)
 		data.Images = images
+		data.Sounds = sounds
 		data.HostHasRunningGame = hostHasRunningGame(r, logger, runningGames)
 		data.UploadedCount, data.FailedCount, data.CancelledCount = parseUploadCounts(r)
 		renderer.Render(w, r, http.StatusOK, data)
@@ -1054,11 +1109,15 @@ type QuizViewData struct {
 	// Rounds is the position-ordered round list, each carrying its own
 	// questions, for the grouped quiz view.
 	Rounds []RoundViewData
-	// Images is the quiz's media library, newest first, for the thumbnail
+	// Images is the quiz's image library, newest first, for the thumbnail
 	// grid (#936 slice 3). The upload control and grid are gated on CanEdit
 	// in the template; the data loads regardless so an owner sees their
 	// library.
 	Images []MediaCardData
+	// Sounds is the quiz's sound library, newest first, for the audio section
+	// (#1059). Each tile shows a duration label and an inline audio preview.
+	// Gated on CanEdit in the template, like Images.
+	Sounds []MediaCardData
 	// HostHasRunningGame gates the "Host live" confirm-and-restart prompt
 	// (#853): true when the signed-in host already has a game in flight, so the
 	// control opens a modal that ends the running session before hosting this
@@ -1135,26 +1194,63 @@ type MediaCardData struct {
 	ID     int64
 	Width  int
 	Height int
+	// DurationMs is the clip length for a sound tile, or nil when unknown / not
+	// applicable (an image leaves it nil) (#1059). DurationLabel renders it.
+	DurationMs *int
 }
+
+// DurationLabel renders DurationMs as an "M:SS" clip-length label, or "" when
+// the duration is unknown (#1059). Seconds are zero-padded; minutes are not.
+func (d MediaCardData) DurationLabel() string {
+	if d.DurationMs == nil || *d.DurationMs <= 0 {
+		return ""
+	}
+	totalSeconds := *d.DurationMs / millisPerSecond
+	minutes := totalSeconds / secondsPerMinute
+	seconds := totalSeconds % secondsPerMinute
+
+	return fmt.Sprintf("%d:%02d", minutes, seconds)
+}
+
+const (
+	millisPerSecond  = 1000
+	secondsPerMinute = 60
+)
 
 func mediaCardDataFromMedia(items []*media.Media) []MediaCardData {
 	cards := make([]MediaCardData, 0, len(items))
 	for _, m := range items {
 		cards = append(cards, MediaCardData{
-			ID:     m.ID,
-			Width:  m.Width,
-			Height: m.Height,
+			ID:         m.ID,
+			Width:      m.Width,
+			Height:     m.Height,
+			DurationMs: m.DurationMs,
 		})
 	}
 
 	return cards
 }
 
-// loadQuizMedia fetches the quiz's image library, newest first. A nil lister
-// (callers that do not wire the media store) yields an empty grid rather than a
-// failure. A lookup error is a 500: the library is part of the same admin view
-// that already loaded the quiz tree, so hiding the failure behind an empty grid
-// would mask it.
+// filterMediaByType returns the subset of items whose media Type matches
+// mediaType, preserving order. The quiz view and the question pickers list
+// images and sounds separately, so the loaders split one ListMediaByQuiz read
+// (which returns every ready row) by type (#1059).
+func filterMediaByType(items []*media.Media, mediaType string) []*media.Media {
+	filtered := make([]*media.Media, 0, len(items))
+	for _, m := range items {
+		if m.Type == mediaType {
+			filtered = append(filtered, m)
+		}
+	}
+
+	return filtered
+}
+
+// loadQuizMedia fetches the quiz's media library, newest first, split into
+// image and sound cards (#936 slice 3, #1059). A nil lister (callers that do not
+// wire the media store) yields empty grids rather than a failure. A lookup error
+// is a 500: the library is part of the same admin view that already loaded the
+// quiz tree, so hiding the failure behind an empty grid would mask it.
 func loadQuizMedia(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -1162,19 +1258,21 @@ func loadQuizMedia(
 	csrfMgr *csrf.Manager,
 	mediaLister MediaLister,
 	quizID int64,
-) ([]MediaCardData, bool) {
+) (images, sounds []MediaCardData, ok bool) {
 	if mediaLister == nil {
-		return nil, true
+		return nil, nil, true
 	}
 	items, err := mediaLister.ListMediaByQuiz(r.Context(), quizID)
 	if err != nil {
 		logger.ErrorContext(r.Context(), "error listing media for quiz view", slog.Any("err", err))
 		render500(w, r, logger, csrfMgr)
 
-		return nil, false
+		return nil, nil, false
 	}
 
-	return mediaCardDataFromMedia(items), true
+	return mediaCardDataFromMedia(filterMediaByType(items, media.TypeImage)),
+		mediaCardDataFromMedia(filterMediaByType(items, media.TypeAudio)),
+		true
 }
 
 func newQuizViewData(quizData *QuizData, players []PlayerScoreData, rounds []*quiz.Round) QuizViewData {
@@ -1498,8 +1596,11 @@ type questionFormData struct {
 	// the image-picker grid (#937). Empty when the quiz has no images yet,
 	// which the template renders as an upload-first hint instead of a
 	// picker.
-	Library     []MediaCardData
-	FieldErrors map[string]string
+	Library []MediaCardData
+	// AudioLibrary is the question's own quiz sound library, newest first, for
+	// the audio-picker list (#1059). Empty when the quiz has no sounds yet.
+	AudioLibrary []MediaCardData
+	FieldErrors  map[string]string
 }
 
 // HandleQuestionCreate creates a question. The round the question lands
@@ -1532,25 +1633,27 @@ func HandleQuestionCreate(
 			return
 		}
 
-		library, ok := loadQuestionLibrary(w, r, logger, csrfMgr, mediaStore, quizID)
+		library, audioLibrary, ok := loadQuestionLibrary(w, r, logger, csrfMgr, mediaStore, quizID)
 		if !ok {
 			return
 		}
 
 		renderer.Render(w, r, http.StatusOK, questionFormData{
-			Title:    "Admin Dashboard - Question Create",
-			Quiz:     quizDataFromQuiz(qz),
-			Question: &QuestionData{},
-			Round:    roundDataFromRound(rnd),
-			Library:  library,
+			Title:        "Admin Dashboard - Question Create",
+			Quiz:         quizDataFromQuiz(qz),
+			Question:     &QuestionData{},
+			Round:        roundDataFromRound(rnd),
+			Library:      library,
+			AudioLibrary: audioLibrary,
 		})
 	})
 }
 
-// loadQuestionLibrary fetches the quiz's image library for the question
-// editor's picker (#937), newest first. A nil store (callers that do not wire
-// media) yields an empty picker rather than a failure; a lookup error is a 500,
-// matching loadQuizMedia, since the library is part of the same editor page.
+// loadQuestionLibrary fetches the quiz's media library for the question
+// editor's pickers (#937, #1059), newest first, split into image and sound
+// cards. A nil store (callers that do not wire media) yields empty pickers
+// rather than a failure; a lookup error is a 500, matching loadQuizMedia, since
+// the library is part of the same editor page.
 func loadQuestionLibrary(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -1558,19 +1661,21 @@ func loadQuestionLibrary(
 	csrfMgr *csrf.Manager,
 	mediaStore QuestionMediaStore,
 	quizID int64,
-) ([]MediaCardData, bool) {
+) (images, sounds []MediaCardData, ok bool) {
 	if mediaStore == nil {
-		return nil, true
+		return nil, nil, true
 	}
 	items, err := mediaStore.ListMediaByQuiz(r.Context(), quizID)
 	if err != nil {
 		logger.ErrorContext(r.Context(), "error listing media for question editor", slog.Any("err", err))
 		render500(w, r, logger, csrfMgr)
 
-		return nil, false
+		return nil, nil, false
 	}
 
-	return mediaCardDataFromMedia(items), true
+	return mediaCardDataFromMedia(filterMediaByType(items, media.TypeImage)),
+		mediaCardDataFromMedia(filterMediaByType(items, media.TypeAudio)),
+		true
 }
 
 // roundFromQuery reads the round_id query parameter and loads the named
@@ -1634,16 +1739,17 @@ func HandleQuestionEdit(
 			}
 		}
 
-		library, ok := loadQuestionLibrary(w, r, logger, csrfMgr, mediaStore, quizID)
+		library, audioLibrary, ok := loadQuestionLibrary(w, r, logger, csrfMgr, mediaStore, quizID)
 		if !ok {
 			return
 		}
 
 		renderer.Render(w, r, http.StatusOK, questionFormData{
-			Title:    "Admin Dashboard - Question Edit",
-			Quiz:     quizDataFromQuiz(qz),
-			Question: questionDataFromQuestion(qs),
-			Library:  library,
+			Title:        "Admin Dashboard - Question Edit",
+			Quiz:         quizDataFromQuiz(qz),
+			Question:     questionDataFromQuestion(qs),
+			Library:      library,
+			AudioLibrary: audioLibrary,
 		})
 	})
 }
@@ -2012,18 +2118,19 @@ func renderQuestionForm(
 	if qctx.Round != nil {
 		roundData = roundDataFromRound(qctx.Round)
 	}
-	// Reload the picker library so the re-rendered form still shows the
-	// thumbnails. A 500 here already wrote the response.
-	library, ok := loadQuestionLibrary(w, r, logger, csrfMgr, mediaStore, qctx.Quiz.ID)
+	// Reload the picker libraries so the re-rendered form still shows the
+	// thumbnails and sounds. A 500 here already wrote the response.
+	library, audioLibrary, ok := loadQuestionLibrary(w, r, logger, csrfMgr, mediaStore, qctx.Quiz.ID)
 	if !ok {
 		return
 	}
 	renderer.Render(w, r, http.StatusBadRequest, questionFormData{
-		Title:       title,
-		Quiz:        quizDataFromQuiz(qctx.Quiz),
-		Question:    questionDataFromQuestion(qctx.Question),
-		Round:       roundData,
-		Library:     library,
-		FieldErrors: fieldErrors,
+		Title:        title,
+		Quiz:         quizDataFromQuiz(qctx.Quiz),
+		Question:     questionDataFromQuestion(qctx.Question),
+		Round:        roundData,
+		Library:      library,
+		AudioLibrary: audioLibrary,
+		FieldErrors:  fieldErrors,
 	})
 }

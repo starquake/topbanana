@@ -96,6 +96,52 @@
             {{end}}
         </fieldset>
 
+        {{/* Audio picker (#1059): attach one of this quiz's uploaded audio
+             clips to the question, or None. When the quiz has no audio yet, show
+             a hint linking to the quiz view to upload first. Server-side
+             validation re-checks that the chosen id is audio belonging to this
+             quiz. */}}
+        {{$audioErr := index .FieldErrors "audio"}}
+        <fieldset class="form-field border-0 p-0 m-0 min-w-0">
+            <legend class="label-eyebrow p-0">Audio</legend>
+            {{if $audioErr}}
+                <p id="audio-error" class="form-help-error" role="alert">{{$audioErr}}</p>
+            {{end}}
+            {{if .AudioLibrary}}
+                <div class="flex flex-col gap-2"
+                     role="radiogroup" aria-label="Attach audio"
+                     data-testid="question-audio-picker"
+                     {{if $audioErr}}aria-describedby="audio-error"{{end}}>
+                    <label class="flex cursor-pointer items-center gap-3 rounded-lg border border-border-soft bg-surface px-4 py-3 text-sm text-text-dim has-[:checked]:border-accent has-[:checked]:text-text has-[:focus-visible]:shadow-focus">
+                        <input type="radio" name="audio_media_id" value="" class="sr-only"
+                               {{if eq .Question.AudioMediaID 0}}checked{{end}}>
+                        None
+                    </label>
+                    {{range .AudioLibrary}}
+                        <label data-testid="audio-library-item"
+                               class="flex cursor-pointer flex-wrap items-center gap-3 rounded-lg border border-border-soft bg-surface px-4 py-3 has-[:checked]:border-accent has-[:focus-visible]:shadow-focus">
+                            <input type="radio" name="audio_media_id" value="{{.ID}}" class="sr-only"
+                                   {{if eq $.Question.AudioMediaID .ID}}checked{{end}}>
+                            <span class="min-w-0 grow truncate text-text">Audio {{.ID}}</span>
+                            {{$label := .DurationLabel}}
+                            {{if $label}}
+                                <span data-testid="audio-duration" class="shrink-0 text-xs text-text-dim tabular-nums">{{$label}}</span>
+                            {{end}}
+                            <audio controls preload="none" src="/media/{{.ID}}"
+                                   class="h-9 max-w-full sm:w-64"></audio>
+                        </label>
+                    {{end}}
+                </div>
+            {{else}}
+                <input type="hidden" name="audio_media_id" value="">
+                <p class="text-text-dim text-[0.95rem]">
+                    No audio in this quiz's library yet.
+                    <a href="/admin/quizzes/{{.Quiz.ID}}" class="text-accent underline">Upload audio on the quiz page first</a>
+                    to attach one here.
+                </p>
+            {{end}}
+        </fieldset>
+
         {{$optionsErr := index .FieldErrors "options"}}
         <div class="form-field">
             <label class="label-eyebrow" for="option[0].text">

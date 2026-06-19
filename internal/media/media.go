@@ -83,6 +83,7 @@ type Store interface {
 	// DeleteMedia removes the media row for id. Returns ErrMediaNotFound when
 	// no row matched.
 	DeleteMedia(ctx context.Context, id int64) error
-	// CountMediaByQuiz returns the number of ready media rows for quizID.
-	CountMediaByQuiz(ctx context.Context, quizID int64) (int64, error)
+	// CountMediaByQuizAndType returns the number of ready media rows of
+	// mediaType for quizID, for the per-type library ceiling.
+	CountMediaByQuizAndType(ctx context.Context, quizID int64, mediaType string) (int64, error)
 }

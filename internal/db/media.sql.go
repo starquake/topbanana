@@ -10,18 +10,27 @@ import (
 	"database/sql"
 )
 
-const countMediaByQuiz = `-- name: CountMediaByQuiz :one
+const countMediaByQuizAndType = `-- name: CountMediaByQuizAndType :one
 SELECT count(*) AS count
 FROM media
 WHERE quiz_id = ?1
+  AND type = ?2
   AND ready = 1
 `
 
-// Returns the number of ready media rows for a quiz. Not-ready rows (in-flight
-// or stranded uploads) are excluded so the count reflects only finished library
-// images, matching what ListMediaByQuiz shows (#992).
-func (q *Queries) CountMediaByQuiz(ctx context.Context, quizID int64) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countMediaByQuiz, quizID)
+type CountMediaByQuizAndTypeParams struct {
+	QuizID int64
+	Type   string
+}
+
+// Returns the number of ready media rows of one type for a quiz, so each upload
+// route enforces a per-type library ceiling: an image upload counts only images
+// and an audio upload counts only audio, so the two kinds never draw down each
+// other's cap (#1059). Not-ready rows (in-flight or stranded uploads) are
+// excluded so the count reflects only finished library rows, matching what
+// ListMediaByQuiz shows (#992).
+func (q *Queries) CountMediaByQuizAndType(ctx context.Context, arg CountMediaByQuizAndTypeParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countMediaByQuizAndType, arg.QuizID, arg.Type)
 	var count int64
 	err := row.Scan(&count)
 	return count, err

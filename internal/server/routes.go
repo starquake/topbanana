@@ -596,6 +596,18 @@ func addMediaRoutes(
 		))),
 	)
 
+	// The audio upload is a single-file multipart POST (the form JS measures the
+	// clip duration in-browser and posts it alongside the file). It reuses the
+	// same multipart middleware, edit gate, upload budget, and per-quiz library
+	// ceiling as the image route (#1059); only the field name and store path
+	// differ.
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/media/audio",
+		mediahttp.MaxMultipartFormMiddleware(csrfMgr.Middleware(requireGameHost(
+			mediahttp.HandleAudioUpload(logger, svc, stores.Quizzes, uploadBudget, cfg.MediaQuizImageLimit),
+		))),
+	)
+
 	// The delete POST is an ordinary urlencoded form (only a csrf_token), not a
 	// multipart upload, so it uses the normal CSRF/form path - no
 	// MaxMultipartFormMiddleware. The handler adds the per-quiz creator-or-admin

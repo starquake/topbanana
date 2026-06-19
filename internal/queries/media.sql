@@ -76,13 +76,17 @@ ORDER BY created_at DESC, id DESC;
 DELETE FROM media
 WHERE id = sqlc.arg('id');
 
--- name: CountMediaByQuiz :one
--- Returns the number of ready media rows for a quiz. Not-ready rows (in-flight
--- or stranded uploads) are excluded so the count reflects only finished library
--- images, matching what ListMediaByQuiz shows (#992).
+-- name: CountMediaByQuizAndType :one
+-- Returns the number of ready media rows of one type for a quiz, so each upload
+-- route enforces a per-type library ceiling: an image upload counts only images
+-- and an audio upload counts only audio, so the two kinds never draw down each
+-- other's cap (#1059). Not-ready rows (in-flight or stranded uploads) are
+-- excluded so the count reflects only finished library rows, matching what
+-- ListMediaByQuiz shows (#992).
 SELECT count(*) AS count
 FROM media
 WHERE quiz_id = sqlc.arg('quiz_id')
+  AND type = sqlc.arg('type')
   AND ready = 1;
 
 -- name: ListStaleNotReadyMedia :many
