@@ -44,6 +44,10 @@ Per-change order of operations:
 - For a PR that only partially addresses a ticket, omit the keyword and close the ticket manually with a summary once all slices land.
 - A PR that has no associated ticket gets an empty body (`--body ""`); nothing else belongs there.
 
+### Creating issues
+
+When Claude files a GitHub issue, add a line to the description noting Claude created it (e.g. a trailing `_Filed by Claude Code._`). Issues are the exception to the no-AI-attribution rule: commit and PR descriptions stay free of attribution lines, but issues record who filed them.
+
 ## Testing
 
 Every change or new feature must have tests. The command sequence to run before marking work done is the per-change workflow at the top of this file; this section is only about *what* to test and *where* to put the test.
