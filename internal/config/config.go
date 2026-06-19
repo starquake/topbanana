@@ -82,6 +82,16 @@ var ErrMediaUploadBudgetWindowNegative = errors.New("MEDIA_UPLOAD_BUDGET_WINDOW 
 // value is meaningless; zero is allowed and disables the cap.
 var ErrMediaQuizImageLimitNegative = errors.New("MEDIA_QUIZ_IMAGE_LIMIT must not be negative")
 
+// ErrMediaAudioMaxBytesNegative is returned when MEDIA_AUDIO_MAX_BYTES parses to
+// a negative integer. It caps a stored audio upload's raw size, so a negative
+// value is meaningless; zero is allowed and disables the cap.
+var ErrMediaAudioMaxBytesNegative = errors.New("MEDIA_AUDIO_MAX_BYTES must not be negative")
+
+// ErrMediaImageMaxBytesNegative is returned when MEDIA_IMAGE_MAX_BYTES parses to
+// a negative integer. It caps a stored image upload's raw size, so a negative
+// value is meaningless; zero is allowed and disables the cap.
+var ErrMediaImageMaxBytesNegative = errors.New("MEDIA_IMAGE_MAX_BYTES must not be negative")
+
 // ErrSMTPConfigIncomplete is returned when SMTP env vars are partially
 // populated. SMTP is opt-in (an unconfigured instance still boots and
 // the no-op mailer kicks in), but a partial configuration is almost
@@ -174,6 +184,18 @@ const (
 	// while bounding the disk and row growth one host can drive on a single
 	// quiz.
 	MediaQuizImageLimitDefault = 200
+
+	// MediaAudioMaxBytesDefault is the default cap on a stored audio upload's raw
+	// size (~20 MB, #1059). Audio is stored as-is (no transcoding), so the cap
+	// bounds the bytes one clip can occupy; 20 MB comfortably holds a typical
+	// short question sound while rejecting an oversized file.
+	MediaAudioMaxBytesDefault int64 = 20 << 20
+
+	// MediaImageMaxBytesDefault is the default cap on a stored image upload's raw
+	// size (~10 MB, #1059). It mirrors media.MaxUploadBytes; the literal is
+	// repeated here rather than imported so config does not depend on the media
+	// package.
+	MediaImageMaxBytesDefault int64 = 10 << 20
 
 	// sessionKeyByteLength is the length in bytes of an ephemeral session key generated for development.
 	sessionKeyByteLength = 32
@@ -293,6 +315,16 @@ type Config struct {
 	// Defaults to 200. Parsed from MEDIA_QUIZ_IMAGE_LIMIT; the e2e/integration
 	// suites shrink it to exercise the 409 path. Zero disables the cap.
 	MediaQuizImageLimit int
+
+	// MediaAudioMaxBytes caps a stored audio upload's raw size in bytes (#1059).
+	// Defaults to MediaAudioMaxBytesDefault (~20 MB). Parsed from
+	// MEDIA_AUDIO_MAX_BYTES; zero disables the cap.
+	MediaAudioMaxBytes int64
+
+	// MediaImageMaxBytes caps a stored image upload's raw size in bytes (#1059).
+	// Defaults to MediaImageMaxBytesDefault (~10 MB). Parsed from
+	// MEDIA_IMAGE_MAX_BYTES; zero disables the cap.
+	MediaImageMaxBytes int64
 
 	// GoogleClientID, GoogleClientSecret, and GoogleRedirectURL are the
 	// Google OAuth 2.0 credentials issued in the Google Cloud Console.
@@ -495,6 +527,8 @@ func defaultConfig() Config {
 		MediaUploadBudget:       MediaUploadBudgetDefault,
 		MediaUploadBudgetWindow: MediaUploadBudgetWindowDefault,
 		MediaQuizImageLimit:     MediaQuizImageLimitDefault,
+		MediaAudioMaxBytes:      MediaAudioMaxBytesDefault,
+		MediaImageMaxBytes:      MediaImageMaxBytesDefault,
 	}
 }
 
@@ -647,8 +681,20 @@ func parseMediaUploadLimits(getenv func(string) string, c *Config) error {
 		return err
 	}
 
-	return parseNonNegativeInt(
+	if err := parseNonNegativeInt(
 		getenv, "MEDIA_QUIZ_IMAGE_LIMIT", ErrMediaQuizImageLimitNegative, &c.MediaQuizImageLimit,
+	); err != nil {
+		return err
+	}
+
+	if err := parseNonNegativeInt64(
+		getenv, "MEDIA_AUDIO_MAX_BYTES", ErrMediaAudioMaxBytesNegative, &c.MediaAudioMaxBytes,
+	); err != nil {
+		return err
+	}
+
+	return parseNonNegativeInt64(
+		getenv, "MEDIA_IMAGE_MAX_BYTES", ErrMediaImageMaxBytesNegative, &c.MediaImageMaxBytes,
 	)
 }
 
@@ -690,11 +736,46 @@ func parseNonNegativeInt(getenv func(string) string, name string, negativeErr er
 		return fmt.Errorf("invalid %s: %q, err: %w", name, val, err)
 	}
 	if n < 0 {
-		return fmt.Errorf("%w: %q", negativeErr, val)
+		return negativeValueErr(negativeErr, val)
 	}
 	*dst = n
 
 	return nil
+}
+
+// parseNonNegativeInt64 is parseNonNegativeInt for an int64 destination, used by
+// the byte-sized caps that can exceed an int's guaranteed range. An unparseable
+// value returns a wrapped error naming the var; a negative value returns the
+// supplied sentinel so callers can match it with [errors.Is]. Zero is accepted
+// (the media caps treat zero as "disabled").
+func parseNonNegativeInt64(getenv func(string) string, name string, negativeErr error, dst *int64) error {
+	val := getenv(name)
+	if val == "" {
+		return nil
+	}
+	n, err := strconv.ParseInt(val, decimalBase, bitSize64)
+	if err != nil {
+		return fmt.Errorf("invalid %s: %q, err: %w", name, val, err)
+	}
+	if n < 0 {
+		return negativeValueErr(negativeErr, val)
+	}
+	*dst = n
+
+	return nil
+}
+
+// decimalBase and bitSize64 are the base and bit width for parsing an int64 env
+// var with [strconv.ParseInt].
+const (
+	decimalBase = 10
+	bitSize64   = 64
+)
+
+// negativeValueErr wraps sentinel with the offending value so callers can match
+// it with [errors.Is] while still seeing the parsed string.
+func negativeValueErr(sentinel error, val string) error {
+	return fmt.Errorf("%w: %q", sentinel, val)
 }
 
 // parseSMTPConfig reads the SMTP_* env vars into c. SMTP defaults to

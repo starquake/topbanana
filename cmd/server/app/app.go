@@ -371,7 +371,7 @@ func runRetentionSweep(ctx context.Context, logger *slog.Logger, retention reten
 // not-ready row is the residue of a cancelled upload, hidden from the library
 // until it is dropped, so it is bounded but not urgent (#992, #472).
 func startSweeps(ctx context.Context, cfg *config.Config, logger *slog.Logger, stores *store.Stores) {
-	mediaSweep := media.NewService(stores.Media, cfg.MediaDir, logger)
+	mediaSweep := media.NewService(stores.Media, cfg.MediaDir, cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes, logger)
 	sweepExpiredAtStartup(ctx, logger, stores, mediaSweep)
 	go runTokenSweep(
 		ctx, logger,

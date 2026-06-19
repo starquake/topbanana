@@ -283,8 +283,9 @@ func (s *QuizStore) ListQuestions(ctx context.Context, quizID int64) ([]*quiz.Qu
 			RoundID:          r.RoundID,
 			Text:             r.Text,
 			Position:         int(r.Position),
-			MediaID:          nullableInt64ToPtr(r.MediaID),
-			TimeLimitSeconds: nullableTimeLimitToPtr(r.TimeLimitSeconds),
+			ImageMediaID:     nullableInt64ToPtr(r.ImageMediaID),
+			AudioMediaID:     nullableInt64ToPtr(r.AudioMediaID),
+			TimeLimitSeconds: nullableIntToPtr(r.TimeLimitSeconds),
 		}
 
 		options := optionsByQuestion[qs.ID]
@@ -316,8 +317,9 @@ func (s *QuizStore) GetQuestion(ctx context.Context, id int64) (*quiz.Question, 
 		RoundID:          row.RoundID,
 		Text:             row.Text,
 		Position:         int(row.Position),
-		MediaID:          nullableInt64ToPtr(row.MediaID),
-		TimeLimitSeconds: nullableTimeLimitToPtr(row.TimeLimitSeconds),
+		ImageMediaID:     nullableInt64ToPtr(row.ImageMediaID),
+		AudioMediaID:     nullableInt64ToPtr(row.AudioMediaID),
+		TimeLimitSeconds: nullableIntToPtr(row.TimeLimitSeconds),
 	}
 
 	options, err := s.listOptions(ctx, qs.ID)
@@ -798,7 +800,7 @@ func (s *QuizStore) createAuthoredRounds(ctx context.Context, q *db.Queries, qz 
 				Title:                   round.Title,
 				Summary:                 round.Summary,
 				Position:                defaultRound.Position,
-				BoundaryDurationSeconds: nullableTimeLimit(round.BoundaryDurationSeconds),
+				BoundaryDurationSeconds: nullableInt(round.BoundaryDurationSeconds),
 				ID:                      defaultRound.ID,
 			}); err != nil {
 				return fmt.Errorf("failed to rename default round: %w", err)
@@ -809,7 +811,7 @@ func (s *QuizStore) createAuthoredRounds(ctx context.Context, q *db.Queries, qz 
 				Position:                int64(i),
 				Title:                   round.Title,
 				Summary:                 round.Summary,
-				BoundaryDurationSeconds: nullableTimeLimit(round.BoundaryDurationSeconds),
+				BoundaryDurationSeconds: nullableInt(round.BoundaryDurationSeconds),
 			})
 			if createErr != nil {
 				return fmt.Errorf("failed to create round %q: %w", round.Title, createErr)
@@ -940,8 +942,9 @@ func (s *QuizStore) execCreateQuestion(ctx context.Context, q *db.Queries, qs *q
 		RoundID:          qs.RoundID,
 		Text:             qs.Text,
 		Position:         int64(qs.Position),
-		MediaID:          nullableInt64(qs.MediaID),
-		TimeLimitSeconds: nullableTimeLimit(qs.TimeLimitSeconds),
+		ImageMediaID:     nullableInt64(qs.ImageMediaID),
+		AudioMediaID:     nullableInt64(qs.AudioMediaID),
+		TimeLimitSeconds: nullableInt(qs.TimeLimitSeconds),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create question: %w", err)
@@ -949,7 +952,7 @@ func (s *QuizStore) execCreateQuestion(ctx context.Context, q *db.Queries, qs *q
 
 	qs.ID = row.ID
 	qs.RoundID = row.RoundID
-	qs.TimeLimitSeconds = nullableTimeLimitToPtr(row.TimeLimitSeconds)
+	qs.TimeLimitSeconds = nullableIntToPtr(row.TimeLimitSeconds)
 	for _, o := range qs.Options {
 		o.ID = 0
 		o.QuestionID = qs.ID
@@ -971,8 +974,9 @@ func (s *QuizStore) execUpdateQuestion(ctx context.Context, q *db.Queries, qs *q
 	res, err := q.UpdateQuestion(ctx, db.UpdateQuestionParams{
 		Text:             qs.Text,
 		Position:         int64(qs.Position),
-		MediaID:          nullableInt64(qs.MediaID),
-		TimeLimitSeconds: nullableTimeLimit(qs.TimeLimitSeconds),
+		ImageMediaID:     nullableInt64(qs.ImageMediaID),
+		AudioMediaID:     nullableInt64(qs.AudioMediaID),
+		TimeLimitSeconds: nullableInt(qs.TimeLimitSeconds),
 		ID:               qs.ID,
 	})
 	if err != nil {
@@ -1212,10 +1216,11 @@ func (*QuizStore) deleteOption(ctx context.Context, q *db.Queries, id int64) err
 	return nil
 }
 
-// nullableTimeLimit packs a *int into the [sql.NullInt64] the sqlc-generated
-// params expect for questions.time_limit_seconds. nil -> NULL, which the
-// game service treats as "inherit the quiz default" (#99).
-func nullableTimeLimit(v *int) sql.NullInt64 {
+// nullableInt packs a *int into the [sql.NullInt64] the sqlc-generated params
+// expect for nullable integer columns such as questions.time_limit_seconds
+// (nil -> "inherit the quiz default", #99) and media.duration_ms (nil ->
+// "unknown length"). nil maps to NULL.
+func nullableInt(v *int) sql.NullInt64 {
 	if v == nil {
 		return sql.NullInt64{}
 	}
@@ -1223,9 +1228,10 @@ func nullableTimeLimit(v *int) sql.NullInt64 {
 	return sql.NullInt64{Int64: int64(*v), Valid: true}
 }
 
-// nullableTimeLimitToPtr is the inverse of nullableTimeLimit, used when
-// hydrating Question domain values from sqlc RETURNING / SELECT rows.
-func nullableTimeLimitToPtr(v sql.NullInt64) *int {
+// nullableIntToPtr is the inverse of nullableInt, used when hydrating domain
+// values from sqlc RETURNING / SELECT rows; NULL maps back to nil so "unset"
+// stays distinct from a real zero.
+func nullableIntToPtr(v sql.NullInt64) *int {
 	if !v.Valid {
 		return nil
 	}
@@ -1235,7 +1241,7 @@ func nullableTimeLimitToPtr(v sql.NullInt64) *int {
 }
 
 // nullableInt64 packs a *int64 into the [sql.NullInt64] the sqlc-generated
-// params expect for questions.media_id. nil -> NULL, which means "no image
+// params expect for questions.image_media_id. nil -> NULL, which means "no image
 // attached" (#937).
 func nullableInt64(v *int64) sql.NullInt64 {
 	if v == nil {
@@ -1246,7 +1252,7 @@ func nullableInt64(v *int64) sql.NullInt64 {
 }
 
 // nullableInt64ToPtr is the inverse of nullableInt64, used when hydrating
-// Question.MediaID from sqlc RETURNING / SELECT rows.
+// Question.ImageMediaID from sqlc RETURNING / SELECT rows.
 func nullableInt64ToPtr(v sql.NullInt64) *int64 {
 	if !v.Valid {
 		return nil

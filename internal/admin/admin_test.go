@@ -1383,9 +1383,9 @@ func TestHandleQuestionSave(t *testing.T) {
 		handler := HandleQuestionSave(logger, nil, env.quizzes, env.media)
 
 		form := url.Values{
-			"text":     {"Question Four"},
-			"media_id": {strconv.FormatInt(mediaID, 10)},
-			"round_id": {strconv.FormatInt(roundID, 10)},
+			"text":           {"Question Four"},
+			"image_media_id": {strconv.FormatInt(mediaID, 10)},
+			"round_id":       {strconv.FormatInt(roundID, 10)},
 		}
 		options := []struct {
 			text    string
@@ -1434,10 +1434,10 @@ func TestHandleQuestionSave(t *testing.T) {
 		if got, want := created.Text, "Question Four"; got != want {
 			t.Errorf("created question text = %q, want %q", got, want)
 		}
-		if created.MediaID == nil {
-			t.Errorf("created question MediaID = nil, want %d", mediaID)
-		} else if got, want := *created.MediaID, mediaID; got != want {
-			t.Errorf("created question MediaID = %d, want %d", got, want)
+		if created.ImageMediaID == nil {
+			t.Errorf("created question ImageMediaID = nil, want %d", mediaID)
+		} else if got, want := *created.ImageMediaID, mediaID; got != want {
+			t.Errorf("created question ImageMediaID = %d, want %d", got, want)
 		}
 		if got, want := created.RoundID, roundID; got != want {
 			t.Errorf("created question RoundID = %d, want %d", got, want)
@@ -1478,8 +1478,8 @@ func TestHandleQuestionSave(t *testing.T) {
 		// Update the text and attach an image, keep the two existing options
 		// (by id) with their text changed, and append a brand-new option.
 		form := url.Values{
-			"text":     {question.Text + " Updated"},
-			"media_id": {strconv.FormatInt(mediaID, 10)},
+			"text":           {question.Text + " Updated"},
+			"image_media_id": {strconv.FormatInt(mediaID, 10)},
 		}
 		form.Add("option[0].id", strconv.FormatInt(question.Options[0].ID, 10))
 		form.Add("option[0].text", question.Options[0].Text+" Updated")
@@ -1515,10 +1515,10 @@ func TestHandleQuestionSave(t *testing.T) {
 		if got, want := stored.Text, question.Text+" Updated"; got != want {
 			t.Errorf("stored text = %q, want %q", got, want)
 		}
-		if stored.MediaID == nil {
-			t.Errorf("stored MediaID = nil, want %d", mediaID)
-		} else if got, want := *stored.MediaID, mediaID; got != want {
-			t.Errorf("stored MediaID = %d, want %d", got, want)
+		if stored.ImageMediaID == nil {
+			t.Errorf("stored ImageMediaID = nil, want %d", mediaID)
+		} else if got, want := *stored.ImageMediaID, mediaID; got != want {
+			t.Errorf("stored ImageMediaID = %d, want %d", got, want)
 		}
 		// Position is no longer driven by the form (#16); it stays put.
 		if got, want := stored.Position, question.Position; got != want {
@@ -1532,7 +1532,7 @@ func TestHandleQuestionSave(t *testing.T) {
 
 // TestHandleQuestionSave_Media covers the image-picker save paths (#937):
 // a same-quiz image attaches, a foreign image is rejected with a field error,
-// and an empty media_id detaches (NULL).
+// and an empty image_media_id detaches (NULL).
 func TestHandleQuestionSave_Media(t *testing.T) {
 	t.Parallel()
 
@@ -1553,8 +1553,8 @@ func TestHandleQuestionSave_Media(t *testing.T) {
 		handler := HandleQuestionSave(logger, nil, env.quizzes, env.media)
 
 		form := url.Values{
-			"text":     {question.Text},
-			"media_id": {strconv.FormatInt(foreignMediaID, 10)},
+			"text":           {question.Text},
+			"image_media_id": {strconv.FormatInt(foreignMediaID, 10)},
 		}
 		form.Add("option[0].id", strconv.FormatInt(question.Options[0].ID, 10))
 		form.Add("option[0].text", question.Options[0].Text)
@@ -1585,8 +1585,8 @@ func TestHandleQuestionSave_Media(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetQuestion err = %v, want nil", err)
 		}
-		if stored.MediaID != nil {
-			t.Errorf("stored MediaID = %d, want nil (foreign media rejected)", *stored.MediaID)
+		if stored.ImageMediaID != nil {
+			t.Errorf("stored ImageMediaID = %d, want nil (foreign media rejected)", *stored.ImageMediaID)
 		}
 	})
 
@@ -1600,7 +1600,7 @@ func TestHandleQuestionSave_Media(t *testing.T) {
 		question := qz.Questions[0]
 
 		// Pre-attach an image so the detach is observable.
-		question.MediaID = &mediaID
+		question.ImageMediaID = &mediaID
 		if err := env.quizzes.UpdateQuestion(t.Context(), question); err != nil {
 			t.Fatalf("seed attach err = %v, want nil", err)
 		}
@@ -1608,8 +1608,8 @@ func TestHandleQuestionSave_Media(t *testing.T) {
 		handler := HandleQuestionSave(logger, nil, env.quizzes, env.media)
 
 		form := url.Values{
-			"text":     {question.Text},
-			"media_id": {""},
+			"text":           {question.Text},
+			"image_media_id": {""},
 		}
 		form.Add("option[0].id", strconv.FormatInt(question.Options[0].ID, 10))
 		form.Add("option[0].text", question.Options[0].Text)
@@ -1636,8 +1636,8 @@ func TestHandleQuestionSave_Media(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetQuestion err = %v, want nil", err)
 		}
-		if stored.MediaID != nil {
-			t.Errorf("stored MediaID = %d, want nil after detach", *stored.MediaID)
+		if stored.ImageMediaID != nil {
+			t.Errorf("stored ImageMediaID = %d, want nil after detach", *stored.ImageMediaID)
 		}
 	})
 }
@@ -1656,7 +1656,7 @@ func TestHandleQuestionEdit_Picker(t *testing.T) {
 		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz One", "quiz-one"))
 		mediaID := env.seedMedia(t, qz.ID)
 		question := qz.Questions[0]
-		question.MediaID = &mediaID
+		question.ImageMediaID = &mediaID
 		if err := env.quizzes.UpdateQuestion(t.Context(), question); err != nil {
 			t.Fatalf("seed attach err = %v, want nil", err)
 		}

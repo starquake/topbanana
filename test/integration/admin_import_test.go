@@ -331,7 +331,7 @@ func TestAdminImport_Integration(t *testing.T) {
 	t.Run("rejects a per-question imageUrl field", func(t *testing.T) {
 		t.Parallel()
 		// #937: questions now reference an uploaded library image by
-		// media_id, not a free-text URL, and the import cannot point at
+		// image_media_id, not a free-text URL, and the import cannot point at
 		// uploaded media. The legacy imageUrl field was dropped from the
 		// wire shape, so a payload still carrying it is rejected by
 		// DisallowUnknownFields rather than silently ignored.

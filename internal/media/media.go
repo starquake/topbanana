@@ -7,10 +7,14 @@ import (
 )
 
 // TypeImage is the media.type value for an image row. The column is
-// type-discriminated (image|video|sound) so the same table and per-quiz
-// directory carry sound and video later without a schema change; only image
-// is produced today.
+// type-discriminated (image|video|audio) so the same table and per-quiz
+// directory carry audio and video without a schema change.
 const TypeImage = "image"
+
+// TypeAudio is the media.type value for an audio row (#1059). Audio is stored
+// as-is (no server-side transcoding); only already-browser-playable formats are
+// accepted.
+const TypeAudio = "audio"
 
 // ErrMediaNotFound is returned when a media id does not name a row.
 var ErrMediaNotFound = errors.New("media not found")
@@ -25,16 +29,20 @@ var ErrPathEscapesRoot = errors.New("media path escapes root")
 // resolves them against that root rather than trusting an absolute path from
 // the DB.
 type Media struct {
-	ID                int64
-	QuizID            int64
-	Type              string
-	MIME              string
-	Path              string
-	ThumbPath         string
-	Width             int
-	Height            int
-	SizeBytes         int64
-	SHA256            string
+	ID        int64
+	QuizID    int64
+	Type      string
+	MIME      string
+	Path      string
+	ThumbPath string
+	Width     int
+	Height    int
+	SizeBytes int64
+	SHA256    string
+	// DurationMs is the playback length of an audio row in milliseconds, or nil
+	// when unknown (#1059). It is advisory and supplied by the caller, since
+	// audio is not decoded server-side; an image row leaves it nil.
+	DurationMs        *int
 	CreatedByPlayerID int64
 	CreatedAt         time.Time
 }
@@ -56,7 +64,8 @@ type Store interface {
 	// assigned id and created_at populated. The row's Path and ThumbPath may be
 	// empty at insert time; they are filled in via UpdateMediaPaths once the
 	// assigned id names the on-disk files. MarkMediaReady flips it ready once
-	// the files are written and the paths recorded.
+	// the files are written and the paths recorded. DurationMs is persisted as
+	// supplied (nil stores NULL) for audio rows.
 	CreateMedia(ctx context.Context, m *Media) (*Media, error)
 	// UpdateMediaPaths sets the on-disk paths of a media row after its files are
 	// written. Returns ErrMediaNotFound when no row matched.

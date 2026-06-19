@@ -667,7 +667,7 @@ func newSessionQuestionResponse(state *livesession.SessionState) *sessionQuestio
 		ID:                q.ID,
 		RoundID:           q.RoundID,
 		Text:              q.Text,
-		ImageURL:          mediaURL(q.MediaID),
+		ImageURL:          mediaURL(q.ImageMediaID),
 		Position:          questionPosition(state.Quiz, q.ID),
 		Total:             len(state.Quiz.Questions),
 		RoundNumber:       round.RoundNumber,

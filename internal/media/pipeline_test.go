@@ -69,7 +69,7 @@ func TestProcessAcceptedFormats(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := Process(bytes.NewReader(raw))
+			got, err := Process(bytes.NewReader(raw), MaxUploadBytes)
 			if err != nil {
 				t.Fatalf("Process(%s) err = %v, want nil", name, err)
 			}
@@ -93,7 +93,7 @@ func TestProcessRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	raw := encodePNG(t, gradient(800, 600))
-	got, err := Process(bytes.NewReader(raw))
+	got, err := Process(bytes.NewReader(raw), MaxUploadBytes)
 	if err != nil {
 		t.Fatalf("Process err = %v, want nil", err)
 	}
@@ -132,7 +132,7 @@ func TestProcessDownscalesLongEdge(t *testing.T) {
 
 	// 3200x1600: long edge double MaxLongEdge, 2:1 aspect ratio.
 	raw := encodePNG(t, gradient(3200, 1600))
-	got, err := Process(bytes.NewReader(raw))
+	got, err := Process(bytes.NewReader(raw), MaxUploadBytes)
 	if err != nil {
 		t.Fatalf("Process err = %v, want nil", err)
 	}
@@ -162,7 +162,7 @@ func TestProcessNeverUpscales(t *testing.T) {
 	t.Parallel()
 
 	raw := encodePNG(t, gradient(100, 60))
-	got, err := Process(bytes.NewReader(raw))
+	got, err := Process(bytes.NewReader(raw), MaxUploadBytes)
 	if err != nil {
 		t.Fatalf("Process err = %v, want nil", err)
 	}
@@ -180,11 +180,11 @@ func TestProcessSHA256Deterministic(t *testing.T) {
 
 	raw := encodePNG(t, gradient(640, 480))
 
-	first, err := Process(bytes.NewReader(raw))
+	first, err := Process(bytes.NewReader(raw), MaxUploadBytes)
 	if err != nil {
 		t.Fatalf("Process #1 err = %v, want nil", err)
 	}
-	second, err := Process(bytes.NewReader(raw))
+	second, err := Process(bytes.NewReader(raw), MaxUploadBytes)
 	if err != nil {
 		t.Fatalf("Process #2 err = %v, want nil", err)
 	}
@@ -200,15 +200,36 @@ func TestProcessSHA256Deterministic(t *testing.T) {
 	}
 }
 
-// TestProcessRejectsOversize pins the raw-size guard: an upload past
-// MaxUploadBytes is rejected before decode.
+// TestProcessRejectsOversize pins the raw-size guard: an upload past the cap is
+// rejected before decode.
 func TestProcessRejectsOversize(t *testing.T) {
 	t.Parallel()
 
 	oversize := bytes.Repeat([]byte{0xff}, MaxUploadBytes+1)
-	_, err := Process(bytes.NewReader(oversize))
+	_, err := Process(bytes.NewReader(oversize), MaxUploadBytes)
 	if got, want := err, ErrUploadTooLarge; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
+	}
+}
+
+// TestProcessHonorsCustomCap pins that the cap is the maxBytes argument, not a
+// fixed constant: an image the default cap accepts is rejected under a tiny cap.
+func TestProcessHonorsCustomCap(t *testing.T) {
+	t.Parallel()
+
+	raw := encodePNG(t, gradient(200, 120))
+	if int64(len(raw)) > MaxUploadBytes {
+		t.Fatalf("test input %d bytes exceeds the default cap %d", len(raw), MaxUploadBytes)
+	}
+
+	if _, err := Process(bytes.NewReader(raw), MaxUploadBytes); err != nil {
+		t.Fatalf("Process under default cap err = %v, want nil", err)
+	}
+
+	tinyCap := int64(len(raw) - 1)
+	_, err := Process(bytes.NewReader(raw), tinyCap)
+	if got, want := err, ErrUploadTooLarge; !errors.Is(got, want) {
+		t.Errorf("err under tiny cap = %v, want %v", got, want)
 	}
 }
 
@@ -216,7 +237,7 @@ func TestProcessRejectsOversize(t *testing.T) {
 func TestProcessRejectsEmpty(t *testing.T) {
 	t.Parallel()
 
-	_, err := Process(bytes.NewReader(nil))
+	_, err := Process(bytes.NewReader(nil), MaxUploadBytes)
 	if got, want := err, ErrEmptyUpload; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
@@ -228,7 +249,7 @@ func TestProcessRejectsEmpty(t *testing.T) {
 func TestProcessRejectsNonImage(t *testing.T) {
 	t.Parallel()
 
-	_, err := Process(bytes.NewReader([]byte("this is plainly not an image at all")))
+	_, err := Process(bytes.NewReader([]byte("this is plainly not an image at all")), MaxUploadBytes)
 	if got, want := err, ErrUnsupportedImage; !errors.Is(got, want) {
 		t.Errorf("err = %v, want %v", got, want)
 	}
@@ -254,7 +275,7 @@ func TestProcess_Concurrent(t *testing.T) {
 	for range workers {
 		go func() {
 			defer wg.Done()
-			if _, err := Process(bytes.NewReader(inputPNG)); err != nil {
+			if _, err := Process(bytes.NewReader(inputPNG), MaxUploadBytes); err != nil {
 				t.Errorf("Process err = %v, want nil", err)
 			}
 		}()
@@ -300,7 +321,7 @@ func TestProcess_RejectsDecodeBomb(t *testing.T) {
 		t.Fatalf("bomb header = %d bytes, want a tiny file", got)
 	}
 
-	_, err := Process(bytes.NewReader(bomb))
+	_, err := Process(bytes.NewReader(bomb), MaxUploadBytes)
 	if got, want := err, ErrImageTooLarge; !errors.Is(got, want) {
 		t.Errorf("Process(decode bomb) err = %v, want %v", got, want)
 	}

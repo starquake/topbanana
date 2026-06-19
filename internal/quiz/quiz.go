@@ -355,13 +355,19 @@ type Question struct {
 	// the caller leaves it zero.
 	RoundID int64
 	Text    string
-	// MediaID references an uploaded image in the question's own quiz
+	// ImageMediaID references an uploaded image in the question's own quiz
 	// library (#937). Nil means no image attached. The referenced media
 	// row is quiz-scoped; the admin save handler validates same-quiz
-	// ownership before persisting. media.media_id ON DELETE SET NULL clears
-	// this when the image is deleted, so a moderated image leaves the
+	// ownership before persisting. The questions.image_media_id foreign key is
+	// ON DELETE SET NULL, so deleting the image clears this and leaves the
 	// question intact minus its picture (#936).
-	MediaID          *int64
+	ImageMediaID *int64
+	// AudioMediaID references an uploaded sound in the question's own quiz
+	// library (#1059). Nil means no sound attached. It is separate from
+	// ImageMediaID so a question can carry both an image and a sound. The
+	// questions.audio_media_id foreign key is ON DELETE SET NULL, so deleting
+	// the sound clears this and leaves the question intact minus its audio.
+	AudioMediaID     *int64
 	Position         int
 	TimeLimitSeconds *int
 	Options          []*Option

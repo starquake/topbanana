@@ -92,6 +92,7 @@ type Medium struct {
 	CreatedByPlayerID int64
 	CreatedAt         time.Time
 	Ready             int64
+	DurationMs        sql.NullInt64
 }
 
 type Option struct {
@@ -137,7 +138,8 @@ type Question struct {
 	Text             string
 	Position         int64
 	TimeLimitSeconds sql.NullInt64
-	MediaID          sql.NullInt64
+	ImageMediaID     sql.NullInt64
+	AudioMediaID     sql.NullInt64
 }
 
 type Quiz struct {

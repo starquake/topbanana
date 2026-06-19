@@ -63,14 +63,14 @@
                      data-testid="question-image-picker"
                      {{if $mediaErr}}aria-describedby="media-error"{{end}}>
                     <label class="group relative flex aspect-square cursor-pointer items-center justify-center rounded-lg border border-border-soft bg-surface text-center text-xs text-text-dim has-[:checked]:border-accent has-[:checked]:text-text has-[:focus-visible]:shadow-focus">
-                        <input type="radio" name="media_id" value="" class="sr-only"
-                               {{if eq .Question.MediaID 0}}checked{{end}}>
+                        <input type="radio" name="image_media_id" value="" class="sr-only"
+                               {{if eq .Question.ImageMediaID 0}}checked{{end}}>
                         None
                     </label>
                     {{range .Library}}
                         <label class="group relative block aspect-square cursor-pointer overflow-hidden rounded-lg border border-border-soft bg-surface has-[:checked]:border-accent has-[:focus-visible]:shadow-focus">
-                            <input type="radio" name="media_id" value="{{.ID}}" class="sr-only peer"
-                                   {{if eq $.Question.MediaID .ID}}checked{{end}}>
+                            <input type="radio" name="image_media_id" value="{{.ID}}" class="sr-only peer"
+                                   {{if eq $.Question.ImageMediaID .ID}}checked{{end}}>
                             <img src="/media/{{.ID}}/thumb"
                                  alt="Quiz image {{.ID}}"
                                  loading="lazy"
@@ -87,7 +87,7 @@
                     {{end}}
                 </div>
             {{else}}
-                <input type="hidden" name="media_id" value="">
+                <input type="hidden" name="image_media_id" value="">
                 <p class="text-text-dim text-[0.95rem]">
                     No images in this quiz's library yet.
                     <a href="/admin/quizzes/{{.Quiz.ID}}" class="text-accent underline">Upload images on the quiz page first</a>

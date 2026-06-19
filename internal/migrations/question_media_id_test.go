@@ -8,7 +8,7 @@ import (
 )
 
 // TestQuestionMediaIDMigration_ColumnSwap pins the #937 schema swap: questions
-// gains a nullable media_id with a foreign key to media, and the legacy
+// gains a nullable image_media_id with a foreign key to media, and the legacy
 // image_url column is gone.
 func TestQuestionMediaIDMigration_ColumnSwap(t *testing.T) {
 	t.Parallel()
@@ -21,8 +21,8 @@ func TestQuestionMediaIDMigration_ColumnSwap(t *testing.T) {
 	})
 
 	cols := tableColumns(t, db, "questions")
-	if !cols["media_id"] {
-		t.Error("questions is missing the media_id column")
+	if !cols["image_media_id"] {
+		t.Error("questions is missing the image_media_id column")
 	}
 	if cols["image_url"] {
 		t.Error("questions still has the image_url column, want it dropped")
@@ -35,7 +35,7 @@ func TestQuestionMediaIDMigration_ColumnSwap(t *testing.T) {
 
 // TestQuestionMediaIDMigration_DeleteSetsNull pins the ON DELETE SET NULL rule
 // (#936 moderation): deleting an image clears it off any question referencing
-// it - the question survives, just loses its media_id.
+// it - the question survives, just loses its image_media_id.
 func TestQuestionMediaIDMigration_DeleteSetsNull(t *testing.T) {
 	t.Parallel()
 
@@ -57,15 +57,15 @@ func TestQuestionMediaIDMigration_DeleteSetsNull(t *testing.T) {
 		t.Fatalf("delete media err = %v, want nil", err)
 	}
 
-	// The question must survive the image delete, with a NULL media_id.
+	// The question must survive the image delete, with a NULL image_media_id.
 	var got sql.NullInt64
 	if err := db.QueryRowContext(
-		t.Context(), "SELECT media_id FROM questions WHERE id = ?", questionID,
+		t.Context(), "SELECT image_media_id FROM questions WHERE id = ?", questionID,
 	).Scan(&got); err != nil {
-		t.Fatalf("read question media_id err = %v, want nil (question must survive)", err)
+		t.Fatalf("read question image_media_id err = %v, want nil (question must survive)", err)
 	}
 	if got.Valid {
-		t.Errorf("question media_id = %d after image delete, want NULL (ON DELETE SET NULL)", got.Int64)
+		t.Errorf("question image_media_id = %d after image delete, want NULL (ON DELETE SET NULL)", got.Int64)
 	}
 }
 
@@ -76,7 +76,7 @@ func seedQuestionWithMedia(t *testing.T, db *sql.DB, quizID, roundID, mediaID in
 	var id int64
 	if err := db.QueryRowContext(
 		t.Context(),
-		`INSERT INTO questions (quiz_id, round_id, text, position, media_id)
+		`INSERT INTO questions (quiz_id, round_id, text, position, image_media_id)
 		 VALUES (?, ?, 'Q', 1, ?) RETURNING id`,
 		quizID, roundID, mediaID,
 	).Scan(&id); err != nil {

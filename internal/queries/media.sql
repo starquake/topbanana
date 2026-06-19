@@ -11,7 +11,7 @@
 -- and the not-ready sweep drops the stranded row plus its files.
 INSERT INTO media (
     quiz_id, type, mime, path, thumb_path,
-    width, height, size_bytes, sha256, created_by_player_id, ready
+    width, height, size_bytes, sha256, duration_ms, created_by_player_id, ready
 )
 VALUES (
     sqlc.arg('quiz_id'),
@@ -23,6 +23,7 @@ VALUES (
     sqlc.arg('height'),
     sqlc.arg('size_bytes'),
     sqlc.arg('sha256'),
+    sqlc.arg('duration_ms'),
     sqlc.arg('created_by_player_id'),
     0
 )

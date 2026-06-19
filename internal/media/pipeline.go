@@ -17,14 +17,18 @@ import (
 	"image/jpeg"
 	_ "image/png" // register the png decoder with image.Decode
 	"io"
+	"math"
 
 	"golang.org/x/image/draw"
 )
 
 const (
-	// MaxUploadBytes caps the raw upload size (~10 MB). A larger upload is
-	// rejected before decode so a hostile or accidental huge file cannot make
-	// the decoder allocate unbounded memory.
+	// MaxUploadBytes is the documented default cap on the raw upload size
+	// (~10 MB). The runtime cap is configurable (MEDIA_IMAGE_MAX_BYTES, threaded
+	// through Service into Process); this constant remains the default value and
+	// the basis for the multipart request envelope in internal/mediahttp. A
+	// larger upload is rejected before decode so a hostile or accidental huge
+	// file cannot make the decoder allocate unbounded memory.
 	MaxUploadBytes = 10 << 20
 
 	// MaxPixels caps the decoded pixel area (~50 megapixels). The byte cap does
@@ -55,7 +59,7 @@ const (
 	MIMEJPEG = "image/jpeg"
 )
 
-// ErrUploadTooLarge is returned when the raw upload exceeds MaxUploadBytes.
+// ErrUploadTooLarge is returned when the raw upload exceeds the configured cap.
 var ErrUploadTooLarge = errors.New("upload exceeds maximum size")
 
 // ErrEmptyUpload is returned when the upload contains no bytes.
@@ -93,13 +97,14 @@ type Processed struct {
 // Process decodes the upload (jpeg or png), downscales it so its long edge is
 // at most MaxLongEdge, re-encodes it as lossy jpeg, and derives a
 // ThumbLongEdge jpeg thumbnail from the same decoded source. It is pure: no
-// disk or network. The reader is fully consumed.
+// disk or network. The reader is fully consumed. maxBytes caps the raw upload
+// size; zero or negative disables the cap.
 //
-// Returns ErrUploadTooLarge when the raw bytes exceed MaxUploadBytes,
-// ErrEmptyUpload for a zero-byte upload, and ErrUnsupportedImage when the
-// bytes are not a decodable jpeg or png.
-func Process(r io.Reader) (*Processed, error) {
-	raw, err := readCapped(r)
+// Returns ErrUploadTooLarge when the raw bytes exceed maxBytes, ErrEmptyUpload
+// for a zero-byte upload, and ErrUnsupportedImage when the bytes are not a
+// decodable jpeg or png.
+func Process(r io.Reader, maxBytes int64) (*Processed, error) {
+	raw, err := readCapped(r, maxBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -157,18 +162,31 @@ func decodeGuarded(raw []byte) (image.Image, error) {
 	return src, nil
 }
 
-// readCapped reads at most MaxUploadBytes+1 from r so the result both holds the
-// whole upload (when within the cap) and detects an over-cap upload by the
-// extra byte. An empty upload is rejected.
-func readCapped(r io.Reader) ([]byte, error) {
-	raw, err := io.ReadAll(io.LimitReader(r, MaxUploadBytes+1))
+// readCapped reads the upload, capping it at maxBytes (plus one byte to detect
+// an over-cap upload). A zero or negative cap disables the limit. An empty
+// upload is rejected.
+func readCapped(r io.Reader, maxBytes int64) ([]byte, error) {
+	reader := r
+	if maxBytes > 0 {
+		// Saturate the read limit rather than computing maxBytes+1: a cap at
+		// math.MaxInt64 would overflow to a negative limit, which LimitReader
+		// treats as "read nothing" and would fail every upload as empty. At the
+		// saturated limit the over-cap check below is unreachable, but a cap that
+		// high is effectively no cap.
+		limit := int64(math.MaxInt64)
+		if maxBytes < math.MaxInt64 {
+			limit = maxBytes + 1
+		}
+		reader = io.LimitReader(r, limit)
+	}
+	raw, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, fmt.Errorf("reading upload: %w", err)
 	}
 	if len(raw) == 0 {
 		return nil, ErrEmptyUpload
 	}
-	if len(raw) > MaxUploadBytes {
+	if maxBytes > 0 && int64(len(raw)) > maxBytes {
 		return nil, ErrUploadTooLarge
 	}
 

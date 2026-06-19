@@ -233,7 +233,7 @@ func quizGetQuestions(qz *quiz.Quiz) []quizGetQuestionResponse {
 			ID:       qs.ID,
 			Text:     qs.Text,
 			Position: qs.Position,
-			ImageURL: mediaURL(qs.MediaID),
+			ImageURL: mediaURL(qs.ImageMediaID),
 			Options:  opts,
 		})
 	}
@@ -939,7 +939,7 @@ func writeQuestionItem(
 		Type:           string(game.ItemTypeQuestion),
 		ID:             gq.QuizQuestion.ID,
 		Text:           gq.QuizQuestion.Text,
-		ImageURL:       mediaURL(gq.QuizQuestion.MediaID),
+		ImageURL:       mediaURL(gq.QuizQuestion.ImageMediaID),
 		Options:        resOptions,
 		StartedAt:      gq.StartedAt,
 		ExpiredAt:      gq.ExpiredAt,

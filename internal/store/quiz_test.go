@@ -1658,10 +1658,10 @@ func seedQuizMedia(t *testing.T, db *sql.DB, quizID int64) int64 {
 	return created.ID
 }
 
-func TestQuizStore_MediaID(t *testing.T) {
+func TestQuizStore_ImageMediaID(t *testing.T) {
 	t.Parallel()
 
-	t.Run("create question persists media_id", func(t *testing.T) {
+	t.Run("create question persists image_media_id", func(t *testing.T) {
 		t.Parallel()
 
 		db := dbtest.Open(t)
@@ -1674,11 +1674,11 @@ func TestQuizStore_MediaID(t *testing.T) {
 		mediaID := seedQuizMedia(t, db, testQuiz.ID)
 
 		q := &quiz.Question{
-			QuizID:   testQuiz.ID,
-			Text:     "What is shown in the image?",
-			Position: 99,
-			MediaID:  &mediaID,
-			Options:  []*quiz.Option{{Text: "A cat", Correct: true}},
+			QuizID:       testQuiz.ID,
+			Text:         "What is shown in the image?",
+			Position:     99,
+			ImageMediaID: &mediaID,
+			Options:      []*quiz.Option{{Text: "A cat", Correct: true}},
 		}
 		if err := quizStore.CreateQuestion(t.Context(), q); err != nil {
 			t.Fatalf("failed to create question: %v", err)
@@ -1688,15 +1688,15 @@ func TestQuizStore_MediaID(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to get question: %v", err)
 		}
-		if qs.MediaID == nil {
-			t.Fatalf("GetQuestion MediaID = nil, want %d", mediaID)
+		if qs.ImageMediaID == nil {
+			t.Fatalf("GetQuestion ImageMediaID = nil, want %d", mediaID)
 		}
-		if got, want := *qs.MediaID, mediaID; got != want {
-			t.Errorf("GetQuestion MediaID = %d, want %d", got, want)
+		if got, want := *qs.ImageMediaID, mediaID; got != want {
+			t.Errorf("GetQuestion ImageMediaID = %d, want %d", got, want)
 		}
 	})
 
-	t.Run("update question persists and clears media_id", func(t *testing.T) {
+	t.Run("update question persists and clears image_media_id", func(t *testing.T) {
 		t.Parallel()
 
 		db := dbtest.Open(t)
@@ -1710,12 +1710,12 @@ func TestQuizStore_MediaID(t *testing.T) {
 
 		original := testQuiz.Questions[0]
 		attached := &quiz.Question{
-			ID:       original.ID,
-			QuizID:   testQuiz.ID,
-			Text:     original.Text,
-			Position: original.Position,
-			MediaID:  &mediaID,
-			Options:  original.Options,
+			ID:           original.ID,
+			QuizID:       testQuiz.ID,
+			Text:         original.Text,
+			Position:     original.Position,
+			ImageMediaID: &mediaID,
+			Options:      original.Options,
 		}
 		if err := quizStore.UpdateQuestion(t.Context(), attached); err != nil {
 			t.Fatalf("failed to update question: %v", err)
@@ -1725,18 +1725,18 @@ func TestQuizStore_MediaID(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to get question: %v", err)
 		}
-		if qs.MediaID == nil || *qs.MediaID != mediaID {
-			t.Fatalf("GetQuestion MediaID = %v, want %d", qs.MediaID, mediaID)
+		if qs.ImageMediaID == nil || *qs.ImageMediaID != mediaID {
+			t.Fatalf("GetQuestion ImageMediaID = %v, want %d", qs.ImageMediaID, mediaID)
 		}
 
-		// A nil MediaID on a later save clears the attachment (NULL).
+		// A nil ImageMediaID on a later save clears the attachment (NULL).
 		detached := &quiz.Question{
-			ID:       original.ID,
-			QuizID:   testQuiz.ID,
-			Text:     original.Text,
-			Position: original.Position,
-			MediaID:  nil,
-			Options:  original.Options,
+			ID:           original.ID,
+			QuizID:       testQuiz.ID,
+			Text:         original.Text,
+			Position:     original.Position,
+			ImageMediaID: nil,
+			Options:      original.Options,
 		}
 		if err = quizStore.UpdateQuestion(t.Context(), detached); err != nil {
 			t.Fatalf("failed to update question: %v", err)
@@ -1745,12 +1745,12 @@ func TestQuizStore_MediaID(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to get question: %v", err)
 		}
-		if qs.MediaID != nil {
-			t.Errorf("GetQuestion MediaID = %v, want nil after detach", *qs.MediaID)
+		if qs.ImageMediaID != nil {
+			t.Errorf("GetQuestion ImageMediaID = %v, want nil after detach", *qs.ImageMediaID)
 		}
 	})
 
-	t.Run("list questions includes media_id", func(t *testing.T) {
+	t.Run("list questions includes image_media_id", func(t *testing.T) {
 		t.Parallel()
 
 		db := dbtest.Open(t)
@@ -1763,7 +1763,7 @@ func TestQuizStore_MediaID(t *testing.T) {
 		mediaID := seedQuizMedia(t, db, testQuiz.ID)
 
 		target := testQuiz.Questions[0]
-		target.MediaID = &mediaID
+		target.ImageMediaID = &mediaID
 		if err := quizStore.UpdateQuestion(t.Context(), target); err != nil {
 			t.Fatalf("failed to update question: %v", err)
 		}
@@ -1777,8 +1777,8 @@ func TestQuizStore_MediaID(t *testing.T) {
 		for _, q := range questions {
 			if q.ID == target.ID {
 				found = true
-				if q.MediaID == nil || *q.MediaID != mediaID {
-					t.Errorf("ListQuestions MediaID = %v, want %d", q.MediaID, mediaID)
+				if q.ImageMediaID == nil || *q.ImageMediaID != mediaID {
+					t.Errorf("ListQuestions ImageMediaID = %v, want %d", q.ImageMediaID, mediaID)
 				}
 			}
 		}
@@ -1787,7 +1787,7 @@ func TestQuizStore_MediaID(t *testing.T) {
 		}
 	})
 
-	t.Run("deleting attached media clears the question's media_id", func(t *testing.T) {
+	t.Run("deleting attached media clears the question's image_media_id", func(t *testing.T) {
 		t.Parallel()
 
 		db := dbtest.Open(t)
@@ -1801,7 +1801,7 @@ func TestQuizStore_MediaID(t *testing.T) {
 		mediaID := seedQuizMedia(t, db, testQuiz.ID)
 
 		target := testQuiz.Questions[0]
-		target.MediaID = &mediaID
+		target.ImageMediaID = &mediaID
 		if err := quizStore.UpdateQuestion(t.Context(), target); err != nil {
 			t.Fatalf("failed to update question: %v", err)
 		}
@@ -1814,8 +1814,181 @@ func TestQuizStore_MediaID(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetQuestion err = %v, want nil (question must survive media delete)", err)
 		}
-		if qs.MediaID != nil {
-			t.Errorf("GetQuestion MediaID = %v, want nil after image delete (ON DELETE SET NULL)", *qs.MediaID)
+		if qs.ImageMediaID != nil {
+			t.Errorf(
+				"GetQuestion ImageMediaID = %v, want nil after image delete (ON DELETE SET NULL)",
+				*qs.ImageMediaID,
+			)
+		}
+	})
+}
+
+func TestQuizStore_AudioMediaID(t *testing.T) {
+	t.Parallel()
+
+	t.Run("create question persists audio_media_id alongside image_media_id", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+		imageID := seedQuizMedia(t, db, testQuiz.ID)
+		audioID := seedQuizMedia(t, db, testQuiz.ID)
+
+		q := &quiz.Question{
+			QuizID:       testQuiz.ID,
+			Text:         "What is this sound?",
+			Position:     99,
+			ImageMediaID: &imageID,
+			AudioMediaID: &audioID,
+			Options:      []*quiz.Option{{Text: "A bell", Correct: true}},
+		}
+		if err := quizStore.CreateQuestion(t.Context(), q); err != nil {
+			t.Fatalf("failed to create question: %v", err)
+		}
+
+		qs, err := quizStore.GetQuestion(t.Context(), q.ID)
+		if err != nil {
+			t.Fatalf("failed to get question: %v", err)
+		}
+		if qs.AudioMediaID == nil {
+			t.Fatalf("GetQuestion AudioMediaID = nil, want %d", audioID)
+		}
+		if got, want := *qs.AudioMediaID, audioID; got != want {
+			t.Errorf("GetQuestion AudioMediaID = %d, want %d", got, want)
+		}
+		// A question carries both an image and a sound independently.
+		if qs.ImageMediaID == nil || *qs.ImageMediaID != imageID {
+			t.Errorf("GetQuestion ImageMediaID = %v, want %d", qs.ImageMediaID, imageID)
+		}
+	})
+
+	t.Run("update question persists and clears audio_media_id", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+		audioID := seedQuizMedia(t, db, testQuiz.ID)
+
+		original := testQuiz.Questions[0]
+		attached := &quiz.Question{
+			ID:           original.ID,
+			QuizID:       testQuiz.ID,
+			Text:         original.Text,
+			Position:     original.Position,
+			AudioMediaID: &audioID,
+			Options:      original.Options,
+		}
+		if err := quizStore.UpdateQuestion(t.Context(), attached); err != nil {
+			t.Fatalf("failed to update question: %v", err)
+		}
+
+		qs, err := quizStore.GetQuestion(t.Context(), original.ID)
+		if err != nil {
+			t.Fatalf("failed to get question: %v", err)
+		}
+		if qs.AudioMediaID == nil || *qs.AudioMediaID != audioID {
+			t.Fatalf("GetQuestion AudioMediaID = %v, want %d", qs.AudioMediaID, audioID)
+		}
+
+		detached := &quiz.Question{
+			ID:           original.ID,
+			QuizID:       testQuiz.ID,
+			Text:         original.Text,
+			Position:     original.Position,
+			AudioMediaID: nil,
+			Options:      original.Options,
+		}
+		if err = quizStore.UpdateQuestion(t.Context(), detached); err != nil {
+			t.Fatalf("failed to update question: %v", err)
+		}
+		qs, err = quizStore.GetQuestion(t.Context(), original.ID)
+		if err != nil {
+			t.Fatalf("failed to get question: %v", err)
+		}
+		if qs.AudioMediaID != nil {
+			t.Errorf("GetQuestion AudioMediaID = %v, want nil after detach", *qs.AudioMediaID)
+		}
+	})
+
+	t.Run("list questions includes audio_media_id", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+		audioID := seedQuizMedia(t, db, testQuiz.ID)
+
+		target := testQuiz.Questions[0]
+		target.AudioMediaID = &audioID
+		if err := quizStore.UpdateQuestion(t.Context(), target); err != nil {
+			t.Fatalf("failed to update question: %v", err)
+		}
+
+		questions, err := quizStore.ListQuestions(t.Context(), testQuiz.ID)
+		if err != nil {
+			t.Fatalf("failed to list questions: %v", err)
+		}
+
+		var found bool
+		for _, q := range questions {
+			if q.ID == target.ID {
+				found = true
+				if q.AudioMediaID == nil || *q.AudioMediaID != audioID {
+					t.Errorf("ListQuestions AudioMediaID = %v, want %d", q.AudioMediaID, audioID)
+				}
+			}
+		}
+		if !found {
+			t.Error("question not found in ListQuestions result")
+		}
+	})
+
+	t.Run("deleting attached sound clears the question's audio_media_id", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		mediaStore := NewMediaStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+		audioID := seedQuizMedia(t, db, testQuiz.ID)
+
+		target := testQuiz.Questions[0]
+		target.AudioMediaID = &audioID
+		if err := quizStore.UpdateQuestion(t.Context(), target); err != nil {
+			t.Fatalf("failed to update question: %v", err)
+		}
+
+		if err := mediaStore.DeleteMedia(t.Context(), audioID); err != nil {
+			t.Fatalf("DeleteMedia err = %v, want nil", err)
+		}
+
+		qs, err := quizStore.GetQuestion(t.Context(), target.ID)
+		if err != nil {
+			t.Fatalf("GetQuestion err = %v, want nil (question must survive sound delete)", err)
+		}
+		if qs.AudioMediaID != nil {
+			t.Errorf(
+				"GetQuestion AudioMediaID = %v, want nil after sound delete (ON DELETE SET NULL)",
+				*qs.AudioMediaID,
+			)
 		}
 	})
 }

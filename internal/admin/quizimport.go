@@ -400,7 +400,7 @@ func fillQuizFromRounds(qz *quiz.Quiz, rounds []quizImportRoundPayload) error {
 // questionFromImportPayload maps one import question onto the domain
 // type at the given quiz-wide position. Imported questions never carry an
 // image: the JSON import cannot reference uploaded media (which is keyed by a
-// per-quiz media id, not a URL), so MediaID stays nil (#937).
+// per-quiz media id, not a URL), so ImageMediaID stays nil (#937).
 func questionFromImportPayload(qIn quizImportQuestionPayload, position int) *quiz.Question {
 	qs := &quiz.Question{
 		Text:     qIn.Text,
