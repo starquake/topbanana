@@ -83,6 +83,7 @@
                  the header stays on the enter-code, name, lobby, round_intro,
                  round_results, intermission, and finished screens. -->
             <header x-show="!inActiveQuestion()"
+                    data-testid="player-header"
                     class="mb-10 flex items-center justify-between gap-4">
                 <h1 class="m-0 font-display font-extrabold text-2xl tracking-wide uppercase">
                     {{template "brand-mark" .}}

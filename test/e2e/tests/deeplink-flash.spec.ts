@@ -159,12 +159,13 @@ test('deep-link to an already-completed quiz paints the leaderboard once, not be
 
   await page.goto(playUrl, { waitUntil: 'commit' });
 
-  // Positive anchor: the anonymous claim CTA renders independent of
-  // startStateResolved (it gates only on !isAuthenticated() && !gameId), so
-  // waiting for it proves Alpine has booted and we are genuinely in the
-  // start-state-pending window — not merely observing a pre-boot blank page,
-  // which would make the "hidden" assertions below pass for the wrong reason.
-  await expect(page.getByTestId('claim-cta-name')).toBeVisible();
+  // Positive anchor: the player header (brand mark) renders as soon as Alpine
+  // boots, independent of startStateResolved, so waiting for it proves we are
+  // genuinely in the start-state-pending window — not merely observing a
+  // pre-boot blank page, which would make the "hidden" assertions below pass
+  // for the wrong reason. The claim CTA is itself gated on startStateResolved
+  // now, so it can no longer serve as the pre-resolution anchor.
+  await expect(page.getByTestId('player-header')).toBeVisible();
 
   // While /my-game is pending, startStateResolved is false: the leaderboard,
   // the "Game Finished!" header, and the start-screen action cluster must all
@@ -175,12 +176,16 @@ test('deep-link to an already-completed quiz paints the leaderboard once, not be
   await expect(page.getByRole('heading', { name: 'Game Finished!' })).toBeHidden();
   await expect(page.getByRole('button', { name: 'Start Game' })).toBeHidden();
   await expect(page.locator('[data-testid="deep-link-header"]')).toHaveCount(0);
+  // The claim / display-name block is gated on startStateResolved too, so it
+  // must not paint in the pending window.
+  await expect(page.getByTestId('claim-cta-name')).toHaveCount(0);
 
   // Release the probe: the resolved completed view now paints in one tick.
   release();
 
   await expect(page.getByRole('heading', { name: 'Game Finished!' })).toBeVisible();
   await expect(page.locator('[data-testid="leaderboard-section"]')).toBeVisible();
+  await expect(page.getByTestId('claim-cta-name')).toBeVisible();
   // Structural sanity check: the finished header sits above the leaderboard.
   const finishedBox = await page.getByRole('heading', { name: 'Game Finished!' }).boundingBox();
   const tableBox = await page.locator('[data-testid="leaderboard-section"]').boundingBox();
@@ -209,10 +214,10 @@ test('deep-link to a not-completed quiz paints the header and leaderboard togeth
 
   await page.goto(url, { waitUntil: 'commit' });
 
-  // Positive anchor: the anonymous claim CTA renders independent of
-  // startStateResolved, so waiting for it proves Alpine booted and we are in
-  // the pending window before the "hidden" assertions run.
-  await expect(page.getByTestId('claim-cta-name')).toBeVisible();
+  // Positive anchor: the player header (brand mark) renders as soon as Alpine
+  // boots, independent of startStateResolved, so waiting for it proves we are
+  // in the pending window before the "hidden" assertions run.
+  await expect(page.getByTestId('player-header')).toBeVisible();
 
   // While /my-game is pending, the deep-link header, the leaderboard, and the
   // Start cluster must all stay hidden — no piecemeal build-up. Under the bug
@@ -220,6 +225,8 @@ test('deep-link to a not-completed quiz paints the header and leaderboard togeth
   await expect(page.locator('[data-testid="deep-link-header"]')).toHaveCount(0);
   await expect(page.locator('[data-testid="leaderboard-section"]')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Start Game' })).toBeHidden();
+  // The claim / display-name block is gated on startStateResolved too.
+  await expect(page.getByTestId('claim-cta-name')).toHaveCount(0);
 
   release();
 
@@ -230,6 +237,7 @@ test('deep-link to a not-completed quiz paints the header and leaderboard togeth
   await expect(header).toBeVisible();
   await expect(page.getByRole('button', { name: 'Start Game' })).toBeVisible();
   await expect(page.locator('[data-testid="leaderboard-section"]')).toBeVisible();
+  await expect(page.getByTestId('claim-cta-name')).toBeVisible();
   const headerBox = await header.boundingBox();
   const tableBox = await page.locator('[data-testid="leaderboard-section"]').boundingBox();
   expect(headerBox).not.toBeNull();
