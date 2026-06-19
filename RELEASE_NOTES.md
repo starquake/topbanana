@@ -2,6 +2,37 @@
 
 What changed in each released version of Top Banana! The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.6.6 — 2026-06-19
+
+This release adds images to quiz questions, removes several brief flashes when play starts and when rounds change, and shows round and score details in the gameplay headers.
+
+### Players
+- A question can show an image on the solo play screen and the big screen.
+- The first question of a new round no longer briefly shows the previous question.
+- A link to a quiz already finished goes straight to the leaderboard without flashing the quiz title and description first.
+- The start screen no longer briefly shows the name and browse options before it finishes loading.
+- The solo and live play headers show the round number, the question number within the round, and the running score.
+- A question's image loads before the question appears.
+- The solo results leaderboard no longer reloads while it is on screen.
+- Opening "Manage quizzes" without being signed in goes to the login page instead of a sign-out screen.
+
+### Hosts
+- A question can be given an uploaded image instead of an image link.
+- Each quiz has an image library for uploading, viewing, and deleting images, and several images can be uploaded at once.
+- A library image opens in a larger view with a loading indicator while the full image loads.
+- A cancelled image upload no longer leaves an entry in the library.
+- The big screen shows the round and question numbers during a live question.
+- The quiz list keeps its edit and delete buttons reachable by showing at most two columns.
+- On a small screen the quiz list shows a note that hosting needs a larger screen instead of a cut-off host button.
+- Deleting a quiz or resetting a player updates in place without reloading the page.
+
+### Visual / chrome
+- The solo play screen aligns its image, answer colours, and verdict styling with the live answer pad and big screen.
+
+### Behind the scenes
+- A failed login can no longer lock another person out of their account.
+- Image uploads are capped per host.
+
 ## v2026.6.5 — 2026-06-13
 
 The quiz to host is picked from the host area instead of the admin section.
