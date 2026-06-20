@@ -116,7 +116,7 @@ func TestSessionRoundIntro_TitleSummaryAndPosition(t *testing.T) {
 	}
 
 	// Play round 1's single question so the runner advances into round 2.
-	playQuestion(ctx, t, ace, bee, baseURL, code)
+	playQuestion(ctx, t, ace, bee, baseURL, code, qz)
 
 	// Second round_intro: the second round's title, and a position past the
 	// first round so a surface knows it is not the first round.

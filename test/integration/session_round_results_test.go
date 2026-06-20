@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
@@ -105,12 +106,14 @@ func waitForResultsAnswersOpen(
 }
 
 // playQuestion drives one question to close: it waits for the question phase,
-// has the winner pick the correct option (index 0) and the loser the wrong one
-// (index 1) on the SAME question, then waits until that question leaves the
-// question phase (early close on all-answered). Returns the question id so the
-// caller can confirm each call advanced to a distinct question.
+// has the winner pick the seeded-correct option and the loser a wrong one on
+// the SAME question, then waits until that question leaves the question phase
+// (early close on all-answered). Returns the question id so the caller can
+// confirm each call advanced to a distinct question. The correct option is
+// resolved from the seeded quiz by id, not by display position, because the
+// live answer set is shuffled per session (#1074).
 func playQuestion(
-	ctx context.Context, t *testing.T, winner, loser *http.Client, baseURL, code string,
+	ctx context.Context, t *testing.T, winner, loser *http.Client, baseURL, code string, qz *quiz.Quiz,
 ) int64 {
 	t.Helper()
 	state := waitForResultsPhase(ctx, t, winner, baseURL, code, "question")
@@ -118,12 +121,13 @@ func playQuestion(
 		t.Fatal("question phase missing a two-option question")
 	}
 	qID := state.Question.ID
+	correctID, wrongID := correctAndWrongOptionID(t, qz, qID)
 
 	// Answers open after the read beat, so wait until the window opens before
 	// submitting; a pick during the read beat would 409.
 	state = waitForResultsAnswersOpen(ctx, t, winner, baseURL, code, qID)
-	answerSession(ctx, t, winner, baseURL, code, state.Question.Options[0].ID, http.StatusNoContent)
-	answerSession(ctx, t, loser, baseURL, code, state.Question.Options[1].ID, http.StatusNoContent)
+	answerSession(ctx, t, winner, baseURL, code, correctID, http.StatusNoContent)
+	answerSession(ctx, t, loser, baseURL, code, wrongID, http.StatusNoContent)
 
 	// Wait for the question to close so the next call targets the next question
 	// rather than re-answering this one.
@@ -138,6 +142,41 @@ func playQuestion(
 	t.Fatalf("question %d never closed", qID)
 
 	return qID
+}
+
+// correctAndWrongOptionID resolves, from the seeded quiz fixture, one correct
+// and one wrong option id for the question with questionID. It scans both the
+// flat questions and the per-round questions so it works for either fixture
+// shape. The fixture's Correct flags are the ground truth the live shuffle
+// (#1074) cannot reorder, so a test can pick the right option by id no matter
+// where the shuffle placed it on the wire.
+func correctAndWrongOptionID(t *testing.T, qz *quiz.Quiz, questionID int64) (int64, int64) {
+	t.Helper()
+	questions := slices.Clone(qz.Questions)
+	for _, r := range qz.Rounds {
+		questions = append(questions, r.Questions...)
+	}
+	for _, q := range questions {
+		if q.ID != questionID {
+			continue
+		}
+		var correctID, wrongID int64
+		for _, o := range q.Options {
+			if o.Correct {
+				correctID = o.ID
+			} else {
+				wrongID = o.ID
+			}
+		}
+		if correctID == 0 || wrongID == 0 {
+			t.Fatalf("question %d fixture lacks a correct and a wrong option", questionID)
+		}
+
+		return correctID, wrongID
+	}
+	t.Fatalf("quiz fixture has no question with id %d", questionID)
+
+	return 0, 0
 }
 
 // findStanding returns the standing for playerID, failing if absent.
@@ -194,8 +233,8 @@ func TestSessionRoundResults_DeltasTotalsAndStandings(t *testing.T) {
 	// Round 1 has two questions. Ace picks the correct option, Bee the wrong
 	// one; both answering closes each question early. Distinct ids confirm the
 	// runner advanced from q1 to q2.
-	q1 := playQuestion(ctx, t, ace, bee, baseURL, code)
-	q2 := playQuestion(ctx, t, ace, bee, baseURL, code)
+	q1 := playQuestion(ctx, t, ace, bee, baseURL, code, qz)
+	q2 := playQuestion(ctx, t, ace, bee, baseURL, code, qz)
 	if q1 == q2 {
 		t.Fatalf("round 1 played the same question twice (id %d)", q1)
 	}
@@ -225,7 +264,7 @@ func TestSessionRoundResults_DeltasTotalsAndStandings(t *testing.T) {
 	// Round 2 is the final round; same picks. Its closing reveal ends the game
 	// directly into intermission (the between-games screen, #836), skipping
 	// round_results, so the game ends on a single final-standings screen (#749).
-	playQuestion(ctx, t, ace, bee, baseURL, code)
+	playQuestion(ctx, t, ace, bee, baseURL, code, qz)
 
 	// intermission: final standings carry the full cumulative totals, Ace first.
 	// The final standings carry the last round's score as RoundScore so the bar

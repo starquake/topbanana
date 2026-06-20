@@ -934,7 +934,7 @@ func writeQuestionItem(
 	for i, o := range gq.QuizQuestion.Options {
 		resOptions[i] = nextOptionResponse{ID: o.ID, Text: o.Text}
 	}
-	shuffleByGame(gameID, gq.QuestionID, len(resOptions), func(i, j int) {
+	shuffleBySeed(gameID, gq.QuestionID, len(resOptions), func(i, j int) {
 		resOptions[i], resOptions[j] = resOptions[j], resOptions[i]
 	})
 

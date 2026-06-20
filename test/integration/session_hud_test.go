@@ -134,7 +134,7 @@ func TestSessionState_HUDPositionTotalAndSelfScore(t *testing.T) {
 
 	// Both answer the same question (Ace correct, Bee wrong); all-answered closes
 	// it early and the runner scores it.
-	playQuestion(ctx, t, ace, bee, baseURL, code)
+	playQuestion(ctx, t, ace, bee, baseURL, code, qz)
 
 	// After the question is scored, Ace's self.score reflects the points earned;
 	// Bee, who picked wrong, stays at 0.
@@ -153,7 +153,7 @@ func TestSessionState_HUDPositionTotalAndSelfScore(t *testing.T) {
 	// Finish round 1's second question so the round_results board appears, then
 	// confirm Ace's self.score equals their standings total - the HUD reads the
 	// same per-game aggregation the board does.
-	playQuestion(ctx, t, ace, bee, baseURL, code)
+	playQuestion(ctx, t, ace, bee, baseURL, code, qz)
 	rr := waitForResultsPhase(ctx, t, ace, baseURL, code, "round_results")
 	aceID := playerIDFromState(ctx, t, ace, baseURL, code, "Ace")
 	aceStanding := findStanding(t, rr.Standings, aceID)

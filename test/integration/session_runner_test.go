@@ -175,15 +175,17 @@ func TestSessionRunner_HostStartQuestionAnswerReveal(t *testing.T) {
 	}
 
 	// During the read beat the answer window has not opened yet: a pick lands as
-	// 409, so a client cannot pre-submit before the options open.
-	pick := state.Question.Options[0].ID
+	// 409, so a client cannot pre-submit before the options open. The correct
+	// option is resolved from the fixture by id, not display position, because
+	// the live answer set is shuffled per session (#1074).
+	pick, _ := correctAndWrongOptionID(t, qz, state.Question.ID)
 	if state.ServerNow.Before(*state.Question.StartedAt) {
 		answerSession(ctx, t, player, baseURL, code, pick, http.StatusConflict)
 	}
 
-	// Once the read beat elapses the window opens; the player answers the FIRST
-	// option (seeded correct). The state read before reveal still must not say
-	// which pick was right.
+	// Once the read beat elapses the window opens; the player answers the seeded
+	// correct option. The state read before reveal still must not say which pick
+	// was right.
 	waitForAnswersOpen(ctx, t, player, baseURL, code)
 	answerSession(ctx, t, player, baseURL, code, pick, http.StatusNoContent)
 

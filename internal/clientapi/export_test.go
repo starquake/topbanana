@@ -1,6 +1,6 @@
 package clientapi
 
-// ExportShuffleByGame exposes the unexported shuffleByGame helper so
+// ExportShuffleBySeed exposes the unexported shuffleBySeed helper so
 // the external clientapi_test package can pin its determinism and
 // permutation contracts without becoming a whitebox test.
-var ExportShuffleByGame = shuffleByGame
+var ExportShuffleBySeed = shuffleBySeed
