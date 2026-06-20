@@ -616,6 +616,24 @@ func questionPosition(qz *quiz.Quiz, questionID int64) int {
 	return 0
 }
 
+// shuffledSessionOptions projects a question's options onto the wire shape in a
+// stable per (session, question) order (#1074): every player in the same
+// session sees the same order across reconnects, two sessions of the same quiz
+// differ, and a maker who lists the answer first cannot game the layout.
+// Scoring and reveal key off option id, not position, so reordering the display
+// set here leaves them untouched.
+func shuffledSessionOptions(sessionID string, q *quiz.Question) []sessionOptionResponse {
+	options := make([]sessionOptionResponse, 0, len(q.Options))
+	for _, o := range q.Options {
+		options = append(options, sessionOptionResponse{ID: o.ID, Text: o.Text})
+	}
+	shuffleBySeed(sessionID, q.ID, len(options), func(i, j int) {
+		options[i], options[j] = options[j], options[i]
+	})
+
+	return options
+}
+
 // newSessionQuestionResponse projects the live question view onto the wire
 // shape, enforcing the no-spoiler guarantee: correctness (per-option and
 // per-answer) is included only when state.Revealed is true.
@@ -625,10 +643,7 @@ func newSessionQuestionResponse(state *livesession.SessionState) *sessionQuestio
 	}
 	q := state.CurrentQuestion
 
-	options := make([]sessionOptionResponse, 0, len(q.Options))
-	for _, o := range q.Options {
-		options = append(options, sessionOptionResponse{ID: o.ID, Text: o.Text})
-	}
+	options := shuffledSessionOptions(state.Session.ID, q)
 
 	// The roster already excludes players who have left, so a left player's
 	// pick drops out of the answered-order badges here (MP-10) without
