@@ -19,6 +19,9 @@ import { adminStatePath } from '../e2e-auth';
 // the playback chrome (the hidden <audio>, the mute toggle, the replay control)
 // and the cross-surface contract that the phone stays answer-only.
 test.use({ storageState: adminStatePath() });
+// Block the page service worker so it can't serve /media ahead of Playwright's
+// route interception, which intermittently fails the audio loading specs.
+test.use({ serviceWorkers: 'block' });
 // Several specs here host a live room as the shared admin, which runs one room
 // at a time, so two host specs must not run against the same per-worker server
 // at once. Serial mode keeps the file's specs from overlapping on a worker; the
@@ -215,8 +218,6 @@ async function startLiveAudioSession(
 // makes the injected clip 404 against the real server. Blocking the SW for these
 // specs keeps the /media route deterministic on both a cold and a warm SW.
 test.describe('host big screen audio loading beat', () => {
-  test.use({ serviceWorkers: 'block' });
-
   test('the host big screen shows the audio loading screen, then reveals the question and plays the clip', async ({
     page,
     context,
