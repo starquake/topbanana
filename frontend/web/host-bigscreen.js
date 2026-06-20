@@ -389,9 +389,9 @@ function hostBigScreen(joinCode, hasQuiz) {
         playLoadedAudio(questionId) {
             if (!this.audio) return;
             if (this.$nextTick) {
-                this.$nextTick(() => this.audio.start(this, questionId));
+                this.$nextTick(() => this.audio.start(this, questionId, false, this.question?.audioRepeat));
             } else {
-                this.audio.start(this, questionId);
+                this.audio.start(this, questionId, false, this.question?.audioRepeat);
             }
         },
 
@@ -731,7 +731,7 @@ function hostBigScreen(joinCode, hasQuiz) {
         // control. The shared controller clears the blocked fallback (the click
         // is a user gesture) and bypasses the per-question guard.
         replayAudio() {
-            if (this.audio) this.audio.replay(this);
+            if (this.audio) this.audio.replay(this, this.question?.audioRepeat);
         },
 
         // toggleMute flips and persists the mute preference through the shared

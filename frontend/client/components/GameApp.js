@@ -698,9 +698,9 @@ export class GameApp {
         if (!this.question || this.question.id !== item.id) return;
         this.audioLoading = false;
         if (this.$nextTick) {
-            this.$nextTick(() => this.audio.start(this, this.question.id));
+            this.$nextTick(() => this.audio.start(this, this.question.id, false, this.question.audioRepeat));
         } else {
-            this.audio.start(this, this.question.id);
+            this.audio.start(this, this.question.id, false, this.question.audioRepeat);
         }
         this.startRevealCountdown();
     }
@@ -1069,7 +1069,7 @@ export class GameApp {
     // control. The shared controller clears the blocked fallback (the click is a
     // user gesture) and bypasses the per-question guard.
     replayAudio() {
-        this.audio.replay(this);
+        this.audio.replay(this, this.question?.audioRepeat);
     }
 
     // toggleMute flips and persists the mute preference through the shared

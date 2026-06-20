@@ -132,7 +132,10 @@ type QuestionData struct {
 	// AudioMediaID is the id of the attached library audio, or 0 when none is
 	// attached (#1059). Separate from ImageMediaID so a question can carry both
 	// an image and audio; the audio picker pre-checks the radio matching it.
-	AudioMediaID          int64
+	AudioMediaID int64
+	// AudioRepeat pre-checks the "repeat audio" checkbox; true makes the play
+	// surfaces replay the attached clip up to 3 times (#1073).
+	AudioRepeat           bool
 	Position              int
 	TimeLimitSecondsValue string
 	Options               []*OptionData
@@ -267,6 +270,7 @@ func questionDataFromQuestion(q *quiz.Question) *QuestionData {
 		Text:                  q.Text,
 		ImageMediaID:          mediaID,
 		AudioMediaID:          audioMediaID,
+		AudioRepeat:           q.AudioRepeat,
 		Position:              q.Position,
 		TimeLimitSecondsValue: timeLimit,
 		Options:               optionDataFromOptions(q.Options),
@@ -738,6 +742,8 @@ func fillQuestionFromForm(
 		return map[string]string{"audio": audioErr}, true
 	}
 	qs.AudioMediaID = audioID
+	// An unchecked HTML checkbox sends no value; checked sends its value (#1073).
+	qs.AudioRepeat = r.PostFormValue("audio_repeat") != ""
 	// Optional per-question override (#99). Blank input clears any
 	// previous override (NULL -> inherit the quiz default); a parse
 	// failure lands a zero, which Question.Valid rejects with an

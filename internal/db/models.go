@@ -141,6 +141,7 @@ type Question struct {
 	TimeLimitSeconds sql.NullInt64
 	ImageMediaID     sql.NullInt64
 	AudioMediaID     sql.NullInt64
+	AudioRepeat      int64
 }
 
 type Quiz struct {

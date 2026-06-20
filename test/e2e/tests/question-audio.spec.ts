@@ -72,6 +72,48 @@ async function injectSoloAudio(page: Page): Promise<void> {
   });
 }
 
+// injectSoloAudioRepeat is injectSoloAudio plus the per-question audioRepeat
+// flag, so the playback controller runs (or skips) its repeat sequence (#1073).
+async function injectSoloAudioRepeat(page: Page, audioRepeat: boolean): Promise<void> {
+  await page.route('**/api/games/*/questions/next', async (route: Route) => {
+    const response = await route.fetch();
+    if (!response.ok()) {
+      await route.fulfill({ response });
+      return;
+    }
+    const body = await response.json();
+    if (body && body.type === 'question') {
+      body.audioUrl = AUDIO_SRC;
+      body.audioRepeat = audioRepeat;
+    }
+    await route.fulfill({ response, json: body });
+  });
+}
+
+// installPlaySpy counts calls to the audio element's play() and re-fires the
+// 'ended' event after each one. Headless autoplay is unreliable and the silent
+// data: URI has ~0 duration, so the controller's 'ended' listener may never fire
+// on its own; dispatching ended deterministically drives the repeat loop. The
+// counter proves how many times the controller asked the clip to play.
+async function installPlaySpy(audio: ReturnType<Page['getByTestId']>): Promise<void> {
+  await audio.evaluate((el: HTMLAudioElement) => {
+    const w = window as unknown as { __playCount: number };
+    w.__playCount = 0;
+    const original = el.play.bind(el);
+    el.play = () => {
+      w.__playCount += 1;
+      // Re-fire ended on the next microtask so the controller's listener (added
+      // during start) runs after this play() returns, advancing the repeat loop.
+      Promise.resolve().then(() => el.dispatchEvent(new Event('ended')));
+      return original().catch(() => undefined);
+    };
+  });
+}
+
+async function playCount(page: Page): Promise<number> {
+  return page.evaluate(() => (window as unknown as { __playCount: number }).__playCount);
+}
+
 test('the solo player gets a hidden audio element and mute / replay controls for a question audio clip', async ({
   page,
   browserName,
@@ -488,4 +530,83 @@ test('the solo audio stops when the player advances to the next question', async
     () => (window as unknown as { __pauseCount: number }).__pauseCount,
   );
   expect(paused).toBeGreaterThan(0);
+});
+
+test('the solo audio repeats a repeat-flagged clip three times then stops', async ({
+  page,
+  browserName,
+}) => {
+  test.setTimeout(60_000);
+
+  const quizTitle = `E2E Audio Repeat ${browserName}`;
+
+  await createQuizWithQuestions(page, quizTitle, SINGLE_QUESTION);
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+
+  await page.context().clearCookies();
+  await installPlaythroughClock(page);
+  await injectSoloAudioRepeat(page, true);
+
+  await page.goto('/quizzes');
+  await page.getByRole('link', { name: quizTitle }).click();
+  await expect(page).toHaveURL(/\/play\//);
+  await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
+  await page.getByRole('button', { name: 'Start Game' }).click();
+
+  // The data: URI buffers instantly, so the loading beat resolves on
+  // canplaythrough; pump the reveal beat so the question paints and the
+  // <audio> element is mounted before the play spy is installed.
+  await page.clock.runFor(3_500);
+  const audio = page.getByTestId('question-audio');
+  await expect(audio).toHaveAttribute('src', AUDIO_SRC);
+
+  // Spy on play() and re-fire ended after each play, then re-arm the controller
+  // by replaying through the user-gesture control so the spy sees the full
+  // sequence (the autoplay start may have run before the spy was installed).
+  await installPlaySpy(audio);
+  await page.getByTestId('audio-replay').click();
+
+  // The controller schedules each repeat after a 1000ms gap; drive the clock
+  // past all of the inter-repeat gaps so the queued replays fire.
+  await page.clock.runFor(5_000);
+
+  // A repeat clip plays three times total, then stops: no fourth play.
+  await expect.poll(() => playCount(page)).toBe(3);
+  await page.clock.runFor(5_000);
+  expect(await playCount(page)).toBe(3);
+});
+
+test('the solo audio plays a normal clip once with no repeats', async ({
+  page,
+  browserName,
+}) => {
+  test.setTimeout(60_000);
+
+  const quizTitle = `E2E Audio NoRepeat ${browserName}`;
+
+  await createQuizWithQuestions(page, quizTitle, SINGLE_QUESTION);
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+
+  await page.context().clearCookies();
+  await installPlaythroughClock(page);
+  await injectSoloAudioRepeat(page, false);
+
+  await page.goto('/quizzes');
+  await page.getByRole('link', { name: quizTitle }).click();
+  await expect(page).toHaveURL(/\/play\//);
+  await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
+  await page.getByRole('button', { name: 'Start Game' }).click();
+
+  await page.clock.runFor(3_500);
+  const audio = page.getByTestId('question-audio');
+  await expect(audio).toHaveAttribute('src', AUDIO_SRC);
+
+  await installPlaySpy(audio);
+  await page.getByTestId('audio-replay').click();
+
+  // A normal clip plays once; the ended event does not schedule a replay even
+  // after the clock advances past the repeat gap.
+  await expect.poll(() => playCount(page)).toBe(1);
+  await page.clock.runFor(5_000);
+  expect(await playCount(page)).toBe(1);
 });

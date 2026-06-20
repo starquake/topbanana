@@ -367,7 +367,10 @@ type Question struct {
 	// ImageMediaID so a question can carry both an image and a sound. The
 	// questions.audio_media_id foreign key is ON DELETE SET NULL, so deleting
 	// the sound clears this and leaves the question intact minus its audio.
-	AudioMediaID     *int64
+	AudioMediaID *int64
+	// AudioRepeat, when true, makes the play surfaces replay the attached clip
+	// up to 3 times (#1073). Meaningful only when AudioMediaID is set.
+	AudioRepeat      bool
 	Position         int
 	TimeLimitSeconds *int
 	Options          []*Option

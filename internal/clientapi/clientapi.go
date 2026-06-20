@@ -189,12 +189,13 @@ type quizGetOptionResponse struct {
 }
 
 type quizGetQuestionResponse struct {
-	ID       int64                   `json:"id"`
-	Text     string                  `json:"text"`
-	Position int                     `json:"position"`
-	ImageURL string                  `json:"imageUrl,omitempty"`
-	AudioURL string                  `json:"audioUrl,omitempty"`
-	Options  []quizGetOptionResponse `json:"options"`
+	ID          int64                   `json:"id"`
+	Text        string                  `json:"text"`
+	Position    int                     `json:"position"`
+	ImageURL    string                  `json:"imageUrl,omitempty"`
+	AudioURL    string                  `json:"audioUrl,omitempty"`
+	AudioRepeat bool                    `json:"audioRepeat,omitempty"`
+	Options     []quizGetOptionResponse `json:"options"`
 }
 
 type quizGetResponse struct {
@@ -231,12 +232,13 @@ func quizGetQuestions(qz *quiz.Quiz) []quizGetQuestionResponse {
 			opts = append(opts, quizGetOptionResponse{ID: o.ID, Text: o.Text})
 		}
 		questions = append(questions, quizGetQuestionResponse{
-			ID:       qs.ID,
-			Text:     qs.Text,
-			Position: qs.Position,
-			ImageURL: mediaURL(qs.ImageMediaID),
-			AudioURL: mediaURL(qs.AudioMediaID),
-			Options:  opts,
+			ID:          qs.ID,
+			Text:        qs.Text,
+			Position:    qs.Position,
+			ImageURL:    mediaURL(qs.ImageMediaID),
+			AudioURL:    mediaURL(qs.AudioMediaID),
+			AudioRepeat: qs.AudioRepeat,
+			Options:     opts,
 		})
 	}
 
@@ -772,17 +774,18 @@ type nextOptionResponse struct {
 // /next variant. Position/Total drive the HUD chip (#253); ServerNow
 // drives the client clock-offset correction (#180).
 type nextQuestionResponse struct {
-	Type      string               `json:"type"`
-	ID        int64                `json:"id"`
-	Text      string               `json:"text"`
-	ImageURL  string               `json:"imageUrl,omitempty"`
-	AudioURL  string               `json:"audioUrl,omitempty"`
-	Options   []nextOptionResponse `json:"options"`
-	StartedAt time.Time            `json:"startedAt"`
-	ExpiredAt time.Time            `json:"expiredAt"`
-	ServerNow time.Time            `json:"serverNow"`
-	Position  int                  `json:"position"`
-	Total     int                  `json:"total"`
+	Type        string               `json:"type"`
+	ID          int64                `json:"id"`
+	Text        string               `json:"text"`
+	ImageURL    string               `json:"imageUrl,omitempty"`
+	AudioURL    string               `json:"audioUrl,omitempty"`
+	AudioRepeat bool                 `json:"audioRepeat,omitempty"`
+	Options     []nextOptionResponse `json:"options"`
+	StartedAt   time.Time            `json:"startedAt"`
+	ExpiredAt   time.Time            `json:"expiredAt"`
+	ServerNow   time.Time            `json:"serverNow"`
+	Position    int                  `json:"position"`
+	Total       int                  `json:"total"`
 	// RoundNumber/RoundTotal place the question's round within the quiz,
 	// and RoundPosition/RoundQuestions place the question within that
 	// round, for the gameplay header's "Round N of M" heading and its
@@ -944,6 +947,7 @@ func writeQuestionItem(
 		Text:           gq.QuizQuestion.Text,
 		ImageURL:       mediaURL(gq.QuizQuestion.ImageMediaID),
 		AudioURL:       mediaURL(gq.QuizQuestion.AudioMediaID),
+		AudioRepeat:    gq.QuizQuestion.AudioRepeat,
 		Options:        resOptions,
 		StartedAt:      gq.StartedAt,
 		ExpiredAt:      gq.ExpiredAt,

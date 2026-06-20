@@ -66,9 +66,9 @@ func (q *Queries) CreateOption(ctx context.Context, arg CreateOptionParams) (Opt
 }
 
 const createQuestion = `-- name: CreateQuestion :one
-INSERT INTO questions (quiz_id, round_id, text, position, image_media_id, audio_media_id, time_limit_seconds)
-VALUES (?, ?, ?, ?, ?, ?, ?)
-RETURNING id, quiz_id, round_id, text, position, time_limit_seconds, image_media_id, audio_media_id
+INSERT INTO questions (quiz_id, round_id, text, position, image_media_id, audio_media_id, audio_repeat, time_limit_seconds)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, quiz_id, round_id, text, position, time_limit_seconds, image_media_id, audio_media_id, audio_repeat
 `
 
 type CreateQuestionParams struct {
@@ -78,6 +78,7 @@ type CreateQuestionParams struct {
 	Position         int64
 	ImageMediaID     sql.NullInt64
 	AudioMediaID     sql.NullInt64
+	AudioRepeat      int64
 	TimeLimitSeconds sql.NullInt64
 }
 
@@ -89,6 +90,7 @@ func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) 
 		arg.Position,
 		arg.ImageMediaID,
 		arg.AudioMediaID,
+		arg.AudioRepeat,
 		arg.TimeLimitSeconds,
 	)
 	var i Question
@@ -101,6 +103,7 @@ func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) 
 		&i.TimeLimitSeconds,
 		&i.ImageMediaID,
 		&i.AudioMediaID,
+		&i.AudioRepeat,
 	)
 	return i, err
 }
@@ -244,7 +247,7 @@ func (q *Queries) GetOptionsByIDs(ctx context.Context, ids []int64) ([]Option, e
 }
 
 const getQuestion = `-- name: GetQuestion :one
-SELECT id, quiz_id, round_id, text, position, time_limit_seconds, image_media_id, audio_media_id
+SELECT id, quiz_id, round_id, text, position, time_limit_seconds, image_media_id, audio_media_id, audio_repeat
 FROM questions
 WHERE id = ?
 LIMIT 1
@@ -262,6 +265,7 @@ func (q *Queries) GetQuestion(ctx context.Context, id int64) (Question, error) {
 		&i.TimeLimitSeconds,
 		&i.ImageMediaID,
 		&i.AudioMediaID,
+		&i.AudioRepeat,
 	)
 	return i, err
 }
@@ -657,7 +661,7 @@ func (q *Queries) ListQuestionIDsByRoundID(ctx context.Context, roundID int64) (
 }
 
 const listQuestionsByQuizID = `-- name: ListQuestionsByQuizID :many
-SELECT id, quiz_id, round_id, text, position, time_limit_seconds, image_media_id, audio_media_id
+SELECT id, quiz_id, round_id, text, position, time_limit_seconds, image_media_id, audio_media_id, audio_repeat
 FROM questions
 WHERE quiz_id = ?
 ORDER BY position
@@ -681,6 +685,7 @@ func (q *Queries) ListQuestionsByQuizID(ctx context.Context, quizID int64) ([]Qu
 			&i.TimeLimitSeconds,
 			&i.ImageMediaID,
 			&i.AudioMediaID,
+			&i.AudioRepeat,
 		); err != nil {
 			return nil, err
 		}
@@ -888,6 +893,7 @@ SET text               = ?,
     position           = ?,
     image_media_id     = ?,
     audio_media_id     = ?,
+    audio_repeat       = ?,
     time_limit_seconds = ?
 WHERE id = ?
 `
@@ -897,6 +903,7 @@ type UpdateQuestionParams struct {
 	Position         int64
 	ImageMediaID     sql.NullInt64
 	AudioMediaID     sql.NullInt64
+	AudioRepeat      int64
 	TimeLimitSeconds sql.NullInt64
 	ID               int64
 }
@@ -907,6 +914,7 @@ func (q *Queries) UpdateQuestion(ctx context.Context, arg UpdateQuestionParams) 
 		arg.Position,
 		arg.ImageMediaID,
 		arg.AudioMediaID,
+		arg.AudioRepeat,
 		arg.TimeLimitSeconds,
 		arg.ID,
 	)

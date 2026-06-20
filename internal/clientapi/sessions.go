@@ -450,13 +450,14 @@ type sessionAnswerResponse struct {
 // place in the quiz and total is the quiz's question count, so the answer-pad
 // HUD can show a "Q position/total" chip (#956).
 type sessionQuestionResponse struct {
-	ID       int64  `json:"id"`
-	RoundID  int64  `json:"roundId"`
-	Text     string `json:"text"`
-	ImageURL string `json:"imageUrl,omitempty"`
-	AudioURL string `json:"audioUrl,omitempty"`
-	Position int    `json:"position"`
-	Total    int    `json:"total"`
+	ID          int64  `json:"id"`
+	RoundID     int64  `json:"roundId"`
+	Text        string `json:"text"`
+	ImageURL    string `json:"imageUrl,omitempty"`
+	AudioURL    string `json:"audioUrl,omitempty"`
+	AudioRepeat bool   `json:"audioRepeat,omitempty"`
+	Position    int    `json:"position"`
+	Total       int    `json:"total"`
 	// RoundNumber/RoundTotal place the question's round within the quiz,
 	// and RoundPosition/RoundQuestions place the question within that
 	// round, so the gameplay header can show "Round N of M" and a
@@ -685,6 +686,7 @@ func newSessionQuestionResponse(state *livesession.SessionState) *sessionQuestio
 		Text:              q.Text,
 		ImageURL:          mediaURL(q.ImageMediaID),
 		AudioURL:          mediaURL(q.AudioMediaID),
+		AudioRepeat:       q.AudioRepeat,
 		Position:          questionPosition(state.Quiz, q.ID),
 		Total:             len(state.Quiz.Questions),
 		RoundNumber:       round.RoundNumber,
