@@ -146,6 +146,24 @@
                 <p class="text-text-dim font-semibold text-[clamp(1rem,2vw,1.5rem)]">Loading audio...</p>
             </div>
 
+            {{/* Question audio element (#1085). A permanent child of the
+                 always-rendered game container (x-show="phase === 'question' ||
+                 phase === 'reveal'"), OUTSIDE the per-question <template x-if>, so
+                 it never unmounts across a question change. This is what makes
+                 playback race-free: getAudioEl() resolves the same element for
+                 every question, so the controller's start() can never run before
+                 the element exists. The :src binding is defensive (`question &&
+                 question.audioUrl` is falsy between questions, and Alpine then
+                 drops the attribute, so no empty-src load fires). The visible
+                 mute/replay controls live in the per-question body below; they
+                 reach this element through the controller's getAudioEl, not a
+                 direct ref. */}}
+            <audio :src="question && question.audioUrl"
+                   :muted="audioMuted"
+                   preload="none"
+                   data-testid="question-audio"
+                   class="hidden"></audio>
+
             {{/* Countdown bar, two phases (mirrors the player surface and the
                  solo game, #247): while `revealing` is true it fills 0 -> 100
                  over the read beat, then drains 100 -> 0 over the answer window;
@@ -191,20 +209,15 @@
                              class="block mx-auto shrink-0 w-auto max-w-full max-h-[clamp(8rem,30vh,18rem)] object-contain rounded-lg">
                     </template>
 
-                    {{/* Question audio, when one is attached (#1059). The <audio>
-                         element is hidden; the big screen autoplays the clip once
-                         a host gesture (Start) has unlocked playback. A mute
+                    {{/* Question audio controls, when one is attached (#1059).
+                         The <audio> element itself is the persistent one at the
+                         top of the game container (#1085). The big screen
+                         autoplays the clip once the question is on screen. A mute
                          toggle lets the room silence it. The phones never get
                          audio: this surface is the only one that plays audio. */}}
                     <template x-if="question.audioUrl">
                         <div class="flex shrink-0 items-center justify-center gap-3"
                              data-testid="question-audio-controls">
-                            <audio x-ref="questionAudio"
-                                   :src="question.audioUrl"
-                                   :muted="audioMuted"
-                                   preload="none"
-                                   data-testid="question-audio"
-                                   class="hidden"></audio>
                             <button type="button"
                                     class="px-4 py-2 rounded-lg border border-white/20 text-[clamp(0.9rem,1.6vw,1.15rem)] font-semibold hover:bg-white/10 transition-colors"
                                     data-testid="audio-mute"

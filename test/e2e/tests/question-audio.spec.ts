@@ -160,6 +160,149 @@ test('the solo player gets a hidden audio element and mute / replay controls for
   await expect(page.getByTestId('audio-replay')).toBeVisible();
 });
 
+// #1085: an audio question must autoplay, not fall back to the manual "Play
+// audio" button. The regression was a mount/timing race: the per-question
+// <audio> element lived inside nested x-if templates, so the loading beat's
+// $nextTick start() ran while the element was being torn down and rebuilt across
+// the question transition; getAudioEl() returned null and start() set
+// audioBlocked=true WITHOUT ever calling play(). The fix makes the <audio> a
+// permanent child of the always-rendered game container, so getAudioEl() resolves
+// it for every question and start() can never run before it exists.
+//
+// The invariant this pins is "start() found the persistent element and called
+// play() on the FIRST audio question". A global play() spy installed before
+// navigation captures that first autoplay regardless of timing. Asserting the
+// "Replay audio" label instead would depend on play()'s promise RESOLVING,
+// which headless autoplay policy makes unreliable for a synthetic clip; the bug
+// was that play() was never called at all, so a positive call count is the
+// precise, browser-policy-independent signal that the race is gone.
+test('the FIRST solo audio question autoplays rather than skipping play() (#1085)', async ({
+  page,
+  browserName,
+}) => {
+  test.setTimeout(60_000);
+
+  const quizTitle = `E2E Audio First Autoplay ${browserName}`;
+
+  await createQuizWithQuestions(page, quizTitle, SINGLE_QUESTION);
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+
+  await page.context().clearCookies();
+  await installPlaythroughClock(page);
+  await injectSoloAudio(page);
+
+  // Count play() calls on ANY audio element from before navigation, so the very
+  // first autoplay (which fires during the loading beat, before the question
+  // paints) is captured. With the pre-fix race start() returns on its null
+  // branch and never calls play(), leaving this counter at 0.
+  await page.addInitScript(() => {
+    const w = window as unknown as { __playCount: number };
+    w.__playCount = 0;
+    const proto = HTMLMediaElement.prototype;
+    const original = proto.play;
+    proto.play = function patchedPlay(this: HTMLMediaElement) {
+      w.__playCount += 1;
+      return original.apply(this).catch(() => undefined);
+    };
+  });
+
+  await page.goto('/quizzes');
+  await page.getByRole('link', { name: quizTitle }).click();
+  await expect(page).toHaveURL(/\/play\//);
+  await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
+  await page.getByRole('button', { name: 'Start Game' }).click();
+
+  // The data: URI buffers instantly, so the loading beat resolves on
+  // canplaythrough; pump the reveal beat so the first question paints.
+  await page.clock.runFor(3_500);
+  await expect(page.getByTestId('question-text')).toHaveText(SINGLE_QUESTION[0].text);
+
+  // The hidden <audio> element is mounted (so start() found it, not null).
+  await expect(page.getByTestId('question-audio')).toHaveAttribute('src', AUDIO_SRC);
+
+  // start() found the mounted element and called play() on the FIRST audio
+  // question: the autoplay ran rather than dropping into the null/blocked
+  // branch. (The "loadAudioClip" warm-up uses a separate `new Audio()` it never
+  // play()s, so this count reflects only the question element's autoplay.)
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __playCount: number }).__playCount))
+    .toBeGreaterThan(0);
+});
+
+// #1085: the SECOND consecutive audio question must also autoplay. This was the
+// reported regression: Q1 played (its clip lands right after the Start gesture)
+// but Q2 was silent. The root cause was the same mount race as above - the
+// Q1->Q2 transition briefly clears `question`, tearing down and rebuilding the
+// per-question <audio> element, so the loading beat's start() for Q2 ran while
+// the element was absent and fell into the null/blocked branch without calling
+// play(). The persistent element (a permanent child of the game container) is
+// never torn down, so Q2's start() finds it and plays.
+//
+// Headless autoplay policy is permissive, so this pins the element-present /
+// auto-start invariant (play() is called on the SECOND question) rather than
+// reproducing a real-browser block. A global play() spy counts the second
+// question's autoplay; the count climbs again after the advance.
+test('the SECOND consecutive solo audio question also autoplays (#1085)', async ({
+  page,
+  browserName,
+}) => {
+  test.setTimeout(60_000);
+
+  const quizTitle = `E2E Audio Second Autoplay ${browserName}`;
+
+  await createQuizWithQuestions(page, quizTitle, TWO_QUESTIONS);
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+
+  await page.context().clearCookies();
+  await installPlaythroughClock(page);
+  await injectSoloAudio(page);
+
+  // Count play() calls on ANY audio element from before navigation, so each
+  // question's autoplay (which fires during its loading beat) is captured. With
+  // the pre-fix race Q2's start() returns on its null branch without play().
+  await page.addInitScript(() => {
+    const w = window as unknown as { __playCount: number };
+    w.__playCount = 0;
+    const proto = HTMLMediaElement.prototype;
+    const original = proto.play;
+    proto.play = function patchedPlay(this: HTMLMediaElement) {
+      w.__playCount += 1;
+      return original.apply(this).catch(() => undefined);
+    };
+  });
+
+  await page.goto('/quizzes');
+  await page.getByRole('link', { name: quizTitle }).click();
+  await expect(page).toHaveURL(/\/play\//);
+  await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
+  await page.getByRole('button', { name: 'Start Game' }).click();
+
+  // Q1 paints and autoplays.
+  await page.clock.runFor(3_500);
+  await expect(page.getByTestId('question-text')).toHaveText(TWO_QUESTIONS[0].text);
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __playCount: number }).__playCount))
+    .toBeGreaterThan(0);
+  const afterFirst = await page.evaluate(
+    () => (window as unknown as { __playCount: number }).__playCount,
+  );
+
+  // Answer Q1, then drive the feedback pause + advance so the loading beat for Q2
+  // runs and the second clip autoplays.
+  await page.getByRole('button', { name: 'Correct' }).click();
+  await page.clock.runFor(6_000);
+  await expect(page.getByTestId('question-text')).toHaveText(TWO_QUESTIONS[1].text);
+
+  // The persistent <audio> element is still mounted on Q2 (start() found it).
+  await expect(page.getByTestId('question-audio')).toHaveAttribute('src', AUDIO_SRC);
+
+  // Q2's start() found the element and called play() again: the second question's
+  // autoplay ran rather than dropping into the null/blocked branch.
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __playCount: number }).__playCount))
+    .toBeGreaterThan(afterFirst);
+});
+
 // injectStateAudio rewrites the live session state reads to carry audioUrl on
 // the current question, so the big screen exercises the playback chrome without
 // the Slice 2 upload path. The url defaults to the instant-buffering data: URI;

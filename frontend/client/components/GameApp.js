@@ -134,9 +134,9 @@ export class GameApp {
         // attribute. Default unmuted.
         this.audioMuted = initialMuted();
         // True when the browser blocked autoplay (the play() promise rejected),
-        // so the template surfaces an explicit play control as a fallback. The
-        // Start-game click usually unlocks autoplay, but a reload mid-game or a
-        // strict autoplay policy can still block it.
+        // so the template surfaces an explicit play control as a fallback. A
+        // reload mid-game or a strict autoplay policy can leave the first clip
+        // blocked until the player taps the play control.
         this.audioBlocked = false;
         // True while the audio loading beat is on screen for a question with a
         // audio (#1070): the clip is buffering before the question is revealed.
@@ -1056,13 +1056,16 @@ export class GameApp {
         return this.roundItem && this.roundItem.summary ? this.roundItem.summary : '';
     }
 
-    // getAudioEl returns the <audio> element for the current question, or null
-    // when no audio is attached / the element is not mounted yet. The element is
-    // reused across questions (Alpine keeps it while x-if stays truthy), so the
-    // shared audio controller reads it fresh on each call rather than caching it.
+    // getAudioEl returns the persistent <audio> element. It is a permanent child
+    // of the always-rendered game container (#1085), so this resolves it for
+    // every question and start() can never run before it exists. The lookup goes
+    // through document, not this.$root: start() runs from a deferred $nextTick on
+    // a re-entrant async path (resolveAndAdvance -> nextQuestion ->
+    // runAudioLoadingBeat) where the magic this.$root is not reliably bound, so a
+    // $root query intermittently saw null and dropped the next question into the
+    // blocked fallback. The element is the only one with this testid on the page.
     getAudioEl() {
-        const refs = this.$refs;
-        return (refs && refs.questionAudio) || null;
+        return document.querySelector('[data-testid="question-audio"]') || null;
     }
 
     // replayAudio restarts the current question's audio from the play/replay
