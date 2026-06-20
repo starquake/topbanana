@@ -63,17 +63,17 @@ function hostBigScreen(joinCode, hasQuiz) {
         // The id of the question currently on screen, so applyState can tell a
         // genuine question change (reset imageError) from a same-question tick.
         lastQuestionId: null,
-        // Mute state for the question sound (#1059), seeded from the persisted
+        // Mute state for the question audio (#1059), seeded from the persisted
         // preference and bound to the <audio> element. Default unmuted.
         audioMuted: initialMuted(),
         // True when the browser blocked autoplay (the play() promise rejected),
         // so the template surfaces an explicit play control. The host's Start
         // gesture usually establishes the page activation that lets later clips
         // play, but a strict autoplay policy can still block the SSE-driven
-        // play(), and the big screen is the only surface that plays sound.
+        // play(), and the big screen is the only surface that plays audio.
         audioBlocked: false,
         // True while the audio loading beat is on the big screen for a question
-        // with a sound (#1070): the clip is buffering before the question is
+        // with audio (#1070): the clip is buffering before the question is
         // revealed. The screen shows a spinner + "Loading audio..." and the
         // question / countdown stay hidden until the clip is ready, times out, or
         // errors. Mirrors the solo client's loading screen.
@@ -281,7 +281,7 @@ function hostBigScreen(joinCode, hasQuiz) {
                 this.lastQuestionId = questionId;
                 this.imageError = false;
                 // Fetch the image during the read beat so the picture is ready
-                // the moment the element mounts. The sound is fetched once by the
+                // the moment the element mounts. The audio is fetched once by the
                 // audio loading beat / the controller's play() (the <audio> uses
                 // preload="none"), so there is no double-fetch (#1070).
                 if (this.question && this.question.imageUrl) {
@@ -301,7 +301,7 @@ function hostBigScreen(joinCode, hasQuiz) {
             const offset = clockOffsetFromServerNow(state.serverNow);
             if (offset !== null) this.clockOffset = offset;
 
-            // A question with a sound runs a loading beat once per question id:
+            // A question with audio runs a loading beat once per question id:
             // the spinner holds the screen while the clip buffers, then the clip
             // plays from the top and the countdown starts (#1070). Other phases /
             // questions take the immediate path below. While the beat is in
@@ -319,7 +319,7 @@ function hostBigScreen(joinCode, hasQuiz) {
             }
 
             // No audio loading beat is pending, so clear any stale spinner left by
-            // a question that lost its sound on a re-read.
+            // a question that lost its audio on a re-read.
             this.audioLoading = false;
 
             // The countdown only runs in the question phase; every other phase
@@ -720,14 +720,14 @@ function hostBigScreen(joinCode, hasQuiz) {
         },
 
         // getAudioEl returns the big screen's <audio> element, or null when no
-        // sound is attached / it is not mounted yet. The shared audio controller
+        // audio is attached / it is not mounted yet. The shared audio controller
         // reads it through this on each call.
         getAudioEl() {
             const refs = this.$refs;
             return (refs && refs.questionAudio) || null;
         },
 
-        // replayAudio restarts the current question's sound from the play/replay
+        // replayAudio restarts the current question's audio from the play/replay
         // control. The shared controller clears the blocked fallback (the click
         // is a user gesture) and bypasses the per-question guard.
         replayAudio() {

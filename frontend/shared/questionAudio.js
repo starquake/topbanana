@@ -1,5 +1,5 @@
 // questionAudio holds the play / mute / replay / per-question-guard logic for
-// the per-question sound (#1059), shared by the solo client (GameApp) and the
+// the per-question audio (#1059), shared by the solo client (GameApp) and the
 // host big screen so the two surfaces stay in lockstep (#1070). Both surfaces
 // own a single <audio> element and a `muted` / `blocked` UI flag; this module
 // drives that element and those flags through a small host object passed on
@@ -69,7 +69,7 @@ export function createQuestionAudio() {
         start(host, null, true);
     }
 
-    // stop pauses the current clip so a still-playing sound does not bleed into
+    // stop pauses the current clip so a still-playing audio clip does not bleed into
     // the next question or the end-of-game screen (#1070). No-ops when no
     // element is mounted.
     function stop(host) {

@@ -128,7 +128,7 @@ export class GameApp {
         // against the server's view of "now" instead of the device's,
         // which can be minutes off on phones with stale time.
         this.clockOffset = 0;
-        // Mute state for the per-question sound (#1059), seeded from the
+        // Mute state for the per-question audio (#1059), seeded from the
         // persisted preference so a player who muted earlier stays muted.
         // Bound to the mute control and to the <audio> element's `muted`
         // attribute. Default unmuted.
@@ -139,7 +139,7 @@ export class GameApp {
         // strict autoplay policy can still block it.
         this.audioBlocked = false;
         // True while the audio loading beat is on screen for a question with a
-        // sound (#1070): the clip is buffering before the question is revealed.
+        // audio (#1070): the clip is buffering before the question is revealed.
         // The view shows a spinner + "Loading audio..." and the reveal countdown
         // does not start until the clip is ready, times out, or errors.
         this.audioLoading = false;
@@ -576,7 +576,7 @@ export class GameApp {
         }
         this.clearRoundTimer();
         // Stop a still-playing clip before swapping to the next item so the
-        // prior question's sound never bleeds into the next beat (#1070).
+        // prior question's audio never bleeds into the next beat (#1070).
         this.audio.stop(this);
         this.audioLoading = false;
         this.revealing = false;
@@ -1057,7 +1057,7 @@ export class GameApp {
     }
 
     // getAudioEl returns the <audio> element for the current question, or null
-    // when no sound is attached / the element is not mounted yet. The element is
+    // when no audio is attached / the element is not mounted yet. The element is
     // reused across questions (Alpine keeps it while x-if stays truthy), so the
     // shared audio controller reads it fresh on each call rather than caching it.
     getAudioEl() {
@@ -1065,7 +1065,7 @@ export class GameApp {
         return (refs && refs.questionAudio) || null;
     }
 
-    // replayAudio restarts the current question's sound from the play/replay
+    // replayAudio restarts the current question's audio from the play/replay
     // control. The shared controller clears the blocked fallback (the click is a
     // user gesture) and bypasses the per-question guard.
     replayAudio() {

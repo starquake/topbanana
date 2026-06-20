@@ -12,7 +12,7 @@ import {
 import { adminStatePath } from '../e2e-auth';
 
 // Slice 3 of #1059: audio PLAYBACK on the play surfaces. The upload/admin path
-// is Slice 2, so these specs do not author a real sound. Instead they
+// is Slice 2, so these specs do not author a real audio clip. Instead they
 // route-intercept the play endpoints to inject audioUrl on the question and
 // serve a tiny real clip for /media/*, mirroring the deterministic
 // route-interception approach the flash specs use. The behaviour under test is
@@ -39,12 +39,12 @@ const AUDIO_SRC =
   'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
 
 const SINGLE_QUESTION: readonly QuestionSpec[] = [
-  { text: 'Question with a sound', options: ['Correct', 'Wrong', 'Nope', 'No'], correctIndices: [0] },
+  { text: 'Question with audio', options: ['Correct', 'Wrong', 'Nope', 'No'], correctIndices: [0] },
 ];
 
 const TWO_QUESTIONS: readonly QuestionSpec[] = [
-  { text: 'First sound question', options: ['Correct', 'Wrong', 'Nope', 'No'], correctIndices: [0] },
-  { text: 'Second sound question', options: ['Correct', 'Wrong', 'Nope', 'No'], correctIndices: [0] },
+  { text: 'First audio question', options: ['Correct', 'Wrong', 'Nope', 'No'], correctIndices: [0] },
+  { text: 'Second audio question', options: ['Correct', 'Wrong', 'Nope', 'No'], correctIndices: [0] },
 ];
 
 // HELD_AUDIO_URL is a fake clip URL the loading-screen specs inject and then
@@ -55,7 +55,7 @@ const TWO_QUESTIONS: readonly QuestionSpec[] = [
 const HELD_AUDIO_URL = '/media/held-audio-clip';
 
 // injectSoloAudio rewrites the solo /next responses to carry audioUrl, so a
-// quiz authored without a sound (Slice 2 is not merged) still exercises the
+// quiz authored without audio (Slice 2 is not merged) still exercises the
 // playback chrome. Other endpoints pass through untouched.
 async function injectSoloAudio(page: Page): Promise<void> {
   await page.route('**/api/games/*/questions/next', async (route: Route) => {
@@ -72,7 +72,7 @@ async function injectSoloAudio(page: Page): Promise<void> {
   });
 }
 
-test('the solo player gets a hidden audio element and mute / replay controls for a question sound', async ({
+test('the solo player gets a hidden audio element and mute / replay controls for a question audio clip', async ({
   page,
   browserName,
 }) => {

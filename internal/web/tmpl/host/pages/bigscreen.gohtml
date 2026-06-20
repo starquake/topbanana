@@ -130,12 +130,12 @@
         <div x-show="phase === 'question' || phase === 'reveal'"
              class="flex-1 min-h-0 flex flex-col gap-[clamp(1rem,3vh,2.25rem)] px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1.25rem,3vh,2.5rem)]"
              data-phase-question>
-            {{/* Audio loading beat (#1070): a question with a sound shows a
+            {{/* Audio loading beat (#1070): a question with audio shows a
                  spinner + "Loading audio..." while the clip buffers, then the
                  question is revealed and the clip plays from the top. The question
                  body below is hidden (not unmounted, so the <audio> element stays
                  mounted and can play) while this shows, so the room does not see
-                 the question or answers before the sound is ready. Mirrors the
+                 the question or answers before the audio is ready. Mirrors the
                  solo client's loading screen. */}}
             <div x-show="audioLoading"
                  class="flex-1 min-h-0 flex flex-col items-center justify-center gap-4"
@@ -191,11 +191,11 @@
                              class="block mx-auto shrink-0 w-auto max-w-full max-h-[clamp(8rem,30vh,18rem)] object-contain rounded-lg">
                     </template>
 
-                    {{/* Question sound, when one is attached (#1059). The <audio>
+                    {{/* Question audio, when one is attached (#1059). The <audio>
                          element is hidden; the big screen autoplays the clip once
                          a host gesture (Start) has unlocked playback. A mute
                          toggle lets the room silence it. The phones never get
-                         audio: this surface is the only one that plays sound. */}}
+                         audio: this surface is the only one that plays audio. */}}
                     <template x-if="question.audioUrl">
                         <div class="flex shrink-0 items-center justify-center gap-3"
                              data-testid="question-audio-controls">

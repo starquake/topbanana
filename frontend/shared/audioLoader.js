@@ -1,5 +1,5 @@
 // audioLoader buffers a question's audio clip before the question is revealed,
-// so the solo client can show a brief loading beat and then start the sound
+// so the solo client can show a brief loading beat and then start the audio
 // from the top the moment the question paints (#1070). It exists because the
 // loading screen, not a separate preload, is the single fetch of the bytes: it
 // loads the clip once here, the real <audio> element plays it from cache.

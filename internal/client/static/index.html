@@ -372,14 +372,13 @@
             <div x-show="gameId && !finished">
                 <template x-if="question && !roundItem">
                     <div class="flex flex-col game-fill">
-                        <!-- Audio loading beat (#1070): for a question with a
-                             sound, the clip buffers behind a spinner before the
+                        <!-- Audio loading beat (#1070): for a question with audio, the clip buffers behind a spinner before the
                              question is revealed. The reveal countdown does not
                              start until the clip is ready, times out (~5s), or
                              errors. The question body below is hidden (not
                              unmounted) while this shows so the <audio> element
                              can buffer/play, but the player does not see the
-                             question or answers before the sound is ready. -->
+                             question or answers before the audio is ready. -->
                         <template x-if="audioLoading">
                             <div class="flex-1 min-h-0 flex flex-col items-center justify-center gap-4"
                                  data-testid="audio-loading"
@@ -445,7 +444,7 @@
                             </template>
                         </div>
 
-                        <!-- Question sound (#1059). The <audio> element is hidden
+                        <!-- Question audio (#1059). The <audio> element is hidden
                              (no native controls); playback is driven by GameApp,
                              which loads the clip behind the loading beat and plays
                              it from the top. preload="none" so the loading beat is
