@@ -25,6 +25,7 @@ import { startQuestionCountdown } from '@shared/countdown.js';
 import { startStartCountdown, formatCountdown } from '@shared/startCountdown.js';
 import { preloadImage } from '@shared/preloadImage.js';
 import { createQuestionAudio, initialMuted } from '@shared/questionAudio.js';
+import { loadAudioClip } from '@shared/audioLoader.js';
 import {
     buildStandingsRows,
     animateStandingsBars,
@@ -71,6 +72,16 @@ function hostBigScreen(joinCode, hasQuiz) {
         // play, but a strict autoplay policy can still block the SSE-driven
         // play(), and the big screen is the only surface that plays sound.
         audioBlocked: false,
+        // True while the audio loading beat is on the big screen for a question
+        // with a sound (#1070): the clip is buffering before the question is
+        // revealed. The screen shows a spinner + "Loading audio..." and the
+        // question / countdown stay hidden until the clip is ready, times out, or
+        // errors. Mirrors the solo client's loading screen.
+        audioLoading: false,
+        // The id of the question whose loading beat has already run, so a
+        // repeated state tick within the same question does not restart the beat
+        // (the big screen re-reads /state on every SSE tick).
+        lastAudioLoadQuestionId: null,
         // Shared play / mute / replay / per-question-guard controller (#1070),
         // created in init() and bound to this surface's <audio> element and UI
         // flags. The controller's guard plays each clip once per question id, so
@@ -271,35 +282,45 @@ function hostBigScreen(joinCode, hasQuiz) {
                 this.imageError = false;
                 // Fetch the image during the read beat so the picture is ready
                 // the moment the element mounts. The sound is fetched once by the
-                // audio controller's play() (the <audio> uses preload="none"), so
-                // there is no double-fetch (#1070).
+                // audio loading beat / the controller's play() (the <audio> uses
+                // preload="none"), so there is no double-fetch (#1070).
                 if (this.question && this.question.imageUrl) {
                     void preloadImage(this.question.imageUrl);
                 }
                 // A new question means a new clip: stop a still-playing one so it
-                // does not bleed across the question change (#1070).
+                // does not bleed across the question change, and clear the loading
+                // beat so a stale spinner can't carry over (#1070). Reset the
+                // per-question beat guard too so the new question runs its own
+                // beat (the guard only suppresses repeat ticks of the same id).
                 if (this.audio) this.audio.stop(this);
-            }
-            // Auto-play the question's sound once per question, and only when the
-            // question phase opens - not in reveal, so a reload mid-reveal does
-            // not start the clip over the answers (#1059). The controller's guard
-            // plays each clip once per question id, so a repeated state tick
-            // within the same question is a no-op. Deferred to the next tick so
-            // the <audio> element is mounted/updated first.
-            if (
-                this.phase === 'question' &&
-                this.question && this.question.audioUrl && this.audio
-            ) {
-                if (this.$nextTick) {
-                    this.$nextTick(() => this.audio.start(this, questionId));
-                } else {
-                    this.audio.start(this, questionId);
-                }
+                this.audioLoading = false;
+                this.lastAudioLoadQuestionId = null;
             }
             this.round = state.round ?? null;
 
             const offset = clockOffsetFromServerNow(state.serverNow);
             if (offset !== null) this.clockOffset = offset;
+
+            // A question with a sound runs a loading beat once per question id:
+            // the spinner holds the screen while the clip buffers, then the clip
+            // plays from the top and the countdown starts (#1070). Other phases /
+            // questions take the immediate path below. While the beat is in
+            // flight a repeated tick for the same question is a no-op (its guard),
+            // and the countdown stays idle so the question does not show early.
+            if (
+                this.phase === 'question' && this.question &&
+                this.question.audioUrl && this.audio
+            ) {
+                this.startAudioLoadingBeat(this.question);
+                this.syncStartCountdown(state);
+                this.syncStandings(state);
+
+                return;
+            }
+
+            // No audio loading beat is pending, so clear any stale spinner left by
+            // a question that lost its sound on a re-read.
+            this.audioLoading = false;
 
             // The countdown only runs in the question phase; every other phase
             // (including reveal, where the answer window has closed) leaves it
@@ -314,6 +335,64 @@ function hostBigScreen(joinCode, hasQuiz) {
 
             this.syncStartCountdown(state);
             this.syncStandings(state);
+        },
+
+        // startAudioLoadingBeat shows the loading spinner while the current
+        // question's clip buffers, then plays it from the top and starts the
+        // countdown (#1070). It runs once per question id: a repeated SSE tick
+        // within the same question is a no-op, so the spinner and the clip are not
+        // restarted. loadAudioClip resolves on canplaythrough, a ~5s timeout, or
+        // an error, so the question always proceeds; on a failure / timeout the
+        // controller's play() can still surface the manual play control. Mirrors
+        // GameApp.runAudioLoadingBeat on the solo surface.
+        startAudioLoadingBeat(question) {
+            const questionId = question.id;
+            if (questionId === this.lastAudioLoadQuestionId) return;
+            this.lastAudioLoadQuestionId = questionId;
+
+            // A host that opens / reconnects the big screen after the answer
+            // window has already opened (serverTime past startedAt) must not hold
+            // the room on a fresh loading screen while the window drains - the
+            // players' phones moved on. Skip the spinner and play + run the
+            // countdown straight away, mirroring the solo client's past-deadline
+            // fall-through in startRevealCountdown.
+            const startAt = question.startedAt ? new Date(question.startedAt).getTime() : NaN;
+            if (Number.isFinite(startAt) && this.serverTime() >= startAt) {
+                this.audioLoading = false;
+                this.playLoadedAudio(questionId);
+                this.startCountdown();
+
+                return;
+            }
+
+            this.audioLoading = true;
+            // Hold the countdown idle while the spinner is up so the question and
+            // answer grid stay hidden until the clip is ready.
+            this.stopCountdown();
+            this.revealing = false;
+            loadAudioClip(question.audioUrl).then(() => {
+                // Bail if the question moved on while the clip was loading - a
+                // later tick advanced the room, so a stale beat must not reveal
+                // or play over the new screen.
+                if (!this.question || this.question.id !== questionId) return;
+                if (this.phase !== 'question') return;
+                this.audioLoading = false;
+                this.playLoadedAudio(questionId);
+                this.startCountdown();
+            });
+        },
+
+        // playLoadedAudio plays the question's clip from the top once the loading
+        // beat has resolved, deferred to the next tick so the <audio> element is
+        // mounted/updated first. The controller's guard plays each clip once per
+        // question id, so a repeated call within the same question is a no-op.
+        playLoadedAudio(questionId) {
+            if (!this.audio) return;
+            if (this.$nextTick) {
+                this.$nextTick(() => this.audio.start(this, questionId));
+            } else {
+                this.audio.start(this, questionId);
+            }
         },
 
         // syncStartCountdown reconciles the host-armed last-call countdown with
