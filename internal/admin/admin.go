@@ -1197,6 +1197,13 @@ type MediaCardData struct {
 	// DurationMs is the clip length for a sound tile, or nil when unknown / not
 	// applicable (an image leaves it nil) (#1059). DurationLabel renders it.
 	DurationMs *int
+	// QuizID is the owning quiz, used by a sound tile to build the
+	// description-edit action URL (#1072).
+	QuizID int64
+	// Description is the host-supplied label for a sound tile (#1072), shown in
+	// the audio library and the question picker. Empty for an unlabelled clip and
+	// for image tiles, which do not surface it.
+	Description string
 }
 
 // DurationLabel renders DurationMs as an "M:SS" clip-length label, or "" when
@@ -1221,10 +1228,12 @@ func mediaCardDataFromMedia(items []*media.Media) []MediaCardData {
 	cards := make([]MediaCardData, 0, len(items))
 	for _, m := range items {
 		cards = append(cards, MediaCardData{
-			ID:         m.ID,
-			Width:      m.Width,
-			Height:     m.Height,
-			DurationMs: m.DurationMs,
+			ID:          m.ID,
+			Width:       m.Width,
+			Height:      m.Height,
+			DurationMs:  m.DurationMs,
+			QuizID:      m.QuizID,
+			Description: m.Description,
 		})
 	}
 

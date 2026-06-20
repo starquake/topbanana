@@ -39,6 +39,7 @@ func (s *MediaStore) CreateMedia(ctx context.Context, m *media.Media) (*media.Me
 		SizeBytes:         m.SizeBytes,
 		Sha256:            m.SHA256,
 		DurationMs:        nullableInt(m.DurationMs),
+		Description:       m.Description,
 		CreatedByPlayerID: m.CreatedByPlayerID,
 	})
 	if err != nil {
@@ -126,6 +127,27 @@ func (s *MediaStore) GetMedia(ctx context.Context, id int64) (*media.Media, erro
 	return mediaFromRow(row), nil
 }
 
+// UpdateMediaDescription sets the host-supplied description label of a media
+// row. Returns media.ErrMediaNotFound when no row matched.
+func (s *MediaStore) UpdateMediaDescription(ctx context.Context, id int64, description string) error {
+	res, err := s.q.UpdateMediaDescription(ctx, db.UpdateMediaDescriptionParams{
+		Description: description,
+		ID:          id,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update media description: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read media description update result: %w", err)
+	}
+	if affected == 0 {
+		return media.ErrMediaNotFound
+	}
+
+	return nil
+}
+
 // ListMediaByQuiz returns every ready media row for quizID, newest first.
 func (s *MediaStore) ListMediaByQuiz(ctx context.Context, quizID int64) ([]*media.Media, error) {
 	rows, err := s.q.ListMediaByQuiz(ctx, quizID)
@@ -189,6 +211,7 @@ func mediaFromRow(row db.Medium) *media.Media {
 		SizeBytes:         row.SizeBytes,
 		SHA256:            row.Sha256,
 		DurationMs:        nullableIntToPtr(row.DurationMs),
+		Description:       row.Description,
 		CreatedByPlayerID: row.CreatedByPlayerID,
 		CreatedAt:         row.CreatedAt,
 	}

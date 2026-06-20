@@ -42,7 +42,11 @@ type Media struct {
 	// DurationMs is the playback length of an audio row in milliseconds, or nil
 	// when unknown (#1059). It is advisory and supplied by the caller, since
 	// audio is not decoded server-side; an image row leaves it nil.
-	DurationMs        *int
+	DurationMs *int
+	// Description is a host-supplied, host-facing label for the row (#1072).
+	// Defaults to the uploaded filename without its extension and is editable
+	// afterwards; the empty string means unlabelled.
+	Description       string
 	CreatedByPlayerID int64
 	CreatedAt         time.Time
 }
@@ -75,6 +79,9 @@ type Store interface {
 	MarkMediaReady(ctx context.Context, id int64) error
 	// GetMedia returns the media row for id, or ErrMediaNotFound.
 	GetMedia(ctx context.Context, id int64) (*Media, error)
+	// UpdateMediaDescription sets the host-supplied description label of a media
+	// row. Returns ErrMediaNotFound when no row matched.
+	UpdateMediaDescription(ctx context.Context, id int64, description string) error
 	// ListMediaByQuiz returns every ready media row for quizID, newest first.
 	ListMediaByQuiz(ctx context.Context, quizID int64) ([]*Media, error)
 	// ListStaleNotReadyMedia returns not-ready rows older than olderThan, the

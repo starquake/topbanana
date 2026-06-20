@@ -51,6 +51,9 @@ func TestMediaTypeAudioMigration_CheckAndShape(t *testing.T) {
 		"id", "quiz_id", "type", "mime", "path", "thumb_path", "width",
 		"height", "size_bytes", "sha256", "created_by_player_id", "created_at",
 		"ready", "duration_ms",
+		// description is added later by 20260620120000; dbtest.Open migrates to
+		// the latest schema, so it is present here (#1072).
+		"description",
 	}
 	gotCols := tableColumns(t, db, "media")
 	for _, col := range wantCols {

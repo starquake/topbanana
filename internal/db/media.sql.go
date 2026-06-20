@@ -39,7 +39,7 @@ func (q *Queries) CountMediaByQuizAndType(ctx context.Context, arg CountMediaByQ
 const createMedia = `-- name: CreateMedia :one
 INSERT INTO media (
     quiz_id, type, mime, path, thumb_path,
-    width, height, size_bytes, sha256, duration_ms, created_by_player_id, ready
+    width, height, size_bytes, sha256, duration_ms, description, created_by_player_id, ready
 )
 VALUES (
     ?1,
@@ -53,9 +53,10 @@ VALUES (
     ?9,
     ?10,
     ?11,
+    ?12,
     0
 )
-RETURNING id, quiz_id, type, mime, path, thumb_path, width, height, size_bytes, sha256, created_by_player_id, created_at, ready, duration_ms
+RETURNING id, quiz_id, type, mime, path, thumb_path, width, height, size_bytes, sha256, created_by_player_id, created_at, ready, duration_ms, description
 `
 
 type CreateMediaParams struct {
@@ -69,6 +70,7 @@ type CreateMediaParams struct {
 	SizeBytes         int64
 	Sha256            string
 	DurationMs        sql.NullInt64
+	Description       string
 	CreatedByPlayerID int64
 }
 
@@ -94,6 +96,7 @@ func (q *Queries) CreateMedia(ctx context.Context, arg CreateMediaParams) (Mediu
 		arg.SizeBytes,
 		arg.Sha256,
 		arg.DurationMs,
+		arg.Description,
 		arg.CreatedByPlayerID,
 	)
 	var i Medium
@@ -112,6 +115,7 @@ func (q *Queries) CreateMedia(ctx context.Context, arg CreateMediaParams) (Mediu
 		&i.CreatedAt,
 		&i.Ready,
 		&i.DurationMs,
+		&i.Description,
 	)
 	return i, err
 }
@@ -130,7 +134,7 @@ func (q *Queries) DeleteMedia(ctx context.Context, id int64) (sql.Result, error)
 }
 
 const getMedia = `-- name: GetMedia :one
-SELECT id, quiz_id, type, mime, path, thumb_path, width, height, size_bytes, sha256, created_by_player_id, created_at, ready, duration_ms
+SELECT id, quiz_id, type, mime, path, thumb_path, width, height, size_bytes, sha256, created_by_player_id, created_at, ready, duration_ms, description
 FROM media
 WHERE id = ?1
 `
@@ -155,12 +159,13 @@ func (q *Queries) GetMedia(ctx context.Context, id int64) (Medium, error) {
 		&i.CreatedAt,
 		&i.Ready,
 		&i.DurationMs,
+		&i.Description,
 	)
 	return i, err
 }
 
 const listMediaByQuiz = `-- name: ListMediaByQuiz :many
-SELECT id, quiz_id, type, mime, path, thumb_path, width, height, size_bytes, sha256, created_by_player_id, created_at, ready, duration_ms
+SELECT id, quiz_id, type, mime, path, thumb_path, width, height, size_bytes, sha256, created_by_player_id, created_at, ready, duration_ms, description
 FROM media
 WHERE quiz_id = ?1
   AND ready = 1
@@ -197,6 +202,7 @@ func (q *Queries) ListMediaByQuiz(ctx context.Context, quizID int64) ([]Medium, 
 			&i.CreatedAt,
 			&i.Ready,
 			&i.DurationMs,
+			&i.Description,
 		); err != nil {
 			return nil, err
 		}
@@ -269,6 +275,24 @@ WHERE id = ?1
 // host can see. The caller checks RowsAffected to confirm the row still exists.
 func (q *Queries) MarkMediaReady(ctx context.Context, id int64) (sql.Result, error) {
 	return q.db.ExecContext(ctx, markMediaReady, id)
+}
+
+const updateMediaDescription = `-- name: UpdateMediaDescription :execresult
+UPDATE media
+SET description = ?1
+WHERE id = ?2
+`
+
+type UpdateMediaDescriptionParams struct {
+	Description string
+	ID          int64
+}
+
+// Sets the host-supplied description label of a media row (#1072). The caller
+// checks RowsAffected to confirm the row still exists (a missing id maps to
+// media.ErrMediaNotFound).
+func (q *Queries) UpdateMediaDescription(ctx context.Context, arg UpdateMediaDescriptionParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, updateMediaDescription, arg.Description, arg.ID)
 }
 
 const updateMediaPaths = `-- name: UpdateMediaPaths :execresult

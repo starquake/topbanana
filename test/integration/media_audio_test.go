@@ -26,7 +26,7 @@ func mp3Bytes() []byte {
 }
 
 // TestMediaAudioUpload_Integration covers the audio upload endpoint (#1059): an
-// owner can upload a sound to their editable quiz, the sound then serves back as
+// owner can upload audio to their editable quiz, the clip then serves back as
 // audio/mpeg and honours a Range request; an unsupported format and an over-cap
 // upload are both rejected with 400; and a non-owner host is refused.
 func TestMediaAudioUpload_Integration(t *testing.T) {
@@ -212,8 +212,8 @@ func TestMediaQuizCapIsPerType_Integration(t *testing.T) {
 	}
 }
 
-// TestMediaAudioLibraryAndPicker_Integration covers the sounds library on the
-// quiz view and the question editor's audio picker (#1059): an uploaded sound
+// TestMediaAudioLibraryAndPicker_Integration covers the audio library on the
+// quiz view and the question editor's audio picker (#1059): an uploaded clip
 // shows with its duration label and an audio preview; the question editor lists
 // it as a radio option; and attaching it persists audio_media_id.
 func TestMediaAudioLibraryAndPicker_Integration(t *testing.T) {
@@ -232,14 +232,14 @@ func TestMediaAudioLibraryAndPicker_Integration(t *testing.T) {
 	questionID := addQuestionToQuiz(ctx, t, setup.Stores, quizID, "Name that tune")
 
 	uploadAudio(ctx, t, owner, baseURL, quizID, "tune.mp3", mp3Bytes(), 95000)
-	soundID := latestMedia(ctx, t, setup.Stores, quizID).ID
+	audioID := latestMedia(ctx, t, setup.Stores, quizID).ID
 
-	t.Run("quiz view lists the sound with a duration label", func(t *testing.T) {
+	t.Run("quiz view lists the audio with a duration label", func(t *testing.T) {
 		t.Parallel()
 		page := getQuizViewBody(ctx, t, owner, baseURL, quizID)
 		for _, want := range []string{
 			`data-testid="audio-library-item"`,
-			fmt.Sprintf(`src="/media/%d"`, soundID),
+			fmt.Sprintf(`src="/media/%d"`, audioID),
 			`data-testid="audio-duration"`,
 			"1:35",
 			fmt.Sprintf(`action="/admin/quizzes/%d/media/audio"`, quizID),
@@ -250,7 +250,7 @@ func TestMediaAudioLibraryAndPicker_Integration(t *testing.T) {
 		}
 	})
 
-	t.Run("question editor shows the audio picker and attaches the sound", func(t *testing.T) {
+	t.Run("question editor shows the audio picker and attaches the audio", func(t *testing.T) {
 		t.Parallel()
 		editURL := fmt.Sprintf("%s/admin/quizzes/%d/questions/%d/edit", baseURL, quizID, questionID)
 		page := getPageBody(ctx, t, owner, editURL)
@@ -260,19 +260,175 @@ func TestMediaAudioLibraryAndPicker_Integration(t *testing.T) {
 			}
 		}
 
-		saveQuestionWithAudio(ctx, t, owner, baseURL, quizID, questionID, soundID)
+		saveQuestionWithAudio(ctx, t, owner, baseURL, quizID, questionID, audioID)
 
 		saved, err := setup.Stores.Quizzes.GetQuestion(ctx, questionID)
 		if err != nil {
 			t.Fatalf("GetQuestion err = %v, want nil", err)
 		}
 		if saved.AudioMediaID == nil {
-			t.Fatal("saved question AudioMediaID = nil, want the attached sound id")
+			t.Fatal("saved question AudioMediaID = nil, want the attached audio id")
 		}
-		if got, want := *saved.AudioMediaID, soundID; got != want {
+		if got, want := *saved.AudioMediaID, audioID; got != want {
 			t.Errorf("saved question AudioMediaID = %d, want %d", got, want)
 		}
 	})
+}
+
+// TestMediaAudioDescription_Integration covers the audio description feature
+// (#1072): an upload without a description defaults to the filename without its
+// extension, an explicit description is stored as posted, the inline-edit
+// endpoint updates the label (and the library + picker render it), and the same
+// edit gate / IDOR guard as delete apply.
+func TestMediaAudioDescription_Integration(t *testing.T) {
+	t.Parallel()
+
+	ctx, setup := setupMedia(t, map[string]string{
+		"ADMIN_EMAILS": "audio-desc-boss@example.test",
+	})
+	baseURL := setup.BaseURL
+
+	registerAdminClient(ctx, t, baseURL, setup.DBURI, "audio-desc-boss")
+	owner := registerAdminClient(ctx, t, baseURL, setup.DBURI, "audio-desc-owner")
+	other := registerAdminClient(ctx, t, baseURL, setup.DBURI, "audio-desc-other")
+	makeHost(ctx, t, setup.DBURI, "audio-desc-owner")
+	makeHost(ctx, t, setup.DBURI, "audio-desc-other")
+
+	t.Run("upload without a description defaults to the filename", func(t *testing.T) {
+		t.Parallel()
+		quizID := createQuizAs(ctx, t, owner, baseURL, "Audio Desc Default Quiz")
+		uploadAudio(ctx, t, owner, baseURL, quizID, "Opening Theme.mp3", mp3Bytes(), 0)
+		row := latestMedia(ctx, t, setup.Stores, quizID)
+		if got, want := row.Description, "Opening Theme"; got != want {
+			t.Errorf("default Description = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("upload with a description stores it and the library renders it", func(t *testing.T) {
+		t.Parallel()
+		quizID := createQuizAs(ctx, t, owner, baseURL, "Audio Desc Explicit Quiz")
+		uploadAudioWithDescription(ctx, t, owner, baseURL, quizID, "raw.mp3", mp3Bytes(), "Victory fanfare")
+		row := latestMedia(ctx, t, setup.Stores, quizID)
+		if got, want := row.Description, "Victory fanfare"; got != want {
+			t.Errorf("stored Description = %q, want %q", got, want)
+		}
+
+		page := getQuizViewBody(ctx, t, owner, baseURL, quizID)
+		if !strings.Contains(page, "Victory fanfare") {
+			t.Errorf("quiz view missing the description %q", "Victory fanfare")
+		}
+		if want := `data-testid="audio-description"`; !strings.Contains(page, want) {
+			t.Errorf("quiz view missing the inline-edit form %q", want)
+		}
+	})
+
+	t.Run("inline edit updates the label and renders in the picker", func(t *testing.T) {
+		t.Parallel()
+		quizID := createQuizAs(ctx, t, owner, baseURL, "Audio Desc Edit Quiz")
+		questionID := addQuestionToQuiz(ctx, t, setup.Stores, quizID, "Name that tune")
+		uploadAudio(ctx, t, owner, baseURL, quizID, "tune.mp3", mp3Bytes(), 0)
+		audioID := latestMedia(ctx, t, setup.Stores, quizID).ID
+
+		status := editAudioDescription(ctx, t, owner, baseURL, quizID, audioID, "Round one intro")
+		if got, want := status, http.StatusSeeOther; got != want {
+			t.Fatalf("edit description status = %d, want %d", got, want)
+		}
+
+		updated, err := setup.Stores.Media.GetMedia(ctx, audioID)
+		if err != nil {
+			t.Fatalf("GetMedia err = %v, want nil", err)
+		}
+		if got, want := updated.Description, "Round one intro"; got != want {
+			t.Errorf("edited Description = %q, want %q", got, want)
+		}
+
+		editURL := fmt.Sprintf("%s/admin/quizzes/%d/questions/%d/edit", baseURL, quizID, questionID)
+		picker := getPageBody(ctx, t, owner, editURL)
+		if !strings.Contains(picker, "Round one intro") {
+			t.Errorf("question picker missing the edited description %q", "Round one intro")
+		}
+	})
+
+	t.Run("non-owner cannot edit a description", func(t *testing.T) {
+		t.Parallel()
+		quizID := createQuizAs(ctx, t, owner, baseURL, "Audio Desc Gate Quiz")
+		uploadAudio(ctx, t, owner, baseURL, quizID, "gate.mp3", mp3Bytes(), 0)
+		audioID := latestMedia(ctx, t, setup.Stores, quizID).ID
+
+		status := editAudioDescription(ctx, t, other, baseURL, quizID, audioID, "hijack")
+		if got, want := status, http.StatusForbidden; got != want {
+			t.Errorf("non-owner edit status = %d, want %d", got, want)
+		}
+	})
+}
+
+// uploadAudioWithDescription posts a single-file audio upload carrying an
+// explicit description field, asserting the 303-to-audio redirect.
+func uploadAudioWithDescription(
+	ctx context.Context, t *testing.T, client *http.Client,
+	baseURL string, quizID int64, name string, data []byte, description string,
+) {
+	t.Helper()
+	token := fetchCSRFToken(ctx, t, client, baseURL+"/admin/quizzes")
+	body, contentType := multipartAudioWithDescription(t, name, data, description, token)
+	req := newMultipartReq(ctx, t, baseURL+fmt.Sprintf("/admin/quizzes/%d/media/audio", quizID), body, contentType)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("audio upload Do err = %v, want nil", err)
+	}
+	defer closeBody(t, resp.Body)
+	if got, want := resp.StatusCode, http.StatusSeeOther; got != want {
+		rb, _ := io.ReadAll(resp.Body)
+		t.Fatalf("audio upload status = %d, want %d; body=%q", got, want, rb)
+	}
+}
+
+// multipartAudioWithDescription builds a multipart body carrying the audio file,
+// a description field, and the csrf_token.
+func multipartAudioWithDescription(
+	t *testing.T, filename string, data []byte, description, token string,
+) (*bytes.Buffer, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	part, err := mw.CreateFormFile("audio", filename)
+	if err != nil {
+		t.Fatalf("CreateFormFile err = %v, want nil", err)
+	}
+	if _, err := part.Write(data); err != nil {
+		t.Fatalf("write audio part err = %v, want nil", err)
+	}
+	if err := mw.WriteField("description", description); err != nil {
+		t.Fatalf("WriteField description err = %v, want nil", err)
+	}
+	if err := mw.WriteField("csrf_token", token); err != nil {
+		t.Fatalf("WriteField csrf_token err = %v, want nil", err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("multipart Close err = %v, want nil", err)
+	}
+
+	return &buf, mw.FormDataContentType()
+}
+
+// editAudioDescription posts the inline description-edit form and returns the
+// response status without following the redirect.
+func editAudioDescription(
+	ctx context.Context, t *testing.T, client *http.Client,
+	baseURL string, quizID, mediaID int64, description string,
+) int {
+	t.Helper()
+	token := fetchCSRFToken(ctx, t, client, baseURL+"/admin/quizzes")
+	form := url.Values{"csrf_token": {token}, "description": {description}}
+	target := baseURL + fmt.Sprintf("/admin/quizzes/%d/media/%d/description", quizID, mediaID)
+	req := newFormReq(ctx, t, target, form)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("edit description Do err = %v, want nil", err)
+	}
+	defer closeBody(t, resp.Body)
+
+	return resp.StatusCode
 }
 
 // addQuestionToQuiz inserts a single question into the quiz via the store and
@@ -326,7 +482,7 @@ func latestMedia(ctx context.Context, t *testing.T, stores *store.Stores, quizID
 }
 
 // uploadAudio posts a single-file audio upload to the quiz's audio endpoint and
-// asserts the 303-to-quiz-view redirect lands on the sounds section anchor.
+// asserts the 303-to-quiz-view redirect lands on the audio section anchor.
 func uploadAudio(
 	ctx context.Context, t *testing.T, client *http.Client,
 	baseURL string, quizID int64, name string, data []byte, durationMs int,
@@ -344,7 +500,7 @@ func uploadAudio(
 		rb, _ := io.ReadAll(resp.Body)
 		t.Fatalf("audio upload status = %d, want %d; body=%q", got, want, rb)
 	}
-	want := fmt.Sprintf("/admin/quizzes/%d#sounds", quizID)
+	want := fmt.Sprintf("/admin/quizzes/%d#audio", quizID)
 	if got := resp.Header.Get("Location"); got != want {
 		t.Errorf("audio upload redirect Location = %q, want %q", got, want)
 	}
@@ -403,11 +559,11 @@ func multipartAudio(t *testing.T, filename string, data []byte, durationMs int, 
 }
 
 // saveQuestionWithAudio posts the question edit form with the audio_media_id set
-// to soundID, preserving the question's text and a minimal valid option set, and
+// to audioID, preserving the question's text and a minimal valid option set, and
 // asserts the 303 redirect back to the quiz view.
 func saveQuestionWithAudio(
 	ctx context.Context, t *testing.T, client *http.Client,
-	baseURL string, quizID, questionID, soundID int64,
+	baseURL string, quizID, questionID, audioID int64,
 ) {
 	t.Helper()
 	saveURL := baseURL + fmt.Sprintf("/admin/quizzes/%d/questions/%d", quizID, questionID)
@@ -416,7 +572,7 @@ func saveQuestionWithAudio(
 		"csrf_token":        {token},
 		"id":                {strconv.FormatInt(questionID, 10)},
 		"text":              {"Name that tune"},
-		"audio_media_id":    {strconv.FormatInt(soundID, 10)},
+		"audio_media_id":    {strconv.FormatInt(audioID, 10)},
 		"option[0].text":    {"A"},
 		"option[0].correct": {"on"},
 		"option[1].text":    {"B"},

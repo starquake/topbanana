@@ -65,10 +65,10 @@ func NewService(store Store, root string, imageMaxBytes, audioMaxBytes int64, lo
 	}
 }
 
-// Store processes the upload into a normalised jpeg full image plus thumbnail,
-// writes both under <root>/<quizID>/, inserts the media row with the relative
-// paths and metadata, and returns the stored Media. createdBy is the uploading
-// player.
+// StoreImage processes the upload into a normalised jpeg full image plus
+// thumbnail, writes both under <root>/<quizID>/, inserts the media row with the
+// relative paths and metadata, and returns the stored Media. createdBy is the
+// uploading player.
 //
 // The row is inserted not-ready, then the files are written, the paths
 // recorded, and only then the row is flipped ready (a two-phase commit, #992).
@@ -78,7 +78,7 @@ func NewService(store Store, root string, imageMaxBytes, audioMaxBytes int64, lo
 // any step removes the just-written files and the row so a failed upload leaves
 // no orphans. The stored Path / ThumbPath are relative to root so a later root
 // remount does not strand the references.
-func (s *Service) Store(ctx context.Context, quizID, createdBy int64, r io.Reader) (*Media, error) {
+func (s *Service) StoreImage(ctx context.Context, quizID, createdBy int64, r io.Reader) (*Media, error) {
 	// Two ctx.Err checks around Process: the first skips Process if the
 	// cancel already arrived (Process is the CPU-heavy decode + re-encode);
 	// the second catches a cancel that arrived during Process, which is sync
@@ -194,6 +194,17 @@ func (s *Service) Get(ctx context.Context, id int64) (*Media, error) {
 	}
 
 	return m, nil
+}
+
+// UpdateDescription sets the host-supplied description label of a media row,
+// normalized (trimmed and length-capped) the same way an upload default is
+// (#1072). Returns ErrMediaNotFound when the id does not name a row.
+func (s *Service) UpdateDescription(ctx context.Context, id int64, description string) error {
+	if err := s.store.UpdateMediaDescription(ctx, id, normalizeDescription(description)); err != nil {
+		return fmt.Errorf("updating media description: %w", err)
+	}
+
+	return nil
 }
 
 // ListByQuiz returns every media row for quizID, newest first.

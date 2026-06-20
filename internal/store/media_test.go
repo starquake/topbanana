@@ -62,6 +62,7 @@ func newAudioMediaRow(quizID int64) *media.Media {
 		SizeBytes:         2048,
 		SHA256:            "cafebabe",
 		DurationMs:        &durationMs,
+		Description:       "Intro theme",
 		CreatedByPlayerID: seededAdminID,
 	}
 }
@@ -138,6 +139,66 @@ func TestMediaStore_UpdatePathsMissing(t *testing.T) {
 		err, media.ErrMediaNotFound,
 	) {
 		t.Errorf("UpdateMediaPaths(missing) err = %v, want ErrMediaNotFound", err)
+	}
+}
+
+// TestMediaStore_DescriptionRoundTrip pins that an audio row's description
+// survives the create/get round trip and that an image row (which never sets one)
+// reads back the empty-string default (#1072).
+func TestMediaStore_DescriptionRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	s, quizID := newMediaStoreWithQuiz(t)
+
+	audio, err := s.CreateMedia(t.Context(), newAudioMediaRow(quizID))
+	if err != nil {
+		t.Fatalf("CreateMedia (audio) err = %v, want nil", err)
+	}
+	if got, want := audio.Description, "Intro theme"; got != want {
+		t.Errorf("created Description = %q, want %q", got, want)
+	}
+	gotAudio, err := s.GetMedia(t.Context(), audio.ID)
+	if err != nil {
+		t.Fatalf("GetMedia (audio) err = %v, want nil", err)
+	}
+	if got, want := gotAudio.Description, "Intro theme"; got != want {
+		t.Errorf("stored Description = %q, want %q", got, want)
+	}
+
+	image, err := s.CreateMedia(t.Context(), newMediaRow(quizID))
+	if err != nil {
+		t.Fatalf("CreateMedia (image) err = %v, want nil", err)
+	}
+	if got, want := image.Description, ""; got != want {
+		t.Errorf("image Description = %q, want %q (empty default)", got, want)
+	}
+}
+
+// TestMediaStore_UpdateDescription pins that UpdateMediaDescription overwrites the
+// label and that an unknown id maps to media.ErrMediaNotFound (#1072).
+func TestMediaStore_UpdateDescription(t *testing.T) {
+	t.Parallel()
+
+	s, quizID := newMediaStoreWithQuiz(t)
+
+	created, err := s.CreateMedia(t.Context(), newAudioMediaRow(quizID))
+	if err != nil {
+		t.Fatalf("CreateMedia err = %v, want nil", err)
+	}
+
+	if err = s.UpdateMediaDescription(t.Context(), created.ID, "Outro sting"); err != nil {
+		t.Fatalf("UpdateMediaDescription err = %v, want nil", err)
+	}
+	got, err := s.GetMedia(t.Context(), created.ID)
+	if err != nil {
+		t.Fatalf("GetMedia err = %v, want nil", err)
+	}
+	if got, want := got.Description, "Outro sting"; got != want {
+		t.Errorf("Description = %q, want %q", got, want)
+	}
+
+	if err = s.UpdateMediaDescription(t.Context(), 999, "x"); !errors.Is(err, media.ErrMediaNotFound) {
+		t.Errorf("UpdateMediaDescription(missing) err = %v, want ErrMediaNotFound", err)
 	}
 }
 

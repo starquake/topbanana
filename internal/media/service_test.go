@@ -98,7 +98,7 @@ func pngUpload(t *testing.T, w, h int) []byte {
 	return buf.Bytes()
 }
 
-// TestServiceStoreRoundTrip pins the full persist path: Store processes and
+// TestServiceStoreRoundTrip pins the full persist path: StoreImage processes and
 // writes the full + thumb jpeg under <root>/<quizID>/ and records a row with
 // the metadata the pipeline computed and the relative paths.
 func TestServiceStoreRoundTrip(t *testing.T) {
@@ -106,9 +106,9 @@ func TestServiceStoreRoundTrip(t *testing.T) {
 
 	fx := newServiceWithQuiz(t)
 
-	m, err := fx.svc.Store(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 800, 400)))
+	m, err := fx.svc.StoreImage(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 800, 400)))
 	if err != nil {
-		t.Fatalf("Store err = %v, want nil", err)
+		t.Fatalf("StoreImage err = %v, want nil", err)
 	}
 
 	if got, want := m.QuizID, fx.quizID; got != want {
@@ -174,9 +174,9 @@ func TestServiceStoreImageOverCap(t *testing.T) {
 	const tinyCap int64 = 8
 	svc := NewService(store.NewMediaStore(db, slog.Default()), root, tinyCap, testAudioMaxBytes, slog.Default())
 
-	_, err := svc.Store(t.Context(), quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
+	_, err := svc.StoreImage(t.Context(), quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
 	if got, want := err, ErrUploadTooLarge; !errors.Is(got, want) {
-		t.Errorf("Store err = %v, want %v", got, want)
+		t.Errorf("StoreImage err = %v, want %v", got, want)
 	}
 }
 
@@ -192,9 +192,9 @@ func TestServiceStoreCancelledBeforeProcessing(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	_, err := fx.svc.Store(ctx, fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
+	_, err := fx.svc.StoreImage(ctx, fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
 	if got, want := err, context.Canceled; !errors.Is(got, want) {
-		t.Errorf("Store err = %v, want %v", got, want)
+		t.Errorf("StoreImage err = %v, want %v", got, want)
 	}
 
 	rows, err := fx.svc.ListByQuiz(t.Context(), fx.quizID)
@@ -202,7 +202,7 @@ func TestServiceStoreCancelledBeforeProcessing(t *testing.T) {
 		t.Fatalf("ListByQuiz err = %v, want nil", err)
 	}
 	if got, want := len(rows), 0; got != want {
-		t.Errorf("rows after cancelled Store = %d, want %d", got, want)
+		t.Errorf("rows after cancelled StoreImage = %d, want %d", got, want)
 	}
 
 	entries, err := os.ReadDir(fx.root)
@@ -210,7 +210,7 @@ func TestServiceStoreCancelledBeforeProcessing(t *testing.T) {
 		t.Fatalf("ReadDir err = %v, want nil", err)
 	}
 	if got, want := len(entries), 0; got != want {
-		t.Errorf("files under root after cancelled Store = %d, want %d", got, want)
+		t.Errorf("files under root after cancelled StoreImage = %d, want %d", got, want)
 	}
 }
 
@@ -218,7 +218,7 @@ func TestServiceStoreCancelledBeforeProcessing(t *testing.T) {
 // function the moment UpdateMediaPaths is invoked, simulating a client that
 // closes the connection between CreateMedia and UpdateMediaPaths. Without
 // this, a pre-cancelled context short-circuits before any row or file is
-// created and the cleanup paths in Service.Store are never exercised.
+// created and the cleanup paths in Service.StoreImage are never exercised.
 type cancelOnUpdatePathsStore struct {
 	Store
 
@@ -251,7 +251,7 @@ func (c *cancelAfterPathsStore) UpdateMediaPaths(ctx context.Context, id int64, 
 
 // TestServiceStoreCancelledMidFlightCleansUp pins the in-flight cancel
 // cleanup: when the connection drops between CreateMedia (row + files just
-// written) and UpdateMediaPaths, Store must return an error AND tear the row
+// written) and UpdateMediaPaths, StoreImage must return an error AND tear the row
 // + files back down via the cancel-immune cleanup path (#951). The vacuous
 // pre-Process variant above can't exercise this branch.
 func TestServiceStoreCancelledMidFlightCleansUp(t *testing.T) {
@@ -271,9 +271,9 @@ func TestServiceStoreCancelledMidFlightCleansUp(t *testing.T) {
 	wrapped := &cancelOnUpdatePathsStore{Store: innerStore, cancel: cancel}
 	svc := NewService(wrapped, root, testImageMaxBytes, testAudioMaxBytes, slog.Default())
 
-	_, err := svc.Store(ctx, quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
+	_, err := svc.StoreImage(ctx, quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
 	if err == nil {
-		t.Fatal("Store err = nil, want non-nil (ctx was cancelled mid-flight)")
+		t.Fatal("StoreImage err = nil, want non-nil (ctx was cancelled mid-flight)")
 	}
 
 	// Use a fresh ctx for verification so the cancelled ctx doesn't taint
@@ -308,7 +308,7 @@ func TestServiceStoreCancelledMidFlightCleansUp(t *testing.T) {
 
 // TestServiceStoreCancelledAfterPathsLeavesNothing pins the last cancel-race
 // window (#992): when the connection drops after the row + files commit but
-// before the ready flip, Store must return an error AND leave nothing the host
+// before the ready flip, StoreImage must return an error AND leave nothing the host
 // can see -- no library row and no files. The cancel makes the MarkMediaReady
 // step fail, and the cleanup branch tears the still-hidden row and its files
 // back down.
@@ -329,9 +329,9 @@ func TestServiceStoreCancelledAfterPathsLeavesNothing(t *testing.T) {
 	wrapped := &cancelAfterPathsStore{Store: innerStore, cancel: cancel}
 	svc := NewService(wrapped, root, testImageMaxBytes, testAudioMaxBytes, slog.Default())
 
-	_, err := svc.Store(ctx, quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
+	_, err := svc.StoreImage(ctx, quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
 	if err == nil {
-		t.Fatal("Store err = nil, want non-nil (ctx cancelled after paths committed)")
+		t.Fatal("StoreImage err = nil, want non-nil (ctx cancelled after paths committed)")
 	}
 
 	probeCtx := t.Context()
@@ -396,9 +396,9 @@ func TestServiceStoreCreateMediaFailureLeavesNoDir(t *testing.T) {
 		t.Fatalf("db.Close err = %v, want nil", err)
 	}
 
-	_, err := svc.Store(t.Context(), quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
+	_, err := svc.StoreImage(t.Context(), quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
 	if err == nil {
-		t.Fatal("Store err = nil, want non-nil (CreateMedia ran against a closed DB)")
+		t.Fatal("StoreImage err = nil, want non-nil (CreateMedia ran against a closed DB)")
 	}
 
 	entries, err := os.ReadDir(root)
@@ -417,9 +417,9 @@ func TestServiceDeleteRemovesRowAndFiles(t *testing.T) {
 
 	fx := newServiceWithQuiz(t)
 
-	m, err := fx.svc.Store(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 320, 240)))
+	m, err := fx.svc.StoreImage(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 320, 240)))
 	if err != nil {
-		t.Fatalf("Store err = %v, want nil", err)
+		t.Fatalf("StoreImage err = %v, want nil", err)
 	}
 
 	if err = fx.svc.Delete(t.Context(), m.ID); err != nil {
@@ -458,16 +458,21 @@ func TestServiceListByQuizScoped(t *testing.T) {
 	// A second quiz in the same DB whose media must not leak into quizA's list.
 	quizB := seedQuiz(t, fx.db, "media-svc-b")
 
-	first, err := fx.svc.Store(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 100, 100)))
+	first, err := fx.svc.StoreImage(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 100, 100)))
 	if err != nil {
-		t.Fatalf("Store first err = %v, want nil", err)
+		t.Fatalf("StoreImage first err = %v, want nil", err)
 	}
-	second, err := fx.svc.Store(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 120, 120)))
+	second, err := fx.svc.StoreImage(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 120, 120)))
 	if err != nil {
-		t.Fatalf("Store second err = %v, want nil", err)
+		t.Fatalf("StoreImage second err = %v, want nil", err)
 	}
-	if _, err = fx.svc.Store(t.Context(), quizB, seededAdminID, bytes.NewReader(pngUpload(t, 80, 80))); err != nil {
-		t.Fatalf("Store quizB err = %v, want nil", err)
+	if _, err = fx.svc.StoreImage(
+		t.Context(),
+		quizB,
+		seededAdminID,
+		bytes.NewReader(pngUpload(t, 80, 80)),
+	); err != nil {
+		t.Fatalf("StoreImage quizB err = %v, want nil", err)
 	}
 
 	list, err := fx.svc.ListByQuiz(t.Context(), fx.quizID)
@@ -493,9 +498,9 @@ func TestServiceOpenRoundTrip(t *testing.T) {
 
 	fx := newServiceWithQuiz(t)
 
-	m, err := fx.svc.Store(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 200, 200)))
+	m, err := fx.svc.StoreImage(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 200, 200)))
 	if err != nil {
-		t.Fatalf("Store err = %v, want nil", err)
+		t.Fatalf("StoreImage err = %v, want nil", err)
 	}
 
 	f, err := fx.svc.Open(m.Path)
@@ -537,9 +542,9 @@ func TestServiceQuizDeleteCascadesMedia(t *testing.T) {
 
 	fx := newServiceWithQuiz(t)
 
-	m, err := fx.svc.Store(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 160, 90)))
+	m, err := fx.svc.StoreImage(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 160, 90)))
 	if err != nil {
-		t.Fatalf("Store err = %v, want nil", err)
+		t.Fatalf("StoreImage err = %v, want nil", err)
 	}
 
 	if _, err = fx.db.ExecContext(t.Context(), "DELETE FROM quizzes WHERE id = ?", fx.quizID); err != nil {
@@ -551,16 +556,16 @@ func TestServiceQuizDeleteCascadesMedia(t *testing.T) {
 	}
 }
 
-// TestServiceStoreFlipsRowReady pins that a completed Store leaves the row
+// TestServiceStoreFlipsRowReady pins that a completed StoreImage leaves the row
 // ready: it shows in the library list, which filters not-ready rows (#992).
 func TestServiceStoreFlipsRowReady(t *testing.T) {
 	t.Parallel()
 
 	fx := newServiceWithQuiz(t)
 
-	m, err := fx.svc.Store(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 100, 100)))
+	m, err := fx.svc.StoreImage(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 100, 100)))
 	if err != nil {
-		t.Fatalf("Store err = %v, want nil", err)
+		t.Fatalf("StoreImage err = %v, want nil", err)
 	}
 
 	list, err := fx.svc.ListByQuiz(t.Context(), fx.quizID)
@@ -618,9 +623,9 @@ func TestServiceSweepStaleNotReadyDropsRowAndFiles(t *testing.T) {
 	staleID := seedNotReadyMedia(t, fx, staleFull, staleThumb, "2000-01-01 00:00:00")
 	freshID := seedNotReadyMedia(t, fx, "1/101.jpg", "1/101-thumb.jpg",
 		time.Now().UTC().Format("2006-01-02 15:04:05"))
-	readyMedia, err := fx.svc.Store(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
+	readyMedia, err := fx.svc.StoreImage(t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)))
 	if err != nil {
-		t.Fatalf("Store err = %v, want nil", err)
+		t.Fatalf("StoreImage err = %v, want nil", err)
 	}
 
 	deleted, err := fx.svc.SweepStaleNotReady(t.Context())

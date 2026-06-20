@@ -93,6 +93,7 @@ type Medium struct {
 	CreatedAt         time.Time
 	Ready             int64
 	DurationMs        sql.NullInt64
+	Description       string
 }
 
 type Option struct {
