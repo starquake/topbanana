@@ -353,7 +353,7 @@ func storeOneUpload(
 		}
 	}()
 
-	stored, err := svc.Store(ctx, quizID, playerID, file)
+	stored, err := svc.StoreImage(ctx, quizID, playerID, file)
 	if err != nil {
 		return 0, fmt.Errorf("storing upload part %q: %w", header.Filename, err)
 	}

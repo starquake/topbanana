@@ -29,9 +29,9 @@ type Viewer func(r *http.Request) (*auth.Player, bool)
 // HTTP layer depends on the narrow surface it calls rather than the whole
 // service.
 type MediaService interface {
-	// Store processes an uploaded image through the pipeline, writes the jpeg
+	// StoreImage processes an uploaded image through the pipeline, writes the jpeg
 	// full + thumbnail under the quiz directory, records a row, and returns it.
-	Store(ctx context.Context, quizID, createdBy int64, r io.Reader) (*media.Media, error)
+	StoreImage(ctx context.Context, quizID, createdBy int64, r io.Reader) (*media.Media, error)
 	// StoreAudio validates and stores an already-browser-playable audio upload
 	// as-is, recording an audio row with the caller-supplied duration and a
 	// description label (defaulting to filename without extension when empty), and
