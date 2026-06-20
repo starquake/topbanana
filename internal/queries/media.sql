@@ -11,7 +11,7 @@
 -- and the not-ready sweep drops the stranded row plus its files.
 INSERT INTO media (
     quiz_id, type, mime, path, thumb_path,
-    width, height, size_bytes, sha256, duration_ms, created_by_player_id, ready
+    width, height, size_bytes, sha256, duration_ms, description, created_by_player_id, ready
 )
 VALUES (
     sqlc.arg('quiz_id'),
@@ -24,6 +24,7 @@ VALUES (
     sqlc.arg('size_bytes'),
     sqlc.arg('sha256'),
     sqlc.arg('duration_ms'),
+    sqlc.arg('description'),
     sqlc.arg('created_by_player_id'),
     0
 )
@@ -46,6 +47,14 @@ WHERE id = sqlc.arg('id');
 -- host can see. The caller checks RowsAffected to confirm the row still exists.
 UPDATE media
 SET ready = 1
+WHERE id = sqlc.arg('id');
+
+-- name: UpdateMediaDescription :execresult
+-- Sets the host-supplied description label of a media row (#1072). The caller
+-- checks RowsAffected to confirm the row still exists (a missing id maps to
+-- media.ErrMediaNotFound).
+UPDATE media
+SET description = sqlc.arg('description')
 WHERE id = sqlc.arg('id');
 
 -- name: GetMedia :one

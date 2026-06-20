@@ -1,0 +1,36 @@
+{{/* sound_description - the editable description label of one audio library
+     tile (#1072).
+
+     Rendered two ways:
+       - Inlined by quizview.gohtml inside each sound tile.
+       - Returned alone by HandleMediaDescriptionSave when the request carries
+         HX-Request: true, swapped in via hx-swap="outerHTML" on its own id so
+         the saved label lands without a full reload.
+
+     The id="sound-description-{id}" wrapper is the swap target. The input is
+     prefilled with the saved label; Save posts the new value and the response
+     re-renders this same fragment. */}}
+{{define "sound_description"}}
+<form id="sound-description-{{.ID}}"
+      data-testid="sound-description"
+      method="post"
+      action="/admin/quizzes/{{.QuizID}}/media/{{.ID}}/description"
+      hx-post="/admin/quizzes/{{.QuizID}}/media/{{.ID}}/description"
+      hx-target="#sound-description-{{.ID}}"
+      hx-swap="outerHTML"
+      class="flex min-w-0 grow items-center gap-2">
+    <input type="hidden" name="csrf_token" value="{{csrfToken}}">
+    <label class="sr-only" for="sound-description-input-{{.ID}}">Audio description</label>
+    <input type="text"
+           id="sound-description-input-{{.ID}}"
+           name="description"
+           value="{{.Description}}"
+           placeholder="Describe this clip"
+           maxlength="200"
+           data-testid="sound-description-input"
+           class="form-input min-w-0 grow text-sm">
+    <button type="submit"
+            data-testid="sound-description-save"
+            class="btn-ghost shrink-0 text-xs">Save</button>
+</form>
+{{end}}

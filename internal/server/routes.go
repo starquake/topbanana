@@ -621,6 +621,18 @@ func addMediaRoutes(
 		)),
 	)
 
+	// The audio description edit is an ordinary urlencoded form (csrf_token plus
+	// the new label), so it uses the form-size + CSRF path. The handler lives in
+	// the admin package because it re-renders the sound_description partial for the
+	// htmx swap; it adds the same per-quiz edit gate and IDOR guard as delete, and
+	// only accepts audio rows (#1072).
+	mux.Handle(
+		"POST /admin/quizzes/{quizID}/media/{mediaID}/description",
+		admin.MaxFormSizeMiddleware(csrfMgr.Middleware(requireGameHost(
+			admin.HandleMediaDescriptionSave(logger, csrfMgr, svc, stores.Quizzes),
+		))),
+	)
+
 	// The serve routes resolve the viewer from the session WITHOUT minting a
 	// player row or setting a cookie (unlike EnsurePlayer): a media response is
 	// cacheable, so it must not carry a Set-Cookie. The private-quiz gate only

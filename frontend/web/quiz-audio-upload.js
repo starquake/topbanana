@@ -44,6 +44,15 @@ function measureDuration(file) {
     });
 }
 
+// descriptionFromFile derives the default library label from a picked file's
+// name by dropping its extension (#1072). The server falls back to the same
+// filename-without-extension when this is absent, so the no-JS path matches.
+function descriptionFromFile(name) {
+    const dot = name.lastIndexOf('.');
+
+    return dot > 0 ? name.slice(0, dot) : name;
+}
+
 function wireAudioUpload() {
     const input = document.getElementById('quiz-audio-upload');
     if (!input) return;
@@ -66,8 +75,10 @@ function wireAudioUpload() {
         rowTestId: 'audio-upload-row',
         prepare: async (file) => {
             const durationMs = await measureDuration(file);
+            const fields = { description: descriptionFromFile(file.name) };
+            if (durationMs > 0) fields.duration_ms = String(durationMs);
 
-            return durationMs > 0 ? { duration_ms: String(durationMs) } : null;
+            return fields;
         },
         isLanded: (json) => typeof json.id === 'number' && json.id > 0,
         onSettle: ({ landed }) => {

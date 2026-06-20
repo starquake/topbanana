@@ -122,7 +122,7 @@
                                class="flex cursor-pointer flex-wrap items-center gap-3 rounded-lg border border-border-soft bg-surface px-4 py-3 has-[:checked]:border-accent has-[:focus-visible]:shadow-focus">
                             <input type="radio" name="audio_media_id" value="{{.ID}}" class="sr-only"
                                    {{if eq $.Question.AudioMediaID .ID}}checked{{end}}>
-                            <span class="min-w-0 grow truncate text-text">Audio {{.ID}}</span>
+                            <span class="min-w-0 grow truncate text-text">{{if .Description}}{{.Description}}{{else}}Audio {{.ID}}{{end}}</span>
                             {{$label := .DurationLabel}}
                             {{if $label}}
                                 <span data-testid="audio-duration" class="shrink-0 text-xs text-text-dim tabular-nums">{{$label}}</span>

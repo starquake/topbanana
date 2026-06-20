@@ -10,6 +10,7 @@ import (
 	"math"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // ErrUnsupportedAudio is returned when an audio upload's magic bytes do not
@@ -65,11 +66,15 @@ const (
 
 // StoreAudio persists an already-browser-playable audio upload as-is under
 // <root>/<quizID>/<id><ext>, recording a media row with the sniffed MIME, byte
-// size, sha256, and the caller-supplied duration. Audio is not decoded or
-// transcoded server-side: the format is detected by sniffing magic bytes, and
-// an unrecognised container is rejected with ErrUnsupportedAudio rather than
-// converted. durationMs is advisory (read in-browser by the caller); a value of
-// zero or less stores NULL.
+// size, sha256, the caller-supplied duration, and a description label. Audio is
+// not decoded or transcoded server-side: the format is detected by sniffing
+// magic bytes, and an unrecognised container is rejected with ErrUnsupportedAudio
+// rather than converted. durationMs is advisory (read in-browser by the caller);
+// a value of zero or less stores NULL.
+//
+// description is the host-facing library label (#1072). When it is empty it
+// defaults to filename without its extension, so a clip always has a readable
+// label even on the no-JS upload path; it is editable afterwards.
 //
 // Like Store, the row is inserted not-ready, the file is written, the path
 // recorded, and only then the row is flipped ready (a two-phase commit). A
@@ -78,7 +83,7 @@ const (
 // ErrEmptyUpload for a zero-byte upload and ErrAudioTooLarge when the bytes
 // exceed the configured cap.
 func (s *Service) StoreAudio(
-	ctx context.Context, quizID, createdBy int64, durationMs int, r io.Reader,
+	ctx context.Context, quizID, createdBy int64, durationMs int, description, filename string, r io.Reader,
 ) (*Media, error) {
 	raw, err := s.readAudioCapped(r)
 	if err != nil {
@@ -99,6 +104,7 @@ func (s *Service) StoreAudio(
 		SizeBytes:         int64(len(raw)),
 		SHA256:            hex.EncodeToString(sum[:]),
 		DurationMs:        durationToPtr(durationMs),
+		Description:       defaultDescription(description, filename),
 		CreatedByPlayerID: createdBy,
 	})
 	if err != nil {
@@ -147,6 +153,40 @@ func (s *Service) readAudioCapped(r io.Reader) ([]byte, error) {
 	}
 
 	return raw, nil
+}
+
+// maxDescriptionLen bounds a stored description label so a crafted request
+// cannot persist an unbounded string (the client maxlength is advisory). Measured
+// in runes so a multi-byte label is not cut mid-character. The library/picker
+// truncate visually anyway; this is the storage guard.
+const maxDescriptionLen = 200
+
+// defaultDescription resolves the stored description label (#1072): a non-empty
+// caller-supplied description wins, otherwise it falls back to filename without
+// its extension so a clip is never unlabelled even on the no-JS upload path. A
+// filename of only an extension (or empty) yields the empty string. The result
+// is normalized (trimmed and length-capped) the same way an edit is.
+func defaultDescription(description, filename string) string {
+	if trimmed := strings.TrimSpace(description); trimmed != "" {
+		return normalizeDescription(trimmed)
+	}
+
+	base := filepath.Base(filename)
+
+	return normalizeDescription(strings.TrimSuffix(base, filepath.Ext(base)))
+}
+
+// normalizeDescription trims surrounding whitespace and caps the label at
+// maxDescriptionLen runes, the single normalization both the upload default and
+// the inline edit apply so the stored value is bounded and consistent.
+func normalizeDescription(description string) string {
+	trimmed := strings.TrimSpace(description)
+	runes := []rune(trimmed)
+	if len(runes) > maxDescriptionLen {
+		trimmed = strings.TrimSpace(string(runes[:maxDescriptionLen]))
+	}
+
+	return trimmed
 }
 
 // durationToPtr maps a caller-supplied duration in milliseconds to the *int the

@@ -59,6 +59,64 @@ test('uploading a sound adds it to the library with a duration and an audio prev
   await expect(libraryItem.locator('audio')).toHaveAttribute('src', /\/media\/\d+$/);
 });
 
+test('an uploaded sound defaults its description to the filename and can be edited inline', async ({
+  page,
+  browserName,
+}) => {
+  test.setTimeout(60_000);
+
+  const quizTitle = `E2E Audio Description ${browserName}`;
+  await createQuizWithQuestions(page, quizTitle, QUESTIONS);
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+
+  await page.locator('input[type="file"][name="audio"]').setInputFiles({
+    name: 'Opening Theme.wav',
+    mimeType: 'audio/wav',
+    buffer: makeWav(1),
+  });
+  await expect(page.getByTestId('audio-library-item')).toHaveCount(1, { timeout: 45_000 });
+
+  // The description defaults to the filename without its extension.
+  const descInput = page.getByTestId('sound-description-input').first();
+  await expect(descInput).toHaveValue('Opening Theme');
+
+  // Edit the label inline; the htmx swap re-renders the form with the saved value.
+  await descInput.fill('Round one intro');
+  await page.getByTestId('sound-description-save').first().click();
+  await expect(page.getByTestId('sound-description-input').first()).toHaveValue('Round one intro');
+
+  // A reload proves it persisted, not just swapped in the DOM.
+  await page.reload();
+  await expect(page.getByTestId('sound-description-input').first()).toHaveValue('Round one intro');
+});
+
+test('an edited sound description shows in the question editor audio picker', async ({ page, browserName }) => {
+  test.setTimeout(60_000);
+
+  const quizTitle = `E2E Audio Picker Desc ${browserName}`;
+  await createQuizWithQuestions(page, quizTitle, QUESTIONS);
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+
+  await page.locator('input[type="file"][name="audio"]').setInputFiles({
+    name: 'jingle.wav',
+    mimeType: 'audio/wav',
+    buffer: makeWav(2),
+  });
+  await expect(page.getByTestId('audio-library-item')).toHaveCount(1, { timeout: 45_000 });
+
+  const descInput = page.getByTestId('sound-description-input').first();
+  await descInput.fill('Theme tune');
+  await page.getByTestId('sound-description-save').first().click();
+  await expect(page.getByTestId('sound-description-input').first()).toHaveValue('Theme tune');
+
+  await page.getByRole('link', { name: 'Edit question' }).first().click();
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/\d+\/edit$/);
+
+  const picker = page.getByTestId('question-audio-picker');
+  await expect(picker).toBeVisible();
+  await expect(picker.getByTestId('audio-library-item').first()).toContainText('Theme tune');
+});
+
 test('the question editor audio picker lists a sound and attaches it', async ({ page, browserName }) => {
   test.setTimeout(60_000);
 

@@ -18,3 +18,7 @@ func DecodeJPEGConfigForTest(r io.Reader) (image.Config, error) {
 
 // ExportSniffAudio re-exports the unexported audio format sniffer for tests.
 var ExportSniffAudio = sniffAudio
+
+// ExportDefaultDescription re-exports the unexported description-defaulting
+// helper for tests.
+var ExportDefaultDescription = defaultDescription

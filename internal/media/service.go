@@ -196,6 +196,17 @@ func (s *Service) Get(ctx context.Context, id int64) (*Media, error) {
 	return m, nil
 }
 
+// UpdateDescription sets the host-supplied description label of a media row,
+// normalized (trimmed and length-capped) the same way an upload default is
+// (#1072). Returns ErrMediaNotFound when the id does not name a row.
+func (s *Service) UpdateDescription(ctx context.Context, id int64, description string) error {
+	if err := s.store.UpdateMediaDescription(ctx, id, normalizeDescription(description)); err != nil {
+		return fmt.Errorf("updating media description: %w", err)
+	}
+
+	return nil
+}
+
 // ListByQuiz returns every media row for quizID, newest first.
 func (s *Service) ListByQuiz(ctx context.Context, quizID int64) ([]*Media, error) {
 	items, err := s.store.ListMediaByQuiz(ctx, quizID)

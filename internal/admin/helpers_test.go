@@ -134,6 +134,31 @@ func (e *adminEnv) seedMedia(t *testing.T, quizID int64) int64 {
 	return m.ID
 }
 
+// seedAudioMedia inserts a ready audio row into the given quiz's library via the
+// real media store, with the given description, and returns its id (#1072).
+func (e *adminEnv) seedAudioMedia(t *testing.T, quizID int64, description string) int64 {
+	t.Helper()
+
+	m, err := e.media.CreateMedia(t.Context(), &media.Media{
+		QuizID:            quizID,
+		Type:              media.TypeAudio,
+		MIME:              "audio/mpeg",
+		Path:              "a.mp3",
+		SizeBytes:         2048,
+		SHA256:            "cafebabe",
+		Description:       description,
+		CreatedByPlayerID: testAdminID,
+	})
+	if err != nil {
+		t.Fatalf("CreateMedia (audio) err = %v, want nil", err)
+	}
+	if err = e.media.MarkMediaReady(t.Context(), m.ID); err != nil {
+		t.Fatalf("MarkMediaReady err = %v, want nil", err)
+	}
+
+	return m.ID
+}
+
 // backdateQuizUpdatedAt rewrites quizzes.updated_at for the given quiz
 // so the list view's relative-time rendering ("2 hr ago") can be pinned;
 // the normal create path always stamps the current time. Raw SQL in a

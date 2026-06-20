@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/starquake/topbanana/internal/dbtest"
@@ -135,7 +136,7 @@ func TestServiceStoreAudioAcceptsFormats(t *testing.T) {
 			fx := newServiceWithQuiz(t)
 
 			m, err := fx.svc.StoreAudio(
-				t.Context(), fx.quizID, seededAdminID, 5000, bytes.NewReader(tt.payload),
+				t.Context(), fx.quizID, seededAdminID, 5000, "", "Theme Song"+tt.wantExt, bytes.NewReader(tt.payload),
 			)
 			if err != nil {
 				t.Fatalf("StoreAudio err = %v, want nil", err)
@@ -143,6 +144,10 @@ func TestServiceStoreAudioAcceptsFormats(t *testing.T) {
 
 			if got, want := m.Type, TypeAudio; got != want {
 				t.Errorf("Type = %q, want %q", got, want)
+			}
+			// An empty description defaults to the filename without its extension.
+			if got, want := m.Description, "Theme Song"; got != want {
+				t.Errorf("Description = %q, want %q", got, want)
 			}
 			if got, want := m.MIME, tt.wantMIME; got != want {
 				t.Errorf("MIME = %q, want %q", got, want)
@@ -183,7 +188,7 @@ func TestServiceStoreAudioPersistsDuration(t *testing.T) {
 	fx := newServiceWithQuiz(t)
 
 	withDuration, err := fx.svc.StoreAudio(
-		t.Context(), fx.quizID, seededAdminID, 3200, bytes.NewReader(mp3ID3()),
+		t.Context(), fx.quizID, seededAdminID, 3200, "", "clip.mp3", bytes.NewReader(mp3ID3()),
 	)
 	if err != nil {
 		t.Fatalf("StoreAudio err = %v, want nil", err)
@@ -200,7 +205,7 @@ func TestServiceStoreAudioPersistsDuration(t *testing.T) {
 	}
 
 	noDuration, err := fx.svc.StoreAudio(
-		t.Context(), fx.quizID, seededAdminID, 0, bytes.NewReader(oggHeader()),
+		t.Context(), fx.quizID, seededAdminID, 0, "", "clip.ogg", bytes.NewReader(oggHeader()),
 	)
 	if err != nil {
 		t.Fatalf("StoreAudio (no duration) err = %v, want nil", err)
@@ -225,7 +230,7 @@ func TestServiceStoreAudioRejectsUnsupported(t *testing.T) {
 	fx := newServiceWithQuiz(t)
 
 	_, err := fx.svc.StoreAudio(
-		t.Context(), fx.quizID, seededAdminID, 1000,
+		t.Context(), fx.quizID, seededAdminID, 1000, "", "clip.mp3",
 		bytes.NewReader([]byte("\x89PNG\r\n\x1a\n not audio")),
 	)
 	if got, want := err, ErrUnsupportedAudio; !errors.Is(got, want) {
@@ -250,7 +255,7 @@ func TestServiceStoreAudioRejectsVideoMP4(t *testing.T) {
 	fx := newServiceWithQuiz(t)
 
 	_, err := fx.svc.StoreAudio(
-		t.Context(), fx.quizID, seededAdminID, 1000, bytes.NewReader(mp4VideoFtyp("isom")),
+		t.Context(), fx.quizID, seededAdminID, 1000, "", "movie.mp4", bytes.NewReader(mp4VideoFtyp("isom")),
 	)
 	if got, want := err, ErrUnsupportedAudio; !errors.Is(got, want) {
 		t.Fatalf("StoreAudio err = %v, want %v", got, want)
@@ -272,7 +277,7 @@ func TestServiceStoreAudioRejectsEmpty(t *testing.T) {
 
 	fx := newServiceWithQuiz(t)
 
-	_, err := fx.svc.StoreAudio(t.Context(), fx.quizID, seededAdminID, 0, bytes.NewReader(nil))
+	_, err := fx.svc.StoreAudio(t.Context(), fx.quizID, seededAdminID, 0, "", "clip.mp3", bytes.NewReader(nil))
 	if got, want := err, ErrEmptyUpload; !errors.Is(got, want) {
 		t.Errorf("StoreAudio err = %v, want %v", got, want)
 	}
@@ -297,7 +302,7 @@ func TestServiceStoreAudioRejectsOverCap(t *testing.T) {
 	svc := NewService(store.NewMediaStore(db, slog.Default()), root, testImageMaxBytes, tinyCap, slog.Default())
 
 	payload := append([]byte("ID3"), bytes.Repeat([]byte{0x00}, 64)...)
-	_, err := svc.StoreAudio(t.Context(), quizID, seededAdminID, 1000, bytes.NewReader(payload))
+	_, err := svc.StoreAudio(t.Context(), quizID, seededAdminID, 1000, "", "clip.mp3", bytes.NewReader(payload))
 	if got, want := err, ErrAudioTooLarge; !errors.Is(got, want) {
 		t.Errorf("StoreAudio err = %v, want %v", got, want)
 	}
@@ -321,11 +326,130 @@ func TestServiceStoreAudioHugeCap(t *testing.T) {
 	root := t.TempDir()
 	svc := NewService(store.NewMediaStore(db, slog.Default()), root, testImageMaxBytes, math.MaxInt64, slog.Default())
 
-	m, err := svc.StoreAudio(t.Context(), quizID, seededAdminID, 1000, bytes.NewReader(mp3ID3()))
+	m, err := svc.StoreAudio(t.Context(), quizID, seededAdminID, 1000, "", "clip.mp3", bytes.NewReader(mp3ID3()))
 	if err != nil {
 		t.Fatalf("StoreAudio err = %v, want nil", err)
 	}
 	if got, want := m.SizeBytes, int64(len(mp3ID3())); got != want {
 		t.Errorf("SizeBytes = %d, want %d", got, want)
+	}
+}
+
+// TestDefaultDescription pins the description-defaulting rule (#1072): a non-empty
+// caller value wins (trimmed), otherwise the filename without its extension is
+// used, and a name that is only an extension (or empty) yields the empty string.
+func TestDefaultDescription(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		description string
+		filename    string
+		want        string
+	}{
+		{"explicit wins over filename", "My Clip", "intro.mp3", "My Clip"},
+		{"explicit is trimmed", "  spaced  ", "intro.mp3", "spaced"},
+		{"blank explicit falls back to filename", "   ", "intro.mp3", "intro"},
+		{"empty explicit falls back to filename", "", "Theme Song.ogg", "Theme Song"},
+		{"filename without extension", "", "loop", "loop"},
+		{"filename strips only last extension", "", "a.b.wav", "a.b"},
+		{"filename with directory uses base", "", "/tmp/sounds/win.m4a", "win"},
+		{"only an extension yields empty", "", ".mp3", ""},
+		{"empty filename yields empty", "", "", ""},
+		{"over-long description is capped to 200 runes", strings.Repeat("a", 250), "x.mp3", strings.Repeat("a", 200)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got, want := ExportDefaultDescription(tt.description, tt.filename), tt.want; got != want {
+				t.Errorf("defaultDescription(%q, %q) = %q, want %q", tt.description, tt.filename, got, want)
+			}
+		})
+	}
+}
+
+// TestServiceStoreAudioExplicitDescription pins that an explicit description is
+// stored as-is (trimmed) and round-trips through the DB, rather than being
+// overridden by the filename default (#1072).
+func TestServiceStoreAudioExplicitDescription(t *testing.T) {
+	t.Parallel()
+
+	fx := newServiceWithQuiz(t)
+
+	m, err := fx.svc.StoreAudio(
+		t.Context(), fx.quizID, seededAdminID, 0, "  Winning fanfare  ", "fanfare.mp3", bytes.NewReader(mp3ID3()),
+	)
+	if err != nil {
+		t.Fatalf("StoreAudio err = %v, want nil", err)
+	}
+	if got, want := m.Description, "Winning fanfare"; got != want {
+		t.Errorf("Description = %q, want %q", got, want)
+	}
+
+	stored, err := fx.svc.Get(t.Context(), m.ID)
+	if err != nil {
+		t.Fatalf("Get err = %v, want nil", err)
+	}
+	if got, want := stored.Description, "Winning fanfare"; got != want {
+		t.Errorf("stored Description = %q, want %q", got, want)
+	}
+}
+
+// TestServiceUpdateDescription pins that UpdateDescription trims and persists a
+// new label, and that a missing id maps to ErrMediaNotFound.
+func TestServiceUpdateDescription(t *testing.T) {
+	t.Parallel()
+
+	fx := newServiceWithQuiz(t)
+
+	m, err := fx.svc.StoreAudio(
+		t.Context(), fx.quizID, seededAdminID, 0, "first", "first.mp3", bytes.NewReader(mp3ID3()),
+	)
+	if err != nil {
+		t.Fatalf("StoreAudio err = %v, want nil", err)
+	}
+
+	if err = fx.svc.UpdateDescription(t.Context(), m.ID, "  second label  "); err != nil {
+		t.Fatalf("UpdateDescription err = %v, want nil", err)
+	}
+	stored, err := fx.svc.Get(t.Context(), m.ID)
+	if err != nil {
+		t.Fatalf("Get err = %v, want nil", err)
+	}
+	if got, want := stored.Description, "second label"; got != want {
+		t.Errorf("stored Description = %q, want %q", got, want)
+	}
+
+	const missingID int64 = 999999
+	if got, want := fx.svc.UpdateDescription(t.Context(), missingID, "x"), ErrMediaNotFound; !errors.Is(got, want) {
+		t.Errorf("UpdateDescription(missing) err = %v, want %v", got, want)
+	}
+}
+
+// TestServiceUpdateDescriptionCapsLength pins that an over-long description is
+// capped server-side (the client maxlength is advisory), so a crafted request
+// cannot persist an unbounded label (#1072).
+func TestServiceUpdateDescriptionCapsLength(t *testing.T) {
+	t.Parallel()
+
+	fx := newServiceWithQuiz(t)
+
+	m, err := fx.svc.StoreAudio(
+		t.Context(), fx.quizID, seededAdminID, 0, "label", "label.mp3", bytes.NewReader(mp3ID3()),
+	)
+	if err != nil {
+		t.Fatalf("StoreAudio err = %v, want nil", err)
+	}
+
+	if err = fx.svc.UpdateDescription(t.Context(), m.ID, strings.Repeat("z", 500)); err != nil {
+		t.Fatalf("UpdateDescription err = %v, want nil", err)
+	}
+	stored, err := fx.svc.Get(t.Context(), m.ID)
+	if err != nil {
+		t.Fatalf("Get err = %v, want nil", err)
+	}
+	if got, want := len([]rune(stored.Description)), 200; got != want {
+		t.Errorf("stored Description rune length = %d, want %d (capped)", got, want)
 	}
 }

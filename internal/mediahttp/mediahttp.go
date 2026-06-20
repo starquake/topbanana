@@ -33,11 +33,17 @@ type MediaService interface {
 	// full + thumbnail under the quiz directory, records a row, and returns it.
 	Store(ctx context.Context, quizID, createdBy int64, r io.Reader) (*media.Media, error)
 	// StoreAudio validates and stores an already-browser-playable audio upload
-	// as-is, recording a sound row with the caller-supplied duration, and returns
-	// it (#1059).
-	StoreAudio(ctx context.Context, quizID, createdBy int64, durationMs int, r io.Reader) (*media.Media, error)
+	// as-is, recording a sound row with the caller-supplied duration and a
+	// description label (defaulting to filename without extension when empty), and
+	// returns it (#1059, #1072).
+	StoreAudio(
+		ctx context.Context, quizID, createdBy int64, durationMs int, description, filename string, r io.Reader,
+	) (*media.Media, error)
 	// Get returns the media row for id, or media.ErrMediaNotFound.
 	Get(ctx context.Context, id int64) (*media.Media, error)
+	// UpdateDescription sets the host-supplied description label of a media row.
+	// Returns media.ErrMediaNotFound when the id does not name a row.
+	UpdateDescription(ctx context.Context, id int64, description string) error
 	// Delete removes the media row and unlinks its files. Returns
 	// media.ErrMediaNotFound when the id does not name a row.
 	Delete(ctx context.Context, id int64) error

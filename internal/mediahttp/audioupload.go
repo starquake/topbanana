@@ -26,6 +26,11 @@ const (
 	// whole milliseconds. It is advisory: audio is not decoded server-side, so a
 	// missing or unparseable value stores NULL rather than failing the upload.
 	audioDurationFormField = "duration_ms"
+
+	// audioDescriptionFormField carries the host-supplied library label (#1072).
+	// The form JS prefills it with the picked file's name; the service falls back
+	// to filename without its extension when it is absent (the no-JS path).
+	audioDescriptionFormField = "description"
 )
 
 // HandleAudioUpload accepts a single-file multipart audio upload for POST
@@ -86,7 +91,8 @@ func HandleAudioUpload(
 			return
 		}
 
-		mediaID, err := storeOneAudio(r.Context(), svc, quizID, player.ID, audioDurationFromForm(r), file)
+		desc := r.PostFormValue(audioDescriptionFormField)
+		mediaID, err := storeOneAudio(r.Context(), svc, quizID, player.ID, audioDurationFromForm(r), desc, file)
 		if err != nil {
 			writeAudioUploadResult(w, r, logger, quizID, mediaID, err)
 
@@ -132,7 +138,8 @@ func audioDurationFromForm(r *http.Request) int {
 // The ctx.Err check is the only abort point: StoreAudio is not context-aware, so
 // a cancel that arrived before the store is surfaced here.
 func storeOneAudio(
-	ctx context.Context, svc MediaService, quizID, playerID int64, durationMs int, header *multipart.FileHeader,
+	ctx context.Context, svc MediaService, quizID, playerID int64, durationMs int, description string,
+	header *multipart.FileHeader,
 ) (mediaID int64, err error) {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return 0, fmt.Errorf("upload cancelled before store of %q: %w", header.Filename, ctxErr)
@@ -147,7 +154,7 @@ func storeOneAudio(
 		}
 	}()
 
-	stored, err := svc.StoreAudio(ctx, quizID, playerID, durationMs, f)
+	stored, err := svc.StoreAudio(ctx, quizID, playerID, durationMs, description, header.Filename, f)
 	if err != nil {
 		return 0, fmt.Errorf("storing audio upload part %q: %w", header.Filename, err)
 	}
