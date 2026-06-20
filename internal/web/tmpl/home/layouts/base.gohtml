@@ -34,13 +34,13 @@
          want to drive the dialog programmatically. esbuild bundle
          (#721); the dialog logic is shared with the player client. */}}
     <script type="module" src="/static/js/dist/share.js"></script>
-    {{/* home.js registers the Alpine resume-session CTA (#888) so the
-         "Join a live game" button flips to "Resume session" when the
-         player has a remembered session in localStorage. Loaded as a
-         module: both modules execute before deferred Alpine boots, so
-         their alpine:init handlers are registered in time for the
-         x-data="resumeSessionCta()" island to mount. */}}
-    <script type="module" src="/static/js/dist/home.js"></script>
+    {{/* admin.js is the combined admin/auth/home bundle (#1071). It carries the
+         home page's Alpine resume-session CTA (#888) that flips "Join a live
+         game" to "Resume session" when the player has a remembered session in
+         localStorage. Loaded as a module above the deferred Alpine vendor
+         script below, so its alpine:init handler is registered before Alpine
+         boots and the x-data="resumeSessionCta()" island can mount. */}}
+    <script type="module" src="/static/js/dist/admin.js"></script>
     {{/* Alpine drives the Popular / Newest tab toggle on the start page.
          Vendored + self-hosted (no CDN, per frontend-style.md); deferred
          so it boots after the DOM parses without blocking first paint. */}}

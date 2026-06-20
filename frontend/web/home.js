@@ -6,8 +6,8 @@
 //
 // The key string and parse shape live in the shared rememberedSession module so
 // the home page reads exactly what the player client (JoinApp) wrote, from one
-// place (#1005). esbuild inlines the shared module into this bundle, emitted to
-// dist/home.js and served at /static/js/home.js.
+// place (#1005). This module is folded into the combined admin.js bundle
+// (#1071), which the home layout loads.
 
 import {
     readRememberedSession,

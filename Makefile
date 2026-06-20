@@ -366,15 +366,14 @@ JS_CLIENT_ENTRIES := $(JS_CLIENT_SRC)/app.js $(JS_CLIENT_SRC)/join.js
 
 JS_WEB_SRC      := frontend/web
 JS_WEB_OUT      := internal/assets/static/js/dist
-# host-bigscreen + share are the live-game / share bundles; the rest are small
-# standalone admin/auth page scripts that are bundled (minified) too, so the
-# served js tree holds only built output and never un-minified source (#756).
+# host-bigscreen + share are the heavier, page-specific live-game / share
+# bundles. admin.js is the combined admin/auth/home bundle (#1071): it imports
+# the small standalone page modules (cooldown, copy-prompt, password-length,
+# quiz-reorder, the two upload queues, home) so the web tree ships three built
+# bundles instead of nine, and the served js tree still holds only built output
+# (#756).
 JS_WEB_ENTRIES  := $(JS_WEB_SRC)/host-bigscreen.js $(JS_WEB_SRC)/share.js \
-                   $(JS_WEB_SRC)/cooldown.js $(JS_WEB_SRC)/copy-prompt.js \
-                   $(JS_WEB_SRC)/password-length.js $(JS_WEB_SRC)/quiz-reorder.js \
-                   $(JS_WEB_SRC)/quiz-image-upload.js \
-                   $(JS_WEB_SRC)/quiz-audio-upload.js \
-                   $(JS_WEB_SRC)/home.js
+                   $(JS_WEB_SRC)/admin.js
 
 # Third-party libraries (Alpine, anime.js, SortableJS) are sourced from the
 # pinned npm packages (package.json) and re-emitted by esbuild as standalone

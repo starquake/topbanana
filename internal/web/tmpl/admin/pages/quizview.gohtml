@@ -776,12 +776,12 @@
             openModal('image-modal-viewer');
         }
     </script>
-    {{/* Drag-and-drop reorder for rounds and questions (#199). Vendored
-         SortableJS plus a plain ES module; both are admin-only and loaded
-         only on this page, not in the global base layout. The module
-         self-noops when the edit handles are absent (read-only viewer). */}}
-    <script src="/static/js/vendor/sortable.min.js" defer></script>
-    <script type="module" src="/static/js/dist/quiz-reorder.js" defer></script>
-    <script type="module" src="/static/js/dist/quiz-image-upload.js" defer></script>
-    <script type="module" src="/static/js/dist/quiz-audio-upload.js" defer></script>
+    {{/* Vendored SortableJS for the drag-and-drop reorder (#199), admin-only
+         and loaded only on this page. The reorder, image-upload and audio-upload
+         modules now ship in the combined admin.js bundle the base layout loads
+         (#1071). admin.js is a deferred module in <head>, so this classic script
+         is left parse-blocking (no defer): a parse-blocking body script runs
+         before any deferred script, so the global Sortable is defined before
+         quiz-reorder's init reads it. */}}
+    <script src="/static/js/vendor/sortable.min.js"></script>
 {{end}}

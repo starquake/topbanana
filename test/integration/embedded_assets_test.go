@@ -25,16 +25,14 @@ func TestEmbeddedAssets_ServeOnlyBuiltOutput(t *testing.T) {
 		"/client/js/dist/app.js",
 		"/client/js/dist/join.js",
 		// Web / admin: every served script is a built bundle under dist/ or a
-		// vendored lib; the standalone admin/auth scripts are bundled too. The
-		// player client loads Alpine + anime from this same web-served vendor
-		// dir rather than a per-client duplicate.
+		// vendored lib. admin.js is the combined admin/auth/home bundle (#1071);
+		// host-bigscreen + share stay separate. The player client loads Alpine +
+		// anime from this same web-served vendor dir rather than a per-client
+		// duplicate.
 		"/static/css/app.css",
 		"/static/js/dist/host-bigscreen.js",
 		"/static/js/dist/share.js",
-		"/static/js/dist/quiz-reorder.js",
-		"/static/js/dist/cooldown.js",
-		"/static/js/dist/copy-prompt.js",
-		"/static/js/dist/password-length.js",
+		"/static/js/dist/admin.js",
 		"/static/js/htmx.min.js",
 		"/static/js/vendor/alpine.min.js",
 		"/static/js/vendor/anime.umd.min.js",
@@ -63,6 +61,15 @@ func TestEmbeddedAssets_ServeOnlyBuiltOutput(t *testing.T) {
 		"/static/js/cooldown.js",
 		"/static/js/copy-prompt.js",
 		"/static/js/password-length.js",
+		// The standalone admin/auth/home dist bundles folded into admin.js
+		// (#1071) no longer exist under dist/.
+		"/static/js/dist/quiz-reorder.js",
+		"/static/js/dist/cooldown.js",
+		"/static/js/dist/copy-prompt.js",
+		"/static/js/dist/password-length.js",
+		"/static/js/dist/quiz-image-upload.js",
+		"/static/js/dist/quiz-audio-upload.js",
+		"/static/js/dist/home.js",
 	}
 	for _, path := range notServed {
 		assertEmbedStatus(ctx, t, srv.BaseURL+path, http.StatusNotFound)

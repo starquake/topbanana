@@ -32,13 +32,10 @@
     <link rel="preload" href="/static/fonts/orbitron-latin.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="/static/css/app.css">
     <script src="/static/js/htmx.min.js" defer></script>
-    {{/* password-length.js shows a live "too short" hint under the
-         set-password input. Self-noops where there is no
-         [data-password-length]. */}}
-    <script type="module" src="/static/js/dist/password-length.js" defer></script>
-    {{/* copy-prompt.js powers the Copy button on the quiz-import page.
-         Self-noops where there is no [data-copy-target]. */}}
-    <script type="module" src="/static/js/dist/copy-prompt.js" defer></script>
+    {{/* admin.js is the combined admin/auth/home bundle (#1071). Each feature
+         it carries self-noops where its anchor is absent, so loading it on
+         every admin page is fine. */}}
+    <script type="module" src="/static/js/dist/admin.js" defer></script>
     <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
 </head>
 <body class="bg-bg text-text font-sans antialiased min-h-dvh flex flex-col leading-relaxed">
