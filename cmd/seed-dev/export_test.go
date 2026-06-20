@@ -1,13 +1,19 @@
 package main
 
 // Test-only re-exports so the external main_test package can exercise
-// the fixture->domain mapping without widening the production surface.
+// the fixture->domain mapping and the audio-seeding path without widening
+// the production surface.
 var (
 	ExportQuizFromFixture              = quizFromFixture
+	ExportSeedQuizzes                  = seedQuizzes
 	ErrExportFixtureQuestionsOrRounds  = errFixtureQuestionsOrRounds
 	ErrExportFixtureRoundTitleRequired = errFixtureRoundTitleRequired
 	ErrExportFixtureRoundNoQuestions   = errFixtureRoundNoQuestions
 )
+
+// ExportSampleAudio re-exports the bundled sample clip so a test can assert the
+// stored file's bytes match what the seeder embedded.
+var ExportSampleAudio = sampleAudio
 
 // ExportQuizFixture, ExportRoundFixture, ExportQuestionFixture, and
 // ExportOptionFixture re-export the unexported fixture types so the
