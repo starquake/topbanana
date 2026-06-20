@@ -6,8 +6,8 @@ import { clockOffsetFromServerNow, serverTime } from '@shared/serverClock.js';
 import { optionStateClass } from '../util/answerOptions.js';
 import { openShareDialog } from '@shared/share.js';
 import { preloadImage } from '@shared/preloadImage.js';
-import { preloadAudio } from '@shared/preloadAudio.js';
-import { loadAudioMuted, saveAudioMuted } from '@shared/audioMute.js';
+import { createQuestionAudio, initialMuted } from '@shared/questionAudio.js';
+import { loadAudioClip } from '@shared/audioLoader.js';
 
 // PLAY_PATH_PATTERN matches /play/<anything>-<integer>; the integer suffix
 // is the quiz ID.
@@ -128,16 +128,27 @@ export class GameApp {
         // against the server's view of "now" instead of the device's,
         // which can be minutes off on phones with stale time.
         this.clockOffset = 0;
-        // Mute state for the per-question sound (#1059), seeded from the
+        // Mute state for the per-question audio (#1059), seeded from the
         // persisted preference so a player who muted earlier stays muted.
         // Bound to the mute control and to the <audio> element's `muted`
         // attribute. Default unmuted.
-        this.audioMuted = loadAudioMuted();
+        this.audioMuted = initialMuted();
         // True when the browser blocked autoplay (the play() promise rejected),
         // so the template surfaces an explicit play control as a fallback. The
         // Start-game click usually unlocks autoplay, but a reload mid-game or a
         // strict autoplay policy can still block it.
         this.audioBlocked = false;
+        // True while the audio loading beat is on screen for a question with a
+        // audio (#1070): the clip is buffering before the question is revealed.
+        // The view shows a spinner + "Loading audio..." and the reveal countdown
+        // does not start until the clip is ready, times out, or errors.
+        this.audioLoading = false;
+        // Shared play / mute / replay / per-question-guard controller (#1070).
+        // Its methods take the live Alpine `this` on each call so reactive
+        // writes go through the proxy; the guard mirrors the big screen's
+        // once-per-question-id rule so a re-render mid-question cannot restart
+        // the clip.
+        this.audio = createQuestionAudio();
         if (typeof window !== 'undefined') {
             window.addEventListener('beforeunload', () => {
                 this.clearRoundTimer();
@@ -564,6 +575,10 @@ export class GameApp {
             this.revealTimer = null;
         }
         this.clearRoundTimer();
+        // Stop a still-playing clip before swapping to the next item so the
+        // prior question's audio never bleeds into the next beat (#1070).
+        this.audio.stop(this);
+        this.audioLoading = false;
         this.revealing = false;
         this.submitError = false;
         let item;
@@ -653,15 +668,39 @@ export class GameApp {
         if (typeof item.position === 'number') this.lastQuestionPosition = item.position;
         // Fire-and-forget so the read beat starts immediately while the
         // browser fetches the bytes in parallel; by the time the answer
-        // window opens, the <img>/<audio> below renders from cache.
+        // window opens, the <img> below renders from cache.
         if (item.imageUrl) void preloadImage(item.imageUrl);
-        if (item.audioUrl) void preloadAudio(item.audioUrl);
-        // Reset the autoplay-blocked fallback for the new question; playQuestionAudio
-        // re-flags it if the fresh play() is rejected. Deferred to the next tick
-        // so Alpine has mounted/updated the <audio> element before play() runs.
+        // Reset the autoplay-blocked fallback for the new question; the audio
+        // controller re-flags it if the fresh play() is rejected.
         this.audioBlocked = false;
-        if (item.audioUrl && this.$nextTick) {
-            this.$nextTick(() => this.playQuestionAudio());
+        if (item.audioUrl) {
+            // Loading beat (#1070): buffer the clip behind a spinner before the
+            // question is revealed, then play it from the top and start the
+            // reveal countdown. The loading screen drives the single fetch of
+            // the bytes (the <audio> element uses preload="none"), so there is
+            // no double-fetch. loadAudioClip resolves on canplaythrough, a
+            // ~5s timeout, or an error, so the question always proceeds.
+            await this.runAudioLoadingBeat(item);
+            return;
+        }
+        this.startRevealCountdown();
+    }
+
+    // runAudioLoadingBeat shows the loading screen while the current question's
+    // clip buffers, then plays it from the top and hands off to the reveal
+    // countdown (#1070). A re-entrant nextQuestion (the player advanced, or a
+    // resume re-fetched) clears audioLoading and swaps `question`, so the guard
+    // below abandons a stale beat without starting the reveal or the clip.
+    async runAudioLoadingBeat(item) {
+        this.audioLoading = true;
+        await loadAudioClip(item.audioUrl);
+        // Bail if the question moved on while the clip was loading.
+        if (!this.question || this.question.id !== item.id) return;
+        this.audioLoading = false;
+        if (this.$nextTick) {
+            this.$nextTick(() => this.audio.start(this, this.question.id));
+        } else {
+            this.audio.start(this, this.question.id);
         }
         this.startRevealCountdown();
     }
@@ -1017,61 +1056,27 @@ export class GameApp {
         return this.roundItem && this.roundItem.summary ? this.roundItem.summary : '';
     }
 
-    // questionAudioEl returns the <audio> element for the current question, or
-    // null when no sound is attached / the element is not mounted yet. The
-    // element is reused across questions (Alpine keeps it while x-if stays
-    // truthy), so callers read it fresh each time rather than caching it.
-    questionAudioEl() {
+    // getAudioEl returns the <audio> element for the current question, or null
+    // when no audio is attached / the element is not mounted yet. The element is
+    // reused across questions (Alpine keeps it while x-if stays truthy), so the
+    // shared audio controller reads it fresh on each call rather than caching it.
+    getAudioEl() {
         const refs = this.$refs;
         return (refs && refs.questionAudio) || null;
     }
 
-    // playQuestionAudio starts the current question's sound from the top (#1059).
-    // Autoplay is normally unlocked by the Start-game click, so each subsequent
-    // question can call play() directly. A rejected play() promise (strict
-    // autoplay policy, or a resume that skipped the Start gesture) flips
-    // audioBlocked so the template shows an explicit play control instead of
-    // failing silently. No-ops when the question has no sound.
-    playQuestionAudio() {
-        if (!this.question || !this.question.audioUrl) return;
-        const el = this.questionAudioEl();
-        if (!el) {
-            // Element not mounted yet (an x-if/$nextTick race): surface the play
-            // control so the player can start the clip manually.
-            this.audioBlocked = true;
-            return;
-        }
-        el.muted = this.audioMuted;
-        try {
-            el.currentTime = 0;
-        } catch {
-            // Some browsers reject currentTime before metadata loads; harmless.
-        }
-        const playback = el.play();
-        if (playback && typeof playback.then === 'function') {
-            playback.then(() => {
-                this.audioBlocked = false;
-            }).catch(() => {
-                this.audioBlocked = true;
-            });
-        }
-    }
-
-    // replayAudio restarts the current question's sound from the play/replay
-    // control. Clears the blocked fallback because this is a user gesture, which
-    // always satisfies the autoplay policy.
+    // replayAudio restarts the current question's audio from the play/replay
+    // control. The shared controller clears the blocked fallback (the click is a
+    // user gesture) and bypasses the per-question guard.
     replayAudio() {
-        this.audioBlocked = false;
-        this.playQuestionAudio();
+        this.audio.replay(this);
     }
 
-    // toggleMute flips and persists the mute preference, applying it to the live
-    // <audio> element at once so a mid-clip toggle takes effect immediately.
+    // toggleMute flips and persists the mute preference through the shared
+    // controller, which applies it to the live <audio> element at once so a
+    // mid-clip toggle takes effect immediately.
     toggleMute() {
-        this.audioMuted = !this.audioMuted;
-        saveAudioMuted(this.audioMuted);
-        const el = this.questionAudioEl();
-        if (el) el.muted = this.audioMuted;
+        this.audio.toggleMute(this);
     }
 
     // optionStateClass returns the class string for an answer button.

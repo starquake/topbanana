@@ -372,6 +372,23 @@
             <div x-show="gameId && !finished">
                 <template x-if="question && !roundItem">
                     <div class="flex flex-col game-fill">
+                        <!-- Audio loading beat (#1070): for a question with audio, the clip buffers behind a spinner before the
+                             question is revealed. The reveal countdown does not
+                             start until the clip is ready, times out (~5s), or
+                             errors. The question body below is hidden (not
+                             unmounted) while this shows so the <audio> element
+                             can buffer/play, but the player does not see the
+                             question or answers before the audio is ready. -->
+                        <template x-if="audioLoading">
+                            <div class="flex-1 min-h-0 flex flex-col items-center justify-center gap-4"
+                                 data-testid="audio-loading"
+                                 role="status" aria-live="polite">
+                                <span class="block w-10 h-10 rounded-full border-4 border-border border-t-accent animate-spin motion-reduce:animate-none"
+                                      aria-hidden="true"></span>
+                                <p class="text-text-dim font-semibold">Loading audio...</p>
+                            </div>
+                        </template>
+                        <div x-show="!audioLoading" class="flex flex-col game-fill">
                         <!-- HUD chips: Round N/M + Q n/m in this round +
                              running score (#253, #1051). -->
                         <div class="flex justify-end gap-2 mb-2 lg:mb-4">
@@ -427,19 +444,21 @@
                             </template>
                         </div>
 
-                        <!-- Question sound (#1059). The <audio> element is hidden
+                        <!-- Question audio (#1059). The <audio> element is hidden
                              (no native controls); playback is driven by GameApp,
-                             which autoplays the clip via the Start-game gesture.
-                             A mute toggle and a replay control sit beside it; the
-                             replay control's label reads "Play audio" when
-                             autoplay was blocked and "Replay audio" otherwise. -->
+                             which loads the clip behind the loading beat and plays
+                             it from the top. preload="none" so the loading beat is
+                             the single fetch of the bytes (#1070). A mute toggle
+                             and a replay control sit beside it; the replay
+                             control's label reads "Play audio" when autoplay was
+                             blocked and "Replay audio" otherwise. -->
                         <template x-if="question.audioUrl">
                             <div class="flex items-center justify-center gap-2 mb-3"
                                  data-testid="question-audio-controls">
                                 <audio x-ref="questionAudio"
                                        :src="question.audioUrl"
                                        :muted="audioMuted"
-                                       preload="auto"
+                                       preload="none"
                                        data-testid="question-audio"
                                        class="hidden"></audio>
                                 <button type="button"
@@ -482,6 +501,7 @@
                                         @click="submitAnswer(option.id)"
                                         x-text="option.text"></button>
                             </template>
+                        </div>
                         </div>
                     </div>
                 </template>
