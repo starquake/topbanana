@@ -15,6 +15,8 @@
 // the server, not the client guess. A failed POST snaps the list back to its
 // pre-move HTML and surfaces a small banner.
 
+import { onDomReady } from '@shared/domReady.js';
+
 const QUESTIONS_LIST_ID = 'questions-list';
 
 const reducedMotion =
@@ -316,14 +318,7 @@ function initSortable(root) {
     }
 }
 
-if (typeof document !== 'undefined') {
-    const run = () => {
-        const root = document.getElementById(QUESTIONS_LIST_ID);
-        if (root) initSortable(root);
-    };
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', run);
-    } else {
-        run();
-    }
-}
+onDomReady(() => {
+    const root = document.getElementById(QUESTIONS_LIST_ID);
+    if (root) initSortable(root);
+});

@@ -10,6 +10,8 @@
 // data-cooldown and active label in data-cooldown-label, so this is generic
 // across the three pages.
 
+import { onDomReady } from '@shared/domReady.js';
+
 function startCooldown(button) {
     let remaining = Number.parseInt(button.dataset.cooldown ?? '', 10);
     // No countdown to run: not in cooldown (0 / empty) or a malformed
@@ -34,11 +36,4 @@ function startCooldown(button) {
     const timer = setInterval(tick, 1000);
 }
 
-if (typeof document !== 'undefined') {
-    const run = () => document.querySelectorAll('[data-cooldown]').forEach(startCooldown);
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', run);
-    } else {
-        run();
-    }
-}
+onDomReady(() => document.querySelectorAll('[data-cooldown]').forEach(startCooldown));

@@ -21,6 +21,8 @@
 // @source directive in _tailwind.css so the classes survive
 // tree-shaking.
 
+import { onDomReady } from '@shared/domReady.js';
+
 // Brand SVG paths sourced from Simple Icons (CC0). Each path is the
 // inner d= value for a 24×24 viewBox; the button template wraps it
 // with the appropriate <svg> + brand-colour background. Keeping the
@@ -262,10 +264,4 @@ export function autowireShareTriggers(root = document) {
     });
 }
 
-if (typeof document !== 'undefined') {
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => autowireShareTriggers());
-    } else {
-        autowireShareTriggers();
-    }
-}
+onDomReady(() => autowireShareTriggers());
