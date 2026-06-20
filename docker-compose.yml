@@ -11,6 +11,10 @@ services:
       - HOST=0.0.0.0
       - PORT=8080
       - DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate
+      # Keep uploaded media on the named volume so it survives rebuilds,
+      # mirroring staging/production. The default ./media writes to the
+      # container's ephemeral filesystem and is lost on every restart.
+      - MEDIA_DIR=/home/nonroot/data/media
       - REGISTRATION_ENABLED=true
       - ADMIN_EMAILS=admin@example.test
       # Uncomment to wire the app to the mailpit sibling service for
