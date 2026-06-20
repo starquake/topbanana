@@ -10,6 +10,10 @@ services:
       - HOST=0.0.0.0
       - PORT=8080
       - DB_URI=file:/home/nonroot/data/topbanana.sqlite?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_txlock=immediate
+      # Uploaded media (#936) must live on the persistent volume: the
+      # distroless image's app filesystem is ephemeral, so the default
+      # ./media would be lost on every redeploy. Shares the data volume.
+      - MEDIA_DIR=/home/nonroot/data/media
       # REGISTRATION_ENABLED is now env-driven so the operator can
       # flip it via a GitHub Actions variable (vars.REGISTRATION_ENABLED)
       # without a redeploy. Defaults true when unset so a fresh stack
