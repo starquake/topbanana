@@ -59,6 +59,16 @@ When the maintainer points you at several tickets — a milestone, or tickets by
 5. Make a branch and push commits to a **draft PR**. Multiple small commits are fine — they aid review and let the maintainer revert parts.
 6. When done, run **Self-review**.
 
+### Planning labels
+
+These labels track an issue's planning state so the board shows whose court it is in:
+
+- **`needs plan`** — the maintainer wants a plan; read the ticket and post a plan as a comment (per Attribution).
+- **`needs decision`** — a plan is posted with open questions; the maintainer must decide.
+- **`ready to build`** — the maintainer has decided and the ticket is ready to implement. Like `ready to merge`, this is a maintainer go-signal: never add it yourself.
+
+When you post a plan with open questions, swap `needs plan` for `needs decision`; if it has none, just remove `needs plan`. The maintainer applies `ready to build` when the ticket is ready for you to implement.
+
 ### Self-review
 
 1. Run the full local suite (`make lint-fix`, `make check`, `make smoke`, `make test-e2e`), then run `/code-review`, `/go-style-review`, and — for any frontend change — `/frontend-style-review`, yourself on the diff (`git diff main...HEAD`). Clear the golangci cache first (`rm -rf ~/.cache/golangci-lint`) and run the reviews yourself — a warm-cache green or a dev-agent's self-reported "clean" can hide findings.
@@ -70,14 +80,14 @@ When the maintainer points you at several tickets — a milestone, or tickets by
 
 A label-driven loop watches your (`starquake`) PRs and acts when either:
 
-- a PR is **ready for review and carries the `ready-to-merge` label** → squash-merge it; or
+- a PR is **ready for review and carries the `ready to merge` label** → squash-merge it; or
 - a PR has **new review comments requesting changes** → make the changes.
 
 Rules:
 
-- Never merge a PR without `ready-to-merge`, and never add that label yourself — the maintainer applies it as sign-off, and it is the only go-ahead (CI passing is not approval; an earlier PR's merge does not carry to the next).
+- Never merge a PR without `ready to merge`, and never add that label yourself — the maintainer applies it as sign-off, and it is the only go-ahead (CI passing is not approval; an earlier PR's merge does not carry to the next).
 - If the branch is behind `main`, rebase it locally (signed) first. A **conflict-free rebase keeps the label** — no fresh sign-off needed.
-- Any **content change** removes `ready-to-merge` so the maintainer re-applies it: fixing a review comment, new work, or a rebase where you had to **resolve conflicts**.
+- Any **content change** removes `ready to merge` so the maintainer re-applies it: fixing a review comment, new work, or a rebase where you had to **resolve conflicts**.
 - Touch only `starquake`'s PRs; for anyone else's, just flag that it needs the maintainer's review.
 
 ### Linking a PR to a ticket
