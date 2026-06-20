@@ -125,7 +125,7 @@ func playQuestion(
 
 	// Answers open after the read beat, so wait until the window opens before
 	// submitting; a pick during the read beat would 409.
-	state = waitForResultsAnswersOpen(ctx, t, winner, baseURL, code, qID)
+	waitForResultsAnswersOpen(ctx, t, winner, baseURL, code, qID)
 	answerSession(ctx, t, winner, baseURL, code, correctID, http.StatusNoContent)
 	answerSession(ctx, t, loser, baseURL, code, wrongID, http.StatusNoContent)
 
@@ -150,7 +150,7 @@ func playQuestion(
 // shape. The fixture's Correct flags are the ground truth the live shuffle
 // (#1074) cannot reorder, so a test can pick the right option by id no matter
 // where the shuffle placed it on the wire.
-func correctAndWrongOptionID(t *testing.T, qz *quiz.Quiz, questionID int64) (int64, int64) {
+func correctAndWrongOptionID(t *testing.T, qz *quiz.Quiz, questionID int64) (correctID, wrongID int64) {
 	t.Helper()
 	questions := slices.Clone(qz.Questions)
 	for _, r := range qz.Rounds {
@@ -160,7 +160,6 @@ func correctAndWrongOptionID(t *testing.T, qz *quiz.Quiz, questionID int64) (int
 		if q.ID != questionID {
 			continue
 		}
-		var correctID, wrongID int64
 		for _, o := range q.Options {
 			if o.Correct {
 				correctID = o.ID
