@@ -1,7 +1,7 @@
-// Auto-upload for the quiz sound library form (#1059). One XHR per file with
+// Auto-upload for the quiz audio library form (#1059). One XHR per file with
 // Accept: application/json; the clip duration is measured in the browser and
 // posted as duration_ms alongside the file. On batch settle the page reloads
-// to the sounds section so the new clips appear. No-JS falls back to the form's
+// to the audio section so the new clips appear. No-JS falls back to the form's
 // submit button posting the multipart (without a measured duration). The
 // queue/XHR/progress machinery is shared with the image-library upload via
 // @shared/uploadQueue.js.
@@ -85,10 +85,10 @@ function wireAudioUpload() {
             // Only reload when at least one clip actually landed; an all-fail
             // batch leaves the failure rows visible instead of wiping them. Set
             // the hash first (a same-document change, no navigation) so the
-            // reload lands on the sounds section, then reload to pull in the new
+            // reload lands on the audio section, then reload to pull in the new
             // rows.
             if (landed > 0) {
-                window.location.hash = 'sounds';
+                window.location.hash = 'audio';
                 window.location.reload();
             }
         },

@@ -70,7 +70,7 @@ func TestHandleMediaDescriptionSave(t *testing.T) {
 		if got, want := rec.Code, http.StatusSeeOther; got != want {
 			t.Errorf("status = %d, want %d", got, want)
 		}
-		if got, want := rec.Header().Get("Location"), "#sounds"; !strings.Contains(got, want) {
+		if got, want := rec.Header().Get("Location"), "#audio"; !strings.Contains(got, want) {
 			t.Errorf("Location = %q, should contain %q", got, want)
 		}
 		m, err := env.media.GetMedia(t.Context(), mediaID)
@@ -101,7 +101,7 @@ func TestHandleMediaDescriptionSave(t *testing.T) {
 		if want := "fresh label"; !strings.Contains(body, want) {
 			t.Errorf("body should contain the saved label %q, got %q", want, body)
 		}
-		if want := "sound-description-" + strconv.FormatInt(mediaID, 10); !strings.Contains(body, want) {
+		if want := "audio-description-" + strconv.FormatInt(mediaID, 10); !strings.Contains(body, want) {
 			t.Errorf("body should contain the swap target id %q", want)
 		}
 	})

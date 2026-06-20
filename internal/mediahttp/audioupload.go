@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	// audioUploadFormField is the multipart field a sound upload arrives under.
+	// audioUploadFormField is the multipart field an audio upload arrives under.
 	// Distinct from the image "images" field so the two upload routes never
 	// collide on a shared form name (#1059).
 	audioUploadFormField = "audio"
@@ -45,7 +45,7 @@ const (
 // image upload does (#988). The order is: library-size cap (409), then budget
 // charge (429), then store - so a 409 never leaves a charge behind.
 //
-// On success a plain form submit redirects 303 back to the quiz view's sounds
+// On success a plain form submit redirects 303 back to the quiz view's audio
 // section; a client that sets Accept: application/json gets the stored row's id
 // so the progressive-enhancement JS can render its own row.
 func HandleAudioUpload(
@@ -163,7 +163,7 @@ func storeOneAudio(
 }
 
 // audioUploadResultJSON is the wire shape of a successful audio upload. The id
-// names the new sound row (also the /media/{id} URL suffix).
+// names the new audio row (also the /media/{id} URL suffix).
 type audioUploadResultJSON struct {
 	ID int64 `json:"id"`
 }
@@ -186,7 +186,7 @@ func writeAudioUploadResult(
 		return
 	}
 
-	dest := fmt.Sprintf("/admin/quizzes/%d", quizID) + "#sounds"
+	dest := fmt.Sprintf("/admin/quizzes/%d", quizID) + "#audio"
 	http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // dest is built from a server-side id.
 }
 

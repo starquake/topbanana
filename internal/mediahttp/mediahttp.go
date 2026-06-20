@@ -33,7 +33,7 @@ type MediaService interface {
 	// full + thumbnail under the quiz directory, records a row, and returns it.
 	Store(ctx context.Context, quizID, createdBy int64, r io.Reader) (*media.Media, error)
 	// StoreAudio validates and stores an already-browser-playable audio upload
-	// as-is, recording a sound row with the caller-supplied duration and a
+	// as-is, recording an audio row with the caller-supplied duration and a
 	// description label (defaulting to filename without extension when empty), and
 	// returns it (#1059, #1072).
 	StoreAudio(

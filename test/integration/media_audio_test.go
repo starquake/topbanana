@@ -26,7 +26,7 @@ func mp3Bytes() []byte {
 }
 
 // TestMediaAudioUpload_Integration covers the audio upload endpoint (#1059): an
-// owner can upload a sound to their editable quiz, the sound then serves back as
+// owner can upload audio to their editable quiz, the clip then serves back as
 // audio/mpeg and honours a Range request; an unsupported format and an over-cap
 // upload are both rejected with 400; and a non-owner host is refused.
 func TestMediaAudioUpload_Integration(t *testing.T) {
@@ -212,8 +212,8 @@ func TestMediaQuizCapIsPerType_Integration(t *testing.T) {
 	}
 }
 
-// TestMediaAudioLibraryAndPicker_Integration covers the sounds library on the
-// quiz view and the question editor's audio picker (#1059): an uploaded sound
+// TestMediaAudioLibraryAndPicker_Integration covers the audio library on the
+// quiz view and the question editor's audio picker (#1059): an uploaded clip
 // shows with its duration label and an audio preview; the question editor lists
 // it as a radio option; and attaching it persists audio_media_id.
 func TestMediaAudioLibraryAndPicker_Integration(t *testing.T) {
@@ -232,14 +232,14 @@ func TestMediaAudioLibraryAndPicker_Integration(t *testing.T) {
 	questionID := addQuestionToQuiz(ctx, t, setup.Stores, quizID, "Name that tune")
 
 	uploadAudio(ctx, t, owner, baseURL, quizID, "tune.mp3", mp3Bytes(), 95000)
-	soundID := latestMedia(ctx, t, setup.Stores, quizID).ID
+	audioID := latestMedia(ctx, t, setup.Stores, quizID).ID
 
-	t.Run("quiz view lists the sound with a duration label", func(t *testing.T) {
+	t.Run("quiz view lists the audio with a duration label", func(t *testing.T) {
 		t.Parallel()
 		page := getQuizViewBody(ctx, t, owner, baseURL, quizID)
 		for _, want := range []string{
 			`data-testid="audio-library-item"`,
-			fmt.Sprintf(`src="/media/%d"`, soundID),
+			fmt.Sprintf(`src="/media/%d"`, audioID),
 			`data-testid="audio-duration"`,
 			"1:35",
 			fmt.Sprintf(`action="/admin/quizzes/%d/media/audio"`, quizID),
@@ -250,7 +250,7 @@ func TestMediaAudioLibraryAndPicker_Integration(t *testing.T) {
 		}
 	})
 
-	t.Run("question editor shows the audio picker and attaches the sound", func(t *testing.T) {
+	t.Run("question editor shows the audio picker and attaches the audio", func(t *testing.T) {
 		t.Parallel()
 		editURL := fmt.Sprintf("%s/admin/quizzes/%d/questions/%d/edit", baseURL, quizID, questionID)
 		page := getPageBody(ctx, t, owner, editURL)
@@ -260,16 +260,16 @@ func TestMediaAudioLibraryAndPicker_Integration(t *testing.T) {
 			}
 		}
 
-		saveQuestionWithAudio(ctx, t, owner, baseURL, quizID, questionID, soundID)
+		saveQuestionWithAudio(ctx, t, owner, baseURL, quizID, questionID, audioID)
 
 		saved, err := setup.Stores.Quizzes.GetQuestion(ctx, questionID)
 		if err != nil {
 			t.Fatalf("GetQuestion err = %v, want nil", err)
 		}
 		if saved.AudioMediaID == nil {
-			t.Fatal("saved question AudioMediaID = nil, want the attached sound id")
+			t.Fatal("saved question AudioMediaID = nil, want the attached audio id")
 		}
-		if got, want := *saved.AudioMediaID, soundID; got != want {
+		if got, want := *saved.AudioMediaID, audioID; got != want {
 			t.Errorf("saved question AudioMediaID = %d, want %d", got, want)
 		}
 	})
@@ -317,7 +317,7 @@ func TestMediaAudioDescription_Integration(t *testing.T) {
 		if !strings.Contains(page, "Victory fanfare") {
 			t.Errorf("quiz view missing the description %q", "Victory fanfare")
 		}
-		if want := `data-testid="sound-description"`; !strings.Contains(page, want) {
+		if want := `data-testid="audio-description"`; !strings.Contains(page, want) {
 			t.Errorf("quiz view missing the inline-edit form %q", want)
 		}
 	})
@@ -327,14 +327,14 @@ func TestMediaAudioDescription_Integration(t *testing.T) {
 		quizID := createQuizAs(ctx, t, owner, baseURL, "Audio Desc Edit Quiz")
 		questionID := addQuestionToQuiz(ctx, t, setup.Stores, quizID, "Name that tune")
 		uploadAudio(ctx, t, owner, baseURL, quizID, "tune.mp3", mp3Bytes(), 0)
-		soundID := latestMedia(ctx, t, setup.Stores, quizID).ID
+		audioID := latestMedia(ctx, t, setup.Stores, quizID).ID
 
-		status := editSoundDescription(ctx, t, owner, baseURL, quizID, soundID, "Round one intro")
+		status := editAudioDescription(ctx, t, owner, baseURL, quizID, audioID, "Round one intro")
 		if got, want := status, http.StatusSeeOther; got != want {
 			t.Fatalf("edit description status = %d, want %d", got, want)
 		}
 
-		updated, err := setup.Stores.Media.GetMedia(ctx, soundID)
+		updated, err := setup.Stores.Media.GetMedia(ctx, audioID)
 		if err != nil {
 			t.Fatalf("GetMedia err = %v, want nil", err)
 		}
@@ -353,9 +353,9 @@ func TestMediaAudioDescription_Integration(t *testing.T) {
 		t.Parallel()
 		quizID := createQuizAs(ctx, t, owner, baseURL, "Audio Desc Gate Quiz")
 		uploadAudio(ctx, t, owner, baseURL, quizID, "gate.mp3", mp3Bytes(), 0)
-		soundID := latestMedia(ctx, t, setup.Stores, quizID).ID
+		audioID := latestMedia(ctx, t, setup.Stores, quizID).ID
 
-		status := editSoundDescription(ctx, t, other, baseURL, quizID, soundID, "hijack")
+		status := editAudioDescription(ctx, t, other, baseURL, quizID, audioID, "hijack")
 		if got, want := status, http.StatusForbidden; got != want {
 			t.Errorf("non-owner edit status = %d, want %d", got, want)
 		}
@@ -363,7 +363,7 @@ func TestMediaAudioDescription_Integration(t *testing.T) {
 }
 
 // uploadAudioWithDescription posts a single-file audio upload carrying an
-// explicit description field, asserting the 303-to-sounds redirect.
+// explicit description field, asserting the 303-to-audio redirect.
 func uploadAudioWithDescription(
 	ctx context.Context, t *testing.T, client *http.Client,
 	baseURL string, quizID int64, name string, data []byte, description string,
@@ -411,9 +411,9 @@ func multipartAudioWithDescription(
 	return &buf, mw.FormDataContentType()
 }
 
-// editSoundDescription posts the inline description-edit form and returns the
+// editAudioDescription posts the inline description-edit form and returns the
 // response status without following the redirect.
-func editSoundDescription(
+func editAudioDescription(
 	ctx context.Context, t *testing.T, client *http.Client,
 	baseURL string, quizID, mediaID int64, description string,
 ) int {
@@ -482,7 +482,7 @@ func latestMedia(ctx context.Context, t *testing.T, stores *store.Stores, quizID
 }
 
 // uploadAudio posts a single-file audio upload to the quiz's audio endpoint and
-// asserts the 303-to-quiz-view redirect lands on the sounds section anchor.
+// asserts the 303-to-quiz-view redirect lands on the audio section anchor.
 func uploadAudio(
 	ctx context.Context, t *testing.T, client *http.Client,
 	baseURL string, quizID int64, name string, data []byte, durationMs int,
@@ -500,7 +500,7 @@ func uploadAudio(
 		rb, _ := io.ReadAll(resp.Body)
 		t.Fatalf("audio upload status = %d, want %d; body=%q", got, want, rb)
 	}
-	want := fmt.Sprintf("/admin/quizzes/%d#sounds", quizID)
+	want := fmt.Sprintf("/admin/quizzes/%d#audio", quizID)
 	if got := resp.Header.Get("Location"); got != want {
 		t.Errorf("audio upload redirect Location = %q, want %q", got, want)
 	}
@@ -559,11 +559,11 @@ func multipartAudio(t *testing.T, filename string, data []byte, durationMs int, 
 }
 
 // saveQuestionWithAudio posts the question edit form with the audio_media_id set
-// to soundID, preserving the question's text and a minimal valid option set, and
+// to audioID, preserving the question's text and a minimal valid option set, and
 // asserts the 303 redirect back to the quiz view.
 func saveQuestionWithAudio(
 	ctx context.Context, t *testing.T, client *http.Client,
-	baseURL string, quizID, questionID, soundID int64,
+	baseURL string, quizID, questionID, audioID int64,
 ) {
 	t.Helper()
 	saveURL := baseURL + fmt.Sprintf("/admin/quizzes/%d/questions/%d", quizID, questionID)
@@ -572,7 +572,7 @@ func saveQuestionWithAudio(
 		"csrf_token":        {token},
 		"id":                {strconv.FormatInt(questionID, 10)},
 		"text":              {"Name that tune"},
-		"audio_media_id":    {strconv.FormatInt(soundID, 10)},
+		"audio_media_id":    {strconv.FormatInt(audioID, 10)},
 		"option[0].text":    {"A"},
 		"option[0].correct": {"on"},
 		"option[1].text":    {"B"},

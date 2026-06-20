@@ -23,15 +23,15 @@ type MediaDescriptionService interface {
 	UpdateDescription(ctx context.Context, id int64, description string) error
 }
 
-// soundDescriptionFormField carries the new description label submitted from the
+// audioDescriptionFormField carries the new description label submitted from the
 // audio library's inline edit.
-const soundDescriptionFormField = "description"
+const audioDescriptionFormField = "description"
 
-// soundDescriptionData backs the sound_description partial for the htmx swap. It
+// audioDescriptionData backs the audio_description partial for the htmx swap. It
 // mirrors the fields the partial reads from a MediaCardData (the inline-render
 // path) - the owning quiz and media ids build the action URL, and Description is
 // the saved label - so the partial renders identically from either source.
-type soundDescriptionData struct {
+type audioDescriptionData struct {
 	QuizID      int64
 	ID          int64
 	Description string
@@ -46,7 +46,7 @@ type soundDescriptionData struct {
 //
 // On success an htmx request gets the re-rendered description region (an
 // outerHTML swap that lands the saved label without a full reload); a plain form
-// submit redirects 303 back to the quiz view's sounds section.
+// submit redirects 303 back to the quiz view's audio section.
 func HandleMediaDescriptionSave(
 	logger *slog.Logger, csrfMgr *csrf.Manager, svc MediaDescriptionService, quizStore quiz.Store,
 ) http.Handler {
@@ -66,11 +66,11 @@ func HandleMediaDescriptionSave(
 			return
 		}
 
-		if !soundBelongsToQuiz(w, r, logger, csrfMgr, svc, mediaID, quizID) {
+		if !audioBelongsToQuiz(w, r, logger, csrfMgr, svc, mediaID, quizID) {
 			return
 		}
 
-		description := r.PostFormValue(soundDescriptionFormField)
+		description := r.PostFormValue(audioDescriptionFormField)
 		if err := svc.UpdateDescription(r.Context(), mediaID, description); err != nil {
 			if errors.Is(err, media.ErrMediaNotFound) {
 				http.NotFound(w, r)
@@ -87,10 +87,10 @@ func HandleMediaDescriptionSave(
 	})
 }
 
-// soundBelongsToQuiz loads the media row and reports whether it is an audio clip
+// audioBelongsToQuiz loads the media row and reports whether it is an audio clip
 // owned by quizID. A missing row, a foreign quiz, or a non-audio type all answer
 // 404 so a probe cannot distinguish them; a store error renders 500.
-func soundBelongsToQuiz(
+func audioBelongsToQuiz(
 	w http.ResponseWriter, r *http.Request, logger *slog.Logger, csrfMgr *csrf.Manager,
 	svc MediaDescriptionService, mediaID, quizID int64,
 ) bool {
@@ -116,7 +116,7 @@ func soundBelongsToQuiz(
 }
 
 // writeDescriptionResponse: htmx gets the re-rendered description region for an
-// outerHTML swap; a plain form submit gets the 303 back to the sounds section.
+// outerHTML swap; a plain form submit gets the 303 back to the audio section.
 // The htmx path re-reads the stored row so the swap shows exactly the persisted
 // (normalized) value, not the raw posted one.
 func writeDescriptionResponse(
@@ -124,7 +124,7 @@ func writeDescriptionResponse(
 	renderer *render.Renderer, svc MediaDescriptionService, quizID, mediaID int64,
 ) {
 	if !htmx.IsRequest(r) {
-		dest := fmt.Sprintf("/admin/quizzes/%d", quizID) + "#sounds"
+		dest := fmt.Sprintf("/admin/quizzes/%d", quizID) + "#audio"
 		http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // dest is built from an int64 id, not user input
 
 		return
@@ -137,7 +137,7 @@ func writeDescriptionResponse(
 
 		return
 	}
-	renderer.RenderPartial(w, r, "sound_description", soundDescriptionData{
+	renderer.RenderPartial(w, r, "audio_description", audioDescriptionData{
 		QuizID:      quizID,
 		ID:          mediaID,
 		Description: m.Description,

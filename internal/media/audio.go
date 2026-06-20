@@ -57,8 +57,8 @@ const (
 
 // Audio major_brand values an ISO-BMFF "ftyp" box must carry to be accepted as
 // audio/mp4. The trailing space is part of the four-byte brand. A video brand
-// (e.g. "isom", "mp42", "avc1") is rejected so an MP4 video is not stored as a
-// sound.
+// (e.g. "isom", "mp42", "avc1") is rejected so an MP4 video is not stored as
+// audio.
 const (
 	ftypBrandM4A = "M4A "
 	ftypBrandM4B = "M4B "

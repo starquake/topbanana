@@ -623,7 +623,7 @@ func addMediaRoutes(
 
 	// The audio description edit is an ordinary urlencoded form (csrf_token plus
 	// the new label), so it uses the form-size + CSRF path. The handler lives in
-	// the admin package because it re-renders the sound_description partial for the
+	// the admin package because it re-renders the audio_description partial for the
 	// htmx swap; it adds the same per-quiz edit gate and IDOR guard as delete, and
 	// only accepts audio rows (#1072).
 	mux.Handle(

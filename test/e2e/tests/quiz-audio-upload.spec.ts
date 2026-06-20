@@ -48,14 +48,14 @@ test('uploading a sound adds it to the library with a duration and an audio prev
     buffer: makeWav(1),
   });
 
-  // The JS reloads to the sounds section once the clip lands.
+  // The JS reloads to the audio section once the clip lands.
   const libraryItem = page.getByTestId('audio-library-item');
   await expect(libraryItem).toHaveCount(1, { timeout: 45_000 });
 
   // The in-browser duration read surfaces a M:SS label.
   await expect(page.getByTestId('audio-duration').first()).toHaveText('0:01');
 
-  // The inline preview points at the served sound.
+  // The inline preview points at the served audio.
   await expect(libraryItem.locator('audio')).toHaveAttribute('src', /\/media\/\d+$/);
 });
 
@@ -77,17 +77,17 @@ test('an uploaded sound defaults its description to the filename and can be edit
   await expect(page.getByTestId('audio-library-item')).toHaveCount(1, { timeout: 45_000 });
 
   // The description defaults to the filename without its extension.
-  const descInput = page.getByTestId('sound-description-input').first();
+  const descInput = page.getByTestId('audio-description-input').first();
   await expect(descInput).toHaveValue('Opening Theme');
 
   // Edit the label inline; the htmx swap re-renders the form with the saved value.
   await descInput.fill('Round one intro');
-  await page.getByTestId('sound-description-save').first().click();
-  await expect(page.getByTestId('sound-description-input').first()).toHaveValue('Round one intro');
+  await page.getByTestId('audio-description-save').first().click();
+  await expect(page.getByTestId('audio-description-input').first()).toHaveValue('Round one intro');
 
   // A reload proves it persisted, not just swapped in the DOM.
   await page.reload();
-  await expect(page.getByTestId('sound-description-input').first()).toHaveValue('Round one intro');
+  await expect(page.getByTestId('audio-description-input').first()).toHaveValue('Round one intro');
 });
 
 test('an edited sound description shows in the question editor audio picker', async ({ page, browserName }) => {
@@ -104,10 +104,10 @@ test('an edited sound description shows in the question editor audio picker', as
   });
   await expect(page.getByTestId('audio-library-item')).toHaveCount(1, { timeout: 45_000 });
 
-  const descInput = page.getByTestId('sound-description-input').first();
+  const descInput = page.getByTestId('audio-description-input').first();
   await descInput.fill('Theme tune');
-  await page.getByTestId('sound-description-save').first().click();
-  await expect(page.getByTestId('sound-description-input').first()).toHaveValue('Theme tune');
+  await page.getByTestId('audio-description-save').first().click();
+  await expect(page.getByTestId('audio-description-input').first()).toHaveValue('Theme tune');
 
   await page.getByRole('link', { name: 'Edit question' }).first().click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/\d+\/edit$/);
@@ -139,7 +139,7 @@ test('the question editor audio picker lists a sound and attaches it', async ({ 
   await expect(picker).toBeVisible();
   await expect(picker.getByTestId('audio-duration').first()).toHaveText('0:02');
 
-  // Select the sound and save. The radio is visually hidden (sr-only) behind
+  // Select the audio and save. The radio is visually hidden (sr-only) behind
   // its styled label, so check it directly rather than clicking the label,
   // whose centre overlaps the inline audio control.
   await picker
@@ -150,7 +150,7 @@ test('the question editor audio picker lists a sound and attaches it', async ({ 
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
-  // Re-open the editor; the sound's radio is now checked.
+  // Re-open the editor; the audio's radio is now checked.
   await page.getByRole('link', { name: 'Edit question' }).first().click();
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/\d+\/edit$/);
   const chosen = page
