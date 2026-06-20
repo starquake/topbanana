@@ -78,16 +78,16 @@ When you post a plan with open questions, swap `needs plan` for `needs decision`
 
 ### Merging
 
-A label-driven loop watches your (`starquake`) PRs and acts when either:
+A label-driven loop watches your (`starquake`) PRs and acts on a label:
 
-- a PR is **ready for review and carries the `ready to merge` label** → squash-merge it; or
-- a PR has **new review comments requesting changes** → make the changes.
+- **`ready to merge`** → rebase onto `main` locally (signed) if behind, then squash-merge once required checks are green.
+- **`changes requested`** → read the PR's review comments, make the fixes, then remove `changes requested` and hand it back for re-review. The maintainer adds this when leaving comments (GitHub won't let them formally request changes on their own PR).
 
 Rules:
 
-- Never merge a PR without `ready to merge`, and never add that label yourself — the maintainer applies it as sign-off, and it is the only go-ahead (CI passing is not approval; an earlier PR's merge does not carry to the next).
-- If the branch is behind `main`, rebase it locally (signed) first. A **conflict-free rebase keeps the label** — no fresh sign-off needed.
-- Any **content change** removes `ready to merge` so the maintainer re-applies it: fixing a review comment, new work, or a rebase where you had to **resolve conflicts**.
+- Never merge a PR without `ready to merge`, and never add either label yourself — the maintainer applies them (CI passing is not approval; an earlier PR's merge does not carry to the next).
+- A **conflict-free rebase keeps `ready to merge`** — no fresh sign-off needed.
+- Any **content change** removes `ready to merge` so the maintainer re-applies it: fixing a `changes requested` comment, new work, or a rebase where you had to **resolve conflicts**.
 - Touch only `starquake`'s PRs; for anyone else's, just flag that it needs the maintainer's review.
 
 ### Linking a PR to a ticket
