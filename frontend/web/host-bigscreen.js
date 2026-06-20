@@ -24,8 +24,7 @@ import { clockOffsetFromServerNow, serverTime } from '@shared/serverClock.js';
 import { startQuestionCountdown } from '@shared/countdown.js';
 import { startStartCountdown, formatCountdown } from '@shared/startCountdown.js';
 import { preloadImage } from '@shared/preloadImage.js';
-import { preloadAudio } from '@shared/preloadAudio.js';
-import { loadAudioMuted, saveAudioMuted } from '@shared/audioMute.js';
+import { createQuestionAudio, initialMuted } from '@shared/questionAudio.js';
 import {
     buildStandingsRows,
     animateStandingsBars,
@@ -65,16 +64,18 @@ function hostBigScreen(joinCode, hasQuiz) {
         lastQuestionId: null,
         // Mute state for the question sound (#1059), seeded from the persisted
         // preference and bound to the <audio> element. Default unmuted.
-        audioMuted: loadAudioMuted(),
+        audioMuted: initialMuted(),
         // True when the browser blocked autoplay (the play() promise rejected),
         // so the template surfaces an explicit play control. The host's Start
         // gesture usually establishes the page activation that lets later clips
         // play, but a strict autoplay policy can still block the SSE-driven
         // play(), and the big screen is the only surface that plays sound.
         audioBlocked: false,
-        // The id of the question whose sound has already been auto-played, so a
-        // repeated state tick within the same question does not restart it.
-        lastAudioQuestionId: null,
+        // Shared play / mute / replay / per-question-guard controller (#1070),
+        // created in init() and bound to this surface's <audio> element and UI
+        // flags. The controller's guard plays each clip once per question id, so
+        // a repeated state tick within the same question does not restart it.
+        audio: null,
         // The round_intro round off the latest state read, or null outside the
         // round_intro phase (the server carries it only there). Drives the
         // between-rounds screen's title/summary and "Round N of M" heading
@@ -159,6 +160,9 @@ function hostBigScreen(joinCode, hasQuiz) {
             // which is why the lookup must be cached now rather than read off $el
             // there.
             this.rootEl = this.$root;
+            // Create the shared audio controller. Its methods take the live
+            // Alpine `this` on each call so reactive writes go through the proxy.
+            this.audio = createQuestionAudio();
             // Pull the authoritative state once up front so the surface is
             // correct even before the first tick arrives, then subscribe.
             this.refresh();
@@ -265,28 +269,31 @@ function hostBigScreen(joinCode, hasQuiz) {
             if (questionId !== this.lastQuestionId) {
                 this.lastQuestionId = questionId;
                 this.imageError = false;
-                // Fetch the bytes during the read beat so the picture / sound
-                // is ready the moment the element mounts.
+                // Fetch the image during the read beat so the picture is ready
+                // the moment the element mounts. The sound is fetched once by the
+                // audio controller's play() (the <audio> uses preload="none"), so
+                // there is no double-fetch (#1070).
                 if (this.question && this.question.imageUrl) {
                     void preloadImage(this.question.imageUrl);
                 }
-                if (this.question && this.question.audioUrl) {
-                    void preloadAudio(this.question.audioUrl);
-                }
+                // A new question means a new clip: stop a still-playing one so it
+                // does not bleed across the question change (#1070).
+                if (this.audio) this.audio.stop(this);
             }
             // Auto-play the question's sound once per question, and only when the
             // question phase opens - not in reveal, so a reload mid-reveal does
-            // not start the clip over the answers (#1059). Deferred to the next
-            // tick so the <audio> element is mounted/updated first.
+            // not start the clip over the answers (#1059). The controller's guard
+            // plays each clip once per question id, so a repeated state tick
+            // within the same question is a no-op. Deferred to the next tick so
+            // the <audio> element is mounted/updated first.
             if (
                 this.phase === 'question' &&
-                this.question && this.question.audioUrl &&
-                questionId !== this.lastAudioQuestionId
+                this.question && this.question.audioUrl && this.audio
             ) {
-                this.lastAudioQuestionId = questionId;
-                this.audioBlocked = false;
                 if (this.$nextTick) {
-                    this.$nextTick(() => this.playQuestionAudio());
+                    this.$nextTick(() => this.audio.start(this, questionId));
+                } else {
+                    this.audio.start(this, questionId);
                 }
             }
             this.round = state.round ?? null;
@@ -633,56 +640,26 @@ function hostBigScreen(joinCode, hasQuiz) {
             }
         },
 
-        // questionAudioEl returns the big screen's <audio> element, or null when
-        // no sound is attached / it is not mounted yet.
-        questionAudioEl() {
+        // getAudioEl returns the big screen's <audio> element, or null when no
+        // sound is attached / it is not mounted yet. The shared audio controller
+        // reads it through this on each call.
+        getAudioEl() {
             const refs = this.$refs;
             return (refs && refs.questionAudio) || null;
         },
 
-        // playQuestionAudio starts the current question's sound from the top.
-        // A rejected play() promise (strict autoplay policy) flips audioBlocked
-        // so the template shows an explicit play control; the host's click on it
-        // is a gesture that always satisfies the policy. No-ops when no sound is
-        // attached or the element is not mounted.
-        playQuestionAudio() {
-            if (!this.question || !this.question.audioUrl) return;
-            const el = this.questionAudioEl();
-            if (!el) {
-                this.audioBlocked = true;
-                return;
-            }
-            el.muted = this.audioMuted;
-            try {
-                el.currentTime = 0;
-            } catch {
-                // currentTime can throw before metadata loads; harmless.
-            }
-            const playback = el.play();
-            if (playback && typeof playback.then === 'function') {
-                playback.then(() => {
-                    this.audioBlocked = false;
-                }).catch(() => {
-                    this.audioBlocked = true;
-                });
-            }
-        },
-
         // replayAudio restarts the current question's sound from the play/replay
-        // control. The click is a user gesture, so it clears the blocked
-        // fallback and the play() is allowed.
+        // control. The shared controller clears the blocked fallback (the click
+        // is a user gesture) and bypasses the per-question guard.
         replayAudio() {
-            this.audioBlocked = false;
-            this.playQuestionAudio();
+            if (this.audio) this.audio.replay(this);
         },
 
-        // toggleMute flips and persists the mute preference, applying it to the
-        // live <audio> element so a mid-clip toggle takes effect at once.
+        // toggleMute flips and persists the mute preference through the shared
+        // controller, which applies it to the live <audio> element so a mid-clip
+        // toggle takes effect at once.
         toggleMute() {
-            this.audioMuted = !this.audioMuted;
-            saveAudioMuted(this.audioMuted);
-            const el = this.questionAudioEl();
-            if (el) el.muted = this.audioMuted;
+            if (this.audio) this.audio.toggleMute(this);
         },
 
         csrfToken() {

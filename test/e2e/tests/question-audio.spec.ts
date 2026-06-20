@@ -33,6 +33,18 @@ const SINGLE_QUESTION: readonly QuestionSpec[] = [
   { text: 'Question with a sound', options: ['Correct', 'Wrong', 'Nope', 'No'], correctIndices: [0] },
 ];
 
+const TWO_QUESTIONS: readonly QuestionSpec[] = [
+  { text: 'First sound question', options: ['Correct', 'Wrong', 'Nope', 'No'], correctIndices: [0] },
+  { text: 'Second sound question', options: ['Correct', 'Wrong', 'Nope', 'No'], correctIndices: [0] },
+];
+
+// HELD_AUDIO_URL is a fake clip URL the loading-screen specs inject and then
+// route to a request that never resolves, so the <audio> element's
+// canplaythrough never fires. With the virtual clock installed the loading beat
+// then proceeds via its ~5s timeout, which the spec drives with runFor - a fully
+// deterministic loading screen with no real wall-clock wait (#1070).
+const HELD_AUDIO_URL = '/media/held-audio-clip';
+
 // injectSoloAudio rewrites the solo /next responses to carry audioUrl, so a
 // quiz authored without a sound (Slice 2 is not merged) still exercises the
 // playback chrome. Other endpoints pass through untouched.
@@ -198,4 +210,118 @@ test('the host big screen gets the audio element and a mute control during a que
   } finally {
     await caseyCtx.close();
   }
+});
+
+// injectSoloAudioUrl rewrites the solo /next responses to carry a given
+// audioUrl, so the loading-screen specs can point the clip at a held route.
+async function injectSoloAudioUrl(page: Page, audioUrl: string): Promise<void> {
+  await page.route('**/api/games/*/questions/next', async (route: Route) => {
+    const response = await route.fetch();
+    if (!response.ok()) {
+      await route.fulfill({ response });
+      return;
+    }
+    const body = await response.json();
+    if (body && body.type === 'question') {
+      body.audioUrl = audioUrl;
+    }
+    await route.fulfill({ response, json: body });
+  });
+}
+
+// holdAudioRoute answers the held clip URL with a request that never resolves,
+// so the <audio> element's canplaythrough never fires and the loading beat falls
+// through to its timeout. The returned hold is registered on the page route so a
+// later runFor drives the timeout deterministically.
+async function holdAudioRoute(page: Page, audioUrl: string): Promise<void> {
+  await page.route(`**${audioUrl}`, async () => {
+    // Never call route.fulfill / route.fetch: the request hangs, so the clip
+    // never buffers and the loading beat must rely on its timeout.
+    await new Promise(() => {});
+  });
+}
+
+test('the solo player sees an audio loading screen before the question, then the question reveals', async ({
+  page,
+  browserName,
+}) => {
+  test.setTimeout(60_000);
+
+  const quizTitle = `E2E Audio Loading ${browserName}`;
+
+  await createQuizWithQuestions(page, quizTitle, SINGLE_QUESTION);
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+
+  await page.context().clearCookies();
+  await installPlaythroughClock(page);
+  await injectSoloAudioUrl(page, HELD_AUDIO_URL);
+  await holdAudioRoute(page, HELD_AUDIO_URL);
+
+  await page.goto('/quizzes');
+  await page.getByRole('link', { name: quizTitle }).click();
+  await expect(page).toHaveURL(/\/play\//);
+  await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
+  await page.getByRole('button', { name: 'Start Game' }).click();
+
+  // The loading screen is on screen and the question text is not yet revealed.
+  await expect(page.getByTestId('audio-loading')).toBeVisible();
+  await expect(page.getByTestId('question-text')).toBeHidden();
+
+  // Drive past the loading beat's ~5s timeout; the question then reveals.
+  await page.clock.runFor(6_000);
+  await expect(page.getByTestId('audio-loading')).toBeHidden();
+  await expect(page.getByTestId('question-text')).toBeVisible();
+  await expect(page.getByTestId('question-text')).toHaveText(SINGLE_QUESTION[0].text);
+});
+
+test('the solo audio stops when the player advances to the next question', async ({
+  page,
+  browserName,
+}) => {
+  test.setTimeout(60_000);
+
+  const quizTitle = `E2E Audio Advance ${browserName}`;
+
+  await createQuizWithQuestions(page, quizTitle, TWO_QUESTIONS);
+  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+
+  await page.context().clearCookies();
+  await installPlaythroughClock(page);
+  await injectSoloAudio(page);
+
+  await page.goto('/quizzes');
+  await page.getByRole('link', { name: quizTitle }).click();
+  await expect(page).toHaveURL(/\/play\//);
+  await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
+  await page.getByRole('button', { name: 'Start Game' }).click();
+
+  // The data: URI buffers instantly, so the loading beat resolves on
+  // canplaythrough; pump the reveal beat so the first question's answers paint.
+  await page.clock.runFor(3_500);
+  await expect(page.getByTestId('question-text')).toHaveText(TWO_QUESTIONS[0].text);
+  const audio = page.getByTestId('question-audio');
+  await expect(audio).toHaveAttribute('src', AUDIO_SRC);
+
+  // Spy on the element's pause() method so the assertion does not depend on the
+  // element ever actually playing (headless autoplay differs by browser). The
+  // app calls pause() in nextQuestion before loading the next clip, so the
+  // counter is non-zero by the time the second question loads - proving the stop
+  // runs on the advance path.
+  await audio.evaluate((el: HTMLAudioElement) => {
+    const w = window as unknown as { __pauseCount: number };
+    w.__pauseCount = 0;
+    const original = el.pause.bind(el);
+    el.pause = () => { w.__pauseCount += 1; original(); };
+  });
+
+  // Answer the first question, then drive the feedback pause + advance so
+  // nextQuestion stops the current clip and loads the second question.
+  await page.getByRole('button', { name: 'Correct' }).click();
+  await page.clock.runFor(6_000);
+  await expect(page.getByTestId('question-text')).toHaveText(TWO_QUESTIONS[1].text);
+
+  const paused = await page.evaluate(
+    () => (window as unknown as { __pauseCount: number }).__pauseCount,
+  );
+  expect(paused).toBeGreaterThan(0);
 });
