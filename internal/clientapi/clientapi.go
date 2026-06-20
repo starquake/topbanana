@@ -193,6 +193,7 @@ type quizGetQuestionResponse struct {
 	Text     string                  `json:"text"`
 	Position int                     `json:"position"`
 	ImageURL string                  `json:"imageUrl,omitempty"`
+	AudioURL string                  `json:"audioUrl,omitempty"`
 	Options  []quizGetOptionResponse `json:"options"`
 }
 
@@ -208,9 +209,9 @@ type quizGetResponse struct {
 // decimalBase is the radix used when formatting ids as strings.
 const decimalBase = 10
 
-// mediaURL returns the serving path for a question's attached image, or ""
-// when the question has no image (mediaID nil), which the wire structs omit
-// via omitempty.
+// mediaURL returns the serving path for a question's attached media (image or
+// sound), or "" when none is attached (mediaID nil), which the wire structs
+// omit via omitempty.
 func mediaURL(mediaID *int64) string {
 	if mediaID == nil {
 		return ""
@@ -234,6 +235,7 @@ func quizGetQuestions(qz *quiz.Quiz) []quizGetQuestionResponse {
 			Text:     qs.Text,
 			Position: qs.Position,
 			ImageURL: mediaURL(qs.ImageMediaID),
+			AudioURL: mediaURL(qs.AudioMediaID),
 			Options:  opts,
 		})
 	}
@@ -774,6 +776,7 @@ type nextQuestionResponse struct {
 	ID        int64                `json:"id"`
 	Text      string               `json:"text"`
 	ImageURL  string               `json:"imageUrl,omitempty"`
+	AudioURL  string               `json:"audioUrl,omitempty"`
 	Options   []nextOptionResponse `json:"options"`
 	StartedAt time.Time            `json:"startedAt"`
 	ExpiredAt time.Time            `json:"expiredAt"`
@@ -940,6 +943,7 @@ func writeQuestionItem(
 		ID:             gq.QuizQuestion.ID,
 		Text:           gq.QuizQuestion.Text,
 		ImageURL:       mediaURL(gq.QuizQuestion.ImageMediaID),
+		AudioURL:       mediaURL(gq.QuizQuestion.AudioMediaID),
 		Options:        resOptions,
 		StartedAt:      gq.StartedAt,
 		ExpiredAt:      gq.ExpiredAt,
