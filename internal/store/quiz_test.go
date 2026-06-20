@@ -1993,6 +1993,85 @@ func TestQuizStore_AudioMediaID(t *testing.T) {
 	})
 }
 
+func TestQuizStore_AudioRepeat(t *testing.T) {
+	t.Parallel()
+
+	t.Run("create with audio_repeat true round-trips, update to false clears it", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+		audioID := seedQuizMedia(t, db, testQuiz.ID)
+
+		q := &quiz.Question{
+			QuizID:       testQuiz.ID,
+			Text:         "Name that tune",
+			Position:     99,
+			AudioMediaID: &audioID,
+			AudioRepeat:  true,
+			Options:      []*quiz.Option{{Text: "A bell", Correct: true}},
+		}
+		if err := quizStore.CreateQuestion(t.Context(), q); err != nil {
+			t.Fatalf("failed to create question: %v", err)
+		}
+
+		qs, err := quizStore.GetQuestion(t.Context(), q.ID)
+		if err != nil {
+			t.Fatalf("failed to get question: %v", err)
+		}
+		if got, want := qs.AudioRepeat, true; got != want {
+			t.Errorf("GetQuestion AudioRepeat = %v, want %v", got, want)
+		}
+
+		qs.AudioRepeat = false
+		if err = quizStore.UpdateQuestion(t.Context(), qs); err != nil {
+			t.Fatalf("failed to update question: %v", err)
+		}
+		qs, err = quizStore.GetQuestion(t.Context(), q.ID)
+		if err != nil {
+			t.Fatalf("failed to get question: %v", err)
+		}
+		if got, want := qs.AudioRepeat, false; got != want {
+			t.Errorf("GetQuestion AudioRepeat = %v, want %v after update", got, want)
+		}
+	})
+
+	t.Run("create without setting audio_repeat defaults to false", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("failed to create quiz: %v", err)
+		}
+
+		q := &quiz.Question{
+			QuizID:   testQuiz.ID,
+			Text:     "No repeat here",
+			Position: 99,
+			Options:  []*quiz.Option{{Text: "A bell", Correct: true}},
+		}
+		if err := quizStore.CreateQuestion(t.Context(), q); err != nil {
+			t.Fatalf("failed to create question: %v", err)
+		}
+
+		qs, err := quizStore.GetQuestion(t.Context(), q.ID)
+		if err != nil {
+			t.Fatalf("failed to get question: %v", err)
+		}
+		if got, want := qs.AudioRepeat, false; got != want {
+			t.Errorf("GetQuestion AudioRepeat = %v, want %v (default)", got, want)
+		}
+	})
+}
+
 func TestQuizStore_GetOptionsByIDs(t *testing.T) {
 	t.Parallel()
 

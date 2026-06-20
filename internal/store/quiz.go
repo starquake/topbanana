@@ -285,6 +285,7 @@ func (s *QuizStore) ListQuestions(ctx context.Context, quizID int64) ([]*quiz.Qu
 			Position:         int(r.Position),
 			ImageMediaID:     nullableInt64ToPtr(r.ImageMediaID),
 			AudioMediaID:     nullableInt64ToPtr(r.AudioMediaID),
+			AudioRepeat:      r.AudioRepeat != 0,
 			TimeLimitSeconds: nullableIntToPtr(r.TimeLimitSeconds),
 		}
 
@@ -319,6 +320,7 @@ func (s *QuizStore) GetQuestion(ctx context.Context, id int64) (*quiz.Question, 
 		Position:         int(row.Position),
 		ImageMediaID:     nullableInt64ToPtr(row.ImageMediaID),
 		AudioMediaID:     nullableInt64ToPtr(row.AudioMediaID),
+		AudioRepeat:      row.AudioRepeat != 0,
 		TimeLimitSeconds: nullableIntToPtr(row.TimeLimitSeconds),
 	}
 
@@ -944,6 +946,7 @@ func (s *QuizStore) execCreateQuestion(ctx context.Context, q *db.Queries, qs *q
 		Position:         int64(qs.Position),
 		ImageMediaID:     nullableInt64(qs.ImageMediaID),
 		AudioMediaID:     nullableInt64(qs.AudioMediaID),
+		AudioRepeat:      boolToInt64(qs.AudioRepeat),
 		TimeLimitSeconds: nullableInt(qs.TimeLimitSeconds),
 	})
 	if err != nil {
@@ -952,6 +955,7 @@ func (s *QuizStore) execCreateQuestion(ctx context.Context, q *db.Queries, qs *q
 
 	qs.ID = row.ID
 	qs.RoundID = row.RoundID
+	qs.AudioRepeat = row.AudioRepeat != 0
 	qs.TimeLimitSeconds = nullableIntToPtr(row.TimeLimitSeconds)
 	for _, o := range qs.Options {
 		o.ID = 0
@@ -976,6 +980,7 @@ func (s *QuizStore) execUpdateQuestion(ctx context.Context, q *db.Queries, qs *q
 		Position:         int64(qs.Position),
 		ImageMediaID:     nullableInt64(qs.ImageMediaID),
 		AudioMediaID:     nullableInt64(qs.AudioMediaID),
+		AudioRepeat:      boolToInt64(qs.AudioRepeat),
 		TimeLimitSeconds: nullableInt(qs.TimeLimitSeconds),
 		ID:               qs.ID,
 	})
@@ -1260,4 +1265,16 @@ func nullableInt64ToPtr(v sql.NullInt64) *int64 {
 	out := v.Int64
 
 	return &out
+}
+
+// boolToInt64 maps a Go bool onto the 0/1 INTEGER column sqlc generates as
+// int64 (e.g. questions.audio_repeat).
+//
+//nolint:revive // v is the value being converted, not a behavioural mode switch.
+func boolToInt64(v bool) int64 {
+	if v {
+		return 1
+	}
+
+	return 0
 }

@@ -132,6 +132,15 @@
                         </label>
                     {{end}}
                 </div>
+                {{/* Repeat toggle (#1073): when an audio clip is attached, replay
+                     it 3 times on the play surfaces. Only meaningful with a clip
+                     selected; harmless (ignored) when None is chosen. */}}
+                <label class="mt-3 flex cursor-pointer items-center gap-3 text-sm text-text-dim"
+                       data-testid="audio-repeat-toggle">
+                    <input type="checkbox" name="audio_repeat" value="on"
+                           {{if .Question.AudioRepeat}}checked{{end}}>
+                    <span>Repeat the audio 3 times</span>
+                </label>
             {{else}}
                 <input type="hidden" name="audio_media_id" value="">
                 <p class="text-text-dim text-[0.95rem]">
