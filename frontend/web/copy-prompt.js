@@ -6,6 +6,8 @@
 // browsers without a user gesture, so a selection + execCommand fallback keeps
 // the button working there; only a total failure leaves the label unchanged.
 
+import { onDomReady } from '@shared/domReady.js';
+
 const COPIED_RESET_MS = 2000;
 
 function selectElementText(element) {
@@ -57,11 +59,4 @@ function wire(button) {
     });
 }
 
-if (typeof document !== 'undefined') {
-    const run = () => document.querySelectorAll('[data-copy-target]').forEach(wire);
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', run);
-    } else {
-        run();
-    }
-}
+onDomReady(() => document.querySelectorAll('[data-copy-target]').forEach(wire));

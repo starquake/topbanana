@@ -5,6 +5,8 @@
 // there is no second copy of the number here; a missing message element (named
 // in data-password-length) or minLength <= 0 is a no-op.
 
+import { onDomReady } from '@shared/domReady.js';
+
 function wire(input) {
     const messageId = input.dataset.passwordLength;
     const message = messageId ? document.getElementById(messageId) : null;
@@ -22,11 +24,4 @@ function wire(input) {
     input.addEventListener('input', update);
 }
 
-if (typeof document !== 'undefined') {
-    const run = () => document.querySelectorAll('[data-password-length]').forEach(wire);
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', run);
-    } else {
-        run();
-    }
-}
+onDomReady(() => document.querySelectorAll('[data-password-length]').forEach(wire));

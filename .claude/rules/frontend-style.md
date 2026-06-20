@@ -53,6 +53,13 @@ App JS is bundled per entry point with **esbuild**; the built, minified bundles 
 - Both trees are bundled: the player client (source `frontend/client/`, entries `app.js` / `join.js`, output `internal/client/static/js/dist/`) and the web/host tree (source `frontend/web/`, entries `host-bigscreen.js` / `share.js` plus the standalone admin/auth scripts `cooldown.js` / `copy-prompt.js` / `password-length.js` / `quiz-reorder.js`, output `internal/assets/static/js/dist/`). Cross-tree shared modules live in `frontend/shared/` and are inlined into each tree's bundles via the `@shared/` import alias. The served `internal/*/static/js/` trees hold only built bundles (`dist/`) and vendored libs (`vendor/`, `htmx.min.js`) -- no un-minified source.
 - Vendored libraries (Alpine, anime.js) stay separate `<script>` tags referenced via `window.*` globals; the bundle does not include them.
 
+### App JS is ES modules everywhere
+
+Every app-JS source file under `frontend/` is a real ES module: it uses `import` / `export`, never a `(function () { ... })()` IIFE wrapper or a bare classic script. The standalone admin/auth entries (`cooldown.js`, `copy-prompt.js`, `password-length.js`, `quiz-reorder.js`, `quiz-image-upload.js`, `quiz-audio-upload.js`) load via `<script type="module">`, which already gives module scope, so they need no wrapper; each runs its setup once on load through the shared `onDomReady` helper rather than an inline `DOMContentLoaded` block.
+
+- Code shared by more than one entry lives in `frontend/shared/` and is imported via the `@shared/` alias, not copied into each entry. Existing shared modules: `domReady.js` (the run-after-parse guard), `uploadQueue.js` (the image + sound upload queue/XHR/progress/cancel engine), `share.js`, `anim.js`, `rememberedSession.js`, `standings.js`, `countdown.js`, `serverClock.js`, `audioMute.js`. The two upload entries are thin: they configure `createUploadQueue` with their field name, success/failure predicate, and post-settle navigation, and the queue machinery itself is shared.
+- The only files that are not ES modules are the vendored libraries (Alpine, anime.js, SortableJS, htmx), which stay classic `<script>` globals on purpose (see above). This rule is about app source only.
+
 ### Animation (anime.js v4)
 
 All animation goes through the shared `runAnim` wrapper (`frontend/shared/anim.js`), which no-ops to the final state under `prefers-reduced-motion` or a missing global. anime.js is **v4**: a v3-style parameter is silently ignored and the animation just snaps to its end, so use the v4 names.
