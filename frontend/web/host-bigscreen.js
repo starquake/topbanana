@@ -67,10 +67,9 @@ function hostBigScreen(joinCode, hasQuiz) {
         // preference and bound to the <audio> element. Default unmuted.
         audioMuted: initialMuted(),
         // True when the browser blocked autoplay (the play() promise rejected),
-        // so the template surfaces an explicit play control. The host's Start
-        // gesture usually establishes the page activation that lets later clips
-        // play, but a strict autoplay policy can still block the SSE-driven
-        // play(), and the big screen is the only surface that plays audio.
+        // so the template surfaces an explicit play control. A strict autoplay
+        // policy can block the SSE-driven play() until the host taps the control;
+        // the big screen is the only surface that plays audio.
         audioBlocked: false,
         // True while the audio loading beat is on the big screen for a question
         // with audio (#1070): the clip is buffering before the question is
@@ -719,12 +718,16 @@ function hostBigScreen(joinCode, hasQuiz) {
             }
         },
 
-        // getAudioEl returns the big screen's <audio> element, or null when no
-        // audio is attached / it is not mounted yet. The shared audio controller
-        // reads it through this on each call.
+        // getAudioEl returns the big screen's persistent <audio> element by its
+        // id. It is a permanent child of the always-rendered game container
+        // (#1085), so this resolves it for every question and start() can never
+        // run before it exists. rootEl (cached from $root in init()) is queried
+        // rather than $el / $root directly because start() can run from the
+        // SSE-driven tick path where neither resolves to the island root. The id
+        // is the production hook; the element's data-testid is reserved for tests.
         getAudioEl() {
-            const refs = this.$refs;
-            return (refs && refs.questionAudio) || null;
+            const root = this.rootEl;
+            return (root && root.querySelector('#question-audio')) || null;
         },
 
         // replayAudio restarts the current question's audio from the play/replay

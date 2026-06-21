@@ -77,23 +77,10 @@ export function createQuestionAudio() {
         }
     }
 
-    // start plays the clip from the top for the given question id, honouring the
-    // per-question guard: the first call for an id plays it, later calls for the
-    // same id are ignored. force=true bypasses the guard for an explicit user
-    // gesture (replay / manual play). audioRepeat enables the repeat sequence for
-    // this play.
-    function start(host, questionId, force = false, audioRepeat = false) {
-        if (!force) {
-            if (questionId == null || questionId === lastPlayedQuestionId) return;
-            lastPlayedQuestionId = questionId;
-        }
-        const el = host.getAudioEl();
-        if (!el) {
-            // Element not mounted yet (an x-if / $nextTick race): surface the
-            // play control so the player can start the clip manually.
-            host.audioBlocked = true;
-            return;
-        }
+    // playWithRepeats wires the repeat sequence onto the mounted element and
+    // plays the clip from the top. Split from start() so the repeat plays and
+    // the initial play share one code path.
+    function playWithRepeats(host, el, audioRepeat) {
         clearRepeat(el);
         playsRemaining = audioRepeat ? AUDIO_REPEAT_PLAYS : 1;
         if (playsRemaining > 1) {
@@ -108,6 +95,26 @@ export function createQuestionAudio() {
             el.addEventListener('ended', endedHandler);
         }
         playFromTop(host, el);
+    }
+
+    // start plays the clip from the top for the given question id, honouring the
+    // per-question guard: the first call for an id plays it, later calls for the
+    // same id are ignored. force=true bypasses the guard for an explicit user
+    // gesture (replay / manual play). audioRepeat enables the repeat sequence for
+    // this play.
+    //
+    // The <audio> element is a permanent child of the always-rendered game
+    // container (#1085), so getAudioEl() returns it for every question and a
+    // missing element means audio is genuinely unavailable (surfaced as the
+    // blocked fallback), not a transient mount race.
+    function start(host, questionId, force = false, audioRepeat = false) {
+        if (!force) {
+            if (questionId == null || questionId === lastPlayedQuestionId) return;
+            lastPlayedQuestionId = questionId;
+        }
+        const el = host.getAudioEl();
+        if (!el) { host.audioBlocked = true; return; }
+        playWithRepeats(host, el, audioRepeat);
     }
 
     // replay restarts the clip from the play / replay control. The click is a
