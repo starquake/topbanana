@@ -718,15 +718,16 @@ function hostBigScreen(joinCode, hasQuiz) {
             }
         },
 
-        // getAudioEl returns the big screen's persistent <audio> element. It is a
-        // permanent child of the always-rendered game container (#1085), so this
-        // resolves it for every question and start() can never run before it
-        // exists. rootEl (cached from $root in init()) is queried rather than $el
-        // / $root directly because start() can run from the SSE-driven tick path
-        // where neither resolves to the island root.
+        // getAudioEl returns the big screen's persistent <audio> element by its
+        // id. It is a permanent child of the always-rendered game container
+        // (#1085), so this resolves it for every question and start() can never
+        // run before it exists. rootEl (cached from $root in init()) is queried
+        // rather than $el / $root directly because start() can run from the
+        // SSE-driven tick path where neither resolves to the island root. The id
+        // is the production hook; the element's data-testid is reserved for tests.
         getAudioEl() {
             const root = this.rootEl;
-            return (root && root.querySelector('[data-testid="question-audio"]')) || null;
+            return (root && root.querySelector('#question-audio')) || null;
         },
 
         // replayAudio restarts the current question's audio from the play/replay

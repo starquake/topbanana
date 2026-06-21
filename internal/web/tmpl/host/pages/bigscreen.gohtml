@@ -158,7 +158,8 @@
                  mute/replay controls live in the per-question body below; they
                  reach this element through the controller's getAudioEl, not a
                  direct ref. */}}
-            <audio :src="question && question.audioUrl"
+            <audio id="question-audio"
+                   :src="question && question.audioUrl"
                    :muted="audioMuted"
                    preload="none"
                    data-testid="question-audio"

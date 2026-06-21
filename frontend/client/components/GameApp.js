@@ -1056,16 +1056,17 @@ export class GameApp {
         return this.roundItem && this.roundItem.summary ? this.roundItem.summary : '';
     }
 
-    // getAudioEl returns the persistent <audio> element. It is a permanent child
-    // of the always-rendered game container (#1085), so this resolves it for
-    // every question and start() can never run before it exists. The lookup goes
-    // through document, not this.$root: start() runs from a deferred $nextTick on
-    // a re-entrant async path (resolveAndAdvance -> nextQuestion ->
-    // runAudioLoadingBeat) where the magic this.$root is not reliably bound, so a
-    // $root query intermittently saw null and dropped the next question into the
-    // blocked fallback. The element is the only one with this testid on the page.
+    // getAudioEl returns the persistent <audio> element by its id. It is a
+    // permanent child of the always-rendered game container (#1085), so this
+    // resolves it for every question and start() can never run before it exists.
+    // The lookup goes through document, not this.$root: start() runs from a
+    // deferred $nextTick on a re-entrant async path (resolveAndAdvance ->
+    // nextQuestion -> runAudioLoadingBeat) where the magic this.$root is not
+    // reliably bound, so a $root query intermittently saw null and dropped the
+    // next question into the blocked fallback. The id is the production hook (one
+    // per page); the element's data-testid is reserved for the e2e tests.
     getAudioEl() {
-        return document.querySelector('[data-testid="question-audio"]') || null;
+        return document.getElementById('question-audio');
     }
 
     // replayAudio restarts the current question's audio from the play/replay
