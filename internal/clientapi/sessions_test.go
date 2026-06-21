@@ -260,6 +260,8 @@ func TestHandleSessionAudio(t *testing.T) {
 		mux := http.NewServeMux()
 		mux.Handle("GET /api/sessions/{code}/audio", HandleSessionAudio(env.service))
 
+		// The host (the player who created the session) reads the manifest the
+		// big screen preloads; only the host passes the host-only gate.
 		req := getRequestWithPlayer(t, hostID, "/api/sessions/"+sess.JoinCode+"/audio")
 		req.SetPathValue("code", sess.JoinCode)
 		rec := httptest.NewRecorder()
@@ -366,6 +368,42 @@ func TestHandleSessionAudio(t *testing.T) {
 		}
 		if got, want := strings.TrimSpace(rec.Body.String()), `{"clips":[]}`; got != want {
 			t.Errorf("body = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("returns 404 when caller is a non-host roster participant", func(t *testing.T) {
+		t.Parallel()
+
+		env := newSessionTestEnv(t)
+		qz := env.seedLiveQuiz(t, "live-nonhost-audio-quiz")
+		env.attachAudio(t, qz.Questions[0], false)
+		hostID := env.seedAnonymousPlayer(t, "nonhost-audio-host")
+
+		sess, err := env.service.CreateSession(t.Context(), &qz.ID, hostID)
+		if err != nil {
+			t.Fatalf("CreateSession err = %v, want nil", err)
+		}
+
+		// A real roster player joins the room, so GetSessionState would pass
+		// the participant gate - but only the host may read the audio manifest,
+		// so a non-host roster player must still get a 404 (the host-only gate),
+		// keeping the manifest's upcoming clip URLs off a player who could
+		// preview them ahead of the question.
+		playerID := env.seedAnonymousPlayer(t, "nonhost-audio-player")
+		if _, jerr := env.service.Join(t.Context(), sess.JoinCode, playerID); jerr != nil {
+			t.Fatalf("Join err = %v, want nil", jerr)
+		}
+
+		mux := http.NewServeMux()
+		mux.Handle("GET /api/sessions/{code}/audio", HandleSessionAudio(env.service))
+
+		req := getRequestWithPlayer(t, playerID, "/api/sessions/"+sess.JoinCode+"/audio")
+		req.SetPathValue("code", sess.JoinCode)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusNotFound; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
 		}
 	})
 
