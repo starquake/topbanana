@@ -8,12 +8,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	mrand "math/rand/v2"
 	"os"
@@ -26,6 +29,7 @@ import (
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/database"
 	"github.com/starquake/topbanana/internal/game"
+	"github.com/starquake/topbanana/internal/media"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
 )
@@ -35,6 +39,25 @@ import (
 // quiz to this account so the NOT NULL created_by_player_id (#281)
 // is satisfied without needing to register a fresh admin first.
 const seededAdminID int64 = 1
+
+// sampleAudio is a short MP3 tone bundled into the seeder so a fixture
+// question with "audio": true gets a real, browser-playable clip stored
+// through the media service - a proper ready media row plus a file on disk
+// served at /media/{id}. It is dev-seed-only and never ships in the
+// production binary.
+//
+//go:embed testdata/sample-tone.mp3
+var sampleAudio []byte
+
+// sampleAudioDurationMs is the bundled clip's playback length, passed to
+// StoreAudio as the advisory duration: audio is not decoded server-side, so
+// the caller supplies it. It matches the generated tone.
+const sampleAudioDurationMs = 1071
+
+// sampleAudioFilename is the filename handed to StoreAudio. It drives only the
+// default description label; the stored MIME and extension come from sniffing
+// the bytes, not this name.
+const sampleAudioFilename = "sample-tone.mp3"
 
 // Defaults for the player + play counts surfaced as CLI flags. Pulled
 // out so the magic-number linter has named symbols to point at and an
@@ -48,6 +71,9 @@ const (
 	// enough that the row reads as a normally-finished question to
 	// any later reader.
 	answerWindowSeconds = 10
+	// mediaDirPerm is the permission for the media root the seeder creates
+	// when it does not already exist.
+	mediaDirPerm os.FileMode = 0o755
 )
 
 // PCG seed words for [seedPlays]. Arbitrary values picked so the
@@ -83,6 +109,12 @@ type roundFixture struct {
 type questionFixture struct {
 	Text    string          `json:"text"`
 	Options []optionFixture `json:"options"`
+	// Audio, when true, opts this question into the bundled sample clip
+	// (#1059); seedAudio attaches it after the quiz is created.
+	Audio bool `json:"audio,omitempty"`
+	// AudioRepeat maps to the question's AudioRepeat (#1073): the play
+	// surfaces replay the clip up to 3 times. Meaningful only with Audio.
+	AudioRepeat bool `json:"audioRepeat,omitempty"`
 }
 
 type optionFixture struct {
@@ -93,6 +125,7 @@ type optionFixture struct {
 func main() {
 	fixturePath := flag.String("fixtures", "dev/fixtures/quizzes.json", "path to the JSON fixture file")
 	dbURI := flag.String("db", "", "DB URI (defaults to $DB_URI or the dev default)")
+	mediaDir := flag.String("media-dir", config.MediaDirDefault, "filesystem directory for stored media (audio clips)")
 	playersFlag := flag.Int("players", defaultPlayerCount, "number of anonymous players to seed")
 	playsFlag := flag.Int("plays", defaultPlaysPerPlayer, "number of quizzes each seeded player finishes")
 	flag.Parse()
@@ -111,7 +144,7 @@ func main() {
 		uri = dbc.URI
 	}
 
-	if err := run(logger, *fixturePath, uri, *playersFlag, *playsFlag); err != nil {
+	if err := run(logger, *fixturePath, uri, *mediaDir, *playersFlag, *playsFlag); err != nil {
 		logger.Error("seed-dev failed", slog.Any("err", err))
 		os.Exit(1)
 	}
@@ -120,7 +153,7 @@ func main() {
 // run is the testable entry point: returns errors so main() can keep
 // its [os.Exit] call at the surface and unit tests (should we ever
 // add them) get a non-fatal path.
-func run(logger *slog.Logger, fixturePath, dbURI string, playerCount, playsPerPlayer int) error {
+func run(logger *slog.Logger, fixturePath, dbURI, mediaDir string, playerCount, playsPerPlayer int) error {
 	ctx := context.Background()
 
 	fixtures, err := loadFixtures(fixturePath)
@@ -143,7 +176,18 @@ func run(logger *slog.Logger, fixturePath, dbURI string, playerCount, playsPerPl
 	}
 	stores := store.New(conn, logger)
 
-	createdQuizzes, err := seedQuizzes(ctx, logger, stores.Quizzes, fixtures)
+	// The media service writes audio files under mediaDir, so ensure the
+	// directory exists before storing (the production server creates it at
+	// startup; the seeder owns that here).
+	if mkErr := os.MkdirAll(mediaDir, mediaDirPerm); mkErr != nil {
+		return fmt.Errorf("create media dir: %w", mkErr)
+	}
+	mediaSvc := media.NewService(
+		stores.Media, mediaDir,
+		config.MediaImageMaxBytesDefault, config.MediaAudioMaxBytesDefault, logger,
+	)
+
+	createdQuizzes, err := seedQuizzes(ctx, logger, stores.Quizzes, mediaSvc, fixtures)
 	if err != nil {
 		return fmt.Errorf("seed quizzes: %w", err)
 	}
@@ -180,13 +224,24 @@ func loadFixtures(path string) ([]quizFixture, error) {
 	return out, nil
 }
 
-// seedQuizzes calls CreateQuiz for each fixture. Slug collisions
-// (re-running the seeder) are treated as "already present" and logged
-// at info level rather than failing the whole run - the operator
-// usually wants idempotent behaviour for a dev-time seed.
+// audioStorer is the narrow part of the media service the seeder needs: store a
+// clip and get back its media row (with the assigned id). Defined here, at the
+// consumer, so the audio-seeding logic can be tested with a real *media.Service
+// or a double.
+type audioStorer interface {
+	StoreAudio(
+		ctx context.Context, quizID, createdBy int64, durationMs int, description, filename string, r io.Reader,
+	) (*media.Media, error)
+}
+
+// seedQuizzes calls CreateQuiz for each fixture, then attaches the bundled
+// sample clip to any question that opted in via "audio": true. Slug collisions
+// (re-running the seeder) are treated as "already present" and logged at info
+// level rather than failing the whole run - the operator usually wants
+// idempotent behaviour for a dev-time seed.
 func seedQuizzes(
 	ctx context.Context, logger *slog.Logger,
-	quizzes quiz.Store, fixtures []quizFixture,
+	quizzes quiz.Store, audio audioStorer, fixtures []quizFixture,
 ) ([]*quiz.Quiz, error) {
 	out := make([]*quiz.Quiz, 0, len(fixtures))
 	for i := range fixtures {
@@ -203,10 +258,44 @@ func seedQuizzes(
 
 			return out, fmt.Errorf("create quiz %q: %w", qz.Title, err)
 		}
+		if err := seedAudio(ctx, quizzes, audio, qz, &fixtures[i]); err != nil {
+			return out, fmt.Errorf("seed audio for quiz %q: %w", qz.Title, err)
+		}
 		out = append(out, qz)
 	}
 
 	return out, nil
+}
+
+// seedAudio attaches the bundled sample clip to every question in qz whose
+// fixture set "audio": true. It runs after CreateQuiz so the quiz and its
+// questions have ids: for each opted-in question it stores the clip through the
+// media service (yielding a ready audio media row plus a file on disk), then
+// points the question's AudioMediaID at the new row via UpdateQuestion. The
+// flattened fixture questions line up 1:1 with qz.Questions in document order.
+func seedAudio(
+	ctx context.Context, quizzes quiz.Store, audio audioStorer,
+	qz *quiz.Quiz, f *quizFixture,
+) error {
+	flat := flattenFixtureQuestions(f)
+	for i, qq := range qz.Questions {
+		if i >= len(flat) || !flat[i].Audio {
+			continue
+		}
+		m, err := audio.StoreAudio(
+			ctx, qz.ID, seededAdminID, sampleAudioDurationMs,
+			"", sampleAudioFilename, bytes.NewReader(sampleAudio),
+		)
+		if err != nil {
+			return fmt.Errorf("store audio for question %d: %w", qq.Position, err)
+		}
+		qq.AudioMediaID = &m.ID
+		if err := quizzes.UpdateQuestion(ctx, qq); err != nil {
+			return fmt.Errorf("update question %d with audio: %w", qq.Position, err)
+		}
+	}
+
+	return nil
 }
 
 // errFixtureQuestionsOrRounds is returned when a fixture supplies both a
@@ -301,15 +390,39 @@ func fillQuizFromRounds(qz *quiz.Quiz, rounds []roundFixture) error {
 }
 
 // questionFromFixture maps one fixture question onto the domain type at
-// the given quiz-wide position.
+// the given quiz-wide position. AudioRepeat is carried straight through; the
+// AudioMediaID is filled in later by seedAudio, which can only run once the
+// quiz (and so its id) exists.
 func questionFromFixture(qf questionFixture, position int) *quiz.Question {
-	qq := &quiz.Question{Text: qf.Text, Position: position}
+	qq := &quiz.Question{Text: qf.Text, Position: position, AudioRepeat: qf.AudioRepeat}
 	qq.Options = make([]*quiz.Option, 0, len(qf.Options))
 	for _, of := range qf.Options {
 		qq.Options = append(qq.Options, &quiz.Option{Text: of.Text, Correct: of.Correct})
 	}
 
 	return qq
+}
+
+// flattenFixtureQuestions returns a fixture's questions in quiz-wide document
+// order - the same order quizFromFixture assigns positions 1..N and appends to
+// qz.Questions - so seedAudio can zip the created questions back against the
+// per-question Audio flags. A flat fixture yields its Questions directly; a
+// rounds fixture yields every round's questions in round then question order.
+func flattenFixtureQuestions(f *quizFixture) []questionFixture {
+	if len(f.Rounds) == 0 {
+		return f.Questions
+	}
+
+	total := 0
+	for _, rf := range f.Rounds {
+		total += len(rf.Questions)
+	}
+	out := make([]questionFixture, 0, total)
+	for _, rf := range f.Rounds {
+		out = append(out, rf.Questions...)
+	}
+
+	return out
 }
 
 // seedPlays creates playerCount anonymous players and finishes

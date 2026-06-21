@@ -301,5 +301,14 @@
       {"text": "Which novel opens with 'Call me Ishmael'?", "options": [{"text": "Treasure Island", "correct": false}, {"text": "Moby-Dick", "correct": true}, {"text": "Heart of Darkness", "correct": false}, {"text": "The Old Man and the Sea", "correct": false}]},
       {"text": "Who is the author of 'Pride and Prejudice'?", "options": [{"text": "Charlotte Brontë", "correct": false}, {"text": "Emily Brontë", "correct": false}, {"text": "Jane Austen", "correct": true}, {"text": "George Eliot", "correct": false}]}
     ]
+  },
+  {
+    "title": "Audio Test",
+    "description": "A quiz whose first question plays a sample clip, for trying the per-question audio feature locally.",
+    "questions": [
+      {"text": "What note does the sample tone play?", "audio": true, "options": [{"text": "Middle C", "correct": false}, {"text": "A above middle C (440 Hz)", "correct": true}, {"text": "Low E", "correct": false}, {"text": "High G", "correct": false}]},
+      {"text": "This question replays its clip up to three times.", "audio": true, "audioRepeat": true, "options": [{"text": "Once", "correct": false}, {"text": "Up to three times", "correct": true}, {"text": "Never", "correct": false}, {"text": "Forever", "correct": false}]},
+      {"text": "This question has no audio attached.", "options": [{"text": "True", "correct": true}, {"text": "False", "correct": false}]}
+    ]
   }
 ]

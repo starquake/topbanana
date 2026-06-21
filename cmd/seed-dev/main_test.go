@@ -1,10 +1,18 @@
 package main_test
 
 import (
+	"bytes"
 	"errors"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 
 	. "github.com/starquake/topbanana/cmd/seed-dev"
+	"github.com/starquake/topbanana/internal/config"
+	"github.com/starquake/topbanana/internal/dbtest"
+	"github.com/starquake/topbanana/internal/media"
+	"github.com/starquake/topbanana/internal/store"
 )
 
 func TestQuizFromFixtureFlat(t *testing.T) {
@@ -176,5 +184,184 @@ func TestQuizFromFixtureRoundNoQuestions(t *testing.T) {
 
 	if _, err := ExportQuizFromFixture(&f); !errors.Is(err, ErrExportFixtureRoundNoQuestions) {
 		t.Errorf("err = %v, want %v", err, ErrExportFixtureRoundNoQuestions)
+	}
+}
+
+// audioSeedHarness bundles the real DB-backed stores, the real media service,
+// the media root, and a logger the audio-seeding tests share. The service
+// writes audio files under mediaDir (a t.TempDir), so a stored clip is a real
+// file on disk a test can read back.
+type audioSeedHarness struct {
+	logger   *slog.Logger
+	stores   *store.Stores
+	mediaSvc *media.Service
+	mediaDir string
+}
+
+func newAudioSeedHarness(t *testing.T) audioSeedHarness {
+	t.Helper()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	stores := store.New(dbtest.Open(t), logger)
+	mediaDir := t.TempDir()
+	mediaSvc := media.NewService(
+		stores.Media, mediaDir,
+		config.MediaImageMaxBytesDefault, config.MediaAudioMaxBytesDefault, logger,
+	)
+
+	return audioSeedHarness{logger: logger, stores: stores, mediaSvc: mediaSvc, mediaDir: mediaDir}
+}
+
+// TestSeedQuizzesAudioFlat exercises the audio path end to end against a real
+// DB and a real media service: a flat fixture whose first question opts into
+// audio must yield a ready audio media row (whose file exists on disk) and the
+// question's audio_media_id set, while a no-audio question stays untouched.
+func TestSeedQuizzesAudioFlat(t *testing.T) {
+	t.Parallel()
+
+	h := newAudioSeedHarness(t)
+
+	fixtures := []ExportQuizFixture{{
+		Title:       "Audio Flat",
+		Description: "First question has audio.",
+		Questions: []ExportQuestionFixture{
+			{
+				Text:        "With audio (repeat)",
+				Audio:       true,
+				AudioRepeat: true,
+				Options:     []ExportOptionFixture{{Text: "A", Correct: true}, {Text: "B"}},
+			},
+			{
+				Text:    "No audio",
+				Options: []ExportOptionFixture{{Text: "C", Correct: true}, {Text: "D"}},
+			},
+		},
+	}}
+
+	created, err := ExportSeedQuizzes(t.Context(), h.logger, h.stores.Quizzes, h.mediaSvc, fixtures)
+	if err != nil {
+		t.Fatalf("ExportSeedQuizzes() err = %v, want nil", err)
+	}
+	if got, want := len(created), 1; got != want {
+		t.Fatalf("len(created) = %d, want %d", got, want)
+	}
+	qz := created[0]
+
+	// Exactly one ready audio media row exists for the quiz: ListByQuiz returns
+	// only ready rows, so a non-ready (failed two-phase) upload would not appear.
+	rows, err := h.mediaSvc.ListByQuiz(t.Context(), qz.ID)
+	if err != nil {
+		t.Fatalf("ListByQuiz() err = %v, want nil", err)
+	}
+	if got, want := len(rows), 1; got != want {
+		t.Fatalf("len(ready media rows) = %d, want %d", got, want)
+	}
+	row := rows[0]
+	if got, want := row.Type, media.TypeAudio; got != want {
+		t.Errorf("media Type = %q, want %q", got, want)
+	}
+	if got, want := row.MIME, "audio/mpeg"; got != want {
+		t.Errorf("media MIME = %q, want %q", got, want)
+	}
+
+	// The file the row points at exists under the media dir and holds the bundled
+	// clip's bytes.
+	onDisk, err := os.ReadFile(filepath.Join(h.mediaDir, row.Path))
+	if err != nil {
+		t.Fatalf("read stored audio file: %v", err)
+	}
+	if got, want := onDisk, ExportSampleAudio; !bytes.Equal(got, want) {
+		t.Errorf("stored audio bytes len = %d, want %d", len(got), len(want))
+	}
+
+	// The first question now references the stored row; the second is untouched.
+	q1, err := h.stores.Quizzes.GetQuestion(t.Context(), qz.Questions[0].ID)
+	if err != nil {
+		t.Fatalf("GetQuestion(q1) err = %v, want nil", err)
+	}
+	if q1.AudioMediaID == nil {
+		t.Fatal("q1.AudioMediaID = nil, want set")
+	}
+	if got, want := *q1.AudioMediaID, row.ID; got != want {
+		t.Errorf("q1.AudioMediaID = %d, want %d", got, want)
+	}
+	if got, want := q1.AudioRepeat, true; got != want {
+		t.Errorf("q1.AudioRepeat = %t, want %t", got, want)
+	}
+
+	q2, err := h.stores.Quizzes.GetQuestion(t.Context(), qz.Questions[1].ID)
+	if err != nil {
+		t.Fatalf("GetQuestion(q2) err = %v, want nil", err)
+	}
+	if q2.AudioMediaID != nil {
+		t.Errorf("q2.AudioMediaID = %d, want nil", *q2.AudioMediaID)
+	}
+}
+
+// TestSeedQuizzesAudioRounds confirms the audio path lines questions up by
+// quiz-wide document order across rounds: a rounds fixture whose audio flag
+// sits on the second round's question attaches the clip to that question, not
+// the first.
+func TestSeedQuizzesAudioRounds(t *testing.T) {
+	t.Parallel()
+
+	h := newAudioSeedHarness(t)
+
+	fixtures := []ExportQuizFixture{{
+		Title:       "Audio Rounds",
+		Description: "Audio on the second round's question.",
+		Rounds: []ExportRoundFixture{
+			{
+				Title: "Round one",
+				Questions: []ExportQuestionFixture{
+					{Text: "R1Q1 no audio", Options: []ExportOptionFixture{{Text: "A", Correct: true}, {Text: "B"}}},
+				},
+			},
+			{
+				Title: "Round two",
+				Questions: []ExportQuestionFixture{
+					{
+						Text:    "R2Q1 audio",
+						Audio:   true,
+						Options: []ExportOptionFixture{{Text: "C", Correct: true}, {Text: "D"}},
+					},
+				},
+			},
+		},
+	}}
+
+	created, err := ExportSeedQuizzes(t.Context(), h.logger, h.stores.Quizzes, h.mediaSvc, fixtures)
+	if err != nil {
+		t.Fatalf("ExportSeedQuizzes() err = %v, want nil", err)
+	}
+	qz := created[0]
+
+	// qz.Questions is the flat mirror in document order: index 0 is the first
+	// round's question (no audio), index 1 the second round's (audio).
+	q1, err := h.stores.Quizzes.GetQuestion(t.Context(), qz.Questions[0].ID)
+	if err != nil {
+		t.Fatalf("GetQuestion(q1) err = %v, want nil", err)
+	}
+	if q1.AudioMediaID != nil {
+		t.Errorf("q1.AudioMediaID = %d, want nil", *q1.AudioMediaID)
+	}
+
+	q2, err := h.stores.Quizzes.GetQuestion(t.Context(), qz.Questions[1].ID)
+	if err != nil {
+		t.Fatalf("GetQuestion(q2) err = %v, want nil", err)
+	}
+	if q2.AudioMediaID == nil {
+		t.Fatal("q2.AudioMediaID = nil, want set")
+	}
+
+	rows, err := h.mediaSvc.ListByQuiz(t.Context(), qz.ID)
+	if err != nil {
+		t.Fatalf("ListByQuiz() err = %v, want nil", err)
+	}
+	if got, want := len(rows), 1; got != want {
+		t.Fatalf("len(ready media rows) = %d, want %d", got, want)
+	}
+	if got, want := *q2.AudioMediaID, rows[0].ID; got != want {
+		t.Errorf("q2.AudioMediaID = %d, want %d", got, want)
 	}
 }
