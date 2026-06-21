@@ -24,8 +24,7 @@ import { clockOffsetFromServerNow, serverTime } from '@shared/serverClock.js';
 import { startQuestionCountdown } from '@shared/countdown.js';
 import { startStartCountdown, formatCountdown } from '@shared/startCountdown.js';
 import { preloadImage } from '@shared/preloadImage.js';
-import { createQuestionAudio, initialMuted } from '@shared/questionAudio.js';
-import { loadAudioClip } from '@shared/audioLoader.js';
+import { createAudioEngine, initialMuted } from '@shared/audioEngine.js';
 import {
     buildStandingsRows,
     animateStandingsBars,
@@ -63,29 +62,34 @@ function hostBigScreen(joinCode, hasQuiz) {
         // The id of the question currently on screen, so applyState can tell a
         // genuine question change (reset imageError) from a same-question tick.
         lastQuestionId: null,
-        // Mute state for the question audio (#1059), seeded from the persisted
-        // preference and bound to the <audio> element. Default unmuted.
+        // Mute state for the question audio + game SFX (#1088), seeded from the
+        // persisted preference. The engine applies it to every live Howl.
+        // Default unmuted.
         audioMuted: initialMuted(),
-        // True when the browser blocked autoplay (the play() promise rejected),
-        // so the template surfaces an explicit play control. A strict autoplay
-        // policy can block the SSE-driven play() until the host taps the control;
-        // the big screen is the only surface that plays audio.
+        // True when the question's clip could not be played (failed to load, or
+        // no preloaded Howl), so the template surfaces an explicit play control.
+        // Reset per question; replayClip clears it on a gesture.
         audioBlocked: false,
-        // True while the audio loading beat is on the big screen for a question
-        // with audio (#1070): the clip is buffering before the question is
-        // revealed. The screen shows a spinner + "Loading audio..." and the
-        // question / countdown stay hidden until the clip is ready, times out, or
-        // errors. Mirrors the solo client's loading screen.
-        audioLoading: false,
-        // The id of the question whose loading beat has already run, so a
-        // repeated state tick within the same question does not restart the beat
-        // (the big screen re-reads /state on every SSE tick).
-        lastAudioLoadQuestionId: null,
-        // Shared play / mute / replay / per-question-guard controller (#1070),
-        // created in init() and bound to this surface's <audio> element and UI
-        // flags. The controller's guard plays each clip once per question id, so
-        // a repeated state tick within the same question does not restart it.
+        // Howler-backed audio engine (#1088), created in init(). Preloads +
+        // decodes the SFX on init, unlocks iOS on the host Start tap, and plays
+        // every question clip from already-decoded Howls. The engine reads/writes
+        // flags on `this` so its reactive writes go through Alpine's proxy.
         audio: null,
+        // True once clips have been preloaded for this game, so a re-armed start
+        // (or a reconnect) does not re-fetch the manifest.
+        clipsPreloaded: false,
+        // Guards a duplicate round-start SFX: the Start gesture plays it, and the
+        // first round_intro phase would play it again. Set true by the Start
+        // play so the first round_intro skips it; later rounds always play it.
+        roundStartPlayed: false,
+        // The phase + question id the SFX cues last fired for, so a repeated SSE
+        // tick within the same phase/question does not re-fire the stings (the
+        // big screen re-reads /state on every tick). null until the first cue.
+        lastAudioPhase: null,
+        lastAudioQuestionId: null,
+        // The question id the answers-show sting has fired for, so it plays once
+        // when the read beat ends (options appear), not on every countdown tick.
+        answersShownQuestionId: null,
         // The round_intro round off the latest state read, or null outside the
         // round_intro phase (the server carries it only there). Drives the
         // between-rounds screen's title/summary and "Round N of M" heading
@@ -170,9 +174,11 @@ function hostBigScreen(joinCode, hasQuiz) {
             // which is why the lookup must be cached now rather than read off $el
             // there.
             this.rootEl = this.$root;
-            // Create the shared audio controller. Its methods take the live
-            // Alpine `this` on each call so reactive writes go through the proxy.
-            this.audio = createQuestionAudio();
+            // Create the Howler audio engine and preload + decode the SFX before
+            // any gesture (#1088): decode runs while the AudioContext is
+            // suspended, so the buffers are ready by the host Start tap.
+            this.audio = createAudioEngine(this);
+            this.audio.preloadEffects();
             // Pull the authoritative state once up front so the surface is
             // correct even before the first tick arrives, then subscribe.
             this.refresh();
@@ -215,6 +221,9 @@ function hostBigScreen(joinCode, hasQuiz) {
             this.disconnect();
             this.stopCountdown();
             this.stopStartCountdown();
+            // Stop the iOS keep-alive and unload every Howl so no audio or timer
+            // leaks on navigation away (#1088).
+            if (this.audio) this.audio.teardown();
         },
 
         async refresh() {
@@ -280,46 +289,24 @@ function hostBigScreen(joinCode, hasQuiz) {
                 this.lastQuestionId = questionId;
                 this.imageError = false;
                 // Fetch the image during the read beat so the picture is ready
-                // the moment the element mounts. The audio is fetched once by the
-                // audio loading beat / the controller's play() (the <audio> uses
-                // preload="none"), so there is no double-fetch (#1070).
+                // the moment the element mounts.
                 if (this.question && this.question.imageUrl) {
                     void preloadImage(this.question.imageUrl);
                 }
-                // A new question means a new clip: stop a still-playing one so it
-                // does not bleed across the question change, and clear the loading
-                // beat so a stale spinner can't carry over (#1070). Reset the
-                // per-question beat guard too so the new question runs its own
-                // beat (the guard only suppresses repeat ticks of the same id).
-                if (this.audio) this.audio.stop(this);
-                this.audioLoading = false;
-                this.lastAudioLoadQuestionId = null;
+                // A new question means a new clip: stop a still-playing one (and
+                // its pending repeats) so it does not bleed across the question
+                // change (#1088).
+                if (this.audio) this.audio.stopClip();
             }
             this.round = state.round ?? null;
 
             const offset = clockOffsetFromServerNow(state.serverNow);
             if (offset !== null) this.clockOffset = offset;
 
-            // A question with audio runs a loading beat once per question id:
-            // the spinner holds the screen while the clip buffers, then the clip
-            // plays from the top and the countdown starts (#1070). Other phases /
-            // questions take the immediate path below. While the beat is in
-            // flight a repeated tick for the same question is a no-op (its guard),
-            // and the countdown stays idle so the question does not show early.
-            if (
-                this.phase === 'question' && this.question &&
-                this.question.audioUrl && this.audio
-            ) {
-                this.startAudioLoadingBeat(this.question);
-                this.syncStartCountdown(state);
-                this.syncStandings(state);
-
-                return;
-            }
-
-            // No audio loading beat is pending, so clear any stale spinner left by
-            // a question that lost its audio on a re-read.
-            this.audioLoading = false;
+            // Fire the SFX + question-clip cues for this state, guarded so a
+            // repeated SSE tick within the same phase/question does not re-fire
+            // them (the big screen re-reads /state on every tick) (#1088).
+            this.applyAudioCues();
 
             // The countdown only runs in the question phase; every other phase
             // (including reveal, where the answer window has closed) leaves it
@@ -336,61 +323,47 @@ function hostBigScreen(joinCode, hasQuiz) {
             this.syncStandings(state);
         },
 
-        // startAudioLoadingBeat shows the loading spinner while the current
-        // question's clip buffers, then plays it from the top and starts the
-        // countdown (#1070). It runs once per question id: a repeated SSE tick
-        // within the same question is a no-op, so the spinner and the clip are not
-        // restarted. loadAudioClip resolves on canplaythrough, a ~5s timeout, or
-        // an error, so the question always proceeds; on a failure / timeout the
-        // controller's play() can still surface the manual play control. Mirrors
-        // GameApp.runAudioLoadingBeat on the solo surface.
-        startAudioLoadingBeat(question) {
-            const questionId = question.id;
-            if (questionId === this.lastAudioLoadQuestionId) return;
-            this.lastAudioLoadQuestionId = questionId;
+        // applyAudioCues fires the SFX + question-clip cues for the current
+        // phase/question, once per transition (#1088). The big screen re-reads
+        // /state on every SSE tick, so each cue is guarded against re-firing
+        // within the same phase + question id:
+        //   - round_intro: round-start sting (deduped against the Start gesture's
+        //     round-start, which already played for the first round).
+        //   - question (new question): question-show sting + the question's quiz
+        //     clip (preloaded at start, so it plays immediately).
+        //   - reveal: answer-correct sting. There is no per-player pick on the
+        //     big screen, so it never plays answer-wrong.
+        // The answers-show sting fires from the read-beat -> answer-window
+        // transition in startCountdown's setRevealing hook, not here.
+        applyAudioCues() {
+            if (!this.audio) return;
+            const qid = this.question ? this.question.id : null;
+            if (this.phase === this.lastAudioPhase && qid === this.lastAudioQuestionId) {
+                return;
+            }
+            const prevPhase = this.lastAudioPhase;
+            this.lastAudioPhase = this.phase;
+            this.lastAudioQuestionId = qid;
 
-            // A host that opens / reconnects the big screen after the answer
-            // window has already opened (serverTime past startedAt) must not hold
-            // the room on a fresh loading screen while the window drains - the
-            // players' phones moved on. Skip the spinner and play + run the
-            // countdown straight away, mirroring the solo client's past-deadline
-            // fall-through in startRevealCountdown.
-            const startAt = question.startedAt ? new Date(question.startedAt).getTime() : NaN;
-            if (Number.isFinite(startAt) && this.serverTime() >= startAt) {
-                this.audioLoading = false;
-                this.playLoadedAudio(questionId);
-                this.startCountdown();
+            if (this.phase === 'round_intro') {
+                if (this.roundStartPlayed) {
+                    this.roundStartPlayed = false;
+                } else {
+                    this.audio.playEffect('round-start');
+                }
 
                 return;
             }
 
-            this.audioLoading = true;
-            // Hold the countdown idle while the spinner is up so the question and
-            // answer grid stay hidden until the clip is ready.
-            this.stopCountdown();
-            this.revealing = false;
-            loadAudioClip(question.audioUrl).then(() => {
-                // Bail if the question moved on while the clip was loading - a
-                // later tick advanced the room, so a stale beat must not reveal
-                // or play over the new screen.
-                if (!this.question || this.question.id !== questionId) return;
-                if (this.phase !== 'question') return;
-                this.audioLoading = false;
-                this.playLoadedAudio(questionId);
-                this.startCountdown();
-            });
-        },
+            if (this.phase === 'question' && this.question) {
+                this.audio.playEffect('question-show');
+                if (this.question.audioUrl) this.audio.playClip(this.question.id);
 
-        // playLoadedAudio plays the question's clip from the top once the loading
-        // beat has resolved, deferred to the next tick so the <audio> element is
-        // mounted/updated first. The controller's guard plays each clip once per
-        // question id, so a repeated call within the same question is a no-op.
-        playLoadedAudio(questionId) {
-            if (!this.audio) return;
-            if (this.$nextTick) {
-                this.$nextTick(() => this.audio.start(this, questionId, false, this.question?.audioRepeat));
-            } else {
-                this.audio.start(this, questionId, false, this.question?.audioRepeat);
+                return;
+            }
+
+            if (this.phase === 'reveal' && prevPhase !== 'reveal') {
+                this.audio.playEffect('answer-correct');
             }
         },
 
@@ -549,7 +522,17 @@ function hostBigScreen(joinCode, hasQuiz) {
             startQuestionCountdown(this.question, {
                 serverNow: () => this.serverTime(),
                 setProgress: (pct) => { this.progress = pct; },
-                setRevealing: (revealing) => { this.revealing = revealing; },
+                setRevealing: (revealing) => {
+                    this.revealing = revealing;
+                    // Answers-shown sting (#1088): the read beat just ended and
+                    // the options appear, in the question phase. Fires once per
+                    // question id so a re-anchored countdown does not replay it.
+                    if (!revealing && this.phase === 'question' && this.question
+                        && this.answersShownQuestionId !== this.question.id) {
+                        this.answersShownQuestionId = this.question.id;
+                        if (this.audio) this.audio.playEffect('answers-show');
+                    }
+                },
                 setTimer: (handle) => { this.timer = handle; },
                 clearTimer: () => this.stopCountdown(),
             });
@@ -647,6 +630,19 @@ function hostBigScreen(joinCode, hasQuiz) {
         },
 
         async start() {
+            // FIRST, synchronously, inside the host Start gesture and BEFORE any
+            // await (#1088): resume the AudioContext + start the iOS keep-alive,
+            // then play the round-start sting. That gesture-bound play unlocks
+            // iOS output so every later clip autoplays. roundStartPlayed dedupes
+            // the first round_intro phase, which would otherwise re-play it.
+            if (this.audio) {
+                this.audio.unlock();
+                this.audio.playEffect('round-start');
+                this.roundStartPlayed = true;
+            }
+            // Preload every question clip up front (#1088), in parallel with the
+            // start POST, so each question plays an already-decoded Howl.
+            void this.preloadGameAudio();
             this.starting = true;
             this.startMessage = '';
             try {
@@ -673,6 +669,29 @@ function hostBigScreen(joinCode, hasQuiz) {
                 this.startMessage = 'Could not start the game. Try again.';
             } finally {
                 this.starting = false;
+            }
+        },
+
+        // preloadGameAudio fetches the session audio manifest and preloads every
+        // clip through the engine (#1088). Best-effort and idempotent: an
+        // audio-free quiz, a fetch failure, or a second call after the clips are
+        // already loaded just proceeds with the clips it has.
+        async preloadGameAudio() {
+            if (!this.audio || this.clipsPreloaded) return;
+            this.clipsPreloaded = true;
+            try {
+                const response = await fetch(
+                    `/api/sessions/${encodeURIComponent(this.joinCode)}/audio`,
+                    { headers: { Accept: 'application/json' } },
+                );
+                if (!response.ok) return;
+                const manifest = await response.json();
+                const clips = manifest && Array.isArray(manifest.clips) ? manifest.clips : [];
+                await this.audio.preloadClips(clips);
+            } catch (err) {
+                // Best-effort: a failed manifest fetch just means no preloaded
+                // clips; playClip then surfaces the manual fallback per question.
+                console.warn('preloadGameAudio failed', err);
             }
         },
 
@@ -718,30 +737,18 @@ function hostBigScreen(joinCode, hasQuiz) {
             }
         },
 
-        // getAudioEl returns the big screen's persistent <audio> element by its
-        // id. It is a permanent child of the always-rendered game container
-        // (#1085), so this resolves it for every question and start() can never
-        // run before it exists. rootEl (cached from $root in init()) is queried
-        // rather than $el / $root directly because start() can run from the
-        // SSE-driven tick path where neither resolves to the island root. The id
-        // is the production hook; the element's data-testid is reserved for tests.
-        getAudioEl() {
-            const root = this.rootEl;
-            return (root && root.querySelector('#question-audio')) || null;
-        },
-
-        // replayAudio restarts the current question's audio from the play/replay
-        // control. The shared controller clears the blocked fallback (the click
-        // is a user gesture) and bypasses the per-question guard.
+        // replayAudio restarts the current question's clip from the play/replay
+        // control. The engine clears the blocked fallback (the click is a user
+        // gesture) and bypasses the once-per-question guard.
         replayAudio() {
-            if (this.audio) this.audio.replay(this, this.question?.audioRepeat);
+            if (this.audio && this.question) this.audio.replayClip(this.question.id);
         },
 
-        // toggleMute flips and persists the mute preference through the shared
-        // controller, which applies it to the live <audio> element so a mid-clip
-        // toggle takes effect at once.
+        // toggleMute flips and persists the mute preference through the engine,
+        // which applies it to every live Howl (SFX + clips) so a mid-clip toggle
+        // takes effect at once.
         toggleMute() {
-            if (this.audio) this.audio.toggleMute(this);
+            if (this.audio) this.audio.toggleMute();
         },
 
         csrfToken() {

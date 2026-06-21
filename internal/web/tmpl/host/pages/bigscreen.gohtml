@@ -130,56 +130,21 @@
         <div x-show="phase === 'question' || phase === 'reveal'"
              class="flex-1 min-h-0 flex flex-col gap-[clamp(1rem,3vh,2.25rem)] px-[clamp(1.5rem,4vw,4rem)] py-[clamp(1.25rem,3vh,2.5rem)]"
              data-phase-question>
-            {{/* Audio loading beat (#1070): a question with audio shows a
-                 spinner + "Loading audio..." while the clip buffers, then the
-                 question is revealed and the clip plays from the top. The question
-                 body below is hidden (not unmounted, so the <audio> element stays
-                 mounted and can play) while this shows, so the room does not see
-                 the question or answers before the audio is ready. Mirrors the
-                 solo client's loading screen. */}}
-            <div x-show="audioLoading"
-                 class="flex-1 min-h-0 flex flex-col items-center justify-center gap-4"
-                 data-testid="audio-loading"
-                 role="status" aria-live="polite">
-                <span class="block w-12 h-12 rounded-full border-4 border-border-soft border-t-accent animate-spin motion-reduce:animate-none"
-                      aria-hidden="true"></span>
-                <p class="text-text-dim font-semibold text-[clamp(1rem,2vw,1.5rem)]">Loading audio...</p>
-            </div>
-
-            {{/* Question audio element (#1085). A permanent child of the
-                 always-rendered game container (x-show="phase === 'question' ||
-                 phase === 'reveal'"), OUTSIDE the per-question <template x-if>, so
-                 it never unmounts across a question change. This is what makes
-                 playback race-free: getAudioEl() resolves the same element for
-                 every question, so the controller's start() can never run before
-                 the element exists. The :src binding is defensive (`question &&
-                 question.audioUrl` is falsy between questions, and Alpine then
-                 drops the attribute, so no empty-src load fires). The visible
-                 mute/replay controls live in the per-question body below; they
-                 reach this element through the controller's getAudioEl, not a
-                 direct ref. */}}
-            <audio id="question-audio"
-                   :src="question && question.audioUrl"
-                   :muted="audioMuted"
-                   preload="none"
-                   data-testid="question-audio"
-                   class="hidden"></audio>
-
             {{/* Countdown bar, two phases (mirrors the player surface and the
                  solo game, #247): while `revealing` is true it fills 0 -> 100
                  over the read beat, then drains 100 -> 0 over the answer window;
                  it sits empty at reveal. Driven off the server deadline by
                  host-bigscreen.js (no client-clock dependence). motion-reduce zeroes
-                 the value transition. Hidden during the audio loading beat. */}}
-            <progress x-show="!audioLoading"
-                      class="block w-full h-2 bg-border-soft rounded-full overflow-hidden appearance-none [&::-webkit-progress-bar]:bg-border-soft [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear"
+                 the value transition. The question clips are preloaded at game
+                 start (#1088), so there is no per-question loading beat. */}}
+            <progress class="block w-full h-2 bg-border-soft rounded-full overflow-hidden appearance-none [&::-webkit-progress-bar]:bg-border-soft [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-100 [&::-webkit-progress-value]:ease-linear"
                       :class="revealing ? '[&::-webkit-progress-value]:bg-cyan [&::-moz-progress-bar]:bg-cyan' : '[&::-webkit-progress-value]:bg-accent [&::-moz-progress-bar]:bg-accent'"
                       :value="progress" max="100"
                       aria-hidden="true"
                       data-countdown-bar></progress>
 
             <template x-if="question">
-                <div x-show="!audioLoading" class="flex-1 min-h-0 flex flex-col gap-[clamp(1rem,3vh,2rem)]">
+                <div class="flex-1 min-h-0 flex flex-col gap-[clamp(1rem,3vh,2rem)]">
                     {{/* Round N/M + Q n/m in this round, so the room sees the same
                          placement the player phones show (#1051). No score chip:
                          the big screen has no single viewer. */}}
@@ -210,12 +175,13 @@
                              class="block mx-auto shrink-0 w-auto max-w-full max-h-[clamp(8rem,30vh,18rem)] object-contain rounded-lg">
                     </template>
 
-                    {{/* Question audio controls, when one is attached (#1059).
-                         The <audio> element itself is the persistent one at the
-                         top of the game container (#1085). The big screen
-                         autoplays the clip once the question is on screen. A mute
-                         toggle lets the room silence it. The phones never get
-                         audio: this surface is the only one that plays audio. */}}
+                    {{/* Question audio controls, when one is attached (#1088).
+                         The clip is preloaded at game start and played through
+                         Howler when the question shows. A mute toggle lets the
+                         room silence the clip + SFX; the replay control restarts
+                         the clip (and recovers if autoplay was blocked). The
+                         phones never get audio: this surface is the only one that
+                         plays audio. */}}
                     <template x-if="question.audioUrl">
                         <div class="flex shrink-0 items-center justify-center gap-3"
                              data-testid="question-audio-controls">
