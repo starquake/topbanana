@@ -17,6 +17,13 @@
          are shared with the player client. Alpine is vendored and self-hosted
          under /static/js/vendor (same copies the admin surface uses). */}}
     <script src="/static/js/vendor/anime.umd.min.js"></script>
+    {{/* Howler.js (2.2.4, MIT) is vendored, self-hosted (#1088) for the
+         per-question audio playback. Web Audio under the hood unlocks the
+         AudioContext on the first user gesture (the host Start tap), so the
+         audio engine can preload every clip up front and play each question
+         without a fresh tap. This base layout backs the big screen, the only
+         host surface that plays audio. */}}
+    <script src="/static/js/vendor/howler.min.js"></script>
     <script type="module" src="/static/js/dist/host-bigscreen.js"></script>
     <script defer src="/static/js/vendor/alpine.min.js"></script>
 </head>

@@ -376,21 +376,25 @@ JS_WEB_ENTRIES  := $(JS_WEB_SRC)/host-bigscreen.js $(JS_WEB_SRC)/share.js \
                    $(JS_WEB_SRC)/quiz-audio-upload.js \
                    $(JS_WEB_SRC)/home.js
 
-# Third-party libraries (Alpine, anime.js, SortableJS) are sourced from the
-# pinned npm packages (package.json) and re-emitted by esbuild as standalone
+# Third-party libraries (Alpine, anime.js, SortableJS, Howler) are sourced from
+# the pinned npm packages (package.json) and re-emitted by esbuild as standalone
 # classic scripts at the served vendor paths the templates reference (#897).
 # Each entry under frontend/vendor imports its npm package and assigns the
-# upstream global (window.Alpine / window.anime / window.Sortable), so the
-# template <script> tags and window.* access are unchanged -- only the source of
-# the committed file moved from a hand-dropped download to the npm build. The
-# web vendor dir gets all three. The player client loads Alpine + anime too, but
-# from this same web-served copy at /static/js/vendor/ rather than a per-client
-# duplicate, so only this one tree is built (the client shells reference the
-# /static/ URLs; see internal/client/static/index.html and join.html).
+# upstream global (window.Alpine / window.anime / window.Sortable /
+# window.Howl + window.Howler), so the template <script> tags and window.*
+# access are unchanged -- only the source of the committed file moved from a
+# hand-dropped download to the npm build. The web vendor dir gets all four.
+# Howler powers the per-question audio playback (#1088), loaded only on the two
+# audio surfaces (the player client index.html + the host big screen). The
+# player client loads Alpine + anime too, but from this same web-served copy at
+# /static/js/vendor/ rather than a per-client duplicate, so only this one tree
+# is built (the client shells reference the /static/ URLs; see
+# internal/client/static/index.html and join.html).
 JS_VENDOR_SRC     := frontend/vendor
 JS_VENDOR_WEB_OUT := internal/assets/static/js/vendor
 JS_VENDOR_WEB_ENTRIES := $(JS_VENDOR_SRC)/alpine.min.js \
-                   $(JS_VENDOR_SRC)/anime.umd.min.js $(JS_VENDOR_SRC)/sortable.min.js
+                   $(JS_VENDOR_SRC)/anime.umd.min.js $(JS_VENDOR_SRC)/sortable.min.js \
+                   $(JS_VENDOR_SRC)/howler.min.js
 
 # Alpine 3 targets modern evergreen browsers; es2020 matches the syntax the
 # source already uses (async/await, optional chaining). The @shared alias

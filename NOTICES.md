@@ -154,6 +154,42 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
+## Howler.js — MIT License
+
+A copy of Howler.js 2.2.4 is vendored at
+`internal/assets/static/js/vendor/howler.min.js` (introduced in #1088). It
+powers the per-question audio playback on the two audio surfaces (the player
+client and the host big screen) and is loaded only on those pages, self-hosted
+rather than from a CDN (following the precedent set for anime.js / Alpine.js in
+#295). It uses Web Audio under the hood, which auto-unlocks the AudioContext on
+the first user gesture and then plays freely - fixing the iOS bug where later
+question audio went silent with the old `<audio>` element. The committed file is
+built from the pinned `howler` npm package by esbuild. Howler.js is published
+under the MIT License:
+
+```
+Copyright (c) 2013-2020 James Simpson and GoldFire Studios, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
 ## Inter — SIL Open Font License 1.1 (OFL-1.1)
 
 The Inter typeface (body/sans font) is vendored under

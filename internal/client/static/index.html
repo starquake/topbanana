@@ -52,6 +52,14 @@
          admin/home pages use) so home -> play reuses one cache entry
          rather than re-downloading a per-client duplicate. */}}
     <script src="/static/js/vendor/anime.umd.min.js"></script>
+    {{/* Howler.js (2.2.4, MIT) is vendored, self-hosted (#1088) for the
+         per-question audio playback. Web Audio under the hood unlocks the
+         AudioContext on the first user gesture (the Start tap), so the audio
+         engine can preload every clip up front and play each question without a
+         fresh tap on iOS. Loaded only on the two audio surfaces (this player
+         client + the host big screen); the live join shell omits it since
+         phones never play audio. */}}
+    <script src="/static/js/vendor/howler.min.js"></script>
     <script type="module" src="/client/js/dist/app.js"></script>
     <script defer src="/static/js/vendor/alpine.min.js"></script>
     <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
