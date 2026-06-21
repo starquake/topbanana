@@ -295,8 +295,10 @@ function hostBigScreen(joinCode, hasQuiz) {
                 }
                 // A new question means a new clip: stop a still-playing one (and
                 // its pending repeats) so it does not bleed across the question
-                // change (#1088).
+                // change, and clear any stale "Play audio" fallback from a prior
+                // question's failed/blocked clip (#1088).
                 if (this.audio) this.audio.stopClip();
+                this.audioBlocked = false;
             }
             this.round = state.round ?? null;
 

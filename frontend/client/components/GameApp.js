@@ -151,6 +151,11 @@ export class GameApp {
         // first round_boundary intro would play it again. Set true by the Start
         // play so the first round intro skips it; later rounds always play it.
         this.roundStartPlayed = false;
+        // Solo only emits a round intro when the round has a summary, so a game
+        // can open straight on a question (no round-1 intro). firstItemAfterStart
+        // lets nextQuestion clear roundStartPlayed in that case, so the dedupe is
+        // not spent on a round-2 intro that should sound. Set true by startGame.
+        this.firstItemAfterStart = false;
         if (typeof window !== 'undefined') {
             window.addEventListener('beforeunload', () => {
                 this.clearRoundTimer();
@@ -531,6 +536,7 @@ export class GameApp {
         this.audio.unlock();
         this.audio.playEffect('round-start');
         this.roundStartPlayed = true;
+        this.firstItemAfterStart = true;
         const existing = await this.checkAlreadyPlayed();
         if (this.startError) return;
         const slugId = this.slugIdFor(this.selectedQuizId);
@@ -691,6 +697,17 @@ export class GameApp {
                 this.openClaimModal();
             }
             return;
+        }
+        // First item of the game (#1088): the Start gesture already played
+        // round-start for round 1. If that first item is a round intro, the
+        // round_boundary branch below consumes the dedupe; but if it is a
+        // question (round 1 has no summary, so no intro), clear the dedupe now so
+        // the next round intro that appears still sounds.
+        if (this.firstItemAfterStart) {
+            this.firstItemAfterStart = false;
+            if (!(item.type === 'round_boundary' && item.phase === 'intro')) {
+                this.roundStartPlayed = false;
+            }
         }
         // Round-boundary variant (#444): no timing, no answer window —
         // the player clicks Continue to acknowledge. The HUD chip on

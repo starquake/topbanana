@@ -57,8 +57,20 @@ function howlerGlobal() {
     return typeof window !== 'undefined' ? window.Howl || null : null;
 }
 
+// audioContextRunning reports whether Howler's Web Audio context is actually
+// producing sound. A play() that did not throw can still be silent if the
+// context is "suspended" (e.g. a mid-game resume with no Start gesture to unlock
+// it), so callers surface the manual play control when this is false. An absent
+// context is treated as running (the join phone has no engine; nothing to flag).
+function audioContextRunning() {
+    const ctx = typeof window !== 'undefined' && window.Howler ? window.Howler.ctx : null;
+    return !ctx || ctx.state === 'running';
+}
+
 export function createAudioEngine(view) {
-    // Preloaded SFX Howls, keyed by logical name. Built once by preloadEffects.
+    // Preloaded SFX Howls, keyed by logical name. Built once by preloadEffects
+    // and kept for the whole page lifetime (teardown does NOT unload them, so a
+    // second game in the same SPA session still has its sounds).
     const effects = {};
     // Preloaded question clips, keyed by questionId, each
     // { howl, loaded, failed, repeat }.
@@ -76,6 +88,14 @@ export function createAudioEngine(view) {
     // Pending repeat-gap timer, cleared on stop.
     let repeatTimer = null;
     let unlocked = false;
+    // True once preloadClips has resolved, so playClip can tell "the clip is
+    // still on its way" (wait) from "there is genuinely no clip for this audio
+    // question" (surface the manual fallback).
+    let clipsReady = false;
+    // The question whose clip the surface currently wants playing. Set by
+    // playClip, cleared by stopClip; lets a play requested before its clip
+    // finished preloading still fire the moment the clip is ready.
+    let wantedClipQuestionId = null;
 
     function muted() {
         return !!view.audioMuted;
@@ -97,6 +117,8 @@ export function createAudioEngine(view) {
     // unlock runs SYNCHRONOUSLY first in the Start gesture: resume the
     // AudioContext, start the iOS keep-alive, mark unlocked. Best-effort and
     // never throws so a quirky environment cannot break the Start handler.
+    // Idempotent, so the manual play control (replayClip) can call it again to
+    // unlock output on a mid-game resume.
     function unlock() {
         try {
             const ctx = typeof window !== 'undefined' && window.Howler ? window.Howler.ctx : null;
@@ -134,7 +156,11 @@ export function createAudioEngine(view) {
     function preloadClips(manifest) {
         const Howl = howlerGlobal();
         const list = Array.isArray(manifest) ? manifest : [];
-        if (!Howl || list.length === 0) return Promise.resolve();
+        if (!Howl || list.length === 0) {
+            clipsReady = true;
+            tryPlayWanted();
+            return Promise.resolve();
+        }
 
         const perClip = list.map((clip) => new Promise((resolve) => {
             if (clip == null || clip.questionId == null || !clip.audioUrl) {
@@ -156,16 +182,37 @@ export function createAudioEngine(view) {
                 preload: true,
                 html5: false,
                 mute: muted(),
-                onload: () => { entry.loaded = true; settle(); },
-                onloaderror: () => { entry.failed = true; settle(); },
+                onload: () => {
+                    entry.loaded = true;
+                    settle();
+                    // A clip the surface is already waiting on plays the moment it
+                    // arrives (the host preloads in parallel with the SSE flow, so
+                    // the first question can be wanted before its Howl loaded).
+                    if (wantedClipQuestionId === clip.questionId) tryPlayWanted();
+                },
+                onloaderror: () => {
+                    entry.failed = true;
+                    settle();
+                    if (wantedClipQuestionId === clip.questionId) tryPlayWanted();
+                },
             });
             entry.howl = howl;
             const timer = setTimeout(settle, PRELOAD_CLIP_TIMEOUT_MS);
         }));
 
+        // The Howls exist now (created synchronously above), so a play requested
+        // before this call can be armed immediately rather than lost.
+        tryPlayWanted();
+
         // Whichever finishes first: all clips settled, or the overall budget.
         const budget = new Promise((resolve) => setTimeout(resolve, PRELOAD_BUDGET_MS));
-        return Promise.race([Promise.all(perClip), budget]);
+        return Promise.race([Promise.all(perClip), budget]).then((result) => {
+            clipsReady = true;
+            // Now that preloading is done, a wanted clip that never materialized
+            // (a manifest miss) can be flagged as the manual fallback.
+            tryPlayWanted();
+            return result;
+        });
     }
 
     // armRepeat wires the repeat sequence for a clip: after each play ends, if
@@ -207,55 +254,86 @@ export function createAudioEngine(view) {
             howl.mute(muted());
             howl.stop();
             howl.play();
-            view.audioBlocked = false;
         } catch {
             view.audioBlocked = true;
             return;
         }
+        // play() does not throw when the context is suspended (a mid-game resume
+        // with no Start-gesture unlock), but no sound comes out -- surface the
+        // manual play control so a tap can unlock output (replayClip resumes the
+        // context). On the normal Start path the context is running by now, so
+        // this clears the fallback.
+        view.audioBlocked = !audioContextRunning();
         if (entry.repeat) armRepeat(entry, token, REPEAT_PLAYS);
     }
 
-    // playClip plays the preloaded clip for questionId once per question id (the
-    // guard mirrors the live big screen's once-per-question rule, so a re-render
-    // or a repeated SSE tick cannot restart it). A clip still loading gets a
-    // one-shot load handler so it plays the moment it is ready; a clip that
-    // failed / is missing surfaces the manual fallback on the view.
+    // playClip asks the engine to play questionId's clip once (the guard makes a
+    // re-render or a repeated SSE tick a no-op). It records the wanted question
+    // and delegates to tryPlayWanted, so a play requested before its clip has
+    // preloaded still fires the moment the clip is ready (the host preloads in
+    // parallel with the SSE flow, so the first question can arrive before its
+    // Howl exists).
     function playClip(questionId) {
         if (questionId == null || questionId === lastPlayedQuestionId) return;
-        lastPlayedQuestionId = questionId;
+        wantedClipQuestionId = questionId;
+        tryPlayWanted();
+    }
+
+    // tryPlayWanted plays the wanted clip if it is ready, arms a one-shot play if
+    // it is still loading, and surfaces the manual fallback if it failed or (once
+    // preloading has finished) is genuinely absent. Re-run by preloadClips as
+    // clips arrive and when the preload resolves, so a wanted-before-ready clip
+    // is not lost. lastPlayedQuestionId is consumed only once a real decision is
+    // made, so a wait does not permanently swallow the play, and re-entry after a
+    // decision is a no-op (no double play / double-armed load handler).
+    function tryPlayWanted() {
+        const questionId = wantedClipQuestionId;
+        if (questionId == null || questionId === lastPlayedQuestionId) return;
         const entry = clips.get(questionId);
         if (!entry || !entry.howl) {
-            // No preloaded clip (manifest miss / no Howler): nothing to play, but
-            // do not flag blocked -- a question may simply have no audio.
+            // No Howl yet. While preloading is in flight, wait -- preloadClips
+            // re-runs this as clips arrive. Once preloading is done and there is
+            // still no clip for this audio question, it cannot play: fall back.
+            if (clipsReady) {
+                lastPlayedQuestionId = questionId;
+                view.audioBlocked = true;
+            }
             return;
         }
-        if (entry.failed) { view.audioBlocked = true; return; }
+        if (entry.failed) {
+            lastPlayedQuestionId = questionId;
+            view.audioBlocked = true;
+            return;
+        }
+        lastPlayedQuestionId = questionId;
         if (entry.loaded) {
             beginPlay(questionId, entry);
             return;
         }
-        // Not loaded yet: arm a one-shot load handler so it plays when ready,
-        // but only while this is still the current question.
-        const token = ++sequenceToken;
+        // The Howl exists but is still loading: play the moment it is ready, as
+        // long as it is still the wanted question.
         entry.howl.once('load', () => {
-            if (token !== sequenceToken) return;
             entry.loaded = true;
-            beginPlay(questionId, entry);
+            if (wantedClipQuestionId === questionId) beginPlay(questionId, entry);
         });
         entry.howl.once('loaderror', () => {
             entry.failed = true;
-            if (token === sequenceToken) view.audioBlocked = true;
+            if (wantedClipQuestionId === questionId) view.audioBlocked = true;
         });
     }
 
     // replayClip is the user-gesture path (the play / replay control): it clears
     // the fallback and bypasses the once-guard so the host/player can restart the
-    // clip on demand.
+    // clip on demand. It also unlocks: on a mid-game resume (no Start tap) this
+    // first tap is what resumes the context and starts the keep-alive, so the
+    // clip is finally audible.
     function replayClip(questionId) {
         if (questionId == null) return;
+        unlock();
+        wantedClipQuestionId = questionId;
         view.audioBlocked = false;
         const entry = clips.get(questionId);
-        if (!entry || !entry.howl) return;
+        if (!entry || !entry.howl) { view.audioBlocked = true; return; }
         if (entry.failed) { view.audioBlocked = true; return; }
         beginPlay(questionId, entry);
     }
@@ -267,11 +345,14 @@ export function createAudioEngine(view) {
         }
     }
 
-    // stopClip stops the current clip and any pending repeat, so a still-playing
-    // clip cannot bleed into the next question. Called on question advance.
+    // stopClip stops the current clip and any pending repeat, and drops the
+    // wanted-clip request, so a still-playing clip cannot bleed into the next
+    // question and a clip still preloading is not played after the advance.
+    // Called on question advance.
     function stopClip() {
         clearRepeatTimer();
         sequenceToken += 1;
+        wantedClipQuestionId = null;
         if (activeClipId != null) {
             const entry = clips.get(activeClipId);
             if (entry && entry.howl) {
@@ -302,15 +383,17 @@ export function createAudioEngine(view) {
         }
     }
 
-    // teardown stops the keep-alive and unloads every Howl (game end / component
-    // destroy) so no audio or timer leaks across games.
+    // teardown stops the keep-alive and unloads the per-game question clips
+    // (game end / component destroy) so no audio or timer leaks across games.
+    // The SFX Howls are deliberately left loaded for the page lifetime, so a
+    // second game in the same SPA session still has its sounds (preloadEffects
+    // skips already-built effects and is not re-run on a same-session restart).
     function teardown() {
         clearRepeatTimer();
         sequenceToken += 1;
+        wantedClipQuestionId = null;
+        clipsReady = false;
         keepAlive.stop();
-        for (const howl of Object.values(effects)) {
-            try { howl.unload(); } catch { /* ignore */ }
-        }
         for (const entry of clips.values()) {
             if (entry.howl) {
                 try { entry.howl.unload(); } catch { /* ignore */ }

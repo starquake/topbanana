@@ -86,9 +86,9 @@ async function serveClips(page: Page): Promise<void> {
 async function installAudioSpies(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const w = window as unknown as {
-      __audio: { resumeCount: number; plays: string[]; endFire: boolean };
+      __audio: { resumeCount: number; plays: string[]; stops: string[]; endFire: boolean };
     };
-    w.__audio = { resumeCount: 0, plays: [], endFire: true };
+    w.__audio = { resumeCount: 0, plays: [], stops: [], endFire: true };
 
     const flattenSrc = (src: unknown): string =>
       Array.isArray(src) ? src.map((s) => String(s)).join(',') : String(src);
@@ -112,6 +112,7 @@ async function installAudioSpies(page: Page): Promise<void> {
       if (!Howl || (Howl.prototype as { __patched?: boolean }).__patched) return !!Howl;
       const proto = Howl.prototype as unknown as {
         play: (...a: unknown[]) => unknown;
+        stop: (...a: unknown[]) => unknown;
         _emit: (e: string, id?: unknown) => unknown;
         __patched?: boolean;
       };
@@ -133,6 +134,11 @@ async function installAudioSpies(page: Page): Promise<void> {
         }
         return id;
       };
+      const originalStop = proto.stop;
+      proto.stop = function patchedStop(this: { _src?: unknown }, ...args: unknown[]) {
+        w.__audio.stops.push(flattenSrc(this._src));
+        return originalStop.apply(this, args);
+      };
       proto.__patched = true;
       return true;
     };
@@ -150,6 +156,16 @@ async function playsMatching(page: Page, fragment: string): Promise<number> {
   return page.evaluate((frag) => {
     const w = window as unknown as { __audio: { plays: string[] } };
     return w.__audio.plays.filter((s) => s.includes(frag)).length;
+  }, fragment);
+}
+
+// stopsMatching counts recorded Howl.stop calls whose source contains the given
+// substring -- used to assert a clip's Howl was stopped (e.g. on a question
+// advance, when the engine's stopClip halts the prior clip).
+async function stopsMatching(page: Page, fragment: string): Promise<number> {
+  return page.evaluate((frag) => {
+    const w = window as unknown as { __audio: { stops: string[] } };
+    return w.__audio.stops.filter((s) => s.includes(frag)).length;
   }, fragment);
 }
 
@@ -278,6 +294,32 @@ test('a second consecutive solo audio question autoplays with no new gesture (#1
   // Q2's clip autoplayed too: the clip-play count climbed again after the
   // advance, with no extra gesture.
   await expect.poll(() => playsMatching(page, CLIP_FRAGMENT)).toBeGreaterThan(afterFirst);
+});
+
+// The advance must halt the prior question's clip so it cannot bleed into the
+// next beat (engine.stopClip). The deleted <audio>-era spec pinned this; here we
+// assert the clip's Howl is stopped when the player advances to the next
+// question.
+test('advancing to the next question stops the previous question clip (#1088)', async ({
+  page,
+  browserName,
+}) => {
+  test.setTimeout(60_000);
+  await startSoloAudioQuiz(page, 'AdvanceStop', browserName, TWO_QUESTIONS);
+
+  await page.getByRole('button', { name: 'Start Game' }).click();
+  await page.clock.runFor(3_500);
+  await expect(page.getByTestId('question-text')).toHaveText(TWO_QUESTIONS[0].text);
+  await expect.poll(() => playsMatching(page, CLIP_FRAGMENT)).toBeGreaterThan(0);
+  const stopsBefore = await stopsMatching(page, CLIP_FRAGMENT);
+
+  // Answer Q1 and drive the feedback pause + advance to Q2 (no audio-control tap).
+  await page.getByRole('button', { name: 'Correct' }).click();
+  await page.clock.runFor(6_000);
+  await expect(page.getByTestId('question-text')).toHaveText(TWO_QUESTIONS[1].text);
+
+  // stopClip halted Q1's clip on the advance, so its Howl saw an extra stop().
+  await expect.poll(() => stopsMatching(page, CLIP_FRAGMENT)).toBeGreaterThan(stopsBefore);
 });
 
 test('the solo player plays the question-show SFX on reveal and the answers-show SFX when the options appear', async ({
