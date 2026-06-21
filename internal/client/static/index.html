@@ -52,6 +52,13 @@
          admin/home pages use) so home -> play reuses one cache entry
          rather than re-downloading a per-client duplicate. */}}
     <script src="/static/js/vendor/anime.umd.min.js"></script>
+    {{/* Howler.js (2.2.4, MIT) is vendored, self-hosted (#1088) for the
+         per-question audio playback. Web Audio under the hood auto-unlocks the
+         AudioContext on the first user gesture (the Start tap), so later
+         questions autoplay on iOS without a fresh tap. Loaded only on the two
+         audio surfaces (this player client + the host big screen); the live
+         join shell omits it since phones never play audio. */}}
+    <script src="/static/js/vendor/howler.min.js"></script>
     <script type="module" src="/client/js/dist/app.js"></script>
     <script defer src="/static/js/vendor/alpine.min.js"></script>
     <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
@@ -370,32 +377,23 @@
                  during gameplay (#253) so we don't subtract for it
                  here. -->
             <div x-show="gameId && !finished">
-                <!-- Question audio element (#1085). A permanent child of the
-                     always-rendered game container, OUTSIDE every per-question
-                     <template x-if>, so it never unmounts during a game. This is
-                     what makes playback race-free: getAudioEl() resolves the same
-                     element for every question, so the controller's start() can
-                     never run before the element exists. The :src binding is
-                     defensive (`question && question.audioUrl` is falsy between
-                     questions, and Alpine then drops the attribute, so no empty-
-                     src load fires). The mute/replay controls live in the
-                     per-question body below; they reach this element through the
-                     controller's getAudioEl, not a direct ref. -->
-                <audio id="question-audio"
-                       :src="question && question.audioUrl"
-                       :muted="audioMuted"
-                       preload="none"
-                       data-testid="question-audio"
-                       class="hidden"></audio>
+                {{/* The per-question audio playback is driven by Howler.js
+                     (#1088), which owns its own Web Audio nodes; there is no
+                     persistent <audio> element on the page. The controller builds
+                     a Howl from the question's audioUrl behind the loading beat
+                     and plays it; Howler auto-unlocks the AudioContext on the
+                     Start tap so later questions autoplay on iOS without a fresh
+                     gesture. The mute/replay controls in the per-question body
+                     below drive the controller. */}}
                 <template x-if="question && !roundItem">
                     <div class="flex flex-col game-fill">
                         <!-- Audio loading beat (#1070): for a question with audio, the clip buffers behind a spinner before the
                              question is revealed. The reveal countdown does not
                              start until the clip is ready, times out (~5s), or
-                             errors. The question body below is hidden (not
-                             unmounted) while this shows so the <audio> element
-                             can buffer/play, but the player does not see the
-                             question or answers before the audio is ready. -->
+                             errors. The question body below is hidden with x-show
+                             (not unmounted) while this shows, so the player does
+                             not see the question or answers before the audio is
+                             ready. -->
                         <template x-if="audioLoading">
                             <div class="flex-1 min-h-0 flex flex-col items-center justify-center gap-4"
                                  data-testid="audio-loading"
@@ -461,14 +459,12 @@
                             </template>
                         </div>
 
-                        <!-- Question audio controls (#1059). The <audio> element
-                             itself is the persistent one at the top of the game
-                             container (#1085). Playback is driven by GameApp,
-                             which loads the clip behind the loading beat and plays
-                             it from the top. A mute toggle and a replay control
-                             sit here; the replay control's label reads "Play
-                             audio" when autoplay was blocked and "Replay audio"
-                             otherwise. -->
+                        <!-- Question audio controls (#1059). Playback is driven
+                             by GameApp through a Howler Howl (#1088): the clip is
+                             warmed behind the loading beat and played from the
+                             top. A mute toggle and a replay control sit here; the
+                             replay control's label reads "Play audio" when
+                             autoplay was blocked and "Replay audio" otherwise. -->
                         <template x-if="question.audioUrl">
                             <div class="flex items-center justify-center gap-2 mb-3"
                                  data-testid="question-audio-controls">

@@ -39,6 +39,7 @@ func TestEmbeddedAssets_ServeOnlyBuiltOutput(t *testing.T) {
 		"/static/js/vendor/alpine.min.js",
 		"/static/js/vendor/anime.umd.min.js",
 		"/static/js/vendor/sortable.min.js",
+		"/static/js/vendor/howler.min.js",
 	}
 	for _, path := range served {
 		assertEmbedStatus(ctx, t, srv.BaseURL+path, http.StatusOK)

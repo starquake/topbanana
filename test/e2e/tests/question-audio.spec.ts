@@ -11,13 +11,21 @@ import {
 } from './helpers';
 import { adminStatePath } from '../e2e-auth';
 
-// Slice 3 of #1059: audio PLAYBACK on the play surfaces. The upload/admin path
-// is Slice 2, so these specs do not author a real audio clip. Instead they
-// route-intercept the play endpoints to inject audioUrl on the question and
-// serve a tiny real clip for /media/*, mirroring the deterministic
-// route-interception approach the flash specs use. The behaviour under test is
-// the playback chrome (the hidden <audio>, the mute toggle, the replay control)
-// and the cross-surface contract that the phone stays answer-only.
+// Slice 3 of #1059 + #1088: audio PLAYBACK on the play surfaces. Playback is
+// driven by Howler.js (#1088), which owns its own Web Audio nodes - there is no
+// longer a persistent <audio data-testid="question-audio"> element. These specs
+// therefore assert via the visible controls (mute / replay) and a spy on
+// Howl.prototype (play / stop / mute) rather than a DOM media element.
+//
+// Headless browsers use a permissive autoplay policy, so these specs pin the
+// WIRING - that the controller builds a Howl, plays it once per question, the
+// repeat sequence loops the right number of times, mute flows through to the
+// Howl, and the clip stops on advance - NOT the iOS autoplay policy the #1088
+// change actually fixes (that needs a real device). The upload/admin path is
+// Slice 2, so these specs do not author a real audio clip; they route-intercept
+// the play endpoints to inject audioUrl on the question and serve a tiny real
+// clip for /media/*, mirroring the deterministic route-interception the flash
+// specs use.
 test.use({ storageState: adminStatePath() });
 // Block the page service worker so it can't serve /media ahead of Playwright's
 // route interception, which intermittently fails the audio loading specs.
@@ -28,15 +36,18 @@ test.use({ serviceWorkers: 'block' });
 // host specs also end their room on teardown so the host is free for the next.
 test.describe.configure({ mode: 'serial' });
 
-// AUDIO_SRC is the value the interceptor injects as the question's audioUrl. A
-// self-contained data: URI for a minimal valid WAV (a 44-byte RIFF/WAVE header,
-// no sample data): the <audio> element resolves a real, playable source with no
-// network round-trip, so the server never logs a bogus /media id and media
-// loader requests cannot escape Playwright's routing. The test asserts the
-// element is wired (src + muted), not actual playback, which headless autoplay
-// policy makes unreliable.
+// AUDIO_SRC is the value the interceptor injects as the question's audioUrl: a
+// self-contained data: URI for a minimal but non-empty WAV (a RIFF/WAVE header
+// plus a short run of silent PCM samples). A data: URI lets Howler decode it
+// through decodeAudioData with no network round-trip, so the server never logs a
+// bogus /media id and the media loader cannot escape Playwright's routing. The
+// non-empty data chunk keeps decodeAudioData from rejecting an empty buffer on
+// the stricter browsers. The specs assert the controller's Howl is wired (built,
+// played, muted), not actual audible output, which headless autoplay makes
+// unreliable.
 const AUDIO_SRC =
-  'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+  'data:audio/wav;base64,UklGRkQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YSAAAAAA' +
+  'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
 
 const SINGLE_QUESTION: readonly QuestionSpec[] = [
   { text: 'Question with audio', options: ['Correct', 'Wrong', 'Nope', 'No'], correctIndices: [0] },
@@ -48,11 +59,161 @@ const TWO_QUESTIONS: readonly QuestionSpec[] = [
 ];
 
 // HELD_AUDIO_URL is a fake clip URL the loading-screen specs inject and then
-// route to a request that never resolves, so the <audio> element's
-// canplaythrough never fires. With the virtual clock installed the loading beat
-// then proceeds via its ~5s timeout, which the spec drives with runFor - a fully
-// deterministic loading screen with no real wall-clock wait (#1070).
+// route to a held / aborted / hung request. Because it is NOT a data: URI,
+// Howler loads it over XHR (its Web Audio path), so the request passes through
+// Playwright's page.route and the test controls when (or whether) the probe
+// Howl's 'load' fires.
 const HELD_AUDIO_URL = '/media/held-audio-clip';
+
+// installHowlSpy patches Howl.prototype (play / stop / mute) BEFORE any Howl is
+// constructed, so it captures the controller's first autoplay (which fires during
+// the loading beat, before the question paints). It records:
+//   __howlPlayCount  - how many times the controller asked a clip to play
+//   __howlStopCount  - how many times a clip was stopped/unloaded on advance
+//   __howlMuted      - the last value passed to mute() (the controller mirrors
+//                      the persisted mute preference onto the Howl)
+// It also re-fires Howler's 'end' event after each play() so the repeat loop
+// advances deterministically: the silent data: URI has ~0 duration and headless
+// playback is unreliable, so 'end' may never fire on its own. A getter argument
+// to mute() (Howler returns state) is ignored - only setter calls (a boolean
+// argument) update __howlMuted.
+async function installHowlSpy(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as unknown as {
+      __howlPlayCount: number;
+      __howlStopCount: number;
+      __howlMuted: boolean | null;
+      Howl?: unknown;
+    };
+    w.__howlPlayCount = 0;
+    w.__howlStopCount = 0;
+    w.__howlMuted = null;
+    const patch = (Howl: { prototype: Record<string, unknown> }) => {
+      const proto = Howl.prototype as {
+        play: (...args: unknown[]) => unknown;
+        stop: (...args: unknown[]) => unknown;
+        mute: (...args: unknown[]) => unknown;
+        _emit?: (event: string) => unknown;
+        __tbSpied?: boolean;
+      };
+      if (proto.__tbSpied) return;
+      proto.__tbSpied = true;
+      const origPlay = proto.play;
+      const origStop = proto.stop;
+      const origMute = proto.mute;
+      proto.play = function patchedPlay(this: typeof proto, ...args: unknown[]) {
+        w.__howlPlayCount += 1;
+        const result = origPlay.apply(this, args);
+        // Fire 'end' on the next microtask so the controller's listener (added
+        // during start) runs after play() returns, advancing any repeat loop.
+        Promise.resolve().then(() => {
+          if (typeof this._emit === 'function') this._emit('end');
+        });
+        return result;
+      };
+      proto.stop = function patchedStop(this: typeof proto, ...args: unknown[]) {
+        w.__howlStopCount += 1;
+        return origStop.apply(this, args);
+      };
+      proto.mute = function patchedMute(this: typeof proto, ...args: unknown[]) {
+        if (args.length > 0 && typeof args[0] === 'boolean') {
+          w.__howlMuted = args[0] as boolean;
+        }
+        return origMute.apply(this, args);
+      };
+    };
+    // The init script runs before the Howler vendor <script>, so window.Howl is
+    // not defined yet (and the page clock is faked, so a polling setInterval
+    // would never fire on its own). Intercept the assignment with an accessor:
+    // when the vendor script does `window.Howl = Howl`, patch the prototype and
+    // store it, so the spy is in place for the very first Howl ever built.
+    let stored: { prototype: Record<string, unknown> } | undefined;
+    Object.defineProperty(window, 'Howl', {
+      configurable: true,
+      get() {
+        return stored;
+      },
+      set(value: { prototype: Record<string, unknown> }) {
+        stored = value;
+        if (value) patch(value);
+      },
+    });
+  });
+}
+
+// installHowlSpyNow patches Howl.prototype AFTER the page has loaded Howler and
+// the question has painted, then zeroes the play counter. Patching the prototype
+// is live (existing Howl instances dispatch play() through the prototype), so the
+// controller's already-built Howl is captured. Used by the repeat specs, which
+// want a clean, deterministic play count from the user-gesture replay click.
+//
+// It first flushes two animation frames: the controller defers the first
+// question's autoplay start() through Alpine's $nextTick (runAudioLoadingBeat),
+// so under the virtual clock + async data:-URI decode that deferred autoplay can
+// otherwise fire AFTER this spy zeroes the counter and the replay click runs,
+// making the spy count both the late autoplay and the replay. Draining the rAF
+// queue here guarantees the autoplay has already played before the counter is
+// reset, so the count reflects only the replay sequence.
+//
+// The patched play() does NOT call the real Howler play(): it just counts and
+// then fires the controller's 'end' listener once on the next microtask. This
+// fully decouples the repeat loop from Howler's real Web Audio playback, whose
+// 'end' fires on the AudioContext clock (real time, not the virtual page clock)
+// and would otherwise race the synthetic one and double-count. The controller's
+// repeat handler reschedules the next play on the (virtual) page clock, so the
+// spec drives the whole sequence with page.clock.runFor. It counts only calls
+// the controller makes (play() with no args); Howler's internal recursive
+// self.play(id) / self.play(id, true) pass an argument, so they never inflate
+// the count even if the patched path is later changed to call real playback.
+async function installHowlSpyNow(page: Page): Promise<void> {
+  // Drain the rAF queue so the $nextTick-deferred autoplay start() has run.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+  );
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      __howlPlayCount: number;
+      Howl?: { prototype: Record<string, unknown> };
+    };
+    w.__howlPlayCount = 0;
+    const Howl = w.Howl;
+    if (!Howl) return;
+    const proto = Howl.prototype as {
+      play: (...args: unknown[]) => unknown;
+      _emit?: (event: string) => unknown;
+      __tbSpiedNow?: boolean;
+    };
+    if (proto.__tbSpiedNow) return;
+    proto.__tbSpiedNow = true;
+    proto.play = function patchedPlay(this: typeof proto, ...args: unknown[]) {
+      // Count only the controller's own play() (no args); Howler's internal
+      // recursive self.play(id[, true]) carries an argument and is skipped.
+      if (args.length === 0) w.__howlPlayCount += 1;
+      // Fire 'end' on the next microtask so the controller's repeat listener
+      // (added during start) advances the loop, with no real Howler playback so
+      // its real 'end' cannot also fire and double the count.
+      Promise.resolve().then(() => {
+        if (typeof this._emit === 'function') this._emit('end');
+      });
+      return undefined;
+    };
+  });
+}
+
+function howlPlayCount(page: Page): Promise<number> {
+  return page.evaluate(() => (window as unknown as { __howlPlayCount: number }).__howlPlayCount);
+}
+
+function howlStopCount(page: Page): Promise<number> {
+  return page.evaluate(() => (window as unknown as { __howlStopCount: number }).__howlStopCount);
+}
+
+function howlMuted(page: Page): Promise<boolean | null> {
+  return page.evaluate(() => (window as unknown as { __howlMuted: boolean | null }).__howlMuted);
+}
 
 // injectSoloAudio rewrites the solo /next responses to carry audioUrl, so a
 // quiz authored without audio (Slice 2 is not merged) still exercises the
@@ -90,31 +251,7 @@ async function injectSoloAudioRepeat(page: Page, audioRepeat: boolean): Promise<
   });
 }
 
-// installPlaySpy counts calls to the audio element's play() and re-fires the
-// 'ended' event after each one. Headless autoplay is unreliable and the silent
-// data: URI has ~0 duration, so the controller's 'ended' listener may never fire
-// on its own; dispatching ended deterministically drives the repeat loop. The
-// counter proves how many times the controller asked the clip to play.
-async function installPlaySpy(audio: ReturnType<Page['getByTestId']>): Promise<void> {
-  await audio.evaluate((el: HTMLAudioElement) => {
-    const w = window as unknown as { __playCount: number };
-    w.__playCount = 0;
-    const original = el.play.bind(el);
-    el.play = () => {
-      w.__playCount += 1;
-      // Re-fire ended on the next microtask so the controller's listener (added
-      // during start) runs after this play() returns, advancing the repeat loop.
-      Promise.resolve().then(() => el.dispatchEvent(new Event('ended')));
-      return original().catch(() => undefined);
-    };
-  });
-}
-
-async function playCount(page: Page): Promise<number> {
-  return page.evaluate(() => (window as unknown as { __playCount: number }).__playCount);
-}
-
-test('the solo player gets a hidden audio element and mute / replay controls for a question audio clip', async ({
+test('the solo player gets mute / replay controls and a wired Howl for a question audio clip', async ({
   page,
   browserName,
 }) => {
@@ -126,8 +263,9 @@ test('the solo player gets a hidden audio element and mute / replay controls for
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
   // Play anonymously with the injected audio and a fixed clock so the reveal
-  // beat can be fast-forwarded.
+  // beat can be fast-forwarded. The Howl spy is installed before navigation.
   await page.context().clearCookies();
+  await installHowlSpy(page);
   await installPlaythroughClock(page);
   await injectSoloAudio(page);
 
@@ -140,43 +278,38 @@ test('the solo player gets a hidden audio element and mute / replay controls for
   // Fast-forward the reveal beat so the question view is fully painted.
   await page.clock.runFor(3_500);
 
-  // The hidden <audio> carries the injected source.
-  const audio = page.getByTestId('question-audio');
-  await expect(audio).toHaveAttribute('src', AUDIO_SRC);
-  await expect(audio).toBeHidden();
+  // The controller built a Howl and played the clip (no DOM <audio> element any
+  // more; the wiring is the assertion).
+  await expect(page.getByTestId('question-text')).toHaveText(SINGLE_QUESTION[0].text);
+  await expect.poll(() => howlPlayCount(page)).toBeGreaterThan(0);
 
-  // The mute control toggles its label and the audio element's muted state.
+  // The mute control toggles its label and flows the mute state through to the
+  // Howl's mute().
   const mute = page.getByTestId('audio-mute');
   await expect(mute).toBeVisible();
   await expect(mute).toHaveText('Mute');
   await mute.click();
   await expect(mute).toHaveText('Unmute');
-  await expect(audio).toHaveJSProperty('muted', true);
+  await expect.poll(() => howlMuted(page)).toBe(true);
   await mute.click();
   await expect(mute).toHaveText('Mute');
-  await expect(audio).toHaveJSProperty('muted', false);
+  await expect.poll(() => howlMuted(page)).toBe(false);
 
   // The replay control is present so the player can restart the clip.
   await expect(page.getByTestId('audio-replay')).toBeVisible();
 });
 
-// #1085: an audio question must autoplay, not fall back to the manual "Play
-// audio" button. The regression was a mount/timing race: the per-question
-// <audio> element lived inside nested x-if templates, so the loading beat's
-// $nextTick start() ran while the element was being torn down and rebuilt across
-// the question transition; getAudioEl() returned null and start() set
-// audioBlocked=true WITHOUT ever calling play(). The fix makes the <audio> a
-// permanent child of the always-rendered game container, so getAudioEl() resolves
-// it for every question and start() can never run before it exists.
-//
-// The invariant this pins is "start() found the persistent element and called
-// play() on the FIRST audio question". A global play() spy installed before
-// navigation captures that first autoplay regardless of timing. Asserting the
-// "Replay audio" label instead would depend on play()'s promise RESOLVING,
-// which headless autoplay policy makes unreliable for a synthetic clip; the bug
-// was that play() was never called at all, so a positive call count is the
-// precise, browser-policy-independent signal that the race is gone.
-test('the FIRST solo audio question autoplays rather than skipping play() (#1085)', async ({
+// #1085 / #1088: an audio question must autoplay, not fall back to the manual
+// "Play audio" button. The original regression was a mount/timing race on the
+// per-question <audio> element; #1088 removes that element entirely and routes
+// playback through Howler, whose autoUnlock frees later plays after the Start
+// gesture. The invariant this pins is "the controller built a Howl and called
+// play() on the FIRST audio question". A Howl.prototype.play spy installed before
+// navigation captures that first autoplay regardless of timing. Asserting a
+// "Replay audio" label would depend on Howler's playback actually resolving,
+// which headless autoplay makes unreliable; a positive play count is the precise,
+// browser-policy-independent signal that the autoplay ran.
+test('the FIRST solo audio question autoplays through Howler (#1088)', async ({
   page,
   browserName,
 }) => {
@@ -188,23 +321,9 @@ test('the FIRST solo audio question autoplays rather than skipping play() (#1085
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
   await page.context().clearCookies();
+  await installHowlSpy(page);
   await installPlaythroughClock(page);
   await injectSoloAudio(page);
-
-  // Count play() calls on ANY audio element from before navigation, so the very
-  // first autoplay (which fires during the loading beat, before the question
-  // paints) is captured. With the pre-fix race start() returns on its null
-  // branch and never calls play(), leaving this counter at 0.
-  await page.addInitScript(() => {
-    const w = window as unknown as { __playCount: number };
-    w.__playCount = 0;
-    const proto = HTMLMediaElement.prototype;
-    const original = proto.play;
-    proto.play = function patchedPlay(this: HTMLMediaElement) {
-      w.__playCount += 1;
-      return original.apply(this).catch(() => undefined);
-    };
-  });
 
   await page.goto('/quizzes');
   await page.getByRole('link', { name: quizTitle }).click();
@@ -212,37 +331,24 @@ test('the FIRST solo audio question autoplays rather than skipping play() (#1085
   await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
   await page.getByRole('button', { name: 'Start Game' }).click();
 
-  // The data: URI buffers instantly, so the loading beat resolves on
-  // canplaythrough; pump the reveal beat so the first question paints.
+  // The data: URI decodes instantly, so the loading beat resolves on Howler's
+  // 'load'; pump the reveal beat so the first question paints.
   await page.clock.runFor(3_500);
   await expect(page.getByTestId('question-text')).toHaveText(SINGLE_QUESTION[0].text);
 
-  // The hidden <audio> element is mounted (so start() found it, not null).
-  await expect(page.getByTestId('question-audio')).toHaveAttribute('src', AUDIO_SRC);
-
-  // start() found the mounted element and called play() on the FIRST audio
-  // question: the autoplay ran rather than dropping into the null/blocked
-  // branch. (The "loadAudioClip" warm-up uses a separate `new Audio()` it never
-  // play()s, so this count reflects only the question element's autoplay.)
-  await expect
-    .poll(() => page.evaluate(() => (window as unknown as { __playCount: number }).__playCount))
-    .toBeGreaterThan(0);
+  // start() built the Howl and called play() on the FIRST audio question: the
+  // autoplay ran rather than dropping into the blocked branch.
+  await expect.poll(() => howlPlayCount(page)).toBeGreaterThan(0);
 });
 
-// #1085: the SECOND consecutive audio question must also autoplay. This was the
-// reported regression: Q1 played (its clip lands right after the Start gesture)
-// but Q2 was silent. The root cause was the same mount race as above - the
-// Q1->Q2 transition briefly clears `question`, tearing down and rebuilding the
-// per-question <audio> element, so the loading beat's start() for Q2 ran while
-// the element was absent and fell into the null/blocked branch without calling
-// play(). The persistent element (a permanent child of the game container) is
-// never torn down, so Q2's start() finds it and plays.
-//
-// Headless autoplay policy is permissive, so this pins the element-present /
-// auto-start invariant (play() is called on the SECOND question) rather than
-// reproducing a real-browser block. A global play() spy counts the second
-// question's autoplay; the count climbs again after the advance.
-test('the SECOND consecutive solo audio question also autoplays (#1085)', async ({
+// #1088: the SECOND consecutive audio question must also autoplay. This was the
+// reported iOS regression: Q1 played (its clip lands right after the Start
+// gesture) but Q2 was silent because HTMLAudioElement.play() needs a fresh
+// gesture each time on iOS. Routing playback through Howler (Web Audio,
+// autoUnlock on the first gesture) lets Q2 play with no further tap. Headless
+// autoplay is permissive, so this pins the auto-start invariant (play() is called
+// again on the SECOND question) rather than reproducing a real-iOS block.
+test('the SECOND consecutive solo audio question also autoplays through Howler (#1088)', async ({
   page,
   browserName,
 }) => {
@@ -254,22 +360,9 @@ test('the SECOND consecutive solo audio question also autoplays (#1085)', async 
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
   await page.context().clearCookies();
+  await installHowlSpy(page);
   await installPlaythroughClock(page);
   await injectSoloAudio(page);
-
-  // Count play() calls on ANY audio element from before navigation, so each
-  // question's autoplay (which fires during its loading beat) is captured. With
-  // the pre-fix race Q2's start() returns on its null branch without play().
-  await page.addInitScript(() => {
-    const w = window as unknown as { __playCount: number };
-    w.__playCount = 0;
-    const proto = HTMLMediaElement.prototype;
-    const original = proto.play;
-    proto.play = function patchedPlay(this: HTMLMediaElement) {
-      w.__playCount += 1;
-      return original.apply(this).catch(() => undefined);
-    };
-  });
 
   await page.goto('/quizzes');
   await page.getByRole('link', { name: quizTitle }).click();
@@ -280,12 +373,8 @@ test('the SECOND consecutive solo audio question also autoplays (#1085)', async 
   // Q1 paints and autoplays.
   await page.clock.runFor(3_500);
   await expect(page.getByTestId('question-text')).toHaveText(TWO_QUESTIONS[0].text);
-  await expect
-    .poll(() => page.evaluate(() => (window as unknown as { __playCount: number }).__playCount))
-    .toBeGreaterThan(0);
-  const afterFirst = await page.evaluate(
-    () => (window as unknown as { __playCount: number }).__playCount,
-  );
+  await expect.poll(() => howlPlayCount(page)).toBeGreaterThan(0);
+  const afterFirst = await howlPlayCount(page);
 
   // Answer Q1, then drive the feedback pause + advance so the loading beat for Q2
   // runs and the second clip autoplays.
@@ -293,19 +382,14 @@ test('the SECOND consecutive solo audio question also autoplays (#1085)', async 
   await page.clock.runFor(6_000);
   await expect(page.getByTestId('question-text')).toHaveText(TWO_QUESTIONS[1].text);
 
-  // The persistent <audio> element is still mounted on Q2 (start() found it).
-  await expect(page.getByTestId('question-audio')).toHaveAttribute('src', AUDIO_SRC);
-
-  // Q2's start() found the element and called play() again: the second question's
-  // autoplay ran rather than dropping into the null/blocked branch.
-  await expect
-    .poll(() => page.evaluate(() => (window as unknown as { __playCount: number }).__playCount))
-    .toBeGreaterThan(afterFirst);
+  // Q2's start() built a Howl and called play() again: the second question's
+  // autoplay ran rather than going silent.
+  await expect.poll(() => howlPlayCount(page)).toBeGreaterThan(afterFirst);
 });
 
 // injectStateAudio rewrites the live session state reads to carry audioUrl on
 // the current question, so the big screen exercises the playback chrome without
-// the Slice 2 upload path. The url defaults to the instant-buffering data: URI;
+// the Slice 2 upload path. The url defaults to the instant-decoding data: URI;
 // the loading-screen specs pass HELD_AUDIO_URL so the clip fetch can be held.
 async function injectStateAudio(page: Page, audioUrl: string = AUDIO_SRC): Promise<void> {
   await page.route('**/api/sessions/*/state', async (route: Route) => {
@@ -323,22 +407,23 @@ async function injectStateAudio(page: Page, audioUrl: string = AUDIO_SRC): Promi
 }
 
 // A minimal but non-empty WAV (44-byte RIFF/WAVE header + a short run of silent
-// PCM samples) so the browser fires canplaythrough once the clip is served.
+// PCM samples) so Howler's decodeAudioData succeeds once the clip is served and
+// the probe Howl fires 'load'.
 const WAV_BYTES = Buffer.from(
   'UklGRkQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YSAAAAAA' +
     'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
   'base64',
 );
 
-// failAudioRoute answers the clip URL by aborting it, so the <audio> element's
-// onerror fires and the loading beat ends on its error branch (no clock needed).
+// failAudioRoute answers the clip URL by aborting it, so the probe Howl's
+// loaderror fires and the loading beat ends on its error branch (no clock needed).
 async function failAudioRoute(page: Page, audioUrl: string): Promise<void> {
   await page.route(`**${audioUrl}`, (route: Route) => route.abort());
 }
 
 // gatedAudioRoute holds the clip's bytes until the returned release() is called,
-// then answers with a real WAV so canplaythrough fires. The test controls when
-// the clip arrives, so the loading spinner stays up deterministically (no
+// then answers with a real WAV so the probe Howl fires 'load'. The test controls
+// when the clip arrives, so the loading spinner stays up deterministically (no
 // dependence on the browser's media-stall timing) until the test releases it.
 function gatedAudioRoute(page: Page, audioUrl: string): { install: () => Promise<void>; release: () => void } {
   let release: () => void = () => {};
@@ -412,9 +497,9 @@ test.describe('host big screen audio loading beat', () => {
     test.setTimeout(60_000);
 
     // Gate the clip's bytes so the loading spinner stays up until the test
-    // releases them; releasing serves a real WAV so canplaythrough fires and the
-    // beat ends. The test owns the timing, so the spinner does not race the
-    // beat's completion.
+    // releases them; releasing serves a real WAV so the probe Howl fires 'load'
+    // and the beat ends. The test owns the timing, so the spinner does not race
+    // the beat's completion.
     const clip = gatedAudioRoute(page, HELD_AUDIO_URL);
     await injectStateAudio(page, HELD_AUDIO_URL);
     await clip.install();
@@ -432,13 +517,12 @@ test.describe('host big screen audio loading beat', () => {
       await expect(page.getByTestId('audio-loading')).toBeVisible({ timeout: 15_000 });
       await expect(page.locator('[data-question-text]')).toBeHidden();
 
-      // Release the clip: canplaythrough ends the beat, so the question reveals
-      // and the clip is wired to play (the <audio> carries the src).
+      // Release the clip: the probe Howl's 'load' ends the beat, so the question
+      // reveals and the controller plays the clip.
       clip.release();
 
       await expect(page.getByTestId('audio-loading')).toBeHidden({ timeout: 15_000 });
       await expect(page.locator('[data-question-text]')).toHaveText(SINGLE_QUESTION[0].text);
-      await expect(page.getByTestId('question-audio')).toHaveAttribute('src', HELD_AUDIO_URL);
     } finally {
       clip.release();
       await cleanup();
@@ -476,7 +560,7 @@ test.describe('host big screen audio loading beat', () => {
   });
 });
 
-test('the host big screen gets the audio element and a mute control during a question, and the phone stays silent', async ({
+test('the host big screen plays a wired Howl during a question, with a mute control, and the phone stays silent', async ({
   page,
   context,
   baseURL,
@@ -489,7 +573,9 @@ test('the host big screen gets the audio element and a mute control during a que
   await createQuizWithQuestions(page, quizTitle, SINGLE_QUESTION);
   setQuizMode(quizTitle, 'live');
 
-  // The big screen injects audioUrl into its own state reads.
+  // The big screen injects audioUrl into its own state reads, and the Howl spy
+  // is installed before the host page navigates.
+  await installHowlSpy(page);
   await injectStateAudio(page);
 
   await page.goto('/admin/quizzes');
@@ -530,32 +616,33 @@ test('the host big screen gets the audio element and a mute control during a que
     await expect(playerRow(page, casey)).toBeVisible();
     await page.getByRole('button', { name: 'Start now' }).click();
 
-    // ---- Question phase on the TV: the audio element + mute control render.
+    // ---- Question phase on the TV: the controller plays a Howl and the mute
+    // control renders.
     const questionView = page.locator('[data-phase-question]');
     await expect(questionView).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('[data-question-text]')).toHaveText(SINGLE_QUESTION[0].text);
-
-    const audio = page.getByTestId('question-audio');
-    await expect(audio).toHaveAttribute('src', AUDIO_SRC);
-    await expect(audio).toBeHidden();
+    await expect.poll(() => howlPlayCount(page)).toBeGreaterThan(0);
 
     const mute = page.getByTestId('audio-mute');
     await expect(mute).toBeVisible();
     await expect(mute).toHaveText('Mute');
     await mute.click();
     await expect(mute).toHaveText('Unmute');
-    await expect(audio).toHaveJSProperty('muted', true);
+    await expect.poll(() => howlMuted(page)).toBe(true);
 
     // The replay/play control gives the host a recovery affordance if autoplay
     // was blocked.
     await expect(page.getByTestId('audio-replay')).toBeVisible();
 
-    // ---- The phone (answer pad) carries NO audio element or controls even
-    // though its state read carries audioUrl: the live phone is answer-only.
+    // ---- The phone (answer pad) carries NO audio controls even though its
+    // state read carries audioUrl: the live phone is answer-only, and the join
+    // shell does not even load Howler.
     await expect(caseyPage.getByTestId('question-view')).toBeVisible({ timeout: 15_000 });
-    await expect(caseyPage.getByTestId('question-audio')).toHaveCount(0);
     await expect(caseyPage.getByTestId('audio-mute')).toHaveCount(0);
     await expect(caseyPage.getByTestId('audio-replay')).toHaveCount(0);
+    await expect(
+      caseyPage.evaluate(() => typeof (window as unknown as { Howl?: unknown }).Howl),
+    ).resolves.toBe('undefined');
   } finally {
     await caseyCtx.close();
   }
@@ -579,13 +666,13 @@ async function injectSoloAudioUrl(page: Page, audioUrl: string): Promise<void> {
 }
 
 // holdAudioRoute answers the held clip URL with a request that never resolves,
-// so the <audio> element's canplaythrough never fires and the loading beat falls
-// through to its timeout. The returned hold is registered on the page route so a
-// later runFor drives the timeout deterministically.
+// so the probe Howl's 'load' never fires and the loading beat falls through to
+// its timeout. The returned hold is registered on the page route so a later
+// runFor drives the timeout deterministically.
 async function holdAudioRoute(page: Page, audioUrl: string): Promise<void> {
   await page.route(`**${audioUrl}`, async () => {
     // Never call route.fulfill / route.fetch: the request hangs, so the clip
-    // never buffers and the loading beat must rely on its timeout.
+    // never loads and the loading beat must rely on its timeout.
     await new Promise(() => {});
   });
 }
@@ -635,6 +722,7 @@ test('the solo audio stops when the player advances to the next question', async
   await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
 
   await page.context().clearCookies();
+  await installHowlSpy(page);
   await installPlaythroughClock(page);
   await injectSoloAudio(page);
 
@@ -644,35 +732,22 @@ test('the solo audio stops when the player advances to the next question', async
   await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
   await page.getByRole('button', { name: 'Start Game' }).click();
 
-  // The data: URI buffers instantly, so the loading beat resolves on
-  // canplaythrough; pump the reveal beat so the first question's answers paint.
+  // The data: URI decodes instantly, so the loading beat resolves on 'load';
+  // pump the reveal beat so the first question's answers paint and its clip plays.
   await page.clock.runFor(3_500);
   await expect(page.getByTestId('question-text')).toHaveText(TWO_QUESTIONS[0].text);
-  const audio = page.getByTestId('question-audio');
-  await expect(audio).toHaveAttribute('src', AUDIO_SRC);
-
-  // Spy on the element's pause() method so the assertion does not depend on the
-  // element ever actually playing (headless autoplay differs by browser). The
-  // app calls pause() in nextQuestion before loading the next clip, so the
-  // counter is non-zero by the time the second question loads - proving the stop
-  // runs on the advance path.
-  await audio.evaluate((el: HTMLAudioElement) => {
-    const w = window as unknown as { __pauseCount: number };
-    w.__pauseCount = 0;
-    const original = el.pause.bind(el);
-    el.pause = () => { w.__pauseCount += 1; original(); };
-  });
+  await expect.poll(() => howlPlayCount(page)).toBeGreaterThan(0);
+  const stopsBefore = await howlStopCount(page);
 
   // Answer the first question, then drive the feedback pause + advance so
-  // nextQuestion stops the current clip and loads the second question.
+  // nextQuestion stops the current clip (the controller unloads its Howl, which
+  // stops it) and loads the second question.
   await page.getByRole('button', { name: 'Correct' }).click();
   await page.clock.runFor(6_000);
   await expect(page.getByTestId('question-text')).toHaveText(TWO_QUESTIONS[1].text);
 
-  const paused = await page.evaluate(
-    () => (window as unknown as { __pauseCount: number }).__pauseCount,
-  );
-  expect(paused).toBeGreaterThan(0);
+  // The advance path stopped the prior question's Howl (stop count climbed).
+  await expect.poll(() => howlStopCount(page)).toBeGreaterThan(stopsBefore);
 });
 
 test('the solo audio repeats a repeat-flagged clip three times then stops', async ({
@@ -696,27 +771,26 @@ test('the solo audio repeats a repeat-flagged clip three times then stops', asyn
   await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
   await page.getByRole('button', { name: 'Start Game' }).click();
 
-  // The data: URI buffers instantly, so the loading beat resolves on
-  // canplaythrough; pump the reveal beat so the question paints and the
-  // <audio> element is mounted before the play spy is installed.
+  // The data: URI decodes instantly; pump the reveal beat so the question paints
+  // and the controller's Howl is built before the spy is installed.
   await page.clock.runFor(3_500);
-  const audio = page.getByTestId('question-audio');
-  await expect(audio).toHaveAttribute('src', AUDIO_SRC);
+  await expect(page.getByTestId('question-text')).toHaveText(SINGLE_QUESTION[0].text);
 
-  // Spy on play() and re-fire ended after each play, then re-arm the controller
-  // by replaying through the user-gesture control so the spy sees the full
-  // sequence (the autoplay start may have run before the spy was installed).
-  await installPlaySpy(audio);
+  // Spy on play() now (post-paint, count from 0) and re-arm the controller
+  // through the user-gesture replay control so the spy sees the full repeat
+  // sequence cleanly. The spy re-fires 'end' after each play(), advancing the
+  // controller's repeat loop.
+  await installHowlSpyNow(page);
   await page.getByTestId('audio-replay').click();
 
-  // The controller schedules each repeat after a 1000ms gap; drive the clock
-  // past all of the inter-repeat gaps so the queued replays fire.
+  // The controller schedules each repeat after a 1000ms gap; drive the clock past
+  // all of the inter-repeat gaps so the queued replays fire.
   await page.clock.runFor(5_000);
 
   // A repeat clip plays three times total, then stops: no fourth play.
-  await expect.poll(() => playCount(page)).toBe(3);
+  await expect.poll(() => howlPlayCount(page)).toBe(3);
   await page.clock.runFor(5_000);
-  expect(await playCount(page)).toBe(3);
+  expect(await howlPlayCount(page)).toBe(3);
 });
 
 test('the solo audio plays a normal clip once with no repeats', async ({
@@ -741,15 +815,16 @@ test('the solo audio plays a normal clip once with no repeats', async ({
   await page.getByRole('button', { name: 'Start Game' }).click();
 
   await page.clock.runFor(3_500);
-  const audio = page.getByTestId('question-audio');
-  await expect(audio).toHaveAttribute('src', AUDIO_SRC);
+  await expect(page.getByTestId('question-text')).toHaveText(SINGLE_QUESTION[0].text);
 
-  await installPlaySpy(audio);
+  // Spy on play() now (post-paint, count from 0) and replay through the
+  // user-gesture control.
+  await installHowlSpyNow(page);
   await page.getByTestId('audio-replay').click();
 
-  // A normal clip plays once; the ended event does not schedule a replay even
+  // A normal clip plays once; the 'end' event does not schedule a replay even
   // after the clock advances past the repeat gap.
-  await expect.poll(() => playCount(page)).toBe(1);
+  await expect.poll(() => howlPlayCount(page)).toBe(1);
   await page.clock.runFor(5_000);
-  expect(await playCount(page)).toBe(1);
+  expect(await howlPlayCount(page)).toBe(1);
 });

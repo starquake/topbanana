@@ -130,13 +130,13 @@ export class GameApp {
         this.clockOffset = 0;
         // Mute state for the per-question audio (#1059), seeded from the
         // persisted preference so a player who muted earlier stays muted.
-        // Bound to the mute control and to the <audio> element's `muted`
-        // attribute. Default unmuted.
+        // Bound to the mute control and applied to the Howl's mute() so a
+        // mid-clip toggle takes effect. Default unmuted.
         this.audioMuted = initialMuted();
-        // True when the browser blocked autoplay (the play() promise rejected),
-        // so the template surfaces an explicit play control as a fallback. A
-        // reload mid-game or a strict autoplay policy can leave the first clip
-        // blocked until the player taps the play control.
+        // True when Howler reported a playerror, so the template surfaces an
+        // explicit play control as a fallback. A reload mid-game or a strict
+        // autoplay policy can leave the first clip blocked until the player taps
+        // the play control; Howler's autoUnlock then frees later plays (#1088).
         this.audioBlocked = false;
         // True while the audio loading beat is on screen for a question with a
         // audio (#1070): the clip is buffering before the question is revealed.
@@ -577,7 +577,7 @@ export class GameApp {
         this.clearRoundTimer();
         // Stop a still-playing clip before swapping to the next item so the
         // prior question's audio never bleeds into the next beat (#1070).
-        this.audio.stop(this);
+        this.audio.stop();
         this.audioLoading = false;
         this.revealing = false;
         this.submitError = false;
@@ -676,10 +676,9 @@ export class GameApp {
         if (item.audioUrl) {
             // Loading beat (#1070): buffer the clip behind a spinner before the
             // question is revealed, then play it from the top and start the
-            // reveal countdown. The loading screen drives the single fetch of
-            // the bytes (the <audio> element uses preload="none"), so there is
-            // no double-fetch. loadAudioClip resolves on canplaythrough, a
-            // ~5s timeout, or an error, so the question always proceeds.
+            // reveal countdown. loadAudioClip warms the clip through a throwaway
+            // Howl and resolves on Howler's 'load', a ~5s timeout, or an error,
+            // so the question always proceeds.
             await this.runAudioLoadingBeat(item);
             return;
         }
@@ -698,9 +697,9 @@ export class GameApp {
         if (!this.question || this.question.id !== item.id) return;
         this.audioLoading = false;
         if (this.$nextTick) {
-            this.$nextTick(() => this.audio.start(this, this.question.id, false, this.question.audioRepeat));
+            this.$nextTick(() => this.audio.start(this, this.question.id, this.question.audioUrl, false, this.question.audioRepeat));
         } else {
-            this.audio.start(this, this.question.id, false, this.question.audioRepeat);
+            this.audio.start(this, this.question.id, this.question.audioUrl, false, this.question.audioRepeat);
         }
         this.startRevealCountdown();
     }
@@ -1056,29 +1055,17 @@ export class GameApp {
         return this.roundItem && this.roundItem.summary ? this.roundItem.summary : '';
     }
 
-    // getAudioEl returns the persistent <audio> element by its id. It is a
-    // permanent child of the always-rendered game container (#1085), so this
-    // resolves it for every question and start() can never run before it exists.
-    // The lookup goes through document, not this.$root: start() runs from a
-    // deferred $nextTick on a re-entrant async path (resolveAndAdvance ->
-    // nextQuestion -> runAudioLoadingBeat) where the magic this.$root is not
-    // reliably bound, so a $root query intermittently saw null and dropped the
-    // next question into the blocked fallback. The id is the production hook (one
-    // per page); the element's data-testid is reserved for the e2e tests.
-    getAudioEl() {
-        return document.getElementById('question-audio');
-    }
-
     // replayAudio restarts the current question's audio from the play/replay
     // control. The shared controller clears the blocked fallback (the click is a
-    // user gesture) and bypasses the per-question guard.
+    // user gesture) and bypasses the per-question guard. It passes the current
+    // question's url so the controller can build / reuse the Howl for it.
     replayAudio() {
-        this.audio.replay(this, this.question?.audioRepeat);
+        this.audio.replay(this, this.question?.audioUrl, this.question?.audioRepeat);
     }
 
     // toggleMute flips and persists the mute preference through the shared
-    // controller, which applies it to the live <audio> element at once so a
-    // mid-clip toggle takes effect immediately.
+    // controller, which applies it to the live Howl at once so a mid-clip toggle
+    // takes effect immediately.
     toggleMute() {
         this.audio.toggleMute(this);
     }

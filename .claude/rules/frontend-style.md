@@ -58,7 +58,7 @@ App JS is bundled per entry point with **esbuild**; the built, minified bundles 
 Every app-JS source file under `frontend/` is a real ES module: it uses `import` / `export`, never a `(function () { ... })()` IIFE wrapper or a bare classic script. The standalone admin/auth entries (`cooldown.js`, `copy-prompt.js`, `password-length.js`, `quiz-reorder.js`, `quiz-image-upload.js`, `quiz-audio-upload.js`) load via `<script type="module">`, which already gives module scope, so they need no wrapper; each runs its setup once on load through the shared `onDomReady` helper rather than an inline `DOMContentLoaded` block.
 
 - Code shared by more than one entry lives in `frontend/shared/` and is imported via the `@shared/` alias, not copied into each entry. Existing shared modules: `domReady.js` (the run-after-parse guard), `uploadQueue.js` (the image + sound upload queue/XHR/progress/cancel engine), `share.js`, `anim.js`, `rememberedSession.js`, `standings.js`, `countdown.js`, `serverClock.js`, `audioMute.js`. The two upload entries are thin: they configure `createUploadQueue` with their field name, success/failure predicate, and post-settle navigation, and the queue machinery itself is shared.
-- The only files that are not ES modules are the vendored libraries (Alpine, anime.js, SortableJS, htmx), which stay classic `<script>` globals on purpose (see above). This rule is about app source only.
+- The only files that are not ES modules are the vendored libraries (Alpine, anime.js, SortableJS, Howler, htmx), which stay classic `<script>` globals on purpose (see above). This rule is about app source only.
 
 ### Animation (anime.js v4)
 
@@ -72,7 +72,10 @@ All animation goes through the shared `runAnim` wrapper (`frontend/shared/anim.j
 
 - **No bundler beyond esbuild, and no npm for runtime dependencies.** App JS is bundled with esbuild and source stays plain ES modules (see "Application JS: esbuild bundles" above); the build steps are the Tailwind CSS CLI and esbuild, both dev-only. Don't pull in a framework bundler, a runtime npm package, or a second JS toolchain.
 - No TypeScript -- plain `.js` only.
-- No third-party component library or JS framework beyond Alpine + anime.js. The one allowed exception is SortableJS (a focused drag-and-drop utility, vendored self-hosted at `internal/assets/static/js/vendor/sortable.min.js`, admin-only), added deliberately for the rounds/questions reorder (#199). It is not a general framework license: reach for it only for drag-and-drop, not as a wedge to pull in more libraries.
+- No third-party component library or JS framework beyond Alpine + anime.js. Two focused, vendored, self-hosted utilities are allowed by exception, not as a general framework license:
+  - SortableJS (`internal/assets/static/js/vendor/sortable.min.js`, admin-only), added deliberately for the rounds/questions reorder (#199) — reach for it only for drag-and-drop.
+  - Howler.js (`internal/assets/static/js/vendor/howler.min.js`, the two audio surfaces only), added deliberately for the per-question audio playback (#1088): its Web Audio AudioContext auto-unlocks on the first user gesture, fixing the iOS "audio goes silent on later questions" bug the old `<audio>` element had — reach for it only for that audio playback.
+  Neither is a wedge to pull in more libraries.
 - No inline styles (`style="..."`) -- use utilities, or a `@theme` token / `@layer` component class.
 - No hand-written `.css` files. Styling changes go through `frontend/web/css/tailwind.css` (tokens, `@layer`), never a new stylesheet.
 - No reactive state added outside an Alpine component constructor (Alpine will not track it).

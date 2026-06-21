@@ -64,12 +64,13 @@ function hostBigScreen(joinCode, hasQuiz) {
         // genuine question change (reset imageError) from a same-question tick.
         lastQuestionId: null,
         // Mute state for the question audio (#1059), seeded from the persisted
-        // preference and bound to the <audio> element. Default unmuted.
+        // preference and applied to the Howl's mute(). Default unmuted.
         audioMuted: initialMuted(),
-        // True when the browser blocked autoplay (the play() promise rejected),
-        // so the template surfaces an explicit play control. A strict autoplay
-        // policy can block the SSE-driven play() until the host taps the control;
-        // the big screen is the only surface that plays audio.
+        // True when Howler reported a playerror, so the template surfaces an
+        // explicit play control. A strict autoplay policy can block the
+        // SSE-driven play() until the host taps the control; Howler's autoUnlock
+        // then frees later plays (#1088). The big screen is the only surface that
+        // plays audio.
         audioBlocked: false,
         // True while the audio loading beat is on the big screen for a question
         // with audio (#1070): the clip is buffering before the question is
@@ -82,7 +83,7 @@ function hostBigScreen(joinCode, hasQuiz) {
         // (the big screen re-reads /state on every SSE tick).
         lastAudioLoadQuestionId: null,
         // Shared play / mute / replay / per-question-guard controller (#1070),
-        // created in init() and bound to this surface's <audio> element and UI
+        // created in init() and driving a Howler Howl plus this surface's UI
         // flags. The controller's guard plays each clip once per question id, so
         // a repeated state tick within the same question does not restart it.
         audio: null,
@@ -280,9 +281,9 @@ function hostBigScreen(joinCode, hasQuiz) {
                 this.lastQuestionId = questionId;
                 this.imageError = false;
                 // Fetch the image during the read beat so the picture is ready
-                // the moment the element mounts. The audio is fetched once by the
-                // audio loading beat / the controller's play() (the <audio> uses
-                // preload="none"), so there is no double-fetch (#1070).
+                // the moment the element mounts. The audio is warmed once by the
+                // audio loading beat (a throwaway Howl), and the controller's
+                // Howl plays it, so there is no double-fetch (#1070).
                 if (this.question && this.question.imageUrl) {
                     void preloadImage(this.question.imageUrl);
                 }
@@ -291,7 +292,7 @@ function hostBigScreen(joinCode, hasQuiz) {
                 // beat so a stale spinner can't carry over (#1070). Reset the
                 // per-question beat guard too so the new question runs its own
                 // beat (the guard only suppresses repeat ticks of the same id).
-                if (this.audio) this.audio.stop(this);
+                if (this.audio) this.audio.stop();
                 this.audioLoading = false;
                 this.lastAudioLoadQuestionId = null;
             }
@@ -340,7 +341,7 @@ function hostBigScreen(joinCode, hasQuiz) {
         // question's clip buffers, then plays it from the top and starts the
         // countdown (#1070). It runs once per question id: a repeated SSE tick
         // within the same question is a no-op, so the spinner and the clip are not
-        // restarted. loadAudioClip resolves on canplaythrough, a ~5s timeout, or
+        // restarted. loadAudioClip resolves on Howler's 'load', a ~5s timeout, or
         // an error, so the question always proceeds; on a failure / timeout the
         // controller's play() can still surface the manual play control. Mirrors
         // GameApp.runAudioLoadingBeat on the solo surface.
@@ -382,15 +383,16 @@ function hostBigScreen(joinCode, hasQuiz) {
         },
 
         // playLoadedAudio plays the question's clip from the top once the loading
-        // beat has resolved, deferred to the next tick so the <audio> element is
-        // mounted/updated first. The controller's guard plays each clip once per
+        // beat has resolved, deferred to the next tick so any dependent render
+        // settles first. The controller's guard plays each clip once per
         // question id, so a repeated call within the same question is a no-op.
         playLoadedAudio(questionId) {
             if (!this.audio) return;
+            const url = this.question?.audioUrl;
             if (this.$nextTick) {
-                this.$nextTick(() => this.audio.start(this, questionId, false, this.question?.audioRepeat));
+                this.$nextTick(() => this.audio.start(this, questionId, url, false, this.question?.audioRepeat));
             } else {
-                this.audio.start(this, questionId, false, this.question?.audioRepeat);
+                this.audio.start(this, questionId, url, false, this.question?.audioRepeat);
             }
         },
 
@@ -718,28 +720,17 @@ function hostBigScreen(joinCode, hasQuiz) {
             }
         },
 
-        // getAudioEl returns the big screen's persistent <audio> element by its
-        // id. It is a permanent child of the always-rendered game container
-        // (#1085), so this resolves it for every question and start() can never
-        // run before it exists. rootEl (cached from $root in init()) is queried
-        // rather than $el / $root directly because start() can run from the
-        // SSE-driven tick path where neither resolves to the island root. The id
-        // is the production hook; the element's data-testid is reserved for tests.
-        getAudioEl() {
-            const root = this.rootEl;
-            return (root && root.querySelector('#question-audio')) || null;
-        },
-
         // replayAudio restarts the current question's audio from the play/replay
         // control. The shared controller clears the blocked fallback (the click
-        // is a user gesture) and bypasses the per-question guard.
+        // is a user gesture) and bypasses the per-question guard. It passes the
+        // current question's url so the controller can build / reuse the Howl.
         replayAudio() {
-            if (this.audio) this.audio.replay(this, this.question?.audioRepeat);
+            if (this.audio) this.audio.replay(this, this.question?.audioUrl, this.question?.audioRepeat);
         },
 
         // toggleMute flips and persists the mute preference through the shared
-        // controller, which applies it to the live <audio> element so a mid-clip
-        // toggle takes effect at once.
+        // controller, which applies it to the live Howl so a mid-clip toggle
+        // takes effect at once.
         toggleMute() {
             if (this.audio) this.audio.toggleMute(this);
         },
