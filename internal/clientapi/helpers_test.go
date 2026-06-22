@@ -2,6 +2,7 @@ package clientapi_test
 
 import (
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/game"
 	"github.com/starquake/topbanana/internal/leaderboard"
+	"github.com/starquake/topbanana/internal/media"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
 )
@@ -29,6 +31,7 @@ type testEnv struct {
 	quizzes quiz.Store
 	games   game.Store
 	players auth.PlayerStore
+	media   media.Store
 	service *game.Service
 }
 
@@ -51,8 +54,55 @@ func newTestEnv(t *testing.T) *testEnv {
 		quizzes: stores.Quizzes,
 		games:   stores.Games,
 		players: stores.Players,
+		media:   stores.Media,
 		service: svc,
 	}
+}
+
+// attachQuestionAudio creates an audio media row scoped to the question's quiz
+// and points the question at it via AudioMediaID, persisting both the reference
+// and the repeat flag. It returns the new media id so a test can assert the
+// clip's audioUrl. Used by the audio-manifest tests (solo + host), which need
+// real audio-bearing questions (questions.audio_media_id is an enforced FK to a
+// media row).
+func attachQuestionAudio(
+	t *testing.T,
+	mediaStore media.Store,
+	quizStore quiz.Store,
+	q *quiz.Question,
+	repeat bool,
+) int64 {
+	t.Helper()
+
+	durationMs := 1500
+	row, err := mediaStore.CreateMedia(t.Context(), &media.Media{
+		QuizID:            q.QuizID,
+		Type:              media.TypeAudio,
+		MIME:              "audio/mpeg",
+		Path:              "a.mp3",
+		SizeBytes:         2048,
+		SHA256:            fmt.Sprintf("audio-%d", q.ID),
+		DurationMs:        &durationMs,
+		CreatedByPlayerID: seededAdminID,
+	})
+	if err != nil {
+		t.Fatalf("CreateMedia err = %v, want nil", err)
+	}
+
+	q.AudioMediaID = &row.ID
+	q.AudioRepeat = repeat
+	if err := quizStore.UpdateQuestion(t.Context(), q); err != nil {
+		t.Fatalf("UpdateQuestion err = %v, want nil", err)
+	}
+
+	return row.ID
+}
+
+// attachAudio is the testEnv convenience wrapper over [attachQuestionAudio].
+func (e *testEnv) attachAudio(t *testing.T, q *quiz.Question, repeat bool) int64 {
+	t.Helper()
+
+	return attachQuestionAudio(t, e.media, e.quizzes, q, repeat)
 }
 
 // closeStore closes the underlying DB so subsequent store calls fail with

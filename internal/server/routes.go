@@ -977,6 +977,10 @@ func addAPIRoutes(
 		ensurePlayer(clientapi.HandleQuestionNext(logger, gameService)),
 	)
 	mux.Handle(
+		"GET /api/games/{gameID}/audio",
+		ensurePlayer(clientapi.HandleGameAudio(logger, gameService)),
+	)
+	mux.Handle(
 		"POST /api/games/{gameID}/questions/{questionID}/answers",
 		ensurePlayer(clientapi.HandleAnswerPost(logger, gameService)),
 	)
@@ -1023,6 +1027,7 @@ func addSessionRoutes(
 	mux.Handle("POST /api/sessions/{code}/answer", ensurePlayer(clientapi.HandleSessionAnswer(sessionService)))
 	mux.Handle("POST /api/sessions/{code}/leave", ensurePlayer(clientapi.HandleSessionLeave(sessionService)))
 	mux.Handle("GET /api/sessions/{code}/state", ensurePlayer(clientapi.HandleSessionState(sessionService)))
+	mux.Handle("GET /api/sessions/{code}/audio", ensurePlayer(clientapi.HandleSessionAudio(sessionService)))
 	mux.Handle(
 		"GET /api/sessions/{code}/events",
 		ensurePlayer(clientapi.HandleSessionEvents(sessionService, sessionHub, heartbeatInterval)),

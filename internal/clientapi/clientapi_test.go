@@ -596,6 +596,208 @@ func TestHandleQuestionNext(t *testing.T) {
 	})
 }
 
+// audioClip mirrors the audioClipResponse wire shape so the manifest tests can
+// decode and assert it. Field names match the camelCase JSON the handler emits.
+type audioClip struct {
+	QuestionID  int64  `json:"questionId"`
+	AudioURL    string `json:"audioUrl"`
+	AudioRepeat bool   `json:"audioRepeat"`
+}
+
+type audioManifest struct {
+	Clips []audioClip `json:"clips"`
+}
+
+func TestHandleGameAudio(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns audio-bearing clips in position order", func(t *testing.T) {
+		t.Parallel()
+
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "audio-quiz"))
+		// Attach audio to both questions, the second one with repeat on, so the
+		// test pins both the audioUrl/questionId projection and the audioRepeat
+		// flag round-trip. Position order is question 1 then question 2.
+		mediaID0 := env.attachAudio(t, qz.Questions[0], false)
+		mediaID1 := env.attachAudio(t, qz.Questions[1], true)
+		playerID := env.seedPlayer(t, "audio-player")
+		gameID := env.playCorrectly(t, qz, playerID, 1)
+
+		mux := http.NewServeMux()
+		mux.Handle("GET /api/games/{gameID}/audio", HandleGameAudio(env.logger, env.service))
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), playerID), http.MethodGet,
+			fmt.Sprintf("/api/games/%s/audio", gameID), nil,
+		)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusOK; got != want {
+			t.Fatalf("status code = %v, want %v", got, want)
+		}
+
+		var manifest audioManifest
+		if err := json.Unmarshal(rec.Body.Bytes(), &manifest); err != nil {
+			t.Fatalf("decoding manifest: %v", err)
+		}
+		if got, want := len(manifest.Clips), 2; got != want {
+			t.Fatalf("clips = %d, want %d", got, want)
+		}
+
+		first := manifest.Clips[0]
+		if got, want := first.QuestionID, qz.Questions[0].ID; got != want {
+			t.Errorf("clip[0].questionId = %d, want %d", got, want)
+		}
+		if got, want := first.AudioURL, fmt.Sprintf("/media/%d", mediaID0); got != want {
+			t.Errorf("clip[0].audioUrl = %q, want %q", got, want)
+		}
+		if got, want := first.AudioRepeat, false; got != want {
+			t.Errorf("clip[0].audioRepeat = %v, want %v", got, want)
+		}
+
+		second := manifest.Clips[1]
+		if got, want := second.QuestionID, qz.Questions[1].ID; got != want {
+			t.Errorf("clip[1].questionId = %d, want %d", got, want)
+		}
+		if got, want := second.AudioURL, fmt.Sprintf("/media/%d", mediaID1); got != want {
+			t.Errorf("clip[1].audioUrl = %q, want %q", got, want)
+		}
+		if got, want := second.AudioRepeat, true; got != want {
+			t.Errorf("clip[1].audioRepeat = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("skips questions without audio", func(t *testing.T) {
+		t.Parallel()
+
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "mixed-audio-quiz"))
+		// Only the second question gets audio; the first must be absent.
+		mediaID := env.attachAudio(t, qz.Questions[1], false)
+		playerID := env.seedPlayer(t, "mixed-audio-player")
+		gameID := env.playCorrectly(t, qz, playerID, 1)
+
+		mux := http.NewServeMux()
+		mux.Handle("GET /api/games/{gameID}/audio", HandleGameAudio(env.logger, env.service))
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), playerID), http.MethodGet,
+			fmt.Sprintf("/api/games/%s/audio", gameID), nil,
+		)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusOK; got != want {
+			t.Fatalf("status code = %v, want %v", got, want)
+		}
+
+		var manifest audioManifest
+		if err := json.Unmarshal(rec.Body.Bytes(), &manifest); err != nil {
+			t.Fatalf("decoding manifest: %v", err)
+		}
+		if got, want := len(manifest.Clips), 1; got != want {
+			t.Fatalf("clips = %d, want %d", got, want)
+		}
+		if got, want := manifest.Clips[0].QuestionID, qz.Questions[1].ID; got != want {
+			t.Errorf("clip[0].questionId = %d, want %d", got, want)
+		}
+		if got, want := manifest.Clips[0].AudioURL, fmt.Sprintf("/media/%d", mediaID); got != want {
+			t.Errorf("clip[0].audioUrl = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("returns empty clips array when quiz has no audio", func(t *testing.T) {
+		t.Parallel()
+
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "silent-quiz"))
+		playerID := env.seedPlayer(t, "silent-player")
+		gameID := env.playCorrectly(t, qz, playerID, 1)
+
+		mux := http.NewServeMux()
+		mux.Handle("GET /api/games/{gameID}/audio", HandleGameAudio(env.logger, env.service))
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), playerID), http.MethodGet,
+			fmt.Sprintf("/api/games/%s/audio", gameID), nil,
+		)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusOK; got != want {
+			t.Fatalf("status code = %v, want %v", got, want)
+		}
+		// An audio-free quiz must serialize clips as [], not null.
+		if got, want := strings.TrimSpace(rec.Body.String()), `{"clips":[]}`; got != want {
+			t.Errorf("body = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("returns 404 when caller is not a participant", func(t *testing.T) {
+		t.Parallel()
+
+		env := newTestEnv(t)
+		qz := env.seedQuiz(t, twoQuestionQuiz("Quiz", "audio-gated-quiz"))
+		ownerID := env.seedPlayer(t, "audio-owner")
+		gameID := env.playCorrectly(t, qz, ownerID, 1)
+		strangerID := env.seedPlayer(t, "audio-stranger")
+
+		mux := http.NewServeMux()
+		mux.Handle("GET /api/games/{gameID}/audio", HandleGameAudio(env.logger, env.service))
+
+		// A real player who is not on this game's roster must be rejected the
+		// same way HandleQuestionNext rejects them: a 404, indistinguishable
+		// from a missing game.
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), strangerID), http.MethodGet,
+			fmt.Sprintf("/api/games/%s/audio", gameID), nil,
+		)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusNotFound; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns 404 when game not found", func(t *testing.T) {
+		t.Parallel()
+
+		env := newTestEnv(t)
+		playerID := env.seedPlayer(t, "audio-missing-game")
+
+		mux := http.NewServeMux()
+		mux.Handle("GET /api/games/{gameID}/audio", HandleGameAudio(env.logger, env.service))
+
+		req := httptest.NewRequestWithContext(
+			withPlayer(t.Context(), playerID), http.MethodGet, "/api/games/missing-game/audio", nil,
+		)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusNotFound; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns 400 when gameID missing", func(t *testing.T) {
+		t.Parallel()
+
+		env := newTestEnv(t)
+		handler := HandleGameAudio(env.logger, env.service)
+
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/games//audio", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusBadRequest; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+}
+
 func TestHandleAnswerPost(t *testing.T) {
 	t.Parallel()
 

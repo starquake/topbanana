@@ -965,6 +965,73 @@ func writeQuestionItem(
 	}
 }
 
+// audioClipResponse is one entry in the audio-manifest wire shape: the
+// metadata a play surface needs to preload one question's audio at game
+// start, without any question text, options, or answer key (so the manifest
+// never leaks gameplay content). questionId correlates the clip with the
+// question when it is later played; audioUrl is the /media path; audioRepeat
+// mirrors the question's AudioRepeat flag. Shared by both manifest endpoints
+// (solo and host) so they emit an identical shape (#1088).
+type audioClipResponse struct {
+	QuestionID  int64  `json:"questionId"`
+	AudioURL    string `json:"audioUrl"`
+	AudioRepeat bool   `json:"audioRepeat"`
+}
+
+// audioManifestResponse is the audio-manifest wire shape: only the
+// audio-bearing questions of the quiz, ordered by play position. clips is
+// always a non-nil slice so an audio-free quiz serializes as an empty array,
+// not null.
+type audioManifestResponse struct {
+	Clips []audioClipResponse `json:"clips"`
+}
+
+// newAudioManifestResponse projects a quiz's questions onto the manifest wire
+// shape, keeping only the questions with audio attached and preserving their
+// input order (the quiz's position order). Used by both manifest endpoints so
+// the solo and host surfaces emit the same shape (#1088).
+func newAudioManifestResponse(questions []*quiz.Question) audioManifestResponse {
+	clips := make([]audioClipResponse, 0, len(questions))
+	for _, q := range questions {
+		if q.AudioMediaID == nil {
+			continue
+		}
+		clips = append(clips, audioClipResponse{
+			QuestionID:  q.ID,
+			AudioURL:    mediaURL(q.AudioMediaID),
+			AudioRepeat: q.AudioRepeat,
+		})
+	}
+
+	return audioManifestResponse{Clips: clips}
+}
+
+// HandleGameAudio returns the audio-preload manifest for a solo game's quiz:
+// the audio-bearing questions in play order, each with its question id, media
+// URL, and repeat flag (#1088). Authorized exactly like
+// [HandleQuestionNext] - the participant gate means a non-participant gets a
+// 404, indistinguishable from a missing game. Carries no question text,
+// options, or answer key, so a player cannot read it to pre-learn the quiz.
+func HandleGameAudio(logger *slog.Logger, service *game.Service) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gameID, playerID, ok := gameRequest(w, r, logger)
+		if !ok {
+			return
+		}
+
+		questions, err := service.GetAudioManifest(r.Context(), gameID, playerID)
+		if err != nil {
+			writeGetNextError(w, r, logger, err)
+
+			return
+		}
+
+		if err = handlers.EncodeJSON(w, http.StatusOK, newAudioManifestResponse(questions)); err != nil {
+			logger.ErrorContext(r.Context(), "error encoding audio manifest", slog.Any("err", err))
+		}
+	})
+}
+
 // HandleRoundSeen records acknowledgement of one round boundary phase
 // (intro or results) carried in the {phase} path value (#548).
 // Idempotent: second call returns 204 because the store INSERTs ON

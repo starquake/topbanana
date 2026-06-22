@@ -39,6 +39,16 @@ func TestEmbeddedAssets_ServeOnlyBuiltOutput(t *testing.T) {
 		"/static/js/vendor/alpine.min.js",
 		"/static/js/vendor/anime.umd.min.js",
 		"/static/js/vendor/sortable.min.js",
+		"/static/js/vendor/howler.min.js",
+		// Game sound effects + the silent ring/silent-switch keep-alive (#1088),
+		// preloaded by the audio engine on the two audio surfaces.
+		"/static/audio/sfx/round-start.mp3",
+		"/static/audio/sfx/question-show.mp3",
+		"/static/audio/sfx/answers-show.mp3",
+		"/static/audio/sfx/answer-correct.mp3",
+		"/static/audio/sfx/answer-wrong.mp3",
+		"/static/audio/sfx/answer-reveal.mp3",
+		"/static/audio/silence.wav",
 	}
 	for _, path := range served {
 		assertEmbedStatus(ctx, t, srv.BaseURL+path, http.StatusOK)

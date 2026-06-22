@@ -140,6 +140,43 @@ export function setQuizMode(title: string, mode: 'solo' | 'live'): void {
   }
 }
 
+// attachQuizAudio stamps an audio clip onto every question of a quiz by title,
+// shelling out to the sqlite3 CLI (#1088). The admin authoring UI has no audio
+// upload in the E2E flow, so this seeds one audio media row for the quiz and
+// points every question's audio_media_id at it (a shared clip is fine: the
+// manifest keys clips by questionId, so each question gets its own preloaded
+// Howl pointing at the same /media/{id} URL). The audio_repeat flag is stamped
+// on every question too. The /media/{id} bytes are served by the spec's route
+// interception, so the media row's path is a placeholder. Returns nothing; the
+// audio-manifest endpoint and the /next (or /state) payloads then both carry the
+// same /media/{id} URL, which the spec routes to a real WAV.
+export function attachQuizAudio(title: string, opts: { audioRepeat?: boolean } = {}): void {
+  const dataDir = process.env.TOPBANANA_E2E_DATA_DIR;
+  if (!dataDir) {
+    throw new Error('TOPBANANA_E2E_DATA_DIR is not set; helpers cannot stamp quiz audio');
+  }
+  const dbFile = join(dataDir, `e2e-${test.info().parallelIndex}.db`);
+  const escapedTitle = title.replace(/'/g, "''");
+  const repeat = opts.audioRepeat ? 1 : 0;
+  // One audio media row owned by the quiz's creator, then link every question of
+  // the quiz to it. last_insert_rowid() is the new media id within the same
+  // sqlite3 invocation. SELECT changes() at the end reports the questions linked
+  // so the caller's assertion catches a title typo / empty quiz.
+  const sql = `
+INSERT INTO media (quiz_id, type, mime, path, size_bytes, sha256, created_by_player_id, ready)
+SELECT q.id, 'audio', 'audio/wav', 'e2e-audio.wav', 44, 'e2e', q.created_by_player_id, 1
+FROM quizzes q WHERE q.title = '${escapedTitle}';
+UPDATE questions
+SET audio_media_id = last_insert_rowid(), audio_repeat = ${repeat}
+WHERE quiz_id = (SELECT id FROM quizzes WHERE title = '${escapedTitle}');
+SELECT changes();`;
+  const output = execSqlite(dbFile, sql);
+  const changed = Number.parseInt(output, 10);
+  if (!(changed >= 1)) {
+    throw new Error(`attachQuizAudio(${title}): expected >=1 question linked, got ${changed}`);
+  }
+}
+
 // csrfTokenPattern scrapes the hidden csrf_token input a server-rendered
 // form carries (the import form, the login form, ...). Tolerant of attribute
 // order: the value may sit before or after the name attribute on the input.

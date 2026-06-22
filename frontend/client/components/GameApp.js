@@ -6,8 +6,7 @@ import { clockOffsetFromServerNow, serverTime } from '@shared/serverClock.js';
 import { optionStateClass } from '../util/answerOptions.js';
 import { openShareDialog } from '@shared/share.js';
 import { preloadImage } from '@shared/preloadImage.js';
-import { createQuestionAudio, initialMuted } from '@shared/questionAudio.js';
-import { loadAudioClip } from '@shared/audioLoader.js';
+import { createAudioEngine, initialMuted, SFX } from '@shared/audioEngine.js';
 
 // PLAY_PATH_PATTERN matches /play/<anything>-<integer>; the integer suffix
 // is the quiz ID.
@@ -128,35 +127,39 @@ export class GameApp {
         // against the server's view of "now" instead of the device's,
         // which can be minutes off on phones with stale time.
         this.clockOffset = 0;
-        // Mute state for the per-question audio (#1059), seeded from the
-        // persisted preference so a player who muted earlier stays muted.
-        // Bound to the mute control and to the <audio> element's `muted`
-        // attribute. Default unmuted.
+        // Mute state for question audio + SFX (#1088), seeded from the persisted
+        // preference; the engine applies it to every live Howl.
         this.audioMuted = initialMuted();
-        // True when the browser blocked autoplay (the play() promise rejected),
-        // so the template surfaces an explicit play control as a fallback. A
-        // reload mid-game or a strict autoplay policy can leave the first clip
-        // blocked until the player taps the play control.
+        // True when the clip could not play, so the template shows the manual play
+        // control. Reset per question; replayClip clears it on a gesture.
         this.audioBlocked = false;
-        // True while the audio loading beat is on screen for a question with a
-        // audio (#1070): the clip is buffering before the question is revealed.
-        // The view shows a spinner + "Loading audio..." and the reveal countdown
-        // does not start until the clip is ready, times out, or errors.
+        // True while clips preload at game start; drives the "Loading sounds" state.
         this.audioLoading = false;
-        // Shared play / mute / replay / per-question-guard controller (#1070).
-        // Its methods take the live Alpine `this` on each call so reactive
-        // writes go through the proxy; the guard mirrors the big screen's
-        // once-per-question-id rule so a re-render mid-question cannot restart
-        // the clip.
-        this.audio = createQuestionAudio();
+        // Created in init() (not here) so it binds the Alpine PROXY `this` -- the
+        // engine writes audioMuted/audioBlocked on the view and only proxy writes
+        // re-render.
+        this.audio = null;
+        // Dedupe the round-start SFX: the Start gesture plays it, so the first
+        // round intro skips it; later rounds play it.
+        this.roundStartPlayed = false;
+        // Solo emits a round intro only when the round has a summary, so a game can
+        // open straight on a question. This lets nextQuestion clear the dedupe in
+        // that case, so it isn't spent on a later round's intro that should sound.
+        this.firstItemAfterStart = false;
         if (typeof window !== 'undefined') {
             window.addEventListener('beforeunload', () => {
                 this.clearRoundTimer();
+                if (this.audio) this.audio.teardown();
             });
         }
     }
 
     async init() {
+        // Create the engine here (not the constructor) so it binds the Alpine proxy
+        // `this`, and preload + decode the SFX before any gesture so they're ready
+        // for the gesture-bound round-start play (#1088).
+        this.audio = createAudioEngine(this);
+        this.audio.preloadEffects();
         // Kick off both in parallel; neither depends on the other.
         // playerService.getMe is best-effort: a null result just means
         // the claim affordances stay hidden, the rest of the page is
@@ -208,6 +211,11 @@ export class GameApp {
             // Best-effort: a failed fetch just leaves the chip at 0,
             // which is the pre-fix behaviour.
             await this.hydrateScoreFromResults();
+            // Resume preloads non-blocking and without the loading screen: the
+            // resumed question must paint at once (its window is already draining).
+            // With no Start gesture the clip surfaces the manual play control until
+            // tapped -- the expected mid-game-reload fallback (#1088).
+            void this.preloadGameAudio({ showLoading: false });
             try {
                 await this.nextQuestion();
             } catch (err) {
@@ -507,6 +515,13 @@ export class GameApp {
     }
 
     async startGame() {
+        // Synchronously first in the gesture, before any await (#1088): unlock the
+        // context + keep-alive, then play the gesture-bound round-start sting that
+        // unlocks iOS output. roundStartPlayed dedupes the first round intro.
+        this.audio.unlock();
+        this.audio.playEffect(SFX.roundStart);
+        this.roundStartPlayed = true;
+        this.firstItemAfterStart = true;
         const existing = await this.checkAlreadyPlayed();
         if (this.startError) return;
         const slugId = this.slugIdFor(this.selectedQuizId);
@@ -547,7 +562,30 @@ export class GameApp {
                 }
             }
         }
+        // Preload every clip up front (#1088) behind the "Loading sounds" state so
+        // each question plays an already-decoded Howl; the engine's budget keeps a
+        // slow/failed clip from hanging the start.
+        await this.preloadGameAudio();
         await this.nextQuestion();
+    }
+
+    // Fetch the audio manifest and preload its clips behind a brief loading state.
+    async preloadGameAudio({ showLoading = true } = {}) {
+        if (!this.gameId) return;
+        if (showLoading) this.audioLoading = true;
+        let manifest = null;
+        try {
+            manifest = await gameService.getAudioManifest(this.gameId);
+        } catch (err) {
+            // Still preload (null -> clips ready) so a question with audio surfaces
+            // the manual fallback instead of waiting forever.
+            console.warn('preloadGameAudio failed', err);
+        }
+        try {
+            await this.audio.preloadClips(manifest);
+        } finally {
+            if (showLoading) this.audioLoading = false;
+        }
     }
 
     // prefetchNextItem kicks off the /next round trip while the feedback
@@ -575,10 +613,8 @@ export class GameApp {
             this.revealTimer = null;
         }
         this.clearRoundTimer();
-        // Stop a still-playing clip before swapping to the next item so the
-        // prior question's audio never bleeds into the next beat (#1070).
-        this.audio.stop(this);
-        this.audioLoading = false;
+        // Stop the prior clip before swapping items so it can't bleed over (#1088).
+        this.audio.stopClip();
         this.revealing = false;
         this.submitError = false;
         let item;
@@ -592,6 +628,8 @@ export class GameApp {
         if (!item) {
             this.feedback = null;
             this.finished = true;
+            // Game over: tear down so no audio/timer leaks into the leaderboard.
+            this.audio.teardown();
             // Re-fetch /me so the player's claim status is current.
             // Could in principle have flipped since page load (rare,
             // but cheap to verify and keeps the UI honest if they
@@ -641,6 +679,16 @@ export class GameApp {
             }
             return;
         }
+        // First item of the game (#1088): the gesture already played round-start.
+        // If this first item is a round intro, the branch below consumes the
+        // dedupe; if it's a question (round 1 had no intro), clear it now so a
+        // later round's intro still sounds.
+        if (this.firstItemAfterStart) {
+            this.firstItemAfterStart = false;
+            if (!(item.type === 'round_boundary' && item.phase === 'intro')) {
+                this.roundStartPlayed = false;
+            }
+        }
         // Round-boundary variant (#444): no timing, no answer window —
         // the player clicks Continue to acknowledge. The HUD chip on
         // the round-summary card reads `lastQuestionPosition` (the server
@@ -652,6 +700,15 @@ export class GameApp {
             this.syncClockFrom(item);
             this.feedback = null;
             this.roundItem = item;
+            // Round intro sting (#1088), deduped against the gesture's round-start
+            // (intro phase only -- never the results recap).
+            if (item.phase === 'intro') {
+                if (this.roundStartPlayed) {
+                    this.roundStartPlayed = false;
+                } else {
+                    this.audio.playEffect(SFX.roundStart);
+                }
+            }
             // Keep the running-score chip honest: the server hands us
             // its authoritative total on the round payload so a
             // resume mid-game also picks up the right value.
@@ -670,38 +727,13 @@ export class GameApp {
         // browser fetches the bytes in parallel; by the time the answer
         // window opens, the <img> below renders from cache.
         if (item.imageUrl) void preloadImage(item.imageUrl);
-        // Reset the autoplay-blocked fallback for the new question; the audio
-        // controller re-flags it if the fresh play() is rejected.
+        // Reset the manual-play fallback for the new question; playClip re-flags
+        // it only if the preloaded clip is missing / failed.
         this.audioBlocked = false;
-        if (item.audioUrl) {
-            // Loading beat (#1070): buffer the clip behind a spinner before the
-            // question is revealed, then play it from the top and start the
-            // reveal countdown. The loading screen drives the single fetch of
-            // the bytes (the <audio> element uses preload="none"), so there is
-            // no double-fetch. loadAudioClip resolves on canplaythrough, a
-            // ~5s timeout, or an error, so the question always proceeds.
-            await this.runAudioLoadingBeat(item);
-            return;
-        }
-        this.startRevealCountdown();
-    }
-
-    // runAudioLoadingBeat shows the loading screen while the current question's
-    // clip buffers, then plays it from the top and hands off to the reveal
-    // countdown (#1070). A re-entrant nextQuestion (the player advanced, or a
-    // resume re-fetched) clears audioLoading and swaps `question`, so the guard
-    // below abandons a stale beat without starting the reveal or the clip.
-    async runAudioLoadingBeat(item) {
-        this.audioLoading = true;
-        await loadAudioClip(item.audioUrl);
-        // Bail if the question moved on while the clip was loading.
-        if (!this.question || this.question.id !== item.id) return;
-        this.audioLoading = false;
-        if (this.$nextTick) {
-            this.$nextTick(() => this.audio.start(this, this.question.id, false, this.question.audioRepeat));
-        } else {
-            this.audio.start(this, this.question.id, false, this.question.audioRepeat);
-        }
+        // Question shown (#1088): the question-show sting, then the preloaded quiz
+        // clip (engine guards it once per question).
+        this.audio.playEffect(SFX.questionShow);
+        if (item.audioUrl) this.audio.playClip(item.id);
         this.startRevealCountdown();
     }
 
@@ -742,6 +774,9 @@ export class GameApp {
         const startAt = new Date(this.question.startedAt).getTime();
         const revealStart = this.serverTime();
         if (revealStart >= startAt) {
+            // Read beat already over (resume/old game): no read-beat -> answer
+            // edge, so skip the answers-show sting here (it fires only on a real
+            // edge below) -- avoids a double-sting on resume (#1088).
             this.revealing = false;
             this.startCountdown();
             return;
@@ -756,6 +791,8 @@ export class GameApp {
                 clearInterval(this.revealTimer);
                 this.revealTimer = null;
                 this.revealing = false;
+                // Answers shown: read beat elapsed, options appear (#1088).
+                this.audio.playEffect(SFX.answersShow);
                 this.startCountdown();
                 return;
             }
@@ -943,6 +980,8 @@ export class GameApp {
             // pick separately from the correct option(s) — see #233.
             fb.pickedOptionId = optionId;
             this.feedback = fb;
+            // Pick-result sting (#1088).
+            this.audio.playEffect(fb.correct ? SFX.answerCorrect : SFX.answerWrong);
             this.score += fb.score || 0;
             this.prefetchNextItem();
         } catch (err) {
@@ -1056,31 +1095,13 @@ export class GameApp {
         return this.roundItem && this.roundItem.summary ? this.roundItem.summary : '';
     }
 
-    // getAudioEl returns the persistent <audio> element by its id. It is a
-    // permanent child of the always-rendered game container (#1085), so this
-    // resolves it for every question and start() can never run before it exists.
-    // The lookup goes through document, not this.$root: start() runs from a
-    // deferred $nextTick on a re-entrant async path (resolveAndAdvance ->
-    // nextQuestion -> runAudioLoadingBeat) where the magic this.$root is not
-    // reliably bound, so a $root query intermittently saw null and dropped the
-    // next question into the blocked fallback. The id is the production hook (one
-    // per page); the element's data-testid is reserved for the e2e tests.
-    getAudioEl() {
-        return document.getElementById('question-audio');
-    }
-
-    // replayAudio restarts the current question's audio from the play/replay
-    // control. The shared controller clears the blocked fallback (the click is a
-    // user gesture) and bypasses the per-question guard.
+    // Restart the current clip from the play/replay control (a user gesture).
     replayAudio() {
-        this.audio.replay(this, this.question?.audioRepeat);
+        if (this.question) this.audio.replayClip(this.question.id);
     }
 
-    // toggleMute flips and persists the mute preference through the shared
-    // controller, which applies it to the live <audio> element at once so a
-    // mid-clip toggle takes effect immediately.
     toggleMute() {
-        this.audio.toggleMute(this);
+        this.audio.toggleMute();
     }
 
     // optionStateClass returns the class string for an answer button.

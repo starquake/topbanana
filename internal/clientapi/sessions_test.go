@@ -3,9 +3,12 @@ package clientapi_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -14,6 +17,8 @@ import (
 	"github.com/starquake/topbanana/internal/dbtest"
 	"github.com/starquake/topbanana/internal/handlers"
 	"github.com/starquake/topbanana/internal/livesession"
+	"github.com/starquake/topbanana/internal/media"
+	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
 )
 
@@ -88,6 +93,8 @@ type sessionTestEnv struct {
 	db      *sql.DB
 	service *livesession.Service
 	players auth.PlayerStore
+	quizzes quiz.Store
+	media   media.Store
 }
 
 func newSessionTestEnv(t *testing.T) *sessionTestEnv {
@@ -98,7 +105,13 @@ func newSessionTestEnv(t *testing.T) *sessionTestEnv {
 	stores := store.New(conn, discard)
 	service := livesession.NewService(stores.LiveSessions, stores.Quizzes, discard)
 
-	return &sessionTestEnv{db: conn, service: service, players: stores.Players}
+	return &sessionTestEnv{
+		db:      conn,
+		service: service,
+		players: stores.Players,
+		quizzes: stores.Quizzes,
+		media:   stores.Media,
+	}
 }
 
 func (e *sessionTestEnv) seedAnonymousPlayer(t *testing.T, name string) int64 {
@@ -110,6 +123,55 @@ func (e *sessionTestEnv) seedAnonymousPlayer(t *testing.T, name string) int64 {
 	}
 
 	return p.ID
+}
+
+// seedLiveQuiz persists a mode='live' quiz with two single-answer questions so
+// a session can be opened on it (CreateSession gates on mode='live'). It mirrors
+// twoQuestionQuiz but in live mode, attributed to the seeded admin so the
+// NOT NULL created_by_player_id column is satisfied.
+func (e *sessionTestEnv) seedLiveQuiz(t *testing.T, slug string) *quiz.Quiz {
+	t.Helper()
+
+	qz := &quiz.Quiz{
+		Title:             "Live Quiz",
+		Slug:              slug,
+		Description:       "seeded",
+		CreatedByPlayerID: seededAdminID,
+		Visibility:        quiz.VisibilityPublic,
+		Mode:              quiz.ModeLive,
+		Questions: []*quiz.Question{
+			{
+				Text:     "What is the capital of France?",
+				Position: 1,
+				Options: []*quiz.Option{
+					{Text: "Paris", Correct: true},
+					{Text: "London", Correct: false},
+				},
+			},
+			{
+				Text:     "What is the capital of Germany?",
+				Position: 2,
+				Options: []*quiz.Option{
+					{Text: "Berlin", Correct: true},
+					{Text: "Hamburg", Correct: false},
+				},
+			},
+		},
+	}
+	if err := e.quizzes.CreateQuiz(t.Context(), qz); err != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", err)
+	}
+
+	return qz
+}
+
+// attachAudio is the sessionTestEnv convenience wrapper over
+// [attachQuestionAudio]; the host manifest tests need real audio-bearing
+// questions (questions.audio_media_id is an enforced FK).
+func (e *sessionTestEnv) attachAudio(t *testing.T, q *quiz.Question, repeat bool) int64 {
+	t.Helper()
+
+	return attachQuestionAudio(t, e.media, e.quizzes, q, repeat)
 }
 
 // TestHandleSessionState_LogLineInheritsRequestScopedFields pins the request-
@@ -153,4 +215,232 @@ func TestHandleSessionState_LogLineInheritsRequestScopedFields(t *testing.T) {
 	if !logs.hasRecordWith("requestId", "player") {
 		t.Error("no log line carried both requestId and player; want the handler to inherit both")
 	}
+}
+
+func TestHandleSessionAudio(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns audio-bearing clips in position order", func(t *testing.T) {
+		t.Parallel()
+
+		env := newSessionTestEnv(t)
+		qz := env.seedLiveQuiz(t, "live-audio-quiz")
+		mediaID0 := env.attachAudio(t, qz.Questions[0], false)
+		mediaID1 := env.attachAudio(t, qz.Questions[1], true)
+		hostID := env.seedAnonymousPlayer(t, "audio-host")
+
+		sess, err := env.service.CreateSession(t.Context(), &qz.ID, hostID)
+		if err != nil {
+			t.Fatalf("CreateSession err = %v, want nil", err)
+		}
+
+		mux := http.NewServeMux()
+		mux.Handle("GET /api/sessions/{code}/audio", HandleSessionAudio(env.service))
+
+		// The host (the player who created the session) reads the manifest the
+		// big screen preloads; only the host passes the host-only gate.
+		req := getRequestWithPlayer(t, hostID, "/api/sessions/"+sess.JoinCode+"/audio")
+		req.SetPathValue("code", sess.JoinCode)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusOK; got != want {
+			t.Fatalf("status code = %v, want %v", got, want)
+		}
+
+		var manifest audioManifest
+		if err := json.Unmarshal(rec.Body.Bytes(), &manifest); err != nil {
+			t.Fatalf("decoding manifest: %v", err)
+		}
+		if got, want := len(manifest.Clips), 2; got != want {
+			t.Fatalf("clips = %d, want %d", got, want)
+		}
+
+		first := manifest.Clips[0]
+		if got, want := first.QuestionID, qz.Questions[0].ID; got != want {
+			t.Errorf("clip[0].questionId = %d, want %d", got, want)
+		}
+		if got, want := first.AudioURL, fmt.Sprintf("/media/%d", mediaID0); got != want {
+			t.Errorf("clip[0].audioUrl = %q, want %q", got, want)
+		}
+		if got, want := first.AudioRepeat, false; got != want {
+			t.Errorf("clip[0].audioRepeat = %v, want %v", got, want)
+		}
+
+		second := manifest.Clips[1]
+		if got, want := second.QuestionID, qz.Questions[1].ID; got != want {
+			t.Errorf("clip[1].questionId = %d, want %d", got, want)
+		}
+		if got, want := second.AudioURL, fmt.Sprintf("/media/%d", mediaID1); got != want {
+			t.Errorf("clip[1].audioUrl = %q, want %q", got, want)
+		}
+		if got, want := second.AudioRepeat, true; got != want {
+			t.Errorf("clip[1].audioRepeat = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("skips questions without audio", func(t *testing.T) {
+		t.Parallel()
+
+		env := newSessionTestEnv(t)
+		qz := env.seedLiveQuiz(t, "live-mixed-audio-quiz")
+		mediaID := env.attachAudio(t, qz.Questions[1], false)
+		hostID := env.seedAnonymousPlayer(t, "mixed-audio-host")
+
+		sess, err := env.service.CreateSession(t.Context(), &qz.ID, hostID)
+		if err != nil {
+			t.Fatalf("CreateSession err = %v, want nil", err)
+		}
+
+		mux := http.NewServeMux()
+		mux.Handle("GET /api/sessions/{code}/audio", HandleSessionAudio(env.service))
+
+		req := getRequestWithPlayer(t, hostID, "/api/sessions/"+sess.JoinCode+"/audio")
+		req.SetPathValue("code", sess.JoinCode)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusOK; got != want {
+			t.Fatalf("status code = %v, want %v", got, want)
+		}
+
+		var manifest audioManifest
+		if err := json.Unmarshal(rec.Body.Bytes(), &manifest); err != nil {
+			t.Fatalf("decoding manifest: %v", err)
+		}
+		if got, want := len(manifest.Clips), 1; got != want {
+			t.Fatalf("clips = %d, want %d", got, want)
+		}
+		if got, want := manifest.Clips[0].QuestionID, qz.Questions[1].ID; got != want {
+			t.Errorf("clip[0].questionId = %d, want %d", got, want)
+		}
+		if got, want := manifest.Clips[0].AudioURL, fmt.Sprintf("/media/%d", mediaID); got != want {
+			t.Errorf("clip[0].audioUrl = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("returns empty clips array for an empty room with no quiz", func(t *testing.T) {
+		t.Parallel()
+
+		env := newSessionTestEnv(t)
+		hostID := env.seedAnonymousPlayer(t, "empty-room-host")
+
+		// An empty room (no quiz picked yet, #836) carries no quiz, so the
+		// manifest must still serialize clips as [], not null.
+		sess, err := env.service.CreateSession(t.Context(), nil, hostID)
+		if err != nil {
+			t.Fatalf("CreateSession err = %v, want nil", err)
+		}
+
+		mux := http.NewServeMux()
+		mux.Handle("GET /api/sessions/{code}/audio", HandleSessionAudio(env.service))
+
+		req := getRequestWithPlayer(t, hostID, "/api/sessions/"+sess.JoinCode+"/audio")
+		req.SetPathValue("code", sess.JoinCode)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusOK; got != want {
+			t.Fatalf("status code = %v, want %v", got, want)
+		}
+		if got, want := strings.TrimSpace(rec.Body.String()), `{"clips":[]}`; got != want {
+			t.Errorf("body = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("returns 404 when caller is a non-host roster participant", func(t *testing.T) {
+		t.Parallel()
+
+		env := newSessionTestEnv(t)
+		qz := env.seedLiveQuiz(t, "live-nonhost-audio-quiz")
+		env.attachAudio(t, qz.Questions[0], false)
+		hostID := env.seedAnonymousPlayer(t, "nonhost-audio-host")
+
+		sess, err := env.service.CreateSession(t.Context(), &qz.ID, hostID)
+		if err != nil {
+			t.Fatalf("CreateSession err = %v, want nil", err)
+		}
+
+		// A real roster player joins the room, so GetSessionState would pass
+		// the participant gate - but only the host may read the audio manifest,
+		// so a non-host roster player must still get a 404 (the host-only gate),
+		// keeping the manifest's upcoming clip URLs off a player who could
+		// preview them ahead of the question.
+		playerID := env.seedAnonymousPlayer(t, "nonhost-audio-player")
+		if _, jerr := env.service.Join(t.Context(), sess.JoinCode, playerID); jerr != nil {
+			t.Fatalf("Join err = %v, want nil", jerr)
+		}
+
+		mux := http.NewServeMux()
+		mux.Handle("GET /api/sessions/{code}/audio", HandleSessionAudio(env.service))
+
+		req := getRequestWithPlayer(t, playerID, "/api/sessions/"+sess.JoinCode+"/audio")
+		req.SetPathValue("code", sess.JoinCode)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusNotFound; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns 404 when caller is not a participant", func(t *testing.T) {
+		t.Parallel()
+
+		env := newSessionTestEnv(t)
+		qz := env.seedLiveQuiz(t, "live-gated-audio-quiz")
+		env.attachAudio(t, qz.Questions[0], false)
+		hostID := env.seedAnonymousPlayer(t, "gated-audio-host")
+
+		sess, err := env.service.CreateSession(t.Context(), &qz.ID, hostID)
+		if err != nil {
+			t.Fatalf("CreateSession err = %v, want nil", err)
+		}
+		strangerID := env.seedAnonymousPlayer(t, "gated-audio-stranger")
+
+		mux := http.NewServeMux()
+		mux.Handle("GET /api/sessions/{code}/audio", HandleSessionAudio(env.service))
+
+		// A real player who is not on the roster (and not the host) must be
+		// rejected the same way HandleSessionState rejects them: a 404, so the
+		// code stays opaque to outsiders.
+		req := getRequestWithPlayer(t, strangerID, "/api/sessions/"+sess.JoinCode+"/audio")
+		req.SetPathValue("code", sess.JoinCode)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusNotFound; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("returns 404 when join code is unknown", func(t *testing.T) {
+		t.Parallel()
+
+		env := newSessionTestEnv(t)
+		playerID := env.seedAnonymousPlayer(t, "unknown-code-player")
+
+		mux := http.NewServeMux()
+		mux.Handle("GET /api/sessions/{code}/audio", HandleSessionAudio(env.service))
+
+		req := getRequestWithPlayer(t, playerID, "/api/sessions/NOPE/audio")
+		req.SetPathValue("code", "NOPE")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if got, want := rec.Code, http.StatusNotFound; got != want {
+			t.Errorf("status code = %v, want %v", got, want)
+		}
+	})
+}
+
+// getRequestWithPlayer builds a GET request carrying an authenticated player on
+// its context, the same shape EnsurePlayer would produce in production, so a
+// session handler that reads the player off the context exercises its real gate.
+func getRequestWithPlayer(t *testing.T, playerID int64, target string) *http.Request {
+	t.Helper()
+
+	ctx := withPlayer(handlers.WithLogger(t.Context(), slog.New(slog.DiscardHandler)), playerID)
+
+	return httptest.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 }

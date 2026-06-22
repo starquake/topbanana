@@ -510,6 +510,63 @@ func HandleSessionState(service *livesession.Service) http.Handler {
 	})
 }
 
+// HandleSessionAudio returns the audio-preload manifest for a hosted session's
+// quiz: the audio-bearing questions in play order, each with its question id,
+// media URL, and repeat flag (#1088). Host-only: only the big screen plays a
+// question's audio, and the manifest lists every upcoming clip's media URL, so a
+// non-host roster player could prefetch and preview clips ahead of the question
+// (a cheat in an audio quiz). A non-host caller - a roster player or a stranger
+// with the code - gets the same opaque 404 the sibling gives a non-participant,
+// so the endpoint never confirms host identity. Carries no question text,
+// options, or answer key. An empty room with no quiz picked yet (and any quiz
+// with no audio) returns an empty clips array.
+func HandleSessionAudio(service *livesession.Service) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		logger := handlers.LoggerFromContext(ctx)
+
+		player, ok := auth.PlayerFromContext(ctx)
+		if !ok {
+			logger.ErrorContext(ctx, "missing player on context for session audio")
+			http.Error(w, "internal error", http.StatusInternalServerError)
+
+			return
+		}
+		logger = logger.With(slog.Int64("player", player.ID))
+
+		state, err := service.GetSessionState(ctx, r.PathValue("code"), player.ID)
+		if err != nil {
+			if errors.Is(err, livesession.ErrSessionNotFound) || errors.Is(err, livesession.ErrNotParticipant) {
+				http.NotFound(w, r)
+
+				return
+			}
+			writeInternalError(w, r, logger, "error retrieving session audio manifest", err)
+
+			return
+		}
+
+		// Host-only gate: GetSessionState passes any participant, but only the
+		// host may read the audio manifest. A non-host gets the same 404 a
+		// stranger gets above, so the response never distinguishes a non-host
+		// participant from an unknown code.
+		if state.Session.HostPlayerID != player.ID {
+			http.NotFound(w, r)
+
+			return
+		}
+
+		var questions []*quiz.Question
+		if state.Quiz != nil {
+			questions = state.Quiz.Questions
+		}
+
+		if err = handlers.EncodeJSON(w, http.StatusOK, newAudioManifestResponse(questions)); err != nil {
+			logger.ErrorContext(ctx, "error encoding session audio manifest", slog.Any("err", err))
+		}
+	})
+}
+
 // newSessionStateResponse projects the domain session state onto the frozen
 // wire shape.
 func newSessionStateResponse(state *livesession.SessionState) sessionStateResponse {

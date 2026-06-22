@@ -210,6 +210,21 @@ func (s *Service) GetGameForPlayerOnQuiz(ctx context.Context, playerID, quizID i
 	return g, nil
 }
 
+// GetAudioManifest returns the questions of the game's quiz so a caller can
+// build the per-question audio preload list. Participant-gated exactly like
+// [Service.GetNextQuestion]: a non-participant gets [ErrGameNotFound] so the
+// gameID stays opaque to outsiders, and a missing quiz surfaces
+// [quiz.ErrQuizNotFound]. The questions carry AudioMediaID/AudioRepeat in
+// position order; the caller filters to the audio-bearing ones.
+func (s *Service) GetAudioManifest(ctx context.Context, gameID string, playerID int64) ([]*quiz.Question, error) {
+	_, qz, err := s.loadGameForPlayer(ctx, gameID, playerID)
+	if err != nil {
+		return nil, err
+	}
+
+	return qz.Questions, nil
+}
+
 // ResetGamesForPlayerOnQuiz hard-deletes every game (and dependent rows) the
 // given player has for the given quiz. The reset is idempotent: running it
 // against a (player, quiz) with no games is a no-op success so the admin

@@ -52,6 +52,10 @@
          admin/home pages use) so home -> play reuses one cache entry
          rather than re-downloading a per-client duplicate. */}}
     <script src="/static/js/vendor/anime.umd.min.js"></script>
+    {{/* Howler.js (2.2.4, MIT), vendored/self-hosted (#1088), drives the audio
+         engine. Loaded only on the two audio surfaces (this client + the host big
+         screen); the live join shell omits it since phones never play audio. */}}
+    <script src="/static/js/vendor/howler.min.js"></script>
     <script type="module" src="/client/js/dist/app.js"></script>
     <script defer src="/static/js/vendor/alpine.min.js"></script>
     <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>
@@ -370,42 +374,8 @@
                  during gameplay (#253) so we don't subtract for it
                  here. -->
             <div x-show="gameId && !finished">
-                <!-- Question audio element (#1085). A permanent child of the
-                     always-rendered game container, OUTSIDE every per-question
-                     <template x-if>, so it never unmounts during a game. This is
-                     what makes playback race-free: getAudioEl() resolves the same
-                     element for every question, so the controller's start() can
-                     never run before the element exists. The :src binding is
-                     defensive (`question && question.audioUrl` is falsy between
-                     questions, and Alpine then drops the attribute, so no empty-
-                     src load fires). The mute/replay controls live in the
-                     per-question body below; they reach this element through the
-                     controller's getAudioEl, not a direct ref. -->
-                <audio id="question-audio"
-                       :src="question && question.audioUrl"
-                       :muted="audioMuted"
-                       preload="none"
-                       data-testid="question-audio"
-                       class="hidden"></audio>
                 <template x-if="question && !roundItem">
                     <div class="flex flex-col game-fill">
-                        <!-- Audio loading beat (#1070): for a question with audio, the clip buffers behind a spinner before the
-                             question is revealed. The reveal countdown does not
-                             start until the clip is ready, times out (~5s), or
-                             errors. The question body below is hidden (not
-                             unmounted) while this shows so the <audio> element
-                             can buffer/play, but the player does not see the
-                             question or answers before the audio is ready. -->
-                        <template x-if="audioLoading">
-                            <div class="flex-1 min-h-0 flex flex-col items-center justify-center gap-4"
-                                 data-testid="audio-loading"
-                                 role="status" aria-live="polite">
-                                <span class="block w-10 h-10 rounded-full border-4 border-border border-t-accent animate-spin motion-reduce:animate-none"
-                                      aria-hidden="true"></span>
-                                <p class="text-text-dim font-semibold">Loading audio...</p>
-                            </div>
-                        </template>
-                        <div x-show="!audioLoading" class="flex flex-col game-fill">
                         <!-- HUD chips: Round N/M + Q n/m in this round +
                              running score (#253, #1051). -->
                         <div class="flex justify-end gap-2 mb-2 lg:mb-4">
@@ -461,14 +431,9 @@
                             </template>
                         </div>
 
-                        <!-- Question audio controls (#1059). The <audio> element
-                             itself is the persistent one at the top of the game
-                             container (#1085). Playback is driven by GameApp,
-                             which loads the clip behind the loading beat and plays
-                             it from the top. A mute toggle and a replay control
-                             sit here; the replay control's label reads "Play
-                             audio" when autoplay was blocked and "Replay audio"
-                             otherwise. -->
+                        <!-- Question audio controls (#1059, #1088): mute toggle +
+                             a replay control whose label reads "Play audio" when
+                             autoplay was blocked, "Replay audio" otherwise. -->
                         <template x-if="question.audioUrl">
                             <div class="flex items-center justify-center gap-2 mb-3"
                                  data-testid="question-audio-controls">
@@ -512,7 +477,6 @@
                                         @click="submitAnswer(option.id)"
                                         x-text="option.text"></button>
                             </template>
-                        </div>
                         </div>
                     </div>
                 </template>
@@ -680,8 +644,14 @@
                         </button>
                     </div>
                 </template>
+                <!-- Pre-first-question state: while clips preload at game start
+                     (#1088) the screen reads "Loading sounds...", then the brief
+                     "Loading question..." gap until /next resolves. Both gate on
+                     no question / round being on screen yet. -->
                 <template x-if="!question && !roundItem">
-                    <p class="text-text-dim">Loading question...</p>
+                    <p class="text-text-dim"
+                       data-testid="audio-loading"
+                       x-text="audioLoading ? 'Loading sounds...' : 'Loading question...'"></p>
                 </template>
             </div>
 

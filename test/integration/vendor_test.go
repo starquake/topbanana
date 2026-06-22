@@ -59,4 +59,25 @@ func TestVendoredClientLibraries(t *testing.T) {
 			t.Errorf("status = %d, want %d", got, want)
 		}
 	})
+
+	// Howler powers the per-question audio playback (#1088); the SPA loads it
+	// from the embedded FS, so a 404 here would mean question audio never plays.
+	t.Run("vendored Howler.js is served", func(t *testing.T) {
+		t.Parallel()
+		resp := httpGet(ctx, t, client, baseURL+"/static/js/vendor/howler.min.js")
+		defer closeBody(t, resp.Body)
+		if got, want := resp.StatusCode, http.StatusOK; got != want {
+			t.Errorf("status = %d, want %d", got, want)
+		}
+	})
+
+	// The SPA shell must load the vendored Howler script so window.Howl exists
+	// for the audio controller (#1088).
+	t.Run("SPA HTML references the vendored Howler script", func(t *testing.T) {
+		t.Parallel()
+		body := getBody(ctx, t, baseURL+"/client/")
+		if got, want := body, `/static/js/vendor/howler.min.js`; !strings.Contains(got, want) {
+			t.Errorf("SPA body should reference %q so window.Howl is available (#1088)", want)
+		}
+	})
 }

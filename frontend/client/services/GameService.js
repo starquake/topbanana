@@ -51,6 +51,16 @@ export class GameService {
         return jsonOrThrow(response);
     }
 
+    // getAudioManifest returns the audio-preload manifest for a solo game: the
+    // audio-bearing questions in play order, each { questionId, audioUrl,
+    // audioRepeat } (#1088). The engine preloads every clip at game start so
+    // each question plays an already-decoded Howl with no per-question decode
+    // race. Returns { clips: [] } for an audio-free quiz.
+    async getAudioManifest(gameId) {
+        const response = await fetch(`/api/games/${gameId}/audio`);
+        return jsonOrThrow(response);
+    }
+
     // markRoundSeen acknowledges one phase of a round boundary (#548):
     // `phase` is 'intro' (before the round's first question) or
     // 'results' (after the round's questions). The server returns 204
