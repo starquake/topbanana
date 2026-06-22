@@ -62,37 +62,28 @@ function hostBigScreen(joinCode, hasQuiz) {
         // The id of the question currently on screen, so applyState can tell a
         // genuine question change (reset imageError) from a same-question tick.
         lastQuestionId: null,
-        // Mute state for the question audio + game SFX (#1088), seeded from the
-        // persisted preference. The engine applies it to every live Howl.
-        // Default unmuted.
+        // Mute state for question audio + SFX (#1088); the engine applies it to
+        // every live Howl.
         audioMuted: initialMuted(),
-        // True when the question's clip could not be played (failed to load, or
-        // no preloaded Howl), so the template surfaces an explicit play control.
-        // Reset per question; replayClip clears it on a gesture.
+        // True when the clip could not play, so the template shows the manual play
+        // control. Reset per question; replayClip clears it on a gesture.
         audioBlocked: false,
-        // Howler-backed audio engine (#1088), created in init(). Preloads +
-        // decodes the SFX on init, unlocks iOS on the host Start tap, and plays
-        // every question clip from already-decoded Howls. The engine reads/writes
-        // flags on `this` so its reactive writes go through Alpine's proxy.
+        // Howler audio engine (#1088), created in init() so it binds the Alpine proxy.
         audio: null,
-        // True once the manifest has been fetched AND its clips preloaded, so a
-        // re-armed start (or a reconnect) does not re-fetch. Left false when the
-        // fetch fails so a later tick can retry once connectivity recovers.
+        // True once the manifest fetched AND preloaded; left false on a failed
+        // fetch so a later tick can retry once connectivity recovers.
         clipsPreloaded: false,
-        // Guards against overlapping manifest fetches while one is in flight (the
-        // mid-game-reopen trigger runs on every SSE tick).
+        // Guards overlapping manifest fetches (the reopen trigger runs every tick).
         preloadInFlight: false,
-        // Guards a duplicate round-start SFX: the Start gesture plays it, and the
-        // first round_intro phase would play it again. Set true by the Start
-        // play so the first round_intro skips it; later rounds always play it.
+        // Dedupe the round-start SFX: the Start gesture plays it, so the first
+        // round_intro skips it; later rounds play it.
         roundStartPlayed: false,
-        // The phase + question id the SFX cues last fired for, so a repeated SSE
-        // tick within the same phase/question does not re-fire the stings (the
-        // big screen re-reads /state on every tick). null until the first cue.
+        // Phase + question id the SFX cues last fired for, so a repeated SSE tick
+        // in the same phase/question doesn't re-fire them.
         lastAudioPhase: null,
         lastAudioQuestionId: null,
-        // The question id the answers-show sting has fired for, so it plays once
-        // when the read beat ends (options appear), not on every countdown tick.
+        // Question id the answers-show sting fired for, so it plays once when the
+        // options appear, not on every countdown tick.
         answersShownQuestionId: null,
         // The round_intro round off the latest state read, or null outside the
         // round_intro phase (the server carries it only there). Drives the
@@ -178,9 +169,8 @@ function hostBigScreen(joinCode, hasQuiz) {
             // which is why the lookup must be cached now rather than read off $el
             // there.
             this.rootEl = this.$root;
-            // Create the Howler audio engine and preload + decode the SFX before
-            // any gesture (#1088): decode runs while the AudioContext is
-            // suspended, so the buffers are ready by the host Start tap.
+            // Preload + decode the SFX before any gesture so they're ready for the
+            // host Start tap (#1088).
             this.audio = createAudioEngine(this);
             this.audio.preloadEffects();
             // Pull the authoritative state once up front so the surface is
@@ -225,8 +215,7 @@ function hostBigScreen(joinCode, hasQuiz) {
             this.disconnect();
             this.stopCountdown();
             this.stopStartCountdown();
-            // Stop the iOS keep-alive and unload every Howl so no audio or timer
-            // leaks on navigation away (#1088).
+            // Tear down so no audio/timer leaks on navigation away (#1088).
             if (this.audio) this.audio.teardown();
         },
 
@@ -297,10 +286,8 @@ function hostBigScreen(joinCode, hasQuiz) {
                 if (this.question && this.question.imageUrl) {
                     void preloadImage(this.question.imageUrl);
                 }
-                // A new question means a new clip: stop a still-playing one (and
-                // its pending repeats) so it does not bleed across the question
-                // change, and clear any stale "Play audio" fallback from a prior
-                // question's failed/blocked clip (#1088).
+                // New question: stop the prior clip so it can't bleed over, and
+                // clear a stale fallback from the prior question (#1088).
                 if (this.audio) this.audio.stopClip();
                 this.audioBlocked = false;
             }
@@ -309,19 +296,13 @@ function hostBigScreen(joinCode, hasQuiz) {
             const offset = clockOffsetFromServerNow(state.serverNow);
             if (offset !== null) this.clockOffset = offset;
 
-            // Preload the question clips on a mid-game open too (#1088): start()
-            // kicks this off for a fresh host, but a host who reloads / reopens
-            // the big screen while a game is already running never calls start(),
-            // so without this the clips would never preload and the question
-            // audio would be silent with no fallback for the rest of the
-            // session. Idempotent via clipsPreloaded.
+            // Preload on a mid-game reopen too (#1088): start() handles a fresh
+            // host, but a host who reloads mid-game never calls it, so without this
+            // the clips would never load. Idempotent via clipsPreloaded.
             if (this.hasQuiz && this.phase !== 'lobby' && !this.clipsPreloaded) {
                 void this.preloadGameAudio();
             }
 
-            // Fire the SFX + question-clip cues for this state, guarded so a
-            // repeated SSE tick within the same phase/question does not re-fire
-            // them (the big screen re-reads /state on every tick) (#1088).
             this.applyAudioCues();
 
             // The countdown only runs in the question phase; every other phase
@@ -339,21 +320,11 @@ function hostBigScreen(joinCode, hasQuiz) {
             this.syncStandings(state);
         },
 
-        // applyAudioCues fires the SFX + question-clip cues for the current
-        // phase/question, once per transition (#1088). The big screen re-reads
-        // /state on every SSE tick, so each cue is guarded against re-firing
-        // within the same phase + question id:
-        //   - round_intro: round-start sting (deduped against the Start gesture's
-        //     round-start, which already played for the first round).
-        //   - question (new question): question-show sting + the question's quiz
-        //     clip (preloaded at start, so it plays immediately).
-        //   - reveal: the reveal sting as the correct answer is shown. This is a
-        //     neutral "here is the answer" sound, NOT a pick result: there is no
-        //     per-player pick on the big screen, so answer-correct / answer-wrong
-        //     would be meaningless here (those play on the solo surface).
-        // The answers-show sting fires from the read-beat -> answer-window
-        // transition in startCountdown's setRevealing hook, not here. The
-        // phase/question guard above makes each cue fire once per transition.
+        // Fire the SFX + clip cues for the current phase, once per transition
+        // (#1088): round_intro -> round-start (deduped vs the gesture); question ->
+        // question-show + the preloaded clip; reveal -> answer-reveal (a neutral
+        // sting, not a pick result -- there is no per-player pick here). answers-
+        // show fires from startCountdown's setRevealing hook, not here.
         applyAudioCues() {
             if (!this.audio) return;
             const qid = this.question ? this.question.id : null;
@@ -381,9 +352,8 @@ function hostBigScreen(joinCode, hasQuiz) {
             }
 
             if (this.phase === 'reveal') {
-                // Cancel a question clip that has not started yet so a late load
-                // does not autoplay the prompt audio over the revealed answers; a
-                // clip already playing from the question phase keeps going.
+                // Cancel a not-yet-started clip so a late load doesn't play over
+                // the revealed answers; a clip already playing keeps going.
                 this.audio.cancelPendingClip();
                 this.audio.playEffect(SFX.answerReveal);
             }
@@ -547,12 +517,9 @@ function hostBigScreen(joinCode, hasQuiz) {
                 setRevealing: (revealing) => {
                     const wasRevealing = this.revealing;
                     this.revealing = revealing;
-                    // Answers-shown sting (#1088): play only on a real read-beat
-                    // -> answer-window edge (revealing true -> false). A host that
-                    // reconnects mid-answer-window goes straight to the answer
-                    // window (wasRevealing false), where the options have long
-                    // been visible, so it must not fire then. Once per question id
-                    // so a re-anchored countdown does not replay it.
+                    // Answers-shown sting (#1088), only on a real revealing
+                    // true->false edge (a mid-window reconnect goes straight to
+                    // false, where options were already shown) and once per question.
                     if (!revealing && wasRevealing && this.phase === 'question' && this.question
                         && this.answersShownQuestionId !== this.question.id) {
                         this.answersShownQuestionId = this.question.id;
@@ -656,18 +623,15 @@ function hostBigScreen(joinCode, hasQuiz) {
         },
 
         async start() {
-            // FIRST, synchronously, inside the host Start gesture and BEFORE any
-            // await (#1088): resume the AudioContext + start the iOS keep-alive,
-            // then play the round-start sting. That gesture-bound play unlocks
-            // iOS output so every later clip autoplays. roundStartPlayed dedupes
-            // the first round_intro phase, which would otherwise re-play it.
+            // Synchronously first in the gesture, before any await (#1088): unlock
+            // the context + keep-alive, then play the gesture-bound round-start
+            // sting that unlocks iOS output. roundStartPlayed dedupes round_intro.
             if (this.audio) {
                 this.audio.unlock();
                 this.audio.playEffect(SFX.roundStart);
                 this.roundStartPlayed = true;
             }
-            // Preload every question clip up front (#1088), in parallel with the
-            // start POST, so each question plays an already-decoded Howl.
+            // Preload clips in parallel with the start POST (#1088).
             void this.preloadGameAudio();
             this.starting = true;
             this.startMessage = '';
@@ -698,10 +662,8 @@ function hostBigScreen(joinCode, hasQuiz) {
             }
         },
 
-        // preloadGameAudio fetches the session audio manifest and preloads every
-        // clip through the engine (#1088). Best-effort and idempotent: an
-        // audio-free quiz, a fetch failure, or a second call after the clips are
-        // already loaded just proceeds with the clips it has.
+        // Fetch the session audio manifest and preload its clips. Idempotent and
+        // best-effort (#1088).
         async preloadGameAudio() {
             if (!this.audio || this.clipsPreloaded || this.preloadInFlight) return;
             this.preloadInFlight = true;
@@ -720,11 +682,9 @@ function hostBigScreen(joinCode, hasQuiz) {
                 console.warn('preloadGameAudio failed', err);
             }
             this.preloadInFlight = false;
-            // Latch only on a successful fetch, so a transient non-ok/thrown
-            // manifest is retried on a later SSE tick once connectivity recovers
-            // (#1088). Either way, run preloadClips so the engine marks clips
-            // ready (preloadClips(null) -> empty) and a question with audio
-            // surfaces the manual play fallback rather than waiting forever.
+            // Latch only on success so a transient failure retries on a later tick;
+            // either way preloadClips runs so a question with audio falls back to
+            // the manual control instead of waiting forever (#1088).
             if (ok) this.clipsPreloaded = true;
             await this.audio.preloadClips(manifest);
         },
@@ -771,16 +731,11 @@ function hostBigScreen(joinCode, hasQuiz) {
             }
         },
 
-        // replayAudio restarts the current question's clip from the play/replay
-        // control. The engine clears the blocked fallback (the click is a user
-        // gesture) and bypasses the once-per-question guard.
+        // Restart the current clip from the play/replay control (a user gesture).
         replayAudio() {
             if (this.audio && this.question) this.audio.replayClip(this.question.id);
         },
 
-        // toggleMute flips and persists the mute preference through the engine,
-        // which applies it to every live Howl (SFX + clips) so a mid-clip toggle
-        // takes effect at once.
         toggleMute() {
             if (this.audio) this.audio.toggleMute();
         },

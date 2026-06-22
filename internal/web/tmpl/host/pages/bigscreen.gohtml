@@ -175,13 +175,9 @@
                              class="block mx-auto shrink-0 w-auto max-w-full max-h-[clamp(8rem,30vh,18rem)] object-contain rounded-lg">
                     </template>
 
-                    {{/* Question audio controls, when one is attached (#1088).
-                         The clip is preloaded at game start and played through
-                         Howler when the question shows. A mute toggle lets the
-                         room silence the clip + SFX; the replay control restarts
-                         the clip (and recovers if autoplay was blocked). The
-                         phones never get audio: this surface is the only one that
-                         plays audio. */}}
+                    {{/* Question audio controls (#1088): mute silences the clip +
+                         SFX; replay restarts the clip (and recovers a blocked
+                         autoplay). */}}
                     <template x-if="question.audioUrl">
                         <div class="flex shrink-0 items-center justify-center gap-3"
                              data-testid="question-audio-controls">
