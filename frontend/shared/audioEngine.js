@@ -129,51 +129,9 @@ export function createAudioEngine(view) {
     // playClip, cleared by stopClip; lets a play requested before its clip
     // finished preloading still fire the moment the clip is ready.
     let wantedClipQuestionId = null;
-    // A looping silent Web Audio source that keeps the output device warm for the
-    // whole game (see startOutputKeepAlive).
-    let outputKeepAlive = null;
 
     function muted() {
         return !!view.audioMuted;
-    }
-
-    // startOutputKeepAlive feeds continuous silence into the Web Audio output so
-    // the OS sound device never powers down between sounds. Disabling Howler's
-    // auto-suspend keeps the AudioContext "running", but with no source connected
-    // the output device can still idle during a silent gap -- the read beat /
-    // reveal between questions, or the ~1s gaps between a repeat clip's plays --
-    // and the next clip then starts into a cold device, which crackles like a
-    // buffer underrun. A connected silent BufferSource keeps the render graph
-    // (and the device) active so every clip starts warm (#1088). Started in the
-    // Start gesture (the context is resumed by then); idempotent.
-    function startOutputKeepAlive() {
-        if (outputKeepAlive) return;
-        const manager = howlerManager();
-        const ctx = manager ? manager.ctx : null;
-        if (!ctx || typeof ctx.createBufferSource !== 'function') return;
-        try {
-            const frames = Math.max(1, Math.floor(ctx.sampleRate)); // ~1s of silence
-            const buffer = ctx.createBuffer(1, frames, ctx.sampleRate);
-            const src = ctx.createBufferSource();
-            src.buffer = buffer; // all-zero samples: inaudible
-            src.loop = true;
-            src.connect(ctx.destination);
-            src.start(0);
-            outputKeepAlive = src;
-        } catch {
-            // Best-effort: keeping the device warm must never break playback.
-        }
-    }
-
-    function stopOutputKeepAlive() {
-        if (!outputKeepAlive) return;
-        try {
-            outputKeepAlive.stop();
-            outputKeepAlive.disconnect();
-        } catch {
-            // ignore
-        }
-        outputKeepAlive = null;
     }
 
     // preloadEffects builds one Howl per SFX and kicks off its load + decode.
@@ -209,7 +167,6 @@ export function createAudioEngine(view) {
                 if (resumed && typeof resumed.catch === 'function') resumed.catch(() => {});
             }
             keepAlive.start();
-            startOutputKeepAlive();
             unlocked = true;
         } catch {
             // Best-effort: a missing/quirky Howler must not break Start.
@@ -524,7 +481,6 @@ export function createAudioEngine(view) {
         wantedClipQuestionId = null;
         clipsReady = false;
         keepAlive.stop();
-        stopOutputKeepAlive();
         for (const entry of clips.values()) {
             if (entry.howl) {
                 try { entry.howl.unload(); } catch { /* ignore */ }
