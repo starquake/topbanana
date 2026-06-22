@@ -187,6 +187,11 @@ export function createAudioEngine(view) {
                 mute: muted(),
                 onload: () => {
                     entry.loaded = true;
+                    // Clear a stale failed flag: the per-clip timeout may have
+                    // marked this failed before the load actually completed within
+                    // the overall budget. A loaded clip is playable, so it must not
+                    // stay flagged failed (every consumer checks failed first).
+                    entry.failed = false;
                     settle();
                     // A clip the surface is already waiting on plays the moment it
                     // arrives (the host preloads in parallel with the SSE flow, so
@@ -317,16 +322,17 @@ export function createAudioEngine(view) {
         if (!entry || !entry.howl) {
             // No Howl yet. While preloading is in flight, wait -- preloadClips
             // re-runs this from each clip's onload as it arrives. Once preloading
-            // is done and there is still no clip for this audio question, it can
-            // never play: surface the manual fallback.
-            if (clipsReady) {
-                lastPlayedQuestionId = questionId;
-                view.audioBlocked = true;
-            }
+            // is done and there is still no clip for this audio question, surface
+            // the manual fallback -- but do NOT consume the once-guard, so a
+            // later retry that loads the real clip can still autoplay it (only
+            // beginPlay latches lastPlayedQuestionId).
+            if (clipsReady) view.audioBlocked = true;
             return;
         }
         if (entry.failed) {
-            lastPlayedQuestionId = questionId;
+            // Failed (load error or stalled past the per-clip timeout): surface
+            // the fallback, but again do not latch the guard, so a clip that
+            // recovers (onload clears failed) can still autoplay.
             view.audioBlocked = true;
             return;
         }

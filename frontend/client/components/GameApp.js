@@ -807,10 +807,11 @@ export class GameApp {
         const startAt = new Date(this.question.startedAt).getTime();
         const revealStart = this.serverTime();
         if (revealStart >= startAt) {
+            // The read beat is already over (a resume / an older game past its
+            // reveal): the options appear at once with no read-beat -> answer
+            // edge, so do NOT fire the answers-show sting here (it only plays on a
+            // genuine read-beat end below), avoiding a double-sting on resume.
             this.revealing = false;
-            // Answers-shown sting (#1088): the read beat is already over (resume
-            // past the reveal), so the options appear at once.
-            this.audio.playEffect('answers-show');
             this.startCountdown();
             return;
         }
