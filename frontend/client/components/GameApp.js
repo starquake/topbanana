@@ -224,11 +224,13 @@ export class GameApp {
             // Best-effort: a failed fetch just leaves the chip at 0,
             // which is the pre-fix behaviour.
             await this.hydrateScoreFromResults();
-            // Resume preloads the clips too (#1088); without a prior Start
-            // gesture iOS output is not unlocked, so a resumed clip may surface
-            // the manual play control until the player taps it -- which is the
-            // expected fallback for a reload mid-game.
-            await this.preloadGameAudio();
+            // Resume preloads the clips too (#1088), but non-blocking and without
+            // the "Loading sounds" screen: the resumed question must paint at once
+            // (its answer window is already draining server-side), not wait on the
+            // whole manifest. Without a prior Start gesture iOS output is not
+            // unlocked, so the resumed clip surfaces the manual play control until
+            // the player taps it -- the expected fallback for a reload mid-game.
+            void this.preloadGameAudio({ showLoading: false });
             try {
                 await this.nextQuestion();
             } catch (err) {
@@ -590,9 +592,9 @@ export class GameApp {
     // the engine to preload every clip, behind a brief loading state. Wrapped in
     // a timeout-bounded engine call so it never hangs the start; an audio-free
     // quiz or a manifest fetch failure just proceeds with no clips (best-effort).
-    async preloadGameAudio() {
+    async preloadGameAudio({ showLoading = true } = {}) {
         if (!this.gameId) return;
-        this.audioLoading = true;
+        if (showLoading) this.audioLoading = true;
         let clips = [];
         try {
             const manifest = await gameService.getAudioManifest(this.gameId);
@@ -606,7 +608,7 @@ export class GameApp {
         try {
             await this.audio.preloadClips(clips);
         } finally {
-            this.audioLoading = false;
+            if (showLoading) this.audioLoading = false;
         }
     }
 

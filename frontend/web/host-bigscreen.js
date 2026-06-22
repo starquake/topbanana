@@ -75,9 +75,13 @@ function hostBigScreen(joinCode, hasQuiz) {
         // every question clip from already-decoded Howls. The engine reads/writes
         // flags on `this` so its reactive writes go through Alpine's proxy.
         audio: null,
-        // True once clips have been preloaded for this game, so a re-armed start
-        // (or a reconnect) does not re-fetch the manifest.
+        // True once the manifest has been fetched AND its clips preloaded, so a
+        // re-armed start (or a reconnect) does not re-fetch. Left false when the
+        // fetch fails so a later tick can retry once connectivity recovers.
         clipsPreloaded: false,
+        // Guards against overlapping manifest fetches while one is in flight (the
+        // mid-game-reopen trigger runs on every SSE tick).
+        preloadInFlight: false,
         // Guards a duplicate round-start SFX: the Start gesture plays it, and the
         // first round_intro phase would play it again. Set true by the Start
         // play so the first round_intro skips it; later rounds always play it.
@@ -377,6 +381,10 @@ function hostBigScreen(joinCode, hasQuiz) {
             }
 
             if (this.phase === 'reveal') {
+                // Cancel a question clip that has not started yet so a late load
+                // does not autoplay the prompt audio over the revealed answers; a
+                // clip already playing from the question phase keeps going.
+                this.audio.cancelPendingClip();
                 this.audio.playEffect('answer-reveal');
             }
         },
@@ -537,11 +545,15 @@ function hostBigScreen(joinCode, hasQuiz) {
                 serverNow: () => this.serverTime(),
                 setProgress: (pct) => { this.progress = pct; },
                 setRevealing: (revealing) => {
+                    const wasRevealing = this.revealing;
                     this.revealing = revealing;
-                    // Answers-shown sting (#1088): the read beat just ended and
-                    // the options appear, in the question phase. Fires once per
-                    // question id so a re-anchored countdown does not replay it.
-                    if (!revealing && this.phase === 'question' && this.question
+                    // Answers-shown sting (#1088): play only on a real read-beat
+                    // -> answer-window edge (revealing true -> false). A host that
+                    // reconnects mid-answer-window goes straight to the answer
+                    // window (wasRevealing false), where the options have long
+                    // been visible, so it must not fire then. Once per question id
+                    // so a re-anchored countdown does not replay it.
+                    if (!revealing && wasRevealing && this.phase === 'question' && this.question
                         && this.answersShownQuestionId !== this.question.id) {
                         this.answersShownQuestionId = this.question.id;
                         if (this.audio) this.audio.playEffect('answers-show');
@@ -691,9 +703,10 @@ function hostBigScreen(joinCode, hasQuiz) {
         // audio-free quiz, a fetch failure, or a second call after the clips are
         // already loaded just proceeds with the clips it has.
         async preloadGameAudio() {
-            if (!this.audio || this.clipsPreloaded) return;
-            this.clipsPreloaded = true;
+            if (!this.audio || this.clipsPreloaded || this.preloadInFlight) return;
+            this.preloadInFlight = true;
             let clips = [];
+            let ok = false;
             try {
                 const response = await fetch(
                     `/api/sessions/${encodeURIComponent(this.joinCode)}/audio`,
@@ -702,14 +715,18 @@ function hostBigScreen(joinCode, hasQuiz) {
                 if (response.ok) {
                     const manifest = await response.json();
                     clips = manifest && Array.isArray(manifest.clips) ? manifest.clips : [];
+                    ok = true;
                 }
             } catch (err) {
-                // Fall through to preloadClips([]) below: a non-ok or thrown
-                // manifest fetch must still mark the engine's clips ready, so a
-                // question with audio surfaces the manual play fallback rather
-                // than waiting forever for a preload that never happened (#1088).
                 console.warn('preloadGameAudio failed', err);
             }
+            this.preloadInFlight = false;
+            // Latch only on a successful fetch, so a transient non-ok/thrown
+            // manifest is retried on a later SSE tick once connectivity recovers
+            // (#1088). Either way, run preloadClips so the engine marks clips
+            // ready and a question with audio surfaces the manual play fallback
+            // rather than waiting forever.
+            if (ok) this.clipsPreloaded = true;
             await this.audio.preloadClips(clips);
         },
 

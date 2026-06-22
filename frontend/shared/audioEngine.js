@@ -200,7 +200,14 @@ export function createAudioEngine(view) {
                 },
             });
             entry.howl = howl;
-            const timer = setTimeout(settle, PRELOAD_CLIP_TIMEOUT_MS);
+            const timer = setTimeout(() => {
+                // A clip that neither loaded nor errored within the per-clip
+                // budget is treated as failed, so tryPlayWanted surfaces the
+                // manual fallback rather than silently dropping a stalled clip.
+                if (!entry.loaded && !entry.failed) entry.failed = true;
+                settle();
+                if (wantedClipQuestionId === clip.questionId) tryPlayWanted();
+            }, PRELOAD_CLIP_TIMEOUT_MS);
         }));
 
         // The Howls exist now (created synchronously above), so a play requested
@@ -273,12 +280,14 @@ export function createAudioEngine(view) {
             view.audioBlocked = true;
             return;
         }
-        // play() does not throw when the context is suspended (a mid-game resume
-        // with no Start-gesture unlock), but no sound comes out -- surface the
-        // manual play control so a tap can unlock output (replayClip resumes the
-        // context). On the normal Start path the context is running by now, so
-        // this clears the fallback.
-        view.audioBlocked = !audioContextRunning();
+        // Surface the manual play control only when there was no Start-gesture
+        // unlock (a mid-game resume): there the context is suspended, so play()
+        // does not throw but no sound comes out, and a tap (replayClip) is needed
+        // to resume output. On the unlocked Start path we trust the gesture +
+        // priming sound and do NOT flag blocked off a context that may still be
+        // mid-resume() at this instant -- a one-time snapshot there would latch a
+        // false "Play audio" for the whole question even though the clip plays.
+        view.audioBlocked = !unlocked && !audioContextRunning();
         if (entry.repeat) armRepeat(entry, token, REPEAT_PLAYS);
     }
 
@@ -341,12 +350,22 @@ export function createAudioEngine(view) {
     function replayClip(questionId) {
         if (questionId == null) return;
         unlock();
-        wantedClipQuestionId = questionId;
-        view.audioBlocked = false;
         const entry = clips.get(questionId);
         if (!entry || !entry.howl) { view.audioBlocked = true; return; }
         if (entry.failed) { view.audioBlocked = true; return; }
-        beginPlay(questionId, entry);
+        view.audioBlocked = false;
+        if (entry.loaded) {
+            beginPlay(questionId, entry);
+            return;
+        }
+        // Still loading: re-arm the wanted-clip path rather than committing the
+        // once-guard now. beginPlay would latch lastPlayedQuestionId, so a load
+        // that then errors would be swallowed by tryPlayWanted's guard and never
+        // re-surface the fallback. Resetting the guard lets onload play it or
+        // onloaderror flag it.
+        wantedClipQuestionId = questionId;
+        lastPlayedQuestionId = null;
+        tryPlayWanted();
     }
 
     function clearRepeatTimer() {
@@ -373,6 +392,15 @@ export function createAudioEngine(view) {
             }
             activeClipId = null;
         }
+    }
+
+    // cancelPendingClip drops a not-yet-started wanted clip WITHOUT stopping a
+    // clip that is already playing. A surface calls it when the question phase
+    // ends (e.g. the live reveal) so a clip that finishes loading late does not
+    // autoplay over the reveal; a clip that already started during the question
+    // keeps playing through, as before.
+    function cancelPendingClip() {
+        wantedClipQuestionId = null;
     }
 
     // toggleMute flips and persists the mute preference and applies it to ALL
@@ -425,6 +453,7 @@ export function createAudioEngine(view) {
         playClip,
         replayClip,
         stopClip,
+        cancelPendingClip,
         toggleMute,
         muted,
         teardown,
