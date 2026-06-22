@@ -66,7 +66,7 @@ const QUESTION_SHOW_SFX = 'question-show';
 const ANSWERS_SHOW_SFX = 'answers-show';
 const ANSWER_CORRECT_SFX = 'answer-correct';
 const ANSWER_WRONG_SFX = 'answer-wrong';
-const REVEAL_SFX = 'answer-reveal';
+const ANSWER_REVEAL_SFX = 'answer-reveal';
 // The clip URLs the DB stamps and /media serves; '/media/' tells a question clip
 // from an SFX in the play spy (the SFX live under /static/audio/sfx/).
 const CLIP_FRAGMENT = '/media/';
@@ -640,7 +640,7 @@ test('the host big screen plays the reveal sting (not a pick sting) and the phon
     });
 
     // The big screen plays the dedicated reveal sting as the answer is shown...
-    await expect.poll(() => playsMatching(page, REVEAL_SFX), { timeout: 30_000 }).toBeGreaterThan(0);
+    await expect.poll(() => playsMatching(page, ANSWER_REVEAL_SFX), { timeout: 30_000 }).toBeGreaterThan(0);
     // ...but NOT a pick sting: there is no per-player pick on the big screen, so
     // answer-correct / answer-wrong would be meaningless here (those belong to the
     // solo surface, where one device picks).
