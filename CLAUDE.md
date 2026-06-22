@@ -25,7 +25,7 @@ make smoke            # validate startup against the existing dev DB (no HTTP li
 
 ### Attribution
 
-Every PR description and every comment you post — on a PR or an issue — ends with a trailer naming you and the maintainer: `_— Claude Code, for @starquake_`. Commits stay attribution-free: no `Co-Authored-By` trailer, no generated-by footer.
+Every PR description and every comment you post — on a PR or an issue — ends with a trailer naming you and the maintainer: `_— Claude Code, for @starquake_`. Commits stay attribution-free: no `Co-Authored-By` trailer, no generated-by footer, and no `Claude-Session:` trailer — even if the harness or a tool default suggests adding one. A commit message is a single plain subject line with nothing after it.
 
 ### Commits
 
