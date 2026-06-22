@@ -222,6 +222,15 @@ test('the solo Start tap resumes the AudioContext and plays the round-start SFX,
   await expect.poll(() => resumeCount(page)).toBeGreaterThan(0);
   await expect.poll(() => playsMatching(page, ROUND_START_SFX)).toBeGreaterThan(0);
 
+  // Howler auto-suspend is disabled so the shared AudioContext stays running
+  // across the gaps between questions; resuming it otherwise glitches the next
+  // clip (#1088).
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { Howler?: { autoSuspend?: boolean } }).Howler?.autoSuspend,
+    ),
+  ).toBe(false);
+
   // Fast-forward the reveal beat so the question view is fully painted.
   await page.clock.runFor(3_500);
   await expect(page.getByTestId('question-text')).toHaveText(SINGLE_QUESTION[0].text);

@@ -111,6 +111,15 @@ export function createAudioEngine(view) {
     function preloadEffects() {
         const Howl = howlerGlobal();
         if (!Howl) return;
+        // Keep the shared AudioContext running for the whole game: Howler
+        // auto-suspends it after ~30s of silence by default, and resuming it for
+        // the next clip glitches/crackles the first moment of audio on many
+        // systems (it reads like a buffer underrun / a cold sound device). Live
+        // play has gaps longer than that between questions (read beat, reveal,
+        // between rounds), so disable auto-suspend (#1088).
+        if (typeof window !== 'undefined' && window.Howler) {
+            window.Howler.autoSuspend = false;
+        }
         for (const [name, src] of Object.entries(EFFECT_SRC)) {
             if (effects[name]) continue;
             effects[name] = new Howl({ src: [src], preload: true, html5: false, mute: muted() });
@@ -124,6 +133,11 @@ export function createAudioEngine(view) {
     // unlock output on a mid-game resume.
     function unlock() {
         try {
+            // Belt-and-suspenders with preloadEffects: keep the context from
+            // auto-suspending (and glitching the next clip) during the game.
+            if (typeof window !== 'undefined' && window.Howler) {
+                window.Howler.autoSuspend = false;
+            }
             const ctx = typeof window !== 'undefined' && window.Howler ? window.Howler.ctx : null;
             if (ctx && typeof ctx.resume === 'function') {
                 // resume() returns a promise; we do not await it (the gesture
