@@ -24,7 +24,7 @@ import { clockOffsetFromServerNow, serverTime } from '@shared/serverClock.js';
 import { startQuestionCountdown } from '@shared/countdown.js';
 import { startStartCountdown, formatCountdown } from '@shared/startCountdown.js';
 import { preloadImage } from '@shared/preloadImage.js';
-import { createAudioEngine, initialMuted } from '@shared/audioEngine.js';
+import { createAudioEngine, initialMuted, SFX } from '@shared/audioEngine.js';
 import {
     buildStandingsRows,
     animateStandingsBars,
@@ -367,14 +367,14 @@ function hostBigScreen(joinCode, hasQuiz) {
                 if (this.roundStartPlayed) {
                     this.roundStartPlayed = false;
                 } else {
-                    this.audio.playEffect('round-start');
+                    this.audio.playEffect(SFX.roundStart);
                 }
 
                 return;
             }
 
             if (this.phase === 'question' && this.question) {
-                this.audio.playEffect('question-show');
+                this.audio.playEffect(SFX.questionShow);
                 if (this.question.audioUrl) this.audio.playClip(this.question.id);
 
                 return;
@@ -385,7 +385,7 @@ function hostBigScreen(joinCode, hasQuiz) {
                 // does not autoplay the prompt audio over the revealed answers; a
                 // clip already playing from the question phase keeps going.
                 this.audio.cancelPendingClip();
-                this.audio.playEffect('answer-reveal');
+                this.audio.playEffect(SFX.answerReveal);
             }
         },
 
@@ -556,7 +556,7 @@ function hostBigScreen(joinCode, hasQuiz) {
                     if (!revealing && wasRevealing && this.phase === 'question' && this.question
                         && this.answersShownQuestionId !== this.question.id) {
                         this.answersShownQuestionId = this.question.id;
-                        if (this.audio) this.audio.playEffect('answers-show');
+                        if (this.audio) this.audio.playEffect(SFX.answersShow);
                     }
                 },
                 setTimer: (handle) => { this.timer = handle; },
@@ -663,7 +663,7 @@ function hostBigScreen(joinCode, hasQuiz) {
             // the first round_intro phase, which would otherwise re-play it.
             if (this.audio) {
                 this.audio.unlock();
-                this.audio.playEffect('round-start');
+                this.audio.playEffect(SFX.roundStart);
                 this.roundStartPlayed = true;
             }
             // Preload every question clip up front (#1088), in parallel with the
@@ -705,7 +705,7 @@ function hostBigScreen(joinCode, hasQuiz) {
         async preloadGameAudio() {
             if (!this.audio || this.clipsPreloaded || this.preloadInFlight) return;
             this.preloadInFlight = true;
-            let clips = [];
+            let manifest = null;
             let ok = false;
             try {
                 const response = await fetch(
@@ -713,8 +713,7 @@ function hostBigScreen(joinCode, hasQuiz) {
                     { headers: { Accept: 'application/json' } },
                 );
                 if (response.ok) {
-                    const manifest = await response.json();
-                    clips = manifest && Array.isArray(manifest.clips) ? manifest.clips : [];
+                    manifest = await response.json();
                     ok = true;
                 }
             } catch (err) {
@@ -724,10 +723,10 @@ function hostBigScreen(joinCode, hasQuiz) {
             // Latch only on a successful fetch, so a transient non-ok/thrown
             // manifest is retried on a later SSE tick once connectivity recovers
             // (#1088). Either way, run preloadClips so the engine marks clips
-            // ready and a question with audio surfaces the manual play fallback
-            // rather than waiting forever.
+            // ready (preloadClips(null) -> empty) and a question with audio
+            // surfaces the manual play fallback rather than waiting forever.
             if (ok) this.clipsPreloaded = true;
-            await this.audio.preloadClips(clips);
+            await this.audio.preloadClips(manifest);
         },
 
         // armStart arms the last-call countdown via the host-gated JSON API.

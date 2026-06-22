@@ -27,18 +27,30 @@ import { loadAudioMuted, saveAudioMuted } from '@shared/audioMute.js';
 import { AUDIO_FORMATS } from '@shared/audioFormats.js';
 import { createIOSKeepAlive } from '@shared/iosKeepAlive.js';
 
-// The game sound effects, by logical name, mapped to their served URLs. These
-// are small placeholder tones; the maintainer swaps real sounds in at the same
-// paths.
+// SFX are the game sound effects by logical name. Both surfaces import these
+// constants and pass them to playEffect, so the names live in exactly one place
+// (a rename or a typo can't drift between the engine and the two callers).
+// answer-correct / answer-wrong are the solo per-pick stings; answer-reveal is
+// the host big screen's neutral "here is the answer" sting (the big screen has
+// no per-player pick).
+export const SFX = {
+    roundStart: 'round-start',
+    questionShow: 'question-show',
+    answersShow: 'answers-show',
+    answerCorrect: 'answer-correct',
+    answerWrong: 'answer-wrong',
+    answerReveal: 'answer-reveal',
+};
+
+// EFFECT_SRC maps each SFX name to its served URL. These are small placeholder
+// tones; the maintainer swaps real sounds in at the same paths.
 const EFFECT_SRC = {
-    'round-start': '/static/audio/sfx/round-start.mp3',
-    'question-show': '/static/audio/sfx/question-show.mp3',
-    'answers-show': '/static/audio/sfx/answers-show.mp3',
-    'answer-correct': '/static/audio/sfx/answer-correct.mp3',
-    'answer-wrong': '/static/audio/sfx/answer-wrong.mp3',
-    // The host big screen's reveal sting: a neutral "here is the answer" sound,
-    // not a per-player pick result (the big screen has no pick).
-    'answer-reveal': '/static/audio/sfx/answer-reveal.mp3',
+    [SFX.roundStart]: '/static/audio/sfx/round-start.mp3',
+    [SFX.questionShow]: '/static/audio/sfx/question-show.mp3',
+    [SFX.answersShow]: '/static/audio/sfx/answers-show.mp3',
+    [SFX.answerCorrect]: '/static/audio/sfx/answer-correct.mp3',
+    [SFX.answerWrong]: '/static/audio/sfx/answer-wrong.mp3',
+    [SFX.answerReveal]: '/static/audio/sfx/answer-reveal.mp3',
 };
 
 // A repeat-flagged clip plays a fixed number of times with a fixed silent gap
@@ -60,13 +72,31 @@ function howlerGlobal() {
     return typeof window !== 'undefined' ? window.Howl || null : null;
 }
 
+// howlerManager returns the global Howler manager (window.Howler), or null when
+// absent. The manager owns the shared Web Audio context and the autoSuspend
+// flag; callers below read both through this one lookup.
+function howlerManager() {
+    return typeof window !== 'undefined' ? window.Howler || null : null;
+}
+
+// keepContextAlive disables Howler's auto-suspend so the shared AudioContext
+// stays running for the whole game. Howler suspends it after ~30s of silence by
+// default, and resuming it for the next clip glitches/crackles the first moment
+// of audio on many systems (it reads like a buffer underrun / a cold sound
+// device). Live play has gaps longer than that between questions (#1088).
+function keepContextAlive() {
+    const manager = howlerManager();
+    if (manager) manager.autoSuspend = false;
+}
+
 // audioContextRunning reports whether Howler's Web Audio context is actually
 // producing sound. A play() that did not throw can still be silent if the
 // context is "suspended" (e.g. a mid-game resume with no Start gesture to unlock
 // it), so callers surface the manual play control when this is false. An absent
 // context is treated as running (the join phone has no engine; nothing to flag).
 function audioContextRunning() {
-    const ctx = typeof window !== 'undefined' && window.Howler ? window.Howler.ctx : null;
+    const manager = howlerManager();
+    const ctx = manager ? manager.ctx : null;
     return !ctx || ctx.state === 'running';
 }
 
@@ -111,15 +141,7 @@ export function createAudioEngine(view) {
     function preloadEffects() {
         const Howl = howlerGlobal();
         if (!Howl) return;
-        // Keep the shared AudioContext running for the whole game: Howler
-        // auto-suspends it after ~30s of silence by default, and resuming it for
-        // the next clip glitches/crackles the first moment of audio on many
-        // systems (it reads like a buffer underrun / a cold sound device). Live
-        // play has gaps longer than that between questions (read beat, reveal,
-        // between rounds), so disable auto-suspend (#1088).
-        if (typeof window !== 'undefined' && window.Howler) {
-            window.Howler.autoSuspend = false;
-        }
+        keepContextAlive();
         for (const [name, src] of Object.entries(EFFECT_SRC)) {
             if (effects[name]) continue;
             effects[name] = new Howl({ src: [src], preload: true, html5: false, mute: muted() });
@@ -135,10 +157,9 @@ export function createAudioEngine(view) {
         try {
             // Belt-and-suspenders with preloadEffects: keep the context from
             // auto-suspending (and glitching the next clip) during the game.
-            if (typeof window !== 'undefined' && window.Howler) {
-                window.Howler.autoSuspend = false;
-            }
-            const ctx = typeof window !== 'undefined' && window.Howler ? window.Howler.ctx : null;
+            keepContextAlive();
+            const manager = howlerManager();
+            const ctx = manager ? manager.ctx : null;
             if (ctx && typeof ctx.resume === 'function') {
                 // resume() returns a promise; we do not await it (the gesture
                 // play below is what actually unlocks iOS output).
@@ -172,7 +193,12 @@ export function createAudioEngine(view) {
     // back. Returns a promise the caller may await behind a brief loading state.
     function preloadClips(manifest) {
         const Howl = howlerGlobal();
-        const list = Array.isArray(manifest) ? manifest : [];
+        // Accept either a raw clips array or the manifest object the endpoints
+        // return ({ clips: [...] }), so each surface hands us the fetched payload
+        // (or null on a failed fetch) directly without re-parsing the shape.
+        const list = Array.isArray(manifest)
+            ? manifest
+            : (manifest && Array.isArray(manifest.clips) ? manifest.clips : []);
         if (!Howl || list.length === 0) {
             clipsReady = true;
             tryPlayWanted();

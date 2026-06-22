@@ -6,7 +6,7 @@ import { clockOffsetFromServerNow, serverTime } from '@shared/serverClock.js';
 import { optionStateClass } from '../util/answerOptions.js';
 import { openShareDialog } from '@shared/share.js';
 import { preloadImage } from '@shared/preloadImage.js';
-import { createAudioEngine, initialMuted } from '@shared/audioEngine.js';
+import { createAudioEngine, initialMuted, SFX } from '@shared/audioEngine.js';
 
 // PLAY_PATH_PATTERN matches /play/<anything>-<integer>; the integer suffix
 // is the quiz ID.
@@ -536,7 +536,7 @@ export class GameApp {
         // output so every later clip autoplays. roundStartPlayed dedupes the
         // first round_boundary intro, which would otherwise re-play it.
         this.audio.unlock();
-        this.audio.playEffect('round-start');
+        this.audio.playEffect(SFX.roundStart);
         this.roundStartPlayed = true;
         this.firstItemAfterStart = true;
         const existing = await this.checkAlreadyPlayed();
@@ -595,18 +595,17 @@ export class GameApp {
     async preloadGameAudio({ showLoading = true } = {}) {
         if (!this.gameId) return;
         if (showLoading) this.audioLoading = true;
-        let clips = [];
+        let manifest = null;
         try {
-            const manifest = await gameService.getAudioManifest(this.gameId);
-            clips = manifest && Array.isArray(manifest.clips) ? manifest.clips : [];
+            manifest = await gameService.getAudioManifest(this.gameId);
         } catch (err) {
             // A failed manifest fetch must NOT leave the engine waiting forever:
-            // fall through to preloadClips([]) so it marks clips ready and a
-            // question with audio surfaces the manual play fallback (#1088).
+            // preloadClips(null) still marks clips ready, so a question with audio
+            // surfaces the manual play fallback (#1088).
             console.warn('preloadGameAudio failed', err);
         }
         try {
-            await this.audio.preloadClips(clips);
+            await this.audio.preloadClips(manifest);
         } finally {
             if (showLoading) this.audioLoading = false;
         }
@@ -736,7 +735,7 @@ export class GameApp {
                 if (this.roundStartPlayed) {
                     this.roundStartPlayed = false;
                 } else {
-                    this.audio.playEffect('round-start');
+                    this.audio.playEffect(SFX.roundStart);
                 }
             }
             // Keep the running-score chip honest: the server hands us
@@ -765,7 +764,7 @@ export class GameApp {
         // immediately with no decode race). The clip plays on the read beat so
         // the room hears it while the question is revealed. Guarded once per
         // question id by the engine.
-        this.audio.playEffect('question-show');
+        this.audio.playEffect(SFX.questionShow);
         if (item.audioUrl) this.audio.playClip(item.id);
         this.startRevealCountdown();
     }
@@ -827,7 +826,7 @@ export class GameApp {
                 this.revealing = false;
                 // Answers-shown sting (#1088): the read beat just elapsed, so the
                 // answer options appear now.
-                this.audio.playEffect('answers-show');
+                this.audio.playEffect(SFX.answersShow);
                 this.startCountdown();
                 return;
             }
@@ -1017,7 +1016,7 @@ export class GameApp {
             this.feedback = fb;
             // Pick-result sting (#1088): the player gets immediate feedback the
             // moment their verdict lands.
-            this.audio.playEffect(fb.correct ? 'answer-correct' : 'answer-wrong');
+            this.audio.playEffect(fb.correct ? SFX.answerCorrect : SFX.answerWrong);
             this.score += fb.score || 0;
             this.prefetchNextItem();
         } catch (err) {
