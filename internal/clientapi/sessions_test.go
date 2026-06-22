@@ -165,36 +165,13 @@ func (e *sessionTestEnv) seedLiveQuiz(t *testing.T, slug string) *quiz.Quiz {
 	return qz
 }
 
-// attachAudio creates an audio media row scoped to the question's quiz and
-// points the question at it via AudioMediaID, persisting both the reference and
-// the repeat flag. Returns the new media id so a test can assert the clip's
-// audioUrl. Mirrors the solo testEnv helper; the host manifest needs real
-// audio-bearing questions (questions.audio_media_id is an enforced FK).
+// attachAudio is the sessionTestEnv convenience wrapper over
+// [attachQuestionAudio]; the host manifest tests need real audio-bearing
+// questions (questions.audio_media_id is an enforced FK).
 func (e *sessionTestEnv) attachAudio(t *testing.T, q *quiz.Question, repeat bool) int64 {
 	t.Helper()
 
-	durationMs := 1500
-	row, err := e.media.CreateMedia(t.Context(), &media.Media{
-		QuizID:            q.QuizID,
-		Type:              media.TypeAudio,
-		MIME:              "audio/mpeg",
-		Path:              "a.mp3",
-		SizeBytes:         2048,
-		SHA256:            fmt.Sprintf("audio-%d", q.ID),
-		DurationMs:        &durationMs,
-		CreatedByPlayerID: seededAdminID,
-	})
-	if err != nil {
-		t.Fatalf("CreateMedia err = %v, want nil", err)
-	}
-
-	q.AudioMediaID = &row.ID
-	q.AudioRepeat = repeat
-	if err := e.quizzes.UpdateQuestion(t.Context(), q); err != nil {
-		t.Fatalf("UpdateQuestion err = %v, want nil", err)
-	}
-
-	return row.ID
+	return attachQuestionAudio(t, e.media, e.quizzes, q, repeat)
 }
 
 // TestHandleSessionState_LogLineInheritsRequestScopedFields pins the request-

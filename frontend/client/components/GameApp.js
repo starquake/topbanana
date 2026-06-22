@@ -593,12 +593,18 @@ export class GameApp {
     async preloadGameAudio() {
         if (!this.gameId) return;
         this.audioLoading = true;
+        let clips = [];
         try {
             const manifest = await gameService.getAudioManifest(this.gameId);
-            const clips = manifest && Array.isArray(manifest.clips) ? manifest.clips : [];
-            await this.audio.preloadClips(clips);
+            clips = manifest && Array.isArray(manifest.clips) ? manifest.clips : [];
         } catch (err) {
+            // A failed manifest fetch must NOT leave the engine waiting forever:
+            // fall through to preloadClips([]) so it marks clips ready and a
+            // question with audio surfaces the manual play fallback (#1088).
             console.warn('preloadGameAudio failed', err);
+        }
+        try {
+            await this.audio.preloadClips(clips);
         } finally {
             this.audioLoading = false;
         }

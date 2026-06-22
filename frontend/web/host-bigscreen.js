@@ -305,6 +305,16 @@ function hostBigScreen(joinCode, hasQuiz) {
             const offset = clockOffsetFromServerNow(state.serverNow);
             if (offset !== null) this.clockOffset = offset;
 
+            // Preload the question clips on a mid-game open too (#1088): start()
+            // kicks this off for a fresh host, but a host who reloads / reopens
+            // the big screen while a game is already running never calls start(),
+            // so without this the clips would never preload and the question
+            // audio would be silent with no fallback for the rest of the
+            // session. Idempotent via clipsPreloaded.
+            if (this.hasQuiz && this.phase !== 'lobby' && !this.clipsPreloaded) {
+                void this.preloadGameAudio();
+            }
+
             // Fire the SFX + question-clip cues for this state, guarded so a
             // repeated SSE tick within the same phase/question does not re-fire
             // them (the big screen re-reads /state on every tick) (#1088).
@@ -683,20 +693,24 @@ function hostBigScreen(joinCode, hasQuiz) {
         async preloadGameAudio() {
             if (!this.audio || this.clipsPreloaded) return;
             this.clipsPreloaded = true;
+            let clips = [];
             try {
                 const response = await fetch(
                     `/api/sessions/${encodeURIComponent(this.joinCode)}/audio`,
                     { headers: { Accept: 'application/json' } },
                 );
-                if (!response.ok) return;
-                const manifest = await response.json();
-                const clips = manifest && Array.isArray(manifest.clips) ? manifest.clips : [];
-                await this.audio.preloadClips(clips);
+                if (response.ok) {
+                    const manifest = await response.json();
+                    clips = manifest && Array.isArray(manifest.clips) ? manifest.clips : [];
+                }
             } catch (err) {
-                // Best-effort: a failed manifest fetch just means no preloaded
-                // clips; playClip then surfaces the manual fallback per question.
+                // Fall through to preloadClips([]) below: a non-ok or thrown
+                // manifest fetch must still mark the engine's clips ready, so a
+                // question with audio surfaces the manual play fallback rather
+                // than waiting forever for a preload that never happened (#1088).
                 console.warn('preloadGameAudio failed', err);
             }
+            await this.audio.preloadClips(clips);
         },
 
         // armStart arms the last-call countdown via the host-gated JSON API.

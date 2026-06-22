@@ -59,16 +59,23 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 }
 
-// attachAudio creates an audio media row scoped to the question's quiz and
-// points the question at it via AudioMediaID, persisting both the reference and
-// the repeat flag. It returns the new media id so a test can assert the clip's
-// audioUrl. Used by the audio-manifest tests, which need real audio-bearing
-// questions (questions.audio_media_id is an enforced FK to a media row).
-func (e *testEnv) attachAudio(t *testing.T, q *quiz.Question, repeat bool) int64 {
+// attachQuestionAudio creates an audio media row scoped to the question's quiz
+// and points the question at it via AudioMediaID, persisting both the reference
+// and the repeat flag. It returns the new media id so a test can assert the
+// clip's audioUrl. Used by the audio-manifest tests (solo + host), which need
+// real audio-bearing questions (questions.audio_media_id is an enforced FK to a
+// media row).
+func attachQuestionAudio(
+	t *testing.T,
+	mediaStore media.Store,
+	quizStore quiz.Store,
+	q *quiz.Question,
+	repeat bool,
+) int64 {
 	t.Helper()
 
 	durationMs := 1500
-	row, err := e.media.CreateMedia(t.Context(), &media.Media{
+	row, err := mediaStore.CreateMedia(t.Context(), &media.Media{
 		QuizID:            q.QuizID,
 		Type:              media.TypeAudio,
 		MIME:              "audio/mpeg",
@@ -84,11 +91,18 @@ func (e *testEnv) attachAudio(t *testing.T, q *quiz.Question, repeat bool) int64
 
 	q.AudioMediaID = &row.ID
 	q.AudioRepeat = repeat
-	if err := e.quizzes.UpdateQuestion(t.Context(), q); err != nil {
+	if err := quizStore.UpdateQuestion(t.Context(), q); err != nil {
 		t.Fatalf("UpdateQuestion err = %v, want nil", err)
 	}
 
 	return row.ID
+}
+
+// attachAudio is the testEnv convenience wrapper over [attachQuestionAudio].
+func (e *testEnv) attachAudio(t *testing.T, q *quiz.Question, repeat bool) int64 {
+	t.Helper()
+
+	return attachQuestionAudio(t, e.media, e.quizzes, q, repeat)
 }
 
 // closeStore closes the underlying DB so subsequent store calls fail with

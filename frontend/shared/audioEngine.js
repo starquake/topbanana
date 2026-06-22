@@ -208,8 +208,12 @@ export function createAudioEngine(view) {
         tryPlayWanted();
 
         // Whichever finishes first: all clips settled, or the overall budget.
-        const budget = new Promise((resolve) => setTimeout(resolve, PRELOAD_BUDGET_MS));
+        // Clear the budget timer on settle so a fast all-loaded preload does not
+        // leave a stray 12s timer ticking after every game start.
+        let budgetTimer = null;
+        const budget = new Promise((resolve) => { budgetTimer = setTimeout(resolve, PRELOAD_BUDGET_MS); });
         return Promise.race([Promise.all(perClip), budget]).then((result) => {
+            if (budgetTimer !== null) clearTimeout(budgetTimer);
             clipsReady = true;
             // Now that preloading is done, a wanted clip that never materialized
             // (a manifest miss) can be flagged as the manual fallback.
@@ -251,10 +255,18 @@ export function createAudioEngine(view) {
         sequenceToken += 1;
         const token = sequenceToken;
         activeClipId = questionId;
+        // Consume the once-per-question guard here, where the clip actually
+        // plays, so a still-loading wait never swallows the play and a repeated
+        // tick after play is a no-op.
+        lastPlayedQuestionId = questionId;
         const howl = entry.howl;
         if (!howl) { view.audioBlocked = true; return; }
         try {
             howl.mute(muted());
+            // Drop any stale 'end' listener left on this reused Howl by a prior
+            // repeat sequence that was torn down before its 'end' fired, so the
+            // listener set does not grow across replays (#1088).
+            howl.off('end');
             howl.stop();
             howl.play();
         } catch {
@@ -295,8 +307,9 @@ export function createAudioEngine(view) {
         const entry = clips.get(questionId);
         if (!entry || !entry.howl) {
             // No Howl yet. While preloading is in flight, wait -- preloadClips
-            // re-runs this as clips arrive. Once preloading is done and there is
-            // still no clip for this audio question, it cannot play: fall back.
+            // re-runs this from each clip's onload as it arrives. Once preloading
+            // is done and there is still no clip for this audio question, it can
+            // never play: surface the manual fallback.
             if (clipsReady) {
                 lastPlayedQuestionId = questionId;
                 view.audioBlocked = true;
@@ -308,21 +321,16 @@ export function createAudioEngine(view) {
             view.audioBlocked = true;
             return;
         }
-        lastPlayedQuestionId = questionId;
         if (entry.loaded) {
             beginPlay(questionId, entry);
             return;
         }
-        // The Howl exists but is still loading: play the moment it is ready, as
-        // long as it is still the wanted question.
-        entry.howl.once('load', () => {
-            entry.loaded = true;
-            if (wantedClipQuestionId === questionId) beginPlay(questionId, entry);
-        });
-        entry.howl.once('loaderror', () => {
-            entry.failed = true;
-            if (wantedClipQuestionId === questionId) view.audioBlocked = true;
-        });
+        // The Howl exists but is still loading: do nothing now. preloadClips
+        // attached the onload/onloaderror that re-run tryPlayWanted (or flag the
+        // failure) when this clip settles -- a single load path, no duplicate
+        // handlers. lastPlayedQuestionId is consumed only once the clip actually
+        // plays (beginPlay) or is definitively unplayable, so a wait never
+        // swallows the play.
     }
 
     // replayClip is the user-gesture path (the play / replay control): it clears
@@ -359,7 +367,9 @@ export function createAudioEngine(view) {
         if (activeClipId != null) {
             const entry = clips.get(activeClipId);
             if (entry && entry.howl) {
-                try { entry.howl.stop(); } catch { /* ignore */ }
+                // off('end') drops the pending repeat listener so a clip stopped
+                // mid-sequence does not leave a handler on the reused Howl.
+                try { entry.howl.off('end'); entry.howl.stop(); } catch { /* ignore */ }
             }
             activeClipId = null;
         }
