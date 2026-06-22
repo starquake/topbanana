@@ -1,7 +1,17 @@
-import type { APIRequestContext, Page } from '@playwright/test';
+import type { APIRequestContext, Locator, Page } from '@playwright/test';
 
 import { test, expect } from './fixtures';
-import { importQuiz, setQuizMode, claimAndJoin } from './helpers';
+import { importQuiz, setQuizMode, claimAndJoin, playerRow } from './helpers';
+
+// standingsRow scopes to a between-games standings bar by player name. Like the
+// lobby roster, the host's one-room-per-host reuse can leave a stale prior-game
+// row in the standings, so specs assert a player's row is present by name rather
+// than a strict total count (#957, #1061).
+function standingsRow(page: Page, displayName: string): Locator {
+  return page
+    .locator('[data-testid="standings-bars"] [data-standings-row]')
+    .filter({ hasText: displayName });
+}
 
 // #876: the host big screen reconnecting mid-game. The TV is on a laptop/TV that
 // can sleep, lose wifi, or get refreshed. A reload must re-GET /state, re-subscribe
@@ -105,7 +115,10 @@ test.describe('host reconnect mid-game', () => {
     await joinAndReady(robinContext.request, joinCode, robin);
     await joinAndReady(quincyContext.request, joinCode, quincy);
 
-    await expect(host.locator('[data-player-row]')).toHaveCount(2, { timeout: 15_000 });
+    // Present-by-name, not a strict total: one-room-per-host reuse can leave a
+    // stale prior-test row in the roster (#957, #1061).
+    await expect(playerRow(host, robin)).toBeVisible({ timeout: 15_000 });
+    await expect(playerRow(host, quincy)).toBeVisible();
 
     // Host starts now; the runner drives round_intro -> question. The TV reaches
     // the live question phase.
@@ -143,7 +156,8 @@ test.describe('host reconnect mid-game', () => {
     // standings screen. The standings bars render on the reconnected host with
     // both players, proving the game ran to completion past the reconnect.
     await expect(host.locator('[data-phase-results]')).toBeVisible({ timeout: 20_000 });
-    await expect(host.locator('[data-testid="standings-bars"] [data-standings-row]')).toHaveCount(2, { timeout: 20_000 });
+    await expect(standingsRow(host, robin)).toBeVisible({ timeout: 20_000 });
+    await expect(standingsRow(host, quincy)).toBeVisible();
   });
 
   test('the host big screen reloaded on the standings screen resumes the standings', async ({ hostSessions }) => {
@@ -166,7 +180,10 @@ test.describe('host reconnect mid-game', () => {
     const quincyContext = await hostSessions.newPlayerContext();
     await joinAndReady(robinContext.request, joinCode, robin);
     await joinAndReady(quincyContext.request, joinCode, quincy);
-    await expect(host.locator('[data-player-row]')).toHaveCount(2, { timeout: 15_000 });
+    // Present-by-name, not a strict total: one-room-per-host reuse can leave a
+    // stale prior-test row in the roster (#957, #1061).
+    await expect(playerRow(host, robin)).toBeVisible({ timeout: 15_000 });
+    await expect(playerRow(host, quincy)).toBeVisible();
 
     await host.getByRole('button', { name: 'Start now' }).click();
     await expect(host.locator('[data-phase-question]')).toBeVisible({ timeout: 20_000 });
@@ -177,7 +194,8 @@ test.describe('host reconnect mid-game', () => {
     await answerOverApi(robinContext.request, joinCode, correct);
     await answerOverApi(quincyContext.request, joinCode, 'wrong-a');
     await expect(host.locator('[data-phase-results]')).toBeVisible({ timeout: 20_000 });
-    await expect(host.locator('[data-testid="standings-bars"] [data-standings-row]')).toHaveCount(2, { timeout: 20_000 });
+    await expect(standingsRow(host, robin)).toBeVisible({ timeout: 20_000 });
+    await expect(standingsRow(host, quincy)).toBeVisible();
 
     // The drop on a non-question phase: reload the host big screen on the
     // standings screen. The reloaded page must re-GET /state and resume on the
@@ -185,7 +203,8 @@ test.describe('host reconnect mid-game', () => {
     await host.reload();
 
     await expect(host.locator('[data-phase-results]')).toBeVisible({ timeout: 20_000 });
-    await expect(host.locator('[data-testid="standings-bars"] [data-standings-row]')).toHaveCount(2, { timeout: 20_000 });
+    await expect(standingsRow(host, robin)).toBeVisible({ timeout: 20_000 });
+    await expect(standingsRow(host, quincy)).toBeVisible();
     await expect(host.locator('[data-enter-code]')).toBeHidden();
   });
 });
