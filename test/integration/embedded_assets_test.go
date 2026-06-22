@@ -47,7 +47,7 @@ func TestEmbeddedAssets_ServeOnlyBuiltOutput(t *testing.T) {
 		"/static/audio/sfx/answers-show.mp3",
 		"/static/audio/sfx/answer-correct.mp3",
 		"/static/audio/sfx/answer-wrong.mp3",
-		"/static/audio/sfx/reveal.mp3",
+		"/static/audio/sfx/answer-reveal.mp3",
 		"/static/audio/silence.wav",
 	}
 	for _, path := range served {

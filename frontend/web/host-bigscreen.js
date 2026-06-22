@@ -367,7 +367,7 @@ function hostBigScreen(joinCode, hasQuiz) {
             }
 
             if (this.phase === 'reveal') {
-                this.audio.playEffect('reveal');
+                this.audio.playEffect('answer-reveal');
             }
         },
 

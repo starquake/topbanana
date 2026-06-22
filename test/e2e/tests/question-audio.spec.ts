@@ -66,7 +66,7 @@ const QUESTION_SHOW_SFX = 'question-show';
 const ANSWERS_SHOW_SFX = 'answers-show';
 const ANSWER_CORRECT_SFX = 'answer-correct';
 const ANSWER_WRONG_SFX = 'answer-wrong';
-const REVEAL_SFX = 'reveal';
+const REVEAL_SFX = 'answer-reveal';
 // The clip URLs the DB stamps and /media serves; '/media/' tells a question clip
 // from an SFX in the play spy (the SFX live under /static/audio/sfx/).
 const CLIP_FRAGMENT = '/media/';
