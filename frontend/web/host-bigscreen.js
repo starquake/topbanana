@@ -333,17 +333,19 @@ function hostBigScreen(joinCode, hasQuiz) {
         //     round-start, which already played for the first round).
         //   - question (new question): question-show sting + the question's quiz
         //     clip (preloaded at start, so it plays immediately).
-        //   - reveal: answer-correct sting. There is no per-player pick on the
-        //     big screen, so it never plays answer-wrong.
+        //   - reveal: the reveal sting as the correct answer is shown. This is a
+        //     neutral "here is the answer" sound, NOT a pick result: there is no
+        //     per-player pick on the big screen, so answer-correct / answer-wrong
+        //     would be meaningless here (those play on the solo surface).
         // The answers-show sting fires from the read-beat -> answer-window
-        // transition in startCountdown's setRevealing hook, not here.
+        // transition in startCountdown's setRevealing hook, not here. The
+        // phase/question guard above makes each cue fire once per transition.
         applyAudioCues() {
             if (!this.audio) return;
             const qid = this.question ? this.question.id : null;
             if (this.phase === this.lastAudioPhase && qid === this.lastAudioQuestionId) {
                 return;
             }
-            const prevPhase = this.lastAudioPhase;
             this.lastAudioPhase = this.phase;
             this.lastAudioQuestionId = qid;
 
@@ -364,8 +366,8 @@ function hostBigScreen(joinCode, hasQuiz) {
                 return;
             }
 
-            if (this.phase === 'reveal' && prevPhase !== 'reveal') {
-                this.audio.playEffect('answer-correct');
+            if (this.phase === 'reveal') {
+                this.audio.playEffect('reveal');
             }
         },
 

@@ -36,6 +36,9 @@ const EFFECT_SRC = {
     'answers-show': '/static/audio/sfx/answers-show.mp3',
     'answer-correct': '/static/audio/sfx/answer-correct.mp3',
     'answer-wrong': '/static/audio/sfx/answer-wrong.mp3',
+    // The host big screen's reveal sting: a neutral "here is the answer" sound,
+    // not a per-player pick result (the big screen has no pick).
+    'reveal': '/static/audio/sfx/reveal.mp3',
 };
 
 // A repeat-flagged clip plays a fixed number of times with a fixed silent gap

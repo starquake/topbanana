@@ -66,6 +66,7 @@ const QUESTION_SHOW_SFX = 'question-show';
 const ANSWERS_SHOW_SFX = 'answers-show';
 const ANSWER_CORRECT_SFX = 'answer-correct';
 const ANSWER_WRONG_SFX = 'answer-wrong';
+const REVEAL_SFX = 'reveal';
 // The clip URLs the DB stamps and /media serves; '/media/' tells a question clip
 // from an SFX in the play spy (the SFX live under /static/audio/sfx/).
 const CLIP_FRAGMENT = '/media/';
@@ -602,7 +603,7 @@ test('the host big screen Start tap resumes the AudioContext, plays the round-st
   }
 });
 
-test('the host big screen plays the answer-correct reveal sting and the phone stays audio-free', async ({
+test('the host big screen plays the reveal sting (not a pick sting) and the phone stays audio-free', async ({
   page,
   context,
   baseURL,
@@ -626,14 +627,25 @@ test('the host big screen plays the answer-correct reveal sting and the phone st
 
     // Make the only player answer via the API so the runner closes the question
     // and moves the room into the reveal phase (the same path host-game.spec.ts
-    // uses). The host big screen then plays the answer-correct reveal sting.
+    // uses). At reveal the big screen lights the correct option.
     const optionId = await liveOptionId(caseyCtx.request, code, 'Correct');
     const answer = await caseyCtx.request.post(`/api/sessions/${code}/answer`, {
       data: { optionId },
     });
     expect(answer.status()).toBe(204);
 
-    await expect.poll(() => playsMatching(page, ANSWER_CORRECT_SFX), { timeout: 30_000 }).toBeGreaterThan(0);
+    // Wait until reveal is actually on screen (the correct option is lit).
+    await expect(page.locator('[data-answer-option][data-correct="true"]')).toHaveCount(1, {
+      timeout: 30_000,
+    });
+
+    // The big screen plays the dedicated reveal sting as the answer is shown...
+    await expect.poll(() => playsMatching(page, REVEAL_SFX), { timeout: 30_000 }).toBeGreaterThan(0);
+    // ...but NOT a pick sting: there is no per-player pick on the big screen, so
+    // answer-correct / answer-wrong would be meaningless here (those belong to the
+    // solo surface, where one device picks).
+    expect(await playsMatching(page, ANSWER_CORRECT_SFX)).toBe(0);
+    expect(await playsMatching(page, ANSWER_WRONG_SFX)).toBe(0);
 
     // The phone (answer pad) carries NO audio controls and never loaded Howler:
     // the live phone is answer-only.
