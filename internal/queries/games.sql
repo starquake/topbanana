@@ -77,9 +77,23 @@ ORDER BY game_question_id;
 -- suffix makes the lexical compare invert across a DST boundary and flip the
 -- in-progress dot (#789). The store binds value.UTC().Format(...) so both the
 -- stored column and the bound cutoff share one encoding.
+-- ON CONFLICT DO NOTHING: the UNIQUE INDEX on (game_id, question_id) prevents
+-- double-issuance when two concurrent /next calls race. A conflict yields
+-- sql.ErrNoRows; the store fetches the existing row via
+-- GetGameQuestionByGameAndQuestion and returns ErrQuestionAlreadyIssued so the
+-- service treats it as a resume.
 INSERT INTO game_questions (game_id, question_id, started_at, expired_at)
 VALUES (?, ?, CAST(sqlc.arg('started_at') AS TEXT), CAST(sqlc.arg('expired_at') AS TEXT))
+ON CONFLICT (game_id, question_id) DO NOTHING
 RETURNING *;
+
+-- name: GetGameQuestionByGameAndQuestion :one
+-- Fetches an existing game_questions row by (game_id, question_id). Used by
+-- the store's CreateQuestion to recover the winning row when ON CONFLICT DO
+-- NOTHING yields no rows (a concurrent /next race).
+SELECT *
+FROM game_questions
+WHERE game_id = ? AND question_id = ?;
 
 -- name: ListAnswersForQuizLeaderboard :many
 -- Selects the per-answer scoring inputs for every game of the given

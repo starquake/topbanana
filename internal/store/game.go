@@ -249,6 +249,12 @@ func execCreateGameAndParticipant(
 // counter cannot drift from the "game just became completed" transition that
 // fires alongside the final question.
 //
+// Returns [game.ErrQuestionAlreadyIssued] when a concurrent /next call already
+// inserted the same (game_id, question_id) row. The Question is populated with
+// the winning row's ID and timestamps so the caller can return it as a resume
+// rather than a duplicate. The play_count bump is skipped in this case because
+// the winning caller already handled it.
+//
 //nolint:revive // completesGame signals whether this insert completes the game (a play-count bump input), not a behavioural mode switch.
 func (s *GameStore) CreateQuestion(ctx context.Context, gq *game.Question, completesGame bool) error {
 	err := database.ExecTx(ctx, s.db, func(q *db.Queries) error {
@@ -262,6 +268,21 @@ func (s *GameStore) CreateQuestion(ctx context.Context, gq *game.Question, compl
 			},
 		)
 		if qerr != nil {
+			if errors.Is(qerr, sql.ErrNoRows) {
+				existing, gerr := q.GetGameQuestionByGameAndQuestion(ctx, db.GetGameQuestionByGameAndQuestionParams{
+					GameID:     gq.GameID,
+					QuestionID: gq.QuestionID,
+				})
+				if gerr != nil {
+					return fmt.Errorf("fetch existing game question after conflict: %w", gerr)
+				}
+				gq.ID = existing.ID
+				gq.StartedAt = existing.StartedAt
+				gq.ExpiredAt = existing.ExpiredAt
+
+				return game.ErrQuestionAlreadyIssued
+			}
+
 			return fmt.Errorf("create game question: %w", qerr)
 		}
 		gq.ID = row.ID

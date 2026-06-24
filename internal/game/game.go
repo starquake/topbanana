@@ -32,6 +32,13 @@ var (
 	// HandleAnswerPost for the recovery path (#353).
 	ErrAnswerAlreadyRecorded = errors.New("answer already recorded for this question")
 
+	// ErrQuestionAlreadyIssued is returned by [GameStore.CreateQuestion]
+	// when a concurrent /next call already inserted the same
+	// (game_id, question_id) row. The store populates the Question with
+	// the winning row's ID and timestamps before returning so the
+	// service can hand it back as a resume rather than a duplicate.
+	ErrQuestionAlreadyIssued = errors.New("question already issued for this game")
+
 	// ErrNoMoreQuestions is returned by [Service.GetNextQuestion] when
 	// every quiz question has already been issued for the game.
 	ErrNoMoreQuestions = errors.New("no more questions")

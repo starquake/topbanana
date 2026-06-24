@@ -1569,3 +1569,103 @@ func countParticipantRows(ctx context.Context, t *testing.T, db *sql.DB, playerI
 
 	return n
 }
+
+// TestService_GetNextQuestion_Race pins the UNIQUE INDEX on
+// game_questions(game_id, question_id): N concurrent /next calls on the same
+// game must produce exactly one game_questions row, not N. Without the index +
+// ON CONFLICT handling, a double-tap on "Next" would insert duplicate rows,
+// re-serving the same question and inflating play_count.
+func TestService_GetNextQuestion_Race(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := dbtest.Open(t)
+
+	qz := &quiz.Quiz{
+		Title:             "Next Race Quiz",
+		Slug:              "next-race-quiz",
+		Description:       "for the concurrent /next race test",
+		CreatedByPlayerID: seededAdminID,
+		Questions: []*quiz.Question{
+			{
+				Text:     "Q1",
+				Position: 1,
+				Options: []*quiz.Option{
+					{Text: "A", Correct: true},
+					{Text: "B"},
+				},
+			},
+		},
+	}
+	stores := store.New(db, slog.Default())
+	if cerr := stores.Quizzes.CreateQuiz(ctx, qz); cerr != nil {
+		t.Fatalf("CreateQuiz err = %v, want nil", cerr)
+	}
+
+	player, err := stores.Players.CreateAnonymousPlayer(ctx, "anon-next-race")
+	if err != nil {
+		t.Fatalf("CreateAnonymousPlayer err = %v, want nil", err)
+	}
+
+	svc := NewService(stores.Games, stores.Quizzes, slog.Default())
+	svc.SetLeaderboardPublisher(leaderboard.NewHub())
+
+	game, err := svc.CreateGame(ctx, qz.ID, player.ID)
+	if err != nil {
+		t.Fatalf("CreateGame err = %v, want nil", err)
+	}
+
+	const parallel = 4
+	var wg sync.WaitGroup
+	wg.Add(parallel)
+	results := make([]*Question, parallel)
+	errs := make([]error, parallel)
+
+	for i := range parallel {
+		go func(idx int) {
+			defer wg.Done()
+			gq, gerr := svc.GetNextQuestion(context.Background(), game.ID, player.ID)
+			results[idx] = gq
+			errs[idx] = gerr
+		}(i)
+	}
+	wg.Wait()
+
+	for i, gerr := range errs {
+		if gerr != nil {
+			t.Errorf("goroutine %d err = %v, want nil", i, gerr)
+		}
+		if results[i] == nil {
+			t.Errorf("goroutine %d returned nil question", i)
+
+			continue
+		}
+		if got, want := results[i].QuestionID, qz.Questions[0].ID; got != want {
+			t.Errorf("goroutine %d QuestionID = %d, want %d", i, got, want)
+		}
+	}
+
+	// The core assertion: exactly one game_questions row for (game, question).
+	// Without the UNIQUE index, the race would produce up to `parallel` rows.
+	rowCount := countGameQuestionRows(ctx, t, db, game.ID, qz.Questions[0].ID)
+	if got, want := rowCount, 1; got != want {
+		t.Errorf("game_questions rows for (game=%s, question=%d) = %d, want %d",
+			game.ID, qz.Questions[0].ID, got, want)
+	}
+}
+
+// countGameQuestionRows pulls the row count for a (game_id, question_id) pair
+// directly from the DB. The UNIQUE INDEX should make this either 0 or 1.
+func countGameQuestionRows(ctx context.Context, t *testing.T, db *sql.DB, gameID string, questionID int64) int {
+	t.Helper()
+	row := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM game_questions WHERE game_id = ? AND question_id = ?`,
+		gameID, questionID,
+	)
+	var n int
+	if err := row.Scan(&n); err != nil {
+		t.Fatalf("QueryRow.Scan err = %v, want nil", err)
+	}
+
+	return n
+}
