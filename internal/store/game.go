@@ -298,6 +298,10 @@ func (s *GameStore) CreateQuestion(ctx context.Context, gq *game.Question, compl
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, game.ErrQuestionAlreadyIssued) {
+			return game.ErrQuestionAlreadyIssued
+		}
+
 		return fmt.Errorf("failed to create game question: %w", err)
 	}
 
