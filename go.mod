@@ -3,7 +3,7 @@ module github.com/starquake/topbanana
 go 1.25.7
 
 require (
-	github.com/coreos/go-oidc/v3 v3.18.0
+	github.com/coreos/go-oidc/v3 v3.19.0
 	github.com/google/go-cmp v0.7.0
 	github.com/gosimple/slug v1.15.0
 	github.com/pressly/goose/v3 v3.27.1
