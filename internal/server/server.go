@@ -65,6 +65,10 @@ func New(
 	mux := http.NewServeMux()
 	addRoutes(mux, logger, stores, gameService, realtime, cfg, mail)
 	var handler http.Handler = mux
+	// securityHeaders is the innermost wrapper so the security headers land on
+	// w.Header() before any handler writes the response, including the 500
+	// recoverPanic emits on a handler panic (the headers survive the unwind).
+	handler = securityHeaders(cfg)(handler)
 	handler = logRequests(handler)
 	// recoverPanic wraps logRequests so a handler panic still captures the
 	// request fields logRequests would have recorded and the 500 reaches the

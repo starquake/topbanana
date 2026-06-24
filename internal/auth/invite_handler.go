@@ -32,9 +32,6 @@ func HandleAcceptInviteForm(logger *slog.Logger, csrfMgr *csrf.Manager, invites 
 	invalid := newTemplateRenderer(logger, csrfMgr, "auth/pages/accept_invite_invalid.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Strip the raw token from any cross-origin Referer the browser
-		// might leak (Google Fonts on base.gohtml is the notable case).
-		w.Header().Set("Referrer-Policy", "no-referrer")
 		raw := r.URL.Query().Get("token")
 		if !inviteLivePreflight(r, logger, invites, raw) {
 			invalid.Render(w, r, http.StatusGone, invitePageData{Title: "Invite"})

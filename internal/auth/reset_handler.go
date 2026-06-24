@@ -31,9 +31,6 @@ func HandleResetForm(
 	invalid := newTemplateRenderer(logger, csrfMgr, "auth/pages/reset_password_invalid.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Strip raw token from any cross-origin Referer the browser
-		// might leak (Google Fonts on base.gohtml is the notable case).
-		w.Header().Set("Referrer-Policy", "no-referrer")
 		raw := r.URL.Query().Get("token")
 		if !resetTokenLivePreflight(r, logger, tokens, raw) {
 			invalid.Render(w, r, http.StatusGone, resetPageData{Title: "Reset link"})
