@@ -3,9 +3,9 @@ import { importQuiz, setQuizMode } from './helpers';
 
 // #1050 — hosting a session needs the big-screen lobby, which does not fit on a
 // phone, so on the host picker (/host/quizzes) the "Host this" button is hidden
-// below the md breakpoint and a plain "use a larger screen" note takes its
-// place. These specs pin that the right one shows at each width by visibility,
-// not pixel geometry, so they stay deterministic.
+// below the md breakpoint and a monitor icon takes its place (#1058). These
+// specs pin that the right one shows at each width by visibility, not pixel
+// geometry, so they stay deterministic.
 
 const MOBILE = { width: 390, height: 844 } as const;
 const WIDE = { width: 1280, height: 800 } as const;

@@ -98,10 +98,13 @@
      cluster sits on `relative z-10` to stay clickable above the card body. */}}
 {{define "quiz_card_actions_host"}}
     {{/* Hosting needs the big-screen lobby, which is unusable on a phone, so
-         below md the action is a plain note instead of a button that overflows
-         the card (#1050). */}}
+         below md the action is an icon with a tooltip instead of a button that
+         overflows the card (#1050). The monitor icon conveys "use a larger
+         screen" without the multi-line text wrap (#1058). */}}
     <div class="relative z-10 ml-auto flex items-center gap-1">
-        <span data-testid="host-needs-larger-screen-{{.ID}}" class="md:hidden text-[0.7rem] uppercase tracking-[0.12em] text-text-mute">Use a larger screen to host</span>
+        <span data-testid="host-needs-larger-screen-{{.ID}}" class="md:hidden inline-flex items-center justify-center w-9 h-9 text-text-mute" title="Use a larger screen to host" aria-label="Use a larger screen to host">
+            <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+        </span>
         {{if .HostHasRunningGame}}
             <button type="button" data-testid="host-action-{{.ID}}" onclick="openModal('modal-restart-host-{{.ID}}')" class="hidden md:inline-flex btn-primary">Change quiz</button>
         {{else}}
