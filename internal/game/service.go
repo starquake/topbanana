@@ -285,14 +285,12 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string, playerID i
 		return gq, nil
 	}
 
-	// Create a lookup map for questions already asked in this game
 	askedQuestions := make(map[int64]bool)
 	for _, gqs := range g.Questions {
 		askedQuestions[gqs.QuestionID] = true
 	}
 
 	var nextQuestion *quiz.Question
-	// Find the first question in the quiz that hasn't been asked yet
 	for _, q := range qz.Questions {
 		if !askedQuestions[q.ID] {
 			nextQuestion = q
@@ -305,12 +303,9 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string, playerID i
 		return nil, ErrNoMoreQuestions
 	}
 
-	// Register the chosen quiz question as a GameQuestion. The answer
-	// window (StartedAt -> ExpiredAt) is anchored at now + revealDelay,
-	// not "now" - the reveal delay gives the player a brief beat to
-	// read the question before the option buttons appear (#247).
-	// Submissions before StartedAt are scored as if they arrived AT
-	// StartedAt (see CalculateScore's clamp).
+	// The answer window (StartedAt -> ExpiredAt) is anchored at now +
+	// revealDelay, not "now" - the reveal delay gives the player a brief
+	// beat to read the question before the option buttons appear (#247).
 	revealAt := time.Now().Add(s.revealDelay)
 	gq := &Question{
 		GameID:       gameID,
@@ -326,6 +321,10 @@ func (s *Service) GetNextQuestion(ctx context.Context, gameID string, playerID i
 	}
 	applyRoundProgress(gq, qz)
 	if err = s.store.CreateQuestion(ctx, gq, completesGame(gq)); err != nil {
+		if errors.Is(err, ErrQuestionAlreadyIssued) {
+			return gq, nil
+		}
+
 		return nil, fmt.Errorf("failed to record game question: %w", err)
 	}
 
@@ -647,6 +646,10 @@ func (s *Service) issueQuestion(
 	}
 	applyRoundProgress(gq, qz)
 	if err := s.store.CreateQuestion(ctx, gq, completesGame(gq)); err != nil {
+		if errors.Is(err, ErrQuestionAlreadyIssued) {
+			return gq, nil
+		}
+
 		return nil, fmt.Errorf("failed to record game question: %w", err)
 	}
 
