@@ -62,7 +62,8 @@ WHERE game_question_id = ?;
 -- game_question_id so callers can partition rows per question in a
 -- single pass. Replaces the N+1 pattern of calling
 -- ListAnswersByGameQuestionID once per issued question (#356); the
--- game_id column is already covered by the FK's implicit index.
+-- UNIQUE(game_id, player_id, game_question_id) constraint serves as
+-- the index for the game_id filter.
 SELECT *
 FROM game_answers
 WHERE game_id = ?
