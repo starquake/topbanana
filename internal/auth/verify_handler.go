@@ -68,11 +68,6 @@ func HandleVerifyEmail(
 	renderer := newTemplateRenderer(logger, csrfMgr, "auth/pages/verify_email.gohtml")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Strip the raw token from any cross-origin Referer the browser
-		// would otherwise send (Google Fonts on base.gohtml is the
-		// notable case). Modern defaults strip the query already; the
-		// explicit no-referrer header pins the behaviour on older UAs.
-		w.Header().Set("Referrer-Policy", "no-referrer")
 		raw := r.URL.Query().Get("token")
 		if raw == "" {
 			renderer.Render(w, r, http.StatusBadRequest, verifyEmailPageData{
