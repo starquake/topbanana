@@ -345,8 +345,9 @@ function hostBigScreen(joinCode, hasQuiz) {
             }
 
             if (this.phase === 'question' && this.question) {
-                this.audio.playEffect(SFX.questionShow);
-                if (this.question.audioUrl) this.audio.playClip(this.question.id);
+                this.audio.playEffectThen(SFX.questionShow, () => {
+                    if (this.question.audioUrl) this.audio.playClip(this.question.id);
+                });
 
                 return;
             }

@@ -38,6 +38,9 @@ const EFFECT_SRC = {
 const REPEAT_PLAYS = 3;
 const REPEAT_GAP_MS = 1000;
 
+// SFX play below full volume so they don't compete with question audio clips.
+const SFX_VOLUME = 0.5;
+
 // Per-clip and overall preload caps so a slow/failed clip can never hang start.
 const PRELOAD_CLIP_TIMEOUT_MS = 8000;
 const PRELOAD_BUDGET_MS = 12000;
@@ -104,7 +107,7 @@ export function createAudioEngine(view) {
         keepContextAlive();
         for (const [name, src] of Object.entries(EFFECT_SRC)) {
             if (effects[name]) continue;
-            effects[name] = new Howl({ src: [src], preload: true, html5: false, mute: muted() });
+            effects[name] = new Howl({ src: [src], preload: true, html5: false, mute: muted(), volume: SFX_VOLUME });
         }
     }
 
@@ -137,6 +140,29 @@ export function createAudioEngine(view) {
             howl.play();
         } catch {
             // An SFX is non-critical.
+        }
+    }
+
+    // Play an SFX then fire callback once it ends, so a question clip can follow
+    // the question-show sting without overlapping it. Token-guarded: a question
+    // advance or teardown during the SFX bumps sequenceToken and the callback
+    // no-ops. If muted or the Howl is missing, the callback fires immediately so
+    // the clip still plays.
+    function playEffectThen(name, callback) {
+        if (muted()) { callback(); return; }
+        const howl = effects[name];
+        if (!howl) { callback(); return; }
+        const token = sequenceToken;
+        try {
+            howl.once('end', () => {
+                if (token === sequenceToken) callback();
+            });
+            howl.once('stop', () => {
+                if (token === sequenceToken) callback();
+            });
+            howl.play();
+        } catch {
+            callback();
         }
     }
 
@@ -386,6 +412,7 @@ export function createAudioEngine(view) {
         preloadEffects,
         unlock,
         playEffect,
+        playEffectThen,
         preloadClips,
         playClip,
         replayClip,

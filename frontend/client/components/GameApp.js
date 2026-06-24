@@ -730,10 +730,11 @@ export class GameApp {
         // Reset the manual-play fallback for the new question; playClip re-flags
         // it only if the preloaded clip is missing / failed.
         this.audioBlocked = false;
-        // Question shown (#1088): the question-show sting, then the preloaded quiz
-        // clip (engine guards it once per question).
-        this.audio.playEffect(SFX.questionShow);
-        if (item.audioUrl) this.audio.playClip(item.id);
+        // Question shown (#1088): play the question-show sting, then the
+        // preloaded quiz clip once the sting ends so they don't overlap.
+        this.audio.playEffectThen(SFX.questionShow, () => {
+            if (item.audioUrl) this.audio.playClip(item.id);
+        });
         this.startRevealCountdown();
     }
 
