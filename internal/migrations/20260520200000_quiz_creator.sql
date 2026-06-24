@@ -137,8 +137,22 @@ BEGIN
 END;
 -- +goose StatementEnd
 
+-- A bare PRAGMA foreign_key_check only RETURNS the violating rows; goose
+-- discards that result set, so on its own it cannot stop a broken rebuild from
+-- committing. This guard turns "a FK violation exists" into a failed INSERT
+-- that aborts the migration: the CHECK (ok = 1) rejects the 0 produced when
+-- pragma_foreign_key_check returns any row.
 -- +goose StatementBegin
-PRAGMA foreign_key_check;
+CREATE TEMP TABLE _fk_guard (ok INTEGER CHECK (ok = 1));
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+INSERT INTO _fk_guard (ok)
+SELECT CASE WHEN (SELECT count(*) FROM pragma_foreign_key_check) = 0 THEN 1 ELSE 0 END;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+DROP TABLE _fk_guard;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
@@ -241,8 +255,19 @@ BEGIN
 END;
 -- +goose StatementEnd
 
+-- Same enforcing FK guard as the Up: abort the migration if the rebuild
+-- left any dangling reference, rather than silently re-enabling FKs.
 -- +goose StatementBegin
-PRAGMA foreign_key_check;
+CREATE TEMP TABLE _fk_guard (ok INTEGER CHECK (ok = 1));
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+INSERT INTO _fk_guard (ok)
+SELECT CASE WHEN (SELECT count(*) FROM pragma_foreign_key_check) = 0 THEN 1 ELSE 0 END;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+DROP TABLE _fk_guard;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
