@@ -18,7 +18,7 @@ const cspExpected = `default-src 'self'; ` +
 	`img-src 'self'; ` +
 	`font-src 'self'; ` +
 	`connect-src 'self'; ` +
-	`media-src 'self'; ` +
+	`media-src 'self' blob:; ` +
 	`worker-src 'self'; ` +
 	`object-src 'none'; ` +
 	`base-uri 'none'; ` +
