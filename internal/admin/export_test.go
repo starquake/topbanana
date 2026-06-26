@@ -167,3 +167,16 @@ func ParseUploadCounts(r *http.Request) (uploaded, failed, cancelled int) {
 
 // UploadCountCeiling exposes the unexported clamp value for tests.
 const UploadCountCeiling = uploadCountCeiling
+
+// WriteQuizArchive exposes the unexported quiz-archive writer so the external
+// admin_test package can pin the manifest + media bundling without driving the
+// full HTTP handler (#1113).
+var WriteQuizArchive = writeQuizArchive
+
+// ArchiveFormatVersion exposes the on-disk manifest version constant so the
+// export test can assert the stamped value without hard-coding it.
+const ArchiveFormatVersion = archiveFormatVersion
+
+// ArchiveExtForMedia exposes the unexported MIME-to-archive-extension mapper so
+// the export test can pin every branch without driving the full exporter.
+var ArchiveExtForMedia = archiveExtForMedia
