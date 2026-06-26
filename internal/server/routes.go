@@ -588,6 +588,18 @@ func addMediaRoutes(
 	requireGameHost := func(h http.Handler) http.Handler {
 		return auth.RequireGameHost(auth.RequireVerifiedEmail(h), stores.Players, sessions, csrfMgr, logger)
 	}
+
+	// Per-quiz archive export (#1113): a read-only GET that streams the quiz
+	// tree plus its referenced media as a .zip. Gated like the other read-only
+	// admin quiz routes (requireGameHost; a download needs no CSRF); the handler
+	// adds the per-quiz creator-or-admin gate. It depends on the media service
+	// (Get + Open) via the narrow admin.MediaArchiver interface, which *svc
+	// satisfies.
+	mux.Handle(
+		"GET /admin/quizzes/{quizID}/export",
+		requireGameHost(admin.HandleQuizExport(logger, stores.Quizzes, svc)),
+	)
+
 	uploadBudget := mediahttp.NewUploadBudgetLimiter(cfg.MediaUploadBudget, cfg.MediaUploadBudgetWindow)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/media",
