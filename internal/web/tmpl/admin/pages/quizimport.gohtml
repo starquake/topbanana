@@ -27,6 +27,10 @@
         </div>
     {{end}}
 
+    {{/* The two one-shot import forms sit side by side on the widest screens
+         (xl+), where the shell is wide enough for two ~500px columns; they
+         stack on anything narrower. */}}
+    <div class="grid gap-8 xl:grid-cols-2 items-start">
     <section aria-label="Import a quiz archive" class="form-shell">
         <h2 class="label-eyebrow mb-3 text-text">Import an archive</h2>
         <p class="mb-4 text-text-dim text-[0.9rem]">
@@ -79,7 +83,7 @@
         </form>
     </section>
 
-    <form class="form-shell mt-12" action="/admin/quizzes/import" method="POST">
+    <form class="form-shell" action="/admin/quizzes/import" method="POST">
         <input type="hidden" name="csrf_token" value="{{csrfToken}}">
 
         <h2 class="label-eyebrow mb-3 text-text">Paste JSON</h2>
@@ -113,6 +117,7 @@
             <a href="/admin/quizzes" class="btn-ghost">Cancel</a>
         </div>
     </form>
+    </div>
 
     <section aria-label="LLM prompt" class="form-shell mt-12">
         <h2 class="label-eyebrow mb-3 text-text">Prompt to paste</h2>
