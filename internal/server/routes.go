@@ -600,6 +600,8 @@ func addMediaRoutes(
 		requireGameHost(admin.HandleQuizExport(logger, stores.Quizzes, svc)),
 	)
 
+	addQuizImportArchiveRoute(mux, logger, stores, csrfMgr, svc, cfg, requireGameHost)
+
 	uploadBudget := mediahttp.NewUploadBudgetLimiter(cfg.MediaUploadBudget, cfg.MediaUploadBudgetWindow)
 	mux.Handle(
 		"POST /admin/quizzes/{quizID}/media",
@@ -655,6 +657,34 @@ func addMediaRoutes(
 	}
 	mux.Handle("GET /media/{id}", mediahttp.HandleMediaServe(logger, svc, stores.Quizzes, viewer))
 	mux.Handle("GET /media/{id}/thumb", mediahttp.HandleMediaThumb(logger, svc, stores.Quizzes, viewer))
+}
+
+// addQuizImportArchiveRoute registers the quiz-archive import POST (#1113): a
+// multipart upload that restores a quiz plus its media from an exported .zip.
+// Split out of addMediaRoutes so that function stays under revive's
+// function-length cap. The multipart middleware caps the body at
+// MEDIA_IMPORT_MAX_BYTES (well above the per-image cap, since the archive bundles
+// a whole library) and parses the form so the CSRF token in PostForm is visible;
+// the importer then bounds zip-bomb expansion via the per-entry and total
+// uncompressed guards. A modest per-host import budget reuses the upload-budget
+// limiter, charged once per import.
+func addQuizImportArchiveRoute(
+	mux *http.ServeMux,
+	logger *slog.Logger,
+	stores *store.Stores,
+	csrfMgr *csrf.Manager,
+	svc *media.Service,
+	cfg *config.Config,
+	requireGameHost func(http.Handler) http.Handler,
+) {
+	budget := mediahttp.NewUploadBudgetLimiter(cfg.MediaImportBudget, cfg.MediaImportBudgetWindow)
+	limits := admin.NewArchiveImportLimits(cfg.MediaImageMaxBytes, cfg.MediaAudioMaxBytes, cfg.MediaImportMaxBytes)
+	mux.Handle(
+		"POST /admin/quizzes/import/archive",
+		mediahttp.MaxMultipartFormMiddlewareWithLimit(cfg.MediaImportMaxBytes, csrfMgr.Middleware(requireGameHost(
+			admin.HandleQuizImportArchive(logger, csrfMgr, stores.Quizzes, svc, budget, limits),
+		))),
+	)
 }
 
 // addAdminQuestionRoutes registers the question CRUD + reorder routes

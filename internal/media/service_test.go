@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -651,5 +652,37 @@ func TestServiceSweepStaleNotReadyDropsRowAndFiles(t *testing.T) {
 	}
 	if _, err = fx.svc.Get(t.Context(), readyMedia.ID); err != nil {
 		t.Errorf("Get(ready) err = %v, want nil (ready rows never swept)", err)
+	}
+}
+
+// TestService_RemoveQuizDir pins the rollback helper (#1113): it removes a
+// quiz's whole on-disk media directory, and removing a directory that does not
+// exist is not an error.
+func TestService_RemoveQuizDir(t *testing.T) {
+	t.Parallel()
+
+	fx := newServiceWithQuiz(t)
+
+	if _, err := fx.svc.StoreImage(
+		t.Context(), fx.quizID, seededAdminID, bytes.NewReader(pngUpload(t, 64, 64)),
+	); err != nil {
+		t.Fatalf("StoreImage err = %v, want nil", err)
+	}
+
+	quizDir := filepath.Join(fx.root, strconv.FormatInt(fx.quizID, 10))
+	if _, err := os.Stat(quizDir); err != nil {
+		t.Fatalf("quiz dir stat err = %v, want it to exist after an upload", err)
+	}
+
+	if err := fx.svc.RemoveQuizDir(fx.quizID); err != nil {
+		t.Fatalf("RemoveQuizDir err = %v, want nil", err)
+	}
+	if _, err := os.Stat(quizDir); !os.IsNotExist(err) {
+		t.Errorf("quiz dir stat err = %v, want not-exist after RemoveQuizDir", err)
+	}
+
+	// Removing an absent directory (a quiz that never had an upload) is a no-op.
+	if err := fx.svc.RemoveQuizDir(fx.quizID + 999); err != nil {
+		t.Errorf("RemoveQuizDir(absent) err = %v, want nil", err)
 	}
 }

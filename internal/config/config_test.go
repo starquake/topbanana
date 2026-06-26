@@ -1001,6 +1001,151 @@ func TestParse_MediaImageMaxBytes(t *testing.T) {
 	})
 }
 
+func TestParse_MediaImportMaxBytes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid values", func(t *testing.T) {
+		t.Parallel()
+
+		tests := []struct {
+			name  string
+			value string
+			want  int64
+		}{
+			{"unset defaults", "", MediaImportMaxBytesDefault},
+			{"explicit zero disables", "0", 0},
+			{"parses a value", "1048576", 1048576},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+
+				getenv := func(key string) string {
+					if key == "MEDIA_IMPORT_MAX_BYTES" {
+						return tt.value
+					}
+					if key == "APP_ENV" {
+						return "development"
+					}
+
+					return ""
+				}
+
+				c, err := Parse(getenv)
+				if err != nil {
+					t.Fatalf("Parse() err = %v, want nil", err)
+				}
+				if got, want := c.MediaImportMaxBytes, tt.want; got != want {
+					t.Errorf("MediaImportMaxBytes = %d, want %d", got, want)
+				}
+			})
+		}
+	})
+
+	t.Run("unparseable value returns error", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := Parse(getenvFailure("MEDIA_IMPORT_MAX_BYTES", "huge"))
+		if err == nil {
+			t.Fatal("Parse() with invalid MEDIA_IMPORT_MAX_BYTES: err = nil, want non-nil")
+		}
+		if got, want := err.Error(), "invalid MEDIA_IMPORT_MAX_BYTES"; !strings.Contains(got, want) {
+			t.Errorf("err.Error() = %q, should contain %q", got, want)
+		}
+	})
+
+	t.Run("negative value returns error", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := Parse(getenvFailure("MEDIA_IMPORT_MAX_BYTES", "-1"))
+		if got, want := err, ErrMediaImportMaxBytesNegative; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+}
+
+func TestParse_MediaImportBudget(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid values", func(t *testing.T) {
+		t.Parallel()
+
+		tests := []struct {
+			name  string
+			value string
+			want  int
+		}{
+			{"unset defaults", "", MediaImportBudgetDefault},
+			{"explicit zero disables", "0", 0},
+			{"parses a value", "5", 5},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+
+				getenv := func(key string) string {
+					if key == "MEDIA_IMPORT_BUDGET" {
+						return tt.value
+					}
+					if key == "APP_ENV" {
+						return "development"
+					}
+
+					return ""
+				}
+
+				c, err := Parse(getenv)
+				if err != nil {
+					t.Fatalf("Parse() err = %v, want nil", err)
+				}
+				if got, want := c.MediaImportBudget, tt.want; got != want {
+					t.Errorf("MediaImportBudget = %d, want %d", got, want)
+				}
+			})
+		}
+	})
+
+	t.Run("negative value returns error", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := Parse(getenvFailure("MEDIA_IMPORT_BUDGET", "-1"))
+		if got, want := err, ErrMediaImportBudgetNegative; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+}
+
+func TestParse_MediaImportBudgetWindow(t *testing.T) {
+	t.Parallel()
+
+	t.Run("unset defaults", func(t *testing.T) {
+		t.Parallel()
+
+		c, err := Parse(func(key string) string {
+			if key == "APP_ENV" {
+				return "development"
+			}
+
+			return ""
+		})
+		if err != nil {
+			t.Fatalf("Parse() err = %v, want nil", err)
+		}
+		if got, want := c.MediaImportBudgetWindow, MediaImportBudgetWindowDefault; got != want {
+			t.Errorf("MediaImportBudgetWindow = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("negative value returns error", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := Parse(getenvFailure("MEDIA_IMPORT_BUDGET_WINDOW", "-1s"))
+		if got, want := err, ErrMediaImportBudgetWindowNegative; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+}
+
 func TestParse_AdminEmails(t *testing.T) {
 	t.Parallel()
 

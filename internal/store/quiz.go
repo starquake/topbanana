@@ -383,6 +383,28 @@ func (s *QuizStore) UpdateQuestion(ctx context.Context, qs *quiz.Question) error
 	return nil
 }
 
+// SetQuestionMedia patches only a question's media references (#1113), leaving
+// its text, position, time limit, and options untouched. The archive importer
+// uses it to wire each restored question to its newly assigned media.
+func (s *QuizStore) SetQuestionMedia(
+	ctx context.Context, questionID int64, imageMediaID, audioMediaID *int64, audioRepeat bool,
+) error {
+	res, err := s.q.SetQuestionMedia(ctx, db.SetQuestionMediaParams{
+		ImageMediaID: nullableInt64(imageMediaID),
+		AudioMediaID: nullableInt64(audioMediaID),
+		AudioRepeat:  boolToInt64(audioRepeat),
+		ID:           questionID,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to set question media: %w", err)
+	}
+	if database.MustRowsAffected(res) == 0 {
+		return quiz.ErrUpdatingQuestionNoRowsAffected
+	}
+
+	return nil
+}
+
 // createQuestionAtNextPositionRetries caps the optimistic retry loop in
 // [QuizStore.CreateQuestionAtNextPosition] so two genuinely concurrent
 // callers eventually serialize without spinning forever. Three attempts

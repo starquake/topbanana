@@ -1658,6 +1658,91 @@ func seedQuizMedia(t *testing.T, db *sql.DB, quizID int64) int64 {
 	return created.ID
 }
 
+// TestQuizStore_SetQuestionMedia pins the media-only patch (#1113): it sets a
+// question's image and audio ids plus the repeat flag without touching the
+// question's text, position, or options, clears them on a nil patch, and returns
+// the no-rows sentinel for an unknown id.
+func TestQuizStore_SetQuestionMedia(t *testing.T) {
+	t.Parallel()
+
+	t.Run("sets and clears media references", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+		mediaStore := NewMediaStore(db, slog.Default())
+
+		testQuiz := newTestQuizzes()[0]
+		if err := quizStore.CreateQuiz(t.Context(), testQuiz); err != nil {
+			t.Fatalf("CreateQuiz err = %v, want nil", err)
+		}
+		imageID := seedQuizMedia(t, db, testQuiz.ID)
+		audioRow, err := mediaStore.CreateMedia(t.Context(), newAudioMediaRow(testQuiz.ID))
+		if err != nil {
+			t.Fatalf("CreateMedia (audio) err = %v, want nil", err)
+		}
+
+		question := testQuiz.Questions[0]
+		originalText := question.Text
+		originalOptionCount := len(question.Options)
+
+		if err = quizStore.SetQuestionMedia(t.Context(), question.ID, &imageID, &audioRow.ID, true); err != nil {
+			t.Fatalf("SetQuestionMedia err = %v, want nil", err)
+		}
+
+		gotQ, err := quizStore.GetQuestion(t.Context(), question.ID)
+		if err != nil {
+			t.Fatalf("GetQuestion err = %v, want nil", err)
+		}
+		if gotQ.ImageMediaID == nil || *gotQ.ImageMediaID != imageID {
+			t.Errorf("ImageMediaID = %v, want %d", gotQ.ImageMediaID, imageID)
+		}
+		if gotQ.AudioMediaID == nil || *gotQ.AudioMediaID != audioRow.ID {
+			t.Errorf("AudioMediaID = %v, want %d", gotQ.AudioMediaID, audioRow.ID)
+		}
+		if !gotQ.AudioRepeat {
+			t.Error("AudioRepeat = false, want true")
+		}
+		// The patch must not rewrite the question's text or options.
+		if got, want := gotQ.Text, originalText; got != want {
+			t.Errorf("Text = %q, want %q (patch must not touch text)", got, want)
+		}
+		if got, want := len(gotQ.Options), originalOptionCount; got != want {
+			t.Errorf("option count = %d, want %d (patch must not touch options)", got, want)
+		}
+
+		// A nil patch clears both references.
+		if err = quizStore.SetQuestionMedia(t.Context(), question.ID, nil, nil, false); err != nil {
+			t.Fatalf("SetQuestionMedia (clear) err = %v, want nil", err)
+		}
+		gotQ, err = quizStore.GetQuestion(t.Context(), question.ID)
+		if err != nil {
+			t.Fatalf("GetQuestion err = %v, want nil", err)
+		}
+		if gotQ.ImageMediaID != nil {
+			t.Errorf("ImageMediaID = %v, want nil after clear", *gotQ.ImageMediaID)
+		}
+		if gotQ.AudioMediaID != nil {
+			t.Errorf("AudioMediaID = %v, want nil after clear", *gotQ.AudioMediaID)
+		}
+		if gotQ.AudioRepeat {
+			t.Error("AudioRepeat = true, want false after clear")
+		}
+	})
+
+	t.Run("unknown id returns no-rows sentinel", func(t *testing.T) {
+		t.Parallel()
+
+		db := dbtest.Open(t)
+		quizStore := NewQuizStore(db, slog.Default())
+
+		err := quizStore.SetQuestionMedia(t.Context(), 999999, nil, nil, false)
+		if got, want := err, quiz.ErrUpdatingQuestionNoRowsAffected; !errors.Is(got, want) {
+			t.Errorf("err = %v, want %v", got, want)
+		}
+	})
+}
+
 func TestQuizStore_ImageMediaID(t *testing.T) {
 	t.Parallel()
 

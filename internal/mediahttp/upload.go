@@ -524,8 +524,21 @@ func authorizeQuizEdit(
 // yields 400 before the token check, so an oversized upload cannot slip past
 // as a CSRF failure.
 func MaxMultipartFormMiddleware(next http.Handler) http.Handler {
+	return MaxMultipartFormMiddlewareWithLimit(maxUploadRequestBytes, next)
+}
+
+// MaxMultipartFormMiddlewareWithLimit is MaxMultipartFormMiddleware with a
+// caller-supplied body cap. The quiz-archive import route mounts it with
+// MEDIA_IMPORT_MAX_BYTES so a much larger (whole-library) upload is bounded by
+// its own knob rather than the image-upload cap (#1113); a maxBytes of zero or
+// less means "no cap" (rely on the server-wide limits). It otherwise behaves
+// identically: it bumps the read deadline, parses the multipart form so the CSRF
+// token is visible, and cleans up any spilled temp files.
+func MaxMultipartFormMiddlewareWithLimit(maxBytes int64, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, maxUploadRequestBytes)
+		if maxBytes > 0 {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+		}
 		// The server-wide ReadTimeout is short so an ordinary slow handler
 		// gets killed quickly. Uploads can legitimately stream for minutes on
 		// a slow phone connection though, so bump the per-connection read

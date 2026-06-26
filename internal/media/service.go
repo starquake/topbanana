@@ -149,6 +149,22 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
+// RemoveQuizDir removes a quiz's entire on-disk media directory
+// (<root>/<quizID>/) best-effort. It is the filesystem half of dropping a
+// quiz's library: the quiz-delete cascade removes the media rows, but nothing
+// unlinks their files, so a failed import's rollback calls this to leave no
+// orphaned files behind (#1113). A missing directory is not an error. The path
+// is the same id-keyed subdir StoreImage / StoreAudio write into, joined to the
+// confined root, so a caller cannot reach outside the media tree.
+func (s *Service) RemoveQuizDir(quizID int64) error {
+	dir := filepath.Join(s.root, strconv.FormatInt(quizID, decimalBase))
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("removing quiz media directory: %w", err)
+	}
+
+	return nil
+}
+
 // SweepStaleNotReady removes media rows still not-ready past
 // StaleNotReadyThreshold and unlinks their files (#992). A row stays not-ready
 // only between CreateMedia and the final MarkMediaReady; one lingering past the
