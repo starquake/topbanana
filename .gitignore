@@ -40,6 +40,10 @@ go.work.sum
 .env.*
 !.env.example
 
+# Uploaded media (default MEDIA_DIR; see internal/config). Runtime uploads,
+# never tracked.
+media/
+
 # Editor/IDE
 # .idea/
 # .vscode/
