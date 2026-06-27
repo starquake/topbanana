@@ -1074,6 +1074,12 @@ func (s *Service) populateInGame(ctx context.Context, state *SessionState) error
 	if sess.Phase != PhaseQuestion && sess.Phase != PhaseReveal {
 		return nil
 	}
+	// A quiz-less room never reaches the question phase normally; guard the
+	// deref so an unusual quiz-less in-game state (e.g. a re-arm race) degrades
+	// to no live question rather than panicking, matching the sibling populators.
+	if state.Quiz == nil {
+		return nil
+	}
 
 	for _, q := range state.Quiz.Questions {
 		if q.ID == *sess.CurrentQuestionID {
