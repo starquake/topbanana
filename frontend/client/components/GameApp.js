@@ -15,6 +15,14 @@ const PLAY_PATH_PATTERN = /^\/play\/.+-(\d+)\/?$/;
 export class GameApp {
     constructor() {
         this.quizzes = [];
+        // True when the quiz-list fetch failed (network / 5xx) rather than
+        // returning a genuinely empty catalogue. Drives the start-screen
+        // error + Retry affordance (#1120); without it a load failure was
+        // swallowed into an empty list and looked the same as "no quizzes".
+        this.quizzesError = false;
+        // True while the Retry fetch is in flight, so the Retry button
+        // disables and a double-tap can't fire two loads.
+        this.quizzesRetrying = false;
         this.selectedQuizId = null;
         this.gameId = null;
         this.question = null;
@@ -161,21 +169,60 @@ export class GameApp {
         this.audio = createAudioEngine(this);
         this.audio.preloadEffects();
         // Kick off both in parallel; neither depends on the other.
-        // playerService.getMe is best-effort: a null result just means
-        // the claim affordances stay hidden, the rest of the page is
-        // unaffected. quizService.getQuizzes throws on non-2xx (#287);
-        // a startup-time list failure is similarly best-effort — the
-        // page renders an empty state and the player can refresh
-        // later instead of seeing an uncaught rejection.
-        const [quizzesResult, player] = await Promise.all([
-            quizService.getQuizzes().catch(err => {
-                console.error('init: getQuizzes failed', err);
-                return [];
-            }),
+        // playerService.getMe is best-effort: a null result just means the
+        // claim affordances stay hidden, the rest of the page is unaffected.
+        // loadQuizzes records its own error state (#1120) so a list failure
+        // surfaces a Retry affordance instead of looking like an empty
+        // catalogue.
+        const [quizzesOk, player] = await Promise.all([
+            this.loadQuizzes(),
             playerService.getMe(),
         ]);
-        this.quizzes = quizzesResult;
         this.player = player;
+        // A list failure leaves the start screen on its error + Retry state
+        // (#1120); the deep-link resolution and resume probe both need the
+        // loaded list, so defer them until a successful (re)load.
+        if (quizzesOk) await this.resolveStartState();
+    }
+
+    // loadQuizzes fetches the quiz catalogue used for deep-link resolution
+    // and the picker. quizService.getQuizzes throws on non-2xx (#287);
+    // rather than swallowing that into an empty list (indistinguishable
+    // from a genuinely empty catalogue), it records quizzesError so the
+    // start screen can show a Retry affordance (#1120). Returns true on
+    // success.
+    async loadQuizzes() {
+        this.quizzesError = false;
+        try {
+            this.quizzes = await quizService.getQuizzes();
+            return true;
+        } catch (err) {
+            console.error('loadQuizzes failed', err);
+            this.quizzes = [];
+            this.quizzesError = true;
+            return false;
+        }
+    }
+
+    // retryLoadQuizzes re-runs the catalogue fetch from the start-screen
+    // Retry button (#1120). On success it clears the error and resolves the
+    // deep-link / resume start state the initial load deferred. The
+    // quizzesRetrying guard disables the button while the fetch is in
+    // flight so a double-tap can't fire two loads.
+    async retryLoadQuizzes() {
+        if (this.quizzesRetrying) return;
+        this.quizzesRetrying = true;
+        try {
+            if (await this.loadQuizzes()) await this.resolveStartState();
+        } finally {
+            this.quizzesRetrying = false;
+        }
+    }
+
+    // resolveStartState runs the deep-link resolution and the resume probe
+    // once the quiz list is in hand. Split out of init so the Retry path
+    // (#1120) can re-run it after a recovered load.
+    async resolveStartState() {
         const deepLinked = this.findDeepLinkedQuiz();
         if (deepLinked) {
             this.deepLinkedQuiz = deepLinked;

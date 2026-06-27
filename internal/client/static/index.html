@@ -202,6 +202,27 @@
                  the leaderboard stays directly under the CTA on
                  revisits — see the CTA comment above. -->
             <div x-show="!gameId">
+                {{/* Quiz-list load failure (#1120): the catalogue fetch
+                     errored (network / 5xx) rather than returning an empty
+                     list, so show an explicit error + Retry instead of the
+                     picker / "not available" copy a swallowed failure used
+                     to leave in place. resolveStartState (and so
+                     startStateResolved) is deferred on a failed load, so the
+                     picker and deep-link blocks below stay hidden while this
+                     is up. */}}
+                <template x-if="quizzesError">
+                    <div class="feedback-banner feedback-danger mb-6" role="alert" data-testid="quizzes-error">
+                        <p>Couldn't load the quiz list.</p>
+                        <button type="button"
+                                class="btn-primary mt-3"
+                                data-testid="quizzes-retry"
+                                :disabled="quizzesRetrying"
+                                @click="retryLoadQuizzes()">
+                            <span x-show="!quizzesRetrying">Retry</span>
+                            <span x-show="quizzesRetrying">Loading...</span>
+                        </button>
+                    </div>
+                </template>
                 {{/* Stale / hidden deep link (#802): the URL matched
                      /play/{slug-id} but the id resolved to no available
                      quiz, so note it above the picker instead of dropping
