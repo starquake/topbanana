@@ -200,6 +200,10 @@ export class JoinApp {
         // Running count of consecutive non-404 GET /state failures, reset to 0
         // on any success.
         this.stateFailures = 0;
+        // Guards the connection-trouble banner's "Reconnect now" control (#1121)
+        // so a double-tap does not fire two overlapping recoveries, and drives
+        // the button's in-flight "Reconnecting..." label.
+        this.reconnecting = false;
 
         // --- Exit-session confirm (#888) ------------------------------------
         // exitConfirmOpen drives the destructive-confirm modal the lobby's
@@ -870,6 +874,26 @@ export class JoinApp {
     // duplicate over a still-connected one.
     streamDropped() {
         return !this.eventSource || this.eventSource.readyState === EventSource.CLOSED;
+    }
+
+    // reconnectNow forces an immediate recovery from the connection-trouble
+    // state instead of waiting for the next automatic retry (an SSE tick or a
+    // return to the foreground), wired to the banner's "Reconnect now" control
+    // (#1121). It reuses the same path the foreground-return recovery uses:
+    // re-open the SSE stream and re-read authoritative state right away. A good
+    // read clears the trouble banner; a 404 flips the closed view. subscribe()
+    // runs first so refreshState()'s 404 path can tear down the stream it just
+    // opened. The reconnecting guard absorbs a double-tap and labels the button.
+    async reconnectNow() {
+        if (this.reconnecting) return;
+        if (this.step !== 'lobby' || !this.code) return;
+        this.reconnecting = true;
+        try {
+            this.subscribe();
+            await this.refreshState();
+        } finally {
+            this.reconnecting = false;
+        }
     }
 
     // subscribe opens the SSE event channel and re-reads state on every tick.
