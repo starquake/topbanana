@@ -92,6 +92,22 @@ var ErrMediaAudioMaxBytesNegative = errors.New("MEDIA_AUDIO_MAX_BYTES must not b
 // value is meaningless; zero is allowed and disables the cap.
 var ErrMediaImageMaxBytesNegative = errors.New("MEDIA_IMAGE_MAX_BYTES must not be negative")
 
+// ErrMediaImportMaxBytesNegative is returned when MEDIA_IMPORT_MAX_BYTES parses
+// to a negative integer. It caps the uploaded quiz-archive (.zip) body, so a
+// negative value is meaningless; zero is allowed and disables the cap.
+var ErrMediaImportMaxBytesNegative = errors.New("MEDIA_IMPORT_MAX_BYTES must not be negative")
+
+// ErrMediaImportBudgetNegative is returned when MEDIA_IMPORT_BUDGET parses to a
+// negative integer. It is the per-host quiz-archive import allowance over the
+// rolling window, so a negative value is meaningless; zero is allowed and
+// disables the limiter.
+var ErrMediaImportBudgetNegative = errors.New("MEDIA_IMPORT_BUDGET must not be negative")
+
+// ErrMediaImportBudgetWindowNegative is returned when MEDIA_IMPORT_BUDGET_WINDOW
+// parses to a negative duration. It is the rolling window the per-host import
+// budget is measured over, so a negative value is meaningless.
+var ErrMediaImportBudgetWindowNegative = errors.New("MEDIA_IMPORT_BUDGET_WINDOW must not be negative")
+
 // ErrSMTPConfigIncomplete is returned when SMTP env vars are partially
 // populated. SMTP is opt-in (an unconfigured instance still boots and
 // the no-op mailer kicks in), but a partial configuration is almost
@@ -196,6 +212,22 @@ const (
 	// repeated here rather than imported so config does not depend on the media
 	// package.
 	MediaImageMaxBytesDefault int64 = 10 << 20
+
+	// MediaImportMaxBytesDefault is the default cap on an uploaded quiz-archive
+	// (.zip) request body (~64 MB, #1113). The archive bundles a quiz's whole
+	// media library, so it sits well above a single image/audio cap while still
+	// bounding the bytes one import can stream; zip-bomb expansion is bounded
+	// separately by the per-entry and total uncompressed caps in the importer.
+	MediaImportMaxBytesDefault int64 = 64 << 20
+
+	// MediaImportBudgetDefault is the default per-host quiz-archive import
+	// allowance over MediaImportBudgetWindow (#1113). An import is a heavy
+	// operation (full media restore), so the budget is modest; zero disables it.
+	MediaImportBudgetDefault = 10
+
+	// MediaImportBudgetWindowDefault is the default rolling window the per-host
+	// import budget is measured over.
+	MediaImportBudgetWindowDefault = time.Minute
 
 	// sessionKeyByteLength is the length in bytes of an ephemeral session key generated for development.
 	sessionKeyByteLength = 32
@@ -325,6 +357,25 @@ type Config struct {
 	// Defaults to MediaImageMaxBytesDefault (~10 MB). Parsed from
 	// MEDIA_IMAGE_MAX_BYTES; zero disables the cap.
 	MediaImageMaxBytes int64
+
+	// MediaImportMaxBytes caps an uploaded quiz-archive (.zip) request body in
+	// bytes (#1113). Defaults to MediaImportMaxBytesDefault (~64 MB). Parsed from
+	// MEDIA_IMPORT_MAX_BYTES. The importer reads the whole archive into memory (zip
+	// needs a ReaderAt), so this body cap is the outer bound on that buffer AND the
+	// total uncompressed budget. Zero disables the cap, leaving the import body
+	// bounded only by the server-wide read limits - set a real value in any
+	// internet-facing deployment so a single host cannot drive an unbounded
+	// allocation.
+	MediaImportMaxBytes int64
+
+	// MediaImportBudget is the maximum number of quiz-archive imports one host
+	// may run within MediaImportBudgetWindow (#1113). Defaults to 10. Parsed from
+	// MEDIA_IMPORT_BUDGET; zero disables the limiter.
+	MediaImportBudget int
+
+	// MediaImportBudgetWindow is the rolling window MediaImportBudget is measured
+	// over. Defaults to 1 minute. Parsed from MEDIA_IMPORT_BUDGET_WINDOW.
+	MediaImportBudgetWindow time.Duration
 
 	// GoogleClientID, GoogleClientSecret, and GoogleRedirectURL are the
 	// Google OAuth 2.0 credentials issued in the Google Cloud Console.
@@ -529,6 +580,9 @@ func defaultConfig() Config {
 		MediaQuizImageLimit:     MediaQuizImageLimitDefault,
 		MediaAudioMaxBytes:      MediaAudioMaxBytesDefault,
 		MediaImageMaxBytes:      MediaImageMaxBytesDefault,
+		MediaImportMaxBytes:     MediaImportMaxBytesDefault,
+		MediaImportBudget:       MediaImportBudgetDefault,
+		MediaImportBudgetWindow: MediaImportBudgetWindowDefault,
 	}
 }
 
@@ -693,8 +747,34 @@ func parseMediaUploadLimits(getenv func(string) string, c *Config) error {
 		return err
 	}
 
-	return parseNonNegativeInt64(
+	if err := parseNonNegativeInt64(
 		getenv, "MEDIA_IMAGE_MAX_BYTES", ErrMediaImageMaxBytesNegative, &c.MediaImageMaxBytes,
+	); err != nil {
+		return err
+	}
+
+	return parseMediaImportLimits(getenv, c)
+}
+
+// parseMediaImportLimits reads the quiz-archive import env vars (#1113) into c:
+// the request-body cap and the per-host import budget over its window. Split out
+// of parseMediaUploadLimits so each stays within the function-length limit. Each
+// is non-negative; zero disables the corresponding guard.
+func parseMediaImportLimits(getenv func(string) string, c *Config) error {
+	if err := parseNonNegativeInt64(
+		getenv, "MEDIA_IMPORT_MAX_BYTES", ErrMediaImportMaxBytesNegative, &c.MediaImportMaxBytes,
+	); err != nil {
+		return err
+	}
+
+	if err := parseNonNegativeInt(
+		getenv, "MEDIA_IMPORT_BUDGET", ErrMediaImportBudgetNegative, &c.MediaImportBudget,
+	); err != nil {
+		return err
+	}
+
+	return parseNonNegativeDuration(
+		getenv, "MEDIA_IMPORT_BUDGET_WINDOW", ErrMediaImportBudgetWindowNegative, &c.MediaImportBudgetWindow,
 	)
 }
 

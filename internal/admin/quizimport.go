@@ -131,6 +131,12 @@ type quizImportPageData struct {
 	Error       string
 	Mode        string
 	ModeOptions []string
+	// VisibilityOptions feeds the archive-import form's visibility override
+	// selector (#1113). It is empty on the paste-JSON render, which has no
+	// visibility selector; the template only iterates it inside the archive
+	// form. The archive form's default option ("use the archive's visibility")
+	// is rendered statically, so this is just the explicit overrides.
+	VisibilityOptions []string
 }
 
 // HandleQuizImportForm renders the JSON-import page. The textarea is empty
@@ -141,9 +147,10 @@ func HandleQuizImportForm(logger *slog.Logger, csrfMgr *csrf.Manager) http.Handl
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		renderer.Render(w, r, http.StatusOK, quizImportPageData{
-			Title:       "Admin Dashboard - Import Quiz",
-			Example:     quizImportExample,
-			ModeOptions: quiz.ModeValues(),
+			Title:             "Admin Dashboard - Import Quiz",
+			Example:           quizImportExample,
+			ModeOptions:       quiz.ModeValues(),
+			VisibilityOptions: quiz.VisibilityValues(),
 		})
 	})
 }
@@ -158,12 +165,13 @@ func HandleQuizImportSave(logger *slog.Logger, csrfMgr *csrf.Manager, quizStore 
 
 	renderStatus := func(w http.ResponseWriter, r *http.Request, status int, jsonText, mode, msg string) {
 		renderer.Render(w, r, status, quizImportPageData{
-			Title:       "Admin Dashboard - Import Quiz",
-			JSON:        jsonText,
-			Example:     quizImportExample,
-			Error:       msg,
-			Mode:        mode,
-			ModeOptions: quiz.ModeValues(),
+			Title:             "Admin Dashboard - Import Quiz",
+			JSON:              jsonText,
+			Example:           quizImportExample,
+			Error:             msg,
+			Mode:              mode,
+			ModeOptions:       quiz.ModeValues(),
+			VisibilityOptions: quiz.VisibilityValues(),
 		})
 	}
 	renderErr := func(w http.ResponseWriter, r *http.Request, jsonText, mode, msg string) {

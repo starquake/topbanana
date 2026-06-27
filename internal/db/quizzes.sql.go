@@ -870,6 +870,35 @@ func (q *Queries) QuizExists(ctx context.Context, id int64) (bool, error) {
 	return quiz_exists, err
 }
 
+const setQuestionMedia = `-- name: SetQuestionMedia :execresult
+UPDATE questions
+SET image_media_id = ?,
+    audio_media_id = ?,
+    audio_repeat   = ?
+WHERE id = ?
+`
+
+type SetQuestionMediaParams struct {
+	ImageMediaID sql.NullInt64
+	AudioMediaID sql.NullInt64
+	AudioRepeat  int64
+	ID           int64
+}
+
+// Patches only a question's media references (#1113): the restored image and
+// audio media ids plus the audio repeat flag. Used by the archive importer
+// after the quiz exists and its media rows have been re-stored, so it can wire
+// each question to its newly assigned media without rewriting the question's
+// text, position, or options the way UpdateQuestion would.
+func (q *Queries) SetQuestionMedia(ctx context.Context, arg SetQuestionMediaParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, setQuestionMedia,
+		arg.ImageMediaID,
+		arg.AudioMediaID,
+		arg.AudioRepeat,
+		arg.ID,
+	)
+}
+
 const updateOption = `-- name: UpdateOption :execresult
 UPDATE options
 SET text = ?,

@@ -1,9 +1,11 @@
 package mediahttp_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -247,4 +249,73 @@ func TestSummarize(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestMaxMultipartFormMiddlewareWithLimit pins the caller-supplied body cap on
+// the parameterized multipart middleware (#1113): a body over the cap yields 400
+// before the inner handler runs; a body under the cap parses and the inner
+// handler runs with the multipart form available.
+func TestMaxMultipartFormMiddlewareWithLimit(t *testing.T) {
+	t.Parallel()
+
+	buildMultipart := func(t *testing.T, payload []byte) (body *bytes.Buffer, contentType string) {
+		t.Helper()
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		part, err := mw.CreateFormFile("archive", "q.zip")
+		if err != nil {
+			t.Fatalf("CreateFormFile err = %v, want nil", err)
+		}
+		if _, err = part.Write(payload); err != nil {
+			t.Fatalf("write part err = %v, want nil", err)
+		}
+		if err = mw.Close(); err != nil {
+			t.Fatalf("multipart Close err = %v, want nil", err)
+		}
+
+		return &buf, mw.FormDataContentType()
+	}
+
+	t.Run("body over cap is rejected before the handler", func(t *testing.T) {
+		t.Parallel()
+
+		body, contentType := buildMultipart(t, bytes.Repeat([]byte("x"), 4096))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", body)
+		req.Header.Set("Content-Type", contentType)
+
+		var ran bool
+		inner := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { ran = true })
+		rr := httptest.NewRecorder()
+		mediahttp.MaxMultipartFormMiddlewareWithLimit(64, inner).ServeHTTP(rr, req)
+
+		if got, want := rr.Code, http.StatusBadRequest; got != want {
+			t.Errorf("status = %d, want %d", got, want)
+		}
+		if ran {
+			t.Error("inner handler ran, want it skipped for an over-cap body")
+		}
+	})
+
+	t.Run("body under cap reaches the handler with the form parsed", func(t *testing.T) {
+		t.Parallel()
+
+		body, contentType := buildMultipart(t, []byte("small"))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", body)
+		req.Header.Set("Content-Type", contentType)
+
+		var ran, hasForm bool
+		inner := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			ran = true
+			hasForm = r.MultipartForm != nil && len(r.MultipartForm.File["archive"]) == 1
+		})
+		rr := httptest.NewRecorder()
+		mediahttp.MaxMultipartFormMiddlewareWithLimit(1<<20, inner).ServeHTTP(rr, req)
+
+		if !ran {
+			t.Fatal("inner handler did not run for an under-cap body")
+		}
+		if !hasForm {
+			t.Error("inner handler did not see the parsed multipart archive part")
+		}
+	})
 }

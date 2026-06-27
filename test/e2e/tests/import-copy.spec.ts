@@ -25,7 +25,9 @@ test.describe('quiz import copy button', () => {
   test('play-mode selector requires an explicit choice before submit', async ({ page }) => {
     await page.goto('/admin/quizzes/import');
 
-    const modeSelect = page.locator('select[name="mode"]');
+    // The paste-JSON form's mode select; scoped by id so it is not confused
+    // with the archive-import form's own name="mode" override select (#1113).
+    const modeSelect = page.locator('select#mode');
     await expect(modeSelect).toBeVisible();
     // No mode is pre-selected: the empty placeholder option is current.
     await expect(modeSelect).toHaveValue('');

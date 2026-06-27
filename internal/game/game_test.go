@@ -206,6 +206,10 @@ func (stubQuizStore) CreateQuestionAtNextPosition(_ context.Context, _ *quiz.Que
 }
 func (stubQuizStore) UpdateQuestion(_ context.Context, _ *quiz.Question) error { return errStub }
 
+func (stubQuizStore) SetQuestionMedia(_ context.Context, _ int64, _, _ *int64, _ bool) error {
+	return errStub
+}
+
 func (stubQuizStore) SwapQuestionPositions(_ context.Context, _, _ int64, _ string) error {
 	return errStub
 }

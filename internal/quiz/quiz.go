@@ -69,6 +69,14 @@ type Store interface {
 	CreateQuestionAtNextPosition(ctx context.Context, qs *Question) error
 	// UpdateQuestion updates a question.
 	UpdateQuestion(ctx context.Context, qs *Question) error
+	// SetQuestionMedia patches only a question's media references - its image
+	// and audio media ids and the audio repeat flag - without touching the
+	// question's text, position, time limit, or options (#1113). The archive
+	// importer uses it to wire each restored question to its newly assigned
+	// media after the quiz and its media rows exist. A nil id stores NULL,
+	// clearing that reference. Returns ErrUpdatingQuestionNoRowsAffected when
+	// the id does not match a row.
+	SetQuestionMedia(ctx context.Context, questionID int64, imageMediaID, audioMediaID *int64, audioRepeat bool) error
 	// SwapQuestionPositions swaps the question with questionID against
 	// its neighbour on the given side ("up" = previous position,
 	// "down" = next position) within the same quiz, atomically.

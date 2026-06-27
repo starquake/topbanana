@@ -198,6 +198,18 @@ SET text               = ?,
     time_limit_seconds = ?
 WHERE id = ?;
 
+-- name: SetQuestionMedia :execresult
+-- Patches only a question's media references (#1113): the restored image and
+-- audio media ids plus the audio repeat flag. Used by the archive importer
+-- after the quiz exists and its media rows have been re-stored, so it can wire
+-- each question to its newly assigned media without rewriting the question's
+-- text, position, or options the way UpdateQuestion would.
+UPDATE questions
+SET image_media_id = ?,
+    audio_media_id = ?,
+    audio_repeat   = ?
+WHERE id = ?;
+
 -- name: MoveQuestionToRound :execresult
 -- Reassigns a question to a different round within the same quiz (#444).
 -- Position is unchanged - questions stay in quiz-wide position order, so
