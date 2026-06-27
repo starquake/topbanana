@@ -177,6 +177,34 @@ SELECT changes();`;
   }
 }
 
+// attachQuizImage stamps an image media row onto every question of a quiz by
+// title, shelling out to the sqlite3 CLI the same way attachQuizAudio does. The
+// /media/{id} bytes are never written to disk, so a spec that wants the broken
+// image state routes /media to 404 (or lets the server miss the file). The
+// question payloads then carry the /media/{id} imageUrl that the <img> tries to
+// load.
+export function attachQuizImage(title: string): void {
+  const dataDir = process.env.TOPBANANA_E2E_DATA_DIR;
+  if (!dataDir) {
+    throw new Error('TOPBANANA_E2E_DATA_DIR is not set; helpers cannot stamp quiz image');
+  }
+  const dbFile = join(dataDir, `e2e-${test.info().parallelIndex}.db`);
+  const escapedTitle = title.replace(/'/g, "''");
+  const sql = `
+INSERT INTO media (quiz_id, type, mime, path, size_bytes, sha256, created_by_player_id, ready)
+SELECT q.id, 'image', 'image/png', 'e2e-missing.png', 64, 'e2e', q.created_by_player_id, 1
+FROM quizzes q WHERE q.title = '${escapedTitle}';
+UPDATE questions
+SET image_media_id = last_insert_rowid()
+WHERE quiz_id = (SELECT id FROM quizzes WHERE title = '${escapedTitle}');
+SELECT changes();`;
+  const output = execSqlite(dbFile, sql);
+  const changed = Number.parseInt(output, 10);
+  if (!(changed >= 1)) {
+    throw new Error(`attachQuizImage(${title}): expected >=1 question linked, got ${changed}`);
+  }
+}
+
 // csrfTokenPattern scrapes the hidden csrf_token input a server-rendered
 // form carries (the import form, the login form, ...). Tolerant of attribute
 // order: the value may sit before or after the name attribute on the input.

@@ -444,11 +444,21 @@
                              needed below. -->
                         <div class="flex-1 min-h-0 flex items-center justify-center">
                             <template x-if="question.imageUrl">
-                                <img :src="question.imageUrl" alt="" loading="lazy"
-                                     data-testid="question-image"
-                                     x-show="!imageError"
-                                     @error="imageError = true"
-                                     class="block mx-auto w-auto max-w-full max-h-[24vh] lg:max-h-[36vh] object-contain rounded-lg">
+                                <div class="flex items-center justify-center">
+                                    <img :src="question.imageUrl" alt="" loading="lazy"
+                                         data-testid="question-image"
+                                         x-show="!imageError"
+                                         @error="imageError = true"
+                                         class="block mx-auto w-auto max-w-full max-h-[24vh] lg:max-h-[36vh] object-contain rounded-lg">
+                                    <!-- Stands in for a broken image so the slot
+                                         explains the missing media instead of
+                                         collapsing to an empty gap (#1119). -->
+                                    <div x-show="imageError"
+                                         data-testid="question-image-placeholder"
+                                         class="flex items-center justify-center px-6 py-8 rounded-lg border border-dashed border-border bg-surface text-text-dim text-sm">
+                                        Image unavailable
+                                    </div>
+                                </div>
                             </template>
                         </div>
 
