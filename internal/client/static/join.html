@@ -172,8 +172,18 @@
                  submits one answer per question. -->
             <div x-show="step === 'lobby'">
                 <template x-if="sessionClosed">
-                    <div class="feedback-banner feedback-danger mb-6" role="alert" data-testid="lobby-closed">
-                        This game is no longer available.
+                    <div class="feedback-banner feedback-danger mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+                         role="alert" data-testid="lobby-closed">
+                        <span>This game is no longer available.</span>
+                        <!-- The session is gone (host ended it, it expired, or
+                             the player was removed), so re-joining the same code
+                             would not work; the actionable next step is back to
+                             the enter-code screen (#1121). The remembered session
+                             was cleared when the closed state was entered, so
+                             /join shows a fresh enter-code form. -->
+                        <a href="/join"
+                           class="btn-primary shrink-0 self-start sm:self-auto"
+                           data-testid="lobby-closed-back">Back to join</a>
                     </div>
                 </template>
 
@@ -184,8 +194,20 @@
                      read. A 404 flips sessionClosed instead, so this never stacks
                      with the closed banner above. -->
                 <template x-if="!sessionClosed && connectionTrouble">
-                    <div class="feedback-banner feedback-danger mb-6" role="status" data-testid="connection-trouble">
-                        Connection problem, retrying...
+                    <div class="feedback-banner feedback-danger mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+                         role="status" data-testid="connection-trouble">
+                        <span>Connection problem, retrying...</span>
+                        <!-- The automatic retry runs off every SSE tick and
+                             foreground return, but a wedged connection can sit
+                             with no tick; this control forces an immediate
+                             re-subscribe + state re-read so the player is not
+                             stuck waiting (#1121). -->
+                        <button type="button"
+                                class="btn-ghost shrink-0 self-start sm:self-auto"
+                                data-testid="reconnect-now"
+                                :disabled="reconnecting"
+                                @click="reconnectNow()"
+                                x-text="reconnecting ? 'Reconnecting...' : 'Reconnect now'"></button>
                     </div>
                 </template>
 
