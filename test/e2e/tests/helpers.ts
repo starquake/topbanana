@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 
-import type { APIRequestContext } from '@playwright/test';
+import type { APIRequestContext, Response } from '@playwright/test';
 
 import type { Locator, Page } from './fixtures';
 import { test, expect } from './fixtures';
@@ -249,22 +249,69 @@ export async function seedQuiz(
   });
 }
 
-export async function createQuizWithQuestions(
-  page: Page,
-  title: string,
-  questions: readonly QuestionSpec[] = QUIZ_QUESTIONS,
-): Promise<void> {
-  // Create the quiz; the save handler redirects to the quiz view at
-  // /admin/quizzes/{id}, where each question is added in turn.
+// submitNewQuizForm fills and submits the create-quiz form, binding the wait to
+// the Save POST so it can never race the navigation, and returns that response.
+// The create handler 303-redirects to /admin/quizzes/{id} on success; a non-303
+// re-renders the form in place at /admin/quizzes (a 400 field error, a 409 slug
+// collision, ...), which clicking-then-asserting-the-URL would otherwise surface
+// only as an opaque toHaveURL timeout on the bare list URL (#1090).
+async function submitNewQuizForm(page: Page, title: string): Promise<Response> {
   await page.goto('/admin/quizzes/new');
   await page.locator('input[name=title]').fill(title);
   // The description is rendered as a <textarea> on the redesigned form,
   // not an <input>. The :is() selector keeps the helper resilient to either.
   await page.locator(':is(input, textarea)[name=description]').fill('E2E generated quiz');
-  await page.getByRole('button', { name: 'Save' }).click();
-  await expect(page).toHaveURL(/\/admin\/quizzes\/\d+$/);
+  const [saveResp] = await Promise.all([
+    page.waitForResponse(
+      (r) => r.request().method() === 'POST' && new URL(r.url()).pathname === '/admin/quizzes',
+    ),
+    page.getByRole('button', { name: 'Save' }).click(),
+  ]);
+  return saveResp;
+}
 
-  for (const [index, q] of questions.entries()) {
+// deleteQuizByTitle removes a quiz the admin owns by exact title, no-op if none
+// exists. The admin delete route cascades through the quiz's questions, media,
+// games, and sessions, so it leaves no leftovers for the next create.
+async function deleteQuizByTitle(page: Page, title: string): Promise<void> {
+  await page.goto('/admin/quizzes');
+  const link = page.getByRole('link', { name: title, exact: true });
+  if ((await link.count()) === 0) return;
+  const href = await link.first().getAttribute('href');
+  const quizID = /\/admin\/quizzes\/(\d+)/.exec(href ?? '')?.[1];
+  if (!quizID) throw new Error(`deleteQuizByTitle(${title}): no quiz id in href ${href}`);
+  const csrfToken = await page.locator('input[name="csrf_token"]').first().inputValue();
+  const resp = await page.request.post(`/admin/quizzes/${quizID}/delete`, { form: { csrf_token: csrfToken } });
+  if (!resp.ok()) {
+    throw new Error(`deleteQuizByTitle(${title}): delete ${quizID} -> ${resp.status()} ${await resp.text()}`);
+  }
+}
+
+export async function createQuizWithQuestions(
+  page: Page,
+  title: string,
+  questions: readonly QuestionSpec[] = QUIZ_QUESTIONS,
+): Promise<void> {
+  // Create the quiz, then add each question in turn on the quiz view. A worker
+  // keeps one SQLite DB for its whole life, and the quiz slug is derived from
+  // the title (the sole UNIQUE column), so re-creating the same title in a
+  // worker - under --repeat-each, or on a Playwright retry that re-runs this
+  // helper - hits a 409 slug collision. On that collision, delete the leftover
+  // quiz and re-create so every attempt starts from a pristine quiz rather than
+  // dead-ending on the create redirect or inheriting a prior run's state (#1090).
+  let saveResp = await submitNewQuizForm(page, title);
+  if (saveResp.status() === 409) {
+    await deleteQuizByTitle(page, title);
+    saveResp = await submitNewQuizForm(page, title);
+  }
+  if (saveResp.status() !== 303) {
+    throw new Error(
+      `quiz Save (POST /admin/quizzes) returned ${saveResp.status()}, expected a 303 redirect; body=${await saveResp.text()}`,
+    );
+  }
+  await page.waitForURL(/\/admin\/quizzes\/\d+$/);
+
+  for (const q of questions) {
     // Each round carries its own "Add question" button now (#929); the
     // imported quiz has a single default round, so the first match is it.
     // The link targets the round-scoped create form, so the URL carries a
@@ -272,12 +319,9 @@ export async function createQuizWithQuestions(
     await page.getByRole('link', { name: /add question/i }).first().click();
     await expect(page).toHaveURL(/\/admin\/quizzes\/\d+\/questions\/new\?round_id=\d+$/);
 
-    // Question text became a <textarea> in the redesign.
+    // Question text became a <textarea> in the redesign. Position is
+    // auto-assigned by the server now (#16) - no input field on the form.
     await page.locator(':is(input, textarea)[name=text]').fill(q.text);
-    // Position is auto-assigned by the server now (#16) — no input field
-    // on the question form. The index variable is kept on the for-of
-    // signature so future helpers can use it without re-binding.
-    void index;
     for (let i = 0; i < q.options.length; i++) {
       await page.locator(`input[name="option[${i}].text"]`).fill(q.options[i]);
       if (q.correctIndices.includes(i)) {
