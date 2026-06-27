@@ -176,9 +176,8 @@ type Question struct {
 	QuestionID   int64
 	QuizQuestion *quiz.Question
 	StartedAt    time.Time
-	// TODO: change this to time duration like 10s instead of timestamp?
-	ExpiredAt time.Time
-	Answers   []*Answer
+	ExpiredAt    time.Time
+	Answers      []*Answer
 	// Position is the 1-indexed ordinal of this question in the
 	// game's issued sequence ("Q 3 of 4"). Populated by
 	// [Service.GetNextQuestion]; zero on Questions loaded from the

@@ -154,7 +154,7 @@ linters:
       allow-unused: true
     godox:
       keywords:
-#        - TODO     # will be enabled in the future
+        - TODO
         - BUG
         - FIXME
   exclusions:
