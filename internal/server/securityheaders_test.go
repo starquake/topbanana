@@ -59,6 +59,30 @@ func TestSecurityHeaders_SetsAllHeaders(t *testing.T) {
 			t.Errorf("header %q = %q, want %q", k, got, want)
 		}
 	}
+	if got, want := rec.Header().Get("Server"), ""; got != want {
+		t.Errorf("Server header = %q, want %q (absent)", got, want)
+	}
+}
+
+// TestSecurityHeaders_SuppressesServer pins that the middleware suppresses the
+// Server response header (a little stack-fingerprinting hardening). A Server
+// value is seeded before the middleware runs so the test fails if the
+// middleware stops clearing it, not just if net/http happens not to add one.
+func TestSecurityHeaders_SuppressesServer(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{AppEnvironment: config.AppEnvironmentProduction}
+	handler := securityHeaders(cfg)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	rec := httptest.NewRecorder()
+	rec.Header().Set("Server", "topbanana")
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil))
+
+	if got, want := rec.Header().Get("Server"), ""; got != want {
+		t.Errorf("Server header = %q, want %q (absent)", got, want)
+	}
 }
 
 // TestSecurityHeaders_HSTSGatedOnSecureCookies pins that HSTS is only set when

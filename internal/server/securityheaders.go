@@ -43,6 +43,11 @@ func securityHeaders(cfg *config.Config) func(http.Handler) http.Handler {
 			h.Set("X-Content-Type-Options", "nosniff")
 			h.Set("Referrer-Policy", "no-referrer")
 			h.Set("X-Frame-Options", "DENY")
+			// Suppress the Server header to drop a little stack fingerprinting.
+			// A nil map entry is the net/http-documented way to suppress a
+			// response header: nothing is emitted for the key, and any value an
+			// earlier layer set is cleared.
+			h["Server"] = nil
 			if cfg.SecureCookies() {
 				h.Set("Strict-Transport-Security", strictTransportSecurity)
 			}
