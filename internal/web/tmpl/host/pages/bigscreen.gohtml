@@ -168,11 +168,21 @@
                          genuine question change in applyState) hides a broken
                          image. */}}
                     <template x-if="question.imageUrl">
-                        <img :src="question.imageUrl" alt="" loading="lazy"
-                             data-testid="question-image"
-                             x-show="!imageError"
-                             @error="imageError = true"
-                             class="block mx-auto shrink-0 w-auto max-w-full max-h-[clamp(8rem,30vh,18rem)] object-contain rounded-lg">
+                        <div class="shrink-0 flex items-center justify-center">
+                            <img :src="question.imageUrl" alt="" loading="lazy"
+                                 data-testid="question-image"
+                                 x-show="!imageError"
+                                 @error="imageError = true"
+                                 class="block mx-auto w-auto max-w-full max-h-[clamp(8rem,30vh,18rem)] object-contain rounded-lg">
+                            {{/* Stands in for a broken image so the slot explains
+                                 the missing media instead of collapsing to an
+                                 empty gap (#1119). */}}
+                            <div x-show="imageError"
+                                 data-testid="question-image-placeholder"
+                                 class="flex items-center justify-center px-8 py-10 rounded-lg border border-dashed border-border bg-surface text-text-dim text-[clamp(0.9rem,1.6vw,1.25rem)]">
+                                Image unavailable
+                            </div>
+                        </div>
                     </template>
 
                     {{/* Question audio controls (#1088): mute silences the clip +
