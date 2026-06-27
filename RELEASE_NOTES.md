@@ -2,6 +2,31 @@
 
 What changed in each released version of Top Banana! The per-PR engineering history lives on each [GitHub release](https://github.com/starquake/topbanana/releases).
 
+## v2026.6.7 — 2026-06-27
+
+This release adds audio to quiz questions, and quiz export and import as an archive that includes a quiz's images and sounds.
+
+### Players
+- A question can play an audio clip on the solo play screen and the big screen.
+- An audio loading screen shows while a question's audio loads.
+- Question audio continues to play on later questions, including on iOS.
+- Sound effects during a game are updated, play at a lower volume, and a question's audio plays after the sound effect finishes.
+- In a live game, the answer options are shuffled for each session.
+- A solo game no longer repeats the current question when advancing to the next one.
+
+### Hosts
+- A quiz can be exported as an archive file that includes its images and sounds.
+- A quiz archive can be imported to recreate the quiz with its images and sounds; pasting quiz JSON is still available.
+- An audio clip can be uploaded to a quiz and attached to a question, with an optional description.
+- A question's audio can repeat up to three times.
+
+### Visual / chrome
+- The host quiz picker shows a monitor icon in place of the larger-screen note.
+
+### Behind the scenes
+- The app sends browser security headers: a content security policy, MIME-type and clickjacking protections, and HSTS over HTTPS.
+- Uploaded images and audio persist on the data volume across deploys.
+
 ## v2026.6.6 — 2026-06-19
 
 This release adds images to quiz questions, removes several brief flashes when play starts and when rounds change, and shows round and score details in the gameplay headers.
