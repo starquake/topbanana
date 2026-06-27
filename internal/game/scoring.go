@@ -13,7 +13,6 @@ const maxPoints = 1000
 
 // CalculateScore calculates the score for a given answer.
 func (s *Service) CalculateScore(ctx context.Context, a *Answer) int {
-	// TODO: Should this be the points for answering immediately? Or within one second?
 	return scoreAnswerCurve(ctx, s.logger, a.Option.Correct, a.Question.StartedAt, a.Question.ExpiredAt, a.AnsweredAt)
 }
 
