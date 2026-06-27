@@ -687,7 +687,7 @@
                  app.js as --visual-viewport-height) so the modal stays
                  above the on-screen keyboard on mobile (#196). -->
             <template x-if="claimModalOpen">
-                <div class="fixed inset-0 z-40 flex flex-col items-center bg-bg/80 backdrop-blur-sm p-4 sm:justify-center" role="dialog" aria-modal="true" aria-labelledby="claim-modal-title">
+                <div class="fixed inset-0 z-40 flex flex-col items-center bg-bg/80 backdrop-blur-sm p-4 sm:justify-center" role="dialog" aria-modal="true" aria-labelledby="claim-modal-title" x-focus-trap="claimModalOpen">
                     <div class="absolute inset-0" @click="closeClaimModal()"></div>
                     <div class="relative w-full max-w-[480px] mx-auto mt-4 sm:mt-0 bg-surface border border-accent-line rounded-lg shadow-2xl flex flex-col overflow-hidden"
                          style="max-height: calc(var(--visual-viewport-height, 100svh) - 2rem)"
@@ -709,7 +709,7 @@
                                 <label class="label-eyebrow" for="claim-name-modal">Display name</label>
                                 <input id="claim-name-modal" type="text" class="form-input"
                                        maxlength="64" autocomplete="off"
-                                       x-init="$nextTick(() => $el.focus())"
+                                       data-autofocus
                                        x-model="displayName"
                                        @keydown.enter.prevent="submit()"
                                        :disabled="submitting">

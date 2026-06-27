@@ -481,6 +481,7 @@
                      only the lobby surfaces the Exit affordance today. -->
                 <div x-show="exitConfirmOpen"
                      x-cloak
+                     x-focus-trap="exitConfirmOpen"
                      class="fixed inset-0 z-40 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4"
                      role="dialog"
                      aria-modal="true"
@@ -501,6 +502,7 @@
                         <footer class="flex justify-end gap-2 px-6 py-4 border-t border-border-soft">
                             <button type="button"
                                     class="btn-ghost"
+                                    data-autofocus
                                     @click="exitConfirmOpen = false">Cancel</button>
                             <button type="button"
                                     class="btn-danger"
