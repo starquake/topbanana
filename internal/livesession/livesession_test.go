@@ -633,3 +633,52 @@ func TestService_SubmitAnswer_RespectsWindowBounds(t *testing.T) {
 		t.Errorf("SubmitAnswer after ExpiresAt err = %v, want %v", got, want)
 	}
 }
+
+// TestService_GetSessionState_QuestionPhaseWithoutQuiz pins the nil-quiz guard
+// in populateInGame (#1122): a quiz-less room that somehow sits in the question
+// phase (an unusual re-arm-race state) must read cleanly rather than
+// dereference a nil quiz. The room is driven there directly via the store so
+// quiz_id stays NULL while current_question_id points at a real question - a
+// state the normal service flow never produces, so the store builds it.
+func TestService_GetSessionState_QuestionPhaseWithoutQuiz(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.June, 5, 12, 0, 0, 0, time.UTC)
+	h := newEmptyRoomHarness(t, start)
+	ctx := t.Context()
+
+	// A real question must exist so the session's current_question_id FK
+	// resolves while its quiz_id stays NULL (the re-arm race).
+	qz := seedRunnerQuizSlug(t, h.quizStore, "nil-quiz-guard", [][]bool{{true}})
+	full, err := h.quizStore.GetQuiz(ctx, qz.ID)
+	if err != nil {
+		t.Fatalf("GetQuiz err = %v, want nil", err)
+	}
+	q := full.Questions[0]
+
+	const hostID int64 = 1 // seeded admin
+	sess, err := h.service.CreateSession(ctx, nil, hostID)
+	if err != nil {
+		t.Fatalf("CreateSession (empty) err = %v, want nil", err)
+	}
+
+	// Drive the quiz-less room straight into the question phase: quiz_id stays
+	// NULL, current_question_id points at the seeded question.
+	if err = h.store.EnterQuestion(ctx, sess.ID, q.RoundID, q.ID, start, start.Add(10*time.Second)); err != nil {
+		t.Fatalf("EnterQuestion err = %v, want nil", err)
+	}
+
+	state, err := h.service.GetSessionState(ctx, sess.JoinCode, hostID)
+	if err != nil {
+		t.Fatalf("GetSessionState (quiz-less question phase) err = %v, want nil", err)
+	}
+	if got, want := state.Session.Phase, PhaseQuestion; got != want {
+		t.Errorf("Phase = %q, want %q", got, want)
+	}
+	if state.Quiz != nil {
+		t.Errorf("Quiz = %v, want nil (quiz-less room)", state.Quiz)
+	}
+	if state.CurrentQuestion != nil {
+		t.Errorf("CurrentQuestion = %v, want nil (no quiz to resolve the question)", state.CurrentQuestion)
+	}
+}
