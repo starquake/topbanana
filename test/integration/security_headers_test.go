@@ -38,6 +38,9 @@ func assertCommonSecurityHeaders(t *testing.T, resp *http.Response) {
 			t.Errorf("header %q = %q, want %q", k, got, v)
 		}
 	}
+	if got, want := resp.Header.Get("Server"), ""; got != want {
+		t.Errorf("Server header = %q, want %q (absent)", got, want)
+	}
 }
 
 // assertHSTSPresent checks that Strict-Transport-Security is set (used in
