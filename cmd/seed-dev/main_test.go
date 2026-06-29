@@ -365,3 +365,83 @@ func TestSeedQuizzesAudioRounds(t *testing.T) {
 		t.Errorf("q2.AudioMediaID = %d, want %d", got, want)
 	}
 }
+
+// demoArchivePath is the committed demo quiz archive the seeder restores, from
+// the seed-dev package directory. The TestSeedDemoQuiz test doubles as a
+// rot-guard: if the committed archive is removed or its shape drifts, this test
+// fails.
+const demoArchivePath = "../../dev/fixtures/demo-quiz.zip"
+
+// TestSeedDemoQuiz restores the real committed demo archive through the seeder's
+// HTTP-free import path against a real DB and a real media service writing into a
+// temp dir. It asserts the showcase quiz lands with 15 questions across 3 rounds
+// and that all 9 media files (4 audio + 5 image) are stored as files on disk,
+// then asserts a second restore is the idempotent no-op (nil quiz, nil error).
+func TestSeedDemoQuiz(t *testing.T) {
+	t.Parallel()
+
+	h := newAudioSeedHarness(t)
+
+	qz, err := ExportSeedDemoQuiz(t.Context(), h.logger, h.stores, h.mediaSvc, demoArchivePath)
+	if err != nil {
+		t.Fatalf("ExportSeedDemoQuiz() err = %v, want nil", err)
+	}
+	if qz == nil {
+		t.Fatal("created quiz = nil, want a quiz")
+	}
+	if got, want := len(qz.Questions), 15; got != want {
+		t.Errorf("len(Questions) = %d, want %d", got, want)
+	}
+
+	rounds, err := h.stores.Quizzes.ListRoundsByQuiz(t.Context(), qz.ID)
+	if err != nil {
+		t.Fatalf("ListRoundsByQuiz() err = %v, want nil", err)
+	}
+	if got, want := len(rounds), 3; got != want {
+		t.Errorf("len(rounds) = %d, want %d", got, want)
+	}
+
+	assertDemoMediaOnDisk(t, h, qz.ID)
+
+	// A second restore collides on the slug and is the idempotent no-op.
+	again, err := ExportSeedDemoQuiz(t.Context(), h.logger, h.stores, h.mediaSvc, demoArchivePath)
+	if err != nil {
+		t.Fatalf("second ExportSeedDemoQuiz() err = %v, want nil", err)
+	}
+	if again != nil {
+		t.Errorf("second ExportSeedDemoQuiz() quiz = %v, want nil (idempotent)", again)
+	}
+}
+
+// assertDemoMediaOnDisk checks the restored demo quiz has the expected 4 audio +
+// 5 image media rows and that every one is backed by a real file under the
+// harness's temp media dir.
+func assertDemoMediaOnDisk(t *testing.T, h audioSeedHarness, quizID int64) {
+	t.Helper()
+
+	rows, err := h.mediaSvc.ListByQuiz(t.Context(), quizID)
+	if err != nil {
+		t.Fatalf("ListByQuiz() err = %v, want nil", err)
+	}
+	if got, want := len(rows), 9; got != want {
+		t.Fatalf("len(media rows) = %d, want %d (4 audio + 5 image)", got, want)
+	}
+
+	var audio, image int
+	for _, m := range rows {
+		if m.Type == media.TypeAudio {
+			audio++
+		} else {
+			image++
+		}
+		if _, statErr := os.Stat(filepath.Join(h.mediaDir, m.Path)); statErr != nil {
+			t.Errorf("stored media file %q missing on disk: %v", m.Path, statErr)
+		}
+	}
+	if got, want := audio, 4; got != want {
+		t.Errorf("audio media rows = %d, want %d", got, want)
+	}
+	if got, want := image, 5; got != want {
+		t.Errorf("image media rows = %d, want %d", got, want)
+	}
+}
