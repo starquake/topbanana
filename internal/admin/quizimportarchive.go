@@ -50,6 +50,14 @@ var ErrArchiveUnsupportedVersion = errors.New("archive format version is newer t
 // archive does not contain.
 var ErrArchiveMediaMissing = errors.New("archive references a media file it does not contain")
 
+// ErrArchiveInvalidQuiz is returned by [ImportQuizArchive] when an archive's
+// manifest decodes but the quiz it describes is invalid: either structurally
+// (neither or both of questions / rounds, a round with no title or no questions)
+// or because it fails the same form-level validation the paste / upload import
+// runs (empty title or slug, empty description, an out-of-range time limit, a
+// question with no options). The wrapped error carries the specific problem.
+var ErrArchiveInvalidQuiz = errors.New("archive is not a valid quiz")
+
 // MediaImporter is the slice of the media service the archive importer needs:
 // restore an image / audio file from bytes (the pipeline validates and
 // re-encodes the untrusted bytes - that is the safety boundary), and remove a
@@ -84,6 +92,54 @@ func NewArchiveImportLimits(imageMaxBytes, audioMaxBytes, totalMaxBytes int64) A
 		audioMaxBytes: audioMaxBytes,
 		totalMaxBytes: totalMaxBytes,
 	}
+}
+
+// ImportQuizArchive restores a quiz and its media from an exported archive
+// (#1113) through the same build / validate / persist path as the admin upload,
+// but with no HTTP coupling: it takes an already-opened archive plus the stores
+// directly, so a non-HTTP caller restores an archive exactly as it was exported.
+// It applies the zip-bomb size guards, decodes + version-checks the manifest,
+// validates the built quiz, then persists it with media pinned to creatorID
+// (rolling back on any post-create failure). It returns the created quiz with
+// its assigned ids (its [quiz.Quiz.ID] and its questions' ids are set in place
+// by the persist step). A title collision surfaces as [quiz.ErrSlugTaken]; a
+// manifest that describes an invalid quiz (bad structure, or a value the form
+// validation rejects) surfaces as [ErrArchiveInvalidQuiz].
+//
+// The quiz's visibility and mode come from the manifest itself - there is no
+// form override here, so the archive is restored exactly as exported.
+func ImportQuizArchive(
+	ctx context.Context, logger *slog.Logger,
+	quizStore quiz.Store, mediaSvc MediaImporter,
+	archive *zip.Reader, creatorID int64, limits ArchiveImportLimits,
+) (*quiz.Quiz, error) {
+	if err := checkArchiveLimits(archive, limits); err != nil {
+		return nil, err
+	}
+
+	manifest, err := decodeArchiveManifest(archive, limits)
+	if err != nil {
+		return nil, err
+	}
+
+	built, err := quizFromArchiveManifest(manifest, creatorID, manifest.Visibility, manifest.Mode)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrArchiveInvalidQuiz, err)
+	}
+
+	// Run the same form-level validation the upload / paste import runs: the
+	// manifest is untrusted, so a structurally-invalid quiz or an out-of-range
+	// time limit (which would otherwise hit a DB CHECK and surface as a 500) is
+	// rejected before anything is persisted.
+	if problems := (&quizForm{quiz: built.quiz}).Valid(ctx); len(problems) > 0 {
+		return nil, fmt.Errorf("%w: %v", ErrArchiveInvalidQuiz, problems)
+	}
+
+	if err = importQuizWithMedia(ctx, logger, quizStore, mediaSvc, archive, built, creatorID); err != nil {
+		return nil, err
+	}
+
+	return built.quiz, nil
 }
 
 // HandleQuizImportArchive accepts a multipart .zip quiz archive on POST

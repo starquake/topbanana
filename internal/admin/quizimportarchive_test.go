@@ -3,6 +3,7 @@ package admin_test
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"log/slog"
 	"mime/multipart"
 	"net/http"
@@ -123,6 +124,139 @@ func importAdmin() *auth.Player {
 
 func defaultImportLimits() ArchiveImportLimits {
 	return NewArchiveImportLimits(importTestImageMax, importTestAudioMax, importTestTotalMax)
+}
+
+// openZipReader opens the given archive bytes as a zip.Reader, the shape
+// ImportQuizArchive takes (the HTTP-free entry point dev tools call).
+func openZipReader(t *testing.T, b []byte) *zip.Reader {
+	t.Helper()
+
+	zr, err := zip.NewReader(bytes.NewReader(b), int64(len(b)))
+	if err != nil {
+		t.Fatalf("zip.NewReader err = %v, want nil", err)
+	}
+
+	return zr
+}
+
+// TestImportQuizArchive_RoundTrip exercises the HTTP-free restore path
+// dev tools call: it exports a media-bearing quiz, restores it on a clean DB
+// through ImportQuizArchive, and asserts the returned quiz carries an id and all
+// three questions, that the persisted tree matches the source, and that the
+// restored image/audio are real media rows wired onto the right questions.
+func TestImportQuizArchive_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	archiveBytes := exportArchiveBytes(t)
+
+	env := newAdminEnv(t)
+	mediaSvc := newMediaServiceOverTemp(t, env)
+
+	created, err := ImportQuizArchive(
+		t.Context(), env.logger, env.quizzes, mediaSvc,
+		openZipReader(t, archiveBytes), testAdminID, defaultImportLimits(),
+	)
+	if err != nil {
+		t.Fatalf("ImportQuizArchive err = %v, want nil", err)
+	}
+	if created.ID == 0 {
+		t.Fatal("created quiz ID = 0, want an assigned id")
+	}
+	if got, want := len(created.Questions), 3; got != want {
+		t.Errorf("created question count = %d, want %d", got, want)
+	}
+
+	imported := onlyQuiz(t, env)
+	if got, want := imported.ID, created.ID; got != want {
+		t.Errorf("imported quiz ID = %d, want %d (returned quiz should be the persisted one)", got, want)
+	}
+	assertImportedQuizMeta(t, imported)
+	assertImportedRounds(t, env, imported)
+	assertImportedMedia(t, env, imported)
+}
+
+// TestImportQuizArchive_Idempotent pins the idempotent restore: importing the
+// same archive twice succeeds the first time and surfaces quiz.ErrSlugTaken the
+// second, leaving exactly one quiz. The seeder relies on this to be a no-op on a
+// re-run.
+func TestImportQuizArchive_Idempotent(t *testing.T) {
+	t.Parallel()
+
+	archiveBytes := exportArchiveBytes(t)
+
+	env := newAdminEnv(t)
+	mediaSvc := newMediaServiceOverTemp(t, env)
+
+	if _, err := ImportQuizArchive(
+		t.Context(), env.logger, env.quizzes, mediaSvc,
+		openZipReader(t, archiveBytes), testAdminID, defaultImportLimits(),
+	); err != nil {
+		t.Fatalf("first ImportQuizArchive err = %v, want nil", err)
+	}
+
+	_, err := ImportQuizArchive(
+		t.Context(), env.logger, env.quizzes, mediaSvc,
+		openZipReader(t, archiveBytes), testAdminID, defaultImportLimits(),
+	)
+	if got, want := err, quiz.ErrSlugTaken; !errors.Is(got, want) {
+		t.Errorf("second ImportQuizArchive err = %v, want %v", got, want)
+	}
+
+	quizzes, err := env.quizzes.ListQuizzes(t.Context())
+	if err != nil {
+		t.Fatalf("ListQuizzes err = %v, want nil", err)
+	}
+	if got, want := len(quizzes), 1; got != want {
+		t.Errorf("quiz count after re-import = %d, want %d (idempotent)", got, want)
+	}
+}
+
+// TestImportQuizArchive_InvalidQuizRejected pins that ImportQuizArchive surfaces
+// an invalid quiz as the ErrArchiveInvalidQuiz sentinel and persists nothing,
+// both for a form-validation failure (empty title) and a structural one (neither
+// questions nor rounds, which comes from quizFromArchiveManifest rather than the
+// form validator).
+func TestImportQuizArchive_InvalidQuizRejected(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		manifest string
+	}{
+		{
+			name: "form validation (empty title)",
+			manifest: `{
+				"formatVersion": 1, "title": "", "description": "d",
+				"questions": [{"text": "Q1", "options": [{"text": "a", "correct": true}]}]
+			}`,
+		},
+		{
+			name: "structural (neither questions nor rounds)",
+			manifest: `{
+				"formatVersion": 1, "title": "T", "description": "d"
+			}`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			env := newAdminEnv(t)
+			mediaSvc := newMediaServiceOverTemp(t, env)
+
+			archiveBytes := buildZip(t, map[string][]byte{"quiz.json": []byte(tc.manifest)})
+
+			_, err := ImportQuizArchive(
+				t.Context(), env.logger, env.quizzes, mediaSvc,
+				openZipReader(t, archiveBytes), testAdminID, defaultImportLimits(),
+			)
+			if got, want := err, ErrArchiveInvalidQuiz; !errors.Is(got, want) {
+				t.Errorf("err = %v, want %v", got, want)
+			}
+			assertNoQuiz(t, env)
+		})
+	}
 }
 
 // TestHandleQuizImportArchive_RoundTrip exports a media-bearing quiz, imports it
