@@ -1,12 +1,17 @@
 package main
 
 // Test-only re-exports so the external main_test package can exercise
-// the fixture->domain mapping, the audio-seeding path, and the demo-archive
-// restore path without widening the production surface.
+// the fixture->domain mapping, the audio-seeding path, the demo-archive
+// restore path, and the play-seeding path without widening the production
+// surface.
 var (
 	ExportQuizFromFixture              = quizFromFixture
 	ExportSeedQuizzes                  = seedQuizzes
 	ExportSeedDemoQuiz                 = seedDemoQuiz
+	ExportOpenDemoArchive              = openDemoArchive
+	ExportSeedPlayerName               = seedPlayerName
+	ExportSeedPlayerNames              = seedPlayerNames
+	ExportSeedPlays                    = seedPlays
 	ErrExportFixtureQuestionsOrRounds  = errFixtureQuestionsOrRounds
 	ErrExportFixtureRoundTitleRequired = errFixtureRoundTitleRequired
 	ErrExportFixtureRoundNoQuestions   = errFixtureRoundNoQuestions

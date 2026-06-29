@@ -151,6 +151,13 @@ type seedConfig struct {
 	playsPerPlayer  int
 }
 
+// seedSource is the loaded, validated seed data, ready to persist once the DB
+// is open. Exactly one field is set, matching the chosen seed set.
+type seedSource struct {
+	fixtures    []quizFixture // test set
+	demoArchive *zip.Reader   // demo set
+}
+
 func main() {
 	seedSet := flag.String("seed", seedSetTest,
 		`which seed set to load: "test" (small fixture quizzes) or "demo" (one large showcase quiz)`)
@@ -201,6 +208,13 @@ func main() {
 func run(logger *slog.Logger, cfg seedConfig) error {
 	ctx := context.Background()
 
+	// Load and validate the seed source before any DB side effects, so a bad
+	// -fixtures / -demo-archive path fails fast without migrating the DB.
+	src, err := loadSeedSource(cfg)
+	if err != nil {
+		return err
+	}
+
 	database.SetupGoose()
 	conn, err := sql.Open("sqlite", cfg.dbURI)
 	if err != nil {
@@ -227,7 +241,7 @@ func run(logger *slog.Logger, cfg seedConfig) error {
 		config.MediaImageMaxBytesDefault, config.MediaAudioMaxBytesDefault, logger,
 	)
 
-	createdQuizzes, err := seedQuizSet(ctx, logger, stores, mediaSvc, cfg)
+	createdQuizzes, err := seedQuizSet(ctx, logger, stores, mediaSvc, src)
 	if err != nil {
 		return err
 	}
@@ -244,16 +258,54 @@ func run(logger *slog.Logger, cfg seedConfig) error {
 	return nil
 }
 
-// seedQuizSet loads the quizzes for the configured seed set: the demo set
-// restores the single committed archive quiz, the test set loads the fixture
-// quizzes. Both are idempotent on a slug collision, so a re-run returns the
-// quizzes it could create (none, when they already exist) without erroring.
+// loadSeedSource reads and validates the configured seed set's source before any
+// DB side effects, so a bad -fixtures / -demo-archive path fails fast without
+// migrating the DB. The demo set opens the committed archive; the test set
+// decodes the JSON fixtures.
+func loadSeedSource(cfg seedConfig) (seedSource, error) {
+	if cfg.seedSet == seedSetDemo {
+		zr, err := openDemoArchive(cfg.demoArchivePath)
+		if err != nil {
+			return seedSource{}, err
+		}
+
+		return seedSource{demoArchive: zr}, nil
+	}
+
+	fixtures, err := loadFixtures(cfg.fixturePath)
+	if err != nil {
+		return seedSource{}, fmt.Errorf("load fixtures: %w", err)
+	}
+
+	return seedSource{fixtures: fixtures}, nil
+}
+
+// openDemoArchive reads the committed demo quiz archive into memory and returns a
+// zip reader over it. The whole file is read up front because [zip.NewReader]
+// needs random access to the bytes, so the backing buffer must outlive this call.
+func openDemoArchive(path string) (*zip.Reader, error) {
+	raw, err := os.ReadFile(path) //nolint:gosec // dev tool reads a path the operator passed in
+	if err != nil {
+		return nil, fmt.Errorf("read demo archive: %w", err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	if err != nil {
+		return nil, fmt.Errorf("open demo archive: %w", err)
+	}
+
+	return zr, nil
+}
+
+// seedQuizSet persists the loaded seed source: the demo set restores the single
+// archived quiz, the test set creates the fixture quizzes. Both are idempotent on
+// a slug collision, so a re-run returns the quizzes it could create (none, when
+// they already exist) without erroring.
 func seedQuizSet(
 	ctx context.Context, logger *slog.Logger,
-	stores *store.Stores, mediaSvc *media.Service, cfg seedConfig,
+	stores *store.Stores, mediaSvc *media.Service, src seedSource,
 ) ([]*quiz.Quiz, error) {
-	if cfg.seedSet == seedSetDemo {
-		qz, err := seedDemoQuiz(ctx, logger, stores, mediaSvc, cfg.demoArchivePath)
+	if src.demoArchive != nil {
+		qz, err := seedDemoQuiz(ctx, logger, stores, mediaSvc, src.demoArchive)
 		if err != nil {
 			return nil, err
 		}
@@ -264,11 +316,7 @@ func seedQuizSet(
 		return []*quiz.Quiz{qz}, nil
 	}
 
-	fixtures, err := loadFixtures(cfg.fixturePath)
-	if err != nil {
-		return nil, fmt.Errorf("load fixtures: %w", err)
-	}
-	created, err := seedQuizzes(ctx, logger, stores.Quizzes, mediaSvc, fixtures)
+	created, err := seedQuizzes(ctx, logger, stores.Quizzes, mediaSvc, src.fixtures)
 	if err != nil {
 		return nil, fmt.Errorf("seed quizzes: %w", err)
 	}
@@ -276,28 +324,19 @@ func seedQuizSet(
 	return created, nil
 }
 
-// seedDemoQuiz restores the committed demo quiz archive through the same
-// HTTP-free import path the admin upload uses, with the demo media files written
-// under the media service's directory. It is idempotent: a slug collision (the
-// demo quiz already exists) logs an info line and returns a nil quiz and nil
-// error, the same no-op the fixture seeder gives on a re-run.
+// seedDemoQuiz restores the demo quiz archive through the same HTTP-free import
+// path the admin upload uses, with the demo media files written under the media
+// service's directory. It is idempotent: a slug collision (the demo quiz already
+// exists) logs an info line and returns a nil quiz and nil error, the same no-op
+// the fixture seeder gives on a re-run.
 func seedDemoQuiz(
 	ctx context.Context, logger *slog.Logger,
-	stores *store.Stores, mediaSvc *media.Service, archivePath string,
+	stores *store.Stores, mediaSvc *media.Service, archive *zip.Reader,
 ) (*quiz.Quiz, error) {
-	raw, err := os.ReadFile(archivePath) //nolint:gosec // dev tool reads a path the operator passed in
-	if err != nil {
-		return nil, fmt.Errorf("read demo archive: %w", err)
-	}
-	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
-	if err != nil {
-		return nil, fmt.Errorf("open demo archive: %w", err)
-	}
-
 	limits := admin.NewArchiveImportLimits(
 		config.MediaImageMaxBytesDefault, config.MediaAudioMaxBytesDefault, config.MediaImportMaxBytesDefault,
 	)
-	qz, err := admin.ImportQuizArchive(ctx, logger, stores.Quizzes, mediaSvc, zr, seededAdminID, limits)
+	qz, err := admin.ImportQuizArchive(ctx, logger, stores.Quizzes, mediaSvc, archive, seededAdminID, limits)
 	if err != nil {
 		if errors.Is(err, quiz.ErrSlugTaken) {
 			logger.Info("demo quiz already exists (skipping)")
@@ -532,6 +571,32 @@ func flattenFixtureQuestions(f *quizFixture) []questionFixture {
 	return out
 }
 
+// seedPlayerNames are imaginative display names for the anonymous players the
+// seeder creates, so the dev home page's active-players list reads like real
+// people rather than "seed-player-..." rows.
+//
+//nolint:gochecknoglobals // dictionary table; values never mutate.
+var seedPlayerNames = []string{
+	"Quizzy McQuizface", "Treble Maker", "Major Minor", "Beethoven's Ghost",
+	"Captain Cortex", "The Know-It-Owl", "Trivia Newton-John", "Sir Guess-a-Lot",
+	"Allegra Tempo", "Doc Decibel", "Maestro Mayhem", "The Quiz Wizard",
+	"Polly Glot", "Echo Chamberlain", "Crescendo Kid", "Harmony Hooper",
+	"Fermata Fred", "Brainstorm Betty", "The Lucky Guesser", "Riff Raffles",
+	"Whisper Quartet", "Anonymous Andante", "The Fact Hunter", "Encore Eleanor",
+}
+
+// seedPlayerName returns a unique display name for the i-th seeded player: a
+// name from the pool, with a lap suffix once i runs past the pool so any
+// -players value still yields distinct names within a run.
+func seedPlayerName(i int) string {
+	name := seedPlayerNames[i%len(seedPlayerNames)]
+	if lap := i / len(seedPlayerNames); lap > 0 {
+		return fmt.Sprintf("%s %d", name, lap+1)
+	}
+
+	return name
+}
+
 // seedPlays creates playerCount anonymous players and finishes
 // playsPerPlayer random quizzes for each. Returns the total number of
 // finished games written. A finished game in this schema is one with
@@ -554,9 +619,18 @@ func seedPlays(
 
 	players := make([]*auth.Player, 0, playerCount)
 	for i := range playerCount {
-		displayName := fmt.Sprintf("seed-player-%d-%d", time.Now().UnixNano(), i)
+		displayName := seedPlayerName(i)
 		p, err := stores.Players.CreateAnonymousPlayer(ctx, displayName)
 		if err != nil {
+			// A name claimed by a prior seed run against the same DB
+			// (display_name is UNIQUE) is not fatal for a dev seed: skip
+			// that player and keep the non-colliding ones.
+			if errors.Is(err, auth.ErrDisplayNameTaken) {
+				logger.Info("seed player already exists (skipping)", slog.String("name", displayName))
+
+				continue
+			}
+
 			return 0, fmt.Errorf("create anonymous player: %w", err)
 		}
 		players = append(players, p)

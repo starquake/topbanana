@@ -382,7 +382,12 @@ func TestSeedDemoQuiz(t *testing.T) {
 
 	h := newAudioSeedHarness(t)
 
-	qz, err := ExportSeedDemoQuiz(t.Context(), h.logger, h.stores, h.mediaSvc, demoArchivePath)
+	archive, err := ExportOpenDemoArchive(demoArchivePath)
+	if err != nil {
+		t.Fatalf("ExportOpenDemoArchive() err = %v, want nil", err)
+	}
+
+	qz, err := ExportSeedDemoQuiz(t.Context(), h.logger, h.stores, h.mediaSvc, archive)
 	if err != nil {
 		t.Fatalf("ExportSeedDemoQuiz() err = %v, want nil", err)
 	}
@@ -403,8 +408,9 @@ func TestSeedDemoQuiz(t *testing.T) {
 
 	assertDemoMediaOnDisk(t, h, qz.ID)
 
-	// A second restore collides on the slug and is the idempotent no-op.
-	again, err := ExportSeedDemoQuiz(t.Context(), h.logger, h.stores, h.mediaSvc, demoArchivePath)
+	// A second restore reuses the same reader, collides on the slug, and is the
+	// idempotent no-op.
+	again, err := ExportSeedDemoQuiz(t.Context(), h.logger, h.stores, h.mediaSvc, archive)
 	if err != nil {
 		t.Fatalf("second ExportSeedDemoQuiz() err = %v, want nil", err)
 	}
@@ -443,5 +449,65 @@ func assertDemoMediaOnDisk(t *testing.T, h audioSeedHarness, quizID int64) {
 	}
 	if got, want := image, 5; got != want {
 		t.Errorf("image media rows = %d, want %d", got, want)
+	}
+}
+
+// TestSeedPlayerName checks the seeded-player naming: the first pass over the
+// pool yields distinct, non-empty names, and the index one past the pool wraps
+// back to the first name with a " 2" lap suffix so larger -players values stay
+// collision-free within a run.
+func TestSeedPlayerName(t *testing.T) {
+	t.Parallel()
+
+	poolSize := len(ExportSeedPlayerNames)
+
+	seen := make(map[string]bool, poolSize)
+	for i := range poolSize {
+		name := ExportSeedPlayerName(i)
+		if name == "" {
+			t.Errorf("ExportSeedPlayerName(%d) = empty, want non-empty", i)
+		}
+		if seen[name] {
+			t.Errorf("ExportSeedPlayerName(%d) = %q, already seen (want distinct)", i, name)
+		}
+		seen[name] = true
+	}
+
+	if got, want := ExportSeedPlayerName(poolSize), ExportSeedPlayerName(0)+" 2"; got != want {
+		t.Errorf("ExportSeedPlayerName(%d) = %q, want %q", poolSize, got, want)
+	}
+}
+
+// TestSeedPlaysToleratesDuplicateName confirms seedPlays skips a player whose
+// name a prior run already claimed (display_name is UNIQUE) rather than failing
+// the whole seed: the non-colliding player still gets a finished game.
+func TestSeedPlaysToleratesDuplicateName(t *testing.T) {
+	t.Parallel()
+
+	h := newAudioSeedHarness(t)
+
+	// Pre-claim the first seeded name so seedPlays collides on player 0.
+	if _, err := h.stores.Players.CreateAnonymousPlayer(t.Context(), ExportSeedPlayerName(0)); err != nil {
+		t.Fatalf("pre-create player err = %v, want nil", err)
+	}
+
+	fixtures := []ExportQuizFixture{{
+		Title:       "Solo Quiz",
+		Description: "A one-question quiz.",
+		Questions: []ExportQuestionFixture{
+			{Text: "Q1", Options: []ExportOptionFixture{{Text: "A", Correct: true}, {Text: "B"}}},
+		},
+	}}
+	created, err := ExportSeedQuizzes(t.Context(), h.logger, h.stores.Quizzes, h.mediaSvc, fixtures)
+	if err != nil {
+		t.Fatalf("ExportSeedQuizzes() err = %v, want nil", err)
+	}
+
+	plays, err := ExportSeedPlays(t.Context(), h.logger, h.stores, created, 2, 1)
+	if err != nil {
+		t.Fatalf("ExportSeedPlays() err = %v, want nil", err)
+	}
+	if plays <= 0 {
+		t.Errorf("plays = %d, want > 0 (non-colliding player still finishes a game)", plays)
 	}
 }
