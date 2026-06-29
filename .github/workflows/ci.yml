@@ -156,6 +156,7 @@ jobs:
     - name: Smoke against seeded DB
       run: |
         make seed-dev
+        make seed-dev-demo
         make smoke
 
   e2e:

@@ -1,13 +1,18 @@
-// seed-dev populates the local dev database with a fixture-driven set
-// of quizzes plus a handful of finished games. Intended purely for
-// hand-eyeballing the player/admin UI on a populated DB - the fixture
-// file lives in dev/fixtures and is not embedded into the production
-// binary. Idempotent on quizzes (a duplicate slug is treated as
-// already-present and skipped, surfaced via [quiz.ErrSlugTaken]) so
-// re-running the seeder against an already-populated DB is a no-op.
+// seed-dev populates the local dev database with quizzes plus a handful
+// of finished games, purely for hand-eyeballing the player/admin UI on a
+// populated DB. The -seed flag chooses the seed set: "test" (the default)
+// loads the small fixture quizzes from dev/fixtures/quizzes.json, while
+// "demo" restores one large showcase quiz with real public-domain media
+// from the committed archive at dev/fixtures/demo-quiz.zip (the inverse of
+// the #1113 quiz-archive export). Neither the fixtures nor the archive are
+// embedded into the production binary. Idempotent on quizzes (a duplicate
+// slug is treated as already-present and skipped, surfaced via
+// [quiz.ErrSlugTaken]) so re-running the seeder against an already-populated
+// DB is a no-op.
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"database/sql"
@@ -25,6 +30,7 @@ import (
 	"github.com/gosimple/slug"
 	_ "modernc.org/sqlite"
 
+	"github.com/starquake/topbanana/internal/admin"
 	"github.com/starquake/topbanana/internal/auth"
 	"github.com/starquake/topbanana/internal/config"
 	"github.com/starquake/topbanana/internal/database"
@@ -32,6 +38,17 @@ import (
 	"github.com/starquake/topbanana/internal/media"
 	"github.com/starquake/topbanana/internal/quiz"
 	"github.com/starquake/topbanana/internal/store"
+)
+
+// seedSetTest loads the small fixture quizzes from the JSON fixture file (the
+// default seed set); seedSetDemo restores one large showcase quiz with real
+// media from the committed archive. They are the only values -seed accepts.
+const (
+	seedSetTest = "test"
+	seedSetDemo = "demo"
+	// defaultDemoArchivePath is the committed demo quiz archive restored by the
+	// demo seed set, an export from the #1113 quiz-archive feature.
+	defaultDemoArchivePath = "dev/fixtures/demo-quiz.zip"
 )
 
 // seededAdminID matches the ID set by migration
@@ -122,8 +139,30 @@ type optionFixture struct {
 	Correct bool   `json:"correct"`
 }
 
+// seedConfig carries the resolved CLI options into run, so a new seed set adds a
+// field rather than another positional argument.
+type seedConfig struct {
+	seedSet         string
+	fixturePath     string
+	demoArchivePath string
+	dbURI           string
+	mediaDir        string
+	playerCount     int
+	playsPerPlayer  int
+}
+
+// seedSource is the loaded, validated seed data, ready to persist once the DB
+// is open. Exactly one field is set, matching the chosen seed set.
+type seedSource struct {
+	fixtures    []quizFixture // test set
+	demoArchive *zip.Reader   // demo set
+}
+
 func main() {
-	fixturePath := flag.String("fixtures", "dev/fixtures/quizzes.json", "path to the JSON fixture file")
+	seedSet := flag.String("seed", seedSetTest,
+		`which seed set to load: "test" (small fixture quizzes) or "demo" (one large showcase quiz)`)
+	fixturePath := flag.String("fixtures", "dev/fixtures/quizzes.json", "path to the JSON fixture file (test seed)")
+	demoArchive := flag.String("demo-archive", defaultDemoArchivePath, "path to the demo quiz archive zip (demo seed)")
 	dbURI := flag.String("db", "", "DB URI (defaults to $DB_URI or the dev default)")
 	mediaDir := flag.String("media-dir", config.MediaDirDefault, "filesystem directory for stored media (audio clips)")
 	playersFlag := flag.Int("players", defaultPlayerCount, "number of anonymous players to seed")
@@ -131,6 +170,11 @@ func main() {
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	if *seedSet != seedSetTest && *seedSet != seedSetDemo {
+		logger.Error(`seed-dev: unknown -seed value (want "test" or "demo")`, slog.String("seed", *seedSet))
+		os.Exit(1)
+	}
 
 	// ParseDatabase keeps the URI and its pragmas in one source of truth; it
 	// bypasses the production server gates, so it is safe here.
@@ -144,25 +188,35 @@ func main() {
 		uri = dbc.URI
 	}
 
-	if err := run(logger, *fixturePath, uri, *mediaDir, *playersFlag, *playsFlag); err != nil {
+	cfg := seedConfig{
+		seedSet:         *seedSet,
+		fixturePath:     *fixturePath,
+		demoArchivePath: *demoArchive,
+		dbURI:           uri,
+		mediaDir:        *mediaDir,
+		playerCount:     *playersFlag,
+		playsPerPlayer:  *playsFlag,
+	}
+	if err := run(logger, cfg); err != nil {
 		logger.Error("seed-dev failed", slog.Any("err", err))
 		os.Exit(1)
 	}
 }
 
-// run is the testable entry point: returns errors so main() can keep
-// its [os.Exit] call at the surface and unit tests (should we ever
-// add them) get a non-fatal path.
-func run(logger *slog.Logger, fixturePath, dbURI, mediaDir string, playerCount, playsPerPlayer int) error {
+// run is the non-fatal entry point: it returns errors so main() keeps its
+// [os.Exit] call at the surface.
+func run(logger *slog.Logger, cfg seedConfig) error {
 	ctx := context.Background()
 
-	fixtures, err := loadFixtures(fixturePath)
+	// Load and validate the seed source before any DB side effects, so a bad
+	// -fixtures / -demo-archive path fails fast without migrating the DB.
+	src, err := loadSeedSource(cfg)
 	if err != nil {
-		return fmt.Errorf("load fixtures: %w", err)
+		return err
 	}
 
 	database.SetupGoose()
-	conn, err := sql.Open("sqlite", dbURI)
+	conn, err := sql.Open("sqlite", cfg.dbURI)
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}
@@ -176,25 +230,25 @@ func run(logger *slog.Logger, fixturePath, dbURI, mediaDir string, playerCount, 
 	}
 	stores := store.New(conn, logger)
 
-	// The media service writes audio files under mediaDir, so ensure the
+	// The media service writes audio + image files under mediaDir, so ensure the
 	// directory exists before storing (the production server creates it at
 	// startup; the seeder owns that here).
-	if mkErr := os.MkdirAll(mediaDir, mediaDirPerm); mkErr != nil {
+	if mkErr := os.MkdirAll(cfg.mediaDir, mediaDirPerm); mkErr != nil {
 		return fmt.Errorf("create media dir: %w", mkErr)
 	}
 	mediaSvc := media.NewService(
-		stores.Media, mediaDir,
+		stores.Media, cfg.mediaDir,
 		config.MediaImageMaxBytesDefault, config.MediaAudioMaxBytesDefault, logger,
 	)
 
-	createdQuizzes, err := seedQuizzes(ctx, logger, stores.Quizzes, mediaSvc, fixtures)
+	createdQuizzes, err := seedQuizSet(ctx, logger, stores, mediaSvc, src)
 	if err != nil {
-		return fmt.Errorf("seed quizzes: %w", err)
+		return err
 	}
 	logger.Info("quizzes seeded", slog.Int("count", len(createdQuizzes)))
 
-	if playerCount > 0 && playsPerPlayer > 0 && len(createdQuizzes) > 0 {
-		plays, err := seedPlays(ctx, logger, stores, createdQuizzes, playerCount, playsPerPlayer)
+	if cfg.playerCount > 0 && cfg.playsPerPlayer > 0 && len(createdQuizzes) > 0 {
+		plays, err := seedPlays(ctx, logger, stores, createdQuizzes, cfg.playerCount, cfg.playsPerPlayer)
 		if err != nil {
 			return fmt.Errorf("seed plays: %w", err)
 		}
@@ -202,6 +256,98 @@ func run(logger *slog.Logger, fixturePath, dbURI, mediaDir string, playerCount, 
 	}
 
 	return nil
+}
+
+// loadSeedSource reads and validates the configured seed set's source before any
+// DB side effects, so a bad -fixtures / -demo-archive path fails fast without
+// migrating the DB. The demo set opens the committed archive; the test set
+// decodes the JSON fixtures.
+func loadSeedSource(cfg seedConfig) (seedSource, error) {
+	if cfg.seedSet == seedSetDemo {
+		zr, err := openDemoArchive(cfg.demoArchivePath)
+		if err != nil {
+			return seedSource{}, err
+		}
+
+		return seedSource{demoArchive: zr}, nil
+	}
+
+	fixtures, err := loadFixtures(cfg.fixturePath)
+	if err != nil {
+		return seedSource{}, fmt.Errorf("load fixtures: %w", err)
+	}
+
+	return seedSource{fixtures: fixtures}, nil
+}
+
+// openDemoArchive reads the committed demo quiz archive into memory and returns a
+// zip reader over it. The whole file is read up front because [zip.NewReader]
+// needs random access to the bytes, so the backing buffer must outlive this call.
+func openDemoArchive(path string) (*zip.Reader, error) {
+	raw, err := os.ReadFile(path) //nolint:gosec // dev tool reads a path the operator passed in
+	if err != nil {
+		return nil, fmt.Errorf("read demo archive: %w", err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	if err != nil {
+		return nil, fmt.Errorf("open demo archive: %w", err)
+	}
+
+	return zr, nil
+}
+
+// seedQuizSet persists the loaded seed source: the demo set restores the single
+// archived quiz, the test set creates the fixture quizzes. Both are idempotent on
+// a slug collision, so a re-run returns the quizzes it could create (none, when
+// they already exist) without erroring.
+func seedQuizSet(
+	ctx context.Context, logger *slog.Logger,
+	stores *store.Stores, mediaSvc *media.Service, src seedSource,
+) ([]*quiz.Quiz, error) {
+	if src.demoArchive != nil {
+		qz, err := seedDemoQuiz(ctx, logger, stores, mediaSvc, src.demoArchive)
+		if err != nil {
+			return nil, err
+		}
+		if qz == nil {
+			return nil, nil
+		}
+
+		return []*quiz.Quiz{qz}, nil
+	}
+
+	created, err := seedQuizzes(ctx, logger, stores.Quizzes, mediaSvc, src.fixtures)
+	if err != nil {
+		return nil, fmt.Errorf("seed quizzes: %w", err)
+	}
+
+	return created, nil
+}
+
+// seedDemoQuiz restores the demo quiz archive through the same HTTP-free import
+// path the admin upload uses, with the demo media files written under the media
+// service's directory. It is idempotent: a slug collision (the demo quiz already
+// exists) logs an info line and returns a nil quiz and nil error, the same no-op
+// the fixture seeder gives on a re-run.
+func seedDemoQuiz(
+	ctx context.Context, logger *slog.Logger,
+	stores *store.Stores, mediaSvc *media.Service, archive *zip.Reader,
+) (*quiz.Quiz, error) {
+	limits := admin.NewArchiveImportLimits(
+		config.MediaImageMaxBytesDefault, config.MediaAudioMaxBytesDefault, config.MediaImportMaxBytesDefault,
+	)
+	qz, err := admin.ImportQuizArchive(ctx, logger, stores.Quizzes, mediaSvc, archive, seededAdminID, limits)
+	if err != nil {
+		if errors.Is(err, quiz.ErrSlugTaken) {
+			logger.Info("demo quiz already exists (skipping)")
+
+			return nil, nil //nolint:nilnil // nil quiz + nil error means "already present", the idempotent no-op.
+		}
+
+		return nil, fmt.Errorf("import demo quiz archive: %w", err)
+	}
+
+	return qz, nil
 }
 
 // loadFixtures reads + decodes the JSON fixture file. DisallowUnknownFields
@@ -425,6 +571,32 @@ func flattenFixtureQuestions(f *quizFixture) []questionFixture {
 	return out
 }
 
+// seedPlayerNames are imaginative display names for the anonymous players the
+// seeder creates, so the dev home page's active-players list reads like real
+// people rather than "seed-player-..." rows.
+//
+//nolint:gochecknoglobals // dictionary table; values never mutate.
+var seedPlayerNames = []string{
+	"Quizzy McQuizface", "Treble Maker", "Major Minor", "Beethoven's Ghost",
+	"Captain Cortex", "The Know-It-Owl", "Trivia Newton-John", "Sir Guess-a-Lot",
+	"Allegra Tempo", "Doc Decibel", "Maestro Mayhem", "The Quiz Wizard",
+	"Polly Glot", "Echo Chamberlain", "Crescendo Kid", "Harmony Hooper",
+	"Fermata Fred", "Brainstorm Betty", "The Lucky Guesser", "Riff Raffles",
+	"Whisper Quartet", "Anonymous Andante", "The Fact Hunter", "Encore Eleanor",
+}
+
+// seedPlayerName returns a unique display name for the i-th seeded player: a
+// name from the pool, with a lap suffix once i runs past the pool so any
+// -players value still yields distinct names within a run.
+func seedPlayerName(i int) string {
+	name := seedPlayerNames[i%len(seedPlayerNames)]
+	if lap := i / len(seedPlayerNames); lap > 0 {
+		return fmt.Sprintf("%s %d", name, lap+1)
+	}
+
+	return name
+}
+
 // seedPlays creates playerCount anonymous players and finishes
 // playsPerPlayer random quizzes for each. Returns the total number of
 // finished games written. A finished game in this schema is one with
@@ -447,9 +619,18 @@ func seedPlays(
 
 	players := make([]*auth.Player, 0, playerCount)
 	for i := range playerCount {
-		displayName := fmt.Sprintf("seed-player-%d-%d", time.Now().UnixNano(), i)
+		displayName := seedPlayerName(i)
 		p, err := stores.Players.CreateAnonymousPlayer(ctx, displayName)
 		if err != nil {
+			// A name claimed by a prior seed run against the same DB
+			// (display_name is UNIQUE) is not fatal for a dev seed: skip
+			// that player and keep the non-colliding ones.
+			if errors.Is(err, auth.ErrDisplayNameTaken) {
+				logger.Info("seed player already exists (skipping)", slog.String("name", displayName))
+
+				continue
+			}
+
 			return 0, fmt.Errorf("create anonymous player: %w", err)
 		}
 		players = append(players, p)

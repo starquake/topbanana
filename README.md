@@ -88,7 +88,7 @@ Following the official guidelines for a [standard Go server project layout](http
 
 ### Folders
 - `cmd/server`: Application entrypoint.
-- `cmd/seed-dev`: Seeds the local dev database with example quizzes.
+- `cmd/seed-dev`: Seeds the local dev database with example quizzes. The `-seed` flag picks the seed set: `test` (the default) loads the small fixture quizzes, while `demo` restores one large showcase quiz with real public-domain music and pictures from a committed quiz archive. Both sets also seed a few anonymous players and finished games so the leaderboard and popular lists have data.
 - `deployments`: Docker compose configurations for the staging and production demo deployments.
 - `docs`: Documentation for the project.
 - `internal/`: Private library code, including domain logic, database operations, HTTP handlers.

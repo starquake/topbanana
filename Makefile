@@ -254,15 +254,26 @@ test-e2e: $(MAILPIT_BIN)
 smoke:
 	go run ./cmd/server/ -check
 
-# Populate the local dev DB from dev/fixtures/quizzes.json so the
-# player and admin UIs are easy to eyeball with realistic content. The
-# seeder is idempotent on quizzes (re-running skips slug collisions
-# via quiz.ErrSlugTaken), but each invocation creates a fresh batch of
-# anonymous players + finished games — so repeated runs grow the
-# popular and active-players lists.
+# Populate the local dev DB so the player and admin UIs are easy to
+# eyeball with realistic content. Two seed sets: the default `test` set
+# loads the small fixture quizzes from dev/fixtures/quizzes.json, and
+# `demo` (see seed-dev-demo) restores one large showcase quiz with real
+# public-domain media from dev/fixtures/demo-quiz.zip. Both sets also seed
+# a handful of anonymous players + finished games so the popular and
+# active-players lists have data. The seeder is idempotent: re-running
+# skips quizzes whose slug already exists (quiz.ErrSlugTaken), and plays
+# are seeded only for freshly-created quizzes, so a re-run against an
+# already-seeded DB is a no-op.
 .PHONY: seed-dev
 seed-dev:
 	go run ./cmd/seed-dev/
+
+# Restore the demo showcase quiz (the `demo` seed set) into the local dev
+# DB from the committed quiz archive at dev/fixtures/demo-quiz.zip, plus a
+# few sample plays so its leaderboard has data.
+.PHONY: seed-dev-demo
+seed-dev-demo:
+	go run ./cmd/seed-dev/ -seed=demo
 
 # --- Tailwind ---------------------------------------------------------------
 #
